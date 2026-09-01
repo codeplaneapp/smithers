@@ -284,6 +284,20 @@ describe("Node", () => {
         const cloned = tagged(Node.succeed(input).ast, "Succeed").value
         expect(yield* withCrypto(contentKey(cloned))).toBe(yield* withCrypto(contentKey(input)))
       }
+
+      const selfReturning: { readonly toJSON: () => unknown } = {
+        toJSON() {
+          return selfReturning
+        }
+      }
+      const input = { m: selfReturning }
+      expect(() => Node.succeed(input)).toThrowError(expect.objectContaining({
+        code: "cyclic_payload",
+        path: ["m"]
+      }))
+      const canonicalFailure = yield* Effect.flip(withCrypto(contentKey(input)))
+      expect(canonicalFailure).toMatchObject({ _tag: "SchemaError" })
+      expect(canonicalFailure.message).toContain("canonicalization_failed")
     }))
 
   it("drops values without a JSON representation and nulls array positions", () => {
@@ -492,7 +506,10 @@ describe("internal/node call factories", () => {
         return directCycle
       }
     }
-    expect(tagged(Node.succeed(directCycle).ast, "Succeed").value).toBeUndefined()
+    expect(() => Node.succeed({ member: directCycle })).toThrowError(expect.objectContaining({
+      code: "cyclic_payload",
+      path: ["member"]
+    }))
   })
 
   it("preserves an own __proto__ payload field without changing the clone prototype", () => {

@@ -259,16 +259,17 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
               )
             )
           }
-          const stored = yield* sql<{ node_id: string; key_digest: string; generation: number }>`
-            SELECT node_id, key_digest, generation
+          const stored = yield* sql<{ node_json: string }>`
+            SELECT node_json
             FROM flows_plan_nodes
             WHERE plan_id = ${plan.planId}
             ORDER BY ordinal
           `
-          const recordedPrefix = stored.map((row) => [row.node_id, row.key_digest, row.generation])
-          const expectedPrefix = plan.nodes
-            .filter((node) => node.generation < plan.generation)
-            .map((node) => [node.id, node.key, node.generation])
+          const recordedPrefix = stored.map((row) => row.node_json)
+          const expectedPrefix = yield* Effect.forEach(
+            plan.nodes.filter((node) => node.generation < plan.generation),
+            nodeJson
+          )
           if (JSON.stringify(recordedPrefix) !== JSON.stringify(expectedPrefix)) {
             return yield* Effect.fail(
               error(

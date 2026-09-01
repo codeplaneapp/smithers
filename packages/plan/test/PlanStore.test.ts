@@ -113,6 +113,47 @@ describe("PlanStore", () => {
       expect(afterCount).toBe(beforeCount)
     }))
 
+  it.effect("refuses a same-key priority-divergent prefix and rolls the append back byte for byte", () =>
+    Effect.gen(function*() {
+      const base = yield* withCrypto(compile([draft("root")]))
+      const branchA = yield* withCrypto(Plan.append(base, [draft("a", { priority: 1 })]))
+      const branchB = yield* withCrypto(Plan.append(base, [draft("a", { priority: 2 })]))
+      const branchB2 = yield* withCrypto(Plan.append(branchB, [
+        draft("c", { inputs: [{ _tag: "Ref", from: "a", path: [] }] })
+      ]))
+      expect(branchA.nodes[1]!.key).toBe(branchB.nodes[1]!.key)
+
+      const result = yield* withStore((store) =>
+        Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          yield* store.record(base, 1)
+          yield* store.append(branchA)
+          const beforePlan = yield* sql<Record<string, unknown>>`
+            SELECT * FROM flows_plans WHERE plan_id = ${base.planId}
+          `
+          const beforeNodes = yield* sql<Record<string, unknown>>`
+            SELECT * FROM flows_plan_nodes WHERE plan_id = ${base.planId} ORDER BY ordinal
+          `
+          const failure = yield* Effect.flip(store.append(branchB2))
+          const afterPlan = yield* sql<Record<string, unknown>>`
+            SELECT * FROM flows_plans WHERE plan_id = ${base.planId}
+          `
+          const afterNodes = yield* sql<Record<string, unknown>>`
+            SELECT * FROM flows_plan_nodes WHERE plan_id = ${base.planId} ORDER BY ordinal
+          `
+          return { afterNodes, afterPlan, beforeNodes, beforePlan, failure }
+        })
+      )
+
+      expect(result.failure).toMatchObject({
+        code: "constraint",
+        message: `plan ${base.planId} recorded plan's nodes diverge from the plan this append was grown from`
+      })
+      expect(result.afterPlan).toEqual(result.beforePlan)
+      expect(result.afterNodes).toEqual(result.beforeNodes)
+      expect(result.afterPlan[0]).toMatchObject({ digest: branchA.digest, generation: 1 })
+    }))
+
   it.effect("refuses a skipped generation and rolls the attempted append back byte for byte", () =>
     Effect.gen(function*() {
       const base = yield* withCrypto(compile([draft("a")]))
@@ -325,6 +366,30 @@ describe("PlanStore", () => {
 
       expect(raised(flow)).toBe("a plan only grows")
       expect(raised(createdAt)).toBe("a plan only grows")
+    }))
+
+  it.effect("refuses rewriting a plan id during a forward update and preserves the row", () =>
+    Effect.gen(function*() {
+      const plan = yield* withCrypto(samplePlan())
+      const { after, before, failure } = yield* withStore((store) =>
+        Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          yield* store.record(plan, 1)
+          const before = yield* sql<Record<string, unknown>>`
+            SELECT * FROM flows_plans WHERE plan_id = ${plan.planId}
+          `
+          const failure = yield* Effect.flip(sql`
+            UPDATE flows_plans
+            SET plan_id = 'stolen', generation = generation + 1, digest = 'd1'
+            WHERE plan_id = ${plan.planId}
+          `)
+          const after = yield* sql<Record<string, unknown>>`SELECT * FROM flows_plans`
+          return { after, before, failure }
+        })
+      )
+
+      expect(raised(failure)).toBe("a plan only grows")
+      expect(after).toEqual(before)
     }))
 
   it.effect("refuses two nodes with the same plan ordinal", () =>

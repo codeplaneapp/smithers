@@ -12,6 +12,8 @@ import { FastCheck } from "effect/testing"
 import * as KeyMaterial from "../src/KeyMaterial.ts"
 import * as Plan from "../src/Plan.ts"
 import * as PlanDiff from "../src/PlanDiff.ts"
+import * as Planned from "../src/Planned.ts"
+import * as StepKey from "../src/StepKey.ts"
 import { withCrypto, withCryptoFailure } from "./Crypto.ts"
 
 export const effects = (
@@ -120,10 +122,10 @@ describe("Plan.compile", () => {
       }).toThrow(TypeError)
     }))
 
-  it.effect("preserves cycles and shared references while snapshotting material", () =>
+  it.effect("mirrors a cyclic toJSON value and preserves shared references", () =>
     Effect.gen(function*() {
       const shared = { value: 1 }
-      const cyclic: { value: number; self?: unknown; toJSON: () => { value: number } } = {
+      const cyclic: { value: number; self?: unknown; readonly toJSON: () => { readonly value: number } } = {
         value: 2,
         toJSON() {
           return { value: this.value }
@@ -135,45 +137,141 @@ describe("Plan.compile", () => {
         body: { cyclic, left: shared, right: shared }
       })]))
       const body = plan.nodes[0]!.material.body as {
-        cyclic: { self: unknown }
+        cyclic: { value: number }
         left: { value: number }
         right: { value: number }
       }
 
+      expect(body.cyclic).toEqual({ value: 2 })
       expect(body.cyclic).not.toBe(cyclic)
-      expect(body.cyclic.self).toBe(body.cyclic)
       expect(body.left).not.toBe(shared)
       expect(body.left).toBe(body.right)
+      expect(Object.isFrozen(body)).toBe(true)
+      expect(Object.isFrozen(body.cyclic)).toBe(true)
+      expect(Object.isFrozen(body.left)).toBe(true)
     }))
 
-  it.effect("copies supported container prototypes and passes opaque values by reference", () =>
+  it.effect("stores a frozen Date mirror without letting caller mutation move keyed material", () =>
     Effect.gen(function*() {
-      const dictionary = Object.assign(Object.create(null) as Record<string, unknown>, { value: 1 })
-      let getterReads = 0
-      const accessor = {}
-      const getter = () => {
-        getterReads++
-        return 2
-      }
-      Object.defineProperty(accessor, "value", { enumerable: true, get: getter })
-      const opaque = new Date(0)
-      const pending = compile([draft("node", { body: { accessor, dictionary, opaque } })])
+      const date = new Date(0)
+      const node = draft("node", { body: date })
+      const expectedKey = yield* withCrypto(StepKey.fromKeyMaterial({
+        ...node.material,
+        effects: node.effects
+      }, {}))
+      const plan = yield* withCrypto(compile([node]))
+      const stored = plan.nodes[0]!.material.body
+      const digest = plan.digest
 
-      expect(getterReads).toBe(0)
-      const plan = yield* withCrypto(pending)
-      const body = plan.nodes[0]!.material.body as {
-        accessor: object
-        dictionary: object
-        opaque: Date
+      expect(stored).toBe("1970-01-01T00:00:00.000Z")
+      expect(stored).not.toBe(date)
+      expect(Object.isFrozen(stored)).toBe(true)
+      expect(plan.nodes[0]!.key).toBe(expectedKey)
+
+      date.setTime(86_400_000)
+      expect(plan.nodes[0]!.material.body).toBe("1970-01-01T00:00:00.000Z")
+      expect(plan.digest).toBe(digest)
+      const changed = yield* withCrypto(compile([draft("node", { body: new Date(86_400_000) })]))
+      expect(changed.nodes[0]!.key).not.toBe(plan.nodes[0]!.key)
+    }))
+
+  it.effect("stores frozen URL and custom toJSON mirrors under their original keys", () =>
+    Effect.gen(function*() {
+      class CustomJson {
+        readonly value: number
+        constructor(value: number) {
+          this.value = value
+        }
+        readonly toJSON = () => ({ value: this.value })
       }
 
-      expect(body.dictionary).not.toBe(dictionary)
-      expect(Object.getPrototypeOf(body.dictionary)).toBe(null)
-      expect(Object.isFrozen(body.dictionary)).toBe(true)
-      expect(body.accessor).not.toBe(accessor)
-      expect(Object.getOwnPropertyDescriptor(body.accessor, "value")?.get).toBe(getter)
-      expect(body.opaque).toBe(opaque)
-      expect(Object.isFrozen(opaque)).toBe(false)
+      const url = new URL("https://example.test/original")
+      const custom = new CustomJson(1)
+      const nodes = [draft("url", { body: url }), draft("custom", { body: custom })]
+      const expectedKeys = yield* Effect.forEach(nodes, (node) =>
+        withCrypto(StepKey.fromKeyMaterial({ ...node.material, effects: node.effects }, {})))
+      const plan = yield* withCrypto(compile(nodes))
+      const digest = plan.digest
+
+      expect(plan.nodes[0]!.material.body).toBe("https://example.test/original")
+      expect(plan.nodes[0]!.material.body).not.toBe(url)
+      expect(Object.isFrozen(plan.nodes[0]!.material.body)).toBe(true)
+      expect(plan.nodes[1]!.material.body).toEqual({ value: 1 })
+      expect(plan.nodes[1]!.material.body).not.toBe(custom)
+      expect(Object.isFrozen(plan.nodes[1]!.material.body)).toBe(true)
+      expect(plan.nodes.map((node) =>
+        node.key
+      )).toEqual(expectedKeys)
+
+      url.pathname = "/changed"
+      ;(custom as { value: number }).value = 2
+      expect(plan.nodes[0]!.material.body).toBe("https://example.test/original")
+      expect(plan.nodes[1]!.material.body).toEqual({ value: 1 })
+      expect(plan.digest).toBe(digest)
+    }))
+
+  it.effect("refuses unsupported material prototypes without exposing their values", () =>
+    Effect.gen(function*() {
+      class Unsupported {
+        readonly credential: string
+        constructor(credential: string) {
+          this.credential = credential
+        }
+      }
+      const failure = yield* withCryptoFailure(
+        compile([draft("class-node", { body: { hidden: new Unsupported("TOP-SECRET-CLASS") } })])
+      )
+
+      expect(failure).toMatchObject({ code: "invalid_node" })
+      expect((failure as Plan.PlanError).message).toContain("Node class-node")
+      expect((failure as Plan.PlanError).message).toContain("$.body.hidden")
+      expect((failure as Plan.PlanError).message).not.toContain("TOP-SECRET-CLASS")
+    }))
+
+  it.effect("refuses appended material accessors without invoking or exposing them", () =>
+    Effect.gen(function*() {
+      const base = yield* withCrypto(compile([draft("root")]))
+      let calls = 0
+      const body = Object.defineProperty({}, "credential", {
+        enumerable: true,
+        get: () => {
+          calls++
+          return "TOP-SECRET-ACCESSOR"
+        }
+      })
+      const failure = yield* withCryptoFailure(Plan.append(base, [draft("accessor-node", { body })]))
+
+      expect(failure).toMatchObject({ code: "invalid_node" })
+      expect((failure as Plan.PlanError).message).toContain("Node accessor-node")
+      expect((failure as Plan.PlanError).message).toContain("$.body.credential")
+      expect((failure as Plan.PlanError).message).not.toContain("TOP-SECRET-ACCESSOR")
+      expect(calls).toBe(0)
+    }))
+
+  it.effect("maps a throwing toJSON to a redacted typed material error", () =>
+    Effect.gen(function*() {
+      const body = {
+        toJSON(): never {
+          throw new Error("TOP-SECRET-TO-JSON")
+        }
+      }
+      const failure = yield* withCryptoFailure(compile([draft("throwing-node", { body })]))
+
+      expect(failure).toMatchObject({
+        code: "invalid_node",
+        message: "Node throwing-node has invalid material payload at $"
+      })
+      expect((failure as Plan.PlanError).message).not.toContain("TOP-SECRET-TO-JSON")
+    }))
+
+  it.effect("keeps planned proxies on the canonical serializer's refusal path", () =>
+    Effect.gen(function*() {
+      const failure = yield* withCryptoFailure(
+        compile([draft("planned-node", { body: { result: Planned.make("upstream") } })])
+      )
+
+      expect(failure).toMatchObject({ _tag: "SchemaError" })
+      expect(failure.message).toContain("canonicalization_failed")
     }))
 
   it.effect("pins recursive-compatible ordering for a non-trivial graph", () =>
@@ -255,7 +353,10 @@ describe("Plan.compile", () => {
 
   it.effect("serializes overlapping writers in declaration order without re-keying them", () =>
     Effect.gen(function*() {
-      const disjoint = yield* withCrypto(compile([draft("first", { writes: ["out"] }), draft("second")]))
+      const disjoint = yield* withCrypto(compile([
+        draft("first", { writes: ["log"] }),
+        draft("second", { writes: ["out"] })
+      ]))
       const plan = yield* withCrypto(compile([
         draft("first", { writes: ["out", "log"] }),
         draft("second", { writes: ["out"] })
@@ -521,8 +622,8 @@ describe("Plan.compile reader-after-writer edges", () => {
   it.effect("orders a reader behind the node that writes what it reads", () =>
     Effect.gen(function*() {
       const unrelated = yield* withCrypto(compile([
-        draft("writer", { writes: ["out"] }),
-        draft("reader", { reads: ["other"] })
+        draft("writer", { writes: ["other"] }),
+        draft("reader", { reads: ["out"] })
       ]))
       const plan = yield* withCrypto(compile([
         draft("writer", { writes: ["out"] }),
@@ -534,7 +635,6 @@ describe("Plan.compile reader-after-writer edges", () => {
       expect(plan.nodes.flatMap((node) => node.conflicts)).toEqual([])
       // And ordering is not key material, so the reader keeps its cache hit.
       expect(keyOf(plan, "reader")).toBe(keyOf(unrelated, "reader"))
-      expect(keyOf(plan, "writer")).toBe(keyOf(unrelated, "writer"))
     }))
 
   it.effect("puts the writer first even when the reader was declared first", () =>
@@ -1003,6 +1103,38 @@ describe("Plan admission", () => {
 })
 
 describe("PlanDiff.diff", () => {
+  it.effect("keys every decoded effect field and attributes each move to effects", () =>
+    Effect.gen(function*() {
+      const unchanged = draft("node")
+      const before = yield* withCrypto(compile([unchanged]))
+      const declarations: ReadonlyArray<Plan.NodeEffects> = [
+        { reads: ["input"], writes: [], boundaryMode: "hard" },
+        { reads: [], writes: ["output"], boundaryMode: "hard" },
+        { reads: [], writes: [], removes: ["stale"], boundaryMode: "hard" },
+        { reads: [], writes: [], boundaryMode: "expected" }
+      ]
+      const keys = [before.nodes[0]!.key]
+      for (const effects of declarations) {
+        const after = yield* withCrypto(compile([{ ...unchanged, effects }]))
+        keys.push(after.nodes[0]!.key)
+        expect(PlanDiff.diff(before, after).rekeyed[0]!.changed).toEqual(["effects"])
+      }
+
+      expect(new Set(keys).size).toBe(keys.length)
+    }))
+
+  it.effect("overrides caller material effects with the decoded declaration", () =>
+    Effect.gen(function*() {
+      const node = draft("node", { reads: ["input"], writes: ["output"] })
+      const plan = yield* withCrypto(compile([{
+        ...node,
+        material: { ...node.material, effects: { caller: "wrong" } }
+      }]))
+
+      expect(plan.nodes[0]!.material.effects).toEqual(node.effects)
+      expect(plan.nodes[0]!.material.effects).toBe(plan.nodes[0]!.effects)
+    }))
+
   it.effect("reports added, removed, unchanged, and re-keyed nodes with attribution", () =>
     Effect.gen(function*() {
       const before = yield* withCrypto(compile([
@@ -1027,7 +1159,10 @@ describe("PlanDiff.diff", () => {
 
   it.effect("attributes every declaration field that can move a key", () =>
     Effect.gen(function*() {
-      const material = (overrides: Partial<KeyMaterial.KeyMaterial>): Plan.NodeDraft => ({
+      const material = (
+        overrides: Partial<KeyMaterial.KeyMaterial>,
+        declaredEffects: Plan.NodeEffects = effects([], [])
+      ): Plan.NodeDraft => ({
         id: "node",
         material: {
           version: KeyMaterial.version,
@@ -1039,7 +1174,7 @@ describe("PlanDiff.diff", () => {
           effects: { net: false },
           ...overrides
         },
-        effects: effects([], [])
+        effects: declaredEffects
       })
       const before = yield* withCrypto(compile([material({})]))
       const after = yield* withCrypto(compile([
@@ -1051,7 +1186,7 @@ describe("PlanDiff.diff", () => {
           effects: { net: true },
           placement: { host: "other" },
           inputs: [{ _tag: "Literal", value: 2 }, { _tag: "Literal", value: 3 }]
-        })
+        }, { reads: ["input"], writes: [], boundaryMode: "expected" })
       ]))
       expect(PlanDiff.diff(before, after).rekeyed[0]!.changed).toEqual([
         "body",
@@ -1067,7 +1202,10 @@ describe("PlanDiff.diff", () => {
 
   it.effect("attributes every hashed material field when it moves by itself", () =>
     Effect.gen(function*() {
-      const material = (overrides: Partial<KeyMaterial.KeyMaterial> = {}): Plan.NodeDraft => ({
+      const material = (
+        overrides: Partial<KeyMaterial.KeyMaterial> = {},
+        declaredEffects: Plan.NodeEffects = effects([], [])
+      ): Plan.NodeDraft => ({
         id: "node",
         material: {
           version: KeyMaterial.version,
@@ -1080,21 +1218,23 @@ describe("PlanDiff.diff", () => {
           placement: { host: "a" },
           ...overrides
         },
-        effects: effects([], [])
+        effects: declaredEffects
       })
       const before = yield* withCrypto(compile([material()]))
-      const cases: ReadonlyArray<readonly [string, Partial<KeyMaterial.KeyMaterial>]> = [
+      const cases: ReadonlyArray<
+        readonly [string, Partial<KeyMaterial.KeyMaterial>, Plan.NodeEffects?]
+      > = [
         ["body", { body: 2 }],
         ["nondeterministic", { nondeterministic: true }],
-        ["effects", { effects: { net: true } }],
+        ["effects", {}, { reads: ["input"], writes: [], boundaryMode: "expected" }],
         ["placement", { placement: { host: "b" } }],
         ["input[0]", { inputs: [{ _tag: "Literal", value: 2 }] }],
         ["layers", { layers: ["b"] }],
         ["capabilities", { capabilities: ["fs:write"] }]
       ]
       const attributions: Array<readonly [string, ReadonlyArray<string>]> = []
-      for (const [field, overrides] of cases) {
-        const after = yield* withCrypto(compile([material(overrides)]))
+      for (const [field, overrides, declaredEffects] of cases) {
+        const after = yield* withCrypto(compile([material(overrides, declaredEffects)]))
         attributions.push([field, PlanDiff.diff(before, after).rekeyed[0]!.changed])
       }
 
@@ -1156,6 +1296,116 @@ describe("PlanDiff.diff", () => {
       const before = yield* withCrypto(compile([node({ a: 1, b: [1, "x", null] })]))
       const reordered = yield* withCrypto(compile([node({ b: [1, "x", null], a: 1 })]))
       expect(PlanDiff.diff(before, reordered).unchanged).toEqual(["node"])
+    }))
+
+  it.effect("projects Date bodies before attributing a hand-built rekey", () =>
+    Effect.gen(function*() {
+      const compiled = yield* withCrypto(compile([draft("node")]))
+      const before: Plan.Plan = {
+        ...compiled,
+        nodes: [{
+          ...compiled.nodes[0]!,
+          material: { ...compiled.nodes[0]!.material, body: new Date(0) }
+        }]
+      }
+      const after: Plan.Plan = {
+        ...before,
+        nodes: [{
+          ...before.nodes[0]!,
+          key: Schema.decodeUnknownSync(Plan.KeyDigest)(`key1_${"0".repeat(64)}`),
+          material: { ...before.nodes[0]!.material, body: new Date(86_400_000) }
+        }]
+      }
+
+      expect(PlanDiff.diff(before, after).rekeyed[0]!.changed).toEqual(["body"])
+    }))
+
+  it.effect("diffs cyclic toJSON bodies without recursing into their cycles", () =>
+    Effect.gen(function*() {
+      const compiled = yield* withCrypto(compile([draft("node")]))
+      const body: { self?: unknown; readonly toJSON: () => { readonly ok: 1 } } = {
+        toJSON: () => ({ ok: 1 })
+      }
+      body.self = body
+      const before: Plan.Plan = {
+        ...compiled,
+        nodes: [{
+          ...compiled.nodes[0]!,
+          material: { ...compiled.nodes[0]!.material, body: { ok: 1 } }
+        }]
+      }
+      const after: Plan.Plan = {
+        ...before,
+        nodes: [{
+          ...before.nodes[0]!,
+          key: Schema.decodeUnknownSync(Plan.KeyDigest)(`key1_${"0".repeat(64)}`),
+          material: { ...before.nodes[0]!.material, body }
+        }]
+      }
+
+      expect(PlanDiff.diff(before, after).rekeyed[0]!.changed).toEqual([])
+    }))
+
+  it.effect("uses identity sentinels for refused fields without invoking accessors", () =>
+    Effect.gen(function*() {
+      const compiled = yield* withCrypto(compile([draft("node")]))
+      let calls = 0
+      const accessor = () =>
+        Object.defineProperty({}, "credential", {
+          enumerable: true,
+          get: () => {
+            calls++
+            return "secret"
+          }
+        })
+      const first = accessor()
+      const before: Plan.Plan = {
+        ...compiled,
+        nodes: [{
+          ...compiled.nodes[0]!,
+          material: { ...compiled.nodes[0]!.material, body: first }
+        }]
+      }
+      const rekeyed = (body: unknown): Plan.Plan => ({
+        ...before,
+        nodes: [{
+          ...before.nodes[0]!,
+          key: Schema.decodeUnknownSync(Plan.KeyDigest)(`key1_${"0".repeat(64)}`),
+          material: { ...before.nodes[0]!.material, body }
+        }]
+      })
+
+      expect(PlanDiff.diff(before, rekeyed(first)).rekeyed[0]!.changed).toEqual([])
+      expect(PlanDiff.diff(before, rekeyed(accessor())).rekeyed[0]!.changed).toEqual(["body"])
+      expect(calls).toBe(0)
+    }))
+
+  it.effect("uses identity sentinels for self-returning toJSON fields", () =>
+    Effect.gen(function*() {
+      const compiled = yield* withCrypto(compile([draft("node")]))
+      const selfReturning = (): { readonly toJSON: () => unknown } => {
+        const body: { readonly toJSON: () => unknown } = { toJSON: () => body }
+        return body
+      }
+      const first = selfReturning()
+      const before: Plan.Plan = {
+        ...compiled,
+        nodes: [{
+          ...compiled.nodes[0]!,
+          material: { ...compiled.nodes[0]!.material, body: first }
+        }]
+      }
+      const rekeyed = (body: unknown): Plan.Plan => ({
+        ...before,
+        nodes: [{
+          ...before.nodes[0]!,
+          key: Schema.decodeUnknownSync(Plan.KeyDigest)(`key1_${"0".repeat(64)}`),
+          material: { ...before.nodes[0]!.material, body }
+        }]
+      })
+
+      expect(PlanDiff.diff(before, rekeyed(first)).rekeyed[0]!.changed).toEqual([])
+      expect(PlanDiff.diff(before, rekeyed(selfReturning())).rekeyed[0]!.changed).toEqual(["body"])
     }))
 
   it.effect("reports bigint material in a hand-built plan without throwing", () =>

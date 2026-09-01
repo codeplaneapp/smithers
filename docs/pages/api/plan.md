@@ -70,7 +70,7 @@ What a planner declares about one node, handed to the compiler: a `version`, a t
 
 `kind` is `sealed`, `compensable`, or `irreversible`. Absence of `nondeterministic` claims determinism; only the explicit declaration changes identity. The `InputRef` tag is hashed, so `Pending{from}` and `Ref{from, path: []}` cannot collide even though both resolve to the same dependency digest.
 
-`dependencies` is the single derivation of a node's edge set, so a hashed reference and an edge can never disagree. `effects` and `placement` are canonically serialized and never interpreted, which keeps the compiler independent of whatever the flow builder decides an effect declaration looks like.
+`dependencies` is the single derivation of a node's edge set, so a hashed reference and an edge can never disagree. `StepKey` canonically serializes `effects` and `placement` and never interprets them, which keeps the key compiler independent of whatever the flow builder decides an effect declaration looks like. `Plan.compile` is stricter: it decodes `NodeDraft.effects` through `NodeEffects` and writes the result into `material.effects`, replacing anything a caller put there. That makes the draft declaration the single derivation point for effect identity, so a node's key cannot disagree with the effects its conflict annotations and approval payload were computed from.
 
 ## StepKey
 
@@ -104,7 +104,7 @@ A plan grows and is never rewritten. `append` leaves the nodes already in it wit
 
 `baseDigest` is the digest at generation 0: what a human approved and what a running run pins. `digest` advances with every appended elaboration. Both cover node identity, every computed key, the edge set, the conflict annotations, the declared effects, the priority, and each node's own conflict and runtime strategies.
 
-A compiled plan is a deep-frozen snapshot of the drafts it was given. Mutating a caller's draft after compiling cannot change the plan, its keys, or its digest.
+A compiled plan is a deep-frozen snapshot of the drafts it was given. Material is stored as the inert JSON mirror its key already covers, so a `Date`, a `URL`, or any value with a data-valued callable `toJSON` is stored as the value it serializes to, and mutating a caller's draft after compiling cannot change the plan, its keys, or its digest. A material accessor, or a prototype with no JSON representation, is refused as `invalid_node` naming the node and the payload path rather than stored by reference. A `Planned` placeholder is left intact so canonical serialization still refuses it.
 
 `PlanError` is a closed set of seven codes.
 
@@ -140,7 +140,7 @@ The pure, pipeable authoring AST. Building a node records an inspectable, closur
 
 Map transforms; branch decides. Both branch arms are evaluated once, symbolically, so the exit condition and the handoff site are visible topology before anything runs. A plan is always a DAG, so there is no loop node: repetition lives one level up, in what a flow settles with.
 
-A payload is stored as its inert JSON mirror. A data-valued callable `toJSON` is honoured, so a `Date` or a `URL` keys as the value it serializes to rather than as an empty object; a function or symbol member is dropped from an object and becomes `null` in an array; shared references and cycles clone as they were written. Accessors and unsupported prototypes without `toJSON` fail as `invalid_payload`.
+A payload is stored as its inert JSON mirror. A data-valued callable `toJSON` is honoured, so a `Date` or a `URL` keys as the value it serializes to rather than as an empty object; a function or symbol member is dropped from an object and becomes `null` in an array; shared references and cycles clone as they were written. Accessors and unsupported prototypes without `toJSON` fail as `invalid_payload`, and a `toJSON` that returns its own receiver fails as `cyclic_payload` rather than collapsing to an empty object the way it once did. The clone and the input therefore key identically or refuse together.
 
 The functions an author writes, a mapper, a continuation, a branch predicate, live in `WeakMap`s keyed by the AST node they belong to, and the AST keeps only a `FunctionIdentity` digest of the function's exact source. Exact source matters, because whitespace inside a string literal is behavior. A function whose inert captures were declared with `capture` digests those captures; every other function additionally carries process-local, per-function entropy, so indistinguishable closure sources fail closed instead of sharing a cache key. `capture` refuses a capture record nested past 256 levels with a path-bearing error rather than overflowing the native stack.
 
@@ -197,6 +197,8 @@ The refusals a plan-time build raises instead of producing a wrong plan. Each ca
 [src/PlanDiff.ts](https://github.com/smithersai/smithers/blob/main/packages/plan/src/PlanDiff.ts)
 
 The verdict is the key: two nodes with the same id and the same key are the same step. The attribution, `changed: ["body", "input[1]"]`, is a report for a human, derived by comparing declarations field by field, and is deliberately part of no digest. Labels mirror the fields the hashed material body folds: `body`, `layers`, `capabilities`, `effects`, `version`, `nondeterministic`, `placement`, and `input[n]`, including `input[n]` entries whose declaration is unchanged but whose referenced node itself re-keyed. A node re-keyed purely by an upstream edit is therefore attributed to the input position that references it, even behind an unprojected `Pending`, rather than reported as nothing changed.
+
+Each compared field is projected through the same JSON mirror the keys are derived from, so two `Date` bodies a generation apart attribute to `body` rather than to nothing. The projection runs no accessor, and a field it refuses compares by an identity token scoped to that node and field, so `diff` stays a total function even for a value canonical serialization would reject.
 
 ## PlanStore
 

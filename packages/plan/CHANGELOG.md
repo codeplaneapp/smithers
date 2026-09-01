@@ -50,6 +50,23 @@
   compares node pairs and adds a reachability walk per overlapping pair, so an
   unbounded plan had an unbounded planning cost; a graph larger than the bound
   now has to be split.
+- `NodeDraft.effects` is now the single derivation point for effect identity.
+  `Plan.compile` and `Plan.append` fold the decoded declaration into the hashed
+  material, replacing any `material.effects` a caller supplied. Every plan
+  re-keys once, and editing `reads`, `writes`, `removes`, or `boundaryMode`
+  now re-keys the node and is attributed by `PlanDiff` as `effects`. Before
+  this, the two channels were independent: a draft could change what a node
+  writes without moving its key, and `PlanDiff` reported it `unchanged`.
+- Compiled material is stored as its deeply frozen JSON mirror. A `Date`, a
+  `URL`, or any value with a data-valued callable `toJSON` is stored as the
+  value it serializes to, which is what its key already covered. A material
+  accessor or a prototype with no JSON representation is now refused with
+  `invalid_node` rather than passed through by reference; the message names the
+  node and the payload path and never the value.
+- A payload whose `toJSON` returns its own receiver now fails with the
+  `cyclic_payload` `GraphBuildError` instead of being silently omitted from the
+  clone. The clone and the input now agree: canonical serialization refused
+  that shape all along, while the clone quietly keyed as `{}`.
 
 ### Fixed
 

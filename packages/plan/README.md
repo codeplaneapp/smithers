@@ -157,7 +157,9 @@ A node payload is stored as its inert JSON mirror: a data-valued callable
 becomes `null` in an array, and shared references and cycles clone as they were
 written. Accessors and unsupported prototypes without `toJSON` fail with
 `invalid_payload` instead of executing author code or collapsing distinct
-values onto `{}`.
+values onto `{}`, and a `toJSON` returning its own receiver fails with
+`cyclic_payload`. The mirror and the value it was taken from therefore key
+identically or refuse together.
 
 A `Planned` placeholder may be passed into a payload field, a branch, or a map,
 and field access is allowed because it records a reference path. It may never
@@ -177,8 +179,17 @@ overlap densely costs more than quadratic. `Plan.maximumPlanNodes` bounds that
 work: a plan above it is refused with `graph_too_large` before any pair is
 compared.
 
-A compiled plan is a deep-frozen snapshot. Mutating the draft objects a caller
-passed in cannot change the plan, its keys, or its digest.
+A compiled plan is a deep-frozen snapshot, and its material is stored as the
+inert JSON mirror the node's key already covers. Mutating the draft objects a
+caller passed in cannot change the plan, its keys, or its digest. A material
+accessor, or a prototype with no JSON representation, is refused as
+`invalid_node` rather than stored by reference.
+
+Effect identity flows through one channel. `Plan.compile` decodes
+`NodeDraft.effects` and writes it into the hashed `material.effects`, replacing
+whatever a caller supplied, so editing `reads`, `writes`, `removes`, or
+`boundaryMode` re-keys the node instead of moving the approval digest behind an
+unchanged key.
 
 ## Browser support
 

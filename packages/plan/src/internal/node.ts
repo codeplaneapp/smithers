@@ -459,6 +459,16 @@ const payloadError = (path: ReadonlyArray<string>, reason: string): GraphBuildEr
     message: `Plan payload at ${path.length === 0 ? "$" : `$.${path.join(".")}`} ${reason}`
   })
 
+const cyclicPayloadError = (path: ReadonlyArray<string>): GraphBuildError =>
+  new GraphBuildError({
+    code: "cyclic_payload",
+    node: "payload",
+    path,
+    message: `Plan payload at ${
+      path.length === 0 ? "$" : `$.${path.join(".")}`
+    } has a toJSON method that returns itself`
+  })
+
 const inheritedDataProperty = (
   value: object,
   key: PropertyKey
@@ -485,7 +495,12 @@ const inheritedDataProperty = (
  * @private
  * @slop
  */
-export const value = (input: unknown, seen: WeakMap<object, unknown> = new WeakMap()): unknown => {
+export const value = (
+  input: unknown,
+  seen: WeakMap<object, unknown> = new WeakMap(),
+  plannedValue: (value: unknown, reference: Planned.Reference) => unknown = (_value, reference) =>
+    makePlannedReference(reference)
+): unknown => {
   const missing = Symbol("missing JSON representation")
   let result: unknown
   const frames: Array<CloneFrame> = []
@@ -505,7 +520,7 @@ export const value = (input: unknown, seen: WeakMap<object, unknown> = new WeakM
     while (true) {
       const reference = Planned.reference(current)
       if (reference !== undefined) {
-        finish(makePlannedReference(reference))
+        finish(plannedValue(current, reference))
         return
       }
       const kind = typeof current
@@ -519,8 +534,7 @@ export const value = (input: unknown, seen: WeakMap<object, unknown> = new WeakM
         return
       }
       if (resolving.has(source)) {
-        finish(missing)
-        return
+        throw cyclicPayloadError(path)
       }
       const toJSON = inheritedDataProperty(source, "toJSON")
       if (toJSON.found && toJSON.value === undefined) {

@@ -22,6 +22,8 @@ import * as Effect from "effect/Effect"
 import * as Inspectable from "effect/Inspectable"
 import * as Schema from "effect/Schema"
 import * as FileSet from "./FileSet.ts"
+import { GraphBuildError } from "./GraphBuildError.ts"
+import { value as jsonMirror } from "./internal/node.ts"
 import * as KeyMaterial from "./KeyMaterial.ts"
 import * as StepKey from "./StepKey.ts"
 
@@ -594,12 +596,12 @@ const emptySnapshot = (source: object): object =>
   Array.isArray(source) ? [] : Object.create(Object.getPrototypeOf(source)) as object
 
 /**
- * Copies and freezes only plain data containers, without native recursion.
- * Shared references and cycles point at one cloned container through `memo`.
- * Every other value passes through by reference and remains unfrozen. That is
- * deliberate: a `Planned` proxy inside a material body must still reach the
- * canonical serializer that refuses it, and freezing an object this package
- * did not create would mutate caller-owned state.
+ * Copies and freezes plain structural containers without interpreting them as
+ * JSON. Shared references and cycles point at one cloned container through
+ * `memo`; every other value passes through by reference and remains unfrozen.
+ * In particular, this does not probe a `Planned` proxy. `validateDrafts`
+ * creates the inert material mirror inside the Effect while retaining that
+ * proxy, so the canonical serializer still reaches and refuses it.
  */
 const snapshot = <A extends object>(value: A): A => {
   const root = emptySnapshot(value)
@@ -652,9 +654,9 @@ const freezePlan = (plan: Plan): Plan => {
 /**
  * Validates the runtime-only parts of `NodeDraft` without replacing effect
  * admission. Effect 4 Struct decoding strips excess properties and copies its
- * schema arrays. Extras therefore remain accepted but are not hashed, matching
- * `materialBody` and PlanStore's decode boundary, while every accepted draft
- * receives a material snapshot.
+ * schema arrays. The decoded effect declaration replaces any caller-supplied
+ * `material.effects`, and every accepted draft receives one deeply frozen JSON
+ * mirror for both storage and hashing.
  *
  * @private
  */
@@ -708,7 +710,7 @@ const validateDrafts = (
           })
         )
       }
-      const material = yield* Schema.decodeUnknownEffect(KeyMaterial.KeyMaterial)(draft.material).pipe(
+      const decodedMaterial = yield* Schema.decodeUnknownEffect(KeyMaterial.KeyMaterial)(draft.material).pipe(
         Effect.mapError((cause) =>
           new PlanError({
             code: "invalid_node",
@@ -716,7 +718,7 @@ const validateDrafts = (
           })
         )
       )
-      const effects = yield* Schema.decodeUnknownEffect(NodeEffects)(draft.effects).pipe(
+      const decodedEffects = yield* Schema.decodeUnknownEffect(NodeEffects)(draft.effects).pipe(
         Effect.mapError((cause) =>
           new PlanError({
             code: "invalid_node",
@@ -724,10 +726,28 @@ const validateDrafts = (
           })
         )
       )
+      let material: KeyMaterial.KeyMaterial
+      try {
+        material = snapshot(
+          jsonMirror(
+            { ...decodedMaterial, effects: decodedEffects },
+            new WeakMap(),
+            (planned) => planned
+          ) as KeyMaterial.KeyMaterial
+        )
+      } catch (cause) {
+        const path = cause instanceof GraphBuildError ? cause.path : []
+        return yield* Effect.fail(
+          new PlanError({
+            code: "invalid_node",
+            message: `Node ${nodeId} has invalid material payload at ${["$", ...path].join(".")}`
+          })
+        )
+      }
       return Object.freeze({
         ...draft,
-        material: snapshot(material),
-        effects: snapshot(effects)
+        material,
+        effects: material.effects as NodeEffects
       })
     }))
 
