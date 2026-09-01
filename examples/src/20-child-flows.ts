@@ -37,6 +37,8 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as Agent from "@smthrs/agent/Agent"
 import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Budget from "@smthrs/agent/Budget"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import * as Effects from "@smthrs/core/Effects"
@@ -358,6 +360,9 @@ export const main = (filename: string): Effect.Effect<Summary> =>
                   Agent.layer
                 )
               ),
+              // The fixture model cannot report provider quota, and this
+              // offline example has no approved envelope to turn into a cap.
+              Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerUnclassified(), Budget.layerUnbounded())),
               Layer.provideMerge(Agent.layerDefaults)
             )
           )

@@ -132,9 +132,9 @@ const scripted = (calls: Array<string>): Model.Model =>
 
 /**
  * The composition half. `Host` carries what every model-backed action in this
- * composition shares; the two policy layers are injected beside it, so a host
- * that wants today's behavior provides `QuotaPolicy.layerNoop()` and
- * `Budget.layerNoop()` instead and nothing above changes.
+ * composition shares. The default classifier is the behavior this example is
+ * demonstrating, and the written token ceiling is the one the example chose.
+ * A host opting out would say `layerUnclassified()` and `layerUnbounded()`.
  */
 const policies = (calls: Array<string>) =>
   Layer.mergeAll(
@@ -151,11 +151,6 @@ const policies = (calls: Array<string>) =>
       // off: the park is the only thing that waits.
       modelRetryPolicy: Schedule.recurs(0)
     }),
-    QuotaPolicy.layerDefault(),
-    // A ceiling in `warn`: the run reports what it spends without being
-    // stopped, which is how a budget is introduced to a live workflow. Under
-    // `fail` the same ceiling would end the step instead.
-    Budget.layer({ tokens: { max: 500, onExceeded: "warn" } }),
     SeatResolver.layer({
       resolve: (id) =>
         Effect.succeed(
@@ -168,6 +163,16 @@ const policies = (calls: Array<string>) =>
         )
     }),
     Agent.layer
+  ).pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(
+        QuotaPolicy.layerDefault(),
+        // A ceiling in `warn`: the run reports what it spends without being
+        // stopped, which is how a budget is introduced to a live workflow.
+        // Under `fail` the same ceiling would end the step instead.
+        Budget.layer({ tokens: { max: 500, onExceeded: "warn" } })
+      )
+    )
   )
 
 const engine = (filename: string, hostId: string, calls: Array<string>) =>

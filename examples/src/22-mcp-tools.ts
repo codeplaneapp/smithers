@@ -34,6 +34,8 @@ import { NodeServices } from "@effect/platform-node"
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as Agent from "@smthrs/agent/Agent"
 import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Budget from "@smthrs/agent/Budget"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import * as Capability from "@smthrs/capability/Capability"
@@ -258,6 +260,9 @@ export const main = (filename: string): Effect.Effect<Summary> =>
                   Agent.layer
                 )
               ),
+              // The scripted seat has no provider quota to classify, and the
+              // standalone example has no approved envelope to derive a cap.
+              Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerUnclassified(), Budget.layerUnbounded())),
               Layer.provideMerge(Agent.layerDefaults),
               Layer.provideMerge(Action.layerImplementations),
               Layer.provideMerge(durableEngine(filename, "examples-mcp"))

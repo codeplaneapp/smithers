@@ -42,6 +42,8 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as Agent from "@smthrs/agent/Agent"
 import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Budget from "@smthrs/agent/Budget"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
@@ -154,9 +156,7 @@ const cellFor = (task: string, note: string): string => {
       ...facts.map((fact) =>
         // The bank is empty on purpose: the policy fills it in. A caller that
         // names its own keeps it.
-        `await ctx.call("remember", { bank: "", key: ${JSON.stringify(fact.key)}, text: ${
-          JSON.stringify(fact.text)
-        } })`
+        `await ctx.call("remember", { bank: "", key: ${JSON.stringify(fact.key)}, text: ${JSON.stringify(fact.text)} })`
       ),
       `ctx.done({ keys: ${JSON.stringify(facts.map((fact) => fact.key))} })`
     ].join("\n")
@@ -291,6 +291,9 @@ export const main = (filename: string): Effect.Effect<Summary> =>
                     Agent.layer
                   )
                 ),
+                // The scripted seat has no provider quota, and these offline
+                // runs have no approved plan envelope to derive a ceiling.
+                Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerUnclassified(), Budget.layerUnbounded())),
                 Layer.provideMerge(Agent.layerDefaults),
                 Layer.provideMerge(Action.layerImplementations)
               )

@@ -36,6 +36,8 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as Agent from "@smthrs/agent/Agent"
 import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Budget from "@smthrs/agent/Budget"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import * as StandardFlows from "@smthrs/agent/StandardFlows"
@@ -202,6 +204,9 @@ export const main = (filename: string, root: string): Effect.Effect<Summary> =>
 
     const stack = Layer.mergeAll(Summarize.layer, Interpreter.layer(Audit)).pipe(
       Layer.provideMerge(Layer.mergeAll(host, seats, Agent.layer)),
+      // The scripted seat cannot refuse for quota, and this offline example
+      // has no approved plan envelope from which to derive a ceiling.
+      Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerUnclassified(), Budget.layerUnbounded())),
       // The QuickJS sandbox the cell's code runs in, and the steering source it
       // drains. Both are browser-safe defaults.
       Layer.provideMerge(Agent.layerDefaults),
