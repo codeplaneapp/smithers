@@ -298,10 +298,11 @@ const declinedLaunch = (control: ControlService.Service, runId: string) =>
     const summary = yield* summaryOf(control, runId)
     if (summary !== undefined) yield* render(summary)
     return new CliError.UnsupportedError({
-      message: `Run ${runId} was accepted but the executor did not take it: it is ` +
-        `${summary?.status ?? "accepted"} with nothing running. This host resolved no seat for the flow, or ` +
-        `refused the launch. Read \`smithers status ${runId}\` and \`smithers ps\`, then run ` +
-        `\`smithers doctor\` to see which provider keys this project has.`
+      message: `Run ${runId} was accepted but no executor took it: it is ` +
+        `${summary?.status ?? "accepted"} with nothing running. This host drives prompt flows. A flow whose ` +
+        `body is a module (\`flow.ts\`) is driven by the host program that registers its delegates, and a flow ` +
+        `this project's registry does not hold belongs to another host: run the flow from that program, or end ` +
+        `the run with \`smithers cancel ${runId}\`. \`smithers status ${runId}\` shows what it waits for.`
     })
   })
 
@@ -688,22 +689,59 @@ const ps = Command.make("ps", {
     yield* guardGlobals
     const control = yield* ControlService.Control
     yield* render(
-      yield* control.list({
-        _tag: "runs",
-        filters: {
-          ...(Option.isNone(config.flow) ? {} : { flowId: config.flow.value }),
-          ...(Option.isNone(config.status) ? {} : { status: config.status.value })
-        }
-      })
+      labelled(
+        yield* control.list({
+          _tag: "runs",
+          filters: {
+            ...(Option.isNone(config.flow) ? {} : { flowId: config.flow.value }),
+            ...(Option.isNone(config.status) ? {} : { status: config.status.value })
+          }
+        })
+      )
     )
   })).pipe(Command.withDescription(Verb.find("ps")!.help))
+
+/**
+ * Whether a run is durably accepted and no process ever claimed it.
+ *
+ * `ControlRuntime.launch` writes the run row with owner pid 0 before the
+ * executor is consulted, and the whole launch is one journal transaction, so
+ * any reader that sees `accepted` with pid 0 is seeing a launch the executor
+ * declined. The run is real, durable, and waiting for a host that drives its
+ * flow — a module flow's delegates are registered in code by the program that
+ * hosts them — and only `smithers cancel` ends it if none arrives.
+ */
+const unclaimed = (run: ControlSchema.RunSummary): boolean => {
+  if (run.status !== "accepted" || run.waitingReason !== undefined) return false
+  if (run.ownerId === undefined) return true
+  try {
+    return (JSON.parse(run.ownerId) as { readonly pid?: unknown }).pid === 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Names what an unclaimed run waits for, in the field that already carries it.
+ *
+ * `RunSummary.waitingReason` is "what a parked run is holding on". This one
+ * holds on an executor, and before the label a listing showed it as an
+ * ordinary `accepted` run — indistinguishable from one a live peer owns.
+ */
+const labelled = (listed: ControlSchema.ListResponse): ControlSchema.ListResponse =>
+  listed._tag === "runs"
+    ? {
+      ...listed,
+      items: listed.items.map((run) => unclaimed(run) ? { ...run, waitingReason: "executor" } : run)
+    }
+    : listed
 
 const statusOf = (runId: Option.Option<string>) =>
   Effect.gen(function*() {
     yield* guardGlobals
     const control = yield* ControlService.Control
     const filters = Option.isSome(runId) ? { runId: runId.value } : undefined
-    const listed = yield* control.list({ _tag: "runs", filters })
+    const listed = labelled(yield* control.list({ _tag: "runs", filters }))
     const root = yield* rootCommand
     // `--json` keeps the stable listing shape untouched; a human reader with a
     // run id gets the diagnosis card computed from that run's own events.
