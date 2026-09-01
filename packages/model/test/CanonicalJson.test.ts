@@ -39,7 +39,9 @@ describe("CanonicalJson", () => {
     const parsed = JSON.parse("{\"a\":1,\"__proto__\":{\"changed\":true}}") as Record<string, unknown>
 
     expect(CanonicalJson.stringify(parsed)).toBe("{\"__proto__\":{\"changed\":true},\"a\":1}")
-    expect(new TextDecoder().decode(CanonicalJson.bytes(parsed))).toBe(JSON.stringify(parsed))
+    expect(new TextDecoder().decode(CanonicalJson.bytes(parsed))).toBe(CanonicalJson.stringify(parsed))
+    // `JSON.stringify` keeps the member too; only the key order differs.
+    expect(JSON.stringify(parsed)).toContain("\"__proto__\"")
     // The member is data, never a prototype mutation.
     expect(Object.getPrototypeOf({})).toBe(Object.prototype)
     expect(({} as { readonly changed?: unknown }).changed).toBeUndefined()
