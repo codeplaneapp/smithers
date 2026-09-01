@@ -21,6 +21,16 @@ interface Entry {
 }
 
 const locks = new WeakMap<FileSystem.FileSystem, Map<string, Entry>>()
+
+/**
+ * The subdirectory of the objects directory that holds lock files and their
+ * stale-owner tombstones. Named here rather than spelled in each caller so the
+ * store's crash-orphan sweep reclaims exactly what this module creates.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const directoryName = ".locks"
 const heartbeatEvery = "10 seconds"
 const staleAfterMs = 60_000
 const acquireWithin = "2 minutes"
@@ -68,16 +78,29 @@ export const withDigest = <A, E, R, E2>(
     ? effect
     : Effect.gen(function*() {
       const owner = yield* token
-      const lockDirectory = `${directory}/.locks`
+      const lockDirectory = `${directory}/${directoryName}`
       const lockPath = `${lockDirectory}/${digest}.lock`
       yield* fs.makeDirectory(lockDirectory, { recursive: true }).pipe(Effect.mapError(failure))
+      /**
+       * Whether this call created the lock file, and therefore owes a release.
+       * It is set in the same uninterruptible step that creates the file, so
+       * interruption striking between the two cannot leak a lock nothing
+       * releases — the only party that would ever reclaim it is a later
+       * acquirer of the same digest, which may never come.
+       */
+      let acquired = false
 
       const acquire = Effect.gen(function*() {
         while (true) {
-          const created = yield* fs.writeFileString(lockPath, owner, { flag: "wx", mode: 0o600 }).pipe(
-            Effect.as(true),
-            Effect.catch((cause): Effect.Effect<boolean, E2> =>
-              isReason(cause, "AlreadyExists") ? Effect.succeed(false) : Effect.fail(failure(cause))
+          const created = yield* Effect.uninterruptible(
+            fs.writeFileString(lockPath, owner, { flag: "wx", mode: 0o600 }).pipe(
+              Effect.andThen(Effect.sync(() => {
+                acquired = true
+                return true
+              })),
+              Effect.catch((cause): Effect.Effect<boolean, E2> =>
+                isReason(cause, "AlreadyExists") ? Effect.succeed(false) : Effect.fail(failure(cause))
+              )
             )
           )
           if (created) return
@@ -110,34 +133,36 @@ export const withDigest = <A, E, R, E2>(
         Effect.catchTag("TimeoutError", (cause) => Effect.fail(failure(cause)))
       )
 
-      yield* acquire
-      return yield* Effect.acquireUseRelease(
-        Effect.void,
-        () =>
-          Effect.scoped(Effect.gen(function*() {
-            yield* Effect.forkScoped(
-              Effect.forever(
-                Effect.sleep(heartbeatEvery).pipe(
-                  Effect.andThen(Clock.currentTimeMillis),
-                  Effect.flatMap((now) => {
-                    const timestamp = new Date(now)
-                    return fs.utimes(lockPath, timestamp, timestamp)
-                  }),
-                  Effect.ignore
-                )
+      const release = fs.readFileString(lockPath).pipe(
+        Effect.flatMap((found) => found === owner ? fs.remove(lockPath) : Effect.void),
+        // A concurrent stale-lock reaper can win release. `NotFound`
+        // means no lock remains for this owner to release or leak.
+        Effect.catch((cause): Effect.Effect<void, E2> =>
+          isReason(cause, "NotFound") ? Effect.void : Effect.fail(failure(cause))
+        )
+      )
+
+      // The finalizer is attached around acquisition itself, not just around
+      // the protected effect, so a lock created moments before an interruption
+      // is still released. A call that never created one owes nothing and must
+      // not touch a file another owner holds.
+      return yield* acquire.pipe(
+        Effect.andThen(Effect.scoped(Effect.gen(function*() {
+          yield* Effect.forkScoped(
+            Effect.forever(
+              Effect.sleep(heartbeatEvery).pipe(
+                Effect.andThen(Clock.currentTimeMillis),
+                Effect.flatMap((now) => {
+                  const timestamp = new Date(now)
+                  return fs.utimes(lockPath, timestamp, timestamp)
+                }),
+                Effect.ignore
               )
             )
-            return yield* effect
-          })),
-        () =>
-          fs.readFileString(lockPath).pipe(
-            Effect.flatMap((found) => found === owner ? fs.remove(lockPath) : Effect.void),
-            // A concurrent stale-lock reaper can win release. `NotFound`
-            // means no lock remains for this owner to release or leak.
-            Effect.catch((cause): Effect.Effect<void, E2> =>
-              isReason(cause, "NotFound") ? Effect.void : Effect.fail(failure(cause))
-            )
           )
+          return yield* effect
+        }))),
+        Effect.onExit(() => acquired ? release : Effect.void)
       )
     })
 

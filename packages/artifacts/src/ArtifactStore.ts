@@ -198,6 +198,16 @@ const digestFailure = (cause: unknown): ArtifactStoreError =>
   error("digest_failed", "the Crypto service failed to compute an artifact digest", cause)
 
 /**
+ * A refused byte copy is the host declining an allocation, not a crypto
+ * failure: the Crypto service has not been consulted when this fires, so
+ * reporting `digest_failed` would point an operator diagnosing memory pressure
+ * at the wrong subsystem. The message is constant, and the buffer is never
+ * attached.
+ */
+const snapshotFailure = (cause: unknown): ArtifactStoreError =>
+  error("unavailable", "the host could not copy the artifact bytes", cause)
+
+/**
  * Measures one immutable byte snapshot without ever retaining it in an error.
  *
  * @category utilities
@@ -209,13 +219,16 @@ export const measureBytes = (bytes: Uint8Array): Effect.Effect<Digest, ArtifactS
 /**
  * Copies a caller-owned buffer when the returned Effect begins.
  *
+ * A host that refuses the copy — a detached buffer, an allocation past what the
+ * runtime will give — fails as `unavailable`, the code for a host refusal.
+ *
  * @category utilities
  * @since 1.0.0-rc.0
  */
 export const snapshotBytes = (bytes: Uint8Array): Effect.Effect<Uint8Array, ArtifactStoreError> =>
   Effect.try({
     try: () => new Uint8Array(bytes),
-    catch: (cause) => digestFailure(cause)
+    catch: (cause) => snapshotFailure(cause)
   })
 
 /**
@@ -250,7 +263,9 @@ const distinct = (digests: Iterable<string>): Array<string> => [...new Set(diges
 export interface FileSystemOptions {
   /**
    * Where blobs are stored, content-addressed by digest. Workspace-relative;
-   * defaults to `.flows/objects`.
+   * defaults to {@link defaultDirectory}. An `ArtifactSweep` over the same
+   * store must be built with this same directory, or it enumerates somewhere
+   * the store never publishes.
    */
   readonly directory?: string | undefined
   /**
@@ -263,6 +278,17 @@ export interface FileSystemOptions {
   /**
    * `required` uses an atomic lock file to coordinate writers and sweepers
    * across processes. `process` is the explicit weaker browser/test mode.
+   *
+   * The fence bounds the race rather than eliminating it: the lock is
+   * heartbeated every 10 seconds, another process reclaims it once it is 60
+   * seconds stale, and acquisition itself gives up after 2 minutes. A holder
+   * whose host stalls past the stale bound can therefore be reaped while it is
+   * still running.
+   *
+   * It also only fences parties that agree. An `ArtifactSweep` over the same
+   * directory must be built with the same `coordination`: a store on `process`
+   * paired with a sweep on `required` takes lock files no writer observes, so
+   * the fence reads as armed and protects nothing.
    */
   readonly coordination?: "required" | "process" | undefined
 }
@@ -270,15 +296,27 @@ export interface FileSystemOptions {
 /**
  * The default objects directory. Workspace-relative, so a workspace carries
  * its own artifacts and a sandbox that mounts the workspace inherits them.
+ *
+ * Exported because the store and its sweep must name the same directory, and a
+ * second private copy of the literal is exactly how they would drift apart.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
  */
-const defaultDirectory = ".flows/objects"
+export const defaultDirectory = ".flows/objects"
 
 /**
- * How old a `.tmp-*` file must be before the sweep treats it as a crash orphan
- * rather than a live writer's in-flight scratch file. A publication writes and
- * renames within one `put`, so an hour is far beyond any live writer's window.
+ * How old a scratch file must be before the sweep treats it as a crash orphan
+ * rather than a live writer's in-flight file. A publication writes and renames
+ * within one `put`, so an hour is far beyond any live writer's window, and it
+ * is sixty times the 60-second bound after which a lock file's own contention
+ * path reclaims it, so a lock this old belongs to no living holder either.
  */
-const staleTempMs = 60 * 60 * 1000
+const staleScratchMs = 60 * 60 * 1000
+
+/** Whether an entry is scratch the sweep may reclaim once it is stale. */
+const isScratch = (entry: string): boolean =>
+  entry.includes(".tmp-") || entry.startsWith(`${ArtifactLocks.directoryName}/`)
 
 const isNotFound = (cause: unknown): boolean =>
   cause instanceof PlatformError.PlatformError && cause.reason._tag === "NotFound"
@@ -341,14 +379,17 @@ export const makeFileSystem = (fs: FileSystem.FileSystem, options: FileSystemOpt
   )
   let tempSequence = 0
   /**
-   * Best-effort reclamation of temp files orphaned by a crash between the temp
-   * write and the rename: nothing else ever observes them — reads resolve only
-   * canonical paths — so without a sweep the objects directory accumulates
-   * dead `.tmp-*` files unboundedly. The sweep runs once per store, on the
-   * first publication, and is conservative: a temp younger than the stale
-   * bound may belong to a live writer in another process, and one whose age
-   * cannot be measured says nothing about its writer, so both survive. Every
-   * step is best-effort — a missing directory or failing host never fails the
+   * Best-effort reclamation of scratch files orphaned by a crash: `.tmp-*`
+   * payloads left between the temp write and the rename, and `.locks/*` files
+   * left by a holder that was hard-killed. Nothing else ever observes either —
+   * reads resolve only canonical paths, and a lock is reclaimed on contention
+   * alone, so a digest nobody publishes again keeps its lock file forever —
+   * which is how the objects directory would accumulate dead files unboundedly.
+   * The sweep runs once per store, on the first publication, and is
+   * conservative: a scratch file younger than the stale bound may belong to a
+   * live writer or lock holder in another process, and one whose age cannot be
+   * measured says nothing about its owner, so both survive. Every step is
+   * best-effort — a missing directory or failing host never fails the
    * publication.
    *
    * This is a sweep of scratch files, not garbage collection. Reclaiming
@@ -364,12 +405,12 @@ export const makeFileSystem = (fs: FileSystem.FileSystem, options: FileSystemOpt
     )
     const now = yield* Clock.currentTimeMillis
     for (const entry of entries) {
-      if (!entry.includes(".tmp-")) continue
+      if (!isScratch(entry)) continue
       const orphanPath = `${directory}/${entry}`
       const info = yield* fs.stat(orphanPath).pipe(Effect.option)
       if (Option.isNone(info)) continue
       const mtime = Option.getOrUndefined(info.value.mtime)
-      if (mtime === undefined || now - mtime.getTime() < staleTempMs) continue
+      if (mtime === undefined || now - mtime.getTime() < staleScratchMs) continue
       yield* fs.remove(orphanPath).pipe(Effect.ignore)
     }
   })

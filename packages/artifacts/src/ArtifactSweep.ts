@@ -82,6 +82,14 @@ export interface Service {
    * Deletes the blob at `digest`, returning whether bytes were removed. A
    * missing blob reports `false` rather than failing, so a crashed and
    * re-run sweep converges instead of erroring on its own progress.
+   *
+   * `false` covers three outcomes a caller cannot tell apart, all of which mean
+   * "nothing was reclaimed, and retrying later is safe": the blob was already
+   * gone, it failed the `ifUnmodifiedSinceMs` fence, or a live backup lease
+   * fenced the deletion (see `ArtifactBackupLease`). The last one is not
+   * progress — the blob is still there — so a collector that counts reclaimed
+   * bytes must not count it, and the next pass after the backup finishes
+   * removes it.
    */
   readonly remove: (
     digest: string,
@@ -114,8 +122,32 @@ const hostFailure = (cause: unknown): ArtifactStore.ArtifactStoreError =>
 const isNotFound = (cause: unknown): boolean =>
   cause instanceof PlatformError.PlatformError && cause.reason._tag === "NotFound"
 
-/** The default objects directory, shared with `ArtifactStore.makeFileSystem`. */
-const defaultDirectory = ".flows/objects"
+/**
+ * How the sweep reaches the objects directory.
+ *
+ * Deliberately not `ArtifactStore.FileSystemOptions`: the sweep never writes a
+ * blob, so `durability` would be an accepted argument it ignores. Both fields
+ * must match the store built over the same directory — see `coordination`.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export interface SweepOptions {
+  /**
+   * The objects directory to enumerate, the one the paired
+   * `ArtifactStore.makeFileSystem` publishes into. Defaults to
+   * `ArtifactStore.defaultDirectory`.
+   */
+  readonly directory?: string | undefined
+  /**
+   * `required` takes the same per-digest lock file a publishing writer takes,
+   * and consults the backup lease, before deleting. It fences nothing unless
+   * the paired store was built with `required` too: a store on `process` never
+   * takes the lock this sweep waits on, so the fence would read as armed while
+   * protecting nothing. `process` is the explicit weaker browser/test mode.
+   */
+  readonly coordination?: "required" | "process" | undefined
+}
 
 /**
  * Builds the filesystem-backed sweep surface over the same objects directory
@@ -124,9 +156,20 @@ const defaultDirectory = ".flows/objects"
  * Enumeration is conservative by construction. Only paths in the store's
  * canonical fanout shape — `xx/<digest>` with `xx` equal to the digest's
  * two-hex prefix — are blobs; anything else in the directory (a temp file, a
- * foreign file, a fanout directory itself) is skipped, never deleted. A blob
- * that vanishes between listing and stat was removed by someone else and is
- * likewise skipped.
+ * lock file, a foreign file, a fanout directory itself) is skipped, never
+ * deleted. A blob that vanishes between listing and stat was removed by someone
+ * else and is likewise skipped.
+ *
+ * Pair it with the store over the SAME `directory` and the SAME `coordination`.
+ * Nothing checks the pairing, and a mismatch is silent: a sweep on `required`
+ * beside a store on `process` deletes blobs no writer is fenced against.
+ *
+ * Under `required`, one deletion costs two lock acquisitions — the per-digest
+ * lock, then the workspace-global backup-lease gate — which is roughly ten
+ * filesystem operations and two forked heartbeat fibers per blob. The gate is
+ * one file for the whole workspace, so concurrent deletions serialize through
+ * it. That is the price of never deleting a blob a running backup already
+ * recorded; size a collection window with it in mind.
  *
  * @category constructors
  * @since 1.0.0-rc.0
@@ -134,9 +177,9 @@ const defaultDirectory = ".flows/objects"
  */
 export const makeFileSystem = (
   fs: FileSystem.FileSystem,
-  options: ArtifactStore.FileSystemOptions = {}
+  options: SweepOptions = {}
 ): Service => {
-  const directory = options.directory ?? defaultDirectory
+  const directory = options.directory ?? ArtifactStore.defaultDirectory
   const coordination = options.coordination ?? "required"
   const blobPath = (digest: string): string => `${directory}/${digest.slice(0, 2)}/${digest}`
 
@@ -226,12 +269,15 @@ export const makeFileSystem = (
 /**
  * Provides the filesystem-backed sweep surface.
  *
+ * Give it the same `directory` and `coordination` as the `ArtifactStore` layer
+ * it sweeps behind; see {@link makeFileSystem}.
+ *
  * @category layers
  * @since 1.0.0-rc.0
  * @slop
  */
 export const layerFileSystem = (
-  options: ArtifactStore.FileSystemOptions = {}
+  options: SweepOptions = {}
 ): Layer.Layer<ArtifactSweep, never, FileSystem.FileSystem> =>
   Layer.effect(ArtifactSweep)(Effect.map(FileSystem.FileSystem, (fs) => makeFileSystem(fs, options)))
 

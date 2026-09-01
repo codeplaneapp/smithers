@@ -54,7 +54,12 @@ export interface Options {
    * the second read is local; they differ only in whether
    * `@smthrs/engine-store`'s `ArtifactSync.hydrate` prefetches. `minimal`
    * serves the bytes without writing them back, so a host that must not
-   * accumulate other machines' artifacts never does.
+   * accumulate other machines' artifacts never does. `minimal` still repairs a
+   * *corrupt* local address, because a rewrite of an address the local tier
+   * already claims is repair rather than growth.
+   *
+   * No policy makes the write-back load-bearing: a local tier that refuses it
+   * costs the next read a network round trip, never this read's answer.
    */
   readonly downloadPolicy?: RemoteArtifacts.DownloadPolicy | undefined
 }
@@ -64,6 +69,16 @@ export interface Options {
  * `--remote_timeout` default for its remote cache calls.
  */
 const defaultUploadTimeout = Duration.seconds(60)
+
+/**
+ * What the local tier answered a read with. A miss and a corrupt address both
+ * fall through to the shared tier, but they are not the same fact: only
+ * corruption earns a write-back the `minimal` policy would otherwise skip.
+ */
+type LocalRead =
+  | { readonly _tag: "hit"; readonly bytes: Uint8Array }
+  | { readonly _tag: "miss" }
+  | { readonly _tag: "corrupt" }
 
 /**
  * Composes a local and a remote artifact store.
@@ -175,32 +190,40 @@ export const make = (
 
     const get: ArtifactStore.Service["get"] = Effect.fn("CombinedArtifacts.get")((digest: string) =>
       Effect.flatMap(ArtifactStore.validateDigest(digest), (validated) =>
-        Effect.annotateCurrentSpan({ digest: validated }).pipe(Effect.andThen(
-          local.get(validated).pipe(
-            // A local miss AND local corruption both fall through to the remote
-            // tier. Corruption is the interesting one: the write-back below hands
-            // the correct bytes to `local.put`, whose own digest verification finds
-            // the mismatched blob and atomically rewrites it, so a read-through
-            // heals a corrupt local address instead of failing on it forever.
+        Effect.gen(function*() {
+          yield* Effect.annotateCurrentSpan({ digest: validated })
+          // A local miss AND local corruption fall through to the remote tier,
+          // and they are kept apart because they earn different write-backs. A
+          // local `ArtifactStoreError` deliberately does NOT fall through: a
+          // host that refused the read has not answered the question, and
+          // silently paying the network for it would hide a broken local tier
+          // behind a working shared one.
+          const cached = yield* local.get(validated).pipe(
+            Effect.map((bytes): LocalRead => ({ _tag: "hit", bytes })),
             Effect.catchTags({
-              "@smthrs/artifacts/ArtifactMissing": () =>
-                Effect.void,
-              "@smthrs/artifacts/ArtifactCorruption": () => Effect.void
-            }),
-            Effect.flatMap((cached) =>
-              cached !== undefined
-                ? Effect.succeed(cached)
-                // `minimal` reads through without materializing: the caller gets
-                // the bytes, the local tier stays exactly as small as it was, and
-                // the next read pays the network again. Every other policy writes
-                // back, which is what makes the second read local and what heals a
-                // corrupt local address.
-                : downloadPolicy === "minimal"
-                ? remote.get(validated)
-                : Effect.tap(remote.get(validated), (bytes) => local.put(bytes))
-            )
+              "@smthrs/artifacts/ArtifactMissing": () => Effect.succeed<LocalRead>({ _tag: "miss" }),
+              "@smthrs/artifacts/ArtifactCorruption": () => Effect.succeed<LocalRead>({ _tag: "corrupt" })
+            })
           )
-        )))
+          if (cached._tag === "hit") return cached.bytes
+          const fetched = yield* remote.get(validated)
+          // `minimal` reads through without materializing: the caller gets the
+          // bytes, the local tier stays exactly as small as it was, and the next
+          // read pays the network again. Corruption is the exception every
+          // policy makes. Handing the correct bytes to `local.put` lets its own
+          // digest verification rewrite the mismatched blob, and an address the
+          // local tier already claims — `has` and `findMissing` both report it
+          // as present — must be one it can serve, or the publication protocol
+          // is told a lie no later read can correct.
+          if (downloadPolicy !== "minimal" || cached._tag === "corrupt") {
+            // Opportunistic, exactly like `put`'s upload: the answer is already
+            // in hand, so a full disk, a read-only mount, or a refused sync must
+            // cost the next read a round trip rather than fail this one. A
+            // caller cannot even tell such a failure apart from a remote one.
+            yield* Effect.ignore(local.put(fetched))
+          }
+          return fetched
+        }))
     )
 
     const has: ArtifactStore.Service["has"] = Effect.fn("CombinedArtifacts.has")((digest: string) =>

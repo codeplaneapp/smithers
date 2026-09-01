@@ -76,6 +76,33 @@ describe("reads", () => {
       expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
     }))
 
+  it.effect("serves the remote bytes when the local write-back fails", () =>
+    Effect.gen(function*() {
+      // The bytes are already in hand and digest-verified. A local tier that
+      // cannot store them — a full disk, a read-only mount, a refused sync —
+      // costs the next read a round trip, never this read's answer.
+      const remote = countingMemory()
+      yield* withCrypto(remote.store.put(bytes(artifact)))
+      const local = ArtifactStore.makeNoop({
+        get: () => Effect.fail(new ArtifactStore.ArtifactMissing({ code: "artifact_missing", digest }))
+      })
+      const combined = yield* CombinedArtifacts.make({ local, remote: remote.store })
+      expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
+    }))
+
+  it.effect("refuses a read the local tier refused, instead of paying the network for it", () =>
+    Effect.gen(function*() {
+      // Only a miss and a corrupt address fall through. A host that refused the
+      // read answered nothing, and hiding that behind a working shared tier
+      // would turn a broken local store into a silent per-read network cost.
+      const remote = countingMemory()
+      yield* withCrypto(remote.store.put(bytes(artifact)))
+      const combined = yield* CombinedArtifacts.make({ local: ArtifactStore.makeNoop(), remote: remote.store })
+      const exit = yield* withCrypto(combined.get(digest).pipe(Effect.exit))
+      expect(exit).toMatchObject({ _tag: "Failure", cause: { reasons: [{ error: { code: "unavailable" } }] } })
+      expect(remote.calls.filter((call) => call === "get")).toEqual([])
+    }))
+
   it.effect("propagates a remote miss", () =>
     Effect.gen(function*() {
       const combined = yield* CombinedArtifacts.make({
@@ -419,6 +446,46 @@ describe("the download policy", () => {
       // Which means the second read pays the network again, on purpose.
       expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
       expect(remote.calls.filter((call) => call === "get")).toHaveLength(2)
+    }))
+
+  it.effect("repairs a corrupt local address under minimal, which reports it as present", () =>
+    Effect.gen(function*() {
+      // `minimal` withholds materialization so the local tier never grows. A
+      // corrupt blob is not growth: the address is already claimed, `has` and
+      // `findMissing` already report it as present, and without the repair the
+      // tier keeps promising bytes it can never serve.
+      const backing = ArtifactStore.makeMemory()
+      let corrupt = true
+      const local: ArtifactStore.Service = {
+        ...backing,
+        get: (address) =>
+          corrupt
+            ? Effect.fail(
+              new ArtifactStore.ArtifactCorruption({
+                code: "artifact_corruption",
+                recordedDigest: digest,
+                measuredDigest: sha256(bytes("torn"))
+              })
+            )
+            : backing.get(address),
+        has: () => Effect.succeed(true),
+        put: (payload) =>
+          Effect.tap(backing.put(payload), () =>
+            Effect.sync(() => {
+              corrupt = false
+            }))
+      }
+      const remote = declaring("minimal")
+      yield* withCrypto(remote.store.put(bytes(artifact)))
+      const combined = yield* CombinedArtifacts.make({ local, remote: remote.store })
+      expect(combined.downloadPolicy).toBe("minimal")
+      expect(yield* withCrypto(combined.has(digest))).toBe(true)
+
+      expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
+      expect(text(yield* withCrypto(backing.get(digest)))).toBe(artifact)
+      // Repaired, so the second read is local and the shared tier is spared.
+      expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
+      expect(remote.calls.filter((call) => call === "get")).toHaveLength(1)
     }))
 
   it.effect("materializes on first read under toplevel", () =>

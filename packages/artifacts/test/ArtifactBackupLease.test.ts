@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as PlatformError from "effect/PlatformError"
 import { TestClock } from "effect/testing"
@@ -302,6 +303,28 @@ describe("ArtifactBackupLease", () => {
       yield* Deferred.succeed(release, undefined)
       yield* Fiber.join(running)
       expect(fixture.files.get(marker)).toBe("replacement")
+    }))
+
+  it.effect("releases without a warning when the marker was already reaped", () =>
+    Effect.gen(function*() {
+      // A backup whose heartbeat lapsed has its marker reaped by whoever
+      // noticed. That is the ordinary end of a slow lease, so the release must
+      // classify it exactly as the sibling lock release does: nothing left to
+      // release, nothing to report.
+      const fixture = host()
+      const logged: Array<unknown> = []
+      const capture = Logger.make<unknown, void>(({ message }) => {
+        logged.push(message)
+      })
+      yield* ArtifactBackupLease.withLease(
+        fixture.fs,
+        directory,
+        Effect.sync(() => {
+          fixture.files.delete(marker)
+        }),
+        failure
+      ).pipe(Effect.provide(Logger.layer([capture])))
+      expect(logged).toEqual([])
     }))
 
   it.effect("ignores heartbeat and release read refusals after acquisition", () =>

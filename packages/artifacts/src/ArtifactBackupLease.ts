@@ -143,7 +143,15 @@ export const withLease = <A, E, R, E2>(
           fs,
           directory,
           fs.readFileString(marker).pipe(
-            Effect.flatMap((found) => found === owner ? fs.remove(marker) : Effect.void)
+            Effect.flatMap((found) => found === owner ? fs.remove(marker) : Effect.void),
+            // A backup whose heartbeat lapsed has its marker reaped by whoever
+            // noticed, so `NotFound` is the ordinary end of a slow lease, not a
+            // fault: there is nothing left to release and nothing left to leak.
+            // The sibling release in `internal/ArtifactLocks.ts` classifies the
+            // same cause the same way.
+            Effect.catch((cause): Effect.Effect<void, PlatformError.PlatformError> =>
+              isReason(cause, "NotFound") ? Effect.void : Effect.fail(cause)
+            )
           ),
           failure
         ).pipe(
