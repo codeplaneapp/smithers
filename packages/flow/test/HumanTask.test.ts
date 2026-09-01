@@ -18,6 +18,7 @@ import { Node } from "@smthrs/plan"
 import { Cause, Effect, Exit, Layer, Option, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 import { TestClock } from "effect/testing"
+import * as BoundedJson from "../src/internal/BoundedJson.ts"
 import { withCrypto } from "./Crypto.ts"
 import { layerMemoryOver, makeInstance, makeMemoryState, type MemoryState } from "./MemoryFlowRuntime.ts"
 
@@ -125,6 +126,139 @@ const record = (executionId: string, name: string, attempt: number, value: unkno
     })
   })
 
+/** Parks each attempt before submitting its answer through the active-token CAS. */
+const submitAnswers = (
+  executionId: string,
+  payload: typeof HumanTask.action.payloadSchema.Type,
+  answers: ReadonlyArray<unknown>
+) =>
+  Effect.gen(function*() {
+    for (const [index, answer] of answers.entries()) {
+      const parked = yield* Flow.intoResult(
+        Interpreter.interpret(HumanTask.action.call(payload))
+      )
+      if (parked._tag !== "Suspended") {
+        return yield* Effect.die(`attempt ${index + 1} did not park before its answer`)
+      }
+      yield* record(executionId, payload.name, index + 1, answer)
+    }
+  })
+
+describe("bounded durable JSON", () => {
+  const limits: BoundedJson.Limits = {
+    maxNodes: 16,
+    maxDepth: 4,
+    maxBytes: 256,
+    maxStringBytes: 64,
+    maxKeyBytes: 32,
+    maxMembers: 8
+  }
+  const refused = (value: unknown, overrides: Partial<BoundedJson.Limits> = {}) =>
+    !BoundedJson.admit(value, { ...limits, ...overrides }).ok
+
+  it("counts every JSON string encoding branch exactly", () => {
+    expect(BoundedJson.encodedStringBytes("", 2)).toBe(2)
+    expect(BoundedJson.encodedStringBytes("a", 3)).toBe(3)
+    expect(BoundedJson.encodedStringBytes("\"", 4)).toBe(4)
+    expect(BoundedJson.encodedStringBytes("\\", 4)).toBe(4)
+    expect(BoundedJson.encodedStringBytes("\u0000", 8)).toBe(8)
+    expect(BoundedJson.encodedStringBytes("é", 4)).toBe(4)
+    expect(BoundedJson.encodedStringBytes("€", 5)).toBe(5)
+    expect(BoundedJson.encodedStringBytes("😀", 6)).toBe(6)
+    expect(BoundedJson.encodedStringBytes("a", 2)).toBeUndefined()
+    expect(BoundedJson.encodedStringBytes("\ud800", 100)).toBeUndefined()
+    expect(BoundedJson.encodedStringBytes("\udc00", 100)).toBeUndefined()
+  })
+
+  it("refuses every primitive resource overflow at the value's path", () => {
+    expect(refused(null, { maxBytes: 3 })).toBe(true)
+    expect(refused(true, { maxBytes: 3 })).toBe(true)
+    expect(refused(123, { maxBytes: 2 })).toBe(true)
+    expect(refused("a", { maxBytes: 2 })).toBe(true)
+    expect(refused("aa", { maxStringBytes: 3 })).toBe(true)
+    expect(refused([null], { maxDepth: 0 })).toBe(true)
+    expect(refused([null], { maxNodes: 1 })).toBe(true)
+    expect(refused(Number.POSITIVE_INFINITY)).toBe(true)
+    expect(refused(undefined)).toBe(true)
+  })
+
+  it("admits only dense inert arrays with ordinary indexed members", () => {
+    const invalidLength = new Proxy([], {
+      getOwnPropertyDescriptor(target, key) {
+        return key === "length"
+          ? { configurable: false, enumerable: false, writable: true, value: "bad" }
+          : Reflect.getOwnPropertyDescriptor(target, key)
+      }
+    })
+    const accessor: Array<unknown> = []
+    Object.defineProperty(accessor, "0", { enumerable: true, get: () => "no" })
+    const hiddenExtra: Array<unknown> = [1]
+    Object.defineProperty(hiddenExtra, "note", { value: true })
+    const enumerableExtra: Array<unknown> = []
+    Object.defineProperty(enumerableExtra, "note", { value: true, enumerable: true })
+    const numericLookalike: Array<unknown> = []
+    Object.defineProperty(numericLookalike, "4294967295", { value: true, enumerable: true })
+    const symbolExtra: Array<unknown> = []
+    Object.defineProperty(symbolExtra, Symbol("extra"), { value: true, enumerable: true })
+
+    expect(refused(invalidLength)).toBe(true)
+    expect(refused([1], { maxMembers: 0 })).toBe(true)
+    expect(refused([], { maxBytes: 1 })).toBe(true)
+    expect(refused(new Array(1))).toBe(true)
+    expect(refused(accessor)).toBe(true)
+    expect(refused([1n])).toBe(true)
+    expect(BoundedJson.admit(hiddenExtra, limits)).toMatchObject({ ok: true, value: [1] })
+    expect(refused(enumerableExtra)).toBe(true)
+    expect(refused(numericLookalike)).toBe(true)
+    expect(refused(symbolExtra)).toBe(true)
+  })
+
+  it("admits only plain descriptor-backed objects within member and byte limits", () => {
+    const accessor = Object.defineProperty({}, "value", { enumerable: true, get: () => "no" })
+    const symbol = Object.defineProperty({}, Symbol("value"), { enumerable: true, value: 1 })
+    const invisible = Object.defineProperty({ visible: 1 }, "hidden", { value: 2 })
+    const absentDescriptor = new Proxy({}, {
+      ownKeys: () => ["ghost"],
+      getOwnPropertyDescriptor: () => undefined
+    })
+    const hostilePrototype = new Proxy({}, {
+      getPrototypeOf() {
+        throw new Error("no")
+      }
+    })
+    const nullPrototype = Object.assign(Object.create(null), { value: 1 })
+
+    expect(refused(new Date())).toBe(true)
+    expect(refused(hostilePrototype)).toBe(true)
+    expect(BoundedJson.admit(absentDescriptor, limits)).toEqual({ ok: true, value: {} })
+    expect(BoundedJson.admit(invisible, limits)).toMatchObject({ ok: true, value: { visible: 1 } })
+    expect(refused(symbol)).toBe(true)
+    expect(refused(accessor)).toBe(true)
+    expect(refused({ a: 1, b: 2 }, { maxMembers: 1 })).toBe(true)
+    expect(refused({}, { maxBytes: 1 })).toBe(true)
+    expect(refused({ "\ud800": 1 })).toBe(true)
+    expect(refused({ long: 1 }, { maxKeyBytes: 3 })).toBe(true)
+    expect(refused({ a: 1 }, { maxBytes: 4 })).toBe(true)
+    expect(refused({ a: 1n })).toBe(true)
+    expect(BoundedJson.admit(nullPrototype, limits)).toMatchObject({ ok: true, value: { value: 1 } })
+  })
+
+  it("renders hostile and truncated diagnostics without malformed Unicode", () => {
+    const cyclic: Record<string, unknown> = {}
+    cyclic["self"] = cyclic
+    expect(BoundedJson.scalarPrefix("😀x", 2)).toBe("😀")
+    expect(BoundedJson.scalarPrefix("\ud800x", 2)).toBe("�x")
+    expect(BoundedJson.scalarPrefix("\udc00x", 2)).toBe("�x")
+    expect(BoundedJson.render(1n, 20)).toBe("1n")
+    expect(BoundedJson.render(Symbol("x"), 20)).toBe("[symbol]")
+    expect(BoundedJson.render(() => undefined, 20)).toBe("[function]")
+    expect(BoundedJson.render(undefined, 20)).toBe("[undefined]")
+    expect(BoundedJson.render(cyclic, 40)).toContain("cycle")
+    expect(BoundedJson.render({ value: "long" }, 4)).toContain("dropped")
+    expect(BoundedJson.render({ value: 1 }, 100)).toBe("{\"value\":1}")
+  })
+})
+
 describe("HumanTask as a declaration", () => {
   it("is an ordinary declared action", () => {
     expect(HumanTask.tag).toBe("system/human-task")
@@ -154,12 +288,41 @@ describe("HumanTask as a declaration", () => {
       payload: { name: "release", kind: "confirm", prompt: "Ship it?" }
     })
   })
+
+  it("bounds persisted request text and option lists in the payload schema", () => {
+    const decode = Schema.decodeUnknownSync(HumanTask.action.payloadSchema)
+    expect(() =>
+      decode({
+        name: "release",
+        kind: "ask",
+        prompt: "x".repeat(HumanTask.maxPromptBytes)
+      })
+    ).toThrow(/prompt/)
+    expect(() =>
+      decode({
+        name: "release",
+        kind: "select",
+        prompt: "Which?",
+        options: Array.from({ length: HumanTask.maxOptions + 1 }, () => "x")
+      })
+    ).toThrow(/length/)
+    expect(() =>
+      decode({
+        name: "release",
+        kind: "json",
+        prompt: "Choose.",
+        schema: { enum: ["x".repeat(HumanTask.maxJsonStringBytes)] }
+      })
+    ).toThrow(/well-formed text/)
+  })
 })
 
 describe("HumanTask.validate", () => {
   it("accepts a string for ask and refuses anything else", () => {
     expect(HumanTask.validate("looks good", { kind: "ask" })).toBeUndefined()
     expect(HumanTask.validate(3, { kind: "ask" })).toContain("string")
+    expect(HumanTask.validate("x".repeat(HumanTask.maxJsonStringBytes), { kind: "ask" }))
+      .toContain("encoded bytes")
   })
 
   it("accepts a boolean for confirm and refuses anything else", () => {
@@ -171,6 +334,15 @@ describe("HumanTask.validate", () => {
     expect(HumanTask.validate("ship", { kind: "select", options: ["ship", "hold"] })).toBeUndefined()
     expect(HumanTask.validate("burn", { kind: "select", options: ["ship", "hold"] })).toContain("burn")
     expect(HumanTask.validate("ship", { kind: "select" })).toContain("options")
+    expect(HumanTask.validate("ship", {
+      kind: "select",
+      options: Array.from({ length: HumanTask.maxOptions + 1 }, () => "ship")
+    })).toContain("limits")
+    expect(HumanTask.validate("ship", {
+      kind: "select",
+      options: ["x".repeat(HumanTask.maxOptionBytes)]
+    })).toContain("limits")
+    expect(HumanTask.validate("ship", { kind: "select", options: [1 as never] })).toContain("limits")
   })
 
   it("accepts any JSON when a json task names no schema", () => {
@@ -235,9 +407,27 @@ describe("HumanTask.validate", () => {
     expect(HumanTask.validate(false, { kind: "json", schema: { enum: [false, true] } })).toBeUndefined()
   })
 
+  it("applies every sibling JSON Schema keyword conjunctively", () => {
+    expect(HumanTask.validate(1, { kind: "json", schema: { type: "string", enum: [1] } }))
+      .toContain("string")
+    expect(HumanTask.validate({}, { kind: "json", schema: { required: ["x"] } }))
+      .toContain("x")
+    expect(HumanTask.validate({ x: 1 }, {
+      kind: "json",
+      schema: { properties: { x: { type: "string" } } }
+    })).toContain("string")
+    expect(HumanTask.validate([1], { kind: "json", schema: { items: { type: "string" } } }))
+      .toContain("string")
+    expect(HumanTask.validate(null, {
+      kind: "json",
+      schema: { type: "string", nullable: true, enum: ["x"] }
+    })).toContain("one of")
+  })
+
   it("checks every scalar type the subset covers, both ways", () => {
     const cases: ReadonlyArray<readonly [unknown, unknown, boolean]> = [
       [1.5, { type: "number" }, true],
+      ["x", { type: "number" }, false],
       [Number.NaN, { type: "number" }, false],
       ["x", { type: "string" }, true],
       [1, { type: "string" }, false],
@@ -279,6 +469,9 @@ describe("HumanTask.validate", () => {
       .toContain("minProperties")
     expect(HumanTask.validate({}, { kind: "json", schema: { enum: "ship" } })).toContain("enum")
     expect(HumanTask.validate({}, { kind: "json", schema: "a string" })).toContain("JSON Schema object")
+    const cyclic: Record<string, unknown> = {}
+    cyclic["items"] = cyclic
+    expect(HumanTask.validate({}, { kind: "json", schema: cyclic })).toContain("cycle")
   })
 
   it("reads an answer's own properties, never the ones every object inherits", () => {
@@ -324,6 +517,55 @@ describe("HumanTask.validate", () => {
       })
     ).toContain("characters dropped")
   })
+
+  it("refuses unbounded and non-JSON answers without executing object code", () => {
+    let calls = 0
+    const accessor = Object.defineProperty({}, "answer", {
+      enumerable: true,
+      get() {
+        calls++
+        return "secret"
+      }
+    })
+    const withToJson = {
+      toJSON() {
+        calls++
+        return "secret"
+      }
+    }
+    const cyclic: Record<string, unknown> = {}
+    cyclic["self"] = cyclic
+    const hostile = new Proxy({}, {
+      ownKeys() {
+        throw new Error("trap")
+      }
+    })
+    const arrayWithNumericLookalike: Array<unknown> = []
+    Object.defineProperty(arrayWithNumericLookalike, "4294967295", {
+      value: "not an array index",
+      enumerable: true
+    })
+
+    for (const value of [accessor, withToJson, cyclic, hostile, arrayWithNumericLookalike, 1n]) {
+      expect(HumanTask.validate(value, { kind: "json" })).toBeDefined()
+    }
+    expect(calls).toBe(0)
+    expect(
+      HumanTask.validate("x".repeat(HumanTask.maxJsonStringBytes), { kind: "json" })
+    ).toContain("encoded bytes")
+    expect(
+      HumanTask.validate({ ["x".repeat(HumanTask.maxJsonKeyBytes)]: true }, { kind: "json" })
+    ).toContain("key")
+  })
+
+  it("keeps astral Unicode diagnostics well formed when truncating", () => {
+    const rejection = HumanTask.validate("😀".repeat(HumanTask.maxDiagnosticChars), {
+      kind: "select",
+      options: ["ok"]
+    })
+    expect(rejection).toBeDefined()
+    expect(new TextDecoder().decode(new TextEncoder().encode(rejection))).toBe(rejection)
+  })
 })
 
 describe("HumanTask.validateSchema", () => {
@@ -360,7 +602,11 @@ describe("HumanTask.validateSchema", () => {
   it("refuses malformed required and nullable declarations at their paths", () => {
     expect(HumanTask.validateSchema({ type: "object", required: "name" })).toContain("required")
     expect(HumanTask.validateSchema({ type: "object", required: [1] })).toContain("required.0")
+    expect(HumanTask.validateSchema({ type: "object", required: ["name", "name"] })).toContain("duplicate")
     expect(HumanTask.validateSchema({ type: "object", nullable: "yes" })).toContain("nullable")
+    expect(HumanTask.validateSchema({ enum: [] })).toContain("empty")
+    expect(HumanTask.validateSchema({ title: 1 })).toContain("title")
+    expect(HumanTask.validateSchema({ description: false })).toContain("description")
   })
 
   it("bounds schema depth at the exported limit", () => {
@@ -389,6 +635,18 @@ describe("HumanTask.validateSchema", () => {
     expect(complaint).toContain(`node count of ${HumanTask.maxSchemaNodes}`)
     expect(complaint).toContain(`field${HumanTask.maxSchemaNodes - 1}`)
   })
+
+  it("bounds complete enum trees, not only schema objects", () => {
+    expect(
+      HumanTask.validateSchema({
+        enum: [Array.from({ length: HumanTask.maxSchemaValueNodes }, () => null)]
+      })
+    ).toContain(String(HumanTask.maxSchemaValueNodes))
+
+    let nested: unknown = "answer"
+    for (let depth = 0; depth <= HumanTask.maxSchemaValueDepth; depth++) nested = [nested]
+    expect(HumanTask.validateSchema({ enum: [nested] })).toContain("depth")
+  })
 })
 
 describe("HumanTask parks", () => {
@@ -416,14 +674,13 @@ describe("HumanTask parks", () => {
 
   effect("re-parks on the next attempt's token when it cannot accept the answer", () => {
     const instance = makeInstance(Host, "human-reask")
+    const payload = { name: "release", kind: "confirm", prompt: "Ship it?" } as const
     return drive(
       Effect.gen(function*() {
-        yield* record("human-reask", "release", 1, "yes please")
+        yield* submitAnswers("human-reask", payload, ["yes please"])
 
         const result = yield* Flow.intoResult(
-          Interpreter.interpret(
-            HumanTask.action.call({ name: "release", kind: "confirm", prompt: "Ship it?" })
-          )
+          Interpreter.interpret(HumanTask.action.call(payload))
         )
 
         expect(result._tag).toBe("Suspended")
@@ -442,11 +699,11 @@ describe("HumanTask parks", () => {
   effect("settles with the first answer it can accept", () =>
     drive(
       Effect.gen(function*() {
-        yield* record("human-accept", "release", 1, "yes please")
-        yield* record("human-accept", "release", 2, true)
+        const payload = { name: "release", kind: "confirm", prompt: "Ship it?" } as const
+        yield* submitAnswers("human-accept", payload, ["yes please", true])
 
         const interpretation = yield* Interpreter.interpret(
-          HumanTask.action.call({ name: "release", kind: "confirm", prompt: "Ship it?" })
+          HumanTask.action.call(payload)
         )
 
         expect(interpretation.value).toBe(true)
@@ -456,12 +713,13 @@ describe("HumanTask parks", () => {
 
   effect("does not park again once an acceptable answer is recorded", () => {
     const instance = makeInstance(Host, "human-replay")
+    const payload = { name: "release", kind: "confirm", prompt: "Ship it?" } as const
     return drive(
       Effect.gen(function*() {
-        yield* record("human-replay", "release", 1, true)
+        yield* submitAnswers("human-replay", payload, [true])
 
         const interpretation = yield* Interpreter.interpret(
-          HumanTask.action.call({ name: "release", kind: "confirm", prompt: "Ship it?" })
+          HumanTask.action.call(payload)
         )
 
         expect(interpretation.value).toBe(true)
@@ -475,20 +733,18 @@ describe("HumanTask parks", () => {
 describe("HumanTask gives up", () => {
   effect("fails once the attempt budget is spent, listing what it refused", () => {
     const instance = makeInstance(Host, "human-exhausted")
+    const payload = {
+      name: "release",
+      kind: "confirm",
+      prompt: "Ship it?",
+      maxAttempts: 2
+    } as const
     return drive(
       Effect.gen(function*() {
-        yield* record("human-exhausted", "release", 1, "yes")
-        yield* record("human-exhausted", "release", 2, 1)
+        yield* submitAnswers("human-exhausted", payload, ["yes", 1])
 
         const exit = yield* Effect.exit(
-          Interpreter.interpret(
-            HumanTask.action.call({
-              name: "release",
-              kind: "confirm",
-              prompt: "Ship it?",
-              maxAttempts: 2
-            })
-          )
+          Interpreter.interpret(HumanTask.action.call(payload))
         )
 
         expect(Exit.isFailure(exit)).toBe(true)
@@ -534,19 +790,16 @@ describe("HumanTask gives up", () => {
       return drive(
         Effect.gen(function*() {
           const answers = [...values, ...extra]
-          for (const [index, value] of answers.entries()) {
-            yield* record(executionId, "bounded", index + 1, value)
-          }
+          const payload = {
+            name: "bounded",
+            kind: "select",
+            prompt: "Choose.",
+            options: ["ok"],
+            maxAttempts: answers.length
+          } as const
+          yield* submitAnswers(executionId, payload, answers)
           const exit = yield* Effect.exit(
-            Interpreter.interpret(
-              HumanTask.action.call({
-                name: "bounded",
-                kind: "select",
-                prompt: "Choose.",
-                options: ["ok"],
-                maxAttempts: answers.length
-              })
-            )
+            Interpreter.interpret(HumanTask.action.call(payload))
           )
           expect(Exit.isFailure(exit)).toBe(true)
           if (!Exit.isFailure(exit)) return []
@@ -817,19 +1070,20 @@ describe("HumanTask gives up", () => {
   effect("keeps json schema validation and ignores a json option list", () =>
     drive(
       Effect.gen(function*() {
-        yield* record("human-json-schema", "json-schema", 1, { choice: { id: 1 } })
+        const payload = {
+          name: "json-schema",
+          kind: "json",
+          prompt: "Choose.",
+          options: ["not-a-json-constraint"],
+          schema: {
+            type: "object",
+            required: ["choice"],
+            properties: { choice: { enum: [{ id: 1 }] } }
+          }
+        } as const
+        yield* submitAnswers("human-json-schema", payload, [{ choice: { id: 1 } }])
         const checked = yield* Interpreter.interpret(
-          HumanTask.action.call({
-            name: "json-schema",
-            kind: "json",
-            prompt: "Choose.",
-            options: ["not-a-json-constraint"],
-            schema: {
-              type: "object",
-              required: ["choice"],
-              properties: { choice: { enum: [{ id: 1 }] } }
-            }
-          })
+          HumanTask.action.call(payload)
         )
         expect(checked.value).toEqual({ choice: { id: 1 } })
       }),
@@ -1012,18 +1266,17 @@ describe("HumanTask records what it refused", () => {
   effect("records the refusal as a step of its own, naming the attempt it judged", () => {
     const durable = makeMemoryState()
     const instance = makeInstance(Host, "human-rejection-record")
+    const payload = {
+      name: "score",
+      kind: "json",
+      prompt: "How did it go?",
+      schema: { type: "object", properties: { score: { type: "integer" } }, required: ["score"] }
+    } as const
     return Effect.gen(function*() {
-      yield* record("human-rejection-record", "score", 1, { score: "high" })
+      yield* submitAnswers("human-rejection-record", payload, [{ score: "high" }])
 
       const result = yield* Flow.intoResult(
-        Interpreter.interpret(
-          HumanTask.action.call({
-            name: "score",
-            kind: "json",
-            prompt: "How did it go?",
-            schema: { type: "object", properties: { score: { type: "integer" } }, required: ["score"] }
-          })
-        )
+        Interpreter.interpret(HumanTask.action.call(payload))
       )
 
       // The run went back to waiting, and the reason it sent the answer back is
@@ -1041,14 +1294,17 @@ describe("HumanTask records what it refused", () => {
   effect("records one refusal per attempt it spent", () => {
     const durable = makeMemoryState()
     const instance = makeInstance(Host, "human-rejection-budget")
+    const payload = {
+      name: "release",
+      kind: "confirm",
+      prompt: "Ship it?",
+      maxAttempts: 2
+    } as const
     return Effect.gen(function*() {
-      yield* record("human-rejection-budget", "release", 1, "yes")
-      yield* record("human-rejection-budget", "release", 2, 1)
+      yield* submitAnswers("human-rejection-budget", payload, ["yes", 1])
 
       yield* Effect.exit(
-        Interpreter.interpret(
-          HumanTask.action.call({ name: "release", kind: "confirm", prompt: "Ship it?", maxAttempts: 2 })
-        )
+        Interpreter.interpret(HumanTask.action.call(payload))
       )
 
       expect(rejectionsRecorded(durable)).toEqual([
@@ -1143,7 +1399,7 @@ describe("HumanTask.answer", () => {
       makeInstance(Host, "human-bad-token")
     ))
 
-  effect("refuses a token naming a deferred no human task ever opened", () => {
+  effect("refuses foreign and unopened human-task tokens without writing a durable row", () => {
     // `answer` completes a caller-supplied address under `Schema.Json`, so
     // without this check it is an oracle over every durable deferred in the
     // run: a queue item's token or a bare wait point's token, submitted to a
@@ -1180,15 +1436,51 @@ describe("HumanTask.answer", () => {
         expect(state.deferredResults.has(`${executionId}/${deferredName}`)).toBe(false)
       }
 
-      // The addresses the surface IS for still complete through it.
+      // A syntactically valid HumanTask address is still refused until that
+      // exact approval wait is active.
       const point = HumanTask.deferred("release", 1)
-      yield* HumanTask.answer({
+      const unopened = yield* HumanTask.answer({
         token: DurableDeferred.tokenFromExecutionId(point, { flow: Host, executionId }),
         value: "ship it"
-      })
-      expect(state.deferredResults.has(`${executionId}/${point.name}`)).toBe(true)
+      }).pipe(Effect.flip)
+      expect(unopened).toBeInstanceOf(HumanTask.HumanAnswerInvalid)
+      expect(unopened.code).toBe("answer_not_open")
+      expect(state.deferredResults.has(`${executionId}/${point.name}`)).toBe(false)
     }).pipe(
       Effect.provideService(FlowRuntime.FlowInstance, makeInstance(Host, executionId)),
+      Effect.provide(wiredOver(state))
+    )
+  })
+
+  effect("rejects oversized or hostile answers before writing a durable row", () => {
+    const state = makeMemoryState()
+    const executionId = "human-invalid-answer"
+    const instance = makeInstance(Host, executionId)
+    const point = HumanTask.deferred("release", 1)
+    const token = DurableDeferred.tokenFromExecutionId(point, { flow: Host, executionId })
+    const cyclic: Record<string, unknown> = {}
+    cyclic["self"] = cyclic
+
+    return Effect.gen(function*() {
+      const parked = yield* Flow.intoResult(
+        Interpreter.interpret(
+          HumanTask.action.call({ name: "release", kind: "json", prompt: "Decide." })
+        )
+      )
+      expect(parked._tag).toBe("Suspended")
+
+      const failure = yield* HumanTask.answer({ token, value: cyclic as never }).pipe(Effect.flip)
+      expect(failure).toBeInstanceOf(HumanTask.HumanAnswerInvalid)
+      expect(state.deferredResults.has(`${executionId}/${point.name}`)).toBe(false)
+
+      const mutable = { decision: "ship" }
+      yield* HumanTask.answer({ token, value: mutable })
+      mutable.decision = "hold"
+      const stored = state.deferredResults.get(`${executionId}/${point.name}`)
+      expect(stored).toBeDefined()
+      expect(Exit.isSuccess(stored!) && stored!.value).toEqual({ decision: "ship" })
+    }).pipe(
+      Effect.provideService(FlowRuntime.FlowInstance, instance),
       Effect.provide(wiredOver(state))
     )
   })
@@ -1212,6 +1504,8 @@ describe("HumanTask.decode", () => {
   effect("gives the answer the caller's own type", () =>
     drive(
       Effect.gen(function*() {
+        const parked = yield* Flow.intoResult(Interpreter.interpret(asked))
+        expect(parked._tag).toBe("Suspended")
         yield* record("human-decode", "release", 1, { decision: "ship" })
 
         const interpretation = yield* Interpreter.interpret(asked)

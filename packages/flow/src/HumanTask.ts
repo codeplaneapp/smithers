@@ -512,7 +512,8 @@ const checkAt = (
       : type === "integer"
       ? Number.isInteger(value) ? undefined : `${at(path)} must be an integer.`
       : type === "number"
-      ? typeof value === "number" && Number.isFinite(value) ? undefined : `${at(path)} must be a number.`
+      // Bounded JSON admission already rejected every non-finite number.
+      ? typeof value === "number" ? undefined : `${at(path)} must be a number.`
       : type === "string"
       ? typeof value === "string" ? undefined : `${at(path)} must be a string.`
       : type === "boolean"
