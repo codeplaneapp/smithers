@@ -859,6 +859,7 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     o: {
       readonly existing: boolean
       readonly creat: boolean
+      readonly excl: boolean
       readonly trunc: boolean
       readonly read: boolean
       readonly write: boolean
@@ -871,7 +872,13 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     }
     if (o.append) return fs.openSync(path, o.read ? "a+" : "a")
     if (o.creat) {
-      if (o.trunc) return fs.openSync(path, o.read ? "w+" : "w")
+      // `O_CREAT|O_EXCL` keeps an exclusive flag even with `O_TRUNC`. The
+      // caller's existence check happened one syscall ago, and O_EXCL exists
+      // precisely so that gap cannot be used: without `wx` a file created in
+      // between is TRUNCATED instead of answering EEXIST.
+      if (o.trunc) {
+        return fs.openSync(path, o.excl ? (o.read ? "wx+" : "wx") : o.read ? "w+" : "w")
+      }
       if (!o.existing) return fs.openSync(path, o.read ? "wx+" : "wx")
       return fs.openSync(path, "r+")
     }

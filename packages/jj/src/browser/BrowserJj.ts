@@ -157,13 +157,14 @@ const exchange = (abi: AbiExports, request: Record<string, unknown>): string => 
  * to `unknown` — the ABI partner is pinned in-repo, so either is a bug worth
  * surfacing, not worth crashing over.
  */
-const decodeResponse = (method: string, text: string): Effect.Effect<OkPayload, JjError> => {
+const decodeResponse = (method: string, command: string, text: string): Effect.Effect<OkPayload, JjError> => {
   const malformed = () =>
     Effect.fail(
       new JjError({
         code: "unknown",
         module: MODULE,
         method,
+        command,
         message: `jj ${method}: malformed ABI response: ${excerpt(text)}`
       })
     )
@@ -177,9 +178,11 @@ const decodeResponse = (method: string, text: string): Effect.Effect<OkPayload, 
     const err: unknown = parsed.err
     const code = isRecord(err) && isJjErrorCode(err.code) ? err.code : "unknown"
     const message = isRecord(err) && typeof err.message === "string" ? err.message : JSON.stringify(err)
-    const command = isRecord(err) && typeof err.command === "string" ? { command: err.command } : {}
+    // The guest names the command when it ran one; otherwise the operation's
+    // own command stands, so no failure reaches a caller without it.
+    const reported = isRecord(err) && typeof err.command === "string" ? err.command : command
     return Effect.fail(
-      new JjError({ code, module: MODULE, method, message: `jj ${method}: ${excerpt(message)}`, ...command })
+      new JjError({ code, module: MODULE, method, command: reported, message: `jj ${method}: ${excerpt(message)}` })
     )
   }
   if (isRecord(parsed) && isRecord(parsed.ok)) {
@@ -189,7 +192,12 @@ const decodeResponse = (method: string, text: string): Effect.Effect<OkPayload, 
 }
 
 /** A string the operation's response payload is required to carry. */
-const stringField = (method: string, payload: OkPayload, field: string): Effect.Effect<string, JjError> => {
+const stringField = (
+  method: string,
+  command: string,
+  payload: OkPayload,
+  field: string
+): Effect.Effect<string, JjError> => {
   const value = payload[field]
   return typeof value === "string"
     ? Effect.succeed(value)
@@ -198,6 +206,7 @@ const stringField = (method: string, payload: OkPayload, field: string): Effect.
         code: "unknown",
         module: MODULE,
         method,
+        command,
         message: `jj ${method}: ABI response is missing the "${field}" field`
       })
     )
@@ -272,17 +281,44 @@ export const make = (options: BrowserJjOptions): Jj => {
   const gate = Semaphore.makeUnsafe(1)
   let ready: AbiExports | undefined
 
-  const ensure: Effect.Effect<AbiExports, JjError> = Effect.suspend(() =>
+  /**
+   * The module, read from the options object EXACTLY once.
+   *
+   * Instantiation is retried per operation, so re-reading `options.wasm` on a
+   * retry would let a caller swap the module between a failed operation and the
+   * next one. The read's outcome is memoized, throw included, so a getter is
+   * called once whatever it does.
+   */
+  let taken: { readonly ok: true; readonly wasm: WebAssembly.Module | BufferSource } | {
+    readonly ok: false
+    readonly cause: unknown
+  } | undefined
+  const wasmOnce = (): WebAssembly.Module | BufferSource => {
+    if (taken === undefined) {
+      try {
+        taken = { ok: true, wasm: options.wasm }
+      } catch (cause) {
+        taken = { ok: false, cause }
+      }
+    }
+    if (!taken.ok) throw taken.cause
+    return taken.wasm
+  }
+
+  /**
+   * The module, instantiated once and reused.
+   *
+   * The failure is a DESCRIPTION rather than a `JjError`: the module is shared
+   * by every operation, so this step cannot say which one asked, and a failure
+   * that reached a caller without a `method` and a `command` is exactly what
+   * `jjError` exists to prevent. `invoke` completes it.
+   */
+  const ensure: Effect.Effect<AbiExports, string> = Effect.suspend(() =>
     ready === undefined
       ? Effect.map(
         Effect.tryPromise({
-          try: () => instantiate(host, options.wasm),
-          catch: (cause) =>
-            new JjError({
-              code: "unknown",
-              module: MODULE,
-              message: `jj: failed to instantiate flows_jj.wasm: ${messageOf(cause)}`
-            })
+          try: () => instantiate(host, wasmOnce()),
+          catch: (cause) => `failed to instantiate flows_jj.wasm: ${messageOf(cause)}`
         }),
         (abi) => {
           ready = abi
@@ -298,39 +334,48 @@ export const make = (options: BrowserJjOptions): Jj => {
     request: Record<string, unknown>
   ): Effect.Effect<OkPayload, JjError> =>
     gate.withPermit(
-      Effect.flatMap(ensure, (abi) =>
-        Effect.suspend(() => {
-          let text: string
-          try {
-            text = exchange(abi, request)
-          } catch (cause) {
-            // A trap (proc_exit, a Rust panic, an out-of-range response) is a
-            // failed operation, never a failed fiber.
-            return Effect.fail(
-              new JjError({
-                code: "unknown",
-                module: MODULE,
-                method,
-                message: `jj ${method}: ${excerpt(messageOf(cause))}`,
-                command
-              })
-            )
-          }
-          return decodeResponse(method, text)
-        }))
+      // The instantiation failure is completed here, where the operation that
+      // asked for the module is known, rather than reaching a caller with no
+      // method and no command.
+      Effect.flatMap(
+        Effect.catch(ensure, (description) =>
+          Effect.fail(
+            new JjError({ code: "unknown", module: MODULE, method, command, message: `jj ${method}: ${description}` })
+          )),
+        (abi) =>
+          Effect.suspend(() => {
+            let text: string
+            try {
+              text = exchange(abi, request)
+            } catch (cause) {
+              // A trap (proc_exit, a Rust panic, an out-of-range response) is a
+              // failed operation, never a failed fiber.
+              return Effect.fail(
+                new JjError({
+                  code: "unknown",
+                  module: MODULE,
+                  method,
+                  message: `jj ${method}: ${excerpt(messageOf(cause))}`,
+                  command
+                })
+              )
+            }
+            return decodeResponse(method, command, text)
+          })
+      )
     )
 
   return Jj.of({
     snapshot: (message) =>
       invoke("snapshot", "jj snapshot", { op: "snapshot", root, ...(message === undefined ? {} : { message }) }).pipe(
-        Effect.flatMap((ok) => stringField("snapshot", ok, "changeId")),
+        Effect.flatMap((ok) => stringField("snapshot", "jj snapshot", ok, "changeId")),
         Effect.map((changeId) => ({ changeId }))
       ),
     restore: (changeId) => Effect.asVoid(invoke("restore", "jj restore", { op: "restore", root, changeId })),
     diff: (from, to) =>
       Effect.flatMap(
         invoke("diff", "jj diff", { op: "diff", root, from, to }),
-        (ok) => stringField("diff", ok, "diff")
+        (ok) => stringField("diff", "jj diff", ok, "diff")
       ),
     workspaceAdd: (name, path, revision) =>
       Effect.asVoid(
@@ -339,37 +384,44 @@ export const make = (options: BrowserJjOptions): Jj => {
         // carries its own `root`, and rooting the restore at the NEW lane's
         // path pins that workspace's working copy without touching the
         // parent's.
-        Effect.flatMap(
-          invoke("workspaceAdd", "jj workspace add", { op: "workspaceAdd", root, name, path }),
-          () =>
-            revision === undefined
-              ? Effect.void
-              : Effect.asVoid(
-                invoke("restore", "jj restore", { op: "restore", root: path, changeId: revision })
-              ).pipe(
-                // The two calls are not one transaction, so a failed pin has
-                // to undo the add: the lane is already registered, and `NodeJj`
-                // promises a failed `workspaceAdd` leaves no lane behind. The
-                // directory stays, as it does after any forget. Forgetting an
-                // absent lane is a no-op, so a failed rollback cannot turn one
-                // error into two.
-                Effect.catch((failure) =>
-                  Effect.andThen(
-                    Effect.ignore(
-                      invoke("workspaceForget", "jj workspace forget", { op: "workspaceForget", root, name })
-                    ),
-                    Effect.fail(
-                      new JjError({
-                        code: failure.code,
-                        module: MODULE,
-                        method: "workspaceAdd",
-                        command: "jj workspace add",
-                        message: `jj workspaceAdd: pinning the new lane failed: ${failure.message}`
-                      })
+        //
+        // The WHOLE sequence is uninterruptible, not just the pin. `NodeJj`
+        // promises a failed `workspaceAdd` leaves no lane behind, and a cancel
+        // delivered between the add, the pin, and the pin's rollback is exactly
+        // what would strand one. Interruptibility buys nothing here anyway:
+        // each call runs the wasm module to completion before it yields.
+        Effect.uninterruptible(
+          Effect.flatMap(
+            invoke("workspaceAdd", "jj workspace add", { op: "workspaceAdd", root, name, path }),
+            () =>
+              revision === undefined
+                ? Effect.void
+                : Effect.asVoid(
+                  invoke("restore", "jj restore", { op: "restore", root: path, changeId: revision })
+                ).pipe(
+                  // The two calls are not one transaction, so a failed pin has
+                  // to undo the add: the lane is already registered. The
+                  // directory stays, as it does after any forget. A rollback
+                  // that ITSELF fails is ignored: the pin failure is the
+                  // actionable one, and forgetting an absent lane is a no-op.
+                  Effect.catch((failure) =>
+                    Effect.andThen(
+                      Effect.ignore(
+                        invoke("workspaceForget", "jj workspace forget", { op: "workspaceForget", root, name })
+                      ),
+                      Effect.fail(
+                        new JjError({
+                          code: failure.code,
+                          module: MODULE,
+                          method: "workspaceAdd",
+                          command: "jj workspace add",
+                          message: `jj workspaceAdd: pinning the new lane failed: ${failure.message}`
+                        })
+                      )
                     )
                   )
                 )
-              )
+          )
         )
       ),
     workspaceForget: (name) =>
@@ -377,7 +429,7 @@ export const make = (options: BrowserJjOptions): Jj => {
     status: () =>
       Effect.flatMap(
         invoke("status", "jj status", { op: "status", root }),
-        (ok) => stringField("status", ok, "status")
+        (ok) => stringField("status", "jj status", ok, "status")
       ),
     // The layer owns exactly one workspace slice, so the repository root that
     // contains `from` is the configured root — but only when `from` is actually
@@ -411,11 +463,30 @@ export const make = (options: BrowserJjOptions): Jj => {
  */
 export const layer = (options: BrowserJjOptions): Layer.Layer<Jj> => Layer.succeed(Jj)(make(options))
 
+/**
+ * A namespace path reduced to its meaning: `.` and empty segments drop, `..`
+ * pops, and `..` of the root is the root. Comparing raw strings accepted
+ * `/repo/../outside` as inside `/repo`.
+ */
+const normalize = (path: string): string => {
+  const segments: Array<string> = []
+  for (const segment of path.split("/")) {
+    if (segment === "" || segment === ".") continue
+    if (segment === "..") {
+      segments.pop()
+      continue
+    }
+    segments.push(segment)
+  }
+  return `/${segments.join("/")}`
+}
+
 /** Whether a namespace path lies inside the slice the layer was given. */
 const contains = (root: string, from: string): boolean => {
-  if (root === "/") return from.startsWith("/")
-  const base = root.replace(/\/+$/, "")
-  return from === base || from.startsWith(`${base}/`)
+  if (!from.startsWith("/")) return false
+  const base = normalize(root)
+  const target = normalize(from)
+  return target === base || target.startsWith(base === "/" ? "/" : `${base}/`)
 }
 
 const fail = (method: string, command: string) =>
