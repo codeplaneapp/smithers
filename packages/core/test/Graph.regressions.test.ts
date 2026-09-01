@@ -1,5 +1,6 @@
 import { Result, Schema } from "effect"
 import { describe, expect, it } from "vitest"
+import * as Digest from "../src/Digest.ts"
 import * as Effects from "../src/Effects.ts"
 import * as Flow from "../src/Flow.ts"
 import * as Graph from "../src/Graph.ts"
@@ -193,7 +194,8 @@ describe("Graph release regressions", () => {
       expect(error).toMatchObject({
         code: "unrepresentable_value",
         member: "$.output",
-        message: "Graph.build cannot derive identity for the declared schema at $.output because its guard is opaque; " +
+        message:
+          "Graph.build cannot derive identity for the declared schema at $.output because its guard is opaque; " +
           "annotate it, for example with an identifier, so distinct declarations key differently"
       })
     }
@@ -216,7 +218,15 @@ describe("Graph release regressions", () => {
 
   it("bounds type-parameter recursion with the payload depth limit", () => {
     let nested: Schema.Top = Schema.String
-    for (let index = 0; index <= Graph.maximumPayloadDepth; index++) nested = Schema.Option(nested)
+    for (let index = 0; index <= Graph.maximumPayloadDepth; index++) {
+      const option = Schema.Option(nested)
+      const ast = Object.create(
+        Object.getPrototypeOf(option.ast),
+        Object.getOwnPropertyDescriptors(option.ast)
+      ) as typeof option.ast
+      Object.defineProperty(ast, "annotations", { configurable: true, value: undefined, writable: true })
+      nested = Schema.make(ast)
+    }
 
     try {
       Graph.build(Node.dynamic({ output: nested }))
@@ -270,7 +280,8 @@ describe("Graph release regressions", () => {
     expect(nodeMaterial(graph, "root")?.kind).toBe("sealed")
     expect(nodeMaterial(graph, "root")?.effects).toBeUndefined()
     expect(nodeMaterial(graph, "root.flow")?.kind).toBe("irreversible")
-    expect(nodeMaterial(graph, "root.flow")?.effects).toBe(irreversible)
+    expect(nodeMaterial(graph, "root.flow")?.effects).toEqual(irreversible)
+    expect(nodeMaterial(graph, "root.flow")?.effects).not.toBe(irreversible)
   })
 
   it("keeps an annotated All declaration as its children's narrowing envelope", () => {
@@ -283,7 +294,8 @@ describe("Graph release regressions", () => {
       envelope
     ))
 
-    expect(nodeMaterial(graph, "root")?.effects).toBe(envelope)
+    expect(nodeMaterial(graph, "root")?.effects).toEqual(envelope)
+    expect(nodeMaterial(graph, "root")?.effects).not.toBe(envelope)
     expect(nodeMaterial(graph, "root")?.kind).toBe("compensable")
     expect(Graph.diagnostics(graph)).toMatchObject([{
       code: "effect_outside_envelope",
@@ -320,8 +332,27 @@ describe("Graph release regressions", () => {
   it("canonicalizes All member order in declaration identity", () => {
     const first = Graph.build(Node.all({ a: Node.succeed(1), b: Node.succeed(2) }))
     const second = Graph.build(Node.all({ b: Node.succeed(2), a: Node.succeed(1) }))
+    const unicodeFirst = Graph.build(Node.all({
+      e: Node.succeed("plain"),
+      ["é"]: Node.succeed("accented"),
+      ["__proto__"]: Node.succeed("prototype")
+    }))
+    const unicodeSecond = Graph.build(Node.all({
+      ["__proto__"]: Node.succeed("prototype"),
+      ["é"]: Node.succeed("accented"),
+      e: Node.succeed("plain")
+    }))
+
+    const assertIdentical = (left: Graph.Graph, right: Graph.Graph): void => {
+      expect(Digest.canonical(Result.getOrThrow(Graph.keyMaterial(left))))
+        .toBe(Digest.canonical(Result.getOrThrow(Graph.keyMaterial(right))))
+      expect(Graph.nodes(left).map((node) => node.id)).toEqual(Graph.nodes(right).map((node) => node.id))
+      expect(Graph.edges(left)).toEqual(Graph.edges(right))
+    }
 
     expect(nodeMaterial(first, "root")?.body).toEqual(nodeMaterial(second, "root")?.body)
+    assertIdentical(first, second)
+    assertIdentical(unicodeFirst, unicodeSecond)
   })
 
   it("rejects a malformed root with an exact typed error", () => {

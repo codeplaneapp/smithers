@@ -1,6 +1,6 @@
 # @smthrs/core
 
-Pure plan-time data model for flows. It defines inert Flow and Node declarations plus the graph, effect, placement, annotation, key-material, and Markdown projections consumed by the registry and execution layers above it.
+Pure plan-time data model for flows. It defines inert Flow and Node declarations plus the graph, effect, placement, annotation, key-material, and Markdown projections consumed by the registry and execution layers above it. `TestRuntime` is the deliberately non-production exception: a pure evaluator for testing deferred declaration callbacks.
 
 ```sh
 npm install @smthrs/core
@@ -17,12 +17,13 @@ The root entry point exports these namespaces; each is also importable from `@sm
 | `Annotations` | `LaneOptions`, `empty`, `add`, `merge`, `getOption`, `Placement`, `Effects`, `Lane`, `Priority`                                                                                                                                                                                                                                                            | Builds and reads typed lexical annotations carried by plan nodes.                  |
 | `Digest`      | `crypto`, `layer`, `runSync`, `digest`, `canonical`                                                                                                                                                                                                                                                                                                        | Synchronous SHA-256 and canonical JSON for pure identity constructors.             |
 | `Effects`     | `Declaration`, `MakeOptions`, `NarrowResult`, `make`, `covers`, `narrow`, `overlaps`, `sealed`                                                                                                                                                                                                                                                             | Normalizes effect declarations and checks path coverage, narrowing, and conflicts. |
-| `Flow`        | `TypeId`, `Flow`, `Any`, `Reference`, `Seat`, `Implementation`, `Input`, `Output`, `Error`, `FlowErrorCode`, `FlowError`, `MakeOptions`, `isFlow`, `make`, `agent`, `withCapabilities`, `within`, `annotate`, `withFlows`, `withEffects`, `sealed`                                                                                                         | Declares callable, schema-described flows without executing them.                  |
+| `Flow`        | `TypeId`, `Flow`, `Any`, `Reference`, `Seat`, `BodyDeclaration`, `Implementation`, `Input`, `Output`, `Error`, `FlowErrorCode`, `FlowError`, `MakeOptions`, `isFlow`, `make`, `agent`, `withCapabilities`, `within`, `annotate`, `withFlows`, `withEffects`, `sealed`                                                                                      | Declares callable, schema-described flows without executing them.                  |
 | `Graph`       | `AnnotationsProjection`, `GraphNode`, `Edge`, `EdgeReason`, `Conflict`, `EffectEntry`, `PlacementEntry`, `LayerRequest`, `BuildOptions`, `GraphBuildErrorCode`, `GraphBuildError`, `isFatalDiagnostic`, `maximumGraphDepth`, `maximumPayloadDepth`, `Graph`, `build`, `nodes`, `edges`, `effects`, `placements`, `conflicts`, `diagnostics`, `keyMaterial` | Builds and inspects closure-free graph topology and execution metadata.            |
 | `KeyMaterial` | `InputRef`, `KeyMaterial`, `Entry`                                                                                                                                                                                                                                                                                                                         | Defines the stable key projection emitted from a built graph. Types only.          |
 | `Markdown`    | `MarkdownFrontmatter`, `SkillDocument`, `MarkdownErrorCode`, `MarkdownError`, `lowerMarkdown`, `parseSkill`, `lowerSkill`                                                                                                                                                                                                                                  | Parses and lowers Markdown and Agent Skills declarations to core flows.            |
 | `Node`        | `dynamic`, `TypeId`, `Ast`, `Node`, `Any`, `Success`, `Error`, `DynamicOptions`, `NodeBuildErrorCode`, `NodeBuildError`, `CatchOptions`, `isNode`, `succeed`, `fail`, `all`, `capture`, `map`, `andThen`, `catch`, `within`, `lane`, `priority`, `withEffects`                                                                                             | Constructs the inert, pipeable plan AST.                                           |
 | `Placement`   | `Options`, `Placement`, `local`, `client`, `sandbox`, `remote`                                                                                                                                                                                                                                                                                             | Creates serializable host-placement declarations.                                  |
+| `TestRuntime` | `EvaluationErrorCode`, `EvaluationError`, `DynamicRequest`, `FlowCallRequest`, `Request`, `Resolver`, `evaluate`, `evaluateInline`                                                                                                                                                                                                                         | Evaluates in-memory node declarations in tests without host behavior.              |
 
 ```ts
 import { Flow, Graph, Node, Placement } from "@smthrs/core"
@@ -40,11 +41,24 @@ const graph = Graph.build(greeting, { name: "world" })
 
 `@smthrs/core/package.json` is also exported. `internal/*` and nested `*/index` subpaths are not public.
 
+## Testing declarations
+
+`TestRuntime.evaluate` executes the deferred maps, continuations, and recovery
+arms stored in an in-memory Node AST. Dynamic nodes and flow-call leaves cross
+one explicit deterministic resolver. `evaluateInline` also enters called flows
+that carry an in-memory body. Both refuse malformed or excessively deep
+declarations with `EvaluationError`.
+
+This is not a substitute for the durable engine: it deliberately has no
+capabilities, persistence, scheduling, retries, cache, concurrency, or output
+schema enforcement. Use it for unit tests of node-building libraries, then use
+engine integration tests for host semantics.
+
 ## Identity and caching
 
 `Graph.keyMaterial` is the digest-free projection `@smthrs/plan` compiles into step keys, so two declarations with equal key material are the same step.
 
-An unannotated mapper, continuation, or flow body receives a process-local `sha256-source-ephemeral/v4` identity, because JavaScript cannot inspect closure state: two processes give the same function two different digests. Only `Node.capture` produces the cross-process-stable `sha256-source-captures/v3` identity, by folding the canonicalized inert values a function closes over into its digest. A step whose result must survive a restart has to declare its captures.
+An unannotated mapper, continuation, or flow body receives a process-local `sha256-source-ephemeral/v4` identity, because JavaScript cannot inspect closure state: two processes give the same function two different digests. Only `Node.capture` produces the cross-process-stable `sha256-source-captures/v4` identity, by folding the canonicalized inert values a function closes over into its digest. A step whose result must survive a restart has to declare its captures.
 
 ```ts
 const scaled = Node.capture({ factor: 3 }, (value: number) => value * 3)

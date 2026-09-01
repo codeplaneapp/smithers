@@ -1,5 +1,6 @@
 import { Schema } from "effect"
 import { expectTypeOf, test } from "vitest"
+import * as Flow from "../src/Flow.ts"
 import * as Node from "../src/Node.ts"
 
 interface FirstError {
@@ -47,6 +48,15 @@ test("dynamic infers schema output and accepts an explicit output type", () => {
 
   expectTypeOf(inferred).toEqualTypeOf<Node.Node<string>>()
   expectTypeOf(explicit).toEqualTypeOf<Node.Node<string>>()
+})
+
+test("dynamic accepts only named or flow-valued collaborators", () => {
+  const flow = Flow.make({ body: () => Node.succeed("done") })
+
+  Node.dynamic({ flows: ["name"] })
+  Node.dynamic({ flows: [flow] })
+  // @ts-expect-error Dynamic collaborators must be names or Flow values.
+  Node.dynamic({ flows: [42] })
 })
 
 test("covariance admits never-valued nodes in heterogeneous records", () => {

@@ -34,7 +34,7 @@ export type InputRef =
  * @slop
  */
 export interface KeyMaterial {
-  readonly version: "flows/key-material/v1"
+  readonly version: "flows/key-material/v2"
   readonly kind: "sealed" | "compensable" | "irreversible"
   readonly body: unknown
   readonly inputs: ReadonlyArray<InputRef>

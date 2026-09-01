@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Chunk, Option, Result, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Flow from "../src/Flow.ts"
 import * as Graph from "../src/Graph.ts"
@@ -78,7 +78,15 @@ describe("Graph reflection", () => {
     })
 
     expect(reflected(value)).toEqual({
-      x: { _tag: "Accessor", get: true, set: false }
+      x: {
+        _tag: "Accessor",
+        get: {
+          _tag: "FunctionIdentity",
+          algorithm: "sha256-source-ephemeral/v4",
+          digest: expect.any(String)
+        },
+        set: null
+      }
     })
     expect(calls).toBe(0)
   })
@@ -111,6 +119,24 @@ describe("Graph reflection", () => {
       _tag: "Bytes",
       kind: "Uint8Array",
       bytes: [1, 2]
+    })
+    expect(reflected(Option.none())).toEqual({ _tag: "Option", value: { _tag: "None" } })
+    expect(reflected(Option.some({ revision: 1 }))).toEqual({
+      _tag: "Option",
+      value: { _tag: "Some", value: { revision: 1 } }
+    })
+    expect(reflected(Result.succeed(1))).toEqual({
+      _tag: "Result",
+      value: { _tag: "Success", value: 1 }
+    })
+    expect(reflected(Result.fail("boom"))).toEqual({
+      _tag: "Result",
+      value: { _tag: "Failure", error: "boom" }
+    })
+    expect(reflected(Chunk.make(2, 1))).toEqual({ _tag: "Chunk", values: [2, 1] })
+    expect(reflected(new URL("https://example.test/a?b=1"))).toEqual({
+      _tag: "URL",
+      href: "https://example.test/a?b=1"
     })
   })
 
@@ -185,20 +211,34 @@ describe("Graph reflection", () => {
     // encoder has to separate them itself.
     // eslint-disable-next-line no-sparse-arrays
     expect(reflected([, 1])).toEqual([{ _tag: "Hole" }, 1])
-    expect(reflected([undefined, 1])).toEqual([undefined, 1])
+    expect(reflected([undefined, 1])).toEqual([{ _tag: "Undefined" }, 1])
     // eslint-disable-next-line no-sparse-arrays
     expect(JSON.stringify(reflected([, 1]))).not.toBe(JSON.stringify(reflected([undefined, 1])))
   })
 
-  it("names an Effect data type and a host object in its refusal", () => {
+  it("names an unsupported data type in its refusal", () => {
     const tagged = Object.create({ _tag: "Some" }) as object
 
     expect(() => Graph.build(Node.succeed({ opt: tagged }))).toThrow(
       "Graph.build cannot derive identity for a \"Some\" instance at $.opt; plan values must be plain data"
     )
-    expect(() => Graph.build(Node.succeed({ href: new URL("https://example.test/") }))).toThrow(
-      "Graph.build cannot derive identity for a \"URL\" instance at $.href; plan values must be plain data"
-    )
+  })
+
+  it("rejects forged Effect data without invoking accessors", () => {
+    let calls = 0
+    const option = Object.create(Object.getPrototypeOf(Option.some(1))) as object
+    Object.defineProperty(option, "value", {
+      enumerable: true,
+      get: () => {
+        calls++
+        return 1
+      }
+    })
+    const result = Object.create(Object.getPrototypeOf(Result.succeed(1))) as object
+
+    expect(() => reflected(option)).toThrow(Node.NodeBuildError)
+    expect(() => reflected(result)).toThrow(Node.NodeBuildError)
+    expect(calls).toBe(0)
   })
 
   it("freezes the key material it hands back, including a literal input payload", () => {

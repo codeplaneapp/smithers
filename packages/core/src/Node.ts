@@ -116,7 +116,7 @@ export type Error<N> = N extends Node<infer _A, infer E> ? E : never
  */
 export interface DynamicOptions {
   readonly model?: string | undefined
-  readonly flows?: ReadonlyArray<unknown> | undefined
+  readonly flows?: ReadonlyArray<string | { readonly "~flows/core/Flow": object }> | undefined
   readonly output?: unknown
   readonly prompt?: string | undefined
   readonly effects?: Effects.Declaration | undefined

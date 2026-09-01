@@ -35,6 +35,9 @@
 - Exported `Flow.MakeOptions` and `Graph.EdgeReason`, so a consumer can name
   what `Flow.make` and `Flow.agent` accept, and why one node depends on
   another, without reaching for `Parameters<typeof Flow.make>[0]`.
+- Added `TestRuntime`, a pure evaluator for the deferred callbacks in in-memory
+  Node declarations. It resolves execution leaves explicitly and can inline
+  called flow bodies without pretending to model durable host behavior.
 
 ### Fixed
 
@@ -92,6 +95,12 @@
   material without a word, as a `duplicate_node_id` diagnostic.
 
 ### Changed
+
+- Bumped graph key material to `flows/key-material/v2` and captured-function
+  identity to `sha256-source-captures/v4`, so the hardened reflection and
+  capture encodings can never alias keys produced by their predecessors.
+- Graph identity now has explicit encodings for `Option`, `Result`, `Chunk`,
+  and `URL` values while continuing to reject unsupported class instances.
 
 - A built graph is now deeply frozen, so `Graph.nodes`, `Graph.edges`,
   `Graph.conflicts`, and `Graph.diagnostics` can no longer be used to edit the

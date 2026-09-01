@@ -1,6 +1,6 @@
 A flow is a schema-described declaration. A node is an inert, pipeable value
-that records an AST. Nothing in this package runs anything: `Graph.build`
-evaluates pure flow bodies and pure `Node.andThen` builders exactly once
+that records an AST. Production code in this package executes no steps:
+`Graph.build` evaluates pure flow bodies and pure `Node.andThen` builders exactly once
 against symbolic predecessor values so the complete static topology is visible
 before the first step executes.
 
@@ -19,6 +19,19 @@ const graph = Graph.build(greeting, { name: "world" })
 const material = Graph.keyMaterial(graph)
 ```
 
+## Testing declarations
+
+`TestRuntime.evaluate` is a pure, synchronous test helper that executes the
+deferred maps, continuations, and recovery arms stored in one in-memory Node
+AST. Dynamic nodes and flow-call leaves cross an explicit deterministic
+resolver. `evaluateInline` additionally enters called flows that carry an
+in-memory body.
+
+It intentionally does not model capabilities, persistence, scheduling,
+retries, cache, concurrency, or output-schema enforcement. Higher-order
+builder packages use it for declaration behavior; durable-engine integration
+tests remain responsible for host semantics.
+
 ## Identity and caching
 
 `Graph.keyMaterial` is the digest-free projection `@smthrs/plan` compiles into
@@ -30,7 +43,7 @@ Functions are the subtle part. An unannotated mapper, continuation, or flow
 body receives a _process-local_ `sha256-source-ephemeral/v4` identity, because
 JavaScript cannot inspect closure state: two runs of the same program give the
 same body two different digests. Only `Node.capture` produces the
-cross-process-stable `sha256-source-captures/v3` identity, by folding the
+cross-process-stable `sha256-source-captures/v4` identity, by folding the
 canonicalized inert values a function closes over into its digest. A step whose
 result must survive a restart therefore has to declare its captures.
 

@@ -6,7 +6,7 @@
  *
  * @since 0.0.0
  */
-import { Context, Option, Result, Schema } from "effect"
+import { Chunk, Context, Option, Result, Schema } from "effect"
 import * as Annotations from "./Annotations.ts"
 import * as Effects from "./Effects.ts"
 import * as Flow from "./Flow.ts"
@@ -314,10 +314,27 @@ export type Graph = GraphImpl
 const option = <I, S>(context: Context.Context<never>, key: Context.Key<I, S>): S | undefined =>
   Option.getOrUndefined(Annotations.getOption(context, key))
 
+const snapshotEffects = (declaration: Effects.Declaration | undefined): Effects.Declaration | undefined =>
+  declaration === undefined
+    ? undefined
+    : {
+      reads: [...declaration.reads],
+      writes: [...declaration.writes],
+      mode: declaration.mode,
+      onConflict: declaration.onConflict,
+      ...(declaration.tier === undefined ? {} : { tier: declaration.tier })
+    }
+
+const snapshotPlacement = (placement: Placement.Placement | undefined): Placement.Placement | undefined =>
+  placement === undefined ? undefined : { ...placement }
+
+const snapshotLane = (lane: Annotations.LaneOptions | undefined): Annotations.LaneOptions | undefined =>
+  lane === undefined ? undefined : { ...lane }
+
 const annotationProjection = (context: Context.Context<never>): AnnotationsProjection => ({
-  placement: option(context, Annotations.Placement),
-  effects: option(context, Annotations.Effects),
-  lane: option(context, Annotations.Lane),
+  placement: snapshotPlacement(option(context, Annotations.Placement)),
+  effects: snapshotEffects(option(context, Annotations.Effects)),
+  lane: snapshotLane(option(context, Annotations.Lane)),
   priority: option(context, Annotations.Priority)
 })
 
@@ -329,6 +346,9 @@ const tier = (effects: Effects.Declaration | undefined): KeyMaterial.KeyMaterial
 const reflectionTags: ReadonlySet<string> = Object.freeze(
   new Set([
     "PlannedInput",
+    "Undefined",
+    "Number",
+    "CyclicAnnotations",
     "BigInt",
     "Symbol",
     "Function",
@@ -344,10 +364,20 @@ const reflectionTags: ReadonlySet<string> = Object.freeze(
     "Error",
     "Map",
     "Set",
+    "Option",
+    "Result",
+    "Chunk",
+    "URL",
     "Bytes",
     "Escaped"
   ])
 )
+
+const optionNonePrototype = Object.getPrototypeOf(Option.none())
+const optionSomePrototype = Object.getPrototypeOf(Option.some(undefined))
+const resultSuccessPrototype = Object.getPrototypeOf(Result.succeed(undefined))
+const resultFailurePrototype = Object.getPrototypeOf(Result.fail(undefined))
+const chunkPrototype = Object.getPrototypeOf(Chunk.empty())
 
 const symbolIdentities = new WeakMap<object, string>() as unknown as {
   readonly get: (key: symbol) => string | undefined
@@ -401,12 +431,13 @@ const symbolIdentity = (value: symbol): SymbolIdentity => {
 const payloadDepthError = (nodeId: string): GraphBuildError =>
   new GraphBuildError({ code: "payload_too_deep", paths: [], nodeId })
 
+class CyclicAnnotationsSignal extends Error {}
+
 const propertyPath = (path: string, key: string): string => `${path}.${key}`
 
 const compareJsonText = (left: unknown, right: unknown): number => {
-  /* v8 ignore next 2 -- `undefined` is the only projection JSON.stringify cannot render, and `Array.prototype.sort` sorts it last without consulting a comparator; the fallback keeps the ordering total anyway */
-  const leftText = JSON.stringify(left) ?? ""
-  const rightText = JSON.stringify(right) ?? ""
+  const leftText = String(JSON.stringify(left))
+  const rightText = String(JSON.stringify(right))
   return leftText < rightText ? -1 : leftText > rightText ? 1 : 0
 }
 
@@ -454,6 +485,15 @@ const nonFiniteNumber = (path: string): Node.NodeBuildError =>
     member: path,
     message:
       `Graph.build cannot derive identity for a number at ${path} because it is not finite; plan values must be plain data`
+  })
+
+const symbolKeyedProperty = (key: symbol, path: string): Node.NodeBuildError =>
+  new Node.NodeBuildError({
+    code: "unrepresentable_value",
+    member: path,
+    message: `Graph.build cannot derive identity for the symbol-keyed property ${
+      String(key)
+    } at ${path}; plan values must use string keys`
   })
 
 const dataProperty = (value: object, key: PropertyKey): unknown => {
@@ -544,8 +584,12 @@ function schemaIdentity(schema: Schema.Top, nodeId: string, depth: number, path:
     if (source.annotations !== undefined) {
       annotations = reflection(source.annotations, nodeId, new Set(), depth + 1, `${path}.ast.annotations`, true)
     }
-  } catch {
-    annotations = null
+  } catch (cause) {
+    if (cause instanceof CyclicAnnotationsSignal) {
+      annotations = { _tag: "CyclicAnnotations" }
+    } else {
+      throw cause
+    }
   }
   const typeParameters = schemaTypeParameters(source, nodeId, depth, path)
   const ast = { tag: source._tag, annotations, typeParameters }
@@ -631,8 +675,7 @@ const define = (target: object, key: string, value: unknown): void => {
   })
 }
 
-const isArrayIndex = (key: string, length: number): boolean =>
-  /^(?:0|[1-9]\d*)$/.test(key) && Number(key) < length
+const isArrayIndex = (key: string, length: number): boolean => /^(?:0|[1-9]\d*)$/.test(key) && Number(key) < length
 
 /**
  * Projects one own property, describing an accessor instead of invoking it.
@@ -647,12 +690,16 @@ const reflectedMember = (
 ): unknown =>
   "value" in member
     ? reflection(member.value, nodeId, seen, depth + 1, path, rejectCycles)
-    : { _tag: "Accessor", get: member.get !== undefined, set: member.set !== undefined }
+    : {
+      _tag: "Accessor",
+      get: member.get === undefined ? null : internal.functionIdentity(member.get),
+      set: member.set === undefined ? null : internal.functionIdentity(member.set)
+    }
 
 /**
- * Projects plan values into canonical-JSON-compatible identity. Own string
+ * Projects plan values into canonical-JSON-compatible identity. Own
  * properties are read through descriptors; symbol-keyed properties are
- * intentionally skipped because canonical JSON cannot represent their keys.
+ * refused because canonical JSON cannot represent their keys.
  */
 function reflection(
   value: unknown,
@@ -670,8 +717,8 @@ function reflection(
       path: descriptor.path
     }
   }
+  if (value === undefined) return depth > 0 ? { _tag: "Undefined" } : value
   if (
-    value === undefined ||
     value === null ||
     typeof value === "boolean" ||
     typeof value === "string"
@@ -679,6 +726,7 @@ function reflection(
     return value
   }
   if (typeof value === "number") {
+    if (Object.is(value, -0)) return { _tag: "Number", value: "-0" }
     if (!Number.isFinite(value)) throw nonFiniteNumber(path)
     return value
   }
@@ -695,7 +743,7 @@ function reflection(
   }
   if (Flow.isFlow(value)) {
     if (seen.has(value)) {
-      if (rejectCycles) throw new TypeError("cyclic schema annotations")
+      if (rejectCycles) throw new CyclicAnnotationsSignal()
       return { _tag: "CircularFlow" }
     }
     seen.add(value)
@@ -705,7 +753,7 @@ function reflection(
       input: schemaIdentity(flow.input, nodeId, depth + 1, `${path}.input`),
       output: schemaIdentity(flow.output, nodeId, depth + 1, `${path}.output`),
       capabilities: [...new Set(flow.capabilities)].sort(),
-      effects: flow.effects,
+      effects: snapshotEffects(flow.effects),
       implementation: reflection(flow.implementation, nodeId, seen, depth + 1, `${path}.implementation`, rejectCycles)
     }
     seen.delete(value)
@@ -714,8 +762,64 @@ function reflection(
   if (Schema.isSchema(value)) return schemaIdentity(value, nodeId, depth, path)
   if (typeof value === "function") return { _tag: "Function", identity: internal.functionIdentity(value) }
   if (seen.has(value)) {
-    if (rejectCycles) throw new TypeError("cyclic schema annotations")
+    if (rejectCycles) throw new CyclicAnnotationsSignal()
     return { _tag: "Circular" }
+  }
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype === optionNonePrototype || prototype === optionSomePrototype) {
+    seen.add(value)
+    try {
+      if (prototype === optionNonePrototype) return { _tag: "Option", value: { _tag: "None" } }
+      const member = Object.getOwnPropertyDescriptor(value, "value")
+      if (member === undefined || !("value" in member)) throw unrepresentableInstance(value, path)
+      return {
+        _tag: "Option",
+        value: {
+          _tag: "Some",
+          value: reflection(member.value, nodeId, seen, depth + 1, `${path}.value`, rejectCycles)
+        }
+      }
+    } finally {
+      seen.delete(value)
+    }
+  }
+  if (prototype === resultSuccessPrototype || prototype === resultFailurePrototype) {
+    seen.add(value)
+    try {
+      const key = prototype === resultSuccessPrototype ? "success" : "failure"
+      const member = Object.getOwnPropertyDescriptor(value, key)
+      if (member === undefined || !("value" in member)) throw unrepresentableInstance(value, path)
+      return {
+        _tag: "Result",
+        value: prototype === resultSuccessPrototype
+          ? {
+            _tag: "Success",
+            value: reflection(member.value, nodeId, seen, depth + 1, `${path}.success`, rejectCycles)
+          }
+          : {
+            _tag: "Failure",
+            error: reflection(member.value, nodeId, seen, depth + 1, `${path}.failure`, rejectCycles)
+          }
+      }
+    } finally {
+      seen.delete(value)
+    }
+  }
+  if (prototype === chunkPrototype) {
+    seen.add(value)
+    try {
+      return {
+        _tag: "Chunk",
+        values: Chunk.toReadonlyArray(value as Chunk.Chunk<unknown>).map((member, index) =>
+          reflection(member, nodeId, seen, depth + 1, `${path}.values[${index}]`, rejectCycles)
+        )
+      }
+    } finally {
+      seen.delete(value)
+    }
+  }
+  if (prototype === URL.prototype) {
+    return { _tag: "URL", href: URL.prototype.toString.call(value) }
   }
   if (value instanceof Date) {
     const epochMilliseconds = Date.prototype.getTime.call(value)
@@ -775,6 +879,8 @@ function reflection(
   if (Array.isArray(value)) {
     try {
       const descriptors = Object.getOwnPropertyDescriptors(value)
+      const symbol = Reflect.ownKeys(descriptors).find((key): key is symbol => typeof key === "symbol")
+      if (symbol !== undefined) throw symbolKeyedProperty(symbol, path)
       const items = new Array<unknown>(value.length)
       for (let index = 0; index < value.length; index++) {
         const member = descriptors[String(index)]
@@ -803,13 +909,14 @@ function reflection(
       seen.delete(value)
     }
   }
-  const prototype = Object.getPrototypeOf(value)
   if (prototype !== Object.prototype && prototype !== null) {
     seen.delete(value)
     throw unrepresentableInstance(value, path)
   }
   try {
     const descriptors = Object.getOwnPropertyDescriptors(value)
+    const symbol = Reflect.ownKeys(descriptors).find((key): key is symbol => typeof key === "symbol")
+    if (symbol !== undefined) throw symbolKeyedProperty(symbol, path)
     const keys = Reflect.ownKeys(descriptors).filter((key): key is string => typeof key === "string").sort()
     const result = Object.create(null) as Record<string, unknown>
     for (const key of keys) {
@@ -847,7 +954,7 @@ const declarationBody = (
         flows: reflection(ast.flows, nodeId, new Set(), 0, "$.flows"),
         output: reflection(ast.output, nodeId, new Set(), 0, "$.output"),
         prompt: ast.prompt,
-        effects: ast.effects
+        effects: snapshotEffects(ast.effects)
       }
     case "FlowCall":
       return {
@@ -855,7 +962,7 @@ const declarationBody = (
         input: flow === undefined ? undefined : schemaIdentity(flow.input, nodeId, 0, "$.input"),
         output: flow === undefined ? undefined : schemaIdentity(flow.output, nodeId, 0, "$.output"),
         capabilities: flow?.capabilities === undefined ? undefined : [...new Set(flow.capabilities)].sort(),
-        effects: flow?.effects,
+        effects: snapshotEffects(flow?.effects),
         implementation: reflection(flow?.implementation, nodeId, new Set(), 0, "$.implementation")
       }
     case "Map":
@@ -925,6 +1032,41 @@ const validateNodeAst = (value: unknown, nodeId: string): NodeAst => {
     ) {
       throw invalidNode(nodeId)
     }
+    const field = (key: string): unknown => {
+      const descriptor = descriptors[key]
+      if (descriptor === undefined || !("value" in descriptor)) throw invalidNode(nodeId)
+      return descriptor.value
+    }
+    switch (tag.value as NodeAst["_tag"]) {
+      case "Succeed":
+        field("value")
+        break
+      case "Fail":
+        field("error")
+        break
+      case "All": {
+        const nodes = field("nodes")
+        if (nodes === null || typeof nodes !== "object") throw invalidNode(nodeId)
+        break
+      }
+      case "Dynamic":
+        if (!Array.isArray(field("flows"))) throw invalidNode(nodeId)
+        break
+      case "AndThen":
+      case "Map":
+      case "Catch": {
+        const first = field("first")
+        if (first === null || typeof first !== "object") throw invalidNode(nodeId)
+        if (tag.value === "Catch") {
+          const error = field("error")
+          if (error !== undefined && !Schema.isSchema(error)) throw invalidNode(nodeId)
+        }
+        break
+      }
+      case "FlowCall":
+        field("input")
+        break
+    }
     return value as NodeAst
   } catch (cause) {
     if (cause instanceof GraphBuildError) throw cause
@@ -942,7 +1084,7 @@ const nodeAst = (value: unknown, nodeId: string): NodeAst => {
 }
 
 const freezeDeep = (value: unknown, seen: WeakSet<object> = new WeakSet()): void => {
-  if (typeof value !== "object" || value === null || seen.has(value) || Object.isFrozen(value)) return
+  if (typeof value !== "object" || value === null || seen.has(value)) return
   seen.add(value)
   for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
     if ("value" in descriptor) freezeDeep(descriptor.value, seen)
@@ -956,8 +1098,7 @@ const freezeKeyMaterial = (material: KeyMaterial.KeyMaterial): void => {
     if (input._tag === "Ref") freezeDeep(input.path)
     // A Literal payload is this module's own projection of the plan value, not
     // the caller's object, so freezing it closes the last writable path into
-    // recorded key material. `freezeDeep` short-circuits on a frozen value, so
-    // the payload has to be frozen before the record that holds it.
+    // recorded key material.
     if (input._tag === "Literal") freezeDeep(input.value)
     Object.freeze(input)
   }
@@ -1046,10 +1187,11 @@ export const build = (
     const flow = Flow.isFlow(targetFlow)
       ? targetFlow as FlowDetails
       : undefined
-    const declaredEffects = projection.effects ?? (ast._tag === "Dynamic" ? ast.effects : undefined) ??
-      (ast._tag === "FlowCall" ? flow?.effects : undefined)
+    const declaredEffects = projection.effects ??
+      (ast._tag === "Dynamic" ? snapshotEffects(ast.effects) : undefined) ??
+      (ast._tag === "FlowCall" ? snapshotEffects(flow?.effects) : undefined)
     const work = ast._tag === "Dynamic"
-    const effectiveEffects = work ? declaredEffects ?? envelope : undefined
+    const effectiveEffects = work ? declaredEffects ?? snapshotEffects(envelope) : undefined
     const identityEffects = work ? effectiveEffects : projection.effects
     const dependencies: Array<string> = []
     const continuationDependencies = new Set<string>()
@@ -1088,7 +1230,7 @@ export const build = (
       case "Fail":
         break
       case "All": {
-        for (const key of Object.keys(ast.nodes)) {
+        for (const key of Object.keys(ast.nodes).sort()) {
           const child = visit(
             ast.nodes[key]!,
             `${id}.all.${key}`,
@@ -1219,7 +1361,7 @@ export const build = (
             normalizedGrant === undefined
               ? flowCapabilities
               : normalizedGrant.filter((capability) => flowCapabilities.includes(capability)),
-            flow.effects ?? narrowedEnvelope,
+            snapshotEffects(flow.effects) ?? narrowedEnvelope,
             depth + 1,
             ast.input
           )
@@ -1255,7 +1397,7 @@ export const build = (
       )
     }
     current.keyMaterial = {
-      version: "flows/key-material/v1",
+      version: "flows/key-material/v2",
       kind: tier(identityEffects),
       body: declarationBody(ast, flow, id),
       inputs,
@@ -1284,7 +1426,15 @@ export const build = (
           : `Cannot build flow "${flow.name}" without a body`
       })
     }
-    visit(nodeAst(flow.body(input), "root"), "root", flow.annotations, flow.capabilities, flow.effects, 0, input)
+    visit(
+      nodeAst(flow.body(input), "root"),
+      "root",
+      flow.annotations,
+      flow.capabilities,
+      snapshotEffects(flow.effects),
+      0,
+      input
+    )
   } else {
     visit(nodeAst(flowOrNode, "root"), "root", Annotations.empty, undefined, undefined)
   }
@@ -1425,7 +1575,7 @@ export const build = (
         priority: undefined
       },
       keyMaterial: {
-        version: "flows/key-material/v1",
+        version: "flows/key-material/v2",
         kind: "compensable",
         body: { _tag: "LaneMerge", paths: laneConflict.paths },
         inputs: [

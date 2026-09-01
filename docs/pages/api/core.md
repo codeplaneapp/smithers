@@ -42,7 +42,7 @@ Functions are the subtle part. An unannotated mapper, continuation, or flow
 body receives a _process-local_ `sha256-source-ephemeral/v4` identity, because
 JavaScript cannot inspect closure state: two runs of the same program give the
 same body two different digests. Only `Node.capture` produces the
-cross-process-stable `sha256-source-captures/v3` identity, by folding the
+cross-process-stable `sha256-source-captures/v4` identity, by folding the
 canonicalized inert values a function closes over into its digest. A step whose
 result must survive a restart therefore has to declare its captures.
 
@@ -152,7 +152,7 @@ Pure effect declarations used to describe flow read and write envelopes.
 | `Declaration` (interface) | models | A normalized description of the resources a flow or step may read and write. |
 | `make` (const) | constructors | Constructs a deterministic effect declaration. |
 | `MakeOptions` (interface) | models | Input accepted by `make`. |
-| `narrow` (const) | validation | ") && path.startsWith(envelope.slice(0, -2))) ||     (envelope.endsWith("*") && path.startsWith(envelope.slice(0, -1))) } |
+| `narrow` (const) | validation | Verifies that a step declaration stays within an enclosing flow envelope. |
 | `NarrowResult` (type) | models | A result of checking that a step declaration narrows a flow envelope. |
 | `overlaps` (const) | analysis | Returns the concrete or narrower write declarations shared by two effect declarations. |
 | `sealed` (const) | constructors | Returns a sealed, hermetic copy of an effect declaration. |
@@ -168,6 +168,7 @@ Calling a flow constructs a `FlowCall` node. It never evaluates the flow body; g
 | `agent` (const) | constructors | Alias for `make`. |
 | `annotate` (const) | combinators | Attaches one typed annotation to a flow, returning a fresh flow. |
 | `Any` (interface) | utility | Marker-only existential type for heterogeneous collections of flows. |
+| `BodyDeclaration` (interface) | models | The seat, collaborator, and prompt declaration a body-backed flow records. |
 | `Error` (type) | utility | Extracts the error type of a flow. |
 | `Flow` (interface) | models | A callable flow declaration. |
 | `FlowError` (class) | errors | A typed flow construction failure. |

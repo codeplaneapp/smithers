@@ -99,7 +99,8 @@ describe("Graph", () => {
         effective: declaration
       }
     ])
-    expect(Graph.nodes(graph)[0]?.keyMaterial.effects).toBe(declaration)
+    expect(Graph.nodes(graph)[0]?.keyMaterial.effects).toEqual(declaration)
+    expect(Graph.nodes(graph)[0]?.keyMaterial.effects).not.toBe(declaration)
   })
 
   it("applies a group effect declaration as a child envelope without exposing internal state", () => {

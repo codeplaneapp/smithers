@@ -168,7 +168,7 @@ export interface BodyDeclaration {
 export type Implementation =
   | {
     readonly _tag: "Body"
-    readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v3"
+    readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v4"
     readonly digest: string
     readonly declaration?: BodyDeclaration | undefined
   }
@@ -566,27 +566,33 @@ export const withFlows: {
   self: Flow<Input, Output, E>,
   flows: ReadonlyArray<Reference>
 ): Flow<Input, Output, E> => {
+  const nextFlows = [...flows]
   const implementation = self.implementation
   if (implementation === undefined || implementation._tag !== "Dynamic") {
     return makeFlow({
       ...optionsFromFlow(self),
-      flows,
+      flows: nextFlows,
       implementation: implementation === undefined
         ? undefined
-        : { ...implementation, declaration: bodyDeclaration(self.model, flows, self.prompt) }
+        : { ...implementation, declaration: bodyDeclaration(self.model, nextFlows, self.prompt) }
     })
   }
   return makeFlow({
     ...optionsFromFlow(self),
-    flows,
+    flows: nextFlows,
     body: () =>
       Node.dynamic({
         ...(implementation.model === undefined ? {} : { model: implementation.model }),
-        flows,
+        flows: nextFlows,
         output: self.output,
         ...(implementation.prompt === undefined ? {} : { prompt: implementation.prompt })
       }) as Node.Node<Output["Type"], E>,
-    implementation: { _tag: "Dynamic", model: implementation.model, flows, prompt: implementation.prompt }
+    implementation: {
+      _tag: "Dynamic",
+      model: implementation.model,
+      flows: nextFlows,
+      prompt: implementation.prompt
+    }
   })
 })
 

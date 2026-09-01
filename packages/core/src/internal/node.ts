@@ -121,13 +121,13 @@ export interface Catch {
  */
 export interface FunctionIdentity {
   readonly _tag: "FunctionIdentity"
-  readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v3" | "static-node/v1"
+  readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v4" | "static-node/v1"
   readonly digest: string
 }
 
 /** @private */
 type OperationIdentity = FunctionIdentity & {
-  readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v3"
+  readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v4"
 }
 
 /** @private */
@@ -186,7 +186,13 @@ const captureError = (path: string, reason: string): TypeError =>
   new TypeError(`Node.capture: capture at ${path} ${reason}; captures must be finite, inert data`)
 
 /** @private */
-const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<object>): string => {
+const maximumCaptureDepth = 256
+
+/** @private */
+const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<object>, depth: number): string => {
+  if (depth > maximumCaptureDepth) {
+    throw captureError(path, `exceeds the maximum capture depth of ${maximumCaptureDepth}`)
+  }
   if (input === null) return "null"
   switch (typeof input) {
     case "boolean":
@@ -214,7 +220,7 @@ const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<objec
       const descriptors = Object.getOwnPropertyDescriptors(input)
       for (const key of Reflect.ownKeys(descriptors)) {
         if (key === "length") continue
-        if (typeof key === "symbol" || !/^(0|[1-9]\d*)$/.test(key)) {
+        if (typeof key === "symbol" || !/^(0|[1-9]\d*)$/.test(key) || Number(key) >= input.length) {
           throw captureError(path, `has unsupported array key ${String(key)}`)
         }
       }
@@ -223,7 +229,7 @@ const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<objec
         const descriptor = descriptors[String(index)]
         if (descriptor === undefined) throw captureError(`${path}[${index}]`, "is an array hole")
         if (!("value" in descriptor)) throw captureError(`${path}[${index}]`, "is an accessor")
-        items.push(canonicalCapture(descriptor.value, `${path}[${index}]`, ancestors))
+        items.push(canonicalCapture(descriptor.value, `${path}[${index}]`, ancestors, depth + 1))
       }
       return `["array",[${items.join(",")}]]`
     }
@@ -234,7 +240,7 @@ const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<objec
     const encoded = (keys as Array<string>).sort().map((key) => {
       const descriptor = members[key]!
       if (!("value" in descriptor)) throw captureError(`${path}.${key}`, "is an accessor")
-      return `${JSON.stringify(key)}:${canonicalCapture(descriptor.value, `${path}.${key}`, ancestors)}`
+      return `${JSON.stringify(key)}:${canonicalCapture(descriptor.value, `${path}.${key}`, ancestors, depth + 1)}`
     })
     return `["object",{${encoded.join(",")}}]`
   } finally {
@@ -267,7 +273,7 @@ export const capture = <Args extends ReadonlyArray<unknown>, A>(
   if (typeof operation !== "function") throw new TypeError("Node.capture requires a function operation")
   const metadata = (operation as CapturedFunction)[CapturedTypeId]
   const source = metadata?.source ?? Function.prototype.toString.call(operation)
-  const outerCanonical = canonicalCapture(captures, "$", new WeakSet())
+  const outerCanonical = canonicalCapture(captures, "$", new WeakSet(), 0)
   const canonical = metadata === undefined
     ? outerCanonical
     : `["nested",${outerCanonical},${metadata.captures}]`
@@ -324,7 +330,7 @@ export const functionIdentity = (operation: unknown): OperationIdentity => {
   }
   return {
     _tag: "FunctionIdentity",
-    algorithm: metadata === undefined ? "sha256-source-ephemeral/v4" : "sha256-source-captures/v3",
+    algorithm: metadata === undefined ? "sha256-source-ephemeral/v4" : "sha256-source-captures/v4",
     digest: digestSync(metadata === undefined ? `${source}\0${ephemeral}` : `${source}\0${metadata.captures}`)
   }
 }

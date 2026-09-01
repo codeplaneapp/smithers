@@ -233,7 +233,7 @@ describe("Node", () => {
     expect(one.operation(2)).toBe(3)
     expect(identity(one.node)).toEqual(identity(same.node))
     expect(identity(one.node)).not.toEqual(identity(two.node))
-    expect(identity(one.node).algorithm).toBe("sha256-source-captures/v3")
+    expect(identity(one.node).algorithm).toBe("sha256-source-captures/v4")
     expect(Object.isFrozen(one.captures)).toBe(true)
     expect(Object.isFrozen(one.captures.nested)).toBe(true)
     expect(() => Node.capture({ value: Number.NaN }, () => undefined)).toThrow(/is not finite/)
@@ -307,6 +307,53 @@ describe("Node", () => {
     const arraySymbol: Array<unknown> = []
     Object.defineProperty(arraySymbol, Symbol("extra"), { enumerable: true, value: 1 })
     expect(() => identity({ arraySymbol })).toThrow(/unsupported array key Symbol\(extra\)/)
+
+    const baseline = identity({ array: [1, 2, 3] })
+    expect(identity({ array: [1, 2, 3] })).toEqual(baseline)
+
+    const ghost = [1, 2, 3]
+    Object.defineProperty(ghost, "4294967295", { enumerable: true, value: 4 })
+    expect(() => identity({ array: ghost })).toThrow(
+      new TypeError(
+        "Node.capture: capture at $.array has unsupported array key 4294967295; captures must be finite, inert data"
+      )
+    )
+
+    let outOfRangeDescriptor: PropertyDescriptor | undefined
+    const outOfRange = new Proxy([1, 2, 3], {
+      defineProperty: (target, key, descriptor) => {
+        if (key !== "10") return Reflect.defineProperty(target, key, descriptor)
+        outOfRangeDescriptor = { ...descriptor, configurable: true }
+        return true
+      },
+      getOwnPropertyDescriptor: (target, key) =>
+        key === "10" ? outOfRangeDescriptor : Reflect.getOwnPropertyDescriptor(target, key),
+      ownKeys: (target) => [...Reflect.ownKeys(target), "10"]
+    })
+    Object.defineProperty(outOfRange, "10", { configurable: true, enumerable: true, value: 4 })
+    expect(Object.hasOwn(outOfRange, "10")).toBe(true)
+    expect(() => identity({ array: outOfRange })).toThrow(
+      new TypeError(
+        "Node.capture: capture at $.array has unsupported array key 10; captures must be finite, inert data"
+      )
+    )
+  })
+
+  it("bounds capture nesting with an exact typed error", () => {
+    const nested = (depth: number): Readonly<Record<string, unknown>> => {
+      let value: unknown = "leaf"
+      for (let index = 0; index < depth; index++) value = { value }
+      return value as Readonly<Record<string, unknown>>
+    }
+    const operation = () => undefined
+
+    expect(() => Node.capture(nested(256), operation)).not.toThrow()
+    const path = `$${".value".repeat(257)}`
+    expect(() => Node.capture(nested(257), operation)).toThrow(
+      new TypeError(
+        `Node.capture: capture at ${path} exceeds the maximum capture depth of 256; captures must be finite, inert data`
+      )
+    )
   })
 
   it("rejects non-Node members with NodeBuildError", () => {

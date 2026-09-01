@@ -56,7 +56,15 @@ describe("Graph release coverage", () => {
 
     expect(result[0]).toBe("visible")
     expect(result[1]).toBe("hidden")
-    expect(result[2]).toEqual({ _tag: "Accessor", get: true, set: false })
+    expect(result[2]).toEqual({
+      _tag: "Accessor",
+      get: {
+        _tag: "FunctionIdentity",
+        algorithm: "sha256-source-ephemeral/v4",
+        digest: expect.any(String)
+      },
+      set: null
+    })
     expect(result[3]).toEqual({ _tag: "Hole" })
     expect(accessorCalls).toBe(0)
   })
@@ -81,7 +89,7 @@ describe("Graph release coverage", () => {
       output: {
         _tag: "Schema",
         document: { schema: { type: "string" } },
-        ast: { tag: "String", annotations: null }
+        ast: { tag: "String", annotations: { _tag: "CyclicAnnotations" } }
       }
     })
 
@@ -108,12 +116,20 @@ describe("Graph release coverage", () => {
     const recursiveFlowBody = Graph.nodes(
       Graph.build(Node.dynamic({ output: recursiveFlowSchema }))
     )[0]?.keyMaterial.body
-    expect(recursiveFlowBody).toMatchObject({ output: { ast: { annotations: null } } })
+    expect(recursiveFlowBody).toMatchObject({
+      output: { ast: { annotations: { _tag: "CyclicAnnotations" } } }
+    })
   })
 
   it("sorts reflection values with undefined and equal JSON projections", () => {
-    expect(reflected(new Set([undefined, 1]))).toEqual({ _tag: "Set", values: [1, undefined] })
-    expect(reflected(new Set([1, undefined]))).toEqual({ _tag: "Set", values: [1, undefined] })
+    expect(reflected(new Set([undefined, 1]))).toEqual({
+      _tag: "Set",
+      values: [1, { _tag: "Undefined" }]
+    })
+    expect(reflected(new Set([1, undefined]))).toEqual({
+      _tag: "Set",
+      values: [1, { _tag: "Undefined" }]
+    })
     expect(reflected(new Set([{ id: 1 }, { id: 1 }]))).toEqual({
       _tag: "Set",
       values: [{ id: 1 }, { id: 1 }]
@@ -303,6 +319,44 @@ describe("Graph release coverage", () => {
       expect((error as Error & { readonly cause?: unknown }).cause).toBe(cause)
       expect(error).toMatchObject({ code: "invalid_node", nodeId: "root" })
     }
+  })
+
+  it("validates required tag-specific AST fields at the root", () => {
+    let accessorCalls = 0
+    const succeed = {
+      _tag: "Succeed",
+      annotations: Annotations.empty
+    }
+    Object.defineProperty(succeed, "value", {
+      get: () => {
+        accessorCalls++
+        return "forged"
+      }
+    })
+    const first = Node.succeed("valid").ast
+    const forged = [
+      succeed,
+      { _tag: "Fail", annotations: Annotations.empty },
+      { _tag: "All", nodes: null, annotations: Annotations.empty },
+      { _tag: "Dynamic", flows: null, annotations: Annotations.empty },
+      { _tag: "AndThen", first: null, annotations: Annotations.empty },
+      { _tag: "Map", first: null, annotations: Annotations.empty },
+      { _tag: "Catch", first: null, error: undefined, annotations: Annotations.empty },
+      { _tag: "Catch", first, error: 42, annotations: Annotations.empty },
+      { _tag: "FlowCall", annotations: Annotations.empty }
+    ]
+
+    for (const ast of forged) {
+      const node = internal.makeNode(ast as unknown as internal.NodeAst)
+      expect(() => Graph.build(node)).toThrow(Graph.GraphBuildError)
+      try {
+        Graph.build(node)
+        throw new Error("expected the forged AST to be rejected")
+      } catch (error) {
+        expect(error).toMatchObject({ code: "invalid_node", nodeId: "root" })
+      }
+    }
+    expect(accessorCalls).toBe(0)
   })
 
   it("reports exact continuation errors for missing and invalid builders", () => {

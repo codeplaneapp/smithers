@@ -1,8 +1,10 @@
 import * as Context from "effect/Context"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 import * as Annotations from "../src/Annotations.ts"
+import * as Digest from "../src/Digest.ts"
 import * as Effects from "../src/Effects.ts"
 import * as Flow from "../src/Flow.ts"
 import * as Graph from "../src/Graph.ts"
@@ -278,6 +280,49 @@ describe("Flow", () => {
       digest: originalDigest,
       declaration: { flows: ["second"] }
     })
+  })
+
+  it("snapshots a body flow's replacement collaborator array", () => {
+    const base = Flow.make({
+      input: Schema.String,
+      output: Schema.String,
+      body: Node.succeed
+    })
+    const replacements: Array<Flow.Reference> = ["helper"]
+    const rebound = Flow.withFlows(base, replacements)
+    const before = Digest.canonical(Result.getOrThrow(Graph.keyMaterial(Graph.build(rebound("input")))))
+
+    replacements.push("late")
+
+    expect(rebound.flows).toEqual(["helper"])
+    expect(rebound.implementation).toMatchObject({
+      _tag: "Body",
+      declaration: { flows: ["helper"] }
+    })
+    expect(Digest.canonical(Result.getOrThrow(Graph.keyMaterial(Graph.build(rebound("input")))))).toBe(before)
+  })
+
+  it("snapshots a dynamic flow's replacement collaborator array", () => {
+    const base = Flow.make({
+      input: Schema.String,
+      output: Schema.String,
+      model: "smart"
+    })
+    const replacements: Array<Flow.Reference> = ["helper"]
+    const rebound = Flow.withFlows(base, replacements)
+    const before = Digest.canonical(Result.getOrThrow(Graph.keyMaterial(Graph.build(rebound("input")))))
+
+    replacements.push("late")
+
+    expect(rebound.flows).toEqual(["helper"])
+    expect(rebound.implementation).toEqual({
+      _tag: "Dynamic",
+      model: "smart",
+      flows: ["helper"],
+      prompt: undefined
+    })
+    expect(rebound.body?.("input").ast).toMatchObject({ _tag: "Dynamic", flows: ["helper"] })
+    expect(Digest.canonical(Result.getOrThrow(Graph.keyMaterial(Graph.build(rebound("input")))))).toBe(before)
   })
 
   it("records collaborators on a declaration-only flow without inventing an implementation", () => {
