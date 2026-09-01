@@ -14,11 +14,13 @@
  * tier before the entry is `put`. Bazel states it at
  * `UploadManifest.java:630-633` — "action results may fail to validate
  * server-side if they are accessed before all blobs they refer to are
- * present". See `docs/specs/Concepts/Remote Cache.md`.
+ * present". See the
+ * {@link https://smithers.sh/api/step-cache | step-cache reference}.
  *
  * The endpoint and its credentials arrive as layer construction options. They
  * are a capability, never an input: they are not hashed into a step key and
- * never journaled (`docs/specs/Specs/Input.md`).
+ * never journaled; see the
+ * {@link https://smithers.sh/concepts/step-keys | step-key contract}.
  *
  * @since 0.1.0
  */
@@ -57,10 +59,20 @@ export interface Options {
   readonly maxResponseBytes?: number | undefined
 }
 
-/** Default deadline for one remote cache request. */
+/**
+ * Default deadline for one remote cache request.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
 export const defaultRequestTimeout = Duration.seconds(60)
 
-/** Default and absolute maximum encoded cache entry size. */
+/**
+ * Default and absolute maximum encoded cache entry size.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
 export const maximumEntryBytes = CacheStore.maximumJsonBytes
 
 const decoder = new TextDecoder("utf-8", { fatal: true })
@@ -74,6 +86,14 @@ const isWellFormedText = (value: string): boolean => {
     } else if (unit >= 0xdc00 && unit <= 0xdfff) return false
   }
   return true
+}
+
+const hasControlText = (value: string): boolean => {
+  for (let index = 0; index < value.length; index++) {
+    const unit = value.charCodeAt(index)
+    if (unit <= 0x1f || unit === 0x7f) return true
+  }
+  return false
 }
 
 const transportFailure = (operation: string, _cause: unknown): CacheStore.CacheStoreError =>
@@ -140,7 +160,7 @@ export const make = (
         if (
           typeof endpoint !== "string" || endpoint.length > 16 * 1024 ||
           endpoint.trim() !== endpoint || !isWellFormedText(endpoint) ||
-          /[\u0000-\u001f\u007f]/.test(endpoint)
+          hasControlText(endpoint)
         ) throw new TypeError("endpoint")
         const rawHeaders = data("headers")
         let headers: Readonly<Record<string, string>> | undefined
@@ -157,7 +177,7 @@ export const make = (
               typeof descriptor.value !== "string" ||
               !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(key) ||
               descriptor.value.length > 16 * 1024 || !isWellFormedText(descriptor.value) ||
-              /[\u0000-\u001f\u007f]/.test(descriptor.value)
+              hasControlText(descriptor.value)
             ) throw new TypeError("headers")
             Object.defineProperty(snapshot, key, {
               value: descriptor.value,
