@@ -17,13 +17,15 @@ import { ModelError } from "./ModelError.ts"
  * `chatgpt-account-id` names an account rather than a secret, but it is an
  * identity the ChatGPT-subscription route must keep out of step keys, journals,
  * and diagnostics, so it is matched here and applied through {@link Auth}.
+ * `token` is anchored to a complete or separator-delimited suffix so numeric
+ * token-count fields remain public diagnostics rather than false credentials.
  *
  * @since 0.1.0
  * @category constants
  * @slop
  */
 export const credentialNamePattern =
-  /authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|token|secret|credential|password|passphrase|passwd|signature|x-amz-signature|cookie|set[-_]?cookie|chatgpt[-_]?account[-_]?id/i
+  /authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|auth[-_]?token|api[-_]?token|session[-_]?token|bearer|(?:^|[-_])token$|secret|credential|password|passphrase|passwd|signature|x-amz-signature|cookie|set[-_]?cookie|chatgpt[-_]?account[-_]?id/i
 
 /**
  * Reports whether a field name conventionally carries credentials.
