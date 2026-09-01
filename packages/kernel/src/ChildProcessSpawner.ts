@@ -140,7 +140,7 @@ const snapshotCommand = (command: ChildProcess.Command): ChildProcess.Command =>
     return ChildProcess.make(
       executable,
       Object.freeze([...args]),
-      snapshotOptions(options as ChildProcess.CommandOptions)
+      snapshotOptions(options)
     )
   }
   if (tag === "PipedCommand") {
@@ -246,19 +246,19 @@ export const layer: Layer.Layer<ChildProcessSpawner, never, ChildProcessSpawner 
     const spawner = yield* ChildProcessSpawner
     const grants = yield* GrantStore
     const check = (command: ChildProcess.Command) => {
-        const rendered = CommandLine.render(command)
-        return grants.check(makeCapability("proc:spawn", rendered), {
-          cwd: CommandLine.cwd(command)
-        }).pipe(
-          Effect.mapError((error) =>
-            toPlatformError({
-              module: "ChildProcessSpawner",
-              method: "spawn",
-              pathOrDescriptor: rendered,
-              error
-            })
-          )
+      const rendered = CommandLine.render(command)
+      return grants.check(makeCapability("proc:spawn", rendered), {
+        cwd: CommandLine.cwd(command)
+      }).pipe(
+        Effect.mapError((error) =>
+          toPlatformError({
+            module: "ChildProcessSpawner",
+            method: "spawn",
+            pathOrDescriptor: rendered,
+            error
+          })
         )
+      )
     }
     return makeSpawner(
       Effect.fn("ChildProcessSpawner.spawn")((command: ChildProcess.Command) =>

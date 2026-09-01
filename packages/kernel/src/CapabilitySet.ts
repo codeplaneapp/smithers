@@ -57,10 +57,12 @@ const normalizeGroup = (
   patterns: ReadonlyArray<CapabilityPattern>
 ): ReadonlyArray<CapabilityPattern> => {
   const sorted = patterns.map((pattern) =>
-    Object.freeze(new CapabilityPattern({
-      action: pattern.action,
-      resource: pattern.resource
-    }))
+    Object.freeze(
+      new CapabilityPattern({
+        action: pattern.action,
+        resource: pattern.resource
+      })
+    )
   ).sort(comparePattern)
   const normalized: Array<CapabilityPattern> = []
   for (const pattern of sorted) {

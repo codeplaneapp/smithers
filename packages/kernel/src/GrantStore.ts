@@ -13,8 +13,8 @@ import {
   CapabilityPattern,
   type EffectTier,
   format,
-  maxResourceLength,
   matches,
+  maxResourceLength,
   subsumes,
   tierOf
 } from "@smthrs/capability/Capability"
@@ -211,8 +211,7 @@ const isWellFormed = (value: string): boolean => {
   return true
 }
 
-const invalid = (message: string): GrantStoreError =>
-  new GrantStoreError({ code: "invalid_resolution", message })
+const invalid = (message: string): GrantStoreError => new GrantStoreError({ code: "invalid_resolution", message })
 
 const immutableFields = <A extends object, K extends keyof A>(
   value: A,
@@ -615,23 +614,23 @@ export const make = (
       if (patterns.length === 0) {
         // An empty envelope carries no authority and no durable event.
       } else {
-      const signature = envelopeSignature(envelope.planDigest, scope, patterns)
-      if (!grantedEnvelopes.has(signature)) {
-        yield* persistEvent(
-          new EnvelopeGrant({
-            eventType: "flows.kernel.grant.envelope.v1",
-            runId: runId ?? "",
-            planDigest: envelope.planDigest,
-            patterns,
-            scope
-          })
-        )
-        grantedEnvelopes.add(signature)
-      }
-      const destination = scope === "remembered" ? rememberedRules : envelopeRules
-      for (const pattern of patterns) {
-        destination.push(new Rule({ effect: "allow", pattern }))
-      }
+        const signature = envelopeSignature(envelope.planDigest, scope, patterns)
+        if (!grantedEnvelopes.has(signature)) {
+          yield* persistEvent(
+            new EnvelopeGrant({
+              eventType: "flows.kernel.grant.envelope.v1",
+              runId: runId ?? "",
+              planDigest: envelope.planDigest,
+              patterns,
+              scope
+            })
+          )
+          grantedEnvelopes.add(signature)
+        }
+        const destination = scope === "remembered" ? rememberedRules : envelopeRules
+        for (const pattern of patterns) {
+          destination.push(new Rule({ effect: "allow", pattern }))
+        }
       }
     }
 
@@ -731,7 +730,7 @@ export const make = (
               return yield* allocateRequest(
                 request.capability,
                 tier,
-                request.meta as Record<string, unknown>,
+                request.meta,
                 ceiling
               )
             })
@@ -806,8 +805,7 @@ export const make = (
                 resolution === "run" || resolution === "remembered"
                   ? suppliedPattern ?? exactPattern(entry.capability)
                   : exactPattern(entry.capability)
-              )
-            )
+              ))
 
             switch (resolution) {
               case "once": {
@@ -839,7 +837,10 @@ export const make = (
                 if (!isValidGrantPattern(pattern, entry.capability, entry.tier, workspaceRoot)) {
                   return yield* Effect.fail(invalid("grant pattern exceeds the requested authority"))
                 }
-                if (configuredRules.length + envelopeRules.length + runRules.length + rememberedRules.length >= maximumRules) {
+                if (
+                  configuredRules.length + envelopeRules.length + runRules.length + rememberedRules.length >=
+                    maximumRules
+                ) {
                   return yield* Effect.fail(invalid(`rules exceed ${maximumRules} entries`))
                 }
                 const rule = snapshotRule(new Rule({ effect: "allow", pattern }))
@@ -863,7 +864,10 @@ export const make = (
                 if (!isValidGrantPattern(pattern, entry.capability, entry.tier, workspaceRoot)) {
                   return yield* Effect.fail(invalid("grant pattern exceeds the requested authority"))
                 }
-                if (configuredRules.length + envelopeRules.length + runRules.length + rememberedRules.length >= maximumRules) {
+                if (
+                  configuredRules.length + envelopeRules.length + runRules.length + rememberedRules.length >=
+                    maximumRules
+                ) {
                   return yield* Effect.fail(invalid(`rules exceed ${maximumRules} entries`))
                 }
                 const rule = snapshotRule(new Rule({ effect: "allow", pattern }))
@@ -914,12 +918,13 @@ export const make = (
         Effect.sync(() =>
           Object.freeze(Array.from(
             pending.values(),
-            ({ requestId, capability, tier, meta }): PendingRequest => Object.freeze({
-              requestId,
-              capability: snapshotCapability(capability),
-              tier,
-              meta: metadataSnapshot(meta)
-            })
+            ({ requestId, capability, tier, meta }): PendingRequest =>
+              Object.freeze({
+                requestId,
+                capability: snapshotCapability(capability),
+                tier,
+                meta: metadataSnapshot(meta)
+              })
           ))
         )
       )
@@ -931,42 +936,42 @@ export const make = (
           const prepared = yield* prepareEnvelope(input, planDigest, workspaceRoot)
           if (prepared.patterns.length === 0) return
           yield* mutation.withPermit(
-          Effect.gen(function*() {
-            if (closed) {
-              return yield* Effect.fail(new GrantStoreError({ code: "store_closed" }))
-            }
-            const signature = envelopeSignature(prepared.planDigest, prepared.scope, prepared.patterns)
-            if (grantedEnvelopes.has(signature)) {
-              // The same approval was already activated and persisted —
-              // repeating or reordering its predicates is a no-op, not new
-              // durable evidence.
-              return
-            }
-            if (
-              configuredRules.length + envelopeRules.length + runRules.length + rememberedRules.length +
-                prepared.patterns.length > maximumRules
-            ) {
-              return yield* Effect.fail(invalid(`rules exceed ${maximumRules} entries`))
-            }
-            if (grantedEnvelopes.size >= maximumRules) {
-              return yield* Effect.fail(invalid(`grant envelopes exceed ${maximumRules} entries`))
-            }
-            yield* persistEvent(
-              new EnvelopeGrant({
-                eventType: "flows.kernel.grant.envelope.v1",
-                runId: runId ?? "",
-                planDigest: prepared.planDigest,
-                patterns: prepared.patterns,
-                scope: prepared.scope
-              })
-            )
-            grantedEnvelopes.add(signature)
-            const destination = prepared.scope === "remembered" ? rememberedRules : envelopeRules
-            for (const pattern of prepared.patterns) {
-              destination.push(snapshotRule(new Rule({ effect: "allow", pattern })))
-            }
-            yield* resolveCovered
-          })
+            Effect.gen(function*() {
+              if (closed) {
+                return yield* Effect.fail(new GrantStoreError({ code: "store_closed" }))
+              }
+              const signature = envelopeSignature(prepared.planDigest, prepared.scope, prepared.patterns)
+              if (grantedEnvelopes.has(signature)) {
+                // The same approval was already activated and persisted —
+                // repeating or reordering its predicates is a no-op, not new
+                // durable evidence.
+                return
+              }
+              if (
+                configuredRules.length + envelopeRules.length + runRules.length + rememberedRules.length +
+                    prepared.patterns.length > maximumRules
+              ) {
+                return yield* Effect.fail(invalid(`rules exceed ${maximumRules} entries`))
+              }
+              if (grantedEnvelopes.size >= maximumRules) {
+                return yield* Effect.fail(invalid(`grant envelopes exceed ${maximumRules} entries`))
+              }
+              yield* persistEvent(
+                new EnvelopeGrant({
+                  eventType: "flows.kernel.grant.envelope.v1",
+                  runId: runId ?? "",
+                  planDigest: prepared.planDigest,
+                  patterns: prepared.patterns,
+                  scope: prepared.scope
+                })
+              )
+              grantedEnvelopes.add(signature)
+              const destination = prepared.scope === "remembered" ? rememberedRules : envelopeRules
+              for (const pattern of prepared.patterns) {
+                destination.push(snapshotRule(new Rule({ effect: "allow", pattern })))
+              }
+              yield* resolveCovered
+            })
           )
         })
       )

@@ -99,13 +99,30 @@ describe("GrantStore bounded input", () => {
           [{ runId: "" }, "runId is empty, malformed, or too long"],
           [{ runId: "\ud800" }, "runId is empty, malformed, or too long"],
           [{ runId: "\udc00" }, "runId is empty, malformed, or too long"],
-          [{ planDigest: "x".repeat(GrantStore.maximumIdentityLength + 1) }, "planDigest is empty, malformed, or too long"],
-          [{ rules: Array.from({ length: GrantStore.maximumRules + 1 }, deny) }, `rules exceed ${GrantStore.maximumRules} entries`],
-          [{ rules: [Array.from({ length: 600 }, deny), Array.from({ length: 600 }, deny)] }, `rules exceed ${GrantStore.maximumRules} entries`],
-          [{ runRules: Array.from({ length: GrantStore.maximumRules + 1 }, deny) }, `runRules exceed ${GrantStore.maximumRules} entries`],
-          [{ rules: Array.from({ length: 600 }, deny), runRules: Array.from({ length: 600 }, deny) }, `rules exceed ${GrantStore.maximumRules} entries`],
+          [
+            { planDigest: "x".repeat(GrantStore.maximumIdentityLength + 1) },
+            "planDigest is empty, malformed, or too long"
+          ],
+          [
+            { rules: Array.from({ length: GrantStore.maximumRules + 1 }, deny) },
+            `rules exceed ${GrantStore.maximumRules} entries`
+          ],
+          [
+            { rules: [Array.from({ length: 600 }, deny), Array.from({ length: 600 }, deny)] },
+            `rules exceed ${GrantStore.maximumRules} entries`
+          ],
+          [
+            { runRules: Array.from({ length: GrantStore.maximumRules + 1 }, deny) },
+            `runRules exceed ${GrantStore.maximumRules} entries`
+          ],
+          [
+            { rules: Array.from({ length: 600 }, deny), runRules: Array.from({ length: 600 }, deny) },
+            `rules exceed ${GrantStore.maximumRules} entries`
+          ],
           [{ envelopeSignatures: "invalid" as never }, `envelopeSignatures exceed ${GrantStore.maximumRules} entries`],
-          [{ envelopeSignatures: Array.from({ length: GrantStore.maximumRules + 1 }, (_, index) => `signature-${index}`) }, `envelopeSignatures exceed ${GrantStore.maximumRules} entries`],
+          [{
+            envelopeSignatures: Array.from({ length: GrantStore.maximumRules + 1 }, (_, index) => `signature-${index}`)
+          }, `envelopeSignatures exceed ${GrantStore.maximumRules} entries`],
           [{ envelopeSignatures: [""] }, "envelopeSignatures[0] is malformed or too long"]
         ]
         for (const [options, message] of cases) {
@@ -210,17 +227,21 @@ describe("GrantStore bounded input", () => {
           code: "invalid_resolution",
           message: `patterns exceed ${GrantStore.maximumEnvelopePatterns} entries`
         })
-        expect(yield* Effect.flip(store.grantEnvelope({
-          planDigest: "plan-1",
-          patterns: "invalid" as never
-        }))).toMatchObject({
+        expect(
+          yield* Effect.flip(store.grantEnvelope({
+            planDigest: "plan-1",
+            patterns: "invalid" as never
+          }))
+        ).toMatchObject({
           code: "invalid_resolution",
           message: "patterns must be an array"
         })
-        expect(yield* Effect.flip(store.grantEnvelope({
-          planDigest: "",
-          patterns: [safePattern()]
-        }))).toMatchObject({
+        expect(
+          yield* Effect.flip(store.grantEnvelope({
+            planDigest: "",
+            patterns: [safePattern()]
+          }))
+        ).toMatchObject({
           code: "invalid_resolution",
           message: "planDigest is empty, malformed, or too long"
         })
@@ -244,10 +265,12 @@ describe("GrantStore bounded input", () => {
           planDigest: "plan-1",
           rules: Array.from({ length: GrantStore.maximumRules }, deny)
         })
-        expect(yield* Effect.flip(fullRules.grantEnvelope({
-          planDigest: "plan-1",
-          patterns: [safePattern()]
-        }))).toMatchObject({
+        expect(
+          yield* Effect.flip(fullRules.grantEnvelope({
+            planDigest: "plan-1",
+            patterns: [safePattern()]
+          }))
+        ).toMatchObject({
           code: "invalid_resolution",
           message: `rules exceed ${GrantStore.maximumRules} entries`
         })
@@ -256,10 +279,12 @@ describe("GrantStore bounded input", () => {
           planDigest: "plan-1",
           envelopeSignatures: Array.from({ length: GrantStore.maximumRules }, (_, index) => `signature-${index}`)
         })
-        expect(yield* Effect.flip(fullSignatures.grantEnvelope({
-          planDigest: "plan-1",
-          patterns: [safePattern()]
-        }))).toMatchObject({
+        expect(
+          yield* Effect.flip(fullSignatures.grantEnvelope({
+            planDigest: "plan-1",
+            patterns: [safePattern()]
+          }))
+        ).toMatchObject({
           code: "invalid_resolution",
           message: `grant envelopes exceed ${GrantStore.maximumRules} entries`
         })
@@ -271,10 +296,12 @@ describe("GrantStore bounded input", () => {
       Effect.gen(function*() {
         const store = yield* make()
         for (let index = 0; index < GrantStore.maximumPendingRequests; index += 1) {
-          yield* store.check(new Capability({
-            action: "fs:read",
-            resource: `/workspace/pending-${index}`
-          })).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* store.check(
+            new Capability({
+              action: "fs:read",
+              resource: `/workspace/pending-${index}`
+            })
+          ).pipe(Effect.forkChild({ startImmediately: true }))
         }
         yield* awaitPending(store, GrantStore.maximumPendingRequests)
         const failure = yield* Effect.flip(store.check(other))

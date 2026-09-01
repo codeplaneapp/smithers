@@ -536,12 +536,12 @@ export const layer: Layer.Layer<
         copy: Effect.fn("FileSystem.copy")((from, to, options) => {
           const captured = snapshotOptions(options)
           return (
-          isolatedTwo(
-            ["fs:read", from],
-            ["fs:write", to],
-            "copy",
-            (host) => host.copy(normalize(from), normalize(to), captured)
-          )
+            isolatedTwo(
+              ["fs:read", from],
+              ["fs:write", to],
+              "copy",
+              (host) => host.copy(normalize(from), normalize(to), captured)
+            )
           )
         }),
         copyFile: Effect.fn("FileSystem.copyFile")((from, to) =>
@@ -583,43 +583,47 @@ export const layer: Layer.Layer<
         makeTempDirectory: Effect.fn("FileSystem.makeTempDirectory")((options) => {
           const captured = snapshotOptions(options)
           return (
-          atomic?.isolated === undefined
-            ? Effect.fail(atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempDirectory"))
-            : temp(captured?.directory).pipe(
-              Effect.andThen(atomic.isolated.makeTempDirectory(normalizeTempOptions(captured)))
-            )
+            atomic?.isolated === undefined
+              ? Effect.fail(
+                atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempDirectory")
+              )
+              : temp(captured?.directory).pipe(
+                Effect.andThen(atomic.isolated.makeTempDirectory(normalizeTempOptions(captured)))
+              )
           )
         }),
         makeTempDirectoryScoped: Effect.fn("FileSystem.makeTempDirectoryScoped")((options) => {
           const captured = snapshotOptions(options)
           return (
-          atomic?.isolated === undefined
-            ? Effect.fail(
-              atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempDirectoryScoped")
-            )
-            : temp(captured?.directory).pipe(
-              Effect.andThen(atomic.isolated.makeTempDirectoryScoped(normalizeTempOptions(captured)))
-            )
+            atomic?.isolated === undefined
+              ? Effect.fail(
+                atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempDirectoryScoped")
+              )
+              : temp(captured?.directory).pipe(
+                Effect.andThen(atomic.isolated.makeTempDirectoryScoped(normalizeTempOptions(captured)))
+              )
           )
         }),
         makeTempFile: Effect.fn("FileSystem.makeTempFile")((options) => {
           const captured = snapshotOptions(options)
           return (
-          atomic?.isolated === undefined
-            ? Effect.fail(atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempFile"))
-            : temp(captured?.directory).pipe(
-              Effect.andThen(atomic.isolated.makeTempFile(normalizeTempOptions(captured)))
-            )
+            atomic?.isolated === undefined
+              ? Effect.fail(atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempFile"))
+              : temp(captured?.directory).pipe(
+                Effect.andThen(atomic.isolated.makeTempFile(normalizeTempOptions(captured)))
+              )
           )
         }),
         makeTempFileScoped: Effect.fn("FileSystem.makeTempFileScoped")((options) => {
           const captured = snapshotOptions(options)
           return (
-          atomic?.isolated === undefined
-            ? Effect.fail(atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempFileScoped"))
-            : temp(captured?.directory).pipe(
-              Effect.andThen(atomic.isolated.makeTempFileScoped(normalizeTempOptions(captured)))
-            )
+            atomic?.isolated === undefined
+              ? Effect.fail(
+                atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempFileScoped")
+              )
+              : temp(captured?.directory).pipe(
+                Effect.andThen(atomic.isolated.makeTempFileScoped(normalizeTempOptions(captured)))
+              )
           )
         }),
         open: Effect.fn("FileSystem.open")((value, options) => {
@@ -734,30 +738,30 @@ export const layer: Layer.Layer<
       sink: (value, options) => {
         const captured = snapshotOptions(options)
         return (
-        Sink.unwrap(
-          Effect.fn("FileSystem.sink")(
-            () =>
-              Effect.suspend(() =>
-                atomic?.isolated === undefined
-                  ? Effect.fail(atomicUnavailable("fs:write", value, "sink"))
-                  : write(value).pipe(Effect.map(() => atomic.isolated!.sink(normalize(value), captured)))
-              )
-          )()
-        )
+          Sink.unwrap(
+            Effect.fn("FileSystem.sink")(
+              () =>
+                Effect.suspend(() =>
+                  atomic?.isolated === undefined
+                    ? Effect.fail(atomicUnavailable("fs:write", value, "sink"))
+                    : write(value).pipe(Effect.map(() => atomic.isolated!.sink(normalize(value), captured)))
+                )
+            )()
+          )
         )
       },
       stream: (value, options) => {
         const captured = snapshotOptions(options)
         return (
-        Stream.unwrap(
-          Effect.fn("FileSystem.stream")(() =>
-            Effect.suspend(() =>
-              atomic?.isolated === undefined
-                ? Effect.fail(atomicUnavailable("fs:read", value, "stream"))
-                : read(value).pipe(Effect.map(() => atomic.isolated!.stream(normalize(value), captured)))
-            )
-          )()
-        )
+          Stream.unwrap(
+            Effect.fn("FileSystem.stream")(() =>
+              Effect.suspend(() =>
+                atomic?.isolated === undefined
+                  ? Effect.fail(atomicUnavailable("fs:read", value, "stream"))
+                  : read(value).pipe(Effect.map(() => atomic.isolated!.stream(normalize(value), captured)))
+              )
+            )()
+          )
         )
       },
       writeFileString: Effect.fn("FileSystem.writeFileString")((value, data, options) => {

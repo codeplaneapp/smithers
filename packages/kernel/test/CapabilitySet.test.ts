@@ -107,7 +107,6 @@ describe("CapabilitySet", () => {
     const set = CapabilitySets.fromPatterns([input])
     const safe = new Capability({ action: "net:get", resource: "safe.example" })
     const evil = new Capability({ action: "net:get", resource: "evil.example" })
-
     ;(input as { resource: string }).resource = "**"
     expect(CapabilitySets.allows(set, safe)).toBe(true)
     expect(CapabilitySets.allows(set, evil)).toBe(false)
