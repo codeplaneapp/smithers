@@ -163,7 +163,7 @@ export const makeStubBash = (
     }>
   >
 ): BrowserChildProcessSpawner.JustBashLike => ({
-  run: async (command) => {
+  exec: async (command) => {
     const scripted = responses?.[command]
     if (scripted === undefined) {
       return { stdout: "", stderr: `command not found: ${command}\n`, exitCode: 127 }

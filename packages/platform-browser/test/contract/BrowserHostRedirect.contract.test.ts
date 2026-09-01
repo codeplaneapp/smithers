@@ -17,7 +17,7 @@ import type * as BrowserChildProcessSpawner from "../../src/BrowserChildProcessS
 import * as BrowserHost from "../../src/BrowserHost.ts"
 
 const bash: BrowserChildProcessSpawner.JustBashLike = {
-  run: async () => ({ stdout: "", stderr: "", exitCode: 0 })
+  exec: async () => ({ stdout: "", stderr: "", exitCode: 0 })
 }
 
 const layer = BrowserHost.layer({

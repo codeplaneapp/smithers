@@ -19,7 +19,7 @@ import { captured } from "./captured.ts"
 import type { JustBashLike } from "./JustBashLike.ts"
 
 /**
- * A capability just-bash does not have, reported as a system failure.
+ * A capability the adapter does not provide, reported as a system failure.
  *
  * @private
  */
@@ -73,7 +73,8 @@ export const make = (bash: JustBashLike) =>
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     /**
-     * just-bash cannot abort an in-flight interpreter call, so runs are
+     * The adapter does not use just-bash's abort `signal` option yet, so an
+     * in-flight interpreter call always runs to completion and runs are
      * serialized: a second `spawn` waits rather than mutating the virtual
      * filesystem underneath the first.
      */
@@ -126,7 +127,7 @@ export const make = (bash: JustBashLike) =>
         Effect.uninterruptible(
           Effect.tryPromise({
             try: () =>
-              bash.run(line, {
+              bash.exec(line, {
                 ...(cwd === undefined ? {} : { cwd }),
                 ...(env === undefined ? {} : { env })
               }),

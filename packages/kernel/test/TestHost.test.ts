@@ -268,7 +268,7 @@ describe("TestHost scripted interpreter latency", () => {
     const bash = TestHost.makeStubBash({ slow: { stdout: "late", delayMs: 5 } })
 
     const started = performance.now()
-    const result = await bash.run("slow")
+    const result = await bash.exec("slow")
 
     expect(result).toEqual({ stdout: "late", stderr: "", exitCode: 0 })
     expect(performance.now() - started).toBeGreaterThanOrEqual(4)

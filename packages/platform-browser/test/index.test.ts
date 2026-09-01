@@ -15,7 +15,7 @@ import * as BrowserServices from "../src/BrowserServices.ts"
 import * as Index from "../src/index.ts"
 
 const bash: BrowserChildProcessSpawner.JustBashLike = {
-  run: async (command) => ({ stdout: command, stderr: "", exitCode: 0 })
+  exec: async (commandLine) => ({ stdout: commandLine, stderr: "", exitCode: 0 })
 }
 
 describe("@smthrs/platform-browser barrel", () => {

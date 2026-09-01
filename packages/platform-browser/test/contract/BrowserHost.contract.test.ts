@@ -24,12 +24,12 @@ import { fileURLToPath } from "node:url"
 import type * as BrowserChildProcessSpawner from "../../src/BrowserChildProcessSpawner/index.ts"
 import * as BrowserHost from "../../src/BrowserHost.ts"
 
-type BashResult = Awaited<ReturnType<BrowserChildProcessSpawner.JustBashLike["run"]>>
+type BashResult = Awaited<ReturnType<BrowserChildProcessSpawner.JustBashLike["exec"]>>
 
 const result = (stdout: string): BashResult => ({ stdout, stderr: "", exitCode: 0 })
 
 const bash: BrowserChildProcessSpawner.JustBashLike = {
-  run: (command, options) => {
+  exec: (command, options) => {
     if (command === "host-contract-exec") return Promise.resolve(result("browser-exec"))
     if (command === "host-contract-stream") return Promise.resolve(result("browser-stream"))
     if (command === "host-contract-options") {
@@ -140,7 +140,8 @@ runHostContract(
         env: { HOST_CONTRACT_ENV: "browser" }
       }),
       expectedOptionsStdout: "browser-options",
-      // just-bash runs a command line to completion; it has no stdin to feed.
+      // The adapter does not use just-bash's string stdin option yet, so a
+      // supplied stdin stream is rejected.
       stdin: { expected: "failure", code: "BadArgument" },
       interruptCommand: ChildProcess.make("host-contract-interrupt")
     },

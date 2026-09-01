@@ -32,15 +32,15 @@ interface Stub {
 }
 
 const stub = (
-  run: (command: string) => Promise<{ stdout: string; stderr: string; exitCode: number }>
+  exec: (commandLine: string) => Promise<{ stdout: string; stderr: string; exitCode: number }>
 ): Stub => {
   const calls: Array<Call> = []
   return {
     calls,
     bash: {
-      run: (command, opts) => {
-        calls.push({ command, cwd: opts?.cwd, env: opts?.env })
-        return run(command)
+      exec: (commandLine, options) => {
+        calls.push({ command: commandLine, cwd: options?.cwd, env: options?.env })
+        return exec(commandLine)
       }
     }
   }
@@ -443,8 +443,8 @@ describe("BrowserChildProcessSpawner handle capabilities", () => {
 
 describe("BrowserChildProcessSpawner boundary", () => {
   /**
-   * just-bash cannot abort an in-flight call, so the adapter runs it
-   * uninterruptibly. Both of these pin the same property from the two
+   * The adapter does not use just-bash's abort `signal` option yet, so it runs
+   * each call uninterruptibly. Both of these pin the same property from the two
    * directions a caller can approach it: the interpreter always finishes, and
    * the caller only hears about it afterwards.
    */
