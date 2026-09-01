@@ -285,7 +285,7 @@ const stack = (options: StackOptions) => {
     // everything else in its `Services` union comes from the engine stack.
     Layer.provide(
       Layer.merge(Agent.layer, SeatResolver.layer({ resolve: options.resolve })).pipe(
-        Layer.provideMerge(Safety.layer)
+        Layer.provide(Safety.layer)
       )
     )
   )

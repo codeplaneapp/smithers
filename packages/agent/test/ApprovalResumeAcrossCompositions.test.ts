@@ -183,7 +183,7 @@ const host = (root: string, owner: Ownership.OwnerId, engineHost = "approval-res
   }).pipe(
     Layer.provide(
       Layer.merge(Agent.layer, SeatResolver.layer({ resolve: seat })).pipe(
-        Layer.provideMerge(Safety.layer)
+        Layer.provide(Safety.layer)
       )
     )
   )
