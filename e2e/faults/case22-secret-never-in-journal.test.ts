@@ -12,20 +12,25 @@
  *
  * The journal is where the leak would be permanent: every committed row is
  * replayed to sync subscribers and to time travel, so redaction happens on the
- * write path and the first test reads what the write path left behind. That
- * half passes.
+ * write path and the first test reads what the write path left behind.
  *
- * The operator's terminal is the other place, and the second test is a plain
- * required gate that is RED at rc.0. rc-contract R-12 makes case 22 a required
- * Phase 7 parity test across the journal *and* the logs, so the log half stays
- * in the matrix as a failing test rather than as prose: that is how a required
- * gate enforces its requirement, and a matrix that is green while a live
- * credential reaches the terminal reports a truth the product does not have.
- * It is not marked `.fails`, skipped, or made advisory, all of which would
- * turn the gate green again. The owner is the Phase 5 redaction work
- * (`docs/migration/rc-contract.md` §5.2, journal retention and redaction): a
- * redacting logger is what turns this test green, and `e2e/fault-gaps.md`
- * row 22 carries the shipped-limitation record.
+ * The operator's terminal is the other place, and the second test reads the
+ * child's whole stdout and stderr. rc-contract R-12 makes case 22 a required
+ * Phase 7 parity test across the journal *and* the logs. That half was RED at
+ * rc.0 and stayed in the matrix as a plain failing test rather than as prose,
+ * because a matrix that is green while a live credential reaches the terminal
+ * reports a truth the product does not have. The section 5.2 redaction
+ * deliverable closed it: `@smthrs/journal` `RedactedLogger` puts every log
+ * line through the same rules the journal applies on the write path, and
+ * `packages/cli/src/bin.ts` and `packages/flows/src/NodeRuntime.ts` install
+ * it. The assertion that was failing went green with no change to it, which is
+ * what a plain failing test is for, and `e2e-faults` became a required CI job.
+ * Two assertions were added afterwards, pinning that redaction rewrites the
+ * line rather than swallowing it.
+ *
+ * Both halves are required gates now. Neither may be marked `.fails`, skipped,
+ * or deleted; `scripts/repo-contract/fault-skips.test.mjs` refuses all three
+ * and names this file.
  */
 import * as SqliteClient from "@effect/sql-sqlite-node/SqliteClient"
 import * as Effect from "effect/Effect"
@@ -96,12 +101,13 @@ describe("case22 a secret never reaches the journal", () => {
     expect(committed).toContain("token=[REDACTED]")
   }, 120_000)
 
-  // REQUIRED GATE, CURRENTLY RED. rc-contract R-12 requires case 22 to cover
-  // the logs as well as the journal, and rc.0 ships no redacting logger, so
-  // `Effect.logInfo` writes the credential straight to the child's stderr.
-  // Owner: the Phase 5 redaction deliverable (rc-contract §5.2). Do not mark
-  // this `.fails`, skip it, or delete it to make the matrix green; the
-  // failure is the record that the limitation is still shipped.
+  // REQUIRED GATE. rc-contract R-12 requires case 22 to cover the logs as well
+  // as the journal. This was red until the section 5.2 redaction deliverable
+  // landed `@smthrs/journal` `RedactedLogger`; before it, `Effect.logInfo`
+  // wrote the credential straight to the child's stderr. It reads the real
+  // binary's real output, so it is the only thing that proves the layer is
+  // actually installed under `NodeRuntime.layerHost` rather than merely
+  // exported.
   it("redacts the credential out of the operator's terminal", async () => {
     const filename = join(directory, "terminal.sqlite")
     const child = await runChild(filename, "case22-terminal")
@@ -111,5 +117,9 @@ describe("case22 a secret never reaches the journal", () => {
     // The run really did execute, so the absence below is about redaction and
     // not about a child that never got as far as logging.
     expect(child.output).not.toContain(secret)
+    // And the line survived: redaction rewrites the credential, it does not
+    // swallow the log call, so an operator still sees what the run was doing.
+    expect(child.output).toContain("https://example.test/deploy")
+    expect(child.output).toContain("[REDACTED_API_KEY]")
   }, 120_000)
 })

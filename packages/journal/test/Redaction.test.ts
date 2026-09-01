@@ -446,6 +446,41 @@ describe("Redaction", () => {
     expect(redacted).toContain(`api_key=${Redaction.placeholder}`)
   })
 
+  it("names a binary view that refuses to describe itself", () => {
+    // The description reads two properties off the view, and either can be an
+    // own accessor that throws or a prototype the caller removed. Neither is a
+    // reason to lose the line, so both fall back to the bare marker.
+    const redact = Redaction.make()
+    const throwing = new Uint8Array([1, 2])
+    Object.defineProperty(throwing, "constructor", {
+      get: () => {
+        throw new TypeError("no constructor for you")
+      },
+      configurable: true
+    })
+    expect(redact(throwing)).toEqual({ [Redaction.binaryMarker]: Redaction.binaryMarker })
+    const bare = Object.setPrototypeOf(new Uint8Array([3]), null) as Uint8Array
+    expect(redact(bare)).toEqual({ [Redaction.binaryMarker]: Redaction.binaryMarker })
+    // Restated 2026-09-01: a caller's own `byteLength` decided the walk here, so
+    // this asserted the members were skipped when it threw. That property is
+    // not a bound: a getter that merely LIES walked one property per byte and
+    // nothing failed. The size is read from the value's internal slot now, and
+    // no property a caller writes answers for it, so a throwing own
+    // `byteLength` costs nothing, the true size is named, and the member is
+    // kept and redacted.
+    const sizeless = Object.assign(new Uint8Array([4]), { seat: "token=sk-live-abcdefgh" })
+    Object.defineProperty(sizeless, "byteLength", {
+      get: () => {
+        throw new TypeError("no byteLength for you")
+      },
+      configurable: true
+    })
+    expect(redact(sizeless)).toEqual({
+      [Redaction.binaryMarker]: "Uint8Array 1 bytes",
+      seat: `token=${Redaction.placeholder}`
+    })
+  })
+
   effect("keeps payloads verbatim when redaction is disabled", () =>
     Effect.gen(function*() {
       const journal = yield* Journal

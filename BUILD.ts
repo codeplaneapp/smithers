@@ -84,7 +84,7 @@ export const ci = Smithers.GithubCiGen({
     { name: "documentation parity", verb: Smithers.Verb.Docs, pattern: "//packages/...", job: "test" },
     { name: "browser contract", verb: Smithers.Verb.Test, pattern: "//scripts:browserContract" }
   ],
-  requiredJobs: ["test", "apps-e2e", "rust", "wasm-repro", "bun", "browser", "packages"],
+  requiredJobs: ["test", "apps-e2e", "rust", "wasm-repro", "bun", "browser", "e2e-faults", "packages"],
   jobs: [
     {
       id: "test",
@@ -207,23 +207,25 @@ export const ci = Smithers.GithubCiGen({
       // `e2e` was not a workspace member, so the target failed in 262 ms with
       // `Command "vitest" not found`.
       //
-      // Advisory, and dated. Two known-red gates live in the matrix by design,
-      // both owned elsewhere: `case22 ... redacts the credential out of the
-      // operator's terminal` (rc-contract R-12; rc.0 ships no redacting
-      // logger, and `scripts/repo-contract/fault-skips.test.mjs` refuses every
-      // way of making it green), and the durable-park cases that the Phase 7
-      // smoke gate records. A required job would be red on every commit for a
-      // defect no commit introduced. It becomes required — drop
-      // `continueOnError` and add `e2e-faults` to `requiredJobs` — when the
-      // Phase 5 redaction deliverable lands and the park defect closes.
+      // Required. It was advisory while `case22 ... redacts the credential out
+      // of the operator's terminal` was red by design (rc-contract R-12): rc.0
+      // shipped no redacting logger, so a required job would have been red on
+      // every commit for a defect no commit introduced. The section 5.2
+      // redaction deliverable landed that logger (`@smthrs/journal`
+      // `RedactedLogger`, installed by `packages/cli/src/bin.ts` and
+      // `packages/flows/src/NodeRuntime.ts`), the case is green in both
+      // halves, and the matrix is 67 of 67. The durable-park defect the old
+      // comment also named is a COVERAGE gap, not a red case: no case in this
+      // directory reaches it (`e2e/fault-gaps.md`, the `03, 05, 31` row), so
+      // nothing here fails for it and it cannot make this job red. A gate that
+      // is green is a gate that can hold the line.
       //
       // `jj` is a real requirement here, not a convenience: cases 12 and 21
       // drive a real Jujutsu workspace and are written to throw rather than
       // skip on CI.
       id: "e2e-faults",
-      name: "fault-injection matrix (advisory)",
+      name: "fault-injection matrix",
       runsOn: ubuntu,
-      continueOnError: true,
       timeoutMinutes: 30,
       toolchain: Smithers.CiToolchain.Needs({ runtimes: [node], jj }),
       steps: [{ name: "Fault matrix", verb: Smithers.Verb.Test, pattern: "//e2e:faults" }]
