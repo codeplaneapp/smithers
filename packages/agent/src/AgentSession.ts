@@ -552,16 +552,37 @@ const prompt = (text: string, input: unknown): string => {
  * the structure rather than trusting `JSON.stringify`, which turns an `Error`
  * into `{}` and reports success.
  */
-const isJsonValue = (value: unknown): boolean => {
+const jsonDepthLimit = 200
+
+/**
+ * Whether the codec would take this value as JSON.
+ *
+ * The walk runs inside `Effect.mapError` on the failure channel, so it must
+ * never throw: a self-referencing failure value or one nested past the stack
+ * would turn a clean failure into a defect thrown by the mapper. A cycle and
+ * a depth past {@link jsonDepthLimit} both answer "not JSON", which sends the
+ * value down the rendering path, where `Cause.pretty` prints it safely.
+ */
+const isJsonValue = (value: unknown, ancestors: WeakSet<object> = new WeakSet(), depth = 0): boolean => {
   if (value === null) return true
   const kind = typeof value
   if (kind === "string" || kind === "boolean") return true
   if (kind === "number") return Number.isFinite(value)
   if (kind !== "object") return false
-  if (Array.isArray(value)) return value.every(isJsonValue)
-  const prototype = Object.getPrototypeOf(value)
-  if (prototype !== Object.prototype && prototype !== null) return false
-  return Object.values(value as Record<string, unknown>).every(isJsonValue)
+  if (depth >= jsonDepthLimit) return false
+  const object = value as object
+  if (ancestors.has(object)) return false
+  ancestors.add(object)
+  try {
+    if (Array.isArray(value)) return value.every((item) => isJsonValue(item, ancestors, depth + 1))
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) return false
+    return Object.values(value as Record<string, unknown>).every((member) => isJsonValue(member, ancestors, depth + 1))
+  } finally {
+    // A value repeated in sibling positions is not a cycle, so it leaves the
+    // ancestor set with its own subtree.
+    ancestors.delete(object)
+  }
 }
 
 /**
@@ -583,8 +604,17 @@ const isJsonValue = (value: unknown): boolean => {
  * @category conversions
  * @since 1.0.0
  */
-export const settlementFailure = (error: unknown): unknown =>
-  isJsonValue(error) ? error : Cause.pretty(Cause.fail(error))
+export const settlementFailure = (error: unknown): unknown => {
+  if (isJsonValue(error)) return error
+  try {
+    return Cause.pretty(Cause.fail(error))
+  } catch {
+    // The renderer walks the value too, and a value deep enough to overflow it
+    // must still not throw from the mapper: the settlement is the last thing
+    // standing between a failed run and a row that never reaches terminal.
+    return `A failure of type ${typeof error} that could not be rendered.`
+  }
+}
 
 /**
  * The one durable flow every agent run executes. Its plan-time body is inert;

@@ -19,7 +19,7 @@ import * as ResolveJj from "@smthrs/jj/node/resolveJjBinary"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import type * as Namespace from "@smthrs/memory/Namespace"
 import * as MigrateCommand from "@smthrs/migrate/flow/Command"
-import { Console, Effect, Option, Schema, Stream } from "effect"
+import { Clock, Console, Effect, Option, Schema, Stream } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import * as Agents from "./Agents.ts"
 import * as Bug from "./Bug.ts"
@@ -688,6 +688,7 @@ const ps = Command.make("ps", {
   Effect.gen(function*() {
     yield* guardGlobals
     const control = yield* ControlService.Control
+    const now = yield* Clock.currentTimeMillis
     yield* render(
       labelled(
         yield* control.list({
@@ -696,23 +697,40 @@ const ps = Command.make("ps", {
             ...(Option.isNone(config.flow) ? {} : { flowId: config.flow.value }),
             ...(Option.isNone(config.status) ? {} : { status: config.status.value })
           }
-        })
+        }),
+        now
       )
     )
   })).pipe(Command.withDescription(Verb.find("ps")!.help))
 
 /**
- * Whether a run is durably accepted and no process ever claimed it.
+ * The window a driven launch may sit at `accepted` before it claims the run.
  *
- * `ControlRuntime.launch` writes the run row with owner pid 0 before the
- * executor is consulted, and the whole launch is one journal transaction, so
- * any reader that sees `accepted` with pid 0 is seeing a launch the executor
- * declined. The run is real, durable, and waiting for a host that drives its
- * flow — a module flow's delegates are registered in code by the program that
- * hosts them — and only `smithers cancel` ends it if none arrives.
+ * `accepted` with owner pid 0 is NOT proof on its own that no executor is
+ * coming: an ordinary driven launch commits that row and flips it to
+ * `running` a moment later, and a reader in another process sees the
+ * intermediate state (measured at 175 ms and 191 ms on this repository's own
+ * launch path). Every CLI-written run also carries pid 0, because
+ * `SqlControlRuntime` defaults the owner that way. So the listing waits out
+ * the handoff before it labels anything.
  */
-const unclaimed = (run: ControlSchema.RunSummary): boolean => {
+const executorHandoffWindowMillis = 5_000
+
+/**
+ * Whether a listing should say a run is waiting for an executor.
+ *
+ * This is a rendering heuristic over the listing's own fields, not a durable
+ * verdict: the durable one is the `control.run.pending` event the status card
+ * reads from the run's journal. It answers true for a run that has sat at
+ * `accepted` with owner pid 0, declaring no other wait, for longer than
+ * {@link executorHandoffWindowMillis}. Such a run is real, durable, and
+ * waiting for a host that drives its flow — a module flow's delegates are
+ * registered in code by the program that hosts them — and only
+ * `smithers cancel` ends it if none arrives.
+ */
+const unclaimed = (run: ControlSchema.RunSummary, now: number): boolean => {
   if (run.status !== "accepted" || run.waitingReason !== undefined) return false
+  if (now - run.updatedAt < executorHandoffWindowMillis) return false
   if (run.ownerId === undefined) return true
   try {
     return (JSON.parse(run.ownerId) as { readonly pid?: unknown }).pid === 0
@@ -728,11 +746,11 @@ const unclaimed = (run: ControlSchema.RunSummary): boolean => {
  * holds on an executor, and before the label a listing showed it as an
  * ordinary `accepted` run — indistinguishable from one a live peer owns.
  */
-const labelled = (listed: ControlSchema.ListResponse): ControlSchema.ListResponse =>
+const labelled = (listed: ControlSchema.ListResponse, now: number): ControlSchema.ListResponse =>
   listed._tag === "runs"
     ? {
       ...listed,
-      items: listed.items.map((run) => unclaimed(run) ? { ...run, waitingReason: "executor" } : run)
+      items: listed.items.map((run) => unclaimed(run, now) ? { ...run, waitingReason: "executor" } : run)
     }
     : listed
 
@@ -741,7 +759,7 @@ const statusOf = (runId: Option.Option<string>) =>
     yield* guardGlobals
     const control = yield* ControlService.Control
     const filters = Option.isSome(runId) ? { runId: runId.value } : undefined
-    const listed = labelled(yield* control.list({ _tag: "runs", filters }))
+    const listed = labelled(yield* control.list({ _tag: "runs", filters }), yield* Clock.currentTimeMillis)
     const root = yield* rootCommand
     // `--json` keeps the stable listing shape untouched; a human reader with a
     // run id gets the diagnosis card computed from that run's own events.

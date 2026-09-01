@@ -393,6 +393,12 @@ export const RunSummary = Schema.Struct({
    * What a parked run is holding on: `approval`, `event`, `timer`, `quota`, or
    * a reason a plugin declared. Absent on a run that is not parked, and on a
    * park whose owner released the run without declaring one.
+   *
+   * The CLI's `ps` and `status` listings also render `executor` here for a run
+   * that has sat at `accepted` with no owner process past the launch handoff
+   * window. That value is computed at render time and never stored, so a
+   * reader going through the control RPC, the gateway projection, or a plugin
+   * sees the field absent on the same run.
    */
   waitingReason: Schema.optional(Schema.String),
   /** What has been steered to this run and not yet delivered. */

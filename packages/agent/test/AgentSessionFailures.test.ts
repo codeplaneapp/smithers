@@ -1307,6 +1307,23 @@ describe("the settlement a failure is persisted as", () => {
     expect(typeof AgentSession.settlementFailure([1, new Error("boom")])).toBe("string")
   })
 
+  it("renders a cyclic or very deep value instead of throwing from the mapper", () => {
+    // `settlementFailure` runs inside Effect.mapError on the failure channel:
+    // a walk that throws turns a clean failure into a defect from the mapper.
+    const cyclic: Record<string, unknown> = { flowId: "agents/notes" }
+    cyclic["self"] = cyclic
+    expect(typeof AgentSession.settlementFailure(cyclic)).toBe("string")
+
+    let deep: Record<string, unknown> = {}
+    for (let level = 0; level < 20_000; level++) deep = { deep }
+    expect(typeof AgentSession.settlementFailure(deep)).toBe("string")
+
+    // A value that repeats a child without a cycle is still JSON.
+    const shared = { id: 1 }
+    const repeated = { a: shared, b: shared }
+    expect(AgentSession.settlementFailure(repeated)).toBe(repeated)
+  })
+
   it("passes a JSON value through untouched", () => {
     const json = { flowId: "agents/notes", attempts: 2, ok: false, tags: ["a", "b"], note: null }
 

@@ -583,6 +583,8 @@ describe("owned-run settlement", () => {
       const kind = settlements[index]!
       if (kind === "control.run.pending") {
         expect(Exit.isFailure(exit)).toBe(true)
+        // Restated 2026-08-31: the refusal used to read "the executor did not
+        // take it"; it now names the cause and both ways forward.
         expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : "")).toContain(
           "no executor took it"
         )
