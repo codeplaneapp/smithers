@@ -338,6 +338,80 @@ export const Package = S.Package({ targets: { bad } })
   })
 })
 
+describe("write-set enforcement against a concurrent peer", () => {
+  /**
+   * A script that writes its own file and then stays inside its body until the
+   * peer's file appears, so both bodies are provably in flight at once. The
+   * deadline keeps the test honest when the two are correctly serialized:
+   * the peer never appears, the wait ends, and the run still finishes.
+   */
+  const rendezvous = (own: string, peer: string, contents: string): string =>
+    `import { existsSync, writeFileSync, mkdirSync } from "node:fs"
+import { dirname } from "node:path"
+mkdirSync(dirname(${JSON.stringify(own)}), { recursive: true })
+writeFileSync(${JSON.stringify(own)}, ${JSON.stringify(contents)})
+const deadline = Date.now() + 1500
+while (!existsSync(${JSON.stringify(peer)}) && Date.now() < deadline) {
+  await new Promise((resume) => setTimeout(resume, 10))
+}
+`
+
+  it("does not let one write node revert a concurrent write node's output", async () => {
+    // The guard snapshots the whole repository, so a peer's write is
+    // indistinguishable from this node writing outside its own set. Two write
+    // nodes each reverted the other's file and both failed naming the other's
+    // path.
+    const root = await temporaryWorkspace()
+    await write(root, "WORKSPACE.ts", workspaceModule())
+    await write(root, "alpha.mjs", rendezvous("alpha.txt", "beta.txt", "alpha"))
+    await write(root, "beta.mjs", rendezvous("beta.txt", "alpha.txt", "beta"))
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+const alpha = S.Generate({ script: S.file("//alpha.mjs"), changes: ["alpha.txt"] })
+const beta = S.Generate({ script: S.file("//beta.mjs"), changes: ["beta.txt"] })
+export const Package = S.Package({ targets: { alpha, beta } })
+`
+    )
+    commitAll(root)
+
+    const { exitCode, logs } = await serve(root, ["//...", "--write"])
+    expect(logs).not.toContain("wrote outside its declared write-set")
+    expect(exitCode).toBe(0)
+    expect(await Fs.readFile(NodePath.join(root, "alpha.txt"), "utf8")).toBe("alpha")
+    expect(await Fs.readFile(NodePath.join(root, "beta.txt"), "utf8")).toBe("beta")
+  })
+
+  it("does not let a write node delete a concurrent build's gitignored output directory", async () => {
+    // The ignored-path census is the more destructive half: an out-of-set
+    // gitignored path is removed recursively, so a peer emitting into dist/
+    // lost the whole directory. This is also why the exclusion cannot be
+    // between write nodes alone; the peer here never enters write mode.
+    const root = await temporaryWorkspace()
+    await write(root, "WORKSPACE.ts", workspaceModule())
+    await write(root, "alpha.mjs", rendezvous("alpha.txt", "dist/out.js", "alpha"))
+    await write(root, "build.mjs", rendezvous("dist/out.js", "alpha.txt", "built"))
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+const alpha = S.Generate({ script: S.file("//alpha.mjs"), changes: ["alpha.txt"] })
+const build = S.Shell.Build({ script: S.file("//build.mjs"), outFiles: ["//dist/out.js"] })
+export const Package = S.Package({ targets: { alpha, build } })
+`
+    )
+    await write(root, ".gitignore", "dist/\n")
+    commitAll(root)
+
+    const { exitCode, logs } = await serve(root, ["//...", "--write"])
+    expect(logs).not.toContain("wrote outside its declared write-set")
+    expect(exitCode).toBe(0)
+    expect(await Fs.readFile(NodePath.join(root, "alpha.txt"), "utf8")).toBe("alpha")
+    expect(await Fs.readFile(NodePath.join(root, "dist", "out.js"), "utf8")).toBe("built")
+  })
+})
+
 describe("artifact store", () => {
   const buildFixture = async (): Promise<string> => {
     const root = await temporaryWorkspace()

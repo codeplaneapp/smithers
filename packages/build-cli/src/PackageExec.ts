@@ -5011,6 +5011,64 @@ export const execute = async (
     }
   }
 
+  /**
+   * Exclusion between a write-set-enforced node and every other node.
+   *
+   * {@link enforceWriteSet} measures the WHOLE repository before and after the
+   * body it guards: `git status` over every tracked path plus a census of every
+   * gitignored one. It has no way to tell a write this node made from a write
+   * a peer made at the same moment, so every concurrent peer's output reads as
+   * this node writing outside its declared set. Tracked paths were restored
+   * from this node's stash and gitignored paths went through `revertIgnored`,
+   * a recursive removal, so two write nodes deleted each other's work and a
+   * plain build target lost its whole `dist` tree to a write node beside it.
+   *
+   * The exclusion is against nodes of EVERY mode, not just other write nodes:
+   * the destructive case has a peer that never enters write mode at all. It
+   * cannot instead be a narrower snapshot, because the guard exists to notice
+   * writes outside the declared set, and a snapshot scoped to that set could
+   * no longer see the thing it is looking for. Excluding only the declared
+   * regions of peers in flight would need this same mutual exclusion to
+   * maintain the registry, and would still miss an out-of-set write that
+   * landed inside a peer's region.
+   *
+   * Grants are first come, first served, so a queued write node is never
+   * starved by a stream of arriving readers.
+   */
+  const treeGate = (() => {
+    const queue: Array<{ readonly exclusive: boolean; readonly grant: () => void }> = []
+    let readers = 0
+    let writing = false
+    const pump = (): void => {
+      while (queue.length > 0) {
+        const next = queue[0]!
+        if (next.exclusive) {
+          if (readers > 0 || writing) return
+          queue.shift()
+          writing = true
+          next.grant()
+          return
+        }
+        if (writing) return
+        queue.shift()
+        readers += 1
+        next.grant()
+      }
+    }
+    return {
+      acquire: (exclusive: boolean): Promise<void> =>
+        new Promise((grant) => {
+          queue.push({ exclusive, grant: () => grant() })
+          pump()
+        }),
+      release: (exclusive: boolean): void => {
+        if (exclusive) writing = false
+        else readers -= 1
+        pump()
+      }
+    }
+  })()
+
   /** Settles one node: gate and dependency checks, refusal, then dispatch. */
   const settle = async (node: PackageNode): Promise<Outcome> => {
     // A red gate is a refusal with the gate report attached; a red data or
@@ -5036,7 +5094,19 @@ export const execute = async (
     const node = byLabel.get(label)!
     const started = performance.now()
     if (!node.dependencies.some((dependency) => notGreen.has(dependency))) reporter.targetStarted(label)
-    const outcome = await settle(node)
+    // Write mode is the mode every `enforceWriteSet` call site is reached
+    // through, so it is the exclusive side of the gate. Taking the permit
+    // around the whole node, rather than around the guarded body alone, keeps
+    // the acquisition on one side of the dispatch and out of the eight places
+    // the guard is entered.
+    const exclusive = node.mode === "write"
+    await treeGate.acquire(exclusive)
+    let outcome: Outcome
+    try {
+      outcome = await settle(node)
+    } finally {
+      treeGate.release(exclusive)
+    }
     if (outcome.status === "failed" || outcome.status === "skipped") notGreen.add(label)
     report({
       label,
