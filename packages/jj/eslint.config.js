@@ -2,7 +2,7 @@ import js from "@eslint/js"
 import importPlugin from "eslint-plugin-import"
 import unicorn from "eslint-plugin-unicorn"
 import tseslint from "typescript-eslint"
-import { invariants, swallowedCause, uninstalledSafety } from "../../eslint.invariants.js"
+import { ambientAuthority, invariants, swallowedCause, uninstalledSafety } from "../../eslint.invariants.js"
 import { jsdocConvention } from "../../eslint.jsdoc.js"
 
 export default tseslint.config(
@@ -45,7 +45,5 @@ export default tseslint.config(
     }
   },
   ...jsdocConvention,
-  // `ambientAuthority` is not wired yet: src/node/resolveJjBinary.ts:157 defaults
-  // its `environment` option to `process.env`.
-  ...invariants(uninstalledSafety, swallowedCause)
+  ...invariants(uninstalledSafety, swallowedCause, ambientAuthority)
 )

@@ -2,7 +2,7 @@ import js from "@eslint/js"
 import importPlugin from "eslint-plugin-import"
 import unicorn from "eslint-plugin-unicorn"
 import tseslint from "typescript-eslint"
-import { invariants, swallowedCause } from "../../eslint.invariants.js"
+import { ambientAuthority, invariants, swallowedCause } from "../../eslint.invariants.js"
 import { jsdocConvention } from "../../eslint.jsdoc.js"
 
 export default tseslint.config(
@@ -61,7 +61,5 @@ export default tseslint.config(
   ...jsdocConvention,
   // `uninstalledSafety` is not wired yet: src/flow/Layers.ts:321 composes the
   // request executor with `GrantStore.layerNoop`, so migration HTTP runs unguarded.
-  // `ambientAuthority` is not wired yet: 2 sites in src/flow/bin.ts, which the rule
-  // would exempt as an entry point once the package is otherwise clean.
-  ...invariants(swallowedCause)
+  ...invariants(swallowedCause, ambientAuthority)
 )
