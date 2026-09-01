@@ -136,7 +136,7 @@ An empty suite never passes under any strategy.
 
 `make` declares one call per check, batched into `Node.all` groups of `concurrency` members, then one pure verdict map. Each call is a `Node.all` member named by its check id. `continueOnFail` changes the topology and is captured as well, so a tolerant suite and a fail-fast suite have different step identity.
 
-`continueOnFail` picks the join. A tolerant suite joins each batch with `Quarantine.all` under the `quarantine` policy, so every check carries a recovery arm, a failing check settles as a `Quarantined` marker its siblings ignore, and `passed` reads that marker as a failed check. A fail-fast suite joins under `halt`, the plain `Node.all` that fails on the first failing member and interrupts the rest.
+`continueOnFail` picks the join. A tolerant suite joins each batch with `Quarantine.all` under the `quarantine` policy, so every check settles as an explicit `Succeeded` or `Quarantined` envelope. `rows` unwraps successful rows and classifies quarantined failures. A fail-fast suite joins under `halt`, the plain `Node.all` that fails on the first failing member and interrupts the rest.
 
 `make` throws a `PatternError` when the record is empty, when an id is the empty string, or when `concurrency` is not a positive safe integer.
 
@@ -175,7 +175,7 @@ Every call receives `{ column, item, previous }`. `previous` refers to the same 
 
 `make` throws a `PatternError` when there are no columns, no items, a duplicate item id, a duplicate column name, or a concurrency that is not a positive safe integer.
 
-A column joins its batch with `Quarantine.all` under the `quarantine` policy, the same call `run` makes: one rejected card does not interrupt the cards beside it, and it settles as a `Quarantined` marker naming the item. The declaration does not drop a quarantined card from the later columns, because a plan has no branch: the card travels on with its marker as `previous`, and `run`, which has the value in hand, drops it. A board's declared call count is an upper bound on the calls a pass makes.
+A column joins its batch with `Quarantine.all` under the `quarantine` policy: every card settles as a `Succeeded` or `Quarantined` envelope, so one rejected card does not interrupt the cards beside it. The declaration does not drop a quarantined card from later columns because a plan has no runtime branch: the envelope travels on as `previous`. `run`, which has the value in hand, drops the failed card. A board's declared call count is an upper bound on the calls a pass makes.
 
 ### Execution
 
@@ -268,9 +268,9 @@ A member without its own priority gets `MergeQueue.DefaultPriority`, which is `1
 
 `concurrency` defaults to 1: a merge queue serializes landings unless a caller widens it deliberately. At concurrency 1 the queue is a plain `Node.andThen` chain with no `Node.all` at all, so the declared plan admits exactly one landing at a time. Above 1, members are batched into `Node.all` groups of `concurrency` and the batches are sequenced.
 
-Each call carries `{ id, position, input }`, so a built graph names each member's place in the queue. A member's effective priority reaches the plan as a `Node.priority` annotation, which is what lets the scheduler start the higher-priority ready landing first. Priority stays out of key material, so raising a member's number without changing the resulting order re-uses the same steps rather than re-landing the queue. Under the quarantine policy, a failed declaration settles to the structural wire marker `{ _tag: "Quarantined", member, error }` produced by `Quarantine.all`; the marker's `member` key is intentional and is not the landing-call payload.
+Each call carries `{ id, position, input }`, so a built graph names each member's place in the queue. A member's effective priority reaches the plan as a `Node.priority` annotation, which is what lets the scheduler start the higher-priority ready landing first. Priority stays out of key material, so raising a member's number without changing the resulting order re-uses the same steps rather than re-landing the queue. Under the quarantine policy, a failed declaration settles to MergeQueue's structural wire marker `{ _tag: "Quarantined", member, error }`; the marker's `member` key is intentional and is not the landing-call payload.
 
-`failurePolicy` picks the topology and is captured as well. Under `quarantine` every landing carries a recovery arm settling it as the `Quarantined` marker `Quarantine.all` produces, so a failing member neither breaks the serial chain nor interrupts its batch: the queue `run` lands. Under `halt` the chain has no continuation past a failed member, and a batch join fails on the first failing member and interrupts the rest.
+`failurePolicy` picks the topology and is captured as well. Under `quarantine` every landing carries a recovery arm settling it as MergeQueue's `Quarantined` result, so a failing member neither breaks the serial chain nor interrupts its batch: the queue `run` lands. Under `halt` the chain has no continuation past a failed member, and a batch join fails on the first failing member and interrupts the rest.
 
 `make` throws a `PatternError` when there are no members, when two members share an id, when `concurrency` is not a positive safe integer, or when `priority` is not a safe integer.
 

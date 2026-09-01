@@ -69,7 +69,7 @@ or errors.
 | `Recursion`       | `@smthrs/patterns/Recursion`       | Trellis-style bounded recursive expansion declarations.                                                                                                            | `Envelope`, `RecurseOptions`, `Branch`, `recurse`                                                                                                                                                                                        |
 | `Bounded`         | `@smthrs/patterns/Bounded`         | Bounded fan-out: a fixed set of members run at most `concurrency` at a time, highest priority first.                                                               | `AllOptions`, `RuntimeOptions`, `all`, `run`                                                                                                                                                                                             |
 | `TryCatchFinally` | `@smthrs/patterns/TryCatchFinally` | Scoped error boundary: a protected body, a filtered recovery arm, and a finalizer that runs on every path.                                                         | `MakeOptions`, `RuntimeOptions`, `make`, `run`                                                                                                                                                                                           |
-| `Quarantine`      | `@smthrs/patterns/Quarantine`      | Continue-on-failure fan-out.                                                                                                                                       | `Policy`, `Quarantined`, `AllOptions`, `RuntimeOptions`, `isQuarantined`, `all`, `run`, `settle`                                                                                                                                         |
+| `Quarantine`      | `@smthrs/patterns/Quarantine`      | Continue-on-failure fan-out.                                                                                                                                       | `Policy`, `Quarantined`, `Succeeded`, `Settled`, `AllOptions`, `RuntimeOptions`, `isQuarantined`, `isSucceeded`, `settle`                                                                                                                |
 | `Saga`            | `@smthrs/patterns/Saga`            | Forward steps with compensations that unwind in reverse.                                                                                                           | `OnFailure`, `Step`, `MakeOptions`, `RuntimeStep`, `RuntimeOptions`, `Compensated`, `make`, `run`                                                                                                                                        |
 | `Trellis`         | `@smthrs/patterns/Trellis`         | Model-authored bounded delegation plans.                                                                                                                           | `TrellisErrorCode`, `TrellisError`, `Envelope`, `Agent`, `Plan`, `Leaf`, `leaves`, `validate`, `CompileOptions`, `compile`, `MakeOptions`, `make`, `Authoring`, `Continuation`, `Round`, `RunResult`, `RuntimeOptions`, `execute`, `run` |
 | `DelegationChain` | `@smthrs/patterns/DelegationChain` | The fixed delegation chain: refine, plan, derisk, execute, review, settle.                                                                                         | `DelegationErrorCode`, `DelegationError`, `Budget`, `Bounds`, `MakeOptions`, `Work`, `ReviewRequest`, `DeriskRequest`, `PlanRequest`, `Settlement`, `RuntimeOptions`, `accepted`, `bound`, `make`, `run`                                 |
@@ -103,14 +103,15 @@ members still in flight.
 
 ## `Quarantine`
 
-`Quarantine.all(members, { policy })` wraps each member in a recovery arm that
-succeeds with `{ _tag: "Quarantined", member, error }`, so one failure never
-takes its siblings down. `policy: "halt"` is a plain join that does interrupt
-them. `Quarantine.run(members, { policy, concurrency? })` is the Effect form,
-and `Quarantine.settle(result)` turns a result holding quarantined members into
-a `quarantined` failure for callers that want to halt after the join.
-`isQuarantined` narrows one joined entry. Quarantine isolates typed failures; a
-defect and an interruption still propagate.
+`Quarantine.all(members, { policy: "quarantine" })` settles every member in an
+explicit envelope: `{ _tag: "Succeeded", member, value }` or
+`{ _tag: "Quarantined", member, error }`. Nesting successful values makes the
+protocol unambiguous even when a user value has either complete wire shape.
+`policy: "halt"` is a plain join that preserves raw successful values and does
+interrupt siblings. `Quarantine.run` is the Effect form, and
+`Quarantine.settle` unwraps successes or returns a `quarantined` failure.
+`isSucceeded` and `isQuarantined` narrow joined entries. Typed failures are
+isolated; defects and interruptions still propagate.
 
 ## `Panel`
 
