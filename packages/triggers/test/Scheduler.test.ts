@@ -1,4 +1,6 @@
 import * as Control from "@smthrs/control/Control"
+import { Unavailable } from "@smthrs/control/ControlError"
+import type { RunStatus } from "@smthrs/control/ControlSchema"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -19,6 +21,10 @@ interface RunnerFixture {
   readonly starts: Array<Scheduler.StartInput>
   readonly active: Set<string>
   readonly cancels: Set<string>
+  /** Every cancel, in order, so a double cancel is visible. */
+  readonly cancelled: Array<string>
+  /** Every run id the scheduler asked the runner about. */
+  readonly inspected: Array<string>
   failures: number
 }
 
@@ -26,10 +32,14 @@ const runnerFixture = (failures = 0): RunnerFixture => {
   const starts: Array<Scheduler.StartInput> = []
   const active = new Set<string>()
   const cancels = new Set<string>()
+  const cancelled: Array<string> = []
+  const inspected: Array<string> = []
   const fixture: RunnerFixture = {
     starts,
     active,
     cancels,
+    cancelled,
+    inspected,
     failures,
     service: Scheduler.makeRunner({
       start: (input) =>
@@ -45,10 +55,15 @@ const runnerFixture = (failures = 0): RunnerFixture => {
           active.add(runId)
           return Effect.succeed(runId)
         }),
-      isActive: (runId) => Effect.sync(() => active.has(runId)),
+      isActive: (runId) =>
+        Effect.sync(() => {
+          inspected.push(runId)
+          return active.has(runId)
+        }),
       cancel: (runId) =>
         Effect.sync(() => {
           cancels.add(runId)
+          cancelled.push(runId)
           active.delete(runId)
         })
     })
@@ -373,7 +388,9 @@ describe("Scheduler", () => {
     expect(results).toHaveLength(0)
   })
 
-  it("uses Control planning and leaves approval-required plans parked", async () => {
+  // The scheduler never approves its own plan. It re-offers the same
+  // idempotent run request and takes the run id once somebody else approves.
+  it("retries a parked plan until approval accepts it, never approving it itself", async () => {
     const calls: Array<string> = []
     let runAttempts = 0
     const control = Layer.succeed(
@@ -566,5 +583,358 @@ describe("Scheduler", () => {
     expect(runner.starts[0]?.idempotencyKey).toBe(
       `hourly:${new Date(2 * hour).toISOString()}`
     )
+  })
+
+  it("provides an inert scheduler and an inert runner without doing work", async () => {
+    const noop = Scheduler.makeNoop()
+    expect(await Effect.runPromise(noop.runOnce)).toBeUndefined()
+
+    const runner = Scheduler.makeNoopRunner()
+    expect(await Effect.runPromise(runner.start({ flowId: "flow", input: {}, idempotencyKey: "key" })))
+      .toBe("key")
+    expect(await Effect.runPromise(runner.isActive("key"))).toBe(false)
+    expect(await Effect.runPromise(runner.cancel("key"))).toBeUndefined()
+
+    const overridden = Scheduler.makeNoopRunner({ isActive: () => Effect.succeed(true) })
+    expect(await Effect.runPromise(overridden.isActive("key"))).toBe(true)
+    expect(await Effect.runPromise(overridden.start({ flowId: "flow", input: {}, idempotencyKey: "k2" })))
+      .toBe("k2")
+
+    const fromLayers = await Effect.runPromise(
+      Effect.gen(function*() {
+        const scheduler = yield* Scheduler.Scheduler
+        const injected = yield* Scheduler.Runner
+        yield* scheduler.runOnce
+        return yield* injected.isActive("anything")
+      }).pipe(
+        Effect.provide(Scheduler.layerNoop),
+        Effect.provide(Scheduler.layerNoopRunner())
+      )
+    )
+    expect(fromLayers).toBe(false)
+  })
+
+  // Zero polls a CPU-tight loop and an infinite interval never detects
+  // completion; `Duration.fromInput` accepts both.
+  it("refuses a poll interval that is not finite and positive", async () => {
+    const failures = await Effect.runPromise(
+      Effect.all([
+        Effect.flip(Effect.scoped(Scheduler.make({ runPollInterval: 0 }))),
+        Effect.flip(Effect.scoped(Scheduler.make({ runPollInterval: -1 }))),
+        Effect.flip(Effect.scoped(Scheduler.make({ runPollInterval: Number.POSITIVE_INFINITY }))),
+        Effect.flip(Effect.scoped(Scheduler.make({ runPollInterval: "nonsense" as never })))
+      ]).pipe(
+        Effect.provide(TestTriggers.layer),
+        Effect.provideService(Scheduler.Runner, Scheduler.makeNoopRunner())
+      )
+    )
+    for (const failure of failures) {
+      expect(failure).toMatchObject({ code: "invalid_options", path: "runPollInterval" })
+    }
+    expect(failures[0]?.message).toBe("runPollInterval must be a finite positive duration")
+    expect(failures[3]?.message).toBe("runPollInterval must be a valid Effect duration")
+
+    const pollInterval = await Effect.runPromise(
+      Effect.flip(
+        Effect.scoped(Layer.build(Scheduler.layer({ pollInterval: 0 }))).pipe(
+          Effect.provide(TestTriggers.layer),
+          Effect.provide(Scheduler.layerNoopRunner())
+        )
+      )
+    )
+    expect(pollInterval).toMatchObject({ code: "invalid_options", path: "pollInterval" })
+  })
+})
+
+interface ControlFixture {
+  readonly layer: Layer.Layer<Control.Control>
+  readonly calls: Array<string>
+  readonly listRequests: Array<unknown>
+}
+
+const controlFixture = (
+  overrides: Partial<Parameters<typeof Control.make>[0]> = {}
+): ControlFixture => {
+  const calls: Array<string> = []
+  const listRequests: Array<unknown> = []
+  return {
+    calls,
+    listRequests,
+    layer: Layer.succeed(
+      Control.Control,
+      Control.make({
+        plan: (input) =>
+          Effect.sync(() => {
+            calls.push("plan")
+            return {
+              planId: "plan-1",
+              flowId: input.flowId,
+              digest: "digest",
+              inputSummary: "input",
+              envelope: { capabilities: [], flows: [], budget: {} },
+              deployClass: false,
+              nodes: [],
+              approval: {
+                target: {
+                  _tag: "Plan" as const,
+                  planId: "plan-1",
+                  digest: "digest",
+                  envelope: { capabilities: [], flows: [], budget: {} }
+                },
+                scope: "run" as const,
+                idempotencyKey: "approval"
+              }
+            }
+          }),
+        run: () =>
+          Effect.sync(() => {
+            calls.push("run")
+            return { _tag: "Accepted" as const, receiptId: "started", runId: "run-1" }
+          }),
+        approve: () => Effect.die("unused"),
+        deny: () => Effect.die("unused"),
+        steer: () => Effect.die("unused"),
+        signal: () => Effect.die("unused"),
+        cancel: () =>
+          Effect.sync(() => {
+            calls.push("cancel")
+            return { _tag: "Accepted" as const, receiptId: "cancelled" }
+          }),
+        resume: () => Effect.die("unused"),
+        list: (request) =>
+          Effect.sync(() => {
+            calls.push("list")
+            listRequests.push(request)
+            return { _tag: "runs" as const, items: [] }
+          }),
+        watch: () => Stream.empty,
+        ...overrides
+      })
+    )
+  }
+}
+
+const summary = (status: RunStatus) => ({
+  runId: "run-1",
+  flowId: "flow",
+  status,
+  startedAt: 0,
+  updatedAt: 0
+})
+
+const withRunner = <A, E>(
+  effect: Effect.Effect<A, E, Scheduler.Runner>,
+  fixture: ControlFixture
+) =>
+  Effect.runPromise(
+    Effect.scoped(effect).pipe(
+      Effect.provide(TestClock.layer()),
+      Effect.provide(Scheduler.layerControlRunner.pipe(Layer.provide(fixture.layer)))
+    )
+  )
+
+describe("Scheduler.layerControlRunner", () => {
+  // Liveness is the complement of the settled set. `accepted` is the status
+  // every run holds between its claim and its first executed step, and reading
+  // liveness as a list of live statuses is what dropped it: the monitor exited
+  // on its first poll and recorded a run that had not started as completed.
+  it("treats every unsettled status as live, accepted included", async () => {
+    for (
+      const [status, live] of [
+        ["accepted", true],
+        ["running", true],
+        ["parked", true],
+        ["waiting-approval", true],
+        ["cancelled", false],
+        ["completed", false],
+        ["failed", false]
+      ] as const
+    ) {
+      const fixture = controlFixture({
+        list: () => Effect.succeed({ _tag: "runs" as const, items: [summary(status)] as never })
+      })
+      const actual = await withRunner(
+        Effect.flatMap(Scheduler.Runner, (runner) => runner.isActive("run-1")),
+        fixture
+      )
+      expect([status, actual]).toEqual([status, live])
+    }
+  })
+
+  it("asks Control for the one run it cares about rather than listing every run", async () => {
+    const fixture = controlFixture()
+    await withRunner(Effect.flatMap(Scheduler.Runner, (runner) => runner.isActive("run-7")), fixture)
+    expect(fixture.listRequests).toEqual([{ _tag: "runs", filters: { runId: "run-7" }, limit: 1 }])
+  })
+
+  it("reports an unknown run and a mismatched page as not active", async () => {
+    const missing = controlFixture()
+    expect(
+      await withRunner(Effect.flatMap(Scheduler.Runner, (runner) => runner.isActive("run-1")), missing)
+    ).toBe(false)
+
+    const other = controlFixture({
+      list: () => Effect.succeed({ _tag: "runs" as const, items: [{ ...summary("running"), runId: "run-2" }] as never })
+    })
+    expect(
+      await withRunner(Effect.flatMap(Scheduler.Runner, (runner) => runner.isActive("run-1")), other)
+    ).toBe(false)
+
+    const flows = controlFixture({
+      list: () => Effect.succeed({ _tag: "flows" as const, items: [] })
+    })
+    expect(
+      await withRunner(Effect.flatMap(Scheduler.Runner, (runner) => runner.isActive("run-1")), flows)
+    ).toBe(false)
+  })
+
+  it("cancels through Control under a derived idempotency key", async () => {
+    const fixture = controlFixture()
+    await withRunner(Effect.flatMap(Scheduler.Runner, (runner) => runner.cancel("run-1")), fixture)
+    expect(fixture.calls).toEqual(["cancel"])
+  })
+
+  // Control failures are the runner's, not the store's. They used to arrive as
+  // `store`, which is the one code a caller reads as "persistence is broken".
+  it("reports every Control failure as a runner failure", async () => {
+    const planning = controlFixture({ plan: () => Effect.die("boom") })
+    const listing = controlFixture({ list: () => Effect.fail(new Error("list down") as never) })
+    const cancelling = controlFixture({ cancel: () => Effect.fail(new Error("cancel down") as never) })
+
+    const planFailure = await withRunner(
+      Effect.flip(
+        Effect.flatMap(Scheduler.Runner, (runner) =>
+          Effect.catchCause(
+            runner.start({ flowId: "flow", input: {}, idempotencyKey: "key" }),
+            () => Effect.fail(new TriggerError({ code: "runner", message: "planning died" }))
+          ))
+      ),
+      planning
+    )
+    expect(planFailure.code).toBe("runner")
+
+    const listFailure = await withRunner(
+      Effect.flip(Effect.flatMap(Scheduler.Runner, (runner) => runner.isActive("run-1"))),
+      listing
+    )
+    expect(listFailure).toMatchObject({ code: "runner" })
+    expect(listFailure.message).toBe("Control could not inspect run run-1")
+
+    const cancelFailure = await withRunner(
+      Effect.flip(Effect.flatMap(Scheduler.Runner, (runner) => runner.cancel("run-1"))),
+      cancelling
+    )
+    expect(cancelFailure).toMatchObject({ code: "runner" })
+    expect(cancelFailure.message).toBe("Control could not cancel run run-1")
+  })
+
+  it("wraps a Control launch failure as a runner failure", async () => {
+    const planFailed = controlFixture({
+      plan: () => Effect.fail(new Unavailable({ feature: "plan", ticket: "control" }))
+    })
+    const planFailure = await withRunner(
+      Effect.flip(
+        Effect.flatMap(Scheduler.Runner, (runner) => runner.start({ flowId: "flow", input: {}, idempotencyKey: "key" }))
+      ),
+      planFailed
+    )
+    expect(planFailure).toMatchObject({ code: "runner" })
+    expect(planFailure.message).toBe("Control could not launch the scheduled run")
+
+    const runFailed = controlFixture({
+      run: () => Effect.fail(new Unavailable({ feature: "run", ticket: "control" }))
+    })
+    const runFailure = await withRunner(
+      Effect.flip(
+        Effect.flatMap(Scheduler.Runner, (runner) => runner.start({ flowId: "flow", input: {}, idempotencyKey: "key" }))
+      ),
+      runFailed
+    )
+    expect(runFailure).toMatchObject({ code: "runner" })
+    expect(runFailure.message).toBe("Control could not launch the scheduled run")
+  })
+
+  it("reads a run id out of every receipt that carries one", async () => {
+    for (
+      const [receipt, expected] of [
+        [{ _tag: "Accepted", receiptId: "r", runId: "run-1" }, "run-1"],
+        [{ _tag: "AlreadyApplied", receiptId: "r", runId: "run-2" }, "run-2"],
+        [{ _tag: "Terminal", receiptId: "r", runId: "run-3", status: "completed" }, "run-3"]
+      ] as const
+    ) {
+      const fixture = controlFixture({ run: () => Effect.succeed(receipt as never) })
+      const runId = await withRunner(
+        Effect.flatMap(
+          Scheduler.Runner,
+          (runner) => runner.start({ flowId: "flow", input: {}, idempotencyKey: "key" })
+        ),
+        fixture
+      )
+      expect(runId).toBe(expected)
+    }
+  })
+
+  it("refuses a receipt with no run id and a rejected run", async () => {
+    const anonymous = controlFixture({
+      run: () => Effect.succeed({ _tag: "Accepted" as const, receiptId: "r" })
+    })
+    const anonymousFailure = await withRunner(
+      Effect.flip(
+        Effect.flatMap(Scheduler.Runner, (runner) => runner.start({ flowId: "flow", input: {}, idempotencyKey: "key" }))
+      ),
+      anonymous
+    )
+    expect(anonymousFailure).toMatchObject({ code: "runner" })
+    expect(anonymousFailure.message).toBe("Control Accepted receipt did not include a run id")
+
+    const conflicting = controlFixture({
+      run: () => Effect.succeed({ _tag: "Conflict" as const, receiptId: "r", reason: "digest", message: "stale plan" })
+    })
+    const conflictFailure = await withRunner(
+      Effect.flip(
+        Effect.flatMap(Scheduler.Runner, (runner) => runner.start({ flowId: "flow", input: {}, idempotencyKey: "key" }))
+      ),
+      conflicting
+    )
+    expect(conflictFailure.message).toBe("Control rejected the scheduled run: stale plan")
+  })
+
+  // A parked plan used to be re-offered once a second for the life of the
+  // scope while the launch reservation behind it quietly expired. The retry is
+  // bounded and this adapter never approves the plan itself.
+  it("gives up on a plan nobody approves without ever approving it", async () => {
+    let attempts = 0
+    const fixture = controlFixture({
+      run: () =>
+        Effect.sync(() => {
+          attempts++
+          return {
+            _tag: "Parked" as const,
+            receiptId: "parked",
+            planId: "plan-1",
+            status: "waiting-approval" as const
+          }
+        }),
+      approve: () => Effect.die("the scheduler must never approve a plan")
+    })
+    const failure = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function*() {
+          const runner = yield* Scheduler.Runner
+          const fiber = yield* Effect.forkScoped(
+            Effect.flip(runner.start({ flowId: "flow", input: {}, idempotencyKey: "key" }))
+          )
+          yield* TestClock.adjust("10 minutes")
+          return yield* Fiber.join(fiber)
+        })
+      ).pipe(
+        Effect.provide(TestClock.layer()),
+        Effect.provide(Scheduler.layerControlRunner.pipe(Layer.provide(fixture.layer)))
+      )
+    )
+    expect(attempts).toBe(Scheduler.parkedAttempts)
+    expect(failure).toMatchObject({ code: "runner" })
+    expect(failure.message).toContain("still parked awaiting approval")
+    expect(fixture.calls).not.toContain("approve")
   })
 })

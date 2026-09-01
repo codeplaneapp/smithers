@@ -58,15 +58,22 @@ export interface ClaimFire extends Fire {
  * The outcome of claiming an occurrence: either another worker holds it, or
  * this caller does and must take `action`.
  *
+ * A claim that hands the caller work to launch always names the reservation it
+ * wrote against the trigger row, so the caller has an id to release. A claim
+ * that only records a decision has no reservation and names none: the two
+ * shapes are separate so a caller cannot read a reservation id that was never
+ * written.
+ *
  * @category models
  * @since 0.1.0
  */
 export type Claim =
   | { readonly claimed: false }
+  | { readonly claimed: true; readonly action: Extract<Action, "skip" | "buffer"> }
   | {
     readonly claimed: true
-    readonly action: Action
-    readonly reservationId?: string | undefined
+    readonly action: Extract<Action, "fire" | "supersede">
+    readonly reservationId: string
     readonly activeRunId?: string | undefined
   }
 /**

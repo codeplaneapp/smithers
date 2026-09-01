@@ -254,9 +254,18 @@ export interface Service {
  */
 export class Scheduler extends Context.Service<Scheduler, Service>()("flows/triggers/Scheduler") {}
 
+/**
+ * What this process knows about the run one trigger currently owns: which
+ * occurrence claimed it, the reservation or run id the store holds for it, and
+ * the monitor fiber when this process is the one watching it.
+ *
+ * `runId` is always known. A claim that hands out work names the reservation it
+ * wrote, and a recovered entry is read back from the store, so an entry with
+ * nothing to release cannot be constructed.
+ */
 interface Active {
   readonly occurrence: number
-  readonly runId?: string | undefined
+  readonly runId: string
   readonly fiber?: Fiber.Fiber<void> | undefined
 }
 
@@ -324,14 +333,28 @@ export const make = (
         return new Map(current).set(triggerId, occurrence)
       })
 
-    const removeActive = (triggerId: string, occurrence: number): Effect.Effect<void> =>
+    // Every write to an entry is fenced on the occurrence that claimed it, so
+    // one guard states the rule once: a launch that has been superseded, or
+    // whose run already settled, no longer owns the entry and must not write to
+    // it. Spelling the fence out at each site is how the three copies of it
+    // drifted apart.
+    const updateActive = (
+      triggerId: string,
+      occurrence: number,
+      change: (entry: Active) => Active | undefined
+    ): Effect.Effect<void> =>
       Ref.update(active, (current) => {
         const entry = current.get(triggerId)
         if (entry?.occurrence !== occurrence) return current
         const next = new Map(current)
-        next.delete(triggerId)
+        const updated = change(entry)
+        if (updated === undefined) next.delete(triggerId)
+        else next.set(triggerId, updated)
         return next
       })
+
+    const removeActive = (triggerId: string, occurrence: number): Effect.Effect<void> =>
+      updateActive(triggerId, occurrence, () => undefined)
 
     // A reservation is not a run: the Runner has never heard of it, and asking
     // answers "not active" for a launch that is still in flight. Its lease is
@@ -345,15 +368,13 @@ export const make = (
       Effect.gen(function*() {
         const local = (yield* Ref.get(active)).get(trigger.id)
         if (local !== undefined) {
-          if (local.fiber !== undefined && local.fiber.pollUnsafe() === undefined) {
-            return local
-          }
-          if (
-            local.fiber === undefined &&
-            local.runId !== undefined &&
-            (yield* stillRunning(local.runId))
-          ) return local
-          if (local.runId !== undefined) yield* store.clearActive(trigger.id, local.runId)
+          // A monitored entry is removed by the monitor's own finalizer when
+          // its lifecycle ends, however it ends, so a fiber still in the map is
+          // a live monitor and there is nothing left to ask. An entry without
+          // one was recovered from the store, and only the runtime can say
+          // whether that run is still going.
+          if (local.fiber !== undefined || (yield* stillRunning(local.runId))) return local
+          yield* store.clearActive(trigger.id, local.runId)
           yield* removeActive(trigger.id, local.occurrence)
         }
         const stored = yield* store.activeRun(trigger.id)
@@ -396,11 +417,8 @@ export const make = (
             input: trigger.input,
             idempotencyKey: idempotencyKey(trigger.id, occurrence)
           })
-          yield* Ref.update(active, (current) => {
-            const entry = current.get(trigger.id)
-            if (entry?.occurrence !== occurrence) return current
-            return new Map(current).set(trigger.id, { ...entry, runId })
-          })
+          const started = runId
+          yield* updateActive(trigger.id, occurrence, (entry) => ({ ...entry, runId: started }))
           yield* store.recordResult({
             triggerId: trigger.id,
             occurrence,
@@ -430,29 +448,32 @@ export const make = (
           parentScope,
           { startImmediately: true }
         )
-        yield* Ref.update(active, (current) => {
-          const entry = current.get(trigger.id)
-          if (entry?.occurrence === occurrence) {
-            return new Map(current).set(trigger.id, { ...entry, fiber })
-          }
-          if (fiber.pollUnsafe() !== undefined) return current
-          return new Map(current).set(trigger.id, { occurrence, fiber })
-        })
+        // The monitor is recorded against the entry this occurrence claimed.
+        // `startImmediately` means a run that settled before its first poll has
+        // already removed that entry by the time this runs, and a fiber with
+        // nothing left to interrupt is not worth putting back.
+        yield* updateActive(trigger.id, occurrence, (entry) => ({ ...entry, fiber }))
       })
 
+    // Only a claim that named the run it is superseding gets here, so the run
+    // id is known. The monitor, on the other hand, may not exist: the run can
+    // belong to a scheduler this one only knows through the store. Cancelling
+    // is a deliberate act and happens here alone; a reservation has no run for
+    // the runtime to cancel, and an occurrence this process never saw has none
+    // of its own to record the supersession against.
     const cancelActive = (
       trigger: Registered,
-      prior: Active
+      prior: Active & { readonly runId: string }
     ): Effect.Effect<void, TriggerError> =>
       Effect.gen(function*() {
         if (prior.fiber !== undefined) yield* Fiber.interrupt(prior.fiber)
-        if (prior.runId !== undefined && !isReservation(prior.runId)) yield* runner.cancel(prior.runId)
+        if (!isReservation(prior.runId)) yield* runner.cancel(prior.runId)
         if (Number.isFinite(prior.occurrence)) {
           yield* store.recordResult({
             triggerId: trigger.id,
             occurrence: prior.occurrence,
             outcome: "superseded",
-            ...(prior.runId === undefined ? {} : { runId: prior.runId })
+            runId: prior.runId
           })
         }
         yield* removeActive(trigger.id, prior.occurrence)
@@ -490,16 +511,17 @@ export const make = (
               outcome: "buffered"
             })
             return
-          case "supersede":
-            if (claim.activeRunId !== undefined) {
+          case "supersede": {
+            const superseded = claim.activeRunId
+            if (superseded !== undefined) {
               const local = (yield* Ref.get(active)).get(trigger.id)
               yield* cancelActive(
                 trigger,
-                local?.runId === claim.activeRunId
-                  ? local
+                local !== undefined && local.runId === superseded
+                  ? { ...local, runId: superseded }
                   : {
                     occurrence: trigger.lastFiredAt ?? Number.NEGATIVE_INFINITY,
-                    runId: claim.activeRunId
+                    runId: superseded
                   }
               )
             }
@@ -513,6 +535,7 @@ export const make = (
             )
             yield* launch(trigger, occurrence)
             return
+          }
         }
       })
 

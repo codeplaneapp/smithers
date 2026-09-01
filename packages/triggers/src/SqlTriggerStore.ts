@@ -15,7 +15,14 @@ import * as Migrations from "./migrations/index.ts"
 import * as Overlap from "./Overlap.ts"
 import * as Schedule from "./Schedule.ts"
 import { TriggerError } from "./TriggerError.ts"
-import { isReservation, type Registered, reservationId, type Service, TriggerStore } from "./TriggerStore.ts"
+import {
+  type Claim,
+  isReservation,
+  type Registered,
+  reservationId,
+  type Service,
+  TriggerStore
+} from "./TriggerStore.ts"
 
 /**
  * Time after which an uncommitted launch reservation may be reclaimed.
@@ -90,7 +97,15 @@ export const make: Effect.Effect<
 > = Effect.gen(function*() {
   const sql = yield* Effect.service(SqlClient.SqlClient)
   const writer = yield* DurableWriter
-  yield* Migrations.run.pipe(Effect.mapError((cause) => storeError("could not run trigger migrations", cause)))
+  // The migrator raises a schema it cannot apply as a defect, not as a typed
+  // failure, so mapping the error channel alone left a defect escaping a
+  // constructor whose signature promises `TriggerError`. Defects are caught
+  // separately from failures, which leaves interruption alone.
+  const migrationFailed = (cause: unknown) => storeError("could not run trigger migrations", cause)
+  yield* Migrations.run.pipe(
+    Effect.mapError(migrationFailed),
+    Effect.catchDefect((defect) => Effect.fail(migrationFailed(defect)))
+  )
   // A failure the store itself typed already says which refusal it is, so it
   // travels out unchanged. Re-wrapping it turned `unknown trigger x` into the
   // generic write failure and erased the one code a caller could branch on.
@@ -212,17 +227,20 @@ export const make: Effect.Effect<
           // A reservation with no claim timestamp predates the lease column.
           // Nothing writes that shape now, so treating it as expired is the
           // only way such a row is ever reclaimed.
-          const reservationExpired = isReservation(activeRunId) &&
-            (row.active_claimed_at_ms === null || row.active_claimed_at_ms <= claimedAt - reservationLeaseMs)
+          const expiredReservation = activeRunId !== undefined && isReservation(activeRunId) &&
+              (row.active_claimed_at_ms === null || row.active_claimed_at_ms <= claimedAt - reservationLeaseMs)
+            ? activeRunId
+            : undefined
+          const reservationExpired = expiredReservation !== undefined
           if (existingOutcome !== undefined) {
             const resumableBuffer = fire.resumeBuffered === true && existingOutcome === "buffered"
             const resumableReservation = existingOutcome === null &&
               (activeRunId === undefined || (activeRunId === reservation && reservationExpired))
             if (!resumableBuffer && !resumableReservation) return { claimed: false as const }
           }
-          if (reservationExpired) {
+          if (expiredReservation !== undefined) {
             yield* sql`UPDATE flows_triggers SET active_run_id = NULL, active_claimed_at_ms = NULL
-            WHERE trigger_id = ${fire.triggerId} AND active_run_id = ${activeRunId ?? null}`
+            WHERE trigger_id = ${fire.triggerId} AND active_run_id = ${expiredReservation}`
             activeRunId = undefined
           }
           const state: Overlap.State = {
@@ -237,7 +255,7 @@ export const make: Effect.Effect<
             yield* sql`UPDATE flows_triggers
             SET last_fired_at_ms = MAX(COALESCE(last_fired_at_ms, ${fire.occurrence}), ${fire.occurrence})
             WHERE trigger_id = ${fire.triggerId}`
-            return { claimed: true as const, action }
+            return { claimed: true as const, action } satisfies Claim
           }
           if (action === "buffer") {
             yield* sql`UPDATE flows_trigger_fires SET outcome = 'buffered'
@@ -246,7 +264,7 @@ export const make: Effect.Effect<
             SET last_fired_at_ms = MAX(COALESCE(last_fired_at_ms, ${fire.occurrence}), ${fire.occurrence}),
               pending_at_ms = ${Overlap.pendingAfter(state)}
             WHERE trigger_id = ${fire.triggerId}`
-            return { claimed: true as const, action }
+            return { claimed: true as const, action } satisfies Claim
           }
           yield* sql`UPDATE flows_triggers SET active_run_id = ${reservation}, active_claimed_at_ms = ${claimedAt}
           WHERE trigger_id = ${fire.triggerId}`

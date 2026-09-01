@@ -28,13 +28,13 @@ const unknown = (triggerId: string) =>
 /**
  * The refusals a claim owes before it applies any policy, in the order the SQL
  * store applies them. Returning the same codes is what makes this layer a
- * usable stand-in rather than a second, kinder set of rules.
+ * usable stand-in rather than a second, kinder set of rules. A missing row is
+ * refused by the caller, which is where the narrowing belongs.
  */
 const refuseClaim = (
-  trigger: Registered | undefined,
+  trigger: Registered,
   fire: ClaimFire
 ): TriggerError | undefined => {
-  if (trigger === undefined) return unknown(fire.triggerId)
   if (trigger.revision !== fire.expectedRevision) {
     return new TriggerError({
       code: "revision_mismatch",
@@ -94,10 +94,9 @@ export const layer: Layer.Layer<TriggerStore> = Layer.effect(TriggerStore)(Effec
     claimFire: (fire) =>
       Ref.modify(state, (current): readonly [Effect.Effect<Claim, TriggerError>, State] => {
         const trigger = current.triggers.get(fire.triggerId)
+        if (trigger === undefined) return [Effect.fail(unknown(fire.triggerId)), current]
         const refusal = refuseClaim(trigger, fire)
-        if (trigger === undefined || refusal !== undefined) {
-          return [Effect.fail(refusal ?? unknown(fire.triggerId)), current]
-        }
+        if (refusal !== undefined) return [Effect.fail(refusal), current]
         const fireKey = key(fire.triggerId, fire.occurrence)
         if (current.fires.has(fireKey) && fire.resumeBuffered !== true) {
           return [Effect.succeed({ claimed: false as const }), current]
@@ -115,15 +114,19 @@ export const layer: Layer.Layer<TriggerStore> = Layer.effect(TriggerStore)(Effec
         const triggers = new Map(current.triggers).set(fire.triggerId, advanced(trigger, fire.occurrence))
         if (action === "buffer") pending.set(fire.triggerId, Overlap.pendingAfter(overlapState))
         const reservation = reservationId(fire.triggerId, fire.occurrence)
-        if (action === "fire" || action === "supersede") active.set(fire.triggerId, reservation)
+        const next = { ...current, fires, active, pending, triggers }
+        if (action === "skip" || action === "buffer") {
+          return [Effect.succeed<Claim>({ claimed: true, action }), next]
+        }
+        active.set(fire.triggerId, reservation)
         return [
-          Effect.succeed({
-            claimed: true as const,
+          Effect.succeed<Claim>({
+            claimed: true,
             action,
-            ...(action === "fire" || action === "supersede" ? { reservationId: reservation } : {}),
+            reservationId: reservation,
             ...(activeRunId === undefined ? {} : { activeRunId })
           }),
-          { ...current, fires, active, pending, triggers }
+          next
         ]
       }).pipe(Effect.flatten),
     recordResult: (result) =>

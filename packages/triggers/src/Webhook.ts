@@ -10,7 +10,7 @@ import { InvalidInput, Unauthorized } from "@smthrs/control/ControlError"
 import type { Receipt, RunSummary } from "@smthrs/control/ControlSchema"
 import type { CredentialRef } from "@smthrs/control/Credential"
 import * as ControlWebhook from "@smthrs/control/WebhookChannel"
-import { Effect, Redacted, Schema } from "effect"
+import { Effect, type Redacted, Schema } from "effect"
 import type * as Channel from "./Channel.ts"
 import { TriggerError } from "./TriggerError.ts"
 
@@ -30,8 +30,8 @@ import { TriggerError } from "./TriggerError.ts"
  */
 export const constantTimeEqual = (expected: Uint8Array, supplied: Uint8Array): boolean => {
   let difference = expected.length ^ supplied.length
-  for (let index = 0; index < expected.length; index++) {
-    difference |= (expected[index] ?? 0) ^ (supplied[index] ?? 0)
+  for (const [index, byte] of expected.entries()) {
+    difference |= byte ^ (supplied[index] ?? 0)
   }
   return difference === 0
 }
@@ -166,12 +166,12 @@ const toControlChannel = <Payload, Outbound>(
   })
   return {
     ...channel,
-    // `ControlChannels.Channel<A>` is invariant in `A`, so a concretely typed
-    // channel is not assignable to the `Channel<unknown>` the registry stores.
-    // Only that variance is cast: the record keeps the declared schema, because
-    // overwriting it with `Schema.Unknown` left the registry advertising a
-    // schema its own `decode` closure disagreed with.
-    schema: channel.schema as unknown as Schema.Schema<unknown>,
+    // The record keeps the declared schema. Overwriting it with
+    // `Schema.Unknown` left the registry advertising a schema that its own
+    // `decode` closure, which closed over the real one, disagreed with. Only
+    // `map` needs a cast: `ControlChannels.Channel<unknown>` hands it an
+    // `unknown` payload that `decode` has already produced as a `Payload`.
+    schema: channel.schema,
     map: (payload) => channel.map(payload as Payload)
   }
 }

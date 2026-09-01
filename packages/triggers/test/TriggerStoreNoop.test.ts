@@ -1,7 +1,17 @@
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import * as TriggerStore from "../src/TriggerStore.ts"
+
+const manifest = JSON.parse(
+  readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")
+) as {
+  readonly private: boolean
+  readonly exports: Record<string, unknown>
+  readonly publishConfig: { readonly exports: Record<string, unknown> }
+}
 
 const declaration = {
   id: "daily",
@@ -103,5 +113,26 @@ describe("TriggerStore reservation ids", () => {
     expect(TriggerStore.isReservation(TriggerStore.reservationId("hourly", 0))).toBe(true)
     expect(TriggerStore.isReservation("run-1")).toBe(false)
     expect(TriggerStore.isReservation(undefined)).toBe(false)
+  })
+})
+
+describe("package boundaries", () => {
+  // A database built from 0001 alone has no `active_claimed_at_ms`, which every
+  // claim and active-run query reads, so the individual migration files are not
+  // a supported entry point. `SqlTriggerStore.layer` applies both in order.
+  it("keeps every migration subpath out of the export map", () => {
+    const exports = manifest.exports as Record<string, unknown>
+    const published = manifest.publishConfig.exports as Record<string, unknown>
+    for (const map of [exports, published]) {
+      expect(map["./migrations/*"]).toBeNull()
+      expect(map["./*/index"]).toBeNull()
+      expect(map["./internal/*"]).toBeNull()
+      expect(map["./package.json"]).toBe("./package.json")
+    }
+    expect(exports["./*"]).toBe("./src/*.ts")
+  })
+
+  it("stays private at 1.0.0-rc.0", () => {
+    expect(manifest.private).toBe(true)
   })
 })

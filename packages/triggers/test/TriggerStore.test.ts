@@ -1,8 +1,8 @@
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { TestClock } from "effect/testing"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { describe, expect, it } from "vitest"
 import * as SqlTriggerStore from "../src/SqlTriggerStore.ts"
 import * as TriggerStore from "../src/TriggerStore.ts"
@@ -100,10 +100,18 @@ describe("TriggerStore", () => {
       Effect.gen(function*() {
         const store = yield* TriggerStore.TriggerStore
         const registered = yield* store.register(trigger)
-        const first = yield* store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: registered.revision })
+        const first = yield* store.claimFire({
+          triggerId: trigger.id,
+          occurrence: 1,
+          expectedRevision: registered.revision
+        })
         yield* TestClock.adjust(SqlTriggerStore.reservationLeaseMs + 1)
         const noLongerActive = yield* store.activeRun(trigger.id)
-        const retried = yield* store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: registered.revision })
+        const retried = yield* store.claimFire({
+          triggerId: trigger.id,
+          occurrence: 1,
+          expectedRevision: registered.revision
+        })
         return { first, noLongerActive, retried }
       }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()))
     )
@@ -432,5 +440,119 @@ describe("TriggerStore", () => {
     )
     expect(reclaimed.active).toMatchObject({ _tag: "None" })
     expect(reclaimed.claim).toMatchObject({ claimed: true, action: "fire" })
+  })
+
+  it("reclaims an expired reservation inside the claim itself", async () => {
+    const reclaimed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const registered = yield* store.register(trigger)
+        const first = yield* store.claimFire({
+          triggerId: trigger.id,
+          occurrence: 1,
+          expectedRevision: registered.revision
+        })
+        yield* TestClock.adjust(SqlTriggerStore.reservationLeaseMs + 1)
+        const second = yield* store.claimFire({
+          triggerId: trigger.id,
+          occurrence: 2,
+          expectedRevision: registered.revision
+        })
+        return { first, second, active: yield* store.activeRun(trigger.id) }
+      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()))
+    )
+    expect(reclaimed.first).toMatchObject({ claimed: true, action: "fire" })
+    expect(reclaimed.second).toMatchObject({ claimed: true, action: "fire" })
+    expect(reclaimed.active).toMatchObject({
+      _tag: "Some",
+      value: "trigger-reservation:daily:2"
+    })
+  })
+
+  it("holds a reservation that is still inside its lease", async () => {
+    const held = await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const registered = yield* store.register(trigger)
+        yield* store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: registered.revision })
+        yield* TestClock.adjust(SqlTriggerStore.reservationLeaseMs - 1)
+        return {
+          claim: yield* store.claimFire({
+            triggerId: trigger.id,
+            occurrence: 2,
+            expectedRevision: registered.revision
+          }),
+          active: yield* store.activeRun(trigger.id)
+        }
+      }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()))
+    )
+    expect(held.claim).toMatchObject({ claimed: true, action: "skip" })
+    expect(held.active).toMatchObject({ _tag: "Some", value: "trigger-reservation:daily:1" })
+  })
+
+  it("records a launch that reports no run id by releasing the reservation", async () => {
+    const active = await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const registered = yield* store.register(trigger)
+        yield* store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: registered.revision })
+        yield* store.recordResult({ triggerId: trigger.id, occurrence: 1, outcome: "launched" })
+        return yield* store.activeRun(trigger.id)
+      }).pipe(Effect.provide(layer))
+    )
+    expect(active).toMatchObject({ _tag: "None" })
+  })
+
+  // A read or a write the database itself refuses is a store failure, not a
+  // typed refusal the store computed.
+  it("reports a failing statement as a store read or write failure", async () => {
+    const failures = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        const store = yield* TriggerStore.TriggerStore
+        yield* store.register(trigger)
+        yield* sql`DROP TABLE flows_trigger_fires`
+        yield* sql`DROP TABLE flows_triggers`
+        return {
+          read: yield* Effect.flip(store.list()),
+          write: yield* Effect.flip(
+            store.recordResult({ triggerId: trigger.id, occurrence: 1, outcome: "completed" })
+          )
+        }
+      }).pipe(Effect.provide(layerWithSql))
+    )
+    expect(failures.read).toMatchObject({ code: "store", message: "trigger store read failed" })
+    expect(failures.write).toMatchObject({ code: "store", message: "trigger store write failed" })
+  })
+
+  // The store owns its schema. A database whose `flows_triggers` already
+  // carries the column migration 0002 adds cannot be migrated, and that has to
+  // arrive as a store failure rather than as a defect out of the migrator.
+  it("reports a migration it cannot apply as a store failure", async () => {
+    const error = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        yield* sql`CREATE TABLE flows_triggers (trigger_id TEXT PRIMARY KEY, active_claimed_at_ms INTEGER)`
+        return yield* Effect.flip(SqlTriggerStore.make)
+      }).pipe(Effect.provide(TestDatabase.layer))
+    )
+    expect(error).toMatchObject({ code: "store", message: "could not run trigger migrations" })
+  })
+
+  // The row is written and then read back. A concurrent delete between the two
+  // leaves nothing to answer with, and the caller is told so rather than
+  // handed a half-registered declaration.
+  it("refuses to report a registration whose row disappeared under it", async () => {
+    const error = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        const store = yield* TriggerStore.TriggerStore
+        yield* sql`CREATE TRIGGER vanish AFTER INSERT ON flows_triggers
+          BEGIN DELETE FROM flows_triggers WHERE trigger_id = NEW.trigger_id; END`
+        return yield* Effect.flip(store.register(trigger))
+      }).pipe(Effect.provide(layerWithSql))
+    )
+    expect(error).toMatchObject({ code: "store", message: "registered trigger disappeared" })
+    expect(error.cause).toBeUndefined()
   })
 })

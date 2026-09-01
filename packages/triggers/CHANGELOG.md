@@ -42,6 +42,13 @@
 - `Schedule.maxCatchUp` defaults to `0` and is bounded above by
   `Schedule.maxCatchUpLimit`. Every catch-up policy answers to it, `one`
   included.
+- `TriggerStore.Claim` is a discriminated union: a claim that hands the caller
+  work to launch carries a required `reservationId`, and a claim that only
+  records a decision carries none.
+- The package documentation is colocated. `packages/triggers/docs/` and the
+  JSDoc in `src/` own the contract, and `packages/triggers/scripts/docs.mjs`
+  generates `README.md` from them. `//packages/triggers:docsPages` drift-checks
+  it in CI.
 
 ### Fixed
 
@@ -61,6 +68,11 @@
 - A parked plan is re-offered a bounded number of times rather than once a
   second for the life of the scope, and a scheduler poll interval must be finite
   and positive.
+- A schema the migrator cannot apply arrives as a typed `store` failure instead
+  of a defect that escapes a constructor whose signature promises
+  `TriggerError`.
+- Coverage thresholds are 100 on all four metrics. The ratchet that stood at
+  68/67/81/80 is what let every defect above ship untested.
 
 ### Removed
 

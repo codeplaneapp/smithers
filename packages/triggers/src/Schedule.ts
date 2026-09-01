@@ -8,7 +8,7 @@
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Cron from "./Cron.ts"
-import { fromSchemaError, TriggerError } from "./TriggerError.ts"
+import { fromSchemaError, type TriggerError } from "./TriggerError.ts"
 
 /**
  * Schedule overlap policies.
