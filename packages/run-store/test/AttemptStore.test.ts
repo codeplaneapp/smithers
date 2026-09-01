@@ -771,5 +771,15 @@ describe("AttemptStore", () => {
         "persistence_failed: AttemptStore.get: attempt persistence failed",
         "persistence_failed: AttemptStore.get: attempt persistence failed"
       ])
+      expect(failures.map((failure) => failure.cause)).toEqual([
+        { category: "unknown" },
+        { category: "constraint", reason: "ConstraintError" },
+        { category: "constraint", reason: "UniqueViolation" },
+        { category: "constraint", reason: "constraint" },
+        { category: "persistence_failed", reason: "unknown" },
+        { category: "persistence_failed", reason: "unknown" },
+        { category: "persistence_failed", reason: "unknown" },
+        { category: "persistence_failed", reason: "unknown" }
+      ])
     }))
 })

@@ -714,14 +714,22 @@ const mapPersistenceError = (method: AttemptStoreMethod) => (cause: unknown): At
   if (Schema.is(AttemptStoreError)(cause)) {
     return cause
   }
-  const constraint = Schema.is(DatabaseError)(cause)
-    ? cause.code === "constraint"
-    : SqlError.isSqlError(cause) &&
-      (cause.reason instanceof SqlError.ConstraintError || cause.reason instanceof SqlError.UniqueViolation)
-  return error(
+  const sqlError = SqlError.isSqlError(cause)
+  const databaseError = Schema.is(DatabaseError)(cause)
+  const constraint = sqlError
+    ? cause.reason instanceof SqlError.ConstraintError || cause.reason instanceof SqlError.UniqueViolation
+    : databaseError && cause.code === "constraint"
+  const code = constraint ? "constraint" : "persistence_failed"
+  // Causes reach logs and telemetry. Driver failures may retain bound attempt
+  // payloads, so publish only a stable, payload-free descriptor.
+  return attemptStoreError(
     method,
-    constraint ? "constraint" : "persistence_failed",
-    "attempt persistence failed"
+    code,
+    "attempt persistence failed",
+    {
+      category: code,
+      reason: sqlError ? cause.reason._tag : databaseError ? cause.code : "unknown"
+    }
   )
 }
 
