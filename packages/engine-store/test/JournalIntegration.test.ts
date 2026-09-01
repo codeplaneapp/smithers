@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { FlowEngine } from "@smthrs/engine"
 import { Journal } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
 import { type Ownership, RunStore } from "@smthrs/run-store"
@@ -63,7 +64,7 @@ describe("engine-store journal integration", () => {
       ])
       // Lineage is the frame address, and it is on every engine record.
       expect(entries.entries.map((entry) => (entry.meta as { lineageId?: string }).lineageId)).toEqual(
-        entries.entries.map(() => "journal-run/root")
+        entries.entries.map(() => FlowEngine.Lineage.root("journal-run"))
       )
     }))
 

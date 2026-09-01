@@ -24,6 +24,7 @@
  * exact retry the journal collapses into a `Duplicate`.
  */
 import { describe, expect, it } from "@effect/vitest"
+import { FlowEngine } from "@smthrs/engine"
 import { Journal } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
 import { AttemptStore, type Ownership, RunStore } from "@smthrs/run-store"
@@ -375,7 +376,7 @@ describe("adoption re-emissions are producer-idempotent (issue #91)", () => {
             JournalRecords.attemptStarted(
               {
                 runId: "adoption-dedupe",
-                lineageId: "adoption-dedupe/root",
+                lineageId: FlowEngine.Lineage.root("adoption-dedupe"),
                 sourceId: `adoption-test:attempt:${digest}:1:started`,
                 sourceSeq: 0
               },
@@ -387,7 +388,7 @@ describe("adoption re-emissions are producer-idempotent (issue #91)", () => {
             JournalRecords.snapshotIdentified(
               {
                 runId: "adoption-dedupe",
-                lineageId: "adoption-dedupe/root",
+                lineageId: FlowEngine.Lineage.root("adoption-dedupe"),
                 sourceId: `adoption-test:attempt:${digest}:1:snapshot`,
                 sourceSeq: 0
               },
