@@ -7,7 +7,8 @@
  * row `packages/ui`, disposition `keep`).
  *
  * Its presence here is what this file is for. The root `packageDefaults`
- * synthesizes `StandardPackage` — a tsc-to-`dist/esm` library build, a vitest
+ * synthesizes `StandardPackage` — a dual `dist/esm` and `dist/cjs` library
+ * build, a vitest
  * suite at 100% coverage, eslint, and dprint — for every `packages/*`
  * directory that ships no `BUILD.ts` of its own. This package satisfies none of
  * that: it builds with tsup, types against `bun-types`, and tests with
