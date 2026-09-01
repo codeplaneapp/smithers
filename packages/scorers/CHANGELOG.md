@@ -1,5 +1,9 @@
 # Changelog
 
+`@smthrs/scorers` is workspace-private and versioned independently of the
+published `1.0.0-rc.0` packages. `publishConfig` is staged for a later publish
+and is inert while `private` is set.
+
 ## [Unreleased]
 
 ### Added
@@ -7,3 +11,68 @@
 - Added flow-native scorers, ground-truth and deterministic sampling bindings,
   durable repeated and inconclusive observations, and scoped queue/batch
   runners.
+- Added `Runner.jobIdentity`, a length-prefixed constructor for the durable
+  idempotency key, so two different tuples cannot produce one identity.
+- Added `ScoreStore.Observation` as a runtime schema plus `ScoreStore.validate`,
+  and the documented bounds `maxReasonBytes`, `maxMetadataBytes`,
+  `maxIdentityBytes`, and `maxObservations`.
+- Added a page bound to `ScoreStore.observations` (`limit`, `before`), an
+  `inconclusive` count to `Aggregate`, and an optional `code` to an
+  inconclusive observation, persisted in a new `failure_code` column by
+  migration `0003_score_failure_codes`.
+- Added colocated documentation under `docs/`.
+
+### Changed
+
+- **Sampling decisions move.** `Sampling.decide` now hashes UTF-8 bytes rather
+  than UTF-16 code units and builds its material from length-prefixed
+  components. The old hash collapsed every astral code point in a
+  1024-code-point block onto one value and gave `("a:b", "c", "d")` and
+  `("a", "b:c", "d")` the same decision. Every ratio decision taken before this
+  change differs from the one taken after it; golden vectors in
+  `test/Sampling.test.ts` freeze the new hash.
+- `Sampling` now rejects a ratio outside the open interval `(0, 1)` and an
+  empty seed at decode time rather than deep inside a run, and
+  `Scorer.Result.score` carries the inclusive `[0, 1]` bound so the declared
+  flow output and `Scorer.validate` enforce one contract.
+- `Scorer.MakeOptions` no longer accepts `body`; `score` is the only
+  implementation.
+- `Scorer.make` throws a `ScorerError` with code `invalid_declaration` instead
+  of a bare `TypeError` or a raw `SchemaError`, names which of `id` and
+  `version` was blank, and refuses a configuration carrying a member canonical
+  JSON would drop, which would otherwise give two different scorers one durable
+  key.
+- `Aggregate.mean` and `Aggregate.min` are `undefined` when no score succeeded.
+- `SqlScoreStore` encodes `meta` through canonical JSON before the transaction
+  opens rather than with a bare `JSON.stringify` inside it, reads its
+  affected-row count with `DurableWriter.affectedRows`, and classifies write
+  failures: a constraint violation now has its own `constraint` code and every
+  other database failure names its code in the message.
+- `RunnerLive` logs a warning when the score store rejects an observation
+  instead of discarding the failure silently, truncates a scorer's reason to
+  the durable bound, and copies a submitted job's scalar fields so a later
+  mutation cannot change what is recorded.
+- `Runner.inconclusive` carries a `code`, coerces the cause safely, and
+  truncates the reason to `maxReasonBytes` on a code-point boundary.
+- Raised the coverage thresholds from 65/76/87/85 to 100 in every category
+  except `branches`, which stays at 99 only while
+  `packages/flows/test/vitestCoverageIsolation.test.ts` lists `scorers` in its
+  `coverageFloorDeferred` set.
+
+### Fixed
+
+- `recordOnce` no longer loses an observation forever under
+  `SqlClient.SafeIntegers`: the bigint affected-row count was read as "already
+  claimed", so the claim committed without the observation and every retry
+  returned `false`.
+- `recordOnce` rejects a blank or oversized job identity instead of letting one
+  empty identity silently drop every observation after the first.
+- The store no longer persists an inconclusive observation with no reason, a
+  score outside `[0, 1]`, or a non-integral `at`. A single such row used to make
+  every later `observations()` call for that target fail, and the read path now
+  names the offending row.
+- `record` and `recordOnce` no longer wrap their own errors twice, so the
+  underlying failure reaches the caller instead of an identical copy of the
+  outer sentence.
+- Removed six `@see docs/specs/Concepts/Scoring.md` pointers at a path that
+  does not exist.

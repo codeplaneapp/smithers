@@ -1,7 +1,7 @@
 /**
  * Non-blocking and blocking scorer runner contract.
  *
- * @see docs/specs/Concepts/Scoring.md
+ * Package documentation: `packages/scorers/docs/api.md`.
  *
  * @since 0.1.0
  */
@@ -9,12 +9,20 @@ import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Text from "./internal/text.ts"
 import type { Result as ScorerResult } from "./Scorer.ts"
 import { ScorerError } from "./ScorerError.ts"
-import type { Observation, ObservationBase } from "./ScoreStore.ts"
+import { maxReasonBytes, type Observation, type ObservationBase } from "./ScoreStore.ts"
 
 /**
  * One scorer execution request.
+ *
+ * A job is retained by reference until a worker takes it, so every field must
+ * be stable from the moment it is submitted. `identity` is the durable
+ * idempotency key: build it with {@link jobIdentity} rather than by joining
+ * strings, so two different tuples cannot produce one identity. It must also be
+ * stable across a restart, or the retry after a crash records a second
+ * observation for work that already happened.
  *
  * @category models
  * @since 0.1.0
@@ -87,25 +95,64 @@ export const makeNoop = (): Service =>
 export const layerNoop: Layer.Layer<Runner> = Layer.succeed(Runner)(makeNoop())
 
 /**
+ * Builds a {@link Job.identity} from its components.
+ *
+ * Each component is length-prefixed, so no choice of separator inside a
+ * component can make two different tuples collide. Joining components with a
+ * delimiter cannot promise that: the only consumer of this package built its
+ * identity by `NUL`-joining five unconstrained strings.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const jobIdentity = (parts: ReadonlyArray<string>): string =>
+  `v1${parts.map((part) => `:${part.length}:${part}`).join("")}`
+
+interface Failure {
+  readonly code: ScorerError["code"]
+  readonly text: string
+}
+
+const failureOf = (cause: unknown): Failure => {
+  try {
+    const squashed = Cause.isCause(cause) ? Cause.squash(cause) : cause
+    return {
+      code: squashed instanceof ScorerError ? squashed.code : "inconclusive",
+      text: String(squashed)
+    }
+  } catch {
+    return { code: "inconclusive", text: "<uncoercible cause>" }
+  }
+}
+
+/**
  * Converts a scorer failure into a typed inconclusive observation.
  *
- * The reason names the cause. It is the only field that reaches a report, so a
- * fixed sentence made a scorer that threw a `TypeError`, which is a bug to fix,
- * indistinguishable from an unreachable judge, which is an outage to wait out.
+ * The reason names the cause. It is the only prose field that reaches a
+ * report, so a fixed sentence made a scorer that threw a `TypeError`, which is
+ * a bug to fix, indistinguishable from an unreachable judge, which is an outage
+ * to wait out. Three bounds keep naming it safe:
+ *
+ * - `code` carries the classification, so the distinction survives without
+ *   parsing prose.
+ * - Coercion is guarded. A cause whose `toString` or `Symbol.toPrimitive`
+ *   throws used to raise synchronously inside the runner's `catchCause`
+ *   handler and escape as a defect, killing the batch this function exists to
+ *   keep alive.
+ * - The reason is truncated to `maxReasonBytes`, because the squashed cause is
+ *   an arbitrary host-formatted string that can carry a whole response body.
  *
  * @category converting
  * @since 0.1.0
  */
 export const inconclusive = (job: Job, cause: unknown): Observation => {
-  const failure = new ScorerError({
-    code: "inconclusive",
-    message: "Scorer execution was inconclusive",
-    cause
-  })
+  const failure = failureOf(cause)
   return {
-    ...job.observation,
+    targetStepKey: job.observation.targetStepKey,
+    scorerKey: job.observation.scorerKey,
     kind: "inconclusive",
-    reason: `${failure.message}: ${String(Cause.isCause(cause) ? Cause.squash(cause) : cause)}`,
+    code: failure.code,
+    reason: Text.truncate(`Scorer execution was inconclusive: ${failure.text}`, maxReasonBytes),
     at: job.at
   }
 }

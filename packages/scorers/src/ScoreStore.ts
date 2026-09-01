@@ -1,14 +1,53 @@
 /**
  * Durable score observation service.
  *
- * @see docs/specs/Concepts/Scoring.md
+ * Package documentation: `packages/scorers/docs/api.md`.
  *
  * @since 0.1.0
  */
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import type { ScorerError } from "./ScorerError.ts"
+import * as Schema from "effect/Schema"
+import { ScorerError, ScorerErrorCode } from "./ScorerError.ts"
+
+/**
+ * Maximum stored size of an observation `reason`, in UTF-8 bytes.
+ *
+ * A judge that fails with a model response body or a stack-laden host error
+ * would otherwise write the whole payload, secrets included, into an unbounded
+ * `TEXT` column. Producers inside this package truncate to this bound;
+ * `record` and `recordOnce` reject anything longer so a direct caller is told
+ * rather than silently trimmed.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export const maxReasonBytes = 1_024
+
+/**
+ * Maximum stored size of an observation `meta`, encoded, in UTF-8 bytes.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export const maxMetadataBytes = 65_536
+
+/**
+ * Maximum size of a `recordOnce` job identity, in UTF-8 bytes.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export const maxIdentityBytes = 512
+
+/**
+ * Largest page {@link Service.observations} will return, and its default.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export const maxObservations = 1_000
 
 /**
  * Fields shared by successful and inconclusive observations.
@@ -38,12 +77,17 @@ export interface ScoreObservation extends ObservationBase {
 /**
  * A scorer failure retained without failing its target.
  *
+ * `code` classifies the failure so a scorer bug and an unreachable judge are
+ * distinguishable without parsing `reason` prose. It is optional because rows
+ * written before the column existed carry none.
+ *
  * @category models
  * @since 0.1.0
  */
 export interface InconclusiveObservation extends ObservationBase {
   readonly kind: "inconclusive"
   readonly reason: string
+  readonly code?: ScorerErrorCode | undefined
 }
 
 /**
@@ -54,16 +98,70 @@ export interface InconclusiveObservation extends ObservationBase {
  */
 export type Observation = ScoreObservation | InconclusiveObservation
 
+const Timestamp = Schema.Finite.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+const Key = Schema.String.check(Schema.isMinLength(1))
+
 /**
- * Aggregate over successful scores only.
+ * Runtime contract every persisted observation is decoded against.
+ *
+ * The store used to persist whatever it was handed. An inconclusive
+ * observation with no reason then wrote a `NULL` the read path rejects, so one
+ * accepted write made every later `observations()` call for that target fail,
+ * and a non-integral `at` round-tripped through SQLite's REAL affinity.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const Observation = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("score"),
+    targetStepKey: Key,
+    scorerKey: Key,
+    score: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+    reason: Schema.optionalKey(Schema.String),
+    meta: Schema.optionalKey(Schema.Unknown),
+    at: Timestamp
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("inconclusive"),
+    targetStepKey: Key,
+    scorerKey: Key,
+    reason: Schema.String.check(Schema.isMinLength(1)),
+    code: Schema.optionalKey(ScorerErrorCode),
+    at: Timestamp
+  })
+])
+
+/**
+ * Aggregate over one target's observations.
+ *
+ * `count`, `mean`, and `min` describe successful scores only, and
+ * `inconclusive` is the denominator that was missing: a target scored a hundred
+ * times where ninety-nine attempts were inconclusive and one returned `1.0`
+ * used to report exactly what a target scored once, cleanly, reports.
+ * `mean` and `min` are `undefined` when `count` is zero.
  *
  * @category models
  * @since 0.1.0
  */
 export interface Aggregate {
   readonly count: number
-  readonly mean: number
-  readonly min: number
+  readonly mean: number | undefined
+  readonly min: number | undefined
+  readonly inconclusive: number
+}
+
+/**
+ * Page bounds for {@link Service.observations}.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface Page {
+  /** At most {@link maxObservations} rows; defaults to that bound. */
+  readonly limit?: number | undefined
+  /** Only observations recorded strictly before this `at` timestamp. */
+  readonly before?: number | undefined
 }
 
 /**
@@ -80,7 +178,8 @@ export interface Service {
   ) => Effect.Effect<boolean, ScorerError>
   readonly observations: (
     targetStepKey: string,
-    scorerKey?: string | undefined
+    scorerKey?: string | undefined,
+    page?: Page | undefined
   ) => Effect.Effect<ReadonlyArray<Observation>, ScorerError>
   readonly aggregate: (
     targetStepKey: string,
@@ -125,3 +224,25 @@ export const makeNoop = (): Service =>
  * @since 0.1.0
  */
 export const layerNoop: Layer.Layer<ScoreStore> = Layer.succeed(ScoreStore)(makeNoop())
+
+const decodeObservation = Schema.decodeUnknownEffect(Observation)
+
+/**
+ * Decodes an observation against {@link Observation} before it is persisted.
+ *
+ * The failure carries the schema issue, which names the offending path, and
+ * never the observation itself.
+ *
+ * @category validation
+ * @since 1.0.0
+ */
+export const validate = (observation: Observation): Effect.Effect<Observation, ScorerError> =>
+  decodeObservation(observation).pipe(
+    Effect.mapError((cause) =>
+      new ScorerError({
+        code: "invalid_observation",
+        message: `A ${observation.kind} observation does not match the durable observation contract`,
+        cause
+      })
+    )
+  )

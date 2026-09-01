@@ -7,10 +7,12 @@ import * as Layer from "effect/Layer"
 import * as Migrator from "effect/unstable/sql/Migrator"
 import scores from "./0001_scores.ts"
 import jobs from "./0002_score_jobs.ts"
+import failureCodes from "./0003_score_failure_codes.ts"
 
 const migrations = {
   "0001_scores": scores,
-  "0002_score_jobs": jobs
+  "0002_score_jobs": jobs,
+  "0003_score_failure_codes": failureCodes
 }
 
 /**

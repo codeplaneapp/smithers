@@ -1,7 +1,7 @@
 /**
  * Scorer bindings attached to target flow declarations.
  *
- * @see docs/specs/Concepts/Scoring.md
+ * Package documentation: `packages/scorers/docs/api.md`.
  *
  * @since 0.1.0
  */
@@ -13,6 +13,15 @@ import type { Scorer } from "./Scorer.ts"
  * A scorer, optional ground truth, and deterministic sampling policy attached
  * to a target flow. The target value is retained unchanged, so binding never
  * changes its step key.
+ *
+ * `context` and `groundTruth` are also retained *by reference*, and scoring
+ * runs asynchronously, so the scorer sees whatever those objects hold when it
+ * executes rather than when the binding was made. `readonly` is a compile-time
+ * promise only, and `scorerKey` covers `{id, version, config}` alone, so a
+ * durable record gives no way to notice the difference. Pass values that do not
+ * change, or copy before binding. Nothing is snapshotted here because a ground
+ * truth is frequently a value with no JSON representation, and refusing those
+ * at binding time would be the larger break.
  *
  * @category models
  * @since 0.1.0
@@ -27,6 +36,9 @@ export interface Binding {
 
 /**
  * Creates a scorer binding, defaulting to sampling every target step.
+ *
+ * The copy is shallow: see {@link Binding} for what that means for `context`
+ * and `groundTruth`.
  *
  * @category constructors
  * @since 0.1.0

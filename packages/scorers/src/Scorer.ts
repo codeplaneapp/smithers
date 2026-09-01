@@ -1,7 +1,13 @@
 /**
  * Flow-native scorer declarations and result validation.
  *
- * @see docs/specs/Concepts/Scoring.md
+ * A scorer is a *declaration-only* flow: it carries the input and output
+ * schemas so a caller can read its contract, and its execution entry point is
+ * {@link Scorer.score}, never a flow body. {@link MakeOptions} therefore omits
+ * `body` as well as `input` and `output`, so a scorer cannot declare two
+ * implementations that disagree.
+ *
+ * Package documentation: `packages/scorers/docs/api.md`.
  *
  * @since 0.1.0
  */
@@ -9,6 +15,7 @@ import * as Digest from "@smthrs/core/Digest"
 import * as Flow from "@smthrs/core/Flow"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as Json from "./internal/json.ts"
 import { ScorerError } from "./ScorerError.ts"
 
 /**
@@ -34,13 +41,19 @@ export const Input = Schema.Struct({
 export type Input = typeof Input.Type
 
 /**
- * Successful scorer output. {@link validate} additionally enforces `[0, 1]`.
+ * Successful scorer output.
+ *
+ * The inclusive `[0, 1]` range lives in the schema, so the declared flow output
+ * and {@link validate} enforce one contract. They used to disagree: the schema
+ * accepted any finite score while `validate` rejected anything outside the
+ * range, so ordinary flow output validation and runner validation gave
+ * different answers for the same declaration.
  *
  * @category schemas
  * @since 0.1.0
  */
 export const Result = Schema.Struct({
-  score: Schema.Finite,
+  score: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
   reason: Schema.optionalKey(Schema.String),
   meta: Schema.optionalKey(Schema.Unknown)
 })
@@ -67,13 +80,16 @@ export interface Scorer<E = never> extends Flow.Flow<typeof Input, typeof Result
 /**
  * Options accepted by {@link make}.
  *
+ * `input`, `output`, and `body` are owned by this module: the schemas are the
+ * scorer contract, and `score` is the single implementation.
+ *
  * @category models
  * @since 0.1.0
  */
 export type MakeOptions<E = never> =
   & Omit<
     Parameters<typeof Flow.make<typeof Input, typeof Result, E | ScorerError>>[0],
-    "input" | "output"
+    "input" | "output" | "body"
   >
   & {
     /** Stable module-owned scorer identity. */
@@ -85,47 +101,81 @@ export type MakeOptions<E = never> =
     readonly score: (input: Input) => Effect.Effect<Result, E | ScorerError>
   }
 
+const declaration = (message: string, cause?: unknown): ScorerError =>
+  new ScorerError({
+    code: "invalid_declaration",
+    message,
+    ...(cause === undefined ? {} : { cause })
+  })
+
 /**
  * Declares a scorer flow and derives its scorer key from its own declaration.
+ *
+ * This is a plan-time constructor and it *throws*, because a bad declaration is
+ * a programming error with no run to fail. Every throw is a `ScorerError` with
+ * code `invalid_declaration`: a blank `id` or `version`, a `config` carrying a
+ * member canonical JSON would drop (a function, a symbol, an `undefined`
+ * member, a symbol key, a cycle, a non-finite number), and a `config` the
+ * canonical encoder refuses outright (a `Map`, a `Set`, a class instance, a
+ * typed array, a `RegExp`) or whose own `toJSON` throws. The dropped-member
+ * case is rejected rather than tolerated because `scorerKey` is the durable
+ * identity written into every stored observation: two configurations differing
+ * only in a dropped member would otherwise be one scorer forever.
+ *
+ * One boundary is deliberate: a member defining `toJSON` is trusted, and its
+ * replacement value is hashed exactly as canonical JSON produces it. The walk
+ * stops there rather than calling `toJSON` a second time to inspect it.
  *
  * @category constructors
  * @since 0.1.0
  */
 export const make = <E = never>(options: MakeOptions<E>): Scorer<E> => {
-  const { score, id, version, config, ...declaration } = options
-  if (id.trim().length === 0 || version.trim().length === 0) {
-    throw new TypeError("Scorer id and version must not be empty")
+  const { config, id, score, version, ...rest } = options
+  if (id.trim().length === 0) throw declaration("A scorer id must not be empty")
+  if (version.trim().length === 0) throw declaration("A scorer version must not be empty")
+  const lossy = config === undefined ? undefined : Json.lossyPath(config, "config")
+  if (lossy !== undefined) {
+    throw declaration(`A scorer configuration must be representable as canonical JSON: ${lossy}`)
   }
-  const flow = Flow.make({ ...declaration, input: Input, output: Result })
-  return Object.assign(flow, {
-    scorerKey: Digest.digest(Digest.canonical({ id, version, config: config ?? null })),
-    score
-  })
+  let scorerKey: string
+  try {
+    scorerKey = Digest.digest(Digest.canonical({ id, version, config: config ?? null }))
+  } catch (cause) {
+    throw declaration("A scorer configuration could not be canonicalized", cause)
+  }
+  const flow = Flow.make({ ...rest, input: Input, output: Result })
+  return Object.assign(flow, { scorerKey, score })
+}
+
+const decodeResult = Schema.decodeUnknownEffect(Result)
+
+const receivedScore = (value: unknown): string => {
+  try {
+    return typeof value === "object" && value !== null && "score" in value
+      ? `, received ${String((value as { readonly score: unknown }).score)}`
+      : ""
+  } catch {
+    return ""
+  }
 }
 
 /**
- * Decodes a scorer result and enforces the finite inclusive score range.
+ * Decodes a scorer result against {@link Result}.
+ *
+ * The failure names the offending score and carries the schema issue, which
+ * reports the failing path, as its cause. It never retains the whole result:
+ * a scorer result can hold a model response body.
  *
  * @category validation
  * @since 0.1.0
  */
 export const validate = (value: unknown): Effect.Effect<Result, ScorerError> =>
-  Schema.decodeUnknownEffect(Result)(value).pipe(
+  decodeResult(value).pipe(
     Effect.mapError((cause) =>
       new ScorerError({
         code: "invalid_score",
-        message: "A scorer result must match the scorer result schema",
+        message: `A scorer result must carry a finite score in [0, 1]${receivedScore(value)}`,
         cause
       })
-    ),
-    Effect.flatMap((result) =>
-      result.score >= 0 && result.score <= 1
-        ? Effect.succeed(result)
-        : Effect.fail(
-          new ScorerError({
-            code: "invalid_score",
-            message: "A scorer result must have a finite score in [0, 1]"
-          })
-        )
     )
   )

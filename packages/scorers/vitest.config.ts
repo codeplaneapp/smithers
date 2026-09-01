@@ -17,11 +17,17 @@ export default defineConfig({
       // each other's coverage scratch state (issues #115/#121).
       reportsDirectory: join(tmpdir(), `flows-scorers-coverage-${process.pid}`),
       include: ["src/**"],
+      // The measured coverage of `src/**` is 100 in all four categories.
+      // `branches` is pinned one below only because
+      // `packages/flows/test/vitestCoverageIsolation.test.ts` still lists
+      // `scorers` in its `coverageFloorDeferred` set and asserts every member
+      // keeps at least one threshold under 100. Remove that entry and raise
+      // this to 100 in the same commit; the two changes are one edit.
       thresholds: {
-        branches: 65,
-        functions: 76,
-        lines: 87,
-        statements: 85
+        branches: 99,
+        functions: 100,
+        lines: 100,
+        statements: 100
       }
     }
   }
