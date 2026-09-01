@@ -46,6 +46,7 @@ import * as DeferredPersistence from "../src/internal/DeferredPersistence.ts"
 import * as RunDriver from "../src/internal/RunDriver.ts"
 import * as Migrations from "../src/Migrations.ts"
 import * as StepBoundary from "../src/StepBoundary.ts"
+import * as Clocks from "./Clocks.ts"
 import { sha256, withCrypto } from "./Sha256.ts"
 
 const owner: Ownership.OwnerId = { hostId: "wal-host", pid: 1, nonce: "wal-owner" }
@@ -130,8 +131,10 @@ const takeover = (runId: string, claimant: Ownership.OwnerId) =>
     const row = yield* runs.get(runId)
     const snapshot = { status: row.status, owner: row.owner, heartbeatAtMs: row.heartbeatAtMs }
     const stealing = row.status === "running" && row.owner !== null
-    const now = (yield* Clock.currentTimeMillis) +
-      (stealing ? Duration.toMillis(Ownership.heartbeatStaleAfter) + 1 : 0)
+    if (stealing) {
+      yield* TestClock.adjust(Duration.millis(Duration.toMillis(Ownership.heartbeatStaleAfter) + 1))
+    }
+    const now = yield* Clock.currentTimeMillis
     const evidence: Ownership.LivenessEvidence | undefined = stealing
       ? {
         expectedOwner: row.owner!,
@@ -139,7 +142,10 @@ const takeover = (runId: string, claimant: Ownership.OwnerId) =>
         kind: row.owner!.hostId === claimant.hostId ? "same-host-pid-dead" : "cross-host-unreachable-stale"
       }
       : undefined
-    const outcome = yield* runs.claimAndOwn(runId, snapshot, claimant, now, evidence)
+    // The store decides staleness from the clock IT reads, never from `now`,
+    // so the steal is taken at the skewed moment rather than merely described
+    // by it (`@smthrs/run-store` `claimAndOwn`).
+    const outcome = yield* Clocks.at(now, runs.claimAndOwn(runId, snapshot, claimant, now, evidence))
     if (outcome._tag !== "Activated") {
       return yield* Effect.die(new Error(`run ${runId} takeover was lost: ${outcome._tag}`))
     }

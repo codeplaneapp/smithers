@@ -21,6 +21,7 @@ import * as ActionPersistence from "../src/internal/ActionPersistence.ts"
 import * as EffectRecords from "../src/internal/EffectRecords.ts"
 import * as StepBoundary from "../src/StepBoundary.ts"
 import * as TestStores from "../src/test/TestStores.ts"
+import * as Clocks from "./Clocks.ts"
 import { sha256, withCrypto } from "./Sha256.ts"
 
 const ownerA: Ownership.OwnerId = { hostId: "fault-host-a", pid: 1, nonce: "fault-owner-a" }
@@ -82,11 +83,12 @@ const takeover = (runs: RunStore.Service, runId: string, claimant: Ownership.Own
     const row = yield* runs.get(runId)
     const snapshot = { status: row.status, owner: row.owner, heartbeatAtMs: row.heartbeatAtMs }
     const stealing = row.status === "running" && row.owner !== null
-    // When stealing a running run, skew past the heartbeat-stale window so the
-    // store-level freshness guard treats the previous owner as stale, without
-    // real sleeps.
-    const now = (yield* Clock.currentTimeMillis) +
-      (stealing ? Duration.toMillis(Ownership.heartbeatStaleAfter) + 1 : 0)
+    // Move the injected clock past the stale window so the store observes the
+    // same time as the takeover evidence.
+    if (stealing) {
+      yield* TestClock.adjust(Duration.millis(Duration.toMillis(Ownership.heartbeatStaleAfter) + 1))
+    }
+    const now = yield* Clock.currentTimeMillis
     const evidence: Ownership.LivenessEvidence | undefined = stealing
       ? {
         expectedOwner: row.owner!,
@@ -94,7 +96,10 @@ const takeover = (runs: RunStore.Service, runId: string, claimant: Ownership.Own
         kind: row.owner!.hostId === claimant.hostId ? "same-host-pid-dead" : "cross-host-unreachable-stale"
       }
       : undefined
-    const outcome = yield* runs.claimAndOwn(runId, snapshot, claimant, now, evidence)
+    // The store decides staleness from the clock IT reads, never from `now`,
+    // so the steal is taken at the skewed moment rather than merely described
+    // by it (`@smthrs/run-store` `claimAndOwn`).
+    const outcome = yield* Clocks.at(now, runs.claimAndOwn(runId, snapshot, claimant, now, evidence))
     if (outcome._tag !== "Activated") {
       return yield* Effect.die(new Error(`run ${runId} takeover was lost: ${outcome._tag}`))
     }

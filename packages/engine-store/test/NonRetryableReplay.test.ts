@@ -303,7 +303,7 @@ describe("non-retryable verdict durability across resume", () => {
       // schema may hold anything: replay must never re-dispatch for any of
       // them.
       const owner = { hostId: "rehydrate-host", pid: 1, nonce: "rehydrate-owner" }
-      const seedAndReplay = (key: string, error: unknown) =>
+      const seedAndReplay = (key: string, error: AttemptStore.JsonValue) =>
         Effect.gen(function*() {
           const attempts = yield* AttemptStore.AttemptStore
           const runs = yield* RunStore.RunStore

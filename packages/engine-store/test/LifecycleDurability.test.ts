@@ -23,6 +23,7 @@ import * as Inconsistency from "../src/Inconsistency.ts"
 import * as ActionPersistence from "../src/internal/ActionPersistence.ts"
 import * as StepBoundary from "../src/StepBoundary.ts"
 import * as TestStores from "../src/test/TestStores.ts"
+import * as Clocks from "./Clocks.ts"
 import { sha256, withCrypto } from "./Sha256.ts"
 
 const ownerA: Ownership.OwnerId = { hostId: "lifecycle-host-a", pid: 1, nonce: "lifecycle-owner-a" }
@@ -107,7 +108,10 @@ const takeover = (runs: RunStore.Service, runId: string, claimant: Ownership.Own
     const evidence: Ownership.LivenessEvidence | undefined = stealing
       ? { expectedOwner: row.owner!, checkedAtMs: now, kind: "cross-host-unreachable-stale" }
       : undefined
-    const outcome = yield* runs.claimAndOwn(runId, snapshot, claimant, now, evidence)
+    // The store decides staleness from the clock IT reads, never from `now`,
+    // so the steal is taken at the skewed moment rather than merely described
+    // by it (`@smthrs/run-store` `claimAndOwn`).
+    const outcome = yield* Clocks.at(now, runs.claimAndOwn(runId, snapshot, claimant, now, evidence))
     if (outcome._tag !== "Activated") {
       return yield* Effect.die(new Error(`run ${runId} takeover was lost: ${outcome._tag}`))
     }

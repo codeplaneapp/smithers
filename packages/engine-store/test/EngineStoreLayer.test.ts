@@ -12,6 +12,7 @@ import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
+import { TestClock } from "effect/testing"
 import * as DurableEngineState from "../src/DurableEngineState.ts"
 import * as EngineStore from "../src/EngineStore.ts"
 import * as StepBoundary from "../src/StepBoundary.ts"
@@ -286,17 +287,17 @@ describe("EngineStore.make liveness", () => {
           const store = yield* RunStore.RunStore
           // Seed a `running` row owned by another host whose heartbeat is
           // ancient, so only the liveness probe stands between it and a steal.
-          yield* store.create(
-            "foreign-run",
-            JSON.stringify({ version: 1, flowName: LayerFlow._tag, payload: {} })
-          )
-          const created = yield* store.get("foreign-run")
-          const expected = { status: created.status, owner: created.owner, heartbeatAtMs: created.heartbeatAtMs }
-          // Activate with a lease backdated well past `heartbeatStaleAfter`,
-          // so the liveness probe — not freshness — decides the steal. The
-          // backdating goes through `claimAndOwn`'s caller-stamped time:
-          // `heartbeat` is monotonic and cannot rewind a lease.
-          const owned = yield* store.claimAndOwn("foreign-run", expected, otherOwner, 0)
+          // Seed the ownership write under a clock at zero. The live clock
+          // then observes a stale lease, so the liveness probe decides.
+          const owned = yield* Effect.gen(function*() {
+            yield* store.create(
+              "foreign-run",
+              JSON.stringify({ version: 1, flowName: LayerFlow._tag, payload: {} })
+            )
+            const created = yield* store.get("foreign-run")
+            const expected = { status: created.status, owner: created.owner, heartbeatAtMs: created.heartbeatAtMs }
+            return yield* store.claimAndOwn("foreign-run", expected, otherOwner, 0)
+          }).pipe(Effect.provide(TestClock.layer()))
           expect(owned._tag).toBe("Activated")
 
           const engine = yield* EngineStore.make({
@@ -344,16 +345,18 @@ describe("EngineStore.make liveness", () => {
       const result = yield* withCrypto(
         Effect.scoped(Effect.gen(function*() {
           const store = yield* RunStore.RunStore
-          yield* store.create(
-            "abandoned-run",
-            JSON.stringify({ version: 1, flowName: LayerFlow._tag, payload: {} })
-          )
-          const created = yield* store.get("abandoned-run")
-          const expected = { status: created.status, owner: created.owner, heartbeatAtMs: created.heartbeatAtMs }
           // The same seeding as the probe case: a foreign owner holding a
           // `running` row whose lease expired at time 0 and is never renewed,
           // which is what SIGKILL leaves behind.
-          const owned = yield* store.claimAndOwn("abandoned-run", expected, otherOwner, 0)
+          const owned = yield* Effect.gen(function*() {
+            yield* store.create(
+              "abandoned-run",
+              JSON.stringify({ version: 1, flowName: LayerFlow._tag, payload: {} })
+            )
+            const created = yield* store.get("abandoned-run")
+            const expected = { status: created.status, owner: created.owner, heartbeatAtMs: created.heartbeatAtMs }
+            return yield* store.claimAndOwn("abandoned-run", expected, otherOwner, 0)
+          }).pipe(Effect.provide(TestClock.layer()))
           expect(owned._tag).toBe("Activated")
 
           const engine = yield* EngineStore.make({

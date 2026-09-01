@@ -630,15 +630,16 @@ describe("RunDriver stale-owner recovery", () => {
               evidence.push(stealEvidence)
             }).pipe(Effect.andThen(base.steal(runId, expected, claimant, nowMs, stealEvidence)))
         })
-        // A previous process on this very host owned the row and died. The
-        // stale lease is arranged through `claimAndOwn`'s caller-stamped
-        // activation time: `heartbeat` is monotonic and can no longer rewind
-        // a lease, so a backdated pulse would keep the real activation time.
+        // A previous process on this host owned the row and died. Seed its
+        // ownership under a clock at zero so the live driver sees a stale
+        // heartbeat.
         const deadSameHost: Ownership.OwnerId = { hostId: owner.hostId, pid: owner.pid + 1, nonce: "dead" }
-        yield* base.create("same-host", stateJson(EdgeFlow._tag))
-        const created = yield* base.get("same-host")
-        const expected = { status: created.status, owner: created.owner, heartbeatAtMs: created.heartbeatAtMs }
-        const owned = yield* base.claimAndOwn("same-host", expected, deadSameHost, 0)
+        const owned = yield* Effect.gen(function*() {
+          yield* base.create("same-host", stateJson(EdgeFlow._tag))
+          const created = yield* base.get("same-host")
+          const expected = { status: created.status, owner: created.owner, heartbeatAtMs: created.heartbeatAtMs }
+          return yield* base.claimAndOwn("same-host", expected, deadSameHost, 0)
+        }).pipe(Effect.provide(TestClock.layer()))
         if (owned._tag !== "Activated") return yield* Effect.die(new Error("claim lost"))
 
         const driver = yield* makeDriver().pipe(Effect.provideService(RunStore.RunStore, recording))

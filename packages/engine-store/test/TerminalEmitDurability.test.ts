@@ -86,9 +86,9 @@ const terminalRowWithoutRecords = (
   key: string,
   row: {
     readonly state: "succeeded" | "failed"
-    readonly outcome?: unknown
-    readonly error?: unknown
-    readonly meta: unknown
+    readonly outcome?: AttemptStore.JsonValue
+    readonly error?: AttemptStore.JsonValue
+    readonly meta: AttemptStore.JsonValue
   }
 ) =>
   Effect.gen(function*() {

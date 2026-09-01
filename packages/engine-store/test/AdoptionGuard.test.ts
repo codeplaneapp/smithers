@@ -28,6 +28,7 @@ import { FlowEngine } from "@smthrs/engine"
 import { Journal } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
 import { AttemptStore, type Ownership, RunStore } from "@smthrs/run-store"
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -66,7 +67,8 @@ const activate = (runId: string) =>
     yield* runs.create(runId, "{}")
     const row = yield* runs.get(runId)
     const snapshot = { status: row.status, owner: row.owner, heartbeatAtMs: row.heartbeatAtMs }
-    const claim = yield* runs.claim(runId, snapshot, owner, 1)
+    const now = yield* Clock.currentTimeMillis
+    const claim = yield* runs.claim(runId, snapshot, owner, now)
     if (claim._tag !== "Claimed") {
       return yield* Effect.die(new Error(`run ${runId} claim was lost`))
     }
@@ -96,13 +98,14 @@ describe("adoption liveness evidence is the admission permit (issues #86, #102, 
         Effect.gen(function*() {
           yield* activate("adoption-redrive")
           const attempts = yield* AttemptStore.AttemptStore
+          const startedAtMs = yield* Clock.currentTimeMillis
           yield* attempts.put(
             {
               runId: "adoption-redrive",
               stepKeyDigest: sha256(key),
               attempt: 1,
               state: "running",
-              startedAtMs: 5,
+              startedAtMs,
               meta: { tier: "sealed", admittedBy: owner }
             },
             owner
