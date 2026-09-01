@@ -3,6 +3,7 @@ import { useMemo, type ReactNode } from "react";
 import { processPatch, type CodeViewItem, type DiffsThemeNames, type FileDiffMetadata } from "@pierre/diffs";
 import { CodeView } from "@pierre/diffs/react";
 import { cn } from "../cn";
+import { decodeGitPath } from "../diff-paginate";
 import { themeRegistry, useInjectUiCss } from "../styles";
 import { useResolvedTheme } from "../internal/useResolvedTheme";
 import { useResolvedPalette } from "../internal/useResolvedPalette";
@@ -41,9 +42,27 @@ export function diffStyleForLayout(layout: PierreDiffLayout): "split" | "unified
   return layout === "inline" ? "unified" : "split";
 }
 
-/** Strip surrounding quotes and a leading `a/` or `b/` from a diff path. */
+/** A backslash sequence only git's path quoting produces. */
+const GIT_ESCAPE_RE = /\\(?:[0-7]{3}|[abtnvfr"\\])/;
+
+/**
+ * Normalize a diff path for comparison: decode git's quoted form, then strip a
+ * leading `a/` or `b/`.
+ *
+ * Git quotes a path with a special or non-ASCII byte and octal-escapes those
+ * bytes, so `café name.ts` ships as `"a/caf\303\251 name.ts"`. Stripping the
+ * quotes without decoding left the escapes in the string, and a caller that
+ * selected the real filename never matched. `@pierre/diffs` strips the quotes
+ * itself but keeps the escapes, so the decode is driven off the escape grammar
+ * rather than off the quotes. A literal backslash in a filename is left alone,
+ * because git escapes that as `\\` and the decode maps it back.
+ */
 export function normalizeDiffPath(path: string | undefined): string {
-  return (path ?? "").replace(/^"(.*)"$/, "$1").replace(/^[ab]\//, "");
+  const raw = path ?? "";
+  const quoted = /^"(.*)"$/.exec(raw);
+  const inner = quoted ? quoted[1]! : raw;
+  const decoded = quoted || GIT_ESCAPE_RE.test(inner) ? decodeGitPath(inner) : inner;
+  return decoded.replace(/^[ab]\//, "");
 }
 
 function diffStats(file: FileDiffMetadata): { additions: number; deletions: number } {
@@ -75,12 +94,18 @@ export function patchToCodeViewItems(patch: string, selectedPath?: string | null
 
   let shown = files;
   if (selectedPath) {
-    const selected = files.filter((file) => {
+    // `selectedPath` goes through the same normalization as the parsed names,
+    // so a caller may pass `a/x.ts`, `b/x.ts`, a bare path, or git's quoted
+    // form and still match.
+    const wanted = normalizeDiffPath(selectedPath);
+    // No fallback: a selection that matches nothing renders the empty state.
+    // Falling back to every file, which is what this used to do, answered
+    // "show me only this file" with the entire patch.
+    shown = files.filter((file) => {
       const path = normalizeDiffPath(file.name);
       const previous = normalizeDiffPath(file.prevName);
-      return path === selectedPath || previous === selectedPath;
+      return path === wanted || previous === wanted;
     });
-    if (selected.length > 0) shown = selected;
   }
 
   return shown.map((file) => ({
@@ -99,7 +124,11 @@ export type PierreDiffViewProps = {
   mode?: PierreDiffMode;
   /** Palette override. Defaults to the active `data-palette` value. */
   palette?: ResolvedPalette;
-  /** When set, only the matching file in a multi-file patch is shown. */
+  /**
+   * When set, only the matching file in a multi-file patch is shown. A
+   * selection that matches nothing shows the empty state, never the whole
+   * patch. `a/`, `b/`, quoted, and bare spellings all compare equal.
+   */
   selectedPath?: string | null;
   /** Extra class on the CodeView (and the empty-state fallback). */
   className?: string;

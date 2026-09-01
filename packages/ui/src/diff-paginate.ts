@@ -218,7 +218,7 @@ const GIT_ESCAPES: Readonly<Record<string, number>> = {
  * then read it as UTF-8, which is why this builds a byte array rather than
  * concatenating characters.
  */
-function unquoteGitPath(quoted: string): string {
+export function decodeGitPath(quoted: string): string {
   const encoder = new TextEncoder();
   const bytes: number[] = [];
   for (let index = 0; index < quoted.length; index += 1) {
@@ -259,7 +259,7 @@ const RENAME_FROM_RE = new RegExp(String.raw`^rename from (?:${QUOTED}|(.+))$`, 
 
 /** Decode whichever alternative matched, then drop a leading `a/` or `b/`. */
 function headerPath(quoted: string | undefined, plain: string | undefined): string | undefined {
-  const raw = quoted !== undefined ? unquoteGitPath(quoted) : plain?.trim();
+  const raw = quoted !== undefined ? decodeGitPath(quoted) : plain?.trim();
   if (raw === undefined || raw === "") return undefined;
   return raw.startsWith("a/") || raw.startsWith("b/") ? raw.slice(2) : raw;
 }

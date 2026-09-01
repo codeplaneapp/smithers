@@ -108,8 +108,23 @@ describe("patchToCodeViewItems", () => {
     expect(only[0]!.id).toBe("second.ts");
   });
 
-  test("an unmatched selectedPath falls back to every file", () => {
-    expect(patchToCodeViewItems(TWO_FILE_PATCH, "missing.ts").length).toBe(2);
+  test("selectedPath accepts the a/ and b/ prefixed spellings of the same file", () => {
+    expect(patchToCodeViewItems(TWO_FILE_PATCH, "b/second.ts").map((item) => item.id)).toEqual(["second.ts"]);
+    expect(patchToCodeViewItems(TWO_FILE_PATCH, "a/second.ts").map((item) => item.id)).toEqual(["second.ts"]);
+  });
+
+  test("an unmatched selectedPath shows nothing rather than the whole patch", () => {
+    // "Only the matching file is shown" cannot mean "every file" when nothing
+    // matched: a caller whose selection was renamed away, or misspelled, was
+    // handed the entire multi-file patch instead of an empty state.
+    expect(patchToCodeViewItems(TWO_FILE_PATCH, "missing.ts")).toEqual([]);
+  });
+
+  test("a git-quoted, octal-escaped path matches its real filename", () => {
+    const patch = 'diff --git "a/caf\\303\\251.ts" "b/caf\\303\\251.ts"\n'
+      + "--- \"a/caf\\303\\251.ts\"\n+++ \"b/caf\\303\\251.ts\"\n"
+      + "@@ -1,1 +1,1 @@\n-const value = 1;\n+const value = 2;\n";
+    expect(patchToCodeViewItems(patch, "café.ts").length).toBe(1);
   });
 
   test("empty, whitespace, and malformed patches degrade to no items", () => {
