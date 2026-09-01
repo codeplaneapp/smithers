@@ -19,7 +19,6 @@ import * as ModelEvent from "@smthrs/model/ModelEvent"
 import * as ModelRequest from "@smthrs/model/ModelRequest"
 import * as Route from "@smthrs/model/Route"
 import { Node } from "@smthrs/plan"
-import * as PersistedPlan from "@smthrs/plan/Plan"
 import * as StepKey from "@smthrs/plan/StepKey"
 import * as Checkpoints from "@smthrs/std/Checkpoints"
 import * as StdError from "@smthrs/std/StdError"
@@ -44,6 +43,7 @@ import { TestClock } from "effect/testing"
 import { describe, expect, it } from "vitest"
 import * as Budget from "../src/Budget.ts"
 import * as FlowEngineLike from "../src/FlowEngineLike.ts"
+import * as InternalFlowEngineLike from "../src/internal/FlowEngineLike.ts"
 import * as QuotaPolicy from "../src/QuotaPolicy.ts"
 import * as WorkspaceObservation from "../src/WorkspaceObservation.ts"
 
@@ -123,44 +123,21 @@ const countingModel = (calls: Array<string>): Model.Model =>
       })
   })
 
-const child = (
-  overrides: {
-    readonly callId?: string
-    readonly flowName?: string
-    readonly args?: unknown
-    readonly tier?: "sealed" | "compensable" | "irreversible"
-    readonly placement?: Option.Option<"client" | "local" | "sandbox" | "remote">
-  } = {}
-): Plan.Child =>
+const child = (flowName = "alpha"): Plan.Child =>
   new Plan.Child({
-    flowName: overrides.flowName ?? "alpha",
-    callId: overrides.callId ?? "call-1",
-    args: overrides.args ?? { value: "x" },
+    flowName,
+    callId: "call-1",
+    args: { value: "x" },
     capabilities: [],
     effects: {
       reads: [],
       writes: [],
       mode: "hermetic",
       onConflict: "serialize",
-      tier: overrides.tier ?? "sealed"
+      tier: "sealed"
     },
-    placement: overrides.placement ?? Option.none()
+    placement: Option.none()
   })
-
-const countingChildren = (calls: Array<string>): FlowEngineLike.ChildRunner => ({
-  run: (target) =>
-    Effect.sync(() => {
-      calls.push(target.callId)
-      return new Plan.ChildResult({
-        callId: target.callId,
-        outcome: "success",
-        result: ModelRequest.ToolResultPart.make({
-          toolCallId: target.callId,
-          content: `ran-${target.flowName}-${calls.length}`
-        })
-      })
-    })
-})
 
 type Outcome =
   | { readonly _tag: "completed"; readonly value: unknown }
@@ -322,10 +299,10 @@ describe("FlowEngineLike.make", () => {
 
     const decoded = Schema.decodeUnknownSync(FlowEngineLike.RecordedModelStep)(legacy)
     expect(decoded).toEqual(legacy)
-    expect(FlowEngineLike.normalizeRecordedModelStep(decoded)).toEqual({ events: legacy, error: undefined })
+    expect(InternalFlowEngineLike.normalizeRecordedModelStep(decoded)).toEqual({ events: legacy, error: undefined })
 
     const current = { events: legacy }
-    expect(FlowEngineLike.normalizeRecordedModelStep(current)).toBe(current)
+    expect(InternalFlowEngineLike.normalizeRecordedModelStep(current)).toBe(current)
   })
 
   it("streams the model events of a sealed step and records them for replay", async () => {
@@ -333,8 +310,7 @@ describe("FlowEngineLike.make", () => {
     const outcome = await drive(Effect.gen(function*() {
       const engine = yield* FlowEngineLike.make({
         model: countingModel(calls),
-        route: staticRoute(),
-        children: countingChildren([])
+        route: staticRoute()
       })
       const first = yield* Stream.runCollect(engine.sealStep(step("hello")))
       const second = yield* Stream.runCollect(engine.sealStep(step("hello")))
@@ -430,13 +406,11 @@ describe("FlowEngineLike.make", () => {
     const outcome = await drive(Effect.gen(function*() {
       const first = yield* FlowEngineLike.make({
         model: countingModel(calls),
-        route: staticRoute("route-a"),
-        children: countingChildren([])
+        route: staticRoute("route-a")
       })
       const second = yield* FlowEngineLike.make({
         model: countingModel(calls),
-        route: staticRoute("route-b"),
-        children: countingChildren([])
+        route: staticRoute("route-b")
       })
       yield* Stream.runCollect(first.sealStep(step("hello")))
       yield* Stream.runCollect(second.sealStep(step("hello")))
@@ -471,7 +445,6 @@ describe("FlowEngineLike.make", () => {
       const engine = yield* FlowEngineLike.make({
         model,
         route: staticRoute(),
-        children: countingChildren([]),
         modelRetryPolicy: Schedule.recurs(2)
       })
       return Array.from(yield* Stream.runCollect(engine.sealStep(step("hello"))))
@@ -576,7 +549,6 @@ describe("FlowEngineLike.make", () => {
       const engine = yield* FlowEngineLike.make({
         model,
         route: staticRoute(),
-        children: countingChildren([]),
         modelRetryPolicy: Schedule.recurs(2)
       })
       return Array.from(yield* Stream.runCollect(engine.sealStep(step("hello"))))
@@ -631,8 +603,7 @@ describe("FlowEngineLike.make", () => {
               return Stream.fail(authentication)
             })
         }),
-        route: staticRoute(),
-        children: countingChildren([])
+        route: staticRoute()
       })
       return yield* Stream.runCollect(engine.sealStep(step("hello")))
     }))
@@ -648,8 +619,7 @@ describe("FlowEngineLike.make", () => {
     const outcome = await drive(Effect.gen(function*() {
       const engine = yield* FlowEngineLike.make({
         model: countingModel(calls),
-        route: failingRoute,
-        children: countingChildren([])
+        route: failingRoute
       })
       return yield* Stream.runCollect(engine.sealStep(step("hello")))
     }))
@@ -662,8 +632,7 @@ describe("FlowEngineLike.make", () => {
     const outcome = await drive(Effect.gen(function*() {
       const engine = yield* FlowEngineLike.make({
         model: countingModel([]),
-        route: staticRoute(),
-        children: countingChildren([])
+        route: staticRoute()
       })
       return yield* Stream.runCollect(engine.sealStep(step("hello", { kind: "irreversible" })))
     }))
@@ -680,8 +649,7 @@ describe("FlowEngineLike.make", () => {
     const outcome = await drive(Effect.gen(function*() {
       const engine = yield* FlowEngineLike.make({
         model: countingModel(calls),
-        route: staticRoute(),
-        children: countingChildren([])
+        route: staticRoute()
       })
       const events = yield* Stream.runCollect(
         engine.sealStep(step("hello", { body: { _tag: "Opaque", note: "no request" } }))
@@ -708,8 +676,7 @@ describe("FlowEngineLike.make", () => {
     const outcome = await drive(Effect.gen(function*() {
       const engine = yield* FlowEngineLike.make({
         model: countingModel(calls),
-        route: staticRoute(),
-        children: countingChildren([])
+        route: staticRoute()
       })
       const events = yield* Stream.runCollect(engine.sealStep({
         request: sparse,
@@ -721,144 +688,43 @@ describe("FlowEngineLike.make", () => {
     expect(completed(outcome)).toBe(3)
   })
 
-  it("settles a batch in model-call order and replays an identical sealed child", async () => {
-    const calls: Array<string> = []
+  it("refuses an elaborated child because the superseded path has no runner", async () => {
     const outcome = await drive(Effect.gen(function*() {
       const engine = yield* FlowEngineLike.make({
         model: countingModel([]),
-        route: staticRoute(),
-        children: countingChildren(calls)
+        route: staticRoute()
       })
-      const first = yield* Stream.runCollect(engine.splice(
-        new Plan.Batch({
-          children: [
-            child({ callId: "call-1", flowName: "alpha" }),
-            child({ callId: "call-2", flowName: "beta", placement: Option.some("local") })
-          ]
-        })
-      ))
-      // The same sealed declaration and arguments — a content-addressed replay,
-      // even though the model issued a fresh call id.
-      const second = yield* Stream.runCollect(engine.splice(
-        new Plan.Batch({ children: [child({ callId: "call-3", flowName: "alpha" })] })
-      ))
-      return {
-        settled: first.map((event) => (event as Plan.ChildSettled).result.callId),
-        replayed: (second[0] as Plan.ChildSettled).result.result.content
-      }
-    }))
-
-    expect(completed(outcome)).toEqual({ settled: ["call-1", "call-2"], replayed: "ran-alpha-1" })
-    expect(calls).toEqual(["call-1", "call-2"])
-  })
-
-  it("keeps two irreversible invocations of one declaration distinct", async () => {
-    const calls: Array<string> = []
-    const outcome = await drive(Effect.gen(function*() {
-      const engine = yield* FlowEngineLike.make({
-        model: countingModel([]),
-        route: staticRoute(),
-        children: countingChildren(calls)
-      })
-      yield* Stream.runCollect(engine.splice(
-        new Plan.Batch({ children: [child({ callId: "call-1", tier: "irreversible" })] })
-      ))
-      yield* Stream.runCollect(engine.splice(
-        new Plan.Batch({ children: [child({ callId: "call-2", tier: "irreversible" })] })
-      ))
-      return calls
-    }))
-
-    expect(completed(outcome)).toEqual(["call-1", "call-2"])
-  })
-
-  it("reports an unkeyable child as a typed harness failure", async () => {
-    const outcome = await drive(Effect.gen(function*() {
-      const engine = yield* FlowEngineLike.make({
-        model: countingModel([]),
-        route: staticRoute(),
-        children: countingChildren([])
-      })
-      // A lone surrogate has no canonical form, so the argument cannot be
-      // digested into a key. (An absent property is keyable: canonical JSON
-      // drops it the way `JSON.stringify` does.)
       return yield* Stream.runCollect(engine.splice(
-        new Plan.Batch({ children: [child({ args: { value: "\uD800" } })] })
+        new Plan.Batch({ children: [child("review/unsupported")] })
       ))
     }))
 
-    expect(failure(outcome)).toMatchObject({
-      _tag: "/harness/HarnessError",
+    const error = failure(outcome)
+    expect(error).toBeInstanceOf(HarnessError)
+    expect(error).toMatchObject({
       code: "engine_failed",
-      message: "Child call call-1 could not be keyed"
+      message: "No child runner is configured",
+      cause: "review/unsupported"
     })
   })
 
-  it("grows the supplied plan by the elaborated batch before running it", async () => {
-    const appended: Array<PersistedPlan.Plan> = []
-    const outcome = await drive(Effect.gen(function*() {
-      const base = yield* PersistedPlan.compile({ planId: "spliced", flow: "review", nodes: [] })
-      const engine = yield* FlowEngineLike.make({
-        model: countingModel([]),
-        route: staticRoute(),
-        children: countingChildren([]),
-        // The port that persists elaboration. A host that supplies one cannot
-        // keep the elaborated subgraph in an unpersisted side channel.
-        plan: {
-          current: Effect.sync(() => appended.at(-1) ?? base),
-          append: (plan) =>
-            Effect.sync(() => {
-              appended.push(plan)
-            })
-        }
-      })
-      return yield* Stream.runCollect(engine.splice(new Plan.Batch({ children: [child()] })))
-    }))
-
-    completed(outcome)
-    expect(appended).toHaveLength(1)
-    expect(appended[0]!.generation).toBe(1)
-    expect(appended[0]!.nodes.map((node) => node.id)).toEqual(["call-1"])
-  })
-
-  it("reports a plan port that refuses the elaborated batch", async () => {
+  it("produces no events and no failure for an empty elaborated batch", async () => {
     const outcome = await drive(Effect.gen(function*() {
       const engine = yield* FlowEngineLike.make({
         model: countingModel([]),
-        route: staticRoute(),
-        children: countingChildren([]),
-        plan: {
-          current: Effect.fail(new HarnessError({ code: "engine_failed", message: "the plan is unreadable" })),
-          append: () => Effect.void
-        }
+        route: staticRoute()
       })
-      return yield* Stream.runCollect(engine.splice(new Plan.Batch({ children: [child()] })))
+      return Array.from(yield* Stream.runCollect(engine.splice(new Plan.Batch({ children: [] }))))
     }))
 
-    expect(failure(outcome)).toMatchObject({ code: "engine_failed", message: "the plan is unreadable" })
-  })
-
-  it("propagates a child runner failure", async () => {
-    const outcome = await drive(Effect.gen(function*() {
-      const engine = yield* FlowEngineLike.make({
-        model: countingModel([]),
-        route: staticRoute(),
-        children: {
-          run: () => Effect.fail(new HarnessError({ code: "elaboration_failed", message: "unknown flow" }))
-        }
-      })
-      return yield* Stream.runCollect(engine.splice(new Plan.Batch({ children: [child()] })))
-    }))
-
-    expect(failure(outcome)).toMatchObject({ code: "elaboration_failed", message: "unknown flow" })
+    expect(completed(outcome)).toEqual([])
   })
 
   it("suspends the execution durably instead of failing", async () => {
     const outcome = await drive(Effect.gen(function*() {
       const engine = yield* FlowEngineLike.make({
         model: countingModel([]),
-        route: staticRoute(),
-        children: countingChildren([])
+        route: staticRoute()
       })
       return yield* engine.suspend(
         new EngineLike.SuspendReason({ code: "waiting-input", message: "needs an answer" })
@@ -875,8 +741,7 @@ describe("FlowEngineLike.make", () => {
       Effect.gen(function*() {
         const engine = yield* FlowEngineLike.make({
           model: countingModel(calls),
-          route: staticRoute(),
-          children: countingChildren([])
+          route: staticRoute()
         })
         const events = yield* Stream.runCollect(engine.sealStep(step("hello")))
         if (park) {
@@ -904,8 +769,7 @@ describe("FlowEngineLike.layer", () => {
         Effect.provide(
           FlowEngineLike.layer({
             model: countingModel([]),
-            route: staticRoute(),
-            children: countingChildren([])
+            route: staticRoute()
           })
         )
       )
@@ -962,140 +826,6 @@ const driveBoth = <A, E>(
     Effect.scoped,
     Effect.runPromise
   )
-
-const spliceOnce = (
-  calls: Array<string>,
-  options: { readonly layers?: ReadonlyArray<string> | undefined } = {}
-) =>
-  Effect.gen(function*() {
-    const engine = yield* FlowEngineLike.make({
-      model: countingModel([]),
-      route: staticRoute(),
-      children: countingChildren(calls),
-      layers: options.layers
-    })
-    // Byte-for-byte the same child in both runs: same declaration, same
-    // arguments, and the same provider-assigned call id, which restarts from
-    // `call-1` in every run and is therefore no identity at all on its own.
-    return yield* Stream.runCollect(
-      engine.splice(new Plan.Batch({ children: [child({ callId: "call-1", tier: "irreversible" })] }))
-    )
-  })
-
-describe("child call identity", () => {
-  it("refuses to alias one irreversible child across two runs that both called it call-1", async () => {
-    const calls: Array<string> = []
-    const outcomes = await driveBoth(spliceOnce(calls), spliceOnce(calls))
-
-    expect(outcomes.map((outcome) => outcome._tag)).toEqual(["completed", "completed"])
-    // Two runs, two executions of the irreversible effect. Before the run scope
-    // entered the key, the second run replayed the first run's recorded result
-    // and the effect never happened.
-    expect(calls).toEqual(["call-1", "call-1"])
-  })
-
-  it("still shares one sealed child across runs, because that is what sealed means", async () => {
-    const calls: Array<string> = []
-    const sealed = (
-      collected: Array<string>
-    ): Effect.Effect<unknown, unknown, PortServices> =>
-      Effect.gen(function*() {
-        const engine = yield* FlowEngineLike.make({
-          model: countingModel([]),
-          route: staticRoute(),
-          children: countingChildren(collected),
-          // Cross-run sharing is what sealed means, but only for a
-          // composition that has stated its complete authority. The empty
-          // record is that statement — "this composition grants nothing" —
-          // not the absence of one.
-          capabilities: {}
-        })
-        return yield* Stream.runCollect(
-          engine.splice(new Plan.Batch({ children: [child({ callId: "call-1" })] }))
-        )
-      })
-    const outcomes = await driveBoth(sealed(calls), sealed(calls))
-
-    expect(outcomes.map((outcome) => outcome._tag)).toEqual(["completed", "completed"])
-    expect(calls).toEqual(["call-1"])
-  })
-
-  it("treats a sealed child resolved under a different composition as a different child", async () => {
-    const calls: Array<string> = []
-    const withLayers = (
-      collected: Array<string>,
-      layers: ReadonlyArray<string>
-    ): Effect.Effect<unknown, unknown, PortServices> =>
-      Effect.gen(function*() {
-        const engine = yield* FlowEngineLike.make({
-          model: countingModel([]),
-          route: staticRoute(),
-          children: countingChildren(collected),
-          layers
-        })
-        return yield* Stream.runCollect(
-          engine.splice(new Plan.Batch({ children: [child({ callId: "call-1" })] }))
-        )
-      })
-    const outcomes = await driveBoth(
-      withLayers(calls, ["flows-plugin-a"]),
-      withLayers(calls, ["flows-plugin-a", "flows-plugin-b"])
-    )
-
-    expect(outcomes.map((outcome) => outcome._tag)).toEqual(["completed", "completed"])
-    // A sealed child is shareable on content, but the composition is part of
-    // that content: adding a plugin changes what the call means.
-    expect(calls).toEqual(["call-1", "call-1"])
-  })
-
-  it("replays a sealed child when the resolved composition is identical", async () => {
-    const calls: Array<string> = []
-    const withLayers = (
-      collected: Array<string>
-    ): Effect.Effect<unknown, unknown, PortServices> =>
-      Effect.gen(function*() {
-        const engine = yield* FlowEngineLike.make({
-          model: countingModel([]),
-          route: staticRoute(),
-          children: countingChildren(collected),
-          layers: ["flows-plugin-b", "flows-plugin-a", "flows-plugin-b"],
-          capabilities: {}
-        })
-        return yield* Stream.runCollect(
-          engine.splice(new Plan.Batch({ children: [child({ callId: "call-1" })] }))
-        )
-      })
-    const first = await driveBoth(withLayers(calls), withLayers(calls))
-
-    expect(first.map((outcome) => outcome._tag)).toEqual(["completed", "completed"])
-    expect(calls).toEqual(["call-1"])
-  })
-
-  it("does not alias a sealed child when resolved layer order changes", async () => {
-    const calls: Array<string> = []
-    const withLayers = (
-      layers: ReadonlyArray<string>
-    ): Effect.Effect<unknown, unknown, PortServices> =>
-      Effect.gen(function*() {
-        const engine = yield* FlowEngineLike.make({
-          model: countingModel([]),
-          route: staticRoute(),
-          children: countingChildren(calls),
-          layers
-        })
-        return yield* Stream.runCollect(
-          engine.splice(new Plan.Batch({ children: [child({ callId: "call-1" })] }))
-        )
-      })
-    const outcomes = await driveBoth(
-      withLayers(["flows-plugin-a", "flows-plugin-b"]),
-      withLayers(["flows-plugin-b", "flows-plugin-a"])
-    )
-
-    expect(outcomes.map((outcome) => outcome._tag)).toEqual(["completed", "completed"])
-    expect(calls).toEqual(["call-1", "call-1"])
-  })
-})
 
 describe("FlowEngineLike.record", () => {
   it("journals a controller boundary once and replays the recorded value after a park", async () => {
@@ -1247,8 +977,10 @@ describe("cell call identity across runs", () => {
         capabilities: {},
         calls: {
           run: () =>
-            Effect.map(Action.CurrentInvocationKey, (key) =>
-              new Cell.CallResult({ outcome: "success", value: key ?? "missing" }))
+            Effect.map(
+              Action.CurrentInvocationKey,
+              (key) => new Cell.CallResult({ outcome: "success", value: key ?? "missing" })
+            )
         }
       })
       const result = yield* port.call(call)
@@ -1390,7 +1122,7 @@ describe("FlowEngineLike.defaultModelRetryPolicy", () => {
    */
   const exhaust = (model: Model.Model): Promise<typeof FlowEngineLike.RecordedModelStep.Type> =>
     Effect.gen(function*() {
-      const fiber = yield* FlowEngineLike.recordModelStep(
+      const fiber = yield* InternalFlowEngineLike.recordModelStep(
         model,
         request("hello"),
         FlowEngineLike.defaultModelRetryPolicy
@@ -1402,7 +1134,7 @@ describe("FlowEngineLike.defaultModelRetryPolicy", () => {
   const retriesOf = (
     recorded: typeof FlowEngineLike.RecordedModelStep.Type
   ): ReadonlyArray<ModelEvent.Retry> =>
-    FlowEngineLike.normalizeRecordedModelStep(recorded).events.filter(
+    InternalFlowEngineLike.normalizeRecordedModelStep(recorded).events.filter(
       (event): event is ModelEvent.Retry => event.type === "retry"
     )
 
@@ -1450,7 +1182,7 @@ describe("FlowEngineLike.defaultModelRetryPolicy", () => {
     expect(observed.attempts).toBe(FlowEngineLike.defaultModelRetryTimes + 1)
     expect(retriesOf(recorded)).toHaveLength(FlowEngineLike.defaultModelRetryTimes)
     // Exhaustion returns the provider's own typed error, never a wrapper.
-    expect(FlowEngineLike.normalizeRecordedModelStep(recorded).error).toStrictEqual(error)
+    expect(InternalFlowEngineLike.normalizeRecordedModelStep(recorded).error).toStrictEqual(error)
   })
 
   it("puts a scripted stream abort on the same ladder, at the same delays", async () => {
@@ -1482,7 +1214,7 @@ describe("FlowEngineLike.defaultModelRetryPolicy", () => {
     expect(observed.attempts).toBe(FlowEngineLike.defaultModelRetryTimes + 1)
     expect(observed.gaps.map((gap) => Math.round(gap))).toEqual(retries.map((retry) => retry.delayMillis))
     expect(observed.gaps.reduce((total, gap) => total + gap, 0)).toBeGreaterThan(24_000)
-    expect(FlowEngineLike.normalizeRecordedModelStep(recorded).error).toMatchObject({
+    expect(InternalFlowEngineLike.normalizeRecordedModelStep(recorded).error).toMatchObject({
       code: "transport",
       message: "The model response stream ended without a settlement"
     })
@@ -1534,7 +1266,7 @@ describe("FlowEngineLike.defaultModelRetryPolicy", () => {
     // charge — that the count alone would have allowed.
     const unbounded = (FlowEngineLike.defaultModelRetryTimes + 1) * 10_000
     expect(observed.attempts * 10_000).toBeLessThan(unbounded)
-    expect(FlowEngineLike.normalizeRecordedModelStep(recorded).error).toMatchObject({ code: "transport" })
+    expect(InternalFlowEngineLike.normalizeRecordedModelStep(recorded).error).toMatchObject({ code: "transport" })
   })
 
   it("runs every declared rung when the attempts themselves are cheap", async () => {
@@ -1581,7 +1313,7 @@ describe("FlowEngineLike.defaultModelRetryPolicy", () => {
 
     await expect(
       Effect.runPromise(
-        FlowEngineLike.recordModelStep(model, request("hello"), Schedule.recurs(0))
+        InternalFlowEngineLike.recordModelStep(model, request("hello"), Schedule.recurs(0))
       )
     ).rejects.toStrictEqual(error)
   })
@@ -1651,7 +1383,7 @@ describe("FlowEngineLike model-call budget", () => {
     budget: number | undefined = budgetMillis
   ): Promise<typeof FlowEngineLike.RecordedModelStep.Type> =>
     Effect.gen(function*() {
-      const fiber = yield* FlowEngineLike.recordModelStep(
+      const fiber = yield* InternalFlowEngineLike.recordModelStep(
         model,
         request("hello"),
         FlowEngineLike.defaultModelRetryPolicy,
@@ -1664,7 +1396,7 @@ describe("FlowEngineLike model-call budget", () => {
   const retriesOf = (
     recorded: typeof FlowEngineLike.RecordedModelStep.Type
   ): ReadonlyArray<ModelEvent.Retry> =>
-    FlowEngineLike.normalizeRecordedModelStep(recorded).events.filter(
+    InternalFlowEngineLike.normalizeRecordedModelStep(recorded).events.filter(
       (event): event is ModelEvent.Retry => event.type === "retry"
     )
 
@@ -1689,7 +1421,7 @@ describe("FlowEngineLike model-call budget", () => {
     // reached its end, and only the second one did.
     expect(seen.completed).toEqual([1])
     // The step still settles. An overrun costs one attempt, not the frame.
-    expect(FlowEngineLike.normalizeRecordedModelStep(recorded).error).toBeUndefined()
+    expect(InternalFlowEngineLike.normalizeRecordedModelStep(recorded).error).toBeUndefined()
 
     // The re-issue teaches. Waiting alone cannot fix an answer that is too
     // long, so the second request says what happened and what to do instead —
@@ -1713,7 +1445,7 @@ describe("FlowEngineLike model-call budget", () => {
     expect(seen.requests).toHaveLength(1)
     expect(seen.requests[0]!.system).toEqual([])
     expect(seen.completed).toEqual([0])
-    expect(FlowEngineLike.normalizeRecordedModelStep(recorded).error).toBeUndefined()
+    expect(InternalFlowEngineLike.normalizeRecordedModelStep(recorded).error).toBeUndefined()
   })
 
   it("runs unbounded when the controller disarms the budget", async () => {
@@ -1724,7 +1456,7 @@ describe("FlowEngineLike model-call budget", () => {
     // past the default ceiling settles untouched.
     expect(retriesOf(recorded)).toEqual([])
     expect(seen.completed).toEqual([0])
-    expect(FlowEngineLike.normalizeRecordedModelStep(recorded).error).toBeUndefined()
+    expect(InternalFlowEngineLike.normalizeRecordedModelStep(recorded).error).toBeUndefined()
   })
 
   it("surfaces the typed error once the re-issue has overrun too", async () => {
@@ -1738,7 +1470,7 @@ describe("FlowEngineLike model-call budget", () => {
     expect(retries).toHaveLength(FlowEngineLike.defaultModelOverruns)
     expect(new Set(retries.map((retry) => retry.code))).toEqual(new Set(["call_timeout"]))
     expect(seen.completed).toEqual([])
-    const error = FlowEngineLike.normalizeRecordedModelStep(recorded).error
+    const error = InternalFlowEngineLike.normalizeRecordedModelStep(recorded).error
     expect(error).toBeInstanceOf(ModelError)
     expect((error as ModelError).code).toBe("call_timeout")
     expect((error as ModelError).message).toContain("5-second budget")

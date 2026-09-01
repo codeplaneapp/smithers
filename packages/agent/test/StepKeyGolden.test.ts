@@ -1,0 +1,227 @@
+/**
+ * Golden vectors for the durable identities this package derives.
+ *
+ * A step key is a cache address. Every other case in this suite asserts a
+ * RELATION between keys — two calls agree, two runs differ, a park replays —
+ * and a relation survives a change that moves every key at once. Rewriting the
+ * material a sealed model call hashes, or the composition token folded into a
+ * cell call, invalidates every step recorded by every released host and pays
+ * for one provider call again per boundary, silently, because the relational
+ * assertions all still hold.
+ *
+ * So these cases pin the exact strings. A failure here is never a bug on its
+ * own: it says the identity moved, and the change is releasable only once the
+ * move is deliberate and recorded in CHANGELOG.md as a cache-invalidation
+ * event — which is exactly how the rename from
+ * `flows/engine-harness/composition/v1` to `flows/agent/composition/v1` was
+ * released.
+ *
+ * Each key is read back through `Action.CurrentInvocationKey` inside the
+ * dispatched activity, so what is pinned is the identity the ENGINE carried,
+ * not a value recomputed from the same source the assertion is checking.
+ */
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Flow, FlowRuntime } from "@smthrs/flow"
+import * as Cell from "@smthrs/harness/Cell"
+import * as ContextWindow from "@smthrs/harness/ContextWindow"
+import type * as EngineLike from "@smthrs/harness/EngineLike"
+import * as Model from "@smthrs/model/Model"
+import * as ModelEvent from "@smthrs/model/ModelEvent"
+import * as ModelRequest from "@smthrs/model/ModelRequest"
+import type * as Route from "@smthrs/model/Route"
+import { Node } from "@smthrs/plan"
+import { Deferred, Effect, Layer, Option, Schema, Scope, Stream } from "effect"
+import type * as Crypto from "effect/Crypto"
+import { describe, expect, it } from "vitest"
+import * as Budget from "../src/Budget.ts"
+import * as FlowEngineLike from "../src/FlowEngineLike.ts"
+import * as QuotaPolicy from "../src/QuotaPolicy.ts"
+
+/** The one prepared wire request both vectors are sealed against. */
+const prepared: Route.PreparedRequest = {
+  routeId: "route-golden",
+  protocolId: "test-protocol",
+  method: "POST",
+  url: "https://example.invalid/v1/messages",
+  publicHeaders: { "content-type": "application/json" },
+  body: new TextEncoder().encode("{\"golden\":true}"),
+  bodyText: "{\"golden\":true}"
+}
+
+const route: FlowEngineLike.RouteResolver = { prepare: () => Effect.succeed(prepared) }
+
+const request = ModelRequest.ModelRequest.make({
+  modelId: "golden-model",
+  system: [],
+  messages: [ModelRequest.Message.user("seal me")],
+  tools: [],
+  params: ModelRequest.GenerationParams.make()
+})
+
+/** The sealed declaration, fixed in every field the key material reads. */
+const sealed: EngineLike.SealedModelStep = {
+  request,
+  keyMaterial: {
+    version: "flows/key-material/v2",
+    kind: "sealed",
+    body: { _tag: "ModelCall", request },
+    inputs: [{
+      _tag: "Literal",
+      value: { contextDigest: ContextWindow.make({ modelId: "golden-model", segments: [] }).digest }
+    }],
+    layers: [],
+    capabilities: [],
+    effects: undefined,
+    placement: undefined
+  }
+}
+
+/** The sealed cell call, fixed the same way. */
+const cellCall = new Cell.Call({
+  flowName: "fs/write",
+  input: { path: "out.txt", text: "done" },
+  capabilities: [],
+  effects: { reads: [], writes: [], mode: "hermetic", onConflict: "serialize", tier: "sealed" },
+  placement: Option.none(),
+  identity: new Cell.CallIdentity({
+    session: "golden-session",
+    frame: 0,
+    cell: "golden-cell-digest",
+    ordinal: 0,
+    declaration: "golden-declaration-digest",
+    layers: []
+  })
+})
+
+/**
+ * A model that answers with the idempotency key the engine dispatched it
+ * under.
+ */
+const reportingModel: Model.Model = Model.make({
+  stream: () =>
+    Stream.unwrap(
+      Effect.map(Action.CurrentInvocationKey, (key) =>
+        Stream.fromIterable([
+          ModelEvent.ModelEvent.TextStart({ type: "text-start", id: "0" }),
+          ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "0", text: key ?? "missing" }),
+          ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+        ]))
+    )
+})
+
+const goldenFlow = Flow.make("agent/test/step-key-golden", {
+  payload: {},
+  success: Schema.Unknown,
+  error: Schema.Unknown,
+  body: () => Node.succeed(undefined)
+})
+
+/** Runs one body as a real execution and hands back what it produced. */
+const drive = <A>(
+  body: Effect.Effect<
+    A,
+    unknown,
+    | Crypto.Crypto
+    | FlowRuntime.FlowRuntime
+    | FlowRuntime.FlowInstance
+    | Budget.Budget
+    | QuotaPolicy.QuotaClassifier
+  >
+): Promise<A> =>
+  Effect.gen(function*() {
+    const engine = yield* FlowRuntime.FlowRuntime
+    const scope = yield* Effect.scope
+    const settled = Deferred.makeUnsafe<A, unknown>()
+    yield* engine.register(
+      goldenFlow,
+      () => Effect.exit(body).pipe(Effect.flatMap((exit) => Deferred.done(settled, exit)))
+    ).pipe(Scope.provide(scope))
+    yield* engine.execute(goldenFlow, { executionId: "exec-golden", payload: {}, discard: true })
+    return yield* Deferred.await(settled)
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        FlowEngine.layerMemory,
+        NodeCrypto.layer,
+        Budget.layerUnbounded(),
+        QuotaPolicy.layerUnclassified()
+      )
+    ),
+    Effect.scoped,
+    Effect.orDie,
+    Effect.runPromise
+  )
+
+/** Seals the fixed step through a port built over `layers`. */
+const sealUnder = (layers: ReadonlyArray<string>) =>
+  Effect.gen(function*() {
+    const port = yield* FlowEngineLike.make({ model: reportingModel, route, layers, capabilities: {} })
+    const events = yield* Stream.runCollect(port.sealStep(sealed))
+    const delta = events.find((event) => event.type === "text-delta")
+    return delta === undefined ? "missing" : (delta as { readonly text: string }).text
+  })
+
+/** Dispatches the fixed cell call through a port built over `layers`. */
+const callUnder = (layers: ReadonlyArray<string>) =>
+  Effect.gen(function*() {
+    const port = yield* FlowEngineLike.make({
+      model: reportingModel,
+      route,
+      layers,
+      capabilities: {},
+      calls: {
+        run: () =>
+          Effect.map(
+            Action.CurrentInvocationKey,
+            (key) => new Cell.CallResult({ outcome: "success", value: key ?? "missing" })
+          )
+      }
+    })
+    const result = yield* port.call(cellCall)
+    return String(result.value)
+  })
+
+describe("the sealed model step key", () => {
+  it("is exactly this string for this prepared request and composition", async () => {
+    const observed = await drive(Effect.gen(function*() {
+      return {
+        host: yield* sealUnder(["golden-host-layer"]),
+        again: yield* sealUnder(["golden-host-layer"]),
+        other: yield* sealUnder(["another-host-layer"])
+      }
+    }))
+
+    // Changing this literal is a CACHE-INVALIDATION EVENT: every sealed model
+    // step every released host recorded misses, and each one pays the provider
+    // again. Record the move in CHANGELOG.md before changing it. The material
+    // behind it is the prepared wire request (route, protocol, method, url,
+    // public headers, canonical body bytes), the harness's declared key
+    // material, and — because this port declares `capabilities` — the cache
+    // environment carrying the composition token.
+    expect(observed.host).toBe("key1_132c02c3b31891b4c1b6362744cafd0860b72b57cc42973838b125a034baa314")
+    // Sealed means content-addressed: the same declaration through a second
+    // port of the same composition is one recorded answer, not two calls.
+    expect(observed.again).toBe(observed.host)
+    // And the composition is genuinely in it, which is what keeps a step
+    // recorded under a broader envelope from being served to a narrower one.
+    expect(observed.other).not.toBe(observed.host)
+  })
+})
+
+describe("the sealed cell-call key", () => {
+  it("is exactly this string, and moves with the composition", async () => {
+    const observed = await drive(Effect.gen(function*() {
+      return { host: yield* callUnder(["golden-host-layer"]), other: yield* callUnder(["another-host-layer"]) }
+    }))
+
+    // The same warning applies. This key additionally folds in the composition
+    // token `flows/agent/composition/v1:<digest of the layer set>`, so a rename
+    // of that prefix, or a change to how the layer set is digested, moves this
+    // string while leaving the sealed model key above untouched.
+    expect(observed.host).toBe("key1_f80eeedbeaf0fccddf7c98a8cbf54d478d39012007a77aaf7eddded0e88fd722")
+    // The composition really is in the key: the same call resolved under a
+    // different layer set is a different boundary, not a cache hit.
+    expect(observed.other).not.toBe(observed.host)
+  })
+})

@@ -1,19 +1,16 @@
 /**
  * The failure edges of the flow-engine port.
  *
- * The happy paths are asserted where they belong — `CellSandbox` for the
- * workspace transaction, `SplicedPlan` for plan growth, `FlowEngineLike` for
- * the port itself. What is left is what only shows up when a seam refuses: an
- * unkeyable sealed call, a sandbox that cannot execute or materialize, an
- * invalidated execution, and a plan port that rejects the elaborated subgraph.
- * Every one of these has to arrive as a typed `HarnessError`, because the cell
- * boundary can only catch what is typed.
+ * The happy paths are asserted where they belong: `CellSandbox` for the
+ * workspace transaction and `FlowEngineLike` for the port itself. What is left
+ * is what only shows up when a seam refuses: an unkeyable sealed call, a
+ * sandbox that cannot execute or materialize, and an invalidated execution.
+ * Every one has to arrive as a typed `HarnessError`, because the cell boundary
+ * can only catch what is typed.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as Cell from "@smthrs/harness/Cell"
 import { HarnessError } from "@smthrs/harness/HarnessError"
-import * as HarnessPlan from "@smthrs/harness/Plan"
-import * as PersistedPlan from "@smthrs/plan/Plan"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import { Effect, Option } from "effect"
 import type * as Crypto from "effect/Crypto"
@@ -96,37 +93,6 @@ const sandboxOf = (
     ...overrides
   } satisfies SandboxStub) as unknown as WorkspaceSandbox.Service
 
-const scope = { run: "run-failures", layers: ["layer-a"] }
-
-/** A one-node base plan, the shape `appendBatch` grows a new generation onto. */
-const basePlan = (planId: string) =>
-  PersistedPlan.compile({
-    planId,
-    flow: "review",
-    nodes: [{
-      id: "root",
-      material: {
-        version: "flows/key-material/v2" as const,
-        kind: "sealed" as const,
-        body: { activity: "root" },
-        inputs: [],
-        layers: [],
-        capabilities: []
-      },
-      effects: { reads: [], writes: [], boundaryMode: "hard" as const }
-    }]
-  })
-
-const child = (args: unknown) =>
-  new HarnessPlan.Child({
-    callId: "call_1",
-    flowName: "fs/write",
-    args: args as HarnessPlan.Child["args"],
-    capabilities: [],
-    effects,
-    placement: Option.none()
-  })
-
 describe("the sandboxed call runner", () => {
   it("reports an unkeyable sealed call as a typed harness failure", async () => {
     // A lone surrogate has no canonical form, so the call cannot be digested
@@ -157,7 +123,7 @@ describe("the sandboxed call runner", () => {
 
     // A `HarnessError` from the body is already the boundary's vocabulary and
     // travels unchanged rather than being wrapped a second time.
-    const typed = new HarnessError({ code: "elaboration_failed", message: "unknown flow" })
+    const typed = new HarnessError({ code: "engine_failed", message: "unknown flow" })
     const passed = await run(
       Effect.gen(function*() {
         const calls = yield* FlowEngineLike.sandboxed(
@@ -328,52 +294,5 @@ describe("callMaterial", () => {
       ordinal: 0
     })
     expect(material.body).not.toHaveProperty("placement")
-  })
-})
-
-describe("appendBatch", () => {
-  it("reports a subgraph that cannot be appended as a typed harness failure", async () => {
-    const error = await run(
-      Effect.gen(function*() {
-        const base = yield* basePlan("failure-plan")
-        return yield* Effect.flip(
-          FlowEngineLike.appendBatch(base, new HarnessPlan.Batch({ children: [child({ path: "\uD800" })] }), scope)
-        )
-      })
-    )
-
-    expect(error).toBeInstanceOf(HarnessError)
-    expect(error.message).toBe("The elaborated subgraph could not be appended to its plan")
-  })
-
-  it("refuses an unsealed expected-mode child, which has no content key to append", async () => {
-    // `childMaterial` still builds the run-local shape for unsealed work — the
-    // run and call id it is scoped by, and the soft boundary an expected-mode
-    // declaration gets. The plan then refuses it, because only sealed material
-    // is content-addressable, and a plan node is addressed by content.
-    const error = await run(
-      Effect.gen(function*() {
-        const base = yield* basePlan("soft-plan")
-        return yield* Effect.flip(FlowEngineLike.appendBatch(
-          base,
-          new HarnessPlan.Batch({
-            children: [
-              new HarnessPlan.Child({
-                callId: "call_soft",
-                flowName: "fs/write",
-                args: { path: "notes/todo.md" } as HarnessPlan.Child["args"],
-                capabilities: [],
-                effects: { ...effects, tier: "irreversible", mode: "expected" },
-                placement: Option.some("local" as const)
-              })
-            ]
-          }),
-          scope
-        ))
-      })
-    )
-
-    expect(error).toBeInstanceOf(HarnessError)
-    expect(String(error.cause)).toContain("Cannot create a content key for irreversible material")
   })
 })

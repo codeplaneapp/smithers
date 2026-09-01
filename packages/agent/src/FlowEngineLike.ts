@@ -19,19 +19,15 @@
  * - `sealStep` resolves the route, runs `Route.prepare`, and digests the
  *   credential-free `PreparedRequest` — canonical body bytes included —
  *   together with the harness's declared key material into a `StepKey`
- *   (`docs/specs/Concepts/Step Keys.md`). That key is the *sealed* activity's
+ *   (`docs/pages/concepts/step-keys.md`). That key is the *sealed* activity's
  *   idempotency key, so a provider wire change produces a new key and a
  *   replayed turn re-emits the recorded model events without calling the
  *   provider again. Credentials are signed on by the route after the digest
  *   and never enter it.
- * - `splice` runs each elaborated child as its own activity at the tier the
- *   child declares. Sealed children take a pure content key, so the same
- *   sealed call replays one recorded result; compensable and irreversible
- *   children fold the run scope *and* the model's `callId` into the key, which
- *   keeps two invocations of one declaration distinct, keeps two runs that both
- *   labelled a call `call_1` from aliasing onto one another, and satisfies the
- *   engine's requirement that an irreversible activity declare an idempotency
- *   key before it may be retried.
+ * - `splice` refuses every child in an elaborated batch with a typed engine
+ *   failure. The elaborated-subgraph path was superseded by the cell loop, so
+ *   the port remains available to the harness but does not run that old path.
+ *   An empty batch still produces an empty stream.
  * - `record` journals one nondeterministic controller read — the steering
  *   drain, and the workspace measurements below — as its own run-scoped
  *   boundary, so a resumed run replays the recorded value instead of reading
@@ -62,21 +58,32 @@ import type { FileBoundary } from "@smthrs/flow/FileBoundary"
 import * as Cell from "@smthrs/harness/Cell"
 import * as EngineLike from "@smthrs/harness/EngineLike"
 import * as HarnessError from "@smthrs/harness/HarnessError"
-import * as Plan from "@smthrs/harness/Plan"
+import type * as Plan from "@smthrs/harness/Plan"
 import * as CanonicalJson from "@smthrs/model/CanonicalJson"
 import type * as Model from "@smthrs/model/Model"
 import * as ModelError from "@smthrs/model/ModelError"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
 import * as ModelRequest from "@smthrs/model/ModelRequest"
 import * as Route from "@smthrs/model/Route"
-import * as PersistedPlan from "@smthrs/plan/Plan"
 import * as StepKey from "@smthrs/plan/StepKey"
 import * as Checkpoints from "@smthrs/std/Checkpoints"
-import { Clock, Context, Crypto, Duration, Effect, Layer, Option, Schedule, Schema, Stream } from "effect"
+import * as Clock from "effect/Clock"
+import * as Context from "effect/Context"
+import * as Crypto from "effect/Crypto"
+import * as Duration from "effect/Duration"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import * as Schedule from "effect/Schedule"
+import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import * as Budget from "./Budget.ts"
+import { normalizeRecordedModelStep, recordModelStep } from "./internal/FlowEngineLike.ts"
 import * as QuotaPolicy from "./QuotaPolicy.ts"
 import * as WorkspaceObservation from "./WorkspaceObservation.ts"
 import type * as WorkspaceSandbox from "./WorkspaceSandbox.ts"
+
+export { defaultModelOverruns } from "./internal/FlowEngineLike.ts"
 
 /**
  * Route resolution for one sealed model request.
@@ -106,26 +113,10 @@ export const routeResolver = <Body, Frame, Event, State>(
 })
 
 /**
- * Executes one child call elaborated from a model tool call.
- *
- * The runner owns flow lookup, decoding, capability attenuation, and placement;
- * this module owns only durability — it wraps whatever the runner returns in an
- * activity so the call is recorded once and replayed thereafter.
- *
- * @category models
- * @since 0.1.0
- */
-export interface ChildRunner {
-  readonly run: (
-    child: Plan.Child
-  ) => Effect.Effect<Plan.ChildResult, HarnessError.HarnessError>
-}
-
-/**
  * Executes one flow call issued from inside a running cell.
  *
- * As with {@link ChildRunner}, the runner owns lookup, decoding, attenuation,
- * and placement; this module owns only durability.
+ * The runner owns lookup, decoding, attenuation, and placement; this module
+ * owns only durability.
  *
  * @category models
  * @since 0.1.0
@@ -213,11 +204,13 @@ export const callBoundary = (call: Cell.Call): FileBoundary => ({
 /**
  * The key material one cell call declares about itself.
  *
- * This is the same material {@link callKey} hashes, exposed as a value so the
- * workspace sandbox is handed the planner's declaration rather than a second,
- * separately-maintained description of the same call. A sealed call is
- * content-addressed; anything else folds in the cell identity that keeps two
- * invocations of one declaration distinct.
+ * This is the workspace sandbox's separate content key over the declared call
+ * material. The durable activity {@link callKey} uses `StepKey.content`
+ * instead: it nests effects under the body and includes the resolved scope
+ * layers, including the composition digest this function never receives. The
+ * two keys therefore describe related boundaries but are intentionally not
+ * equal. A sealed call is content-addressed; anything else folds in the cell
+ * identity that keeps two invocations of one declaration distinct.
  *
  * @category constructors
  * @since 0.1.0
@@ -255,65 +248,6 @@ export const callMaterial = (
   effects: call.effects,
   placement: undefined
 })
-
-/**
- * One node of an elaborated subgraph, keyed and ready to append to a plan.
- *
- * @category models
- * @since 0.1.0
- */
-/** The key material one elaborated child declares about itself. */
-const childMaterial = (
-  child: Plan.Child,
-  scope: { readonly layers: ReadonlyArray<string>; readonly run: string }
-): KeyMaterial.KeyMaterial => ({
-  version: "flows/key-material/v2",
-  kind: child.effects.tier,
-  body: {
-    _tag: "FlowChild",
-    flowName: child.flowName,
-    args: child.args,
-    ...(Option.isSome(child.placement) ? { placement: child.placement.value } : {}),
-    ...(child.effects.tier === "sealed" ? {} : { run: scope.run, callId: child.callId })
-  },
-  inputs: [],
-  layers: [...scope.layers].sort(),
-  capabilities: [...child.capabilities].sort(),
-  effects: child.effects,
-  placement: undefined
-})
-
-/**
- * Appends one elaborated batch to the persisted plan value.
- *
- * This is deliberately the main tree's compiler and append operation, not a
- * second node projection: dependency substitution, conflict annotations,
- * generation, and the plan digest advance together or not at all.
- *
- * @category constructors
- * @since 0.1.0
- */
-export const appendBatch = (
-  plan: PersistedPlan.Plan,
-  batch: Plan.Batch,
-  scope: { readonly layers: ReadonlyArray<string>; readonly run: string }
-): Effect.Effect<PersistedPlan.Plan, HarnessError.HarnessError> =>
-  keyed(PersistedPlan.append(
-    plan,
-    batch.children.map((child): PersistedPlan.NodeDraft => ({
-      id: child.callId,
-      material: childMaterial(child, scope),
-      effects: {
-        reads: child.effects.reads,
-        writes: child.effects.writes,
-        boundaryMode: child.effects.mode === "hermetic" ? "hard" : "expected"
-      },
-      kind: "step",
-      conflictStrategy: child.effects.onConflict
-    }))
-  )).pipe(
-    Effect.mapError((cause) => engineFailed("The elaborated subgraph could not be appended to its plan", cause))
-  )
 
 /**
  * Runs every cell call inside an outer workspace transaction.
@@ -392,8 +326,9 @@ export const sandboxed = (
 /**
  * The collaborators a durable harness engine needs.
  *
- * `calls` is required by the cell path and `children` by the superseded
- * tool-call path; a host that runs only one of the two supplies only that one.
+ * `calls` is the cell loop's flow-call seam. A host that equips cells with
+ * callable flows supplies it; without one, a cell call is refused with a typed
+ * engine failure.
  *
  * @category models
  * @since 0.1.0
@@ -403,20 +338,7 @@ export interface Options {
   /** Bounded model-boundary retry policy; injectable so tests and hosts control time. */
   readonly modelRetryPolicy?: Schedule.Schedule<unknown, Model.ModelFailure> | undefined
   readonly route: RouteResolver
-  readonly children?: ChildRunner | undefined
   readonly calls?: CallRunner | undefined
-  /**
-   * The already-recorded plan this run grows during elaboration.
-   *
-   * `current` reads the latest persisted generation and `append` records the
-   * value returned by `@smthrs/plan/Plan.append`. Hosts without a dynamic plan
-   * omit the port; hosts that supply one cannot accidentally keep elaboration
-   * in an unpersisted side channel.
-   */
-  readonly plan?: {
-    readonly current: Effect.Effect<PersistedPlan.Plan, HarnessError.HarnessError>
-    readonly append: (plan: PersistedPlan.Plan) => Effect.Effect<void, HarnessError.HarnessError>
-  } | undefined
   /**
    * The resolved composition identity every durable key folds in.
    *
@@ -510,56 +432,6 @@ export const Correction = Context.Reference<number | undefined>(
 )
 
 /**
- * Reads either {@link RecordedModelStep} branch as the object form.
- *
- * @since 0.1.0
- * @private
- */
-export const normalizeRecordedModelStep = (
-  recorded: typeof RecordedModelStep.Type
-): {
-  readonly events: ReadonlyArray<ModelEvent.ModelEvent>
-  readonly error?: ModelError.ModelError | undefined
-  readonly correction?: number | undefined
-} => "events" in recorded ? recorded : { events: recorded, error: undefined, correction: undefined }
-
-/**
- * Every failure `Model.stream` may report, as one encodable schema. The engine
- * stores an activity's failure as well as its success, so the port's error
- * channel has to be expressible as a schema rather than an opaque value.
- */
-/**
- * The model error codes worth trying again.
- *
- * A provider call is the one step in the loop that fails for reasons that have
- * nothing to do with the task: a dropped HTTP/2 session, a 5xx, a rate limit.
- * Without a retry the first of those ends the run — an agent working a real
- * repository lost twenty minutes of context to
- * `ERR_HTTP2_INVALID_SESSION: The session has been destroyed`, with the frame,
- * the run, and the workspace state all discarded.
- *
- * `call_timeout` joins them for a different reason. It is the caller's own
- * doing — the request was interrupted at the budget the controller armed — but
- * it is retryable for the same reason the other two are: nothing about the
- * task changed, and the next attempt can succeed. What separates it is that
- * waiting alone would not help, so the re-issue also carries
- * {@link overrunTeaching} — and that it does not get this set's whole retry
- * budget, because it is the one code whose every attempt costs a full wall
- * clock ceiling rather than a refused connection. {@link defaultModelOverruns}
- * bounds it separately.
- *
- * Everything absent from this set is terminal for the request as written — a
- * bad key, a malformed request, a context overflow, a refusal — and retrying
- * one is pure latency. `context_overflow` in particular must reach the caller
- * unchanged: it is the typed signal compaction reads.
- */
-const retryableModelCodes: ReadonlySet<string> = new Set([
-  "provider_internal",
-  "transport",
-  "call_timeout"
-])
-
-/**
  * The first delay the production transport policy waits, in milliseconds.
  *
  * @category policies
@@ -610,7 +482,7 @@ export const defaultModelRetryTimes = 5
  * wait.
  *
  * @category policies
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const defaultModelRetryWindowMillis = 45_000
 
@@ -651,250 +523,6 @@ export const defaultModelRetryPolicy: Schedule.Schedule<unknown, Model.ModelFail
     Schedule.upTo({ times: defaultModelRetryTimes, duration: Duration.millis(defaultModelRetryWindowMillis) })
   )
 
-const seconds = (millis: number): number => Math.round(millis / 1000)
-
-/**
- * How many times one sealed step re-issues a call its budget cut off.
- *
- * The retry budget the transport codes share cannot be shared with an overrun,
- * because the two cost different things. A dropped session fails in
- * milliseconds, so five retries of it cost five backoffs; an overrun fails
- * only after spending the whole armed ceiling, so five retries of it cost five
- * ceilings. On the wave 7 default of 300,000 ms that is a single sealed step
- * spending 1,800 s of wall clock — 150% of the 1,200 s process budget that
- * wave gave a whole run, and 2.7x the 667 s call the budget was written to
- * bound. A budget that multiplies the failure it names is not a budget.
- *
- * One re-issue is the number the mechanism supports. Waiting cannot shorten an
- * answer, so the only thing a re-issue adds is {@link overrunTeaching}, and a
- * model that overran again *after* being told to answer directly has already
- * shown the teaching did not land; a third ask costs another full ceiling and
- * buys nothing new. With one re-issue a step spends at most twice the armed
- * budget — 600 s at the default, under the 667 s single call that motivated
- * the ceiling — and then fails the frame with the typed error, which is a
- * bound a report can state.
- *
- * @category policies
- * @since 0.1.0
- */
-export const defaultModelOverruns = 1
-
-/**
- * What a re-issued call tells the model about the attempt that was cut off.
- *
- * A transport failure is repaired by waiting; an overrun is not. The provider
- * would happily spend the budget again on the same answer, so the re-issue has
- * to say something the first attempt did not, and the only party that can
- * shorten the answer is the model. The note is deliberately terse and states
- * one instruction, because it is prepended to a system context that already
- * carries the cell contract, the task, and the run's state.
- *
- * It says nothing about how many attempts have been spent, because
- * {@link defaultModelOverruns} allows exactly one: a call carrying this note is
- * always the last one the step will make.
- *
- * @since 0.1.0
- * @private
- */
-export const overrunTeaching = (budgetMillis: number): string =>
-  `Time budget — your previous answer ran past this run's ${
-    seconds(budgetMillis)
-  }-second budget for one model call and was cut off before it finished, so none of it survives, and this is the last attempt this step will make. Answer directly this time: decide with the evidence you already have, keep the reasoning short, and emit the cell.`
-
-/**
- * Re-issues one overrun call with the teaching prepended to its system context.
- *
- * The teaching goes at the front of `system` rather than at the end of the
- * transcript because the transcript is the cell's to shape — the controller
- * replaces it wholesale each frame from what the cell projected — while the
- * system context is the run's stable teaching, which is where an instruction
- * about how to answer belongs. The original request is never mutated; a later
- * attempt re-derives from it, so two overruns leave one note rather than two.
- *
- * @since 0.1.0
- * @private
- */
-export const withOverrunTeaching = (
-  request: ModelRequest.ModelRequest,
-  budgetMillis: number
-): ModelRequest.ModelRequest =>
-  ModelRequest.ModelRequest.make({
-    ...request,
-    system: [
-      ModelRequest.SystemPart.make({ text: overrunTeaching(budgetMillis) }),
-      ...request.system
-    ]
-  })
-
-/**
- * Retries transient provider failures inside the sealed step.
- *
- * The retry is deliberately here rather than on the action's `retryPolicy`.
- * The engine's policy classifies by error *tag*, and every provider failure
- * shares the one `flows/model/ModelError` tag, so a tag-level policy either
- * retries a bad API key four times or retries nothing. It also replaces an
- * exhausted failure with `RetryAttemptsExhausted`, which would hide the very
- * `code` the caller branches on. Retrying in place keeps the classification
- * precise and lets the original typed error surface unchanged when the
- * backoff gives up.
- *
- * Each retry states the delay the schedule chose for it. The delay cannot be
- * read back off the journal timestamps: every retry of one step is buffered
- * and written when the step settles, so a run that backed off for half a
- * minute and one that did not back off at all are indistinguishable there.
- *
- * The classification is a `Schedule.while` *inside* the schedule rather than
- * `Effect.retry`'s `while` option, and the tap sits outside it. Both placements
- * matter. `Effect.retry` applies its `while` after stepping the schedule, so a
- * tap under it fires once for a terminal failure too and records a retry that
- * never happened — a `quota_exceeded` run journaled a phantom `model-retried`
- * exactly that way. Stopping the schedule first means the tap only ever sees a
- * step that will really recur, and `duration` is then the delay actually
- * slept — jitter and bound already applied — not the nominal one the base
- * schedule would have produced.
- *
- * `budgetMillis` is the same retry, applied to the one failure the provider
- * never reports: a call that answers, slowly, forever. It is enforced here
- * rather than around the whole sealed step so an overrun is an attempt rather
- * than the end of the frame — it is interrupted, classified `call_timeout`,
- * and re-issued on this schedule with {@link overrunTeaching} in front of it.
- * Interruption is the only mechanism involved: `Effect.timeoutOrElse` closes
- * the attempt's scope, and the model layer's own request teardown follows from
- * that, so nothing threads an abort signal and nothing polls a flag.
- *
- * The overrun rides the schedule's delays but not its count. Every other
- * retryable code fails fast and costs a backoff; an overrun costs a whole
- * armed ceiling, so it stops after {@link defaultModelOverruns} re-issues and
- * the step's total model time stays bounded by twice the budget rather than by
- * six times it.
- *
- * @since 0.1.0
- * @private
- */
-export const recordModelStep = (
-  model: Model.Model,
-  request: ModelRequest.ModelRequest,
-  policy: Schedule.Schedule<unknown, Model.ModelFailure>,
-  budgetMillis?: number | undefined,
-  correction?: number | undefined
-): Effect.Effect<typeof RecordedModelStep.Type, Model.ModelFailure> => {
-  const retries: Array<ModelEvent.ModelEvent> = []
-  let attempt = 0
-  /** How many attempts this step has already had cut off at the budget. */
-  let overruns = 0
-  const schedule = policy.pipe(
-    Schedule.while(({ input }) =>
-      input instanceof ModelError.ModelError && retryableModelCodes.has(input.code) &&
-      // The overrun's own bound. `overruns` was incremented by the attempt
-      // this failure came from, so the first cut-off call reads 1 and is
-      // re-issued, and the re-issue's own cut-off reads 2 and is not.
-      (input.code !== "call_timeout" || overruns <= defaultModelOverruns)
-    ),
-    Schedule.tap(({ duration, input }) =>
-      Effect.sync(() => {
-        attempt++
-        // Only a retryable `ModelError` reaches the tap: the classification
-        // above stops the schedule before it on anything else.
-        const error = input as ModelError.ModelError
-        retries.push(
-          ModelEvent.ModelEvent.Retry({
-            type: "retry",
-            attempt,
-            code: error.code,
-            // Jitter produces a fractional millisecond. The whole millisecond
-            // is the honest resolution for a report to read.
-            delayMillis: Math.round(Duration.toMillis(duration))
-          })
-        )
-      })
-    )
-  )
-  const budget = budgetMillis === undefined || budgetMillis <= 0 ? undefined : budgetMillis
-  const collected = budget === undefined
-    // Disarmed. The call is bounded by nothing but the caller's own process,
-    // which is what every model call was before this budget existed.
-    ? Stream.runCollect(model.stream(request))
-    // Suspended so each attempt reads the overrun count the attempt before it
-    // left. That is what puts the teaching on a re-issue and never on the
-    // first call, and what keeps the original request the one thing every
-    // attempt derives from.
-    : Effect.suspend(() =>
-      Stream.runCollect(
-        model.stream(overruns === 0 ? request : withOverrunTeaching(request, budget))
-      ).pipe(
-        Effect.timeoutOrElse({
-          duration: budget,
-          orElse: () =>
-            Effect.sync(() => {
-              overruns++
-            }).pipe(
-              Effect.andThen(Effect.fail(
-                new ModelError.ModelError({
-                  code: "call_timeout",
-                  message: `The model call ran past its ${seconds(budget)}-second budget and was interrupted`
-                })
-              ))
-            )
-        })
-      )
-    )
-  // A response body that ends without a settlement is a dead socket, and until
-  // now it was the one way a socket could end a run outright. `Stream.runCollect`
-  // *succeeds* on a truncated body — the events it did receive are returned,
-  // `settledMessage` folds them into an `aborted` assistant message, and the
-  // controller then raises `model_failed` because no `settle` is among them.
-  // That failure is a `HarnessError`, not a `ModelError`, so no retry
-  // classification ever saw it: one dropped HTTP/2 session, no backoff, run
-  // over. Two r91 instances were lost to that class and re-run as
-  // infrastructure crashes.
-  //
-  // Classifying it as `transport` puts it on the ladder every other socket
-  // failure already rides. It cannot be confused with an interruption: an
-  // interrupted fiber never reaches here with a value at all, and a settled
-  // stream always carries its settlement.
-  const attemptOnce = Effect.flatMap(collected, (events) =>
-    Array.from(events).some((event) => event.type === "settle")
-      ? Effect.succeed(events)
-      : Effect.fail(
-        new ModelError.ModelError({
-          code: "transport",
-          message: "The model response stream ended without a settlement"
-        })
-      ))
-  // Spread rather than always present: a call outside a correction ladder has
-  // no ordinal, and writing one anyway would make every ordinary model step
-  // claim to be correction zero of a ladder that never ran.
-  const ladder = correction === undefined ? {} : { correction }
-  return attemptOnce.pipe(
-    Effect.retry(schedule),
-    Effect.map((events) => ({ ...ladder, events: [...retries, ...events] })),
-    Effect.catchIf(
-      (error): error is ModelError.ModelError => error instanceof ModelError.ModelError,
-      (error) =>
-        isCapacityRefusal(error)
-          ? Effect.fail(error)
-          : Effect.succeed({ ...ladder, events: retries, error })
-    )
-  )
-}
-
-/**
- * Failures that describe provider capacity rather than the request.
- *
- * This is the recorder's unconditional floor. Classifier policy may decide
- * whether the caller parks and retries one of these failures, but no classifier
- * can turn one into a durable sealed value. `provider_internal` is the model
- * vocabulary used for provider overload (including Anthropic 529); the status
- * checks cover transports that retained the wire status under another code.
- */
-const capacityStatuses: ReadonlySet<number> = new Set([429, 503, 504, 529])
-
-const isCapacityRefusal = (error: ModelError.ModelError): boolean =>
-  error.code === "rate_limited" ||
-  error.code === "quota_exceeded" ||
-  error.code === "provider_internal" ||
-  (error.httpStatus !== undefined && capacityStatuses.has(error.httpStatus))
-
 /**
  * Applies a composition's additional quota-parking policy.
  *
@@ -923,6 +551,11 @@ const unlessParked = (quota: QuotaPolicy.Service) =>
   )
 }
 
+/**
+ * Every failure `Model.stream` may report, as one encodable schema. The engine
+ * stores an activity's failure as well as its success, so the port's error
+ * channel has to be expressible as a schema rather than an opaque value.
+ */
 const ModelFailure = Schema.Union([
   ModelError.ModelError,
   Permission.PermissionRequired,
@@ -931,8 +564,6 @@ const ModelFailure = Schema.Union([
 ])
 
 const sealStepActivityName = "harness/sealStep"
-
-const childActivityName = (flowName: string): string => `harness/child/${flowName}`
 
 const cellCallActivityName = (flowName: string): string => `harness/cell-call/${flowName}`
 
@@ -1041,47 +672,6 @@ interface Scope {
   readonly layers: ReadonlyArray<string>
   readonly run: string
 }
-
-/**
- * Derives one child's activity identity.
- *
- * A sealed child is content-addressed: the same declaration and arguments
- * replay one recorded result wherever they appear, under the resolved layer set
- * they were resolved with.
- *
- * Anything else folds in the run scope as well as the model's `callId`. The
- * `callId` alone was not enough: it is a provider-assigned label that restarts
- * at `call_1` in every run, so two semantically distinct executions — different
- * flow, different execution id, different resolved composition — collided on one
- * content key, and the second one replayed the first one's recorded result
- * instead of running. Run-scoping a non-sealed child is the same rule the cell
- * path already applies in {@link callKey}: an effect that is not shareable on
- * content is never shared across executions.
- */
-const childKey = (
-  child: Plan.Child,
-  scope: Scope
-): Effect.Effect<StepKey.StepKey, HarnessError.HarnessError> =>
-  keyed(
-    child.effects.tier === "sealed"
-      ? StepKey.fromKeyMaterial(childMaterial(child, scope), {})
-      : StepKey.content({
-        body: {
-          _tag: "FlowChild",
-          flowName: child.flowName,
-          args: child.args,
-          effects: child.effects,
-          placement: Option.getOrUndefined(child.placement),
-          run: scope.run,
-          callId: child.callId
-        },
-        inputs: {},
-        layers: scope.layers,
-        capabilities: { declared: [...child.capabilities].sort() }
-      })
-  ).pipe(
-    Effect.mapError((cause) => engineFailed(`Child call ${child.callId} could not be keyed`, cause))
-  )
 
 /**
  * Derives one cell call's activity identity.
@@ -1296,37 +886,9 @@ export const make = (
         }).pipe(Effect.provide(context))
       )
 
-    const splice = (
-      batch: Plan.Batch
-    ): Stream.Stream<Plan.SpliceEvent, HarnessError.HarnessError> =>
-      Stream.unwrap(
-        Effect.gen(function*() {
-          if (options.plan !== undefined) {
-            const current = yield* options.plan.current
-            const appended = yield* appendBatch(current, batch, scope)
-            yield* options.plan.append(appended)
-          }
-          return Stream.fromIterable(batch.children).pipe(
-            Stream.mapEffect((child) =>
-              Effect.gen(function*() {
-                const children = options.children
-                if (children === undefined) {
-                  return yield* Effect.fail(engineFailed("No child runner is configured", child.flowName))
-                }
-                const key = yield* childKey(child, scope)
-                return yield* Action.make({
-                  name: childActivityName(child.flowName),
-                  success: Plan.ChildResult,
-                  error: HarnessError.HarnessError,
-                  tier: child.effects.tier,
-                  idempotencyKey: key,
-                  execute: children.run(child)
-                })
-              }).pipe(Effect.provide(context))
-            ),
-            Stream.map((result) => new Plan.ChildSettled({ result }))
-          )
-        }).pipe(Effect.provide(context))
+    const splice = (batch: Plan.Batch): Stream.Stream<Plan.SpliceEvent, HarnessError.HarnessError> =>
+      Stream.fromIterable(batch.children).pipe(
+        Stream.mapEffect((child) => Effect.fail(engineFailed("No child runner is configured", child.flowName)))
       )
 
     const call = (

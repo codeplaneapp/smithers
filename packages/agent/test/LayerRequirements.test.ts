@@ -6,8 +6,7 @@ import * as AgentAction from "../src/AgentAction.ts"
 import * as Budget from "../src/Budget.ts"
 import * as QuotaPolicy from "../src/QuotaPolicy.ts"
 
-type Requirements<Self> = Self extends Layer.Layer<infer _Success, infer _Error, infer Requirement>
-  ? Requirement
+type Requirements<Self> = Self extends Layer.Layer<infer _Success, infer _Error, infer Requirement> ? Requirement
   : never
 
 const Checked = AgentAction.make("agent/test/LayerRequirements", {
