@@ -94,17 +94,17 @@ A compiled plan is a deep-frozen snapshot of the drafts it was given. Mutating a
 
 `PlanError` is a closed set of seven codes.
 
-| `code`               | Meaning                                                                                                               |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `cycle`              | material dependencies close a cycle                                                                                   |
-| `unknown_dependency` | a `Ref` or `Pending` names a node that is neither in the drafts nor already in the plan                               |
-| `duplicate_node`     | a draft reuses an id the plan already holds                                                                           |
-| `overlap_forbidden`  | a `fail` pair genuinely overlaps and no dependency path orders it                                                     |
-| `invalid_effects`    | a declared path is not workspace-relative, or one path is declared as both a write and a removal                      |
-| `invalid_node`       | an empty plan id, flow, or node id, a priority that is not a safe integer, or key material this release cannot decode |
-| `graph_too_large`    | a plan contains more than `Plan.maximumPlanNodes` nodes                                                               |
+| `code`               | Meaning                                                                                                                                                                                                                                            |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cycle`              | material dependencies close a cycle                                                                                                                                                                                                                |
+| `unknown_dependency` | a `Ref` or `Pending` names a node that is neither in the drafts nor already in the plan                                                                                                                                                            |
+| `duplicate_node`     | a draft reuses an id the plan already holds                                                                                                                                                                                                        |
+| `overlap_forbidden`  | a `fail` pair genuinely overlaps and no dependency path orders it                                                                                                                                                                                  |
+| `invalid_effects`    | one path is declared as both a write and a removal                                                                                                                                                                                                 |
+| `invalid_node`       | an empty plan id, flow, or node id, a priority that is not a safe integer, a `kind` or strategy outside its literal set, or key material or an effect declaration this release cannot decode, which includes a path that is not workspace-relative |
+| `graph_too_large`    | a plan contains more than `Plan.maximumPlanNodes` nodes                                                                                                                                                                                            |
 
-Compilation walks with explicit stacks and never recurses per edge. The conflict and reader-after-writer passes compare node pairs, so compilation is quadratic in node count and one plan is capped at `Plan.maximumPlanNodes`.
+Compilation walks with explicit stacks and never recurses per edge. The conflict and reader-after-writer passes compare node pairs, so pair comparison is quadratic in node count, and each pair whose write sets actually overlap adds one on-demand reachability walk over the edge set. A plan whose write sets barely overlap costs about `n²` comparisons; one whose writers overlap densely costs more than quadratic. `Plan.maximumPlanNodes` bounds that work, because a plan above it is refused with `graph_too_large` before any pair is compared.
 
 ### Conflict annotations
 

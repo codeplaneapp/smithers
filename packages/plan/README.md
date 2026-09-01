@@ -119,13 +119,14 @@ the plan digest a human approves.
 
 ## When it refuses
 
-`Plan.compile` and `Plan.append` fail with a `PlanError` carrying one of six
+`Plan.compile` and `Plan.append` fail with a `PlanError` carrying one of seven
 stable codes: `cycle`, `unknown_dependency`, `duplicate_node`,
-`overlap_forbidden`, `invalid_effects` (a declared path that is not
-workspace-relative, or one path declared as both a write and a removal), and
-`invalid_node` (an empty plan id or node id, a priority that is not a safe
-integer, or key material this release cannot decode), and `graph_too_large`
-(more than `Plan.maximumPlanNodes` nodes). They also surface
+`overlap_forbidden`, `invalid_effects` (one path declared as both a write and a
+removal), `invalid_node` (an empty plan id or node id, a priority that is not a
+safe integer, a `kind` or strategy outside its literal set, or key material or
+an effect declaration this release cannot decode, which includes a path that is
+not workspace-relative), and `graph_too_large` (more than
+`Plan.maximumPlanNodes` nodes). They also surface
 `StepKey.KeyMaterialError` for a missing dependency digest, non-content
 material, or an invalid environment identity, and Effect's `SchemaError` when a
 declaration has no canonical serialization.
@@ -168,8 +169,13 @@ application, `in`, and enumeration all throw a `GraphBuildError`.
 `Node.capture` refuses a capture record nested past 256 levels with a
 path-bearing `TypeError` rather than overflowing the native stack.
 `Plan.compile` walks with explicit stacks and never recurses per edge. Its
-conflict and reader-after-writer passes compare node pairs, so compilation is
-quadratic in node count and one plan is capped at `Plan.maximumPlanNodes`.
+conflict and reader-after-writer passes compare node pairs, so pair comparison
+is quadratic in node count, and each pair whose write sets actually overlap adds
+one on-demand reachability walk over the edge set. A plan whose write sets
+barely overlap therefore costs about `n²` comparisons, while one whose writers
+overlap densely costs more than quadratic. `Plan.maximumPlanNodes` bounds that
+work: a plan above it is refused with `graph_too_large` before any pair is
+compared.
 
 A compiled plan is a deep-frozen snapshot. Mutating the draft objects a caller
 passed in cannot change the plan, its keys, or its digest.
