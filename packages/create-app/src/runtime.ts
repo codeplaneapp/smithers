@@ -181,3 +181,18 @@ export const layerFor = (options: LayerOptions) => {
     Layer.provideMerge(options.crypto)
   )
 }
+
+/** Refuses a composition root that still owes a service. */
+type Complete<L> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>] ? [R] extends [never] ? true : false
+  : false
+
+/** Fails to compile unless its argument is `true`. */
+type Expect<T extends true> = T
+
+/**
+ * The routed-app runtime supplies every service its flow can require.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type CompositionRootsAreComplete = [Expect<Complete<ReturnType<typeof layerFor>>>]
