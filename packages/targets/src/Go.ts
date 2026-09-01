@@ -10,7 +10,6 @@ import * as Compose from "./Compose.ts"
 import * as Input from "./Input.ts"
 import * as Mise from "./Mise.ts"
 import * as Reference from "./Reference.ts"
-import type * as Secret from "./Secret.ts"
 import * as Stamp from "./Stamp.ts"
 import * as Target from "./Target.ts"
 import * as WorkspaceToolchain from "./Toolchain.ts"
@@ -87,8 +86,7 @@ const packageSelection = Schema.Union([
 ])
 const stampValue = Schema.Union([
   Stamp.Value,
-  Schema.String,
-  Schema.Struct({ _tag: Schema.Literal("Secret"), env: Schema.NonEmptyString })
+  Schema.String
 ])
 /** */
 export const StampMap = Schema.Record(Schema.String, stampValue)
@@ -216,7 +214,7 @@ export const Fuzz = (attrs: (typeof FuzzAttrs)["~type.make.in"]): Target.AnyTarg
  * value immediately before spawn.
  */
 export const ldflags = (
-  options: { readonly strip?: boolean; readonly stamp?: Readonly<Record<string, Stamp.Value | string | Secret.Secret>> }
+  options: { readonly strip?: boolean; readonly stamp?: Readonly<Record<string, Stamp.Value | string>> }
 ): string => {
   if (typeof options !== "object" || options === null) throw new TypeError("Go.ldflags options must be an object")
   for (const key of Object.getOwnPropertyNames(options)) {
@@ -224,9 +222,10 @@ export const ldflags = (
       throw new TypeError(`Go.ldflags received unknown option ${JSON.stringify(key)}`)
     }
   }
+  const stamp = options.stamp === undefined ? {} : Schema.decodeUnknownSync(StampMap)(options.stamp)
   return [
     ...(options.strip === true ? ["-s", "-w"] : []),
-    ...Object.entries(options.stamp ?? {}).flatMap((
+    ...Object.entries(stamp).flatMap((
       [name, value]
     ) => ["-X", `${name}=${Stamp.token(name, value)}`])
   ].join(" ")

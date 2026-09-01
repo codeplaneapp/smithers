@@ -102,6 +102,20 @@ export const layer: Layer.Layer<BunHost> = Layer.mergeAll(
 )
 
 /**
+ * Provides all five Bun Host services bound to one absolute repository root.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerAt = (root: string): Layer.Layer<BunHost> =>
+  Layer.mergeAll(
+    platform,
+    Layer.provide(BunChildProcessSpawner.layer, platform),
+    BunJj.layerAt(root),
+    layerHttpClient
+  )
+
+/**
  * Provides the Bun host with process containment turned on.
  *
  * Bun runs Effect's Node child-process implementation, so containment is the
@@ -126,6 +140,28 @@ export const layerContained = (
     // no recorded group, is in no ledger, and outlives the host that ran it.
     Layer.provideMerge(
       BunJj.layerSpawner,
+      Layer.provide(
+        ContainedSpawner.layer({ platform: process.platform, ...options }),
+        Layer.provide(BunChildProcessSpawner.layer, platform)
+      )
+    )
+  ).pipe(Layer.provideMerge(ProcessReaper.layer(options)))
+
+/**
+ * Provides the contained Bun host bound to one absolute repository root.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerContainedAt = (
+  root: string,
+  options?: ContainedSpawner.Options & ProcessReaper.Options
+): Layer.Layer<BunHost, never, ProcessLedger.ProcessLedger> =>
+  Layer.mergeAll(
+    platform,
+    layerHttpClient,
+    Layer.provideMerge(
+      BunJj.layerSpawnerAt(root),
       Layer.provide(
         ContainedSpawner.layer({ platform: process.platform, ...options }),
         Layer.provide(BunChildProcessSpawner.layer, platform)

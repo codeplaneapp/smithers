@@ -1,14 +1,23 @@
+import * as Sha256 from "@smthrs/crypto/Sha256"
 import { Effect, Layer, Redacted, Schema, Stream } from "effect"
+import * as Crypto from "effect/Crypto"
 import { describe, expect, it } from "vitest"
 import * as Channels from "../src/Channels.ts"
 import * as Control from "../src/Control.ts"
 import { PersistenceError, Unauthorized } from "../src/ControlError.ts"
+import * as ControlRuntime from "../src/ControlRuntime.ts"
 import * as WebhookChannel from "../src/WebhookChannel.ts"
 
 const accepted = { _tag: "Accepted" as const, receiptId: "receipt" }
 
+const runtime = ControlRuntime.layerMemory().pipe(
+  Layer.provide(Layer.succeed(Crypto.Crypto, Sha256.syncCrypto))
+)
+
+const channelsLayer = (control: Layer.Layer<Control.Control>) => Channels.layer.pipe(Layer.provide([control, runtime]))
+
 const run = <A, E>(effect: Effect.Effect<A, E, Channels.Channels>, calls: Array<string> = []) =>
-  Effect.runPromise(effect.pipe(Effect.provide(Channels.layer.pipe(Layer.provide(recordingControl(calls))))))
+  Effect.runPromise(effect.pipe(Effect.provide(channelsLayer(recordingControl(calls)))))
 
 const recordingControl = (calls: Array<string>) => {
   return Layer.succeed(
@@ -190,9 +199,91 @@ describe("Channels", () => {
           channel: "events",
           raw: { ...raw("signal"), body: new TextEncoder().encode("{\"kind\":\"signal\"}") }
         })
-      }).pipe(Effect.provide(Channels.layer.pipe(Layer.provide(control))))
+      }).pipe(Effect.provide(channelsLayer(control)))
     )
     expect(calls).toEqual(["plan", "run", "signal"])
+  })
+
+  it("scopes identical external keys by channel", async () => {
+    const calls: Array<string> = []
+    const channel = (name: string): Channels.Channel => ({
+      name,
+      schema: Schema.Unknown,
+      verify: () => Effect.void,
+      decode: () => Effect.succeed(null),
+      map: () => Effect.succeed({ _tag: "Start", flowId: "flow", input: {} }),
+      project: () => ({ cursor: "1", operation: "post", message: {} })
+    })
+    await run(
+      Effect.gen(function*() {
+        const channels = yield* Channels.Channels
+        yield* channels.register(channel("alpha"))
+        yield* channels.register(channel("beta"))
+        yield* channels.ingest({ channel: "alpha", raw: raw("shared") })
+        yield* channels.ingest({ channel: "beta", raw: raw("shared") })
+      }),
+      calls
+    )
+    expect(calls).toEqual(["plan", "run", "plan", "run"])
+  })
+
+  it("retains inbound receipts across coordinator reconstruction", async () => {
+    const calls: Array<string> = []
+    let decoded = 0
+    const channel: Channels.Channel = {
+      name: "durable",
+      schema: Schema.Unknown,
+      verify: () => Effect.void,
+      decode: () => Effect.sync(() => ++decoded),
+      map: () => Effect.succeed({ _tag: "Start", flowId: "flow", input: {} }),
+      project: () => ({ cursor: "1", operation: "post", message: {} })
+    }
+    const receipts = await Effect.runPromise(
+      Effect.gen(function*() {
+        const first = yield* Channels.make
+        yield* first.register(channel)
+        const accepted = yield* first.ingest({ channel: "durable", raw: raw("restart-key") })
+
+        // A new coordinator has an empty registry/delivery map but shares the
+        // durable ControlRuntime receipt store.
+        const second = yield* Channels.make
+        yield* second.register(channel)
+        const replay = yield* second.ingest({ channel: "durable", raw: raw("restart-key") })
+        return { accepted, replay }
+      }).pipe(Effect.provide([recordingControl(calls), runtime]))
+    )
+    expect(receipts.accepted).toMatchObject({ _tag: "Accepted", receiptId: "restart-key" })
+    expect(receipts.replay).toMatchObject({ _tag: "AlreadyApplied", receiptId: "restart-key" })
+    expect(calls).toEqual(["plan", "run"])
+    expect(decoded).toBe(1)
+  })
+
+  it("returns a durable conflict when one channel key is reused for another body", async () => {
+    const calls: Array<string> = []
+    let decoded = 0
+    const channel: Channels.Channel = {
+      name: "conflict",
+      schema: Schema.Unknown,
+      verify: () => Effect.void,
+      decode: () => Effect.sync(() => ++decoded),
+      map: () => Effect.succeed({ _tag: "Start", flowId: "flow", input: {} }),
+      project: () => ({ cursor: "1", operation: "post", message: {} })
+    }
+    const receipt = await run(
+      Effect.gen(function*() {
+        const channels = yield* Channels.Channels
+        yield* channels.register(channel)
+        yield* channels.ingest({ channel: "conflict", raw: raw("same") })
+        return yield* channels.ingest({
+          channel: "conflict",
+          raw: { ...raw("same"), body: new TextEncoder().encode("different") }
+        })
+      }),
+      calls
+    )
+    expect(receipt._tag).toBe("Conflict")
+    expect(calls).toEqual(["plan", "run"])
+    expect(decoded).toBe(1)
   })
 
   it("does not poison an inbound key when Control fails", async () => {
@@ -233,7 +324,7 @@ describe("Channels", () => {
         yield* Effect.exit(channels.ingest({ channel: "retry", raw: raw("retry-key") }))
         const receipt = yield* channels.ingest({ channel: "retry", raw: raw("retry-key") })
         expect(receipt._tag).toBe("Accepted")
-      }).pipe(Effect.provide(Channels.layer.pipe(Layer.provide(retryingControl))))
+      }).pipe(Effect.provide(channelsLayer(retryingControl)))
     )
     expect(attempts).toBe(2)
   })

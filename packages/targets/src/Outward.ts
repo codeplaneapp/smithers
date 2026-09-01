@@ -71,6 +71,7 @@ export const isRefused = (value: unknown): value is Refused => value instanceof 
  * @since 0.1.0
  */
 export interface Invocation {
+  /** @deprecated Secret values are resolved only by the outbound transport. */
   readonly environment: Readonly<Record<string, string | undefined>>
   readonly approvalGranted: boolean
 }
@@ -96,9 +97,9 @@ export interface Requirements {
  * Returns the refusal one outward invocation earns, or undefined when every
  * precondition is satisfied.
  *
- * Secrets are checked before approval so an author who has declared neither
- * is told about the credential first: it is the one that cannot be granted
- * interactively.
+ * Only declarations are checked here. Reading a value before an outbound
+ * request would move secret resolution into the job instead of its transport
+ * boundary.
  *
  * @category validation
  * @since 0.1.0
@@ -112,14 +113,6 @@ export const refuse = (requirements: Requirements, invocation: Invocation): Refu
         requirements.rule,
         "missing_secret",
         `declares no S.Secret(${JSON.stringify(name)}) in secrets`
-      )
-    }
-    const value = invocation.environment[secret.env]
-    if (value === undefined || value === "") {
-      return new Refused(
-        requirements.rule,
-        "missing_secret",
-        `the declared ${secret.env} secret has no value in the invoking environment`
       )
     }
   }

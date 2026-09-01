@@ -1,7 +1,7 @@
 /**
  * `S.Github.Pr` refusal paths: the target never reaches its outward action
- * without the declared token secret carrying a value and a satisfied
- * approval. This lane ships only the refusals; a satisfied gate is a loud
+ * without the declared token secret and a satisfied approval. Values are a
+ * transport concern. This lane ships only the refusals; a satisfied gate is a loud
  * NotImplemented, never a silent green.
  */
 import { describe, expect, it } from "vitest"
@@ -34,12 +34,13 @@ describe("refusePr", () => {
     expect(refusal!.code).toBe("missing_token_secret")
   })
 
-  it("refuses a declared token whose environment value is absent or empty", () => {
-    for (const environment of [{}, { GITHUB_TOKEN: "" }]) {
-      const refusal = GithubTarget.refusePr(withToken(), { environment, approvalGranted: true })
-      expect(refusal!.code).toBe("missing_token_secret")
-      expect(refusal!.message).toContain("no value in the invoking environment")
-    }
+  it("does not read a declared token before the transport sends a request", () => {
+    const environment = new Proxy({}, {
+      get: () => {
+        throw new Error("secret read before HTTP boundary")
+      }
+    })
+    expect(GithubTarget.refusePr(withToken(), { environment, approvalGranted: true })).toBeUndefined()
   })
 
   it("refuses approval:\"required\" without a granted approval", () => {

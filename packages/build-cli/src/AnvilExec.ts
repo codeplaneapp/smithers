@@ -4,9 +4,9 @@
  * An Anvil fork is a supervised service, so this module resolves the host
  * `anvil` binary (with the typed host refusal as identity when absent) and
  * renders the fork declaration into a supervisor spec: loopback bind,
- * port readiness, and the RPC secret resolved at spawn. The spawn argv
- * carries the secret value while the canonical argv redacts it, so the
- * supervisor's identity comparison never sees the credential.
+ * port readiness, and a loopback URL capability in place of the RPC secret.
+ * The supervisor resolves the true destination only when Anvil makes its
+ * outbound request, so the child argv never contains the credential.
  *
  * @since 0.1.0
  */
@@ -43,17 +43,10 @@ export const serviceSpec = async (options: {
   readonly label: string
   readonly cwd: string
   readonly attrs: (typeof Anvil.ForkAttrs)["Type"]
-  readonly environment: Readonly<Record<string, string | undefined>>
 }): Promise<ServiceSupervisor.ServiceSpec | { readonly error: string }> => {
   const tool = await resolveAnvil()
   if (!tool.ok) return { error: tool.refusal }
-  const forkUrl = options.environment[options.attrs.forkUrl.env] ?? options.attrs.forkUrl.fallback
-  if (forkUrl === undefined || forkUrl === "") {
-    return {
-      error:
-        `missing secret: environment variable ${options.attrs.forkUrl.env} is not set for Anvil.Fork ${options.label}`
-    }
-  }
+  const forkUrlIndex = 6
   const argv: Array<string> = [
     tool.path,
     "--host",
@@ -61,7 +54,7 @@ export const serviceSpec = async (options: {
     "--port",
     String(options.attrs.port),
     "--fork-url",
-    forkUrl
+    `{secret-url:${options.attrs.forkUrl.env}}`
   ]
   if (options.attrs.forkBlockNumber !== "latest") {
     argv.push("--fork-block-number", String(options.attrs.forkBlockNumber))
@@ -70,10 +63,7 @@ export const serviceSpec = async (options: {
     key: options.label,
     cwd: options.cwd,
     argv: argv as [string, ...Array<string>],
-    canonicalArgv: argv.map((entry) => entry === forkUrl ? `{secret:${options.attrs.forkUrl.env}}` : entry) as [
-      string,
-      ...Array<string>
-    ],
+    secretUrls: [{ index: forkUrlIndex, secret: options.attrs.forkUrl }],
     readiness: { port: options.attrs.port },
     stop: { signal: "SIGTERM", grace: "5s" }
   }

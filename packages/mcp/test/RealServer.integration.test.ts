@@ -38,6 +38,11 @@ const succeed = (request, result) => send({ jsonrpc: "2.0", id: request.id, resu
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const request = JSON.parse(line)
   if (request.method === "initialize") {
+    if (mode === "hang-handshake") return
+    if (mode === "oversized-frame") {
+      process.stdout.write("x".repeat(1024) + "\n")
+      return
+    }
     if (mode === "malformed-frames") {
       process.stdout.write("\nnot json\n42\n")
       send({ jsonrpc: "1.0", id: request.id, result: {} })
@@ -71,6 +76,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         { name: "error", description: 42 }
       ]
     })
+    if (mode === "exit-after-list") setImmediate(() => process.exit(0))
     if (mode === "close-stdin") {
       setImmediate(() => fs.closeSync(0))
       setInterval(() => {}, 1000)
@@ -97,12 +103,17 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 })
 `
 
-const connectNode = (mode = "normal", extraArgs: ReadonlyArray<string> = []) =>
+const connectNode = (
+  mode = "normal",
+  extraArgs: ReadonlyArray<string> = [],
+  overrides: Partial<McpClient.ConnectOptions> = {}
+) =>
   Effect.provide(
     McpClient.connect({
       server: mode,
       command: process.execPath,
-      args: ["-e", SERVER, mode, ...extraArgs]
+      args: ["-e", SERVER, mode, ...extraArgs],
+      ...overrides
     }),
     NodeServices.layer
   )
@@ -164,6 +175,20 @@ describe("McpClient against a real MCP server", () => {
     expect(error).toMatchObject({ code: "connection_closed", server: "exit-mid-call" })
   })
 
+  it("fails every request immediately after the server has exited", async () => {
+    const errors = await execute(Effect.scoped(Effect.gen(function*() {
+      const client = yield* connectNode("exit-after-list")
+      yield* Effect.sleep("100 millis")
+      const first = yield* Effect.flip(client.callTool("add", {}).pipe(Effect.timeout("1 second")))
+      const second = yield* Effect.flip(client.callTool("add", {}).pipe(Effect.timeout("1 second")))
+      return [first, second]
+    })))
+    expect(errors).toEqual([
+      expect.objectContaining({ code: "connection_closed", server: "exit-after-list" }),
+      expect.objectContaining({ code: "connection_closed", server: "exit-after-list" })
+    ])
+  })
+
   it("fails a pending call when the server closes stdin", async () => {
     const error = await execute(Effect.scoped(Effect.gen(function*() {
       const client = yield* connectNode("close-stdin")
@@ -173,12 +198,26 @@ describe("McpClient against a real MCP server", () => {
     expect(error).toMatchObject({ code: "connection_closed", server: "close-stdin" })
   })
 
-  it("allows callers to bound an unresponsive request", async () => {
+  it("applies the configured request deadline", async () => {
     const error = await execute(Effect.scoped(Effect.gen(function*() {
-      const client = yield* connectNode("hang")
-      return yield* Effect.flip(client.callTool("add", {}).pipe(Effect.timeout("100 millis")))
+      const client = yield* connectNode("hang", [], { requestTimeoutMs: 50 })
+      return yield* Effect.flip(client.callTool("add", {}))
     })))
-    expect(error._tag).toBe("TimeoutError")
+    expect(error).toMatchObject({ code: "timeout", server: "hang" })
+  })
+
+  it("applies the configured handshake deadline", async () => {
+    const error = await execute(Effect.scoped(Effect.flip(
+      connectNode("hang-handshake", [], { handshakeTimeoutMs: 50 })
+    )))
+    expect(error).toMatchObject({ code: "timeout", server: "hang-handshake" })
+  })
+
+  it("closes on an oversized inbound frame", async () => {
+    const error = await execute(Effect.scoped(Effect.flip(
+      connectNode("oversized-frame", [], { maxFrameBytes: 128 })
+    )))
+    expect(error).toMatchObject({ code: "protocol_error", server: "oversized-frame" })
   })
 
   it("tears the child process down when its scope closes", async () => {

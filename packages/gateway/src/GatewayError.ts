@@ -18,6 +18,7 @@ export const GatewayErrorCode = Schema.Literals([
   "bind_failed",
   "unauthorized",
   "malformed_request",
+  "request_too_large",
   "token_expired",
   "run_unavailable",
   "unsupported_projection",

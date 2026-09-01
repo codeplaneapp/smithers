@@ -76,6 +76,20 @@ export const layer: Layer.Layer<NodeHost> = Layer.mergeAll(
 )
 
 /**
+ * Provides the Node host with `Jj` bound to one absolute repository root.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerAt = (repositoryRoot: string): Layer.Layer<NodeHost> =>
+  Layer.mergeAll(
+    platform,
+    Layer.provide(NodeChildProcessSpawner.layer, platform),
+    NodeHttpClient.layerUndici,
+    NodeJj.layerAt(repositoryRoot)
+  )
+
+/**
  * Provides the Node host with process containment turned on.
  *
  * The difference from {@link layer} is what happens to a spawned process when
@@ -117,5 +131,27 @@ export const layerContained = (
     // recorded process group, appears in no ledger, and survives the
     // incarnation that started it.
     Layer.provideMerge(NodeJj.layerSpawner, spawner)
+  ).pipe(Layer.provideMerge(ProcessReaper.layer(options)))
+}
+
+/**
+ * Provides the contained Node host with `Jj` bound to one absolute repository
+ * root.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerContainedAt = (
+  repositoryRoot: string,
+  options?: ContainedSpawner.Options & ProcessReaper.Options
+): Layer.Layer<NodeHost, never, ProcessLedger.ProcessLedger> => {
+  const spawner = Layer.provide(
+    ContainedSpawner.layer({ platform: process.platform, ...options }),
+    Layer.provide(NodeChildProcessSpawner.layer, platform)
+  )
+  return Layer.mergeAll(
+    platform,
+    NodeHttpClient.layerUndici,
+    Layer.provideMerge(NodeJj.layerSpawnerAt(repositoryRoot), spawner)
   ).pipe(Layer.provideMerge(ProcessReaper.layer(options)))
 }

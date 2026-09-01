@@ -167,6 +167,65 @@ describe("the assembled gateway over a real loopback bind", () => {
       }
     }).pipe(Effect.provide(served())))
 
+  test("refuses fixed-length and chunked RPC bodies above the configured limit", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const fixed = yield* Effect.promise(() =>
+        fetch(`${url}/rpc`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "x".repeat(256)
+        })
+      )
+      const bytes = new TextEncoder().encode("x".repeat(256))
+      const chunkedBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes.subarray(0, 128))
+          controller.enqueue(bytes.subarray(128))
+          controller.close()
+        }
+      })
+      const chunked = yield* Effect.promise(() =>
+        fetch(
+          `${url}/rpc`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: chunkedBody,
+            duplex: "half"
+          } as RequestInit & { readonly duplex: "half" }
+        )
+      )
+
+      expect(fixed.status).toBe(413)
+      expect(chunked.status).toBe(413)
+      expect(yield* Effect.promise(() => fixed.json() as Promise<unknown>)).toMatchObject({
+        code: "request_too_large"
+      })
+      expect(yield* Effect.promise(() => chunked.json() as Promise<unknown>)).toMatchObject({
+        code: "request_too_large"
+      })
+    }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, maxRequestBodyBytes: 64 }))))
+
+  test("authenticates before inspecting an oversized body", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const response = yield* Effect.promise(() =>
+        fetch(`${url}/rpc`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "x".repeat(256)
+        })
+      )
+      expect(response.status).toBe(401)
+      expect(yield* Effect.promise(() => response.json() as Promise<unknown>)).toMatchObject({ code: "unauthorized" })
+    }).pipe(Effect.provide(served({
+      host: "127.0.0.1",
+      port: 0,
+      credential: "edge-secret",
+      maxRequestBodyBytes: 64
+    }))))
+
   test("passes a well-formed request message through to the server it names", () =>
     Effect.gen(function*() {
       const url = yield* baseUrl
@@ -367,7 +426,13 @@ describe("gateway bind policy", () => {
   })
 
   it("accepts a credentialed non-loopback bind that opted in", () => {
-    expect(NodeGateway.listenOptions({ host: "0.0.0.0", port: 0, listen: true, credential: "secret" })).toEqual({
+    expect(NodeGateway.listenOptions({
+      host: "0.0.0.0",
+      port: 0,
+      listen: true,
+      credential: "secret",
+      maxRequestBodyBytes: 128
+    })).toEqual({
       host: "0.0.0.0",
       port: 0
     })

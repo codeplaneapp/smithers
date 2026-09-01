@@ -113,7 +113,7 @@ const run = <A, E>(
 ) =>
   Effect.runPromise(
     effect.pipe(
-      Effect.provide(ControlChannels.layer.pipe(Layer.provide(controlLayer(calls))))
+      Effect.provide(ControlChannels.layerMemory.pipe(Layer.provide(controlLayer(calls))))
     )
   )
 

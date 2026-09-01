@@ -76,8 +76,20 @@ describe("S.Go", () => {
     expect(rendered).toBe(`-s -w -X main.Version=${S.Stamp.token("main.Version", S.Stamp.version)}`)
     // The token spells the stamp's name only, so the flag string keys.
     expect(rendered).not.toContain("Stamp")
-    expect(S.Go.ldflags({ stamp: { "a.Key": S.Secret("POSTHOG_API_KEY") } })).toBe(
-      `-X a.Key=${S.Stamp.token("a.Key", S.Secret("POSTHOG_API_KEY"))}`
-    )
+    expect(() =>
+      S.Go.Binary({
+        pkg: "./cmd/app",
+        out: "//bin/app",
+        // The type rejects this too; the runtime assertion protects JavaScript callers.
+        // @ts-expect-error secrets may cross only the outbound proxy boundary
+        stamp: { "a.Key": S.Secret("POSTHOG_API_KEY") }
+      })
+    ).toThrow(/Expected .*Stamp.*string/)
+    expect(() =>
+      S.Go.ldflags({
+        // @ts-expect-error secrets may not be embedded in linker arguments
+        stamp: { "a.Key": S.Secret("POSTHOG_API_KEY") }
+      })
+    ).toThrow(/Expected .*Stamp.*string/)
   })
 })

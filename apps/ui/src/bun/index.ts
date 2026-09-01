@@ -55,10 +55,10 @@ if (headless) {
           const queued = queuedRepositorySelections.shift()
           const selectedPath = queued === undefined
             ? (await Utils.openFileDialog({
-                canChooseFiles: false,
-                canChooseDirectory: true,
-                allowsMultipleSelection: false
-              })).find((path) => path.trim() !== "")
+              canChooseFiles: false,
+              canChooseDirectory: true,
+              allowsMultipleSelection: false
+            })).find((path) => path.trim() !== "")
             : queued.path ?? undefined
           if (selectedPath === undefined) return { status: "cancelled" } as const
           return server.authorizeRepository(selectedPath, access)
@@ -99,7 +99,14 @@ interface RendererEvalRPC {
 }
 
 const evaluateInMainWindow = async (script: string): Promise<unknown> => {
-  const rpc = mainWindow?.webview.rpc as RendererEvalRPC | undefined
+  const window = mainWindow
+  if (window === undefined) throw new Error("The main WebView is not available.")
+  // WKWebView may defer animation-driven rendering while another application
+  // is frontmost. Packaged E2E assertions and captures must observe this app,
+  // not whichever window happened to have focus when the runner launched it.
+  await window.activate()
+  await Bun.sleep(50)
+  const rpc = window.webview.rpc as RendererEvalRPC | undefined
   const evaluator = rpc?.requestProxy?.evaluateJavascriptWithResponse
   if (evaluator === undefined) throw new Error("The main WebView is not available.")
   const response = await evaluator({
@@ -158,8 +165,12 @@ bridge = startPackagedE2EBridge({
     }
     queuedRepositorySelections.push({ path })
   },
-  screenshot: () => {
-    const frame = mainWindow?.getFrame()
+  screenshot: async () => {
+    const window = mainWindow
+    if (window === undefined) return null
+    await window.activate()
+    await Bun.sleep(100)
+    const frame = window.getFrame()
     if (frame === undefined) return null
     const width = Math.round(frame.width)
     const height = Math.round(frame.height)

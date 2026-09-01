@@ -12,11 +12,10 @@ export const token = Stamp.token
 
 const stampValue = async (
   root: string,
-  value: { readonly _tag?: unknown; readonly name?: unknown; readonly env?: unknown } | string
+  value: { readonly _tag?: unknown; readonly name?: unknown } | string
 ): Promise<string> => {
   if (typeof value === "string") return value
-  if (value._tag === "Secret" && typeof value.env === "string") return process.env[value.env] ?? ""
-  if (value._tag !== "Stamp") return ""
+  if (value._tag !== "Stamp") throw new Error("invalid build stamp: only public stamps and literals are supported")
   switch (value.name) {
     case "version":
       return (await PackageTree.runGit(root, ["describe", "--tags", "--always", "--dirty"])).trim()
@@ -45,7 +44,7 @@ export const resolveArgv = async (root: string, argv: ReadonlyArray<string>): Pr
     for (const match of arg.matchAll(expression)) {
       const payload = JSON.parse(Buffer.from(match[1]!, "base64url").toString("utf8")) as {
         readonly name: string
-        readonly value: { readonly _tag?: unknown; readonly name?: unknown; readonly env?: unknown } | string
+        readonly value: { readonly _tag?: unknown; readonly name?: unknown } | string
       }
       text = text.replace(match[0], await stampValue(root, payload.value))
     }

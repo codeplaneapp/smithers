@@ -686,7 +686,11 @@ describe("the Node host composition", () => {
     // check let the engine through, a permission failure means it did not.
     const reported = Exit.isFailure(outcome) ? String(outcome.cause) : "succeeded"
     expect(reported).not.toMatch(/Permission/)
-    expect(NodeRuntime.engineRules.map((rule) => rule.pattern.action)).toEqual(["jj:snapshot", "jj:restore"])
+    expect(NodeRuntime.engineRules.map((rule) => rule.pattern.action)).toEqual([
+      "jj:snapshot",
+      "jj:restore",
+      "jj:diff"
+    ])
   }, 60_000)
 
   it("still refuses the engine's pre-image when the program denies it", async () => {

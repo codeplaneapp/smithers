@@ -5,14 +5,15 @@
 // supervisor's backstop must SIGKILL the service's process group and re-raise,
 // leaving no orphan (verified with pgrep in the test).
 //
-// Run with: node --import tsx sigint-driver.ts <port> <path-to-server.mjs>
+// Run with: node --import tsx sigint-driver.ts <port> <path-to-server.mjs> <unique-marker>
 import * as Effect from "effect/Effect"
 import * as ServiceSupervisor from "../../../src/ServiceSupervisor.ts"
 
 const port = Number(process.argv[2])
 const serverPath = process.argv[3]
-if (!Number.isInteger(port) || typeof serverPath !== "string") {
-  console.error("usage: sigint-driver.ts <port> <server.mjs>")
+const marker = process.argv[4]
+if (!Number.isInteger(port) || typeof serverPath !== "string" || typeof marker !== "string" || marker === "") {
+  console.error("usage: sigint-driver.ts <port> <server.mjs> <unique-marker>")
   process.exit(2)
 }
 
@@ -27,7 +28,7 @@ const program = Effect.scoped(Effect.gen(function*() {
       "--port",
       String(port),
       "--marker",
-      "service-supervisor-sigint-proof"
+      marker
     ],
     readiness: { port }
   })

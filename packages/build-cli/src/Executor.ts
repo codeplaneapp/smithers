@@ -117,7 +117,7 @@ export interface ExecuteOptions {
   readonly remoteCache?: {
     readonly endpoint: string
     readonly tokenEnv: string
-    readonly token?: string | undefined
+    readonly readToken: () => string | undefined
   } | undefined
   readonly signal?: AbortSignal | undefined
   readonly packageName?: string | undefined
@@ -890,7 +890,7 @@ export const execute = async (options: ExecuteOptions): Promise<Summary> => {
     workspaceRoot: workspace.root,
     cacheDirectory: workspace.cacheDirectory,
     endpoint: options.remoteCache?.endpoint,
-    token: options.remoteCache?.token,
+    readToken: options.remoteCache?.readToken,
     warn: log
   })
   const byLabel = new Map(options.targets.map((target) => [target.label, target]))

@@ -20,7 +20,7 @@ const repositoryRoot = new URL("../../../", import.meta.url)
 const corpusRoot = [
   new URL("../reference/", repositoryRoot),
   new URL("reference/", repositoryRoot)
-].find((candidate) => existsSync(candidate))
+].find((candidate) => existsSync(new URL("opencode/packages/core/test/", candidate)))
 const testFile = /\.test\.ts$/
 
 describe("ParityManifest", () => {

@@ -109,8 +109,7 @@ const clickSelector = async (app: PackagedApp, selector: string): Promise<void> 
   `)
 }
 
-const clickTestId = (app: PackagedApp, testId: string): Promise<void> =>
-  clickSelector(app, selectorForTestId(testId))
+const clickTestId = (app: PackagedApp, testId: string): Promise<void> => clickSelector(app, selectorForTestId(testId))
 
 const setControlValue = async (app: PackagedApp, testId: string, value: string): Promise<void> => {
   await app.eval<boolean>(`
@@ -150,7 +149,8 @@ const rendererApi = async <T>(
   app: PackagedApp,
   path: string,
   options: { readonly method?: string; readonly body?: unknown } = {}
-): Promise<RendererResponse<T>> => app.eval<RendererResponse<T>>(`
+): Promise<RendererResponse<T>> =>
+  app.eval<RendererResponse<T>>(`
   (async () => {
     const token = document.querySelector('meta[name="smithers-local-session"]')?.getAttribute('content')
     if (token === null || token === undefined) throw new Error('local session token is missing')
@@ -168,13 +168,16 @@ const rendererApi = async <T>(
 
 const openRepository = async (app: PackagedApp, path: string | null): Promise<void> => {
   await app.queueRepositorySelection(path)
-  const menuOpen = await app.waitFor<boolean>(`
+  const menuOpen = await app.waitFor<boolean>(
+    `
     (() => {
       const trigger = document.querySelector('[data-testid="composer-repo-trigger"]')
       if (!(trigger instanceof HTMLButtonElement) || trigger.disabled) return null
       return trigger.getAttribute('aria-expanded') === 'true'
     })()
-  `, (value) => value !== null)
+  `,
+    (value) => value !== null
+  )
   if (!menuOpen) await clickTestId(app, "composer-repo-trigger")
   await app.waitFor<boolean>(`
     (() => {
@@ -276,12 +279,19 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
       expect(await app.eval<number>("6 * 7")).toBe(42)
 
       await sendMessage(app, "/theme")
-      expect(await app.waitFor<boolean>(`document.querySelector('[data-testid="card-theme-picker"]') !== null`)).toBe(true)
+      expect(await app.waitFor<boolean>(`document.querySelector('[data-testid="card-theme-picker"]') !== null`)).toBe(
+        true
+      )
       await clickTestId(app, "card-maximize-theme-picker")
       await clickTestId(app, "card-open-in-tab-theme-picker")
-      expect(await app.waitFor<boolean>(`document.querySelector('[data-testid="tab-card-theme-picker"][data-active="true"]') !== null`)).toBe(true)
+      expect(
+        await app.waitFor<boolean>(
+          `document.querySelector('[data-testid="tab-card-theme-picker"][data-active="true"]') !== null`
+        )
+      ).toBe(true)
       await clickTestId(app, "tab-close-card-theme-picker")
-      expect(await app.waitFor<boolean>(`document.querySelector('[data-testid="tab-card-theme-picker"]') === null`)).toBe(true)
+      expect(await app.waitFor<boolean>(`document.querySelector('[data-testid="tab-card-theme-picker"]') === null`))
+        .toBe(true)
       expect(await app.eval<boolean>(`document.querySelector('[data-testid="card-theme-picker"]') !== null`)).toBe(true)
 
       const screenshot = await app.screenshot("launch.png").catch((error) => {
@@ -324,17 +334,27 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
       expect((await rendererApi<{ repos: Array<unknown> }>(app, "/api/repos")).body.repos).toEqual([])
 
       await openRepository(app, join(fixture.directory, "missing-repository"))
-      expect(await app.waitFor<boolean>(`
+      expect(
+        await app.waitFor<boolean>(
+          `
         document.body.innerText.includes('cannot read and write this repository')
-      `, (value) => value, 15_000)).toBe(true)
+      `,
+          (value) => value,
+          15_000
+        )
+      ).toBe(true)
       expect((await rendererApi<{ repos: Array<unknown> }>(app, "/api/repos")).body.repos).toEqual([])
 
       const plain = await fixture.makeDirectory("plain-repository")
       await runCommand(["git", "init", "--quiet"], plain)
       await openRepository(app, plain)
-      expect(await app.waitFor<boolean>(`document.querySelector('.smithers-card[data-kind="repo"]') !== null`)).toBe(true)
+      expect(await app.waitFor<boolean>(`document.querySelector('.smithers-card[data-kind="repo"]') !== null`)).toBe(
+        true
+      )
       expect(await app.waitFor<boolean>(`document.body.innerText.includes('no WORKSPACE.ts')`)).toBe(true)
-      expect(await app.eval<boolean>(`document.querySelector('.smithers-card[data-kind="targets"]') === null`)).toBe(true)
+      expect(await app.eval<boolean>(`document.querySelector('.smithers-card[data-kind="targets"]') === null`)).toBe(
+        true
+      )
 
       const listed = await rendererApi<{ repos: Array<{ id: string; path: string; smithers: { detected: boolean } }> }>(
         app,
@@ -363,8 +383,10 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
       expect(manual.body.error.code).toBe("manual_repository_paths_disabled")
 
       await openRepository(app, repository)
-      expect(await app.waitFor<boolean>(`document.querySelector('.smithers-card[data-kind="repo-plugin"]') !== null`)).toBe(true)
-      const targets = await app.waitFor<{ status: string; count: string; alert: string }>(`
+      expect(await app.waitFor<boolean>(`document.querySelector('.smithers-card[data-kind="repo-plugin"]') !== null`))
+        .toBe(true)
+      const targets = await app.waitFor<{ status: string; count: string; alert: string }>(
+        `
         (() => {
           const body = document.querySelector('.smithers-card[data-kind="targets"] .targets-card')
           return {
@@ -373,11 +395,18 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
             alert: body?.querySelector('[role="alert"]')?.textContent ?? ''
           }
         })()
-      `, (value) => value.status !== "" && value.status !== "pending", 60_000)
+      `,
+        (value) => value.status !== "" && value.status !== "pending",
+        60_000
+      )
       expect(targets).toEqual({ status: "done", count: "2 of 2", alert: "" })
-      expect(await app.eval<string>(`document.querySelector('.smithers-card[data-kind="repo-plugin"]')?.textContent ?? ''`))
+      expect(
+        await app.eval<string>(`document.querySelector('.smithers-card[data-kind="repo-plugin"]')?.textContent ?? ''`)
+      )
         .toContain("The tiny two-workspace fixture")
-      expect(await app.eval<string>(`document.querySelector('[data-testid="composer-repo-trigger"]')?.textContent ?? ''`))
+      expect(
+        await app.eval<string>(`document.querySelector('[data-testid="composer-repo-trigger"]')?.textContent ?? ''`)
+      )
         .toContain("codeplanesmithers/canary-sandbox")
 
       const listed = await rendererApi<{
@@ -399,18 +428,32 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
       })
 
       await setControlValue(app, "targets-filter-query", "polish")
-      expect(await app.waitFor<string>(`document.querySelector('[data-testid="targets-count"]')?.textContent ?? ''`,
-        (value) => value === "1 of 2")).toBe("1 of 2")
+      expect(
+        await app.waitFor<string>(
+          `document.querySelector('[data-testid="targets-count"]')?.textContent ?? ''`,
+          (value) => value === "1 of 2"
+        )
+      ).toBe("1 of 2")
       await setControlValue(app, "targets-filter-query", "")
-      expect(await app.waitFor<string>(`document.querySelector('[data-testid="targets-count"]')?.textContent ?? ''`,
-        (value) => value === "2 of 2")).toBe("2 of 2")
+      expect(
+        await app.waitFor<string>(
+          `document.querySelector('[data-testid="targets-count"]')?.textContent ?? ''`,
+          (value) => value === "2 of 2"
+        )
+      ).toBe("2 of 2")
       await clickTestId(app, "targets-star-//:hello")
-      expect(await app.waitFor<string>(`
+      expect(
+        await app.waitFor<string>(
+          `
         document.querySelector('[data-testid="targets-star-//:hello"]')?.getAttribute('aria-pressed') ?? ''
-      `, (value) => value === "true")).toBe("true")
+      `,
+          (value) => value === "true"
+        )
+      ).toBe("true")
 
       await clickTestId(app, "plugin-run-hello")
-      const targetRun = await app.waitFor<{ status: string; text: string; output: string }>(`
+      const targetRun = await app.waitFor<{ status: string; text: string; output: string }>(
+        `
         (() => {
           const cards = Array.from(document.querySelectorAll('.smithers-card[data-kind="target-run"]'))
           const card = cards[cards.length - 1]
@@ -420,31 +463,48 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
             output: card?.querySelector('[data-testid^="target-run-output-"]')?.textContent ?? ''
           }
         })()
-      `, (value) => value.status === "done" || value.status === "failed", 90_000)
+      `,
+        (value) => value.status === "done" || value.status === "failed",
+        90_000
+      )
       expect(targetRun.status).toBe("done")
       expect(targetRun.text).toContain("exit 0")
-      expect(targetRun.output).toContain("plugin-hello")
+      expect(targetRun.output).toContain("\"//:hello\",Shell.Test,ran")
 
       const beforeRelaunch = await app.state()
       await app.relaunch()
       expect((await app.state()).app.pid).not.toBe(beforeRelaunch.app.pid)
       expect((await rendererApi<{ repos: Array<unknown> }>(app, "/api/repos")).body.repos).toEqual([])
-      expect(await app.waitFor<boolean>(`
+      expect(
+        await app.waitFor<boolean>(`
         Array.from(document.querySelectorAll('.repo-name')).some((node) => node.textContent === 'codeplanesmithers/canary-sandbox')
-      `)).toBe(true)
+      `)
+      ).toBe(true)
 
       await app.queueRepositorySelection(repository)
       await clickSelector(app, ".repo-select")
-      expect(await app.waitFor<number>(`
+      expect(
+        await app.waitFor<number>(
+          `
         (async () => {
           const token = document.querySelector('meta[name="smithers-local-session"]')?.getAttribute('content') ?? ''
           const response = await fetch('/api/repos', { headers: { 'x-smithers-local-session': token } })
           return ((await response.json()).repos ?? []).length
         })()
-      `, (value) => value === 1, 30_000)).toBe(1)
-      expect(await app.waitFor<string>(`
+      `,
+          (value) => value === 1,
+          30_000
+        )
+      ).toBe(1)
+      expect(
+        await app.waitFor<string>(
+          `
         document.querySelector('[data-testid="targets-star-//:hello"]')?.getAttribute('aria-pressed') ?? ''
-      `, (value) => value === "true", 60_000)).toBe("true")
+      `,
+          (value) => value === "true",
+          60_000
+        )
+      ).toBe("true")
     })
   })
 
@@ -453,14 +513,20 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
       const repository = await fixture.makeDirectory("terminal-repository")
       await runCommand(["git", "init", "--quiet"], repository)
       await openRepository(app, repository)
-      expect(await app.waitFor<boolean>(`document.querySelector('.smithers-card[data-kind="repo"]') !== null`)).toBe(true)
+      expect(await app.waitFor<boolean>(`document.querySelector('.smithers-card[data-kind="repo"]') !== null`)).toBe(
+        true
+      )
 
       await clickTestId(app, "tab-add")
       await app.waitFor<boolean>(`document.querySelector('[data-testid="tab-add-terminal"]') !== null`)
       await clickTestId(app, "tab-add-terminal")
-      const sessionId = await app.waitFor<string>(`
+      const sessionId = await app.waitFor<string>(
+        `
         document.querySelector('[data-testid^="terminal-"]')?.getAttribute('data-testid')?.replace(/^terminal-/, '') ?? ''
-      `, (value) => value !== "", 30_000)
+      `,
+        (value) => value !== "",
+        30_000
+      )
       const created = await rendererApi<{
         sessions: Array<{ sessionId: string; kind: string; cwd: string; alive: boolean }>
       }>(app, "/api/pty")
@@ -471,7 +537,8 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
 
       const marker = `PACKAGED_PTY_${crypto.randomUUID().replaceAll("-", "")}`
       await typeInTerminal(app, sessionId, `printf '${marker}\\n'`)
-      const output = await app.waitFor<string>(`
+      const output = await app.waitFor<string>(
+        `
         (async () => {
           const token = document.querySelector('meta[name="smithers-local-session"]')?.getAttribute('content') ?? ''
           const response = await fetch('/api/pty/${sessionId}/output?tail=16384', {
@@ -479,11 +546,22 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
           })
           return response.ok ? (await response.json()).output : ''
         })()
-      `, (value) => value.includes(marker), 30_000)
+      `,
+        (value) => value.includes(marker),
+        30_000
+      )
       expect(output).toContain(marker)
-      expect(await app.waitFor<boolean>(`
-        document.querySelector('[data-testid="terminal-${sessionId}"] .xterm-rows')?.textContent?.includes(${JSON.stringify(marker)}) === true
-      `, (value) => value, 30_000)).toBe(true)
+      expect(
+        await app.waitFor<boolean>(
+          `
+        document.querySelector('[data-testid="terminal-${sessionId}"] .xterm-rows')?.textContent?.includes(${
+            JSON.stringify(marker)
+          }) === true
+      `,
+          (value) => value,
+          30_000
+        )
+      ).toBe(true)
 
       await clickTestId(app, `tab-close-${sessionId}`)
       expect(await app.waitFor<boolean>(`document.querySelector('[role="dialog"]') !== null`)).toBe(true)
@@ -496,14 +574,23 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
           return true
         })()
       `)
-      expect(await app.waitFor<boolean>(`document.querySelector(${JSON.stringify(selectorForTestId(`tab-${sessionId}`))}) === null`)).toBe(true)
-      expect(await app.waitFor<number>(`
+      expect(
+        await app.waitFor<boolean>(
+          `document.querySelector(${JSON.stringify(selectorForTestId(`tab-${sessionId}`))}) === null`
+        )
+      ).toBe(true)
+      expect(
+        await app.waitFor<number>(
+          `
         (async () => {
           const token = document.querySelector('meta[name="smithers-local-session"]')?.getAttribute('content') ?? ''
           const response = await fetch('/api/pty', { headers: { 'x-smithers-local-session': token } })
           return ((await response.json()).sessions ?? []).length
         })()
-      `, (value) => value === 0)).toBe(0)
+      `,
+          (value) => value === 0
+        )
+      ).toBe(0)
 
       await app.relaunch()
       expect(await app.waitFor<number>(`document.querySelectorAll('[data-testid^="tab-body-"]').length`)).toBe(1)

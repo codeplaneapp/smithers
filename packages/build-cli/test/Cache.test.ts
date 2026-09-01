@@ -267,8 +267,18 @@ describe("openCache", () => {
     respond = (_request, response) => {
       response.writeHead(201).end()
     }
-    const cache = await openCache({ workspaceRoot: root, endpoint, token: "top-secret" })
+    let reads = 0
+    const cache = await openCache({
+      workspaceRoot: root,
+      endpoint,
+      readToken: () => {
+        reads += 1
+        return "top-secret"
+      }
+    })
+    expect(reads).toBe(0)
     await cache.put(result.key, result)
+    expect(reads).toBe(1)
     expect(requests[0]!.authorization).toBe("Bearer top-secret")
     expect(requests[0]!.body).not.toContain("top-secret")
     await cache.close()
@@ -296,7 +306,7 @@ describe("openCache", () => {
     const cache = await openCache({
       workspaceRoot: root,
       endpoint,
-      token: "top-secret",
+      readToken: () => "top-secret",
       fetch: () => Promise.reject(new Error("top-secret")),
       warn: (line) => warnings.push(line)
     })

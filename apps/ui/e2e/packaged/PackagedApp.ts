@@ -105,6 +105,7 @@ export class PackagedApp {
   private readonly localPort: number
   private child: ChildProcess | undefined
   private exit: Promise<ProcessExit> | undefined
+  private processGroup: number | undefined
   private bridgePort: number | undefined
   private bridgeToken: string | undefined
   private readyPromise: Promise<void> | undefined
@@ -218,6 +219,7 @@ export class PackagedApp {
       stdio: ["ignore", "pipe", "pipe"]
     })
     this.child = child
+    this.processGroup = process.platform === "win32" ? undefined : child.pid
     child.stdout?.setEncoding("utf8")
     child.stderr?.setEncoding("utf8")
     child.stdout?.on("data", (chunk: string) => this.appendLog("stdout", chunk))
@@ -316,7 +318,7 @@ export class PackagedApp {
         // ElizaOS's packaged harness treats only this transport timeout as
         // transient; renderer-thrown errors remain immediate test failures.
         const transient = message.includes("POST /window/eval timed out") ||
-          message.includes('"message":"RPC request timed out.')
+          message.includes("\"message\":\"RPC request timed out.")
         if (!transient) throw error
         lastError = error
         await delay(250)
@@ -419,8 +421,8 @@ export class PackagedApp {
     const child = this.child
     if (child === undefined || processExited(child) || child.pid === undefined) return
     try {
-      if (process.platform === "win32") child.kill(signal)
-      else process.kill(-child.pid, signal)
+      if (this.processGroup === undefined) child.kill(signal)
+      else process.kill(-this.processGroup, signal)
     } catch {
       try {
         child.kill(signal)
@@ -428,6 +430,73 @@ export class PackagedApp {
         // It exited between the checks.
       }
     }
+  }
+
+  private async processGroupMembers(): Promise<Array<ExecutableProcess>> {
+    const group = this.processGroup
+    if (group === undefined || group <= 1) return []
+    const child = Bun.spawn(["/bin/ps", "-axo", "pid=,pgid=,command="], {
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe"
+    })
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text()
+    ])
+    if (exitCode !== 0) throw new Error(`Could not inspect packaged app process group: ${stderr.trim()}`)
+    return stdout.split("\n").flatMap((line) => {
+      const match = /^\s*(\d+)\s+(\d+)\s+/.exec(line)
+      if (match === null) return []
+      const pid = Number(match[1])
+      const candidateGroup = Number(match[2])
+      return candidateGroup === group && pid !== process.pid && Number.isSafeInteger(pid)
+        ? [{ pid, group }]
+        : []
+    })
+  }
+
+  private async terminateProcessGroup(): Promise<void> {
+    let remaining = await this.processGroupMembers()
+    if (remaining.length === 0) {
+      this.processGroup = undefined
+      return
+    }
+    this.appendLog(
+      "runner",
+      `terminating residual process-group pid(s): ${remaining.map(({ pid }) => pid).join(", ")}\n`
+    )
+    const signal = (value: NodeJS.Signals): void => {
+      const group = this.processGroup
+      if (group === undefined) return
+      try {
+        process.kill(-group, value)
+      } catch {
+        // The final descendant exited between inspection and the signal.
+      }
+    }
+    signal("SIGTERM")
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await delay(100)
+      remaining = await this.processGroupMembers()
+      if (remaining.length === 0) {
+        this.processGroup = undefined
+        return
+      }
+    }
+    signal("SIGKILL")
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await delay(100)
+      remaining = await this.processGroupMembers()
+      if (remaining.length === 0) {
+        this.processGroup = undefined
+        return
+      }
+    }
+    throw new Error(
+      `Packaged app process-group member(s) survived cleanup: ${remaining.map(({ pid }) => pid).join(", ")}`
+    )
   }
 
   private async executableProcesses(): Promise<Array<ExecutableProcess>> {
@@ -503,6 +572,9 @@ export class PackagedApp {
         }
       }
     }
+    // Electrobun's launcher can exit before probes or PTYs inherited from the
+    // backend. Drain the detached launch group before deleting isolated HOME.
+    await this.terminateProcessGroup()
     await this.terminateExecutableProcesses()
   }
 
@@ -539,8 +611,10 @@ const productionCandidate = async (bundle: string): Promise<ProductionCandidate 
       readonly hash?: unknown
       readonly identifier?: unknown
     }
-    if (metadata.channel !== "stable" || metadata.identifier !== "sh.smithers.app" ||
-        typeof metadata.hash !== "string" || !/^[a-z0-9]+$/.test(metadata.hash)) {
+    if (
+      metadata.channel !== "stable" || metadata.identifier !== "sh.smithers.app" ||
+      typeof metadata.hash !== "string" || !/^[a-z0-9]+$/.test(metadata.hash)
+    ) {
       return undefined
     }
     await access(join(resources, `${metadata.hash}.tar.zst`), constants.R_OK)

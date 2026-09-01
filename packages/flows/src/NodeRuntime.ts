@@ -40,7 +40,7 @@ import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import { constants } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 
 /**
  * Configuration for the supported Node SQLite runtime.
@@ -59,6 +59,11 @@ import { dirname, join } from "node:path"
 export interface Options {
   /** SQLite database filename. Its parent directory is created recursively. */
   readonly filename: string
+  /**
+   * Workspace whose files actions may read or mutate. When omitted, the
+   * database directory is used as a fail-closed compatibility default.
+   */
+  readonly workspaceRoot?: string | undefined
   /** Stable identity of this engine host. */
   readonly owner: {
     readonly hostId: string
@@ -75,6 +80,7 @@ export interface Options {
 
 const Configuration = Schema.Struct({
   filename: Schema.NonEmptyString,
+  workspaceRoot: Schema.optional(Schema.NonEmptyString),
   owner: Schema.Struct({ hostId: Schema.NonEmptyString })
 })
 
@@ -115,9 +121,12 @@ const databaseLayer = (filename: string) =>
  * @category layers
  * @slop
  */
-export const storage = (filename: string) => {
+export const storage = (filename: string, workspaceRoot?: string) => {
   const validatedFilename = Schema.decodeUnknownSync(Schema.NonEmptyString)(filename)
-  const root = dirname(validatedFilename)
+  const databaseRoot = dirname(validatedFilename)
+  const resolvedWorkspaceRoot = resolve(
+    Schema.decodeUnknownSync(Schema.NonEmptyString)(workspaceRoot ?? databaseRoot)
+  )
   const database = Layer.provideMerge(Migrations.layer, databaseLayer(validatedFilename))
   return Layer.mergeAll(
     SqlJournal.layer({ capacity: 1024, overflow: "reject" }),
@@ -126,8 +135,8 @@ export const storage = (filename: string) => {
     CacheStore.layer,
     DurableEngineState.layer,
     OwnerIdentity.layer,
-    Workspace.layer(root),
-    ArtifactStore.layerFileSystem({ directory: join(root, ".flows/objects") })
+    Workspace.layer(resolvedWorkspaceRoot),
+    ArtifactStore.layerFileSystem({ directory: join(databaseRoot, ".flows/objects") })
   ).pipe(Layer.provideMerge(database))
 }
 
@@ -151,7 +160,7 @@ const composition = <
 ) => {
   const validated = validate(options)
   const execution = Layer.merge(stepBoundary, workspaceSandbox).pipe(
-    Layer.provideMerge(storage(validated.filename))
+    Layer.provideMerge(storage(validated.filename, validated.workspaceRoot))
   )
   const engine = EngineStore.layer({
     owner: validated.owner,
@@ -253,6 +262,12 @@ export const layer = <
 export interface HostOptions {
   /** SQLite database filename. Its parent directory is created recursively. */
   readonly filename: string
+  /**
+   * Absolute or relative project workspace. It is resolved once while the
+   * host is constructed and all Jj operations stay bound to that root.
+   * Defaults to the database directory for backwards compatibility.
+   */
+  readonly workspaceRoot?: string | undefined
   /** Stable identity of this engine host. */
   readonly owner: {
     readonly hostId: string
@@ -341,6 +356,10 @@ export const engineRules: ReadonlyArray<Permission.Rule> = [
   new Permission.Rule({
     effect: "allow",
     pattern: new Capability.CapabilityPattern({ action: "jj:restore", resource: "*" })
+  }),
+  new Permission.Rule({
+    effect: "allow",
+    pattern: new Capability.CapabilityPattern({ action: "jj:diff", resource: "*" })
   })
 ]
 
@@ -470,9 +489,11 @@ export const layerHost = <
 ) => {
   const validated = validate({
     filename: options.filename,
+    ...(options.workspaceRoot === undefined ? {} : { workspaceRoot: options.workspaceRoot }),
     owner: options.owner,
     isAlive: options.isAlive ?? HostLiveness.isAlive({ hostId: options.owner.hostId })
   })
+  const workspaceRoot = resolve(validated.workspaceRoot ?? dirname(validated.filename))
   // The layering is the design decision this function makes, and it has two
   // sides. The engine's MACHINERY — the SQLite storage, the step boundary, the
   // workspace sandbox — runs on the raw host: a database directory the engine
@@ -482,14 +503,14 @@ export const layerHost = <
   // guarded surface, because a body is exactly what the capability check
   // exists for. That is why the engine is built over the kernel here and not
   // beside it: an action resolves its host services from the engine's context.
-  const raw = Layer.mergeAll(NodeHost.layer, NodeHost.NodeCrypto.layer)
-  const store = storage(validated.filename).pipe(Layer.provideMerge(raw))
+  const raw = Layer.mergeAll(NodeHost.layerAt(workspaceRoot), NodeHost.NodeCrypto.layer)
+  const store = storage(validated.filename, workspaceRoot).pipe(Layer.provideMerge(raw))
   const execution = Layer.merge(StepBoundary.layer, WorkspaceSandbox.layerFileSystem()).pipe(
     Layer.provideMerge(store)
   )
   const guarded = HostServices.layer.pipe(
     Layer.provide(Layer.orDie(GrantStore.layer({ attended: false, rules: withEngineRules(options.rules) }))),
-    Layer.provideMerge(NodeHost.layerContained(options.containment)),
+    Layer.provideMerge(NodeHost.layerContainedAt(workspaceRoot, options.containment)),
     Layer.provideMerge(ProcessLedger.layer({ hostId: validated.owner.hostId, ownerPid: process.pid })),
     Layer.provideMerge(execution)
   )

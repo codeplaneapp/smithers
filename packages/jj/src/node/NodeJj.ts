@@ -29,6 +29,7 @@ import * as Stream from "effect/Stream"
 import * as EffectChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as ChildProcess from "node:child_process"
+import { isAbsolute } from "node:path"
 import { Jj, JjError } from "../Jj.ts"
 
 interface Output {
@@ -137,7 +138,9 @@ const viaSpawner = (spawner: ChildProcessSpawner["Service"]): Run => (method, ar
  * a jj child that goes through a host spawner must behave the same as one that
  * does not, or the containment story would be bought with a behavior change.
  */
-const operations = (run: Run) => {
+const operations = (run: Run, repositoryRoot?: string) => {
+  const inRepository = (method: string, args: ReadonlyArray<string>) => run(method, args, repositoryRoot)
+
   /**
    * `jj` snapshots the working copy on every command, so a snapshot is a
    * describe of the current change followed by a `new` to open a fresh one.
@@ -155,9 +158,9 @@ const operations = (run: Run) => {
   const snapshot = (message?: string) =>
     (message === undefined
       ? Effect.void
-      : Effect.asVoid(run("snapshot", ["describe", "-m", message, "--quiet"]))).pipe(
-        Effect.andThen(run("snapshot", ["log", "-r", "@", "--no-graph", "-T", "change_id.short()"])),
-        Effect.tap(() => run("snapshot", ["new", "--quiet"])),
+      : Effect.asVoid(inRepository("snapshot", ["describe", "-m", message, "--quiet"]))).pipe(
+        Effect.andThen(inRepository("snapshot", ["log", "-r", "@", "--no-graph", "-T", "change_id.short()"])),
+        Effect.tap(() => inRepository("snapshot", ["new", "--quiet"])),
         Effect.map((changeId) => ({ changeId: changeId.trim() }))
       )
 
@@ -165,27 +168,29 @@ const operations = (run: Run) => {
     Effect.asVoid(
       Effect.flatMap(
         requireRevision("restore", changeId),
-        (revision) => run("restore", ["restore", "--from", revision])
+        (revision) => inRepository("restore", ["restore", "--from", revision])
       )
     )
 
   const diff = (from: string, to: string) =>
     Effect.flatMap(
       Effect.all([requireRevision("diff", from), requireRevision("diff", to)]),
-      ([fromRevision, toRevision]) => run("diff", ["diff", "--from", fromRevision, "--to", toRevision, "--git"])
+      ([fromRevision, toRevision]) =>
+        inRepository("diff", ["diff", "--from", fromRevision, "--to", toRevision, "--git"])
     )
 
   const workspaceAdd = (name: string, path: string, revision?: string) =>
     Effect.asVoid(
       revision === undefined
-        ? run("workspaceAdd", ["workspace", "add", "--name", name, path])
+        ? inRepository("workspaceAdd", ["workspace", "add", "--name", name, path])
         : Effect.flatMap(requireRevision("workspaceAdd", revision), (pinned) =>
-          run("workspaceAdd", ["workspace", "add", "--name", name, "--revision", pinned, path]))
+          inRepository("workspaceAdd", ["workspace", "add", "--name", name, "--revision", pinned, path]))
     )
 
-  const workspaceForget = (name: string) => Effect.asVoid(run("workspaceForget", ["workspace", "forget", name]))
+  const workspaceForget = (name: string) =>
+    Effect.asVoid(inRepository("workspaceForget", ["workspace", "forget", name]))
 
-  const status = () => run("status", ["status"])
+  const status = () => inRepository("status", ["status"])
 
   /**
    * `jj root` prints the workspace root for whatever directory it runs in,
@@ -208,10 +213,10 @@ const operations = (run: Run) => {
     Effect.flatMap(
       requireRevision("revert", changeId),
       (revision) =>
-        run("revert", ["diff", "-r", revision, "--name-only"]).pipe(
+        inRepository("revert", ["diff", "-r", revision, "--name-only"]).pipe(
           Effect.flatMap((names) =>
             Effect.as(
-              run("revert", ["revert", "-r", revision, "--insert-before", "@"]),
+              inRepository("revert", ["revert", "-r", revision, "--insert-before", "@"]),
               {
                 reverted: names.split("\n").map((line) => line.trim()).filter((line) => line.length > 0)
               }
@@ -252,6 +257,23 @@ const operations = (run: Run) => {
 export const layer: Layer.Layer<Jj> = Layer.succeed(Jj)(operations(jj))
 
 /**
+ * Provides `Jj` bound to one absolute repository root.
+ *
+ * Binding makes repository authority explicit: later changes to
+ * `process.cwd()` cannot redirect snapshots, restores, or diffs into another
+ * checkout.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerAt = (repositoryRoot: string): Layer.Layer<Jj> => {
+  if (!isAbsolute(repositoryRoot)) {
+    throw new TypeError(`NodeJj.layerAt requires an absolute repository root: ${repositoryRoot}`)
+  }
+  return Layer.succeed(Jj)(operations(jj, repositoryRoot))
+}
+
+/**
  * Provides the `Jj` service backed by the `jj` CLI, spawning through the host's
  * `ChildProcessSpawner`.
  *
@@ -268,3 +290,21 @@ export const layerSpawner: Layer.Layer<Jj, never, ChildProcessSpawner> = Layer.e
   Jj,
   Effect.map(ChildProcessSpawner, (spawner) => operations(viaSpawner(spawner)))
 )
+
+/**
+ * Provides repository-bound `Jj` through the host's process spawner.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerSpawnerAt = (
+  repositoryRoot: string
+): Layer.Layer<Jj, never, ChildProcessSpawner> => {
+  if (!isAbsolute(repositoryRoot)) {
+    throw new TypeError(`NodeJj.layerSpawnerAt requires an absolute repository root: ${repositoryRoot}`)
+  }
+  return Layer.effect(
+    Jj,
+    Effect.map(ChildProcessSpawner, (spawner) => operations(viaSpawner(spawner), repositoryRoot))
+  )
+}

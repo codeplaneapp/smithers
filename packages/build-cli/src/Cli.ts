@@ -121,7 +121,7 @@ export interface RuntimeConfig {
 interface PreparedWorkspace {
   readonly root: string
   readonly cacheDirectory: string
-  readonly remoteCache?: (ResolvedRemoteCache & { readonly token?: string | undefined }) | undefined
+  readonly remoteCache?: (ResolvedRemoteCache & { readonly readToken: () => string | undefined }) | undefined
 }
 
 /** The slice of an incur command context the presentation helpers read. */
@@ -194,7 +194,8 @@ const present = <A>(
  * the declared gitignore policy before writing state; query, graph, and plan
  * commands pass `writeState = false` and remain observational.
  *
- * Reading the declared token from the environment is a read, never a write.
+ * The declared token is not read here. The cache transport receives a reader
+ * and invokes it only while constructing an outbound request.
  * Removing the name from `process.env` here would mutate state the caller
  * owns: `makeCli` is a library entry point, and two concurrent commands with
  * different declared token names would delete each other's credentials. The
@@ -216,10 +217,11 @@ const prepare = async (
   const remoteCache = await resolveRemoteCache(root, runtime.cacheUrl)
   let preparedRemote: PreparedWorkspace["remoteCache"]
   if (remoteCache !== undefined) {
-    const token = remoteCache.tokenEnv === "SMITHERS_CACHE_TOKEN"
-      ? runtime.cacheToken ?? process.env[remoteCache.tokenEnv]
-      : process.env[remoteCache.tokenEnv]
-    preparedRemote = { ...remoteCache, token }
+    const readToken = (): string | undefined =>
+      remoteCache.tokenEnv === "SMITHERS_CACHE_TOKEN"
+        ? runtime.cacheToken ?? environmentOf(runtime)[remoteCache.tokenEnv]
+        : environmentOf(runtime)[remoteCache.tokenEnv]
+    preparedRemote = { ...remoteCache, readToken }
   }
   if (writeState && config.gitignored) await ensureGitignored(root, config.cacheDirectory)
   runtime.signal?.throwIfAborted()

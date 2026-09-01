@@ -11,13 +11,14 @@
  *    request smithers build itself makes, which today means the remote-cache client.
  *    This seam is complete: the credential exists only inside the CLI process,
  *    for the duration of one request.
- * 2. **Child processes.** {@link startProxy} runs a local HTTP proxy a spawned
- *    tool is pointed at. Plain-HTTP requests through it are rewritten. HTTPS is
- *    tunnelled with `CONNECT` and is **not** rewritten, because rewriting an
- *    encrypted stream requires terminating TLS with a certificate authority the
- *    child trusts, which this module does not create. A tool that must send a
- *    real credential over HTTPS is therefore not yet covered; see the smithers build
- *    DESIGN.md limitations section rather than assuming the placeholder works.
+ * 2. **Child request fields.** {@link startProxy} runs a local HTTP proxy a
+ *    spawned tool is pointed at. Plain-HTTP request headers and bodies are
+ *    rewritten. HTTPS `CONNECT` streams remain opaque because the boundary
+ *    does not terminate TLS.
+ * 3. **Secret destination URLs.** {@link Proxy.urlFor} gives a child a
+ *    loopback capability URL. The proxy resolves the real HTTP or HTTPS URL
+ *    only when the child calls that capability, then performs the outbound
+ *    request itself. The true destination never enters child argv or env.
  *
  * The value is read from the host environment at substitution time, never
  * cached in the vault. A run that plans without executing, or that never
@@ -27,6 +28,7 @@
  */
 import { randomBytes } from "node:crypto"
 import * as NodeHttp from "node:http"
+import * as NodeHttps from "node:https"
 import * as NodeNet from "node:net"
 import type * as Secret from "./Secret.ts"
 import { placeholderPattern, placeholderPrefix } from "./Secret.ts"
@@ -125,25 +127,25 @@ export interface Vault {
 export const makeVault = (options: { readonly read?: Read | undefined } = {}): Vault => {
   const read: Read = options.read ?? ((name) => process.env[name])
   const byEnv = new Map<string, string>()
-  const byPlaceholder = new Map<string, string>()
+  const byPlaceholder = new Map<string, Secret.Secret>()
   const mint = (secret: Secret.Secret): string => {
     const existing = byEnv.get(secret.env)
     if (existing !== undefined) return existing
     const placeholder = `${placeholderPrefix}${randomBytes(32).toString("hex")}`
     byEnv.set(secret.env, placeholder)
-    byPlaceholder.set(placeholder, secret.env)
+    byPlaceholder.set(placeholder, secret)
     return placeholder
   }
   const substitute = (text: string): string => {
     if (byPlaceholder.size === 0 || !text.includes(placeholderPrefix)) return text
     return text.replace(placeholderPattern, (match) => {
-      const env = byPlaceholder.get(match)
+      const secret = byPlaceholder.get(match)
       // An unminted placeholder is not ours. Leaving it untouched is what
       // keeps substitution a capability: a target cannot obtain a value by
       // spelling a placeholder it was never given.
-      if (env === undefined) return match
-      const value = read(env)
-      if (value === undefined || value === "") throw new SecretUnavailable(env)
+      if (secret === undefined) return match
+      const value = read(secret.env) ?? secret.fallback
+      if (value === undefined || value === "") throw new SecretUnavailable(secret.env)
       return value
     })
   }
@@ -171,9 +173,22 @@ export const makeVault = (options: { readonly read?: Read | undefined } = {}): V
 export interface Proxy {
   /** The loopback endpoint a child is pointed at. */
   readonly endpoint: string
+  /** Mints a loopback URL that resolves one secret destination on request. */
+  readonly urlFor: (secret: Secret.Secret) => string
   /** Stops the proxy and drops every in-flight connection. */
   readonly close: () => Promise<void>
 }
+
+/** Private path namespace used for secret destination capabilities. */
+const secretUrlPath = "/.well-known/smithers-secret-url/"
+
+/**
+ * Maximum request body buffered for placeholder substitution.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const maximumRequestBodyBytes = 16 * 1024 * 1024
 
 /** Hop-by-hop headers a proxy must not forward. */
 const hopByHop = new Set([
@@ -204,21 +219,72 @@ const hopByHop = new Set([
  */
 export const startProxy = (vault: Vault): Promise<Proxy> =>
   new Promise((resolve, reject) => {
+    const destinations = new Map<string, { readonly placeholder: string; readonly env: string }>()
+    const destinationByEnv = new Map<string, string>()
     const server = NodeHttp.createServer((request, response) => {
       let target: URL
-      try {
-        target = new URL(request.url ?? "")
-      } catch {
-        response.writeHead(400).end("proxy requires an absolute request URL")
-        return
+      let secretDestination = false
+      const requestUrl = request.url ?? ""
+      if (requestUrl.startsWith(secretUrlPath)) {
+        const route = requestUrl.slice(secretUrlPath.length)
+        const destination = destinations.get(route)
+        if (destination === undefined) {
+          response.writeHead(404).end("unknown secret destination")
+          return
+        }
+        let resolved: string
+        try {
+          resolved = vault.substitute(destination.placeholder)
+        } catch (cause) {
+          const message = cause instanceof SecretUnavailable ? cause.message : "secret substitution failed"
+          response.writeHead(502).end(message)
+          return
+        }
+        try {
+          target = new URL(resolved)
+        } catch {
+          response.writeHead(502).end(`the declared secret ${destination.env} is not an http(s) URL`)
+          return
+        }
+        if (target.protocol !== "http:" && target.protocol !== "https:") {
+          response.writeHead(502).end(`the declared secret ${destination.env} is not an http(s) URL`)
+          return
+        }
+        secretDestination = true
+      } else {
+        try {
+          target = new URL(requestUrl)
+        } catch {
+          response.writeHead(400).end("proxy requires an absolute request URL")
+          return
+        }
+        if (target.protocol !== "http:") {
+          response.writeHead(400).end("proxy forwards http requests only")
+          return
+        }
       }
-      if (target.protocol !== "http:") {
-        response.writeHead(400).end("proxy forwards http requests only")
+      const declaredLength = Number(request.headers["content-length"] ?? "0")
+      if (Number.isFinite(declaredLength) && declaredLength > maximumRequestBodyBytes) {
+        response.writeHead(413).end("proxy request body is too large")
+        request.resume()
         return
       }
       const chunks: Array<Buffer> = []
-      request.on("data", (chunk: Buffer) => chunks.push(chunk))
+      let bodyBytes = 0
+      let rejected = false
+      request.on("data", (chunk: Buffer) => {
+        if (rejected) return
+        bodyBytes += chunk.byteLength
+        if (bodyBytes > maximumRequestBodyBytes) {
+          rejected = true
+          chunks.length = 0
+          response.writeHead(413).end("proxy request body is too large")
+          return
+        }
+        chunks.push(chunk)
+      })
       request.on("end", () => {
+        if (rejected) return
         let headers: Record<string, string | Array<string>>
         let body: Buffer
         try {
@@ -227,6 +293,7 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
             if (!hopByHop.has(name.toLowerCase())) forwarded[name] = value
           }
           headers = vault.substituteHeaders(forwarded)
+          if (secretDestination) headers.host = target.host
           const raw = Buffer.concat(chunks)
           const text = raw.toString("utf8")
           // Substituting a body only makes sense when it is text that survives
@@ -241,11 +308,12 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
           response.writeHead(502).end(message)
           return
         }
-        const upstream = NodeHttp.request(
+        const requestUpstream = target.protocol === "https:" ? NodeHttps.request : NodeHttp.request
+        const upstream = requestUpstream(
           {
             protocol: target.protocol,
             hostname: target.hostname,
-            port: target.port === "" ? 80 : target.port,
+            port: target.port === "" ? (target.protocol === "https:" ? 443 : 80) : target.port,
             method: request.method,
             path: `${target.pathname}${target.search}`,
             headers
@@ -302,6 +370,15 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
       }
       resolve({
         endpoint: `http://127.0.0.1:${address.port}`,
+        urlFor: (secret) => {
+          const existing = destinationByEnv.get(secret.env)
+          if (existing !== undefined) return existing
+          const route = randomBytes(32).toString("hex")
+          const url = `http://127.0.0.1:${address.port}${secretUrlPath}${route}`
+          destinations.set(route, { placeholder: vault.mint(secret), env: secret.env })
+          destinationByEnv.set(secret.env, url)
+          return url
+        },
         close: () =>
           new Promise<void>((done) => {
             server.closeAllConnections()

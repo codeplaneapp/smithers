@@ -647,7 +647,7 @@ export const Package = S.Package({ targets: { gate, redGate, commit, agentCommit
 
 describe("Github.Pr dispatch", () => {
   it(
-    "refuses without the token secret, without a token value, and without approval; NotImplemented past the gate",
+    "refuses without the token declaration and without approval; values stay lazy until HTTP egress",
     async () => {
       const root = await temporaryWorkspace()
       await write(root, "WORKSPACE.ts", workspaceModule())
@@ -674,7 +674,8 @@ export const Package = S.Package({ targets: { gate, prNoToken, pr, prApproval } 
 
       const noValue = await serve(root, ["//:pr"], { environment: withoutToken })
       expect(noValue.exitCode).toBe(1)
-      expect(noValue.logs).toContain("the declared GITHUB_TOKEN secret has no value in the invoking environment")
+      expect(noValue.logs).toMatch(/\/\/:gate {2}(ran|hit)/)
+      expect(noValue.logs).toContain("NotImplemented: Github.Pr passed its refusal gate")
 
       const approval = await serve(root, ["//:prApproval"], {
         environment: { ...process.env, GITHUB_TOKEN: "ghp_secret" }

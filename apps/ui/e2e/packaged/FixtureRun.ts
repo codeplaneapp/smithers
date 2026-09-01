@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { constants } from "node:fs"
-import { access, lstat, mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises"
+import { access, lstat, mkdir, readFile, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve, sep } from "node:path"
 
@@ -12,8 +12,7 @@ const ACTIVE_TEST_FILE = "active-test.json"
 const safeLabel = (label: string): string =>
   label.replaceAll(/[^a-zA-Z0-9._-]+/g, "-").replaceAll(/^-+|-+$/g, "").slice(0, 80) || "test"
 
-const exists = async (path: string): Promise<boolean> =>
-  access(path, constants.F_OK).then(() => true, () => false)
+const exists = async (path: string): Promise<boolean> => access(path, constants.F_OK).then(() => true, () => false)
 
 const processIsAlive = (pid: number): boolean => {
   try {
@@ -105,7 +104,7 @@ const staleReport = async (
 ): Promise<void> => {
   if (artifactsDirectory === undefined) return
   await mkdir(artifactsDirectory, { recursive: true })
-  const path = join(artifactsDirectory, `stale-fixture-${new Date().toISOString().replaceAll(/[:.]/g, "-")}.json`)
+  const path = join(artifactsDirectory, `stale-fixture.${new Date().toISOString().replaceAll(/[:.]/g, "-")}.json`)
   await atomicJson(path, { detectedAt: new Date().toISOString(), reason, lease: lease ?? null })
 }
 
@@ -256,6 +255,11 @@ export class PackagedFixtureRun {
     const markerExists = await exists(this.activeTestPath)
     const leaked = this.currentTest ?? await readJson(this.activeTestPath).then(parseActiveTestLease, () => undefined)
     await removeInside(this.registryDirectory, this.activeDirectory)
+    await rmdir(this.registryDirectory).catch((error: NodeJS.ErrnoException) => {
+      // A caller-supplied registry may contain reports, and a new suite may
+      // acquire it immediately after this lease is removed.
+      if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") throw error
+    })
     this.closed = true
     if (leaked !== undefined) {
       throw new Error(

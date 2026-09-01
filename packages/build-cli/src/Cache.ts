@@ -1001,7 +1001,8 @@ export interface OpenCacheOptions {
   readonly workspaceRoot: string
   readonly cacheDirectory?: string | undefined
   readonly endpoint?: string | undefined
-  readonly token?: string | undefined
+  /** Reads the bearer token at the instant an outbound request is built. */
+  readonly readToken?: (() => string | undefined) | undefined
   readonly fetch?: typeof globalThis.fetch | undefined
   readonly warn?: ((line: string) => void) | undefined
   readonly timeouts?: { readonly get: number; readonly put: number } | undefined
@@ -1012,7 +1013,7 @@ interface NormalizedOpenCacheOptions {
   readonly workspaceRoot: string
   readonly cacheDirectory: string
   readonly endpoint: string | undefined
-  readonly token: string | undefined
+  readonly readToken: () => string | undefined
   readonly fetch: typeof globalThis.fetch
   readonly warn: (line: string) => void
   readonly timeouts: { readonly get: number; readonly put: number }
@@ -1091,12 +1092,12 @@ const normalizeOpenCacheOptions = (value: OpenCacheOptions): NormalizedOpenCache
   const record = plainDataRecord(value, "cache options")
   exactDataKeys(
     record,
-    new Set(["workspaceRoot", "cacheDirectory", "endpoint", "token", "fetch", "warn", "timeouts", "io"]),
+    new Set(["workspaceRoot", "cacheDirectory", "endpoint", "readToken", "fetch", "warn", "timeouts", "io"]),
     "cache options"
   )
   const workspaceRoot = dataMember(record, "workspaceRoot", "cache options")
   const cacheDirectory = dataMember(record, "cacheDirectory", "cache options")
-  const token = dataMember(record, "token", "cache options")
+  const readToken = dataMember(record, "readToken", "cache options") ?? (() => undefined)
   const fetch = dataMember(record, "fetch", "cache options") ?? globalThis.fetch
   const warn = dataMember(record, "warn", "cache options") ?? ((line: string) => process.stderr.write(`${line}\n`))
   if (
@@ -1114,21 +1115,14 @@ const normalizeOpenCacheOptions = (value: OpenCacheOptions): NormalizedOpenCache
     typeof cacheDirectory === "string" &&
     (cacheDirectory.length > 32 * 1024 || !isWellFormedText(cacheDirectory) || cacheDirectory.includes("\0"))
   ) throw new TypeError("cache cacheDirectory must be bounded usable text")
-  if (
-    token !== undefined &&
-    (typeof token !== "string" ||
-      token.length > 4_096 ||
-      !isWellFormedText(token) ||
-      /[\u0000-\u001f\u007f]/.test(token) ||
-      Buffer.byteLength(token, "utf8") > 4_096)
-  ) throw new TypeError("remote cache token must be bounded control-free text")
+  if (typeof readToken !== "function") throw new TypeError("remote cache readToken must be a function")
   if (typeof fetch !== "function") throw new TypeError("remote cache fetch must be a function")
   if (typeof warn !== "function") throw new TypeError("remote cache warn must be a function")
   return Object.freeze({
     workspaceRoot,
     cacheDirectory: Config.normalizeCacheDirectory(cacheDirectory ?? Config.defaultCacheDirectory),
     endpoint: normalizeEndpoint(dataMember(record, "endpoint", "cache options")),
-    token,
+    readToken: readToken as () => string | undefined,
     fetch: fetch as typeof globalThis.fetch,
     warn: warn as (line: string) => void,
     timeouts: validateTimeouts(dataMember(record, "timeouts", "cache options")),
@@ -1144,7 +1138,7 @@ type Fetched =
 
 class RemoteStore {
   private readonly endpoint: string
-  private readonly token: string | undefined
+  private readonly readToken: () => string | undefined
   private readonly fetch: typeof globalThis.fetch
   private readonly warn: (line: string) => void
   private readonly timeouts: { readonly get: number; readonly put: number }
@@ -1153,13 +1147,13 @@ class RemoteStore {
 
   constructor(options: {
     readonly endpoint: string
-    readonly token?: string | undefined
+    readonly readToken: () => string | undefined
     readonly fetch: typeof globalThis.fetch
     readonly warn: (line: string) => void
     readonly timeouts: { readonly get: number; readonly put: number }
   }) {
     this.endpoint = options.endpoint.replace(/\/+$/, "")
-    this.token = options.token
+    this.readToken = options.readToken
     this.fetch = options.fetch
     this.warn = options.warn
     this.timeouts = options.timeouts
@@ -1180,8 +1174,16 @@ class RemoteStore {
 
   private headers(): Headers {
     const headers = new Headers({ "content-type": "application/json" })
-    if (this.token !== undefined && this.token !== "") {
-      headers.set("authorization", `Bearer ${this.token}`)
+    const token = this.readToken()
+    if (
+      token !== undefined &&
+      (typeof token !== "string" || token.length > 4_096 || !isWellFormedText(token) ||
+        /[\u0000-\u001f\u007f]/.test(token) || Buffer.byteLength(token, "utf8") > 4_096)
+    ) {
+      throw new TypeError("remote cache token must be bounded control-free text")
+    }
+    if (token !== undefined && token !== "") {
+      headers.set("authorization", `Bearer ${token}`)
     }
     return headers
   }
@@ -1314,7 +1316,7 @@ export const openCache = async (opts: OpenCacheOptions): Promise<CacheStore> => 
     ? null
     : new RemoteStore({
       endpoint: options.endpoint,
-      token: options.token,
+      readToken: options.readToken,
       fetch: options.fetch,
       warn: options.warn,
       timeouts: options.timeouts

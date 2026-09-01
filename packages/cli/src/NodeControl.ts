@@ -70,7 +70,7 @@ import type { SqlClient } from "effect/unstable/sql/SqlClient"
 import { existsSync, mkdirSync, readFileSync } from "node:fs"
 import { createServer } from "node:http"
 import type { ListenOptions } from "node:net"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import * as Application from "./Application.ts"
 import * as CodexAuth from "./CodexAuth.ts"
 import * as Environment_ from "./Environment.ts"
@@ -113,17 +113,31 @@ const valueFromArguments = (args: ReadonlyArray<string>, flag: string): string |
 }
 
 /** One entry of an `--mcp-config` file, structurally `McpClient.ConnectOptions`. */
-const isMcpServerEntry = (value: unknown): value is McpClient.ConnectOptions =>
-  typeof value === "object" &&
-  value !== null &&
-  typeof (value as { readonly server?: unknown }).server === "string" &&
-  typeof (value as { readonly command?: unknown }).command === "string" &&
-  Array.isArray((value as { readonly args?: unknown }).args)
+const isMcpServerEntry = (value: unknown): value is McpClient.ConnectOptions => {
+  if (typeof value !== "object" || value === null) return false
+  const entry = value as Record<string, unknown>
+  const positiveInteger = (key: string) =>
+    entry[key] === undefined || (typeof entry[key] === "number" && Number.isInteger(entry[key]) && entry[key] > 0)
+  const env = entry.env
+  return typeof entry.server === "string" &&
+    typeof entry.command === "string" &&
+    Array.isArray(entry.args) && entry.args.every((argument) => typeof argument === "string") &&
+    (entry.cwd === undefined || typeof entry.cwd === "string") &&
+    (env === undefined || (
+      typeof env === "object" && env !== null &&
+      Object.values(env).every((item) => item === undefined || typeof item === "string")
+    )) &&
+    positiveInteger("handshakeTimeoutMs") &&
+    positiveInteger("requestTimeoutMs") &&
+    positiveInteger("queueCapacity") &&
+    positiveInteger("maxFrameBytes")
+}
 
 /**
  * Reads and validates the MCP servers named by `--mcp-config`/`FLOWS_MCP_CONFIG`.
  *
- * The file is a JSON array of `{server, command, args, cwd?, env?}` entries —
+ * The file is a JSON array of `{server, command, args, cwd?, env?,
+ * handshakeTimeoutMs?, requestTimeoutMs?, queueCapacity?, maxFrameBytes?}` entries —
  * exactly `McpClient.ConnectOptions`. A missing path is not configured (no
  * MCP servers, the same as omitting the flag); a present but malformed file
  * is a startup defect, thrown here rather than silently ignored, since a
@@ -141,7 +155,7 @@ const mcpServersFromArguments = (
   const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))
   if (!Array.isArray(parsed) || !parsed.every(isMcpServerEntry)) {
     throw new Error(
-      `--mcp-config ${path} must be a JSON array of { server, command, args, cwd?, env? } entries`
+      `--mcp-config ${path} contains an invalid MCP server entry`
     )
   }
   return parsed
@@ -787,6 +801,7 @@ export const layerExecutor = (
   never,
   ControlRuntime.ControlRuntime | Journal.Journal | NotificationQueue.NotificationQueue | Registry.Registry
 > => {
+  const workspaceRoot = resolve(root)
   const grants = GrantStore.layerNoop
   // The same guarded platform the registry discovers under: kernel FileSystem
   // over descriptor-relative atomic access, with the Node service bundle
@@ -865,6 +880,7 @@ export const layerExecutor = (
   return NodeFlowsRuntime.layer(
     {
       filename: executionDatabasePath(root),
+      workspaceRoot,
       owner: { hostId: "flows-cli" },
       // Two terminals over one project are two engine processes over one
       // `.flows/engine.db`, so "one engine process at a time" was never true
@@ -878,7 +894,7 @@ export const layerExecutor = (
     WorkspaceSandbox.layerFileSystem(),
     registration
   ).pipe(
-    Layer.provide([platform, NodeCrypto.layer, NodeJj.layer]),
+    Layer.provide([platform, NodeCrypto.layer, NodeJj.layerAt(workspaceRoot)]),
     // Failure to open or migrate the local execution engine is a startup
     // defect, just like the control database above: no command can execute
     // honestly without this composition.

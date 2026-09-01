@@ -13,8 +13,7 @@ const scratch = async (): Promise<string> => {
   return root
 }
 
-const exists = (path: string): Promise<boolean> =>
-  access(path, constants.F_OK).then(() => true, () => false)
+const exists = (path: string): Promise<boolean> => access(path, constants.F_OK).then(() => true, () => false)
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
@@ -38,6 +37,7 @@ describe("the packaged E2E fixture lease", () => {
     await second.cleanup()
     await run.cleanup()
     expect(await exists(join(registry, "active"))).toBe(false)
+    expect(await exists(registry)).toBe(false)
   })
 
   test("refuses to start a new test when the prior test never cleaned up", async () => {
@@ -77,7 +77,7 @@ describe("the packaged E2E fixture lease", () => {
       isProcessAlive: () => false
     })).rejects.toThrow("Detected an unclean prior packaged E2E run")
     expect(await exists(join(registry, "active"))).toBe(false)
-    expect((await Array.fromAsync(new Bun.Glob("stale-fixture-*.json").scan(artifacts))).length).toBe(1)
+    expect((await Array.fromAsync(new Bun.Glob("stale-fixture.*.json").scan(artifacts))).length).toBe(1)
 
     const clean = await PackagedFixtureRun.start({ registryDirectory: registry })
     await clean.cleanup()

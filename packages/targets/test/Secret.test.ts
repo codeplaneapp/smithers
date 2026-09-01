@@ -117,6 +117,20 @@ describe("SecretProxy vault", () => {
     }
   })
 
+  it("uses a declared public fallback only at substitution time", () => {
+    let reads = 0
+    const vault = SecretProxy.makeVault({
+      read: () => {
+        reads += 1
+        return undefined
+      }
+    })
+    const placeholder = vault.mint(Secret.Secret("VAULT_FALLBACK", { fallback: "public-value" }))
+    expect(reads).toBe(0)
+    expect(vault.substitute(placeholder)).toBe("public-value")
+    expect(reads).toBe(1)
+  })
+
   it("substitutes header records, single and repeated", () => {
     const vault = SecretProxy.makeVault({ read: () => "real-value" })
     const placeholder = vault.mint(token)
@@ -211,6 +225,45 @@ describe("SecretProxy server", () => {
     }
   })
 
+  it("turns a secret destination into a loopback capability and resolves it lazily", async () => {
+    let requests = 0
+    const upstream = NodeHttp.createServer((_request, response) => {
+      requests += 1
+      response.end("destination-ok")
+    })
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve))
+    const address = upstream.address()
+    if (address === null || typeof address === "string") throw new Error("no upstream port")
+    let reads = 0
+    const destination = `http://127.0.0.1:${address.port}/rpc?network=test`
+    const vault = SecretProxy.makeVault({
+      read: () => {
+        reads += 1
+        return destination
+      }
+    })
+    const proxy = await SecretProxy.startProxy(vault)
+    try {
+      const capability = proxy.urlFor(Secret.Secret("PROXY_DESTINATION_URL"))
+      expect(capability).not.toContain(destination)
+      expect(new URL(capability).hostname).toBe("127.0.0.1")
+      expect(reads).toBe(0)
+      const body = await new Promise<string>((resolve, reject) => {
+        NodeHttp.get(capability, (response) => {
+          const chunks: Array<Buffer> = []
+          response.on("data", (chunk: Buffer) => chunks.push(chunk))
+          response.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")))
+        }).on("error", reject)
+      })
+      expect(body).toBe("destination-ok")
+      expect(requests).toBe(1)
+      expect(reads).toBe(1)
+    } finally {
+      await proxy.close()
+      await new Promise<void>((resolve) => upstream.close(() => resolve()))
+    }
+  })
+
   it("replaces the placeholder in request headers on the way out", async () => {
     const vault = SecretProxy.makeVault({ read: () => "real-value" })
     const placeholder = vault.mint(token)
@@ -284,6 +337,30 @@ describe("SecretProxy server", () => {
         outgoing.end()
       })
       expect(status).toBe(502)
+    } finally {
+      await proxy.close()
+    }
+  })
+
+  it("rejects an oversized body before buffering or contacting an upstream", async () => {
+    const proxy = await SecretProxy.startProxy(SecretProxy.makeVault())
+    try {
+      const port = Number(new URL(proxy.endpoint).port)
+      const status = await new Promise<number>((resolve, reject) => {
+        const outgoing = NodeHttp.request({
+          host: "127.0.0.1",
+          port,
+          method: "POST",
+          path: "http://127.0.0.1:1/never-contacted",
+          headers: { "content-length": String(SecretProxy.maximumRequestBodyBytes + 1) }
+        }, (response) => {
+          response.resume()
+          resolve(response.statusCode ?? 0)
+        })
+        outgoing.on("error", reject)
+        outgoing.end()
+      })
+      expect(status).toBe(413)
     } finally {
       await proxy.close()
     }

@@ -56,8 +56,11 @@ export const digestFileBytes = async (path: string): Promise<string> => {
  * @category tools
  * @since 0.1.0
  */
-export const findOnPath = (name: string): string | undefined => {
-  return findAllOnPath(name)[0]
+export const findOnPath = (
+  name: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env
+): string | undefined => {
+  return findAllOnPath(name, environment)[0]
 }
 
 /**
@@ -66,9 +69,12 @@ export const findOnPath = (name: string): string | undefined => {
  * @category tools
  * @since 0.1.0
  */
-export const findAllOnPath = (name: string): ReadonlyArray<string> => {
+export const findAllOnPath = (
+  name: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env
+): ReadonlyArray<string> => {
   const found: Array<string> = []
-  const environmentPath = process.env["PATH"] ?? ""
+  const environmentPath = environment["PATH"] ?? ""
   for (const entry of environmentPath.split(NodePath.delimiter)) {
     if (entry === "") continue
     const candidate = NodePath.join(entry, name)
@@ -112,9 +118,16 @@ const probeOutputLimit = 2 * 1024
  */
 export const probeVersion = (
   path: string,
-  options?: { readonly cwd?: string | undefined; readonly args?: ReadonlyArray<string> | undefined }
+  options?: {
+    readonly cwd?: string | undefined
+    readonly args?: ReadonlyArray<string> | undefined
+    readonly environment?: Readonly<Record<string, string | undefined>> | undefined
+  }
 ): Promise<Probe> =>
-  probeCommand(path, options?.args ?? ["--version"], options?.cwd === undefined ? undefined : { cwd: options.cwd })
+  probeCommand(path, options?.args ?? ["--version"], {
+    ...(options?.cwd === undefined ? {} : { cwd: options.cwd }),
+    ...(options?.environment === undefined ? {} : { environment: options.environment })
+  })
 
 /**
  * Runs one bounded tool identity/readiness command.
@@ -125,13 +138,21 @@ export const probeVersion = (
 export const probeCommand = (
   path: string,
   args: ReadonlyArray<string>,
-  options?: { readonly cwd?: string | undefined }
+  options?: {
+    readonly cwd?: string | undefined
+    readonly environment?: Readonly<Record<string, string | undefined>> | undefined
+  }
 ): Promise<Probe> =>
   new Promise((resolve) => {
     NodeChildProcess.execFile(
       path,
       [...args],
-      { timeout: 10_000, maxBuffer: 1 << 20, ...(options?.cwd === undefined ? {} : { cwd: options.cwd }) },
+      {
+        timeout: 10_000,
+        maxBuffer: 1 << 20,
+        ...(options?.cwd === undefined ? {} : { cwd: options.cwd }),
+        ...(options?.environment === undefined ? {} : { env: { ...options.environment } })
+      },
       (error, stdout, stderr) => {
         const exitCode = error === null
           ? 0

@@ -36,6 +36,7 @@ import * as Outward from "@smthrs/targets/Outward"
 import type * as Reference from "@smthrs/targets/Reference"
 import * as RepoTarget from "@smthrs/targets/RepoTarget"
 import * as RustToolchain from "@smthrs/targets/RustToolchain"
+import * as Secret from "@smthrs/targets/Secret"
 import * as Shell from "@smthrs/targets/Shell"
 import * as Target from "@smthrs/targets/Target"
 import * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration"
@@ -406,7 +407,7 @@ export interface PackageNode extends Planner.PlannedTarget {
   readonly keyTemplate: Planner.KeyMaterial | undefined
   readonly refusal: string | undefined
   readonly sandbox: "none" | { readonly network?: boolean | "loopback" | undefined } | undefined
-  readonly secrets: ReadonlyArray<string>
+  readonly secrets: ReadonlyArray<Secret.Secret>
   readonly argv: ReadonlyArray<string> | undefined
   /** Shell.Test fan-out count; each shard owns a distinct key and execution. */
   readonly shards: number
@@ -1189,7 +1190,12 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
       }
     }
   } else if (tag === "MiseBin") {
-    const resolved = await FoundryExec.resolveMiseBin(context.root, context.index.workspace, String(reference["name"]))
+    const resolved = await FoundryExec.resolveMiseBin(
+      context.root,
+      context.index.workspace,
+      String(reference["name"]),
+      context.environment
+    )
     outcome = resolved.ok
       ? { _tag: "resolved", tool: { path: resolved.path, identity: resolved.identity } }
       : { _tag: "refused", tool: { refusal: resolved.refusal, identity: resolved.identity } }
@@ -1622,11 +1628,11 @@ const visit = async (
   let materializeOf: string | undefined
   const cleanOutDirs: Array<string> = []
   const cleanPaths: Array<string> = []
-  const secrets: Array<string> = []
+  const secrets: Array<Secret.Secret> = []
   const secretRecords: Array<Record<string, unknown>> = []
   collectTagged(attrMember(attrs, "secrets"), "Secret", secretRecords, new Set())
   for (const record of secretRecords) {
-    if (typeof record["env"] === "string") secrets.push(record["env"])
+    if (Secret.isSecret(record)) secrets.push(record)
   }
   let sandbox = attrMember(attrs, "sandbox") as PackageNode["sandbox"]
 
@@ -1903,6 +1909,7 @@ const visit = async (
       workspace: context.index.workspace,
       rule,
       mode: plannedMode,
+      environment: context.environment,
       attrs: attrs as never
     })
     toolchain.push(planned.toolchain)
@@ -2440,10 +2447,9 @@ const visit = async (
   }
   if (lane?.kind === "outward") {
     for (const required of lane.required) {
-      if (!secrets.includes(required)) {
+      const declaration = secrets.find((secret) => secret.env === required)
+      if (declaration === undefined) {
         noteRefusal(`${rule}: missing secret: declaration requires S.Secret(${JSON.stringify(required)})`)
-      } else if (context.environment[required] === undefined || context.environment[required] === "") {
-        noteRefusal(`${rule}: missing secret: the declared ${required} secret has no value in the invoking environment`)
       }
     }
   }
@@ -3027,8 +3033,8 @@ export const execute = async (
   }
 
   /**
-   * Resolves the argv and environment one node spawns with: secrets from the
-   * host environment, the generated bun program for `bun:` templates. Shared
+   * Resolves the argv and environment one node spawns with: declared secrets
+   * stay as declarations, alongside the generated bun program for `bun:` templates. Shared
    * by tool runs and by service acquisition, so a Serve target spawns exactly
    * the process its declaration plans.
    */
@@ -3036,22 +3042,15 @@ export const execute = async (
     node: PackageNode,
     override?: ReadonlyArray<string>
   ): Promise<
-    { readonly argv: [string, ...Array<string>]; readonly env: Record<string, string> } | { readonly error: string }
+    {
+      readonly argv: [string, ...Array<string>]
+      readonly env: Record<string, string>
+      readonly secrets: ReadonlyArray<Secret.Secret>
+    } | { readonly error: string }
   > => {
     const planned = override ?? node.argv
     if (planned === undefined) return { error: `${node.rule} planned no executable` }
-    const secretEnv: Record<string, string> = {}
-    for (const name of node.secrets) {
-      const value = process.env[name]
-      if (value === undefined) {
-        return {
-          error: `missing secret: environment variable ${name} is not set (declared as S.Secret(${
-            JSON.stringify(name)
-          }))`
-        }
-      }
-      secretEnv[name] = value
-    }
+    const spawnEnv: Record<string, string> = { ...node.env }
     // The plan keeps workspace-relative paths so two checkouts key alike; the
     // spawn is where they become paths a child process can use.
     const rooted = planned.map((entry) =>
@@ -3060,7 +3059,7 @@ export const execute = async (
     let argv = await StampExec.resolveArgv(root, rooted)
     for (const name of node.absoluteEnv) {
       const value = node.env[name]
-      if (value !== undefined) secretEnv[name] = NodePath.join(root, ...value.split("/"))
+      if (value !== undefined) spawnEnv[name] = NodePath.join(root, ...value.split("/"))
     }
     if (node.bunTemplate !== undefined) {
       const directory = NodePath.join(root, ...cacheDirectory.split("/"), "tmp")
@@ -3075,7 +3074,7 @@ export const execute = async (
       await Fs.writeFile(program, lines.join("\n"), "utf8")
       argv = argv.map((entry) => entry === Shell.bunProgramToken ? program : entry)
     }
-    return { argv: argv as [string, ...Array<string>], env: { ...node.env, ...secretEnv } }
+    return { argv: argv as [string, ...Array<string>], env: spawnEnv, secrets: node.secrets }
   }
 
   const spawnNode = async (
@@ -3091,7 +3090,7 @@ export const execute = async (
       cwd: node.cwd,
       argv: wrapped as [string, ...Array<string>],
       env: resolved.env,
-      secrets: [],
+      secrets: resolved.secrets,
       expectedExitCodes: [0],
       timeoutMs: node.timeoutMs
     }
@@ -3346,8 +3345,7 @@ export const execute = async (
       return AnvilExec.serviceSpec({
         label: key,
         cwd: Exec.resolveWorkspacePath(treeRoot, serveNode.cwd),
-        attrs: serveNode.lane.attrs,
-        environment
+        attrs: serveNode.lane.attrs
       })
     }
     if (serveNode.lane?.kind !== "serve") return { error: `service ${label} is not a service target` }
@@ -3366,6 +3364,7 @@ export const execute = async (
       cwd: Exec.resolveWorkspacePath(treeRoot, serveNode.cwd),
       argv: resolved.argv,
       env: resolved.env,
+      secrets: resolved.secrets,
       readiness: serveNode.lane.readiness,
       health: serveNode.lane.health,
       stop: serveNode.lane.stop
@@ -4964,10 +4963,10 @@ export const execute = async (
           return green("ran")
         }
         case "Github.Pr": {
-          // Refusal paths only: no token secret declared, no token value in
-          // the environment, or (already refused at plan time) no approval.
-          // Past the gate, opening the pull request is NotImplemented and
-          // says so.
+          // Refusal paths only: no token declaration or (already refused at
+          // plan time) no approval. Secret values remain unread until a real
+          // HTTP transport exists. Past the gate, opening the pull request is
+          // NotImplemented and says so.
           try {
             GithubTarget.openPr(node.declaration, { environment, approvalGranted: false })
           } catch (cause) {

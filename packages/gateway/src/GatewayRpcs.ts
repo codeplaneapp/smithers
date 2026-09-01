@@ -49,16 +49,16 @@ export const SubmitApprovalInput = Schema.Struct({
 /**
  * What submitting an approval did.
  *
- * `decision` is the receipt for the grant or refusal; `resume` is the receipt
- * for restarting the run the decision unblocked, which the gateway performs on
- * the caller's behalf. `resume` is absent for a plan-scoped decision, which
- * has no run to restart, and for a denial, which leaves the run parked.
+ * `decision` is the receipt for the grant or refusal. `resume` is retained as
+ * an optional wire-compatibility field and is no longer emitted: Control owns
+ * the decision and its durable resume delegation as one domain command.
  *
  * @since 1.0.0
  * @category models
  */
 export const SubmitApprovalOutput = Schema.Struct({
   decision: ControlSchema.Receipt,
+  /** @deprecated Control resumes node approvals as part of `decision`. */
   resume: Schema.optional(ControlSchema.Receipt)
 })
 
@@ -83,14 +83,9 @@ const submitErrors = Schema.Union([
 /**
  * The gateway read path and the composite approval mutation.
  *
- * `Approval.Submit` exists because approving a parked node and restarting the
- * run it parked are one operator act and two control mutations. A product
- * client that made them two round trips would leave a run approved and
- * stopped whenever the second call was lost, which is exactly the state a
- * human reads as "I approved it and nothing happened". Binding them here
- * keeps the pair on the server side of the relay. When the control plane
- * resumes on approval itself, this procedure keeps its signature and stops
- * issuing the second mutation.
+ * `Approval.Submit` is the transport form of Control's single decision
+ * command. Control records the decision and durable resume delegation; the
+ * gateway never composes a second mutation.
  *
  * @since 1.0.0
  * @category groups

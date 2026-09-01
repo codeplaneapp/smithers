@@ -724,7 +724,7 @@ export const Package = S.Package({ targets: { confined, loopback, networked, ope
 })
 
 describe("secrets", () => {
-  it("fails before spawn with the missing variable named", async () => {
+  it("does not read a missing secret when the job makes no outbound request", async () => {
     const root = await temporaryWorkspace()
     await write(root, "WORKSPACE.ts", workspaceModule())
     await write(
@@ -738,9 +738,47 @@ export const Package = S.Package({ targets: { push } })
     commitAll(root)
     delete process.env["SMTHRS_TEST_ABSENT_SECRET"]
     const { exitCode, logs } = await serve(root, ["//:push"])
-    expect(exitCode).toBe(1)
-    expect(logs).toContain("SMTHRS_TEST_ABSENT_SECRET")
-    expect(logs).toContain("missing secret")
+    expect(exitCode).toBe(0)
+    expect(logs).not.toContain("missing secret")
+  })
+
+  it("gives the job a placeholder and substitutes only on the outbound request", async () => {
+    let authorization: string | undefined
+    const upstream = NodeHttp.createServer((request, response) => {
+      authorization = request.headers.authorization
+      response.end("ok")
+    })
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve))
+    const address = upstream.address()
+    const port = typeof address === "object" && address !== null ? address.port : 0
+    const secret = "package-boundary-secret"
+    process.env["SMTHRS_TEST_BOUNDARY_SECRET"] = secret
+    try {
+      const root = await temporaryWorkspace()
+      await write(root, "WORKSPACE.ts", workspaceModule())
+      const command = `case "$SMTHRS_TEST_BOUNDARY_SECRET" in smithers-build-secret-*) ;; *) exit 91;; esac; ` +
+        `curl -sf -H "authorization: Bearer $SMTHRS_TEST_BOUNDARY_SECRET" http://127.0.0.1:${port}/`
+      await write(
+        root,
+        "PACKAGE.ts",
+        `import { Smithers as S } from "@smthrs/targets"
+const push = S.Shell.Run({
+  command: ${JSON.stringify(command)},
+  secrets: [S.Secret("SMTHRS_TEST_BOUNDARY_SECRET")],
+  sandbox: "none"
+})
+export const Package = S.Package({ targets: { push } })
+`
+      )
+      commitAll(root)
+      const { exitCode, logs } = await serve(root, ["//:push"])
+      expect(exitCode).toBe(0)
+      expect(authorization).toBe(`Bearer ${secret}`)
+      expect(logs).not.toContain(secret)
+    } finally {
+      delete process.env["SMTHRS_TEST_BOUNDARY_SECRET"]
+      await new Promise<void>((resolve) => upstream.close(() => resolve()))
+    }
   })
 })
 

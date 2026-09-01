@@ -22,6 +22,14 @@ import * as NodeJj from "../node/NodeJj.ts"
 export const layer: Layer.Layer<Jj> = NodeJj.layer
 
 /**
+ * Provides the `Jj` service bound to one absolute repository root under Bun.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerAt = NodeJj.layerAt
+
+/**
  * Provides the `Jj` service through the host's `ChildProcessSpawner` under Bun.
  *
  * The contained counterpart of {@link layer}, for the same reason the Node one
@@ -32,3 +40,11 @@ export const layer: Layer.Layer<Jj> = NodeJj.layer
  * @since 0.1.0
  */
 export const layerSpawner: Layer.Layer<Jj, never, ChildProcessSpawner> = NodeJj.layerSpawner
+
+/**
+ * Provides a repository-bound `Jj` service through the host spawner under Bun.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerSpawnerAt = NodeJj.layerSpawnerAt

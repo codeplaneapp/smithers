@@ -30,6 +30,7 @@ import * as ControlServer from "@smthrs/control/ControlServer"
 import { SyncRpcs } from "@smthrs/sync/SyncRpcs"
 import * as SyncServer from "@smthrs/sync/SyncServer"
 import { Effect, Layer, Schema, Stream, type Types } from "effect"
+import * as FileSystem from "effect/FileSystem"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc"
 import { GatewayError } from "./GatewayError.ts"
@@ -82,29 +83,15 @@ export const layerHandlers = GatewayRpcs.toLayer(
     return GatewayRpcs.of({
       "Projection.Snapshot": Effect.fn("Gateway.snapshot")(({ selector }) => projections.snapshot(selector)),
       "Projection.Subscribe": ({ selector }) => projections.subscribe(selector),
-      /*
-       * One operator act, two control mutations, one round trip. A parked
-       * node's approval installs the grant; the run it parked still has to be
-       * told to go on. Splitting those across the relay would leave a run
-       * approved and stopped whenever the second call was lost.
-       *
-       * A denial issues no resume: the run stays parked, which is what a
-       * denial means. A plan-scoped decision has no run to resume.
-       */
+      /* One operator command. Control owns the atomic decision plus durable
+       * resume delegation; the gateway is only a transport adapter. */
       "Approval.Submit": Effect.fn("Gateway.submitApproval")((input) =>
         Effect.gen(function*() {
-          const target = input.target
-          const payload = { target, scope: input.scope, idempotencyKey: input.idempotencyKey }
+          const payload = { target: input.target, scope: input.scope, idempotencyKey: input.idempotencyKey }
           const decision = input.decision === "approve"
             ? yield* control.approve(payload)
             : yield* control.deny(payload)
-          const resume = input.decision === "approve" && target._tag === "Node"
-            ? yield* control.resume({
-              runId: target.runId,
-              idempotencyKey: `${input.idempotencyKey}:resume`
-            })
-            : undefined
-          return resume === undefined ? { decision } : { decision, resume }
+          return { decision }
         })
       )
     })
@@ -253,6 +240,40 @@ export const layerSyncHttp = Layer.mergeAll(
  */
 export const rpcPaths: ReadonlyArray<string> = ["/rpc", "/projections", "/sync"]
 
+/**
+ * RPC paths whose upgrade/request must pass edge authentication.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const protectedPaths: ReadonlyArray<string> = [
+  ...rpcPaths,
+  "/rpc/ws",
+  "/projections/ws",
+  "/sync/ws"
+]
+
+/**
+ * Default maximum request body accepted by an RPC mount (one MiB).
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const defaultMaxRequestBodyBytes = 1024 * 1024
+
+/**
+ * Ingress policy enforced before an RPC transport parses a request.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface IngressOptions {
+  readonly maxRequestBodyBytes?: number | undefined
+  readonly authorize?: (
+    headers: Readonly<Record<string, string>>
+  ) => Effect.Effect<boolean>
+}
+
 const encodeGatewayError = Schema.encodeUnknownSync(GatewayError)
 
 const malformedRequest = (path: string) =>
@@ -265,6 +286,30 @@ const malformedRequest = (path: string) =>
       })
     ),
     { status: 400 }
+  )
+
+const unauthorizedRequest = () =>
+  HttpServerResponse.jsonUnsafe(
+    encodeGatewayError(
+      new GatewayError({
+        code: "unauthorized",
+        message: "A valid bearer credential is required",
+        cause: null
+      })
+    ),
+    { status: 401 }
+  )
+
+const requestTooLarge = (path: string, maxBytes: number) =>
+  HttpServerResponse.jsonUnsafe(
+    encodeGatewayError(
+      new GatewayError({
+        code: "request_too_large",
+        message: `POST ${path} exceeds the ${maxBytes}-byte request limit`,
+        cause: null
+      })
+    ),
+    { status: 413 }
   )
 
 /**
@@ -315,22 +360,49 @@ export const carriesRpcRequest = (
  * @since 1.0.0
  * @category layers
  */
-export const layerRefuseMalformedRpc = HttpRouter.middleware(
-  Effect.gen(function*() {
-    const serialization = yield* RpcSerialization.RpcSerialization
-    return (httpEffect: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
-      Effect.gen(function*() {
-        const request = yield* HttpServerRequest.HttpServerRequest
-        const path = new URL(request.url, "http://gateway.invalid").pathname
-        if (request.method !== "POST" || !rpcPaths.includes(path)) return yield* httpEffect
-        // The mount itself dies on an unreadable body; this reads the same
-        // cached effect, so a read failure is still the mount's to report.
-        const body = yield* Effect.orDie(request.text)
-        return carriesRpcRequest(serialization, body) ? yield* httpEffect : malformedRequest(path)
-      })
-  }),
-  { global: true }
-)
+export const layerIngress = (options: IngressOptions = {}) => {
+  const maxBytes = options.maxRequestBodyBytes ?? defaultMaxRequestBodyBytes
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    throw new TypeError("Gateway request body limit must be a positive safe integer")
+  }
+  return HttpRouter.middleware(
+    Effect.gen(function*() {
+      const serialization = yield* RpcSerialization.RpcSerialization
+      return (httpEffect: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
+        Effect.gen(function*() {
+          const request = yield* HttpServerRequest.HttpServerRequest
+          const path = new URL(request.url, "http://gateway.invalid").pathname
+          if (protectedPaths.includes(path) && options.authorize !== undefined) {
+            const authorized = yield* options.authorize(request.headers)
+            if (!authorized) return unauthorizedRequest()
+          }
+          if (request.method !== "POST" || !rpcPaths.includes(path)) return yield* httpEffect
+          const declaredLength = request.headers["content-length"]
+          if (declaredLength !== undefined && /^\d+$/.test(declaredLength) && Number(declaredLength) > maxBytes) {
+            return requestTooLarge(path, maxBytes)
+          }
+          const body = yield* request.text.pipe(
+            Effect.provideService(HttpServerRequest.MaxBodySize, FileSystem.Size(maxBytes)),
+            Effect.match({
+              onFailure: () => undefined,
+              onSuccess: (value) => value
+            })
+          )
+          if (body === undefined) return requestTooLarge(path, maxBytes)
+          return carriesRpcRequest(serialization, body) ? yield* httpEffect : malformedRequest(path)
+        })
+    }),
+    { global: true }
+  )
+}
+
+/**
+ * Compatibility export for the default ingress policy.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerRefuseMalformedRpc = layerIngress()
 
 /**
  * The whole gateway surface, as one application layer a host serves.
@@ -346,11 +418,15 @@ export const layerRefuseMalformedRpc = HttpRouter.middleware(
  * @since 1.0.0
  * @category layers
  */
-export const layer = (health: Health, heartbeatMillis?: number | undefined) =>
+export const layer = (
+  health: Health,
+  heartbeatMillis?: number | undefined,
+  ingress?: IngressOptions | undefined
+) =>
   Layer.mergeAll(
     layerControlHttp(heartbeatMillis),
     layerProjectionsHttp,
     layerSyncHttp,
     layerHealth(health),
-    layerRefuseMalformedRpc
+    layerIngress(ingress)
   )

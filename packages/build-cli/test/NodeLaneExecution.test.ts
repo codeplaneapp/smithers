@@ -291,22 +291,9 @@ describe("Node lane package execution", () => {
     const root = await fixture()
     const missing = await serve(root, ["//:publishMissing", "--plan"])
     expect(missing.output).toContain("missing secret")
-    const oldNpm = process.env["NPM_TOKEN"]
-    process.env["NPM_TOKEN"] = "fixture-token"
-    try {
-      const approval = await serve(root, ["//:publishApproval", "--plan"])
-      expect(approval.output).toContain("approval required")
-    } finally {
-      if (oldNpm === undefined) delete process.env["NPM_TOKEN"]
-      else process.env["NPM_TOKEN"] = oldNpm
-    }
-    const oldGithub = process.env["GITHUB_TOKEN"]
-    delete process.env["GITHUB_TOKEN"]
-    try {
-      expect((await serve(root, ["//:pages"])).logs).toContain("missing secret")
-      expect((await serve(root, ["//:pr"])).logs).toContain("missing secret")
-    } finally {
-      if (oldGithub !== undefined) process.env["GITHUB_TOKEN"] = oldGithub
-    }
+    const approval = await serve(root, ["//:publishApproval", "--plan"])
+    expect(approval.output).toContain("approval required")
+    expect((await serve(root, ["//:pages"])).logs).toContain("NotImplemented: Github.Pages")
+    expect((await serve(root, ["//:pr"])).logs).toContain("NotImplemented: Git.Pr")
   })
 })

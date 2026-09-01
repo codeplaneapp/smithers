@@ -24,7 +24,8 @@ const workspace = async (): Promise<string> => {
 
 const serve = async (
   root: string,
-  args: ReadonlyArray<string>
+  args: ReadonlyArray<string>,
+  environment?: Readonly<Record<string, string | undefined>>
 ): Promise<{ readonly exitCode: number; readonly output: string; readonly logs: string }> => {
   let exitCode = 0
   let output = ""
@@ -35,7 +36,7 @@ const serve = async (
     return true
   }) as typeof process.stderr.write
   try {
-    await makeCli({}).serve([...normalizeArgv(args), "--workspace", root], {
+    await makeCli({ environment }).serve([...normalizeArgv(args), "--workspace", root], {
       exit: (code) => {
         exitCode = code
       },
@@ -224,7 +225,7 @@ describe("Docker service spec", () => {
   })
 })
 
-describe("host refusals and Anvil secret resolution", () => {
+describe("host refusals and Anvil secret boundaries", () => {
   it("plans a typed Mise refusal from the declared config when mise is absent", async () => {
     const root = await workspace()
     await Fs.writeFile(NodePath.join(root, "mise.toml"), "[tools]\nmockery = \"2.53.6\"\n", "utf8")
@@ -248,7 +249,7 @@ export const Package = S.Package({ targets: { tool } })
 `,
       "utf8"
     )
-    const result = await serve(root, ["//:tool", "--plan"])
+    const result = await serve(root, ["//:tool", "--plan"], { ...process.env, PATH: "" })
     expect(result.exitCode).toBe(0)
     expect(result.output).toContain("host binary")
     expect(result.output).toContain("mise")
@@ -256,38 +257,27 @@ export const Package = S.Package({ targets: { tool } })
     expect(result.output).toContain("2.53.6")
   })
 
-  it("refuses a fork at spawn when its RPC secret has no value", async () => {
+  it("keeps the RPC URL out of Anvil argv and resolves it only at egress", async () => {
     const port = await freePort()
+    const secretUrl = "https://secret.example.invalid/rpc-token"
+    process.env["CHAIN_TEST_RPC"] = secretUrl
     const result = await AnvilExec.serviceSpec({
       label: "//:fork",
       cwd: process.cwd(),
       attrs: {
-        forkUrl: { _tag: "Secret", env: "CHAIN_TEST_RPC_ABSENT" },
+        forkUrl: { _tag: "Secret", env: "CHAIN_TEST_RPC" },
         forkBlockNumber: "latest",
         port
-      },
-      environment: {}
+      }
     })
-    expect(result).toEqual({
-      error: "missing secret: environment variable CHAIN_TEST_RPC_ABSENT is not set for Anvil.Fork //:fork"
-    })
-
-    const secretUrl = "https://secret.example.invalid/rpc-token"
-    const resolved = await AnvilExec.serviceSpec({
-      label: "//:fork",
-      cwd: process.cwd(),
-      attrs: {
-        forkUrl: { _tag: "Secret", env: "CHAIN_TEST_RPC" },
-        forkBlockNumber: 1,
-        port
-      },
-      environment: { CHAIN_TEST_RPC: secretUrl }
-    })
-    expect("error" in resolved).toBe(false)
-    if (!("error" in resolved)) {
-      expect(resolved.argv).toContain(secretUrl)
-      expect(JSON.stringify(resolved.canonicalArgv)).not.toContain(secretUrl)
-      expect(JSON.stringify(resolved.canonicalArgv)).toContain("CHAIN_TEST_RPC")
+    delete process.env["CHAIN_TEST_RPC"]
+    expect("error" in result).toBe(false)
+    if (!("error" in result)) {
+      expect(JSON.stringify(result.argv)).not.toContain(secretUrl)
+      expect(result.argv).toContain("{secret-url:CHAIN_TEST_RPC}")
+      expect(result.secretUrls).toEqual([
+        { index: 6, secret: { _tag: "Secret", env: "CHAIN_TEST_RPC" } }
+      ])
     }
   })
 

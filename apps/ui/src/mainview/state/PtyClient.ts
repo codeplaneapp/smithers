@@ -7,9 +7,9 @@ import type { FetchLike } from "smithers-shared/NativeAgent"
  * that session's output and exit; keystrokes go back as `pty.input` frames.
  *
  * The socket opens on the first attachment and reconnects while attachments
- * exist. Frames sent before the socket is open are queued and flushed on
- * open, and every live topic is re-subscribed after a reconnect, so a tab
- * never has to know whether the socket is up.
+ * exist. Frames sent before the server acknowledges the topic subscription
+ * are queued, and every live topic is re-subscribed after a reconnect, so a
+ * fast shell cannot publish output before the renderer is listening.
  */
 
 export interface PtyAttachment {

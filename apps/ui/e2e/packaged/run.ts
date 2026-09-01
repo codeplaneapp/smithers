@@ -213,6 +213,17 @@ const main = async (): Promise<void> => {
         }
       }
     )
+    // A successful test process is not sufficient: a detached native child
+    // can recreate HOME after the suite removes its fixture. Let late writes
+    // settle, then use the same durable lease contract as startup to audit it.
+    await Bun.sleep(250)
+    const postflight = await PackagedFixtureRun.start({
+      artifactsDirectory: artifacts,
+      ...(process.env.SMITHERS_E2E_FIXTURE_REGISTRY === undefined
+        ? {}
+        : { registryDirectory: process.env.SMITHERS_E2E_FIXTURE_REGISTRY })
+    })
+    await postflight.cleanup()
   } catch (error) {
     operationError = error
   }
@@ -220,7 +231,11 @@ const main = async (): Promise<void> => {
   const cleanupErrors: Array<unknown> = []
   if (portableRuntimePrepared) {
     try {
-      await run("portable runtime source cleanup", [process.execPath, "scripts/prepare-packaged-build-cli.ts", "--clean"])
+      await run("portable runtime source cleanup", [
+        process.execPath,
+        "scripts/prepare-packaged-build-cli.ts",
+        "--clean"
+      ])
       portableRuntimePrepared = false
     } catch (error) {
       cleanupErrors.push(error)

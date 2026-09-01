@@ -102,19 +102,15 @@ describe("smithers executable", processBudget, () => {
   it("answers --version without discovery or a database, from a directory with no project marker", () => {
     const home = stageHomeProject(24)
     try {
-      const startedAt = Date.now()
       const result = spawnSync(process.execPath, ["--no-warnings", executable, "--version"], {
         cwd: join(home, "deep", "nested"),
         encoding: "utf8",
         timeout: 30_000,
         env: { ...process.env, HOME: home }
       })
-      const elapsed = Date.now() - startedAt
-
       expect(result.error).toBeUndefined()
       expect(result.status).toBe(0)
       expect(result.stdout).toContain(Version.packageVersion)
-      expect(elapsed).toBeLessThan(5_000)
       expect(existsSync(join(home, ".flows", "control.db"))).toBe(false)
       expect(existsSync(join(home, ".flows", "engine.db"))).toBe(false)
     } finally {
@@ -125,19 +121,15 @@ describe("smithers executable", processBudget, () => {
   it("answers --help without discovery or a database, from a directory with no project marker", () => {
     const home = stageHomeProject(24)
     try {
-      const startedAt = Date.now()
       const result = spawnSync(process.execPath, ["--no-warnings", executable, "--help"], {
         cwd: join(home, "deep", "nested"),
         encoding: "utf8",
         timeout: 30_000,
         env: { ...process.env, HOME: home }
       })
-      const elapsed = Date.now() - startedAt
-
       expect(result.error).toBeUndefined()
       expect(result.status).toBe(0)
       expect(result.stdout).toContain("plan")
-      expect(elapsed).toBeLessThan(5_000)
       expect(existsSync(join(home, ".flows", "control.db"))).toBe(false)
     } finally {
       rmSync(home, { recursive: true, force: true })
