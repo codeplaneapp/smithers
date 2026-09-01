@@ -26,13 +26,13 @@ const report = (
 })
 
 describe("Gate", () => {
-  it("delegates threshold arithmetic and keeps inconclusive green", async () => {
-    const failed = await Effect.runPromiseExit(
+  it("delegates threshold arithmetic and leaves an unobservable run undecided", async () => {
+    const failed = await Effect.runPromise(
       Gate.check(report([{ case: "c", scorer: "s", stepKey: "k", kind: "score", score: 0.2, at: "t" }]), {
         min: 0.5
       })
     )
-    expect(failed._tag).toBe("Failure")
+    expect(failed).toMatchObject({ _tag: "Failed", reasons: ["min_below_threshold: threshold 0.5, actual 0.2"] })
     const inconclusive = await Effect.runPromise(
       Gate.check({
         ...report([]),
@@ -76,6 +76,49 @@ describe("Gate", () => {
     expect(Gate.ciGrade(verdict).exitCode).toBe(5)
   })
 
+  // A regression is a measurement: the run scored lower than the baseline it
+  // is gated on. Folding it in with the environment faults reported exit 5,
+  // which the CI convention treats as a harness to repair rather than a red.
+  it("fails a run that regressed against its baseline", async () => {
+    const observation = {
+      case: "c",
+      scorer: "s",
+      stepKey: "changed",
+      kind: "score" as const,
+      score: 0,
+      at: "t"
+    }
+    const verdict = await Effect.runPromise(
+      Gate.check({
+        ...report([observation]),
+        regressions: [{
+          case: "c",
+          scorer: "s",
+          baseline: { suite: "s", case: "c", scorer: "s", stepKey: "baseline", score: 1 },
+          actual: observation,
+          drop: 1
+        }]
+      }, { mean: 0 })
+    )
+    expect(verdict).toMatchObject({ _tag: "Failed", reasons: [expect.stringContaining("regression for c/s")] })
+    expect(Gate.ciGrade(verdict).exitCode).toBe(1)
+  })
+
+  it("runs the threshold gates when an observation is missing, and reports both", async () => {
+    const verdict = await Effect.runPromise(
+      Gate.check({
+        ...report([{ case: "c", scorer: "s", stepKey: "k", kind: "score", score: 0.1, at: "t" }]),
+        missing: [{ side: "run" as const, case: "other", scorer: "s", stepKey: "k" }]
+      }, { mean: 0.9 })
+    )
+    expect(verdict).toMatchObject({
+      _tag: "Failed",
+      reasons: [expect.stringContaining("mean_below_threshold")],
+      inconclusive: [expect.stringContaining("missing run")]
+    })
+    expect(Gate.ciGrade(verdict).exitCode).toBe(1)
+  })
+
   it("fails closed on target errors and incomplete regression evidence", async () => {
     const targetFailed = await Effect.runPromise(
       Gate.check({
@@ -98,7 +141,13 @@ describe("Gate", () => {
         missing: [{ side: "run" as const, case: "c", scorer: "s", stepKey: "k" }]
       })
     )
-    expect(targetFailed).toMatchObject({ _tag: "Inconclusive", reasons: [expect.stringContaining("target crashed")] })
-    expect(missing).toMatchObject({ _tag: "Inconclusive", reasons: [expect.stringContaining("missing run")] })
+    expect(targetFailed).toMatchObject({
+      _tag: "Inconclusive",
+      reasons: expect.arrayContaining([expect.stringContaining("target crashed")])
+    })
+    expect(missing).toMatchObject({
+      _tag: "Inconclusive",
+      reasons: expect.arrayContaining([expect.stringContaining("missing run")])
+    })
   })
 })

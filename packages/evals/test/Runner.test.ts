@@ -106,7 +106,44 @@ describe("Runner", () => {
         Effect.provide(Runner.layerNoop)
       )
     )
-    expect(result.observations[0]?.kind).toBe("inconclusive")
+    const observation = result.observations[0]
+    expect(observation?.kind).toBe("inconclusive")
+    expect(observation?.kind === "inconclusive" && observation.reason).toContain("judge unavailable")
+  })
+
+  // A scorer that threw a TypeError is a bug in the scorer; an unreachable
+  // judge is an outage. Both used to arrive as the same fixed sentence, so a
+  // permanently broken scorer read as an unavailable one forever.
+  it("names the scorer's own cause in the inconclusive reason", async () => {
+    const broken = Scorer.make({
+      id: "packages/evals/test/Runner/broken",
+      version: "1",
+      name: "broken",
+      score: () =>
+        Effect.sync(() => {
+          throw new TypeError("scorerKey is not a function")
+        })
+    })
+    const suite = await Effect.runPromise(
+      Suite.make({
+        name: "broken-scorer",
+        concurrency: 1,
+        bindings: [Binding.make({ scorer: broken, appliesTo: target })],
+        cases: [{ name: "one", input: 1 }]
+      })
+    )
+    const executor = CaseExecutor.make((suiteCase) =>
+      Effect.succeed({ output: suiteCase.input, stepKey: "step", latencyMs: 0, target })
+    )
+    const result = await Effect.runPromise(
+      Runner.run(suite, runOptions).pipe(
+        Effect.provide(Layer.succeed(CaseExecutor.CaseExecutor)(executor)),
+        Effect.provide(Layer.succeed(Runner.Runner)(inlineScorer))
+      )
+    )
+    const observation = result.observations[0]
+    expect(observation?.kind).toBe("inconclusive")
+    expect(observation?.kind === "inconclusive" && observation.reason).toContain("scorerKey is not a function")
   })
 
   it("retains a typed target failure without re-running the target", async () => {
