@@ -121,7 +121,8 @@ const frames = (
       () => "",
       (partial, chunk) => {
         const pieces = `${partial}${chunk}`.split("\n")
-        const tail = pieces.pop() ?? ""
+        // `split` always returns at least one member.
+        const tail = pieces.pop()!
         return Effect.gen(function*() {
           yield* check(tail)
           const complete = yield* Effect.forEach(
@@ -180,23 +181,24 @@ export const connect = (
 
     const nextId = yield* Ref.make(0)
     const outbound = yield* Queue.bounded<Uint8Array>(queueCapacity)
-    const terminal = yield* Deferred.make<never, McpError>()
     const state = yield* Ref.make<ConnectionState>({ _tag: "Open", pending: HashMap.empty() })
 
     /** Closes once, fails every waiter, and rejects all future traffic. */
     const closeWith = (error: McpError) =>
-      Effect.gen(function*() {
+      Effect.uninterruptible(Effect.gen(function*() {
         const waiters = yield* Ref.modify(state, (current) =>
           current._tag === "Closed"
             ? [undefined, current] as const
             : [Array.from(HashMap.values(current.pending)), { _tag: "Closed", error }] as const)
         if (waiters === undefined) return
-        yield* Deferred.fail(terminal, error)
+        // Wake blocked offers first, then settle every registered request.
+        // No caller can leave the connection scope before this cleanup has
+        // completed because the request deferreds are the terminal signal.
         yield* Queue.shutdown(outbound)
         yield* Effect.forEach(waiters, (deferred) => Deferred.fail(deferred, error), {
           discard: true
         })
-      })
+      }))
 
     yield* Effect.addFinalizer(() => closeWith(closed(options.server, "connection scope closed")))
 
@@ -205,10 +207,7 @@ export const connect = (
     // fact the reader loop reports, so it collapses pending requests too.
     yield* Stream.fromQueue(outbound).pipe(
       Stream.run(handle.stdin),
-      Effect.matchCauseEffect({
-        onFailure: () => closeWith(closed(options.server, "stdin closed")),
-        onSuccess: () => closeWith(closed(options.server, "stdin closed"))
-      }),
+      Effect.ensuring(closeWith(closed(options.server, "stdin closed"))),
       Effect.forkScoped
     )
 
@@ -265,6 +264,12 @@ export const connect = (
           ? current
           : { ...current, pending: HashMap.remove(current.pending, id) })
 
+    const enqueue = (frame: Uint8Array): Effect.Effect<void, McpError> =>
+      Effect.flatMap(Queue.offer(outbound, frame), (offered) =>
+        offered
+          ? Effect.void
+          : Effect.fail(closed(options.server, "outbound queue closed")))
+
     const request = (
       method: string,
       params?: unknown,
@@ -282,12 +287,8 @@ export const connect = (
               ? [current.error, current] as const
               : [undefined, { ...current, pending: HashMap.set(current.pending, id, deferred) }] as const)
           if (registration !== undefined) return yield* Effect.fail(registration)
-          const offered = yield* Effect.raceFirst(
-            Queue.offer(outbound, Rpc.encode({ jsonrpc: "2.0", id, method, params })),
-            Deferred.await(terminal)
-          )
-          if (!offered) return yield* Effect.fail(closed(options.server, "outbound queue closed"))
-          return yield* Effect.raceFirst(Deferred.await(deferred), Deferred.await(terminal))
+          yield* enqueue(Rpc.encode({ jsonrpc: "2.0", id, method, params }))
+          return yield* Deferred.await(deferred)
         }).pipe(
           Effect.ensuring(removePending(id)),
           Effect.timeoutOrElse({
@@ -301,11 +302,7 @@ export const connect = (
       Effect.gen(function*() {
         const current = yield* Ref.get(state)
         if (current._tag === "Closed") return yield* Effect.fail(current.error)
-        const offered = yield* Effect.raceFirst(
-          Queue.offer(outbound, Rpc.encode({ jsonrpc: "2.0", method, params })),
-          Deferred.await(terminal)
-        )
-        if (!offered) return yield* Effect.fail(closed(options.server, "outbound queue closed"))
+        yield* enqueue(Rpc.encode({ jsonrpc: "2.0", method, params }))
       }).pipe(
         Effect.timeoutOrElse({
           duration: requestTimeoutMs,
