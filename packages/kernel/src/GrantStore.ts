@@ -5,7 +5,7 @@
  * `docs/specs/Concepts/Permission Kernel.md` and
  * `docs/specs/Concepts/Trust Granularity.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import {
   type Capability,
@@ -36,7 +36,7 @@ import { Workspace } from "./Workspace.ts"
  * A capability request waiting for an attended reply.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface PendingRequest {
@@ -50,7 +50,7 @@ export interface PendingRequest {
  * A resolution supplied by an attended permission surface.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export type Resolution = "once" | "run" | "remembered" | "deny"
@@ -59,7 +59,7 @@ export type Resolution = "once" | "run" | "remembered" | "deny"
  * Scope and plan identity for a bulk envelope approval.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface EnvelopeGrantOptions {
@@ -72,7 +72,7 @@ export interface EnvelopeGrantOptions {
  * Operations exposed by the grant store.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface Service {
@@ -93,7 +93,7 @@ export interface Service {
  * Service key for permission decisions and attended grant requests.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export class GrantStore extends Context.Service<GrantStore, Service>()("@smthrs/kernel/GrantStore") {}
@@ -102,7 +102,7 @@ export class GrantStore extends Context.Service<GrantStore, Service>()("@smthrs/
  * A hook that durably records a grant decision before it becomes active.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export type Persist = (event: GrantEvent) => Effect.Effect<void, GrantStoreError>
@@ -115,7 +115,7 @@ export type Persist = (event: GrantEvent) => Effect.Effect<void, GrantStoreError
  * grants.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface MakeOptions {
@@ -398,7 +398,7 @@ const isEnvelopeScope = (value: string): value is "run" | "remembered" => value 
  * pattern-array order.
  *
  * @category validation
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const canonicalEnvelopePatterns = (
@@ -424,7 +424,7 @@ export const canonicalEnvelopePatterns = (
  * is already durable.
  *
  * @category validation
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const envelopeSignature = (
@@ -443,7 +443,7 @@ export const envelopeSignature = (
  * more dangerous effect tier than the request displayed to the user.
  *
  * @category validation
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const isValidGrantPattern = (
@@ -476,7 +476,7 @@ export const isValidGrantPattern = (
  * effect-tier boundaries.
  *
  * @category validation
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const isValidEnvelopePattern = (
@@ -533,7 +533,7 @@ const normalizeRules = (
  * pending map.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const make = (
@@ -979,7 +979,7 @@ export const make = (
  * Provides a scoped in-memory grant store.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer = (
@@ -990,7 +990,7 @@ export const layer = (
  * An allow-all grant store.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const makeNoop: Service = GrantStore.of({
@@ -1004,7 +1004,7 @@ export const makeNoop: Service = GrantStore.of({
  * Provides the allow-all grant store.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layerNoop: Layer.Layer<GrantStore> = Layer.succeed(GrantStore)(makeNoop)

@@ -9,7 +9,7 @@
  * `docs/specs/Concepts/Effect Taxonomy.md` and
  * `docs/specs/Concepts/Permission Kernel.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { Context, Layer } from "effect"
 
@@ -17,7 +17,7 @@ import { Context, Layer } from "effect"
  * Workspace-root configuration.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface Service {
@@ -28,7 +28,7 @@ export interface Service {
  * The workspace-root service tag.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export class Workspace extends Context.Service<Workspace, Service>()("@smthrs/kernel/Workspace") {}
@@ -37,7 +37,7 @@ export class Workspace extends Context.Service<Workspace, Service>()("@smthrs/ke
  * Constructs workspace-root configuration.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const make = (root: string): Service => Workspace.of({ root })
@@ -46,7 +46,7 @@ export const make = (root: string): Service => Workspace.of({ root })
  * Provides a workspace root.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer = (root: string): Layer.Layer<Workspace> => Layer.succeed(Workspace, make(root))
@@ -55,7 +55,7 @@ export const layer = (root: string): Layer.Layer<Workspace> => Layer.succeed(Wor
  * Constructs a relative workspace-root stub for tests.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const makeNoop: Service = make(".")
@@ -64,7 +64,7 @@ export const makeNoop: Service = make(".")
  * Provides a relative workspace-root stub for tests.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layerNoop: Layer.Layer<Workspace> = Layer.succeed(Workspace, makeNoop)

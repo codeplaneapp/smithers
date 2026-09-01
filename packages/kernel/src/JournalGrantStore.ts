@@ -5,7 +5,7 @@
  * `docs/specs/Concepts/Permission Kernel.md` and
  * `docs/specs/Concepts/Journal Queue.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import type { CapabilityPattern } from "@smthrs/capability/Capability"
 import { GrantStoreError, Rule } from "@smthrs/capability/Permission"
@@ -34,7 +34,7 @@ import { Workspace } from "./Workspace.ts"
  * because a dropped grant decision cannot safely be treated as persisted.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface JournalGrantStoreOptions {
@@ -248,7 +248,7 @@ const replayRunRules = (
  * `journal_failed`, so permission decisions fail closed.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const make = (options: JournalGrantStoreOptions) =>
@@ -373,7 +373,7 @@ export const make = (options: JournalGrantStoreOptions) =>
  * Provides a journal-backed `GrantStore`.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer = (options: JournalGrantStoreOptions) => Layer.effect(GrantStore.GrantStore)(make(options))

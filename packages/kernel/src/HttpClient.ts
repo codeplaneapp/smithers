@@ -26,7 +26,7 @@
  * `docs/specs/Concepts/Effect Taxonomy.md`, and
  * `docs/specs/Concepts/Host Adapters.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 
 import { type Capability, make as makeCapability } from "@smthrs/capability/Capability"
@@ -100,7 +100,7 @@ const invalidRequest = (request: HttpClientRequest.HttpClientRequest): HttpClien
  * one.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export { HttpClient } from "effect/unstable/http/HttpClient"
 
@@ -109,7 +109,7 @@ export { HttpClient } from "effect/unstable/http/HttpClient"
  * URL construction, tracing, header redaction, and interruption behavior.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export { make } from "effect/unstable/http/HttpClient"
 
@@ -123,7 +123,7 @@ export { make } from "effect/unstable/http/HttpClient"
  * for `model:call` rather than `net:get`/`net:post`.
  *
  * @category references
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const ModelCall: Context.Reference<string | undefined> = Context.Reference<string | undefined>(
@@ -136,7 +136,7 @@ export const ModelCall: Context.Reference<string | undefined> = Context.Referenc
  * `modelId` instead of as plain network access.
  *
  * @category references
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const withModelCall = (modelId: string) => <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
@@ -154,7 +154,7 @@ export const withModelCall = (modelId: string) => <A, E, R>(effect: Effect.Effec
  * `capability`, `tier`, `requestId`, and `reason`.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const toHttpClientError = (options: {
@@ -175,7 +175,7 @@ export const toHttpClientError = (options: {
  * and an unattended report can still name the capability.
  *
  * @category refinements
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const fromHttpClientError = (
@@ -192,7 +192,7 @@ export const fromHttpClientError = (
  * request, so an unconfigured capability answers rather than vanishing.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const makeNoop = (): EffectHttpClient.HttpClient =>
@@ -211,7 +211,7 @@ export const makeNoop = (): EffectHttpClient.HttpClient =>
  * Provides an unavailable HTTP client stub.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layerNoop = (): Layer.Layer<EffectHttpClient.HttpClient> =>
@@ -259,7 +259,7 @@ const capabilityFor = (
  * second hop instead of being fetched.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer: Layer.Layer<

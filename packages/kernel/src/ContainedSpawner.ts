@@ -28,7 +28,7 @@
  * Governing design:
  * `docs/specs/Concepts/Host Adapters.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -43,7 +43,7 @@ import * as ProcessLedger from "./ProcessLedger.ts"
  * How long a contained child may take to honour `SIGTERM`.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const defaultGraceMs = 2000
 
@@ -51,7 +51,7 @@ export const defaultGraceMs = 2000
  * Containment configuration.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Options {
   /**
@@ -79,7 +79,7 @@ export interface Options {
  * a `killSignal` or a `forceKillAfter` has an owner who thought about it.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const withContainment = (
   command: ChildProcess.Command,
@@ -114,7 +114,7 @@ export const withContainment = (
  * group the child does not lead.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const groupOf = (command: ChildProcess.Command, pid: number, platform?: string): number | null => {
   const options = command._tag === "PipedCommand" ? rightmost(command).options : command.options
@@ -133,7 +133,7 @@ const rightmost = (command: ChildProcess.Command): ChildProcess.StandardCommand 
  * so the two stack in either order over one host implementation.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layer = (
   options?: Options

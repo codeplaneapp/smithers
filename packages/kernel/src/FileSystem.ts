@@ -14,7 +14,7 @@
  * `docs/specs/Concepts/Effect Taxonomy.md`, and
  * `docs/specs/Concepts/Host Adapters.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { make as makeCapability } from "@smthrs/capability/Capability"
 import { permissionDenied, type PermissionError, toPlatformError } from "@smthrs/capability/Permission"
@@ -39,7 +39,7 @@ import { Workspace } from "./Workspace.ts"
  * Platform adapters opt in only when they can pin a root handle and reject
  * symlinks while traversing from it. Hosts without this extension fail closed.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category security
  * @slop
  */
@@ -47,7 +47,7 @@ export const AtomicFileSystemTypeId = Symbol.for("@smthrs/kernel/AtomicFileSyste
 
 /** A serializable operation executed relative to a pinned filesystem root.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category security
  * @slop
  */
@@ -67,7 +67,7 @@ export interface AtomicRequest {
 
 /** Trusted host extension implementing atomic path resolution and operation.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category security
  * @slop
  */
@@ -83,7 +83,7 @@ export interface AtomicFileSystem {
 
 /** An Effect filesystem carrying the atomic host extension.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category security
  * @slop
  */
@@ -93,7 +93,7 @@ export type AtomicHostFileSystem = EffectFileSystem.FileSystem & {
 
 /** Attaches a trusted platform's descriptor-relative executor to its service.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category security
  * @slop
  */
@@ -107,7 +107,7 @@ export const withAtomicFileSystem = (
  * browser/test volumes whose implementation cannot address the host
  * filesystem at all; native path-based adapters must not use this shortcut.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category security
  * @slop
  */
@@ -203,7 +203,7 @@ const identityOf = (info: EffectFileSystem.File.Info): Option.Option<string> =>
  * a symlink.
  *
  * @category security
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const canonicalResource = (
@@ -278,7 +278,7 @@ export const canonicalResource = (
  * `Permission.fromPlatformError` reads it back.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer: Layer.Layer<

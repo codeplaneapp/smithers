@@ -11,7 +11,7 @@
  * `docs/specs/Concepts/Effect Taxonomy.md`, and
  * `docs/specs/Concepts/Host Adapters.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { make as makeCapability } from "@smthrs/capability/Capability"
 import { permissionDenied } from "@smthrs/capability/Permission"
@@ -26,7 +26,7 @@ import { Workspace } from "./Workspace.ts"
  * kernel namespace stays one-stop; it is the *same* tag, never a second one.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export { Jj } from "@smthrs/jj"
 
@@ -34,7 +34,7 @@ export { Jj } from "@smthrs/jj"
  * Provides an unavailable Jujutsu stub.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export { layerNoop } from "@smthrs/jj"
 
@@ -42,7 +42,7 @@ export { layerNoop } from "@smthrs/jj"
  * Constructs a Jujutsu service from an implementation.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export { make } from "@smthrs/jj"
 
@@ -50,7 +50,7 @@ export { make } from "@smthrs/jj"
  * Constructs an unavailable Jujutsu stub.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export { makeNoop } from "@smthrs/jj"
 
@@ -69,7 +69,7 @@ export { makeNoop } from "@smthrs/jj"
  * authorized path from the directory jj is run in.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer: Layer.Layer<

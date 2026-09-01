@@ -19,7 +19,7 @@
  * `docs/specs/Concepts/Permission Kernel.md` and
  * `docs/specs/Concepts/Host Adapters.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { make as makeCapability } from "@smthrs/capability/Capability"
 import { toPlatformError } from "@smthrs/capability/Permission"
@@ -169,7 +169,7 @@ const snapshotCommand = (command: ChildProcess.Command): ChildProcess.Command =>
  * kernel namespace stays one-stop; it is the *same* tag, never a second one.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 
@@ -179,7 +179,7 @@ export { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
  * `spawn` was given.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export { make } from "effect/unstable/process/ChildProcessSpawner"
 
@@ -191,7 +191,7 @@ export { make } from "effect/unstable/process/ChildProcessSpawner"
  * answers rather than vanishing.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const makeNoop = (
@@ -214,7 +214,7 @@ export const makeNoop = (
  * Provides an unavailable spawner stub.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layerNoop = (
@@ -237,7 +237,7 @@ export const layerNoop = (
  * `Effect` is checked too.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer: Layer.Layer<ChildProcessSpawner, never, ChildProcessSpawner | GrantStore> = Layer.effect(
