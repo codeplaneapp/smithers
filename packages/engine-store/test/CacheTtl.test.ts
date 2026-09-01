@@ -171,6 +171,28 @@ const dispatchInFlow = (
     Effect.provideService(FlowRuntime.FlowInstance, FlowEngine.makeInstance(flow, runId))
   )
 
+/**
+ * A wall clock fixed at `millis`, for a dispatch that runs on another host.
+ *
+ * Two incarnations of one run do not share a clock. A corrected system clock,
+ * or simply a second machine, hands the resuming engine a reading the previous
+ * one had already passed, and the whole point of journalling the admission
+ * verdict is that the run's decision survives that. `TestClock` only moves
+ * forward, so the second reading is supplied directly.
+ */
+const clockAt = (millis: number): Clock.Clock => {
+  const nanos = BigInt(millis) * 1_000_000n
+  return {
+    currentTimeMillisUnsafe: () => millis,
+    currentTimeMillis: Effect.succeed(millis),
+    currentTimeNanosUnsafe: () => nanos,
+    currentTimeNanos: Effect.succeed(nanos),
+    monotonicTimeNanosUnsafe: () => nanos,
+    monotonicTimeNanos: Effect.succeed(nanos),
+    sleep: () => Effect.void
+  }
+}
+
 /** Every cache-provenance record the run journalled, newest last. */
 const provenance = (runId: string) =>
   Effect.gen(function*() {
@@ -298,9 +320,8 @@ describe("the journalled admission verdict", () => {
         yield* activate("verdict-expiry-first")
         yield* dispatch("verdict-expiry-first", "verdict/expiry", body, { ttlMs: 1000 })
         const original = yield* cache.get(sha256("verdict/expiry"))
-        const provenanceOf = Option.isSome(original)
-          ? { runId: original.value.recordedRunId, eventSeq: original.value.recordedEventSeq }
-          : undefined
+        if (Option.isNone(original)) return yield* Effect.die(new Error("the first dispatch recorded no row"))
+        const recorded = original.value
 
         // The second run expires that provenance and records the verdict.
         yield* TestClock.adjust("1001 millis")
@@ -308,26 +329,24 @@ describe("the journalled admission verdict", () => {
         yield* dispatch("verdict-expiry-second", "verdict/expiry", body, { ttlMs: 1000 })
         expect(executions).toBe(2)
 
-        // A copy of the SAME recorded event lands again, fresh by the clock —
-        // a shared-tier write-back, or a fork replaying the parent's rows. The
+        // A copy of the SAME recorded event lands again — a shared-tier
+        // write-back, or a fork replaying the parent's rows. The provenance
+        // ledger is immutable, so only a byte-identical copy restores the head,
+        // and this is that copy.
+        yield* cache.evict(sha256("verdict/expiry"))
+        expect((yield* cache.put(recorded))._tag).toBe("Inserted")
+
+        // The dispatch is re-driven on a host whose clock reads a moment inside
+        // the bound, so its own measurement would admit the restored row. The
         // run already decided that provenance is expired, so the decision holds
         // and the fresh-looking copy is not served.
-        const now = yield* Clock.currentTimeMillis
-        yield* cache.evict(sha256("verdict/expiry"))
-        yield* cache.put({
-          keyDigest: sha256("verdict/expiry"),
-          result: "resurrected",
-          meta: (Option.isSome(original) ? original.value.meta : {}) as never,
-          createdAtMs: now,
-          recordedRunId: provenanceOf!.runId,
-          recordedEventSeq: provenanceOf!.eventSeq
-        })
-        const after = yield* dispatch("verdict-expiry-second", "verdict/expiry", body, { ttlMs: 1000 })
-        // Not `resurrected`: the recorded verdict refused the copy, so the
+        const after = yield* dispatch("verdict-expiry-second", "verdict/expiry", body, { ttlMs: 1000 }).pipe(
+          Effect.provideService(Clock.Clock, clockAt(1000))
+        )
+        // Not the restored copy: the recorded verdict refused it, so the
         // dispatch fell through to this attempt's own durable outcome.
         expect(after).toBe("recorded-2")
         expect(executions).toBe(2)
-        expect(Option.isNone(yield* cache.get(sha256("verdict/expiry")))).toBe(false)
         expect(
           (yield* provenance("verdict-expiry-second")).filter((record) => record.action === "ttl").map((record) =>
             record.verdict
@@ -389,9 +408,8 @@ describe("the journalled admission verdict", () => {
         yield* activate("verdict-source-expiry-first")
         yield* dispatch("verdict-source-expiry-first", "verdict/source-expiry", body, { ttlMs: 1000 })
         const original = yield* cache.get(sha256("verdict/source-expiry"))
-        const recorded = Option.isSome(original)
-          ? { runId: original.value.recordedRunId, eventSeq: original.value.recordedEventSeq }
-          : undefined
+        if (Option.isNone(original)) return yield* Effect.die(new Error("the first dispatch recorded no row"))
+        const recorded = original.value
 
         // Engine A expires that provenance past the bound and records the
         // verdict.
@@ -406,27 +424,21 @@ describe("the journalled admission verdict", () => {
         )
         expect(executions).toBe(2)
 
-        // A copy of the same recorded event lands again, fresh by the clock,
-        // and engine B resumes the run. The refusal is as durable as the
-        // admission: B reads the expiry A recorded and does not serve the
-        // fresh-looking copy.
-        const now = yield* Clock.currentTimeMillis
+        // A byte-identical copy of the same recorded event lands again, which
+        // is the only copy the immutable provenance ledger admits.
         yield* cache.evict(sha256("verdict/source-expiry"))
-        yield* cache.put({
-          keyDigest: sha256("verdict/source-expiry"),
-          result: "resurrected",
-          meta: (Option.isSome(original) ? original.value.meta : {}) as never,
-          createdAtMs: now,
-          recordedRunId: recorded!.runId,
-          recordedEventSeq: recorded!.eventSeq
-        })
+        expect((yield* cache.put(recorded))._tag).toBe("Inserted")
+
+        // Engine B resumes the run on a host whose clock is behind A's, so its
+        // own measurement admits the restored row. The refusal is as durable as
+        // the admission: B reads the expiry A recorded and does not serve it.
         const after = yield* dispatchFrom(
           "engine-b",
           "verdict-source-expiry-second",
           "verdict/source-expiry",
           body,
           { ttlMs: 1000 }
-        )
+        ).pipe(Effect.provideService(Clock.Clock, clockAt(1000)))
         expect(after).toBe("recorded-2")
         expect(executions).toBe(2)
         expect(
@@ -434,6 +446,11 @@ describe("the journalled admission verdict", () => {
             (record) => record.verdict
           )
         ).toEqual(["expired"])
+        // B evicted the restored copy under the recorded verdict, so the row a
+        // later reader finds is this attempt's own durable outcome, never the
+        // one the run had already refused.
+        const surviving = yield* cache.get(sha256("verdict/source-expiry"))
+        expect(Option.isSome(surviving) ? surviving.value.result : undefined).toBe("recorded-2")
       }).pipe(Effect.provide(layers), Effect.provide(TestClock.layer()), Effect.scoped)
     ))
 
