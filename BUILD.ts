@@ -244,10 +244,20 @@ export const ci = Smithers.GithubCiGen({
       steps: [{ name: "Browser bundle guard", verb: Smithers.Verb.Test, pattern: "//scripts:browserContract" }]
     },
     {
-      // One matrix over the three platforms, replacing a required ubuntu job
-      // and two copy-pasted advisory ones. The steps, the toolchain, and the
-      // timeout are declared once, so a platform can never drift into running
-      // a different suite than its neighbours.
+      // One matrix over the three platforms, replacing the two copy-pasted
+      // advisory jobs `node-macos` and `node-windows` and adding a required
+      // ubuntu row. The steps, the toolchain, and the timeout are declared
+      // once, so a platform can never drift into running a different suite
+      // than its neighbours.
+      //
+      // The ubuntu row re-runs package test targets the required `test` job
+      // already covers: that job runs `ci '//packages/...'`, and the `ci` verb
+      // aggregates Build, Test, Lint, and Docs. The two jobs run concurrently,
+      // so the remote cache does not dedupe them, and ubuntu pays the package
+      // suites twice per run. That cost buys a truthful `requiredJobs`: with no
+      // required row, `packages` could be deleted or turned all-advisory and
+      // nothing would fail. Drop the ubuntu row only together with `packages`
+      // in `requiredJobs`.
       //
       // The advisory bit is per row, and it is data: `continue-on-error` reads
       // `matrix.advisory` out of the `include:` rows below, because this

@@ -23,8 +23,10 @@ afterAll(async () => {
  * Mise case below inherited it from whatever PATH the suite happened to run
  * with, so it asserted a refusal a developer machine with mise installed never
  * produces: on this macOS host the plan resolved
- * `argv[2]: /opt/homebrew/bin/mise,"--version"` and the case failed. The rest
- * of PATH is kept, so nothing else the planner resolves changes.
+ * `argv[2]: /opt/homebrew/bin/mise,"--version"` and the case failed. Every PATH
+ * directory that holds the binary is removed, not just its own entry, so a
+ * fixture needing another host tool from the same directory would break; this
+ * one declares a mise tool alone.
  */
 const withoutOnPath = async <A>(binary: string, body: () => Promise<A>): Promise<A> => {
   const original = process.env["PATH"] ?? ""
