@@ -229,6 +229,43 @@ describe("the fault-suite skip audit", () => {
     }
   })
 
+  it("counts the limits the release page says remain", () => {
+    // The paragraph states a number and then lists the limits. Nothing checked
+    // the number against the list: `check-docs` and `check-llms` prove the
+    // generated page matches rc-contract §7, not that §7 can count. It said
+    // "Two limits remain" over three sentences, and the miscount shipped to
+    // the release page verbatim.
+    const page = readFileSync(knownLimitations, "utf8")
+    const paragraph = page.split("\n").find((line) => line.includes("**Credential redaction in logs.**"))
+    assert.ok(paragraph !== undefined, "known-limitations.md has no credential-redaction paragraph")
+    const counted = /\b(One|Two|Three|Four|Five) limits? remain\./.exec(paragraph)
+    assert.ok(counted !== null, "the credential-redaction paragraph no longer states how many limits remain")
+    const spelled = new Map([["One", 1], ["Two", 2], ["Three", 3], ["Four", 4], ["Five", 5]])
+    const claimed = spelled.get(counted[1])
+    // A sentence ends at a period followed by whitespace and a capital, which
+    // leaves `flows_runs.state_json` and the other dotted identifiers alone.
+    const listed = paragraph.slice(counted.index + counted[0].length).trim()
+      .split(/(?<=\.)\s+(?=[A-Z])/)
+      .filter((sentence) => sentence.length > 0)
+    assert.equal(
+      listed.length,
+      claimed,
+      `the paragraph says "${counted[0]}" and then lists ${listed.length}: ${
+        listed.map((sentence) => sentence.slice(0, 60)).join(" | ")
+      }. Fix the count in rc-contract §7 and regenerate the page, or move a sentence that is standing policy `
+        + "rather than a limit ahead of the count."
+    )
+    // And the count is not free to drift from the matrix: fault-gaps row 22
+    // says "Both limits", so the page has to name exactly those two.
+    const row = readFileSync(faultGaps, "utf8").split("\n").find((line) => line.startsWith("| 22 |"))
+    assert.ok(row !== undefined, "e2e/fault-gaps.md has no row 22")
+    assert.ok(
+      row.includes("Both limits are stated in"),
+      "row 22 no longer claims two limits, so this check and the release page have to move together"
+    )
+    assert.equal(claimed, 2, "fault-gaps row 22 names two limits, so the release page must state two")
+  })
+
   it("keeps the skip allow-list pointed at files that exist", () => {
     const present = new Set(sources.map((source) => source.relative))
     for (const relative of allowedSkips.keys()) {
