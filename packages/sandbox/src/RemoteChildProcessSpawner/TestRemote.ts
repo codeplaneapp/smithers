@@ -18,12 +18,16 @@ const scriptedOutput = (text: string | undefined): Stream.Stream<Uint8Array, Pro
   text === undefined || text === "" ? Stream.empty : Stream.fromArray([encoder.encode(text)])
 
 /**
- * Constructs a deterministic scripted provider.
+ * What a scripted provider is built from.
  *
- * @private
+ * Named rather than inline, so a consumer can write a fixture factory whose
+ * argument type is spellable — the sibling models `TestRemoteState` and
+ * `TestRemoteProvider` already are.
+ *
+ * @category models
  * @since 0.1.0
  */
-const makeTestRemote = (options: {
+export interface TestRemoteOptions {
   readonly session?: string | undefined
   readonly scripts?: Readonly<Record<string, TestScript>> | undefined
   readonly openFailure?: ProviderError | undefined
@@ -40,7 +44,15 @@ const makeTestRemote = (options: {
   readonly ping?: Effect.Effect<void, ProviderError> | undefined
   /** Declares the provider able to deliver standard input, which it records. */
   readonly stdin?: boolean | undefined
-} = {}): TestRemoteProvider => {
+}
+
+/**
+ * Constructs a deterministic scripted provider.
+ *
+ * @category testing
+ * @since 0.1.0
+ */
+const makeTestRemote = (options: TestRemoteOptions = {}): TestRemoteProvider => {
   const state: TestRemoteState = {
     openedSessions: [],
     commands: [],

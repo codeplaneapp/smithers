@@ -15,7 +15,14 @@ import type { Provider } from "../Sandbox/Provider.ts"
 import type { Session } from "../Sandbox/Session.ts"
 import type { Sdk } from "./Sdk.ts"
 
-interface Options<Binding> {
+/**
+ * How the provider reaches its Worker binding and shapes each session's
+ * Durable Object sandbox.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface CloudflareSandboxOptions<Binding> {
   readonly sdk: Sdk<Binding>
   readonly binding: Binding
   readonly execution?: "exec" | "process" | undefined
@@ -76,7 +83,7 @@ const processOf = (stdout: string, stderr: string, exitCode: number): RemoteProc
  * @category constructors
  * @since 0.1.0
  */
-export const make = <Binding>(options: Options<Binding>): Provider => {
+export const make = <Binding>(options: CloudflareSandboxOptions<Binding>): Provider => {
   const workdir = options.workdir ?? "/workspace"
 
   return {

@@ -21,7 +21,13 @@ import type { Session } from "../Sandbox/Session.ts"
 import type { ExecTransport } from "./ExecTransport.ts"
 import type { Sdk } from "./Sdk.ts"
 
-interface CommonOptions {
+/**
+ * What every AWS session needs, whichever way its task definition is named.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface AwsSandboxCommonOptions {
   readonly sdk: Sdk
   /**
    * How commands reach the task. Without it the provider provisions and tears
@@ -44,12 +50,24 @@ interface CommonOptions {
   readonly maxPollAttempts?: number | undefined
 }
 
-interface TaskDefinitionOptions extends CommonOptions {
+/**
+ * The arm that runs an existing task definition.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface AwsSandboxTaskDefinitionOptions extends AwsSandboxCommonOptions {
   readonly taskDefinition: string
   readonly image?: never
 }
 
-interface ImageOptions extends CommonOptions {
+/**
+ * The arm that registers a task definition for an image.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface AwsSandboxImageOptions extends AwsSandboxCommonOptions {
   readonly image: string
   readonly taskDefinition?: never
   readonly taskRoleArn: string
@@ -57,7 +75,14 @@ interface ImageOptions extends CommonOptions {
   readonly memory?: string | undefined
 }
 
-type Options = TaskDefinitionOptions | ImageOptions
+/**
+ * How the provider reaches ECS and shapes each session's task: either an
+ * existing task definition or an image the provider registers one for.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type AwsSandboxOptions = AwsSandboxTaskDefinitionOptions | AwsSandboxImageOptions
 
 type RunTaskOutput = Awaited<ReturnType<Sdk["runTask"]>>
 type DescribeTasksOutput = Awaited<ReturnType<Sdk["describeTasks"]>>
@@ -84,7 +109,7 @@ const startedByOf = (session: string): string => {
 const taskArnsOf = (output: RunTaskOutput): ReadonlyArray<string> =>
   (output.tasks ?? []).flatMap((task) => task.taskArn === undefined ? [] : [task.taskArn])
 
-const stopTasks = (options: Options, taskArns: ReadonlyArray<string>): Effect.Effect<void> =>
+const stopTasks = (options: AwsSandboxOptions, taskArns: ReadonlyArray<string>): Effect.Effect<void> =>
   Effect.ignore(
     Effect.forEach(
       taskArns,
@@ -124,7 +149,7 @@ interface Leftover {
  * provisioning, so a key never accumulates machines.
  */
 const leftoverTasks = (
-  options: Options,
+  options: AwsSandboxOptions,
   startedBy: string,
   container: string | undefined
 ): Effect.Effect<{ readonly adopt: Leftover | undefined; readonly stale: ReadonlyArray<string> }, ProviderError> =>
@@ -177,8 +202,7 @@ const chunkBytesOf = (transport: ExecTransport): Effect.Effect<number, ProviderE
     : Effect.fail(
       new ProviderError({
         code: "spawn_error",
-        message:
-          `ExecTransport.chunkBytes must be a whole number of bytes of at least 1, not ${chunkBytes}`
+        message: `ExecTransport.chunkBytes must be a whole number of bytes of at least 1, not ${chunkBytes}`
       })
     )
 }
@@ -187,7 +211,7 @@ const registeredArnOf = (output: RegisterTaskDefinitionOutput): string | undefin
   output.taskDefinition?.taskDefinitionArn
 
 const deregisterDefinition = (
-  options: ImageOptions,
+  options: AwsSandboxImageOptions,
   output: RegisterTaskDefinitionOutput
 ): Effect.Effect<void> => {
   const taskDefinition = registeredArnOf(output)
@@ -217,7 +241,7 @@ const describedTask = (output: DescribeTasksOutput, taskArn: string): Task | und
   output.tasks?.find((task) => task.taskArn === taskArn) ?? output.tasks?.[0]
 
 const describe = (
-  options: Options,
+  options: AwsSandboxOptions,
   taskArn: string
 ): Effect.Effect<DescribeTasksOutput, ProviderError> =>
   attempt(
@@ -227,7 +251,7 @@ const describe = (
   )
 
 const awaitReady = (
-  options: Options,
+  options: AwsSandboxOptions,
   taskArn: string,
   container: string | undefined
 ): Effect.Effect<Task, ProviderError> => {
@@ -252,7 +276,7 @@ const awaitReady = (
 }
 
 const registerDefinition = (
-  options: ImageOptions,
+  options: AwsSandboxImageOptions,
   startedBy: string,
   workdir: string,
   container: string
@@ -290,7 +314,7 @@ const registerDefinition = (
   })
 
 const runTask = (
-  options: Options,
+  options: AwsSandboxOptions,
   taskDefinition: string,
   startedBy: string,
   container: string | undefined
@@ -461,13 +485,13 @@ const spawnScript = (
  * @category constructors
  * @since 0.1.0
  */
-export const make = (options: Options): Provider => ({
+export const make = (options: AwsSandboxOptions): Provider => ({
   acquire: (sessionKey) =>
     Effect.gen(function*() {
       const workdir = options.workdir ?? "/workspace"
       const startedBy = startedByOf(sessionKey)
       const generatedContainer = options.container ?? "sandbox"
-      let imageOptions: ImageOptions | undefined
+      let imageOptions: AwsSandboxImageOptions | undefined
       let taskDefinition: string
       if (options.taskDefinition === undefined) {
         imageOptions = options

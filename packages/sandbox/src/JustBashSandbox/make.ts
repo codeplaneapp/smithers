@@ -14,7 +14,13 @@ import type { Provider } from "../Sandbox/Provider.ts"
 import type { Session } from "../Sandbox/Session.ts"
 import type { JustBashExecOptions, JustBashLike } from "./JustBashLike.ts"
 
-interface Options {
+/**
+ * How the provider reaches its interpreter and the tree it shares with it.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface JustBashSandboxOptions {
   /** The interpreter that runs every session command. */
   readonly bash: JustBashLike
   /** The filesystem mounted under the interpreter's own filesystem view. */
@@ -93,7 +99,7 @@ const rootedAt = (workdir: string) => (path: string): string => {
  * @category constructors
  * @since 0.1.0
  */
-export const make = (options: Options): Provider => {
+export const make = (options: JustBashSandboxOptions): Provider => {
   const root = (options.root ?? "/workspace").replace(/\/+$/, "")
   const gate = Semaphore.makeUnsafe(1)
   return {

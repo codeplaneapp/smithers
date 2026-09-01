@@ -14,7 +14,13 @@ import type { Session } from "../Sandbox/Session.ts"
 import type { Credentials } from "./Credentials.ts"
 import type { Sdk } from "./Sdk.ts"
 
-interface Options extends Credentials {
+/**
+ * How the provider authenticates to Vercel and shapes each session's sandbox.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface VercelSandboxOptions extends Credentials {
   readonly sdk: Sdk
   /** The environment credentials are discovered from. Never `process.env`. */
   readonly env?: Readonly<Record<string, string | undefined>> | undefined
@@ -137,7 +143,7 @@ const machineName = (prefix: string, session: string): string =>
  * @category constructors
  * @since 0.1.0
  */
-export const make = (options: Options): Provider => ({
+export const make = (options: VercelSandboxOptions): Provider => ({
   acquire: (sessionKey) =>
     Effect.gen(function*() {
       const desiredMs = options.timeoutMs ?? createCeilingMillis

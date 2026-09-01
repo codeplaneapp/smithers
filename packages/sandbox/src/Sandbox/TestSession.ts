@@ -17,7 +17,17 @@ const encoder = new TextEncoder()
 const scriptedOutput = (text: string | undefined): Stream.Stream<Uint8Array, ProviderError> =>
   text === undefined || text === "" ? Stream.empty : Stream.fromArray([encoder.encode(text)])
 
-const makeTestSession = (options: {
+/**
+ * What a scripted session is built from.
+ *
+ * Named rather than inline, so a consumer can write a fixture factory whose
+ * argument type is spellable — the sibling models `TestSessionState` and
+ * `TestSessionProvider` already are.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface TestSessionOptions {
   readonly session?: string | undefined
   readonly remoteId?: string | undefined
   readonly workdir?: string | undefined
@@ -30,7 +40,15 @@ const makeTestSession = (options: {
   readonly acquireFailure?: ProviderError | undefined
   /** Gives every session a `ping`, backed by this effect. */
   readonly ping?: Effect.Effect<void, ProviderError> | undefined
-} = {}): TestSessionProvider => {
+}
+
+/**
+ * Constructs a deterministic scripted session provider.
+ *
+ * @category testing
+ * @since 0.1.0
+ */
+const makeTestSession = (options: TestSessionOptions = {}): TestSessionProvider => {
   const state: TestSessionState = {
     acquired: [],
     commands: [],

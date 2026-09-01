@@ -18,7 +18,13 @@ const defaultWorkdir = "/workspace"
 const defaultShell = "/bin/sh"
 const namePrefix = "smthrs-msb-"
 
-interface Options {
+/**
+ * How the provider reaches its SDK and shapes each session's microVM.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface MicrosandboxSandboxOptions {
   /** The injected Microsandbox SDK module. */
   readonly sdk: Sdk
   /** Boot from this image. Default `oven/bun:1`. */
@@ -86,7 +92,7 @@ const attempt = <A>(
     catch: (cause) => failure(code, message, cause)
   })
 
-const configure = (builder: Builder, options: Options, sticky: boolean): Builder => {
+const configure = (builder: Builder, options: MicrosandboxSandboxOptions, sticky: boolean): Builder => {
   let configured = options.snapshot === undefined
     ? builder.image(options.image ?? defaultImage)
     : builder.fromSnapshot(options.snapshot)
@@ -107,7 +113,7 @@ const configure = (builder: Builder, options: Options, sticky: boolean): Builder
 const isAlreadyExists = (cause: unknown): boolean => Reflect.get(Object(cause), "code") === "sandboxAlreadyExists"
 
 const openMachine = (
-  options: Options,
+  options: MicrosandboxSandboxOptions,
   name: string,
   sticky: boolean
 ): Effect.Effect<{ readonly sandbox: VendorSandbox; readonly created: boolean }, ProviderError> =>
@@ -204,7 +210,7 @@ const isMissingFile = (cause: unknown): boolean =>
  * @category constructors
  * @since 0.1.0
  */
-export const make = (options: Options): Provider => ({
+export const make = (options: MicrosandboxSandboxOptions): Provider => ({
   acquire: (sessionKey) =>
     Effect.gen(function*() {
       const name = `${namePrefix}${sessionSlug(sessionKey)}`

@@ -14,7 +14,13 @@ import type { Provider } from "../Sandbox/Provider.ts"
 import type { Session } from "../Sandbox/Session.ts"
 import type { Sdk } from "./Sdk.ts"
 
-interface Options {
+/**
+ * How the provider reaches Daytona and shapes each session's sandbox.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface DaytonaSandboxOptions {
   /** A configured `Daytona` client instance. */
   readonly sdk: Sdk
   /** An explicit absolute guest workspace, otherwise `getWorkDir()` is used. */
@@ -99,7 +105,7 @@ const machineName = (prefix: string, session: string): string =>
  * @category constructors
  * @since 0.1.0
  */
-export const make = (options: Options): Provider => ({
+export const make = (options: DaytonaSandboxOptions): Provider => ({
   acquire: (sessionKey) =>
     Effect.gen(function*() {
       if (options.workdir !== undefined && !options.workdir.startsWith("/")) {
