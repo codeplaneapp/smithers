@@ -115,11 +115,21 @@ describe.skipIf(!jjInstalled)("rewind crash recovery over file SQLite", () => {
                 // process that stopped renewing. The audit is still pending,
                 // so the next build steals the run and rolls the rewind back.
                 // That is the whole point of declining rather than failing.
+                //
+                // `started_at_ms` moves with it. `flows_runs` is read back
+                // through `RunStore`'s durable-invariant check, and one of
+                // those invariants is `heartbeat_at_ms >= started_at_ms`: a
+                // heartbeat alone at the epoch, under a start stamped with the
+                // child's real wall clock, is a row RunStore refuses to decode
+                // at all, so recovery failed reading the run instead of
+                // stealing it.
                 yield* runReal(
                   fixture.databaseFile,
                   Effect.gen(function*() {
                     const sql = yield* Effect.service(SqlClient.SqlClient)
-                    yield* sql`UPDATE flows_runs SET heartbeat_at_ms = 0 WHERE run_id = ${runId}`
+                    yield* sql`
+                  UPDATE flows_runs SET started_at_ms = 0, heartbeat_at_ms = 0 WHERE run_id = ${runId}
+                `
                   })
                 )
                 yield* TestClock.adjust("1 minute")

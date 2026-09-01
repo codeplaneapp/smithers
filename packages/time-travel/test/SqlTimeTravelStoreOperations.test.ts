@@ -608,6 +608,71 @@ describe("SqlTimeTravelStore persistence fault matrix", () => {
     }))
 })
 
+describe("SqlTimeTravelStore.archiveAndTruncate attempts", () => {
+  it.effect("keeps only parent attempts named by the surviving prefix and removes attached-child attempts", () =>
+    Effect.gen(function*() {
+      const rows = yield* run((store, sql) =>
+        Effect.gen(function*() {
+          yield* insertOwnedRun(sql, "attempt-parent")
+          yield* insertRun(sql, "attempt-child")
+          for (const [seq, digest] of [[1, "survives"], [5, "future"]] as const) {
+            yield* sql`
+              INSERT INTO flows_journal_events
+                (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+                 event_type, payload_json, meta_json)
+              VALUES (
+                'attempt-parent', ${seq}, ${`attempt-${seq}`}, 'source', ${seq}, 0,
+                'flows.engine.attempt-started',
+                ${JSON.stringify({ stepKeyDigest: digest, attempt: 1 })},
+                ${JSON.stringify({ lineageId: "main" })}
+              )
+            `
+            yield* sql`
+              INSERT INTO flows_attempts
+                (run_id, step_key_digest, attempt, state, started_at_ms, meta_json)
+              VALUES ('attempt-parent', ${digest}, 1, 'succeeded', 0, '{}')
+            `
+          }
+          yield* sql`
+            INSERT INTO flows_time_travel_edges
+              (parent_run_id, parent_seq, child_run_id, kind, attached)
+            VALUES ('attempt-parent', 5, 'attempt-child', 'child', 1)
+          `
+          yield* sql`
+            INSERT INTO flows_journal_events
+              (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+               event_type, payload_json, meta_json)
+            VALUES ('attempt-child', 0, 'child-0', 'source', 0, 0, 'test', '{}', '{}')
+          `
+          yield* sql`
+            INSERT INTO flows_attempts
+              (run_id, step_key_digest, attempt, state, started_at_ms, meta_json)
+            VALUES ('attempt-child', 'child-future', 1, 'succeeded', 0, '{}')
+          `
+
+          yield* store.archiveAndTruncate(
+            "attempt-parent",
+            { lineageId: "main", seq: 1 },
+            [],
+            owner
+          )
+          return yield* sql<{
+            readonly run_id: string
+            readonly step_key_digest: string
+            readonly attempt: number
+          }>`
+            SELECT run_id, step_key_digest, attempt
+            FROM flows_attempts
+            WHERE run_id IN ('attempt-parent', 'attempt-child')
+            ORDER BY run_id, step_key_digest
+          `
+        })
+      )
+
+      expect(rows).toEqual([{ run_id: "attempt-parent", step_key_digest: "survives", attempt: 1 }])
+    }))
+})
+
 describe("SqlTimeTravelStore.recordReceipt", () => {
   it.effect("persists a receipt row that archiveAndTruncate can then append to", () =>
     Effect.gen(function*() {

@@ -15,6 +15,7 @@ import * as Option from "effect/Option"
 import * as EffectBoundary from "../src/EffectBoundary.ts"
 import type { LineageEdge } from "../src/Frame.ts"
 import * as EffectHandlerRegistry from "../src/internal/EffectHandlerRegistry.ts"
+import * as Recovery from "../src/internal/Recovery.ts"
 import * as Rewind from "../src/internal/Rewind.ts"
 import * as MemoryTimeTravelStore from "../src/MemoryTimeTravelStore.ts"
 import { error } from "../src/TimeTravelError.ts"
@@ -420,14 +421,14 @@ describe("Rewind protocol fault matrix", () => {
       expect(store.state().audits[0]).toMatchObject({ status: "failed", detail: { phase: "rolled_back" } })
     }))
 
-  it.effect("accepts an empty continuation page, terminates, and derives the default audit id", () =>
+  it.effect("rejects an empty suffix continuation page without archiving history", () =>
     Effect.gen(function*() {
       const store = MemoryTimeTravelStore.make({ records: [stored(0, "baseline", {})] })
       const runs = makeRuns(runRow())
       const jj = makeJj()
       let pages = 0
 
-      const result = yield* (
+      const failure = yield* Effect.flip(
         provide(
           Rewind.rewind({ runId: "run", frame, owner }),
           {
@@ -435,19 +436,154 @@ describe("Rewind protocol fault matrix", () => {
             runs,
             jj: jj.service,
             journal: Journal.makeNoop({
-              entries: () =>
+              entries: ({ after }) =>
                 Effect.sync(() => {
                   pages += 1
-                  return { entries: [], hasMore: true }
+                  return after === undefined
+                    ? {
+                      entries: [{
+                        runId: "run" as JournalEvent.RunId,
+                        seq: 0 as JournalEvent.Seq,
+                        eventId: "event-0",
+                        sourceId: "rollback" as JournalEvent.SourceId,
+                        sourceSeq: 0 as JournalEvent.SourceSeq,
+                        emittedAtMs: 0,
+                        eventType: "baseline",
+                        payload: {},
+                        meta: { lineageId: frame.lineageId }
+                      }],
+                      hasMore: false
+                    }
+                    : { entries: [], hasMore: true }
                 })
             })
           }
         )
       )
 
-      expect(pages).toBe(1)
-      expect(result.auditId).toMatch(/^run:rewind:rollback-owner:\d+:0$/)
-      expect(store.state().audits).toMatchObject([{ id: result.auditId, status: "completed" }])
+      expect(pages).toBe(2)
+      expect(failure).toMatchObject({
+        code: "invalid",
+        message: "journal suffix returned an empty continuation page for run"
+      })
+      expect(store.state().archived).toEqual([])
+    }))
+
+  it.effect("persists handler receipts before workspace restoration and recovery can roll them back", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make({
+        records: records(),
+        snapshots: [{ runId: "run", frame, changeId: "target" }]
+      })
+      const runs = makeRuns(runRow())
+      const rollbacks: Array<string> = []
+      const registry = Effect.runSync(
+        EffectHandlerRegistry.make([{
+          kind: "send",
+          tier: "irreversible",
+          requiresIdempotencyKey: true,
+          residue: () => "message residue",
+          revert: () => Effect.succeed({ value: "sent" }),
+          rollback: (crossedEffect) =>
+            Effect.sync(() => {
+              rollbacks.push(crossedEffect.id)
+            })
+        }])
+      )
+      let persisted: Rewind.AuditDetail | undefined
+
+      yield* Effect.flip(provide(
+        Rewind.rewind({
+          runId: "run",
+          frame,
+          owner,
+          auditId: "audit-receipts-before-workspace",
+          hooks: {
+            beforeStep: (step) =>
+              step === "restore-workspace"
+                ? Effect.sync(() => {
+                  persisted = store.state().audits[0]?.detail as Rewind.AuditDetail
+                }).pipe(Effect.andThen(Effect.fail(new Error("crash before workspace restore"))))
+                : Effect.void
+          }
+        }),
+        { store, runs, jj: makeJj().service, registry }
+      ))
+
+      expect(persisted?.compensation?.handlerReceipts).toHaveLength(1)
+      rollbacks.length = 0
+      const recoveryStore = MemoryTimeTravelStore.make({ records: records() })
+      yield* recoveryStore.writeAudit({
+        id: "audit-recover-persisted-receipts",
+        runId: "run",
+        frame,
+        status: "in_progress",
+        detail: persisted
+      })
+      const recoveryRuns = makeRuns({
+        ...runRow(),
+        status: "running",
+        owner,
+        heartbeatAtMs: 1
+      })
+
+      const outcomes = yield* provide(
+        Recovery.recover({ owner }),
+        { store: recoveryStore, runs: recoveryRuns, jj: makeJj().service, registry }
+      )
+
+      expect(outcomes).toEqual([{
+        _tag: "RolledBack",
+        auditId: "audit-recover-persisted-receipts"
+      }])
+      expect(rollbacks).toEqual(["send"])
+    }))
+
+  it.effect("leaves the audit recoverable when restoring run ownership fails or loses its fence", () =>
+    Effect.gen(function*() {
+      const persistenceError = new RunStore.RunStoreError({
+        code: "persistence_failed",
+        method: "transitionOwned",
+        message: "restore database unavailable",
+        cause: "restore database unavailable"
+      })
+      for (
+        const scenario of [
+          {
+            label: "write failure",
+            transition: () => Effect.fail(persistenceError),
+            restoration: "restore run state failed"
+          },
+          {
+            label: "fence loss",
+            transition: () => Effect.succeed({ _tag: "FenceLost" as const }),
+            restoration: "restore run state returned FenceLost"
+          }
+        ]
+      ) {
+        const store = MemoryTimeTravelStore.make({ records: [stored(0, "baseline", {})] })
+        const runs = makeRuns(runRow(), { transitionOwned: scenario.transition })
+
+        const failure = yield* Effect.flip(provide(
+          Rewind.rewind({
+            runId: "run",
+            frame,
+            owner,
+            auditId: `audit-restore-${scenario.label}`,
+            hooks: {
+              beforeStep: (step) =>
+                step === "write-audit"
+                  ? Effect.fail(new Error("original protocol failure"))
+                  : Effect.void
+            }
+          }),
+          { store, runs, jj: makeJj().service }
+        ))
+
+        expect(failure.message).toContain("original protocol failure")
+        expect(failure.message).toContain(scenario.restoration)
+        expect(store.state().audits[0]).toMatchObject({ status: "in_progress" })
+      }
     }))
 
   it.effect("reads every non-empty suffix page before archiving history", () =>

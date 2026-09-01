@@ -3,8 +3,10 @@ import * as Jj from "@smthrs/jj"
 import { Journal } from "@smthrs/journal"
 import type * as JournalEvent from "@smthrs/journal/JournalEvent"
 import { RunStore } from "@smthrs/run-store"
+import * as Ownership from "@smthrs/run-store/Ownership"
 import type { OwnerId } from "@smthrs/run-store/Ownership"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
@@ -20,7 +22,9 @@ import { type Audit, TimeTravelStore } from "../src/TimeTravelStore.ts"
 const owner: OwnerId = { hostId: "recovery-host", pid: 40, nonce: "recovery-owner" }
 const frame = { lineageId: "run/root", seq: 0 } as const
 
-const makeRuns = (): RunStore.Service & { readonly state: () => RunStore.RunRow } => {
+const makeRuns = (
+  overrides: Partial<RunStore.Service> = {}
+): RunStore.Service & { readonly state: () => RunStore.RunRow } => {
   let row: RunStore.RunRow = {
     runId: "run",
     status: "running",
@@ -56,7 +60,8 @@ const makeRuns = (): RunStore.Service & { readonly state: () => RunStore.RunRow 
             })
         }
         return { _tag: "Transitioned" as const }
-      })
+      }),
+    ...overrides
   })
   return Object.assign(service, { state: () => ({ ...row }) })
 }
@@ -233,7 +238,7 @@ describe("Recovery", () => {
         auditId: "audit-compensated",
         error: { code: "compensation_failed" }
       })
-      expect(runs.state().status).toBe("running")
+      expect(runs.state()).toMatchObject({ status: "suspended", owner: null })
       expect(["pending", "running", "suspended", "completed", "failed", "cancelled"]).toContain(
         runs.state().status
       )
@@ -241,6 +246,45 @@ describe("Recovery", () => {
         status: "failed",
         detail: { phase: "terminal_failure" }
       })
+    }))
+
+  it.effect("heartbeats throughout recovery rollback and stops after ownership restoration", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make()
+      seed(store, audit("compensated", compensation))
+      const pulses: Array<{ readonly runId: string; readonly owner: OwnerId; readonly nowMs: number }> = []
+      const intervalMs = Duration.toMillis(Ownership.heartbeatInterval)
+      const runs = makeRuns({
+        heartbeat: (runId, heartbeatOwner, nowMs) =>
+          Effect.sync(() => {
+            pulses.push({ runId, owner: heartbeatOwner, nowMs })
+            return { _tag: "Updated" as const }
+          })
+      })
+      const registry = Effect.runSync(
+        EffectHandlerRegistry.make([{
+          kind: "send",
+          tier: "irreversible",
+          requiresIdempotencyKey: true,
+          residue: () => "message residue",
+          revert: () => Effect.succeed({ value: "sent" }),
+          rollback: () => Effect.sleep(Duration.millis(intervalMs + 100))
+        }])
+      )
+
+      const outcomes = yield* runRecovery(
+        store,
+        runs,
+        Jj.makeNoop({ restore: () => Effect.void }),
+        registry,
+        true
+      )
+
+      expect(outcomes).toEqual([{ _tag: "RolledBack", auditId: "audit-compensated" }])
+      expect(pulses).toEqual([expect.objectContaining({ runId: "run", owner })])
+      const afterReturn = pulses.length
+      yield* Effect.sleep(Duration.millis(intervalMs + 100))
+      expect(pulses).toHaveLength(afterReturn)
     }))
 
   it.effect("isolates malformed audits so one terminal failure does not block later recovery", () =>
