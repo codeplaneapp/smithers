@@ -125,7 +125,8 @@ const enumerateUnder = (
   fs: FileSystem.FileSystem,
   dir: string,
   resolve: (path: string) => string,
-  budget: EnumerationBudget
+  budget: EnumerationBudget,
+  pruneIgnoredDirectories: boolean
 ): Effect.Effect<EnumeratedEntries, PlatformError.PlatformError | FileEnumerationError> =>
   Effect.gen(function*() {
     // The workspace root itself always exists; a host may not even answer
@@ -153,7 +154,7 @@ const enumerateUnder = (
         }
         if (info.type !== "Directory") continue
         const name = path.slice(path.lastIndexOf("/") + 1)
-        if (ignoredDirectoryNames.has(name) && !explicit.has(name)) continue
+        if (pruneIgnoredDirectories && ignoredDirectoryNames.has(name) && !explicit.has(name)) continue
         directories.push(path)
         pending.push(path)
       }
@@ -165,7 +166,9 @@ const enumerateUnder = (
  * Every file under `dir` (workspace-relative; `""` for the workspace root),
  * as sorted workspace-relative paths. A missing directory enumerates to
  * nothing — a zero-match expansion is legal, so absence is a fact rather than
- * a failure.
+ * a failure. This declared-tree walk does not prune `.git`, `.jj`, or
+ * `node_modules`. Those names are part of the tree identity and must be
+ * captured and restored exactly.
  *
  * @since 0.1.0
  * @category accessors
@@ -177,7 +180,13 @@ export const filesUnder = (
 ): Effect.Effect<ReadonlyArray<string>, PlatformError.PlatformError | FileEnumerationError> =>
   Effect.gen(function*() {
     const resolve = options.resolve ?? defaultResolve
-    return (yield* enumerateUnder(fs, dir, resolve, budgetFor(dir === "" ? "**" : `${dir}/**`, options))).files
+    return (yield* enumerateUnder(
+      fs,
+      dir,
+      resolve,
+      budgetFor(dir === "" ? "**" : `${dir}/**`, options),
+      false
+    )).files
   })
 
 /**
@@ -185,7 +194,9 @@ export const filesUnder = (
  * as sorted workspace-relative paths. The directory list includes `dir`
  * itself, so a tree replay can audit exactly the scaffolding it may have to
  * prune. A missing directory enumerates to nothing — a tree that matched
- * nothing is legal, so absence is a fact rather than a failure.
+ * nothing is legal, so absence is a fact rather than a failure. This
+ * declared-tree walk does not prune `.git`, `.jj`, or `node_modules` because
+ * replay needs every directory and file that contributes to the tree.
  *
  * @since 0.1.0
  * @category accessors
@@ -200,7 +211,7 @@ export const entriesUnder = (
 > =>
   Effect.gen(function*() {
     const resolve = options.resolve ?? defaultResolve
-    return yield* enumerateUnder(fs, dir, resolve, budgetFor(`${dir}/**`, options))
+    return yield* enumerateUnder(fs, dir, resolve, budgetFor(`${dir}/**`, options), false)
   })
 
 /**
@@ -223,7 +234,10 @@ export const staticPrefix = (pattern: string): string => {
 /**
  * Expands one glob against the workspace: walk each include's static prefix,
  * keep the files `FileSet.matchesGlob` covers. Sorted and deduplicated, so
- * expansion is deterministic.
+ * expansion is deterministic. A glob walk prunes `.git`, `.jj`, and
+ * `node_modules` unless its static prefix explicitly names that directory.
+ * This keeps a root glob from traversing repository metadata and dependency
+ * trees while preserving an explicitly declared match.
  *
  * @since 0.1.0
  * @category accessors
@@ -243,7 +257,7 @@ export const expandGlob = (
       if (walked.has(prefix)) continue
       walked.add(prefix)
       budget.pattern = include
-      for (const path of (yield* enumerateUnder(fs, prefix, resolve, budget)).files) {
+      for (const path of (yield* enumerateUnder(fs, prefix, resolve, budget, true)).files) {
         if (FileSet.matchesGlob(glob, path)) matched.add(path)
       }
     }

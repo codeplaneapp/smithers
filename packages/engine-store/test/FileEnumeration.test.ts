@@ -82,20 +82,22 @@ describe("FileEnumeration", () => {
       const resolve = (path: string): string => path === "" ? "." : path
 
       expect(yield* FileEnumeration.filesUnder(host.fs, "src", { resolve })).toEqual([
+        "src/node_modules/hidden.json",
         "src/visible.json"
       ])
       expect(yield* FileEnumeration.filesUnder(host.fs, "")).toEqual([
         "root.json",
         "root.txt",
+        "src/node_modules/hidden.json",
         "src/visible.json"
       ])
       expect(yield* FileEnumeration.entriesUnder(host.fs, "src", { resolve })).toEqual({
-        files: ["src/visible.json"],
-        directories: ["src"]
+        files: ["src/node_modules/hidden.json", "src/visible.json"],
+        directories: ["src", "src/node_modules"]
       })
       expect(yield* FileEnumeration.entriesUnder(host.fs, "src")).toEqual({
-        files: ["src/visible.json"],
-        directories: ["src"]
+        files: ["src/node_modules/hidden.json", "src/visible.json"],
+        directories: ["src", "src/node_modules"]
       })
       expect(yield* FileEnumeration.filesUnder(host.fs, "missing")).toEqual([])
 
