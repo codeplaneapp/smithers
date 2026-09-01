@@ -244,6 +244,18 @@ describe("CollapsiblePanel", () => {
     expect(panel()!.getAttribute("data-state")).toBe("open");
   });
 
+  test("toggles when the visible title text is clicked", async () => {
+    await render(
+      <CollapsiblePanel title="Visible title">
+        <div>panel body</div>
+      </CollapsiblePanel>,
+    );
+
+    await click(document.querySelector(".sui-collapsible-title")!);
+    expect(panel()!.getAttribute("data-state")).toBe("closed");
+    expect(document.body.textContent).not.toContain("panel body");
+  });
+
   test("does not toggle when a button in the title is activated", async () => {
     let activations = 0;
     await render(

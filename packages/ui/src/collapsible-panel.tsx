@@ -4,6 +4,8 @@ import { cn } from "./cn";
 import { StatusPill } from "./status-pill";
 import { useInjectUiCss } from "./styles";
 
+const INTERACTIVE_SELECTOR = 'button, a, input, select, textarea, [role="button"]';
+
 export type CollapsiblePanelProps = Omit<ComponentProps<"section">, "title"> & {
   /** Header label. */
   title: ReactNode;
@@ -79,7 +81,9 @@ export function CollapsiblePanel({
   }
 
   function onClick(event: MouseEvent<HTMLDivElement>) {
-    if (event.target !== event.currentTarget) return;
+    if (!(event.target instanceof Element)) return;
+    const interactive = event.target.closest(INTERACTIVE_SELECTOR);
+    if (interactive !== null && interactive !== event.currentTarget) return;
     toggle();
   }
 
