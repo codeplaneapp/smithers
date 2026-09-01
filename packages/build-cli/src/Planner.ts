@@ -962,12 +962,17 @@ export const make = async (
     for (const dependency of view.dependencies) {
       const planned = await visit(dependency)
       depKeys.set(dependency, planned.keyPreview)
-      dependencies.push({ label: planned.label, key: planned.keyPreview })
+      // The label list and the edge list are two views of one relation, so
+      // they are deduplicated together. Two module instances of one BUILD.ts
+      // produce two target objects for one label, which `Target.metadata`
+      // cannot collapse because it deduplicates by object identity. Pushing
+      // the label twice made `Executor.validateWorkList` refuse the entire
+      // work list before dispatching anything.
       const edgeId = `${planned.label}\0${label}`
-      if (!edgeIds.has(edgeId)) {
-        edgeIds.add(edgeId)
-        edges.push({ from: planned.label, to: label })
-      }
+      if (edgeIds.has(edgeId)) continue
+      edgeIds.add(edgeId)
+      edges.push({ from: planned.label, to: label })
+      dependencies.push({ label: planned.label, key: planned.keyPreview })
     }
     const declaredInputs = await workspace.expandInputs(target, view.inputs, view.dependencies)
     const inputDigests = new Map<Input.Declared, string>()

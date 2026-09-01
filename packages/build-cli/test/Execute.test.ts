@@ -13,6 +13,7 @@
  * 3. A checking verb does not mutate the working tree. Drifted generated files
  *    fail the run, byte for byte unchanged.
  */
+import { PackageJsonWrite } from "@smthrs/targets/PackageJson"
 import { spawn } from "node:child_process"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
@@ -141,6 +142,26 @@ describe("targets execute", () => {
     expect(JSON.parse(await read("packages/beta/package.json")).description).toBe("beta")
   })
 
+  it("exempts exactly the manifest the write target rewrites, named by the target definition", async () => {
+    // The exemption used to be the literal "PackageJsonWrite" compared against
+    // the whole declared input set. Both halves are pinned here: the
+    // identifier comes from the real definition, so a rename moves with it,
+    // and the exempted value is the one manifest path, not the input set.
+    await generatorWorkspace()
+    const workspace = await open()
+    const plan = await Planner.make(workspace, "run", "//packages/alpha:packageJsonWrite")
+    const write = plan.targets.find((target) => target.label === "//packages/alpha:packageJsonWrite")
+    expect(write?.target).toBe(PackageJsonWrite.id)
+    expect(Executor.rewrittenInputPath(write!)).toBe("packages/alpha/package.json")
+    // The exempted path is a path this target really declares, not a spelling
+    // that quietly matches nothing.
+    expect(write!.declaredInputs.flatMap((input) => input.files.map((file) => file.path)))
+      .toContain("packages/alpha/package.json")
+    // Every other target keeps the full post-run revalidation.
+    const other = await Planner.make(workspace, "lint", "//packages/alpha:packageJsonCheck")
+    expect(Executor.rewrittenInputPath(other.targets[0]!)).toBeUndefined()
+  })
+
   it("executes only the target named by an exact label", async () => {
     await generatorWorkspace()
     const summary = await run("run", "//packages/alpha:packageJsonWrite")
@@ -236,6 +257,57 @@ describe("targets execute", () => {
     expect(result.code).not.toBe(0)
     expect(result.output).toContain("//packages/base:failing")
     await expect(Fs.stat(NodePath.join(root, "process-dependent-ran"))).rejects.toMatchObject({ code: "ENOENT" })
+  })
+
+  it("runs a declaration that reaches one dependency through two module instances", async () => {
+    // The loader scopes each top-level import call to its own namespace, so
+    // one BUILD.ts reached through two specifiers yields two target objects
+    // for one label. `Target.metadata` deduplicates dependencies by object
+    // identity, which those two survive; the planner then deduplicated
+    // `edges` by id but not the label list beside it, so `validateWorkList`
+    // refused every target in the run before anything was dispatched. An
+    // authoring shape the planner already reconciles must not be a
+    // whole-graph refusal.
+    await write("BUILD.ts", "export const root = 1\n")
+    await write(
+      "packages/base/BUILD.ts",
+      `import { Exec, Target } from "${rulesModule}"\n` +
+        `import * as Schema from "${schemaModule}"\n` +
+        `export const base = Target.make("RepeatedBase", {\n` +
+        `  attrs: Schema.Struct({}), kinds: ["build"], success: Exec.Result, error: Exec.ExecError,\n` +
+        `  implementation: () => Target.runTool({ cwd: ".", argv: ["node", "-e", ` +
+        `"require('node:fs').appendFileSync('base-runs','x')"] })\n` +
+        `})({})\n`
+    )
+    await write(
+      "packages/dependent/BUILD.ts",
+      `import { Exec, Target } from "${rulesModule}"\n` +
+        `import * as Schema from "${schemaModule}"\n` +
+        `import { base } from "../base/BUILD.ts"\n` +
+        `import { base as second } from "../base/BUILD.ts?instance=2"\n` +
+        `export const downstream = Target.make("RepeatedDependent", {\n` +
+        `  attrs: Schema.Struct({ deps: Schema.Array(Target.Target) }), kinds: ["build"],\n` +
+        `  success: Exec.Result, error: Exec.ExecError,\n` +
+        `  implementation: () => Target.runTool({ cwd: ".", argv: ["node", "-e", ` +
+        `"require('node:fs').writeFileSync('dependent-ran','ok')"] })\n` +
+        `})({ deps: [base, second] })\n`
+    )
+
+    const workspace = await open()
+    const plan = await Planner.make(workspace, "build", "//...")
+    const dependent = plan.targets.find((target) => target.label === "//packages/dependent:downstream")
+    // The label list and the edge list are two views of one relation, so they
+    // agree: one edge, one dependency label.
+    expect(dependent?.dependencies).toEqual(["//packages/base:base"])
+    expect(plan.edges).toEqual([{ from: "//packages/base:base", to: "//packages/dependent:downstream" }])
+
+    const summary = await run("build", "//...")
+    expect(summary.ok, JSON.stringify(summary)).toBe(true)
+    expect(status(summary, "//packages/base:base")).toBe("ran")
+    expect(status(summary, "//packages/dependent:downstream")).toBe("ran")
+    // Deduplicating the label list must not make the dependency run twice.
+    expect(await read("base-runs")).toBe("x")
+    expect(await read("dependent-ran")).toBe("ok")
   })
 })
 

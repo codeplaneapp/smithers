@@ -20,10 +20,10 @@ import { GenerateCheckLive } from "@smthrs/targets/Compose"
 import { CheckDocsLive } from "@smthrs/targets/DocsParity"
 import { ExecLive } from "@smthrs/targets/Exec"
 import { ExpandFilegroupLive, isFilegroup } from "@smthrs/targets/Filegroup"
-import { CheckFileLive, WriteFileLive } from "@smthrs/targets/GeneratedFile"
+import { CheckFileLive, resolveOutputPath, WriteFileLive } from "@smthrs/targets/GeneratedFile"
 import { LlmReviewLive } from "@smthrs/targets/LlmLint"
 import { ScaffoldPackageLive } from "@smthrs/targets/NewPackage"
-import { SyncPackageJsonLive } from "@smthrs/targets/PackageJson"
+import { PackageJsonWrite, SyncPackageJsonLive } from "@smthrs/targets/PackageJson"
 import * as Target from "@smthrs/targets/Target"
 import { CaptureOutputsLive, verifyOutputs } from "@smthrs/targets/ToolBuild"
 import * as Cause from "effect/Cause"
@@ -816,7 +816,8 @@ const checkDeclaredOutputs = async (
  */
 const revalidateInputs = async (
   workspace: Workspace,
-  target: Planner.PlannedTarget
+  target: Planner.PlannedTarget,
+  rewritten?: string | undefined
 ): Promise<string | undefined> => {
   if (target.declaredInputs.length === 0) return undefined
   let expanded: ReadonlyArray<ExpandedInput>
@@ -830,7 +831,12 @@ const revalidateInputs = async (
   }
   for (const [index, planned] of target.declaredInputs.entries()) {
     const now = expanded[index]!
-    if (now.digest !== planned.digest) {
+    // The exemption is one PATH, not one declaration and not the whole input
+    // set: a declaration that also names the rewritten file still has every
+    // other file it matches revalidated, and every other declaration is
+    // revalidated whole.
+    const carriesRewritten = rewritten !== undefined && planned.files.some((file) => file.path === rewritten)
+    if (!carriesRewritten && now.digest !== planned.digest) {
       return `declared input ${JSON.stringify(planned.declaration)} changed since the plan was made`
     }
     if (now.files.length !== planned.files.length) {
@@ -838,12 +844,39 @@ const revalidateInputs = async (
     }
     for (const [position, file] of planned.files.entries()) {
       const observed = now.files[position]!
-      if (observed.path !== file.path || observed.digest !== file.digest) {
+      if (observed.path !== file.path) {
+        return `declared input file ${file.path} changed since the plan was made`
+      }
+      if (file.path === rewritten) continue
+      if (observed.digest !== file.digest) {
         return `declared input file ${file.path} changed since the plan was made`
       }
     }
   }
   return undefined
+}
+
+/**
+ * The workspace-relative path a target rewrites as its whole purpose, which
+ * the post-run revalidation exempts, or undefined for every other target.
+ *
+ * `PackageJsonWrite` deliberately reads and then replaces one manifest, so
+ * requiring that file to be unchanged after the action would reject every
+ * successful write by definition. Only that one path is exempt: waiving the
+ * target's whole declared input set instead would also waive a lockfile or a
+ * projected filegroup source that changed while the action ran.
+ *
+ * The identifier comes from the target definition rather than a literal, so
+ * renaming the target moves the exemption with it instead of silently turning
+ * every successful write into a "declared inputs changed" failure.
+ *
+ * @category execution
+ * @since 0.1.0
+ */
+export const rewrittenInputPath = (target: Planner.PlannedTarget): string | undefined => {
+  if (target.target !== PackageJsonWrite.id) return undefined
+  const output = (target.attrs as { readonly output?: unknown }).output
+  return typeof output === "string" ? resolveOutputPath(output) : undefined
 }
 
 /**
@@ -1003,11 +1036,10 @@ export const execute = async (options: ExecuteOptions): Promise<Summary> => {
       options.signal
     )
     if (produced !== undefined) return fail(produced)
-    // PackageJsonWrite deliberately reads and then replaces package.json so it
-    // can preserve manager-owned dependency fields. Its pre-run snapshot still
-    // closes the plan-to-execution race; requiring that input to remain equal
-    // after the action would reject every successful write by definition.
-    const afterRun = target.target === "PackageJsonWrite" ? undefined : await revalidateInputs(workspace, target)
+    // The pre-run snapshot closes the plan-to-execution race; this closes the
+    // execution window itself, minus the one path the action rewrote on
+    // purpose. See {@link rewrittenInputPath}.
+    const afterRun = await revalidateInputs(workspace, target, rewrittenInputPath(target))
     if (afterRun !== undefined) return fail(afterRun)
     report({
       label,
