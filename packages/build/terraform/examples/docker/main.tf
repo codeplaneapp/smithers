@@ -4,14 +4,16 @@
  *   terraform init
  *   terraform apply \
  *     -var 'postgres_password=...' \
- *     -var 'auth_token=...' \
+ *     -var 'read_auth_token=...' \
+ *     -var 'write_auth_token=...' \
  *     -var 'postgres_image=postgres@sha256:...' \
  *     -var 'bun_image=oven/bun@sha256:...'
  *
  * The endpoint output is what RemoteCacheStore.layer and RemoteArtifacts.layer
- * take as their `endpoint` option. The token goes in their `headers` option as
+ * take as their `endpoint` option. A token goes in their `headers` option as
  * `Authorization: Bearer ...`; it is a capability, so it never appears in a
- * step key and never enters the journal.
+ * step key and never enters the journal. The read token may only read: every
+ * PUT and DELETE presented on it is refused with 403.
  */
 
 variable "postgres_password" {
@@ -20,8 +22,14 @@ variable "postgres_password" {
   sensitive   = true
 }
 
-variable "auth_token" {
-  description = "Bearer token clients must present."
+variable "read_auth_token" {
+  description = "Bearer token a reading client must present. It cannot publish."
+  type        = string
+  sensitive   = true
+}
+
+variable "write_auth_token" {
+  description = "Bearer token a publishing client must present."
   type        = string
   sensitive   = true
 }
@@ -51,7 +59,8 @@ module "cache" {
   postgres_password = var.postgres_password
   postgres_image    = var.postgres_image
   bun_image         = var.bun_image
-  auth_token        = var.auth_token
+  read_auth_token   = var.read_auth_token
+  write_auth_token  = var.write_auth_token
   listen_port       = var.listen_port
 
   # Publish Postgres on the host only when inspecting it by hand.

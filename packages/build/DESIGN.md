@@ -91,7 +91,7 @@ of running through a cache-oriented execution path.
 
 ## 5. Dependency installation
 
-Installation is one flow with two trampoline rounds:
+Installation is one flow of three actions in a single round:
 
 ```text
 Measure({}) -> Fetch[manager]({ content }) -> Link({ content, store })
@@ -102,10 +102,10 @@ plan-time declaration carried in the payload, so the body selects exactly one
 manager-specific action and lockfile declaration without measuring anything
 first.
 
-This used to be two rounds. The package-manager service is a runtime layer, so
-a pure body could not branch on it, and round one existed only to turn the
-wired manager's identity into ordinary payload. Declaring the manager in
-BUILD.ts removes the reason for the trampoline.
+This used to be two trampoline rounds. The package-manager service is a
+runtime layer, so a pure body could not branch on it, and round one existed
+only to turn the wired manager's identity into ordinary payload. Declaring the
+manager in BUILD.ts removes the reason for the trampoline.
 
 ### 5.1 Measured content, declared identity
 
@@ -122,9 +122,17 @@ through its own `verify`.
 
 Lockfiles, manifests, and `.npmrc` are read through bounded,
 descriptor-stable, exact-UTF-8 readers. Before fetch and before link, the
-implementation checks the declared manager against the provided layer and both
-declared versions against the host. A mismatch fails with
-`environment_mismatch` rather than using a key minted for a different world.
+implementation checks the provided layer for internal consistency, its lockfile
+name and store directory against what its own manager name implies, and both
+declared versions against the host. Link additionally recomputes the store
+manifest from the measured content and refuses a store fetched for anything
+else. A mismatch fails with `environment_mismatch` rather than using a key
+minted for a different world.
+
+Checking the _declared_ manager against the provided layer is deliberately not
+done here. `d191c9dfcf` removed that guard because nothing installed it, and
+because the check belongs at whatever composition root wires a layer against a
+declaration rather than inside a sealed action that receives only the layer.
 
 Literal credentials in `.npmrc` are refused. Environment placeholders are
 allowed, but process-control variable names are not. Child commands receive an

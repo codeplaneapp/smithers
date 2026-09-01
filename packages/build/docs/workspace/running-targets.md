@@ -144,9 +144,9 @@ lookup.
 
 ## Installing dependencies
 
-`smithers-build install` takes no label. It executes the two-round install flow under
-the pnpm layer and returns the canonical workspace, manager, first-round nodes,
-and link manifest.
+`smithers-build install` takes no label. It executes the one-round install flow
+under the pnpm layer and returns the canonical workspace, manager, recorded
+nodes, and link manifest.
 
 The declared store is fixed at `.flows/store/pnpm`. If `--cache-dir` or the
 root `Workspace` declaration selects another directory, install refuses rather

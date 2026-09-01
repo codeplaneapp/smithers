@@ -14,18 +14,19 @@ export default defineConfig({
     coverage: {
       // Enabled so the thresholds below actually gate every run; without
       // this flag they were declared and never computed. The floors are the
-      // measured coverage on 2026-08-15 rounded down one point — an honest
-      // ratchet, raised as tests accrete toward the workspace's 100% norm,
-      // never lowered.
+      // measured coverage rounded down one point: an honest ratchet, raised
+      // as tests accrete toward the workspace's 100% norm, never lowered.
+      // Last raised 2026-09-01, from 83/70/74/84, when the mid-read guards,
+      // the probe bound, the layers, and the manifest vectors got tests.
       enabled: true,
       provider: "v8",
       reportsDirectory: join(tmpdir(), `flows-build-coverage-${process.pid}`),
       include: ["src/**"],
       thresholds: {
-        branches: 70,
-        functions: 74,
-        lines: 84,
-        statements: 83
+        branches: 91,
+        functions: 89,
+        lines: 95,
+        statements: 94
       }
     }
   }

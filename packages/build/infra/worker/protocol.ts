@@ -7,7 +7,11 @@
 const hexDigest = /^[0-9a-f]{64}$/
 const jsonContentType = /^application\/(?:[a-z0-9!#$&^_.+-]+\+)?json$/
 const decimalDigits = /^[0-9]+$/
+const numberLexeme = /[0-9eE+.-]/
 const controlCharacters = /[\u0000-\u001f\u007f]/
+
+/** The buffer an undeclared-length body starts at before it grows. */
+const initialBodyBufferBytes = 64 * 1024
 
 const isWellFormedText = (value: string): boolean => {
   for (let index = 0; index < value.length; index += 1) {
@@ -47,7 +51,10 @@ export const maxFindMissingBodyBytes = 256 * 1024
 export const maxFindMissingDigests = 1000
 
 /**
- * The longest action-cache key or journal run identifier the service stores.
+ * The longest action-cache key the service stores.
+ *
+ * `worker/migrations/0002_bound_cache_rows.sql` hardcodes the same 512 bytes
+ * for `key_digest`, so the constant and the migration move together.
  *
  * @category constants
  * @since 0.1.0
@@ -55,12 +62,17 @@ export const maxFindMissingDigests = 1000
 export const maxKeyDigestLength = 512
 
 /**
- * The most artifact references one publication records.
+ * The longest journal run identifier the service stores.
+ *
+ * Separate from {@link maxKeyDigestLength} because a cache key and a run
+ * identifier are unrelated protocol limits that happen to share a value.
+ * `worker/migrations/0002_bound_cache_rows.sql` hardcodes the same 512 bytes
+ * for `recorded_run_id`, so the constant and the migration move together.
  *
  * @category constants
  * @since 0.1.0
  */
-export const maxReferencedDigests = 1000
+export const maxRecordedRunIdLength = 512
 
 /**
  * The absolute per-artifact ceiling supported by both cache deployments.
@@ -165,6 +177,10 @@ export interface DeleteFence {
  * canonical conflict discriminator: the entry's `result` member when it has
  * one, or the entire JSON value for the CLI's `CachedResult` shape.
  *
+ * The service stores the publication verbatim and does not index the
+ * artifacts it declares. Nothing consumed the reference list this type once
+ * carried, so entries are not reference counted and eviction is time based.
+ *
  * @category models
  * @since 0.1.0
  */
@@ -174,7 +190,6 @@ export interface ActionCachePublication {
   readonly createdAtMs: number | null
   readonly recordedRunId: string | null
   readonly recordedEventSeq: number | null
-  readonly digests: ReadonlyArray<string>
 }
 
 /**
@@ -341,7 +356,11 @@ const readBody = async (request: Request, limit: number): Promise<BodyRead> => {
     return Promise.resolve()
   }
 
-  const bytes = new Uint8Array(declaredLength ?? limit)
+  // A declared length is reserved exactly. An undeclared one grows from a
+  // small buffer instead of reserving the whole ceiling, so a one-byte chunked
+  // upload costs one small buffer rather than the route's maximum.
+  const exact = declaredLength !== null
+  let bytes = new Uint8Array(declaredLength ?? Math.min(initialBodyBufferBytes, limit))
   let length = 0
   let chunks = 0
   try {
@@ -363,8 +382,17 @@ const readBody = async (request: Request, limit: number): Promise<BodyRead> => {
         return { ok: false, response: json(413, { error: "request body exceeds the configured bound" }) }
       }
       if (length + chunk.value.byteLength > bytes.byteLength) {
-        await abandon()
-        return { ok: false, response: json(400, { error: "content-length does not match the request body" }) }
+        if (exact) {
+          await abandon()
+          return { ok: false, response: json(400, { error: "content-length does not match the request body" }) }
+        }
+        // The bound above already refused anything past `limit`, so doubling
+        // to at least what this chunk needs and no further than the ceiling
+        // always fits and never iterates.
+        const capacity = Math.min(Math.max(bytes.byteLength * 2, length + chunk.value.byteLength), limit)
+        const grown = new Uint8Array(capacity)
+        grown.set(bytes.subarray(0, length))
+        bytes = grown
       }
       bytes.set(chunk.value, length)
       length += chunk.value.byteLength
@@ -381,6 +409,76 @@ const readBody = async (request: Request, limit: number): Promise<BodyRead> => {
   return { ok: true, bytes: bytes.subarray(0, length) }
 }
 
+/**
+ * Refuses JSON text whose parse is not reversible.
+ *
+ * `JSON.parse` collapses information the raw text carried: a duplicate member
+ * name keeps only the last value, and a number literal beyond IEEE-754 double
+ * precision becomes the nearest double. Conflict classification compares the
+ * parsed value, so two mathematically different published results would
+ * compare identical and answer `200` where the protocol promises `409`.
+ *
+ * The scan runs over text `JSON.parse` already accepted, so it may assume
+ * well-formed JSON, and it is linear in the body length, which the caller has
+ * already bounded.
+ */
+const irreversibleJson = (text: string): string | null => {
+  const scopes: Array<Set<string> | null> = []
+  let expectingKey = false
+  let index = 0
+  while (index < text.length) {
+    const character = text[index] ?? ""
+    if (character === "{") {
+      scopes.push(new Set<string>())
+      expectingKey = true
+      index += 1
+    } else if (character === "[") {
+      scopes.push(null)
+      expectingKey = false
+      index += 1
+    } else if (character === "}" || character === "]") {
+      scopes.pop()
+      expectingKey = false
+      index += 1
+    } else if (character === ",") {
+      expectingKey = scopes.at(-1) instanceof Set
+      index += 1
+    } else if (character === ":") {
+      expectingKey = false
+      index += 1
+    } else if (character === "\"") {
+      let end = index + 1
+      while (end < text.length && text[end] !== "\"") end += text[end] === "\\" ? 2 : 1
+      if (expectingKey) {
+        const names = scopes.at(-1)
+        let name: string
+        try {
+          name = JSON.parse(text.slice(index, end + 1)) as string
+        } catch {
+          // The caller already parsed this text, so a member name this scan
+          // cannot read back is a refusal rather than a storage failure.
+          return "body contains an object member name the service cannot compare"
+        }
+        if (names instanceof Set) {
+          if (names.has(name)) return "body contains a duplicate object member name"
+          names.add(name)
+        }
+      }
+      index = end + 1
+    } else if (character === "-" || (character >= "0" && character <= "9")) {
+      let end = index + 1
+      while (end < text.length && numberLexeme.test(text[end] ?? "")) end += 1
+      const lexeme = text.slice(index, end)
+      const value = Number(lexeme)
+      if (!Number.isFinite(value) || Object.is(value, -0) || String(value) !== lexeme) {
+        return "body contains a JSON number that does not round-trip through a double"
+      }
+      index = end
+    } else index += 1
+  }
+  return null
+}
+
 const readJson = async (request: Request, limit: number): Promise<JsonRead> => {
   if (!jsonContentType.test(mediaType(request))) {
     await discardBody(request.body)
@@ -394,12 +492,15 @@ const readJson = async (request: Request, limit: number): Promise<JsonRead> => {
   } catch {
     return { ok: false, response: json(400, { error: "body must be UTF-8 JSON" }) }
   }
+  let value: unknown
   try {
-    const value: unknown = JSON.parse(text)
-    return { ok: true, text, value }
+    value = JSON.parse(text)
   } catch {
     return { ok: false, response: json(400, { error: "body must be valid JSON" }) }
   }
+  const irreversible = irreversibleJson(text)
+  if (irreversible !== null) return { ok: false, response: json(400, { error: irreversible }) }
+  return { ok: true, text, value }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -407,6 +508,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * Renders an inert JSON value with deterministic member order and hard bounds.
+ *
+ * The argument must be a value a JSON parser owns. Rendering reads the value's
+ * prototype, own keys, and property descriptors, all of which a `Proxy` can
+ * trap, so a caller-supplied object could run code during canonicalization.
+ * Both callers in this service pass `JSON.parse` output, which is inert.
  *
  * @category utilities
  * @since 0.1.0
@@ -548,33 +654,6 @@ const validatedContentBody = (object: unknown): BodyInit => {
   return descriptor.value as BodyInit
 }
 
-const referencedDigests = (record: Record<string, unknown>): ReadonlyArray<string> => {
-  const meta = isRecord(record["meta"]) ? record["meta"] : null
-  const boundary = meta !== null && isRecord(meta["boundary"]) ? meta["boundary"] : null
-  const declaredOutputs = boundary !== null && isRecord(boundary["declaredOutputs"])
-    ? boundary["declaredOutputs"]
-    : null
-  const outputs = declaredOutputs?.["outputs"]
-  if (outputs === undefined) return []
-  if (!Array.isArray(outputs)) throw new Error("declared outputs must be an array")
-  const references = new Set<string>()
-  for (const output of outputs) {
-    if (!isRecord(output)) throw new Error("declared output must be an object")
-    if (!Object.hasOwn(output, "digest") || output["digest"] === null || Object.hasOwn(output, "content")) {
-      continue
-    }
-    const digest = output["digest"]
-    if (typeof digest !== "string" || !hexDigest.test(digest)) {
-      throw new Error("declared output digest is invalid")
-    }
-    references.add(digest)
-    if (references.size > maxReferencedDigests) {
-      throw new Error("publication references too many artifacts")
-    }
-  }
-  return [...references]
-}
-
 const readPublication = async (request: Request, keyDigest: string): Promise<PublicationRead> => {
   const parsed = await readJson(request, maxActionCacheBodyBytes)
   if (!parsed.ok) return parsed
@@ -588,11 +667,9 @@ const readPublication = async (request: Request, keyDigest: string): Promise<Pub
 
   const enveloped = record !== null && Object.hasOwn(record, "keyDigest") && Object.hasOwn(record, "result")
   let resultJson: string
-  let digests: ReadonlyArray<string>
   try {
     canonicalJson(parsed.value)
     resultJson = canonicalJson(enveloped ? record["result"] : parsed.value)
-    digests = enveloped ? referencedDigests(record) : []
   } catch {
     return {
       ok: false,
@@ -625,7 +702,7 @@ const readPublication = async (request: Request, keyDigest: string): Promise<Pub
     (typeof recordedRunId !== "string" ||
       recordedRunId.length === 0 ||
       !isWellFormedText(recordedRunId) ||
-      utf8Bytes(recordedRunId) > maxKeyDigestLength ||
+      utf8Bytes(recordedRunId) > maxRecordedRunIdLength ||
       controlCharacters.test(recordedRunId) ||
       !Number.isSafeInteger(recordedEventSeq) ||
       (recordedEventSeq as number) < 0)
@@ -640,8 +717,7 @@ const readPublication = async (request: Request, keyDigest: string): Promise<Pub
       resultJson,
       createdAtMs: hasCreatedAtMs ? (createdAtMs as number) : null,
       recordedRunId: hasRecordedRunId ? (recordedRunId as string) : null,
-      recordedEventSeq: hasRecordedEventSeq ? (recordedEventSeq as number) : null,
-      digests
+      recordedEventSeq: hasRecordedEventSeq ? (recordedEventSeq as number) : null
     }
   }
 }
@@ -739,7 +815,7 @@ const handleActionCache = async (
       if (
         runId.length === 0 ||
         !isWellFormedText(runId) ||
-        utf8Bytes(runId) > maxKeyDigestLength ||
+        utf8Bytes(runId) > maxRecordedRunIdLength ||
         controlCharacters.test(runId)
       ) {
         return json(400, { error: "recordedRunId must be a non-empty bounded string" })
@@ -802,6 +878,44 @@ const handleArtifact = async (
   }
   await discardBody(request.body)
   return methodNotAllowed("GET, HEAD, PUT")
+}
+
+/**
+ * Returns the same response with its body holding an admission slot.
+ *
+ * The runtime streams a `GET` body after the handler has returned, so a
+ * counter decremented on return bounds the store lookup rather than the
+ * transfer. Wrapping the body moves the release to the point the client
+ * actually stops consuming it: end of stream, error, or cancellation.
+ */
+const heldWhileStreaming = (response: Response, release: () => void): Response => {
+  const body = response.body
+  if (body === null) {
+    release()
+    return response
+  }
+  const reader = body.getReader()
+  const held = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read()
+        if (chunk.done) {
+          controller.close()
+          release()
+          return
+        }
+        controller.enqueue(chunk.value)
+      } catch (cause) {
+        release()
+        controller.error(cause)
+      }
+    },
+    cancel(reason) {
+      release()
+      return reader.cancel(reason)
+    }
+  })
+  return new Response(held, { status: response.status, headers: response.headers })
 }
 
 const handleFindMissing = async (
@@ -1069,8 +1183,19 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
   }
 
   return async (request: Request): Promise<Response> => {
+    let url: URL
     try {
-      const url = new URL(request.url)
+      url = new URL(request.url)
+    } catch {
+      // A URL the runtime cannot parse is a client error. Reporting it as a
+      // storage refusal would tell the client to retry an unfixable request.
+      await discardBody(request.body)
+      return json(400, { error: "request URL is malformed" })
+    }
+    // Set when a streamed response body took ownership of the admission slots
+    // it holds; the request's own `finally` must then leave them alone.
+    let streaming = false
+    try {
       if (activeCacheRequests >= maxConcurrentCacheRequests) {
         await discardBody(request.body)
         return busy("too many simultaneous cache requests")
@@ -1149,15 +1274,32 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
               return busy("too many simultaneous artifact transfers")
             }
             activeArtifactTransfers += 1
+            let transferred = false
             try {
-              return await handleArtifact(
+              const response = await handleArtifact(
                 request,
                 digest,
                 contentStore,
                 maxArtifactBytes
               )
+              // A `PUT` body is buffered inside the slot, so the transfer is
+              // over when the handler returns. A `GET` body streams after it,
+              // so the slot the README promises bounds artifact transfers has
+              // to outlive the return and end with the stream.
+              if (request.method !== "GET" || response.status !== 200 || response.body === null) {
+                return response
+              }
+              transferred = true
+              streaming = true
+              let released = false
+              return heldWhileStreaming(response, () => {
+                if (released) return
+                released = true
+                activeArtifactTransfers -= 1
+                activeCacheRequests -= 1
+              })
             } finally {
-              activeArtifactTransfers -= 1
+              if (!transferred) activeArtifactTransfers -= 1
             }
           }
           return await handleArtifact(request, digest, contentStore, maxArtifactBytes)
@@ -1165,7 +1307,7 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
         await discardBody(request.body)
         return empty(404)
       } finally {
-        activeCacheRequests -= 1
+        if (!streaming) activeCacheRequests -= 1
       }
     } catch (cause) {
       console.error(describeFailure(cause))

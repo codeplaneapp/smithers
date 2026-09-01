@@ -24,8 +24,10 @@ import {
   maxReferencedDigests
 } from "../protocol.js"
 
-const token = "test-token-with-sufficient-entropy-for-unit-tests"
-const tokenHash = new Bun.CryptoHasher("sha256").update(token, "utf8").digest("hex")
+const readToken = "read-token-with-sufficient-entropy-for-unit-tests"
+const writeToken = "write-token-with-sufficient-entropy-for-unit-tests"
+const readTokenHash = new Bun.CryptoHasher("sha256").update(readToken, "utf8").digest("hex")
+const writeTokenHash = new Bun.CryptoHasher("sha256").update(writeToken, "utf8").digest("hex")
 const keyDigest = "a".repeat(64)
 
 const digestOf = (text) => new Bun.CryptoHasher("sha256").update(text, "utf8").digest("hex")
@@ -88,15 +90,19 @@ const makeHandler = (overrides = {}) =>
     actionCache: overrides.actionCache ?? memoryActionCache(),
     contentStore: overrides.contentStore ?? memoryContentStore(),
     health: overrides.health,
-    tokenHash: overrides.tokenHash === undefined ? tokenHash : overrides.tokenHash,
+    readTokenHash: Object.hasOwn(overrides, "readTokenHash") ? overrides.readTokenHash : readTokenHash,
+    writeTokenHash: Object.hasOwn(overrides, "writeTokenHash") ? overrides.writeTokenHash : writeTokenHash,
     maxArtifactBytes: overrides.maxArtifactBytes ?? 1024
   })
 
-const request = (path, init = {}) => {
+const requestAs = (credential, path, init = {}) => {
   const headers = new Headers(init.headers)
-  if (!headers.has("authorization")) headers.set("authorization", `Bearer ${token}`)
+  if (!headers.has("authorization")) headers.set("authorization", `Bearer ${credential}`)
   return new Request(`http://cache.test${path}`, { ...init, headers })
 }
+
+const request = (path, init = {}) => requestAs(writeToken, path, init)
+const readRequest = (path, init = {}) => requestAs(readToken, path, init)
 
 /**
  * A request-shaped value the handler reads structurally.
@@ -108,7 +114,7 @@ const request = (path, init = {}) => {
 const rawRequest = (path, { method = "GET", headers = {}, body = null } = {}) => ({
   url: `http://cache.test${path}`,
   method,
-  headers: new Headers({ authorization: `Bearer ${token}`, ...headers }),
+  headers: new Headers({ authorization: `Bearer ${writeToken}`, ...headers }),
   body
 })
 
@@ -207,10 +213,10 @@ describe("authentication", () => {
     const handler = makeHandler()
     const anonymous = await handler(new Request(`http://cache.test/ac/${keyDigest}`))
     const wrong = await handler(
-      new Request(`http://cache.test/ac/${keyDigest}`, { headers: { authorization: `Bearer ${token}x` } })
+      new Request(`http://cache.test/ac/${keyDigest}`, { headers: { authorization: `Bearer ${writeToken}x` } })
     )
     const prefix = await handler(
-      new Request(`http://cache.test/ac/${keyDigest}`, { headers: { authorization: token } })
+      new Request(`http://cache.test/ac/${keyDigest}`, { headers: { authorization: writeToken } })
     )
 
     expect(anonymous.status).toBe(401)
@@ -268,25 +274,32 @@ describe("authentication", () => {
   })
 
   test("accepts an unauthenticated request in the documented development mode", async () => {
-    const handler = makeHandler({ tokenHash: null })
+    const handler = makeHandler({ readTokenHash: null, writeTokenHash: null })
     const response = await handler(new Request(`http://cache.test/ac/${keyDigest}`))
     expect(response.status).toBe(404)
   })
 
-  test("refuses to construct a handler with an invalid token hash", () => {
-    expect(() => makeHandler({ tokenHash: "not-a-digest" })).toThrow("tokenHash")
+  test("refuses to construct a handler without two valid token hashes outside development mode", () => {
+    expect(() => makeHandler({ readTokenHash: "not-a-digest" })).toThrow("readTokenHash")
+    expect(() => makeHandler({ writeTokenHash: "not-a-digest" })).toThrow("writeTokenHash")
+    expect(() => makeHandler({ readTokenHash: null })).toThrow("both be digests or both be null")
+    expect(() => makeHandler({ writeTokenHash: null })).toThrow("both be digests or both be null")
+    // Equal digests are one credential under two names, and the classifier
+    // answers "write" for it, so admitting the pair would hand publication to
+    // every holder of the nominal read credential.
+    expect(() => makeHandler({ writeTokenHash: readTokenHash })).toThrow("must differ")
   })
 
   test("matches the bearer scheme the way RFC 9110 defines it", async () => {
     const handler = makeHandler()
     const lowercase = await handler(
-      new Request(`http://cache.test/ac/${keyDigest}`, { headers: { authorization: `bearer ${token}` } })
+      new Request(`http://cache.test/ac/${keyDigest}`, { headers: { authorization: `bearer ${writeToken}` } })
     )
     const padded = await handler(
-      new Request(`http://cache.test/ac/${keyDigest}`, { headers: { authorization: `Bearer   ${token}` } })
+      new Request(`http://cache.test/ac/${keyDigest}`, { headers: { authorization: `Bearer   ${writeToken}` } })
     )
     const other = await handler(
-      new Request(`http://cache.test/ac/${keyDigest}`, { headers: { authorization: `Basic ${token}` } })
+      new Request(`http://cache.test/ac/${keyDigest}`, { headers: { authorization: `Basic ${writeToken}` } })
     )
 
     expect(lowercase.status).toBe(404)
@@ -298,7 +311,7 @@ describe("authentication", () => {
     const handler = makeHandler()
     const response = await handler(request(`/ac/${keyDigest}`))
     const serialized = JSON.stringify([...response.headers.entries()])
-    expect(serialized).not.toContain(token)
+    expect(serialized).not.toContain(writeToken)
   })
 
   test("cancels an unauthorized request body without reading it", async () => {
@@ -319,6 +332,76 @@ describe("authentication", () => {
       body
     }))
     expect(response.status).toBe(401)
+  })
+
+  test("lets the read credential GET and HEAD but refuses every PUT and DELETE with 403", async () => {
+    const actionCache = memoryActionCache()
+    const contentStore = memoryContentStore()
+    const bytes = new TextEncoder().encode("readable artifact")
+    const digest = digestOf("readable artifact")
+    actionCache.entries.set(keyDigest, { ...envelope, body: JSON.stringify(envelope), resultJson: "{}" })
+    contentStore.objects.set(digest, bytes)
+    const handler = makeHandler({ actionCache, contentStore })
+
+    const readEntry = await handler(readRequest(`/ac/${keyDigest}`))
+    const readArtifact = await handler(readRequest(`/cas/${digest}`))
+    const headArtifact = await handler(readRequest(`/cas/${digest}`, { method: "HEAD" }))
+    expect(readEntry.status).toBe(200)
+    expect(readArtifact.status).toBe(200)
+    expect(await readArtifact.text()).toBe("readable artifact")
+    expect(headArtifact.status).toBe(200)
+
+    const cases = [
+      readRequest(`/ac/${keyDigest}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(envelope)
+      }),
+      readRequest(`/ac/${keyDigest}`, { method: "DELETE" }),
+      readRequest(`/cas/${digest}`, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: bytes
+      }),
+      readRequest(`/cas/${digest}`, { method: "DELETE" })
+    ]
+    for (const refused of cases) {
+      const response = await handler(refused)
+      expect(response.status).toBe(403)
+      expect(await response.json()).toEqual({ error: "this credential may read the cache but not publish to it" })
+    }
+    expect(actionCache.entries.has(keyDigest)).toBe(true)
+  })
+
+  test("refuses a read credential before reading a publication body", async () => {
+    const streamed = instrumentedBody({ chunks: [new TextEncoder().encode(JSON.stringify(envelope))] })
+    const response = await makeHandler()(rawRequest(`/ac/${keyDigest}`, {
+      method: "PUT",
+      headers: { authorization: `Bearer ${readToken}`, "content-type": "application/json" },
+      body: streamed.body
+    }))
+    expect(response.status).toBe(403)
+    expect(streamed.log).toEqual(["body-cancel"])
+  })
+
+  test("lets the write credential read, publish, and delete", async () => {
+    const handler = makeHandler()
+    const bytes = new TextEncoder().encode("writeable artifact")
+    const digest = digestOf("writeable artifact")
+    expect((await handler(jsonRequest(`/ac/${keyDigest}`, envelope, { method: "PUT" }))).status).toBe(201)
+    expect((await handler(request(`/ac/${keyDigest}`))).status).toBe(200)
+    expect(
+      (await handler(request(`/cas/${digest}`, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: bytes
+      }))).status
+    ).toBe(201)
+    expect((await handler(request(`/cas/${digest}`, { method: "HEAD" }))).status).toBe(200)
+    const fetched = await handler(request(`/cas/${digest}`))
+    expect(fetched.status).toBe(200)
+    expect(await fetched.text()).toBe("writeable artifact")
+    expect((await handler(request(`/ac/${keyDigest}`, { method: "DELETE" }))).status).toBe(200)
   })
 })
 
@@ -594,6 +677,13 @@ describe("action-cache request bounds", () => {
     const suffixed = await handler(
       request(`/ac/${keyDigest}`, {
         method: "PUT",
+        headers: { "content-type": "application/vnd.smithers-build+json; charset=utf-8" },
+        body: JSON.stringify(envelope)
+      })
+    )
+    const whitespace = await handler(
+      request(`/ac/${keyDigest}`, {
+        method: "PUT",
         headers: { "content-type": "application/vnd.smithers build+json; charset=utf-8" },
         body: JSON.stringify(envelope)
       })
@@ -602,6 +692,7 @@ describe("action-cache request bounds", () => {
     expect(octet.status).toBe(415)
     expect(none.status).toBe(415)
     expect(suffixed.status).toBe(201)
+    expect(whitespace.status).toBe(415)
   })
 
   test("refuses a body that is not UTF-8 and a body that is not JSON", async () => {
@@ -826,6 +917,36 @@ describe("content-addressed storage", () => {
     expect(missing.status).toBe(404)
   })
 
+  test("answers a successful corrupt-row repair with 200 and serves the repaired bytes", async () => {
+    const repairedBytes = new TextEncoder().encode("repaired artifact bytes")
+    const digest = digestOf("repaired artifact bytes")
+    let storedBytes = new TextEncoder().encode("corrupt bytes")
+    const contentStore = {
+      has: async () => true,
+      get: async () => ({ body: storedBytes }),
+      put: async (_digest, bytes) => {
+        storedBytes = new Uint8Array(bytes)
+        return "repaired"
+      },
+      presentDigests: async () => new Set([digest])
+    }
+    const handler = makeHandler({ contentStore })
+
+    const repaired = await captureErrors(() =>
+      handler(request(`/cas/${digest}`, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: repairedBytes
+      }))
+    )
+    const fetched = await handler(request(`/cas/${digest}`))
+
+    expect(repaired.value.status).toBe(200)
+    expect(repaired.lines).toHaveLength(0)
+    expect(storedBytes).toEqual(repairedBytes)
+    expect(new Uint8Array(await fetched.arrayBuffer())).toEqual(repairedBytes)
+  })
+
   test("refuses bytes that do not hash to the address", async () => {
     const handler = makeHandler()
     const response = await handler(
@@ -941,6 +1062,63 @@ describe("content-addressed storage", () => {
     expect((await Promise.all(uploads)).map((response) => response.status)).toEqual(
       Array.from({ length: maxConcurrentArtifactTransfers }, () => 201)
     )
+  })
+
+  test("holds streaming downloads through cancel, drain, and error, releasing exactly one slot", async () => {
+    const digest = digestOf("streaming artifact")
+    for (const completion of ["cancel", "drain", "error"]) {
+      const streams = []
+      const contentStore = {
+        ...memoryContentStore(),
+        get: async () => {
+          let controller
+          let cancellations = 0
+          const body = new ReadableStream({
+            start(value) {
+              controller = value
+            },
+            cancel() {
+              cancellations += 1
+            }
+          })
+          const controlled = {
+            body,
+            controller,
+            get cancellations() {
+              return cancellations
+            }
+          }
+          streams.push(controlled)
+          return { body }
+        }
+      }
+      const handler = makeHandler({ contentStore })
+      const held = await Promise.all(
+        Array.from({ length: maxConcurrentArtifactTransfers }, () => handler(request(`/cas/${digest}`)))
+      )
+      expect(held.map((response) => response.status)).toEqual([200, 200])
+      expect((await handler(request(`/cas/${digest}`))).status).toBe(429)
+
+      if (completion === "cancel") {
+        await held[0].body.cancel()
+        expect(streams[0].cancellations).toBe(1)
+      } else if (completion === "drain") {
+        streams[0].controller.enqueue(new TextEncoder().encode("done"))
+        streams[0].controller.close()
+        expect(await held[0].text()).toBe("done")
+      } else {
+        streams[0].controller.error(new Error("stream failed"))
+        await expect(held[0].arrayBuffer()).rejects.toThrow("stream failed")
+      }
+
+      const admitted = await handler(request(`/cas/${digest}`))
+      expect(admitted.status).toBe(200)
+      // Exactly one permit was released: the other original transfer and this
+      // replacement still occupy the two-slot ceiling.
+      expect((await handler(request(`/cas/${digest}`))).status).toBe(429)
+      await held[1].body.cancel()
+      await admitted.body.cancel()
+    }
   })
 
   test("rejects impossible artifact limits at handler construction", () => {
@@ -1162,15 +1340,15 @@ describe("failure diagnostics", () => {
       query: "INSERT INTO smithers_build_cache_entry (key_digest, body) VALUES ($1, $2)",
       parameters: ["a".repeat(64), `{"secret":"payload"}`],
       databaseUrl: "postgres://smthrs:hunter2@cache-postgres:5432/smithers_build_cache",
-      headers: { authorization: `Bearer ${token}` },
-      token,
+      headers: { authorization: `Bearer ${writeToken}` },
+      token: writeToken,
       body: `{"secret":"payload"}`,
       stack: "at connect (postgres://smthrs:hunter2@cache-postgres:5432)"
     })
 
   const secrets = [
     "hunter2",
-    token,
+    writeToken,
     "ECONNREFUSED",
     "10.0.0.4",
     "INSERT INTO",
@@ -1191,8 +1369,8 @@ describe("failure diagnostics", () => {
 
   test("drops a tag that does not have the shape of an identifier", () => {
     const rendered = describeFailure({
-      name: `Error: ${token}`,
-      code: `SELECT 1 -- ${token}`,
+      name: `Error: ${writeToken}`,
+      code: `SELECT 1 -- ${writeToken}`,
       syscall: "a".repeat(64)
     })
     expect(rendered).toBe("smithers build cache: request failed (unattributed)")
@@ -1205,14 +1383,14 @@ describe("failure diagnostics", () => {
       Object.defineProperty(throwing, field, {
         get() {
           reads += 1
-          throw new Error(`getter leaked ${token}`)
+          throw new Error(`getter leaked ${writeToken}`)
         }
       })
     }
     expect(describeFailure(throwing)).toBe("smithers build cache: request failed (unattributed)")
     expect(reads).toBe(0)
     expect(describeFailure(null)).toBe("smithers build cache: request failed (kind=null)")
-    expect(describeFailure(token)).toBe("smithers build cache: request failed (kind=string)")
+    expect(describeFailure(writeToken)).toBe("smithers build cache: request failed (kind=string)")
     expect(describeFailure(undefined)).toBe("smithers build cache: request failed (kind=undefined)")
   })
 
@@ -1263,7 +1441,7 @@ describe("storage failure", () => {
       delete: async () => "yes"
     }
     const invalidContentStore = {
-      get: async () => Object.defineProperty({}, "body", { get: () => token }),
+      get: async () => Object.defineProperty({}, "body", { get: () => writeToken }),
       has: async () => "yes",
       put: async () => "unexpected",
       presentDigests: async () => ({ has: () => true })
@@ -1298,7 +1476,8 @@ describe("storage failure", () => {
       actionCache,
       contentStore: memoryContentStore(),
       health: async () => true,
-      tokenHash,
+      readTokenHash,
+      writeTokenHash,
       maxArtifactBytes: 1024
     }
     const handler = createHandler(dependencies)
@@ -1316,12 +1495,12 @@ describe("storage failure", () => {
         contentStore: memoryContentStore(),
         maxArtifactBytes: 1024
       },
-      "tokenHash",
+      "readTokenHash",
       {
         enumerable: true,
         get: () => {
           reads += 1
-          return tokenHash
+          return readTokenHash
         }
       }
     )

@@ -1,8 +1,9 @@
 # Install
 
 `smithers-build` expresses dependency installation as one flow with one round and
-three actions: measure, fetch, and link. Only pnpm performs work today; npm,
-Bun, and Yarn are explicit typed refusals.
+three actions: measure, fetch, and link. A workspace declares pnpm or Bun.
+Only pnpm performs work today; the Bun layer resolves the service and refuses
+every operation with a typed `unsupported` error.
 
 `node_modules` is a target. A BUILD.ts file declares the toolchain once and
 asks the `Install` target for the tree:

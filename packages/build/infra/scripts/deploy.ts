@@ -55,7 +55,25 @@ const terminateProcessTree = (child: ChildProcess, signal: NodeJS.Signals): void
   }
 }
 
+/**
+ * Substitutions for the process the wrapper drives.
+ *
+ * Every field defaults to the production deployment. Naming them keeps the
+ * wrapper's own guarantees testable without deploying anything: signal
+ * forwarding, escalation, and redaction on every exit path.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface DeployOptions {
+  readonly cli?: string | undefined
+  readonly cwd?: string | undefined
+  readonly redact?: (() => Promise<number>) | undefined
+  readonly escalationDelayMs?: number | undefined
+}
+
 const runAlchemy = (
+  command: { readonly cli: string; readonly cwd: string },
   args: ReadonlyArray<string>,
   onSpawn: (child: ChildProcess) => void,
   onFinish: (child: ChildProcess) => void
@@ -63,8 +81,8 @@ const runAlchemy = (
   new Promise((resolve, reject) => {
     let child: ChildProcess
     try {
-      child = spawn(process.execPath, [alchemyCli, "deploy", "alchemy.run.ts", ...args], {
-        cwd: infraDirectory,
+      child = spawn(process.execPath, [command.cli, "deploy", "alchemy.run.ts", ...args], {
+        cwd: command.cwd,
         detached: process.platform !== "win32",
         env: process.env,
         stdio: "inherit"
@@ -91,8 +109,17 @@ const runAlchemy = (
  * Termination signals are held while cleanup runs and are forwarded to the
  * complete detached Alchemy process group. A command that ignores the first
  * signal is killed after a bounded grace period.
+ *
+ * @category commands
+ * @since 0.1.0
  */
-export const deploy = async (args: ReadonlyArray<string> = process.argv.slice(2)): Promise<number> => {
+export const deploy = async (
+  args: ReadonlyArray<string> = process.argv.slice(2),
+  options: DeployOptions = {}
+): Promise<number> => {
+  const target = { cli: options.cli ?? alchemyCli, cwd: options.cwd ?? infraDirectory }
+  const redact = options.redact ?? redactAlchemyState
+  const escalationDelay = options.escalationDelayMs ?? escalationDelayMs
   let activeChild: ChildProcess | undefined
   let requestedSignal: NodeJS.Signals | undefined
   let escalationTimer: ReturnType<typeof setTimeout> | undefined
@@ -107,7 +134,7 @@ export const deploy = async (args: ReadonlyArray<string> = process.argv.slice(2)
     terminateProcessTree(child, signal)
     if (signal !== "SIGKILL") {
       clearEscalation()
-      escalationTimer = setTimeout(() => terminateProcessTree(child, "SIGKILL"), escalationDelayMs)
+      escalationTimer = setTimeout(() => terminateProcessTree(child, "SIGKILL"), escalationDelay)
       escalationTimer.unref()
     }
   }
@@ -131,6 +158,7 @@ export const deploy = async (args: ReadonlyArray<string> = process.argv.slice(2)
   try {
     try {
       command = await runAlchemy(
+        target,
         args,
         (child) => {
           activeChild = child
@@ -146,7 +174,7 @@ export const deploy = async (args: ReadonlyArray<string> = process.argv.slice(2)
     }
 
     try {
-      const redactedFiles = await redactAlchemyState()
+      const redactedFiles = await redact()
       process.stdout.write(`Redacted ${redactedFiles} Alchemy Worker state file(s).\n`)
     } catch (error) {
       redactionFailure = error

@@ -1,5 +1,5 @@
 import { NodeServices } from "@effect/platform-node"
-import { Flow } from "@smthrs/flow"
+import { Flow, Graph } from "@smthrs/flow"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Fs from "node:fs/promises"
@@ -50,6 +50,8 @@ interface ManagerOptions {
   readonly version?: string
   readonly storeDirectory?: string
   readonly lockfileName?: string
+  readonly name?: PackageManager.Name
+  readonly platformSensitive?: boolean
   readonly onFetch?: () => void
   readonly onLink?: () => void
   readonly onVersionRead?: () => void
@@ -61,12 +63,13 @@ const managerService = (options: ManagerOptions): PackageManager.Service => {
     options.onVersionRead?.()
     return options.version ?? "11.21.0"
   })
+  const name = options.name ?? "pnpm"
   return {
-    name: "pnpm",
+    name,
     projectRoot: options.root,
-    storeDirectory: options.storeDirectory ?? ".flows/store/pnpm",
-    lockfileName: options.lockfileName ?? "pnpm-lock.yaml",
-    platformSensitive: true,
+    storeDirectory: options.storeDirectory ?? `.flows/store/${name}`,
+    lockfileName: options.lockfileName ?? (name === "pnpm" ? "pnpm-lock.yaml" : "bun.lock"),
+    platformSensitive: options.platformSensitive ?? true,
     requirement,
     version,
     verify: Effect.flatMap(version, (measured) =>
@@ -140,10 +143,8 @@ describe("Install", () => {
           Effect.provideService(PackageManager.PackageManager, service),
           Effect.provideService(Runtime.Runtime, runtimeService())
         )
-      const first = await Effect.runPromise(link())
-      const second = await Effect.runPromise(link())
-      expect(first.linked).toBe(true)
-      expect(second.linked).toBe(true)
+      await Effect.runPromise(link())
+      await Effect.runPromise(link())
       expect(fetches).toBe(0)
       expect(links).toBe(2)
     })
@@ -259,21 +260,173 @@ describe("Install", () => {
       const evidence = await packageJsonDigest(root)
       const service = managerService({ root, evidence })
       const measured = await Effect.runPromise(
-        Effect.gen(function*() {
-          const manager = yield* PackageManager.PackageManager
-          const lockfile = yield* PackageManager.lockfileDigest(manager.projectRoot, manager.lockfileName)
-          const npmrc = yield* PackageManager.npmrcDigest(manager.projectRoot)
-          return {
-            lockfile: { path: manager.lockfileName, digest: lockfile },
-            npmrc: npmrc === null ? null : { path: ".npmrc", digest: npmrc }
-          }
-        }).pipe(
+        Install.executeMeasure().pipe(
           Effect.provide(NodeServices.layer),
           Effect.provideService(PackageManager.PackageManager, service)
         )
       )
       expect(Object.keys(measured).sort()).toEqual(["lockfile", "npmrc"])
+      expect(measured.lockfile.path).toBe("pnpm-lock.yaml")
+      expect(measured.lockfile.digest).toMatch(/^[0-9a-f]{64}$/)
       expect(measured.npmrc).toBe(null)
     })
+  })
+
+  it("reports the .npmrc alongside the lockfile when a project has one", async () => {
+    await withFixture(async (root) => {
+      await Fs.writeFile(NodePath.join(root, ".npmrc"), "registry=https://registry.example/\n", "utf8")
+      const evidence = await packageJsonDigest(root)
+      const measured = await Effect.runPromise(
+        Install.executeMeasure().pipe(
+          Effect.provide(NodeServices.layer),
+          Effect.provideService(PackageManager.PackageManager, managerService({ root, evidence }))
+        )
+      )
+      expect(measured.npmrc?.path).toBe(".npmrc")
+      expect(measured.npmrc?.digest).toMatch(/^[0-9a-f]{64}$/)
+    })
+  })
+
+  it("refuses to measure through a layer whose paths disagree with the Flow boundary", async () => {
+    await withFixture(async (root) => {
+      const evidence = await packageJsonDigest(root)
+      const error = await Effect.runPromise(
+        Install.executeMeasure().pipe(
+          Effect.flip,
+          Effect.provide(NodeServices.layer),
+          Effect.provideService(
+            PackageManager.PackageManager,
+            managerService({ root, evidence, lockfileName: "nested/pnpm-lock.yaml" })
+          )
+        )
+      )
+      expect(error.code).toBe("environment_mismatch")
+      expect(error.message).toMatch(/install Flow boundary requires/)
+    })
+  })
+
+  /**
+   * `content` is in Link's payload because it is key material the
+   * implementation is supposed to honour, and the implementation destructured
+   * only `store`. A manifest fetched from another lockfile on the same host
+   * passed every check and produced a LinkManifest attesting to content the
+   * tree was never built from.
+   */
+  it("refuses a store fetched for a different lockfile or a different .npmrc", async () => {
+    await withFixture(async (root) => {
+      const evidence = await packageJsonDigest(root)
+      const service = managerService({ root, evidence })
+      const content = await installContent(root)
+      const foreign = async (overrides: {
+        readonly lockfileDigest?: string
+        readonly npmrcDigest?: string | null
+      }) =>
+        Effect.runPromise(
+          PackageManager.storeManifest({
+            manager: "pnpm",
+            managerVersion: "11.21.0",
+            platform,
+            lockfileDigest: overrides.lockfileDigest ?? content.lockfile.digest,
+            npmrcDigest: overrides.npmrcDigest ?? null
+          }).pipe(Effect.provide(NodeServices.layer))
+        )
+
+      for (
+        const store of [
+          await foreign({ lockfileDigest: "f".repeat(64) }),
+          await foreign({ npmrcDigest: "e".repeat(64) })
+        ]
+      ) {
+        const error = await Effect.runPromise(
+          Install.executeLink({ content, store }).pipe(
+            Effect.flip,
+            Effect.provide(NodeServices.layer),
+            Effect.provideService(PackageManager.PackageManager, service),
+            Effect.provideService(Runtime.Runtime, runtimeService())
+          )
+        )
+        expect(error.code).toBe("environment_mismatch")
+        expect(error.message).toMatch(/this project's measured content is/)
+      }
+    })
+  })
+
+  /**
+   * A manager whose fetch does not vary by platform drops the platform out of
+   * its key material, so the store manifest it reports carries `null` there and
+   * the digest differs from the platform-sensitive one for the same content.
+   */
+  it("keeps the platform out of a platform-independent manager's store manifest", async () => {
+    await withFixture(async (root) => {
+      await Fs.writeFile(NodePath.join(root, ".npmrc"), "registry=https://registry.example/\n", "utf8")
+      const evidence = await packageJsonDigest(root)
+      const content = await Effect.runPromise(
+        Install.executeMeasure().pipe(
+          Effect.provide(NodeServices.layer),
+          Effect.provideService(PackageManager.PackageManager, managerService({ root, evidence }))
+        )
+      )
+      expect(content.npmrc).not.toBe(null)
+
+      const fetched = (platformSensitive: boolean) =>
+        Effect.runPromise(
+          Install.executeFetch({ content }).pipe(
+            Effect.provide(NodeServices.layer),
+            Effect.provideService(
+              PackageManager.PackageManager,
+              managerService({ root, evidence, platformSensitive })
+            ),
+            Effect.provideService(Runtime.Runtime, runtimeService())
+          )
+        )
+      const independent = await fetched(false)
+      const sensitive = await fetched(true)
+      expect(independent.platform).toBe(null)
+      expect(sensitive.platform).toEqual(platform)
+      expect(independent.digest).not.toBe(sensitive.digest)
+    })
+  })
+
+  it("refuses a layer whose manager name is outside the declared union", async () => {
+    await withFixture(async (root) => {
+      const evidence = await packageJsonDigest(root)
+      const service = {
+        ...managerService({ root, evidence }),
+        name: "npm" as PackageManager.Name
+      }
+      const error = await Effect.runPromise(
+        Install.executeMeasure().pipe(
+          Effect.flip,
+          Effect.provide(NodeServices.layer),
+          Effect.provideService(PackageManager.PackageManager, service)
+        )
+      )
+      expect(error.code).toBe("environment_mismatch")
+      expect(error.message).toMatch(/declares an unknown manager/)
+    })
+  })
+
+  /**
+   * The manager is a plan-time declaration, so one round records measure,
+   * exactly one fetch, and link. This is the assertion that the declared
+   * manager reaches the recorded boundary: the fetch node names that manager's
+   * lockfile and that manager's store directory, and nothing else changes.
+   */
+  it("records measure, one manager-specific fetch, and link in one round", () => {
+    for (
+      const [manager, lockfile] of [["pnpm", "pnpm-lock.yaml"], ["bun", "bun.lock"]] as const
+    ) {
+      const graph = Graph.build(Install.Install, { manager })
+      const actions = graph.nodes.filter((node) => node.kind === "ActionCall")
+      expect(actions).toHaveLength(3)
+      const [measure, fetch, link] = actions
+      expect(measure!.draft.effects.reads).toEqual([".npmrc", "bun.lock", "pnpm-lock.yaml"])
+      expect(fetch!.draft.effects.reads).toEqual([lockfile, ".npmrc"])
+      expect(fetch!.draft.effects.writes).toEqual([
+        { _tag: "TreeArtifact", path: `.flows/store/${manager}` }
+      ])
+      expect(link!.draft.effects.reads).toEqual(["package.json"])
+      for (const action of actions) expect(action.draft.effects.boundaryMode).toBe("expected")
+    }
   })
 })

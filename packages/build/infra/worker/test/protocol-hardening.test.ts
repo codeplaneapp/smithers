@@ -16,8 +16,9 @@ import {
   maxConcurrentFindMissingRequests,
   maxFindMissingDigests,
   maxJsonDepth,
+  maxJsonMembers,
   maxKeyDigestLength,
-  maxReferencedDigests
+  maxRecordedRunIdLength
 } from "../protocol.ts"
 
 const token = "test-token-with-sufficient-entropy-for-unit-tests"
@@ -292,46 +293,28 @@ describe("remote-cache hardening", () => {
     expect((await handler(jsonRequest(`/ac/${keyDigest}`, second, { method: "PUT" }))).status).toBe(409)
   })
 
-  it("validates and bounds declared artifact references", async () => {
+  it("stores declared artifact metadata verbatim without interpreting it", async () => {
     const actionCache = new MemoryActionCache()
     const handler = makeHandler({ actionCache })
-    const digest = "b".repeat(64)
-    const valid = {
+    // Nothing reads the artifacts a publication declares, so a digest the
+    // service would once have refused must not cost the client a 400 for
+    // metadata the service only ever stores and returns.
+    const body = JSON.stringify({
       keyDigest,
       result: { exitOk: true },
-      meta: {
-        boundary: {
-          declaredOutputs: {
-            outputs: [{ digest }, { digest }, { digest, content: "inline" }, { digest: null }]
-          }
-        }
-      }
-    }
-    expect((await handler(jsonRequest(`/ac/${keyDigest}`, valid, { method: "PUT" }))).status).toBe(201)
-    expect(actionCache.entries.get(keyDigest)?.digests).toEqual([digest])
+      meta: { boundary: { declaredOutputs: { outputs: [{ digest: "not-a-digest" }] } } }
+    })
 
-    const malformed = {
-      ...valid,
-      keyDigest: `${keyDigest}x`,
-      result: { exitOk: false },
-      meta: { boundary: { declaredOutputs: { outputs: [{ digest: "wrong" }] } } }
-    }
-    expect((await handler(jsonRequest(`/ac/${keyDigest}x`, malformed, { method: "PUT" }))).status).toBe(400)
+    const stored = await handler(request(`/ac/${keyDigest}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body
+    }))
+    const fetched = await handler(request(`/ac/${keyDigest}`))
 
-    const tooMany = {
-      keyDigest: `${keyDigest}y`,
-      result: { exitOk: true },
-      meta: {
-        boundary: {
-          declaredOutputs: {
-            outputs: Array.from({ length: maxReferencedDigests + 1 }, (_, index) => ({
-              digest: index.toString(16).padStart(64, "0")
-            }))
-          }
-        }
-      }
-    }
-    expect((await handler(jsonRequest(`/ac/${keyDigest}y`, tooMany, { method: "PUT" }))).status).toBe(400)
+    expect(stored.status).toBe(201)
+    expect(actionCache.entries.get(keyDigest)?.body).toBe(body)
+    expect(await fetched.text()).toBe(body)
   })
 
   it("rejects lossy or structurally hostile canonical JSON", () => {
@@ -755,6 +738,448 @@ describe("remote-cache hardening", () => {
     } finally {
       error.mockRestore()
     }
+  })
+
+  it("names the media type it requires on every body-bearing route", async () => {
+    const handler = makeHandler()
+    const publication = await handler(
+      request(`/ac/${keyDigest}`, {
+        method: "PUT",
+        headers: { "content-type": "text/plain" },
+        body: "{}"
+      })
+    )
+    const artifact = await handler(
+      request(`/cas/${digestOf("bytes")}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: "bytes"
+      })
+    )
+    const findMissing = await handler(
+      request("/cas/findMissing", { method: "POST", headers: { "content-type": "text/plain" }, body: "{}" })
+    )
+
+    expect(publication.status).toBe(415)
+    await expect(publication.json()).resolves.toEqual({ error: "content-type must be application/json" })
+    expect(artifact.status).toBe(415)
+    await expect(artifact.json()).resolves.toEqual({ error: "content-type must be application/octet-stream" })
+    expect(findMissing.status).toBe(415)
+  })
+
+  it("refuses a declared length over the bound before reading the body", async () => {
+    const body = instrumentedBody({ chunks: [textEncoder.encode("{}")] })
+    const response = await makeHandler()(
+      rawRequest(`/ac/${keyDigest}`, {
+        method: "PUT",
+        headers: { "content-length": String(1024 * 1024 + 1), "content-type": "application/json" },
+        body: body.body
+      })
+    )
+
+    expect(response.status).toBe(413)
+    await expect(response.json()).resolves.toEqual({ error: "request body exceeds the configured bound" })
+    expect(body.log).toEqual(["body-cancel"])
+  })
+
+  it("refuses a body shorter than its declared length", async () => {
+    const short = instrumentedBody({ chunks: [textEncoder.encode("{}")] })
+    const response = await makeHandler()(
+      rawRequest(`/ac/${keyDigest}`, {
+        method: "PUT",
+        headers: { "content-length": "3", "content-type": "application/json" },
+        body: short.body
+      })
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: "content-length does not match the request body" })
+  })
+
+  it("grows an undeclared-length body past its starting buffer and still bounds it", async () => {
+    // The route limit is above the 64 KiB starting capacity and the payload is
+    // above it too, so acceptance can only come from the growth path copying
+    // every earlier chunk forward: the digest check would fail otherwise.
+    const limit = 200 * 1024
+    const handler = makeHandler({ maxArtifactBytes: limit })
+    const payload = "x".repeat(100 * 1024)
+    const bytes = textEncoder.encode(payload)
+    const accepted = instrumentedBody({
+      chunks: [bytes.subarray(0, 40 * 1024), bytes.subarray(40 * 1024, 90 * 1024), bytes.subarray(90 * 1024)]
+    })
+    const stored = await handler(
+      rawRequest(`/cas/${digestOf(payload)}`, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: accepted.body
+      })
+    )
+
+    const exactPayload = "y".repeat(limit)
+    const exactBytes = textEncoder.encode(exactPayload)
+    const exact = instrumentedBody({
+      chunks: [exactBytes.subarray(0, limit - 1), exactBytes.subarray(limit - 1)]
+    })
+    const atLimit = await handler(
+      rawRequest(`/cas/${digestOf(exactPayload)}`, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: exact.body
+      })
+    )
+
+    const oversized = instrumentedBody({ chunks: [new Uint8Array(limit), new Uint8Array(1)] })
+    const refused = await handler(
+      rawRequest(`/cas/${digestOf("unused")}`, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: oversized.body
+      })
+    )
+
+    expect(stored.status).toBe(201)
+    expect(atLimit.status).toBe(201)
+    expect(refused.status).toBe(413)
+  })
+
+  it("refuses a body that is not UTF-8 and one that is not JSON", async () => {
+    const handler = makeHandler()
+    const invalidUtf8 = instrumentedBody({ chunks: [Uint8Array.from([0xff, 0xfe])] })
+    const decoded = await handler(
+      rawRequest(`/ac/${keyDigest}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: invalidUtf8.body
+      })
+    )
+    const malformed = await handler(
+      request(`/ac/${keyDigest}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: "{\"unterminated\":"
+      })
+    )
+
+    expect(decoded.status).toBe(400)
+    await expect(decoded.json()).resolves.toEqual({ error: "body must be UTF-8 JSON" })
+    expect(malformed.status).toBe(400)
+    await expect(malformed.json()).resolves.toEqual({ error: "body must be valid JSON" })
+  })
+
+  it("refuses JSON whose parse is not reversible", async () => {
+    const handler = makeHandler()
+    const duplicate = await handler(
+      request(`/ac/${keyDigest}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        // JSON.parse keeps only the last member, so two divergent results
+        // would compare identical and answer 200 where 409 is promised.
+        body: "{\"keyDigest\":\"" + keyDigest + "\",\"result\":{\"a\":1,\"a\":2}}"
+      })
+    )
+    const imprecise = await handler(
+      request(`/ac/${keyDigest}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: "{\"keyDigest\":\"" + keyDigest + "\",\"result\":{\"n\":9007199254740993}}"
+      })
+    )
+    const overflowing = await handler(
+      request(`/ac/${keyDigest}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: "{\"keyDigest\":\"" + keyDigest + "\",\"result\":{\"n\":1e400}}"
+      })
+    )
+    const accepted = await handler(
+      jsonRequest(`/ac/${keyDigest}`, { keyDigest, result: { n: 9007199254740992, e: 1e21 } }, { method: "PUT" })
+    )
+
+    expect(duplicate.status).toBe(400)
+    await expect(duplicate.json()).resolves.toEqual({ error: "body contains a duplicate object member name" })
+    expect(imprecise.status).toBe(400)
+    expect(overflowing.status).toBe(400)
+    expect(accepted.status).toBe(201)
+  })
+
+  it("accepts every document a JSON serializer produces", async () => {
+    const handler = makeHandler()
+    // A deterministic walk over the shapes the prescan has to step past:
+    // strings holding braces, quotes, escapes and digits; numbers in every
+    // rendering `JSON.stringify` emits; and objects nested inside arrays,
+    // where each object needs its own member-name scope.
+    let seed = 0x2f6e2b1
+    const next = (): number => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      return seed / 0x7fffffff
+    }
+    const strings = [
+      "",
+      "{\"a\":1,\"a\":2}",
+      "quote\" brace} comma, colon:",
+      "back\\slash",
+      "digits 9007199254740993 and 1e400",
+      "é 😀"
+    ]
+    const numbers = [0, 1, -1, 0.1, -0.5, 1e21, 1e-7, 9007199254740992, -9007199254740992, 1.7976931348623157e308]
+    const value = (depth: number): unknown => {
+      const choice = next()
+      if (depth > 3 || choice < 0.25) {
+        const leaf = next()
+        if (leaf < 0.3) return strings[Math.floor(next() * strings.length)] ?? ""
+        if (leaf < 0.6) return numbers[Math.floor(next() * numbers.length)] ?? 0
+        if (leaf < 0.8) return next() < 0.5
+        return null
+      }
+      if (choice < 0.6) return Array.from({ length: Math.floor(next() * 4) }, () => value(depth + 1))
+      return Object.fromEntries(
+        Array.from(
+          { length: Math.floor(next() * 4) },
+          (_, index) => [`k${index}${strings[index] ?? ""}`, value(depth + 1)]
+        )
+      )
+    }
+
+    for (let round = 0; round < 60; round += 1) {
+      const body = JSON.stringify({ keyDigest, result: value(0) })
+      const response = await handler(
+        request(`/ac/${keyDigest}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body
+        })
+      )
+      expect([200, 201, 409]).toContain(response.status)
+    }
+  })
+
+  it("does not confuse a member name inside a string with a duplicate", async () => {
+    const handler = makeHandler()
+    const response = await handler(
+      jsonRequest(
+        `/ac/${keyDigest}`,
+        { keyDigest, result: { a: "\"a\":1,\"a\"", nested: { a: 1 }, list: [{ a: 1 }, { a: 2 }] } },
+        { method: "PUT" }
+      )
+    )
+
+    expect(response.status).toBe(201)
+  })
+
+  it("refuses a publication whose key disagrees with the request path", async () => {
+    const response = await makeHandler()(
+      jsonRequest(`/ac/${keyDigest}`, { keyDigest: "other", result: { exitOk: true } }, { method: "PUT" })
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      error: "keyDigest must match the request path when supplied"
+    })
+  })
+
+  it("refuses malformed artifact digests and malformed artifact paths", async () => {
+    const handler = makeHandler()
+
+    const shape = await handler(request("/cas/not-a-digest"))
+    const uppercase = await handler(request(`/cas/${"A".repeat(64)}`))
+    const encoding = await handler(request("/cas/%"))
+    const emptyKey = await handler(request("/ac/"))
+
+    expect(shape.status).toBe(400)
+    await expect(shape.json()).resolves.toEqual({ error: "digest must be 64 lowercase hex characters" })
+    expect(uppercase.status).toBe(400)
+    expect(encoding.status).toBe(400)
+    await expect(encoding.json()).resolves.toEqual({ error: "digest must be valid URL encoding" })
+    expect(emptyKey.status).toBe(400)
+    await expect(emptyKey.json()).resolves.toEqual({ error: "empty keyDigest" })
+  })
+
+  it("refuses an unpaired or unbounded deletion fence", async () => {
+    const handler = makeHandler()
+    const runIdOnly = await handler(request(`/ac/${keyDigest}?recordedRunId=run-1`, { method: "DELETE" }))
+    const emptyRunId = await handler(
+      request(`/ac/${keyDigest}?recordedRunId=&recordedEventSeq=1`, { method: "DELETE" })
+    )
+    const oversized = await handler(
+      request(
+        `/ac/${keyDigest}?recordedRunId=${"r".repeat(maxRecordedRunIdLength + 1)}&recordedEventSeq=1`,
+        { method: "DELETE" }
+      )
+    )
+    const control = await handler(
+      request(`/ac/${keyDigest}?recordedRunId=run%001&recordedEventSeq=1`, { method: "DELETE" })
+    )
+
+    expect(runIdOnly.status).toBe(400)
+    await expect(runIdOnly.json()).resolves.toEqual({
+      error: "recordedRunId and recordedEventSeq must be supplied together"
+    })
+    expect(emptyRunId.status).toBe(400)
+    expect(oversized.status).toBe(400)
+    expect(control.status).toBe(400)
+    await expect(control.json()).resolves.toEqual({
+      error: "recordedRunId must be a non-empty bounded string"
+    })
+  })
+
+  it("refuses a findMissing body that is not a digest array", async () => {
+    const handler = makeHandler()
+    const notAnArray = await handler(jsonRequest("/cas/findMissing", { digests: "all" }, { method: "POST" }))
+    const notDigests = await handler(
+      jsonRequest("/cas/findMissing", { digests: ["not-a-digest"] }, { method: "POST" })
+    )
+
+    expect(notAnArray.status).toBe(400)
+    await expect(notAnArray.json()).resolves.toEqual({ error: "body must be {\"digests\":[...]}" })
+    expect(notDigests.status).toBe(400)
+    await expect(notDigests.json()).resolves.toEqual({
+      error: "every digest must be 64 lowercase hex characters"
+    })
+  })
+
+  it("refuses a stored row that names a different key and a store that invents digests", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      const foreignRow = makeHandler({
+        actionCache: {
+          get: async () => JSON.stringify({ keyDigest: "someone-else" }),
+          put: async () => "inserted",
+          delete: async () => false
+        }
+      })
+      const inventingStore = makeHandler({
+        contentStore: {
+          get: async () => null,
+          has: async () => false,
+          put: async () => "inserted",
+          presentDigests: async () => new Set([digestOf("never requested")])
+        }
+      })
+
+      expect((await foreignRow(request(`/ac/${keyDigest}`))).status).toBe(503)
+      expect(
+        (await inventingStore(
+          jsonRequest("/cas/findMissing", { digests: [digestOf("asked")] }, { method: "POST" })
+        )).status
+      ).toBe(503)
+    } finally {
+      errors.mockRestore()
+    }
+  })
+
+  it("refuses every dependency shape it cannot snapshot safely", () => {
+    const actionCache = new MemoryActionCache()
+    const contentStore = new MemoryContentStore()
+    const base = { actionCache, contentStore, readTokenHash, writeTokenHash }
+
+    expect(() => createHandler({ ...base, actionCache: 5 } as never)).toThrow("actionCache must be an object")
+    expect(() => createHandler({ ...base, actionCache: { get: async () => null } } as never)).toThrow(
+      "actionCache.put must be a method"
+    )
+    expect(() =>
+      createHandler({
+        ...base,
+        contentStore: Object.defineProperty({ ...contentStore }, "get", { get: () => async () => null })
+      } as never)
+    ).toThrow("contentStore.get must be a data method")
+    expect(() => createHandler(Object.assign(Object.create({ inherited: true }), base) as never)).toThrow(
+      "must be a plain object"
+    )
+    expect(() => createHandler({ ...base, unexpected: true } as never)).toThrow("unknown property: unexpected")
+    expect(() =>
+      createHandler(Object.defineProperty({ ...base }, "readTokenHash", {
+        enumerable: false,
+        value: readTokenHash
+      }) as never)
+    ).toThrow("enumerable data property")
+    expect(() => createHandler({ ...base, health: 5 } as never)).toThrow("health must be a function")
+    expect(() => createHandler([] as never)).toThrow("must be a plain object")
+  })
+
+  it("refuses hostile object and array shapes during canonicalization", () => {
+    expect(() => canonicalJson(Object.create({ inherited: 1 }))).toThrow("not a JSON object")
+    expect(() => canonicalJson({ [Symbol("hidden")]: 1 })).toThrow("symbol keys")
+    const extended: Array<number> & { extra?: number } = [1]
+    extended.extra = 2
+    expect(() => canonicalJson(extended)).toThrow("not a JSON array")
+    const hiddenElement = [1]
+    Object.defineProperty(hiddenElement, "0", { enumerable: false })
+    expect(() => canonicalJson(hiddenElement)).toThrow("inert JSON array")
+    const hiddenMember = Object.defineProperty({}, "key", { enumerable: false, value: 1 })
+    expect(() => canonicalJson(hiddenMember)).toThrow("inert JSON object")
+    expect(() => canonicalJson(new Array(maxJsonMembers + 1).fill(0))).toThrow("too many members")
+    expect(() => canonicalJson(undefined)).toThrow("unsupported JSON value")
+  })
+
+  it("runs the traps a proxy installs, so only parser-owned values may be canonicalized", () => {
+    const traps: Array<string> = []
+    const proxy = new Proxy({ value: "safe" }, {
+      getPrototypeOf(target) {
+        traps.push("getPrototypeOf")
+        return Reflect.getPrototypeOf(target)
+      },
+      ownKeys(target) {
+        traps.push("ownKeys")
+        return Reflect.ownKeys(target)
+      },
+      getOwnPropertyDescriptor(target, property) {
+        traps.push("getOwnPropertyDescriptor")
+        return Reflect.getOwnPropertyDescriptor(target, property)
+      }
+    })
+
+    expect(canonicalJson(proxy)).toBe("{\"value\":\"safe\"}")
+    // The JSDoc precondition is the guarantee, not inertness: a proxy that
+    // reaches this function does run code, so no caller may pass one.
+    expect(traps).toEqual(["getPrototypeOf", "ownKeys", "getOwnPropertyDescriptor"])
+
+    const revocable = Proxy.revocable({ value: 1 }, {})
+    revocable.revoke()
+    expect(() => canonicalJson(revocable.proxy)).toThrow()
+  })
+
+  it("holds an artifact transfer slot until the response body is done", async () => {
+    const bytes = textEncoder.encode("streamed artifact")
+    const digest = digestOf("streamed artifact")
+    const contentStore = new MemoryContentStore()
+    await contentStore.put(digest, new Uint8Array(bytes))
+    const handler = makeHandler({ contentStore })
+
+    const held = await Promise.all(
+      Array.from({ length: maxConcurrentArtifactTransfers }, () => handler(request(`/cas/${digest}`)))
+    )
+    expect(held.map((response) => response.status)).toEqual(
+      Array.from({ length: maxConcurrentArtifactTransfers }, () => 200)
+    )
+
+    // Every slot is still held: the bodies have not been consumed, so the
+    // transfers the ceiling exists to bound are still in flight.
+    const refused = await handler(request(`/cas/${digest}`))
+    expect(refused.status).toBe(429)
+
+    await held[0]?.body?.cancel()
+    const afterCancel = await handler(request(`/cas/${digest}`))
+    expect(afterCancel.status).toBe(200)
+    expect(await afterCancel.text()).toBe("streamed artifact")
+
+    expect(await held[1]?.text()).toBe("streamed artifact")
+    const afterDrain = await handler(request(`/cas/${digest}`))
+    expect(afterDrain.status).toBe(200)
+    await afterDrain.text()
+  })
+
+  it("reports a malformed request URL as a client error", async () => {
+    const response = await makeHandler()(
+      {
+        url: "https://cache.test:99999/ac/key",
+        method: "GET",
+        headers: new Headers({ authorization: `Bearer ${token}` }),
+        body: null
+      } as Request
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: "request URL is malformed" })
   })
 
   it("survives diagnostics with throwing fields and primitive failures", () => {

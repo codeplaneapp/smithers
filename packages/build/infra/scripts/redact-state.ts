@@ -1,8 +1,9 @@
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import { stackName } from "../deployment.ts"
 
 const redacted = "__SMITHERS_CACHE_TOKEN_REDACTED__"
 
@@ -21,7 +22,9 @@ const credentialEnvironmentNames = [
   "SMITHERS_CACHE_WRITE_TOKEN"
 ] as const
 const infraDirectory = NodePath.dirname(NodePath.dirname(fileURLToPath(import.meta.url)))
-const defaultStateDirectory = NodePath.join(infraDirectory, ".alchemy", "state", "SmithersBuildRemoteCache")
+// The stack name is the state directory. Importing it keeps a rename from
+// silently turning redaction into a no-op that reports success.
+const defaultStateDirectory = NodePath.join(infraDirectory, ".alchemy", "state", stackName)
 
 /** Maximum bytes accepted from one Alchemy state file. */
 export const maximumStateFileBytes = 16 * 1024 * 1024
@@ -50,7 +53,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
 const normalizeOptions = (value: RedactAlchemyStateOptions): {
-  readonly bearerTokens: ReadonlyArray<string>
+  readonly permitted: ReadonlySet<string>
   readonly directory: string
 } => {
   let prototype: object | null
@@ -92,14 +95,25 @@ const normalizeOptions = (value: RedactAlchemyStateOptions): {
     throw new TypeError("Alchemy state bearer token must be a string when supplied")
   }
   // Without an override, every credential this service can be deployed with is
-  // scrubbed. Missing one would leave a raw value in state that the operator
+  // considered. Missing one would leave a raw value in state that the operator
   // believes was redacted.
   const bearerTokens = configuredToken !== undefined
     ? [configuredToken]
     : credentialEnvironmentNames
       .map((name) => process.env[name])
       .filter((token): token is string => typeof token === "string" && token !== "")
-  return { bearerTokens, directory }
+  if (bearerTokens.includes(redacted)) {
+    throw new TypeError("a cache bearer token must not be the redaction sentinel")
+  }
+  // Redaction fails closed: a credential binding may hold the sentinel or a
+  // verifier derived from a currently configured bearer, and nothing else.
+  // Matching known bearer values instead would leave a rotated-away
+  // credential in place while still reporting success.
+  const permitted = new Set([
+    redacted,
+    ...bearerTokens.map((token) => createHash("sha256").update(token, "utf8").digest("hex"))
+  ])
+  return { permitted, directory }
 }
 
 const errorCode = (value: unknown): string | undefined => {
@@ -245,17 +259,35 @@ const readStateFile = async (file: string): Promise<{ readonly identity: FileIde
 
 const isCredentialBinding = (name: unknown): boolean => typeof name === "string" && credentialBindingNames.has(name)
 
-const redactWorkerState = (value: unknown, bearerTokens: ReadonlyArray<string>): boolean => {
+const redactWorkerState = (value: unknown, permitted: ReadonlySet<string>): boolean => {
   if (!isRecord(value)) return false
   let changed = false
-  const isBearer = (candidate: unknown): boolean => typeof candidate === "string" && bearerTokens.includes(candidate)
+  // Fail closed on the value's type as well as its content: a credential
+  // binding holding a number, an array, or an object with the bearer nested
+  // inside it is exactly the shape a string-only test walks past while the
+  // wrapper reports a successful redaction.
+  const mustRedact = (candidate: unknown): boolean => typeof candidate !== "string" || !permitted.has(candidate)
 
   const props = isRecord(value["props"]) ? value["props"] : null
   const env = props !== null && isRecord(props["env"]) ? props["env"] : null
-  for (const [name, entry] of env === null ? [] : Object.entries(env)) {
-    if (!isCredentialBinding(name) || !isRecord(entry) || !isBearer(entry["__redacted__"])) continue
-    changed = true
-    entry["__redacted__"] = redacted
+  if (env !== null) {
+    for (const [name, entry] of Object.entries(env)) {
+      if (!isCredentialBinding(name)) continue
+      if (isRecord(entry)) {
+        if (!Object.hasOwn(entry, "__redacted__")) {
+          // Refusing beats reporting success over a shape this script cannot
+          // prove is credential free.
+          throw new TypeError(`Alchemy state holds an unrecognized shape for credential binding ${name}`)
+        }
+        if (!mustRedact(entry["__redacted__"])) continue
+        changed = true
+        entry["__redacted__"] = redacted
+        continue
+      }
+      if (!mustRedact(entry)) continue
+      changed = true
+      env[name] = redacted
+    }
   }
 
   const bindings = value["bindings"]
@@ -271,7 +303,7 @@ const redactWorkerState = (value: unknown, bearerTokens: ReadonlyArray<string>):
         nativeBinding["type"] !== "secret_text" ||
         !isCredentialBinding(nativeBinding["name"])
       ) continue
-      if (isBearer(nativeBinding["text"])) {
+      if (mustRedact(nativeBinding["text"])) {
         changed = true
         nativeBinding["text"] = redacted
       }
@@ -381,10 +413,10 @@ const writeStateFile = async (
 const redactFile = async (
   root: string,
   file: string,
-  bearerTokens: ReadonlyArray<string>
+  permitted: ReadonlySet<string>
 ): Promise<boolean> => {
   const { identity, state } = await readStateFile(file)
-  if (!redactWorkerState(state, bearerTokens)) return false
+  if (!redactWorkerState(state, permitted)) return false
   const rendered = `${JSON.stringify(state, null, 2)}\n`
   if (Buffer.byteLength(rendered, "utf8") > maximumRenderedStateBytes) {
     throw new RangeError(`redacted Alchemy state exceeds ${maximumRenderedStateBytes} bytes: ${file}`)
@@ -451,12 +483,12 @@ const discoverWorkerStates = async (
  * used for other durable repository state.
  */
 export const redactAlchemyState = async (options: RedactAlchemyStateOptions = {}): Promise<number> => {
-  const { bearerTokens, directory } = normalizeOptions(options)
+  const { directory, permitted } = normalizeOptions(options)
   const discovered = await discoverWorkerStates(directory)
   if (discovered === null) return 0
   let changed = 0
   for (const file of discovered.files) {
-    if (await redactFile(discovered.root, file, bearerTokens)) changed += 1
+    if (await redactFile(discovered.root, file, permitted)) changed += 1
   }
   return changed
 }

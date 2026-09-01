@@ -27,7 +27,36 @@ export const remoteCache = Smithers.RemoteCache.make({
 
 `token` is a `Secret` declaration and defaults to `Secret("SMITHERS_CACHE_TOKEN")`.
 It may name another environment variable, but the bearer-token value must only
-arrive through that variable; never put it in `BUILD.ts`. Every tool the CLI
+arrive through that variable; never put it in `BUILD.ts`.
+
+### Read and write credentials
+
+One token that both reads and publishes is the shape a cache-poisoning path
+needs: any job holding it can replace an entry every later job trusts. A
+declaration may therefore split the credential in two, and the server enforces
+the split rather than trusting the client to respect it.
+
+```ts
+export const remoteCache = Smithers.RemoteCache.make({
+  endpoint: "https://build.smithers.sh",
+  read: Smithers.Secret("SMITHERS_CACHE_READ_TOKEN"),
+  write: Smithers.Secret("SMITHERS_CACHE_WRITE_TOKEN")
+})
+```
+
+`read` names the same slot as `token`, so a declaration passes one or the
+other, never both. `write` is optional: omitting it means the read credential
+publishes too, which is the single-token model above.
+
+Give the read credential to every job that only consumes the cache, which is
+most of them, and the write credential only to the jobs that are trusted to
+publish. A request presenting the read credential is refused with `403` for
+every `PUT` and `DELETE`, on `/ac` and `/cas` alike, before the request body is
+read. `GET`, `HEAD`, and `POST /cas/findMissing` are open to both credentials.
+
+`infra/CACHE-TRUST.md` records the trust model the split exists to enforce, and
+what still has to land before a pull-request job on a fork can be given cache
+access at all. Every tool the CLI
 spawns gets an environment with `SMITHERS_CACHE_URL` and the declared token
 variable removed, so a target's own commands never see the credential. The
 `smithers-build` process itself clears the two default names from its own environment
@@ -135,7 +164,8 @@ cd terraform/examples/docker
 terraform init
 terraform apply \
   -var 'postgres_password=<password>' \
-  -var 'auth_token=<token>' \
+  -var 'read_auth_token=<read token>' \
+  -var 'write_auth_token=<write token>' \
   -var 'postgres_image=postgres@sha256:<digest>' \
   -var 'bun_image=oven/bun@sha256:<digest>'
 ```
@@ -146,13 +176,17 @@ checked-in `RemoteCache` declaration, because declarations require HTTPS.
 Engine layers may also use the module output directly on the trusted local
 host.
 
-Terraform deployments require an `auth_token` of 16-4096 printable ASCII
-characters and immutable `name@sha256:digest` references for both container
-images. `postgres_password` must be at least 12 characters; ports and
-`max_body_bytes` must be integers, and one artifact is capped at 16 MiB. The
-service still supports an empty token when run directly for development, but
-then it binds itself to `127.0.0.1`; the Terraform module never enables that
-mode. Startup validates the same values, checks the database schema version
+Terraform deployments require a `read_auth_token` and a different
+`write_auth_token`, each 16-4096 printable ASCII characters, and immutable
+`name@sha256:digest` references for both container images. The service
+classifies every request against the two: a request presenting the read
+credential is refused with `403` for every `PUT` and `DELETE`, before its body
+is read, which is the same model the hosted Worker enforces. `postgres_password`
+must be at least 12 characters; ports and `max_body_bytes` must be integers,
+and one artifact is capped at 16 MiB. The service still supports empty tokens
+when run directly for development, but then it binds itself to `127.0.0.1`; the
+Terraform module never enables that mode, and it refuses the old single
+`SMITHERS_CACHE_TOKEN` rather than accepting it as both credentials. Startup validates the same values, checks the database schema version
 before binding, and refuses a bad configuration rather than turning it into a
 request-time `503`. `/healthz` is unauthenticated so the container runtime can
 probe it, but it performs a database/schema readiness check and reveals no
@@ -237,13 +271,18 @@ action-cache JSON in D1 and blobs in R2, served at `https://build.smithers.sh`.
 ```sh
 cd infra
 npm ci --ignore-scripts
-export SMITHERS_CACHE_TOKEN="$(openssl rand -hex 32)"
+export SMITHERS_CACHE_READ_TOKEN="$(openssl rand -hex 32)"
+export SMITHERS_CACHE_WRITE_TOKEN="$(openssl rand -hex 32)"
 CI=1 npx alchemy plan alchemy.run.ts --stage prod
 CI=1 npm run deploy -- --yes
 ```
 
+`alchemy.run.ts` reads those two names, not `SMITHERS_CACHE_TOKEN`: the Worker
+hashes both and classifies every request against them.
+
 `GET` and `HEAD /healthz` are public readiness probes over D1 and R2 and reveal
-no cache state. Every `/ac` and `/cas` route requires the bearer token. A client
+no cache state. Every `/ac` and `/cas` route requires a bearer token, and the
+publishing methods require the write one. A client
 switches between the hosted and self-hosted services by changing the endpoint
 and token; cache keys and payloads do not change. Hosted migrations live in
 `infra/worker/migrations/`; the second migration bounds legacy and future D1

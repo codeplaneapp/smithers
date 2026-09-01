@@ -71,7 +71,7 @@ declared by `RemoteCache`; `SMITHERS_CACHE_URL` overrides its endpoint and
 `--no-cache` bypasses reads while still writing.
 `--plan` prints the inert structured plan instead of executing. `ci` merges
 the build, test, and lint plans over one pattern. `query` and `graph` stay
-inert. `smthrs install` plans and executes the `Install.Install` Flow over the layer
+inert. `smithers-build install` plans and executes the `Install.Install` Flow over the layer
 the declared toolchain selects; the root `Install` target calls the same Flow
 with the declared manager as its payload. The executor derives both the
 package-manager layer and the runtime layer from each target's own attrs, so

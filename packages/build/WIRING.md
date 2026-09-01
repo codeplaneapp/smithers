@@ -34,8 +34,11 @@ The Smithers checkout uses pnpm. Its `pnpm-workspace.yaml` includes
    `build-cli`, and `infra`.
 
 No TypeScript path mapping is required. `tsconfig.json`, the build scripts,
-the dual ESM/CJS export map, and the pinned tooling dependencies copy the
-current `@smthrs/flow` package shape.
+the source export map, and the pinned tooling dependencies copy the current
+`@smthrs/flow` package shape. The export map resolves to `src/*.ts`, because
+the package is private and every consumer of it is in this workspace; a
+published dual ESM/CJS map is what a `publishConfig` would carry, and this
+package has none.
 
 ## BUILD.ts imports
 
@@ -48,8 +51,8 @@ workspace bin.
 Embedding the install flow requires:
 
 - an `Install.layer` containing its action implementations;
-- an interpreter registration for `Install.Install` so the second trampoline
-  round can resolve the flow by tag;
+- an interpreter registration for `Install.Install` so the runtime can
+  resolve the flow by tag;
 - a `FlowRuntime`;
 - Node `FileSystem`, `ChildProcessSpawner`, and `Crypto` services;
 - one `PackageManager` layer.
@@ -57,22 +60,40 @@ Embedding the install flow requires:
 Only `PackageManager.layerPnpm` performs work today. `layerBun` resolves the
 service but fails every operation with a typed `unsupported` error.
 
-The pnpm layer is constructed with an absolute project root and explicit host
-facts:
+The pnpm layer is constructed with an absolute project root and the version the
+workspace declared, over a runtime layer carrying the host facts:
 
 ```ts
 PackageManager.layerPnpm({
   projectRoot: "/absolute/workspace",
-  platform: { os: "linux", arch: "x64", libc: "glibc" }
-})
+  requirement: ">=11.0.0"
+}).pipe(
+  Layer.provide(Runtime.layerNode({
+    requirement: ">=22.19.0",
+    platform: { os: "linux", arch: "x64", libc: "glibc" },
+    environment: process.env
+  }))
+)
 ```
 
+The platform is not a package-manager option: it moved to the `Runtime`
+service, and `normalizeOptions` refuses it as an unknown property. The manager
+takes it from that service.
+
 Optional construction values are a bounded command timeout, an executable
-override, and an environment snapshot. Child processes do not inherit the
-complete host environment. The layer selects bootstrap/network variables and
-variables referenced by the project `.npmrc`, clears user/global npm config,
-refuses embedded credentials and process-control variable references, and
-passes `extendEnv: false`.
+override, and an environment snapshot. A manager child does not inherit the
+complete host environment: the layer selects bootstrap and network variables
+plus the variables the project `.npmrc` references, clears user and global npm
+config, refuses embedded credentials and process-control variable references,
+and passes both `env` and `extendEnv: false`.
+
+`Runtime` takes the same `environment` snapshot, and selects only the four
+executable-lookup names out of it for the version probe. Passing it is what
+makes the probe hermetic: `extendEnv: false` on its own selects nothing,
+because Effect returns an absent `env` unchanged and a spawn with no `env`
+inherits everything. A runtime layer built without an `environment` still
+inherits, so a composition root that spawns a workspace-declared interpreter
+should always pass one.
 
 `../build-cli/src/engine.ts` is the production composition. It uses an
 in-memory flows runtime per invocation, anchors the package-manager service to

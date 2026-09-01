@@ -28,12 +28,54 @@ const integer = (text) => (typeof text === "string" && /^[0-9]+$/.test(text) ? N
 const sha256Hex = (text) => new Bun.CryptoHasher("sha256").update(text, "utf8").digest("hex")
 
 /**
+ * Reads and validates one bearer credential.
+ *
+ * A credential travels as an `Authorization` value, and a credential is
+ * visible ASCII with no spaces. A token carrying a space hashes to something no
+ * client can present, because the header value arrives with its optional
+ * whitespace already trimmed; the symptom is every request answering 401 with
+ * nothing to read. The shape is the one variables.tf validates, so both ends
+ * refuse the same values, and the value itself is never echoed.
+ */
+const readToken = (env, name, problems) => {
+  const token = env[name] ?? ""
+  if (typeof token !== "string" || controlCharacters.test(token)) {
+    problems.push(`${name} must not contain control characters`)
+    return ""
+  }
+  if (token !== "" && (token.length < 16 || utf8Bytes(token) > maxTokenBytes || !/^[!-~]+$/.test(token))) {
+    problems.push(
+      `${name} must be 16-${maxTokenBytes} printable ASCII bytes with no spaces, ` +
+        "or empty for development mode"
+    )
+    return ""
+  }
+  return token
+}
+
+/**
  * Validates the service environment.
  *
  * Returns every problem at once rather than the first, so one restart reports
- * the whole misconfiguration. An empty `SMITHERS_CACHE_TOKEN` is the documented
- * development mode: the bearer check is disabled, and the module publishes the
- * port on loopback only.
+ * the whole misconfiguration.
+ *
+ * The cache takes two credentials, not one. A single token that both reads and
+ * publishes is the cache-poisoning path `infra/CACHE-TRUST.md` describes: every
+ * holder can replace an entry every later job trusts. `SMITHERS_CACHE_READ_TOKEN`
+ * may read, and only `SMITHERS_CACHE_WRITE_TOKEN` may publish or delete. They
+ * are set together or not at all: one of the two on its own is a deployment
+ * that silently grants one direction to nobody, or write access to whoever
+ * holds the only token there is.
+ *
+ * They must also differ. Two equal values are one credential under two names,
+ * and the classifier answers `write` for it, so accepting them would leave
+ * every reader able to publish while the configuration claimed otherwise.
+ *
+ * Both empty is the documented development mode: the bearer check is disabled,
+ * and the module publishes the port on loopback only. `SMITHERS_CACHE_TOKEN`,
+ * the name the single-credential service used, is refused rather than accepted
+ * as both, because accepting it would hand write access to every reader of a
+ * deployment that thought it had upgraded.
  *
  * @category constructors
  */
@@ -81,40 +123,45 @@ export const readConfig = (env) => {
     }
   }
 
-  const token = env.SMITHERS_CACHE_TOKEN ?? ""
-  if (typeof token !== "string" || controlCharacters.test(token)) {
-    problems.push("SMITHERS_CACHE_TOKEN must not contain control characters")
-  } else if (
-    token !== "" && (
-      token.length < 16 ||
-      utf8Bytes(token) > maxTokenBytes ||
-      !/^[!-~]+$/.test(token)
-    )
-  ) {
-    // A token travels as an `Authorization` credential, and a credential is
-    // visible ASCII with no spaces. A token carrying a space hashes to
-    // something no client can present, because the header value arrives with
-    // its optional whitespace already trimmed; the symptom is every request
-    // answering 401 with nothing to read. The shape is the one variables.tf
-    // validates, so both ends refuse the same values, and the value itself is
-    // never echoed. Empty stays the documented development mode.
+  const read = readToken(env, "SMITHERS_CACHE_READ_TOKEN", problems)
+  const write = readToken(env, "SMITHERS_CACHE_WRITE_TOKEN", problems)
+  const legacy = env.SMITHERS_CACHE_TOKEN ?? ""
+  if (typeof legacy === "string" && legacy !== "") {
     problems.push(
-      `SMITHERS_CACHE_TOKEN must be 16-${maxTokenBytes} printable ASCII bytes with no spaces, ` +
-        "or empty for development mode"
+      "SMITHERS_CACHE_TOKEN is no longer accepted: set SMITHERS_CACHE_READ_TOKEN and " +
+        "SMITHERS_CACHE_WRITE_TOKEN, so a job that only consumes the cache cannot publish to it"
+    )
+  }
+  if ((read === "") !== (write === "")) {
+    problems.push(
+      "SMITHERS_CACHE_READ_TOKEN and SMITHERS_CACHE_WRITE_TOKEN must both be set, " +
+        "or both be empty for loopback development mode"
+    )
+  } else if (read !== "" && read === write) {
+    // Two equal values are one credential wearing two names, and the classifier
+    // answers `write` for it, so the split would be configuration theatre: every
+    // holder of the read token could publish. variables.tf refuses this too; the
+    // service refuses it as well, because a deployment can reach this file
+    // without Terraform.
+    problems.push(
+      "SMITHERS_CACHE_READ_TOKEN and SMITHERS_CACHE_WRITE_TOKEN must differ, " +
+        "or every holder of the read credential can publish"
     )
   }
 
   if (problems.length > 0) return { ok: false, problems }
+  const development = read === "" && write === ""
   return {
     ok: true,
     config: {
       port,
       maxArtifactBytes,
       databaseUrl,
-      // The token itself is never retained, so nothing downstream can log it.
-      tokenHash: token === "" ? null : sha256Hex(token),
-      development: token === "",
-      hostname: token === "" ? "127.0.0.1" : "0.0.0.0"
+      // Neither token is retained, so nothing downstream can log one.
+      readTokenHash: development ? null : sha256Hex(read),
+      writeTokenHash: development ? null : sha256Hex(write),
+      development,
+      hostname: development ? "127.0.0.1" : "0.0.0.0"
     }
   }
 }

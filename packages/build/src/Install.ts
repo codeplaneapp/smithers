@@ -63,7 +63,9 @@ import { Action, Flow } from "@smthrs/flow"
 import { FileInput } from "@smthrs/flow/FileInput"
 import * as Node from "@smthrs/plan/Node"
 import type * as Planned from "@smthrs/plan/Planned"
+import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
+import type * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as PackageManager from "./PackageManager.ts"
@@ -111,7 +113,17 @@ export const LinkManifest = Schema.Struct({
   store: PackageManager.Digest,
   /** Digest of the store, root package manifest, and manager tree evidence. */
   manifest: PackageManager.Digest,
-  /** Whether the manager ran, or the tree was already fresh. */
+  /**
+   * Always `true`: link never trusts a freshness marker.
+   *
+   * Manager metadata describes the intended graph and cannot prove every
+   * package file is still present and unmodified, so the manager runs every
+   * time and no code path produces `false`. The field is reserved for an
+   * implementation that can prove a tree intact. It stays on the schema
+   * because `@smthrs/targets` declares this struct as the `Install` target's
+   * public success type, so removing it is a coordinated change in both
+   * packages rather than a rename here.
+   */
   linked: Schema.Boolean
 })
 
@@ -124,13 +136,18 @@ export const LinkManifest = Schema.Struct({
  */
 export type LinkManifest = typeof LinkManifest.Type
 
-/** The lockfiles and configuration the measure action may read. */
+/**
+ * The lockfiles and configuration the measure action may read.
+ *
+ * One entry per manager {@link PackageManager.Name} admits, plus the project
+ * `.npmrc`. `package-lock.json` and `yarn.lock` were declared here too, for
+ * managers no declaration can select and no implementation can drive, which
+ * inflated a sealed action's read set with paths no code path opens.
+ */
 const measureInputPatterns: ReadonlyArray<string> = [
   ".npmrc",
   "bun.lock",
-  "package-lock.json",
-  "pnpm-lock.yaml",
-  "yarn.lock"
+  "pnpm-lock.yaml"
 ]
 
 /**
@@ -431,11 +448,20 @@ const verifyStoreManager = (
  * platform, because neither is content and both now have a service that
  * answers for them.
  *
+ * Exported for the same reason {@link executeFetch} and {@link executeLink}
+ * are: a test that drives the layer's body has to be able to name it, and a
+ * body reachable only through `MeasureLive` is a body a test re-implements
+ * inline and then asserts against its own copy.
+ *
  * @category layers
  * @since 0.1.0
  * @slop
  */
-export const MeasureLive = Measure.toLayer(() =>
+export const executeMeasure = (): Effect.Effect<
+  Content,
+  PackageManager.PackageManagerError,
+  PackageManager.PackageManager | FileSystem.FileSystem | Crypto.Crypto
+> =>
   Effect.gen(function*() {
     const manager = yield* PackageManager.PackageManager
     yield* verifyManagerContract(manager)
@@ -446,12 +472,24 @@ export const MeasureLive = Measure.toLayer(() =>
       npmrc: npmrc === null ? null : { path: ".npmrc", digest: npmrc }
     }
   })
-)
+
+/**
+ * Implements {@link Measure}.
+ *
+ * @category layers
+ * @since 0.1.0
+ * @slop
+ */
+export const MeasureLive = Measure.toLayer(executeMeasure)
 
 /**
  * The implementation shared by the manager-specific fetch declarations.
  *
- * @private
+ * It holds the layer, the host manager, and the host runtime to the
+ * declaration before the manager writes anything, then reports the store
+ * manifest the measured content produces.
+ *
+ * @category layers
  * @since 0.1.0
  * @slop
  */
@@ -489,6 +527,43 @@ export const FetchPnpmLive = FetchPnpm.toLayer(executeFetch)
 export const FetchBunLive = FetchBun.toLayer(executeFetch)
 
 /**
+ * Refuses to link a store that was fetched for different content.
+ *
+ * `content` is in {@link Link}'s payload because it is key material the
+ * implementation is supposed to honour, and the implementation ignored it: a
+ * `StoreManifest` fetched from another lockfile, or under another project
+ * `.npmrc`, on this same host passed every check and produced a
+ * {@link LinkManifest} attesting to content the tree was not built from.
+ *
+ * The check is one recompute, because a store manifest's digest is already
+ * taken over a canonical text carrying both digests.
+ *
+ * @private
+ */
+const verifyStoreContent = (
+  manager: PackageManager.Service,
+  managerVersion: string,
+  platform: PackageManager.Platform | null,
+  content: Content,
+  store: PackageManager.StoreManifest
+): Effect.Effect<void, PackageManager.PackageManagerError, Crypto.Crypto> =>
+  Effect.flatMap(
+    PackageManager.storeManifest({
+      manager: manager.name,
+      managerVersion,
+      platform,
+      lockfileDigest: content.lockfile.digest,
+      npmrcDigest: content.npmrc === null ? null : content.npmrc.digest
+    }),
+    (expected) =>
+      expected.digest === store.digest ? Effect.void : Effect.fail(
+        environmentMismatch(
+          `the fetched store attests ${store.digest}; this project's measured content is ${expected.digest}`
+        )
+      )
+  )
+
+/**
  * The implementation of {@link Link}.
  *
  * Link always asks the selected package manager to reconcile `node_modules`.
@@ -502,7 +577,7 @@ export const FetchBunLive = FetchBun.toLayer(executeFetch)
  * @since 0.1.0
  * @slop
  */
-export const executeLink = ({ store }: {
+export const executeLink = ({ content, store }: {
   readonly content: Content
   readonly store: PackageManager.StoreManifest
 }) =>
@@ -510,12 +585,9 @@ export const executeLink = ({ store }: {
     const manager = yield* PackageManager.PackageManager
     const runtime = yield* Runtime.Runtime
     const managerVersion = yield* verifyEnvironment(manager, runtime)
-    yield* verifyStoreManager(
-      manager,
-      managerVersion,
-      manager.platformSensitive ? runtime.platform : null,
-      store
-    )
+    const platform = manager.platformSensitive ? runtime.platform : null
+    yield* verifyStoreManager(manager, managerVersion, platform, store)
+    yield* verifyStoreContent(manager, managerVersion, platform, content, store)
     const packageJsonDigest = yield* PackageManager.packageJsonDigest(manager.projectRoot)
     yield* manager.link
     const managerEvidence = yield* manager.linkManifest

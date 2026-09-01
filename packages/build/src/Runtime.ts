@@ -15,9 +15,10 @@
  * anything needing an interpreter takes as a dependency.
  *
  * Host access is Effect's own: `effect/unstable/process/ChildProcessSpawner`
- * for the version probe. The platform arrives as a layer construction option
- * rather than from `globalThis.process`, because this module has to stay
- * browser-bundleable even though the interpreters it measures do not.
+ * for the version probe. The platform and the host environment arrive as layer
+ * construction options rather than from `globalThis.process`, because this
+ * module has to stay browser-bundleable even though the interpreters it
+ * measures do not.
  *
  * @since 0.1.0
  */
@@ -25,9 +26,11 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import * as BoundedOutput from "./internal/boundedOutput.ts"
+import * as Diagnostics from "./internal/diagnostic.ts"
+import * as Validate from "./internal/validate.ts"
 
 /**
  * Schema for the supported JavaScript runtimes.
@@ -77,6 +80,27 @@ export const Platform = Schema.Struct({
 export type Platform = typeof Platform.Type
 
 /**
+ * Schema for the bounded description of a host failure an error carries.
+ *
+ * A declared error schema is encoded through `Schema.toCodecJson` before it is
+ * journaled, and that encoding refuses a class instance. Attaching the raw
+ * platform `Error` therefore turned an ordinary probe failure into a defect
+ * that killed the run. These three bounded strings encode.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const Diagnostic = Diagnostics.Diagnostic
+
+/**
+ * The bounded description of a host failure an error carries.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Diagnostic = Diagnostics.Diagnostic
+
+/**
  * Schema for the stable error codes a runtime operation reports.
  *
  * @category models
@@ -113,18 +137,22 @@ export class RuntimeError extends Schema.TaggedError<RuntimeError>()(
   {
     code: ErrorCode,
     message: Schema.String,
-    cause: Schema.optional(Schema.Unknown)
+    cause: Schema.optional(Diagnostic)
   }
 ) {}
 
 /**
  * Maximum stdout bytes accepted from a version probe.
  *
+ * One constant, applied by both probes in this package. It used to be declared
+ * here and enforced only on the package manager's independent copy, so a reader
+ * importing this name was told a bound existed that nothing applied.
+ *
  * @category constants
  * @since 0.1.0
  * @slop
  */
-export const maximumVersionOutputBytes = 64 * 1024
+export const maximumVersionOutputBytes = BoundedOutput.maximumVersionOutputBytes
 
 /**
  * Wall-clock deadline for one version probe.
@@ -189,6 +217,18 @@ export interface Options {
    * this module never touches the host outside a service call.
    */
   readonly platform: Platform
+  /**
+   * Host environment capability, for the same reason the platform is an option.
+   *
+   * A version probe selects the four executable-lookup names out of it and
+   * gives the child nothing else. Supplying it is what makes the probe
+   * hermetic: see {@link measureVersion} for what an omitted environment costs.
+   *
+   * Because it is the host's environment, its names are held to the host's own
+   * rule rather than to the portable one. Windows names `ProgramFiles(x86)`,
+   * and a lookup table is not a declaration.
+   */
+  readonly environment?: Readonly<Record<string, string | undefined>> | undefined
   /** The interpreter executable, when it is not on `PATH` under its own name. */
   readonly executable?: string | undefined
 }
@@ -199,10 +239,11 @@ const comparators = [">=", "<=", ">", "<", "="] as const
 /**
  * Splits a dotted numeric version into comparable parts.
  *
- * A trailing prerelease or build suffix is dropped: `1.3.0-canary.2` compares
- * as `1.3.0`. Comparing prerelease precedence correctly is a semver problem
- * this seam does not need, and guessing at it would silently accept a
- * prerelease where an exact requirement was written.
+ * A trailing prerelease or build suffix is dropped, so `1.3.0-canary.2` and
+ * `1.3.0+build.7` both compare as `1.3.0`. Ordering prereleases correctly is a
+ * semver problem this seam does not need. What it does need is that an exact
+ * pin never accepts one, and {@link satisfies} states that separately rather
+ * than by pretending the suffix was not there.
  */
 const numericParts = (value: string): ReadonlyArray<number> | undefined => {
   const core = value.trim().replace(/^v/, "").split(/[-+]/)[0]
@@ -216,6 +257,21 @@ const numericParts = (value: string): ReadonlyArray<number> | undefined => {
     numbers.push(parsed)
   }
   return numbers
+}
+
+/**
+ * The prerelease identity of a version string, or `""` when it names a release.
+ *
+ * Build metadata (`+build.7`) is not a prerelease: semver defines it as ignored
+ * for precedence, so `1.3.0+build.7` is the release `1.3.0`. Only the `-` form
+ * marks a build that came before the release it is named after.
+ */
+const prereleaseOf = (value: string): string => {
+  const trimmed = value.trim().replace(/^v/, "")
+  const build = trimmed.indexOf("+")
+  const core = build < 0 ? trimmed : trimmed.slice(0, build)
+  const dash = core.indexOf("-")
+  return dash < 0 ? "" : core.slice(dash + 1)
 }
 
 /** Compares two dotted numeric versions, shorter treated as zero-padded. */
@@ -237,6 +293,18 @@ const compare = (left: ReadonlyArray<number>, right: ReadonlyArray<number>): num
  * and `~` operators are deliberately unsupported rather than approximated: a
  * half-implemented caret would accept versions the author meant to exclude.
  * An unsupported requirement is an error at verification, not a silent pass.
+ *
+ * An exact pin matches on prerelease identity as well as on the numbers, so
+ * `=1.3.0` is not satisfied by `1.3.0-canary.2` and `=1.3.0-canary.2` is
+ * satisfied by exactly that canary and by no other. A canary is not the build
+ * an author pinning the release asked for, and it is exactly the build an
+ * author pinning the canary asked for.
+ *
+ * A comparator form compares the release version and ignores the suffix, so
+ * `>=1.3.0` accepts `1.3.0-canary.2`. Ordering a prerelease against its own
+ * release is the semver problem this seam does not solve, and refusing every
+ * prerelease under every comparator would fail a workspace that deliberately
+ * runs one.
  *
  * @category validation
  * @since 0.1.0
@@ -263,8 +331,38 @@ export const satisfies = (
     case "<":
       return ordering < 0
     default:
-      return ordering === 0
+      return ordering === 0 &&
+        prereleaseOf(comparator === undefined ? trimmed : trimmed.slice(comparator.length)) ===
+          prereleaseOf(version)
   }
+}
+
+/**
+ * The refusal a declaration and a measured version produce, or `null`.
+ *
+ * One function, called by both the measuring implementation and the double, so
+ * the two cannot disagree about which of the three outcomes a pair produces.
+ * They used to: the double collapsed `unsupported_requirement` into
+ * `unsatisfied` and reported "this host runs node 24.9.0, and the workspace
+ * declares ^24.0.0", which is a false sentence pointing the operator at the
+ * host when the declaration is what needs fixing.
+ *
+ * @private
+ */
+const refusal = (name: Name, requirement: string, measured: string): RuntimeError | null => {
+  const outcome = satisfies(requirement, measured)
+  if (outcome === "unsupported_requirement") {
+    return new RuntimeError({
+      code: "unsupported_requirement",
+      message: `the declared ${name} version ${
+        JSON.stringify(requirement)
+      } is not an exact version or a single comparator, and ${JSON.stringify(measured)} cannot be checked against it`
+    })
+  }
+  return outcome ? null : new RuntimeError({
+    code: "unsatisfied",
+    message: `this host runs ${name} ${measured}, and the workspace declares ${requirement}`
+  })
 }
 
 /** @private */
@@ -276,34 +374,130 @@ const probeFailed = (label: string, cause: unknown): RuntimeError =>
         ? cause.message
         : "unknown failure"
     }`,
-    cause
+    cause: Diagnostics.diagnostic(cause)
   })
+
+/**
+ * The names a child needs to resolve a bare executable through `PATH`.
+ *
+ * Nothing else is forwarded. A `--version` run needs no proxy, no certificate
+ * bundle, and no temporary directory, so it is given none.
+ */
+const lookupEnvironmentNames = ["PATH", "PATHEXT", "SYSTEMROOT", "WINDIR"] as const
+
+interface NormalizedOptions {
+  readonly requirement: string
+  readonly platform: Platform
+  /** Absent, not empty, when the composition supplied no environment. */
+  readonly environment: ReadonlyMap<string, string> | undefined
+  readonly executable: string | undefined
+}
+
+/**
+ * Snapshots and validates construction options before any service exists.
+ *
+ * The sibling `PackageManager` seam has done this since it shipped, and this
+ * one did not: it stored `options` and re-read it, so a caller that mutated the
+ * object afterwards left the service reporting one requirement while `verify`
+ * enforced another, and a shared `platform` object could be edited through the
+ * service into every store manifest minted from it.
+ */
+const normalizeOptions = (value: Options, extraKeys: ReadonlyArray<string> = []): NormalizedOptions => {
+  const options = Validate.plainRecord(value, "runtime options")
+  Validate.exactKeys(
+    options,
+    new Set(["requirement", "platform", "environment", "executable", ...extraKeys]),
+    "runtime options"
+  )
+  const requirement = Validate.ownData(options, "requirement", "runtime options")
+  if (!Validate.usableText(requirement, 256)) {
+    throw new TypeError("runtime requirement must be non-empty usable text no longer than 256 bytes")
+  }
+  const platformRecord = Validate.plainRecord(
+    Validate.ownData(options, "platform", "runtime options"),
+    "runtime platform"
+  )
+  Validate.exactKeys(platformRecord, new Set(["os", "arch", "libc"]), "runtime platform")
+  const os = Validate.ownData(platformRecord, "os", "runtime platform")
+  const arch = Validate.ownData(platformRecord, "arch", "runtime platform")
+  const libc = Validate.ownData(platformRecord, "libc", "runtime platform")
+  if (!Validate.usableText(os, 256) || !Validate.usableText(arch, 256)) {
+    throw new TypeError("runtime platform os and arch must be non-empty usable text no longer than 256 bytes")
+  }
+  if (libc !== null && !Validate.usableText(libc, 256)) {
+    throw new TypeError("runtime platform libc must be non-empty usable text no longer than 256 bytes, or null")
+  }
+  const executable = Validate.ownData(options, "executable", "runtime options")
+  if (executable !== undefined && !Validate.usableText(executable, 32 * 1024)) {
+    throw new TypeError("runtime executable must be usable non-empty text")
+  }
+  const platform = Object.freeze<Platform>({ os, arch, libc })
+  const environment = Validate.ownData(options, "environment", "runtime options")
+  return Object.freeze({
+    requirement,
+    platform,
+    environment: environment === undefined
+      ? undefined
+      : Validate.normalizeEnvironment(environment, platform.os === "win32", "runtime environment"),
+    executable
+  })
+}
+
+/** Selects the executable-lookup names out of a normalized host environment. */
+const probeEnvironment = (options: NormalizedOptions): Record<string, string> | undefined => {
+  if (options.environment === undefined) return undefined
+  const windows = options.platform.os === "win32"
+  const selected: Record<string, string> = Object.create(null)
+  for (const name of lookupEnvironmentNames) {
+    const value = Validate.sourceValue(options.environment, name, windows)
+    if (value !== undefined) selected[name] = value
+  }
+  return selected
+}
 
 /**
  * Measures the interpreter version by running it.
  *
- * The child receives no ambient environment beyond executable lookup. A
- * version probe needs nothing else, and inheriting the process environment
- * would hand a `--version` run the same capabilities a build gets.
+ * When the composition supplied an `environment`, the child receives the four
+ * executable-lookup names selected from it and nothing else. A `--version` run
+ * needs no other capability, and inheriting the process environment hands it
+ * every secret a build holds.
+ *
+ * When no `environment` was supplied the child inherits this process's
+ * environment. `extendEnv: false` on its own does not prevent that:
+ * `resolveEnvironment` in `@effect/platform-node-shared` returns the absent
+ * `env` unchanged, and `spawn` reads an absent `env` as "inherit everything".
+ * An empty environment is not an alternative either, because a child given one
+ * cannot resolve a bare executable name through `PATH`. Only a composition root
+ * knows the host environment, so only a composition root can close this: pass
+ * `environment`.
+ *
+ * Standard output is collected under {@link maximumVersionOutputBytes} and
+ * decoded afterwards, so an executable that prints megabytes is refused at the
+ * bound instead of buffered in full.
  *
  * @private
  */
 const measureVersion = (
   spawner: ChildProcessSpawner["Service"],
-  executable: string
+  executable: string,
+  environment: Record<string, string> | undefined
 ): Effect.Effect<string, RuntimeError> => {
   const label = `${executable} --version`
-  const command = ChildProcess.make(executable, ["--version"], {
+  const shape = {
     extendEnv: false,
     stdin: "ignore",
     stdout: "pipe",
     stderr: "inherit",
     killSignal: "SIGKILL"
-  })
+  } as const
+  const command = environment === undefined
+    ? ChildProcess.make(executable, ["--version"], shape)
+    : ChildProcess.make(executable, ["--version"], { ...shape, env: environment })
   const captured = Effect.scoped(
     Effect.flatMap(spawner.spawn(command), (handle) =>
       Effect.all(
-        [Stream.mkString(Stream.decodeText(handle.stdout)), handle.exitCode],
+        [BoundedOutput.boundedOutput(handle.stdout), handle.exitCode],
         { concurrency: "unbounded" }
       ))
   )
@@ -319,7 +513,7 @@ const measureVersion = (
           })
         )
     }),
-    Effect.flatMap(([output, status]) => {
+    Effect.flatMap(([bytes, status]) => {
       // A non-zero exit is reported as an exit, not as unparsable output. The
       // spawner returns whatever the tool printed regardless of status, so
       // without this check a probe that failed outright would be reported as a
@@ -332,6 +526,12 @@ const measureVersion = (
           })
         )
       }
+      return Effect.try({
+        try: () => BoundedOutput.decodedText(bytes, `${label} stdout`),
+        catch: (cause) => probeFailed(label, cause)
+      })
+    }),
+    Effect.flatMap((output) => {
       // Node prints `v24.9.0` and Bun prints `1.3.0`. Taking the first
       // version-shaped token on the first line covers both without a
       // per-runtime parser.
@@ -362,38 +562,22 @@ export const make = (
 ): Effect.Effect<Service, never, ChildProcessSpawner> =>
   Effect.gen(function*() {
     const spawner = yield* ChildProcessSpawner
-    const executable = options.executable ?? name
-    const version = measureVersion(spawner, executable)
-    return {
-      name,
-      executable,
-      requirement: options.requirement,
-      platform: options.platform,
-      version,
-      verify: Effect.flatMap(version, (measured) => {
-        const outcome = satisfies(options.requirement, measured)
-        if (outcome === "unsupported_requirement") {
-          return Effect.fail(
-            new RuntimeError({
-              code: "unsupported_requirement",
-              message: `the declared ${name} version ${
-                JSON.stringify(options.requirement)
-              } is not an exact version or a single comparator, and ${
-                JSON.stringify(measured)
-              } cannot be checked against it`
-            })
-          )
-        }
-        return outcome
-          ? Effect.succeed(measured)
-          : Effect.fail(
-            new RuntimeError({
-              code: "unsatisfied",
-              message: `this host runs ${name} ${measured}, and the workspace declares ${options.requirement}`
-            })
-          )
-      })
-    }
+    const normalized = normalizeOptions(options)
+    const executable = normalized.executable ?? name
+    const version = measureVersion(spawner, executable, probeEnvironment(normalized))
+    return Object.freeze(
+      {
+        name,
+        executable,
+        requirement: normalized.requirement,
+        platform: normalized.platform,
+        version,
+        verify: Effect.flatMap(version, (measured) => {
+          const refused = refusal(name, normalized.requirement, measured)
+          return refused === null ? Effect.succeed(measured) : Effect.fail(refused)
+        })
+      } satisfies Service
+    )
   })
 
 /**
@@ -422,8 +606,8 @@ export const layerBun = (
  * Builds a runtime that reports a fixed version and never spawns anything.
  *
  * Tests and browser compositions use it. `verify` applies the same comparison
- * the measuring implementation does, so a test can assert the refusal path
- * without a host interpreter.
+ * the measuring implementation does, through the same function, so a test can
+ * assert any of the three refusal outcomes without a host interpreter.
  *
  * @category constructors
  * @since 0.1.0
@@ -433,22 +617,27 @@ export const makeNoop = (
   name: Name,
   options: Options & { readonly version: string }
 ): Service => {
-  const version = Effect.succeed(options.version)
-  return {
-    name,
-    executable: options.executable ?? name,
-    requirement: options.requirement,
-    platform: options.platform,
-    version,
-    verify: satisfies(options.requirement, options.version) === true
-      ? version
-      : Effect.fail(
-        new RuntimeError({
-          code: "unsatisfied",
-          message: `this host runs ${name} ${options.version}, and the workspace declares ${options.requirement}`
-        })
-      )
+  const normalized = normalizeOptions(options, ["version"])
+  const measured = Validate.ownData(
+    Validate.plainRecord(options, "runtime options"),
+    "version",
+    "runtime options"
+  )
+  if (!Validate.usableText(measured, 256)) {
+    throw new TypeError("runtime version must be non-empty usable text no longer than 256 bytes")
   }
+  const version = Effect.succeed(measured)
+  const refused = refusal(name, normalized.requirement, measured)
+  return Object.freeze(
+    {
+      name,
+      executable: normalized.executable ?? name,
+      requirement: normalized.requirement,
+      platform: normalized.platform,
+      version,
+      verify: refused === null ? version : Effect.fail(refused)
+    } satisfies Service
+  )
 }
 
 /**

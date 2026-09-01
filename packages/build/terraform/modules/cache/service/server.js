@@ -84,7 +84,8 @@ export const main = async (env = process.env, runtime = {}) => {
         actionCache,
         contentStore,
         health,
-        tokenHash: config.tokenHash,
+        readTokenHash: config.readTokenHash,
+        writeTokenHash: config.writeTokenHash,
         maxArtifactBytes: config.maxArtifactBytes
       }),
       error(cause) {
@@ -143,8 +144,8 @@ export const main = async (env = process.env, runtime = {}) => {
 
   if (config.development) {
     logger.warn(
-      "smithers build cache: SMITHERS_CACHE_TOKEN is empty, so every request is accepted. " +
-        "The listener is restricted to loopback."
+      "smithers build cache: SMITHERS_CACHE_READ_TOKEN and SMITHERS_CACHE_WRITE_TOKEN are empty, " +
+        "so every request is accepted. The listener is restricted to loopback."
     )
   }
   logger.log(`smithers build cache listening on ${config.hostname}:${server.port}`)

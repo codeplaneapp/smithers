@@ -28,12 +28,16 @@ without the sandbox evidence needed to support that claim.
 
 ## Dependency installation
 
-Installation is a two-round flow:
+Installation is one round of three actions:
 
-1. `measure` records the selected manager's exact version, platform, lockfile
-   digest, and credential-free project `.npmrc` digest.
-2. A manager-specific `fetch` populates `.flows/store/<manager>`, then `link`
-   reconciles `node_modules` from that store.
+1. `measure` records the content an install is keyed on: the lockfile digest
+   and the credential-free project `.npmrc` digest. The manager version and the
+   host platform are not content; they come from the `PackageManager` and
+   `Runtime` services, which hold the host to what the workspace declared.
+2. A manager-specific `fetch` populates `.flows/store/<manager>`. The manager
+   is a plan-time declaration from BUILD.ts, so the body selects exactly one
+   fetch without a second round.
+3. `link` reconciles `node_modules` from that store.
 
 All three actions currently use an `expected` filesystem boundary. None is
 admitted to a cross-run engine cache: the absolute-root package-manager process
@@ -97,17 +101,34 @@ export const remoteCache = Smithers.RemoteCache.make({
 })
 ```
 
-`tokenEnv` defaults to `SMITHERS_CACHE_TOKEN`. The bearer value must arrive
-through that environment variable and never enters `BUILD.ts`, a target key,
-or a stored entry. `SMITHERS_CACHE_URL` can override the declared HTTPS endpoint
-for one process.
+`tokenEnv` defaults to `SMITHERS_CACHE_TOKEN`. A deployment that separates
+reading from publishing declares the split form instead, and the two values
+arrive through `SMITHERS_CACHE_READ_TOKEN` and `SMITHERS_CACHE_WRITE_TOKEN`:
+
+```ts
+export const remoteCache = Smithers.RemoteCache.make({
+  endpoint: "https://build.smithers.sh",
+  read: Smithers.Secret("SMITHERS_CACHE_READ_TOKEN"),
+  write: Smithers.Secret("SMITHERS_CACHE_WRITE_TOKEN")
+})
+```
+
+A bearer value must arrive through an environment variable and never enters
+`BUILD.ts`, a target key, or a stored entry. `SMITHERS_CACHE_URL` can override
+the declared HTTPS endpoint for one process. See
+[remote caching](docs/workspace/remote-caching.md) for which job gets which
+credential, and `infra/CACHE-TRUST.md` for the trust model the split exists to
+enforce.
 
 A local hit avoids HTTP. A remote hit hydrates the local cache. Remote failures
 warn once and degrade to local-only; a first-writer conflict warns without
 failing the run. Bodies, keys, JSON structure, timeouts, and stream chunk counts
 are bounded, and corrupt or misfiled entries are misses rather than results.
 
-The shared hosted and self-hosted protocol exposes:
+Both deployments, the hosted Cloudflare Worker under `infra/` and the
+self-hosted container under `terraform/`, serve the same routes, the same
+bounds, and the same read/write credential split. They are two implementations
+of it rather than one shared one, so a change to either belongs in both:
 
 - `/ac/{keyDigest}` for action-cache documents;
 - `/cas/{sha256}` for content-addressed artifacts;

@@ -12,11 +12,23 @@ import { packageManager } from "../../../BUILD.ts"
 
 const cwd = "packages/build/infra"
 
-/** The worker, its migrations, and the operator scripts the gates read. */
+/**
+ * The worker, its migrations, and the operator scripts the gates read.
+ *
+ * The migrations are declared inputs because they are the production D1
+ * schema and `worker/test/migrations.test.ts` executes them: without them a
+ * schema change leaves the target key unchanged and the suite reports green
+ * on a stale remote-cache hit. `BUILD.ts` and `vitest.config.ts` are declared
+ * for the same reason, since `tsconfig.node.json` typechecks both.
+ */
 const sources = [
   Smithers.glob("//packages/build/infra/worker/**/*.ts"),
+  Smithers.glob("//packages/build/infra/worker/migrations/**/*.sql"),
   Smithers.glob("//packages/build/infra/scripts/**/*.ts"),
   Smithers.file("alchemy.run.ts"),
+  Smithers.file("deployment.ts"),
+  Smithers.file("BUILD.ts"),
+  Smithers.file("vitest.config.ts"),
   Smithers.file("tsconfig.worker.json"),
   Smithers.file("tsconfig.node.json"),
   Smithers.file("tsconfig.test.json")
@@ -46,11 +58,52 @@ export const check = Smithers.Typecheck({
  */
 export const suite = Smithers.Vitest({
   packageManager,
-  tests: [Smithers.glob("//packages/build/infra/worker/test/**/*.ts")],
+  tests: [
+    Smithers.glob("//packages/build/infra/worker/test/**/*.ts"),
+    Smithers.glob("//packages/build/infra/scripts/**/*.test.ts")
+  ],
   sources,
   deps: [],
   config: Smithers.file("vitest.config.ts"),
   environment: "node",
   passWithNoTests: false,
+  cwd
+})
+
+/**
+ * Lints the worker and the operator scripts.
+ *
+ * `packages/build/eslint.config.js` has configured `infra/**` since this
+ * directory was imported, but nothing ran it: the parent package's `lint`
+ * target takes the standard `src/**` glob, so these files reached ESLint
+ * only by hand. The target runs from `packages/build` so the flat config's
+ * relative `files` patterns and `tsconfigRootDir` resolve.
+ *
+ * @since 0.1.0
+ * @category lint
+ */
+export const lint = Smithers.EsLint({
+  packageManager,
+  sources: [Smithers.glob("infra/**/*.ts")],
+  deps: [],
+  configs: [
+    Smithers.file("eslint.config.js"),
+    Smithers.file("//eslint.jsdoc.js"),
+    Smithers.file("//eslint.invariants.js")
+  ],
+  maxWarnings: 0,
+  fix: false,
+  cwd: "packages/build"
+})
+
+/**
+ * Checks that the deployment documents itself beside its code.
+ *
+ * @since 0.1.0
+ * @category docs
+ */
+export const docs = Smithers.DocsParity({
+  readme: Smithers.file("README.md"),
+  deps: [],
   cwd
 })

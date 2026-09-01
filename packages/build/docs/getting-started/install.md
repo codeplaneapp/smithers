@@ -6,13 +6,15 @@ smithers build lives in the Smithers repository as three pnpm workspace packages
 smithers/
   BUILD.ts
   packages/
-    build/        # @smthrs/build — Install and PackageManager
-    @smthrs/targets/  # @smthrs/targets — the BUILD.ts authoring surface
-    @smthrs/build-cli/    # @smthrs/build-cli — the smithers build bin
+    build/        # @smthrs/build: Install, PackageManager, and Runtime
+    targets/      # @smthrs/targets: the BUILD.ts authoring surface
+    build-cli/    # @smthrs/build-cli: the smithers-build bin
 ```
 
-`@smthrs/build` is the publishable library. `@smthrs/targets` and
-`@smthrs/build-cli` are private and never published.
+All three are private workspace packages and none of them is published: the
+rc.0 release contract fixes `@smthrs/build` as private alongside
+`@smthrs/targets` and `@smthrs/build-cli`. A consumer reaches them through the
+workspace, never through a registry.
 
 ## Requirements
 
@@ -26,21 +28,20 @@ smithers/
 ## Link the authoring package
 
 The Smithers root manifest declares both the authoring package and CLI as
-devDependencies at the workspace version:
+devDependencies on the workspace:
 
 ```json
 // smithers/package.json
 {
   "devDependencies": {
-    "@smthrs/build-cli": "0.1.0",
-    "@smthrs/targets": "0.1.0"
+    "@smthrs/build-cli": "workspace:*",
+    "@smthrs/targets": "workspace:*"
   }
 }
 ```
 
-`linkWorkspacePackages` resolves the exact version to the workspace package, so
-`pnpm install` links both packages with no `file:` or `link:` specifier. The CLI
-dependency exposes the `smithers-build` bin to `pnpm exec` at the workspace root.
+`pnpm install` links both packages from the workspace. The CLI dependency
+exposes the `smithers-build` bin to `pnpm exec` at the workspace root.
 
 `BUILD.ts` files then import by bare specifier:
 
@@ -52,19 +53,18 @@ import { Smithers } from "@smthrs/targets"
 ## Install the CLI dependencies
 
 The CLI package depends on the Smithers engine packages, on
-`@smthrs/build`, and on `@smthrs/targets` at the workspace version:
+`@smthrs/build`, and on `@smthrs/targets`. Published Smithers packages are
+pinned at the release version; the private ones are workspace links:
 
 ```json
 // packages/build-cli/package.json
 {
   "dependencies": {
-    "@smthrs/engine": "0.1.0",
-    "@smthrs/flow": "0.1.0",
-    "@smthrs/plan": "0.1.0",
-    "@smthrs/build": "0.1.0",
-    "@smthrs/targets": "0.1.0",
-    "incur": "0.5.1",
-    "tsx": "4.23.12"
+    "@smthrs/engine": "1.0.0-rc.0",
+    "@smthrs/flow": "1.0.0-rc.0",
+    "@smthrs/plan": "1.0.0-rc.0",
+    "@smthrs/build": "workspace:*",
+    "@smthrs/targets": "workspace:*"
   }
 }
 ```

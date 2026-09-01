@@ -18,7 +18,8 @@
 export * as Install from "./Install.ts"
 
 /**
- * The package-manager layer seam and its npm, pnpm, and Bun implementations.
+ * The package-manager layer seam, its pnpm implementation, and the typed Bun
+ * refusal.
  *
  * @category namespace exports
  * @since 0.1.0

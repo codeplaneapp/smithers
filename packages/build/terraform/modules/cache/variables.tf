@@ -82,18 +82,42 @@ variable "listen_port" {
   }
 }
 
-variable "auth_token" {
+variable "read_auth_token" {
   description = <<-EOT
-    Bearer token every request must present. The Terraform deployment always
-    requires authentication; empty-token development mode is available only
-    when running the service directly on loopback.
+    Bearer token a request must present to read the cache. Give it to every job
+    that only consumes results, which is most of them: it cannot publish or
+    delete. The Terraform deployment always requires authentication;
+    empty-token development mode is available only when running the service
+    directly on loopback.
   EOT
   type        = string
   sensitive   = true
 
   validation {
-    condition     = length(var.auth_token) >= 16 && length(var.auth_token) <= 4096 && can(regex("^[\\x21-\\x7e]+$", var.auth_token))
-    error_message = "auth_token must be 16-4096 printable ASCII characters with no spaces."
+    condition     = length(var.read_auth_token) >= 16 && length(var.read_auth_token) <= 4096 && can(regex("^[\\x21-\\x7e]+$", var.read_auth_token))
+    error_message = "read_auth_token must be 16-4096 printable ASCII characters with no spaces."
+  }
+}
+
+variable "write_auth_token" {
+  description = <<-EOT
+    Bearer token a request must present to publish to or delete from the cache.
+    Give it only to jobs trusted to write results every later job will trust: a
+    single credential for both directions is the cache-poisoning path
+    infra/CACHE-TRUST.md describes. It must differ from read_auth_token,
+    because two equal values are one credential wearing two names.
+  EOT
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.write_auth_token) >= 16 && length(var.write_auth_token) <= 4096 && can(regex("^[\\x21-\\x7e]+$", var.write_auth_token))
+    error_message = "write_auth_token must be 16-4096 printable ASCII characters with no spaces."
+  }
+
+  validation {
+    condition     = var.write_auth_token != var.read_auth_token
+    error_message = "write_auth_token must differ from read_auth_token, or the split grants every reader write access."
   }
 }
 

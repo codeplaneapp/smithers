@@ -31,11 +31,12 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
-import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import * as BoundedOutput from "./internal/boundedOutput.ts"
+import * as Diagnostics from "./internal/diagnostic.ts"
+import * as Validate from "./internal/validate.ts"
 import * as Runtime from "./Runtime.ts"
 
 /**
@@ -80,6 +81,26 @@ export const Platform = Runtime.Platform
  * @slop
  */
 export type Platform = Runtime.Platform
+
+/**
+ * Schema for the bounded description of a host failure an error carries.
+ *
+ * An alias of {@link Runtime.Diagnostic} for the same reason {@link Platform}
+ * is an alias: two definitions of one shape drift, and this one is folded into
+ * a journaled error.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const Diagnostic = Runtime.Diagnostic
+
+/**
+ * The bounded description of a host failure an error carries.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Diagnostic = Runtime.Diagnostic
 
 /**
  * Schema for a content digest produced by this module.
@@ -139,7 +160,7 @@ export class PackageManagerError extends Schema.TaggedError<PackageManagerError>
   {
     code: ErrorCode,
     message: Schema.String,
-    cause: Schema.optional(Schema.Unknown)
+    cause: Schema.optional(Diagnostic)
   }
 ) {}
 
@@ -216,11 +237,15 @@ export const maximumLockfileBytes = 64 * 1024 * 1024
 /**
  * Maximum stdout bytes accepted from a package-manager version probe.
  *
+ * The same constant the runtime probe applies, re-exported rather than
+ * redeclared: two exported names for one bound, with one of them enforced, is
+ * how the runtime probe ended up documented as bounded and running unbounded.
+ *
  * @category constants
  * @since 0.1.0
  * @slop
  */
-export const maximumVersionOutputBytes = 64 * 1024
+export const maximumVersionOutputBytes = Runtime.maximumVersionOutputBytes
 /**
  * Default wall-clock timeout for one package-manager subprocess.
  *
@@ -237,36 +262,6 @@ export const defaultCommandTimeoutMs = 30 * 60 * 1000
  * @slop
  */
 export const maximumCommandTimeoutMs = 24 * 60 * 60 * 1000
-
-const maximumEnvironmentEntries = 4_096
-const maximumEnvironmentBytes = 256 * 1024
-
-/** The POSIX convention for an environment name: what `export NAME=` accepts. */
-const portableEnvironmentName = /^[A-Za-z_][A-Za-z0-9_]*$/
-
-/**
- * The Windows environment block's own rule: `NAME=VALUE` entries separated by
- * NUL, so a name is non-empty and carries neither `=` nor a control character.
- *
- * Windows sets names the POSIX convention never produces. `ProgramFiles(x86)`
- * and `CommonProgramFiles(x86)` are on every 64-bit image, the GitHub Actions
- * `windows-latest` runner included, so holding a Windows host to the POSIX rule
- * refuses the whole environment before any command runs.
- */
-const windowsEnvironmentName = /^[^=\u0000-\u001F\u007F]+$/
-
-/**
- * Whether a name is one this host can carry into a child environment.
- *
- * The rule belongs to the host that named the variable, not to the repository.
- * A name the repository declares is a different question and keeps the portable
- * rule: the `.npmrc` placeholder syntax matches only a portable name, and every
- * entry of `bootstrapEnvironment` is portable by construction. Those two lists
- * are the whole of what a child receives, so relaxing the source's rule never
- * puts a non-portable name on a command line or in a child environment.
- */
-const usableEnvironmentName = (name: string, windows: boolean): boolean =>
-  windows ? windowsEnvironmentName.test(name) : portableEnvironmentName.test(name)
 
 /**
  * The two-verb contract every manager implements.
@@ -376,7 +371,7 @@ const failedToStart = (label: string, cause: unknown): PackageManagerError =>
   new PackageManagerError({
     code: "command_failed",
     message: `${label} failed: ${failureMessage(cause)}`,
-    cause
+    cause: Diagnostics.diagnostic(cause)
   })
 
 /** @private */
@@ -399,7 +394,11 @@ const unreadable = (
   path: string,
   cause: unknown
 ): PackageManagerError =>
-  new PackageManagerError({ code, message: `could not read ${path}: ${failureMessage(cause)}`, cause })
+  new PackageManagerError({
+    code,
+    message: `could not read ${path}: ${failureMessage(cause)}`,
+    cause: Diagnostics.diagnostic(cause)
+  })
 
 /** @private */
 const failureMessage = (cause: unknown): string => {
@@ -457,20 +456,6 @@ const timeoutOf = (value: unknown): number => {
   return timeout
 }
 
-/** Reports whether UTF-8 encoding can preserve a string without replacement. */
-const isWellFormedText = (value: string): boolean => {
-  for (let index = 0; index < value.length; index += 1) {
-    const unit = value.charCodeAt(index)
-    if (unit >= 0xd800 && unit <= 0xdbff) {
-      if (index + 1 >= value.length) return false
-      const next = value.charCodeAt(index + 1)
-      if (next < 0xdc00 || next > 0xdfff) return false
-      index += 1
-    } else if (unit >= 0xdc00 && unit <= 0xdfff) return false
-  }
-  return true
-}
-
 interface NormalizedOptions {
   readonly projectRoot: string
   readonly platform: Platform
@@ -478,101 +463,6 @@ interface NormalizedOptions {
   readonly environment: ReadonlyMap<string, string>
   readonly timeoutMs: number
   readonly executable: string | undefined
-}
-
-const inspect = <A>(what: string, operation: () => A): A => {
-  try {
-    return operation()
-  } catch {
-    throw new TypeError(`${what} could not be inspected safely`)
-  }
-}
-
-const plainRecord = (value: unknown, what: string): Record<PropertyKey, unknown> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TypeError(`${what} must be a plain object`)
-  }
-  const prototype = inspect(what, () => Object.getPrototypeOf(value))
-  if (prototype !== Object.prototype && prototype !== null) {
-    throw new TypeError(`${what} must be a plain object`)
-  }
-  return value as Record<PropertyKey, unknown>
-}
-
-const ownData = (
-  value: Record<PropertyKey, unknown>,
-  name: string,
-  what: string
-): unknown => {
-  const descriptor = inspect(what, () => Object.getOwnPropertyDescriptor(value, name))
-  if (descriptor === undefined) return undefined
-  if (!("value" in descriptor) || descriptor.enumerable !== true) {
-    throw new TypeError(`${what}.${name} must be an enumerable data property`)
-  }
-  return descriptor.value
-}
-
-const exactKeys = (
-  value: Record<PropertyKey, unknown>,
-  allowed: ReadonlySet<string>,
-  what: string
-): void => {
-  const keys = inspect(what, () => Reflect.ownKeys(value))
-  for (const key of keys) {
-    if (typeof key !== "string" || !allowed.has(key)) {
-      throw new TypeError(
-        `${what} contains unknown property ${typeof key === "string" ? JSON.stringify(key) : "symbol"}`
-      )
-    }
-  }
-}
-
-const normalizeEnvironment = (
-  value: unknown,
-  windows: boolean
-): ReadonlyMap<string, string> => {
-  if (value === undefined) return new Map()
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TypeError("package-manager environment must be an object of string values")
-  }
-  const record = value as Record<PropertyKey, unknown>
-  const keys = inspect("package-manager environment", () => Reflect.ownKeys(record))
-  if (keys.length > maximumEnvironmentEntries) {
-    throw new TypeError(`package-manager environment has more than ${maximumEnvironmentEntries} entries`)
-  }
-  const output = new Map<string, string>()
-  let bytes = 0
-  for (const key of keys) {
-    if (typeof key !== "string") {
-      throw new TypeError("package-manager environment must not contain symbol properties")
-    }
-    const name = key
-    if (!usableEnvironmentName(name, windows)) {
-      throw new TypeError(`package-manager environment name is not portable: ${JSON.stringify(name)}`)
-    }
-    const descriptor = inspect("package-manager environment", () => Object.getOwnPropertyDescriptor(record, name))
-    if (descriptor === undefined || !("value" in descriptor) || descriptor.enumerable !== true) {
-      throw new TypeError(`package-manager environment ${name} must be an enumerable data property`)
-    }
-    const member = descriptor.value
-    if (member === undefined) continue
-    if (typeof member !== "string") {
-      throw new TypeError(`package-manager environment ${name} must be a string or undefined`)
-    }
-    if (member.includes("\0") || !isWellFormedText(member)) {
-      throw new TypeError(`package-manager environment ${name} is not usable text`)
-    }
-    bytes += Buffer.byteLength(name, "utf8") + Buffer.byteLength(member, "utf8")
-    if (!Number.isSafeInteger(bytes) || bytes > maximumEnvironmentBytes) {
-      throw new TypeError(`package-manager environment exceeds ${maximumEnvironmentBytes} bytes`)
-    }
-    const normalizedName = windows ? name.toUpperCase() : name
-    if (output.has(normalizedName)) {
-      throw new TypeError(`package-manager environment repeats a case-insensitive name: ${JSON.stringify(name)}`)
-    }
-    output.set(normalizedName, member)
-  }
-  return output
 }
 
 /**
@@ -583,39 +473,39 @@ const normalizeEnvironment = (
  * this module never builds a command from a platform it has not checked.
  */
 const normalizeOptions = (value: Options, hostPlatform: Platform): NormalizedOptions => {
-  const options = plainRecord(value, "package-manager options")
-  exactKeys(
+  const options = Validate.plainRecord(value, "package-manager options")
+  Validate.exactKeys(
     options,
     new Set(["projectRoot", "requirement", "environment", "timeoutMs", "executable"]),
     "package-manager options"
   )
-  const root = ownData(options, "projectRoot", "package-manager options")
+  const root = Validate.ownData(options, "projectRoot", "package-manager options")
   if (
     typeof root !== "string" ||
     root.length === 0 ||
     root.includes("\0") ||
-    !isWellFormedText(root) ||
+    !Validate.isWellFormedText(root) ||
     Buffer.byteLength(root, "utf8") > 32 * 1024 ||
     !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(root)
   ) {
     throw new TypeError("package-manager projectRoot must be a usable absolute path")
   }
-  const requirement = ownData(options, "requirement", "package-manager options")
+  const requirement = Validate.ownData(options, "requirement", "package-manager options")
   if (
     typeof requirement !== "string" ||
     requirement.length === 0 ||
     requirement.includes("\0") ||
-    !isWellFormedText(requirement) ||
+    !Validate.isWellFormedText(requirement) ||
     Buffer.byteLength(requirement, "utf8") > 256
   ) {
     throw new TypeError("package-manager requirement must be non-empty usable text no longer than 256 bytes")
   }
-  const platformRecord = plainRecord(hostPlatform, "package-manager platform")
-  exactKeys(platformRecord, new Set(["os", "arch", "libc"]), "package-manager platform")
+  const platformRecord = Validate.plainRecord(hostPlatform, "package-manager platform")
+  Validate.exactKeys(platformRecord, new Set(["os", "arch", "libc"]), "package-manager platform")
   const platform = {
-    os: ownData(platformRecord, "os", "package-manager platform"),
-    arch: ownData(platformRecord, "arch", "package-manager platform"),
-    libc: ownData(platformRecord, "libc", "package-manager platform")
+    os: Validate.ownData(platformRecord, "os", "package-manager platform"),
+    arch: Validate.ownData(platformRecord, "arch", "package-manager platform"),
+    libc: Validate.ownData(platformRecord, "libc", "package-manager platform")
   }
   for (
     const [name, value] of [
@@ -627,7 +517,7 @@ const normalizeOptions = (value: Options, hostPlatform: Platform): NormalizedOpt
     if (
       value !== null &&
       (typeof value !== "string" || value.length === 0 || value.includes("\0") ||
-        !isWellFormedText(value) || Buffer.byteLength(value, "utf8") > 256)
+        !Validate.isWellFormedText(value) || Buffer.byteLength(value, "utf8") > 256)
     ) {
       throw new TypeError(`package-manager ${name} must be non-empty usable text no longer than 256 bytes`)
     }
@@ -638,15 +528,15 @@ const normalizeOptions = (value: Options, hostPlatform: Platform): NormalizedOpt
   if (platform.libc !== null && typeof platform.libc !== "string") {
     throw new TypeError("package-manager platform libc must be a string or null")
   }
-  const executable = ownData(options, "executable", "package-manager options")
+  const executable = Validate.ownData(options, "executable", "package-manager options")
   if (
     executable !== undefined &&
     (typeof executable !== "string" || executable.length === 0 || executable.includes("\0") ||
-      !isWellFormedText(executable) || Buffer.byteLength(executable, "utf8") > 32 * 1024)
+      !Validate.isWellFormedText(executable) || Buffer.byteLength(executable, "utf8") > 32 * 1024)
   ) {
     throw new TypeError("package-manager executable must be usable non-empty text")
   }
-  const timeoutMs = timeoutOf(ownData(options, "timeoutMs", "package-manager options"))
+  const timeoutMs = timeoutOf(Validate.ownData(options, "timeoutMs", "package-manager options"))
   const normalizedPlatform = Object.freeze<Platform>({
     os: platform.os,
     arch: platform.arch,
@@ -656,17 +546,15 @@ const normalizeOptions = (value: Options, hostPlatform: Platform): NormalizedOpt
     projectRoot: root,
     platform: normalizedPlatform,
     requirement,
-    environment: normalizeEnvironment(
-      ownData(options, "environment", "package-manager options"),
-      normalizedPlatform.os === "win32"
+    environment: Validate.normalizeEnvironment(
+      Validate.ownData(options, "environment", "package-manager options"),
+      normalizedPlatform.os === "win32",
+      "package-manager environment"
     ),
     timeoutMs,
     executable
   })
 }
-
-const sourceValue = (source: ReadonlyMap<string, string>, name: string, windows: boolean): string | undefined =>
-  source.get(windows ? name.toUpperCase() : name)
 
 /** Variables that can mutate the runtime or package-manager command itself. */
 const unsafeReferencedEnvironmentName = (name: string): boolean =>
@@ -674,14 +562,6 @@ const unsafeReferencedEnvironmentName = (name: string): boolean =>
     .test(
       name
     )
-
-const decodedText = (bytes: Uint8Array, path: string): string => {
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes)
-  } catch {
-    throw new Error(`${path} is not valid UTF-8`)
-  }
-}
 
 const fileIdentity = (info: FileSystem.File.Info): string =>
   `${info.dev}:${Option.getOrUndefined(info.ino) ?? "none"}:${info.size}:` +
@@ -789,7 +669,7 @@ const boundedText = (
   boundedBytes(fs, code, projectRoot, path, limit).pipe(
     Effect.flatMap((bytes) =>
       Effect.try({
-        try: () => decodedText(bytes, path),
+        try: () => BoundedOutput.decodedText(bytes, path),
         catch: (cause) => unreadable(code, path, cause)
       })
     )
@@ -820,7 +700,13 @@ const managerEnvironment = (
     const referenced = new Set<string>()
     for (const match of npmrc.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) referenced.add(match[1]!)
     const windows = options.platform.os === "win32"
-    const env: Record<string, string> = {
+    // A null prototype, because the loop below decides what to forward by
+    // asking whether a name is already set. On an object literal every
+    // `Object.prototype` name answers that question wrongly: a `.npmrc`
+    // legitimately referencing `${constructor}` or `${toString}` reads as
+    // already present and is silently dropped rather than forwarded.
+    const env: Record<string, string> = Object.create(null)
+    Object.assign(env, {
       CI: "true",
       CLICOLOR: "0",
       FORCE_COLOR: "0",
@@ -829,7 +715,7 @@ const managerEnvironment = (
       NO_COLOR: "1",
       NPM_CONFIG_GLOBALCONFIG: windows ? "NUL" : "/dev/null",
       NPM_CONFIG_USERCONFIG: windows ? "NUL" : "/dev/null"
-    }
+    })
     for (const name of referenced) {
       if (unsafeReferencedEnvironmentName(name)) {
         return yield* Effect.fail(
@@ -841,40 +727,11 @@ const managerEnvironment = (
       }
     }
     for (const name of [...bootstrapEnvironment, ...referenced]) {
-      const value = sourceValue(source, name, windows)
-      if (value !== undefined && env[name] === undefined) env[name] = value
+      const value = Validate.sourceValue(source, name, windows)
+      if (value !== undefined && !Object.hasOwn(env, name)) env[name] = value
     }
     return env
   })
-
-interface ByteState {
-  buffer: Uint8Array
-  length: number
-}
-
-const collectVersion = (
-  stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>
-): Effect.Effect<Uint8Array, unknown> =>
-  Stream.runFoldEffect(
-    stream,
-    (): ByteState => ({ buffer: new Uint8Array(1024), length: 0 }),
-    (state, chunk) => {
-      const length = state.length + chunk.byteLength
-      if (!Number.isSafeInteger(length) || length > maximumVersionOutputBytes) {
-        return Effect.fail(new Error(`version output exceeds ${maximumVersionOutputBytes} bytes`))
-      }
-      if (length > state.buffer.byteLength) {
-        let capacity = state.buffer.byteLength
-        while (capacity < length) capacity = Math.min(maximumVersionOutputBytes, capacity * 2)
-        const grown = new Uint8Array(capacity)
-        grown.set(state.buffer.subarray(0, state.length))
-        state.buffer = grown
-      }
-      state.buffer.set(chunk, state.length)
-      state.length = length
-      return Effect.succeed(state)
-    }
-  ).pipe(Effect.map((state) => state.buffer.subarray(0, state.length)))
 
 /** Constructs a child that receives only explicitly selected capabilities. */
 const managerCommand = (
@@ -927,7 +784,7 @@ const capture = (
 ): Effect.Effect<string, PackageManagerError> =>
   Effect.scoped(
     Effect.flatMap(spawner.spawn(command), (handle) =>
-      Effect.all([collectVersion(handle.stdout), handle.exitCode], { concurrency: "unbounded" }))
+      Effect.all([BoundedOutput.boundedOutput(handle.stdout), handle.exitCode], { concurrency: "unbounded" }))
   ).pipe(
     Effect.mapError((cause) =>
       failedToStart(label, cause)
@@ -942,7 +799,7 @@ const capture = (
     Effect.flatMap((output) =>
       Effect.try({
         try: () => {
-          const text = decodedText(output, `${label} stdout`).trim()
+          const text = BoundedOutput.decodedText(output, `${label} stdout`).trim()
           if (text === "") throw new Error(`${label} returned an empty version`)
           if (/\r|\n|[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text)) {
             throw new Error(`${label} returned more than one line or control characters`)
@@ -1230,15 +1087,15 @@ interface NormalizedStoreManifestInput {
 const digestPattern = /^[0-9a-f]{64}$/
 
 const normalizedPlatform = (value: unknown, what: string): Platform => {
-  const record = plainRecord(value, what)
-  exactKeys(record, new Set(["os", "arch", "libc"]), what)
-  const os = ownData(record, "os", what)
-  const arch = ownData(record, "arch", what)
-  const libc = ownData(record, "libc", what)
+  const record = Validate.plainRecord(value, what)
+  Validate.exactKeys(record, new Set(["os", "arch", "libc"]), what)
+  const os = Validate.ownData(record, "os", what)
+  const arch = Validate.ownData(record, "arch", what)
+  const libc = Validate.ownData(record, "libc", what)
   for (const [name, member] of [["os", os], ["arch", arch], ["libc", libc]] as const) {
     if (
       member !== null &&
-      (typeof member !== "string" || member.length === 0 || !isWellFormedText(member) ||
+      (typeof member !== "string" || member.length === 0 || !Validate.isWellFormedText(member) ||
         Buffer.byteLength(member, "utf8") > 256)
     ) {
       throw new TypeError(`${what}.${name} must be bounded non-empty usable text or null`)
@@ -1257,35 +1114,35 @@ const normalizeStoreManifestInput = (value: {
   readonly lockfileDigest: string
   readonly npmrcDigest: string | null
 }): NormalizedStoreManifestInput => {
-  const record = plainRecord(value, "store manifest input")
-  exactKeys(
+  const record = Validate.plainRecord(value, "store manifest input")
+  Validate.exactKeys(
     record,
     new Set(["manager", "managerVersion", "platform", "lockfileDigest", "npmrcDigest"]),
     "store manifest input"
   )
-  const manager = ownData(record, "manager", "store manifest input")
+  const manager = Validate.ownData(record, "manager", "store manifest input")
   if (manager !== "pnpm" && manager !== "bun") {
     throw new TypeError("store manifest manager is unsupported")
   }
-  const managerVersion = ownData(record, "managerVersion", "store manifest input")
+  const managerVersion = Validate.ownData(record, "managerVersion", "store manifest input")
   if (
     typeof managerVersion !== "string" ||
     managerVersion.length === 0 ||
-    !isWellFormedText(managerVersion) ||
+    !Validate.isWellFormedText(managerVersion) ||
     Buffer.byteLength(managerVersion, "utf8") > maximumVersionOutputBytes ||
     /[\u0000-\u001f\u007f]/.test(managerVersion)
   ) {
     throw new TypeError("store manifest managerVersion must be bounded single-line usable text")
   }
-  const lockfileDigest = ownData(record, "lockfileDigest", "store manifest input")
-  const npmrcDigest = ownData(record, "npmrcDigest", "store manifest input")
+  const lockfileDigest = Validate.ownData(record, "lockfileDigest", "store manifest input")
+  const npmrcDigest = Validate.ownData(record, "npmrcDigest", "store manifest input")
   if (typeof lockfileDigest !== "string" || !digestPattern.test(lockfileDigest)) {
     throw new TypeError("store manifest lockfileDigest must be a lowercase SHA-256 digest")
   }
   if (npmrcDigest !== null && (typeof npmrcDigest !== "string" || !digestPattern.test(npmrcDigest))) {
     throw new TypeError("store manifest npmrcDigest must be a lowercase SHA-256 digest or null")
   }
-  const platformValue = ownData(record, "platform", "store manifest input")
+  const platformValue = Validate.ownData(record, "platform", "store manifest input")
   return Object.freeze({
     manager,
     managerVersion,
@@ -1370,16 +1227,16 @@ export const linkedTreeManifest = (input: {
   readonly managerEvidence: Digest
 }): Effect.Effect<Digest, never, Crypto.Crypto> =>
   Effect.sync(() => {
-    const record = plainRecord(input, "linked tree manifest input")
-    exactKeys(
+    const record = Validate.plainRecord(input, "linked tree manifest input")
+    Validate.exactKeys(
       record,
       new Set(["storeDigest", "packageJsonDigest", "managerEvidence"]),
       "linked tree manifest input"
     )
     const values = [
-      ownData(record, "storeDigest", "linked tree manifest input"),
-      ownData(record, "packageJsonDigest", "linked tree manifest input"),
-      ownData(record, "managerEvidence", "linked tree manifest input")
+      Validate.ownData(record, "storeDigest", "linked tree manifest input"),
+      Validate.ownData(record, "packageJsonDigest", "linked tree manifest input"),
+      Validate.ownData(record, "managerEvidence", "linked tree manifest input")
     ]
     if (!values.every((member) => typeof member === "string" && digestPattern.test(member))) {
       throw new TypeError("linked tree manifest inputs must be lowercase SHA-256 digests")
@@ -1393,21 +1250,46 @@ export const linkedTreeManifest = (input: {
  *
  * Install key material hashes the complete file. Literal credentials therefore
  * cannot be allowed in it. A value such as `${NPM_TOKEN}` is safe because the
- * file contains only the variable name. The environment value remains a host
- * capability and never enters the key or journal.
+ * file contains only the variable name, quoted or not. The environment value
+ * remains a host capability and never enters the key or journal.
+ *
+ * Two shapes are refused: a credential-named setting whose value is not a bare
+ * placeholder, and any value whose URL form carries userinfo, which is how a
+ * password reaches `registry`, a scoped registry, `proxy`, and `https-proxy`
+ * without ever being spelled under a credential-shaped name.
  *
  * @private
  */
 const hasEmbeddedNpmCredential = (text: string): boolean => {
   const credential = /(_auth|_authtoken|_password|token|certfile|keyfile)\s*=/i
   const environment = /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/
+  // A URL carrying userinfo is a literal credential no matter what the setting
+  // is called. `registry=`, a scoped registry, `proxy=`, and `https-proxy=` are
+  // all spelled with an ordinary name the credential pattern never matches, so
+  // without this the file passes the check and its password is digested into
+  // install key material.
+  const userinfoUrl = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^/@\s]+@/
   return text.split("\n").some((raw) => {
     const line = raw.trim()
     if (line.length === 0 || line.startsWith("#") || line.startsWith(";")) return false
     const separator = line.indexOf("=")
-    if (separator < 0 || !credential.test(line.slice(0, separator + 1))) return false
-    return !environment.test(line.slice(separator + 1).trim())
+    if (separator < 0) return false
+    // npm's ini parser strips one layer of surrounding quotes, so the quoted
+    // placeholder is the same declaration as the bare one and refusing it told
+    // the author to do what they had already done.
+    const value = unquoted(line.slice(separator + 1).trim())
+    if (userinfoUrl.test(value)) return true
+    if (!credential.test(line.slice(0, separator + 1))) return false
+    return !environment.test(value)
   })
+}
+
+/** Strips one layer of matching surrounding quotes, the way npm's ini parser does. */
+const unquoted = (value: string): string => {
+  const first = value[0]
+  return (first === "\"" || first === "'") && value.length >= 2 && value.endsWith(first)
+    ? value.slice(1, -1)
+    : value
 }
 
 /**

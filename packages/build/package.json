@@ -38,6 +38,7 @@
     ".": "./src/index.ts",
     "./Install": "./src/Install.ts",
     "./PackageManager": "./src/PackageManager.ts",
+    "./Runtime": "./src/Runtime.ts",
     "./*": "./src/*.ts",
     "./internal/*": null,
     "./*/index": null
@@ -53,37 +54,8 @@
     "DESIGN.md",
     "WIRING.md"
   ],
-  "publishConfig": {
-    "access": "public",
-    "provenance": true,
-    "exports": {
-      "./package.json": "./package.json",
-      ".": {
-        "types": "./dist/esm/index.d.ts",
-        "import": "./dist/esm/index.js",
-        "require": "./dist/cjs/index.js"
-      },
-      "./Install": {
-        "types": "./dist/esm/Install.d.ts",
-        "import": "./dist/esm/Install.js",
-        "require": "./dist/cjs/Install.js"
-      },
-      "./PackageManager": {
-        "types": "./dist/esm/PackageManager.d.ts",
-        "import": "./dist/esm/PackageManager.js",
-        "require": "./dist/cjs/PackageManager.js"
-      },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
-      "./internal/*": null,
-      "./*/index": null
-    }
-  },
   "scripts": {
-    "lint": "eslint src infra terraform/modules/cache/service --max-warnings=0 && dprint check",
+    "lint": "eslint src test infra terraform/modules/cache/service --max-warnings=0 && dprint check",
     "format": "dprint fmt",
     "build": "node scripts/build.mjs",
     "check": "tsc -b tsconfig.json && tsc -p tsconfig.test.json --noEmit",

@@ -31,7 +31,8 @@ const environment = {
   DATABASE_URL: "postgres://smthrs:secret@cache:5432/smithers_build_cache",
   PORT: "8080",
   SMITHERS_CACHE_MAX_BODY_BYTES: String(16 * 1024 * 1024),
-  SMITHERS_CACHE_TOKEN: "a-production-token-with-entropy"
+  SMITHERS_CACHE_READ_TOKEN: "a-read-token-with-production-entropy",
+  SMITHERS_CACHE_WRITE_TOKEN: "a-write-token-with-production-entropy"
 }
 
 const runtime = ({ schemaVersion = 1 } = {}) => {
@@ -85,7 +86,11 @@ describe("server lifecycle", () => {
 
   test("binds unauthenticated direct development mode to loopback only", async () => {
     const fake = runtime()
-    const started = await main({ ...environment, SMITHERS_CACHE_TOKEN: "" }, fake.runtime)
+    const started = await main({
+      ...environment,
+      SMITHERS_CACHE_READ_TOKEN: "",
+      SMITHERS_CACHE_WRITE_TOKEN: ""
+    }, fake.runtime)
     expect(fake.calls.options.hostname).toBe("127.0.0.1")
     expect(fake.calls.logs.some((line) => line[0] === "warn")).toBe(true)
     await started.close()

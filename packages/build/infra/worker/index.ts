@@ -38,6 +38,24 @@ const healthObjectKey = "__smithers_build_healthcheck__"
 const findMissingConcurrency = 16
 const maxPublicationAttempts = 3
 
+/**
+ * How long an unread action-cache entry survives.
+ *
+ * D1 holds 10 GB per database and an entry is up to 1 MiB, so an unpruned
+ * store reaches its ceiling at roughly ten thousand entries and every
+ * publication after that fails. Deleting a cold entry only costs the next
+ * build a cache miss, so retention is a plain time window over the
+ * `last_accessed_at` index the read path already maintains.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const retentionDays = 30
+
+const retentionBatchRows = 500
+const maxRetentionBatches = 20
+const millisecondsPerDay = 24 * 60 * 60 * 1000
+
 const digestBytes = (digest: string): Uint8Array<ArrayBuffer> =>
   Uint8Array.from(digest.match(/.{2}/g) ?? [], (pair) => Number.parseInt(pair, 16))
 
@@ -51,7 +69,14 @@ const sameBytes = (left: ArrayBuffer, right: Uint8Array<ArrayBuffer>): boolean =
   return difference === 0
 }
 
-const assertContentObject = (digest: string, object: R2Object): void => {
+/**
+ * Refuses an object the provider should never have returned.
+ *
+ * A wrong key or an impossible size is a broken bucket, not a repairable
+ * object: no client republication would change the answer, so it stays a
+ * storage refusal.
+ */
+const assertObjectShape = (digest: string, object: R2Object): void => {
   if (
     object.key !== digest ||
     !Number.isSafeInteger(object.size) ||
@@ -60,12 +85,48 @@ const assertContentObject = (digest: string, object: R2Object): void => {
   ) {
     throw new Error("R2 returned an object outside the content-store invariant")
   }
+}
+
+/**
+ * Reports why a well-shaped object's checksum does not prove its address.
+ *
+ * Returns `null` when the checksum verifies. Every other answer names the
+ * single failed check and is safe to log: it carries the content address and
+ * never the object's bytes. This is the repairable half of the invariant, the
+ * one a client republication fixes.
+ */
+const contentChecksumFault = (digest: string, object: R2Object): string | null => {
   const checksum = object.checksums.sha256
-  if (checksum === undefined) {
-    throw new Error("R2 returned an object without a SHA-256 checksum")
-  }
+  if (checksum === undefined) return "R2 returned an object without a SHA-256 checksum"
   if (!sameBytes(checksum, digestBytes(digest))) {
-    throw new Error("R2 returned an object with a mismatched SHA-256 checksum")
+    return "R2 returned an object with a mismatched SHA-256 checksum"
+  }
+  return null
+}
+
+const assertContentObject = (digest: string, object: R2Object): void => {
+  assertObjectShape(digest, object)
+  const fault = contentChecksumFault(digest, object)
+  if (fault !== null) throw new Error(fault)
+}
+
+/**
+ * Reports an unverifiable object as absent so the client republishes it.
+ *
+ * A stored object whose provider checksum is missing or wrong is not CAS
+ * content, and only `put` can repair it. Refusing the read instead would
+ * answer `503`, which the client retries rather than treating as a miss, so
+ * the digest would stay wedged for as long as the object survives.
+ */
+const reportAbsent = (digest: string, fault: string): void => {
+  console.error(`smithers build cache: ${fault}; reporting ${digest} absent so a publisher repairs it`)
+}
+
+const discardObjectBody = (object: R2ObjectBody): void => {
+  try {
+    void object.body.cancel().catch(() => undefined)
+  } catch {
+    // A body that cannot be cancelled is already unusable; the answer stands.
   }
 }
 
@@ -132,7 +193,13 @@ const readAndTouchStoredResult = (
     .bind(keyDigest)
     .first<ResultRow>()
 
-const makeActionCache = (database: D1Database): ActionCache => ({
+/**
+ * Adapts D1 to the first-writer-wins action-cache contract.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const makeActionCache = (database: D1Database): ActionCache => ({
   async get(keyDigest) {
     const row = await database
       .prepare(
@@ -189,14 +256,23 @@ export const makeContentStore = (bucket: R2Bucket): ContentStore => ({
   async get(digest) {
     const object = await bucket.get(digest)
     if (object === null) return null
-    assertContentObject(digest, object)
+    assertObjectShape(digest, object)
+    const fault = contentChecksumFault(digest, object)
+    if (fault !== null) {
+      reportAbsent(digest, fault)
+      discardObjectBody(object)
+      return null
+    }
     return { body: object.body }
   },
   async has(digest) {
     const object = await bucket.head(digest)
     if (object === null) return false
-    assertContentObject(digest, object)
-    return true
+    assertObjectShape(digest, object)
+    const fault = contentChecksumFault(digest, object)
+    if (fault === null) return true
+    reportAbsent(digest, fault)
+    return false
   },
   async put(digest, bytes) {
     const options = {
@@ -239,15 +315,56 @@ export const makeContentStore = (bucket: R2Bucket): ContentStore => ({
       for (let index = 0; index < batch.length; index += 1) {
         const digest = batch[index]
         const object = objects[index]
-        if (digest !== undefined && object !== null && object !== undefined) {
-          assertContentObject(digest, object)
+        if (digest === undefined || object === null || object === undefined) continue
+        assertObjectShape(digest, object)
+        const fault = contentChecksumFault(digest, object)
+        if (fault === null) {
           present.add(digest)
+          continue
         }
+        // One unverifiable object must not fail the whole batch: the client
+        // needs the rest of the answer, and reporting this digest missing is
+        // what makes it republish the bytes that repair the object.
+        reportAbsent(digest, fault)
       }
     }
     return present
   }
 })
+
+/**
+ * Deletes action-cache entries last read before `cutoff`, in bounded batches.
+ *
+ * `cutoff` is an ISO-8601 instant in the same rendering the table stores, so
+ * the comparison is the lexicographic one the `last_accessed_at` index
+ * supports. One invocation removes at most twenty batches; the next scheduled
+ * run continues from where this one stopped.
+ *
+ * @category storage
+ * @since 0.1.0
+ */
+export const pruneStaleEntries = async (database: D1Database, cutoff: string): Promise<number> => {
+  let removed = 0
+  for (let batch = 0; batch < maxRetentionBatches; batch += 1) {
+    const deleted = await database
+      .prepare(
+        `DELETE FROM smithers_build_cache_entry
+        WHERE key_digest IN (
+          SELECT key_digest FROM smithers_build_cache_entry
+          WHERE last_accessed_at < ?
+          ORDER BY last_accessed_at
+          LIMIT ?
+        )
+        RETURNING key_digest`
+      )
+      .bind(cutoff, retentionBatchRows)
+      .all<KeyRow>()
+    const count = deleted.results.length
+    removed += count
+    if (count < retentionBatchRows) break
+  }
+  return removed
+}
 
 const makeHealth = (database: D1Database, bucket: R2Bucket) => async (): Promise<void> => {
   const [row] = await Promise.all([
@@ -289,6 +406,18 @@ const worker = {
         status: 503,
         headers: { "content-type": "application/json" }
       })
+    }
+  },
+  async scheduled(_controller: ScheduledController, env: CacheWorkerEnv): Promise<void> {
+    const cutoff = new Date(Date.now() - retentionDays * millisecondsPerDay).toISOString()
+    try {
+      const removed = await pruneStaleEntries(env.CACHE_DATABASE, cutoff)
+      console.log(`smithers build cache: pruned ${removed} action-cache entries last read before ${cutoff}`)
+    } catch (cause) {
+      // The allowlisted diagnostic is the record; the rethrown failure is what
+      // makes Cloudflare retry the invocation without repeating the cause.
+      console.error(describeFailure(cause))
+      throw new Error("scheduled retention failed")
     }
   }
 } satisfies ExportedHandler<CacheWorkerEnv>

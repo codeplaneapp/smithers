@@ -6,8 +6,11 @@ This directory deploys the hosted smithers build remote cache to Cloudflare with
 content-addressed blobs in R2.
 
 The hosted service and the self-hosted service under [`../terraform/`](../terraform/)
-serve the same HTTP protocol. A client can switch between them by changing the
-endpoint and bearer token; cache keys and payloads do not change.
+serve the same HTTP routes, and cache keys and payloads do not change between
+them. They are not identical: the self-hosted translation is maintained by
+hand, and it has taken neither the read and write credential split nor the
+newer refusals this Worker applies, so treat this file as the contract for the
+hosted service alone.
 
 The service has two credentials: one that may read and one that may publish.
 [`CACHE-TRUST.md`](./CACHE-TRUST.md) states the trust model, which secret
@@ -15,12 +18,12 @@ belongs in which CI job, and the order to roll the two out in.
 
 ## Before you begin
 
-Use Node.js 22 or later and install the pinned dependencies without running
-package lifecycle scripts:
+This directory is the `@smthrs/build-infra` workspace package at
+`packages/build/infra`. Use Node.js 22.19.0 or later with pnpm 11.21.0, and
+install from the repository root:
 
 ```sh
-cd infra
-npm ci --ignore-scripts
+pnpm install --frozen-lockfile --offline
 ```
 
 Provide these credentials in the deploying shell:
@@ -30,13 +33,16 @@ Provide these credentials in the deploying shell:
   least 32 random bytes each. The Worker receives only their SHA-256 digests;
   do not put a bearer value in an `.env` file or source control. Both are
   required, and a deployment that has not separated its credentials yet sets
-  both to the same value.
+  both to the same value. Keep them equal until the CI half of the split
+  lands: the workflow generator still hands every job one credential, so a
+  write token rotated to a distinct value would stop every job publishing
+  with `403`. [`CACHE-TRUST.md`](./CACHE-TRUST.md) tracks that rollout.
 - Cloudflare authentication: Set `CLOUDFLARE_API_TOKEN` and
   `CLOUDFLARE_ACCOUNT_ID` for non-interactive deployments, or authenticate
   interactively with Cloudflare OAuth. You can use `wrangler whoami` to check
   an existing Wrangler OAuth login. Alchemy currently keeps its own OAuth
-  profile, so run `npx alchemy login --configure` and choose OAuth on the first
-  Alchemy deployment if you do not set an API token.
+  profile, so run `pnpm exec alchemy login --configure` and choose OAuth on the
+  first Alchemy deployment if you do not set an API token.
 
 Generate the bearer tokens in the current shell without writing them to disk:
 
@@ -54,23 +60,27 @@ ignored directory available to the deployment operator so later plans can
 compare against the resources already deployed. This avoids requiring the
 account-wide Cloudflare Secrets Store permissions needed by
 `Cloudflare.state()`. The repository's deploy scripts also run
-`scripts/redact-state.ts`, including after a failed Alchemy command, to scrub
-any legacy state that contains the raw bearer value. Current state contains
+`scripts/redact-state.ts`, including after a failed Alchemy command. Redaction
+fails closed: a credential binding may hold the redaction sentinel or a
+verifier derived from a currently configured bearer, every other value is
+replaced whatever its type, and a credential binding in a shape the script
+cannot read is refused rather than reported clean. A rotated-away credential
+therefore cannot survive a run that claims success. Current state contains
 only the one-way verifier. Use the scripts instead of calling `alchemy deploy`
 directly.
 
 ## Deploy production
 
-Preview the production plan:
+Run both commands from `packages/build/infra`. Preview the production plan:
 
 ```sh
-CI=1 npx alchemy plan alchemy.run.ts --stage prod
+CI=1 pnpm exec alchemy plan alchemy.run.ts --stage prod
 ```
 
 Apply it:
 
 ```sh
-CI=1 npm run deploy -- --yes
+CI=1 pnpm run deploy -- --yes
 ```
 
 The `CI=1` prefix is for the environment-token path. Omit it when you use an
@@ -78,17 +88,19 @@ interactive Alchemy OAuth profile.
 
 Alchemy creates a stage-specific D1 database and R2 bucket, applies every SQL
 file in `worker/migrations/` in order, deploys the Worker with the four
-bindings, and attaches `build.smithers.sh` as its custom domain. Migration
-`0001_initial.sql` creates the table; `0002_bound_cache_rows.sql` constrains
-existing and future body/discriminator sizes. The
-production Worker does not expose a `workers.dev` URL.
+bindings and its retention cron trigger, and attaches `build.smithers.sh` as
+its custom domain. Migration `0001_initial.sql` creates the table;
+`0002_bound_cache_rows.sql` bounds every insert and every update of the
+guarded columns. It does not revalidate rows written before it, and the read
+path's access-metadata update deliberately does not fire it. The production
+Worker does not expose a `workers.dev` URL.
 
 ## Deploy a development stage
 
 Run the development script without `--stage`:
 
 ```sh
-npm run deploy:dev
+pnpm run deploy:dev
 ```
 
 Alchemy uses its default `dev_$USER` stage. Development stages get independent
@@ -109,12 +121,16 @@ Every `/ac` and `/cas` request requires a bearer token. `GET`, `HEAD`, and
 write credential and answer `403` to the read one, before the request body is
 read.
 
-Run the unit tests and TypeScript check locally:
+The repository's gates for this package are build targets. Run them from the
+repository root:
 
 ```sh
-npm test
-npm run check
+pnpm exec smithers-build ci '//packages/build/infra/...'
 ```
+
+That plans the typecheck (`:check`), the suite (`:suite`), ESLint (`:lint`),
+and the README parity check (`:docs`). The fast local loop is
+`pnpm exec vitest run` from `packages/build/infra`.
 
 ## Protocol
 
@@ -138,6 +154,11 @@ classification uses the envelope's `result`, and uses the whole document for
 every other shape. Object keys are canonicalized before comparison, while the
 first writer's original JSON text is preserved for reads.
 
+The service stores an entry verbatim and does not index the artifacts its
+metadata declares. Nothing consumed that reference list, so entries are not
+reference counted, a digest written in any shape costs the publisher nothing,
+and retention is time based rather than reference aware.
+
 Requests use these bounds:
 
 - `/ac` JSON body: 1 MiB.
@@ -146,18 +167,48 @@ Requests use these bounds:
   `application/json`.
 
 JSON is also bounded to depth 64, 100,000 aggregate members, a 2 MiB canonical
-conflict discriminator, and 16,384 stream chunks. Action keys are at most 512
-UTF-8 bytes and one publication may reference at most 1,000 artifacts.
+conflict discriminator, and 16,384 stream chunks. Action keys and recorded run
+identifiers are each at most 512 UTF-8 bytes.
+
+A JSON body must survive its own parse. Every number is read as an IEEE-754
+double, so a literal is accepted only when it is finite and is already the
+shortest form that renders that double: `9007199254740993`, `1e400`, `1.0`,
+and negative zero are refused with `400`, while `9007199254740992` and `1e+21`
+are accepted. A duplicate member name in one object is refused for the same
+reason. Both would otherwise let two mathematically different results
+canonicalize to the same discriminator and answer `200` where this table
+promises `409`.
 
 One isolate admits at most 64 cache requests, with independent route ceilings
-of four action-cache publications, eight `findMissing` requests, and two large
-artifact transfers. Excess work returns `429` with `Retry-After: 1` and its
-request body is cancelled without waiting for a hostile cancellation promise.
+of four action-cache publications, eight `findMissing` requests, and two
+artifact transfers. An artifact transfer holds its slot until the transfer
+ends: a `PUT` body is buffered inside the slot, and a `GET` slot is held by
+the response body until the client drains or cancels it. Excess work returns
+`429` with `Retry-After: 1` and its request body is cancelled without waiting
+for a hostile cancellation promise.
 
 Malformed input returns `400`, unsupported content types return `415`, and
 oversized input returns `413`. Unsupported methods return `405`. An internal
 storage refusal returns `503`, which clients treat as retryable rather than as
-a cache miss.
+a cache miss. A stored R2 object whose provider checksum is absent or does not
+match its content address is reported absent rather than refused, because only
+a publisher can repair it and a `503` would leave the digest wedged.
+
+## Retention and capacity
+
+D1 holds 10 GB per database and an action-cache entry is up to 1 MiB, so an
+unpruned store would refuse every publication with `503` after roughly ten
+thousand entries. A cron trigger runs the Worker's `scheduled` handler daily;
+it deletes entries whose `last_accessed_at` is more than 30 days old, in
+bounded batches, using the LRU index the read path already maintains. Deleting
+a cold entry only costs the next build a cache miss.
+
+R2 has no such ceiling and no expiry: artifacts accumulate until an operator
+configures a bucket lifecycle rule. `DELETE /ac/{keyDigest}` is the manual
+escape hatch for one entry; it removes the D1 row and never the R2 objects the
+entry named.
+
+## Deploy wrapper
 
 The deploy wrapper forwards termination to the Alchemy process group, waits a
 bounded grace period, escalates when necessary, and runs state redaction after

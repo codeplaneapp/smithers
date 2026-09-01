@@ -13,7 +13,7 @@
  * - `newPackage` is the `run` target that creates such a directory.
  */
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../BUILD.ts"
+import { bunRuntime, packageManager } from "../../BUILD.ts"
 
 const standard = Smithers.StandardPackage({ packageManager, cwd: "packages/build" })
 
@@ -24,6 +24,37 @@ export const lint = standard.lint
 export const fmt = standard.fmt
 export const docs = standard.docs
 export const circular = standard.circular
+
+/**
+ * Runs the self-hosted cache service's suite.
+ *
+ * `standard.test` is a Vitest target over `test/**` and `vitest.config.ts`
+ * says so, so nothing ran the five suites beside
+ * `terraform/modules/cache/service`: a 965-line protocol, a 409-line Postgres
+ * translation, and its configuration contract were gated by no target at all,
+ * and the repository invariant is that a gate becomes a target in the package
+ * that owns it before CI can run it.
+ *
+ * It runs under Bun rather than the declared Node runtime because the service
+ * is a Bun program: it hashes with `Bun.CryptoHasher` and its suites import
+ * `bun:test`. Nothing here needs a database or a listener. `postgres_test.js`
+ * is discovered too and guards itself with
+ * `describe.skipIf(!process.env.SMITHERS_CACHE_TEST_DATABASE_URL)`, so it
+ * skips here and runs only where an operator points it at a real Postgres.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const cacheService = Smithers.NodeTest({
+  runtime: bunRuntime,
+  runner: Smithers.testSuite(["terraform/modules/cache/service/test"]),
+  srcs: [
+    Smithers.glob("//packages/build/terraform/modules/cache/service/*.js"),
+    Smithers.glob("//packages/build/terraform/modules/cache/service/test/*.js")
+  ],
+  deps: [],
+  cwd: "packages/build"
+})
 
 /**
  * The manifest fields every package in this workspace shares.

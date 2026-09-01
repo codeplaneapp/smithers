@@ -5,7 +5,7 @@
  *   PUT    /ac/{keyDigest}            -> 201 inserted | 200 already identical | 409 different
  *   DELETE /ac/{keyDigest}            -> 200 deleted | 404, fenced by ?recordedRunId&recordedEventSeq
  *   GET    /cas/{digest}              -> 200 octet-stream | 404
- *   PUT    /cas/{digest}              -> 201 stored | 200 already present
+ *   PUT    /cas/{digest}              -> 201 stored | 200 already present or repaired
  *   HEAD   /cas/{digest}              -> 200 | 404
  *   POST   /cas/findMissing           -> 200 {"missing":[...]}
  *   GET    /healthz                   -> 200, unauthenticated
@@ -90,6 +90,12 @@ const unauthorized = () =>
   new Response(null, {
     status: 401,
     headers: { "www-authenticate": "Bearer realm=\"smithers-build-cache\"" }
+  })
+
+const forbidden = () =>
+  new Response(JSON.stringify({ error: "this credential may read the cache but not publish to it" }), {
+    status: 403,
+    headers: { "content-type": "application/json" }
   })
 
 const busy = (message) =>
@@ -509,26 +515,36 @@ const readPublication = async (request, keyDigest) => {
  */
 const bearerScheme = /^Bearer +/i
 
+const matchesDigest = (supplied, expected) => {
+  let difference = 0
+  for (let index = 0; index < expected.byteLength; index += 1) {
+    difference |= (supplied[index] ?? 0) ^ (expected[index] ?? 0)
+  }
+  return difference === 0
+}
+
 /**
- * Compares the presented bearer token against the configured one in time that
- * does not depend on how much of it matched.
+ * Classifies the presented bearer token against both credential digests.
  *
- * Both sides are SHA-256 digests, so the comparison is over two fixed 32-byte
- * values whatever the token lengths are. A null hash is the documented
- * development mode: no token is configured, the check is disabled, and the
- * service must only be bound to loopback.
+ * Both comparisons always run and neither short circuits, so the answer costs
+ * the same work whichever credential was presented and whichever byte first
+ * differs. A deployment that configures one secret for both directions matches
+ * both, and the more capable classification wins so publication keeps working.
+ *
+ * Null digests are the documented development mode: no token is configured,
+ * the check is disabled, and the service must only be bound to loopback.
  */
-const authorized = (request, expected) => {
-  if (expected === null) return true
+const presentedCredential = (request, expectedWrite, expectedRead) => {
+  if (expectedWrite === null && expectedRead === null) return "write"
   const authorization = request.headers.get("authorization") ?? ""
   const scheme = bearerScheme.exec(authorization)
   const bearer = scheme !== null
   const supplied = sha256(textEncoder.encode(bearer ? authorization.slice(scheme[0].length) : ""))
-  let difference = 0
-  for (let index = 0; index < expected.byteLength; index += 1) {
-    difference |= supplied[index] ^ expected[index]
-  }
-  return bearer && difference === 0
+  const isWrite = matchesDigest(supplied, expectedWrite)
+  const isRead = matchesDigest(supplied, expectedRead)
+  if (!bearer) return "none"
+  if (isWrite) return "write"
+  return isRead ? "read" : "none"
 }
 
 const handleActionCache = async (request, keyDigest, url, actionCache) => {
@@ -628,11 +644,58 @@ const handleArtifact = async (request, digest, contentStore, maxArtifactBytes) =
     if (measured !== digest) return json(400, { error: `bytes digest to ${measured}` })
     const outcome = await contentStore.put(digest, body.bytes)
     if (outcome === "inserted") return empty(201)
-    if (outcome === "present") return empty(200)
+    // `repaired` replaced a stored row that failed its integrity check with
+    // these bytes, which is `present` with extra work: the address now holds
+    // the content the client published. Answering it as an unexpected outcome
+    // reached the outer catch and became a 503, which the client retries
+    // rather than treating as a miss, so a successful repair looked like the
+    // tier refusing.
+    if (outcome === "present" || outcome === "repaired") return empty(200)
     throw new Error("content store returned an invalid publication outcome")
   }
   await discardBody(request.body)
   return methodNotAllowed("GET, HEAD, PUT")
+}
+
+/**
+ * Returns the same response with its body holding an admission slot.
+ *
+ * The runtime streams a `GET` body after the handler has returned, so a
+ * counter decremented on return bounds the store lookup rather than the
+ * transfer, and arbitrarily many long-lived downloads coexist under a cap that
+ * says it bounds them. Wrapping the body moves the release to the point the
+ * client actually stops consuming it: end of stream, error, or cancellation.
+ *
+ * This is the translation of `heldWhileStreaming` in infra/worker/protocol.ts.
+ */
+const heldWhileStreaming = (response, release) => {
+  const body = response.body
+  if (body === null) {
+    release()
+    return response
+  }
+  const reader = body.getReader()
+  const held = new ReadableStream({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read()
+        if (chunk.done) {
+          controller.close()
+          release()
+          return
+        }
+        controller.enqueue(chunk.value)
+      } catch (cause) {
+        release()
+        controller.error(cause)
+      }
+    },
+    cancel(reason) {
+      release()
+      return reader.cancel(reason)
+    }
+  })
+  return new Response(held, { status: response.status, headers: response.headers })
 }
 
 const handleFindMissing = async (request, contentStore) => {
@@ -776,7 +839,14 @@ const normalizeDependencies = (value) => {
   if (prototype !== Object.prototype && prototype !== null) {
     throw new TypeError("protocol dependencies must be a plain object")
   }
-  const allowed = new Set(["actionCache", "contentStore", "health", "maxArtifactBytes", "tokenHash"])
+  const allowed = new Set([
+    "actionCache",
+    "contentStore",
+    "health",
+    "maxArtifactBytes",
+    "readTokenHash",
+    "writeTokenHash"
+  ])
   for (const key of keys) {
     if (typeof key !== "string" || !allowed.has(key)) {
       throw new TypeError(`protocol dependencies contain an unknown property: ${String(key)}`)
@@ -799,11 +869,26 @@ const normalizeDependencies = (value) => {
   const content = read("contentStore")
   const configuredHealth = read("health")
   const health = configuredHealth ?? (async () => true)
-  const tokenHash = read("tokenHash")
+  const readTokenHash = read("readTokenHash")
+  const writeTokenHash = read("writeTokenHash")
   const maxArtifactBytes = read("maxArtifactBytes")
   if (typeof health !== "function") throw new TypeError("health must be a function")
-  if (tokenHash !== null && (typeof tokenHash !== "string" || !hexDigest.test(tokenHash))) {
-    throw new TypeError("tokenHash must be a lowercase SHA-256 digest or null")
+  for (const [name, hash] of [["readTokenHash", readTokenHash], ["writeTokenHash", writeTokenHash]]) {
+    if (hash !== null && (typeof hash !== "string" || !hexDigest.test(hash))) {
+      throw new TypeError(`${name} must be a lowercase SHA-256 digest or null`)
+    }
+  }
+  // One credential configured and the other not is a deployment that either
+  // grants nobody the direction it forgot, or grants write access to whoever
+  // holds the only token there is. Neither is a state to start in.
+  if ((readTokenHash === null) !== (writeTokenHash === null)) {
+    throw new TypeError("readTokenHash and writeTokenHash must both be digests or both be null")
+  }
+  // Equal digests are one credential under two names. The classifier below
+  // answers `write` for it, so admitting the pair would hand publication to
+  // every holder of the nominal read credential.
+  if (readTokenHash !== null && readTokenHash === writeTokenHash) {
+    throw new TypeError("readTokenHash and writeTokenHash must differ, or the read credential can publish")
   }
   if (!Number.isSafeInteger(maxArtifactBytes) || maxArtifactBytes < 1 || maxArtifactBytes > maxArtifactBodyBytes) {
     throw new TypeError(`maxArtifactBytes must be an integer from 1 through ${maxArtifactBodyBytes}`)
@@ -822,24 +907,29 @@ const normalizeDependencies = (value) => {
     }),
     health,
     maxArtifactBytes,
-    tokenHash
+    readTokenHash,
+    writeTokenHash
   })
 }
 
 /**
  * Creates the request handler for the remote-cache protocol.
  *
- * `tokenHash` is the lowercase hex SHA-256 of the bearer token, or null for the
- * documented unauthenticated development mode. `maxArtifactBytes` bounds one
- * `PUT /cas` body.
+ * `readTokenHash` and `writeTokenHash` are the lowercase hex SHA-256 of the two
+ * bearer tokens, or both null for the documented unauthenticated development
+ * mode. A credential that matches only the read digest may read the cache and
+ * never publish to it. `maxArtifactBytes` bounds one `PUT /cas` body.
  *
  * @category constructors
  */
 export const createHandler = (dependencies) => {
-  const { actionCache, contentStore, health, tokenHash, maxArtifactBytes } = normalizeDependencies(dependencies)
-  const expectedTokenHash = tokenHash === null
-    ? null
-    : Uint8Array.from(tokenHash.match(/.{2}/g), (pair) => Number.parseInt(pair, 16))
+  const { actionCache, contentStore, health, maxArtifactBytes, readTokenHash, writeTokenHash } = normalizeDependencies(
+    dependencies
+  )
+  const digestBytes = (hash) =>
+    hash === null ? null : Uint8Array.from(hash.match(/.{2}/g), (pair) => Number.parseInt(pair, 16))
+  const expectedReadTokenHash = digestBytes(readTokenHash)
+  const expectedWriteTokenHash = digestBytes(writeTokenHash)
   let activeCacheRequests = 0
   let activeActionCachePublications = 0
   let activeArtifactTransfers = 0
@@ -865,6 +955,9 @@ export const createHandler = (dependencies) => {
   }
 
   return async (request) => {
+    // Set when a response leaves holding both permits until its body ends, so
+    // the outer release below does not hand back a slot that is still in use.
+    let streaming = false
     try {
       const url = new URL(request.url)
       if (activeCacheRequests >= maxConcurrentCacheRequests) {
@@ -886,9 +979,19 @@ export const createHandler = (dependencies) => {
           await ready()
           return request.method === "HEAD" ? empty(200) : json(200, { ok: true })
         }
-        if (!authorized(request, expectedTokenHash)) {
+        const credential = presentedCredential(request, expectedWriteTokenHash, expectedReadTokenHash)
+        if (credential === "none") {
           await discardBody(request.body)
           return unauthorized()
+        }
+        // Authorization is decided by method before the route is even parsed,
+        // so a publication presented on the read credential is refused without
+        // reading its body. Every route below this line either reads state or
+        // probes it; `findMissing` is a POST that mutates nothing, so it is not
+        // in the mutating set.
+        if ((request.method === "PUT" || request.method === "DELETE") && credential !== "write") {
+          await discardBody(request.body)
+          return forbidden()
         }
         const segments = url.pathname.split("/")
         if (segments.length === 3 && segments[0] === "" && segments[1] === "cas" && segments[2] === "findMissing") {
@@ -939,10 +1042,27 @@ export const createHandler = (dependencies) => {
               return busy("too many simultaneous artifact transfers")
             }
             activeArtifactTransfers += 1
+            let transferred = false
             try {
-              return await handleArtifact(request, digest, contentStore, maxArtifactBytes)
+              const response = await handleArtifact(request, digest, contentStore, maxArtifactBytes)
+              // A `PUT` body is buffered inside the slot, so the transfer is
+              // over when the handler returns. A `GET` body streams after it,
+              // so the slot that bounds artifact transfers has to outlive the
+              // return and end with the stream.
+              if (request.method !== "GET" || response.status !== 200 || response.body === null) {
+                return response
+              }
+              transferred = true
+              streaming = true
+              let released = false
+              return heldWhileStreaming(response, () => {
+                if (released) return
+                released = true
+                activeArtifactTransfers -= 1
+                activeCacheRequests -= 1
+              })
             } finally {
-              activeArtifactTransfers -= 1
+              if (!transferred) activeArtifactTransfers -= 1
             }
           }
           return await handleArtifact(request, digest, contentStore, maxArtifactBytes)
@@ -950,7 +1070,7 @@ export const createHandler = (dependencies) => {
         await discardBody(request.body)
         return empty(404)
       } finally {
-        activeCacheRequests -= 1
+        if (!streaming) activeCacheRequests -= 1
       }
     } catch (cause) {
       // A failure here is the tier refusing, which the client treats as

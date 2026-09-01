@@ -1,5 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Schema from "effect/Schema"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
@@ -414,16 +416,17 @@ describe("PackageManager.storeRoot", () => {
       // No Windows host here, so the observation is the spawn failure itself:
       // the error names the command line it could not start, which is the
       // executable this manager chose.
-      const refusal = await Effect.runPromise(
+      const error = await Effect.runPromise(
         PackageManager.makePnpm({ requirement: "11.21.0", projectRoot: root }).pipe(
           Effect.flatMap((manager) => manager.version),
           Effect.flip,
-          Effect.map((error) => String((error as { readonly cause?: unknown }).cause)),
           Effect.provide(NodeServices.layer),
           Effect.provide(windowsRuntimeLayer)
         )
       )
-      expect(refusal).toContain("pnpm.cmd")
+      expect(error.code).toBe("command_failed")
+      expect(error.cause?.message).toContain("pnpm.cmd")
+      expect(error.cause?.code).toBe("ENOENT")
     })
   })
 
@@ -595,6 +598,443 @@ describe("PackageManager.storeRoot", () => {
       await expect(Effect.runPromise(manager.fetch)).rejects.toThrow(/did not finish within 250ms/)
       await new Promise((resolve) => setTimeout(resolve, 850))
       await expect(Fs.stat(marker)).rejects.toMatchObject({ code: "ENOENT" })
+    })
+  })
+})
+
+/**
+ * The real Node filesystem, with a hook that runs after one operation.
+ *
+ * `boundedBytes` re-checks the file's identity across `stat`, `open`, the read
+ * loop, and `realPath`, because a lockfile that changes mid-read would be
+ * digested as something it never was. Those checks are only observable if
+ * something mutates the file at the exact point between two of them, so this
+ * wraps the real service and performs a real mutation there. Nothing about the
+ * filesystem's behaviour is simulated: every call still goes to the host.
+ */
+const hookedFileSystem = async (
+  hooks: {
+    readonly afterStat?: () => Promise<void>
+    readonly afterOpen?: () => Promise<void>
+    readonly afterDescriptorStat?: () => Promise<void>
+  }
+): Promise<FileSystem.FileSystem> => {
+  const real = await Effect.runPromise(
+    Effect.gen(function*() {
+      return yield* FileSystem.FileSystem
+    }).pipe(Effect.provide(NodeServices.layer))
+  )
+  const once = (hook: (() => Promise<void>) | undefined) => {
+    let fired = false
+    return Effect.promise(async () => {
+      if (fired || hook === undefined) return
+      fired = true
+      await hook()
+    })
+  }
+  const afterStat = once(hooks.afterStat)
+  const afterOpen = once(hooks.afterOpen)
+  const afterDescriptorStat = once(hooks.afterDescriptorStat)
+  // A `File` keeps its state on the prototype, so the descriptor hook delegates
+  // through a proxy rather than through a spread that would drop it.
+  const observed = (file: FileSystem.File): FileSystem.File =>
+    hooks.afterDescriptorStat === undefined ? file : new Proxy(file, {
+      get: (target, property) => {
+        const value = Reflect.get(target, property, target)
+        if (property === "stat") {
+          return (value as Effect.Effect<unknown, unknown>).pipe(Effect.tap(() => afterDescriptorStat))
+        }
+        return typeof value === "function" ? value.bind(target) : value
+      }
+    })
+  return {
+    ...real,
+    stat: (path) => real.stat(path).pipe(Effect.tap(() => afterStat)),
+    open: (path, options) => real.open(path, options).pipe(Effect.tap(() => afterOpen), Effect.map(observed))
+  }
+}
+
+const digestOver = (fileSystem: FileSystem.FileSystem, root: string) =>
+  Effect.runPromise(
+    PackageManager.lockfileDigest(root, "pnpm-lock.yaml").pipe(
+      Effect.flip,
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provide(NodeServices.layer)
+    )
+  )
+
+describe("PackageManager file reads", () => {
+  it("refuses a lockfile whose inode is replaced between the stat and the open", async () => {
+    await withFixture("package-manager-inode-swap", async (root) => {
+      const lockfile = NodePath.join(root, "pnpm-lock.yaml")
+      const replacement = NodePath.join(root, "replacement")
+      await Fs.writeFile(lockfile, "lockfileVersion: '9.0'\n", "utf8")
+      await Fs.writeFile(replacement, "lockfileVersion: '8.0'\n", "utf8")
+      const fileSystem = await hookedFileSystem({ afterStat: () => Fs.rename(replacement, lockfile) })
+      const error = await digestOver(fileSystem, root)
+      expect(error.code).toBe("lockfile_unreadable")
+      expect(error.message).toMatch(/file changed while it was opened/)
+    })
+  })
+
+  it("refuses a lockfile that grows after it was opened", async () => {
+    await withFixture("package-manager-grow", async (root) => {
+      const lockfile = NodePath.join(root, "pnpm-lock.yaml")
+      await Fs.writeFile(lockfile, "lockfileVersion: '9.0'\n", "utf8")
+      const fileSystem = await hookedFileSystem({
+        afterDescriptorStat: () => Fs.appendFile(lockfile, "packages: {}\n", "utf8")
+      })
+      const error = await digestOver(fileSystem, root)
+      expect(error.message).toMatch(/file length changed while it was read/)
+    })
+  })
+
+  it("refuses a lockfile touched between the open and the last read", async () => {
+    await withFixture("package-manager-touch", async (root) => {
+      const lockfile = NodePath.join(root, "pnpm-lock.yaml")
+      await Fs.writeFile(lockfile, "lockfileVersion: '9.0'\n", "utf8")
+      const later = new Date(Date.now() + 60_000)
+      const fileSystem = await hookedFileSystem({ afterDescriptorStat: () => Fs.utimes(lockfile, later, later) })
+      const error = await digestOver(fileSystem, root)
+      expect(error.message).toMatch(/file changed while it was read/)
+    })
+  })
+
+  it("refuses a lockfile whose canonical location moves while it is read", async () => {
+    await withFixture("package-manager-relocate", async (root) => {
+      const lockfile = NodePath.join(root, "pnpm-lock.yaml")
+      const elsewhere = NodePath.join(root, "elsewhere.yaml")
+      await Fs.writeFile(lockfile, "lockfileVersion: '9.0'\n", "utf8")
+      await Fs.writeFile(elsewhere, "lockfileVersion: '9.0'\n", "utf8")
+      const fileSystem = await hookedFileSystem({
+        afterOpen: async () => {
+          await Fs.rm(lockfile)
+          await Fs.symlink(elsewhere, lockfile)
+        }
+      })
+      const error = await digestOver(fileSystem, root)
+      expect(error.message).toMatch(/file changed its canonical location while read/)
+    })
+  })
+
+  /**
+   * `Action.executeEncoded` encodes a declared error through
+   * `Schema.toCodecJson` and `Effect.orDie`s the encode, so an error carrying a
+   * raw platform `Error` turned the most ordinary install failure, a missing
+   * lockfile, into a defect that killed the run instead of journaling
+   * `lockfile_unreadable`.
+   */
+  it("encodes a missing-lockfile failure, cause and all, as JSON", async () => {
+    await withFixture("package-manager-encodes", async (root) => {
+      const error = await Effect.runPromise(
+        PackageManager.lockfileDigest(root, "pnpm-lock.yaml").pipe(
+          Effect.flip,
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      const encoded = await Effect.runPromise(
+        Schema.encodeEffect(Schema.toCodecJson(PackageManager.PackageManagerError))(error)
+      )
+      expect(JSON.parse(JSON.stringify(encoded))).toMatchObject({
+        code: "lockfile_unreadable",
+        cause: { name: "PlatformError", code: "ENOENT" }
+      })
+      expect(error.message).toMatch(/could not read/)
+    })
+  })
+})
+
+describe("PackageManager project configuration", () => {
+  const npmrcRefusal = (root: string) =>
+    Effect.runPromise(
+      PackageManager.npmrcDigest(root).pipe(Effect.flip, Effect.provide(NodeServices.layer))
+    )
+
+  const npmrcValue = (root: string) =>
+    Effect.runPromise(PackageManager.npmrcDigest(root).pipe(Effect.provide(NodeServices.layer)))
+
+  it("reports no digest when a project has no .npmrc", async () => {
+    await withFixture("package-manager-no-npmrc", async (root) => {
+      expect(await npmrcValue(root)).toBe(null)
+    })
+  })
+
+  it("digests a credential-free .npmrc and re-digests it when it changes", async () => {
+    await withFixture("package-manager-npmrc-digest", async (root) => {
+      await Fs.writeFile(NodePath.join(root, ".npmrc"), "registry=https://registry.example/\n", "utf8")
+      const first = await npmrcValue(root)
+      expect(first).toMatch(/^[0-9a-f]{64}$/)
+      await Fs.writeFile(NodePath.join(root, ".npmrc"), "registry=https://other.example/\n", "utf8")
+      expect(await npmrcValue(root)).not.toBe(first)
+    })
+  })
+
+  /**
+   * The credential check matched a credential-shaped key and nothing else, so
+   * a password written into a registry or proxy URL passed it and was digested
+   * into install key material under an ordinary name.
+   */
+  it("refuses a credential carried as URL userinfo under any setting name", async () => {
+    await withFixture("package-manager-userinfo", async (root) => {
+      for (
+        const line of [
+          "registry=https://user:password@registry.example/",
+          "@scope:registry=https://user:password@registry.example/",
+          "https-proxy=https://user:password@proxy.example",
+          "proxy=http://user%40corp:pw@proxy.example",
+          "//registry.example/:_authToken=literal-secret"
+        ]
+      ) {
+        await Fs.writeFile(NodePath.join(root, ".npmrc"), `${line}\n`, "utf8")
+        const error = await npmrcRefusal(root)
+        expect(error.code).toBe("unsafe_configuration")
+        expect(error.message).toMatch(/embeds a credential/)
+      }
+    })
+  })
+
+  it("accepts a placeholder the way npm's ini parser reads it", async () => {
+    await withFixture("package-manager-placeholder", async (root) => {
+      for (
+        const line of [
+          "//registry.example/:_authToken=${NPM_TOKEN}",
+          "//registry.example/:_authToken=\"${NPM_TOKEN}\"",
+          "//registry.example/:_authToken='${NPM_TOKEN}'",
+          "registry=https://registry.example/",
+          "; _authToken=commented-out",
+          "# token=commented-out",
+          "not-a-url=this:is/not//a-url@all"
+        ]
+      ) {
+        await Fs.writeFile(NodePath.join(root, ".npmrc"), `${line}\n`, "utf8")
+        expect(await npmrcValue(root)).toMatch(/^[0-9a-f]{64}$/)
+      }
+    })
+  })
+
+  /**
+   * The child environment was an object literal, so every `Object.prototype`
+   * name read as already set and a `.npmrc` legitimately referencing one had
+   * its variable silently dropped instead of forwarded.
+   */
+  it("forwards a referenced variable named after an Object.prototype member", async () => {
+    await withFixture("package-manager-proto-name", async (root) => {
+      const executable = NodePath.join(root, "pnpm.mjs")
+      const observed = NodePath.join(root, "observed.json")
+      await Fs.writeFile(NodePath.join(root, ".npmrc"), "registry=https://${constructor}.example/\n", "utf8")
+      await writeExecutable(
+        executable,
+        `import { writeFileSync } from "node:fs"\n` +
+          `writeFileSync(${JSON.stringify(observed)}, JSON.stringify(process.env.constructor ?? null))\n` +
+          `process.stdout.write("11.21.0\\n")`
+      )
+      const manager = await makePnpm(root, executable, {
+        environment: { PATH: process.env.PATH, constructor: "registry-host" }
+      })
+      expect(await Effect.runPromise(manager.version)).toBe("11.21.0")
+      expect(JSON.parse(await Fs.readFile(observed, "utf8"))).toBe("registry-host")
+    })
+  })
+})
+
+describe("PackageManager manifests", () => {
+  const platformInput = { os: "linux", arch: "x64", libc: null }
+  const validInput = {
+    manager: "pnpm",
+    managerVersion: "11.21.0",
+    platform: platformInput,
+    lockfileDigest: "a".repeat(64),
+    npmrcDigest: "b".repeat(64)
+  } as const
+
+  /**
+   * The canonical text and its digest are step-key material, and the version
+   * prefix exists so a change to the shape cannot collide with a digest minted
+   * under the old one. Freezing both here is what makes that promise checkable:
+   * reordering a field or adding one now fails rather than silently
+   * invalidating every recorded install.
+   */
+  it("renders one frozen canonical text and one frozen digest", async () => {
+    expect(PackageManager.storeManifestText(validInput)).toBe(
+      "[\"smithers-build/store-manifest/v1\",\"pnpm\",\"11.21.0\",[\"linux\",\"x64\",null],"
+        + `"${"a".repeat(64)}","${"b".repeat(64)}"]`
+    )
+    const manifest = await Effect.runPromise(
+      PackageManager.storeManifest(validInput).pipe(Effect.provide(NodeServices.layer))
+    )
+    expect(manifest.digest).toBe("6f5246c3848639c37da7cc2c66e8d67979505f9fddf1c734da358748209f6eac")
+    expect(manifest.manager).toBe("pnpm")
+    expect(manifest.managerVersion).toBe("11.21.0")
+    expect(manifest.platform).toEqual(platformInput)
+  })
+
+  it("gives every field a distinct digest", async () => {
+    const digestOf = (input: Parameters<typeof PackageManager.storeManifest>[0]) =>
+      Effect.runPromise(
+        PackageManager.storeManifest(input).pipe(
+          Effect.map((manifest) => manifest.digest),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+    const base = await digestOf(validInput)
+    const variants = [
+      { ...validInput, manager: "bun" as const },
+      { ...validInput, managerVersion: "11.21.1" },
+      { ...validInput, platform: null },
+      { ...validInput, platform: { ...platformInput, arch: "arm64" } },
+      { ...validInput, lockfileDigest: "c".repeat(64) },
+      { ...validInput, npmrcDigest: null }
+    ]
+    const digests = await Promise.all(variants.map(digestOf))
+    expect(new Set([base, ...digests]).size).toBe(digests.length + 1)
+  })
+
+  it("refuses store-manifest inputs that are not the shape the digest promises", () => {
+    expect(() => PackageManager.storeManifestText({ ...validInput, manager: "npm" as never }))
+      .toThrow(/manager is unsupported/)
+    expect(() => PackageManager.storeManifestText({ ...validInput, managerVersion: "11.21.0\n" }))
+      .toThrow(/bounded single-line usable text/)
+    expect(() => PackageManager.storeManifestText({ ...validInput, lockfileDigest: "A".repeat(64) }))
+      .toThrow(/lowercase SHA-256 digest/)
+    expect(() => PackageManager.storeManifestText({ ...validInput, npmrcDigest: "short" }))
+      .toThrow(/lowercase SHA-256 digest or null/)
+    expect(() => PackageManager.storeManifestText({ ...validInput, extra: 1 } as never))
+      .toThrow(/unknown property/)
+    expect(() => PackageManager.storeManifestText({ ...validInput, platform: { os: "linux", arch: "" } as never }))
+      .toThrow(/bounded non-empty usable text or null/)
+    expect(() =>
+      PackageManager.storeManifestText({ ...validInput, platform: { os: null, arch: "x64", libc: null } as never })
+    ).toThrow(/string os and arch fields/)
+  })
+
+  it("renders one frozen linked-tree digest and refuses anything but three digests", async () => {
+    const manifest = await Effect.runPromise(
+      PackageManager.linkedTreeManifest({
+        storeDigest: "c".repeat(64) as PackageManager.Digest,
+        packageJsonDigest: "d".repeat(64) as PackageManager.Digest,
+        managerEvidence: "e".repeat(64) as PackageManager.Digest
+      }).pipe(Effect.provide(NodeServices.layer))
+    )
+    expect(manifest).toBe("55a1c29f0e23410f4962a2199622841f8e7c02b2dabec967d1fe88eeacd3e484")
+    await expect(Effect.runPromise(
+      PackageManager.linkedTreeManifest({
+        storeDigest: "not-a-digest" as PackageManager.Digest,
+        packageJsonDigest: "d".repeat(64) as PackageManager.Digest,
+        managerEvidence: "e".repeat(64) as PackageManager.Digest
+      }).pipe(Effect.provide(NodeServices.layer))
+    )).rejects.toThrow(/lowercase SHA-256 digests/)
+  })
+})
+
+describe("PackageManager layers", () => {
+  const resolve = <A>(
+    layer: ReturnType<typeof PackageManager.layerNoop>,
+    read: (service: PackageManager.Service) => A
+  ) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        return read(yield* PackageManager.PackageManager)
+      }).pipe(Effect.provide(layer))
+    )
+
+  it("provides each manager implementation through its own layer", async () => {
+    const options = { requirement: "11.21.0", projectRoot: "/workspace" }
+    expect(await resolve(PackageManager.layerNoop("bun", options, platform), (service) => service.name)).toBe("bun")
+    for (
+      const [name, layer] of [
+        ["pnpm", PackageManager.layerPnpm(options)],
+        ["bun", PackageManager.layerBun(options)]
+      ] as const
+    ) {
+      const resolved = await Effect.runPromise(
+        Effect.gen(function*() {
+          const service = yield* PackageManager.PackageManager
+          return { name: service.name, store: service.storeDirectory }
+        }).pipe(
+          Effect.provide(layer),
+          Effect.provide(NodeServices.layer),
+          Effect.provide(runtimeLayer)
+        )
+      )
+      expect(resolved).toEqual({ name, store: `.flows/store/${name}` })
+    }
+  })
+
+  it("refuses a manager name outside the declared union", () => {
+    expect(() => PackageManager.makeNoop("npm" as never, { requirement: "1.0.0", projectRoot: "/w" }, platform))
+      .toThrow(/name is unsupported/)
+  })
+
+  it("reports the refusal code every unwired operation answers with", async () => {
+    const service = PackageManager.makeNoop("bun", { requirement: "1.0.0", projectRoot: "/w" }, platform)
+    for (const operation of [service.version, service.verify, service.fetch, service.link, service.linkManifest]) {
+      const error = await Effect.runPromise(Effect.flip(operation as Effect.Effect<never, never, never>))
+      expect((error as PackageManager.PackageManagerError).code).toBe("unsupported")
+    }
+  })
+})
+
+describe("PackageManager link", () => {
+  it("pins pnpm install to the offline, frozen, non-mutating flags README documents", async () => {
+    await withFixture("package-manager-link-args", async (root) => {
+      const executable = NodePath.join(root, "pnpm.mjs")
+      const invocation = NodePath.join(root, "invocation.json")
+      await writeExecutable(
+        executable,
+        `import { writeFileSync } from "node:fs"\nwriteFileSync(${
+          JSON.stringify(invocation)
+        }, JSON.stringify(process.argv.slice(2)))`
+      )
+      const manager = await makePnpm(root, executable)
+      await Effect.runPromise(manager.link)
+      expect(JSON.parse(await Fs.readFile(invocation, "utf8"))).toEqual([
+        "install",
+        "--offline",
+        "--frozen-lockfile",
+        "--ignore-scripts",
+        "--reporter=append-only",
+        "--store-dir",
+        NodePath.join(root, ".flows/store/pnpm")
+      ])
+    })
+  })
+
+  it("digests the modules manifest pnpm leaves behind, and reports a missing one", async () => {
+    await withFixture("package-manager-link-manifest", async (root) => {
+      const executable = NodePath.join(root, "pnpm.mjs")
+      await writeExecutable(executable, "process.stdout.write('11.21.0\\n')")
+      const manager = await makePnpm(root, executable)
+      const absent = await Effect.runPromise(
+        Effect.flip(manager.linkManifest).pipe(Effect.provide(NodeServices.layer))
+      )
+      expect(absent.code).toBe("manifest_unreadable")
+
+      await Fs.mkdir(NodePath.join(root, "node_modules"))
+      await Fs.writeFile(NodePath.join(root, "node_modules/.modules.yaml"), "hoistPattern: []\n", "utf8")
+      const digest = await Effect.runPromise(manager.linkManifest.pipe(Effect.provide(NodeServices.layer)))
+      expect(digest).toMatch(/^[0-9a-f]{64}$/)
+    })
+  })
+
+  it("holds the host manager to the declaration and names the code it refused with", async () => {
+    await withFixture("package-manager-verify", async (root) => {
+      const executable = NodePath.join(root, "pnpm.mjs")
+      await writeExecutable(executable, "process.stdout.write('10.0.0\\n')")
+      const manager = await makePnpm(root, executable)
+      const mismatch = await Effect.runPromise(Effect.flip(manager.verify))
+      expect(mismatch.code).toBe("environment_mismatch")
+      expect(mismatch.message).toMatch(/this host runs pnpm 10\.0\.0, and the workspace declares 11\.21\.0/)
+
+      const unsupported = await Effect.runPromise(
+        PackageManager.makePnpm({ requirement: "^11.0.0", projectRoot: root, executable, environment: process.env })
+          .pipe(
+            Effect.flatMap((service) => Effect.flip(service.verify)),
+            Effect.provide(NodeServices.layer),
+            Effect.provide(runtimeLayer)
+          )
+      )
+      expect(unsupported.code).toBe("environment_mismatch")
+      expect(unsupported.message).toMatch(/is not an exact version or a single comparator/)
     })
   })
 })
