@@ -87,10 +87,26 @@ describe("appendBatch", () => {
     expect(changed.grown.nodes[1]!.key).not.toBe(first.grown.nodes[1]!.key)
   })
 
-  it("advances the plan generation even for an empty append", async () => {
-    const { base, grown } = await append(new HarnessPlan.Batch({ children: [] }))
+  // Re-pinned 2026-09-01. This asserted that an empty batch still minted a
+  // generation. `@smthrs/plan` now refuses an append with no drafts, because a
+  // generation with no nodes is one `PlanStore.append` has always rejected: the
+  // plan value could be built but never recorded, so the two layers disagreed
+  // about what a generation is. The refusal is the honest contract, and the
+  // adapter reports it as the same typed harness failure as any other plan
+  // refusal.
+  it("refuses an empty append rather than minting an unrecordable generation", async () => {
+    const error = await Effect.gen(function*() {
+      const base = yield* basePlan
+      return yield* Effect.flip(
+        FlowEngineLike.appendBatch(base, new HarnessPlan.Batch({ children: [] }), scope)
+      )
+    }).pipe(Effect.provide(NodeCrypto.layer), Effect.runPromise)
 
-    expect(grown.nodes).toEqual(base.nodes)
-    expect(grown.generation).toBe(1)
+    expect(error.code).toBe("engine_failed")
+    expect(error.message).toBe("The elaborated subgraph could not be appended to its plan")
+    expect(error.cause).toMatchObject({
+      code: "invalid_node",
+      message: "Plan review-plan append requires at least one draft"
+    })
   })
 })

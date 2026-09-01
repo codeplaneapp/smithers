@@ -350,7 +350,12 @@ describe("an agent run whose seat rejects the call", () => {
     }
     const defect = state.result?.exit?.cause?.[0]?.defect
     expect(defect?.["_tag"]).toBe("flows/engine-store/UnencodableResult")
-    expect(String(defect?.["note"])).toContain("Expected JSON value")
+    // Re-pinned 2026-09-01. `note` used to carry the codec's own rejection
+    // message, which is why this read `Expected JSON value`. `@smthrs/engine-store`
+    // now records a fixed sentence instead, so a hostile settlement cannot
+    // choose the text the engine writes onto the row. The reason the run failed
+    // is still on the row, in the bounded `reasons` projection below.
+    expect(String(defect?.["note"])).toBe("the flow result codec rejected the settlement")
     expect(JSON.stringify(defect?.["reasons"])).toContain("You have no credits remaining")
   }, 120_000)
 
