@@ -16,17 +16,17 @@ underneath it.
 `AgentAction.Host` is the composition half, provided once through
 `AgentAction.layerHost`:
 
-| Field | What it decides |
-| --- | --- |
-| `registry` | The catalog a cell is shown and the registry its calls resolve against. |
-| `limits` | The sandbox budget every cell runs under. Never unlimited. |
-| `flows`, `implementations`, `plugins`, `config` | The executable flows, module-backed implementations, plugins, and configuration composed into every run. |
-| `system` | Stable teaching placed ahead of every action's own. |
-| `capabilityEnvelope` | What the composition grants, and what its sealed step keys are computed under. |
-| `maxFrames` | The default cell-loop bound for steps that declare none. |
-| `defaultCorrections` | The correction budget for steps that declare none. |
-| `modelRetryPolicy` | The transport retry ladder one model call runs under. Defaults to the port's own; `Schedule.recurs(0)` turns it off. |
-| `maxQuotaParks` | How many quota waits one step may take. Defaults to `QuotaPolicy.defaultMaxParks`, which is eight. |
+| Field                                           | What it decides                                                                                                      |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `registry`                                      | The catalog a cell is shown and the registry its calls resolve against.                                              |
+| `limits`                                        | The sandbox budget every cell runs under. Never unlimited.                                                           |
+| `flows`, `implementations`, `plugins`, `config` | The executable flows, module-backed implementations, plugins, and configuration composed into every run.             |
+| `system`                                        | Stable teaching placed ahead of every action's own.                                                                  |
+| `capabilityEnvelope`                            | What the composition grants, and what its sealed step keys are computed under.                                       |
+| `maxFrames`                                     | The default cell-loop bound for steps that declare none.                                                             |
+| `defaultCorrections`                            | The correction budget for steps that declare none.                                                                   |
+| `modelRetryPolicy`                              | The transport retry ladder one model call runs under. Defaults to the port's own; `Schedule.recurs(0)` turns it off. |
+| `maxQuotaParks`                                 | How many quota waits one step may take. Defaults to `QuotaPolicy.defaultMaxParks`, which is eight.                   |
 
 ## Structured-output corrections
 
@@ -34,11 +34,11 @@ The declared output schema is rendered into the run's system teaching and
 enforced against the run's final answer. A decode miss spends a correction slot
 on a re-prompt that repeats the task verbatim and appends the validation issues.
 
-| Where | What it decides |
-| --- | --- |
-| `Options.corrections` | This step's budget. Zero makes a first miss terminal. |
+| Where                     | What it decides                                       |
+| ------------------------- | ----------------------------------------------------- |
+| `Options.corrections`     | This step's budget. Zero makes a first miss terminal. |
 | `Host.defaultCorrections` | The composition's budget for steps that declare none. |
-| `Options.repair` | One bounded ask after the budget is spent. |
+| `Options.repair`          | One bounded ask after the budget is spent.            |
 
 Neither declared leaves the budget at one. The declaration always beats the
 composition default, including when it is zero: a step that declared a first
@@ -110,7 +110,7 @@ A classified refusal parks for real:
   is not one a run waits out forever.
 
 One thing changes at the engine port. `FlowEngineLike` records a provider
-refusal as the sealed step's *result*, which is right for every failure but this
+refusal as the sealed step's _result_, which is right for every failure but this
 one: a capacity refusal says nothing about the request, so recording it under a
 content key would pin "this prompt is refused" into the shared cache and make
 the wake pointless. A capacity refusal fails the sealed action instead, which
@@ -155,10 +155,10 @@ rules make it usable:
 
 `onExceeded` decides what running out means:
 
-| Setting | Behavior |
-| --- | --- |
-| `fail` | The step fails with `BudgetExceeded { scope, used, max, next }`. |
-| `warn` | A `flows.agent.budget-warning.v1` record is written and the call proceeds. |
+| Setting          | Behavior                                                                                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `fail`           | The step fails with `BudgetExceeded { scope, used, max, next }`.                                       |
+| `warn`           | A `flows.agent.budget-warning.v1` record is written and the call proceeds.                             |
 | `skip-remaining` | The budget latches. Every later model call in the run fails typed `skipped` without asking a provider. |
 
 A latched refusal is `Budget.Skipped`, not another `BudgetExceeded`. It is
