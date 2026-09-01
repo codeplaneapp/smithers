@@ -468,6 +468,10 @@ describe("AgentSession", () => {
   it("keeps cancellation and registration failures contained at the executor boundary", async () => {
     await expect(Effect.runPromise(AgentSession.preserveDriverInterrupt(() => Effect.fail("interrupted"))))
       .resolves.toBeUndefined()
+    const interruptExit = await Effect.runPromiseExit(
+      AgentSession.preserveDriverInterrupt(() => Effect.interrupt)
+    )
+    expect(Exit.isFailure(interruptExit) && Cause.hasInterruptsOnly(interruptExit.cause)).toBe(true)
     const failure = await Effect.runPromise(
       Effect.flip(AgentSession.registerDriver(() => Effect.fail("missing run"), "run-registration"))
     )
@@ -545,6 +549,10 @@ describe("AgentSession", () => {
     //   waiting on it. Measured: this case runs in 410 ms without the explicit
     //   sequence and does not finish in 120 s with it.
     const settled = outcome.agentTrail.filter((entry) => entry.eventType === "control.agent.model-settled")
+    console.log(JSON.stringify(outcome.agentTrail.map((entry) => ({
+      eventType: entry.eventType,
+      payload: entry.payload
+    })), null, 2))
     expect(settled).toHaveLength(4)
     expect(
       settled.every((entry) =>
