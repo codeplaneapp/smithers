@@ -30,51 +30,202 @@
   "loads": true,
   "refusal": null,
   "proven": [
-    { "label": "//...", "verb": "query", "verdict": "green", "detail": "600 labels" },
-    { "label": "//...", "verb": "graph", "verdict": "green", "detail": "warnings: []" },
-    { "label": "//workflows/wave-reconciliation:waveReconciliation", "verb": "plan", "verdict": "green", "detail": "mode: execute" },
-    { "label": "//:ci", "verb": "plan", "verdict": "green" },
-    { "label": "//:preCommit", "verb": "plan", "verdict": "green" },
-    { "label": "//:gates", "verb": "plan", "verdict": "green" },
-    { "label": "//:agentLints", "verb": "plan", "verdict": "green", "detail": "four diff-scoped lints" },
-    { "label": "//packages/canonical:fmt", "verb": "run", "verdict": "green", "ms": 428 },
-    { "label": "//packages/canonical:fmt", "verb": "run", "verdict": "cache hit", "ms": 7 },
-    { "label": "//packages/canonical:lint", "verb": "run", "verdict": "green", "ms": 7200 },
-    { "label": "//packages/canonical:lint", "verb": "run", "verdict": "cache hit", "ms": 3 },
-    { "label": "//packages/canonical:check", "verb": "run", "verdict": "green", "ms": 2200 },
-    { "label": "//packages/canonical:circular", "verb": "run", "verdict": "green", "ms": 909 },
-    { "label": "//:knownFiles", "verb": "run", "verdict": "green", "ms": 10781 },
-    { "label": "//:knownFiles", "verb": "run", "verdict": "cache hit", "ms": 3.2 }
+    {
+      "label": "//...",
+      "verb": "query",
+      "verdict": "green",
+      "detail": "600 labels"
+    },
+    {
+      "label": "//...",
+      "verb": "graph",
+      "verdict": "green",
+      "detail": "warnings: []"
+    },
+    {
+      "label": "//workflows/wave-reconciliation:waveReconciliation",
+      "verb": "plan",
+      "verdict": "green",
+      "detail": "mode: execute"
+    },
+    {
+      "label": "//:ci",
+      "verb": "plan",
+      "verdict": "green"
+    },
+    {
+      "label": "//:preCommit",
+      "verb": "plan",
+      "verdict": "green"
+    },
+    {
+      "label": "//:gates",
+      "verb": "plan",
+      "verdict": "green"
+    },
+    {
+      "label": "//:agentLints",
+      "verb": "plan",
+      "verdict": "green",
+      "detail": "four diff-scoped lints"
+    },
+    {
+      "label": "//packages/canonical:fmt",
+      "verb": "run",
+      "verdict": "green",
+      "ms": 428
+    },
+    {
+      "label": "//packages/canonical:fmt",
+      "verb": "run",
+      "verdict": "cache hit",
+      "ms": 7
+    },
+    {
+      "label": "//packages/canonical:lint",
+      "verb": "run",
+      "verdict": "green",
+      "ms": 7200
+    },
+    {
+      "label": "//packages/canonical:lint",
+      "verb": "run",
+      "verdict": "cache hit",
+      "ms": 3
+    },
+    {
+      "label": "//packages/canonical:check",
+      "verb": "run",
+      "verdict": "green",
+      "ms": 2200
+    },
+    {
+      "label": "//packages/canonical:circular",
+      "verb": "run",
+      "verdict": "green",
+      "ms": 909
+    },
+    {
+      "label": "//:knownFiles",
+      "verb": "run",
+      "verdict": "green",
+      "ms": 10781
+    },
+    {
+      "label": "//:knownFiles",
+      "verb": "run",
+      "verdict": "cache hit",
+      "ms": 3.2
+    },
+    {
+      "label": "//:preCommit",
+      "verb": "run",
+      "verdict": "1 member red (host-caused)",
+      "detail": "339 targets, 335 ran, 2 hit, 178.2s; only //packages/build-cli:lint red, identical on the base commit",
+      "ms": 178200
+    }
   ],
   "lints": [
-    { "label": "//:durableIdentityGuard", "file": "workflows/lints/durable-identity.md", "evidence": "port of lint/BUILD.ts durableIdentityGuard, failOn error" },
-    { "label": "//:docsReferenceSync", "file": "workflows/lints/docs-reference-sync.md", "evidence": "port of lint/BUILD.ts docsReferenceSync" },
-    { "label": "//:jsdocTruthfulness", "file": "workflows/lints/jsdoc-truthfulness.md", "evidence": "port of lint/BUILD.ts jsdocTruthfulness" },
-    { "label": "//:adapterConformance", "file": "workflows/lints/adapter-conformance.md", "evidence": "issues #1622-#1626 closed by PR #1627; #1629 open; 12 adapters shipped" }
+    {
+      "label": "//:durableIdentityGuard",
+      "file": "workflows/lints/durable-identity.md",
+      "evidence": "port of lint/BUILD.ts durableIdentityGuard, failOn error"
+    },
+    {
+      "label": "//:docsReferenceSync",
+      "file": "workflows/lints/docs-reference-sync.md",
+      "evidence": "port of lint/BUILD.ts docsReferenceSync"
+    },
+    {
+      "label": "//:jsdocTruthfulness",
+      "file": "workflows/lints/jsdoc-truthfulness.md",
+      "evidence": "port of lint/BUILD.ts jsdocTruthfulness"
+    },
+    {
+      "label": "//:adapterConformance",
+      "file": "workflows/lints/adapter-conformance.md",
+      "evidence": "issues #1622-#1626 closed by PR #1627; #1629 open; 12 adapters shipped"
+    }
   ],
   "lanes": [
-    { "label": "//workflows/wave-reconciliation:waveReconciliation", "kind": "Agent.Diff", "namedQueue": true, "evidence": "65 merge/migrate commits in 3 days; 274 lane@local commits; issue #1443, PR #1538" },
-    { "label": "//workflows/effect-bump:effectBump", "kind": "Agent.Diff", "evidence": "hand constant in scripts/check-single-effect-version.mjs:30; issues #1462, #1463, #1467, #1468" },
-    { "label": "//workflows/new-agent-adapter:newAgentAdapter", "kind": "Agent.Diff", "evidence": "issue #1590 to PR #1608; gap set #1622-#1626" },
-    { "label": "//workflows/ci-red-triage:ciRedTriage", "kind": "Agent.Diff", "evidence": "issues #1549, #1577 closed by PRs #1617 and #1621; 115 of 1000 issues CI-themed" }
+    {
+      "label": "//workflows/wave-reconciliation:waveReconciliation",
+      "kind": "Agent.Diff",
+      "namedQueue": true,
+      "evidence": "65 merge/migrate commits in 3 days; 274 lane@local commits; issue #1443, PR #1538"
+    },
+    {
+      "label": "//workflows/effect-bump:effectBump",
+      "kind": "Agent.Diff",
+      "evidence": "hand constant in scripts/check-single-effect-version.mjs:30; issues #1462, #1463, #1467, #1468"
+    },
+    {
+      "label": "//workflows/new-agent-adapter:newAgentAdapter",
+      "kind": "Agent.Diff",
+      "evidence": "issue #1590 to PR #1608; gap set #1622-#1626"
+    },
+    {
+      "label": "//workflows/ci-red-triage:ciRedTriage",
+      "kind": "Agent.Diff",
+      "evidence": "issues #1549, #1577 closed by PRs #1617 and #1621; 115 of 1000 issues CI-themed"
+    }
   ],
   "namedQueueLane": "//workflows/wave-reconciliation:waveReconciliation",
   "gatesAdded": [
-    { "label": "//:tsconfig", "kind": "drift lint", "evidence": "generated at BUILD.ts:25, ungated in ci.yml; hand edits 6ff3c3c334, 65b2bf8c2f" },
-    { "label": "//scripts:lockfilePair", "kind": "deterministic", "evidence": "AGENTS.md invariant with no enforcer; 117 pnpm-only vs 91 bun-only commits" }
+    {
+      "label": "//:tsconfig",
+      "kind": "drift lint",
+      "evidence": "generated at BUILD.ts:25, ungated in ci.yml; hand edits 6ff3c3c334, 65b2bf8c2f"
+    },
+    {
+      "label": "//scripts:lockfilePair",
+      "kind": "deterministic",
+      "evidence": "AGENTS.md invariant with no enforcer; 117 pnpm-only vs 91 bun-only commits"
+    }
   ],
   "engineDefectsFound": [
-    { "area": "PackageDiscovery", "summary": "case-insensitive lstat probe treated Workspace.ts as a workspace declaration", "test": "packages/build-cli/test/DiscoveryCaseInsensitive.test.ts" },
-    { "area": "gitDiff expansion", "summary": "submodule gitlinks were handed to the digester and refused as non-regular files", "test": "packages/build-cli/test/GitDiffSubmodule.test.ts" },
-    { "area": "NodeModule.Bin", "summary": "package-local reference resolved only at the workspace root, refusing every pnpm per-package tool", "test": "packages/build-cli/test/ShellCwd.test.ts" },
-    { "area": "Shell targets", "summary": "no working directory, so a package's own lint or format gate could not be expressed", "test": "packages/build-cli/test/ShellCwd.test.ts" }
+    {
+      "area": "PackageDiscovery",
+      "summary": "case-insensitive lstat probe treated Workspace.ts as a workspace declaration",
+      "test": "packages/build-cli/test/DiscoveryCaseInsensitive.test.ts"
+    },
+    {
+      "area": "gitDiff expansion",
+      "summary": "submodule gitlinks were handed to the digester and refused as non-regular files",
+      "test": "packages/build-cli/test/GitDiffSubmodule.test.ts"
+    },
+    {
+      "area": "NodeModule.Bin",
+      "summary": "package-local reference resolved only at the workspace root, refusing every pnpm per-package tool",
+      "test": "packages/build-cli/test/ShellCwd.test.ts"
+    },
+    {
+      "area": "Shell targets",
+      "summary": "no working directory, so a package's own lint or format gate could not be expressed",
+      "test": "packages/build-cli/test/ShellCwd.test.ts"
+    }
   ],
   "proposals": [
-    { "name": "DocsParity", "oneLine": "no package-mode executor, so the synthesized docs gate is unported" },
-    { "name": "NewPackage", "oneLine": "no package-mode executor and no Shell equivalent for its dynamic --name input" },
-    { "name": "Cron", "oneLine": "plans but does not execute in package mode, so a scheduled lane cannot run" },
-    { "name": "PackageDefaults", "oneLine": "package mode has no macro, so about twenty packages' check surfaces are hand written" },
-    { "name": "ci/docs/install verbs", "oneLine": "refuse in package mode, so generated workflows call targets directly" }
+    {
+      "name": "DocsParity",
+      "oneLine": "no package-mode executor, so the synthesized docs gate is unported"
+    },
+    {
+      "name": "NewPackage",
+      "oneLine": "no package-mode executor and no Shell equivalent for its dynamic --name input"
+    },
+    {
+      "name": "Cron",
+      "oneLine": "plans but does not execute in package mode, so a scheduled lane cannot run"
+    },
+    {
+      "name": "PackageDefaults",
+      "oneLine": "package mode has no macro, so about twenty packages' check surfaces are hand written"
+    },
+    {
+      "name": "ci/docs/install verbs",
+      "oneLine": "refuse in package mode, so generated workflows call targets directly"
+    }
   ],
   "hostDrift": [
     "vendor/jj submodule is not initialized, so native Cargo targets refuse",

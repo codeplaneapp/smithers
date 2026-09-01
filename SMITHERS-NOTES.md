@@ -39,6 +39,14 @@ Every command below ran from the worktree root through
 | `target '//packages/canonical:check'` | green, `ran 2.2s` |
 | `target '//packages/canonical:circular'` | green, `ran 909ms` |
 | `target '//:knownFiles'` | green, `ran 10.8s`, second run `hit 3.2ms` |
+| `target '//:preCommit'` | 339 targets, 335 ran, 2 hit, 1 member failed, 178.2s |
+
+`//:preCommit` is the whole repository's static gate surface: every package's
+typecheck, lint, and format, plus the five root gates, plus the apps, evals,
+and examples typechecks. It runs in three minutes from cold. The single failing
+member is `//packages/build-cli:lint`, which fails identically on the
+unmodified base commit for a reason this host causes; see "Failure modes and
+host drift".
 
 The cache hits are the point. `//packages/canonical:lint` costs 7.2 seconds
 cold and 3 milliseconds when nothing it reads has changed.
