@@ -1025,7 +1025,6 @@ export const execute = async (options: ExecuteOptions): Promise<Summary> => {
       options.signal
     )
     if (!Exit.isSuccess(exit)) {
-      console.error("DEBUG TARGET FAILURE", target.attrs, Cause.pretty(exit.cause), Cause.squash(exit.cause))
       return fail(describeFailure(Cause.squash(exit.cause)))
     }
     // A success is not a success until the target's declared outputs are on
