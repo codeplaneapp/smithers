@@ -1841,9 +1841,6 @@ importers:
       '@effect/language-service':
         specifier: 0.87.1
         version: 0.87.1
-      '@effect/vitest':
-        specifier: 4.0.0-rc.108
-        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(vitest@4.1.9)
       '@eslint/js':
         specifier: 9.39.1
         version: 9.39.1
@@ -1856,9 +1853,6 @@ importers:
       dprint:
         specifier: 0.55.2
         version: 0.55.2
-      effect:
-        specifier: 4.0.0-rc.108
-        version: 4.0.0-rc.108
       esbuild:
         specifier: 0.28.1
         version: 0.28.1
@@ -4332,9 +4326,6 @@ importers:
       '@smthrs/control':
         specifier: 1.0.0-rc.0
         version: link:../control
-      '@smthrs/core':
-        specifier: 1.0.0-rc.0
-        version: link:../core
       '@smthrs/database':
         specifier: 1.0.0-rc.0
         version: link:../database

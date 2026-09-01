@@ -809,12 +809,10 @@
       "version": "1.0.0-rc.0",
       "devDependencies": {
         "@effect/language-service": "0.87.1",
-        "@effect/vitest": "4.0.0-rc.108",
         "@eslint/js": "9.39.1",
         "@types/node": "25.9.5",
         "@vitest/coverage-v8": "4.1.9",
         "dprint": "0.55.2",
-        "effect": "4.0.0-rc.108",
         "esbuild": "0.28.1",
         "eslint": "9.39.1",
         "eslint-import-resolver-typescript": "4.4.5",
@@ -1903,9 +1901,8 @@
       "name": "@smthrs/triggers",
       "version": "0.1.0",
       "dependencies": {
-        "@smthrs/control": "0.1.0",
-        "@smthrs/core": "0.1.0",
-        "@smthrs/database": "0.1.0",
+        "@smthrs/control": "1.0.0-rc.0",
+        "@smthrs/database": "1.0.0-rc.0",
         "effect": "4.0.0-rc.108",
       },
       "devDependencies": {
