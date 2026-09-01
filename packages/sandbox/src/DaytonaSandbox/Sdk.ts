@@ -6,6 +6,13 @@
 
 interface ExecuteResponse {
   readonly exitCode: number
+  /**
+   * The command's output as one string. The wire response carries no
+   * separate stderr field, and the execution endpoint merges standard error
+   * into this text, so it is the command's combined output rather than pure
+   * stdout. (The SDK also mirrors it at `artifacts.stdout`, which this
+   * provider does not read.)
+   */
   readonly result: string
 }
 
@@ -39,7 +46,12 @@ interface CreateInput {
  *
  * A caller passes an instance created with `new Daytona(...)`. Keeping only
  * this structural slice avoids importing the vendor package or its Node-only
- * transitive dependencies into `@smthrs/sandbox`.
+ * transitive dependencies into `@smthrs/sandbox`. The shapes mirror the
+ * published `@daytonaio/sdk` 0.207.0 typings: `get`/`create`/`start`/`delete`
+ * on the client, `getWorkDir` on the sandbox, `process.executeCommand`
+ * returning `{ exitCode, result }`, and `fs.downloadFile` (a `Buffer` is a
+ * `Uint8Array`) / `fs.uploadFileStream` (whose `UploadSource` accepts a
+ * `Uint8Array`) for file transfer.
  *
  * @category models
  * @since 0.1.0

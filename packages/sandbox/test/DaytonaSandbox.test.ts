@@ -1,5 +1,20 @@
-import { describe, expect, it } from "@effect/vitest"
-import { Effect, Stream } from "effect"
+import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
+import { afterAll, describe, expect, it } from "@effect/vitest"
+import { Effect, Layer, Path, Stream } from "effect"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import * as DaytonaSandbox from "../src/DaytonaSandbox/index.ts"
 import type { Sdk } from "../src/DaytonaSandbox/Sdk.ts"
 import { sessionSlug } from "../src/internal/sessionSlug.ts"
@@ -13,12 +28,74 @@ const decoder = new TextDecoder()
 type VendorSandbox = Awaited<ReturnType<Sdk["get"]>>
 type CreateInput = NonNullable<Parameters<Sdk["create"]>[0]>
 
+// -----------------------------------------------------------------------------
+// The Daytona SDK as a fake: real shells behind the vendor's promise surface.
+// -----------------------------------------------------------------------------
+
+// The fake emulates only what `@daytonaio/sdk` 0.207 adds around a machine —
+// the sandbox registry with its documented not-found shapes, the
+// `executeCommand` response `{ exitCode, result, artifacts: { stdout } }`
+// whose one `result` string is the command's merged output, and byte-typed
+// `downloadFile`/`uploadFileStream`. Underneath, every command is a real
+// `sh -c` run by the platform spawner in the machine's real directory, and
+// the file operations touch that same tree, so the provider is proven against
+// a machine rather than a script table.
+const root = realpathSync(mkdtempSync(join(tmpdir(), "smthrs-daytona-sandbox-")))
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true })
+})
+
+const platform = Layer.provideMerge(
+  NodeChildProcessSpawner.layer,
+  Layer.merge(NodeFileSystem.layer, Path.layer)
+)
+const local = Effect.runSync(
+  Effect.gen(function*() {
+    return yield* ChildProcessSpawner
+  }).pipe(Effect.provide(platform))
+)
+
+const combinedRun = (
+  command: string,
+  cwd: string,
+  env: Readonly<Record<string, string>> | undefined
+): Promise<{ readonly exitCode: number; readonly output: string }> =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function*() {
+        // "Executes a shell command in the Sandbox", with the sandbox's own
+        // environment beneath the caller's variables.
+        const child = yield* local.spawn(
+          ChildProcess.make("sh", ["-c", command], { cwd, env: { ...env }, extendEnv: true })
+        )
+        const [output, exitCode] = yield* Effect.all(
+          [
+            // The wire response carries one output string with standard error
+            // merged in, which is what a combined gathering of both pipes is.
+            Stream.mkString(Stream.decodeText(Stream.merge(child.stdout, child.stderr))),
+            child.exitCode
+          ],
+          { concurrency: "unbounded" }
+        )
+        return { exitCode, output }
+      })
+    )
+  )
+
+/** The `{ exitCode, result, artifacts }` shape the vendor documents. */
+interface VendorExecuteResponse {
+  readonly exitCode: number
+  readonly result: string
+  readonly artifacts: { readonly stdout: string }
+}
+
+const vendorError = (message: string, fields: Record<string, unknown>): Error =>
+  Object.assign(new Error(message), fields)
+
 interface Machine {
   readonly id: string
   readonly name: string
-  readonly files: Map<string, Uint8Array>
-  readonly directories: Set<string>
-  workdir: string | undefined
+  dir: string | undefined
   running: boolean
 }
 
@@ -28,15 +105,21 @@ interface ExecuteCall {
   readonly env: Record<string, string> | undefined
 }
 
-interface Plan {
+interface Faults {
+  /** `get` is refused with something other than the not-found shape. */
   getFailure?: unknown
+  /** `create` is refused (quota, capacity). */
   createFailure?: unknown
+  /** `start` is refused. */
   startFailure?: unknown
+  /** `delete` is refused. */
   deleteFailure?: unknown
+  /** `getWorkDir` is refused. */
   workdirFailure?: unknown
-  downloadFailure?: unknown
-  uploadFailure?: unknown
-  execute?: ((call: ExecuteCall) => number | unknown | undefined) | undefined
+  /** Every `executeCommand` call is refused (the API is unreachable). */
+  executeFailure?: unknown
+  /** The machine reports every command finished with this status (a dying VM). */
+  commandFailure?: { readonly exitCode: number; readonly result: string } | undefined
 }
 
 interface Recorded {
@@ -47,72 +130,24 @@ interface Recorded {
     { readonly id: string; readonly timeout: number | undefined; readonly wait: boolean | undefined }
   >
   readonly executes: Array<ExecuteCall>
-  readonly downloads: Array<string>
-  readonly uploads: Array<{ readonly path: string; readonly content: Uint8Array }>
 }
 
-const vendorError = (message: string, fields: Record<string, unknown>): Error =>
-  Object.assign(new Error(message), fields)
-
-const addDirectory = (machine: Machine, path: string): void => {
-  const parts = path.split("/").filter((part) => part !== "")
-  let current = ""
-  machine.directories.add("/")
-  for (const part of parts) {
-    current += `/${part}`
-    machine.directories.add(current)
-  }
-}
-
-const parentOf = (path: string): string => path.slice(0, path.lastIndexOf("/")) || "/"
-
-const unquote = (token: string): string =>
-  token.startsWith("'") && token.endsWith("'")
-    ? token.slice(1, -1).replaceAll("'\\''", "'")
-    : token
-
-const shell = (call: ExecuteCall): { readonly exitCode: number; readonly result: string } => {
-  if (call.command === "pwd") return { exitCode: 0, result: `${call.cwd}\n` }
-  if (call.command === `printf '%s' "$SANDBOX_CONFORMANCE"`) {
-    return { exitCode: 0, result: call.env?.["SANDBOX_CONFORMANCE"] ?? "" }
-  }
-  if (call.command === `printf '%s:%s' "$STATIC_PROOF" "$SPAWN_PROOF"`) {
-    return { exitCode: 0, result: `${call.env?.["STATIC_PROOF"] ?? ""}:${call.env?.["SPAWN_PROOF"] ?? ""}` }
-  }
-  const printed = /^printf '([^']*)'$/.exec(call.command)
-  if (printed !== null) return { exitCode: 0, result: printed[1] ?? "" }
-  const exited = /^exit ([0-9]+)$/.exec(call.command)
-  if (exited !== null) return { exitCode: Number(exited[1]), result: "" }
-  return { exitCode: 0, result: "done" }
-}
-
-const fakeSdk = (plan: Plan = {}): {
+const fakeSdk = (faults: Faults = {}): {
   readonly sdk: Sdk
   readonly recorded: Recorded
   readonly machines: Map<string, Machine>
-  readonly seed: (name: string, workdir?: string | undefined) => Machine
+  readonly seed: (name: string, dir?: string) => Machine
 } => {
-  const recorded: Recorded = {
-    gets: [],
-    creates: [],
-    starts: [],
-    deletes: [],
-    executes: [],
-    downloads: [],
-    uploads: []
-  }
+  const recorded: Recorded = { gets: [], creates: [], starts: [], deletes: [], executes: [] }
   const machines = new Map<string, Machine>()
   let nextId = 1
-  const seed = (name: string, workdir: string | undefined = "/home/daytona"): Machine => {
+  const seed = (name: string, dir?: string): Machine => {
     const machine: Machine = {
       id: `sandbox-${nextId++}`,
       name,
-      files: new Map(),
-      directories: new Set(["/"]),
-      workdir,
+      dir: dir ?? mkdtempSync(join(root, "machine-")),
       running: false
     }
-    if (workdir !== undefined && workdir.startsWith("/")) addDirectory(machine, workdir)
     machines.set(name, machine)
     machines.set(machine.id, machine)
     return machine
@@ -121,69 +156,73 @@ const fakeSdk = (plan: Plan = {}): {
     id: machine.id,
     name: machine.name,
     getWorkDir: () =>
-      plan.workdirFailure === undefined ? Promise.resolve(machine.workdir) : Promise.reject(plan.workdirFailure),
+      faults.workdirFailure === undefined ? Promise.resolve(machine.dir) : Promise.reject(faults.workdirFailure),
     process: {
-      executeCommand: async (command, cwd, env) => {
-        if (!machine.running) throw new Error("sandbox is stopped")
-        const call = { command, cwd, env }
-        recorded.executes.push(call)
-        const planned = plan.execute?.(call)
-        if (planned !== undefined && typeof planned !== "number") throw planned
-        if (typeof planned === "number") return { exitCode: planned, result: "" }
-        const directory = /^mkdir -p (.+)$/.exec(command)
-        if (directory !== null) {
-          addDirectory(machine, unquote(directory[1] ?? ""))
-          return { exitCode: 0, result: "" }
+      executeCommand: async (command, cwd, env): Promise<VendorExecuteResponse> => {
+        if (!machine.running) throw new Error(`the fake was asked to execute on a stopped sandbox: ${machine.name}`)
+        recorded.executes.push({ command, cwd, env })
+        if (faults.executeFailure !== undefined) throw faults.executeFailure
+        if (faults.commandFailure !== undefined) {
+          const { exitCode, result } = faults.commandFailure
+          return { exitCode, result, artifacts: { stdout: result } }
         }
-        return shell(call)
+        const run = await combinedRun(command, cwd ?? machine.dir ?? root, env)
+        return { exitCode: run.exitCode, result: run.output, artifacts: { stdout: run.output } }
       }
     },
     fs: {
       downloadFile: async (path) => {
-        recorded.downloads.push(path)
-        if (plan.downloadFailure !== undefined) throw plan.downloadFailure
-        const content = machine.files.get(path)
-        if (content === undefined) throw vendorError(`file not found: ${path}`, { code: "FILE_NOT_FOUND" })
-        return new Uint8Array(content)
+        if (!existsSync(path)) {
+          // The documented `DaytonaFileNotFoundError` shape: code
+          // `FILE_NOT_FOUND` on HTTP 404.
+          throw vendorError(`file not found: ${path}`, { code: "FILE_NOT_FOUND", statusCode: 404 })
+        }
+        return new Uint8Array(readFileSync(path))
       },
       uploadFileStream: async (content, path) => {
-        recorded.uploads.push({ path, content: new Uint8Array(content) })
-        if (plan.uploadFailure !== undefined) throw plan.uploadFailure
-        if (!machine.directories.has(parentOf(path))) throw new Error("parent directory does not exist")
-        machine.files.set(path, new Uint8Array(content))
+        // Relative remote paths resolve against the sandbox working
+        // directory, the way the vendor's own examples use them.
+        writeFileSync(path.startsWith("/") ? path : join(machine.dir ?? root, path), content)
       }
     }
   })
   const sdk: Sdk = {
     get: async (idOrName) => {
       recorded.gets.push(idOrName)
-      if (plan.getFailure !== undefined) throw plan.getFailure
+      if (faults.getFailure !== undefined) throw faults.getFailure
       const machine = machines.get(idOrName)
-      if (machine === undefined) throw vendorError(`sandbox not found: ${idOrName}`, { statusCode: 404 })
+      if (machine === undefined) {
+        // The documented `DaytonaNotFoundError` shape: HTTP 404.
+        throw vendorError(`sandbox not found: ${idOrName}`, { statusCode: 404 })
+      }
       return instance(machine)
     },
     create: async (input) => {
       recorded.creates.push(input)
-      if (plan.createFailure !== undefined) throw plan.createFailure
+      if (faults.createFailure !== undefined) throw faults.createFailure
       const machine = seed(input?.name ?? `generated-${nextId}`)
       machine.running = true
       return instance(machine)
     },
     start: async (sandbox, timeout) => {
       recorded.starts.push({ id: sandbox.id, timeout })
-      if (plan.startFailure !== undefined) throw plan.startFailure
+      if (faults.startFailure !== undefined) throw faults.startFailure
       const machine = machines.get(sandbox.id)
       if (machine === undefined) throw vendorError("sandbox not found", { statusCode: 404 })
       machine.running = true
     },
     delete: async (sandbox, timeout, wait) => {
       recorded.deletes.push({ id: sandbox.id, timeout, wait })
-      if (plan.deleteFailure !== undefined) throw plan.deleteFailure
+      if (faults.deleteFailure !== undefined) throw faults.deleteFailure
       const machine = machines.get(sandbox.id)
       if (machine === undefined) throw vendorError("sandbox not found", { statusCode: 404 })
       machine.running = false
       machines.delete(machine.id)
       machines.delete(machine.name)
+      // Deleting a sandbox destroys its filesystem.
+      if (machine.dir !== undefined && machine.dir.startsWith(root)) {
+        rmSync(machine.dir, { recursive: true, force: true })
+      }
     }
   }
   return { sdk, recorded, machines, seed }
@@ -194,21 +233,33 @@ const acquired = <A, E>(
   body: (session: Session) => Effect.Effect<A, E>
 ): Effect.Effect<A, E | ProviderError> => Effect.scoped(Effect.flatMap(provider.acquire("run-1"), body))
 
+const output = (session: Session, command: string, options: Parameters<Session["spawn"]>[1] = {}) =>
+  Effect.scoped(
+    Effect.gen(function*() {
+      const process = yield* session.spawn(command, options)
+      const stdout = yield* Stream.mkString(Stream.decodeText(process.stdout))
+      const code = yield* process.exitCode
+      return { stdout, code }
+    })
+  )
+
 describe("DaytonaSandbox", () => {
-  it.effect("passes SandboxConformance against the Daytona SDK fake", () =>
+  it.effect("passes SandboxConformance running real shells against a real tree", () =>
     Effect.gen(function*() {
       const { sdk } = fakeSdk()
       const violations = yield* SandboxConformance.check(DaytonaSandbox.make({ sdk }), {
         provides: { ping: true }
       })
       expect(violations).toEqual([])
-    }), 30_000)
+    }), 60_000)
 
   it.effect("attaches, starts, discovers the workdir, and deletes synchronously", () =>
     Effect.gen(function*() {
       const fake = fakeSdk()
       const name = `lane-${sessionSlug("run-1")}`
-      const machine = fake.seed(name, "/workspace with quote's")
+      const quoted = join(root, "workspace with quote's")
+      mkdirSync(quoted)
+      const machine = fake.seed(name, quoted)
       const provider = DaytonaSandbox.make({
         sdk: fake.sdk,
         namePrefix: "lane-",
@@ -220,23 +271,21 @@ describe("DaytonaSandbox", () => {
         Effect.gen(function*() {
           expect(session.id).toBe("run-1")
           expect(session.remoteId).toBe(machine.id)
-          return yield* Effect.scoped(
-            Effect.flatMap(
-              session.spawn(`printf '%s:%s' "$STATIC_PROOF" "$SPAWN_PROOF"`, {
-                cwd: "/tmp",
-                env: { SPAWN_PROOF: "spawn", OMITTED: undefined }
-              }),
-              (process) => Stream.mkString(Stream.decodeText(process.stdout))
-            )
-          )
+          expect(session.workdir).toBe(quoted)
+          return yield* output(session, `printf '%s:%s' "$STATIC_PROOF" "$SPAWN_PROOF"`, {
+            cwd: "/tmp",
+            env: { SPAWN_PROOF: "spawn", OMITTED: undefined }
+          })
         }))
 
-      expect(answer).toBe("static:spawn")
+      expect(answer).toEqual({ stdout: "static:spawn", code: 0 })
       expect(fake.recorded.gets).toEqual([name])
       expect(fake.recorded.creates).toEqual([])
       expect(fake.recorded.starts).toEqual([{ id: machine.id, timeout: 17 }])
       expect(fake.recorded.deletes).toEqual([{ id: machine.id, timeout: 29, wait: true }])
-      expect(fake.recorded.executes[0]?.command).toBe("mkdir -p '/workspace with quote'\\''s'")
+      // The workspace with a quote in its name survived a real shell because
+      // the provider quoted it; the recorded line is that rendering.
+      expect(fake.recorded.executes[0]?.command).toBe(`mkdir -p '${quoted.replaceAll("'", `'\\''`)}'`)
       expect(fake.recorded.executes[1]).toMatchObject({
         cwd: "/tmp",
         env: { STATIC_PROOF: "static", SPAWN_PROOF: "spawn" }
@@ -244,17 +293,60 @@ describe("DaytonaSandbox", () => {
       expect(fake.machines.size).toBe(0)
     }))
 
-  it.effect("uses an explicit workspace and preserves file bytes", () =>
+  it.effect("delivers stdin, merged stderr, rooted cwds, and byte-faithful files", () =>
     Effect.gen(function*() {
       const fake = fakeSdk()
-      const bytes = new Uint8Array([0, 255, 254, 1])
-      yield* acquired(DaytonaSandbox.make({ sdk: fake.sdk, workdir: "/explicit" }), (session) =>
+      const bytes = new Uint8Array([0, 255, 254, 1, 10, 13, 7])
+      yield* acquired(DaytonaSandbox.make({ sdk: fake.sdk }), (session) =>
         Effect.gen(function*() {
-          expect(session.workdir).toBe("/explicit")
-          yield* session.writeFile("/root-file", bytes)
-          expect(yield* session.readFile("/root-file")).toEqual(bytes)
-          const process = yield* Effect.scoped(session.spawn("printf 'ok'", {}))
-          expect(yield* Stream.mkString(Stream.decodeText(process.stderr))).toBe("")
+          const work = session.workdir
+          yield* session.writeFile(`${work}/deep/tree/out.bin`, bytes)
+          expect(yield* session.readFile(`${work}/deep/tree/out.bin`)).toEqual(bytes)
+
+          // A path with no parent to create takes the bare write, and the
+          // vendor roots it at the sandbox working directory.
+          yield* session.writeFile("rooted.bin", new Uint8Array([42]))
+          expect(Array.from(yield* session.readFile(`${work}/rooted.bin`))).toEqual([42])
+
+          // Standard input is staged in the workspace, delivered, and the
+          // staged file is removed once the command ends.
+          expect(yield* output(session, "cat > stdin-copy.bin", { stdin: bytes })).toEqual({ stdout: "", code: 0 })
+          expect(yield* session.readFile(`${work}/stdin-copy.bin`)).toEqual(bytes)
+          expect(yield* Effect.flip(session.readFile(`${work}/.smthrs-stdin-0`))).toMatchObject({ code: "not_found" })
+
+          // `executeCommand` merges standard error into its one output, so
+          // the text arrives on stdout and stderr is honestly empty.
+          const merged = yield* Effect.scoped(
+            Effect.gen(function*() {
+              const process = yield* session.spawn("printf 'to-stderr' >&2; printf 'to-stdout'", {})
+              const stdout = yield* Stream.mkString(Stream.decodeText(process.stdout))
+              const stderr = yield* Stream.mkString(Stream.decodeText(process.stderr))
+              return { stdout, stderr, code: yield* process.exitCode }
+            })
+          )
+          expect(merged.stdout).toContain("to-stderr")
+          expect(merged.stdout).toContain("to-stdout")
+          expect(merged.stderr).toBe("")
+          expect(merged.code).toBe(0)
+
+          expect((yield* output(session, "mkdir -p nested/leaf")).code).toBe(0)
+          expect((yield* output(session, "pwd", { cwd: "nested/leaf" })).stdout).toBe(`${work}/nested/leaf\n`)
+          expect((yield* output(session, "pwd", { cwd: "./nested" })).stdout).toBe(`${work}/nested\n`)
+          expect((yield* output(session, "pwd", { cwd: "" })).stdout).toBe(`${work}\n`)
+          expect((yield* output(session, "pwd", { cwd: "." })).stdout).toBe(`${work}\n`)
+          expect((yield* output(session, "pwd", { cwd: work })).stdout).toBe(`${work}\n`)
+        }))
+    }), 30_000)
+
+  it.effect("uses an explicit workspace over discovery", () =>
+    Effect.gen(function*() {
+      const fake = fakeSdk()
+      const explicit = mkdtempSync(join(root, "explicit-"))
+      yield* acquired(DaytonaSandbox.make({ sdk: fake.sdk, workdir: explicit }), (session) =>
+        Effect.gen(function*() {
+          expect(session.workdir).toBe(explicit)
+          yield* session.writeFile(`${explicit}/probe.bin`, new Uint8Array([7]))
+          expect(Array.from(yield* session.readFile(`${explicit}/probe.bin`))).toEqual([7])
         }))
       expect(fake.recorded.deletes[0]).toMatchObject({ timeout: 60, wait: true })
     }))
@@ -271,7 +363,7 @@ describe("DaytonaSandbox", () => {
       for (const workdir of [undefined, "relative"] as const) {
         const fake = fakeSdk()
         const expected = `bad-${sessionSlug("run-1")}`
-        fake.seed(expected).workdir = workdir
+        fake.seed(expected).dir = workdir
         const failure = yield* Effect.flip(
           acquired(DaytonaSandbox.make({ sdk: fake.sdk, namePrefix: "bad-" }), Effect.succeed)
         )
@@ -313,16 +405,22 @@ describe("DaytonaSandbox", () => {
       expect((discoveryFailure as ProviderError).code).toBe("unavailable")
       expect(discovery.recorded.deletes).toHaveLength(1)
 
-      const execute = fakeSdk({ execute: () => new Error("exec refused") })
+      const execute = fakeSdk({ executeFailure: new Error("exec refused") })
       const executeFailure = yield* Effect.flip(acquired(DaytonaSandbox.make({ sdk: execute.sdk }), Effect.succeed))
       expect((executeFailure as ProviderError).code).toBe("spawn_error")
       expect(execute.recorded.deletes).toHaveLength(1)
 
-      const prepare = fakeSdk({ execute: (call) => call.command.startsWith("mkdir -p ") ? 8 : undefined })
-      const prepareFailure = yield* Effect.flip(acquired(DaytonaSandbox.make({ sdk: prepare.sdk }), Effect.succeed))
+      // A workspace that really cannot be created refuses the session.
+      const blocked = fakeSdk()
+      const blocker = join(mkdtempSync(join(root, "prepare-")), "blocker")
+      writeFileSync(blocker, "a file, not a directory")
+      const prepareFailure = yield* Effect.flip(
+        acquired(DaytonaSandbox.make({ sdk: blocked.sdk, workdir: `${blocker}/work` }), Effect.succeed)
+      )
       expect((prepareFailure as ProviderError).code).toBe("unavailable")
-      expect(prepare.recorded.deletes).toHaveLength(1)
+      expect(blocked.recorded.deletes).toHaveLength(1)
 
+      // A delete that fails is logged, and the acquisition still succeeds.
       const ignoredDelete = fakeSdk({ deleteFailure: new Error("already gone") })
       yield* acquired(DaytonaSandbox.make({ sdk: ignoredDelete.sdk }), Effect.succeed)
       expect(ignoredDelete.recorded.deletes).toHaveLength(1)
@@ -330,35 +428,43 @@ describe("DaytonaSandbox", () => {
 
   it.effect("maps file, spawn, and ping failures", () =>
     Effect.gen(function*() {
-      const plan: Plan = {}
-      const fake = fakeSdk(plan)
+      const faults: Faults = {}
+      const fake = fakeSdk(faults)
       yield* acquired(DaytonaSandbox.make({ sdk: fake.sdk }), (session) =>
         Effect.gen(function*() {
-          plan.execute = (call) => call.command === "broken" ? new Error("exec failed") : undefined
-          const spawnFailure = yield* Effect.flip(Effect.scoped(session.spawn("broken", {})))
+          const work = session.workdir
+          faults.executeFailure = new Error("exec failed")
+          const spawnFailure = yield* Effect.flip(Effect.scoped(session.spawn("true", {})))
           expect((spawnFailure as ProviderError).code).toBe("spawn_error")
+          faults.executeFailure = undefined
 
-          plan.execute = (call) => call.command.includes("/blocked") ? 3 : undefined
-          const directoryFailure = yield* Effect.flip(session.writeFile("/blocked/file", new Uint8Array()))
+          // A parent that is really a file cannot become a directory.
+          writeFileSync(join(work, "occupied"), "a file, not a directory")
+          const directoryFailure = yield* Effect.flip(session.writeFile(`${work}/occupied/child`, new Uint8Array()))
           expect((directoryFailure as ProviderError).code).toBe("unknown")
 
-          plan.execute = undefined
-          plan.uploadFailure = new Error("upload failed")
-          const uploadFailure = yield* Effect.flip(session.writeFile("/file", new Uint8Array()))
+          // A directory that refuses writes fails the upload itself.
+          mkdirSync(join(work, "sealed-dir"))
+          chmodSync(join(work, "sealed-dir"), 0o555)
+          const uploadFailure = yield* Effect.flip(
+            session.writeFile(`${work}/sealed-dir/child`, new Uint8Array([1]))
+          )
           expect((uploadFailure as ProviderError).code).toBe("unknown")
 
-          plan.uploadFailure = undefined
-          const absent = yield* Effect.flip(session.readFile("/absent"))
+          const absent = yield* Effect.flip(session.readFile(`${work}/absent`))
           expect((absent as ProviderError).code).toBe("not_found")
 
-          plan.downloadFailure = vendorError("permission denied", { code: "PERMISSION_DENIED" })
-          const downloadFailure = yield* Effect.flip(session.readFile("/private"))
-          expect((downloadFailure as ProviderError).code).toBe("unknown")
+          // A file that exists but cannot be read is broken, not absent.
+          writeFileSync(join(work, "sealed.bin"), "sealed")
+          chmodSync(join(work, "sealed.bin"), 0)
+          const sealed = yield* Effect.flip(session.readFile(join(work, "sealed.bin")))
+          expect((sealed as ProviderError).code).toBe("unknown")
 
-          plan.downloadFailure = undefined
-          plan.execute = (call) => call.command === "true" ? 9 : undefined
+          // A dying machine reports commands as finished without running them.
+          faults.commandFailure = { exitCode: 9, result: "" }
           const pingFailure = yield* Effect.flip(session.ping!)
           expect((pingFailure as ProviderError).code).toBe("unavailable")
+          faults.commandFailure = undefined
         }))
     }))
 })

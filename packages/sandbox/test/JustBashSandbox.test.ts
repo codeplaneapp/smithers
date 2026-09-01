@@ -1,437 +1,114 @@
-import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Option, PlatformError, Stream } from "effect"
+import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
+import { afterAll, describe, expect, it } from "@effect/vitest"
+import { Effect, FileSystem, Layer, Path, Stream } from "effect"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { chmodSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { env as hostEnv } from "node:process"
 import * as JustBashSandbox from "../src/JustBashSandbox/index.ts"
-import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import * as Sandbox from "../src/Sandbox/index.ts"
 import type { Session } from "../src/Sandbox/Session.ts"
 import * as SandboxConformance from "../src/SandboxConformance/index.ts"
 
 const encoder = new TextEncoder()
-const decoder = new TextDecoder()
 
-const normalize = (raw: string): string => {
-  const parts: Array<string> = []
-  for (const part of `/${raw}`.split("/")) {
-    if (part === "" || part === ".") continue
-    if (part === "..") parts.pop()
-    else parts.push(part)
-  }
-  return `/${parts.join("/")}`
-}
-
-const parentOf = (path: string): string => {
-  const normalized = normalize(path)
-  const separator = normalized.lastIndexOf("/")
-  return separator === 0 ? "/" : normalized.slice(0, separator)
-}
-
-const platformFailure = (
-  method: string,
-  path: string,
-  tag: PlatformError.SystemErrorTag = "NotFound"
-): PlatformError.PlatformError =>
-  PlatformError.systemError({
-    _tag: tag,
-    module: "FileSystem",
-    method,
-    description: `${tag}: ${path}`,
-    pathOrDescriptor: path
-  })
-
-const info = (type: FileSystem.File.Type, size = 0): FileSystem.File.Info => ({
-  type,
-  mtime: Option.none(),
-  atime: Option.none(),
-  birthtime: Option.none(),
-  dev: 0,
-  ino: Option.none(),
-  mode: 0,
-  nlink: Option.none(),
-  uid: Option.none(),
-  gid: Option.none(),
-  rdev: Option.none(),
-  size: FileSystem.Size(size),
-  blksize: Option.none(),
-  blocks: Option.none()
+// Real directories and real shells; the resolved root keeps macOS's symlinked
+// temp tree from making `pwd` disagree with a session workdir.
+const root = realpathSync(mkdtempSync(join(tmpdir(), "smthrs-just-bash-")))
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true })
 })
 
-const memoryFileSystem = () => {
-  const directories = new Set<string>(["/"])
-  const files = new Map<string, Uint8Array>()
-  const links = new Map<string, string>()
+const platform = Layer.provideMerge(
+  NodeChildProcessSpawner.layer,
+  Layer.merge(NodeFileSystem.layer, Path.layer)
+)
 
-  const linkTarget = (path: string): string | undefined => {
-    const normalized = normalize(path)
-    const target = links.get(normalized)
-    if (target === undefined) return undefined
-    return normalize(target.startsWith("/") ? target : `${parentOf(normalized)}/${target}`)
-  }
+const services = Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const local = yield* ChildProcessSpawner
+  return { fs, local }
+}).pipe(Effect.provide(platform))
 
-  const resolved = (path: string): string => {
-    const normalized = normalize(path)
-    return linkTarget(normalized) ?? normalized
-  }
+// -----------------------------------------------------------------------------
+// just-bash as a fake: a real `sh` behind the interpreter's own exec contract.
+// -----------------------------------------------------------------------------
 
-  const entryPaths = (): Array<string> => [
-    ...directories,
-    ...files.keys(),
-    ...links.keys()
-  ]
-
-  const fs = FileSystem.makeNoop({
-    access: (path) =>
-      Effect.suspend(() => {
-        const target = resolved(path)
-        return directories.has(target) || files.has(target)
-          ? Effect.void
-          : Effect.fail(platformFailure("access", path))
-      }),
-    exists: (path) =>
-      Effect.sync(() => {
-        const target = resolved(path)
-        return directories.has(target) || files.has(target)
-      }),
-    makeDirectory: (path, options) =>
-      Effect.suspend(() => {
-        const target = normalize(path)
-        if (files.has(target) || links.has(target)) {
-          return Effect.fail(platformFailure("makeDirectory", path, "AlreadyExists"))
-        }
-        if (directories.has(target)) {
-          return options?.recursive === true
-            ? Effect.void
-            : Effect.fail(platformFailure("makeDirectory", path, "AlreadyExists"))
-        }
-        if (options?.recursive !== true && !directories.has(parentOf(target))) {
-          return Effect.fail(platformFailure("makeDirectory", path))
-        }
-        let current = ""
-        for (const part of target.split("/").filter(Boolean)) {
-          current += `/${part}`
-          if (files.has(current) || links.has(current)) {
-            return Effect.fail(platformFailure("makeDirectory", current, "AlreadyExists"))
-          }
-        }
-        return Effect.sync(() => {
-          let directory = ""
-          for (const part of target.split("/").filter(Boolean)) {
-            directory += `/${part}`
-            directories.add(directory)
-          }
-        })
-      }),
-    readFile: (path) =>
-      Effect.suspend(() => {
-        const target = resolved(path)
-        if (directories.has(target)) {
-          return Effect.fail(platformFailure("readFile", path, "BadResource"))
-        }
-        const content = files.get(target)
-        return content === undefined
-          ? Effect.fail(platformFailure("readFile", path))
-          : Effect.succeed(content.slice())
-      }),
-    readFileString: (path) => Effect.map(fs.readFile(path), (content) => decoder.decode(content)),
-    writeFile: (path, content) =>
-      Effect.suspend(() => {
-        const target = resolved(path)
-        if (directories.has(target)) {
-          return Effect.fail(platformFailure("writeFile", path, "BadResource"))
-        }
-        if (!directories.has(parentOf(target))) {
-          return Effect.fail(platformFailure("writeFile", path))
-        }
-        return Effect.sync(() => {
-          files.set(target, content.slice())
-        })
-      }),
-    writeFileString: (path, content) => fs.writeFile(path, encoder.encode(content)),
-    stat: (path) =>
-      Effect.suspend(() => {
-        const target = resolved(path)
-        if (directories.has(target)) return Effect.succeed(info("Directory"))
-        const content = files.get(target)
-        return content === undefined
-          ? Effect.fail(platformFailure("stat", path))
-          : Effect.succeed(info("File", content.length))
-      }),
-    readDirectory: (path, options) =>
-      Effect.suspend(() => {
-        const target = resolved(path)
-        if (!directories.has(target)) return Effect.fail(platformFailure("readDirectory", path))
-        const prefix = target === "/" ? "/" : `${target}/`
-        const entries = new Set<string>()
-        for (const entry of entryPaths()) {
-          if (entry === target || !entry.startsWith(prefix)) continue
-          const relative = entry.slice(prefix.length)
-          entries.add(options?.recursive === true ? relative : relative.split("/")[0]!)
-        }
-        return Effect.succeed([...entries].sort())
-      }),
-    remove: (path, options) =>
-      Effect.suspend(() => {
-        const target = normalize(path)
-        const present = files.has(target) || links.has(target) || directories.has(target)
-        if (!present) {
-          return options?.force === true ? Effect.void : Effect.fail(platformFailure("remove", path))
-        }
-        const prefix = `${target}/`
-        const hasChildren = entryPaths().some((entry) => entry.startsWith(prefix))
-        if (directories.has(target) && hasChildren && options?.recursive !== true) {
-          return Effect.fail(platformFailure("remove", path, "Busy"))
-        }
-        return Effect.sync(() => {
-          for (const entry of [...files.keys()]) {
-            if (entry === target || entry.startsWith(prefix)) files.delete(entry)
-          }
-          for (const entry of [...links.keys()]) {
-            if (entry === target || entry.startsWith(prefix)) links.delete(entry)
-          }
-          for (const entry of [...directories]) {
-            if (entry === target || entry.startsWith(prefix)) directories.delete(entry)
-          }
-        })
-      }),
-    rename: (oldPath, newPath) =>
-      Effect.suspend(() => {
-        const oldTarget = normalize(oldPath)
-        const newTarget = normalize(newPath)
-        if (!files.has(oldTarget) && !links.has(oldTarget) && !directories.has(oldTarget)) {
-          return Effect.fail(platformFailure("rename", oldPath))
-        }
-        if (!directories.has(parentOf(newTarget))) {
-          return Effect.fail(platformFailure("rename", newPath))
-        }
-        return Effect.sync(() => {
-          const move = <A>(entries: Map<string, A>): void => {
-            for (const [path, value] of [...entries]) {
-              if (path !== oldTarget && !path.startsWith(`${oldTarget}/`)) continue
-              entries.delete(path)
-              entries.set(`${newTarget}${path.slice(oldTarget.length)}`, value)
-            }
-          }
-          move(files)
-          move(links)
-          for (const path of [...directories]) {
-            if (path !== oldTarget && !path.startsWith(`${oldTarget}/`)) continue
-            directories.delete(path)
-            directories.add(`${newTarget}${path.slice(oldTarget.length)}`)
-          }
-        })
-      }),
-    symlink: (fromPath, toPath) =>
-      Effect.suspend(() => {
-        const target = normalize(toPath)
-        if (files.has(target) || directories.has(target) || links.has(target)) {
-          return Effect.fail(platformFailure("symlink", toPath, "AlreadyExists"))
-        }
-        if (!directories.has(parentOf(target))) {
-          return Effect.fail(platformFailure("symlink", toPath))
-        }
-        return Effect.sync(() => {
-          links.set(target, fromPath)
-        })
-      }),
-    readLink: (path) =>
-      Effect.suspend(() => {
-        const target = links.get(normalize(path))
-        return target === undefined
-          ? Effect.fail(platformFailure("readLink", path))
-          : Effect.succeed(target)
-      }),
-    realPath: (path) =>
-      Effect.suspend(() => {
-        const target = resolved(path)
-        return directories.has(target) || files.has(target)
-          ? Effect.succeed(target)
-          : Effect.fail(platformFailure("realPath", path))
-      })
-  })
-
-  return { fs }
+/**
+ * The result shape just-bash 3.2.0 resolves from `exec` (`dist/types.d.ts`,
+ * `interface BashExecResult`): the captured output text, the exit code, and
+ * the final environment of the run. The provider slice reads the first three
+ * fields; returning the vendor's whole required shape keeps the fake
+ * assignable to `JustBashLike` exactly the way the real `Bash` class is.
+ */
+interface BashExecResult {
+  readonly stdout: string
+  readonly stderr: string
+  readonly exitCode: number
+  readonly env: Record<string, string>
 }
 
-const shellWords = (line: string): Array<string> => {
-  const words: Array<string> = []
-  let word = ""
-  let quote: "'" | "\"" | undefined
-  let escaped = false
-  let started = false
-  for (const character of line.trim()) {
-    if (escaped) {
-      word += character
-      escaped = false
-      started = true
-    } else if (character === "\\" && quote !== "'") {
-      escaped = true
-    } else if (quote !== undefined) {
-      if (character === quote) quote = undefined
-      else word += character
-      started = true
-    } else if (character === "'" || character === "\"") {
-      quote = character
-      started = true
-    } else if (/\s/.test(character)) {
-      if (started) {
-        words.push(word)
-        word = ""
-        started = false
-      }
-    } else {
-      word += character
-      started = true
-    }
-  }
-  if (started) words.push(word)
-  return words
+interface ExecCall {
+  readonly commandLine: string
+  readonly options: JustBashSandbox.JustBashExecOptions
 }
 
-const base64 = (bytes: Uint8Array): string => {
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-  let output = ""
-  for (let index = 0; index < bytes.length; index += 3) {
-    const first = bytes[index]!
-    const second = bytes[index + 1]
-    const third = bytes[index + 2]
-    output += alphabet[first >> 2]
-    output += alphabet[((first & 3) << 4) | ((second ?? 0) >> 4)]
-    output += second === undefined ? "=" : alphabet[((second & 15) << 2) | ((third ?? 0) >> 6)]
-    output += third === undefined ? "=" : alphabet[third & 63]
+/** One byte per character, the latin1 byte buffer `stdinKind: "bytes"` names. */
+const bytesOfLatin1 = (text: string): Uint8Array => {
+  const bytes = new Uint8Array(text.length)
+  for (let index = 0; index < text.length; index++) {
+    bytes[index] = text.charCodeAt(index) & 0xff
   }
-  return output
+  return bytes
 }
 
-interface BashCall {
-  readonly command: string
-  readonly cwd: string
-  readonly env: Readonly<Record<string, string>>
+const definedHostEnv = (): Record<string, string> => {
+  const resolved: Record<string, string> = {}
+  for (const [key, value] of Object.entries(hostEnv)) {
+    if (value !== undefined) resolved[key] = value
+  }
+  return resolved
 }
 
-const justBash = (fs: FileSystem.FileSystem) => {
-  const calls: Array<BashCall> = []
-  const result = (stdout = "", stderr = "", exitCode = 0) => ({ stdout, stderr, exitCode })
-
-  const attempt = async <A>(effect: Effect.Effect<A, PlatformError.PlatformError>): Promise<A | undefined> => {
-    try {
-      return await Effect.runPromise(effect)
-    } catch {
-      return undefined
-    }
-  }
-
-  const run: JustBashSandbox.JustBashLike["run"] = async (command, options = {}) => {
-    const cwd = normalize(options.cwd ?? "/")
-    const env = options.env ?? {}
-    calls.push({ command, cwd, env })
-    const absolute = (path: string): string => normalize(path.startsWith("/") ? path : `${cwd}/${path}`)
-
-    if (command === "pwd") return result(`${cwd}\n`)
-    if (command === "printf 'out'; printf 'err' >&2; exit 4") return result("out", "err", 4)
-
-    if (command.startsWith("if [ -d ") && command.includes("t=Directory")) {
-      const target = absolute(shellWords(command.slice(8, command.indexOf(" ]; then")))[0]!)
-      const stats = await attempt(fs.stat(target))
-      if (stats !== undefined) return result(`${stats.type} ${stats.type === "File" ? stats.size : 0n}`)
-      if (await attempt(fs.readLink(target)) !== undefined) return result("SymbolicLink 0")
-      return result("", "", 9)
-    }
-
-    if (command.startsWith("if [ -d ") && (command.includes("; then find ") || command.includes("; then ls "))) {
-      const target = absolute(shellWords(command.slice(8, command.indexOf(" ]; then")))[0]!)
-      const stats = await attempt(fs.stat(target))
-      if (stats?.type !== "Directory") return result("", "", 9)
-      const recursive = command.includes("; then find ")
-      const entries = await Effect.runPromise(fs.readDirectory(target, { recursive }))
-      const output = recursive ? entries.map((entry) => `${target}/${entry}`) : entries
-      return result(output.length === 0 ? "" : `${output.join("\n")}\n`)
-    }
-
-    if (command.startsWith("if [ -e ") && command.includes("; then rm ")) {
-      const target = absolute(shellWords(command.slice(8, command.indexOf(" ] ||")))[0]!)
-      const exists = await Effect.runPromise(fs.exists(target))
-      const link = await attempt(fs.readLink(target)) !== undefined
-      if (!exists && !link) return result("", "", 9)
-      command = command.slice(command.indexOf("then ") + 5, command.indexOf("; else"))
-    }
-
-    const words = shellWords(command)
-    const program = words[0]
-    try {
-      if (program === "exit") return result("", "", Number(words[1] ?? 0))
-      if (program === "printf") {
-        const format = words[1] ?? ""
-        const values = words.slice(2).map((value) => {
-          const variable = /^\$(?:\{([^}]+)\}|([A-Za-z_][A-Za-z0-9_]*))$/.exec(value)
-          const name = variable?.[1] ?? variable?.[2]
-          return name === "PWD" ? cwd : name === undefined ? value : env[name] ?? ""
-        })
-        let index = 0
-        return result(format.replaceAll("%s", () => values[index++] ?? ""))
-      }
-      if (program === "test") {
-        const flag = words[1]
-        const target = absolute(words[2]!)
-        if (flag === "-h") return result("", "", await attempt(fs.readLink(target)) === undefined ? 1 : 0)
-        const stats = await attempt(fs.stat(target))
-        const passes = flag === "-e"
-          ? stats !== undefined
-          : flag === "-d"
-          ? stats?.type === "Directory"
-          : stats?.type === "File"
-        return result("", "", passes ? 0 : 1)
-      }
-      if (program === "cat") {
-        const content = await Effect.runPromise(fs.readFile(absolute(words[1]!)))
-        return result(decoder.decode(content))
-      }
-      if (program === "base64") {
-        const content = await Effect.runPromise(fs.readFile(absolute(words[1]!)))
-        return result(`${base64(content)}\n`)
-      }
-      if (program === "wc" && words[1] === "-c" && words[2] === "<") {
-        const content = await Effect.runPromise(fs.readFile(absolute(words[3]!)))
-        return result(`${content.length}\n`)
-      }
-      if (program === "mkdir") {
-        const recursive = words.includes("-p")
-        await Effect.runPromise(fs.makeDirectory(absolute(words.at(-1)!), { recursive }))
-        return result()
-      }
-      if (program === "ls") {
-        const entries = await Effect.runPromise(fs.readDirectory(absolute(words.at(-1)!)))
-        return result(entries.length === 0 ? "" : `${entries.join("\n")}\n`)
-      }
-      if (program === "find") {
-        const target = absolute(words[1]!)
-        const entries = await Effect.runPromise(fs.readDirectory(target, { recursive: true }))
-        return result(entries.length === 0 ? "" : `${entries.map((entry) => `${target}/${entry}`).join("\n")}\n`)
-      }
-      if (program === "rm") {
-        await Effect.runPromise(fs.remove(absolute(words.at(-1)!), {
-          recursive: words.includes("-r"),
-          force: words.includes("-f")
-        }))
-        return result()
-      }
-      if (program === "mv") {
-        await Effect.runPromise(fs.rename(absolute(words[1]!), absolute(words[2]!)))
-        return result()
-      }
-      if (program === "readlink") {
-        const canonical = words[1] === "-f"
-        const target = absolute(words[canonical ? 2 : 1]!)
-        const answer = canonical
-          ? await Effect.runPromise(fs.realPath(target))
-          : await Effect.runPromise(fs.readLink(target))
-        return result(`${answer}\n`)
-      }
-    } catch (error) {
-      return result("", `${program}: ${String(error)}\n`, 1)
-    }
-    return result("", `${program}: command not found\n`, 127)
-  }
-
-  return { bash: { run } satisfies JustBashSandbox.JustBashLike, calls }
+// The fake honors just-bash's documented `ExecOptions` semantics with a real
+// `sh` run against the same real tree the injected `FileSystem` operates on,
+// so "the interpreter and the filesystem are mounted on the same tree" is
+// literally true here: `cwd` is this one call's working directory; `env` is
+// merged into the interpreter's current environment (the host's, for a real
+// shell); `stdin` with `stdinKind: "bytes"` is a latin1 byte buffer forwarded
+// verbatim, `"text"` (the default) is UTF-8 encoded, and absent stdin is
+// empty. A script table mirroring the provider's command lines would prove
+// nothing; this reproduces the interpreter the provider has to drive.
+const justBash = () => {
+  const calls: Array<ExecCall> = []
+  const exec = (commandLine: string, options: JustBashSandbox.JustBashExecOptions = {}): Promise<BashExecResult> =>
+    Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      calls.push({ commandLine, options })
+      const { local } = yield* services
+      const stdin = options.stdin === undefined
+        ? new Uint8Array()
+        : options.stdinKind === "bytes"
+        ? bytesOfLatin1(options.stdin)
+        : encoder.encode(options.stdin)
+      const child = yield* local.spawn(ChildProcess.make("sh", ["-c", commandLine], {
+        cwd: options.cwd,
+        env: options.env,
+        extendEnv: true,
+        stdin: Stream.make(stdin)
+      }))
+      const [stdout, stderr, exitCode] = yield* Effect.all(
+        [
+          Stream.mkString(Stream.decodeText(child.stdout)),
+          Stream.mkString(Stream.decodeText(child.stderr)),
+          child.exitCode
+        ],
+        { concurrency: "unbounded" }
+      )
+      return { stdout, stderr, exitCode, env: { ...definedHostEnv(), ...options.env } }
+    })))
+  return { bash: { exec } satisfies JustBashSandbox.JustBashLike, calls }
 }
 
 const output = (session: Session, command: string, options: Parameters<Session["spawn"]>[1] = {}) =>
@@ -447,175 +124,215 @@ const output = (session: Session, command: string, options: Parameters<Session["
       ))
   )
 
+// The suite runs every command through a real `sh`; a loaded machine still fits this.
+const budget = 60_000
+
 describe("JustBashSandbox", () => {
-  it.effect("passes SandboxConformance against a shared in-memory tree", () =>
-    Effect.gen(function*() {
-      const memory = memoryFileSystem()
-      const fake = justBash(memory.fs)
-      const provider = JustBashSandbox.make({ bash: fake.bash, fs: memory.fs })
-      const violations = yield* SandboxConformance.check(provider, { provides: { ping: true } })
-      expect(violations).toEqual([])
-      expect(fake.calls.some((call) => call.cwd.startsWith("/workspace/sandbox-conformance-"))).toBe(true)
-      expect(fake.calls.find((call) => call.env.SANDBOX_CONFORMANCE === "delivered")?.env).toEqual({
-        SANDBOX_CONFORMANCE: "delivered"
-      })
-    }))
+  it.effect(
+    "passes SandboxConformance with a real interpreter and filesystem on one real tree",
+    () =>
+      Effect.gen(function*() {
+        const { fs } = yield* services
+        const fake = justBash()
+        const provider = JustBashSandbox.make({ bash: fake.bash, fs, root: `${root}/conformance` })
+        const violations = yield* SandboxConformance.check(provider, { provides: { ping: true } })
+        expect(violations).toEqual([])
+        // The interpreter was driven the way the contract says: in the session
+        // workspace, with the caller's environment, with bytes-typed stdin.
+        expect(
+          fake.calls.some((call) => call.options.cwd?.startsWith(`${root}/conformance/sandbox-conformance-`) === true)
+        ).toBe(true)
+        expect(
+          fake.calls.find((call) => call.options.env?.SANDBOX_CONFORMANCE !== undefined)?.options.env
+        ).toEqual({ SANDBOX_CONFORMANCE: "delivered" })
+        expect(fake.calls.some((call) => call.options.stdin !== undefined)).toBe(true)
+        expect(fake.calls.every((call) => call.options.stdin === undefined || call.options.stdinKind === "bytes"))
+          .toBe(true)
+      }),
+    budget
+  )
 
-  it.effect("shares files with the interpreter and serves rooted native and probe operations", () =>
-    Effect.gen(function*() {
-      const memory = memoryFileSystem()
-      const fake = justBash(memory.fs)
-      const provider = JustBashSandbox.make({ bash: fake.bash, fs: memory.fs, root: "/virtual///" })
-      let released = ""
-      yield* Effect.scoped(
-        Effect.gen(function*() {
-          const session = yield* provider.acquire("shared/tree")
-          released = session.workdir
-          expect(session.remoteId).toBe(session.workdir)
-          expect(session.workdir.startsWith("/virtual/")).toBe(true)
-          expect(session.kill).toBeUndefined()
-          yield* session.ping!
+  it.effect(
+    "shares one real tree between the interpreter and the filesystem",
+    () =>
+      Effect.gen(function*() {
+        const { fs } = yield* services
+        const fake = justBash()
+        const provider = JustBashSandbox.make({ bash: fake.bash, fs, root: `${root}/virtual///` })
+        let released = ""
+        yield* Effect.scoped(
+          Effect.gen(function*() {
+            const session = yield* provider.acquire("shared/tree")
+            released = session.workdir
+            expect(session.remoteId).toBe(session.workdir)
+            expect(session.workdir.startsWith(`${root}/virtual/shared-tree-`)).toBe(true)
+            // Documented divergences that still hold: no signal delivery, so
+            // sessions omit `kill` and the conformance run above skipped its
+            // kill-and-survivor check instead of reporting a violation.
+            expect(session.kill).toBeUndefined()
+            yield* session.ping!
 
-          const binary = new Uint8Array([0, 1, 2, 255, 254])
-          yield* session.writeFile(`${session.workdir}/deep/data.bin`, binary)
-          expect(Array.from(yield* session.readFile(`${session.workdir}/deep/data.bin`))).toEqual([...binary])
-          expect((yield* output(session, `base64 ${session.workdir}/deep/data.bin`)).stdout).toBe("AAEC//4=\n")
-          expect((yield* output(session, `wc -c < ${session.workdir}/deep/data.bin`)).stdout).toBe("5\n")
+            // Bytes written through the session are the bytes a real process
+            // measures and reads back.
+            const binary = new Uint8Array([0, 1, 2, 255, 254])
+            yield* session.writeFile(`${session.workdir}/deep/data.bin`, binary)
+            expect(Array.from(yield* session.readFile(`${session.workdir}/deep/data.bin`))).toEqual([...binary])
+            expect((yield* output(session, "wc -c < deep/data.bin")).stdout.trim()).toBe("5")
+            expect((yield* output(session, "base64 < deep/data.bin")).stdout).toBe("AAEC//4=\n")
 
-          yield* session.writeFile(`${session.workdir}/notes/agenda.txt`, encoder.encode("prepared"))
-          expect((yield* output(session, `cat ${session.workdir}/notes/agenda.txt`)).stdout).toBe("prepared")
-          expect((yield* output(session, "pwd", { cwd: "/virtual" })).stdout).toBe("/virtual\n")
-          const env = yield* output(session, `printf '%s:%s' "$KEPT" "$DROPPED"`, {
-            env: { KEPT: "yes", DROPPED: undefined }
+            // Standard input takes the latin1 bytes path in 8 KiB slices: a
+            // payload past the slice boundary with every byte value in it
+            // survives to the file a real `cat` writes.
+            const payload = new Uint8Array(3 * 8192 + 7)
+            for (let index = 0; index < payload.length; index++) payload[index] = (index * 31) & 0xff
+            expect((yield* output(session, "cat > fed.bin", { stdin: payload })).exitCode).toBe(0)
+            expect(Array.from(yield* session.readFile(`${session.workdir}/fed.bin`))).toEqual([...payload])
+            const fed = fake.calls.at(-1)!
+            expect(fed.options.stdinKind).toBe("bytes")
+            expect(fed.options.stdin?.length).toBe(payload.length)
+
+            // A relative cwd roots at the workdir, dot forms included; an
+            // absolute one passes through.
+            yield* output(session, "mkdir -p sub")
+            expect((yield* output(session, "pwd", { cwd: "sub" })).stdout).toBe(`${session.workdir}/sub\n`)
+            expect((yield* output(session, "pwd", { cwd: "./sub" })).stdout).toBe(`${session.workdir}/sub\n`)
+            expect((yield* output(session, "pwd", { cwd: "." })).stdout).toBe(`${session.workdir}\n`)
+            expect((yield* output(session, "pwd", { cwd: "" })).stdout).toBe(`${session.workdir}\n`)
+            expect((yield* output(session, "pwd", { cwd: root })).stdout).toBe(`${root}\n`)
+
+            // Defined environment entries are merged for the one call; an
+            // `undefined` value is dropped rather than sent as text.
+            const env = yield* output(session, `printf '%s:%s' "$KEPT" "$DROPPED"`, {
+              env: { KEPT: "yes", DROPPED: undefined }
+            })
+            expect(env.stdout).toBe("yes:")
+            expect(fake.calls.at(-1)?.options.env).toEqual({ KEPT: "yes" })
+
+            // Run-to-completion replay, the other documented divergence: both
+            // streams and the status arrive after the fact, empty output as an
+            // empty stream and captured output as a single chunk.
+            const replayed = yield* output(session, "printf 'out'; printf 'err' >&2; exit 4")
+            expect(replayed).toEqual({ stdout: "out", stderr: "err", exitCode: 4 })
+            yield* Effect.scoped(Effect.gen(function*() {
+              const done = yield* session.spawn("exit 0", {})
+              expect(yield* Stream.runCollect(done.stdout)).toEqual([])
+              expect(yield* Stream.runCollect(done.stderr)).toEqual([])
+              expect(yield* done.exitCode).toBe(0)
+            }))
+            yield* Effect.scoped(Effect.gen(function*() {
+              const chunked = yield* session.spawn("printf 'one chunk'", {})
+              expect(yield* Stream.runCollect(chunked.stdout)).toHaveLength(1)
+            }))
+
+            // The native overrides serve the derived filesystem surface with
+            // the workdir rooting rule, against the same tree the probes see.
+            const native = Sandbox.fileSystem(session)
+            const probed = Sandbox.fileSystem({ ...session, files: undefined })
+            yield* native.writeFileString("notes/agenda.txt", "prepared")
+            yield* fs.symlink(`${session.workdir}/notes/agenda.txt`, `${session.workdir}/notes/link.txt`)
+            expect(yield* native.exists("notes/agenda.txt")).toBe(true)
+            expect(yield* native.exists("missing")).toBe(false)
+            expect(yield* probed.exists("notes/agenda.txt")).toBe(true)
+            expect((yield* native.stat("./notes/agenda.txt")).size).toBe(8n)
+            expect((yield* native.stat(".")).type).toBe("Directory")
+            expect((yield* native.readDirectory("notes")).sort()).toEqual(["agenda.txt", "link.txt"])
+            expect(yield* native.readLink("notes/link.txt")).toBe(`${session.workdir}/notes/agenda.txt`)
+            expect(yield* native.realPath("notes/link.txt")).toBe(`${session.workdir}/notes/agenda.txt`)
+            yield* native.makeDirectory("build/out", { recursive: true })
+            yield* native.rename("notes/agenda.txt", "build/out/agenda.txt")
+            expect((yield* output(session, "cat build/out/agenda.txt")).stdout).toBe("prepared")
+            yield* native.remove("notes", { recursive: true, force: true })
+            expect(yield* native.exists("notes")).toBe(false)
+
+            // An absolute write outside the workspace still lands on the one
+            // shared tree: a workspace boundary, not a security boundary.
+            yield* session.writeFile(`${root}/virtual/top-level.bin`, new Uint8Array([9]))
+            expect(yield* fs.exists(`${root}/virtual/top-level.bin`)).toBe(true)
           })
-          expect(env.stdout).toBe("yes:")
-          expect(fake.calls.at(-1)?.env).toEqual({ KEPT: "yes" })
+        )
+        // Releasing the scope removed the workspace.
+        expect(yield* fs.exists(released)).toBe(false)
+      }),
+    budget
+  )
 
-          const replayed = yield* output(session, "printf 'out'; printf 'err' >&2; exit 4")
-          expect(replayed).toEqual({ stdout: "out", stderr: "err", exitCode: 4 })
-          expect(
-            yield* Stream.runCollect(
-              (yield* session.spawn("exit 0", {})).stdout
-            )
-          ).toEqual([])
-
-          const probed = Sandbox.fileSystem({ ...session, files: undefined })
-          yield* memory.fs.symlink(
-            `${session.workdir}/notes/agenda.txt`,
-            `${session.workdir}/notes/link.txt`
-          )
-          expect(yield* probed.exists(`${session.workdir}/notes/agenda.txt`)).toBe(true)
-          expect(yield* probed.exists(`${session.workdir}/missing`)).toBe(false)
-          expect((yield* probed.stat(`${session.workdir}/notes/agenda.txt`)).size).toBe(8n)
-          expect((yield* probed.stat(`${session.workdir}/notes`)).type).toBe("Directory")
-          expect(yield* probed.readDirectory(`${session.workdir}/notes`)).toEqual(["agenda.txt", "link.txt"])
-          expect(yield* probed.readDirectory(session.workdir, { recursive: true })).toEqual([
-            "deep",
-            "deep/data.bin",
-            "notes",
-            "notes/agenda.txt",
-            "notes/link.txt"
-          ])
-          expect(yield* probed.readLink(`${session.workdir}/notes/link.txt`)).toBe(
-            `${session.workdir}/notes/agenda.txt`
-          )
-          expect(yield* probed.realPath(`${session.workdir}/notes/link.txt`)).toBe(
-            `${session.workdir}/notes/agenda.txt`
-          )
-          yield* probed.makeDirectory(`${session.workdir}/build/out`, { recursive: true })
-          yield* probed.rename(
-            `${session.workdir}/notes/agenda.txt`,
-            `${session.workdir}/build/out/agenda.txt`
-          )
-          yield* probed.remove(`${session.workdir}/notes`, { recursive: true, force: true })
-
-          const native = Sandbox.fileSystem(session)
-          yield* native.writeFileString("relative.txt", "rooted")
-          expect((yield* native.stat("./relative.txt")).type).toBe("File")
-          expect(yield* native.exists("")).toBe(true)
-          expect(yield* native.exists(".")).toBe(true)
-          expect(yield* native.exists(`${session.workdir}/relative.txt`)).toBe(true)
-          yield* native.makeDirectory("native/dir", { recursive: true })
-          yield* native.rename("relative.txt", "native/dir/moved.txt")
-          expect(yield* native.readDirectory(".")).toContain("native")
-          yield* memory.fs.symlink("native/dir/moved.txt", `${session.workdir}/native-link`)
-          expect(yield* native.readLink("native-link")).toBe("native/dir/moved.txt")
-          expect(yield* native.realPath("native-link")).toBe(`${session.workdir}/native/dir/moved.txt`)
-          yield* native.remove("native", { recursive: true })
-          expect(yield* native.exists("native")).toBe(false)
-
-          yield* session.writeFile("/top-level.bin", new Uint8Array([9]))
-          expect(Array.from(yield* memory.fs.readFile("/top-level.bin"))).toEqual([9])
-        })
-      )
-      expect(yield* memory.fs.exists(released)).toBe(false)
-    }))
-
-  it.effect("keeps colliding keys separate and tears both workspaces down", () =>
+  it.effect("keeps colliding keys in separate workspaces and tears both down", () =>
     Effect.gen(function*() {
-      const memory = memoryFileSystem()
-      const fake = justBash(memory.fs)
-      const provider = JustBashSandbox.make({ bash: fake.bash, fs: memory.fs })
+      const { fs } = yield* services
+      const fake = justBash()
+      const provider = JustBashSandbox.make({ bash: fake.bash, fs, root: `${root}/lanes` })
       const workdirs = yield* Effect.scoped(
         Effect.gen(function*() {
           const one = yield* provider.acquire("lane/one")
           const other = yield* provider.acquire("lane-one")
           expect(one.workdir).not.toBe(other.workdir)
           yield* one.writeFile(`${one.workdir}/proof.txt`, encoder.encode("one"))
-          expect(yield* memory.fs.exists(`${other.workdir}/proof.txt`)).toBe(false)
+          expect(yield* fs.exists(`${other.workdir}/proof.txt`)).toBe(false)
           return [one.workdir, other.workdir]
         })
       )
-      for (const workdir of workdirs) expect(yield* memory.fs.exists(workdir)).toBe(false)
-    }))
+      for (const workdir of workdirs) {
+        expect(yield* fs.exists(workdir)).toBe(false)
+      }
+    }), budget)
 
   it.effect("maps interpreter and filesystem failures into the provider vocabulary", () =>
     Effect.gen(function*() {
-      const memory = memoryFileSystem()
-      const refusal = platformFailure("test", "/refused", "PermissionDenied")
-      const refusingFs = FileSystem.makeNoop({
-        ...memory.fs,
-        readFile: (path) => path.endsWith("locked") ? Effect.fail(refusal) : memory.fs.readFile(path),
-        writeFile: (path, content) =>
-          path.endsWith("refused") ? Effect.fail(refusal) : memory.fs.writeFile(path, content)
-      })
-      const fake = justBash(refusingFs)
-      const provider = JustBashSandbox.make({ bash: fake.bash, fs: refusingFs })
-      const failures = yield* Effect.scoped(
+      const { fs } = yield* services
+      const fake = justBash()
+
+      // A root that sits under a plain file cannot host a workspace.
+      yield* fs.writeFile(`${root}/plug`, new Uint8Array())
+      const blocked = JustBashSandbox.make({ bash: fake.bash, fs, root: `${root}/plug` })
+      expect((yield* Effect.flip(Effect.scoped(blocked.acquire("unavailable")))).code).toBe("unavailable")
+
+      const provider = JustBashSandbox.make({ bash: fake.bash, fs, root: `${root}/failures` })
+      yield* Effect.scoped(
         Effect.gen(function*() {
           const session = yield* provider.acquire("failures")
-          const absent = yield* Effect.flip(session.readFile(`${session.workdir}/absent`))
-          const locked = yield* Effect.flip(session.readFile(`${session.workdir}/locked`))
-          const write = yield* Effect.flip(session.writeFile(`${session.workdir}/refused`, new Uint8Array([1])))
-          return { absent, locked, write }
+          expect((yield* Effect.flip(session.readFile(`${session.workdir}/absent`))).code).toBe("not_found")
+          yield* fs.writeFile(`${session.workdir}/sealed.bin`, new Uint8Array([1]))
+          chmodSync(`${session.workdir}/sealed.bin`, 0)
+          expect((yield* Effect.flip(session.readFile(`${session.workdir}/sealed.bin`))).code).toBe("unknown")
+          yield* fs.writeFile(`${session.workdir}/blocker`, new Uint8Array())
+          expect(
+            (yield* Effect.flip(session.writeFile(`${session.workdir}/blocker/child`, new Uint8Array([1])))).code
+          ).toBe("unknown")
         })
       )
-      expect((failures.absent as ProviderError).code).toBe("not_found")
-      expect((failures.locked as ProviderError).code).toBe("unknown")
-      expect((failures.write as ProviderError).code).toBe("unknown")
 
-      const brokenBash: JustBashSandbox.JustBashLike = {
-        run: () => Promise.reject(new Error("interpreter crashed"))
+      // A rejecting interpreter is a spawn error, not a defect.
+      const broken: JustBashSandbox.JustBashLike = {
+        exec: () => Promise.reject(new Error("interpreter crashed"))
       }
+      const crashed = JustBashSandbox.make({ bash: broken, fs, root: `${root}/broken` })
       const spawnFailure = yield* Effect.flip(
         Effect.scoped(
-          Effect.flatMap(
-            JustBashSandbox.make({ bash: brokenBash, fs: memory.fs }).acquire("broken-bash"),
-            (session) => Effect.scoped(Effect.asVoid(session.spawn("true", {})))
-          )
+          Effect.flatMap(crashed.acquire("broken-bash"), (session) =>
+            Effect.scoped(Effect.asVoid(session.spawn("true", {}))))
         )
       )
-      expect((spawnFailure as ProviderError).code).toBe("spawn_error")
+      expect(spawnFailure.code).toBe("spawn_error")
 
-      const unavailableFs = FileSystem.makeNoop({
-        makeDirectory: () => Effect.fail(refusal),
-        remove: () => Effect.void
+      // The root option defaults to the virtual `/workspace`. Proving that
+      // must not create `/workspace` on this real host, so the one acquire
+      // against the default runs on a filesystem that only records the
+      // directory it is asked to make; nothing spawns through it.
+      const made: Array<string> = []
+      const recording = FileSystem.makeNoop({
+        makeDirectory: (path) =>
+          Effect.sync(() => {
+            made.push(path)
+          }),
+        remove: () =>
+          Effect.void
       })
-      const acquireFailure = yield* Effect.flip(
-        Effect.scoped(
-          JustBashSandbox.make({ bash: fake.bash, fs: unavailableFs }).acquire("unavailable")
-        )
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const session = yield* JustBashSandbox.make({ bash: fake.bash, fs: recording }).acquire("defaults")
+          expect(session.workdir.startsWith("/workspace/defaults-")).toBe(true)
+          expect(made).toEqual([session.workdir])
+        })
       )
-      expect((acquireFailure as ProviderError).code).toBe("unavailable")
-    }))
+    }), budget)
 })

@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
+import { stdinRedirect } from "../internal/stdinRedirect.ts"
 import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
 import type { Provider } from "../Sandbox/Provider.ts"
 import type { Session } from "../Sandbox/Session.ts"
@@ -31,6 +32,8 @@ interface Options {
 type VendorSandbox = Awaited<ReturnType<Sdk["get"]>>
 type ExecuteResponse = Awaited<ReturnType<VendorSandbox["process"]["executeCommand"]>>
 
+const encoder = new TextEncoder()
+
 const parentOf = (path: string): string | undefined => {
   const separator = path.lastIndexOf("/")
   return separator > 0 ? path.slice(0, separator) : undefined
@@ -39,8 +42,15 @@ const parentOf = (path: string): string | undefined => {
 const field = (cause: unknown, name: string): unknown =>
   typeof cause === "object" && cause !== null ? Reflect.get(cause, name) : undefined
 
+// The `@daytonaio/sdk` 0.207.0 typings document `DaytonaNotFoundError` with
+// `statusCode: 404` for a `get` of a missing sandbox. The shape is taken from
+// the published typings; it has not been verified against the live service.
 const missingSandbox = (cause: unknown): boolean => field(cause, "statusCode") === 404
 
+// The `@daytonaio/sdk` 0.207.0 typings document `DaytonaFileNotFoundError`
+// ("The file does not exist in the sandbox") with `code: "FILE_NOT_FOUND"`
+// for a download of a missing file. The shape is taken from the published
+// typings; it has not been verified against the live service.
 const missingFile = (cause: unknown): boolean => field(cause, "code") === "FILE_NOT_FOUND"
 
 const attempt = <A>(
@@ -69,8 +79,22 @@ const machineName = (prefix: string, session: string): string =>
  * missing sandbox is created with that name, while an existing one is started
  * before use. Creation or attachment is registered as a scoped resource before
  * start and workspace preparation, so any later failure still runs the
- * blocking delete finalizer. Daytona's byte-native download and stream-upload
- * operations serve file transfer; shell execution creates missing parents.
+ * blocking delete finalizer; a delete that fails is logged at Warn rather
+ * than swallowed. Daytona's byte-native download and stream-upload operations
+ * serve file transfer; shell execution creates missing parents.
+ *
+ * `process.executeCommand` answers with a single `result` string and an exit
+ * code — the wire response carries no stderr field, and the execution
+ * endpoint merges standard error into that one output (Daytona's own
+ * error-handling documentation prints `result` as the error output). The
+ * merged text is delivered on stdout, so text a command writes to stderr
+ * still reaches the caller there, and the stderr stream stays empty rather
+ * than fabricating a second copy of it.
+ *
+ * A relative spawn `cwd` is rooted at the session workdir per the session
+ * contract, and `options.stdin` is delivered through a workspace file —
+ * `executeCommand` takes a command line and nothing else, so the redirect in
+ * `internal/stdinRedirect` is the only honest route.
  *
  * @category constructors
  * @since 0.1.0
@@ -105,7 +129,8 @@ export const make = (options: Options): Provider => ({
               () => options.sdk.delete(sandbox, options.deleteTimeoutSeconds ?? 60, true),
               "unknown",
               `could not delete ${name}`
-            )
+            ),
+            { log: "Warn" }
           )
       )
       if (held.attached) {
@@ -140,27 +165,53 @@ export const make = (options: Options): Provider => ({
       const prepare = yield* execute(`mkdir -p ${CommandLine.quote(workdir)}`)
       yield* checked(prepare, "unavailable", `daytona-sandbox: could not prepare ${workdir}`)
 
+      const writeFile: Session["writeFile"] = (path, content) =>
+        Effect.gen(function*() {
+          const parent = parentOf(path)
+          if (parent !== undefined) {
+            const result = yield* execute(`mkdir -p ${CommandLine.quote(parent)}`)
+            yield* checked(result, "unknown", `daytona-sandbox: could not create ${parent}`)
+          }
+          yield* attempt(
+            () => held.sandbox.fs.uploadFileStream(content, path),
+            "unknown",
+            `could not upload ${path}`
+          )
+        })
+      // `executeCommand` takes a command line and nothing else, so a
+      // command's standard input is staged as a workspace file and the line
+      // is rewritten to read from it.
+      const redirect = stdinRedirect({ workdir, writeFile })
+      const resolveCwd = (cwd: string | undefined): string =>
+        cwd === undefined || cwd.startsWith("/")
+          ? cwd ?? workdir
+          : `${workdir}/${cwd.replace(/^(\.\/)+/, "")}`.replace(/\/\.?$/, "")
       const session: Session = {
         id: sessionKey,
         remoteId: held.sandbox.id,
         workdir,
         spawn: (command, spawnOptions) =>
-          Effect.map(
-            execute(
-              command,
-              spawnOptions.cwd ?? workdir,
-              Object.fromEntries(
-                [...Object.entries(options.commandEnv ?? {}), ...Object.entries(spawnOptions.env ?? {})].filter(
-                  (entry): entry is [string, string] => entry[1] !== undefined
+          Effect.flatMap(redirect(command, spawnOptions.stdin), (fed) =>
+            Effect.map(
+              execute(
+                fed,
+                resolveCwd(spawnOptions.cwd),
+                Object.fromEntries(
+                  [...Object.entries(options.commandEnv ?? {}), ...Object.entries(spawnOptions.env ?? {})].filter(
+                    (entry): entry is [string, string] => entry[1] !== undefined
+                  )
                 )
-              )
-            ),
-            (result) => ({
-              stdout: Stream.make(new TextEncoder().encode(result.result)),
-              stderr: Stream.empty,
-              exitCode: Effect.succeed(result.exitCode)
-            })
-          ),
+              ),
+              (result) => ({
+                // `result` is the command's combined output: the wire
+                // response has no stderr field and the endpoint merges
+                // standard error into it, so the merged text is delivered on
+                // stdout and stderr stays honestly empty.
+                stdout: Stream.make(encoder.encode(result.result)),
+                stderr: Stream.empty,
+                exitCode: Effect.succeed(result.exitCode)
+              })
+            )),
         readFile: (path) =>
           Effect.tryPromise({
             try: () => held.sandbox.fs.downloadFile(path).then((content) => new Uint8Array(content)),
@@ -173,19 +224,7 @@ export const make = (options: Options): Provider => ({
                 })
                 : providerFailure("unknown", `daytona-sandbox: could not download ${path}`)(cause)
           }),
-        writeFile: (path, content) =>
-          Effect.gen(function*() {
-            const parent = parentOf(path)
-            if (parent !== undefined) {
-              const result = yield* execute(`mkdir -p ${CommandLine.quote(parent)}`)
-              yield* checked(result, "unknown", `daytona-sandbox: could not create ${parent}`)
-            }
-            yield* attempt(
-              () => held.sandbox.fs.uploadFileStream(content, path),
-              "unknown",
-              `could not upload ${path}`
-            )
-          }),
+        writeFile,
         ping: Effect.gen(function*() {
           const result = yield* execute("true", workdir)
           yield* checked(result, "unavailable", `daytona-sandbox: ${name} did not answer`)

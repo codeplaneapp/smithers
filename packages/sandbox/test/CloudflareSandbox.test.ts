@@ -1,5 +1,11 @@
-import { describe, expect, it } from "@effect/vitest"
-import { Effect, Exit, Stream } from "effect"
+import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
+import { afterAll, describe, expect, it } from "@effect/vitest"
+import { Effect, Layer, Path, Stream } from "effect"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import * as CloudflareSandbox from "../src/CloudflareSandbox/index.ts"
 import type { RemoteProcess } from "../src/RemoteChildProcessSpawner/Provider.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
@@ -18,12 +24,13 @@ interface CommandOptions {
 }
 
 interface CommandResult {
+  readonly success: boolean
   readonly exitCode: number
   readonly stdout: string
   readonly stderr: string
 }
 
-type ProcessExitMode = "wait" | "handle" | "fallback"
+type ProcessExitMode = "wait" | "handle" | "none"
 
 class CloudflareError extends Error {
   readonly code: string
@@ -40,6 +47,7 @@ interface Binding {
   readonly resolutions: Array<{ readonly id: string; readonly options: SandboxOptions | undefined }>
   resolveFailure?: unknown
   processExitMode: ProcessExitMode
+  nextInstance: number
 }
 
 const encoder = new TextEncoder()
@@ -54,30 +62,63 @@ const base64Of = (content: Uint8Array): string => {
 const bytesOfBase64 = (content: string): Uint8Array =>
   Uint8Array.from(atob(content), (character) => character.charCodeAt(0))
 
-const parentOf = (path: string): string | undefined => {
-  const separator = path.lastIndexOf("/")
-  return separator < 0 ? undefined : separator === 0 ? "/" : path.slice(0, separator)
-}
+// -----------------------------------------------------------------------------
+// The Cloudflare Sandbox SDK as a fake: real shells and real files behind the
+// Durable Object surface.
+// -----------------------------------------------------------------------------
 
-const commandResult = (command: string, options: CommandOptions | undefined): CommandResult => {
-  if (command === "true") return { stdout: "", stderr: "", exitCode: 0 }
-  if (command === "pwd") return { stdout: `${options?.cwd ?? "/"}\n`, stderr: "", exitCode: 0 }
-  if (command === `printf '%s' "$SANDBOX_CONFORMANCE"`) {
-    return { stdout: options?.env?.SANDBOX_CONFORMANCE ?? "", stderr: "", exitCode: 0 }
-  }
-  const literal = /^printf '([^']*)'$/.exec(command)
-  if (literal !== null) return { stdout: literal[1]!, stderr: "", exitCode: 0 }
-  if (command.startsWith("exit ")) return { stdout: "", stderr: "", exitCode: Number(command.slice(5)) }
-  if (command === "emit-both") return { stdout: "out", stderr: "err", exitCode: 4 }
-  return { stdout: "", stderr: `sh: ${command}: not found\n`, exitCode: 127 }
-}
+// The fake emulates only what the vendor adds on top of a container: the
+// binding resolution, the base64 file framing, the FILE_NOT_FOUND error shape,
+// and the two execution surfaces. Underneath, every command is a REAL `sh -c`
+// with the requested cwd and environment, and every file operation lands on a
+// real file under the test's root. Guest-fixed absolute paths outside that
+// root live under the instance's own directory, the way the AWS fake keeps
+// guest pids under the test root.
+const root = realpathSync(mkdtempSync(join(tmpdir(), "smthrs-cf-sandbox-")))
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true })
+})
+
+const platform = Layer.provideMerge(
+  NodeChildProcessSpawner.layer,
+  Layer.merge(NodeFileSystem.layer, Path.layer)
+)
+const local = Effect.runSync(
+  Effect.gen(function*() {
+    return yield* ChildProcessSpawner
+  }).pipe(Effect.provide(platform))
+)
+
+const runSh = (
+  command: string,
+  cwd: string,
+  env: Record<string, string | undefined> | undefined
+): Promise<CommandResult> =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function*() {
+        const child = yield* local.spawn(
+          ChildProcess.make("sh", ["-c", command], { cwd, env: env ?? {}, extendEnv: true })
+        )
+        const [stdout, stderr, exitCode] = yield* Effect.all(
+          [
+            Stream.mkString(Stream.decodeText(child.stdout)),
+            Stream.mkString(Stream.decodeText(child.stderr)),
+            child.exitCode
+          ],
+          { concurrency: "unbounded" }
+        )
+        return { success: exitCode === 0, exitCode, stdout, stderr }
+      })
+    )
+  )
 
 class FakeSandbox {
   readonly binding: Binding
   readonly id: string
   readonly processExitMode: ProcessExitMode
-  readonly directories = new Set(["/"])
-  readonly files = new Map<string, Uint8Array>()
+  /** The real directory backing guest-fixed paths outside the test root. */
+  readonly root: string
   readonly events: Array<string> = []
   readonly readFailures = new Map<string, unknown>()
   readonly readContents = new Map<string, string>()
@@ -86,17 +127,23 @@ class FakeSandbox {
   failExec: unknown | undefined
   failStart: unknown | undefined
   failDestroy: unknown | undefined
-  pingExitCode = 0
+  execExitOverride: number | undefined
   destroyed = false
 
   constructor(binding: Binding, id: string, processExitMode: ProcessExitMode) {
     this.binding = binding
     this.id = id
     this.processExitMode = processExitMode
+    this.root = join(root, "instances", `${id}-${binding.nextInstance++}`)
+    mkdirSync(this.root, { recursive: true })
   }
 
   private assertLive(): void {
     if (this.destroyed) throw new CloudflareError("SESSION_DESTROYED", "sandbox destroyed")
+  }
+
+  private hostPath(path: string): string {
+    return path === root || path.startsWith(`${root}/`) ? path : join(this.root, path)
   }
 
   async mkdir(path: string, options?: { readonly recursive?: boolean | undefined }): Promise<{ path: string }> {
@@ -107,20 +154,7 @@ class FakeSandbox {
       this.failMkdir = undefined
       throw cause
     }
-    if (options?.recursive === true) {
-      const pieces = path.split("/").filter((piece) => piece.length > 0)
-      let current = path.startsWith("/") ? "" : "."
-      for (const piece of pieces) {
-        current = current === "" ? `/${piece}` : `${current}/${piece}`
-        this.directories.add(current)
-      }
-    } else {
-      const parent = parentOf(path)
-      if (parent !== undefined && !this.directories.has(parent)) {
-        throw new CloudflareError("FILE_NOT_FOUND", `missing ${parent}`)
-      }
-      this.directories.add(path)
-    }
+    mkdirSync(this.hostPath(path), { recursive: options?.recursive === true })
     return { path }
   }
 
@@ -136,11 +170,10 @@ class FakeSandbox {
       this.failWrite = undefined
       throw cause
     }
-    const parent = parentOf(path)
-    if (parent !== undefined && !this.directories.has(parent)) {
-      throw new CloudflareError("FILE_NOT_FOUND", `missing ${parent}`)
-    }
-    this.files.set(path, options?.encoding === "base64" ? bytesOfBase64(content) : encoder.encode(content))
+    writeFileSync(
+      this.hostPath(path),
+      options?.encoding === "base64" ? bytesOfBase64(content) : encoder.encode(content)
+    )
     return { path, success: true }
   }
 
@@ -154,12 +187,19 @@ class FakeSandbox {
     if (this.readContents.has(path)) {
       return { path, success: true, content: this.readContents.get(path)! }
     }
-    const content = this.files.get(path)
-    if (content === undefined) throw new CloudflareError("FILE_NOT_FOUND", `missing ${path}`)
+    let bytes: Uint8Array
+    try {
+      bytes = new Uint8Array(readFileSync(this.hostPath(path)))
+    } catch (cause) {
+      if (Reflect.get(Object(cause), "code") === "ENOENT") {
+        throw new CloudflareError("FILE_NOT_FOUND", `missing ${path}`)
+      }
+      throw cause
+    }
     return {
       path,
       success: true,
-      content: options?.encoding === "base64" ? base64Of(content) : decoder.decode(content)
+      content: options?.encoding === "base64" ? base64Of(bytes) : decoder.decode(bytes)
     }
   }
 
@@ -171,8 +211,13 @@ class FakeSandbox {
       this.failExec = undefined
       throw cause
     }
-    const result = commandResult(command, options)
-    return command === "true" ? { ...result, exitCode: this.pingExitCode } : result
+    const result = await runSh(command, this.hostPath(options?.cwd ?? "/"), options?.env)
+    if (this.execExitOverride !== undefined) {
+      const exitCode = this.execExitOverride
+      this.execExitOverride = undefined
+      return { ...result, exitCode, success: exitCode === 0 }
+    }
+    return result
   }
 
   async startProcess(command: string, options?: CommandOptions) {
@@ -183,19 +228,27 @@ class FakeSandbox {
       this.failStart = undefined
       throw cause
     }
-    const result = commandResult(command, options)
+    const running = runSh(command, this.hostPath(options?.cwd ?? "/"), options?.env)
     const mode = this.processExitMode
-    return {
-      ...(mode === "handle" ? { exitCode: result.exitCode } : {}),
+    const events = this.events
+    const process: {
+      exitCode?: number | undefined
+      waitForExit(timeout?: number): Promise<{ readonly exitCode?: number | undefined }>
+      getLogs(): Promise<{ readonly stdout: string; readonly stderr: string }>
+    } = {
       waitForExit: async () => {
-        this.events.push(`wait:${command}`)
-        return mode === "wait" ? { exitCode: result.exitCode } : { exitCode: undefined }
+        const result = await running
+        events.push(`wait:${command}`)
+        if (mode === "handle") process.exitCode = result.exitCode
+        return mode === "wait" ? { exitCode: result.exitCode } : {}
       },
       getLogs: async () => {
-        this.events.push(`logs:${command}`)
+        const result = await running
+        events.push(`logs:${command}`)
         return { stdout: result.stdout, stderr: result.stderr }
       }
     }
+    return process
   }
 
   async destroy(): Promise<void> {
@@ -210,7 +263,8 @@ const binding = (processExitMode: ProcessExitMode = "wait"): Binding => ({
   active: new Map(),
   instances: [],
   resolutions: [],
-  processExitMode
+  processExitMode,
+  nextInstance: 0
 })
 
 const sdk = {
@@ -244,10 +298,11 @@ describe("CloudflareSandbox", () => {
   it.effect("conforms in exec mode and forwards only named resolver options", () =>
     Effect.gen(function*() {
       const workerBinding = binding()
+      const workdir = join(root, "conformance-exec-ws")
       const provider = CloudflareSandbox.make({
         sdk,
         binding: workerBinding,
-        workdir: "/work dir",
+        workdir,
         keepAlive: true,
         sleepAfter: "3m"
       })
@@ -261,20 +316,31 @@ describe("CloudflareSandbox", () => {
         instance.destroyed
       )).toBe(true)
       expect(workerBinding.instances.some((instance) =>
-        instance.events.includes("write:/work dir/conformance-bytes.bin:base64") &&
-        instance.events.includes("read:/work dir/conformance-bytes.bin:base64")
+        instance.events.includes(`write:${workdir}/conformance-bytes.bin:base64`) &&
+        instance.events.includes(`read:${workdir}/conformance-bytes.bin:base64`)
       )).toBe(true)
-    }))
+      // Standard input was staged as a workspace file and read back through
+      // the redirect, then removed by the rewritten command itself.
+      expect(workerBinding.instances.some((instance) =>
+        instance.events.includes(`write:${workdir}/.smthrs-stdin-0:base64`)
+      )).toBe(true)
+    }), 30_000)
 
   it.effect("conforms in process mode only after waiting and fetching logs", () =>
     Effect.gen(function*() {
       const workerBinding = binding()
-      const provider = CloudflareSandbox.make({ sdk, binding: workerBinding, execution: "process" })
+      const provider = CloudflareSandbox.make({
+        sdk,
+        binding: workerBinding,
+        workdir: join(root, "conformance-process-ws"),
+        execution: "process"
+      })
       const violations = yield* SandboxConformance.check(provider, { provides: { ping: true } })
       expect(violations).toEqual([])
       const processEvents = workerBinding.instances.flatMap((instance) => instance.events).filter((event) =>
         /^(?:start|wait|logs):/.test(event)
       )
+      expect(processEvents.length).toBeGreaterThan(0)
       for (let index = 0; index < processEvents.length; index += 3) {
         expect(processEvents.slice(index, index + 3).map((event) => event.slice(0, event.indexOf(":")))).toEqual([
           "start",
@@ -282,25 +348,65 @@ describe("CloudflareSandbox", () => {
           "logs"
         ])
       }
+    }), 30_000)
+
+  it.effect("delivers stdin through the workspace redirect and roots a relative cwd", () =>
+    Effect.gen(function*() {
+      const workerBinding = binding()
+      const workdir = join(root, "stdin-ws")
+      const provider = CloudflareSandbox.make({ sdk, binding: workerBinding, workdir })
+      const bytes = new Uint8Array([0, 1, 2, 255, 254, 10, 13, 0, 7])
+      yield* acquired(provider, (session) =>
+        Effect.gen(function*() {
+          const copied = yield* Effect.scoped(
+            Effect.flatMap(session.spawn("cat > stdin-copy.bin", { stdin: bytes }), output)
+          )
+          expect(copied.code).toBe(0)
+          expect(Array.from(yield* session.readFile(`${workdir}/stdin-copy.bin`))).toEqual(Array.from(bytes))
+          // The staged input file is gone once the command ends.
+          expect(yield* Effect.flip(session.readFile(`${workdir}/.smthrs-stdin-0`))).toMatchObject({
+            code: "not_found"
+          })
+          yield* Effect.scoped(Effect.asVoid(session.spawn("mkdir -p sub", {})))
+          const rooted = yield* Effect.scoped(Effect.flatMap(session.spawn("pwd", { cwd: "./sub/" }), output))
+          expect(rooted).toEqual({ stdout: `${workdir}/sub\n`, stderr: "", code: 0 })
+        }))
     }))
 
-  it.effect("covers process exit fallbacks and command option filtering", () =>
+  it.effect("reports process exits faithfully and filters command options", () =>
     Effect.gen(function*() {
       const handleBinding = binding("handle")
-      const handleProvider = CloudflareSandbox.make({ sdk, binding: handleBinding, execution: "process" })
+      const workdir = join(root, "process-handle-ws")
+      const handleProvider = CloudflareSandbox.make({
+        sdk,
+        binding: handleBinding,
+        workdir,
+        execution: "process"
+      })
       const handleResult = yield* acquired(handleProvider, (session) =>
         Effect.scoped(Effect.flatMap(
-          session.spawn("emit-both", { cwd: "/chosen", env: { KEEP: "yes", DROP: undefined } }),
+          session.spawn(`printf 'out %s' "${"$"}{KEEP:-}${"$"}{DROP:-}"; printf 'err' >&2; exit 4`, {
+            env: { KEEP: "yes", DROP: undefined }
+          }),
           output
         )))
-      expect(handleResult).toEqual({ stdout: "out", stderr: "err", code: 4 })
+      expect(handleResult).toEqual({ stdout: "out yes", stderr: "err", code: 4 })
 
-      const fallbackBinding = binding("fallback")
-      const fallbackProvider = CloudflareSandbox.make({ sdk, binding: fallbackBinding, execution: "process" })
-      const fallback = yield* acquired(fallbackProvider, (session) =>
-        Effect.scoped(Effect.flatMap(session.spawn("emit-both", {}), (process) => process.exitCode)))
-      expect(fallback).toBe(1)
-      expect(fallbackBinding.resolutions[0]?.options).toEqual({ enableDefaultSession: false })
+      // An SDK that reports no exit status anywhere is a provider failure,
+      // never an invented exit code.
+      const noneBinding = binding("none")
+      const noneProvider = CloudflareSandbox.make({
+        sdk,
+        binding: noneBinding,
+        workdir: join(root, "process-none-ws"),
+        execution: "process"
+      })
+      const missing = yield* Effect.flip(acquired(noneProvider, (session) =>
+        Effect.scoped(Effect.flatMap(session.spawn("printf 'lost'", {}), (process) =>
+          process.exitCode))))
+      expect(missing).toMatchObject({ code: "spawn_error" })
+      expect(missing.message).toContain("no exit status")
+      expect(noneBinding.resolutions[0]?.options).toEqual({ enableDefaultSession: false })
     }))
 
   it.effect("maps vendor failures and releases half-prepared sandboxes", () =>
@@ -319,13 +425,17 @@ describe("CloudflareSandbox", () => {
           return sandbox
         }
       } satisfies CloudflareSandbox.Sdk<Binding>
-      const setupProvider = CloudflareSandbox.make({ sdk: setupSdk, binding: setupBinding })
+      const setupProvider = CloudflareSandbox.make({
+        sdk: setupSdk,
+        binding: setupBinding,
+        workdir: join(root, "setup-ws")
+      })
       const setupFailure = yield* Effect.flip(Effect.scoped(setupProvider.acquire("key")))
       expect(setupFailure).toMatchObject({ code: "unavailable" })
       expect(setupBinding.instances[0]?.events).toContain("destroy")
 
       const workerBinding = binding()
-      const provider = CloudflareSandbox.make({ sdk, binding: workerBinding })
+      const provider = CloudflareSandbox.make({ sdk, binding: workerBinding, workdir: join(root, "destroy-ws") })
       yield* Effect.scoped(
         Effect.flatMap(provider.acquire("key"), (session) =>
           Effect.sync(() => {
@@ -338,14 +448,18 @@ describe("CloudflareSandbox", () => {
   it.effect("preserves detailed file and process failure codes", () =>
     Effect.gen(function*() {
       const workerBinding = binding()
-      const provider = CloudflareSandbox.make({ sdk, binding: workerBinding })
+      const workdir = join(root, "failure-ws")
+      const provider = CloudflareSandbox.make({ sdk, binding: workerBinding, workdir })
       yield* Effect.scoped(
         Effect.flatMap(provider.acquire("edge"), (session) =>
           Effect.gen(function*() {
             const live = workerBinding.instances.at(-1)!
+            // A path with no separator takes the bare write; a path whose
+            // parent is the root takes the "/" parent branch. Both are real
+            // files under the instance's own directory.
             yield* session.writeFile("leaf", new Uint8Array())
             yield* session.writeFile("/leaf", new Uint8Array([0, 255]))
-            expect(yield* session.readFile("/leaf")).toEqual(new Uint8Array([0, 255]))
+            expect(Array.from(yield* session.readFile("/leaf"))).toEqual([0, 255])
 
             live.readContents.set("/invalid", "not base64 %")
             expect(yield* Effect.flip(session.readFile("/invalid"))).toMatchObject({ code: "unknown" })
@@ -370,7 +484,7 @@ describe("CloudflareSandbox", () => {
             expect(yield* Effect.flip(Effect.scoped(session.spawn("pwd", {})))).toMatchObject({
               code: "spawn_error"
             })
-            live.pingExitCode = 8
+            live.execExitOverride = 8
             expect(yield* Effect.flip(session.ping!)).toMatchObject({ code: "unavailable" })
             live.failExec = new Error("ping rejected")
             expect(yield* Effect.flip(session.ping!)).toMatchObject({ code: "unavailable" })
@@ -381,6 +495,7 @@ describe("CloudflareSandbox", () => {
       const processProvider = CloudflareSandbox.make({
         sdk,
         binding: processBinding,
+        workdir: join(root, "failure-process-ws"),
         execution: "process"
       })
       yield* Effect.scoped(

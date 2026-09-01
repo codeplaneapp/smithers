@@ -15,9 +15,11 @@
  * by sending it one rendered command line, so there is no local process to hold
  * onto:
  *
- * - **No stdin.** `stdin` is a `Sink` that fails, and a command that supplies a
- *   `Stream` for stdin is rejected at spawn time rather than losing its input
- *   silently.
+ * - **Stdin is a blob, not a pipe.** A provider that declares `stdin: true`
+ *   receives a command's standard input collected whole (bounded at 16 MiB)
+ *   in `RemoteOptions.stdin`; for any other provider the command is rejected
+ *   at spawn time rather than losing its input silently. The handle's own
+ *   `stdin` sink always fails: there is no interactive channel either way.
  * - **No signals.** A remote process ends by closing its scope, which runs the
  *   provider's cancellation finalizer; there is no signal to deliver, so `kill`
  *   fails rather than pretending to have delivered one.

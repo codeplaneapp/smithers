@@ -1,5 +1,20 @@
-import { describe, expect, it } from "@effect/vitest"
-import { Effect, Stream } from "effect"
+import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
+import { afterAll, describe, expect, it } from "@effect/vitest"
+import { Effect, Layer, Path, Stream } from "effect"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import {
+  chmodSync,
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import type { Session } from "../src/Sandbox/Session.ts"
 import * as SandboxConformance from "../src/SandboxConformance/index.ts"
@@ -13,25 +28,91 @@ type CreateInput = Parameters<Sdk["Sandbox"]["getOrCreate"]>[0]
 type VendorSandbox = Awaited<ReturnType<Sdk["Sandbox"]["getOrCreate"]>>
 type RunInput = Parameters<VendorSandbox["runCommand"]>[0]
 type CommandFinished = Awaited<ReturnType<VendorSandbox["runCommand"]>>
-type ReadableFile = NonNullable<Awaited<ReturnType<VendorSandbox["readFile"]>>>
 
-interface Machine {
-  readonly name: string
-  readonly directories: Set<string>
-  readonly files: Map<string, Uint8Array>
-  running: boolean
+// -----------------------------------------------------------------------------
+// The Vercel SDK as a fake: real programs behind the vendor's promise surface.
+// -----------------------------------------------------------------------------
+
+// The fake emulates only what `@vercel/sandbox` adds around a machine — the
+// named-sandbox registry, the promise-shaped `runCommand` that resolves once
+// the command finished with its output as strings, `readFile` answering a
+// Node stream or `null`, and the vendor error shapes. Underneath, every
+// command is the real program run by the platform spawner against a real
+// directory tree, and the file surface reads and writes that same tree, so
+// what the provider proves here is agreement with a machine, not with a
+// script table.
+const root = realpathSync(mkdtempSync(join(tmpdir(), "smthrs-vercel-sandbox-")))
+// The image's own working directory, which `/vercel/sandbox` is on the real
+// machine: the default `cwd` of every command and the base of relative paths.
+const home = join(root, "vercel-home")
+mkdirSync(home)
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true })
+})
+
+const dir = (label: string): string => mkdtempSync(join(root, `${label}-`))
+
+const platform = Layer.provideMerge(
+  NodeChildProcessSpawner.layer,
+  Layer.merge(NodeFileSystem.layer, Path.layer)
+)
+const local = Effect.runSync(
+  Effect.gen(function*() {
+    return yield* ChildProcessSpawner
+  }).pipe(Effect.provide(platform))
+)
+
+interface FinishedRun {
+  readonly stdout: string
+  readonly stderr: string
+  readonly exitCode: number
 }
 
-interface Plan {
+const finishedRun = (
+  file: string,
+  args: ReadonlyArray<string>,
+  cwd: string,
+  env: Readonly<Record<string, string>> | undefined
+): Promise<FinishedRun> =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function*() {
+        // The sandbox image gives commands its own base environment plus the
+        // caller's variables, which on this host is the process environment
+        // plus the request's.
+        const child = yield* local.spawn(ChildProcess.make(file, [...args], { cwd, env: { ...env }, extendEnv: true }))
+        const [stdout, stderr, exitCode] = yield* Effect.all(
+          [
+            Stream.mkString(Stream.decodeText(child.stdout)),
+            Stream.mkString(Stream.decodeText(child.stderr)),
+            child.exitCode
+          ],
+          { concurrency: "unbounded" }
+        )
+        return { stdout, stderr, exitCode }
+      })
+    )
+  )
+
+interface Faults {
+  /** The control plane refuses the acquire call. */
   acquireFailure?: unknown
+  /** `extendTimeout` is refused (plan limit reached). */
   extendFailure?: unknown
+  /** `stop` is refused (the session already ended). */
   stopFailure?: unknown
+  /** `readFile` is refused before any stream is handed out. */
   readFailure?: unknown
-  writeFailure?: unknown
+  /** Every `runCommand` call is refused (the API is unreachable). */
+  runFailure?: unknown
+  /** Fetching a finished command's stdout fails. */
   stdoutFailure?: unknown
+  /** Fetching a finished command's stderr fails. */
   stderrFailure?: unknown
+  /** The machine reports every command finished with this status (a dying VM). */
+  commandFailure?: { readonly exitCode: number } | undefined
+  /** File reads arrive as UTF-8 text chunks rather than bytes. */
   textReads?: boolean
-  run?: ((input: RunInput) => number | unknown | undefined) | undefined
 }
 
 interface Recorded {
@@ -41,119 +122,67 @@ interface Recorded {
   readonly stopped: Array<string>
 }
 
-const addDirectory = (machine: Machine, path: string): void => {
-  const parts = path.split("/").filter((part) => part !== "")
-  let current = ""
-  machine.directories.add("/")
-  for (const part of parts) {
-    current += `/${part}`
-    machine.directories.add(current)
-  }
-}
-
-const parentOf = (path: string): string => path.slice(0, path.lastIndexOf("/")) || "/"
-
-const readable = (content: Uint8Array, asText: boolean): ReadableFile => ({
-  async *[Symbol.asyncIterator]() {
-    if (asText) {
-      yield decoder.decode(content)
-      return
-    }
-    const split = Math.min(4, content.length)
-    yield content.slice(0, split)
-    yield content.slice(split)
-  }
-})
-
-const shell = (line: string, input: RunInput): { stdout: string; stderr: string; exitCode: number } => {
-  if (line === "pwd") return { stdout: `${input.cwd}\n`, stderr: "", exitCode: 0 }
-  if (line === `printf '%s' "$SANDBOX_CONFORMANCE"`) {
-    return { stdout: input.env?.["SANDBOX_CONFORMANCE"] ?? "", stderr: "", exitCode: 0 }
-  }
-  if (line === `printf '%s:%s' "$STATIC_PROOF" "$SPAWN_PROOF"`) {
-    return {
-      stdout: `${input.env?.["STATIC_PROOF"] ?? ""}:${input.env?.["SPAWN_PROOF"] ?? ""}`,
-      stderr: "",
-      exitCode: 0
-    }
-  }
-  const printed = /^printf '([^']*)'$/.exec(line)
-  if (printed !== null) return { stdout: printed[1] ?? "", stderr: "", exitCode: 0 }
-  const exited = /^exit ([0-9]+)$/.exec(line)
-  if (exited !== null) return { stdout: "", stderr: "", exitCode: Number(exited[1]) }
-  return { stdout: "done", stderr: "", exitCode: 0 }
-}
-
-const fakeSdk = (plan: Plan = {}): {
-  readonly sdk: Sdk
-  readonly recorded: Recorded
-  readonly machines: Map<string, Machine>
-} => {
+const fakeSdk = (faults: Faults = {}): { readonly sdk: Sdk; readonly recorded: Recorded } => {
   const recorded: Recorded = { acquired: [], commands: [], extended: [], stopped: [] }
-  const machines = new Map<string, Machine>()
+  const machines = new Map<string, { readonly name: string; running: boolean }>()
+  const finished = (result: FinishedRun): CommandFinished => ({
+    exitCode: result.exitCode,
+    stdout: () =>
+      faults.stdoutFailure === undefined ? Promise.resolve(result.stdout) : Promise.reject(faults.stdoutFailure),
+    stderr: () =>
+      faults.stderrFailure === undefined ? Promise.resolve(result.stderr) : Promise.reject(faults.stderrFailure)
+  })
+  // Relative paths resolve the way the vendor documents them: "Defaults to
+  // writing to /vercel/sandbox unless an absolute path is specified."
+  const resolve = (path: string): string => path.startsWith("/") ? path : join(home, path)
+  const instance = (machine: { readonly name: string; running: boolean }): VendorSandbox => ({
+    name: machine.name,
+    runCommand: async (request) => {
+      recorded.commands.push(request)
+      if (faults.runFailure !== undefined) throw faults.runFailure
+      // "A persistent sandbox still auto-resumes on the first SDK call that
+      // needs a running session (such as `runCommand`)."
+      machine.running = true
+      if (faults.commandFailure !== undefined) {
+        return finished({ stdout: "", stderr: "", exitCode: faults.commandFailure.exitCode })
+      }
+      return finished(await finishedRun(request.cmd, request.args ?? [], request.cwd ?? home, request.env))
+    },
+    readFile: async ({ path }) => {
+      if (faults.readFailure !== undefined) throw faults.readFailure
+      const at = resolve(path)
+      if (!existsSync(at)) return null
+      return faults.textReads === true ? createReadStream(at, "utf8") : createReadStream(at)
+    },
+    writeFiles: async (files) => {
+      for (const file of files) writeFileSync(resolve(file.path), file.content)
+    },
+    extendTimeout: async (duration) => {
+      recorded.extended.push(duration)
+      if (faults.extendFailure !== undefined) throw faults.extendFailure
+    },
+    stop: async () => {
+      recorded.stopped.push(machine.name)
+      machine.running = false
+      if (faults.stopFailure !== undefined) throw faults.stopFailure
+    }
+  })
+  // The vendor's documented `getOrCreate` flow: try `get` first, and on
+  // not_found create a sandbox with that name (sandbox.d.ts).
+  const get = (name: string) => machines.get(name)
+  const create = (name: string) => {
+    const machine = { name, running: true }
+    machines.set(name, machine)
+    return machine
+  }
   const getOrCreate: Sdk["Sandbox"]["getOrCreate"] = async (input) => {
     recorded.acquired.push(input)
-    if (plan.acquireFailure !== undefined) throw plan.acquireFailure
-    let machine = machines.get(input.name)
-    if (machine === undefined) {
-      machine = { name: input.name, directories: new Set(), files: new Map(), running: true }
-      addDirectory(machine, "/vercel/sandbox")
-      machines.set(input.name, machine)
-    } else if (input.resume === true) {
-      machine.running = true
-    }
-    const command = (
-      stdout: string,
-      stderr: string,
-      exitCode: number
-    ): CommandFinished => ({
-      exitCode,
-      stdout: () => plan.stdoutFailure === undefined ? Promise.resolve(stdout) : Promise.reject(plan.stdoutFailure),
-      stderr: () => plan.stderrFailure === undefined ? Promise.resolve(stderr) : Promise.reject(plan.stderrFailure)
-    })
-    return {
-      name: machine.name,
-      runCommand: async (request) => {
-        recorded.commands.push(request)
-        machine.running = true
-        const planned = plan.run?.(request)
-        if (planned !== undefined && typeof planned !== "number") throw planned
-        if (typeof planned === "number") return command("", "", planned)
-        if (request.cmd === "mkdir") {
-          addDirectory(machine, request.args?.[1] ?? "")
-          return command("", "", 0)
-        }
-        if (request.cmd === "true") return command("", "", 0)
-        const result = shell(request.args?.[1] ?? "", request)
-        return command(result.stdout, result.stderr, result.exitCode)
-      },
-      readFile: async ({ path }) => {
-        if (plan.readFailure !== undefined) throw plan.readFailure
-        const content = machine.files.get(path)
-        return content === undefined ? null : readable(content, plan.textReads === true)
-      },
-      writeFiles: async (files) => {
-        if (plan.writeFailure !== undefined) throw plan.writeFailure
-        for (const file of files) {
-          if (!machine.directories.has(parentOf(file.path))) throw new Error("parent directory does not exist")
-          machine.files.set(
-            file.path,
-            typeof file.content === "string" ? encoder.encode(file.content) : new Uint8Array(file.content)
-          )
-        }
-      },
-      extendTimeout: (duration) => {
-        recorded.extended.push(duration)
-        return plan.extendFailure === undefined ? Promise.resolve() : Promise.reject(plan.extendFailure)
-      },
-      stop: () => {
-        recorded.stopped.push(machine.name)
-        machine.running = false
-        return plan.stopFailure === undefined ? Promise.resolve() : Promise.reject(plan.stopFailure)
-      }
-    }
+    if (faults.acquireFailure !== undefined) throw faults.acquireFailure
+    const machine = get(input.name) ?? create(input.name)
+    if (input.resume === true) machine.running = true
+    return instance(machine)
   }
-  return { sdk: { Sandbox: { getOrCreate } }, recorded, machines }
+  return { sdk: { Sandbox: { getOrCreate } }, recorded }
 }
 
 const acquired = <A, E>(
@@ -161,19 +190,36 @@ const acquired = <A, E>(
   body: (session: Session) => Effect.Effect<A, E>
 ): Effect.Effect<A, E | ProviderError> => Effect.scoped(Effect.flatMap(provider.acquire("run-1"), body))
 
-describe("VercelSandbox", () => {
-  it.effect("passes SandboxConformance against a persistent SDK fake", () =>
+const output = (session: Session, command: string, options: Parameters<Session["spawn"]>[1] = {}) =>
+  Effect.scoped(
     Effect.gen(function*() {
-      const { sdk } = fakeSdk()
-      const violations = yield* SandboxConformance.check(VercelSandbox.make({ sdk }), {
-        provides: { ping: true }
-      })
+      const process = yield* session.spawn(command, options)
+      const stdout = yield* Stream.mkString(Stream.decodeText(process.stdout))
+      const code = yield* process.exitCode
+      return { stdout, code }
+    })
+  )
+
+describe("VercelSandbox", () => {
+  it.effect("passes SandboxConformance running real programs against a real tree", () =>
+    Effect.gen(function*() {
+      const { recorded, sdk } = fakeSdk()
+      const violations = yield* SandboxConformance.check(
+        VercelSandbox.make({ sdk, workdir: dir("conformance") }),
+        { provides: { ping: true } }
+      )
       expect(violations).toEqual([])
-    }), 30_000)
+      // Every shell line reaches the machine as `sh -c`, never a login shell
+      // whose profile output would land in parsed stdout.
+      const shells = recorded.commands.filter((command) => command.cmd === "sh")
+      expect(shells.length).toBeGreaterThan(0)
+      expect(shells.every((command) => command.args?.[0] === "-c")).toBe(true)
+    }), 60_000)
 
   it.effect("uses deterministic persistence, explicit credentials, and the timeout remainder", () =>
     Effect.gen(function*() {
       const { recorded, sdk } = fakeSdk()
+      const work = dir("persist")
       const provider = VercelSandbox.make({
         sdk,
         oidcToken: "explicit-oidc",
@@ -184,12 +230,13 @@ describe("VercelSandbox", () => {
         timeoutMs: 15 * 60_000,
         maxDurationMs: 15 * 60_000,
         runtime: "node22",
-        commandEnv: { STATIC_PROOF: "static" }
+        commandEnv: { STATIC_PROOF: "static" },
+        workdir: work
       })
       const first = yield* acquired(provider, (session) =>
         Effect.gen(function*() {
           expect(session.id).toBe("run-1")
-          yield* session.writeFile("/vercel/sandbox/persisted.bin", new Uint8Array([0, 255]))
+          yield* session.writeFile(`${work}/persisted.bin`, new Uint8Array([0, 255]))
           return yield* Effect.scoped(
             Effect.flatMap(
               session.spawn(`printf '%s:%s' "$STATIC_PROOF" "$SPAWN_PROOF"`, {
@@ -199,10 +246,14 @@ describe("VercelSandbox", () => {
             )
           )
         }))
-      const second = yield* acquired(provider, (session) =>
-        Effect.gen(function*() {
-          return { remoteId: session.remoteId, content: yield* session.readFile("/vercel/sandbox/persisted.bin") }
-        }))
+      const second = yield* acquired(
+        provider,
+        (session) =>
+          Effect.map(session.readFile(`${work}/persisted.bin`), (content) => ({
+            remoteId: session.remoteId,
+            content
+          }))
+      )
 
       expect(first).toBe("static:spawn")
       expect(second.remoteId).toBe(recorded.acquired[0]?.name)
@@ -219,11 +270,13 @@ describe("VercelSandbox", () => {
       expect(recorded.extended).toEqual([10 * 60_000, 10 * 60_000])
       expect(recorded.stopped).toHaveLength(2)
       const spawned = recorded.commands.find((command) => command.cmd === "sh")
+      expect(spawned?.args?.[0]).toBe("-c")
       expect(spawned?.env).toEqual({ STATIC_PROOF: "static", SPAWN_PROOF: "spawn" })
     }))
 
   it.effect("resolves caller-supplied credential sources in precedence order", () =>
     Effect.gen(function*() {
+      const work = dir("credentials")
       const ambient = fakeSdk()
       yield* acquired(
         VercelSandbox.make({
@@ -231,7 +284,8 @@ describe("VercelSandbox", () => {
           token: "pat",
           teamId: "team",
           projectId: "project",
-          env: { VERCEL_OIDC_TOKEN: "ambient" }
+          env: { VERCEL_OIDC_TOKEN: "ambient" },
+          workdir: work
         }),
         Effect.succeed
       )
@@ -242,7 +296,8 @@ describe("VercelSandbox", () => {
       yield* acquired(
         VercelSandbox.make({
           sdk: personal.sdk,
-          env: { VERCEL_TOKEN: "env-pat", VERCEL_TEAM_ID: "env-team", VERCEL_PROJECT_ID: "env-project" }
+          env: { VERCEL_TOKEN: "env-pat", VERCEL_TEAM_ID: "env-team", VERCEL_PROJECT_ID: "env-project" },
+          workdir: work
         }),
         Effect.succeed
       )
@@ -252,18 +307,22 @@ describe("VercelSandbox", () => {
         projectId: "env-project"
       })
 
-      const incomplete = fakeSdk()
-      yield* acquired(
-        VercelSandbox.make({
-          sdk: incomplete.sdk,
-          oidcToken: "",
-          token: "pat",
-          teamId: "team",
-          projectId: ""
-        }),
-        Effect.succeed
-      )
-      expect(incomplete.recorded.acquired[0]).not.toHaveProperty("token")
+      // A personal token is used only when every identifier arrives with it.
+      const incomplete: Array<VercelSandbox.Credentials> = [
+        { oidcToken: "", token: "pat", teamId: "team", projectId: "" },
+        { token: "", teamId: "team", projectId: "project" },
+        { token: "pat", teamId: "", projectId: "project" },
+        { token: "pat", teamId: "team" },
+        { token: "pat", projectId: "project" },
+        {}
+      ]
+      for (const credentials of incomplete) {
+        const missing = fakeSdk()
+        yield* acquired(VercelSandbox.make({ sdk: missing.sdk, workdir: work, ...credentials }), Effect.succeed)
+        expect(missing.recorded.acquired[0]).not.toHaveProperty("token")
+        expect(missing.recorded.acquired[0]).not.toHaveProperty("teamId")
+        expect(missing.recorded.acquired[0]).not.toHaveProperty("projectId")
+      }
     }))
 
   it.effect("refuses invalid local configuration before acquiring a sandbox", () =>
@@ -292,28 +351,51 @@ describe("VercelSandbox", () => {
       expect((capped as ProviderError).message).toContain("30000ms")
     }))
 
-  it.effect("drains string streams, supports root files, and surfaces output failures", () =>
+  it.effect("delivers standard input, roots relative cwds, and drains text reads", () =>
     Effect.gen(function*() {
-      const plan: Plan = { textReads: true }
-      const { sdk } = fakeSdk(plan)
-      const provider = VercelSandbox.make({ sdk, timeoutMs: 60_000, workdir: "/custom" })
-      yield* acquired(provider, (session) =>
+      const faults: Faults = {}
+      const { sdk } = fakeSdk(faults)
+      const work = dir("behavior")
+      yield* acquired(VercelSandbox.make({ sdk, workdir: work }), (session) =>
         Effect.gen(function*() {
-          yield* session.writeFile("/root-file", encoder.encode("plain text"))
-          expect(decoder.decode(yield* session.readFile("/root-file"))).toBe("plain text")
+          const bytes = new Uint8Array([0, 1, 2, 255, 10, 13, 7])
+          expect(yield* output(session, "cat > stdin-copy.bin", { stdin: bytes })).toEqual({ stdout: "", code: 0 })
+          expect(yield* session.readFile(`${work}/stdin-copy.bin`)).toEqual(bytes)
+          // The redirect's staged input is removed once the command ends.
+          expect(yield* Effect.flip(session.readFile(`${work}/.smthrs-stdin-0`))).toMatchObject({ code: "not_found" })
+
+          expect((yield* output(session, "mkdir -p nested/leaf")).code).toBe(0)
+          expect((yield* output(session, "pwd", { cwd: "nested/leaf" })).stdout).toBe(`${work}/nested/leaf\n`)
+          expect((yield* output(session, "pwd", { cwd: "./nested" })).stdout).toBe(`${work}/nested\n`)
+          expect((yield* output(session, "pwd", { cwd: "" })).stdout).toBe(`${work}\n`)
+          expect((yield* output(session, "pwd", { cwd: "." })).stdout).toBe(`${work}\n`)
+          expect((yield* output(session, "pwd", { cwd: work })).stdout).toBe(`${work}\n`)
+
+          // A path with no parent to create takes the bare write, and the
+          // vendor roots it at the sandbox's own working directory.
+          yield* session.writeFile("rooted.bin", new Uint8Array([42]))
+          expect(Array.from(yield* session.readFile(join(home, "rooted.bin")))).toEqual([42])
+
+          // A vendor stream may hand contents back as text chunks.
+          faults.textReads = true
+          yield* session.writeFile(`${work}/text-file`, encoder.encode("plain text"))
+          expect(decoder.decode(yield* session.readFile(`${work}/text-file`))).toBe("plain text")
+          faults.textReads = false
+
           const process = yield* Effect.scoped(session.spawn("printf 'ok'", {}))
-          plan.stdoutFailure = new Error("stdout unavailable")
-          const stdout = yield* Effect.flip(Stream.runDrain(process.stdout))
-          expect(stdout).toBeInstanceOf(ProviderError)
-          plan.stdoutFailure = undefined
-          plan.stderrFailure = new Error("stderr unavailable")
-          const stderr = yield* Effect.flip(Stream.runDrain(process.stderr))
-          expect(stderr).toBeInstanceOf(ProviderError)
+          faults.stdoutFailure = new Error("stdout unavailable")
+          expect(yield* Effect.flip(Stream.runDrain(process.stdout))).toBeInstanceOf(ProviderError)
+          faults.stdoutFailure = undefined
+          faults.stderrFailure = new Error("stderr unavailable")
+          expect(yield* Effect.flip(Stream.runDrain(process.stderr))).toBeInstanceOf(ProviderError)
+          faults.stderrFailure = undefined
         }))
-    }))
+    }), 30_000)
 
   it.effect("maps vendor and command failures and still runs teardown", () =>
     Effect.gen(function*() {
+      // The default workdir is only reachable on the real machine; refusing
+      // the acquire keeps the fake off the host's root filesystem.
       const unavailable = fakeSdk({ acquireFailure: new Error("service offline") })
       const acquireFailure = yield* Effect.flip(
         acquired(VercelSandbox.make({ sdk: unavailable.sdk }), Effect.succeed)
@@ -322,47 +404,79 @@ describe("VercelSandbox", () => {
 
       const extend = fakeSdk({ extendFailure: new Error("limit") })
       const extendFailure = yield* Effect.flip(
-        acquired(VercelSandbox.make({ sdk: extend.sdk, timeoutMs: 6 * 60_000 }), Effect.succeed)
+        acquired(
+          VercelSandbox.make({ sdk: extend.sdk, timeoutMs: 6 * 60_000, workdir: dir("extend") }),
+          Effect.succeed
+        )
       )
       expect((extendFailure as ProviderError).code).toBe("unavailable")
       expect(extend.recorded.stopped).toHaveLength(1)
 
-      const prepare = fakeSdk({ run: (input) => input.cmd === "mkdir" ? 7 : undefined })
+      // The transport refusing every command stops acquisition at the
+      // workspace preparation.
+      const rejected = fakeSdk({ runFailure: new Error("api unreachable") })
+      const rejectedFailure = yield* Effect.flip(
+        acquired(VercelSandbox.make({ sdk: rejected.sdk, workdir: dir("rejected") }), Effect.succeed)
+      )
+      expect((rejectedFailure as ProviderError).code).toBe("unavailable")
+      expect(rejected.recorded.stopped).toHaveLength(1)
+
+      // A workspace that really cannot be created refuses the session.
+      const blocked = fakeSdk()
+      const blocker = join(dir("prepare"), "blocker")
+      writeFileSync(blocker, "a file, not a directory")
       const prepareFailure = yield* Effect.flip(
-        acquired(VercelSandbox.make({ sdk: prepare.sdk }), Effect.succeed)
+        acquired(VercelSandbox.make({ sdk: blocked.sdk, workdir: `${blocker}/work` }), Effect.succeed)
       )
       expect((prepareFailure as ProviderError).code).toBe("unavailable")
-      expect(prepare.recorded.stopped).toHaveLength(1)
+      expect(blocked.recorded.stopped).toHaveLength(1)
 
-      const runtime: Plan = {}
-      const active = fakeSdk(runtime)
-      yield* acquired(VercelSandbox.make({ sdk: active.sdk }), (session) =>
+      const faults: Faults = {}
+      const active = fakeSdk(faults)
+      const work = dir("runtime")
+      yield* acquired(VercelSandbox.make({ sdk: active.sdk, workdir: work }), (session) =>
         Effect.gen(function*() {
-          runtime.run = (input) => input.cmd === "sh" ? new Error("command refused") : undefined
+          faults.runFailure = new Error("command refused")
           const spawnFailure = yield* Effect.flip(Effect.scoped(session.spawn("true", {})))
           expect((spawnFailure as ProviderError).code).toBe("spawn_error")
-          runtime.run = (input) =>
-            input.cmd === "mkdir" && input.args?.[1]?.includes("blocked") === true
-              ? 4
-              : undefined
-          const directoryFailure = yield* Effect.flip(session.writeFile("/blocked/file", new Uint8Array()))
+          faults.runFailure = undefined
+
+          // A parent that is really a file cannot become a directory.
+          writeFileSync(join(work, "occupied"), "a file, not a directory")
+          const directoryFailure = yield* Effect.flip(
+            session.writeFile(`${work}/occupied/child`, new Uint8Array([1]))
+          )
           expect((directoryFailure as ProviderError).code).toBe("unknown")
-          runtime.run = undefined
-          runtime.writeFailure = new Error("upload refused")
-          const writeFailure = yield* Effect.flip(session.writeFile("/file", new Uint8Array()))
+
+          // A directory that refuses writes fails the upload itself.
+          mkdirSync(join(work, "sealed-dir"))
+          chmodSync(join(work, "sealed-dir"), 0o555)
+          const writeFailure = yield* Effect.flip(
+            session.writeFile(`${work}/sealed-dir/child`, new Uint8Array([1]))
+          )
           expect((writeFailure as ProviderError).code).toBe("unknown")
-          runtime.writeFailure = undefined
-          runtime.readFailure = new Error("read refused")
-          const readFailure = yield* Effect.flip(session.readFile("/file"))
+
+          faults.readFailure = new Error("read refused")
+          const readFailure = yield* Effect.flip(session.readFile(`${work}/anything`))
           expect((readFailure as ProviderError).code).toBe("unknown")
-          runtime.readFailure = undefined
-          runtime.run = (input) => input.cmd === "true" ? 9 : undefined
+          faults.readFailure = undefined
+
+          // A file that exists but cannot be opened fails while draining.
+          writeFileSync(join(work, "sealed.bin"), "sealed")
+          chmodSync(join(work, "sealed.bin"), 0)
+          const sealed = yield* Effect.flip(session.readFile(join(work, "sealed.bin")))
+          expect(sealed).toMatchObject({ code: "unknown" })
+
+          // A dying machine reports commands as finished without running them.
+          faults.commandFailure = { exitCode: 9 }
           const pingFailure = yield* Effect.flip(session.ping!)
           expect((pingFailure as ProviderError).code).toBe("unavailable")
+          faults.commandFailure = undefined
         }))
 
+      // A stop that fails is logged, and the acquisition still succeeds.
       const ignoredStop = fakeSdk({ stopFailure: new Error("already stopped") })
-      yield* acquired(VercelSandbox.make({ sdk: ignoredStop.sdk }), Effect.succeed)
+      yield* acquired(VercelSandbox.make({ sdk: ignoredStop.sdk, workdir: dir("stop") }), Effect.succeed)
       expect(ignoredStop.recorded.stopped).toHaveLength(1)
-    }))
+    }), 30_000)
 })

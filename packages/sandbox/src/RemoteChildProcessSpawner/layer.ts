@@ -117,7 +117,9 @@ const collectStdin = (
     Effect.flatMap((bytes) =>
       bytes.length > maxStdinBytes
         ? Effect.fail(
-          rejected(`the standard input for \`${command}\` exceeds ${maxStdinBytes} bytes; have the command read a file instead`)
+          rejected(
+            `the standard input for \`${command}\` exceeds ${maxStdinBytes} bytes; have the command read a file instead`
+          )
         )
         : Effect.succeed(bytes)
     )

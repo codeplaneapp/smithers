@@ -1,5 +1,11 @@
-import { describe, expect, it } from "@effect/vitest"
-import { Effect, Stream } from "effect"
+import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
+import { afterAll, describe, expect, it } from "@effect/vitest"
+import { Effect, Layer, Path, Stream } from "effect"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import * as MicrosandboxSandbox from "../src/MicrosandboxSandbox/index.ts"
 import type { Sdk } from "../src/MicrosandboxSandbox/Sdk.ts"
 import type { RemoteProcess } from "../src/RemoteChildProcessSpawner/Provider.ts"
@@ -15,24 +21,52 @@ type Builder = ReturnType<Sdk["Sandbox"]["builder"]>
 type VendorSandbox = Awaited<ReturnType<Builder["create"]>>
 type VendorHandle = Awaited<ReturnType<Sdk["Sandbox"]["get"]>>
 type ExecBuilder = Parameters<Parameters<VendorSandbox["execStreamWith"]>[1]>[0]
+type ExecOutput = Awaited<ReturnType<Awaited<ReturnType<VendorSandbox["execStreamWith"]>>["collect"]>>
+
+// -----------------------------------------------------------------------------
+// The Microsandbox SDK as a fake: real shells and real files behind the
+// vendor's builders and handles.
+// -----------------------------------------------------------------------------
+
+// The fake emulates only the vendor transport: the fluent builders and the
+// single-drain command handle record what the SDK would carry, and underneath
+// every command is a REAL `sh` running against a REAL directory, every guest
+// file a real file. Guest-fixed absolute paths — the default `/workspace`, the
+// image's `/etc/hostname` — live under the machine's own directory on this
+// host, the way the AWS fake keeps guest pids under the test root.
+const root = realpathSync(mkdtempSync(join(tmpdir(), "smthrs-msb-sandbox-")))
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true })
+})
+
+const platform = Layer.provideMerge(
+  NodeChildProcessSpawner.layer,
+  Layer.merge(NodeFileSystem.layer, Path.layer)
+)
+const local = Effect.runSync(
+  Effect.gen(function*() {
+    return yield* ChildProcessSpawner
+  }).pipe(Effect.provide(platform))
+)
+
+const concat = (chunks: ReadonlyArray<Uint8Array>): Uint8Array => {
+  let length = 0
+  for (const chunk of chunks) length += chunk.length
+  const whole = new Uint8Array(length)
+  let offset = 0
+  for (const chunk of chunks) {
+    whole.set(chunk, offset)
+    offset += chunk.length
+  }
+  return whole
+}
 
 interface Machine {
   readonly name: string
-  readonly files: Map<string, Uint8Array>
-  readonly directories: Set<string>
+  /** The real directory guest-fixed absolute paths live under on this host. */
+  readonly root: string
   readonly ephemeral: boolean
   running: boolean
-}
-
-interface Controls {
-  readonly createFailure?: (() => unknown) | undefined
-  readonly mkdirFailures?: ReadonlySet<string> | undefined
-  readonly writeFailures?: ReadonlySet<string> | undefined
-  readonly deniedReads?: ReadonlySet<string> | undefined
-  readonly malformedBase64?: ReadonlySet<string> | undefined
-  readonly execFailureCommand?: string | undefined
-  readonly pingFailure?: boolean | undefined
-  readonly stopFailure?: boolean | undefined
 }
 
 interface ExecCall {
@@ -41,13 +75,12 @@ interface ExecCall {
   readonly args: ReadonlyArray<string>
   readonly cwd: string
   readonly env: Readonly<Record<string, string>>
+  readonly stdin: Uint8Array | undefined
 }
 
 interface Recorded {
   readonly builds: Array<{ readonly name: string; readonly settings: Record<string, unknown> }>
   readonly execs: Array<ExecCall>
-  readonly writes: Array<{ readonly path: string; readonly bytes: Uint8Array }>
-  readonly textReads: Array<string>
   readonly mkdirs: Array<string>
   readonly stops: Array<string>
   readonly connects: Array<string>
@@ -55,87 +88,22 @@ interface Recorded {
   collects: number
 }
 
-const parentOf = (path: string): string | undefined => {
-  const separator = path.lastIndexOf("/")
-  return separator > 0 ? path.slice(0, separator) : undefined
+interface Controls {
+  readonly createFailure?: (() => unknown) | undefined
+  readonly stopFailure?: boolean | undefined
 }
 
-const mkdirAll = (directories: Set<string>, path: string): void => {
-  if (!path.startsWith("/")) throw new Error(`guest paths must be absolute: ${path}`)
-  directories.add("/")
-  let current = ""
-  for (const part of path.split("/").filter((segment) => segment !== "")) {
-    current += `/${part}`
-    directories.add(current)
-  }
-}
-
-const shellWord = (word: string): string =>
-  word.startsWith("'") && word.endsWith("'")
-    ? word.slice(1, -1).replaceAll("'\\''", "'")
-    : word
-
-const base64 = (bytes: Uint8Array): string => {
-  let binary = ""
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary)
-}
-
-const commandOutput = (
-  machine: Machine,
-  call: ExecCall,
-  controls: Controls
-): { readonly code: number; stdout(): string; stderr(): string } => {
-  const command = call.args[1] ?? ""
-  let code = 0
-  let stdout = ""
-  let stderr = ""
-
-  if (!machine.directories.has(call.cwd)) {
-    code = 1
-    stderr = `sh: ${call.cwd}: no such directory`
-  } else if (command === "pwd") {
-    stdout = `${call.cwd}\n`
-  } else {
-    const environmentPrint = /^printf '%s' "\$([A-Za-z_][A-Za-z0-9_]*)"$/.exec(command)
-    const literalPrint = /^printf '([^']*)'$/.exec(command)
-    const exit = /^exit ([0-9]+)$/.exec(command)
-    const readMarker = " || exit 9; base64 "
-    if (environmentPrint !== null) {
-      stdout = call.env[environmentPrint[1]!] ?? ""
-    } else if (literalPrint !== null) {
-      stdout = literalPrint[1]!
-    } else if (exit !== null) {
-      code = Number(exit[1])
-    } else if (command.startsWith("test -e ") && command.includes(readMarker)) {
-      const marker = command.indexOf(readMarker)
-      const tested = shellWord(command.slice("test -e ".length, marker))
-      const read = shellWord(command.slice(marker + readMarker.length))
-      if (tested !== read) {
-        code = 2
-        stderr = "test and base64 paths differ"
-      } else if (controls.deniedReads?.has(read) === true) {
-        code = 1
-        stderr = `base64: ${read}: permission denied`
-      } else {
-        const bytes = machine.files.get(read)
-        if (bytes === undefined) {
-          code = 9
-        } else {
-          stdout = controls.malformedBase64?.has(read) === true ? "%%%\n" : `${base64(bytes)}\n`
-        }
-      }
-    } else {
-      code = 127
-      stderr = `sh: ${command}: not found`
-    }
-  }
-
-  return {
-    code,
-    stdout: () => stdout,
-    stderr: () => stderr
-  }
+/** Every guest filesystem failure arrives as the SDK's one fs error kind. */
+const fsFailure = (cause: unknown): Error => {
+  const code = Reflect.get(Object(cause), "code")
+  return Object.assign(
+    new Error(
+      code === "ENOENT"
+        ? "sandbox fs error: open: No such file or directory (os error 2)"
+        : `sandbox fs error: ${cause instanceof Error ? cause.message : String(cause)}`
+    ),
+    { code: "sandboxFsOps" }
+  )
 }
 
 const fakeSdk = (controls: Controls = {}) => {
@@ -143,8 +111,6 @@ const fakeSdk = (controls: Controls = {}) => {
   const recorded: Recorded = {
     builds: [],
     execs: [],
-    writes: [],
-    textReads: [],
     mkdirs: [],
     stops: [],
     connects: [],
@@ -158,43 +124,44 @@ const fakeSdk = (controls: Controls = {}) => {
     return machine
   }
 
+  // A guest path the test placed under its own root is that real path; any
+  // other absolute guest path is a guest-fixed location backed by a real file
+  // under the machine's directory.
+  const hostPath = (machine: Machine, path: string): string =>
+    path === root || path.startsWith(`${root}/`) ? path : join(machine.root, path)
+
+  const realFs = <A>(body: () => A): A => {
+    try {
+      return body()
+    } catch (cause) {
+      throw fsFailure(cause)
+    }
+  }
+
   const sandboxFor = (machine: Machine): VendorSandbox => ({
     name: machine.name,
     fs: () => ({
       write: async (path, data) => {
-        if (controls.writeFailures?.has(path) === true) {
-          throw new Error(`sandbox filesystem refused ${path}`)
-        }
-        const parent = parentOf(path)
-        if (parent !== undefined && !machine.directories.has(parent)) {
-          throw new Error(`sandbox filesystem has no directory ${parent}`)
-        }
         const bytes = typeof data === "string" ? encoder.encode(data) : new Uint8Array(data)
-        machine.files.set(path, bytes)
-        recorded.writes.push({ path, bytes: new Uint8Array(bytes) })
+        realFs(() => writeFileSync(hostPath(machine, path), bytes))
       },
-      readToString: async (path) => {
-        recorded.textReads.push(path)
-        if (controls.pingFailure === true && path === "/etc/hostname") {
-          throw new Error("sandbox agent is unavailable")
-        }
-        const bytes = machine.files.get(path)
-        if (bytes === undefined) throw new Error(`sandbox filesystem has no such file ${path}`)
-        return decoder.decode(bytes)
-      },
+      read: async (path) => realFs(() => new Uint8Array(readFileSync(hostPath(machine, path)))),
+      readToString: async (path) => realFs(() => readFileSync(hostPath(machine, path), "utf8")),
       mkdir: async (path) => {
         recorded.mkdirs.push(path)
-        if (controls.mkdirFailures?.has(path) === true) {
-          throw new Error(`sandbox filesystem refused mkdir ${path}`)
-        }
-        mkdirAll(machine.directories, path)
+        realFs(() => mkdirSync(hostPath(machine, path), { recursive: true }))
       }
     }),
     execStreamWith: async (shell, configure) => {
-      if (!machine.running) throw new Error(`microVM ${machine.name} is stopped`)
+      if (!machine.running) {
+        throw Object.assign(new Error(`[SandboxNotRunning] microVM ${machine.name} is stopped`), {
+          code: "sandboxNotRunning"
+        })
+      }
       let args: Array<string> = []
       let cwd = ""
       let env: Record<string, string> = {}
+      let stdin: Uint8Array | undefined
       const builder: ExecBuilder = {
         args(value) {
           args = [...value]
@@ -207,22 +174,51 @@ const fakeSdk = (controls: Controls = {}) => {
         envs(value) {
           env = { ...value }
           return this
+        },
+        stdinBytes(value) {
+          stdin = new Uint8Array(value)
+          return this
         }
       }
       configure(builder)
-      const call: ExecCall = { name: machine.name, shell, args, cwd, env }
+      const call: ExecCall = { name: machine.name, shell, args, cwd, env, stdin }
       recorded.execs.push(call)
-      const command = args[1] ?? ""
-      if (controls.execFailureCommand === command) {
-        throw new Error(`transport failed for ${command}`)
-      }
       let collected = false
       return {
         collect: async () => {
           if (collected) throw new Error("Microsandbox command handles can only be collected once")
           collected = true
           recorded.collects++
-          return commandOutput(machine, call, controls)
+          return await Effect.runPromise(
+            Effect.scoped(
+              Effect.gen(function*() {
+                const child = yield* local.spawn(
+                  ChildProcess.make(call.shell, [...call.args], {
+                    cwd: hostPath(machine, call.cwd),
+                    env: call.env,
+                    extendEnv: true,
+                    // The vendor default connects stdin to /dev/null; given
+                    // bytes are sent and the channel closed.
+                    stdin: Stream.make(call.stdin ?? new Uint8Array())
+                  })
+                )
+                const [stdout, stderr, code] = yield* Effect.all(
+                  [Stream.runCollect(child.stdout), Stream.runCollect(child.stderr), child.exitCode],
+                  { concurrency: "unbounded" }
+                )
+                const stdoutBytes = concat(stdout)
+                const stderrBytes = concat(stderr)
+                const output: ExecOutput = {
+                  code,
+                  stdout: () => decoder.decode(stdoutBytes),
+                  stderr: () => decoder.decode(stderrBytes),
+                  stdoutBytes: () => stdoutBytes,
+                  stderrBytes: () => stderrBytes
+                }
+                return output
+              })
+            )
+          )
         }
       }
     },
@@ -230,7 +226,11 @@ const fakeSdk = (controls: Controls = {}) => {
       recorded.stops.push(machine.name)
       if (controls.stopFailure === true) throw new Error(`could not stop ${machine.name}`)
       machine.running = false
-      if (machine.ephemeral) machines.delete(machine.name)
+      // An ephemeral microVM's filesystem dies with it.
+      if (machine.ephemeral) {
+        machines.delete(machine.name)
+        rmSync(machine.root, { recursive: true, force: true })
+      }
     }
   })
 
@@ -309,11 +309,13 @@ const fakeSdk = (controls: Controls = {}) => {
             }
             const machine: Machine = {
               name,
-              files: new Map([["/etc/hostname", encoder.encode(name)]]),
-              directories: new Set(["/", "/etc"]),
+              root: join(root, "machines", name),
               ephemeral: settings["ephemeral"] === true,
               running: true
             }
+            // The image ships a hostname; the fake machine really holds one.
+            mkdirSync(join(machine.root, "etc"), { recursive: true })
+            writeFileSync(join(machine.root, "etc", "hostname"), name)
             machines.set(name, machine)
             return sandboxFor(machine)
           }
@@ -351,11 +353,10 @@ const fakeSdk = (controls: Controls = {}) => {
     markStopped: (name: string): void => {
       machineAt(name).running = false
     },
-    vendorText: (name: string, path: string): string => {
-      const bytes = machineAt(name).files.get(path)
-      if (bytes === undefined) throw new Error(`no such fake guest file: ${path}`)
-      return decoder.decode(bytes)
-    }
+    breakHostname: (name: string): void => {
+      rmSync(join(machineAt(name).root, "etc", "hostname"), { force: true })
+    },
+    machineRoot: (name: string): string => machineAt(name).root
   }
 }
 
@@ -376,10 +377,11 @@ const output = (process: RemoteProcess) =>
   )
 
 describe("MicrosandboxSandbox", () => {
-  it.effect("passes SandboxConformance against a byte-honest vendor fake", () =>
+  it.effect("passes SandboxConformance running real shells against real files", () =>
     Effect.gen(function*() {
       const fake = fakeSdk()
-      const provider = MicrosandboxSandbox.make({ sdk: fake.sdk })
+      const workdir = join(root, "conformance-ws")
+      const provider = MicrosandboxSandbox.make({ sdk: fake.sdk, workdir })
 
       const violations = yield* SandboxConformance.check(provider, {
         provides: { ping: true }
@@ -392,21 +394,22 @@ describe("MicrosandboxSandbox", () => {
         settings["ephemeral"] === true &&
         settings["detached"] === false
       )).toBe(true)
-      const binaryWrite = fake.recorded.writes.find(({ bytes }) => bytes.includes(255))
-      expect(binaryWrite).toBeDefined()
-      expect(Array.from(encoder.encode(decoder.decode(binaryWrite!.bytes))))
-        .not.toEqual(Array.from(binaryWrite!.bytes))
-      expect(fake.recorded.textReads.some((path) => path.endsWith("conformance-bytes.bin"))).toBe(false)
-      expect(fake.recorded.execs.some(({ args }) => args[1]?.includes("base64") === true)).toBe(true)
-    }))
+      // Commands run a plain shell, never a login shell, and never smuggle
+      // file contents through the command line.
+      expect(fake.recorded.execs.every(({ args, shell }) => shell === "/bin/sh" && args[0] === "-c")).toBe(true)
+      expect(fake.recorded.execs.every(({ args }) => args[1]?.includes("base64") !== true)).toBe(true)
+      // Standard input rode the exec builder's byte channel.
+      expect(fake.recorded.execs.some(({ stdin }) => stdin !== undefined && stdin.includes(255))).toBe(true)
+    }), 30_000)
 
   it.effect("carries every builder option and command setting without a builder workdir", () =>
     Effect.gen(function*() {
       const fake = fakeSdk()
+      const workdir = join(root, "options-ws")
       const provider = MicrosandboxSandbox.make({
         sdk: fake.sdk,
         image: "alpine:3.22",
-        workdir: "/work",
+        workdir,
         shell: "/bin/bash",
         env: { STATIC: "base", KEPT: "base" },
         cpus: 2,
@@ -427,30 +430,46 @@ describe("MicrosandboxSandbox", () => {
         Effect.gen(function*() {
           const first = yield* provider.acquire("lane/one")
           const second = yield* provider.acquire("lane-one")
+          // A path with no parent segment takes the bare write, backed by the
+          // machine's own directory since it is not a test-root path.
           yield* first.writeFile("/root.bin", new Uint8Array([1, 2]))
           const spaced = new Uint8Array([0, 255, 7])
-          yield* first.writeFile("/work/a b.bin", spaced)
-          expect(fake.vendorText(first.remoteId, "/work/a b.bin")).toContain("\uFFFD")
-          expect(Array.from(yield* first.readFile("/work/a b.bin"))).toEqual(Array.from(spaced))
-          const process = yield* first.spawn("pwd", {
-            cwd: "/",
+          yield* first.writeFile(`${workdir}/a b.bin`, spaced)
+          expect(Array.from(yield* first.readFile(`${workdir}/a b.bin`))).toEqual(Array.from(spaced))
+          const absolute = yield* first.spawn("pwd", {
+            cwd: root,
             env: { STATIC: undefined, DYNAMIC: "yes" }
           })
+          const printed = yield* output(absolute)
+          yield* Effect.scoped(Effect.asVoid(first.spawn("mkdir -p sub", {})))
+          const relative = yield* Effect.scoped(Effect.flatMap(first.spawn("pwd", { cwd: "./sub/" }), output))
+          const emptied = yield* Effect.scoped(
+            Effect.flatMap(first.spawn(`cat > ${workdir}/empty-stdin.bin`, { stdin: new Uint8Array() }), output)
+          )
+          const emptyCopy = yield* first.readFile(`${workdir}/empty-stdin.bin`)
           return {
             names: [first.remoteId, second.remoteId],
-            process: yield* output(process)
+            printed,
+            relative,
+            emptied,
+            emptyCopy
           }
         })
       )
 
       expect(result.names[0]).not.toBe(result.names[1])
       expect(result.names[0]).toMatch(/^smthrs-msb-lane-one-/)
-      expect(result.process).toEqual(["/\n", "", 0])
-      expect(fake.recorded.execs.at(-1)).toMatchObject({
+      expect(result.printed).toEqual([`${root}\n`, "", 0])
+      expect(result.relative).toEqual([`${workdir}/sub\n`, "", 0])
+      expect(result.emptied[2]).toBe(0)
+      expect(Array.from(result.emptyCopy)).toEqual([])
+      const spawned = fake.recorded.execs.find(({ env }) => env["DYNAMIC"] === "yes")
+      expect(spawned).toMatchObject({
         shell: "/bin/bash",
-        cwd: "/",
+        cwd: root,
         env: { KEPT: "base", DYNAMIC: "yes" }
       })
+      expect(spawned?.env["STATIC"]).toBeUndefined()
       expect(fake.recorded.builds[0]?.settings).toEqual({
         image: "alpine:3.22",
         cpus: 2,
@@ -474,6 +493,8 @@ describe("MicrosandboxSandbox", () => {
   it.effect("keeps sticky machines and reconnects to running or stopped instances", () =>
     Effect.gen(function*() {
       const fake = fakeSdk()
+      // No workdir named: the default guest workspace lives under the
+      // machine's directory and survives exactly as long as the machine.
       const provider = MicrosandboxSandbox.make({
         sdk: fake.sdk,
         snapshot: "snapshot-7",
@@ -483,7 +504,11 @@ describe("MicrosandboxSandbox", () => {
       const bytes = new Uint8Array([0, 254, 8])
 
       const name = yield* inSession(provider, "sticky", (session) =>
-        Effect.as(session.writeFile(`${session.workdir}/kept.bin`, bytes), session.remoteId))
+        Effect.gen(function*() {
+          expect(session.workdir).toBe("/workspace")
+          yield* session.writeFile("/workspace/kept.bin", bytes)
+          return session.remoteId
+        }))
       expect(fake.recorded.stops).toEqual([])
       expect(fake.recorded.builds[0]?.settings).toEqual({
         snapshot: "snapshot-7",
@@ -492,13 +517,15 @@ describe("MicrosandboxSandbox", () => {
       })
 
       fake.markStopped(name)
-      const reopened = yield* inSession(provider, "sticky", (session) =>
-        session.readFile(`${session.workdir}/kept.bin`))
+      const reopened = yield* inSession(
+        provider,
+        "sticky",
+        (session) => session.readFile(`${session.workdir}/kept.bin`)
+      )
       expect(Array.from(reopened)).toEqual(Array.from(bytes))
       expect(fake.recorded.starts).toEqual([{ name, detached: false }])
 
-      yield* inSession(provider, "sticky", (session) =>
-        session.ping!)
+      yield* inSession(provider, "sticky", (session) => session.ping!)
       expect(fake.recorded.connects).toEqual([name])
       expect(fake.recorded.stops).toEqual([])
 
@@ -542,12 +569,14 @@ describe("MicrosandboxSandbox", () => {
       expect((unavailable as ProviderError).code).toBe("unavailable")
       expect((unavailable as ProviderError).message).toContain("no hypervisor")
 
-      const partialFake = fakeSdk({ mkdirFailures: new Set(["/broken"]) })
+      // A real file where the workspace's parent should be refuses the mkdir.
+      writeFileSync(join(root, "not-a-directory"), "occupied")
+      const partialFake = fakeSdk()
       const partial = yield* Effect.flip(
         inSession(
           MicrosandboxSandbox.make({
             sdk: partialFake.sdk,
-            workdir: "/broken",
+            workdir: join(root, "not-a-directory", "ws"),
             persistence: "sticky"
           }),
           "partial",
@@ -559,7 +588,7 @@ describe("MicrosandboxSandbox", () => {
 
       const stopFailureFake = fakeSdk({ stopFailure: true })
       yield* inSession(
-        MicrosandboxSandbox.make({ sdk: stopFailureFake.sdk }),
+        MicrosandboxSandbox.make({ sdk: stopFailureFake.sdk, workdir: join(root, "stop-failure-ws") }),
         "stop-failure",
         (session) => Effect.succeed(session.id)
       )
@@ -568,43 +597,40 @@ describe("MicrosandboxSandbox", () => {
 
   it.effect("maps guest filesystem, command, and ping failures", () =>
     Effect.gen(function*() {
-      const locked = "/workspace/locked.bin"
-      const malformed = "/workspace/malformed.bin"
-      const refused = "/workspace/refused.bin"
-      const fake = fakeSdk({
-        mkdirFailures: new Set(["/workspace/blocked"]),
-        writeFailures: new Set([refused]),
-        deniedReads: new Set([locked]),
-        malformedBase64: new Set([malformed]),
-        execFailureCommand: "transport-down",
-        pingFailure: true
-      })
-      const provider = MicrosandboxSandbox.make({ sdk: fake.sdk })
+      const workdir = join(root, "failures-ws")
+      const fake = fakeSdk()
+      const provider = MicrosandboxSandbox.make({ sdk: fake.sdk, workdir })
 
       const failures = yield* Effect.scoped(
         Effect.gen(function*() {
           const session = yield* provider.acquire("failures")
+          const locked = `${workdir}/locked.bin`
           yield* session.writeFile(locked, new Uint8Array([1]))
-          yield* session.writeFile(malformed, new Uint8Array([2]))
+          chmodSync(locked, 0)
           const read = yield* Effect.flip(session.readFile(locked))
-          const invalidBase64 = yield* Effect.flip(session.readFile(malformed))
-          const write = yield* Effect.flip(session.writeFile(refused, new Uint8Array([3])))
-          const mkdir = yield* Effect.flip(session.writeFile("/workspace/blocked/out.bin", new Uint8Array([4])))
+          // A real file where a parent directory should be refuses the parent
+          // creation, and a real directory where the file should be refuses
+          // the write itself.
+          yield* session.writeFile(`${workdir}/occupied`, new Uint8Array([2]))
+          const mkdir = yield* Effect.flip(session.writeFile(`${workdir}/occupied/out.bin`, new Uint8Array([3])))
+          mkdirSync(join(workdir, "a-directory"), { recursive: true })
+          const write = yield* Effect.flip(session.writeFile(`${workdir}/a-directory`, new Uint8Array([4])))
+          fake.breakHostname(session.remoteId)
           const ping = yield* Effect.flip(session.ping!)
-          const unknown = yield* session.spawn("does-not-exist", {})
+          const unknown = yield* session.spawn("definitely-not-a-command-9f2", {})
           const unknownOutput = yield* output(unknown)
-          const spawn = yield* Effect.flip(Effect.asVoid(session.spawn("transport-down", {})))
-          return { read, invalidBase64, write, mkdir, ping, spawn, unknownOutput }
+          fake.markStopped(session.remoteId)
+          const spawn = yield* Effect.flip(Effect.asVoid(session.spawn("printf late", {})))
+          return { read, mkdir, write, ping, spawn, unknownOutput }
         })
       )
 
       expect((failures.read as ProviderError).code).toBe("unknown")
-      expect((failures.read as ProviderError).message).toContain("permission denied")
-      expect((failures.invalidBase64 as ProviderError).code).toBe("unknown")
-      expect((failures.write as ProviderError).code).toBe("unknown")
       expect((failures.mkdir as ProviderError).code).toBe("unknown")
+      expect((failures.write as ProviderError).code).toBe("unknown")
       expect((failures.ping as ProviderError).code).toBe("unavailable")
       expect((failures.spawn as ProviderError).code).toBe("spawn_error")
-      expect(failures.unknownOutput).toEqual(["", "sh: does-not-exist: not found", 127])
+      expect(failures.unknownOutput[2]).toBe(127)
+      expect(failures.unknownOutput[1]).toContain("not found")
     }))
 })

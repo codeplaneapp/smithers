@@ -283,7 +283,9 @@ describe("ContainerSandbox", () => {
       // The script waits for a pid a just-started command has not written yet,
       // instead of reporting a delivered signal it never sent.
       expect(killCall!.args.at(-1)).toContain("while [ ! -s /tmp/.smthrs-sbx/0.pid ]")
-      expect(killCall!.args.at(-1)).toContain("kill -s TERM")
+      // One batch delivery to the collected set: killing children one at a
+      // time before the parent lets a respawning parent replace them.
+      expect(killCall!.args.at(-1)).toContain(`kill -s TERM "$@"`)
 
       const refusing = engine((args) =>
         args.at(-1)?.includes("kids()") === true ? { exitCode: 1, stderr: "no exec" } : {}

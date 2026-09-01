@@ -57,7 +57,7 @@ The package depends on `@smthrs/kernel`, for `CommandLine` rendering and quoting
 | `TestScript`, `TestRemoteState`, `TestRemoteProvider` | interfaces | scripted provider fixtures |
 | `TestRemote` | const | `make(options?)`, a deterministic scripted provider |
 
-`layer` rejects command-supplied stdin streams, additional file descriptors,
+`layer` delivers a command-supplied stdin stream only to a provider that declares `stdin: true`, collected whole and bounded at 16 MiB; for any other provider it rejects the command instead of dropping its input. It also rejects additional file descriptors,
 custom shell paths, detached processes, and non-default pipeline routing with a
 `BadArgument` `PlatformError`. Those options cannot be represented by the
 provider contract and are never silently dropped. Output dispositions and
@@ -114,7 +114,7 @@ A provider may add SDK details to `ProviderError.cause`, but it cannot create ne
 
 The codes are this seam's own. They used to borrow the deleted `Shell` service's set; a remote session goes wrong in its own ways, so the seam now declares them.
 
-The command reaches the provider as the string `CommandLine.render` produces: the same string `@smthrs/kernel`'s `proc:spawn` check is written against, so a grant and the thing it authorizes cannot drift apart. Unsupported semantics are declared rather than dropped: command-supplied stdin streams, additional file descriptors, custom shell paths, detached processes, non-default pipeline routing, and delivering a signal to `kill` fail with a `BadArgument` `PlatformError`. The adapter honors output `pipe` / `ignore` / `inherit` dispositions and output sinks. A remote process ends by closing its scope. Two divergences cannot be reported as a failure and are stated in the module header instead: `extendEnv` is ignored, because the remote session's ambient environment never crosses the seam, and `isRunning` turns `false` when a caller observes `exitCode` rather than when the remote process ends.
+The command reaches the provider as the string `CommandLine.render` produces: the same string `@smthrs/kernel`'s `proc:spawn` check is written against, so a grant and the thing it authorizes cannot drift apart. Unsupported semantics are declared rather than dropped: a stdin stream for a provider that does not declare `stdin: true` (or on any stage of a pipeline but the first), additional file descriptors, custom shell paths, detached processes, non-default pipeline routing, and delivering a signal to `kill` fail with a `BadArgument` `PlatformError`. A declared provider receives stdin as one complete byte blob in `RemoteOptions.stdin`, never as a live pipe. The adapter honors output `pipe` / `ignore` / `inherit` dispositions and output sinks. A remote process ends by closing its scope. Two divergences cannot be reported as a failure and are stated in the module header instead: `extendEnv` is ignored, because the remote session's ambient environment never crosses the seam, and `isRunning` turns `false` when a caller observes `exitCode` rather than when the remote process ends.
 
 ### SandboxHealth
 
@@ -208,10 +208,12 @@ The checks run through `RemoteChildProcessSpawner.layer`, because a provider tha
 | Obligation | Required behavior |
 | --- | --- |
 | default directory | `spawn(command, {})` runs in `Session.workdir` |
+| relative cwd | a relative `cwd` is taken under `workdir`, never under the transport's own directory |
+| standard input | `spawn` delivers `options.stdin` bytes as the command's complete input; a transport with no input channel stages a workspace file and redirects |
 | parent creation | `writeFile` creates missing parent directories |
 | absence | `readFile` fails with `ProviderError.code === "not_found"` when the path is absent |
 | contents | file contents cross as bytes and round-trip unchanged |
-| optional control | `kill` and `ping` keep the spawner-level meanings |
+| optional control | `ping` keeps the spawner-level meaning; a declared `kill` ends the command and everything it started, not only the shell that wrapped it |
 
 ```ts
 import { Sandbox } from "@smthrs/sandbox"
@@ -264,7 +266,7 @@ const violations = yield* SandboxConformance.check(provider, {
 })
 ```
 
-Each check acquires a fresh session. The suite verifies byte round-trips, `not_found`, parent creation, the default workdir, environment delivery, and a working release-then-reacquire cycle. It projects the provider through `Sandbox.commandProvider` and delegates spawn, exit, ping, and real process-stop checks to `ProviderConformance`. A provider package asserts that the returned array is empty.
+Each check acquires a fresh session. The file checks verify binary, empty, and 64 KiB byte round-trips, `not_found`, parent creation, the default workdir and a relative `cwd`, environment delivery, standard input delivery (verified through `readFile`, so a pseudo-terminal transport is not penalized for its output), standard error arriving on one of the two streams, and a working release-then-reacquire cycle. Two checks deliberately cross surfaces: `files-reach-processes` writes through `writeFile` and measures the file with `wc -c` in a process, and `processes-reach-files` has a process produce a file that `readFile` must return, so a session serving files from anywhere but the machine its processes run on cannot pass. The suite then projects the provider through `Sandbox.commandProvider` and delegates spawn, exit, ping, and process-stop checks to `ProviderConformance`, whose kill check now also runs the fixture's `survivor` probe: after a kill, a command that can still be found running on the machine is a violation even though its wrapper exited. A provider package asserts that the returned array is empty.
 
 ### Providers
 
@@ -279,7 +281,7 @@ One row per bundled provider. Every cell is read from the provider's source and 
 | `MicrosandboxSandbox` | one local microVM from an image or a snapshot | injected SDK slice (`Sdk`) | yes, `sandboxAlreadyExists` connects to or restarts it; `persistence: "sticky"` keeps it running for that purpose | no | Microsandbox microVM (`RealMicrosandbox.integration.test.ts`, skipped without the `microsandbox` binary) |
 | `VercelSandbox` | one named persistent Vercel sandbox | injected SDK slice (`Sdk`) plus caller-supplied credentials | yes, `getOrCreate` with `persistent: true` and `resume: true` | no | none, fake only |
 | `DaytonaSandbox` | one named Daytona sandbox | injected SDK slice: a configured `Daytona` client | yes, `get(name)` first, `create` on a 404, `start` when attached | no | none, fake only |
-| `AwsSandbox` | one Fargate task from `RunTask` | injected SDK slice: the ECS aggregate client | no, every acquire runs a new task | no | none, fake only |
+| `AwsSandbox` | one Fargate task from `RunTask` | injected SDK slice for the lifecycle, the AWS CLI over an injected spawner for commands | yes, `ListTasks` by the `startedBy` tag adopts a ready leftover | yes, a pidfile plus the descendant walk through a second session | none live; the fake reproduces the Session Manager framing over a real local shell |
 | `CloudflareSandbox` | one Sandbox Durable Object behind a Worker binding | caller-supplied binding, through an injected `getSandbox` slice | yes, the Durable Object id is derived from the key, so the same object answers | no | none, fake only |
 
 ### DirectorySandbox
@@ -451,8 +453,9 @@ Teardown deletes the sandbox, so nothing survives a normal release; only a crash
 
 | Export | Kind | Notes |
 | --- | --- | --- |
-| `Sdk` | interface | the structural slice of the AWS SDK v3 `ECS` aggregate client: `runTask`, `describeTasks`, `executeCommand`, `stopTask`, `registerTaskDefinition`, `deregisterTaskDefinition` |
-| `make` | constructor | builds a `Sandbox.Provider` over Fargate tasks; `region`, `cluster`, `subnets`, and either `taskDefinition` or `image` with `taskRoleArn` are required, and `securityGroups`, `assignPublicIp`, `container`, `workdir`, `platformVersion`, `executionRoleArn`, `env`, `pollIntervalMs`, `maxPollAttempts`, and for an image `cpu` and `memory` shape the task |
+| `Sdk` | interface | the structural slice of the AWS SDK v3 `ECS` aggregate client: `runTask`, `describeTasks`, `listTasks`, `stopTask`, `registerTaskDefinition`, `deregisterTaskDefinition` |
+| `ExecTransport` | interface | how commands reach the task: the AWS CLI and its Session Manager plugin over an injected spawner, with `program`, `globalArgs`, and `chunkBytes` knobs |
+| `make` | constructor | builds a `Sandbox.Provider` over Fargate tasks; `region`, `cluster`, `subnets`, and either `taskDefinition` or `image` with `taskRoleArn` are required; `exec` supplies the command transport; `securityGroups`, `assignPublicIp`, `container`, `workdir`, `platformVersion`, `executionRoleArn`, `env`, `pollIntervalMs`, `maxPollAttempts`, and for an image `cpu` and `memory` shape the task |
 
 ```ts
 import { ECS } from "@aws-sdk/client-ecs"
@@ -460,6 +463,7 @@ import { AwsSandbox } from "@smthrs/sandbox"
 
 const provider = AwsSandbox.make({
   sdk: new ECS({ region: "us-west-2" }),
+  exec: { spawner },
   region: "us-west-2",
   cluster: "smithers",
   subnets: ["subnet-0abc"],
@@ -470,9 +474,11 @@ const provider = AwsSandbox.make({
 })
 ```
 
-`acquire` calls `RunTask` with `enableExecuteCommand: true`, `launchType: "FARGATE"`, and a `startedBy` derived from the session key, polls `DescribeTasks` with exponential backoff (capped at 10 seconds, `maxPollAttempts` default 60) until the task is `RUNNING` and its `ExecuteCommandAgent` reports `RUNNING`, and registers `StopTask` on the scope. A task that reaches `STOPPED` first fails with `unavailable`; an exhausted poll budget fails with `timeout`. "Supplying an image registers a minimal Fargate task definition and deregisters it after the task finalizer runs": family `smthrs-<startedBy>`, `sleep infinity`, `initProcessEnabled`, `cpu` 256 and `memory` 512 by default, container `sandbox`. `env` reaches the task as container overrides, which needs a `container` name or an image-generated definition. `ping` describes the task again and requires the same readiness.
+`acquire` first looks for the machine a previous acquire of the same key left running: `ListTasks` filtered by the `startedBy` tag derived from the key, adopted only when `DescribeTasks` shows its `ExecuteCommandAgent` already `RUNNING`, so a crash-interrupted run resumes its task instead of starting a second one beside it. Otherwise it calls `RunTask` with `enableExecuteCommand: true`, `launchType: "FARGATE"`, and that `startedBy`, polls `DescribeTasks` with exponential backoff (capped at 10 seconds, `maxPollAttempts` default 60) until the task is `RUNNING` and its agent is, and registers `StopTask` on the scope; an adopted task is released the same way, so closing the scope always leaves nothing behind. A task that reaches `STOPPED` first fails with `unavailable`; an exhausted poll budget fails with `timeout`. Supplying an image registers a minimal Fargate task definition and deregisters it after the task finalizer runs: family `smthrs-<startedBy>`, `sleep infinity`, `initProcessEnabled`, `cpu` 256 and `memory` 512 by default, container `sandbox`. `env` reaches the task as container overrides, which needs a `container` name or an image-generated definition. `ping` describes the task again and requires the same readiness.
 
-AwsSandbox cannot transfer files at all. `readFile` and `writeFile` fail with `unavailable` and the reason "reading `<path>` requires the ECS Exec SSM data channel, which @aws-sdk/client-ecs does not implement" (or "writing"). `spawn` calls `ExecuteCommand`, which "returns SSM session metadata only", and then fails with "ExecuteCommand opened an SSM session, but the ECS client exposes no process data channel"; the failure carries the region and the session id and never the stream URL or token. The conformance suite records exactly eight violations for this provider: `round-trips-binary-bytes`, `reports-an-absent-file`, `creates-parent-directories`, `runs-in-its-workdir`, `delivers-the-environment`, `reacquires-its-session`, `writes-its-output`, `reports-a-nonzero-exit`. Every acquire runs a new task and nothing looks a task up by `startedBy`, so the provider cannot resume across a crash: the previous task keeps running and the next acquire starts another. There is no `kill` and no real-backend suite. "A future provider can add a separately injected, browser-safe SSM stream transport."
+Commands, reads, and writes travel through `ExecTransport`: `aws ecs execute-command --interactive`, driven through the injected spawner, because ECS Exec is two halves and the ECS API implements only one. `ExecuteCommand` opens an SSM session and returns its metadata; the data channel that carries output and status is the Session Manager protocol, which the AWS CLI speaks by delegating to `session-manager-plugin`. The session is a pseudo-terminal, so standard error arrives interleaved on standard output and line endings are normalized; the plugin exits zero whatever the remote command did, so every command is wrapped to print its own status line, and a session that ends without one is `aborted`, never a success. Reads come back as guest `base64` and writes go in as base64 slices bounded by `chunkBytes` (default 3072 bytes before encoding), so file contents are byte-exact despite the terminal. Standard input is staged as a workspace file and redirected. `kill` records each command's guest pid in a session-private pidfile and signals it and its descendants through a second session; closing a spawn's scope does the same for a command not yet seen to end.
+
+Without an `exec` transport the session still provisions and tears down tasks but refuses `spawn`, `readFile`, and `writeFile` with `unavailable`, naming the missing transport, and the conformance suite records fifteen violations for it; with the transport it passes the suite in full. Honest limits: the host running the provider needs the `aws` CLI and `session-manager-plugin` installed; a command's standard error cannot be separated from its output; and no live cluster is driven from this repository, so the transport is proven against a fake that reproduces the plugin's banner, footer, carriage returns, and zero exit over a real local shell, while the exact command length the SSM document accepts is the service's to enforce, which is what `chunkBytes` is for.
 
 ### CloudflareSandbox
 

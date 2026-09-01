@@ -5,9 +5,11 @@
  */
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
+import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessHandle, ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import { providerFailure, remoteProcessOf } from "../internal/localProcess.ts"
+import { hostKillScript } from "../internal/killScript.ts"
+import { gather, providerFailure, remoteProcessOf } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import type { RemoteProcess } from "../RemoteChildProcessSpawner/Provider.ts"
 import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
@@ -40,9 +42,11 @@ const failure = providerFailure
  *
  * `acquire` creates one scratch directory per session key and serves the
  * session contract from it: `spawn` runs the command line through the host
- * spawner's shell with the directory as its default working directory, file
- * transfer is the host filesystem, `kill` delivers real signals, and closing
- * the scope removes the directory.
+ * spawner's shell with the directory as its default working directory — a
+ * relative `cwd` is taken under it, the caller's `env` extends the host's
+ * rather than replacing it, and `stdin` bytes become the command's whole
+ * standard input — file transfer is the host filesystem, `kill` delivers
+ * real signals, and closing the scope removes the directory.
  *
  * This is the trusted local backend — a workspace boundary, **not a security
  * boundary**. Nothing confines a spawned process to the directory; what the
@@ -64,6 +68,14 @@ export const make = (options: DirectorySandboxOptions): Provider => ({
         ),
         () => Effect.ignore(options.fs.remove(workdir, { recursive: true, force: true }))
       )
+      // One rooting rule for every relative path the session sees, mirroring
+      // `Sandbox.fileSystem`: a relative `cwd` or file path is the
+      // workspace's, never the engine process's working directory.
+      const resolve = (path: string): string => {
+        if (path.startsWith("/")) return path
+        const trimmed = path.replace(/^(\.\/)+/, "")
+        return trimmed === "" || trimmed === "." ? workdir : `${workdir}/${trimmed}`
+      }
       const started = new WeakMap<RemoteProcess, ChildProcessHandle>()
       const session: Session = {
         id: sessionKey,
@@ -72,8 +84,12 @@ export const make = (options: DirectorySandboxOptions): Provider => ({
         spawn: Effect.fnUntraced(function*(command, spawnOptions) {
           const settings: ChildProcess.CommandOptions = {
             shell: true,
-            cwd: spawnOptions.cwd ?? workdir,
-            ...spawnOptions.env === undefined ? {} : { env: spawnOptions.env }
+            cwd: resolve(spawnOptions.cwd ?? ""),
+            // The caller's variables extend the host environment the way
+            // `docker exec --env` extends a container's; replacing it would
+            // strip PATH from every spawn that sets a single variable.
+            ...spawnOptions.env === undefined ? {} : { env: spawnOptions.env, extendEnv: true },
+            ...spawnOptions.stdin === undefined ? {} : { stdin: Stream.make(spawnOptions.stdin) }
           }
           const handle = yield* options.spawner.spawn(ChildProcess.make(command, settings)).pipe(
             Effect.mapError(failure("spawn_error", `\`${command}\` could not start`))
@@ -99,6 +115,13 @@ export const make = (options: DirectorySandboxOptions): Provider => ({
             }
             yield* options.fs.writeFile(path, content)
           }).pipe(Effect.mapError(failure("unknown", `the sandbox could not write ${path}`))),
+        // Commands run as `sh -c <line>`, so the handle's own kill reaches
+        // only that shell — and a shell that forked the work (dash does, and
+        // any pipeline or background job everywhere) leaves it running, the
+        // exact silent no-op kill the conformance suite exists to catch. The
+        // handle's pid is the real OS pid, so a walk through the injected
+        // spawner collects the whole descendant set first and signals it and
+        // the root in one `kill` invocation.
         kill: (process, signal) =>
           Effect.suspend(() => {
             const handle = started.get(process)
@@ -106,30 +129,37 @@ export const make = (options: DirectorySandboxOptions): Provider => ({
             if (handle === undefined) {
               return Effect.fail(new ProviderError({ code: "unknown", message: "unrecognized process" }))
             }
-            return handle.kill({ killSignal: signal }).pipe(
-              Effect.mapError(failure("unknown", `the signal ${signal} could not be delivered`))
+            const walk = ChildProcess.make(hostKillScript(handle.pid, signal.replace(/^SIG/, "")), { shell: true })
+            return Effect.scoped(
+              Effect.gen(function*() {
+                const running = yield* options.spawner.spawn(walk).pipe(
+                  Effect.mapError(failure("unknown", `the signal ${signal} could not be delivered`))
+                )
+                const result = yield* gather(running, `kill -s ${signal}`)
+                if (result.code !== 0) {
+                  return yield* Effect.fail(
+                    new ProviderError({
+                      code: "unknown",
+                      message: `the signal ${signal} could not be delivered: ${result.stderr.trim()}`
+                    })
+                  )
+                }
+              })
             )
           }),
         ping: Effect.void,
-        // Native overrides mirror `Sandbox.fileSystem`'s rooting rule: a
-        // relative path is the workspace's, never the host process's cwd.
-        files: (() => {
-          const resolve = (path: string): string => {
-            if (path.startsWith("/")) return path
-            const trimmed = path.replace(/^(\.\/)+/, "")
-            return trimmed === "" || trimmed === "." ? workdir : `${workdir}/${trimmed}`
-          }
-          return {
-            exists: (path) => options.fs.exists(resolve(path)),
-            stat: (path) => options.fs.stat(resolve(path)),
-            readDirectory: (path, directoryOptions) => options.fs.readDirectory(resolve(path), directoryOptions),
-            makeDirectory: (path, directoryOptions) => options.fs.makeDirectory(resolve(path), directoryOptions),
-            remove: (path, removeOptions) => options.fs.remove(resolve(path), removeOptions),
-            rename: (oldPath, newPath) => options.fs.rename(resolve(oldPath), resolve(newPath)),
-            realPath: (path) => options.fs.realPath(resolve(path)),
-            readLink: (path) => options.fs.readLink(resolve(path))
-          } satisfies Partial<FileSystem.FileSystem>
-        })()
+        // Native overrides serve the derived filesystem with the same
+        // rooting rule the probe surface has.
+        files: {
+          exists: (path) => options.fs.exists(resolve(path)),
+          stat: (path) => options.fs.stat(resolve(path)),
+          readDirectory: (path, directoryOptions) => options.fs.readDirectory(resolve(path), directoryOptions),
+          makeDirectory: (path, directoryOptions) => options.fs.makeDirectory(resolve(path), directoryOptions),
+          remove: (path, removeOptions) => options.fs.remove(resolve(path), removeOptions),
+          rename: (oldPath, newPath) => options.fs.rename(resolve(oldPath), resolve(newPath)),
+          realPath: (path) => options.fs.realPath(resolve(path)),
+          readLink: (path) => options.fs.readLink(resolve(path))
+        } satisfies Partial<FileSystem.FileSystem>
       }
       return session
     })

@@ -414,7 +414,9 @@ describe("KubernetesSandbox", () => {
       expect(spawnCalls[1]!.args.at(-1)).toContain("cd '/other place'")
       const kill = fake.calls.find((call) => call.args.at(-1)?.includes("kids()") === true)
       expect(kill!.args.at(-1)).toContain("while [ ! -s /tmp/.smthrs-sbx/1.pid ]")
-      expect(kill!.args.at(-1)).toContain("kill -s TERM")
+      // One batch delivery to the collected set: killing children one at a
+      // time before the parent lets a respawning parent replace them.
+      expect(kill!.args.at(-1)).toContain(`kill -s TERM "$@"`)
 
       const refused = cluster((args) =>
         args.at(-1)?.includes("kids()") === true ? { exitCode: 1, stderr: "exec refused" } : undefined

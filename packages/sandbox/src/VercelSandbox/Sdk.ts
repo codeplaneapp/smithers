@@ -41,7 +41,13 @@ type GetOrCreateInput = {
  * The portion of `@vercel/sandbox` used by this provider.
  *
  * The SDK is injected rather than imported, keeping the package free of a
- * vendor dependency and preserving its browser bundle contract.
+ * vendor dependency and preserving its browser bundle contract. The shapes
+ * mirror the published `@vercel/sandbox` 3.2.1 typings: `getOrCreate`
+ * resumes a named sandbox or creates it, `runCommand` resolves once the
+ * command finishes and exposes its output as strings, `readFile` answers
+ * `null` for an absent path, and `RunCommandParams` carries no standard
+ * input channel — which is why the provider stages `stdin` as a workspace
+ * file instead of passing it here.
  *
  * @category models
  * @since 0.1.0

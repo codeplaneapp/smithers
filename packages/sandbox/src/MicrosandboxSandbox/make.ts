@@ -3,10 +3,8 @@
  *
  * @since 0.1.0
  */
-import * as CommandLine from "@smthrs/kernel/CommandLine"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
-import { decodeBase64 } from "../internal/base64.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import type { RemoteProcess } from "../RemoteChildProcessSpawner/Provider.ts"
 import type { ProviderErrorCode } from "../RemoteChildProcessSpawner/ProviderError.ts"
@@ -154,12 +152,18 @@ const execute = (
   command: string,
   cwd: string,
   env: Record<string, string>,
+  stdin: Uint8Array | undefined,
   code: ProviderErrorCode,
   message: string
 ): Effect.Effect<ExecOutput, ProviderError> =>
   attempt(
     async () => {
-      const handle = await sandbox.execStreamWith(shell, (builder) => builder.args(["-lc", command]).cwd(cwd).envs(env))
+      // `-c`, not `-lc`: a login shell runs the image's profile scripts, and
+      // anything those print lands ahead of the command's own output.
+      const handle = await sandbox.execStreamWith(shell, (builder) => {
+        const configured = builder.args(["-c", command]).cwd(cwd).envs(env)
+        return stdin === undefined ? configured : configured.stdinBytes(stdin)
+      })
       // Microsandbox exposes one drain for stdout, stderr, and status. Calling
       // collect more than once consumes an already-drained command handle.
       return await handle.collect()
@@ -169,10 +173,18 @@ const execute = (
   )
 
 const processOf = (output: ExecOutput): RemoteProcess => ({
-  stdout: Stream.make(new TextEncoder().encode(output.stdout())),
-  stderr: Stream.make(new TextEncoder().encode(output.stderr())),
+  stdout: Stream.make(output.stdoutBytes()),
+  stderr: Stream.make(output.stderrBytes()),
   exitCode: Effect.succeed(output.code)
 })
+
+/**
+ * The SDK wraps every guest filesystem failure in one error kind, so absence
+ * is recognized by the guest's own ENOENT text riding in the message.
+ */
+const isMissingFile = (cause: unknown): boolean =>
+  Reflect.get(Object(cause), "code") === "sandboxFsOps" &&
+  /no such file or directory/i.test(messageOf(cause))
 
 /**
  * Builds a sandbox provider backed by local Microsandbox microVMs.
@@ -180,9 +192,10 @@ const processOf = (output: ExecOutput): RemoteProcess => ({
  * Machine creation is registered as a scoped resource before guest setup, so
  * a microVM that boots but cannot prepare its workspace is stopped. Commands
  * apply the workdir per execution because Microsandbox validates a builder
- * workdir before the selected image has booted. Writes use the SDK's byte-safe
- * operation, while reads travel through guest `base64` because the required
- * SDK read operation is UTF-8 text only.
+ * workdir before the selected image has booted; a relative `cwd` is rooted at
+ * the session workdir and standard input rides the exec builder's own byte
+ * channel. File transfer in both directions uses the SDK's byte-typed
+ * operations, and process output is surfaced as the SDK's raw output bytes.
  *
  * Ephemeral persistence is the default and stops the machine when the scope
  * closes. Sticky persistence leaves a successfully prepared machine running
@@ -212,7 +225,10 @@ export const make = (options: Options): Provider => ({
         openMachine(options, name, sticky),
         ({ created, sandbox }) =>
           !sticky || created && !prepared
-            ? Effect.ignore(attempt(() => sandbox.stop(), "unavailable", `the microVM ${name} could not be stopped`))
+            ? Effect.ignore(
+              attempt(() => sandbox.stop(), "unavailable", `the microVM ${name} could not be stopped`),
+              { log: "Warn" }
+            )
             : Effect.void
       )
 
@@ -222,6 +238,11 @@ export const make = (options: Options): Provider => ({
         `the workspace ${workdir} could not be prepared in ${name}`
       )
       prepared = true
+
+      const resolveCwd = (cwd: string | undefined): string =>
+        cwd === undefined || cwd.startsWith("/")
+          ? cwd ?? workdir
+          : `${workdir}/${cwd.replace(/^(\.\/)+/, "")}`.replace(/\/\.?$/, "")
 
       const session: Session = {
         id: sessionKey,
@@ -233,38 +254,26 @@ export const make = (options: Options): Provider => ({
               opened.sandbox,
               shell,
               command,
-              spawnOptions.cwd ?? workdir,
+              resolveCwd(spawnOptions.cwd),
               environment(options.env, spawnOptions.env),
+              spawnOptions.stdin,
               "spawn_error",
               `\`${command}\` could not run in ${name}`
             ),
             processOf
           ),
         readFile: (path) =>
-          Effect.flatMap(
-            execute(
-              opened.sandbox,
-              shell,
-              `test -e ${CommandLine.quote(path)} || exit 9; base64 ${CommandLine.quote(path)}`,
-              workdir,
-              environment(options.env, undefined),
-              "unknown",
-              `the read from ${path} could not run in ${name}`
-            ),
-            (output) =>
-              output.code === 0
-                ? decodeBase64(output.stdout(), `while reading ${path}`)
-                : output.code === 9
-                ? Effect.fail(
-                  new ProviderError({ code: "not_found", message: `the microVM holds nothing at ${path}` })
-                )
-                : Effect.fail(
-                  new ProviderError({
-                    code: "unknown",
-                    message: `the microVM could not read ${path}: ${output.stderr().trim()}`
-                  })
-                )
-          ),
+          Effect.tryPromise({
+            try: () => opened.sandbox.fs().read(path),
+            catch: (cause) =>
+              isMissingFile(cause)
+                ? new ProviderError({
+                  code: "not_found",
+                  message: `the microVM holds nothing at ${path}`,
+                  cause
+                })
+                : failure("unknown", `the microVM could not read ${path}`, cause)
+          }),
         writeFile: (path, content) =>
           Effect.gen(function*() {
             const parent = parentOf(path)

@@ -216,14 +216,18 @@ describe("Sandbox.fileSystem", () => {
       expect(provider.state.commands).toEqual([])
     }))
 
-  it.effect("answers exists from the probe's exit code and surfaces probe breakage", () =>
+  it.effect("answers exists from the probe's exit code, restating denial, and surfaces probe breakage", () =>
     Effect.gen(function*() {
       const provider = Sandbox.TestSession.make({
         script: (command) =>
-          command.includes(" /there")
+          command.includes(" /there ")
             ? { exitCode: 0 }
-            : command.includes(" /absent")
+            : command.includes(" /absent ")
             ? { exitCode: 1 }
+            : command.includes(" /denied ")
+            ? { exitCode: 12 }
+            : command.includes(" /under-file ")
+            ? { exitCode: 11 }
             : { exitCode: 2, stderr: "sh: test: broken" }
       })
       const outcome = yield* Effect.scoped(
@@ -232,12 +236,27 @@ describe("Sandbox.fileSystem", () => {
           return {
             there: yield* files.exists("/there"),
             absent: yield* files.exists("/absent"),
+            // The platform `exists` converts only `NotFound` into `false`;
+            // a path an unsearchable ancestor hides or a non-directory
+            // ancestor blocks fails the way `access(2)` does.
+            denied: platformReason(yield* Effect.flip(files.exists("/denied"))),
+            underFile: platformReason(yield* Effect.flip(files.exists("/under-file"))),
             broken: platformReason(yield* Effect.flip(files.exists("/broken")))
           }
         })
       )
-      expect(outcome).toEqual({ there: true, absent: false, broken: "Unknown" })
-      expect(provider.state.commands[0]).toBe("test -e /there")
+      expect(outcome).toEqual({
+        there: true,
+        absent: false,
+        denied: "PermissionDenied",
+        underFile: "BadResource",
+        broken: "Unknown"
+      })
+      expect(provider.state.commands[0]).toBe(
+        `if [ -e /there ]; then exit 0; fi; p=/there; ` +
+          `while [ "$p" != / ]; do p=$(dirname "$p"); if [ -e "$p" ]; then ` +
+          `if [ ! -d "$p" ]; then exit 11; elif [ ! -x "$p" ]; then exit 12; else exit 1; fi; fi; done; exit 1`
+      )
     }))
 
   it.effect("derives stat from the compound probe, in every shape", () =>
@@ -285,6 +304,8 @@ describe("Sandbox.fileSystem", () => {
             ? { stdout: command.includes("find") ? "/tree/a\n/tree/a/b.txt\n/elsewhere/x\n" : "a\nz.txt\n" }
             : command.includes(" /gone ")
             ? { exitCode: 9 }
+            : command.includes(" /plain ")
+            ? { exitCode: 11 }
             : { exitCode: 2, stderr: "ls: exploded" }
       })
       const outcome = yield* Effect.scoped(
@@ -294,6 +315,9 @@ describe("Sandbox.fileSystem", () => {
             flat: yield* files.readDirectory("/tree/"),
             deep: yield* files.readDirectory("/tree/", { recursive: true }),
             gone: platformReason(yield* Effect.flip(files.readDirectory("/gone"))),
+            // Listing a present non-directory is the `ENOTDIR` the platform
+            // reports as `BadResource`, not a `NotFound`.
+            plain: platformReason(yield* Effect.flip(files.readDirectory("/plain"))),
             broken: platformReason(yield* Effect.flip(files.readDirectory("/broken")))
           }
         })
@@ -301,7 +325,14 @@ describe("Sandbox.fileSystem", () => {
       expect(outcome.flat).toEqual(["a", "z.txt"])
       expect(outcome.deep).toEqual(["/elsewhere/x", "a", "a/b.txt"])
       expect(outcome.gone).toBe("NotFound")
+      expect(outcome.plain).toBe("BadResource")
       expect(outcome.broken).toBe("Unknown")
+      expect(provider.state.commands[0]).toBe(
+        "if [ -d /tree/ ]; then ls -A /tree/; elif [ -e /tree/ ]; then exit 11; else exit 9; fi"
+      )
+      expect(provider.state.commands[1]).toBe(
+        "if [ -d /tree/ ]; then find /tree/ -mindepth 1; elif [ -e /tree/ ]; then exit 11; else exit 9; fi"
+      )
     }))
 
   it.effect("shapes directory making, removal, and renames as their POSIX lines", () =>
@@ -310,6 +341,14 @@ describe("Sandbox.fileSystem", () => {
         script: (command) =>
           command.includes("refused")
             ? { exitCode: 1, stderr: "refused" }
+            : command.includes("/occupied")
+            ? { exitCode: 10 }
+            : command.includes("/orphan")
+            ? { exitCode: 9 }
+            : command.includes("/missing-src")
+            ? { exitCode: 9 }
+            : command.includes("/into-dir")
+            ? { exitCode: 11 }
             : command.includes("/absent") && command.startsWith("if [ -e")
             ? { exitCode: 9 }
             : { exitCode: 0 }
@@ -323,6 +362,13 @@ describe("Sandbox.fileSystem", () => {
           yield* files.remove("/single")
           yield* files.rename("/from", "/to")
           const failed = yield* Effect.flip(files.makeDirectory("/refused"))
+          // An occupied `mkdir` target is AlreadyExists in both modes (the
+          // recursive form refuses only a non-directory occupant), and a
+          // missing parent is NotFound — the reasons the platform
+          // implementations report for `EEXIST` and `ENOENT`.
+          const occupied = yield* Effect.flip(files.makeDirectory("/occupied"))
+          const occupiedByFile = yield* Effect.flip(files.makeDirectory("/occupied", { recursive: true }))
+          const orphan = yield* Effect.flip(files.makeDirectory("/orphan/child"))
           const unremoved = yield* Effect.flip(files.remove("/refused"))
           // An unforced removal of a missing path is NotFound, the reason the
           // platform implementations report and an idempotent caller catches;
@@ -331,17 +377,27 @@ describe("Sandbox.fileSystem", () => {
           expect(platformReason(absent)).toBe("NotFound")
           yield* files.remove("/absent", { force: true })
           const unrenamed = yield* Effect.flip(files.rename("/refused", "/nowhere"))
+          // A rename's missing source is NotFound, and an existing directory
+          // destination is the `EISDIR` refusal (`mv` would silently move the
+          // source *into* it instead).
+          const missingSource = yield* Effect.flip(files.rename("/missing-src", "/anywhere"))
+          const ontoDirectory = yield* Effect.flip(files.rename("/from", "/into-dir"))
           expect(platformReason(failed)).toBe("Unknown")
+          expect(platformReason(occupied)).toBe("AlreadyExists")
+          expect(platformReason(occupiedByFile)).toBe("AlreadyExists")
+          expect(platformReason(orphan)).toBe("NotFound")
           expect(platformReason(unremoved)).toBe("Unknown")
           expect(platformReason(unrenamed)).toBe("Unknown")
+          expect(platformReason(missingSource)).toBe("NotFound")
+          expect(platformReason(ontoDirectory)).toBe("BadResource")
         })
       )
       expect(provider.state.commands.slice(0, 5)).toEqual([
-        "mkdir -p /deep/tree",
-        "mkdir /flat",
+        "if [ -d /deep/tree ]; then exit 0; elif [ -e /deep/tree ]; then exit 10; else mkdir -p /deep/tree; fi",
+        `if [ -e /flat ] || [ -h /flat ]; then exit 10; elif [ ! -e "$(dirname /flat)" ]; then exit 9; else mkdir /flat; fi`,
         "rm -r -f /old",
         "if [ -e /single ] || [ -h /single ]; then rm /single; else exit 9; fi",
-        "mv /from /to"
+        "if [ ! -e /from ] && [ ! -h /from ]; then exit 9; elif [ -d /to ]; then exit 11; else mv /from /to; fi"
       ])
     }))
 
@@ -349,10 +405,14 @@ describe("Sandbox.fileSystem", () => {
     Effect.gen(function*() {
       const provider = Sandbox.TestSession.make({
         script: (command) =>
-          command === "readlink -f /link"
+          command === "if [ -e /link ]; then readlink -f /link; else exit 9; fi"
             ? { stdout: "/real/target\n" }
-            : command === "readlink /link"
+            : command === "if [ -e /link ] || [ -h /link ]; then readlink /link; else exit 9; fi"
             ? { stdout: "/real/target\n" }
+            : command.includes(" /missing ")
+            ? { exitCode: 9 }
+            : command.includes(" /fried ")
+            ? { exitCode: 1, stderr: "readlink: fried" }
             : { exitCode: 1, stderr: "readlink: no" }
       })
       const outcome = yield* Effect.scoped(
@@ -361,7 +421,15 @@ describe("Sandbox.fileSystem", () => {
           return {
             real: yield* files.realPath("/link"),
             target: yield* files.readLink("/link"),
+            // Presence is probed before `readlink` runs, so absence is
+            // NotFound on both operations (`readlink -f` would happily exit 0
+            // for a missing path, and bare `readlink` cannot tell "missing"
+            // from "not a link"); a readlink that breaks on a present path is
+            // the probe's own failure; and a present non-link stays the
+            // caller's BadArgument.
             missing: platformReason(yield* Effect.flip(files.realPath("/missing"))),
+            missingLink: platformReason(yield* Effect.flip(files.readLink("/missing"))),
+            fried: platformReason(yield* Effect.flip(files.realPath("/fried"))),
             notLink: platformReason(yield* Effect.flip(files.readLink("/plain")))
           }
         })
@@ -370,6 +438,8 @@ describe("Sandbox.fileSystem", () => {
         real: "/real/target",
         target: "/real/target",
         missing: "NotFound",
+        missingLink: "NotFound",
+        fried: "Unknown",
         notLink: "BadArgument"
       })
     }))
@@ -378,7 +448,7 @@ describe("Sandbox.fileSystem", () => {
     Effect.gen(function*() {
       const provider = Sandbox.TestSession.make({
         workdir: "/work",
-        script: (command) => command === "test -e /work/probed.txt" ? { exitCode: 0 } : { exitCode: 1 }
+        script: (command) => command.startsWith("if [ -e /work/probed.txt ]") ? { exitCode: 0 } : { exitCode: 1 }
       })
       const outcome = yield* Effect.scoped(
         Effect.gen(function*() {
@@ -400,7 +470,7 @@ describe("Sandbox.fileSystem", () => {
     Effect.gen(function*() {
       const provider = Sandbox.TestSession.make({
         script: (command) =>
-          command.startsWith("test -e")
+          command.startsWith("if [ -e /broken ]")
             ? { exitCode: 2 }
             : command.includes("'/garbled'") || command.includes(" /garbled ")
             ? { stdout: "" }
@@ -420,7 +490,9 @@ describe("Sandbox.fileSystem", () => {
       expect(String(outcome.silent)).toContain("probe exited 2")
       expect(outcome.garbled.type).toBe("Unknown")
       expect(outcome.garbled.size).toBe(0n)
-      expect(provider.state.commands).toContain("mkdir /sandbox")
+      expect(provider.state.commands).toContain(
+        `if [ -e /sandbox ] || [ -h /sandbox ]; then exit 10; elif [ ! -e "$(dirname /sandbox)" ]; then exit 9; else mkdir /sandbox; fi`
+      )
     }))
 
   it.effect("prefers a session's native override to the probe", () =>

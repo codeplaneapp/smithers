@@ -26,6 +26,15 @@ import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSp
  * back; a session that ends without it is reported as `aborted`, never as
  * success.
  *
+ * What this repository can and cannot prove about it: the framing, the
+ * sentinel, the byte paths, and the signal walk are exercised against a fake
+ * that reproduces the plugin's banner, footer, carriage returns, and zero exit
+ * over a real shell. That the ECS agent hands `--command` to the container's
+ * `sh` (which is why the provider sends `sh -c '...'`) and the exact command
+ * length the SSM document accepts are taken from the service's documented
+ * behavior, not from a live cluster run here; `chunkBytes` exists so the
+ * latter can be tuned without a code change.
+ *
  * @category models
  * @since 0.1.0
  */

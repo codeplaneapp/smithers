@@ -1,6 +1,7 @@
 import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
 import { afterAll, describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Path, PlatformError, Sink, Stream } from "effect"
+import { Effect, Exit, Layer, Path, PlatformError, Sink, Stream } from "effect"
+import * as Scope from "effect/Scope"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import {
   ChildProcessSpawner,
@@ -41,9 +42,14 @@ interface Fault {
   readonly cause: unknown
 }
 
+type ListTasksInput = Parameters<AwsSandbox.Sdk["listTasks"]>[0]
+
 interface FakeEcs {
   readonly runInputs: Array<RunTaskInput>
   readonly describeInputs: Array<DescribeTasksInput>
+  readonly listInputs: Array<ListTasksInput>
+  /** Tasks RunTask started and StopTask has not yet stopped, by startedBy. */
+  readonly running: Array<{ readonly arn: string; readonly startedBy: string }>
   readonly stopInputs: Array<StopTaskInput>
   readonly registerInputs: Array<RegisterTaskDefinitionInput>
   readonly deregisterInputs: Array<DeregisterTaskDefinitionInput>
@@ -51,6 +57,7 @@ interface FakeEcs {
   readonly describeSteps: Array<DescribeStep>
   runFault?: Fault | undefined
   describeFault?: Fault | undefined
+  listFault?: Fault | undefined
   stopFault?: Fault | undefined
   registerFault?: Fault | undefined
   deregisterFault?: Fault | undefined
@@ -64,6 +71,8 @@ interface FakeEcs {
 const fakeEcs = (): FakeEcs => ({
   runInputs: [],
   describeInputs: [],
+  listInputs: [],
+  running: [],
   stopInputs: [],
   registerInputs: [],
   deregisterInputs: [],
@@ -125,9 +134,18 @@ const sdkOf = (fake: FakeEcs): AwsSandbox.Sdk => ({
     if (fake.runWithoutTask === true) return { failures: [{ reason: "CAPACITY" }] }
     const taskArn = `arn:aws:ecs:us-west-2:123456789012:task/cluster/task-${fake.nextTask++}`
     fake.lastContainer = input.overrides?.containerOverrides?.[0]?.name ?? fake.lastContainer
-    return fake.runWithoutArn === true
-      ? { tasks: [{ lastStatus: "PROVISIONING" }], failures: [{ reason: "MISSING_ARN" }] }
-      : { tasks: [{ taskArn, lastStatus: "PROVISIONING", enableExecuteCommand: true }] }
+    if (fake.runWithoutArn === true) {
+      return { tasks: [{ lastStatus: "PROVISIONING" }], failures: [{ reason: "MISSING_ARN" }] }
+    }
+    fake.running.push({ arn: taskArn, startedBy: input.startedBy })
+    return { tasks: [{ taskArn, lastStatus: "PROVISIONING", enableExecuteCommand: true }] }
+  },
+  async listTasks(input) {
+    fake.listInputs.push(input)
+    fake.events.push("list")
+    const fault = takeFault(fake, "listFault")
+    if (fault !== undefined) throw fault
+    return { taskArns: fake.running.filter((task) => task.startedBy === input.startedBy).map((task) => task.arn) }
   },
   async describeTasks(input): Promise<DescribeTasksOutput> {
     fake.describeInputs.push(input)
@@ -144,6 +162,8 @@ const sdkOf = (fake: FakeEcs): AwsSandbox.Sdk => ({
     fake.events.push("stop")
     const fault = takeFault(fake, "stopFault")
     if (fault !== undefined) throw fault
+    const index = fake.running.findIndex((task) => task.arn === input.task)
+    if (index >= 0) fake.running.splice(index, 1)
     return { task: { taskArn: input.task, lastStatus: "STOPPED" } }
   },
   async registerTaskDefinition(input) {
@@ -711,6 +731,67 @@ describe("AwsSandbox", () => {
       expect(runAfterRegister.deregisterInputs).toHaveLength(1)
     }))
 
+  it.effect("adopts the task a previous acquire of the same key left running", () =>
+    Effect.gen(function*() {
+      const fake = fakeEcs()
+      const cli = fakeCli()
+      const provider = transportProvider(fake, cli)
+      // A crash is a scope whose finalizers never ran.
+      const leaked = yield* Scope.make()
+      const first = yield* Effect.provideService(provider.acquire("aws/resume"), Scope.Scope, leaked)
+      const second = yield* acquired(provider, (session) => Effect.succeed(session.remoteId), "aws/resume")
+      expect(second).toBe(first.remoteId)
+      expect(fake.runInputs).toHaveLength(1)
+      expect(fake.listInputs[0]).toMatchObject({ cluster: "cluster-arn", desiredStatus: "RUNNING" })
+      // Releasing the adopting scope stops the adopted task like any other.
+      expect(fake.stopInputs).toHaveLength(1)
+      yield* Scope.close(leaked, Exit.void)
+
+      // A leftover whose agent is not ready is not adopted: a new task starts.
+      const notReady = fakeEcs()
+      const notReadyProvider = transportProvider(notReady, fakeCli())
+      const leakedToo = yield* Scope.make()
+      yield* Effect.provideService(notReadyProvider.acquire("aws/pending"), Scope.Scope, leakedToo)
+      notReady.describeSteps.push("pending")
+      yield* acquired(notReadyProvider, () => Effect.void, "aws/pending")
+      expect(notReady.runInputs).toHaveLength(2)
+      yield* Scope.close(leakedToo, Exit.void)
+
+      // Listing or describing leftovers failing is a failure to acquire.
+      const listFailed = fakeEcs()
+      listFailed.listFault = { cause: new Error("list failed") }
+      expect(yield* Effect.flip(acquired(transportProvider(listFailed, fakeCli()), () => Effect.void))).toMatchObject({
+        code: "unavailable"
+      })
+      const describeFailed = fakeEcs()
+      const describeProvider = transportProvider(describeFailed, fakeCli())
+      const leakedThrice = yield* Scope.make()
+      yield* Effect.provideService(describeProvider.acquire("aws/described"), Scope.Scope, leakedThrice)
+      describeFailed.describeFault = { cause: new Error("describe failed") }
+      expect(yield* Effect.flip(acquired(describeProvider, () => Effect.void, "aws/described"))).toMatchObject({
+        code: "unavailable"
+      })
+      yield* Scope.close(leakedThrice, Exit.void)
+    }), 60_000)
+
+  it.effect(
+    "signals the guest when a spawn scope closes on a live command, and not on an ended one",
+    () =>
+      Effect.gen(function*() {
+        const fake = fakeEcs()
+        const cli = fakeCli()
+        yield* acquired(transportProvider(fake, cli), (session) =>
+          Effect.gen(function*() {
+            const kills = () => cli.calls.filter((call) => call.remote.includes("kids()")).length
+            yield* Effect.scoped(Effect.asVoid(session.spawn("sleep 30", {})))
+            expect(kills()).toBe(1)
+            yield* output(session, "true")
+            expect(kills()).toBe(1)
+          }))
+      }),
+    60_000
+  )
+
   it.effect("passes the sandbox conformance suite through the CLI session transport", () =>
     Effect.gen(function*() {
       const violations = yield* SandboxConformance.check(transportProvider(fakeEcs(), fakeCli()), {
@@ -726,10 +807,17 @@ describe("AwsSandbox", () => {
       })
       expect(violations.map(({ check }) => check)).toEqual([
         "round-trips-binary-bytes",
+        "round-trips-an-empty-file",
+        "round-trips-a-large-file",
         "reports-an-absent-file",
         "creates-parent-directories",
         "runs-in-its-workdir",
+        "roots-a-relative-cwd",
         "delivers-the-environment",
+        "delivers-standard-input",
+        "delivers-standard-error",
+        "files-reach-processes",
+        "processes-reach-files",
         "reacquires-its-session",
         "writes-its-output",
         "reports-a-nonzero-exit"

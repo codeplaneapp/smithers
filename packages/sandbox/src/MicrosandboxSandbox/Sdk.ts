@@ -11,6 +11,7 @@
 
 interface GuestFs {
   write(path: string, data: Uint8Array | string): Promise<void>
+  read(path: string): Promise<Uint8Array>
   readToString(path: string): Promise<string>
   mkdir(path: string): Promise<void>
 }
@@ -19,6 +20,8 @@ interface ExecOutput {
   readonly code: number
   stdout(): string
   stderr(): string
+  stdoutBytes(): Uint8Array
+  stderrBytes(): Uint8Array
 }
 
 interface ExecHandle {
@@ -29,6 +32,7 @@ interface ExecBuilder {
   args(args: Array<string>): this
   cwd(cwd: string): this
   envs(vars: Record<string, string>): this
+  stdinBytes(data: Uint8Array): this
 }
 
 interface Sandbox {

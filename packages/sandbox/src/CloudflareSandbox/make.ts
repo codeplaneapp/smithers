@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { decodeBase64, encodeBase64 } from "../internal/base64.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
+import { stdinRedirect } from "../internal/stdinRedirect.ts"
 import type { RemoteProcess } from "../RemoteChildProcessSpawner/Provider.ts"
 import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
 import type { Provider } from "../Sandbox/Provider.ts"
@@ -61,11 +62,15 @@ const processOf = (stdout: string, stderr: string, exitCode: number): RemoteProc
  * session resolves its collision-proof Durable Object id, disables the SDK's
  * implicit default shell session, and registers `destroy()` on the acquiring
  * scope. `exec` mode uses the completed command result. `process` mode waits
- * for the detached handle and fetches its logs before it reports an outcome.
+ * for the detached handle and fetches its logs before it reports an outcome,
+ * and a handle that reports no exit status at all is a provider failure, not
+ * an invented one.
  *
- * File payloads use the SDK's base64 encoding and the text is read from the
- * result's `content` field. This preserves arbitrary bytes without importing
- * host modules.
+ * The SDK's command options carry no input channel, so `spawn` stages
+ * `options.stdin` as a workspace file and redirects the command from it, and
+ * a relative `cwd` is rooted at the session workdir. File payloads use the
+ * SDK's base64 encoding and the text is read from the result's `content`
+ * field. This preserves arbitrary bytes without importing host modules.
  *
  * @category constructors
  * @since 0.1.0
@@ -87,7 +92,11 @@ export const make = <Binding>(options: Options<Binding>): Provider => {
               }),
             catch: (cause) => failed("unavailable", `could not resolve ${remoteId}`, cause)
           }),
-          (sandbox) => Effect.ignore(attempt(() => sandbox.destroy(), "unknown", `could not destroy ${remoteId}`))
+          (sandbox) =>
+            Effect.ignore(
+              attempt(() => sandbox.destroy(), "unknown", `could not destroy ${remoteId}`),
+              { log: "Warn" }
+            )
         )
         yield* attempt(
           () => sandbox.mkdir(workdir, { recursive: true }),
@@ -95,37 +104,68 @@ export const make = <Binding>(options: Options<Binding>): Provider => {
           `could not create ${workdir}`
         )
 
-        const spawn: Session["spawn"] = (command, spawnOptions) => {
-          const commandOptions = {
-            cwd: spawnOptions.cwd ?? workdir,
-            env: definedEnv(spawnOptions.env)
-          }
-          return options.execution === "process"
-            ? Effect.map(
-              attempt(
-                async () => {
-                  const started = await sandbox.startProcess(command, commandOptions)
-                  const exit = await started.waitForExit()
-                  const logs = await started.getLogs()
-                  return {
-                    ...logs,
-                    exitCode: exit.exitCode ?? started.exitCode ?? 1
-                  }
-                },
-                "spawn_error",
-                `process failed for ${command}`
-              ),
-              (result) => processOf(result.stdout, result.stderr, result.exitCode)
+        const writeFile: Session["writeFile"] = (path, content) =>
+          Effect.gen(function*() {
+            const parent = parentOf(path)
+            if (parent !== undefined) {
+              yield* attempt(
+                () => sandbox.mkdir(parent, { recursive: true }),
+                "unknown",
+                `could not create the parent of ${path}`
+              )
+            }
+            yield* attempt(
+              () => sandbox.writeFile(path, encodeBase64(content), { encoding: "base64" }),
+              "unknown",
+              `could not write ${path}`
             )
-            : Effect.map(
-              attempt(
-                () => sandbox.exec(command, commandOptions),
-                "spawn_error",
-                `exec failed for ${command}`
-              ),
-              (result) => processOf(result.stdout, result.stderr, result.exitCode)
-            )
-        }
+          })
+
+        // The SDK's exec and process options carry no standard input, so the
+        // bytes are staged as a workspace file and the command reads from it.
+        const redirect = stdinRedirect({ workdir, writeFile })
+        const resolveCwd = (cwd: string | undefined): string =>
+          cwd === undefined || cwd.startsWith("/")
+            ? cwd ?? workdir
+            : `${workdir}/${cwd.replace(/^(\.\/)+/, "")}`.replace(/\/\.?$/, "")
+
+        const spawn: Session["spawn"] = (command, spawnOptions) =>
+          Effect.flatMap(redirect(command, spawnOptions.stdin), (fed) => {
+            const commandOptions = {
+              cwd: resolveCwd(spawnOptions.cwd),
+              env: definedEnv(spawnOptions.env)
+            }
+            return options.execution === "process"
+              ? Effect.flatMap(
+                attempt(
+                  async () => {
+                    const started = await sandbox.startProcess(fed, commandOptions)
+                    const exit = await started.waitForExit()
+                    const logs = await started.getLogs()
+                    return {
+                      ...logs,
+                      exitCode: exit.exitCode ?? started.exitCode
+                    }
+                  },
+                  "spawn_error",
+                  `process failed for ${command}`
+                ),
+                (result) =>
+                  result.exitCode === undefined
+                    ? Effect.fail(
+                      failed("spawn_error", `the sandbox reported no exit status for \`${command}\``, result)
+                    )
+                    : Effect.succeed(processOf(result.stdout, result.stderr, result.exitCode))
+              )
+              : Effect.map(
+                attempt(
+                  () => sandbox.exec(fed, commandOptions),
+                  "spawn_error",
+                  `exec failed for ${command}`
+                ),
+                (result) => processOf(result.stdout, result.stderr, result.exitCode)
+              )
+          })
 
         const session: Session = {
           id: sessionKey,
@@ -143,22 +183,7 @@ export const make = <Binding>(options: Options<Binding>): Provider => {
               }),
               (result) => decodeBase64(result.content, `for ${path}`)
             ),
-          writeFile: (path, content) =>
-            Effect.gen(function*() {
-              const parent = parentOf(path)
-              if (parent !== undefined) {
-                yield* attempt(
-                  () => sandbox.mkdir(parent, { recursive: true }),
-                  "unknown",
-                  `could not create the parent of ${path}`
-                )
-              }
-              yield* attempt(
-                () => sandbox.writeFile(path, encodeBase64(content), { encoding: "base64" }),
-                "unknown",
-                `could not write ${path}`
-              )
-            }),
+          writeFile,
           ping: Effect.flatMap(
             attempt(() => sandbox.exec("true", { cwd: workdir }), "unavailable", `could not ping ${remoteId}`),
             (result) =>

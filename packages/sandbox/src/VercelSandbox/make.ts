@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
+import { stdinRedirect } from "../internal/stdinRedirect.ts"
 import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
 import type { Provider } from "../Sandbox/Provider.ts"
 import type { Session } from "../Sandbox/Session.ts"
@@ -114,8 +115,19 @@ const machineName = (prefix: string, session: string): string =>
  *
  * A session key becomes a collision-proof sandbox name and
  * `Sandbox.getOrCreate` resumes that machine when it already exists. Closing
- * the acquisition scope stops the current session. Vercel persists the named
- * sandbox by default, so a later acquire restores its filesystem.
+ * the acquisition scope stops the current session; a stop that fails is
+ * logged at Warn rather than swallowed, because teardown runs for its side
+ * effect and its failure is the only trace an operator gets. Vercel persists
+ * the named sandbox by default, so a later acquire restores its filesystem.
+ *
+ * Commands run through `sh -c`, never `sh -lc`: a login shell sources
+ * profile scripts, and anything those print lands ahead of the command's own
+ * standard output, which callers parse as data. A relative `cwd` is rooted
+ * at the session workdir per the session contract, and `options.stdin` is
+ * delivered through a workspace file — the `@vercel/sandbox` 3.2.1
+ * `RunCommandParams` carries no input channel (its `stdout`/`stderr` fields
+ * are Writables for output), so the redirect in `internal/stdinRedirect` is
+ * the only honest route.
  *
  * Vercel limits the timeout accepted by one create request to five minutes.
  * Longer requested lifetimes create at that ceiling, then call
@@ -169,7 +181,7 @@ export const make = (options: Options): Provider => ({
           "unavailable",
           `could not acquire ${name}`
         ),
-        (sandbox) => Effect.ignore(attempt(() => sandbox.stop(), "unknown", `could not stop ${name}`))
+        (sandbox) => Effect.ignore(attempt(() => sandbox.stop(), "unknown", `could not stop ${name}`), { log: "Warn" })
       )
       if (desiredMs > createMs) {
         yield* attempt(
@@ -187,28 +199,52 @@ export const make = (options: Options): Provider => ({
 
       const run = (params: Parameters<VendorSandbox["runCommand"]>[0]) =>
         attempt(() => sandbox.runCommand(params), "spawn_error", `could not run ${params.cmd}`)
+      const writeFile: Session["writeFile"] = (path, content) =>
+        Effect.gen(function*() {
+          const parent = parentOf(path)
+          if (parent !== undefined) {
+            const result = yield* run({ cmd: "mkdir", args: ["-p", parent] })
+            yield* checked(result, "unknown", `vercel-sandbox: could not create ${parent}`)
+          }
+          yield* attempt(
+            () => sandbox.writeFiles([{ path, content }]),
+            "unknown",
+            `could not write ${path}`
+          )
+        })
+      // `runCommand` takes no standard input (verified against the
+      // `@vercel/sandbox` 3.2.1 typings), so a command's input is staged as
+      // a workspace file and the command line is rewritten to read from it.
+      const redirect = stdinRedirect({ workdir, writeFile })
+      const resolveCwd = (cwd: string | undefined): string =>
+        cwd === undefined || cwd.startsWith("/")
+          ? cwd ?? workdir
+          : `${workdir}/${cwd.replace(/^(\.\/)+/, "")}`.replace(/\/\.?$/, "")
       const session: Session = {
         id: sessionKey,
         remoteId: sandbox.name,
         workdir,
         spawn: (command, spawnOptions) =>
-          Effect.map(
-            run({
-              cmd: "sh",
-              args: ["-lc", command],
-              cwd: spawnOptions.cwd ?? workdir,
-              env: Object.fromEntries(
-                [...Object.entries(options.commandEnv ?? {}), ...Object.entries(spawnOptions.env ?? {})].filter(
-                  (entry): entry is [string, string] => entry[1] !== undefined
+          Effect.flatMap(redirect(command, spawnOptions.stdin), (fed) =>
+            Effect.map(
+              run({
+                cmd: "sh",
+                // `-c`, never `-lc`: profile output from a login shell would
+                // precede the command's own stdout on this transport.
+                args: ["-c", fed],
+                cwd: resolveCwd(spawnOptions.cwd),
+                env: Object.fromEntries(
+                  [...Object.entries(options.commandEnv ?? {}), ...Object.entries(spawnOptions.env ?? {})].filter(
+                    (entry): entry is [string, string] => entry[1] !== undefined
+                  )
                 )
-              )
-            }),
-            (result) => ({
-              stdout: output(() => result.stdout(), "could not read command stdout"),
-              stderr: output(() => result.stderr(), "could not read command stderr"),
-              exitCode: Effect.succeed(result.exitCode)
-            })
-          ),
+              }),
+              (result) => ({
+                stdout: output(() => result.stdout(), "could not read command stdout"),
+                stderr: output(() => result.stderr(), "could not read command stderr"),
+                exitCode: Effect.succeed(result.exitCode)
+              })
+            )),
         readFile: (path) =>
           Effect.flatMap(
             attempt(() => sandbox.readFile({ path }), "unknown", `could not read ${path}`),
@@ -219,19 +255,7 @@ export const make = (options: Options): Provider => ({
                 )
                 : attempt(() => decodeFile(stream), "unknown", `could not drain ${path}`)
           ),
-        writeFile: (path, content) =>
-          Effect.gen(function*() {
-            const parent = parentOf(path)
-            if (parent !== undefined) {
-              const result = yield* run({ cmd: "mkdir", args: ["-p", parent] })
-              yield* checked(result, "unknown", `vercel-sandbox: could not create ${parent}`)
-            }
-            yield* attempt(
-              () => sandbox.writeFiles([{ path, content }]),
-              "unknown",
-              `could not write ${path}`
-            )
-          }),
+        writeFile,
         ping: Effect.gen(function*() {
           const result = yield* run({ cmd: "true", cwd: workdir })
           yield* checked(result, "unavailable", `vercel-sandbox: ${name} did not answer`)
