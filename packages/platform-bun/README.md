@@ -63,10 +63,10 @@ directory. Both refuse a relative root.
 
 ## Modules
 
-| Module          | What it provides                                                                                                                        |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Module          | What it provides                                                                                                                                                                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `BunHost`       | The closed Host bundle: `layer`, `layerAt`, `layerContained`, `layerContainedAt`; re-exports `AtomicFileSystem`, `BunChildProcessSpawner`, `BunFileSystem`, and `BunHttpClient` |
-| `BunFileSystem` | `@smthrs/platform-node`'s atomic `FileSystem`, plus `layerWith` for a host whose python3 lives elsewhere                                 |
+| `BunFileSystem` | `@smthrs/platform-node`'s atomic `FileSystem`, plus `layerWith` for a host whose python3 lives elsewhere                                                                        |
 
 **The filesystem slot is the atomic adapter.** `BunFileSystem.layer` _is_
 `@smthrs/platform-node`'s `AtomicFileSystem.layer`, the same layer behind

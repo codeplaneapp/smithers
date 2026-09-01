@@ -30,10 +30,10 @@ of the host has one place to take it from.
 
 ## Entry points
 
-| Import | Source | Platform |
-| --- | --- | --- |
-| `@smthrs/platform-bun` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/platform-bun/src/index.ts) | Bun, Node |
-| `@smthrs/platform-bun/BunHost` | [src/BunHost.ts](https://github.com/smithersai/smithers/blob/main/packages/platform-bun/src/BunHost.ts) | Bun, Node |
+| Import                               | Source                                                                                                              | Platform  |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | --------- |
+| `@smthrs/platform-bun`               | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/platform-bun/src/index.ts)                 | Bun, Node |
+| `@smthrs/platform-bun/BunHost`       | [src/BunHost.ts](https://github.com/smithersai/smithers/blob/main/packages/platform-bun/src/BunHost.ts)             | Bun, Node |
 | `@smthrs/platform-bun/BunFileSystem` | [src/BunFileSystem.ts](https://github.com/smithersai/smithers/blob/main/packages/platform-bun/src/BunFileSystem.ts) | Bun, Node |
 
 Supported runtimes are Bun >=1.3.0 and Node.js >=22.19.0.
@@ -41,7 +41,7 @@ Supported runtimes are Bun >=1.3.0 and Node.js >=22.19.0.
 ## Shell and HTTP
 
 There is no shell service, and no runtime detection either, because Bun's
-spawner *is* the Node one. See [design decisions](/design-decisions) for why the
+spawner _is_ the Node one. See [design decisions](/design-decisions) for why the
 old `Shell` wrapper and its hand-rolled `Bun.spawn` detection were deleted
 together.
 
@@ -84,13 +84,25 @@ a relative root.
 
 The package runs the shared suite from
 [`@smthrs/kernel/test/contract`](/api/kernel) against `BunHost.layerAt`, with a
-loopback server behind the HTTP probes so the success path is exercised rather
+loopback server behind the HTTP probes so the success path is asserted rather
 than only connection refusal. The suite runs on both interpreters: the package
 vitest lane under Node, which carries the coverage gate, and the
-`//ci:platformBun` target, which re-runs the same files under Bun. Process
-spawning is literally the same module on both runtimes, so there is no Bun-only
-spawn path left to fake; the filesystem helper is not, which is why the guarded
-descriptor-relative operations are exercised here too.
+`//ci:platformBun` target, which re-runs the same files under Bun.
+
+Process spawning is literally the same module on both runtimes, so there is no
+Bun-only spawn path left to fake. The filesystem is not: its no-follow extension
+runs every guarded operation in a CPython 3 subprocess, so whether that helper
+starts and answers is a per-runtime question, and a guarded read, write, rename,
+and one symlink refusal run here to settle it. The byte ceilings, the Unicode
+matrix, and the full refusal matrix are not restaged; they already run against
+the byte-identical module in
+[@smthrs/platform-node](/api/platform-node).
+
+Containment is driven over real processes rather than doubles: a group a dead
+incarnation abandoned is reaped while the layer is built, a child that ignores
+`SIGTERM` is ended by the `graceMs` escalation, and a `jj` invocation appears in
+the ledger like any other child, which is what proves `layerContainedAt` routes
+`jj` through the contained spawner instead of around it.
 
 ## Reading next
 

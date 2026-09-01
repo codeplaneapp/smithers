@@ -1,0 +1,95 @@
+/**
+ * The guarded, descriptor-relative filesystem, executed on this runtime.
+ *
+ * `BunFileSystem.layer` is `@smthrs/platform-node`'s `AtomicFileSystem.layer`,
+ * and its no-follow extension does not run in-process: every guarded operation
+ * is executed by a CPython 3 helper the adapter spawns. The extension being
+ * *present* is a barrel assertion; whether the helper actually starts and
+ * answers is a runtime question, and this package exists for a runtime the
+ * helper is never otherwise exercised on, because `//ci:platformBun` re-runs
+ * these files under Bun.
+ *
+ * So this suite asks only the Bun-specific question. The byte ceilings, the
+ * Unicode matrix, and the full refusal matrix already run against the
+ * byte-identical module in `packages/platform-node/test/AtomicFileSystem*`, and
+ * are deliberately not restaged here.
+ *
+ * `it.live` throughout: the helper is a real subprocess on real elapsed time.
+ */
+import { describe, expect, it } from "@effect/vitest"
+import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
+import * as GrantStore from "@smthrs/kernel/GrantStore"
+import * as Workspace from "@smthrs/kernel/Workspace"
+import { Effect, FileSystem, Layer, Path } from "effect"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import * as BunFileSystem from "../src/BunFileSystem.ts"
+
+/** The kernel's guarded filesystem over the Bun host adapter, bounded at `root`. */
+const guarded = (root: string) =>
+  KernelFileSystem.layer.pipe(
+    Layer.provide(BunFileSystem.layer),
+    Layer.provide(Path.layer),
+    Layer.provide(Workspace.layer(root)),
+    Layer.provide(GrantStore.layerNoop)
+  )
+
+const temporaryDirectory = () => mkdtempSync(join(tmpdir(), "flows-bun-guarded-fs-"))
+
+describe("BunFileSystem under the kernel guard", () => {
+  it.live("runs read, write, and rename through the helper on this runtime", () =>
+    Effect.gen(function*() {
+      const root = temporaryDirectory()
+      try {
+        const nested = join(root, "nested")
+        const written = join(nested, "written.txt")
+        const renamed = join(nested, "renamed.txt")
+
+        const outcome = yield* Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          yield* fs.makeDirectory(nested, { recursive: true })
+          yield* fs.writeFileString(written, "bun guarded")
+          const readBack = yield* fs.readFileString(written)
+          yield* fs.rename(written, renamed)
+          return {
+            readBack,
+            renamedText: yield* fs.readFileString(renamed),
+            sourceGone: yield* fs.exists(written)
+          }
+        }).pipe(Effect.provide(guarded(root)))
+
+        expect(outcome).toEqual({ readBack: "bun guarded", renamedText: "bun guarded", sourceGone: false })
+        // The helper wrote to the real filesystem, not to a private view of it.
+        expect(readFileSync(renamed, "utf8")).toBe("bun guarded")
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    }), 30_000)
+
+  it.live("refuses to traverse a symlink that leaves the boundary root", () =>
+    Effect.gen(function*() {
+      const enclosing = temporaryDirectory()
+      try {
+        const root = join(enclosing, "workspace")
+        const outside = join(enclosing, "outside")
+        mkdirSync(root)
+        mkdirSync(outside)
+        writeFileSync(join(outside, "victim.txt"), "outside")
+        symlinkSync(outside, join(root, "escape"))
+
+        const failure = yield* Effect.flip(
+          Effect.flatMap(FileSystem.FileSystem, (fs) => fs.readFileString(join(root, "escape", "victim.txt"))).pipe(
+            Effect.provide(guarded(root))
+          )
+        )
+
+        // A path-based filesystem would have followed the link and returned the
+        // bytes; the descriptor-relative helper refuses the component instead.
+        expect(failure).toMatchObject({ reason: { _tag: "BadResource" } })
+        expect(readFileSync(join(root, "escape", "victim.txt"), "utf8")).toBe("outside")
+      } finally {
+        rmSync(enclosing, { recursive: true, force: true })
+      }
+    }), 30_000)
+})
