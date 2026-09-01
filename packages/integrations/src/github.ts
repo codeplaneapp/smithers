@@ -43,4 +43,10 @@ export * as Payload from "./github/Payload.ts"
  * @category constructors
  * @since 1.0.0
  */
+export * as Repository from "./github/Repository.ts"
+
+/**
+ * @category constructors
+ * @since 1.0.0
+ */
 export * as Webhook from "./github/Webhook.ts"

@@ -17,6 +17,7 @@ import { Action, type FlowRuntime } from "@smthrs/flow"
 import { Effect, type Layer, Schema } from "effect"
 import { fromIntegrationError, IntegrationFailure } from "../core/ActionFailure.ts"
 import { GitHubClient } from "./GitHubClient.ts"
+import { IssueNumber, Owner, Repo, requireRepositoryPath } from "./Repository.ts"
 
 /**
  * What {@link CommentOnIssue} needs.
@@ -24,13 +25,18 @@ import { GitHubClient } from "./GitHubClient.ts"
  * `issueNumber` is GitHub's issue or pull-request number. GitHub numbers both
  * in one sequence, so the same action comments on either.
  *
+ * The three coordinates are validated rather than merely encoded, because they
+ * become the request path and `new URL` resolves `..` inside one. A payload
+ * built from a webhook body or a model's output therefore cannot walk the
+ * token-bearing POST to another GitHub endpoint: it fails to decode.
+ *
  * @category schemas
  * @since 1.0.0
  */
 export const CommentOnIssuePayload = Schema.Struct({
-  owner: Schema.String,
-  repo: Schema.String,
-  issueNumber: Schema.Number,
+  owner: Owner,
+  repo: Repo,
+  issueNumber: IssueNumber,
   body: Schema.String
 })
 
@@ -75,9 +81,10 @@ export const layerCommentOnIssue: Layer.Layer<
 > = CommentOnIssue.toLayer((payload) =>
   Effect.gen(function*() {
     const client = yield* GitHubClient
+    const repository = yield* requireRepositoryPath(payload.owner, payload.repo)
     return yield* client.request(
       "POST",
-      `/repos/${payload.owner}/${payload.repo}/issues/${payload.issueNumber}/comments`,
+      `/repos/${repository}/issues/${payload.issueNumber}/comments`,
       { body: payload.body },
       { schema: Comment }
     )
