@@ -6,7 +6,9 @@
  * Adapted nearly verbatim from
  * `reference/opencode/packages/core/src/session/run-coordinator.ts`:
  * `Deferred` joins, `FiberSet` ownership, coalesced wakes, and
- * `uninterruptibleMask` preserve its start-or-join semantics.
+ * `uninterruptibleMask` preserve its start-or-join semantics. This adaptation
+ * drops the source's `force` drain argument because no engine-store drain has
+ * a second execution mode; the successor flag carries coordinator scheduling.
  *
  * @since 0.1.0
  */
@@ -66,7 +68,7 @@ type Entry<E> = {
  * @slop
  */
 export const make = <Key, E, R>(options: {
-  readonly drain: (key: Key, force: boolean) => Effect.Effect<void, E, R>
+  readonly drain: (key: Key) => Effect.Effect<void, E, R>
 }): Effect.Effect<RunCoordinator<Key, E>, never, Scope.Scope | R> =>
   Effect.gen(function*() {
     const active = new Map<Key, Entry<E>>()
@@ -78,11 +80,11 @@ export const make = <Key, E, R>(options: {
       stopping: false
     })
 
-    const start = (key: Key, entry: Entry<E>, force: boolean, successor = false): void => {
+    const start = (key: Key, entry: Entry<E>, successor = false): void => {
       const ready = Deferred.makeUnsafe<void>()
       const owner = fork(
         (successor ? Effect.yieldNow : Deferred.await(ready)).pipe(
-          Effect.andThen(Effect.suspend(() => options.drain(key, force))),
+          Effect.andThen(Effect.suspend(() => options.drain(key))),
           Effect.onError((cause) =>
             Cause.hasInterruptsOnly(cause)
               ? Effect.void
@@ -100,7 +102,7 @@ export const make = <Key, E, R>(options: {
     const settle = (key: Key, entry: Entry<E>, exit: Exit.Exit<void, E>): void => {
       if (Exit.isSuccess(exit) && !entry.stopping && entry.pendingWake) {
         entry.pendingWake = false
-        start(key, entry, false, true)
+        start(key, entry, true)
         return
       }
 
@@ -108,7 +110,7 @@ export const make = <Key, E, R>(options: {
       if (successor === undefined) active.delete(key)
       else {
         active.set(key, successor)
-        start(key, successor, false, true)
+        start(key, successor, true)
       }
       Deferred.doneUnsafe(entry.done, exit)
     }
@@ -124,7 +126,7 @@ export const make = <Key, E, R>(options: {
 
         const next = makeEntry()
         active.set(key, next)
-        start(key, next, true)
+        start(key, next)
         return restore(Deferred.await(next.done))
       })
 
@@ -138,7 +140,7 @@ export const make = <Key, E, R>(options: {
 
         const next = makeEntry()
         active.set(key, next)
-        start(key, next, false)
+        start(key, next)
       })
 
     const interrupt = (key: Key): Effect.Effect<void> =>

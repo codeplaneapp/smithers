@@ -147,23 +147,23 @@ describe("RunCoordinator", () => {
     )
   })
 
-  effect("distinguishes direct runs from coalesced wakes", () =>
+  effect("passes only the key to direct and wake-initiated drains", () =>
     Effect.scoped(Effect.gen(function*() {
       const woke = yield* Deferred.make<void>()
-      const forces: Array<boolean> = []
+      const arities: Array<number> = []
       const coordinator = yield* RunCoordinator.make<string, never, never>({
-        drain: (_key, force) =>
-          Effect.sync(() => {
-            forces.push(force)
-          }).pipe(
-            Effect.andThen(force ? Effect.void : Deferred.succeed(woke, undefined))
-          )
+        drain: function() {
+          const call = arities.length
+          return Effect.sync(() => {
+            arities.push(arguments.length)
+          }).pipe(Effect.andThen(call === 0 ? Effect.void : Deferred.succeed(woke, undefined)))
+        }
       })
 
       yield* coordinator.run("run")
       yield* coordinator.wake("run")
       yield* Deferred.await(woke)
-      expect(forces).toEqual([true, false])
+      expect(arities).toEqual([1, 1])
     })))
 
   effect("cleans entries after a failure or defect", () =>
