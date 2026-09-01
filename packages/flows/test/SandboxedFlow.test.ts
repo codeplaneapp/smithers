@@ -108,7 +108,7 @@ const recording = (base: Sandbox.Provider, keys: Array<string>): Sandbox.Provide
 
 const failureOf = <A>(
   effect: Effect.Effect<A, SandboxedFlow.SandboxedFlowError>
-): Effect.Effect<SandboxedFlow.SandboxedFlowError> => Effect.flip(effect)
+): Effect.Effect<SandboxedFlow.SandboxedFlowError, A> => Effect.flip(effect)
 
 const bunInstalled = spawnSync("bun", ["--version"], { stdio: "ignore" }).status === 0
 
@@ -211,15 +211,21 @@ describe.skipIf(!bunInstalled)("SandboxedFlow.execute under bun", () => {
 })
 
 describe("SandboxedFlow.execute failures", () => {
-  const run = <A>(
-    flow: Flow.Flow<string, Flow.AnyStructSchema, Schema.Top, Schema.Top, any>,
-    payload: A,
+  const run = <
+    Tag extends string,
+    Payload extends Flow.AnyStructSchema,
+    Success extends Schema.Top,
+    Error extends Schema.Top,
+    Requires
+  >(
+    flow: Flow.Flow<Tag, Payload, Success, Error, Requires>,
+    payload: Payload["Type"],
     options: Partial<SandboxedFlow.ExecuteOptions>
   ) =>
     Effect.gen(function*() {
       const directory = yield* provider
       return yield* failureOf(
-        SandboxedFlow.execute(flow, payload as never, {
+        SandboxedFlow.execute(flow, payload, {
           provider: directory,
           session: `failure-${Date.now()}-${Math.random()}`,
           entry,
