@@ -369,7 +369,8 @@ export const layerNode = (config: NodeConfig) => {
       }))
   ).pipe(Layer.provide(executorFor(config)))
   return MigrateFlow.layer.pipe(
-    Layer.provideMerge(Layer.mergeAll(hostFor(config), seats, Agent.layer, agentPolicy)),
+    Layer.provideMerge(Layer.mergeAll(hostFor(config), seats, Agent.layer)),
+    Layer.provideMerge(agentPolicy),
     Layer.provideMerge(Agent.layerDefaults),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),
@@ -541,7 +542,8 @@ export const layerScripted = (config: NodeConfig & { readonly script: Script }) 
       )
   })
   return MigrateFlow.layer.pipe(
-    Layer.provideMerge(Layer.mergeAll(hostFor(config), seats, Agent.layer, agentPolicy)),
+    Layer.provideMerge(Layer.mergeAll(hostFor(config), seats, Agent.layer)),
+    Layer.provideMerge(agentPolicy),
     Layer.provideMerge(Agent.layerDefaults),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),
