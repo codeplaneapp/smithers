@@ -46,8 +46,9 @@
  *
  * Deliberately still out of scope, recorded here so the absences read as
  * decisions rather than oversights: the model-backed selection layer (this
- * package must not grow a model dependency), CLI verbs (there is no CLI package
- * in this repo), approval routing from risk (approval machinery lives
+ * package must not grow a model dependency), selection CLI verbs (`@smthrs/cli`
+ * owns CLI verbs and `smithers gc` drives `Retention.collect`, but no selection
+ * verbs are exposed yet), approval routing from risk (approval machinery lives
  * elsewhere), auto-appending proposed nodes (pending human review), and
  * scheduled recertification cadence (a product/system-flow concern; this
  * module ships only the primitive).

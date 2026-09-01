@@ -42,6 +42,28 @@ const errorOf = (exit: Exit.Exit<unknown, unknown>): SelectionStore.SelectionSto
 }
 
 describe("SelectionStore", () => {
+  it.effect("keeps only the newest bounded training evidence in order", () =>
+    Effect.gen(function*() {
+      const expectedCap = 128
+      const observations = Array.from({ length: expectedCap + 5 }, (_, index) => ({
+        scope: edge().scope,
+        affects: edge().affects,
+        outcome: index % 2 === 0 ? "hit" as const : "miss" as const
+      }))
+      const listed = yield* withStore((store) =>
+        Effect.gen(function*() {
+          yield* store.upsert([edge({ evidence: [] })])
+          yield* store.train(observations)
+          return yield* store.list()
+        })
+      )
+
+      expect(listed[0]!.evidence).toEqual(
+        observations.slice(-expectedCap).map((observation) => JSON.stringify(observation))
+      )
+      expect(SelectionStore.maxEvidenceEntries).toBe(expectedCap)
+    }))
+
   it.effect("round-trips edges through upsert and list, ordered by scope then affects", () =>
     Effect.gen(function*() {
       const listed = yield* withStore((store) =>

@@ -11,10 +11,11 @@
  *
  * Model-backed selection, CLI verbs, approval routing, auto-appending
  * proposals, and scheduled recertification cadence are deliberately out of
- * scope here: `engine-store` must not grow a model dependency, this repo has
- * no CLI or approval machinery at this seam, proposal admission still needs
- * human product review, and cadence belongs to a system-flow/product layer
- * rather than the primitive store.
+ * scope here: `engine-store` must not grow a model dependency, no selection
+ * CLI verbs are exposed yet, approval routing belongs to
+ * `@smthrs/control`, proposal admission still needs human product review, and
+ * cadence belongs to a system-flow/product layer rather than the primitive
+ * store.
  *
  * @since 0.1.0
  */
@@ -110,7 +111,8 @@ export class SelectionStoreError extends Schema.TaggedError<SelectionStoreError>
  * clock's now, never `Date.now()`; `train` applies the asymmetric rule — a
  * hit gains five percent of the remaining headroom, a miss halves — to
  * matching stored edges only, ignoring unknown pairs rather than creating
- * them.
+ * them. Training retains at most {@link maxEvidenceEntries} newest evidence
+ * entries per edge.
  *
  * @category models
  * @since 0.1.0
@@ -228,6 +230,16 @@ const trainConfidence = (confidence: number, outcome: TrainingOutcome): number =
     : confidence * 0.5
 
 /**
+ * Maximum evidence entries retained for one suspected edge. Training drops
+ * the oldest entries after this bound and preserves the newest entries in
+ * observation order.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const maxEvidenceEntries = 128
+
+/**
  * Builds the SQL-backed suspected-edge store.
  *
  * @category constructors
@@ -325,7 +337,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             yield* writeEdge({
               ...edge,
               confidence: trainConfidence(edge.confidence, observation.outcome),
-              evidence: [...edge.evidence, JSON.stringify(observation)]
+              evidence: [...edge.evidence, JSON.stringify(observation)].slice(-maxEvidenceEntries)
             })
           }),
         { discard: true }
