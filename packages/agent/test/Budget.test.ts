@@ -248,9 +248,9 @@ describe("a token budget", () => {
         const budget = yield* Budget.make({ tokens: { max: 1_000 } })
         // Nothing recorded yet: the first call is never refused, because the
         // only honest projection of its cost is zero.
-        const first = yield* budget.check
+        const first = yield* budget.check(undefined)
         yield* budget.record("step-a", { totalTokens: 600 })
-        const second = yield* budget.check
+        const second = yield* budget.check(undefined)
         return { first, second }
       })
     )
@@ -262,14 +262,58 @@ describe("a token budget", () => {
     })
   })
 
+  it("lets a step the ledger already counted proceed to its own replay", async () => {
+    const verdicts = await Effect.runPromise(
+      Effect.gen(function*() {
+        const budget = yield* Budget.make({ tokens: { max: 1_000 } })
+        yield* budget.record("step-a", { totalTokens: 600 })
+        // The step whose spend is already in the ledger. A run killed after its
+        // last model call resumes into this exact question, and the honest
+        // answer is that the call costs nothing: its result is recorded, the
+        // replay pays a provider nothing, and the projection that refuses it is
+        // adding an estimate for a call the ledger is already holding.
+        const counted = yield* budget.check("step-a")
+        // Any other step is refused on the same numbers, which is what makes
+        // the verdict attributable at all.
+        const next = yield* budget.check("step-b")
+        const unnamed = yield* budget.check(undefined)
+        return { counted, next, unnamed }
+      })
+    )
+
+    expect(verdicts.counted._tag).toBe("proceed")
+    expect(verdicts.next).toMatchObject({ _tag: "refuse", exceeded: { used: 600, next: 600 } })
+    // A caller that names no step gets the projection, because an unnamed call
+    // is one the ledger cannot recognize.
+    expect(verdicts.unnamed._tag).toBe("refuse")
+  })
+
+  it("lets a counted step through a latch that stops every step after it", async () => {
+    const verdicts = await Effect.runPromise(
+      Effect.gen(function*() {
+        const budget = yield* Budget.make({ tokens: { max: 1_000, onExceeded: "skip-remaining" } })
+        yield* budget.record("step-a", { totalTokens: 600 })
+        const latched = yield* budget.check("step-b")
+        return { latched, counted: yield* budget.check("step-a"), next: yield* budget.check("step-c") }
+      })
+    )
+
+    expect(verdicts.latched).toMatchObject({ _tag: "refuse", exceeded: { onExceeded: "skip-remaining" } })
+    // The latch is permanent for every call the run has not already made, and
+    // it is not a reason to refuse a call the run already paid for: replaying
+    // that step asks no provider anything.
+    expect(verdicts.counted._tag).toBe("proceed")
+    expect(verdicts.next._tag).toBe("refuse")
+  })
+
   it("warns and keeps going when the composition asked it to", async () => {
     const verdicts = await Effect.runPromise(
       Effect.gen(function*() {
         const budget = yield* Budget.make({ tokens: { max: 1_000, onExceeded: "warn" } })
         yield* budget.record("step-a", { totalTokens: 600 })
-        const second = yield* budget.check
+        const second = yield* budget.check(undefined)
         yield* budget.record("step-b", { totalTokens: 600 })
-        const third = yield* budget.check
+        const third = yield* budget.check(undefined)
         return { second, third }
       })
     )
@@ -284,8 +328,8 @@ describe("a token budget", () => {
       Effect.gen(function*() {
         const budget = yield* Budget.make({ tokens: { max: 1_000, onExceeded: "skip-remaining" } })
         yield* budget.record("step-a", { totalTokens: 600 })
-        const second = yield* budget.check
-        const third = yield* budget.check
+        const second = yield* budget.check(undefined)
+        const third = yield* budget.check(undefined)
         return { second, third }
       })
     )
@@ -301,9 +345,9 @@ describe("a latency budget", () => {
     const verdicts = await Effect.runPromise(
       Effect.gen(function*() {
         const budget = yield* Budget.make({ latency: { maxMillis: 5_000 } })
-        const early = yield* budget.check
+        const early = yield* budget.check(undefined)
         yield* TestClock.adjust("6 seconds")
-        const late = yield* budget.check
+        const late = yield* budget.check(undefined)
         return { early, late }
       }).pipe(Effect.provide(TestClock.layer()))
     )
@@ -645,12 +689,54 @@ const waitForTimer = (state: DurableEngineState.Service) =>
     return yield* state.waitingRuns({ reason: "timer" })
   })
 
+/**
+ * One question the budget was asked, and the answer it gave.
+ *
+ * The step key is the whole point. Without it a case can see THAT a resumed run
+ * was refused and never WHICH step was refused, and the two candidates report
+ * identical numbers: a run of two 600-token steps against a 1,000-token ceiling
+ * reports `used: 600, next: 600` whether the refusal landed on the step already
+ * in the ledger — which replays for free and must proceed — or on the step that
+ * has not been made yet. That is the difference between a budget that stops
+ * overspending and one that kills every run resumed after its last model call.
+ */
+interface Verdict {
+  readonly stepKey: string | undefined
+  readonly verdict: string
+}
+
+/** Wraps a budget so a case can see which step each verdict was about. */
+const attributed = (
+  policy: Budget.Policy,
+  asked: Array<Verdict>,
+  counted: Set<string>
+): Layer.Layer<Budget.Budget> =>
+  Layer.effect(Budget.Budget)(
+    Effect.map(Budget.make(policy), (budget) =>
+      Budget.Budget.of({
+        ...budget,
+        check: (stepKey) =>
+          Effect.tap(
+            budget.check(stepKey),
+            (verdict) => Effect.sync(() => asked.push({ stepKey, verdict: verdict._tag }))
+          ),
+        record: (stepKey, usage) =>
+          Effect.tap(budget.record(stepKey, usage), () => Effect.sync(() => counted.add(stepKey)))
+      }))
+  )
+
 describe("a budget refusing a resumed run", () => {
   it(
     "refuses the next call from the spend it projected across the boundary, before any provider is asked",
     async () => {
       const calls: Array<string> = []
-      const incarnation = (hostId: string) =>
+      // Shared across both incarnations on purpose: what the first one recorded
+      // is exactly the ledger the second one recovers, so this is the set of
+      // steps the resumed run has already paid for.
+      const counted = new Set<string>()
+      const before: Array<Verdict> = []
+      const after: Array<Verdict> = []
+      const incarnation = (hostId: string, asked: Array<Verdict>) =>
         Effect.gen(function*() {
           const engine = yield* EngineStore.make({
             owner: { hostId },
@@ -662,7 +748,7 @@ describe("a budget refusing a resumed run", () => {
             // 600 spent and 600 projected is 1,200 against a 1,000 ceiling, so
             // the step after the boundary cannot be made — but ONLY if the 600
             // the first incarnation spent is still known.
-            Layer.provideMerge(Budget.layer({ tokens: { max: 1_000 } })),
+            Layer.provideMerge(attributed({ tokens: { max: 1_000 } }, asked, counted)),
             Layer.provideMerge(QuotaPolicy.layerUnclassified()),
             Layer.provideMerge(seats(spending(600, [answering(`{"approved":true}`)], calls))),
             Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
@@ -676,7 +762,7 @@ describe("a budget refusing a resumed run", () => {
           const state = yield* DurableEngineState.DurableEngineState
           yield* Effect.scoped(
             Effect.gen(function*() {
-              const wiring = yield* incarnation("refuse-before")
+              const wiring = yield* incarnation("refuse-before", before)
               const running = yield* ParkedSteps.execute({ diff: "-  old\n+  new" }, {
                 executionId: "budget-refusal"
               }).pipe(Effect.provide(wiring), Effect.forkChild({ startImmediately: true }))
@@ -689,7 +775,7 @@ describe("a budget refusing a resumed run", () => {
           const callsBefore = calls.length
           const exit = yield* Effect.scoped(
             Effect.gen(function*() {
-              const wiring = yield* incarnation("refuse-after")
+              const wiring = yield* incarnation("refuse-after", after)
               const resuming = yield* Effect.exit(
                 ParkedSteps.execute({ diff: "-  old\n+  new" }, { executionId: "budget-refusal" }).pipe(
                   Effect.provide(wiring)
@@ -717,6 +803,16 @@ describe("a budget refusing a resumed run", () => {
       // Zero provider calls after the boundary: the refusal happened before the
       // ask, which is the difference between a budget and a report.
       expect(calls).toHaveLength(1)
+      // And the refusal is attributable, which is what makes the numbers above
+      // mean anything: the resumed run was refused for a step it has never
+      // made, and no step whose spend is already in the recovered ledger was
+      // refused. Without the key both readings produce `used: 600, next: 600`.
+      const refused = after.filter((asked) => asked.verdict === "refuse")
+      expect(refused).toHaveLength(1)
+      expect(refused[0]?.stepKey).toBeTypeOf("string")
+      expect(counted.has(refused[0]!.stepKey!)).toBe(false)
+      expect(after.filter((asked) => asked.stepKey !== undefined && counted.has(asked.stepKey)))
+        .toEqual(after.filter((asked) => asked.verdict === "proceed" && counted.has(asked.stepKey!)))
     },
     60_000
   )
@@ -941,7 +1037,7 @@ describe("an explicitly unbounded composition", () => {
         const budget = yield* Budget.current
         yield* budget.record("step-a", { totalTokens: 10_000 })
         return {
-          verdict: yield* budget.check,
+          verdict: yield* budget.check(undefined),
           usage: yield* budget.usage,
           run: yield* budget.usageOf("any-run")
         }
@@ -957,9 +1053,9 @@ describe("an explicitly unbounded composition", () => {
     const verdicts = await Effect.runPromise(
       Effect.gen(function*() {
         const budget = yield* Budget.Budget
-        const first = yield* budget.check
+        const first = yield* budget.check(undefined)
         yield* budget.record("step-a", { totalTokens: 900 })
-        return { first, second: yield* budget.check }
+        return { first, second: yield* budget.check(undefined) }
       }).pipe(
         Effect.provide(
           Budget.layerFromEnvelope({
@@ -982,8 +1078,8 @@ describe("an explicitly unbounded composition", () => {
           latency: { maxMillis: 1_000, onExceeded: "skip-remaining" }
         })
         yield* TestClock.adjust("2 seconds")
-        const first = yield* budget.check
-        const second = yield* budget.check
+        const first = yield* budget.check(undefined)
+        const second = yield* budget.check(undefined)
         return { first, second }
       }).pipe(Effect.provide(TestClock.layer()))
     )

@@ -1239,7 +1239,15 @@ export const make = (
           // in the run passes: a step that assembles its own loop cannot evade
           // a budget declared for the whole run. `warn` journals inside the
           // budget itself and falls through here.
-          const verdict = yield* budget.check.pipe(Effect.mapError(accountingFailed))
+          //
+          // The sealed key goes with the question, and it has to: the check
+          // runs BEFORE the activity below replays, so on a resumed run it is
+          // asked about steps whose answers are already journaled and whose
+          // replay pays a provider nothing. Unnamed, it projects prior spend
+          // plus an estimate for a call the ledger already holds, and a run
+          // killed after its last model call resumes straight into
+          // `BudgetExceeded` for a call that costs zero.
+          const verdict = yield* budget.check(key).pipe(Effect.mapError(accountingFailed))
           if (verdict._tag === "refuse") {
             return yield* Effect.fail(
               new HarnessError.HarnessError({

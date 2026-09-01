@@ -288,8 +288,23 @@ export type Verdict =
  * @since 0.1.0
  */
 export interface Service {
-  /** Decides whether the next model call may be made. */
-  readonly check: Effect.Effect<Verdict, AccountingUnavailable>
+  /**
+   * Decides whether the model call keyed by `stepKey` may be made.
+   *
+   * The key is what makes a verdict attributable, and attribution is the whole
+   * difference between a budget and a trap on a resumed run. A run resumes by
+   * re-executing its frames, so it asks this again for every model step it has
+   * already paid for — and those steps replay from the journal without asking a
+   * provider anything. A projection that adds the next call's estimate to a
+   * ledger that already holds this very step refuses a call that costs zero,
+   * and a run killed after its last model call comes back dead on arrival.
+   *
+   * So a step the ledger has already counted proceeds, whatever the ceiling
+   * says. `undefined` is the honest answer for a caller with no key, and it
+   * gets the projection, because a call the ledger cannot recognize is a call
+   * the run has not made.
+   */
+  readonly check: (stepKey: string | undefined) => Effect.Effect<Verdict, AccountingUnavailable>
   /** Accounts one model step's usage, idempotently in its step key. */
   readonly record: (stepKey: string, usage: ModelEvent.Usage) => Effect.Effect<void, AccountingUnavailable>
   /** What the CURRENT run has spent. Outside a run, what the caller recorded. */
@@ -763,49 +778,58 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
         return verdictFor(failure)
       })
 
-    const check: Effect.Effect<Verdict, AccountingUnavailable> = Effect.gen(function*() {
-      const { run } = yield* recovered
-      const current = yield* Ref.get(run.state)
-      const now = yield* Clock.currentTimeMillis
-      if (current.latched) {
-        return verdictFor(
-          exceeded(
-            "tokens",
-            "skip-remaining",
-            current.tokens,
-            policy.tokens?.max ?? 0,
-            current.largestCall
+    const check = (stepKey: string | undefined): Effect.Effect<Verdict, AccountingUnavailable> =>
+      Effect.gen(function*() {
+        const { run } = yield* recovered
+        const current = yield* Ref.get(run.state)
+        // A step the ledger already holds is a step this run already paid for,
+        // so the call about to be made is its replay and costs nothing. Every
+        // ceiling below projects the NEXT call's cost onto the ledger, and
+        // projecting it onto a ledger that already counts this step refuses a
+        // call for spend the refusal is itself double-counting. It is checked
+        // ahead of the latch for the same reason: `skip-remaining` stops the
+        // calls a run has not made, not the ones it is replaying.
+        if (stepKey !== undefined && current.counted.has(stepKey)) return { _tag: "proceed" }
+        const now = yield* Clock.currentTimeMillis
+        if (current.latched) {
+          return verdictFor(
+            exceeded(
+              "tokens",
+              "skip-remaining",
+              current.tokens,
+              policy.tokens?.max ?? 0,
+              current.largestCall
+            )
           )
-        )
-      }
-      const latency = policy.latency
-      if (latency !== undefined && now - run.startedAt > latency.maxMillis) {
-        return yield* settle(
-          run,
-          exceeded(
-            "latency",
-            latency.onExceeded ?? "fail",
-            now - run.startedAt,
-            latency.maxMillis,
-            0
+        }
+        const latency = policy.latency
+        if (latency !== undefined && now - run.startedAt > latency.maxMillis) {
+          return yield* settle(
+            run,
+            exceeded(
+              "latency",
+              latency.onExceeded ?? "fail",
+              now - run.startedAt,
+              latency.maxMillis,
+              0
+            )
           )
-        )
-      }
-      const tokens = policy.tokens
-      if (tokens !== undefined && current.tokens + current.largestCall > tokens.max) {
-        return yield* settle(
-          run,
-          exceeded(
-            "tokens",
-            tokens.onExceeded ?? "fail",
-            current.tokens,
-            tokens.max,
-            current.largestCall
+        }
+        const tokens = policy.tokens
+        if (tokens !== undefined && current.tokens + current.largestCall > tokens.max) {
+          return yield* settle(
+            run,
+            exceeded(
+              "tokens",
+              tokens.onExceeded ?? "fail",
+              current.tokens,
+              tokens.max,
+              current.largestCall
+            )
           )
-        )
-      }
-      return { _tag: "proceed" }
-    })
+        }
+        return { _tag: "proceed" }
+      })
 
     const summarize = (current: State): Usage => ({
       tokens: current.tokens,
@@ -870,7 +894,7 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
  */
 export const makeUnbounded = (): Service =>
   Budget.of({
-    check: Effect.succeed<Verdict>({ _tag: "proceed" }),
+    check: () => Effect.succeed<Verdict>({ _tag: "proceed" }),
     record: () => Effect.void,
     usage: Effect.succeed({ tokens: 0, calls: 0, largestCall: 0 }),
     usageOf: () => Effect.succeed({ tokens: 0, calls: 0, largestCall: 0 })
