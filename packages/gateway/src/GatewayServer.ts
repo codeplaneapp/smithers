@@ -34,7 +34,7 @@ import { Effect, Layer, Schema, Stream, type Types } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc"
-import { GatewayError } from "./GatewayError.ts"
+import { GatewayError, settingRefusal } from "./GatewayError.ts"
 import { GatewayRpcs } from "./GatewayRpcs.ts"
 import * as GatewaySchema from "./GatewaySchema.ts"
 import { heartbeatIntervalMillis, Projections } from "./Projections.ts"
@@ -83,7 +83,7 @@ export const layerHandlers = GatewayRpcs.toLayer(
     const control = yield* Control
     return GatewayRpcs.of({
       "Projection.Snapshot": Effect.fn("Gateway.snapshot")(({ selector }) => projections.snapshot(selector)),
-      "Projection.Subscribe": ({ selector }) => projections.subscribe(selector),
+      "Projection.Subscribe": ({ after, selector }) => projections.subscribe(selector, after),
       /* One operator command. Control owns the atomic decision plus durable
        * resume delegation; the gateway is only a transport adapter. */
       "Approval.Submit": Effect.fn("Gateway.submitApproval")((input) =>
@@ -294,8 +294,7 @@ const malformedRequest = (path: string) =>
     encodeGatewayError(
       new GatewayError({
         code: "malformed_request",
-        message: `POST ${path} carries no RPC request message`,
-        cause: null
+        message: `POST ${path} carries no RPC request message`
       })
     ),
     { status: 400 }
@@ -306,8 +305,7 @@ const unauthorizedRequest = () =>
     encodeGatewayError(
       new GatewayError({
         code: "unauthorized",
-        message: "A valid bearer credential is required",
-        cause: null
+        message: "A valid bearer credential is required"
       })
     ),
     { status: 401 }
@@ -318,12 +316,55 @@ const requestTooLarge = (path: string, maxBytes: number) =>
     encodeGatewayError(
       new GatewayError({
         code: "request_too_large",
-        message: `POST ${path} exceeds the ${maxBytes}-byte request limit`,
-        cause: null
+        message: `POST ${path} exceeds the ${maxBytes}-byte request limit`
       })
     ),
     { status: 413 }
   )
+
+const unreadableRequest = (path: string) =>
+  HttpServerResponse.jsonUnsafe(
+    encodeGatewayError(
+      new GatewayError({
+        code: "malformed_request",
+        message: `POST ${path} carries a body the server could not read`
+      })
+    ),
+    { status: 400 }
+  )
+
+/** The message `@effect/platform-node-shared` `NodeStream` gives a size overflow. */
+const maxBytesExceeded = "maxBytes exceeded"
+
+/**
+ * Whether a failed request-body read hit the configured size limit rather than
+ * failing for another reason.
+ *
+ * `@effect/platform-node` raises the limit as an `HttpServerError` whose
+ * `reason` is a `RequestParseError` carrying the `Error("maxBytes exceeded")`
+ * that `@effect/platform-node-shared` `NodeStream.toString` throws
+ * (`NodeHttpIncomingMessage.text` passes `MaxBodySize` in as `maxBytes`, and
+ * `NodeHttpServer`'s `ServerRequestImpl` wraps whatever it throws). Nothing on
+ * the wire distinguishes it otherwise, so the check is that exact shape and a
+ * version bump of those packages is the thing to re-read it against.
+ *
+ * Every other read failure, a transport reset among them, is not a size
+ * overflow. Answering 413 for all of them told a client to shrink a request
+ * that was never too big.
+ *
+ * @param error the failure a body read produced
+ * @since 1.0.0
+ * @category predicates
+ */
+export const exceededBodyLimit = (error: unknown): boolean => {
+  const reason = typeof error === "object" && error !== null
+    ? (error as { readonly reason?: unknown }).reason
+    : undefined
+  const cause = typeof reason === "object" && reason !== null
+    ? (reason as { readonly cause?: unknown }).cause
+    : undefined
+  return cause instanceof Error && cause.message === maxBytesExceeded
+}
 
 /**
  * Whether a request body carries at least one RPC message the server can act
@@ -374,10 +415,9 @@ export const carriesRpcRequest = (
  * @category layers
  */
 export const layerIngress = (options: IngressOptions = {}) => {
+  const refusal = settingRefusal("The gateway request body limit", options.maxRequestBodyBytes)
+  if (refusal !== undefined) throw refusal
   const maxBytes = options.maxRequestBodyBytes ?? defaultMaxRequestBodyBytes
-  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
-    throw new TypeError("Gateway request body limit must be a positive safe integer")
-  }
   return HttpRouter.middleware(
     Effect.gen(function*() {
       const serialization = yield* RpcSerialization.RpcSerialization
@@ -390,19 +430,26 @@ export const layerIngress = (options: IngressOptions = {}) => {
             if (!authorized) return unauthorizedRequest()
           }
           if (request.method !== "POST" || !rpcPaths.includes(path)) return yield* httpEffect
-          const declaredLength = request.headers["content-length"]
-          if (declaredLength !== undefined && /^\d+$/.test(declaredLength) && Number(declaredLength) > maxBytes) {
-            return requestTooLarge(path, maxBytes)
-          }
-          const body = yield* request.text.pipe(
+          // A declared length is a hint that saves reading a body already
+          // known to be too big. It is never trusted the other way: a body
+          // that declares less than it sends is still measured by the read,
+          // and a chunked body declares nothing at all.
+          const declaredLength = Number(request.headers["content-length"])
+          if (Number.isFinite(declaredLength) && declaredLength > maxBytes) return requestTooLarge(path, maxBytes)
+          const read = yield* request.text.pipe(
             Effect.provideService(HttpServerRequest.MaxBodySize, FileSystem.Size(maxBytes)),
             Effect.match({
-              onFailure: () => undefined,
-              onSuccess: (value) => value
+              onFailure: (error): { readonly body: string | undefined; readonly error: unknown } => ({
+                body: undefined,
+                error
+              }),
+              onSuccess: (body) => ({ body, error: undefined })
             })
           )
-          if (body === undefined) return requestTooLarge(path, maxBytes)
-          return carriesRpcRequest(serialization, body) ? yield* httpEffect : malformedRequest(path)
+          if (read.body === undefined) {
+            return exceededBodyLimit(read.error) ? requestTooLarge(path, maxBytes) : unreadableRequest(path)
+          }
+          return carriesRpcRequest(serialization, read.body) ? yield* httpEffect : malformedRequest(path)
         })
     }),
     { global: true }
@@ -410,12 +457,20 @@ export const layerIngress = (options: IngressOptions = {}) => {
 }
 
 /**
- * Compatibility export for the default ingress policy.
+ * How an assembled gateway is configured.
  *
- * @category layers
+ * @category models
  * @since 1.0.0
  */
-export const layerRefuseMalformedRpc = layerIngress()
+export interface LayerOptions {
+  /**
+   * How often an idle followed `Watch` emits a keepalive, defaulting to
+   * `Projections.heartbeatIntervalMillis`.
+   */
+  readonly heartbeatMillis?: number | undefined
+  /** The ingress policy the RPC mounts run behind. */
+  readonly ingress?: IngressOptions | undefined
+}
 
 /**
  * The whole gateway surface, as one application layer a host serves.
@@ -425,21 +480,25 @@ export const layerRefuseMalformedRpc = layerIngress()
  * (`Control`, `Projections`, `SyncServer`). `@smthrs/gateway/node/NodeGateway`
  * is the Node host that binds this to a socket.
  *
+ * A keepalive cadence or a body limit that is not a positive safe integer is
+ * refused here, before anything binds, by throwing the `bind_failed`
+ * `GatewayError` {@link GatewayError.settingRefusal} builds. A host that wants
+ * the refusal as a value rather than an exception asks
+ * `NodeGateway.bindRefusal` first.
+ *
  * @param health the identity `GET /health` answers with
- * @param heartbeatMillis how often an idle followed `Watch` emits a keepalive,
- * defaulting to `Projections.heartbeatIntervalMillis`
+ * @param options the keepalive cadence and the ingress policy
  * @since 1.0.0
  * @category layers
  */
-export const layer = (
-  health: Health,
-  heartbeatMillis?: number | undefined,
-  ingress?: IngressOptions | undefined
-) =>
-  Layer.mergeAll(
-    layerControlHttp(heartbeatMillis),
+export const layer = (health: Health, options: LayerOptions = {}) => {
+  const refusal = settingRefusal("The gateway keepalive cadence", options.heartbeatMillis)
+  if (refusal !== undefined) throw refusal
+  return Layer.mergeAll(
+    layerControlHttp(options.heartbeatMillis),
     layerProjectionsHttp,
     layerSyncHttp,
     layerHealth(health),
-    layerIngress(ingress)
+    layerIngress(options.ingress)
   )
+}

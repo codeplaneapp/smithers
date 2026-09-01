@@ -4,15 +4,17 @@
  *
  * The suites beside this one run the read path against a real SQLite control
  * plane and prove the rows. These drive a stub control service instead,
- * because the branches under test are the gateway's — a listing that fails, a
- * response of the wrong shape, a subscription that must keep following — and a
+ * because the branches under test are the gateway's: a listing that fails, a
+ * response of the wrong shape, a subscription that must keep following, and a
  * real control plane cannot be asked to produce them on demand.
  */
 import { describe, expect, it } from "@effect/vitest"
 import type { Service as ControlService } from "@smthrs/control/Control"
-import { Unavailable } from "@smthrs/control/ControlError"
+import { PersistenceError, Unavailable } from "@smthrs/control/ControlError"
 import type { ControlEvent, ListResponse, RunSummary } from "@smthrs/control/ControlSchema"
-import { Effect, Stream } from "effect"
+import { Effect, Schema, Stream } from "effect"
+import { GatewayError } from "../src/GatewayError.ts"
+import * as GatewaySchema from "../src/GatewaySchema.ts"
 import * as Projections from "../src/Projections.ts"
 
 const die = () => Effect.die("the suite does not use this operation")
@@ -69,6 +71,27 @@ describe("Projections read-path failures", () => {
       const failure = yield* Effect.flip(projections.snapshot({ _tag: "workspace-runs" }))
       expect(failure.code).toBe("run_unavailable")
       expect(failure.message).toBe("Listing runs failed")
+      expect(failure.cause).toEqual({ _tag: "/control/Unavailable", code: "unavailable" })
+    }))
+
+  it.effect("redacts a persistence failure before it reaches a caller", () =>
+    Effect.gen(function*() {
+      const nested = new Error("nested driver detail at /private/tmp/control.db")
+      nested.cause = nested
+      const persistence = new PersistenceError({
+        operation: "list runs",
+        message: "SQL failed while reading /private/tmp/control.db",
+        cause: { nested, statement: "select secret from runs", offset: 1n }
+      })
+      const projections = Projections.make(control({ list: () => Effect.fail(persistence) }))
+
+      const failure = yield* Effect.flip(projections.snapshot({ _tag: "workspace-runs" }))
+      expect(failure.cause).toEqual({ _tag: "/control/PersistenceError", code: "persistence_failed" })
+      const json = JSON.stringify(failure)
+      for (const privateText of ["SQL failed", "nested driver", "/private/tmp", "select secret"]) {
+        expect(json).not.toContain(privateText)
+      }
+      expect(() => Schema.encodeUnknownSync(GatewayError)(failure)).not.toThrow()
     }))
 
   it.effect("reports a failed event read as a gateway refusal naming the run", () =>
@@ -110,30 +133,199 @@ describe("Projections approvals inbox", () => {
 })
 
 describe("Projections subscriptions", () => {
-  it.effect("recomputes the selector's rows on every new event", () =>
+  const movingLog = () => {
+    let nonFollowingReads = 0
+    let log: ReadonlyArray<ControlEvent> = []
+    const service = control({
+      list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+      watch: (filter) => {
+        if (filter.follow !== true) {
+          nonFollowingReads += 1
+          log = [...log, event(log.length + 1, "control.run.accepted", { runId: "run-1" })]
+          return Stream.fromIterable(log)
+        }
+        log = [...log, event(log.length + 1, "control.run.completed", { runId: "run-1" })]
+        return Stream.fromIterable(log.filter((item) => item.sequence > (filter.afterSequence ?? 0)))
+      }
+    })
+    return { reads: () => nonFollowingReads, service }
+  }
+
+  for (const tag of ["run-events", "run-summary", "run-tree", "transcript", "approvals"] as const) {
+    it.effect(`uses one moving-log read for a ${tag} subscription`, () =>
+      Effect.gen(function*() {
+        const moving = movingLog()
+        const projections = Projections.make(moving.service, { heartbeatMillis: 60_000 })
+        const frames = yield* Stream.runCollect(projections.subscribe({ _tag: tag, runId: "run-1" }))
+        const snapshotEnd = frames.find((frame) => frame._tag === "snapshot-end")
+        const deltas = frames.filter((frame) => frame._tag === "delta")
+
+        expect(moving.reads()).toBe(1)
+        expect(snapshotEnd?._tag).toBe("snapshot-end")
+        if (snapshotEnd?._tag !== "snapshot-end") return
+        expect(deltas.length).toBeGreaterThan(0)
+        expect(deltas.every((frame) => frame.cursor.value > snapshotEnd.cursor.value)).toBe(true)
+
+        if (tag === "run-events") {
+          const snapshotSequences = frames.flatMap((frame) =>
+            frame._tag === "row" ? [(frame.row as ControlEvent).sequence] : []
+          )
+          const deltaSequences = deltas.flatMap((frame) =>
+            (frame.delta as ReadonlyArray<ControlEvent>).map((item) => item.sequence)
+          )
+          expect(snapshotSequences.filter((sequence) => deltaSequences.includes(sequence))).toEqual([])
+        }
+      }))
+  }
+
+  it.effect("uses one moving-log read for a unary snapshot cursor and rows", () =>
     Effect.gen(function*() {
-      let follows = 0
+      const moving = movingLog()
+      const snapshot = yield* Projections.make(moving.service).snapshot({ _tag: "run-events", runId: "run-1" })
+      const rows = snapshot.rows as ReadonlyArray<ControlEvent>
+      expect(moving.reads()).toBe(1)
+      expect(snapshot.cursor.value).toBe(rows.at(-1)?.sequence)
+    }))
+
+  it.effect("reads each run's non-following log exactly once per snapshot", () =>
+    Effect.gen(function*() {
+      const second = { ...run, runId: "run-2" }
+      const reads: Array<string> = []
+      const projections = Projections.make(control({
+        list: (request) => {
+          const named = request._tag === "runs" ? request.filters?.runId : undefined
+          return Effect.succeed(
+            {
+              _tag: "runs",
+              items: named === undefined ? [run, second] : [run, second].filter((item) => item.runId === named)
+            } satisfies ListResponse
+          )
+        },
+        watch: (filter) => {
+          if (filter.follow !== true && filter.runId !== undefined) reads.push(filter.runId)
+          return Stream.empty
+        }
+      }))
+
+      yield* projections.snapshot({ _tag: "run-summary", runId: "run-1" })
+      expect(reads).toEqual(["run-1"])
+      reads.length = 0
+      yield* projections.snapshot({ _tag: "workspace-runs" })
+      expect(reads.sort()).toEqual(["run-1", "run-2"])
+    }))
+
+  it.effect("accumulates fifty run-tree deltas without re-reading history", () =>
+    Effect.gen(function*() {
+      const followed = Array.from({ length: 50 }, (_, index) =>
+        event(index + 1, "control.agent.cell-call-started", { flowName: `call-${index + 1}` }))
+      let history: ReadonlyArray<ControlEvent> = []
+      let nonFollowingReads = 0
+      let listCalls = 0
       const projections = Projections.make(
         control({
-          list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+          list: () => {
+            listCalls += 1
+            return Effect.succeed({ _tag: "runs", items: [run] })
+          },
           watch: (filter) => {
-            if (filter.follow !== true) return Stream.fromIterable([approvalRequested])
-            follows += 1
-            return Stream.fromIterable([event(2, "control.run.completed", { runId: "run-1" })])
+            if (filter.follow !== true) {
+              nonFollowingReads += 1
+              return Stream.fromIterable(history)
+            }
+            history = followed
+            return Stream.fromIterable(followed)
           }
         }),
         { heartbeatMillis: 60_000 }
       )
-      const frames = yield* Stream.runCollect(
-        Stream.take(projections.subscribe({ _tag: "run-summary", runId: "run-1" }), 4)
+
+      const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "run-tree", runId: "run-1" }))
+      const deltas = frames.filter((frame) =>
+        frame._tag === "delta"
       )
-      expect(frames.map((frame) => frame._tag)).toEqual(["snapshot-start", "row", "snapshot-end", "delta"])
-      expect(follows).toBe(1)
-      // The delta follows from the snapshot's cursor, so nothing is replayed
-      // and nothing between the two reads is skipped.
-      const delta = frames[3]
-      expect(delta?._tag === "delta" && delta.cursor.value).toBe(2)
+      expect(nonFollowingReads).toBe(1)
+      expect(listCalls).toBe(51)
+      expect(deltas).toHaveLength(50)
+
+      const fresh = yield* projections.snapshot({ _tag: "run-tree", runId: "run-1" })
+      expect(nonFollowingReads).toBe(2)
+      expect(deltas.at(-1)?.delta).toEqual(fresh.rows)
     }))
+
+  it.effect("resumes after a run cursor without emitting snapshot frames", () =>
+    Effect.gen(function*() {
+      const history = [
+        event(1, "control.run.accepted", { runId: "run-1" }),
+        event(2, "control.run.running", { runId: "run-1" }),
+        event(3, "control.run.completed", { runId: "run-1" })
+      ]
+      const projections = Projections.make(
+        control({
+          list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+          watch: (filter) =>
+            filter.follow === true
+              ? Stream.fromIterable(history.filter((item) => item.sequence > (filter.afterSequence ?? 0)))
+              : Stream.fromIterable(history)
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      const frames = yield* Stream.runCollect(projections.subscribe(
+        { _tag: "run-events", runId: "run-1" },
+        { projection: "run-events", runId: "run-1", value: 1 }
+      ))
+      expect(frames.map((frame) => frame._tag)).toEqual(["delta", "delta"])
+      expect(frames.flatMap((frame) => frame._tag === "delta" ? [frame.cursor.value] : [])).toEqual([2, 3])
+      // The fold is seeded with the events up to the cursor, so a resumed
+      // subscription is not a projection of the tail alone.
+      expect(frames.flatMap((frame) => frame._tag === "delta" ? [frame.delta] : [])).toEqual([
+        [history[1]],
+        [history[2]]
+      ])
+    }))
+
+  for (
+    const [name, selector, after, message] of [
+      [
+        "a different projection",
+        { _tag: "run-events", runId: "run-1" },
+        { projection: "transcript", runId: "run-1", value: 1 },
+        "projection"
+      ],
+      [
+        "a different run",
+        { _tag: "run-events", runId: "run-1" },
+        { projection: "run-events", runId: "run-2", value: 1 },
+        "run"
+      ],
+      [
+        "a workspace projection",
+        { _tag: "workspace-runs" },
+        { projection: "workspace-runs", runId: null, value: 0 },
+        "workspace"
+      ]
+    ] as const satisfies ReadonlyArray<
+      readonly [
+        string,
+        GatewaySchema.ProjectionSelector,
+        GatewaySchema.ProjectionCursor,
+        string
+      ]
+    >
+  ) {
+    it.effect(`refuses a resume cursor for ${name}`, () =>
+      Effect.gen(function*() {
+        const projections = Projections.make(
+          control({
+            list: () => Effect.succeed({ _tag: "runs", items: [run] })
+          }),
+          { heartbeatMillis: 60_000 }
+        )
+        const failure = yield* Effect.flip(Stream.runCollect(Stream.take(projections.subscribe(selector, after), 1)))
+        expect(failure.code).toBe("malformed_request")
+        expect(failure.message).toContain(message)
+      }))
+  }
 
   it.live("keeps a workspace subscription open on keepalives alone", () =>
     Effect.gen(function*() {
@@ -150,6 +342,36 @@ describe("Projections subscriptions", () => {
       expect(frames.map((frame) => frame._tag)).toEqual(["snapshot-start", "snapshot-end", "heartbeat"])
       const heartbeat = frames[2]
       expect(heartbeat?._tag === "heartbeat" && typeof heartbeat.atMs).toBe("number")
+    }))
+
+  it.live("emits every declared gateway frame tag through subscriptions", () =>
+    Effect.gen(function*() {
+      const runFrames = yield* Stream.runCollect(
+        Projections.make(
+          control({
+            list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+            watch: (filter) =>
+              filter.follow === true
+                ? Stream.fromIterable([event(2, "control.run.completed", { runId: "run-1" })])
+                : Stream.fromIterable([approvalRequested])
+          }),
+          { heartbeatMillis: 60_000 }
+        ).subscribe({ _tag: "run-summary", runId: "run-1" })
+      )
+      const workspaceFrames = yield* Stream.runCollect(Stream.take(
+        Projections.make(
+          control({
+            list: () => Effect.succeed({ _tag: "runs", items: [] })
+          }),
+          { heartbeatMillis: 1 }
+        ).subscribe({ _tag: "workspace-runs" }),
+        3
+      ))
+      const emitted = new Set([...runFrames, ...workspaceFrames].map((frame) => frame._tag))
+      const declared = new Set(
+        GatewaySchema.GatewayFrame.members.map((member) => member.fields._tag.schema.literal)
+      )
+      expect(emitted).toEqual(declared)
     }))
 })
 

@@ -5,7 +5,7 @@
  * Control mutations are not re-declared here. `@smthrs/control` `ControlRpcs`
  * is the mutation contract and the gateway mounts it unchanged at `/rpc`, so
  * there is exactly one wire definition of `Plan`, `Run`, `Approve`, `Deny`,
- * `Cancel`, `Signal`, `Steer`, `Pause`, `Resume`, `List`, and `Watch`.
+ * `Cancel`, `Signal`, `Steer`, `Resume`, `List`, and `Watch`.
  *
  * The group shares `ControlRpcs.ControlAuth`, so one bearer credential
  * authenticates both mounts and one server-stamped principal is recorded for
@@ -47,19 +47,24 @@ export const SubmitApprovalInput = Schema.Struct({
 })
 
 /**
+ * One approval decision, submitted with the exact payload the run published.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type SubmitApprovalInput = typeof SubmitApprovalInput.Type
+
+/**
  * What submitting an approval did.
  *
- * `decision` is the receipt for the grant or refusal. `resume` is retained as
- * an optional wire-compatibility field and is no longer emitted: Control owns
- * the decision and its durable resume delegation as one domain command.
+ * `decision` is the receipt for the grant or refusal. Control owns the
+ * decision and its durable resume delegation as one domain command.
  *
  * @since 1.0.0
  * @category models
  */
 export const SubmitApprovalOutput = Schema.Struct({
-  decision: ControlSchema.Receipt,
-  /** @deprecated Control resumes node approvals as part of `decision`. */
-  resume: Schema.optional(ControlSchema.Receipt)
+  decision: ControlSchema.Receipt
 })
 
 /**
@@ -97,7 +102,10 @@ export const GatewayRpcs = RpcGroup.make(
     error: GatewayError
   }),
   Rpc.make("Projection.Subscribe", {
-    payload: Schema.Struct({ selector: GatewaySchema.ProjectionSelector }),
+    payload: Schema.Struct({
+      selector: GatewaySchema.ProjectionSelector,
+      after: Schema.optional(GatewaySchema.ProjectionCursor)
+    }),
     success: GatewaySchema.GatewayFrame,
     error: GatewayError,
     stream: true

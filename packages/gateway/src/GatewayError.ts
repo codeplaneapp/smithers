@@ -10,21 +10,14 @@ import { Schema } from "effect"
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export const GatewayErrorCode = Schema.Literals([
-  "already_running",
-  "not_running",
   "bind_failed",
   "unauthorized",
   "malformed_request",
   "request_too_large",
-  "token_expired",
   "run_unavailable",
-  "unsupported_projection",
-  "subscription_expired",
-  "overflow",
-  "sweep_failed"
+  "run_not_found"
 ])
 
 /**
@@ -32,7 +25,6 @@ export const GatewayErrorCode = Schema.Literals([
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export type GatewayErrorCode = typeof GatewayErrorCode.Type
 
@@ -41,10 +33,35 @@ export type GatewayErrorCode = typeof GatewayErrorCode.Type
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class GatewayError extends Schema.TaggedError<GatewayError>()("flows/gateway/GatewayError", {
   code: GatewayErrorCode,
   message: Schema.String,
-  cause: Schema.Unknown
+  cause: Schema.optional(Schema.Struct({
+    _tag: Schema.String,
+    code: Schema.optional(Schema.String)
+  }))
 }) {}
+
+/**
+ * The refusal a numeric setting earns when it is not a positive safe integer,
+ * or `undefined` when the gateway can run under it.
+ *
+ * The keepalive cadence and the request body limit are the same kind of
+ * setting and are checked the same way. A cadence of zero turns the keepalive
+ * into a tight loop and a body limit of zero refuses every request, so a
+ * composition that asks for either is refused before it binds rather than
+ * after it is serving.
+ *
+ * @param name what the value configures, named as the message will read
+ * @param value the configured value, or undefined to accept the default
+ * @since 1.0.0
+ * @category constructors
+ */
+export const settingRefusal = (name: string, value: number | undefined): GatewayError | undefined =>
+  value === undefined || (Number.isSafeInteger(value) && value > 0)
+    ? undefined
+    : new GatewayError({
+      code: "bind_failed",
+      message: `${name} must be a positive safe integer, not ${value}`
+    })

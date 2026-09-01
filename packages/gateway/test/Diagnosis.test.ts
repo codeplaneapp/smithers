@@ -190,12 +190,69 @@ describe("Diagnosis.duration", () => {
     // A clock that ran backwards is reported as zero, never as a negative.
     expect(Diagnosis.duration(facts(10_000, 0))).toBe("0s")
   })
+
+  it("measures the run, not how long a client watched it", () => {
+    // `GatewayServer.watchHeartbeatKind` is merged into every followed `Watch`
+    // stream. A fold that let an unhandled kind widen the span reported this
+    // run as having taken sixteen minutes.
+    const watched = Diagnosis.digest([
+      event("control.run.accepted", { at: 1_000 }),
+      event("control.run.completed", { at: 2_000 }),
+      event("control.gateway.heartbeat", null, 999_000)
+    ])
+    expect(Diagnosis.duration(watched)).toBe("1s")
+    expect(watched.startedAt).toBe(1_000)
+    expect(watched.endedAt).toBe(2_000)
+  })
+
+  it("measures nothing at all from kinds it does not handle", () => {
+    const unknown = Diagnosis.digest([
+      event("control.run.lineage", { at: 5 }),
+      event("flows.engine.step.settled", { at: 9 })
+    ])
+    expect(unknown.startedAt).toBeUndefined()
+    expect(unknown.endedAt).toBeUndefined()
+    expect(unknown.status).toBeUndefined()
+  })
 })
 
 describe("Diagnosis.clip", () => {
   it("leaves short text alone and marks a cut", () => {
     expect(Diagnosis.clip("short", 10)).toBe("short")
     expect(Diagnosis.clip("abcdefghij", 5)).toBe("abcd…")
+  })
+
+  it("cuts on code points rather than UTF-16 code units", () => {
+    // A lone surrogate does not survive a UTF-8 round trip: every decoder
+    // replaces it with U+FFFD, which is exactly the silent corruption slicing
+    // code units used to put on the wire.
+    const wellFormed = (text: string) => new TextDecoder().decode(new TextEncoder().encode(text)) === text
+
+    const clipped = Diagnosis.clip("ab😀cd", 4)
+    expect(clipped).toBe("ab😀…")
+    expect(wellFormed(clipped)).toBe(true)
+    expect([...clipped]).toHaveLength(4)
+    // The old implementation is the counterexample this pins against.
+    expect(wellFormed(`${"ab😀cd".slice(0, 3)}…`)).toBe(false)
+
+    const family = Diagnosis.clip("👨‍👩‍👧‍👦 shipped", 3)
+    expect(wellFormed(family)).toBe(true)
+    expect(JSON.parse(JSON.stringify(family))).toBe(family)
+  })
+
+  it("never returns more than the width asked for", () => {
+    expect(Diagnosis.clip("abc", 0)).toBe("")
+    expect(Diagnosis.clip("abc", -1)).toBe("")
+    expect(Diagnosis.clip("abc", 1)).toBe("…")
+    expect(Diagnosis.clip("", 0)).toBe("")
+  })
+
+  it("reports the first line of a CRLF cause without its carriage return", () => {
+    const digest = Diagnosis.digest([event("control.run.failed", { cause: "boom\r\nstack frame" })])
+    expect(Diagnosis.verdict(digest)).toBe("failed — boom")
+    const card = Diagnosis.render({ runId: "run-1" }, digest)
+    expect(card).toContain("Cause     boom")
+    expect(card).not.toContain("\r")
   })
 })
 

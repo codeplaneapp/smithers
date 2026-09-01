@@ -24,17 +24,20 @@ import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { describe, expect, it } from "@effect/vitest"
 import { Control } from "@smthrs/control/Control"
+import type { Service as ControlService } from "@smthrs/control/Control"
 import * as ControlClient from "@smthrs/control/ControlClient"
+import { Unavailable } from "@smthrs/control/ControlError"
 import type { ApprovalPayload, PlanCard } from "@smthrs/control/ControlSchema"
 import { SyncAuth as SyncAuthTag } from "@smthrs/sync/SyncRpcs"
 import * as SyncServer from "@smthrs/sync/SyncServer"
 import { Effect, Layer, type Scope, Stream } from "effect"
 import { HttpServer } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
-import { GatewayError } from "../src/GatewayError.ts"
+import { connect } from "node:net"
+import { GatewayError, GatewayErrorCode, type GatewayErrorCode as GatewayErrorCodeValue } from "../src/GatewayError.ts"
 import * as GatewayServer from "../src/GatewayServer.ts"
 import * as NodeGateway from "../src/node/NodeGateway.ts"
-import { Projections } from "../src/Projections.ts"
+import { make as makeProjections, Projections } from "../src/Projections.ts"
 import { emit, stack } from "./GatewayStack.ts"
 
 const health: GatewayServer.Health = {
@@ -73,6 +76,60 @@ const SEVEN_STATUSES = [
 const test = <E>(title: string, body: () => Effect.Effect<void, E, Scope.Scope>) =>
   it(title, () => Effect.runPromise(Effect.scoped(body())))
 
+/** One framed RPC message, and the byte limit that admits it and nothing more. */
+const exactBody = `${JSON.stringify({ _tag: "Request", id: 1, tag: "NoSuchProcedure", payload: {}, headers: [] })}\n`
+const exactBodyBytes = new TextEncoder().encode(exactBody).byteLength
+
+/**
+ * One HTTP/1.1 exchange written straight onto a socket.
+ *
+ * `fetch` owns framing headers: it refuses to set `connection` and `upgrade`,
+ * it rewrites `content-length`, and it will not send a body it then abandons.
+ * A WebSocket upgrade and a truncated body are exactly what has to be proved
+ * here, so the request is written by hand.
+ *
+ * `truncate` sends the headers and the body given and then half-closes, so the
+ * server reads fewer bytes than the request declared and its read fails for a
+ * reason that is not a size overflow. The write side stays open, so the answer
+ * still arrives.
+ */
+const raw = (
+  target: string,
+  head: ReadonlyArray<string>,
+  body = "",
+  truncate = false
+): Promise<{ readonly status: number; readonly body: string }> => {
+  const url = new URL(target)
+  return new Promise((resolve, reject) => {
+    let received = ""
+    const socket = connect({ host: url.hostname, port: Number(url.port), allowHalfOpen: true }, () => {
+      const request = `${[...head, `Host: ${url.host}`, "", ""].join("\r\n")}${body}`
+      if (truncate) socket.end(request)
+      else socket.write(request)
+    })
+    const answer = () => {
+      const separator = received.indexOf("\r\n\r\n")
+      if (separator < 0) return
+      const headers = received.slice(0, separator)
+      const payload = received.slice(separator + 4)
+      const status = Number(/^HTTP\/1\.1 (\d+)/.exec(headers)?.[1] ?? 0)
+      const declared = /content-length: (\d+)/i.exec(headers)?.[1]
+      // 101 carries no body, and anything else is complete once the bytes it
+      // declared have arrived.
+      if (status !== 101 && (declared === undefined || payload.length < Number(declared))) return
+      socket.destroy()
+      resolve({ status, body: payload })
+    }
+    socket.setEncoding("utf8")
+    socket.on("data", (chunk: string) => {
+      received += chunk
+      answer()
+    })
+    socket.on("end", () => resolve({ status: 0, body: received }))
+    socket.on("error", reject)
+  })
+}
+
 /** A control client speaking to the served gateway over real HTTP and WebSocket. */
 const client = (url: string, credential?: string | undefined) =>
   ControlClient.layer(credential === undefined ? { url: `${url}/rpc` } : { url: `${url}/rpc`, credential }).pipe(
@@ -98,6 +155,31 @@ describe("the RPC body a mount will act on", () => {
 
   it("leaves a binary framing to the mount, since its body is not text", () => {
     expect(GatewayServer.carriesRpcRequest(RpcSerialization.msgPack, "{}")).toBe(true)
+  })
+})
+
+describe("telling a size overflow from every other body-read failure", () => {
+  /** The exact shape `@effect/platform-node` raises for each. */
+  const httpServerError = (cause: unknown) => ({
+    _tag: "HttpServerError",
+    reason: { _tag: "RequestParseError", cause }
+  })
+
+  it.each([
+    ["the upstream size overflow", httpServerError(new Error("maxBytes exceeded")), true],
+    ["a transport failure carrying another Error", httpServerError(new Error("socket hang up")), false],
+    ["a parse failure carrying no cause", httpServerError(undefined), false],
+    ["a reason that is not an object", { reason: "RequestParseError" }, false],
+    ["a null reason", { reason: null }, false],
+    ["an error with no reason at all", new Error("boom"), false],
+    ["null", null, false],
+    ["undefined", undefined, false],
+    ["a string", "maxBytes exceeded", false]
+  ])("reads %s as %s", (_name, error, expected) => {
+    // A body that could not be read is not a body that was too big. Answering
+    // 413 for every read failure told a client to shrink a request that was
+    // never the problem.
+    expect(GatewayServer.exceededBodyLimit(error)).toBe(expected)
   })
 })
 
@@ -146,8 +228,7 @@ describe("the assembled gateway over a real loopback bind", () => {
         expect(yield* Effect.promise(() => response.json() as Promise<unknown>)).toEqual({
           _tag: "flows/gateway/GatewayError",
           code: "malformed_request",
-          message: "POST /rpc carries no RPC request message",
-          cause: null
+          message: "POST /rpc carries no RPC request message"
         })
       }).pipe(Effect.provide(served())))
   }
@@ -206,6 +287,47 @@ describe("the assembled gateway over a real loopback bind", () => {
         code: "request_too_large"
       })
     }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, maxRequestBodyBytes: 64 }))))
+
+  test("admits a body at exactly the limit and never trusts a declared length", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const post = (headers: ReadonlyArray<string>, body: string) =>
+        raw(`${url}/rpc`, ["POST /rpc HTTP/1.1", "Content-Type: application/json", ...headers], body)
+
+      // The limit is a maximum, not a threshold: a body of exactly that many
+      // bytes is served rather than refused.
+      const atLimit = yield* Effect.promise(() => post([`Content-Length: ${exactBodyBytes}`], exactBody))
+      expect(atLimit.status).toBe(200)
+
+      // A body one byte over is refused, which is what makes the line above a
+      // boundary rather than a coincidence.
+      const overLimit = yield* Effect.promise(() => post([`Content-Length: ${exactBodyBytes + 1}`], `${exactBody} `))
+      expect(overLimit.status).toBe(413)
+      expect(JSON.parse(overLimit.body)).toMatchObject({ code: "request_too_large" })
+
+      // A body the server could not read is not a body that was too big.
+      // Answering 413 for every read failure told a client to shrink a request
+      // that was never the problem, so a truncated body earns 400 instead.
+      const truncated = yield* Effect.promise(() =>
+        raw(
+          `${url}/rpc`,
+          ["POST /rpc HTTP/1.1", "Content-Type: application/json", `Content-Length: ${exactBodyBytes}`],
+          exactBody.slice(0, 4),
+          true
+        )
+      )
+      expect(truncated.status).toBe(400)
+      expect(JSON.parse(truncated.body)).toMatchObject({
+        code: "malformed_request",
+        message: "POST /rpc carries a body the server could not read"
+      })
+
+      // A declared length that understates the body smuggles nothing past the
+      // limit, and needs no test of its own: HTTP/1.1 framing means the server
+      // reads exactly the length it was given, so the extra bytes are never
+      // part of this request at all. The case the guard has to answer for is a
+      // body that declares no length, which the chunked case above covers.
+    }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, maxRequestBodyBytes: exactBodyBytes }))))
 
   test("authenticates before inspecting an oversized body", () =>
     Effect.gen(function*() {
@@ -352,6 +474,131 @@ describe("the assembled gateway over a real loopback bind", () => {
       expect(listed.items[0]?.cancellation?.principal).toMatchObject({ id: "gateway", kind: "bearer" })
     }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, credential: "edge-secret" }))))
 
+  test("serves a projection snapshot over POST /projections, framed on the wire", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const projections = yield* Projections
+      const control = yield* Control
+      const card = yield* control.plan({ flowId: "system/test", input: {} })
+      yield* control.approve(approvalOf(card))
+      const receipt = yield* control.run({
+        _tag: "Plan",
+        planId: card.planId,
+        digest: card.digest,
+        envelope: card.envelope,
+        idempotencyKey: `run:${card.planId}`
+      })
+      if (receipt._tag !== "Accepted" || receipt.runId === undefined) return yield* Effect.die("expected a run")
+      const selector = { _tag: "run-summary" as const, runId: receipt.runId }
+
+      // The relay reaches the projections over the request/response path, so
+      // the mount is exercised the way that path uses it rather than only in
+      // process.
+      const response = yield* Effect.promise(() =>
+        fetch(`${url}/projections`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: `${
+            JSON.stringify({
+              _tag: "Request",
+              id: 1,
+              tag: "Projection.Snapshot",
+              payload: { selector },
+              headers: []
+            })
+          }\n`
+        })
+      )
+      const framed = yield* Effect.promise(() => response.text())
+      const exit = JSON.parse(framed.split("\n")[0] ?? "{}") as {
+        readonly _tag: string
+        readonly exit: { readonly _tag: string; readonly value: unknown }
+      }
+
+      expect(response.status).toBe(200)
+      expect(exit._tag).toBe("Exit")
+      expect(exit.exit._tag).toBe("Success")
+      // What the wire answers is what the service answers.
+      expect(exit.exit.value).toEqual(yield* projections.snapshot(selector))
+    }).pipe(Effect.provide(served())))
+
+  test("serves a sync read over POST /sync", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const response = yield* Effect.promise(() =>
+        fetch(`${url}/sync`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: `${
+            JSON.stringify({
+              _tag: "Request",
+              id: 1,
+              tag: "Read",
+              payload: { scope: { _tag: "workspace" }, limit: 10 },
+              headers: []
+            })
+          }\n`
+        })
+      )
+      // The sync mount is reachable and framed. What it answers for a given
+      // cursor is `@smthrs/sync`'s contract, proved in that package.
+      expect(response.status).toBe(200)
+      expect(yield* Effect.promise(() => response.text())).toContain("\"Exit\"")
+    }).pipe(Effect.provide(served())))
+
+  test("freezes the wire form of the health body and a refusal frame", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const probe = yield* Effect.promise(() => fetch(`${url}/health`))
+      // A golden body: a renamed or dropped field fails here rather than in a
+      // deployment that reads the identity to decide whether to replace this
+      // process.
+      expect(yield* Effect.promise(() => probe.json() as Promise<unknown>)).toEqual({
+        workspaceHash: "workspace-hash",
+        gatewayId: "gateway-1",
+        protocolVersion: "1",
+        version: "1.0.0-rc.0"
+      })
+
+      const refused = yield* Effect.promise(() =>
+        fetch(`${url}/projections`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}"
+        })
+      )
+      expect(yield* Effect.promise(() => refused.json() as Promise<unknown>)).toEqual({
+        _tag: "flows/gateway/GatewayError",
+        code: "malformed_request",
+        message: "POST /projections carries no RPC request message"
+      })
+    }).pipe(Effect.provide(served())))
+
+  test("refuses an uncredentialed WebSocket upgrade on every protected socket", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      // The relay opens the sockets, so the guard has to run on the upgrade
+      // request and not only on the unary mounts. `layerIngress` is a global
+      // router middleware and every socket path is in `protectedPaths`.
+      for (const path of ["/rpc/ws", "/projections/ws", "/sync/ws"]) {
+        const response = yield* Effect.promise(() =>
+          raw(`${url}${path}`, [
+            `GET ${path} HTTP/1.1`,
+            "Connection: Upgrade",
+            "Upgrade: websocket",
+            "Sec-WebSocket-Version: 13",
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="
+          ])
+        )
+        expect([path, response.status]).toEqual([path, 401])
+        expect([path, JSON.parse(response.body) as unknown]).toEqual([path, {
+          _tag: "flows/gateway/GatewayError",
+          code: "unauthorized",
+          message: "A valid bearer credential is required"
+        }])
+      }
+    }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, credential: "edge-secret" }))))
+
   test("streams a projection snapshot and keeps the connection alive between changes", () =>
     Effect.gen(function*() {
       const projections = yield* Projections
@@ -472,14 +719,44 @@ describe("the Watch keepalive", () => {
 })
 
 describe("gateway bind policy", () => {
+  /** Whatever a start-time refusal raised, as the typed error it should be. */
+  const raised = (build: () => unknown): GatewayError => {
+    try {
+      build()
+    } catch (error) {
+      expect(error).toBeInstanceOf(GatewayError)
+      return error as GatewayError
+    }
+    throw new Error("expected a refusal")
+  }
+
   it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])("refuses the invalid body limit %s", (maxRequestBodyBytes) => {
-    expect(() => GatewayServer.layerIngress({ maxRequestBodyBytes })).toThrow(
-      "Gateway request body limit must be a positive safe integer"
-    )
+    // A start-time refusal is this package's own typed failure, so a host that
+    // reports one reports a `bind_failed` code rather than a bare exception.
+    const refusal = raised(() => GatewayServer.layerIngress({ maxRequestBodyBytes }))
+    expect(refusal.code).toBe("bind_failed")
+    expect(refusal.message).toContain("request body limit")
+    expect(NodeGateway.bindRefusal({ port: 0, maxRequestBodyBytes })?.code).toBe("bind_failed")
+  })
+
+  it.each([0, -1, 1.5])("refuses the invalid keepalive cadence %s", (heartbeatMillis) => {
+    // A cadence of zero makes `Stream.tick` a tight loop that floods every
+    // subscriber, which is why the cadence is checked the same way the body
+    // limit is rather than not at all.
+    const assembled = raised(() => GatewayServer.layer(health, { heartbeatMillis }))
+    expect(assembled.code).toBe("bind_failed")
+    expect(assembled.message).toContain("keepalive cadence")
+    expect(raised(() => makeProjections({} as unknown as ControlService, { heartbeatMillis })).code).toBe("bind_failed")
+    expect(NodeGateway.bindRefusal({ port: 0, heartbeatMillis })?.code).toBe("bind_failed")
+  })
+
+  it("accepts a positive cadence and body limit", () => {
+    expect(NodeGateway.bindRefusal({ port: 0, heartbeatMillis: 25, maxRequestBodyBytes: 64 })).toBeUndefined()
   })
 
   it("defaults a bind with no host to loopback", () => {
     expect(NodeGateway.listenOptions({ port: 0 })).toEqual({ port: 0, host: "127.0.0.1" })
+    expect(NodeGateway.bindRefusal({ port: 0 })).toBeUndefined()
   })
 
   it("accepts every loopback spelling with no opt-in and no credential", () => {
@@ -489,16 +766,30 @@ describe("gateway bind policy", () => {
     }
   })
 
+  it("classifies every other host as reachable from elsewhere", () => {
+    // `127.0.0.2` is loopback to the kernel and is not one of the three names
+    // this policy accepts: the policy is a list of spellings a person types,
+    // not a subnet test, and widening it silently is how a gateway ends up
+    // reachable without the opt-in.
+    for (const host of ["0.0.0.0", "::", "192.168.1.10", "example.com", "", "127.0.0.2"]) {
+      expect(NodeGateway.isLoopbackHost(host)).toBe(false)
+    }
+  })
+
   it("refuses a non-loopback bind without an explicit --listen", () => {
-    expect(() => NodeGateway.listenOptions({ host: "0.0.0.0", port: 0 })).toThrow(/--listen/)
-    expect(() => NodeGateway.listenOptions({ host: "0.0.0.0", port: 0, listen: false })).toThrow(/--listen/)
+    expect(raised(() => NodeGateway.listenOptions({ host: "0.0.0.0", port: 0 })).message).toMatch(/--listen/)
+    expect(raised(() => NodeGateway.listenOptions({ host: "0.0.0.0", port: 0, listen: false })).message).toMatch(
+      /--listen/
+    )
   })
 
   it("refuses a non-loopback bind without a bearer credential", () => {
-    expect(() => NodeGateway.listenOptions({ host: "0.0.0.0", port: 0, listen: true })).toThrow(/bearer credential/)
-    expect(() => NodeGateway.listenOptions({ host: "0.0.0.0", port: 0, listen: true, credential: "" })).toThrow(
+    expect(raised(() => NodeGateway.listenOptions({ host: "0.0.0.0", port: 0, listen: true })).message).toMatch(
       /bearer credential/
     )
+    expect(
+      raised(() => NodeGateway.listenOptions({ host: "0.0.0.0", port: 0, listen: true, credential: "" })).message
+    ).toMatch(/bearer credential/)
   })
 
   it("accepts a credentialed non-loopback bind that opted in", () => {
@@ -549,6 +840,62 @@ describe("gateway credential policy", () => {
     }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, credential: "alpha-secret" }))))
 })
 
+describe("gateway error vocabulary", () => {
+  test("reaches callers through every behavioral gateway error code", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const projections = yield* Projections
+      const postCode = (body: string, credential?: string | undefined) =>
+        Effect.promise(async () => {
+          const response = await fetch(`${url}/rpc`, {
+            method: "POST",
+            headers: {
+              ...(credential === undefined ? {} : { authorization: `Bearer ${credential}` }),
+              "content-type": "application/json"
+            },
+            body
+          })
+          return (await response.json() as { readonly code: string }).code
+        })
+      const unavailable = makeProjections({
+        list: () => Effect.fail(new Unavailable({ code: "unavailable", feature: "list", ticket: "T-errors" })),
+        watch: () => Stream.empty
+      } as unknown as ControlService)
+      const table = [
+        [
+          "bind_failed",
+          Effect.sync(() => NodeGateway.bindRefusal({ host: "0.0.0.0", port: 0 })?.code)
+        ],
+        ["unauthorized", postCode("{}")],
+        ["malformed_request", postCode("{}", "edge-secret")],
+        ["request_too_large", postCode("x".repeat(256), "edge-secret")],
+        [
+          "run_unavailable",
+          Effect.map(Effect.flip(unavailable.snapshot({ _tag: "workspace-runs" })), (failure) => failure.code)
+        ],
+        [
+          "run_not_found",
+          Effect.map(
+            Effect.flip(projections.snapshot({ _tag: "run-summary", runId: "missing-run" })),
+            (failure) => failure.code
+          )
+        ]
+      ] as const satisfies ReadonlyArray<readonly [GatewayErrorCodeValue, Effect.Effect<string | undefined, unknown>]>
+
+      for (const [expected, operation] of table) {
+        expect(yield* operation).toBe(expected)
+      }
+      // The declared vocabulary is exactly the vocabulary the table just
+      // produced, so a code cannot outlive the path that constructs it.
+      expect([...GatewayErrorCode.literals].sort()).toEqual(table.map(([code]) => code as string).sort())
+    }).pipe(Effect.provide(served({
+      host: "127.0.0.1",
+      port: 0,
+      credential: "edge-secret",
+      maxRequestBodyBytes: 64
+    }))))
+})
+
 describe("gateway startup", () => {
   test("comes up and answers /health with a read path that cannot read", () =>
     Effect.gen(function*() {
@@ -564,10 +911,8 @@ describe("gateway startup", () => {
           Layer.provideMerge(
             Layer.mergeAll(
               Layer.succeed(Projections, {
-                snapshot: () =>
-                  Effect.fail(new GatewayError({ code: "sweep_failed", message: "recovery boom", cause: null })),
-                subscribe: () =>
-                  Stream.fail(new GatewayError({ code: "sweep_failed", message: "recovery boom", cause: null }))
+                snapshot: () => Effect.fail(new GatewayError({ code: "run_unavailable", message: "recovery boom" })),
+                subscribe: () => Stream.fail(new GatewayError({ code: "run_unavailable", message: "recovery boom" }))
               }),
               SyncServer.layerNoop,
               Layer.succeed(SyncAuthTag, () => Effect.die("sync is unavailable"))

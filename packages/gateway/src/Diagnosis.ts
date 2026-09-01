@@ -85,7 +85,9 @@ export interface Digest {
   readonly finalOutput: string | undefined
   /** The pending ask's question, when the run parked for approval. */
   readonly parkedQuestion: string | undefined
+  /** The earliest time a kind this fold handles occurred at. */
   readonly startedAt: number | undefined
+  /** The latest time a kind this fold handles occurred at. */
   readonly endedAt: number | undefined
 }
 
@@ -107,21 +109,35 @@ const asNumber = (value: unknown): number | undefined => typeof value === "numbe
 /** Occurrence time: the payload's own stamp, else journal admission time. */
 const timeOf = (event: ControlSchema.ControlEvent): number => asNumber(asRecord(event.payload).at) ?? event.occurredAt
 
+/**
+ * The first line, whichever line ending produced it. Splitting on `\n` alone
+ * left the `\r` of a CRLF cause on the wire.
+ */
 const firstLine = (text: string): string => {
-  const index = text.indexOf("\n")
+  const index = text.search(/\r?\n/)
   return index < 0 ? text : text.slice(0, index)
 }
 
 /**
  * Truncates to a display width, marking the cut.
  *
+ * The cut is made on code points, never on UTF-16 code units. Slicing code
+ * units splits an astral character in half and puts a lone surrogate on the
+ * wire, where a Go decoder silently replaces it with U+FFFD and a strict
+ * decoder rejects the whole frame; the result of this function is always well
+ * formed. A clipped result is exactly `width` code points, so `width` 1 is the
+ * ellipsis alone and `width` 0, or any negative width, is the empty string.
+ *
  * @param text the text to clip
- * @param width the greatest length to keep
+ * @param width the greatest number of code points to keep
  * @since 1.0.0
  * @category rendering
  */
-export const clip = (text: string, width: number): string =>
-  text.length <= width ? text : `${text.slice(0, width - 1)}…`
+export const clip = (text: string, width: number): string => {
+  if (width <= 0) return ""
+  const points = [...text]
+  return points.length <= width ? text : `${points.slice(0, width - 1).join("")}…`
+}
 
 /** The mutable accumulator the fold below writes into. */
 interface Accumulator {
@@ -192,17 +208,31 @@ export const digest = (events: ReadonlyArray<ControlSchema.ControlEvent>): Diges
   let startedAt: number | undefined
   let endedAt: number | undefined
 
+  /**
+   * Widens the span this digest reports.
+   *
+   * Only a kind this fold handles widens it. The gateway merges a keepalive
+   * event whose kind no emitter uses into every followed `Watch` stream
+   * (`GatewayServer.watchHeartbeatKind`), and a fold that let an unhandled kind
+   * contribute its timestamp reported a run that ran for as long as it was
+   * watched.
+   */
+  const observe = (at: number): void => {
+    startedAt = startedAt === undefined ? at : Math.min(startedAt, at)
+    endedAt = endedAt === undefined ? at : Math.max(endedAt, at)
+  }
+
   for (const event of events) {
     const payload = asRecord(event.payload)
     const at = timeOf(event)
-    startedAt = startedAt === undefined ? at : Math.min(startedAt, at)
-    endedAt = endedAt === undefined ? at : Math.max(endedAt, at)
     const handler = handlers[event.kind]
     if (handler !== undefined) {
+      observe(at)
       handler(accumulator, payload)
       continue
     }
     if (event.kind === "control.agent.cell-call-settled") {
+      observe(at)
       if (asString(payload.outcome) === "failure") {
         accumulator.callsFailed += 1
         const message = firstLine(asString(payload.message) ?? "unknown refusal")
@@ -215,6 +245,7 @@ export const digest = (events: ReadonlyArray<ControlSchema.ControlEvent>): Diges
     if (event.kind.startsWith("control.run.")) {
       const status = event.kind.slice("control.run.".length)
       if (!runStatuses.has(status)) continue
+      observe(at)
       accumulator.status = status as RunStatus
       if (status === "failed") accumulator.cause = asString(payload.cause)
     }

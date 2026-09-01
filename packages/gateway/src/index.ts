@@ -1,22 +1,21 @@
 /**
- * Workspace gateway contracts and supervision ports for flows.
+ * The assembled workspace gateway: one HTTP surface carrying the control
+ * plane, the sync read path, the served projections, and a health probe.
  *
- * The mounts, the bind and credential policy, and the keepalive cadence are
- * documented in this package's README. `docs/pages/api/gateway.md` is the
- * repository page for it and is the docs lane's to write.
+ * The package also declares the wire schemas those mounts speak, the pure
+ * folds that compute every served row from control-plane facts, and the host
+ * seam a supervisor would implement.
  *
  * @since 0.1.0
  */
 
 /**
  * @since 0.1.0 @category errors
- * @slop
  */
 export * as GatewayError from "./GatewayError.ts"
 
 /**
  * @since 0.1.0 @category models
- * @slop
  */
 export * as GatewaySchema from "./GatewaySchema.ts"
 
@@ -47,7 +46,6 @@ export * as Projections from "./Projections.ts"
 
 /**
  * @since 0.1.0 @category services
- * @slop
  */
 export * as SuperviseRuntime from "./SuperviseRuntime.ts"
 
@@ -56,6 +54,5 @@ export * as SuperviseRuntime from "./SuperviseRuntime.ts"
  *
  * @since 0.1.0
  * @category services
- * @slop
  */
 export * as Sync from "@smthrs/sync"

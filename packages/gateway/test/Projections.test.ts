@@ -16,8 +16,9 @@ import { describe, expect, it } from "@effect/vitest"
 import { Control } from "@smthrs/control/Control"
 import { ControlRuntime } from "@smthrs/control/ControlRuntime"
 import type { ApprovalPayload, ApprovalTarget, PlanCard } from "@smthrs/control/ControlSchema"
-import { Effect, Fiber, type Scope, Stream } from "effect"
+import { Effect, Fiber, Schema, type Scope, Stream } from "effect"
 import type * as GatewayProjection from "../src/GatewayProjection.ts"
+import * as GatewaySchema from "../src/GatewaySchema.ts"
 import { Projections } from "../src/Projections.ts"
 import { defaultCadenceStack, emit, stack } from "./GatewayStack.ts"
 
@@ -79,6 +80,15 @@ const parkOnApproval = (runId: string, requestId: string, question: string) =>
 
 const test = <E>(title: string, body: () => Effect.Effect<void, E, Scope.Scope>) =>
   it(title, () => Effect.runPromise(Effect.scoped(body())))
+
+const runScopedSelectors = (runId: string): ReadonlyArray<GatewaySchema.ProjectionSelector> => [
+  { _tag: "run-summary", runId },
+  { _tag: "run-tree", runId },
+  { _tag: "run-events", runId },
+  { _tag: "transcript", runId },
+  { _tag: "approvals", runId },
+  { _tag: "node-output", runId, nodeId: "call-1" }
+]
 
 describe("gateway projections over a real SQLite control plane", () => {
   test("projects an approval request into a pending row carrying its decision payload", () =>
@@ -249,19 +259,34 @@ describe("gateway projections over a real SQLite control plane", () => {
       expect(transcript.every((row) => row.runId === runId)).toBe(true)
     }).pipe(Effect.provide(stack())))
 
-  test("refuses a projection of a run the control plane does not have", () =>
-    Effect.gen(function*() {
-      const projections = yield* Projections
-      const failure = yield* Effect.flip(projections.snapshot({ _tag: "run-summary", runId: "missing-run" }))
-      expect(failure.code).toBe("run_unavailable")
-      expect(failure.message).toContain("missing-run")
-    }).pipe(Effect.provide(stack())))
+  for (const selector of runScopedSelectors("missing-run")) {
+    test(`refuses an unknown run for ${selector._tag}`, () =>
+      Effect.gen(function*() {
+        const projections = yield* Projections
+        const failure = yield* Effect.flip(projections.snapshot(selector))
+        expect(failure.code).toBe("run_not_found")
+        expect(failure.message).toContain("missing-run")
+      }).pipe(Effect.provide(stack())))
+  }
 
-  test("refuses plan-cards, which planning returns rather than projecting", () =>
+  test("answers every declared projection name", () =>
     Effect.gen(function*() {
       const projections = yield* Projections
-      const failure = yield* Effect.flip(projections.snapshot({ _tag: "plan-cards" }))
-      expect(failure.code).toBe("unsupported_projection")
+      const runId = yield* launch
+      const selectorFor = {
+        "workspace-runs": { _tag: "workspace-runs" },
+        "run-summary": { _tag: "run-summary", runId },
+        "run-events": { _tag: "run-events", runId },
+        transcript: { _tag: "transcript", runId },
+        "run-tree": { _tag: "run-tree", runId },
+        approvals: { _tag: "approvals", runId },
+        "node-output": { _tag: "node-output", runId, nodeId: "call-1" }
+      } as const satisfies Record<GatewaySchema.ProjectionName, GatewaySchema.ProjectionSelector>
+
+      for (const name of GatewaySchema.ProjectionName.literals) {
+        const snapshot = yield* projections.snapshot(selectorFor[name])
+        expect(Schema.decodeUnknownSync(GatewaySchema.ProjectionSnapshot)(snapshot)).toEqual(snapshot)
+      }
     }).pipe(Effect.provide(stack())))
 
   test("lists every workspace run as a summary row", () =>

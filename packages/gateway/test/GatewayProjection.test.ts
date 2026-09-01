@@ -18,6 +18,7 @@
  * no open call, a settled call whose value is not a string.
  */
 import type { ControlSchema } from "@smthrs/control"
+import { FastCheck } from "effect/testing"
 import { describe, expect, it } from "vitest"
 import * as GatewayProjection from "../src/GatewayProjection.ts"
 
@@ -279,6 +280,140 @@ describe("GatewayProjection.nodeOutput", () => {
       orphan("control.agent.cell-call-settled", { outcome: "success", value: "v" })
     ])
     expect(rows).toMatchObject([{ nodeId: "call-1", runId: "run-1", output: "v" }])
+  })
+
+  it("closes an open call whose settlement names no run, without emitting a row", () => {
+    // A row has to name the run it belongs to. The call is still consumed, so
+    // the next settlement of the same flow does not claim it a second time.
+    const rows = GatewayProjection.nodeOutput([
+      event("control.agent.cell-call-started", { flowName: "write" }),
+      event("control.agent.cell-call-started", { flowName: "write" }),
+      orphan("control.agent.cell-call-settled", { flowName: "write", outcome: "success", value: "orphaned" }),
+      event("control.agent.cell-call-settled", { flowName: "write", outcome: "success", value: "kept" })
+    ])
+    expect(rows).toMatchObject([{ nodeId: "call-2", runId: "run-1", output: "kept" }])
+  })
+
+  it("keys a call the way runTree keys it even when an event names no run", () => {
+    // Both folds number a call by the ordinal it opened on, so a UI can pass a
+    // `run-tree` node id to `node-output`. Skipping an event before the ordinal
+    // advanced shifted one fold's keys against the other's.
+    const events = [
+      orphan("control.agent.cell-call-started", { flowName: "read" }),
+      event("control.agent.cell-call-started", { flowName: "write" }),
+      event("control.agent.cell-call-settled", { flowName: "write", outcome: "success", value: "written" }),
+      event("control.agent.cell-call-settled", { flowName: "read", outcome: "success", value: "read it" })
+    ]
+    const tree = GatewayProjection.runTree(run, events)
+    const outputs = GatewayProjection.nodeOutput(events)
+
+    expect(tree.map((row) => `${row.nodeId}:${row.label}`)).toEqual(["call-1:read", "call-2:write"])
+    expect(outputs.map((row) => `${row.nodeId}:${row.output}`)).toEqual(["call-2:written", "call-1:read it"])
+    const known = new Set(tree.map((row) => row.nodeId))
+    expect(outputs.every((row) => known.has(row.nodeId))).toBe(true)
+  })
+})
+
+/**
+ * The invariants that must hold whatever order a journal arrives in.
+ *
+ * A real journal interleaves calls, decisions, and malformed payloads, and
+ * these folds are the whole read contract, so the properties are stated over
+ * generated sequences rather than over the handful of shapes a happy path
+ * produces.
+ */
+describe("GatewayProjection fold invariants", () => {
+  const flowNames = ["write", "read", "grep"]
+
+  const generated = FastCheck.array(
+    FastCheck.oneof(
+      FastCheck.record({
+        kind: FastCheck.constant("control.agent.cell-call-started"),
+        flow: FastCheck.constantFrom(...flowNames)
+      }),
+      FastCheck.record({
+        kind: FastCheck.constant("control.agent.cell-call-settled"),
+        flow: FastCheck.constantFrom(...flowNames, "unopened")
+      }),
+      FastCheck.record({
+        kind: FastCheck.constant("control.approval.requested"),
+        flow: FastCheck.constantFrom("gate-a", "gate-b")
+      }),
+      FastCheck.record({
+        kind: FastCheck.constant("control.approval.approved"),
+        flow: FastCheck.constantFrom("gate-a", "gate-b", "gate-missing")
+      }),
+      FastCheck.record({
+        kind: FastCheck.constant("control.approval.denied"),
+        flow: FastCheck.constantFrom("gate-a", "gate-b", "gate-missing")
+      })
+    ),
+    { maxLength: 40 }
+  )
+
+  const journal = (
+    steps: ReadonlyArray<{ readonly kind: string; readonly flow: string }>
+  ): ReadonlyArray<ControlSchema.ControlEvent> =>
+    steps.map((step) => {
+      if (step.kind === "control.approval.requested") {
+        return event(step.kind, {
+          runId: "run-1",
+          requestId: step.flow,
+          question: `Ship ${step.flow}?`,
+          payload: {
+            target: { _tag: "Node", runId: "run-1", requestId: step.flow, digest: "d", envelope: {} },
+            scope: "run",
+            idempotencyKey: step.flow
+          }
+        })
+      }
+      if (step.kind.startsWith("control.approval.")) return event(step.kind, { tokenId: step.flow })
+      return event(step.kind, { flowName: step.flow, outcome: "success", value: step.flow })
+    })
+
+  it("emits exactly one tree row per opened call and agrees with nodeOutput on its id", () => {
+    FastCheck.assert(
+      FastCheck.property(generated, (steps) => {
+        const events = journal(steps)
+        const opened = steps.filter((step) => step.kind === "control.agent.cell-call-started").length
+        const tree = GatewayProjection.runTree(run, events)
+        const outputs = GatewayProjection.nodeOutput(events)
+        const ids = new Set(tree.map((row) => row.nodeId))
+
+        expect(tree).toHaveLength(opened)
+        expect(ids.size).toBe(opened)
+        expect(outputs.every((row) => ids.has(row.nodeId))).toBe(true)
+        // A settled output belongs to a node the tree also reports as settled.
+        const settled = new Set(tree.filter((row) => row.status !== "running").map((row) => row.nodeId))
+        expect(outputs.every((row) => settled.has(row.nodeId))).toBe(true)
+      }),
+      { numRuns: 200 }
+    )
+  })
+
+  it("never loses a gate it opened, and no decision reopens one", () => {
+    FastCheck.assert(
+      FastCheck.property(generated, (steps) => {
+        const events = journal(steps)
+        let before = new Map(GatewayProjection.approvals([]).map((row) => [row.requestId, row.status]))
+        for (let index = 1; index <= events.length; index++) {
+          const rows = GatewayProjection.approvals(events.slice(0, index))
+          const after = new Map(rows.map((row) => [row.requestId, row.status]))
+          // The row set only grows, in the order the gates opened.
+          expect([...after.keys()].slice(0, before.size)).toEqual([...before.keys()])
+          if (events[index - 1]?.kind.startsWith("control.approval.") === true) {
+            const decision = events[index - 1]?.kind !== "control.approval.requested"
+            for (const [requestId, status] of before) {
+              // Only a fresh request may put a gate back on the pending list.
+              // A decision may correct another decision, never reopen a gate.
+              if (decision && status !== "pending") expect(after.get(requestId)).not.toBe("pending")
+            }
+          }
+          before = after
+        }
+      }),
+      { numRuns: 200 }
+    )
   })
 })
 

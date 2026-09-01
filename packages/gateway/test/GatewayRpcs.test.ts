@@ -19,13 +19,13 @@ import { layerNoopAuth } from "@smthrs/control/ControlRpcs"
 import { ControlRuntime } from "@smthrs/control/ControlRuntime"
 import type { ApprovalPayload, ApprovalTarget, PlanCard } from "@smthrs/control/ControlSchema"
 import { RunStore } from "@smthrs/run-store"
-import { Effect, Layer, type Scope, Stream } from "effect"
+import { Effect, Fiber, Layer, Schema, type Scope, Stream } from "effect"
 import { RpcTest } from "effect/unstable/rpc"
 import type * as GatewayProjection from "../src/GatewayProjection.ts"
-import { GatewayRpcs } from "../src/GatewayRpcs.ts"
+import { GatewayRpcs, SubmitApprovalOutput } from "../src/GatewayRpcs.ts"
 import * as GatewayServer from "../src/GatewayServer.ts"
 import { Projections } from "../src/Projections.ts"
-import { stack } from "./GatewayStack.ts"
+import { emit, stack } from "./GatewayStack.ts"
 
 const principal = { id: "gateway-test", kind: "test", stampedAt: 1 }
 
@@ -87,7 +87,9 @@ describe("Approval.Submit", () => {
       })
 
       expect(submitted.decision._tag).toBe("Accepted")
-      expect(submitted.resume).toBeUndefined()
+      const encoded = Schema.encodeUnknownSync(SubmitApprovalOutput)(submitted)
+      expect(Object.keys(encoded)).toEqual(["decision"])
+      expect(encoded).toEqual({ decision: submitted.decision })
       // This fixture's executor owns no engine row. Control therefore leaves
       // the row parked and records a durable delegation for its real host.
       expect((yield* runtime.getRun(runId)).status).toBe("waiting-approval")
@@ -129,7 +131,6 @@ describe("Approval.Submit", () => {
       })
 
       expect(submitted.decision._tag).toBe("Accepted")
-      expect(submitted.resume).toBeUndefined()
       expect((yield* runtime.getRun(runId)).status).toBe("waiting-approval")
       expect((yield* runtime.pendingResumes).map((entry) => entry.runId)).toEqual([runId])
       const events = yield* Stream.runCollect((yield* Control).watch({ runId, follow: false }))
@@ -151,7 +152,6 @@ describe("Approval.Submit", () => {
       })
 
       expect(submitted.decision._tag).toBe("Accepted")
-      expect(submitted.resume).toBeUndefined()
     }).pipe(Effect.provide(served)))
 
   /**
@@ -194,7 +194,66 @@ describe("Approval.Submit", () => {
       })
 
       expect(submitted.decision._tag).toBe("Accepted")
-      expect(submitted.resume).toBeUndefined()
+    }).pipe(Effect.provide(served)))
+
+  /**
+   * The typed failures the mount declares, produced over the wire rather than
+   * asserted from the schema. A client writes one recovery per tag, so a tag
+   * the mount cannot actually produce is a branch nobody's code will ever
+   * reach, and a tag it produces as a defect is a branch nobody can catch.
+   */
+  test("answers a plan digest that does not match with PlanDigestMismatch", () =>
+    Effect.gen(function*() {
+      const rpc = yield* RpcTest.makeClient(GatewayRpcs)
+      const control = yield* Control
+      const card = yield* control.plan({ flowId: "system/test", input: {} })
+
+      const failure = yield* Effect.flip(rpc["Approval.Submit"]({
+        target: { _tag: "Plan", planId: card.planId, digest: "not-the-digest", envelope: card.envelope },
+        scope: "run",
+        idempotencyKey: `mismatch:${card.planId}`,
+        decision: "approve"
+      }))
+      expect(failure._tag).toBe("/control/PlanDigestMismatch")
+    }).pipe(Effect.provide(served)))
+
+  test("answers a second decision on the same gate with AlreadyResolved", () =>
+    Effect.gen(function*() {
+      const rpc = yield* RpcTest.makeClient(GatewayRpcs)
+      const control = yield* Control
+      const card = yield* control.plan({ flowId: "system/test", input: {} })
+      const target: ApprovalTarget = {
+        _tag: "Plan",
+        planId: card.planId,
+        digest: card.digest,
+        envelope: card.envelope
+      }
+
+      yield* rpc["Approval.Submit"]({ target, scope: "run", idempotencyKey: "first", decision: "approve" })
+      // A different idempotency key makes this a new command rather than a
+      // replay of the accepted one, so the gate itself has to refuse it.
+      const failure = yield* Effect.flip(
+        rpc["Approval.Submit"]({ target, scope: "run", idempotencyKey: "second", decision: "deny" })
+      )
+      expect(failure._tag).toBe("/control/AlreadyResolved")
+    }).pipe(Effect.provide(served)))
+
+  test("answers a decision for a run that does not exist with RunNotFound", () =>
+    Effect.gen(function*() {
+      const rpc = yield* RpcTest.makeClient(GatewayRpcs)
+      const failure = yield* Effect.flip(rpc["Approval.Submit"]({
+        target: {
+          _tag: "Node",
+          runId: "no-such-run",
+          requestId: "gate",
+          digest: "gate-digest",
+          envelope: { capabilities: [], flows: [], budget: {} }
+        },
+        scope: "run",
+        idempotencyKey: "missing-run",
+        decision: "approve"
+      }))
+      expect(failure._tag).toBe("/control/RunNotFound")
     }).pipe(Effect.provide(served)))
 })
 
@@ -218,13 +277,42 @@ describe("Projection.Snapshot and Projection.Subscribe", () => {
       expect(frames.map((frame) => frame._tag)).toEqual(["snapshot-start", "row", "snapshot-end"])
     }).pipe(Effect.provide(served)))
 
+  test("passes a resume cursor through the subscription handler", () =>
+    Effect.gen(function*() {
+      const rpc = yield* RpcTest.makeClient(GatewayRpcs)
+      const runId = yield* launch
+      const selector = { _tag: "run-events" as const, runId }
+      const snapshot = yield* rpc["Projection.Snapshot"]({ selector })
+      // A resumed subscription sends no snapshot frames, so the keepalive
+      // channel is the only other thing on the stream: filter to the deltas.
+      const following = yield* Effect.forkChild(
+        Stream.runCollect(
+          Stream.take(
+            Stream.filter(
+              rpc["Projection.Subscribe"]({ selector, after: snapshot.cursor }),
+              (frame) => frame._tag === "delta"
+            ),
+            1
+          )
+        )
+      )
+      yield* Effect.sleep("100 millis")
+      yield* emit(runId, "control.run.completed", { runId, status: "completed" })
+      const frames = yield* Fiber.join(following)
+
+      expect(frames.map((frame) => frame._tag)).toEqual(["delta"])
+      expect(frames[0]?._tag === "delta" && frames[0].cursor.value).toBeGreaterThan(snapshot.cursor.value)
+    }).pipe(Effect.provide(served)))
+
   test("refuses a projection of an unknown run with a typed gateway error", () =>
     Effect.gen(function*() {
       const rpc = yield* RpcTest.makeClient(GatewayRpcs)
       const failure = yield* Effect.flip(
         rpc["Projection.Snapshot"]({ selector: { _tag: "run-summary", runId: "nope" } })
       )
-      expect(failure.code).toBe("run_unavailable")
+      // A run the control plane does not have is not a backend failure, and a
+      // client decides whether to retry on the difference.
+      expect(failure.code).toBe("run_not_found")
     }).pipe(Effect.provide(served)))
 })
 
@@ -236,7 +324,7 @@ describe("run visibility", () => {
       const parentRunId = yield* launch
       // A child run is a run the engine created under a parent. Whatever
       // created it, the ordinary listing every run surface renders must show
-      // it — a child that only a debug escape hatch can see is a child a human
+      // it. A child that only a debug escape hatch can see is a child a human
       // cannot reach.
       yield* runs.create(`${parentRunId}:child`, "{}", { parentRunId })
 
@@ -254,7 +342,7 @@ describe("run visibility", () => {
       const projections = yield* Projections
       const runId = yield* launch
       // The noop executor takes nothing, so the run stays pending rather than
-      // running. It is still a run, still listed, and still diagnosable — a
+      // running. It is still a run, still listed, and still diagnosable. A
       // refused launch must not leave a hole where a run should be.
       const rows = (yield* projections.snapshot({ _tag: "run-summary", runId })).rows as ReadonlyArray<
         GatewayProjection.RunSummaryRow

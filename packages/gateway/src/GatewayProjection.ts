@@ -399,7 +399,10 @@ export const nodeOutput = (
   for (const event of events) {
     const payload = asRecord(event.payload)
     const runId = asString(payload.runId) ?? event.runId
-    if (runId === undefined) continue
+    // The ordinal and the open-call list are kept unconditionally, exactly as
+    // `runTree` keeps them. Skipping an event before the ordinal advanced
+    // shifted this fold's `call-N` keys relative to that one, so the two folds
+    // disagreed about which node produced which output.
     if (event.kind === "control.agent.cell-call-started") {
       ordinal += 1
       const nodeId = `call-${ordinal}`
@@ -409,6 +412,9 @@ export const nodeOutput = (
     if (event.kind !== "control.agent.cell-call-settled") continue
     const settled = takeOpenCall(openCalls, asString(payload.flowName))
     if (settled === undefined) continue
+    // A row names the run it belongs to. A settlement that names none closes
+    // its call without producing one.
+    if (runId === undefined) continue
     const failed = asString(payload.outcome) === "failure"
     rows.set(settled.nodeId, {
       runId,

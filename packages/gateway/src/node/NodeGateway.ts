@@ -24,6 +24,7 @@ import { HttpRouter } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
 import { createServer } from "node:http"
 import type { ListenOptions } from "node:net"
+import { GatewayError, settingRefusal } from "../GatewayError.ts"
 import * as GatewayServer from "../GatewayServer.ts"
 
 /**
@@ -65,25 +66,63 @@ export const defaultServerOptions: ServerOptions = { host: "127.0.0.1", port: 73
 export const isLoopbackHost = (host: string): boolean => host === "127.0.0.1" || host === "::1" || host === "localhost"
 
 /**
- * Applies the bind policy, or explains exactly which rule refused.
+ * The typed refusal a requested bind earns, or `undefined` when it is allowed.
+ *
+ * Every start-time rule this module enforces answers here as a `bind_failed`
+ * `GatewayError`, so a host that wants to report a refusal rather than crash on
+ * one asks this before it composes a layer. {@link listenOptions} and
+ * {@link layer} raise exactly what this returns.
+ *
+ * @param options the requested bind
+ * @since 1.0.0
+ * @category constructors
+ */
+export const bindRefusal = (options: ServerOptions): GatewayError | undefined => {
+  const setting = settingRefusal("The gateway keepalive cadence", options.heartbeatMillis) ??
+    settingRefusal("The gateway request body limit", options.maxRequestBodyBytes)
+  if (setting !== undefined) return setting
+  const host = options.host ?? "127.0.0.1"
+  if (isLoopbackHost(host)) return undefined
+  if (options.listen !== true) {
+    return new GatewayError({
+      code: "bind_failed",
+      message: `Refusing non-loopback gateway bind ${host} without an explicit --listen opt-in`
+    })
+  }
+  if (options.credential === undefined || options.credential === "") {
+    return new GatewayError({
+      code: "bind_failed",
+      message: `Refusing non-loopback gateway bind ${host} without a bearer credential`
+    })
+  }
+  return undefined
+}
+
+/**
+ * Applies the bind policy, or raises the `bind_failed` `GatewayError` naming
+ * exactly which rule refused.
+ *
+ * The raise is what a composition sees, because a layer is built rather than
+ * run: `Layer.mergeAll` calls this while the host is still assembling itself.
+ * {@link bindRefusal} is the same policy as a value.
  *
  * @param options the requested bind
  * @since 1.0.0
  * @category constructors
  */
 export const listenOptions = (options: ServerOptions): ListenOptions => {
+  const refusal = bindRefusal(options)
+  if (refusal !== undefined) throw refusal
   // `credential`, `listen`, and the keepalive cadence are this module's, not
   // `node:net`'s: they are named here so the rest is exactly a bind.
-  const { credential, heartbeatMillis: _cadence, listen, maxRequestBodyBytes: _maxBody, ...node } = options
-  const host = node.host ?? "127.0.0.1"
-  if (isLoopbackHost(host)) return { ...node, host }
-  if (listen !== true) {
-    throw new Error(`Refusing non-loopback gateway bind ${host} without an explicit --listen opt-in`)
-  }
-  if (credential === undefined || credential === "") {
-    throw new Error(`Refusing non-loopback gateway bind ${host} without a bearer credential`)
-  }
-  return { ...node, host }
+  const {
+    credential: _credential,
+    heartbeatMillis: _cadence,
+    listen: _listen,
+    maxRequestBodyBytes: _maxBody,
+    ...node
+  } = options
+  return { ...node, host: node.host ?? "127.0.0.1" }
 }
 
 /**
@@ -141,6 +180,12 @@ const ingressOptions = (options: ServerOptions): GatewayServer.IngressOptions =>
  * The returned layer retains the concrete `HttpServer` service, so a caller
  * that bound port 0 can read the ephemeral address it got.
  *
+ * A bind this module's policy refuses raises the `bind_failed` `GatewayError`
+ * {@link bindRefusal} names, while the layer is being built. A host that wants
+ * to answer a refusal rather than raise one calls {@link bindRefusal} first.
+ * A listen failure the operating system reports, such as an address already in
+ * use, is not mapped here: it stays the `NodeHttpServer` failure it is.
+ *
  * @param health the identity `GET /health` answers with
  * @param options the requested bind
  * @since 1.0.0
@@ -151,7 +196,10 @@ export const layer = (
   options: ServerOptions = defaultServerOptions
 ) =>
   HttpRouter.serve(
-    GatewayServer.layer(health, options.heartbeatMillis, ingressOptions(options)).pipe(
+    GatewayServer.layer(health, {
+      ...(options.heartbeatMillis === undefined ? {} : { heartbeatMillis: options.heartbeatMillis }),
+      ingress: ingressOptions(options)
+    }).pipe(
       Layer.provide(layerAuth(options)),
       Layer.provide(RpcSerialization.layerNdjson)
     ),
