@@ -73,13 +73,11 @@ case folding, so `\` is an ordinary character that never matches `/`, and
 `A:/x` never matches `a:/X`.
 
 **Size and cost.** Matching costs O(pattern length times resource length) in the
-worst case. Pattern resources reject anything longer than `maxResourceLength`
-(4096 UTF-16 code units) at construction and decode. Exact capabilities are
-deliberately unbounded because they carry caller text on the authorization
-path. `maxMatchWork` bounds the product of the pattern and exact-resource
-lengths. `matches` returns `false` when that product exceeds the budget, and
-`withinMatchBudget` reports the case. `evaluate` returns `deny` when any rule
-cannot be decided, so an undecidable deny is never skipped.
+worst case. Exact and pattern resources reject anything longer than
+`maxResourceLength` (4096 UTF-16 code units) at construction and decode.
+Adapters reject or summarize larger host values before authorization.
+`maxMatchWork` is the fail-closed guard for unchecked structural inputs;
+`withinMatchBudget` reports the case and `evaluate` denies it.
 
 **Tiers.** `tierOf` decides containment lexically, so it cannot see symlinks: a
 caller that materializes snapshots resolves real paths first. A `workspaceRoot`

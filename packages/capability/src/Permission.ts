@@ -11,7 +11,16 @@
  */
 import { Option, Schema } from "effect"
 import { type PlatformError, systemError } from "effect/PlatformError"
-import { Action, Capability, CapabilityPattern, EffectTier, format, matches, withinMatchBudget } from "./Capability.ts"
+import {
+  Action,
+  Capability,
+  CapabilityPattern,
+  EffectTier,
+  format,
+  matches,
+  maxResourceLength,
+  withinMatchBudget
+} from "./Capability.ts"
 
 const PermissionMeta = Schema.Record(Schema.String, Schema.Json)
 const decodePermissionMeta = Schema.decodeUnknownSync(PermissionMeta)
@@ -22,16 +31,26 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   return prototype === Object.prototype || prototype === null
 }
 
-const withoutUndefined = (value: unknown): unknown => {
+const withoutUndefined = (value: unknown, snapshots = new WeakMap<object, unknown>()): unknown => {
   // Array elements are deliberately retained: JSON.stringify changes an
   // undefined element to null, so dropping it would be a real value change.
-  if (Array.isArray(value)) return value.map((element) => withoutUndefined(element))
+  if (Array.isArray(value)) {
+    const existing = snapshots.get(value)
+    if (existing !== undefined) return existing
+    const snapshot: Array<unknown> = []
+    snapshots.set(value, snapshot)
+    for (const element of value) snapshot.push(withoutUndefined(element, snapshots))
+    return snapshot
+  }
   if (isPlainObject(value)) {
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([, nested]) => nested !== undefined)
-        .map(([key, nested]) => [key, withoutUndefined(nested)])
-    )
+    const existing = snapshots.get(value)
+    if (existing !== undefined) return existing
+    const snapshot: Record<string, unknown> = {}
+    snapshots.set(value, snapshot)
+    for (const [key, nested] of Object.entries(value)) {
+      if (nested !== undefined) snapshot[key] = withoutUndefined(nested, snapshots)
+    }
+    return snapshot
   }
   // Restrict recursion to plain objects. Object.entries(new Date()) is empty;
   // flattening non-plain objects would silently turn an invalid Date, Map, or
@@ -55,6 +74,19 @@ const permissionMetaSnapshot = (
   meta: Readonly<Record<string, unknown>>
 ): Readonly<Record<string, Schema.Json>> =>
   deepFrozenJsonSnapshot(decodePermissionMeta(withoutUndefined(meta))) as Readonly<Record<string, Schema.Json>>
+
+const capabilitySnapshot = (capability: Capability): Capability => {
+  const snapshot = new Capability({ action: capability.action, resource: capability.resource })
+  for (const field of ["action", "resource"] as const) {
+    Object.defineProperty(snapshot, field, {
+      value: snapshot[field],
+      enumerable: true,
+      writable: false,
+      configurable: false
+    })
+  }
+  return snapshot
+}
 
 /**
  * A permission request that must be resolved by an attended surface.
@@ -103,10 +135,7 @@ export class PermissionRequired extends Schema.TaggedError<PermissionRequired>()
     const meta = permissionMetaSnapshot(props.meta)
     super({ ...props, code: "permission_required", meta })
     Object.defineProperty(this, "capability", {
-      value: new Capability({
-        action: props.capability.action,
-        resource: props.capability.resource
-      }),
+      value: capabilitySnapshot(props.capability),
       enumerable: true,
       writable: false,
       configurable: false
@@ -146,10 +175,7 @@ export class PermissionDenied extends Schema.TaggedError<PermissionDenied>()(
   }) {
     super({ ...props, code: "permission_denied" })
     Object.defineProperty(this, "capability", {
-      value: new Capability({
-        action: props.capability.action,
-        resource: props.capability.resource
-      }),
+      value: capabilitySnapshot(props.capability),
       enumerable: true,
       writable: false,
       configurable: false
@@ -347,8 +373,25 @@ const isAction = Schema.is(Action)
 const isEffectTier = Schema.is(EffectTier)
 const isPermissionMeta = Schema.is(PermissionMeta)
 const grantStoreErrorCodes: ReadonlySet<string> = new Set(GrantStoreErrorCode.literals)
+const missing = Symbol("missing")
+const ownData = (input: Readonly<Record<PropertyKey, unknown>>, key: PropertyKey): unknown => {
+  const descriptor = Object.getOwnPropertyDescriptor(input, key)
+  return descriptor !== undefined && "value" in descriptor ? descriptor.value : missing
+}
+const hasOnlyEnumerableFields = (
+  input: Readonly<Record<PropertyKey, unknown>>,
+  allowed: ReadonlySet<string>
+): boolean => Object.keys(input).every((key) => allowed.has(key))
+const requiredFields = new Set(["_tag", "code", "requestId", "runId", "capability", "tier", "meta"])
+const deniedFields = new Set(["_tag", "code", "capability", "reason"])
+const grantStoreFields = new Set(["_tag", "code", "message", "cause"])
+const capabilityFields = new Set(["action", "resource"])
 const isCapability = (input: unknown): boolean =>
-  isRecord(input) && typeof input.resource === "string" && isAction(input.action)
+  isRecord(input) &&
+  hasOnlyEnumerableFields(input, capabilityFields) &&
+  typeof ownData(input, "resource") === "string" &&
+  (ownData(input, "resource") as string).length <= maxResourceLength &&
+  isAction(ownData(input, "action"))
 
 /**
  * Refines an unknown value to a kernel permission failure.
@@ -361,25 +404,29 @@ export const isPermissionError = (input: unknown): input is PermissionError => {
   if (!isRecord(input)) {
     return false
   }
-  // Excess fields are deliberately accepted. Real Schema.TaggedError
-  // instances carry `message`, `stack`, and `name`, so an exact structural
-  // check would reject the primary input this cross-boundary guard receives.
-  switch (input._tag) {
+  switch (ownData(input, "_tag")) {
     case "@smthrs/capability/PermissionRequired":
-      return input.code === "permission_required" &&
-        typeof input.requestId === "string" &&
-        (input.runId === undefined || typeof input.runId === "string") &&
-        isEffectTier(input.tier) &&
-        isCapability(input.capability) &&
-        isPermissionMeta(input.meta)
+      return hasOnlyEnumerableFields(input, requiredFields) &&
+        ownData(input, "code") === "permission_required" &&
+        typeof ownData(input, "requestId") === "string" &&
+        (ownData(input, "runId") === missing ||
+          ownData(input, "runId") === undefined ||
+          typeof ownData(input, "runId") === "string") &&
+        isEffectTier(ownData(input, "tier")) &&
+        isCapability(ownData(input, "capability")) &&
+        isPermissionMeta(ownData(input, "meta"))
     case "@smthrs/capability/PermissionDenied":
-      return input.code === "permission_denied" &&
-        typeof input.reason === "string" &&
-        isCapability(input.capability)
+      return hasOnlyEnumerableFields(input, deniedFields) &&
+        ownData(input, "code") === "permission_denied" &&
+        typeof ownData(input, "reason") === "string" &&
+        isCapability(ownData(input, "capability"))
     case "@smthrs/capability/GrantStoreError":
-      return typeof input.code === "string" &&
-        grantStoreErrorCodes.has(input.code) &&
-        (input.message === undefined || typeof input.message === "string")
+      return hasOnlyEnumerableFields(input, grantStoreFields) &&
+        typeof ownData(input, "code") === "string" &&
+        grantStoreErrorCodes.has(ownData(input, "code") as string) &&
+        (ownData(input, "message") === missing ||
+          ownData(input, "message") === undefined ||
+          typeof ownData(input, "message") === "string")
     default:
       return false
   }

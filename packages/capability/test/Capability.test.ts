@@ -7,15 +7,18 @@ import * as Capability from "../src/Capability.ts"
 const capability = (action: Capability.Action, resource: string): Capability.Capability =>
   Capability.make(action, resource)
 
+const uncheckedCapability = (action: Capability.Action, resource: string): Capability.Capability =>
+  new Capability.Capability({ action, resource }, { disableChecks: true })
+
 const pattern = (action: Capability.PatternAction, resource: string): Capability.CapabilityPattern =>
   new Capability.CapabilityPattern({ action, resource })
 
 const capabilityModuleUrl = new URL("../src/Capability.ts", import.meta.url).href
 
 const repeatedStarProgram = `
-  import { CapabilityPattern, make, matches } from ${JSON.stringify(capabilityModuleUrl)}
+  import { Capability, CapabilityPattern, matches } from ${JSON.stringify(capabilityModuleUrl)}
   const pattern = new CapabilityPattern({ action: "fs:read", resource: "a*a*a*a*a*b" })
-  const capability = make("fs:read", "a".repeat(10_000))
+  const capability = new Capability({ action: "fs:read", resource: "a".repeat(10_000) }, { disableChecks: true })
   process.stdout.write(String(matches(pattern, capability)))
 `
 
@@ -273,63 +276,61 @@ describe("Capability", () => {
     expect(Schema.is(Capability.EffectTier)("reversible")).toBe(false)
   })
 
-  it("bounds pattern resources without bounding exact capabilities", () => {
+  it("applies one resource bound to exact capabilities and patterns", () => {
     const boundary = "x".repeat(Capability.maxResourceLength)
     const overlong = `${boundary}x`
     const exactBoundary = capability("proc:spawn", boundary)
 
     expect(capability("fs:read", boundary).resource).toBe(boundary)
     expect(pattern("fs:read", boundary).resource).toBe(boundary)
-    expect(capability("fs:read", overlong).resource).toBe(overlong)
+    expect(() => capability("fs:read", overlong)).toThrow("Schema validation failed")
     expect(() => pattern("fs:read", overlong)).toThrow("Schema validation failed")
     expect(Schema.decodeUnknownResult(Capability.Capability)({ action: "fs:read", resource: overlong }))
-      .toMatchObject({ success: { resource: overlong } })
+      .toMatchObject({ failure: { _tag: "SchemaError" } })
     expect(Schema.decodeUnknownResult(Capability.CapabilityPattern)({ action: "fs:read", resource: overlong }))
       .toMatchObject({ failure: { _tag: "SchemaError" } })
-    expect(Option.getOrThrow(Capability.parse(`fs:read:${overlong}`)).resource).toBe(overlong)
+    expect(Capability.parse(`fs:read:${overlong}`)).toStrictEqual(Option.none())
     expect(Capability.parsePattern(`fs:read:${overlong}`)).toStrictEqual(Option.none())
     expect(Capability.parsePattern(`*:${overlong}`)).toStrictEqual(Option.none())
-    expect(Capability.patternFromCapability(capability("proc:spawn", overlong))).toStrictEqual(Option.none())
+    expect(Capability.patternFromCapability(uncheckedCapability("proc:spawn", overlong))).toStrictEqual(Option.none())
     expect(
       Capability.matches(Option.getOrThrow(Capability.patternFromCapability(exactBoundary)), exactBoundary)
     ).toBe(true)
   })
 
-  it("constructs a long exact capability as an Effect success rather than a defect", () => {
+  it("rejects an overlong exact capability at construction", () => {
     const resource = "x".repeat(5000)
     const exit = Effect.runSyncExit(
       Effect.suspend(() => Effect.succeed(Capability.make("proc:spawn", resource)))
     )
 
-    expect(exit).toMatchObject({ _tag: "Success", value: { resource } })
+    expect(exit).toMatchObject({ _tag: "Failure" })
   })
 
-  it("round trips a formatted long exact capability", () => {
+  it("refuses a formatted overlong exact capability", () => {
     const formatted = Capability.format({ action: "proc:spawn", resource: "x".repeat(5000) })
-    const parsed = Option.getOrThrow(Capability.parse(formatted))
-
-    expect(Capability.format(parsed)).toBe(formatted)
+    expect(Capability.parse(formatted)).toStrictEqual(Option.none())
   })
 
-  it("matches a short command grant against a long realistic resource", () => {
+  it("matches a short command grant against the longest valid resource", () => {
     expect(
       Capability.matches(
         pattern("proc:spawn", "node *"),
-        capability("proc:spawn", `node ${"x".repeat(20_000)}`)
+        capability("proc:spawn", `node ${"x".repeat(Capability.maxResourceLength - 5)}`)
       )
     ).toBe(true)
   })
 
   it("fails closed when glob matching would exceed the work budget", () => {
     const maximalPattern = pattern("fs:read", "*".repeat(Capability.maxResourceLength))
-    const overBudget = capability("fs:read", "x".repeat(Capability.maxResourceLength + 1))
+    const overBudget = uncheckedCapability("fs:read", "x".repeat(Capability.maxResourceLength + 1))
 
     expect(maximalPattern.resource.length * overBudget.resource.length).toBeGreaterThan(Capability.maxMatchWork)
     expect(Capability.matches(maximalPattern, overBudget)).toBe(false)
   })
 
   it("reports whether a pattern and capability can be matched within the budget", () => {
-    const big = capability("proc:spawn", "x".repeat(100_000))
+    const big = uncheckedCapability("proc:spawn", "x".repeat(100_000))
     const maximalPattern = pattern("proc:spawn", "x".repeat(Capability.maxResourceLength))
 
     expect(Capability.withinMatchBudget(pattern("proc:spawn", "*"), big)).toBe(true)
@@ -344,7 +345,7 @@ describe("Capability", () => {
     expect(
       Capability.withinMatchBudget(
         maximalPattern,
-        capability("proc:spawn", "x".repeat(Capability.maxResourceLength + 1))
+        uncheckedCapability("proc:spawn", "x".repeat(Capability.maxResourceLength + 1))
       )
     ).toBe(false)
   })

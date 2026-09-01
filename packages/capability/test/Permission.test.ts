@@ -178,7 +178,10 @@ describe("Permission policy", () => {
   })
 
   it("vetoes a decision when any rule cannot be matched within the work budget", () => {
-    const big = new Capability({ action: "proc:spawn", resource: "x".repeat(100_000) })
+    const big = new Capability(
+      { action: "proc:spawn", resource: "x".repeat(100_000) },
+      { disableChecks: true }
+    )
     const allow = new Rule({
       effect: "allow",
       pattern: new CapabilityPattern({ action: "proc:spawn", resource: "*" })
@@ -194,7 +197,10 @@ describe("Permission policy", () => {
   })
 
   it("does not veto for an over-budget rule whose action does not select the capability", () => {
-    const big = new Capability({ action: "proc:spawn", resource: "x".repeat(100_000) })
+    const big = new Capability(
+      { action: "proc:spawn", resource: "x".repeat(100_000) },
+      { disableChecks: true }
+    )
     const deny = new Rule({
       effect: "deny",
       pattern: new CapabilityPattern({ action: "fs:read", resource: `${"x".repeat(170)}*` })
@@ -373,6 +379,29 @@ describe("Permission construction and PlatformError projection", () => {
       ;(error as any).capability = new Capability({ action: "fs:read", resource: "/replacement" })
     }).toThrow()
     expect(error.capability.resource).toBe("/workspace/readme.md")
+  })
+
+  it.each([
+    permissionRequired({ requestId: "request-1", capability, tier: "sealed" }),
+    permissionDenied(capability, "no")
+  ])("makes a permission failure's carried capability immutable", (error) => {
+    expect(() => {
+      ;(error.capability as any).resource = "/replacement"
+    }).toThrow()
+    expect(error.capability.resource).toBe("/workspace/readme.md")
+  })
+
+  it("reports cyclic metadata as a schema failure instead of overflowing", () => {
+    const cyclic: Record<string, unknown> = {}
+    cyclic.self = cyclic
+    const cyclicArray: Array<unknown> = []
+    cyclicArray.push(cyclicArray)
+
+    expect(() => permissionRequired({ requestId: "request-1", capability, tier: "sealed", meta: cyclic })).toThrow(
+      /Expected JSON value/
+    )
+    expect(() => permissionRequired({ requestId: "request-2", capability, tier: "sealed", meta: { cyclicArray } }))
+      .toThrow(/Expected JSON value/)
   })
 
   it("preserves a numeric file descriptor in the PlatformError projection", () => {

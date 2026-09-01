@@ -10,14 +10,12 @@
 import { Option, Schema } from "effect"
 
 /**
- * The maximum UTF-16 length of a capability-pattern resource.
+ * The maximum UTF-16 length of an exact or patterned capability resource.
  *
- * Exact capabilities are deliberately not bounded. A capability is built from
- * caller text on the authorization path, including a rendered command line, a
- * commit message, or a URL. Rejecting one there converts an authorization
- * decision into an unhandled defect. Pattern resources are authored policy and
- * remain bounded at 4096 units. See {@link maxMatchWork} for the matcher's cost
- * bound.
+ * Exact requests and authored patterns share the bound so permission failures,
+ * journal payloads, matching work, and exact-pattern derivation all have one
+ * finite input contract. Adapters must reject or summarize a larger host value
+ * before constructing a capability rather than carrying it into authorization.
  *
  * @since 0.1.0
  * @category constants
@@ -114,7 +112,7 @@ const PatternResource = Schema.String.check(Schema.isMaxLength(maxResourceLength
  */
 export class Capability extends Schema.Class<Capability>("@smthrs/capability/Capability")({
   action: Action,
-  resource: Schema.String
+  resource: PatternResource
 }) {}
 
 /**
@@ -174,7 +172,9 @@ export const parse = (input: string): Option.Option<Capability> => {
   }
   const action = `${namespace}:${operation}`
   const resource = components.slice(2).join(":")
-  return isAction(action) ? Option.some(make(action, resource)) : Option.none()
+  return isAction(action) && resource.length <= maxResourceLength
+    ? Option.some(make(action, resource))
+    : Option.none()
 }
 
 /**
@@ -198,9 +198,9 @@ export const parse = (input: string): Option.Option<Capability> => {
  * {@link patternFromCapability} to derive exact grants safely.
  *
  * Matching costs O(pattern length times resource length) in the worst case.
- * Pattern resources are limited to {@link maxResourceLength}, and
- * {@link maxMatchWork} bounds the combined work for an unbounded exact
- * resource.
+ * Both resources are limited to {@link maxResourceLength}, and
+ * {@link maxMatchWork} remains a fail-closed guard for unchecked structural
+ * inputs at the host boundary.
  *
  * @since 0.1.0
  * @category models

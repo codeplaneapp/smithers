@@ -1,7 +1,7 @@
 import { Option, Schema } from "effect"
 import { badArgument, type PlatformError, systemError } from "effect/PlatformError"
 import { describe, expect, it } from "vitest"
-import { make as makeCapability } from "../src/Capability.ts"
+import { make as makeCapability, maxResourceLength } from "../src/Capability.ts"
 import * as Index from "../src/index.ts"
 import {
   formatError,
@@ -136,10 +136,55 @@ describe("permission failures", () => {
     expect(isPermissionError(structural)).toBe(true)
   })
 
-  it("accepts a denial carrying an unbounded exact capability resource", () => {
-    const denied = permissionDenied(makeCapability("proc:spawn", "x".repeat(5000)), "no")
+  it.each([
+    "@smthrs/capability/PermissionRequired",
+    "@smthrs/capability/PermissionDenied",
+    "@smthrs/capability/GrantStoreError"
+  ])("rejects an excess-field forgery of %s", (tag) => {
+    const base = tag === "@smthrs/capability/PermissionRequired"
+      ? {
+        _tag: tag,
+        code: "permission_required",
+        requestId: "r1",
+        capability: { action: "fs:read", resource: "/a" },
+        tier: "sealed",
+        meta: {}
+      }
+      : tag === "@smthrs/capability/PermissionDenied"
+      ? {
+        _tag: tag,
+        code: "permission_denied",
+        capability: { action: "fs:read", resource: "/a" },
+        reason: "no"
+      }
+      : { _tag: tag, code: "store_closed" }
 
-    expect(isPermissionError(denied)).toBe(true)
+    expect(isPermissionError({ ...base, forged: true })).toBe(false)
+  })
+
+  it("rejects a denial carrying an overlong exact capability resource", () => {
+    const denied = {
+      _tag: "@smthrs/capability/PermissionDenied",
+      code: "permission_denied",
+      capability: { action: "proc:spawn", resource: "x".repeat(maxResourceLength + 1) },
+      reason: "no"
+    }
+
+    expect(isPermissionError(denied)).toBe(false)
+  })
+
+  it("accepts absent, undefined, and string grant-store messages", () => {
+    expect(isPermissionError({ _tag: "@smthrs/capability/GrantStoreError", code: "store_closed" })).toBe(true)
+    expect(isPermissionError({
+      _tag: "@smthrs/capability/GrantStoreError",
+      code: "store_closed",
+      message: undefined
+    })).toBe(true)
+    expect(isPermissionError({
+      _tag: "@smthrs/capability/GrantStoreError",
+      code: "journal_failed",
+      message: "disk full"
+    })).toBe(true)
   })
 
   it("exports validators for rule effects and permission failures", () => {

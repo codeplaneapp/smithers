@@ -10,11 +10,8 @@
 - Added `Capability.patternFromCapability`, which derives the exact grant for a
   capability and returns `Option.none()` when the resource contains a glob
   metacharacter the grammar cannot express exactly.
-- Added `Capability.maxResourceLength` as the bound on pattern resources and
-  `Capability.maxMatchWork` as the matcher work budget. Exact capabilities are
-  deliberately unbounded so an over-long command line remains an authorization
-  decision rather than becoming an unhandled defect; matching fails closed when
-  the pattern-length times resource-length product exceeds the new budget.
+- Added `Capability.maxResourceLength` as the shared bound on exact and pattern
+  resources and `Capability.maxMatchWork` as the defensive matcher work budget.
 - Added `Capability.withinMatchBudget`, which reports whether the matcher can
   decide a pattern and exact capability within `Capability.maxMatchWork`.
 - Exported the schema values `Capability.Action`, `Capability.PatternAction`,
@@ -52,9 +49,9 @@
   whose backslashes were rewritten could still escape its granted subtree;
   `patternFromCapability` was not exact for a drive-shaped resource; and a
   drive-shaped `workspaceRoot` made `tierOf` fold case.
-- **Breaking.** `CapabilityPattern` rejects a resource longer than
-  `Capability.maxResourceLength`, which 0.1.0 accepted. Exact `Capability`
-  resources remain unbounded.
+- **Breaking.** `Capability` and `CapabilityPattern` reject a resource longer
+  than `Capability.maxResourceLength`, which 0.1.0 accepted. Adapters must
+  reject or summarize a larger host value before authorization.
 - Replaced the backtracking RegExp compilation with a linear-scan iterative glob
   matcher. A pattern such as `a*a*a*a*b` against a long non-matching resource
   made the old compilation exponential on the authorization path.
@@ -75,11 +72,15 @@
   working directory, which previously failed construction with a schema error.
 - Permission errors no longer retain the caller's `Capability` instance.
   `PermissionRequired.capability`, `PermissionDenied.capability`, and
-  `PermissionRequired.meta` are non-writable data slots, so a parked approval
+  `PermissionRequired.meta` are non-writable data slots; the copied
+  capability's action and resource are non-writable too, so a parked approval
   cannot be mutated into a different or unencodable request.
 - `Permission.isPermissionError` now validates `PermissionRequired.runId` and
-  `meta` as well as the rest of the structural shape. A forgery missing `meta`
-  is no longer refined and unwrapped by `fromPlatformError`.
+  `meta` as well as the exact enumerable structural shape. Missing, excess,
+  overlong, or accessor-backed fields are no longer refined and unwrapped by
+  `fromPlatformError`.
+- Cyclic permission metadata now reaches the JSON schema refusal instead of
+  overflowing during undefined-property normalization.
 - `Permission.formatError` escapes C0 and C1 controls and caps each field. It is
   documented as a one-line renderer, and an agent-chosen resource containing a
   newline used to add lines a log reader could not distinguish from real ones.
