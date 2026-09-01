@@ -42,7 +42,16 @@ import type * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
-import * as NodeUtil from "node:util/types"
+import * as HostReflection from "./HostReflection.ts"
+
+/**
+ * Proxy and native-error detection, taken from the host that can answer them.
+ *
+ * `./HostReflection.ts` states why these are host predicates rather than a
+ * `node:util/types` import: the module has to bundle for a browser, and only
+ * some hosts can name a proxy at all.
+ */
+const { isNativeError, isProxy } = HostReflection.host
 
 /**
  * The `_tag` every projection carries, so a reader of `state_json` can tell a
@@ -224,9 +233,9 @@ export const projectValue = (value: unknown, depth = 0, seen = new WeakSet<objec
       message: truncate(text(value), maxTextLength)
     }
   }
-  // Generic Proxy introspection is observable user code. Node exposes the
-  // internal-slot predicate needed to reject it without invoking a trap.
-  if (NodeUtil.isProxy(value) || seen.has(value)) return minimalValue()
+  // Generic Proxy introspection is observable user code. A host that can name
+  // a proxy from its internal slot rejects it without invoking a trap.
+  if (isProxy(value) || seen.has(value)) return minimalValue()
   seen.add(value)
   try {
     const message = ownData(value, "message")
@@ -244,7 +253,7 @@ export const projectValue = (value: unknown, depth = 0, seen = new WeakSet<objec
     } = {
       type: typeof tag === "string" && tag.length > 0
         ? truncate(tag, maxTextLength)
-        : NodeUtil.isNativeError(value)
+        : isNativeError(value)
         ? "Error"
         : Array.isArray(value)
         ? "Array"
@@ -268,7 +277,7 @@ export const projectValue = (value: unknown, depth = 0, seen = new WeakSet<objec
 }
 
 const projectReason = (reason: Cause.Reason<unknown>): ReasonProjection => {
-  if (NodeUtil.isProxy(reason)) return { _tag: "Die", error: minimalValue() }
+  if (isProxy(reason)) return { _tag: "Die", error: minimalValue() }
   try {
     const tag = ownData(reason, "_tag")
     if (tag === "Fail") return { _tag: "Fail", error: projectValue(ownData(reason, "error")) }
@@ -292,10 +301,10 @@ export const projectCause = (
   cause: Cause.Cause<unknown> | undefined
 ): ReadonlyArray<ReasonProjection> => {
   if (cause === undefined) return []
-  if (NodeUtil.isProxy(cause)) return [{ _tag: "Die", error: minimalValue() }]
+  if (isProxy(cause)) return [{ _tag: "Die", error: minimalValue() }]
   try {
     const reasons = ownData(cause, "reasons")
-    if (!Array.isArray(reasons) || NodeUtil.isProxy(reasons)) {
+    if (!Array.isArray(reasons) || isProxy(reasons)) {
       return [{ _tag: "Die", error: minimalValue() }]
     }
     const projected = reasons.slice(0, maxReasonCount).map(projectReason)
@@ -341,7 +350,7 @@ export const projectResult = (
   note: string
 ): ResultProjection => {
   note = truncate(note, maxTextLength)
-  if (NodeUtil.isProxy(result)) return minimalResult(note)
+  if (isProxy(result)) return minimalResult(note)
   try {
     const tag = ownData(result, "_tag")
     if (tag === "Suspended") {
@@ -363,7 +372,7 @@ export const projectResult = (
       })
     }
     const exit = ownData(result, "exit")
-    if (typeof exit !== "object" || exit === null || NodeUtil.isProxy(exit)) return minimalResult(note)
+    if (typeof exit !== "object" || exit === null || isProxy(exit)) return minimalResult(note)
     const prototype = Object.getPrototypeOf(exit)
     const argument = ownData(exit, exitArguments)
     if (prototype !== successExitPrototype && prototype !== failureExitPrototype) return minimalResult(note)
@@ -400,7 +409,7 @@ export const projectResult = (
  */
 const degrade = (result: Flow.Result<unknown, unknown>, projection: ResultProjection): unknown => {
   try {
-    if (!NodeUtil.isProxy(result) && ownData(result, "_tag") === "Handoff") {
+    if (!isProxy(result) && ownData(result, "_tag") === "Handoff") {
       const flow = ownData(result, "flow")
       if (typeof flow === "string") return { _tag: "Handoff", flow, payload: projection }
     }
