@@ -135,7 +135,10 @@ export const CreateApp = (options: CreateAppOptions): AppTargets => {
     bin: S.NodeModule.Bin("wrangler"),
     args: ["deploy"],
     gates: [build],
-    secrets: [S.Secret("CLOUDFLARE_API_TOKEN"), S.Secret("CLOUDFLARE_ACCOUNT_ID")],
+    secrets: [
+      S.HttpSecret(S.Secret("CLOUDFLARE_API_TOKEN"), ["https://api.cloudflare.com"]),
+      S.HttpSecret(S.Secret("CLOUDFLARE_ACCOUNT_ID"), ["https://api.cloudflare.com"])
+    ],
     sandbox: { network: true },
     approval: "required"
   })
