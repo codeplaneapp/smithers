@@ -571,7 +571,7 @@ describe("the guest crypto", () => {
       const inGuest = yield* Guest.guestCrypto.digest("SHA-256", material)
       const onHost = yield* host.digest("SHA-256", material)
       expect(inGuest).toEqual(onHost)
-      expect(Guest.guestCrypto.randomBytes(16)).toHaveLength(16)
+      expect(yield* Guest.guestCrypto.randomBytes(16)).toHaveLength(16)
     }).pipe(Effect.provide(NodeCrypto.layer)))
 })
 
