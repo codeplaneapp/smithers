@@ -45,13 +45,31 @@ const boundedPositiveInteger = (value: number | undefined, fallback: number): nu
   return Number.isSafeInteger(candidate) && candidate >= 1 ? candidate : 1
 }
 
-const causeCode = (cause: unknown): string | undefined => {
-  if (typeof cause !== "object" || cause === null || !("code" in cause)) {
+const Uninspectable = Symbol("@smthrs/database/internal/WriteRetry/Uninspectable")
+
+// Driver errors sometimes inherit their fields, so reads stay inheritance-aware
+// rather than requiring own data properties. Each read is isolated so a hostile
+// accessor or Proxy is treated as uninspectable instead of escaping as a defect.
+const readProperty = (value: object, property: "cause" | "code" | "message"): unknown => {
+  try {
+    return (value as Record<typeof property, unknown>)[property]
+  } catch {
+    return Uninspectable
+  }
+}
+
+const sqlErrorOf = (value: unknown): SqlError.SqlError | undefined => {
+  try {
+    return SqlError.isSqlError(value) ? value : undefined
+  } catch {
     return undefined
   }
-  const code = cause.code
-  return typeof code === "string" ? code : undefined
 }
+
+const causeCode = (cause: object): string | undefined | typeof Uninspectable =>
+  ((code) => code === Uninspectable || typeof code === "string" ? code : undefined)(
+    readProperty(cause, "code")
+  )
 
 /**
  * Postgres SQLSTATEs a write may legitimately be replayed on:
@@ -84,15 +102,22 @@ const hasCause = (
   let current = cause
   while (typeof current === "object" && current !== null && !seen.has(current)) {
     seen.add(current)
-    if (SqlError.isSqlError(current)) {
-      current = current.reason.cause
+    const sqlError = sqlErrorOf(current)
+    if (sqlError !== undefined) {
+      current = sqlError.reason.cause
       continue
     }
-    const message = "message" in current && typeof current.message === "string" ? current.message.toLowerCase() : ""
-    if (match(causeCode(current), message)) {
+    const code = causeCode(current)
+    const messageValue = readProperty(current, "message")
+    const next = readProperty(current, "cause")
+    if (code === Uninspectable || messageValue === Uninspectable || next === Uninspectable) {
+      return false
+    }
+    const message = typeof messageValue === "string" ? messageValue.toLowerCase() : ""
+    if (match(code, message)) {
       return true
     }
-    current = "cause" in current ? current.cause : undefined
+    current = next
   }
   return false
 }
@@ -172,10 +197,13 @@ export const isRetryableWriteError = (error: unknown): boolean => {
   let current = error
   while (typeof current === "object" && current !== null && !seen.has(current)) {
     seen.add(current)
-    if (SqlError.isSqlError(current)) {
-      return classifySqlError(current) === "busy"
+    const sqlError = sqlErrorOf(current)
+    if (sqlError !== undefined) {
+      return classifySqlError(sqlError) === "busy"
     }
-    current = "cause" in current ? current.cause : undefined
+    const next = readProperty(current, "cause")
+    if (next === Uninspectable) return false
+    current = next
   }
   return false
 }
@@ -189,6 +217,29 @@ export const isRetryableWriteError = (error: unknown): boolean => {
  * Typed failures never get that exception.
  */
 const isRetryableDefect = (defect: unknown): boolean => isBusyCause(defect) && !isIoCause(defect)
+
+/** Finds the structured SQL failure, if any, in a typed failure chain. */
+const findSqlError = (error: unknown): SqlError.SqlError | undefined => {
+  const seen = new Set<unknown>()
+  let current = error
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current)
+    const sqlError = sqlErrorOf(current)
+    if (sqlError !== undefined) {
+      return sqlError
+    }
+    const next = readProperty(current, "cause")
+    if (next === Uninspectable) return undefined
+    current = next
+  }
+  return undefined
+}
+
+/** Returns whether one typed reason carries an I/O failure. */
+const isIoFailure = (error: unknown): boolean => {
+  const sqlError = findSqlError(error)
+  return sqlError === undefined ? isIoCause(error) : classifySqlError(sqlError) === "io"
+}
 
 interface ClassifiedCause<E> {
   readonly cause: Cause.Cause<E>
@@ -206,6 +257,14 @@ interface ClassifiedCause<E> {
  * carries both is classified with the provenance a `SqlError` gives.
  */
 const classifyCause = <E>(cause: Cause.Cause<E>): ClassifiedCause<E> => {
+  for (const reason of cause.reasons) {
+    if (
+      (Cause.isFailReason(reason) && isIoFailure(reason.error)) ||
+      (Cause.isDieReason(reason) && isIoCause(reason.defect))
+    ) {
+      return { cause, retryable: false }
+    }
+  }
   for (const reason of cause.reasons) {
     if (Cause.isFailReason(reason) && isRetryableWriteError(reason.error)) {
       return { cause, retryable: true }

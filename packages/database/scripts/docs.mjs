@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Projects package-owned database documentation into the repository site. */
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Package } from "../Package.ts"
@@ -118,6 +118,28 @@ const sourceLink = (relative) =>
 for (const entry of [...Package.entries, ...Package.modules]) {
   if (!existsSync(join(packageRoot, entry.source))) {
     failures.push(`${entry.source}: declared in Package.ts but the file does not exist`)
+  }
+}
+
+/**
+ * The inventory assertion runs both ways: every entry names a file that exists
+ * (above), and every module the `./*` export map publishes has an entries row
+ * (here), so a new src module cannot ship as a supported import specifier
+ * without appearing in the generated entry-point table. `src/internal/**` is
+ * excluded because the export map maps `./internal/*` to `null`.
+ */
+const publishedSources = new Set(Package.entries.map((entry) => entry.source))
+const walkSources = (relative) =>
+  readdirSync(join(packageRoot, relative), { withFileTypes: true }).flatMap((dirent) =>
+    dirent.isDirectory()
+      ? dirent.name === "internal" ? [] : walkSources(`${relative}/${dirent.name}`)
+      : dirent.name.endsWith(".ts")
+      ? [`${relative}/${dirent.name}`]
+      : []
+  )
+for (const source of walkSources("src")) {
+  if (!publishedSources.has(source)) {
+    failures.push(`${source}: published by the ./* export map but missing from Package.ts entries`)
   }
 }
 

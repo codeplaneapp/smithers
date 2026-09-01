@@ -20,6 +20,9 @@ import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 | Import | Source | Platform |
 | --- | --- | --- |
 | `@smthrs/database` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/index.ts) | any |
+| `@smthrs/database/DurableWriter` | [src/DurableWriter.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/DurableWriter.ts) | any |
+| `@smthrs/database/DatabaseMetrics` | [src/DatabaseMetrics.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/DatabaseMetrics.ts) | any |
+| `@smthrs/database/Migrations` | [src/Migrations.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/Migrations.ts) | any |
 | `@smthrs/database/UnsupportedBackend` | [src/UnsupportedBackend.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/UnsupportedBackend.ts) | any |
 | `@smthrs/database/node/NodeDatabase` | [src/node/NodeDatabase.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/node/NodeDatabase.ts) | Node |
 | `@smthrs/database/cloudflare/DurableObjectDatabase` | [src/cloudflare/DurableObjectDatabase.ts](https://github.com/smithersai/smithers/blob/main/packages/database/src/cloudflare/DurableObjectDatabase.ts) | Cloudflare Workers |

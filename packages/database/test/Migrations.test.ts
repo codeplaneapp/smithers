@@ -98,6 +98,48 @@ describe("composed migrations", () => {
       ])
     }))
 
+  it.effect("reruns idempotently when migration ids are safe integers", () =>
+    Effect.gen(function*() {
+      const result = yield* (
+        Effect.gen(function*() {
+          const first = yield* Migrations.run([alpha])
+          const second = yield* Migrations.run([alpha])
+          return { first, second }
+        }).pipe(
+          Effect.provideService(SqlClient.SafeIntegers, true),
+          Effect.provide(TestDatabase.layer)
+        )
+      )
+
+      expect(result.first).toEqual([[1, "alpha_initial"]])
+      expect(result.second).toEqual([])
+    }))
+
+  it.effect("rejects an out-of-range bigint migration id as bad state", () =>
+    Effect.gen(function*() {
+      const invalidId = BigInt(Number.MAX_SAFE_INTEGER) + 1n
+      const exit = yield* Effect.exit(
+        Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          yield* Migrations.run([])
+          yield* sql`INSERT INTO ${sql(Migrations.table)} (migration_id, name) VALUES (${invalidId}, 'invalid')`
+          yield* Migrations.loader([])
+        }).pipe(
+          Effect.provideService(SqlClient.SafeIntegers, true),
+          Effect.provide(TestDatabase.layer)
+        )
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (!Exit.isFailure(exit)) return
+      const failure = Result.getOrUndefined(Cause.findError(exit.cause))
+      expect(failure).toBeInstanceOf(Migrator.MigrationError)
+      expect(failure).toMatchObject({
+        kind: "BadState",
+        message: `${Migrations.table} contains an invalid migration_id: ${invalidId}`
+      })
+    }))
+
   it.effect("rolls back a failing id-zero migration with the whole run", () =>
     Effect.gen(function*() {
       const broken: Migrations.MigrationSet = {
@@ -169,6 +211,34 @@ describe("composed migrations", () => {
         [1, "alpha_initial"],
         [1001, "beta_initial"]
       ])
+    }))
+
+  it.effect("snapshots a migration plan before the caller can mutate its record", () =>
+    Effect.gen(function*() {
+      const migrations: Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>> = {
+        "0001_initial": createTable("snapshot_initial")
+      }
+      const set: Migrations.MigrationSet = {
+        namespace: "snapshot",
+        idOffset: 0,
+        migrations
+      }
+      const run = Migrations.run([set])
+      migrations["0002_late"] = createTable("snapshot_late")
+
+      const result = yield* (
+        Effect.gen(function*() {
+          const completed = yield* run
+          const sql = yield* SqlClient.SqlClient
+          const records = yield* sql<{
+            readonly migration_id: number
+          }>`SELECT migration_id FROM ${sql(Migrations.table)} ORDER BY migration_id`
+          return { completed, records }
+        }).pipe(Effect.provide(TestDatabase.layer))
+      )
+
+      expect(result.completed).toEqual([[1, "snapshot_initial"]])
+      expect(result.records).toEqual([{ migration_id: 1 }])
     }))
 
   it.effect("installs every set's tables through the layer", () =>

@@ -315,6 +315,49 @@ describe("NodeDatabase guard: 0.x database files (X-13)", () => {
       expect((yield* build({ filename: "file::memory:?cache=shared" }))._tag).toBe("Success")
     }))
 
+  it.effect("opens a mode=memory URI whose name collides with a 0.x file", () =>
+    Effect.gen(function*() {
+      const directory = tempDirectory()
+      const basename = "smithers.db"
+      seedZeroX(join(directory, basename))
+      const previousDirectory = process.cwd()
+      process.chdir(directory)
+      try {
+        const exit = yield* build({ filename: `file:${basename}?mode=memory&cache=shared` })
+        expect(exit._tag).toBe("Success")
+      } finally {
+        process.chdir(previousDirectory)
+      }
+    }))
+
+  // SQLite honors the LAST `mode` when the query repeats it, so only a URI
+  // whose final mode is `memory` names an in-memory database. A crafted
+  // `?mode=memory&mode=rw` opens the on-disk file read-write, and skipping the
+  // probe for it would reopen the exact mode=rw bypass the guard closed.
+  it.effect("refuses a 0.x file whose URI hides mode=rw behind an earlier mode=memory", () =>
+    Effect.gen(function*() {
+      const filename = tempFile("smithers.db")
+      seedZeroX(filename)
+      const uri = `file:${filename}?mode=memory&mode=rw`
+
+      const defect = defectOf(yield* build({ filename: uri }))
+
+      expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(true)
+      if (!NodeDatabase.isUnsupportedDatabase(defect)) return
+      expect(defect.code).toBe("unsupported_database_file")
+      expect(defect.message).toBe(
+        `${uri} is not a Smithers 1.0 database (1.0.0-rc.0 does not load a 0.x smithers.db)`
+      )
+    }))
+
+  it.effect("opens a URI whose last mode is memory beside an earlier mode=rw", () =>
+    Effect.gen(function*() {
+      const filename = tempFile("smithers.db")
+      seedZeroX(filename)
+
+      expect((yield* build({ filename: `file:${filename}?mode=rw&mode=memory` }))._tag).toBe("Success")
+    }))
+
   it.effect("opens a file: URI whose path does not exist yet", () =>
     Effect.gen(function*() {
       expect((yield* build({ filename: `file:${tempFile()}` }))._tag).toBe("Success")

@@ -20,6 +20,21 @@ export const Package = {
       platform: "any"
     },
     {
+      specifier: "@smthrs/database/DurableWriter",
+      source: "src/DurableWriter.ts",
+      platform: "any"
+    },
+    {
+      specifier: "@smthrs/database/DatabaseMetrics",
+      source: "src/DatabaseMetrics.ts",
+      platform: "any"
+    },
+    {
+      specifier: "@smthrs/database/Migrations",
+      source: "src/Migrations.ts",
+      platform: "any"
+    },
+    {
       specifier: "@smthrs/database/UnsupportedBackend",
       source: "src/UnsupportedBackend.ts",
       platform: "any"
@@ -63,7 +78,6 @@ export const Package = {
   ],
   references: [
     "docs/pages/api/engine-store.md",
-    "docs/pages/api/flows.md",
     "docs/pages/api/run-store.md",
     "docs/pages/api/step-cache.md",
     "docs/pages/architecture/package-map.md",

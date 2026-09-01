@@ -150,6 +150,23 @@ const probeTarget = (filename: string): string => {
   return query === -1 ? filename : filename.slice(0, query)
 }
 
+/**
+ * Returns whether a file URI names a pure in-memory SQLite database.
+ *
+ * SQLite honors the LAST `mode` parameter when the query repeats it, so only a
+ * URI whose final mode is `memory` qualifies: `?mode=memory&mode=rw` opens the
+ * on-disk file read-write, and skipping the probe for it would reopen the
+ * mode=rw bypass the guard closed.
+ */
+const isMemoryModeUri = (filename: string): boolean => {
+  if (!filename.startsWith("file:")) return false
+  const target = filename.split("#", 1)[0]!
+  const query = target.indexOf("?")
+  if (query === -1) return false
+  const modes = new URLSearchParams(target.slice(query + 1)).getAll("mode")
+  return modes[modes.length - 1] === "memory"
+}
+
 const readTableNames = (filename: string): ReadonlyArray<string> | undefined => {
   let db: DatabaseSync | undefined
   try {
@@ -181,6 +198,7 @@ const unsupportedOpen = (filename: string): UnsupportedDatabase | undefined => {
       message: `1.0.0-rc.0 runs the durable engine on Node.js ${nodeFloor} only`
     })
   }
+  if (isMemoryModeUri(filename)) return undefined
   const tables = readTableNames(probeTarget(filename))
   if (tables === undefined || tables.length === 0) return undefined
   if (tables.includes(migrationLedgerTable)) return undefined

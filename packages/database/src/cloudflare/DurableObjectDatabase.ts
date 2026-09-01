@@ -71,6 +71,11 @@ const DurableObjectTransaction = Context.Service<
   SqlClient.TransactionConnection.Service
 >("@smthrs/database/cloudflare/DurableObjectDatabase/Transaction")
 
+/** Serializes sibling savepoints inside one enclosing transaction. */
+const TransactionSemaphore = Context.Service<Semaphore.Semaphore>(
+  "@smthrs/database/cloudflare/DurableObjectDatabase/TransactionSemaphore"
+)
+
 /**
  * Recovers the SQLite extended code from a failure's message.
  *
@@ -127,7 +132,12 @@ function* rowsFromCursor(cursor: SqlStorageCursorLike): Generator<Record<string,
   for (const values of cursor.raw()) {
     const row: Record<string, unknown> = {}
     for (let index = 0; index < columns.length; index++) {
-      row[columns[index]!] = normalize(values[index]!)
+      Object.defineProperty(row, columns[index]!, {
+        configurable: true,
+        enumerable: true,
+        value: normalize(values[index]!),
+        writable: true
+      })
     }
     yield row
   }
@@ -246,7 +256,13 @@ const withSavepoint = <A, E, R>(
   const name = `effect_sql_${id}`
   return connection.executeUnprepared(`SAVEPOINT ${name}`, [], undefined).pipe(
     Effect.andThen(Effect.exit(
-      Effect.provideContext(effect, Context.add(services, DurableObjectTransaction, [connection, id]))
+      Effect.provideContext(
+        effect,
+        services.pipe(
+          Context.add(DurableObjectTransaction, [connection, id]),
+          Context.add(TransactionSemaphore, Semaphore.makeUnsafe(1))
+        )
+      )
     )),
     Effect.flatMap((exit) =>
       Exit.isSuccess(exit) ? exit : Effect.andThen(
@@ -285,7 +301,13 @@ const withStorageTransaction = <A, E, R>(
         }
         resumed = true
         resume(Effect.onExit(
-          Effect.provideContext(effect, Context.add(services, DurableObjectTransaction, [connection, 0])),
+          Effect.provideContext(
+            effect,
+            services.pipe(
+              Context.add(DurableObjectTransaction, [connection, 0]),
+              Context.add(TransactionSemaphore, Semaphore.makeUnsafe(1))
+            )
+          ),
           (exit) => {
             if (Exit.isFailure(exit)) {
               transaction.rollback()
@@ -326,7 +348,9 @@ const makeWithTransaction = (
     const services = fiber.context
     const enclosing = Context.getOption(services, DurableObjectTransaction)
     return enclosing._tag === "Some"
-      ? withSavepoint(connection, effect, services, enclosing.value[1] + 1)
+      ? Context.getUnsafe(services, TransactionSemaphore).withPermit(
+        withSavepoint(connection, effect, services, enclosing.value[1] + 1)
+      )
       : semaphore.withPermits(1)(withStorageTransaction(storage, connection, effect, services))
   })
 

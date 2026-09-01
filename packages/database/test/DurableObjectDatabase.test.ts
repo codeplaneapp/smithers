@@ -13,7 +13,7 @@
  * is the only way to reach them without workerd.
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Fiber, Layer, Result, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Result, Stream } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlError from "effect/unstable/sql/SqlError"
 import * as DurableObjectDatabase from "../src/cloudflare/DurableObjectDatabase.ts"
@@ -56,6 +56,28 @@ describe("DurableObjectDatabase", () => {
 
       expect(rows[0]!.body).toBeInstanceOf(Uint8Array)
       expect(Array.from(rows[0]!.body)).toEqual([1, 2, 3])
+    }))
+
+  it.effect("keeps a __proto__ alias as an own field in eager and streamed rows", () =>
+    Effect.gen(function*() {
+      const result = yield* withFake((sql) =>
+        Effect.gen(function*() {
+          yield* sql`CREATE TABLE prototype_payloads (body BLOB NOT NULL)`
+          yield* sql`INSERT INTO prototype_payloads (body) VALUES (${new Uint8Array([4, 5, 6])})`
+          return {
+            eager: yield* sql<Record<string, Uint8Array>>`SELECT body AS "__proto__" FROM prototype_payloads`,
+            streamed: yield* Stream.runCollect(
+              sql<Record<string, Uint8Array>>`SELECT body AS "__proto__" FROM prototype_payloads`.stream
+            )
+          }
+        })
+      )
+
+      for (const row of [...result.eager, ...result.streamed]) {
+        expect(Object.prototype.hasOwnProperty.call(row, "__proto__")).toBe(true)
+        expect(Object.getPrototypeOf(row)).toBe(Object.prototype)
+        expect(Array.from(row["__proto__"]!)).toEqual([4, 5, 6])
+      }
     }))
 
   it.effect("yields rows from .raw for a statement with result columns", () =>
@@ -272,6 +294,49 @@ describe("DurableObjectDatabase", () => {
       )
 
       expect(rows).toEqual([{ id: 1 }, { id: 2 }])
+    }))
+
+  it.effect("serializes sibling savepoints so one rollback cannot undo the other", () =>
+    Effect.gen(function*() {
+      const result = yield* withFake((sql) =>
+        Effect.gen(function*() {
+          yield* sql`CREATE TABLE sibling_rows (id TEXT PRIMARY KEY)`
+          const exits = yield* sql.withTransaction(Effect.gen(function*() {
+            const aInserted = yield* Deferred.make<void>()
+            const releaseA = yield* Deferred.make<void>()
+            const bInserted = yield* Deferred.make<void>()
+            const siblingA = yield* sql.withTransaction(Effect.gen(function*() {
+              yield* sql`INSERT INTO sibling_rows (id) VALUES ('A')`
+              yield* Deferred.succeed(aInserted, undefined)
+              yield* Deferred.await(releaseA)
+              return yield* Effect.fail("sibling A failed")
+            })).pipe(Effect.exit, Effect.forkChild({ startImmediately: true }))
+
+            yield* Deferred.await(aInserted)
+            const siblingB = yield* sql.withTransaction(Effect.gen(function*() {
+              yield* sql`INSERT INTO sibling_rows (id) VALUES ('B')`
+              yield* Deferred.succeed(bInserted, undefined)
+            })).pipe(Effect.exit, Effect.forkChild({ startImmediately: true }))
+
+            // Without the parent transaction's permit, B reaches its body and
+            // creates a second savepoint with A's name. With the permit it is
+            // still waiting here, so releasing A first avoids a test deadlock.
+            yield* Effect.yieldNow
+            yield* Effect.yieldNow
+            yield* Deferred.succeed(releaseA, undefined)
+            const a = yield* Fiber.join(siblingA)
+            const b = yield* Fiber.join(siblingB)
+            return { a, b, bInserted: yield* Deferred.isDone(bInserted) }
+          }))
+          const rows = yield* sql<{ readonly id: string }>`SELECT id FROM sibling_rows ORDER BY id`
+          return { ...exits, rows }
+        })
+      )
+
+      expect(Exit.isFailure(result.a)).toBe(true)
+      expect(Exit.isSuccess(result.b)).toBe(true)
+      expect(result.bInserted).toBe(true)
+      expect(result.rows).toEqual([{ id: "B" }])
     }))
 })
 

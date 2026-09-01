@@ -80,6 +80,38 @@
   package. Both diagnostics name the offending key, and two keys in one set that
   realize the same id are reported as the collision they are.
 
+### Fixed
+
+- `Migrations.run` decodes applied migration ids by value, so the idempotent
+  re-run under `SqlClient.SafeIntegers` no longer dies converting a `bigint`,
+  and an unreadable `migration_id` fails as a `BadState` `MigrationError`
+  naming the value instead of a raw `TypeError`. `MigrationSet.migrations` is
+  `Readonly`, and the loader snapshots the plan when it is built, so mutating
+  the record after `run` returned its Effect cannot change which migrations
+  execute.
+- The Durable Object driver serializes sibling nested transactions on the
+  enclosing transaction's permit, mirroring `SqlClient.makeWithTransaction`,
+  so concurrent siblings can no longer collide on one savepoint name and roll
+  back each other's committed work. Cursor rows define each column label as an
+  own property, so a column aliased `__proto__` can no longer mutate a row's
+  prototype.
+- An I/O failure anywhere in a parallel `Cause` now vetoes the replay
+  cause-wide, so a write that raced an I/O failure against a busy conflict is
+  never replayed, in either arrival order. Retry classification no longer
+  executes arbitrary error property getters, so a throwing `code`, `message`,
+  or `cause` accessor keeps the typed failure on the typed channel instead of
+  replacing it with a defect.
+- The open guard skips the file probe for a SQLite `mode=memory` URI, which
+  names a pure in-memory database, so a memory-mode name that collides with an
+  on-disk 0.x file is no longer refused.
+- README links to repository documentation are absolute, so they resolve on
+  npm, and the Cloudflare section no longer advertises an engine composition
+  that does not ship in 1.0.0-rc.0.
+- The generated entry-point table lists the root-module subpaths
+  (`DurableWriter`, `DatabaseMetrics`, `Migrations`), and `docs.mjs --check`
+  fails when a module the `./*` export map publishes is missing from
+  `Package.ts` entries.
+
 ## [0.1.0] - 2026-08-05
 
 ### Added

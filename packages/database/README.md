@@ -27,7 +27,7 @@ driver is platform-specific, so they live under explicit subpaths.
 
 Any Effect `SqlClient` works underneath `DurableWriter.layer()`, so a browser or
 Postgres client gets the same normalized errors and write retry. See
-[browser support](../../docs/pages/architecture/browser-support.md).
+[browser support](https://smithers.sh/architecture/browser-support).
 
 ```ts
 import { DurableWriter } from "@smthrs/database"
@@ -89,8 +89,12 @@ rather than something about the file it named. The file check reads
 URI filename, which `node:sqlite` accepts and which would otherwise slip past a
 filesystem probe. A URI is probed by its path alone, because its query says how
 to open the file rather than which tables the file holds, and a read-only open
-of `file:<path>?mode=rw` fails on the mode conflict before reading one. It says
-nothing when the file cannot be inspected at all: a
+of `file:<path>?mode=rw` fails on the mode conflict before reading one. The one
+exception is `mode=memory`, which names a pure in-memory database rather than
+saying how to open a file, so the guard skips the probe instead of refusing an
+on-disk 0.x file the open would never read; SQLite honors the last `mode` when
+the query repeats it, so only a URI whose final mode is `memory` qualifies. It
+says nothing when the file cannot be inspected at all: a
 path that does not exist, a directory, an in-memory name, or a file SQLite
 refuses to read. None of those is a 0.x database, so the driver's own open
 decides what happens next.
@@ -123,8 +127,9 @@ and `--backend` with any value but `sqlite` exit 1 with `unsupported_database`
 The file check exists because 1.0.0-rc.0 does not load 0.x run state. Without
 it, pointing the runtime at a 0.x `smithers.db` would add `flows_*` tables
 beside the `_smithers_*` ones and silently mix two schemas. See
-[the rc.0 contract](../../docs/migration/rc-contract.md) sections 2 and 6 and
-[known limitations](../../docs/pages/release/known-limitations.md).
+[the rc.0 contract](https://github.com/smithersai/smithers/blob/main/docs/migration/rc-contract.md)
+sections 2 and 6 and
+[known limitations](https://smithers.sh/release/known-limitations).
 
 ## Cloudflare Durable Objects
 
@@ -150,8 +155,8 @@ Use `.values` when both columns are needed.
 `test/workerd/` runs the platform-specific claims against real workerd behind
 `FLOWS_WORKERD_BIN`; see the README there. Everywhere else the driver runs
 against `test/DurableObjectStorageFake`, which mirrors the platform over
-`node:sqlite`. `@smthrs/flows/CloudflareRuntime` composes the whole engine on
-top.
+`node:sqlite`. No engine composition for Cloudflare ships in 1.0.0-rc.0; the
+driver satisfies the `DurableWriter` contract standalone.
 
 **The subpath is provisional.** rc-contract section 1 and the exclusion table
 place Cloudflare engine composition outside rc.0 core, and no disposition row
@@ -189,5 +194,5 @@ transaction policy that must live at one boundary:
   PGlite, and Postgres one stable `busy`/`constraint`/`io` vocabulary, so
   store logic never branches on driver-specific codes.
 
-See the [database reference](../../docs/pages/api/database.md) and
-[journal concepts](../../docs/pages/concepts/journal.md).
+See the [database reference](https://smithers.sh/api/database) and
+[journal concepts](https://smithers.sh/concepts/journal).

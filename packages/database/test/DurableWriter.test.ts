@@ -593,6 +593,122 @@ describe("DurableWriter", () => {
       expect(attempts).toBe(3)
     }))
 
+  it.effect.each([
+    {
+      label: "typed I/O before typed busy",
+      makeCause: () =>
+        Cause.combine(
+          Cause.fail(sqliteError("SQLITE_IOERR")),
+          Cause.fail(sqliteError("SQLITE_BUSY"))
+        )
+    },
+    {
+      label: "typed busy before typed I/O",
+      makeCause: () =>
+        Cause.combine(
+          Cause.fail(sqliteError("SQLITE_BUSY")),
+          Cause.fail(sqliteError("SQLITE_IOERR"))
+        )
+    },
+    {
+      label: "typed I/O beside a busy defect",
+      makeCause: () =>
+        Cause.combine(
+          Cause.fail(sqliteError("SQLITE_IOERR")),
+          Cause.die({ code: "SQLITE_BUSY" })
+        )
+    },
+    {
+      label: "raw I/O defect beside typed busy",
+      makeCause: () =>
+        Cause.combine(
+          Cause.die({ code: "SQLITE_IOERR" }),
+          Cause.fail(sqliteError("SQLITE_BUSY"))
+        )
+    }
+  ])("does not replay a parallel cause with $label", ({ makeCause }) =>
+    Effect.gen(function*() {
+      let attempts = 0
+      const original = makeCause()
+      const program = Effect.gen(function*() {
+        const fiber = yield* WriteRetry.withWriteRetry(
+          Effect.suspend(() => {
+            attempts += 1
+            return Effect.failCause(original)
+          }),
+          { baseDelayMs: 1, maxDelayMs: 1, maxAttempts: 2 }
+        ).pipe(Effect.exit, Effect.forkChild({ startImmediately: true }))
+        yield* Effect.yieldNow
+        yield* TestClock.adjust("1 second")
+        return yield* Fiber.join(fiber)
+      }).pipe(Effect.provide(TestClock.layer()))
+
+      const exit = yield* program
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (!Exit.isFailure(exit)) return
+      expect(exit.cause).toBe(original)
+      expect(attempts).toBe(1)
+    }))
+
+  it.effect.each([
+    {
+      label: "code getter",
+      makeFailure: () =>
+        Object.defineProperty({}, "code", {
+          get: () => {
+            throw new Error("code getter ran")
+          }
+        })
+    },
+    {
+      label: "message getter",
+      makeFailure: () =>
+        Object.defineProperty({}, "message", {
+          get: () => {
+            throw new Error("message getter ran")
+          }
+        })
+    },
+    {
+      label: "cause getter",
+      makeFailure: () =>
+        Object.defineProperty({}, "cause", {
+          get: () => {
+            throw new Error("cause getter ran")
+          }
+        })
+    },
+    {
+      label: "hostile Proxy traps",
+      makeFailure: () =>
+        new Proxy({}, {
+          getOwnPropertyDescriptor: () => {
+            throw new Error("descriptor trap ran")
+          },
+          has: () => {
+            throw new Error("has trap ran")
+          }
+        })
+    }
+  ])("keeps a typed failure with a throwing $label on the typed channel", ({ makeFailure }) =>
+    Effect.gen(function*() {
+      let attempts = 0
+      const original = makeFailure()
+      const exit = yield* Effect.exit(WriteRetry.withWriteRetry(
+        Effect.suspend(() => {
+          attempts += 1
+          return Effect.fail(original)
+        }),
+        publicRetryOptions
+      ))
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (!Exit.isFailure(exit)) return
+      expect(Result.getOrUndefined(Cause.findError(exit.cause)) === original).toBe(true)
+      expect(Result.isFailure(Cause.findDefect(exit.cause))).toBe(true)
+      expect(attempts).toBe(1)
+    }))
+
   // Order dependence was the defect: the classifier read only the FIRST failure
   // in the cause, so the same parallel pair replayed or did not depending on
   // which effect lost the race first. Both orders must replay, and both halves
