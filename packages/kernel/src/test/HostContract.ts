@@ -19,7 +19,7 @@ import { HttpClient } from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { type ChildProcessHandle, ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -52,7 +52,11 @@ export interface FileSystemSuccess {
   readonly unsupported?: Partial<Record<FileSystemOperation, string>> | undefined
 }
 
-/** Every method on Effect's closed filesystem service. */
+/**
+ * Every method on Effect's closed filesystem service.
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
 export const FileSystemOperations = [
   "access",
   "copy",
@@ -86,7 +90,11 @@ export const FileSystemOperations = [
   "writeFileString"
 ] as const
 
-/** One method of Effect's closed filesystem service. */
+/**
+ * One method of Effect's closed filesystem service.
+ * @category models
+ * @since 1.0.0-rc.0
+ */
 export type FileSystemOperation = typeof FileSystemOperations[number]
 
 /**
@@ -155,7 +163,11 @@ export interface JjSuccess {
   readonly unsupported?: Partial<Record<"root" | "revert", JjErrorCode>> | undefined
 }
 
-/** Every method on the closed Jj host service. */
+/**
+ * Every method on the closed Jj host service.
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
 export const JjOperations = [
   "snapshot",
   "restore",
@@ -167,7 +179,11 @@ export const JjOperations = [
   "revert"
 ] as const
 
-/** One method of the closed Jj host service. */
+/**
+ * One method of the closed Jj host service.
+ * @category models
+ * @since 1.0.0-rc.0
+ */
 export type JjOperation = typeof JjOperations[number]
 
 /**
@@ -185,6 +201,11 @@ export interface HttpClientProbe {
   readonly assertResponse: (response: HttpClientResponse.HttpClientResponse) => void
 }
 
+/**
+ * Successful read/write/redirect HTTP contract probes.
+ * @category models
+ * @since 1.0.0-rc.0
+ */
 export interface HttpClientSuccess {
   readonly expected: "success"
   /** Safe read method. */
@@ -633,9 +654,7 @@ export const runHostContract = (
           ? unsupportedChildProcess("stream", childProcessCap.code)
           : Effect.gen(function*() {
             const spawner = yield* ChildProcessSpawner
-            const ready = yield* Deferred.make<
-              import("effect/unstable/process/ChildProcessSpawner").ChildProcessHandle
-            >()
+            const ready = yield* Deferred.make<ChildProcessHandle>()
             const fiber = yield* Effect.scoped(
               Effect.gen(function*() {
                 const handle = yield* spawner.spawn(
