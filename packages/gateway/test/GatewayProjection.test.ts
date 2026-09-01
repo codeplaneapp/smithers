@@ -118,6 +118,35 @@ describe("GatewayProjection.runTree", () => {
     ])
   })
 
+  it("drops an unknown-flow settlement without stealing another flow's open call", () => {
+    const events = [
+      event("control.agent.cell-call-started", { flowName: "write", input: {} }, 1),
+      event("control.agent.cell-call-started", { flowName: "read", input: {} }, 2),
+      event("control.agent.cell-call-settled", { flowName: "grep", outcome: "failure", message: "missing" }, 3),
+      event("control.agent.cell-call-settled", { flowName: "write", outcome: "success", value: "written" }, 4)
+    ]
+
+    expect(GatewayProjection.runTree(run, events)).toMatchObject([
+      { nodeId: "call-1", label: "write", status: "completed", endedAt: 4 },
+      { nodeId: "call-2", label: "read", status: "running" }
+    ])
+    expect(GatewayProjection.nodeOutput(events)).toMatchObject([
+      { nodeId: "call-1", outcome: "success", output: "written", settledAt: 4 }
+    ])
+  })
+
+  it("still closes a known call after a settlement names an unknown flow", () => {
+    const rows = GatewayProjection.runTree(run, [
+      event("control.agent.cell-call-started", { flowName: "read", input: {} }),
+      event("control.agent.cell-call-settled", { flowName: "unknown", outcome: "failure" }),
+      event("control.agent.cell-call-settled", { flowName: "read", outcome: "success" })
+    ])
+
+    expect(rows.map((row) => `${row.nodeId}:${row.label}:${row.status}`)).toEqual([
+      "call-1:read:completed"
+    ])
+  })
+
   it("names a call whose flow name is missing after the ordinal it opened on", () => {
     const rows = GatewayProjection.runTree({ ...run, parentRunId: "parent-1" }, [
       event("control.agent.cell-call-started", {}),
@@ -189,6 +218,15 @@ describe("GatewayProjection.approvals", () => {
       })
     ])
     expect(rows.map((row) => `${row.requestId}:${row.status}`)).toEqual(["first:pending", "second:approved"])
+  })
+
+  it("leaves pending gates unchanged when a decision names an unknown token", () => {
+    const rows = GatewayProjection.approvals([
+      event("control.approval.requested", { runId: "run-1", requestId: "gate-a", payload }),
+      event("control.approval.approved", { tokenId: "gate-unknown", target: "Node", scope: "run" })
+    ])
+
+    expect(rows.map((row) => `${row.requestId}:${row.status}`)).toEqual(["gate-a:pending"])
   })
 
   it("closes the oldest pending gate when a decision names no token", () => {

@@ -234,16 +234,17 @@ export const runSummary = (
 }
 
 /**
- * Claims the open agent call a settlement belongs to: the oldest one whose
- * flow name the settlement repeats, or the oldest open call when it names
- * none. A settlement that matches nothing open is dropped.
+ * Claims the open agent call a settlement belongs to. A named settlement
+ * takes the oldest open call with that flow name and is dropped when none
+ * matches. Only an unnamed settlement takes the oldest open call.
  */
 const takeOpenCall = <A extends { readonly flowName: string }>(
   open: Array<A>,
   flowName: string | undefined
 ): A | undefined => {
-  const found = flowName === undefined ? -1 : open.findIndex((call) => call.flowName === flowName)
-  return open.splice(found < 0 ? 0 : found, 1)[0]
+  if (flowName === undefined) return open.shift()
+  const found = open.findIndex((call) => call.flowName === flowName)
+  return found < 0 ? undefined : open.splice(found, 1)[0]
 }
 
 /**
@@ -329,9 +330,10 @@ export const runTree = (
  * A decision names the gate it closed by `tokenId`. `@smthrs/control`
  * `SqlControlRuntime.lookupApproval` mints that token id from the target, and
  * for the `Node` target a run parks on it is the request id itself, so the two
- * records join on one field. A decision that names no token closes the oldest
- * pending row rather than all of them: two gates open at once must not both
- * flip on one decision.
+ * records join on one field. A decision whose `tokenId` or `requestId` names
+ * no row is ignored. Only a decision that names neither field closes the
+ * oldest pending row, because two gates open at once must not both flip on one
+ * decision.
  *
  * @param events the run's ordered control events
  * @since 1.0.0
@@ -363,9 +365,10 @@ export const approvals = (
     if (event.kind === "control.approval.approved" || event.kind === "control.approval.denied") {
       const decided = event.kind === "control.approval.approved" ? "approved" as const : "denied" as const
       const tokenId = asString(payload.tokenId) ?? asString(payload.requestId)
-      const named = tokenId === undefined ? undefined : rows.get(tokenId)
-      if (named !== undefined) {
-        rows.set(tokenId as string, { ...named, status: decided })
+      if (tokenId !== undefined) {
+        const named = rows.get(tokenId)
+        if (named === undefined) continue
+        rows.set(tokenId, { ...named, status: decided })
         continue
       }
       const oldest = [...rows.entries()].find(([, row]) => row.status === "pending")
