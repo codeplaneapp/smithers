@@ -21,7 +21,6 @@ import { FileInput } from "./FileInput.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const FileBoundary = Schema.Struct({
   /** Exact files already measured, or globs to expand while preparing. */
@@ -66,6 +65,5 @@ export const FileBoundary = Schema.Struct({
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type FileBoundary = typeof FileBoundary.Type

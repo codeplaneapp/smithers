@@ -18,7 +18,6 @@ import * as StepIdentity from "./StepIdentity.ts"
  *
  * @category idempotency
  * @since 0.1.0
- * @slop
  */
 export const idempotencyKey: (
   name: string,

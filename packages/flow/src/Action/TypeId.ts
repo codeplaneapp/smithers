@@ -5,6 +5,5 @@
  *
  * @private
  * @since 0.1.0
- * @slop
  */
 export const TypeId = "@smthrs/flow/Action"

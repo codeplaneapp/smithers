@@ -47,7 +47,6 @@ import { annotateWaiting } from "./FlowRuntime/WaitingAnnotation.ts"
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class SleepRequestInvalid extends Schema.TaggedError<SleepRequestInvalid>()(
   "@smthrs/flow/SleepRequestInvalid",
@@ -62,7 +61,6 @@ export class SleepRequestInvalid extends Schema.TaggedError<SleepRequestInvalid>
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const tag = "system/sleep"
 
@@ -83,7 +81,6 @@ export const tag = "system/sleep"
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const action: Action.Declared<
   typeof tag,
@@ -226,7 +223,6 @@ const clockName: Effect.Effect<string> = Effect.gen(function*() {
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer: Layer.Layer<never, never, Crypto.Crypto | FlowRuntime> = action.toLayer((payload) =>
   Effect.gen(function*() {

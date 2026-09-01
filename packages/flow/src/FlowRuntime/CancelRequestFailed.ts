@@ -37,7 +37,6 @@ import * as Schema from "effect/Schema"
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class CancelRequestFailed extends Schema.TaggedError<CancelRequestFailed>()(
   "@smthrs/flow/CancelRequestFailed",

@@ -15,7 +15,6 @@ import * as Schema from "effect/Schema"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const BoundaryMode = Schema.Literals(["hard", "expected"])
 
@@ -24,6 +23,5 @@ export const BoundaryMode = Schema.Literals(["hard", "expected"])
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type BoundaryMode = typeof BoundaryMode.Type

@@ -22,7 +22,6 @@ import * as Schema from "effect/Schema"
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class MaxRoundsExceeded extends Schema.TaggedError<MaxRoundsExceeded>()(
   "@smthrs/flow/MaxRoundsExceeded",

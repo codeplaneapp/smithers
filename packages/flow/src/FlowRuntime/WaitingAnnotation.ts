@@ -18,7 +18,6 @@ import { FlowInstance } from "./FlowInstance.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface WaitingAnnotation {
   readonly reason: string
@@ -45,7 +44,6 @@ export interface WaitingAnnotation {
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const annotateWaiting = (
   waiting: WaitingAnnotation | undefined

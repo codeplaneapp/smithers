@@ -34,21 +34,6 @@ Two rules the generator enforces:
   invisible to readers of the site, which is why `eslint.jsdoc.js` requires the
   tag on the public surface.
 
-## `@slop` markers stay in the source
-
-176 declarations in `src` carry `@slop`, which `eslint.jsdoc.js` defines as
-prose the slop sweep identified and a human has not yet reviewed. None of them
-reaches the site: the generator reads a declaration's summary only up to its
-first tag line, so `@slop` is stripped from every published sentence.
-
-DECIDED: they stay until someone reviews the prose they mark. Deleting a marker
-asserts a review, so a mechanical sweep would replace an honest "not reviewed"
-with a false "reviewed" across the whole public surface. `@smthrs/plan` and
-`@smthrs/canonical` carry theirs for the same reason, so the marker means one
-thing everywhere. The way to remove one is to rewrite the prose it marks and
-drop the tag in that same edit, the way `Flow/ExecutionIdRequired.ts` did when
-its summary was corrected.
-
 Fragments projected into shared pages work the way `packages/crypto/docs`
 projects `contract.md` into `docs/pages/architecture.md`: a region marker in the
 target page and one entry in `Package.ts` `snippets`. `docs/testing.md` is the

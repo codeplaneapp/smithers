@@ -11,6 +11,5 @@ export type { Filegroup as Type } from "@smthrs/plan/FileSet"
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = makeFilegroup

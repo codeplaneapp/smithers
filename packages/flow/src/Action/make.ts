@@ -241,7 +241,6 @@ const makeDeclared = <
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make: {
   <
@@ -302,7 +301,6 @@ export const make: {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const makeSystem = <
   const Tag extends string,

@@ -54,7 +54,6 @@ const Invocation = Schema.Struct({
  *
  * @since 0.1.0
  * @category services
- * @slop
  */
 export class DispatchSite extends Context.Service<DispatchSite, string>()(
   "@smthrs/flow/Action/DispatchSite"
@@ -65,7 +64,6 @@ export class DispatchSite extends Context.Service<DispatchSite, string>()(
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface AllocationIdentity {
   /**
@@ -123,7 +121,6 @@ export interface AllocationIdentity {
  *
  * @since 0.1.0
  * @category derivations
- * @slop
  */
 export const allocationScope = (
   identity: AllocationIdentity
@@ -152,7 +149,6 @@ export const allocationScope = (
  *
  * @since 0.1.0
  * @category derivations
- * @slop
  */
 export const invocationKey = (input: {
   readonly runId: string

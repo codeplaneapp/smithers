@@ -16,7 +16,6 @@ import * as Schema from "effect/Schema"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const FileInput = Schema.Struct({
   /** Non-empty path of the input file. */
@@ -30,6 +29,5 @@ export const FileInput = Schema.Struct({
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type FileInput = typeof FileInput.Type

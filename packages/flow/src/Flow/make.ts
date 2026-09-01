@@ -237,7 +237,6 @@ type PayloadSchemaOf<Payload extends Schema.Struct.Fields | AnyStructSchema> = P
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = <
   const Tag extends string,
