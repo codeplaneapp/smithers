@@ -95,6 +95,46 @@ describe("Edit anchoring", () => {
     expect(content).toBe("x = 2\nx = 2\n")
   })
 
+  // A self-overlapping anchor is the case that separates "find every occurrence"
+  // from "find every occurrence a replacement can consume". Scanning forward one
+  // character at a time reports "aa" twice in "aaa", and splicing both spans
+  // writes the replacement twice over bytes only one of them owns.
+  it("counts a self-overlapping anchor the way a replacement consumes it", async () => {
+    const { content, result } = await editThenRead(
+      { "/o.txt": "aaa" },
+      { path: "/o.txt", oldString: "aa", newString: "b", replaceAll: true }
+    )
+    expect(result.replacements).toBe(1)
+    expect(content).toBe("ba")
+  })
+
+  it("collapses a run of repeated blank lines without doubling the replacement", async () => {
+    const { content, result } = await editThenRead(
+      { "/o.py": "a\n\n\n\n\nb\n" },
+      { path: "/o.py", oldString: "\n\n", newString: "\n", replaceAll: true }
+    )
+    expect(result.replacements).toBe(2)
+    expect(content).toBe("a\n\n\nb\n")
+  })
+
+  it("rewrites a separator run byte-exactly", async () => {
+    const { content, result } = await editThenRead(
+      { "/o.md": "====" },
+      { path: "/o.md", oldString: "==", newString: "-", replaceAll: true }
+    )
+    expect(result.replacements).toBe(2)
+    expect(content).toBe("--")
+  })
+
+  it("does not call a singly-occurring overlapping anchor ambiguous", async () => {
+    const { content, result } = await editThenRead(
+      { "/o2.txt": "aab" },
+      { path: "/o2.txt", oldString: "aa", newString: "c" }
+    )
+    expect(result.replacements).toBe(1)
+    expect(content).toBe("cb")
+  })
+
   it("anchors on the line range of a prior hit", async () => {
     const { content, result } = await editThenRead(
       { "/f.py": "one\ntwo\nthree\n" },
