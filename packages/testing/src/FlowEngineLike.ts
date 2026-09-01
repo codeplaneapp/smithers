@@ -484,12 +484,31 @@ const layerWebCrypto: Layer.Layer<Crypto.Crypto> = Layer.succeed(Crypto.Crypto)(
 )
 
 /**
+ * Provides an `EngineSubject` over any `FlowRuntime` implementation.
+ *
+ * This is the seam the conformance suite binds to. `make` reads the runtime
+ * out of the ambient service and never names an implementation, so the same
+ * case list runs against whichever runtime is provided here: the volatile
+ * `FlowEngine.layerMemory` below, or the durable engine, whose runtime layer
+ * is `EngineStore.layer({ owner, journalSource })` in `@smthrs/engine-store`.
+ * That package is not a dependency of this one, so the durable binding belongs
+ * to a suite that already has it; supplying its layer is the whole connection.
+ *
+ * @category layers
+ * @since 0.0.0
+ */
+export const layerOver = <E, R>(
+  runtime: Layer.Layer<FlowRuntime.FlowRuntime, E, R>
+): Layer.Layer<EngineSubjectService, E, R> =>
+  layer().pipe(
+    Layer.provide(runtime),
+    Layer.provideMerge(layerWebCrypto)
+  )
+
+/**
  * Provides an `EngineSubject` over the engine's in-memory implementation.
  *
  * @category layers
  * @since 0.0.0
  */
-export const layerMemory: Layer.Layer<EngineSubjectService> = layer().pipe(
-  Layer.provide(FlowEngine.layerMemory),
-  Layer.provideMerge(layerWebCrypto)
-)
+export const layerMemory: Layer.Layer<EngineSubjectService> = layerOver(FlowEngine.layerMemory)
