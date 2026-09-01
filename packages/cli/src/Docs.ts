@@ -16,7 +16,7 @@
  */
 import { existsSync, readFileSync } from "node:fs"
 import { basename, dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
 /**
  * The bundle names this command prints.
@@ -25,6 +25,30 @@ import { fileURLToPath } from "node:url"
  * @since 1.0.0
  */
 export const bundles = { index: "llms.txt", full: "llms-full.txt" } as const
+
+/**
+ * This module's own URL, under both emitted module systems.
+ *
+ * The package publishes an ESM build and a CommonJS one from the same source.
+ * `import.meta` does not exist in CommonJS, and the bundler rewrites it to an
+ * empty object rather than failing, so the published `require("@smthrs/cli/Docs")`
+ * path reached `fileURLToPath(undefined)` and threw `ERR_INVALID_ARG_TYPE` on
+ * the first call that used a default argument. Reading `__filename` when there
+ * is no module URL gives the CommonJS build the same answer the ESM build has.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const moduleUrl = (): string => {
+  const url: unknown = (import.meta as { readonly url?: unknown }).url
+  if (typeof url === "string" && url !== "") return url
+  const filename: unknown = (globalThis as { readonly __filename?: unknown }).__filename ??
+    (typeof __filename === "string" ? __filename : undefined)
+  if (typeof filename !== "string" || filename === "") {
+    throw new Error("@smthrs/cli/Docs cannot resolve its own location under this module system")
+  }
+  return pathToFileURL(filename).href
+}
 
 /**
  * The root of the installed package, from the location of one of its modules.
@@ -37,8 +61,8 @@ export const bundles = { index: "llms.txt", full: "llms-full.txt" } as const
  * @category constructors
  * @since 1.0.0
  */
-export const packageRoot = (moduleUrl: string = import.meta.url): string => {
-  const enclosing = dirname(fileURLToPath(moduleUrl))
+export const packageRoot = (url: string = moduleUrl()): string => {
+  const enclosing = dirname(fileURLToPath(url))
   const parent = dirname(enclosing)
   return basename(parent) === "dist" ? dirname(parent) : parent
 }
@@ -55,7 +79,7 @@ export const packageRoot = (moduleUrl: string = import.meta.url): string => {
  * @category constructors
  * @since 1.0.0
  */
-export const directory = (moduleUrl: string = import.meta.url): string => join(packageRoot(moduleUrl), "docs")
+export const directory = (url: string = moduleUrl()): string => join(packageRoot(url), "docs")
 
 /**
  * The path of one bundle.

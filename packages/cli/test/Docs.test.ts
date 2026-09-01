@@ -1,7 +1,7 @@
 /**
  * `smithers docs`, which prints what shipped rather than what is online.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
@@ -79,8 +79,15 @@ describe("the shipped bundles", () => {
   })
 
   it("resolves lazy defaults from the emitted CommonJS module", () => {
-    const root = bundleDirectory()
-    const output = join(root, "Docs.cjs")
+    // `__filename` is the resolved path, and on macOS the temporary root
+    // reaches it through the `/var` -> `/private/var` symlink, so the
+    // expectation is resolved too. The assertion is about the DEPTH the
+    // module resolves from, not about which spelling of the path it saw.
+    const root = realpathSync(bundleDirectory())
+    // The published CommonJS entry sits at `<package>/dist/cjs/Docs.js`, so
+    // the fixture reproduces that depth: resolving from anywhere else would
+    // not exercise the layout the export map actually points `require` at.
+    const output = join(root, "dist", "cjs", "Docs.js")
     buildSync({
       entryPoints: [join(dirname(fileURLToPath(import.meta.url)), "..", "src", "Docs.ts")],
       outfile: output,
