@@ -10,11 +10,14 @@ import {
   smithersErrorDefinitions
 } from "../src/ErrorCode.ts"
 import {
+  barrelExports,
   exportedDocs,
+  exportNames,
   markdownTable,
   moduleDoc,
   paragraphs,
-  replaceRegion
+  replaceRegion,
+  unsupportedExports
 } from "./docs-lib.ts"
 
 const check = process.argv.includes("--check")
@@ -40,9 +43,42 @@ const codeRows = smithersErrorCodes.map((code) => {
 const codesTable = markdownTable(["Code", "Raised when", "`details`"], codeRows)
 
 const barrel = read(join(packageRoot, "src", "index.ts"))
-const modules = [...new Set([...barrel.matchAll(/from "\.\/(\w+)\.ts"/g)].map((match) => match[1]))]
+const entries = barrelExports(barrel)
+const modules = [...new Set(entries.map((entry) => entry.module))]
 if (paragraphs(moduleDoc(barrel)) === "") throw new Error("errors docs: empty module JSDoc block")
-const exports = modules.flatMap((name) => exportedDocs(read(join(packageRoot, "src", `${name}.ts`))))
+const unsupportedBarrel = unsupportedExports(barrel)
+if (unsupportedBarrel.length > 0) {
+  throw new Error(`errors docs: src/index.ts has unsupported export: ${unsupportedBarrel[0]}`)
+}
+const aliased = entries.find((entry) => entry.exported !== entry.name)
+if (aliased !== undefined) {
+  throw new Error(`errors docs: aliased re-exports are unsupported: ${aliased.name} as ${aliased.exported}`)
+}
+
+const exports = []
+const documentedNames = new Set()
+for (const module of modules) {
+  const path = `src/${module}.ts`
+  const source = read(join(packageRoot, path))
+  const unsupported = unsupportedExports(source)
+  if (unsupported.length > 0) {
+    throw new Error(`errors docs: ${path} has unsupported export: ${unsupported[0]}`)
+  }
+  const documented = exportedDocs(source)
+  const categorizedNames = new Set(documented.map((entry) => entry.name))
+  for (const name of exportNames(source)) {
+    if (!categorizedNames.has(name)) {
+      throw new Error(`errors docs: ${path} export ${name} lacks a categorized JSDoc block`)
+    }
+  }
+  exports.push(...documented)
+  for (const name of categorizedNames) documentedNames.add(name)
+}
+for (const entry of entries) {
+  if (!documentedNames.has(entry.name)) {
+    throw new Error(`errors docs: src/index.ts re-exports undocumented name ${entry.name}`)
+  }
+}
 if (exports.length === 0) throw new Error("errors docs: no documented exports found")
 const exportsTable = markdownTable(
   ["Export", "Kind", "Summary"],

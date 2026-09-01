@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
@@ -10,7 +10,8 @@ import {
   moduleDoc,
   regionEnd,
   regionStart,
-  replaceRegion
+  replaceRegion,
+  unsupportedExports
 } from "../scripts/docs-lib.ts"
 
 // The docsPages target drift-checks docs/pages; these tests cover generator logic without opening that output.
@@ -91,12 +92,50 @@ export { delta, type Epsilon } from "./Second.ts"
 `
 
     expect(barrelExports(source)).toEqual([
-      { name: "Alpha", module: "First" },
-      { name: "beta", module: "First" },
-      { name: "gamma", module: "First" },
-      { name: "delta", module: "Second" },
-      { name: "Epsilon", module: "Second" }
+      { name: "Alpha", exported: "Alpha", module: "First" },
+      { name: "beta", exported: "renamed", module: "First" },
+      { name: "gamma", exported: "gamma", module: "First" },
+      { name: "delta", exported: "delta", module: "Second" },
+      { name: "Epsilon", exported: "Epsilon", module: "Second" }
     ])
+  })
+
+  it("accepts every supported export statement form", () => {
+    const source = `
+export type A = string
+export const b = 1
+export let c = 2
+export class D {}
+export interface E {}
+export function f() {}
+export enum G { One }
+export abstract class H {}
+export async function i() {}
+export { b, type A as PublicA } from "./First.ts"
+export {
+  c,
+  f
+} from "./Second.ts"
+`
+
+    expect(unsupportedExports(source)).toEqual([])
+  })
+
+  it("flags every export statement form the generator cannot represent", () => {
+    const statements = [
+      "export default x",
+      "export namespace N {}",
+      "export declare const x: number",
+      "export const { a } = o",
+      "export const [a] = p",
+      "export * from \"./X.ts\"",
+      "export { local }",
+      "export type { A } from \"./X.ts\""
+    ]
+    for (const statement of statements) {
+      expect(unsupportedExports(`const filler = 1\n${statement}\n`)).toEqual([statement])
+    }
+    expect(unsupportedExports(statements.join("\n"))).toEqual(statements)
   })
 })
 
@@ -151,12 +190,28 @@ describe("generated regions", () => {
 })
 
 describe("real source completeness", () => {
-  it("documents every source and barrel export", () => {
-    const sourceRoot = join(import.meta.dirname, "..", "src")
-    const barrel = readFileSync(join(sourceRoot, "index.ts"), "utf8")
-    const entries = barrelExports(barrel)
-    const documentedNames = new Set<string>()
+  const sourceRoot = join(import.meta.dirname, "..", "src")
+  const barrel = readFileSync(join(sourceRoot, "index.ts"), "utf8")
+  const entries = barrelExports(barrel)
 
+  it("re-exports every source module from the barrel", () => {
+    const moduleFiles = readdirSync(sourceRoot)
+      .filter((file) => file.endsWith(".ts") && file !== "index.ts")
+      .map((file) => file.slice(0, -".ts".length))
+      .sort()
+    expect([...new Set(entries.map((entry) => entry.module))].sort()).toEqual(moduleFiles)
+  })
+
+  it("uses only export forms the generator understands, without aliases", () => {
+    expect(unsupportedExports(barrel)).toEqual([])
+    for (const module of new Set(entries.map((entry) => entry.module))) {
+      expect(unsupportedExports(readFileSync(join(sourceRoot, `${module}.ts`), "utf8"))).toEqual([])
+    }
+    for (const entry of entries) expect(entry.exported).toBe(entry.name)
+  })
+
+  it("documents exactly the public surface", () => {
+    const documentedNames = new Set<string>()
     for (const module of new Set(entries.map((entry) => entry.module))) {
       const source = readFileSync(join(sourceRoot, `${module}.ts`), "utf8")
       const exported = new Set(exportNames(source))
@@ -164,7 +219,20 @@ describe("real source completeness", () => {
       expect(documented).toEqual(exported)
       for (const name of documented) documentedNames.add(name)
     }
+    expect(documentedNames).toEqual(new Set(entries.map((entry) => entry.exported)))
+  })
 
-    for (const entry of entries) expect(documentedNames.has(entry.name)).toBe(true)
+  it("publishes a generated Exports row for every barrel export", () => {
+    const page = readFileSync(
+      join(import.meta.dirname, "..", "..", "..", "docs", "pages", "reference", "errors.md"),
+      "utf8"
+    )
+    const start = page.indexOf("{/* generated:error-exports start */}")
+    const end = page.indexOf("{/* generated:error-exports end */}")
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+    const rows = [...page.slice(start, end).matchAll(/^\| `(\w+)`/gm)].map((match) => match[1])
+    expect(new Set(rows)).toEqual(new Set(entries.map((entry) => entry.exported)))
+    expect(rows).toHaveLength(entries.length)
   })
 })

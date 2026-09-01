@@ -79,21 +79,40 @@ export const exportNames = (source: string): ReadonlyArray<string> =>
   [...source.matchAll(/^export (?:abstract |async )?(?:type|const|let|class|interface|function|enum) (\w+)/gm)]
     .map((match) => match[1]!)
 
-/** Lists each local name and source module exported by a barrel. */
+/** Lists each local name, public name, and source module exported by a barrel. */
 export const barrelExports = (source: string): ReadonlyArray<{
   readonly name: string
+  readonly exported: string
   readonly module: string
 }> => {
-  const entries: Array<{ readonly name: string; readonly module: string }> = []
-  const pattern = /^export \{([\s\S]*?)\} from "\.\/([^"/]+)\.ts"/gm
+  const entries: Array<{ readonly name: string; readonly exported: string; readonly module: string }> = []
+  const pattern = /^export \{([^}]*)\} from "\.\/([^"/]+)\.ts"/gm
   for (let match = pattern.exec(source); match !== null; match = pattern.exec(source)) {
     const module = match[2]!
-    for (const exported of match[1]!.split(",")) {
-      const local = exported.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]?.trim()
-      if (local !== undefined && local !== "") entries.push({ name: local, module })
+    for (const specifier of match[1]!.split(",")) {
+      const [name, alias] = specifier.trim().replace(/^type\s+/, "").split(/\s+as\s+/)
+      if (name !== undefined && name !== "") {
+        entries.push({ name, exported: alias?.trim() ?? name, module })
+      }
     }
   }
   return entries
+}
+
+/** Lists every top-level export statement the generator cannot represent. */
+export const unsupportedExports = (source: string): ReadonlyArray<string> => {
+  const unsupported: string[] = []
+  for (const match of source.matchAll(/^export\b[^\n]*/gm)) {
+    const statement = match[0]!
+    const declaration = /^export (?:abstract |async )?(?:type|const|let|class|interface|function|enum) \w+/
+    // [^}] keeps the block from leaking past its own closing brace into a
+    // later statement's `} from "./..."`, so a local export list stays flagged.
+    const barrel = /^export \{[^}]*\} from "\.\/[^"/]+\.ts"/
+    if (!declaration.test(statement) && !barrel.test(source.slice(match.index))) {
+      unsupported.push(statement.trim())
+    }
+  }
+  return unsupported
 }
 
 /** Escapes a Markdown table cell and flattens its line breaks. */
