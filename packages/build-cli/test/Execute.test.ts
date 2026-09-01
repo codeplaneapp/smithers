@@ -103,6 +103,55 @@ afterEach(async () => {
 })
 
 describe("targets execute", () => {
+  const selectorWorkspace = async (target = "lib"): Promise<void> => {
+    await write(
+      "BUILD.ts",
+      `import { NodeBinary, PackageDefaults, Runtime } from "${rulesModule}"\n` +
+        `const runtime = Runtime.Node({ version: ">=22.19.0" })\n` +
+        `const macro = ({ cwd }) => ({ lib: NodeBinary({ runtime, entry: { _tag: "File", path: "//leaf.mjs" }, args: [cwd], srcs: [], deps: [] }) })\n` +
+        `export const defaults = PackageDefaults({ directories: "packages/*", macro })\n` +
+        `export { runtime }\n`
+    )
+    await write(
+      "leaf.mjs",
+      `import { writeFileSync } from "node:fs"\n` +
+        `writeFileSync(\`built-\${process.argv[2].split("/").at(-1)}\`, "ok")\n`
+    )
+    await write(
+      "aggregate.mjs",
+      `import { existsSync, writeFileSync } from "node:fs"\n` +
+        `if (!existsSync("built-alpha") || !existsSync("built-beta")) process.exit(9)\n` +
+        `writeFileSync("aggregate-ran", "ok")\n`
+    )
+    for (const name of ["alpha", "beta"]) {
+      await write(`packages/${name}/package.json`, `${JSON.stringify({ name, private: true })}\n`)
+    }
+    await write(
+      "scripts/BUILD.ts",
+      `import { NodeBinary, Target } from "${rulesModule}"\n` +
+        `import { runtime } from "../BUILD.ts"\n` +
+        `export const aggregate = NodeBinary({ runtime, entry: { _tag: "File", path: "//aggregate.mjs" }, args: [], srcs: [], deps: [Target.subtree("//packages/...", "${target}")] })\n`
+    )
+  }
+
+  it("executes synthesized targets selected as aggregate dependencies", async () => {
+    await selectorWorkspace()
+    const summary = await run("build", "//scripts:aggregate")
+
+    expect(summary.ok, JSON.stringify(summary)).toBe(true)
+    expect(status(summary, "//packages/alpha:lib")).toBe("ran")
+    expect(status(summary, "//packages/beta:lib")).toBe("ran")
+    expect(status(summary, "//scripts:aggregate")).toBe("ran")
+    expect(await read("aggregate-ran")).toBe("ok")
+  })
+
+  it("refuses an aggregate dependency selector that matches no target name", async () => {
+    await selectorWorkspace("missing")
+    const workspace = await open()
+    await expect(Planner.make(workspace, "build", "//scripts:aggregate"))
+      .rejects.toThrow(/dependency selector .* matched no targets/)
+  })
+
   /**
    * Two packages, each generating a manifest, plus an `Exec` target that
    * touches a file. A generated file appearing on disk and a shell command

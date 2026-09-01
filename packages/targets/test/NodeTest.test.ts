@@ -150,6 +150,19 @@ describe("NodeBinary", () => {
     }))
     expect(attrs.env).toEqual({ CARGO_TARGET_DIR: "target/scratch" })
   })
+
+  it("accepts a workspace subtree as a graph dependency", () => {
+    const selector = Target.subtree("//packages/...", "lib")
+    const target = NodeBinary.NodeBinary({
+      runtime,
+      entry: Input.file("//scripts/pack-release.mjs"),
+      args: [],
+      srcs: [],
+      deps: [selector]
+    })
+    expect(Target.metadata(target).dependencies).toEqual([])
+    expect(Target.metadata(target).dependencySelectors).toEqual([selector])
+  })
 })
 
 describe("StandardPackage circular guard", () => {

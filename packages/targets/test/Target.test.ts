@@ -10,6 +10,51 @@ const Leaf = Target.make("RuleTestLeaf", {
 })
 
 describe("Target metadata traversal", () => {
+  it("constructs immutable, narrowly-scoped dependency selectors", () => {
+    const selector = Target.subtree("//packages/...", "lib")
+    expect(selector).toEqual({
+      _tag: "TargetDependencySelector",
+      pattern: "//packages/...",
+      target: "lib"
+    })
+    expect(Object.isFrozen(selector)).toBe(true)
+    expect(Target.isDependencySelector(selector)).toBe(true)
+    for (
+      const [pattern, target] of [
+        ["packages/...", "lib"],
+        ["//packages/*", "lib"],
+        ["//packages/...", ""],
+        ["//packages/...", "bad/name"]
+      ]
+    ) {
+      expect(() => Target.subtree(pattern!, target!)).toThrow()
+    }
+  })
+
+  it("rejects malformed dependency selectors without invoking proxy traps", () => {
+    let invoked = false
+    const proxy = new Proxy({ _tag: "TargetDependencySelector", pattern: "//...", target: "lib" }, {
+      getOwnPropertyDescriptor: () => {
+        invoked = true
+        return undefined
+      }
+    })
+    expect(Target.isDependencySelector(proxy)).toBe(false)
+    expect(invoked).toBe(false)
+    expect(Target.isDependencySelector(null)).toBe(false)
+    expect(Target.isDependencySelector({ _tag: "Other", pattern: "//...", target: "lib" })).toBe(false)
+    expect(Target.isDependencySelector({
+      _tag: "TargetDependencySelector",
+      pattern: `//${"x".repeat(4_096)}/...`,
+      target: "lib"
+    })).toBe(false)
+    expect(Target.isDependencySelector({
+      _tag: "TargetDependencySelector",
+      pattern: "//...",
+      target: "x".repeat(257)
+    })).toBe(false)
+  })
+
   it("recognizes only an own, immutable, well-formed target marker", () => {
     const target = Leaf({})
     expect(Target.isTarget(target)).toBe(true)
@@ -71,17 +116,37 @@ describe("Target metadata traversal", () => {
   it("re-derives dependencies from verb-effective attrs", () => {
     const declared = Leaf({})
     const mapped = Leaf({})
+    const declaredSelector = Target.subtree("//packages/...", "lib")
+    const mappedSelector = Target.subtree("//apps/...", "lib")
     const Parent = Target.make("RuleTestMappedDependencies", {
-      attrs: Schema.Struct({ dependency: Target.Target }),
+      attrs: Schema.Struct({ dependency: Target.Target, selector: Target.DependencySelector }),
       kinds: ["build", "lint"],
-      attrsForKind: (kind, attrs) => kind === "lint" ? { dependency: mapped } : attrs,
+      attrsForKind: (kind, attrs) => kind === "lint" ? { dependency: mapped, selector: mappedSelector } : attrs,
       implementation: () => Target.notImplemented("RuleTestMappedDependencies")
     })
 
-    const metadata = Target.metadata(Parent({ dependency: declared }))
+    const metadata = Target.metadata(Parent({ dependency: declared, selector: declaredSelector }))
     expect(metadata.dependencies).toEqual([declared])
+    expect(metadata.dependencySelectors).toEqual([declaredSelector])
     expect(metadata.forKind("build").dependencies).toEqual([declared])
+    expect(metadata.forKind("build").dependencySelectors).toEqual([declaredSelector])
     expect(metadata.forKind("lint").dependencies).toEqual([mapped])
+    expect(metadata.forKind("lint").dependencySelectors).toEqual([mappedSelector])
+  })
+
+  it("deduplicates structurally equal dependency selectors", () => {
+    const Holder = Target.make("RuleTestSelectorDeduplication", {
+      attrs: Schema.Struct({ dependencies: Schema.Array(Target.Dependency) }),
+      kinds: ["build"],
+      implementation: () => Target.notImplemented("RuleTestSelectorDeduplication")
+    })
+    const metadata = Target.metadata(Holder({
+      dependencies: [
+        Target.subtree("//packages/...", "lib"),
+        Target.subtree("//packages/...", "lib")
+      ]
+    }))
+    expect(metadata.dependencySelectors).toEqual([Target.subtree("//packages/...", "lib")])
   })
 
   it("does not recurse forever through a cyclic array", () => {
