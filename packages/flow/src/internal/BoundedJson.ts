@@ -83,7 +83,7 @@ export const encodedStringBytes = (value: string, maximum: number): number | und
     } else if (unit === 0x22 || unit === 0x5c) {
       bytes += 2
     } else if (unit <= 0x1f) {
-      bytes += 6
+      bytes += unit === 0x08 || unit === 0x09 || unit === 0x0a || unit === 0x0c || unit === 0x0d ? 2 : 6
     } else if (unit <= 0x7f) {
       bytes++
     } else if (unit <= 0x7ff) {

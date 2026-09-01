@@ -18,6 +18,7 @@ import { Node } from "@smthrs/plan"
 import { Cause, Effect, Exit, Layer, Option, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 import { TestClock } from "effect/testing"
+import { Buffer } from "node:buffer"
 import * as BoundedJson from "../src/internal/BoundedJson.ts"
 import { withCrypto } from "./Crypto.ts"
 import { layerMemoryOver, makeInstance, makeMemoryState, type MemoryState } from "./MemoryFlowRuntime.ts"
@@ -168,6 +169,12 @@ describe("bounded durable JSON", () => {
     expect(BoundedJson.encodedStringBytes("a", 2)).toBeUndefined()
     expect(BoundedJson.encodedStringBytes("\ud800", 100)).toBeUndefined()
     expect(BoundedJson.encodedStringBytes("\udc00", 100)).toBeUndefined()
+
+    const everyControl = String.fromCharCode(...Array.from({ length: 0x20 }, (_, unit) => unit))
+    const value = `${everyControl}"\\😀é€`
+    expect(BoundedJson.encodedStringBytes(value, 1_000)).toBe(
+      Buffer.byteLength(JSON.stringify(value))
+    )
   })
 
   it("refuses every primitive resource overflow at the value's path", () => {
@@ -320,6 +327,9 @@ describe("HumanTask as a declaration", () => {
 describe("HumanTask.validate", () => {
   it("accepts a string for ask and refuses anything else", () => {
     expect(HumanTask.validate("looks good", { kind: "ask" })).toBeUndefined()
+    const multilineAnswer = "\n".repeat((HumanTask.maxJsonStringBytes - 2) / 2)
+    expect(Buffer.byteLength(JSON.stringify(multilineAnswer))).toBe(HumanTask.maxJsonStringBytes)
+    expect(HumanTask.validate(multilineAnswer, { kind: "ask" })).toBeUndefined()
     expect(HumanTask.validate(3, { kind: "ask" })).toContain("string")
     expect(HumanTask.validate("x".repeat(HumanTask.maxJsonStringBytes), { kind: "ask" }))
       .toContain("encoded bytes")

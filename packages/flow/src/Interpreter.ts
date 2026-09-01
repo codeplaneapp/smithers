@@ -42,7 +42,6 @@
  * @since 0.1.0
  */
 import { Key } from "@smthrs/keys"
-import type { GraphBuildError } from "@smthrs/plan/GraphBuildError"
 import * as KeyMaterial from "@smthrs/plan/KeyMaterial"
 import * as Node from "@smthrs/plan/Node"
 import * as Planned from "@smthrs/plan/Planned"
@@ -132,6 +131,17 @@ type Services = Crypto.Crypto | FlowRuntime | FlowInstance | Implementations
  */
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
+/** Reads one own data property without invoking an accessor or letting a proxy trap escape. */
+const ownDataProperty = (value: unknown, key: PropertyKey): unknown => {
+  if (Object(value) !== value) return undefined
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /**
  * The execution id a `.child()` boundary runs its child under.
  *
@@ -200,14 +210,17 @@ export const interpret = (
         // throws. Reading `node` and `message` off the value without checking
         // built an InterpreterError its own schema rejects, and the
         // constructor's "Schema validation failed" then replaced the reason
-        // the author needed. Both fields are narrowed here so a plain Error
-        // from a body arrives as a typed failure that still says why. A body
-        // that threw produced no topology, so it reports `incomplete_graph`.
-        const refusal = cause as Partial<GraphBuildError>
-        const node = typeof refusal?.node === "string" ? refusal.node : ""
-        const reported = typeof refusal?.message === "string" ? refusal.message : ""
+        // the author needed. All three fields are read through own data
+        // descriptors and narrowed here so a plain Error from a body arrives
+        // as a typed failure that still says why. A body that threw produced no
+        // topology, so it reports `incomplete_graph`.
+        const refusalNode = ownDataProperty(cause, "node")
+        const refusalCode = ownDataProperty(cause, "code")
+        const refusalMessage = ownDataProperty(cause, "message")
+        const node = typeof refusalNode === "string" ? refusalNode : ""
+        const reported = typeof refusalMessage === "string" ? refusalMessage : ""
         return new InterpreterError({
-          code: refusal?.code === "duplicate_node" ? "duplicate_node_id" : "incomplete_graph",
+          code: refusalCode === "duplicate_node" ? "duplicate_node_id" : "incomplete_graph",
           flow: name,
           node,
           message: reported === "" ? `building the graph of flow ${name} threw ${String(cause)}` : reported

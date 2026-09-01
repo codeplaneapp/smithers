@@ -362,7 +362,13 @@ export const nextDelayEffect = (
 
 /**
  * Extracts the stable identity tag of an error for non-retryable matching:
- * a string `_tag` property when present, otherwise the `Error` name.
+ * an own string `_tag` when present, otherwise the first own `name` descriptor
+ * found while walking a bounded prototype chain. That first descriptor decides
+ * the result: only a string data value is a tag.
+ *
+ * Descriptors keep accessors inert instead of running author code through a
+ * property read. A bounded walk also terminates when a hostile proxy reports a
+ * cyclic prototype chain; any proxy trap that throws leaves the error untagged.
  *
  * @category attempts
  * @since 0.1.0
@@ -373,17 +379,14 @@ export const errorTag = (error: unknown): string | undefined => {
     const tag = Object.getOwnPropertyDescriptor(error, "_tag")
     if (tag !== undefined && "value" in tag && typeof tag.value === "string") return tag.value
 
-    const name = Object.getOwnPropertyDescriptor(error, "name")
-    if (name !== undefined && "value" in name && typeof name.value === "string") return name.value
-
-    if (error instanceof EvalError) return "EvalError"
-    if (error instanceof RangeError) return "RangeError"
-    if (error instanceof ReferenceError) return "ReferenceError"
-    if (error instanceof SyntaxError) return "SyntaxError"
-    if (error instanceof TypeError) return "TypeError"
-    if (error instanceof URIError) return "URIError"
-    if (error instanceof AggregateError) return "AggregateError"
-    if (error instanceof Error) return "Error"
+    let current: object | null = error
+    for (let depth = 0; current !== null && depth < 64; depth++) {
+      const name = Object.getOwnPropertyDescriptor(current, "name")
+      if (name !== undefined) {
+        return "value" in name && typeof name.value === "string" ? name.value : undefined
+      }
+      current = Object.getPrototypeOf(current)
+    }
   } catch {
     // Proxies and hostile accessors are untrusted failure payloads. An error
     // that cannot be inspected inertly simply has no stable retry tag.
@@ -459,10 +462,13 @@ export const decide = (
     nextDelay(policy, options.attempt, { random: options.random, elapsedMs: options.elapsedMs }),
     {
       onNone: () =>
-        // The expiration bound is the only give-up that depends on elapsed
-        // time: when dropping it would have allowed another attempt, the
-        // sequence expired rather than exhausted.
-        Option.isSome(nextDelay(policy, options.attempt, { random: options.random }))
+        // A policy can report `expired` only when it declares an expiration
+        // bound and dropping elapsed time would have allowed another attempt.
+        // A malformed elapsed value still gives up because the sequence cannot
+        // continue without a trustworthy clock reading; without an expiration
+        // bound, the public terminal reason for that refusal is `exhausted`.
+        policy.expirationMs !== undefined &&
+          Option.isSome(nextDelay(policy, options.attempt, { random: options.random }))
           ? giveUp("expired")
           : giveUp("exhausted"),
       onSome: retryAfter

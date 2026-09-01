@@ -294,6 +294,18 @@ describe("expiration (issue #36)", () => {
     })
     expect(decision).toEqual({ _tag: "GiveUp", reason: "expired" })
   })
+
+  it("separates malformed elapsed time from a genuine policy expiry", () => {
+    const unbounded = RetryPolicy.make({ initialMs: 100, factor: 2, maxMs: 1_000 })
+    for (const elapsedMs of [-1, Number.NaN]) {
+      expect(RetryPolicy.decide(unbounded, { attempt: 1, error: "e", elapsedMs })).toEqual(
+        RetryPolicy.giveUp("exhausted")
+      )
+    }
+    expect(RetryPolicy.decide(policy, { attempt: 1, error: "e", elapsedMs: 1_000 })).toEqual(
+      RetryPolicy.giveUp("expired")
+    )
+  })
 })
 
 describe("decide", () => {
@@ -371,6 +383,45 @@ describe("decide", () => {
     expect(
       RetryPolicy.decide(policy, { attempt: 1, error: new TypeError("boom") })
     ).toEqual(RetryPolicy.giveUp("nonRetryable"))
+  })
+
+  it("matches an Error subclass whose stable name is defined on its prototype", () => {
+    class Permanent extends Error {}
+    Permanent.prototype.name = "Permanent"
+    const error = new Permanent("do not retry")
+    const policy = RetryPolicy.make({
+      initialMs: 100,
+      factor: 2,
+      maxMs: 1_000,
+      nonRetryable: ["Permanent"]
+    })
+
+    expect(RetryPolicy.errorTag(error)).toBe("Permanent")
+    expect(RetryPolicy.decide(policy, { attempt: 1, error })).toEqual(
+      RetryPolicy.giveUp("nonRetryable")
+    )
+  })
+
+  it("bounds a hostile proxy prototype walk without invoking property getters", () => {
+    let prototypeReads = 0
+    let propertyReads = 0
+    const target = Object.defineProperty({}, "message", {
+      get() {
+        propertyReads++
+        return "hidden"
+      }
+    })
+    let hostile: object
+    hostile = new Proxy(target, {
+      getPrototypeOf() {
+        prototypeReads++
+        return prototypeReads <= 65 ? hostile : null
+      }
+    })
+
+    expect(RetryPolicy.errorTag(hostile)).toBeUndefined()
+    expect(prototypeReads).toBe(64)
+    expect(propertyReads).toBe(0)
   })
 
   it("never invokes accessors or proxy traps while classifying an error", () => {

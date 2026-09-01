@@ -166,6 +166,29 @@ describe("Graph.build placement refusal", () => {
     }))
   })
 
+  it("keeps a placement refusal typed when rendering an object with a throwing tag", () => {
+    class HostilePlacement {
+      get [Symbol.toStringTag](): string {
+        throw new Error("boom")
+      }
+    }
+    const Hostile = Flow.make("child/hostile-placement", {
+      payload: {},
+      success: Schema.Number,
+      body: () => Bump.call({ value: 1 })
+    }).annotate(Flow.Placement, new HostilePlacement())
+    const Local = Flow.make("child/local-hostile-placement", {
+      payload: {},
+      success: Schema.Number,
+      body: () => Hostile.call({})
+    }).annotate(Flow.Placement, { host: "worker" })
+
+    expect(() => Graph.build(Local, {})).toThrowError(expect.objectContaining({
+      _tag: "@smthrs/plan/GraphBuildError",
+      code: "placement_requires_boundary"
+    }))
+  })
+
   it("admits the same pair as a child boundary", () => {
     const Local = Flow.make("child/local-boundary", {
       payload: {},

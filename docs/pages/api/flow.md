@@ -591,7 +591,7 @@ Retry policy models and constructors.
 | `RetryAttemptsExhausted` | class | errors | A retry sequence exhausted the policy's `maxAttempts` bound. |
 | `nextDelay` | const | attempts | Computes the delay before attempt `attempt + 1` from the persisted attempt count, mirroring Temporal's `ComputeNextDelay` (`common/backoff/retrypolicy.go`). |
 | `nextDelayEffect` | const | attempts | Computes the next retry delay, sampling the `Random` service for jitter. |
-| `errorTag` | const | attempts | Extracts the stable identity tag of an error for non-retryable matching: a string `_tag` property when present, otherwise the `Error` name. |
+| `errorTag` | const | attempts | Extracts the stable identity tag of an error for non-retryable matching: an own string `_tag` when present, otherwise the first own `name` descriptor found while walking a bounded prototype chain. |
 | `defaultNonRetryable` | const | attempts | Error tags that are non-retryable by type, under every policy (issue #156). |
 | `isNonRetryable` | const | attempts | Whether an error is classified non-retryable, either by type (see `defaultNonRetryable`) or by the policy's declared tag list. |
 | `decide` | const | attempts | The pure core of the engine's single retry decision point. |

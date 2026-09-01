@@ -545,6 +545,40 @@ describe("Interpreter refusals", () => {
       })
     }))
 
+  it.effect("keeps graph-build catch fields inert when a body throws accessor-backed data", () =>
+    Effect.gen(function*() {
+      let messageReads = 0
+      const accessor = Object.defineProperty({}, "message", {
+        get() {
+          messageReads++
+          throw new Error("secondary")
+        }
+      })
+      const thrown = new Proxy(accessor, {
+        getOwnPropertyDescriptor(target, key) {
+          if (key === "node") throw new Error("descriptor trap")
+          return Reflect.getOwnPropertyDescriptor(target, key)
+        }
+      })
+      const Refusing = Flow.make("interpreter/body-throws-accessor", {
+        payload: {},
+        success: Schema.Number,
+        body: (): Node.Node<number> => {
+          throw thrown
+        }
+      })
+
+      expect(yield* refusal(Interpreter.interpret(Refusing, {}))).toMatchObject({
+        error: {
+          _tag: "@smthrs/flow/InterpreterError",
+          code: "incomplete_graph",
+          flow: "interpreter/body-throws-accessor",
+          node: ""
+        }
+      })
+      expect(messageReads).toBe(0)
+    }))
+
   it.effect("refuses an unimplemented action before the implemented ones ahead of it run", () =>
     Effect.gen(function*() {
       calls.length = 0

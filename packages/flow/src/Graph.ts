@@ -682,10 +682,14 @@ const renderPlacement = (value: unknown): string => {
     return `{${members.join(",")}}`
   }
 
-  const rendered = render(value, 0, [])
-  return rendered.length <= maxPlacementChars
-    ? rendered
-    : `${rendered.slice(0, maxPlacementChars)} [${rendered.length - maxPlacementChars} characters dropped]`
+  try {
+    const rendered = render(value, 0, [])
+    return rendered.length <= maxPlacementChars
+      ? rendered
+      : `${rendered.slice(0, maxPlacementChars)} [${rendered.length - maxPlacementChars} characters dropped]`
+  } catch {
+    return "<unrenderable>"
+  }
 }
 
 /**

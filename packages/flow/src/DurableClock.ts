@@ -37,11 +37,11 @@ export interface DurableClock {
 }
 
 /**
- * Creates a durable clock definition and its associated deferred wake-up
- * signal.
+ * Parses one author-supplied duration and requires it to be finite and
+ * nonnegative. Invalid input throws `RangeError` so the authoring mistake is
+ * caught at declaration time, matching `Flow.make` and `Poll.make`.
  *
- * @category constructors
- * @since 0.1.0
+ * @private
  */
 const durationFromInput = (input: Duration.Input, field: string): Duration.Duration => {
   const parsed = Duration.fromInput(input)
