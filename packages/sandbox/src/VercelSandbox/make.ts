@@ -5,6 +5,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
+import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import { stdinRedirect } from "../internal/stdinRedirect.ts"
@@ -242,26 +243,29 @@ export const make = (options: VercelSandboxOptions): Provider => ({
         remoteId: sandbox.name,
         workdir,
         spawn: (command, spawnOptions) =>
-          Effect.flatMap(redirect(command, spawnOptions.stdin), (fed) =>
-            Effect.map(
-              run({
-                cmd: "sh",
-                // `-c`, never `-lc`: profile output from a login shell would
-                // precede the command's own stdout on this transport.
-                args: ["-c", fed],
-                cwd: resolveCwd(spawnOptions.cwd),
-                env: Object.fromEntries(
-                  [...Object.entries(options.commandEnv ?? {}), ...Object.entries(spawnOptions.env ?? {})].filter(
-                    (entry): entry is [string, string] => entry[1] !== undefined
+          Effect.flatMap(
+            Effect.andThen(checkEnvironmentNames(spawnOptions.env), redirect(command, spawnOptions.stdin)),
+            (fed) =>
+              Effect.map(
+                run({
+                  cmd: "sh",
+                  // `-c`, never `-lc`: profile output from a login shell would
+                  // precede the command's own stdout on this transport.
+                  args: ["-c", fed],
+                  cwd: resolveCwd(spawnOptions.cwd),
+                  env: Object.fromEntries(
+                    [...Object.entries(options.commandEnv ?? {}), ...Object.entries(spawnOptions.env ?? {})].filter(
+                      (entry): entry is [string, string] => entry[1] !== undefined
+                    )
                   )
-                )
-              }),
-              (result) => ({
-                stdout: output(() => result.stdout(), "could not read command stdout"),
-                stderr: output(() => result.stderr(), "could not read command stderr"),
-                exitCode: Effect.succeed(result.exitCode)
-              })
-            )),
+                }),
+                (result) => ({
+                  stdout: output(() => result.stdout(), "could not read command stdout"),
+                  stderr: output(() => result.stderr(), "could not read command stderr"),
+                  exitCode: Effect.succeed(result.exitCode)
+                })
+              )
+          ),
         readFile: (path) =>
           Effect.flatMap(
             attempt(() => sandbox.readFile({ path }), "unknown", `could not read ${path}`),
