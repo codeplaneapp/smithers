@@ -61,7 +61,117 @@ const encode = (event: GrantEvent.GrantEvent): Record<string, unknown> => {
   return result.success as Record<string, unknown>
 }
 
+const goldenPayloads = [
+  {
+    name: "OnceGrant",
+    event: events[0]!,
+    payload: Object.freeze({
+      _tag: "@smthrs/kernel/GrantEvent/OnceGrant",
+      eventType: "flows.kernel.grant.once.v1",
+      requestId: "request-once",
+      runId: "run-1",
+      planDigest: "plan-1",
+      capability: Object.freeze({
+        action: "fs:read",
+        resource: "/workspace/readme.md"
+      }),
+      pattern: Object.freeze({
+        action: "fs:read",
+        resource: "/workspace/**"
+      }),
+      scope: "once",
+      tier: "sealed"
+    })
+  },
+  {
+    name: "RunGrant",
+    event: events[1]!,
+    payload: Object.freeze({
+      _tag: "@smthrs/kernel/GrantEvent/RunGrant",
+      eventType: "flows.kernel.grant.run.v1",
+      requestId: "request-run",
+      runId: "run-1",
+      planDigest: "plan-1",
+      capability: Object.freeze({
+        action: "fs:read",
+        resource: "/workspace/readme.md"
+      }),
+      pattern: Object.freeze({
+        action: "fs:read",
+        resource: "/workspace/**"
+      }),
+      scope: "run",
+      tier: "sealed"
+    })
+  },
+  {
+    name: "RememberedGrant",
+    event: events[2]!,
+    payload: Object.freeze({
+      _tag: "@smthrs/kernel/GrantEvent/RememberedGrant",
+      eventType: "flows.kernel.grant.remembered.v1",
+      requestId: "request-remembered",
+      runId: "run-1",
+      capability: Object.freeze({
+        action: "fs:read",
+        resource: "/workspace/readme.md"
+      }),
+      pattern: Object.freeze({
+        action: "fs:read",
+        resource: "/workspace/**"
+      }),
+      scope: "remembered",
+      tier: "sealed"
+    })
+  },
+  {
+    name: "DeniedGrant",
+    event: events[3]!,
+    payload: Object.freeze({
+      _tag: "@smthrs/kernel/GrantEvent/DeniedGrant",
+      eventType: "flows.kernel.grant.denied.v1",
+      requestId: "request-denied",
+      runId: "run-1",
+      capability: Object.freeze({
+        action: "fs:read",
+        resource: "/workspace/readme.md"
+      }),
+      pattern: Object.freeze({
+        action: "fs:read",
+        resource: "/workspace/**"
+      }),
+      scope: "once",
+      tier: "sealed"
+    })
+  },
+  {
+    name: "EnvelopeGrant",
+    event: events[4]!,
+    payload: Object.freeze({
+      _tag: "@smthrs/kernel/GrantEvent/EnvelopeGrant",
+      eventType: "flows.kernel.grant.envelope.v1",
+      runId: "run-1",
+      planDigest: "plan-1",
+      patterns: Object.freeze([
+        Object.freeze({
+          action: "fs:read",
+          resource: "/workspace/**"
+        })
+      ]),
+      scope: "remembered"
+    })
+  }
+] as const
+
 describe("GrantEvent schema", () => {
+  for (const golden of goldenPayloads) {
+    it("encodes " + golden.name + " as its exact durable wire payload", () => {
+      const encoded = encode(golden.event)
+      expect(encoded).toEqual(golden.payload)
+      expect(JSON.stringify(encoded)).toBe(JSON.stringify(golden.payload))
+    })
+  }
+
   for (const event of events) {
     it(`round trips ${event.eventType}`, () => {
       const encoded = GrantEvent.encode(event)

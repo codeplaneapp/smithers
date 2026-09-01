@@ -24,6 +24,16 @@ describe("CommandLine.render", () => {
     expect(CommandLine.render(ChildProcess.make("echo", ["it's"]))).toBe("echo 'it'\\''s'")
   })
 
+  it("preserves newline and NUL tokens in the durable grant identity", () => {
+    const newline = "line\nbreak"
+    expect(CommandLine.quote(newline)).toBe("'line\nbreak'")
+    expect(CommandLine.render(ChildProcess.make("echo", [newline]))).toBe("echo 'line\nbreak'")
+
+    const nul = "nul\0byte"
+    expect(CommandLine.quote(nul)).toBe("'nul\0byte'")
+    expect(CommandLine.render(ChildProcess.make("echo", [nul]))).toBe("echo 'nul\0byte'")
+  })
+
   it("renders shell commands verbatim so the capability names what executes", () => {
     expect(CommandLine.render(ChildProcess.make("echo", ["safe; touch /tmp/marker"], { shell: true })))
       .toBe("echo safe; touch /tmp/marker")

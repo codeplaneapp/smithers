@@ -10,7 +10,7 @@ import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import type * as Scope from "effect/Scope"
 import { spawnSync } from "node:child_process"
 import * as GrantEvent from "../src/GrantEvent.ts"
-import { GrantStore } from "../src/GrantStore.ts"
+import { GrantStore, maximumRules } from "../src/GrantStore.ts"
 import * as JournalGrantStore from "../src/JournalGrantStore.ts"
 import * as Workspace from "../src/Workspace.ts"
 
@@ -606,6 +606,105 @@ const entry = (seq: number, event: GrantEvent.GrantEvent, target: string): Entry
     payload: encoded(event),
     meta: undefined
   })
+
+const repeatedEntries = (
+  count: number,
+  event: GrantEvent.GrantEvent,
+  target: string
+): ReadonlyArray<Entry> => {
+  const payload = encoded(event)
+  return Array.from({ length: count }, (_, index) =>
+    new Entry({
+      runId: runId(target),
+      seq: index + 1 as Seq,
+      eventId: `event-${index + 1}`,
+      sourceId: sourceId(options.sourceId),
+      sourceSeq: index + 1 as JournalEvent.SourceSeq,
+      emittedAtMs: 0,
+      eventType: event.eventType,
+      payload,
+      meta: undefined
+    }))
+}
+
+const replayJournal = (
+  policyEntries: ReadonlyArray<Entry>,
+  runEntries: ReadonlyArray<Entry> = []
+) =>
+  JournalModule.layerNoop({
+    entries: (entriesOptions) =>
+      Effect.succeed({
+        entries: entriesOptions.runId === options.policyRunId ? policyEntries : runEntries,
+        hasMore: false
+      })
+  })
+
+describe("JournalGrantStore replayed rule limits", () => {
+  itEffect("deduplicates repeated remembered grants before enforcing the rule ceiling", () => {
+    const entries = repeatedEntries(maximumRules + 1, rememberedGrant(insidePattern), options.policyRunId)
+    return Effect.gen(function*() {
+      const store = yield* JournalGrantStore.make(options)
+      yield* store.check(insideWrite)
+    }).pipe(
+      Effect.provide(replayJournal(entries)),
+      Effect.provide(Workspace.layer(workspaceRoot)),
+      Effect.scoped
+    )
+  })
+
+  itEffect("deduplicates repeated run grants before enforcing the rule ceiling", () => {
+    const entries = repeatedEntries(maximumRules + 1, runGrant(insidePattern), options.runId)
+    return Effect.gen(function*() {
+      const store = yield* JournalGrantStore.make(options)
+      yield* store.check(insideWrite)
+    }).pipe(
+      Effect.provide(replayJournal([], entries)),
+      Effect.provide(Workspace.layer(workspaceRoot)),
+      Effect.scoped
+    )
+  })
+
+  itEffect("names an oversized distinct remembered policy and its configured rule count", () => {
+    const entries = Array.from({ length: maximumRules + 1 }, (_, index) => {
+      const resource = `/workspace/file-${index}.txt`
+      const exact = new Capability.CapabilityPattern({ action: "fs:write", resource })
+      return entry(
+        index + 1,
+        new GrantEvent.RememberedGrant({
+          eventType: "flows.kernel.grant.remembered.v1",
+          requestId: `request-${index}`,
+          runId: options.runId,
+          planDigest: options.planDigest,
+          capability: new Capability.Capability({ action: "fs:write", resource }),
+          pattern: exact,
+          scope: "remembered",
+          tier: "compensable"
+        }),
+        options.policyRunId
+      )
+    })
+
+    return Effect.gen(function*() {
+      const failure = yield* Effect.flip(
+        JournalGrantStore.make({
+          ...options,
+          rules: [[new Rule({ effect: "deny", pattern: insidePattern })]]
+        })
+      )
+      expect(failure.code).toBe("invalid_resolution")
+      expect(failure.message).toContain(
+        `policy run ${options.policyRunId} replayed ${maximumRules + 1} remembered rules`
+      )
+      expect(failure.message).toContain("configured rules (1)")
+      expect(failure.message).toContain(`${maximumRules}-rule ceiling`)
+      expect(failure.message).toContain("compact the policy journal")
+    }).pipe(
+      Effect.provide(replayJournal(entries)),
+      Effect.provide(Workspace.layer(workspaceRoot)),
+      Effect.scoped
+    )
+  })
+})
 
 describe("JournalGrantStore paging and journal failures", () => {
   it("fails closed when a page repeats its last sequence with hasMore", () => {

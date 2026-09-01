@@ -194,19 +194,31 @@ const cases: ReadonlyArray<Case> = [
     run: (fs) => fs.makeTempDirectory({ directory: "scratch" })
   },
   {
-    name: "makeTempDirectoryScoped",
+    name: "makeTempDirectoryScoped in the system location",
+    capabilities: [write("/<system-temp>")],
+    hostCall: "makeTempDirectoryScoped",
+    run: (fs) => Effect.scoped(fs.makeTempDirectoryScoped())
+  },
+  {
+    name: "makeTempDirectoryScoped in an explicit directory",
     capabilities: [write("/workspace/scratch")],
     hostCall: "makeTempDirectoryScoped",
     run: (fs) => Effect.scoped(fs.makeTempDirectoryScoped({ directory: "scratch" }))
   },
   {
-    name: "makeTempFile",
+    name: "makeTempFile in the system location",
+    capabilities: [write("/<system-temp>")],
+    hostCall: "makeTempFile",
+    run: (fs) => fs.makeTempFile()
+  },
+  {
+    name: "makeTempFile in an explicit directory",
     capabilities: [write("/workspace/scratch")],
     hostCall: "makeTempFile",
     run: (fs) => fs.makeTempFile({ directory: "scratch" })
   },
   {
-    name: "makeTempFileScoped",
+    name: "makeTempFileScoped in the system location",
     capabilities: [write("/<system-temp>")],
     hostCall: "makeTempFileScoped",
     run: (fs) => Effect.scoped(fs.makeTempFileScoped())
@@ -413,6 +425,40 @@ describe("FileSystem operation guards", () => {
         if (testCase.hostCall !== undefined) expect(calls).not.toContain(testCase.hostCall)
       }))
   }
+
+  it.effect("uses the resolved outside-workspace sentinel for every implicit system-temp operation", () =>
+    Effect.gen(function*() {
+      const checks: Array<Capability.Capability> = []
+      const calls: Array<string> = []
+      const exit = yield* (
+        provide(
+          (fileSystem) =>
+            Effect.gen(function*() {
+              yield* fileSystem.makeTempDirectory()
+              yield* Effect.scoped(fileSystem.makeTempDirectoryScoped())
+              yield* fileSystem.makeTempFile()
+              yield* Effect.scoped(fileSystem.makeTempFileScoped())
+            }),
+          hostFileSystem(calls),
+          scriptedStore(() => true, checks)
+        )
+      )
+
+      expect(exit._tag).toBe("Success")
+      expect(checks).toEqual([
+        write("/<system-temp>"),
+        write("/<system-temp>"),
+        write("/<system-temp>"),
+        write("/<system-temp>")
+      ])
+      expect(checks.every((check) => !check.resource.startsWith("/workspace"))).toBe(true)
+      expect(calls.filter((call) => call !== "stat")).toEqual([
+        "makeTempDirectory",
+        "makeTempDirectoryScoped",
+        "makeTempFile",
+        "makeTempFileScoped"
+      ])
+    }))
 
   it.effect("guards each operation on an open file handle", () =>
     Effect.gen(function*() {

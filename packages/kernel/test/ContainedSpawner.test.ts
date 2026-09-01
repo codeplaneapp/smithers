@@ -59,30 +59,20 @@ const hostSpawner = (
 
 const refused = new JournalError({ code: "journal_closed", message: "journal is gone" })
 
-/** A ledger whose durable half refuses the writes named in `failing`. */
-const brokenLedger = (
-  failing: ReadonlyArray<"record" | "release">,
+/** A real in-memory ledger whose release can expose finalizer retries. */
+const ledgerWithRelease = (
+  failing: boolean,
   events?: Array<string>
-): ProcessLedger.Service => ({
-  record: (spawned) =>
-    failing.includes("record") ? Effect.fail(refused) : Effect.succeed({
-      pid: spawned.pid,
-      pgid: spawned.pgid,
-      hostId: "broken",
-      ownerPid: 1,
-      startedAtMs: 0,
-      commandDigest: spawned.commandDigest
-    }),
-  release: () =>
-    Effect.suspend(() => {
-      events?.push("released")
-      return failing.includes("release") ? Effect.fail(refused) : Effect.void
-    }),
-  reaped: () => Effect.void,
-  skipped: () => Effect.void,
-  live: Effect.succeed([]),
-  orphans: Effect.succeed([])
-})
+) =>
+  Effect.map(ProcessLedger.makeMemory({ hostId: "broken", ownerPid: 1 }), (ledger) =>
+    ProcessLedger.ProcessLedger.of({
+      ...ledger,
+      release: (record) =>
+        Effect.suspend(() => {
+          events?.push("released")
+          return failing ? Effect.fail(refused) : ledger.release(record)
+        })
+    }))
 
 const options = (command: ChildProcess.Command) => command._tag === "StandardCommand" ? command.options : undefined
 
@@ -166,6 +156,7 @@ describe("ContainedSpawner", () => {
     Effect.gen(function*() {
       const spawned: Array<ChildProcess.Command> = []
       const events: Array<string> = []
+      const ledger = yield* ledgerWithRelease(false, events)
 
       yield* Effect.gen(function*() {
         const spawner = yield* ChildProcessSpawner
@@ -174,7 +165,7 @@ describe("ContainedSpawner", () => {
         Effect.provide(
           ContainedSpawner.layer({ graceMs: 50 }).pipe(
             Layer.provide(hostSpawner(spawned, 4321, events)),
-            Layer.provide(Layer.succeed(ProcessLedger.ProcessLedger)(brokenLedger([], events)))
+            Layer.provide(Layer.succeed(ProcessLedger.ProcessLedger)(ledger))
           )
         ),
         Effect.scoped
@@ -224,6 +215,7 @@ describe("ContainedSpawner", () => {
     Effect.gen(function*() {
       const spawned: Array<ChildProcess.Command> = []
       const events: Array<string> = []
+      const ledger = yield* ledgerWithRelease(true, events)
 
       yield* Effect.gen(function*() {
         const spawner = yield* ChildProcessSpawner
@@ -232,7 +224,7 @@ describe("ContainedSpawner", () => {
         Effect.provide(
           ContainedSpawner.layer().pipe(
             Layer.provide(hostSpawner(spawned, 4321, events)),
-            Layer.provide(Layer.succeed(ProcessLedger.ProcessLedger)(brokenLedger(["release"], events)))
+            Layer.provide(Layer.succeed(ProcessLedger.ProcessLedger)(ledger))
           )
         ),
         Effect.scoped

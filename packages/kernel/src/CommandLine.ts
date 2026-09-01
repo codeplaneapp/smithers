@@ -47,6 +47,11 @@ export const quote = (token: string): string =>
  * with `/d /s /c` rather than `-c`, so the rendered line describes the POSIX
  * invocation, not a cmd.exe one.
  *
+ * The capability resource is the rendered line alone, so `cwd`, environment
+ * overrides, and pipeline `from`/`to` routing remain outside the grant. The
+ * spawner sends `cwd` and overridden environment names to attended surfaces as
+ * display metadata only.
+ *
  * A `PipedCommand` renders with `|` between its sides. That is a faithful
  * rendering of what the pipeline does, and it is the only form an interpreter
  * that takes a command line rather than an `argv` can be given. `from`/`to`
@@ -69,7 +74,7 @@ export const render = (command: ChildProcess.Command): string =>
 
 /**
  * The working directory a command runs in, taking the leftmost stage of a
- * pipeline — the stage `setCwd` and the spawners agree to treat as the
+ * pipeline, which is the stage `setCwd` and the spawners agree to treat as the
  * pipeline's own directory.
  *
  * @category rendering

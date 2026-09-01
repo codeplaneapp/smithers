@@ -226,7 +226,7 @@ describe("ChildProcessSpawner", () => {
         yield* Deferred.succeed(release, undefined)
 
         expect(yield* Fiber.join(running)).toBe("ok")
-        expect(checked).toEqual([["tool safe", { cwd: "/safe" }]])
+        expect(checked).toEqual([["tool safe", { cwd: "/safe", env: ["MODE"] }]])
         expect(delegated).toMatchObject({
           _tag: "StandardCommand",
           command: "tool",
@@ -299,7 +299,7 @@ describe("ChildProcessSpawner", () => {
     )
   })
 
-  itEffect("passes the command's cwd to the grant check", () => {
+  itEffect("passes the command's cwd to the grant check without changing no-env metadata", () => {
     const seen: Array<unknown> = []
     const store = GrantStore.of({
       check: (capability, context) => {
@@ -314,10 +314,76 @@ describe("ChildProcessSpawner", () => {
     return Effect.gen(function*() {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       yield* spawner.string(ChildProcess.make("tool", [], { cwd: "/work" }))
+      yield* spawner.string(ChildProcess.make("tool", [], { cwd: "/work", env: { OMITTED: undefined } }))
+      expect(seen).toEqual([
+        {
+          capability: { action: "proc:spawn", resource: "tool" },
+          context: { cwd: "/work" }
+        },
+        {
+          capability: { action: "proc:spawn", resource: "tool" },
+          context: { cwd: "/work" }
+        }
+      ])
+    }).pipe(
+      Effect.provide(ChildProcessSpawner.layer),
+      Effect.provideService(HostChildProcessSpawner, hostSpawner({ stdout: "out" })),
+      Effect.provideService(GrantStore, store)
+    )
+  })
+
+  itEffect("passes sorted environment names without values to the grant check", () => {
+    const seen: Array<unknown> = []
+    const store = GrantStore.of({
+      check: (capability, context) => {
+        seen.push({ capability, context })
+        return Effect.void
+      },
+      reply: () => Effect.die("not used by decorator tests"),
+      list: Effect.succeed([]),
+      grantEnvelope: () => Effect.void
+    })
+
+    return Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      yield* spawner.string(ChildProcess.make("tool", [], {
+        env: { Z_TOKEN: "secret-z", OMITTED: undefined, A_PATH: "secret-a" }
+      }))
       expect(seen).toEqual([{
         capability: { action: "proc:spawn", resource: "tool" },
-        context: { cwd: "/work" }
+        context: { cwd: undefined, env: ["A_PATH", "Z_TOKEN"] }
       }])
+      expect(JSON.stringify(seen)).not.toContain("secret")
+    }).pipe(
+      Effect.provide(ChildProcessSpawner.layer),
+      Effect.provideService(HostChildProcessSpawner, hostSpawner({ stdout: "out" })),
+      Effect.provideService(GrantStore, store)
+    )
+  })
+
+  itEffect("caps environment metadata at 64 sorted names and reports the omitted count", () => {
+    const seen: Array<unknown> = []
+    const environment = Object.fromEntries(
+      Array.from({ length: 71 }, (_, index) => [`NAME_${String(index).padStart(2, "0")}`, `value-${index}`])
+    )
+    const store = GrantStore.of({
+      check: (_capability, context) => {
+        seen.push(context)
+        return Effect.void
+      },
+      reply: () => Effect.die("not used by decorator tests"),
+      list: Effect.succeed([]),
+      grantEnvelope: () => Effect.void
+    })
+
+    return Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      yield* spawner.string(ChildProcess.make("tool", [], { env: environment }))
+      expect(seen).toEqual([{
+        cwd: undefined,
+        env: [...Array.from({ length: 64 }, (_, index) => `NAME_${String(index).padStart(2, "0")}`), "+7 more"]
+      }])
+      expect(JSON.stringify(seen)).not.toContain("value-")
     }).pipe(
       Effect.provide(ChildProcessSpawner.layer),
       Effect.provideService(HostChildProcessSpawner, hostSpawner({ stdout: "out" })),

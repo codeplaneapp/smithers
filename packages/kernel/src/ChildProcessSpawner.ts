@@ -164,6 +164,21 @@ const snapshotCommand = (command: ChildProcess.Command): ChildProcess.Command =>
   throw new TypeError("unsupported command shape")
 }
 
+const maximumEnvironmentNames = 64
+
+const environmentNames = (command: ChildProcess.Command): ReadonlyArray<string> | undefined => {
+  const environment = CommandLine.env(command)
+  if (environment === undefined) return undefined
+  const names = Object.entries(environment)
+    .filter(([, value]) => value !== undefined)
+    .map(([name]) => name)
+    .sort()
+  if (names.length === 0) return undefined
+  return names.length <= maximumEnvironmentNames
+    ? names
+    : [...names.slice(0, maximumEnvironmentNames), `+${names.length - maximumEnvironmentNames} more`]
+}
+
 /**
  * The process spawner service — Effect's tag, unchanged. Re-exported so the
  * kernel namespace stays one-stop; it is the *same* tag, never a second one.
@@ -232,6 +247,11 @@ export const layerNoop = (
  * browser and remote adapters reject them rather than silently substituting a
  * different shell.
  *
+ * The capability resource is the rendered line alone, so the working
+ * directory, environment overrides, and pipeline `from`/`to` routing remain
+ * outside the grant. The working directory and overridden environment names
+ * reach attended surfaces as display metadata only; environment values do not.
+ *
  * The layer provides the tag it also requires: compose it over a host spawner
  * layer with `Layer.provide` and a `ChildProcess.Command` run as a plain
  * `Effect` is checked too.
@@ -247,8 +267,10 @@ export const layer: Layer.Layer<ChildProcessSpawner, never, ChildProcessSpawner 
     const grants = yield* GrantStore
     const check = (command: ChildProcess.Command) => {
       const rendered = CommandLine.render(command)
+      const environment = environmentNames(command)
       return grants.check(makeCapability("proc:spawn", rendered), {
-        cwd: CommandLine.cwd(command)
+        cwd: CommandLine.cwd(command),
+        ...(environment === undefined ? {} : { env: environment })
       }).pipe(
         Effect.mapError((error) =>
           toPlatformError({

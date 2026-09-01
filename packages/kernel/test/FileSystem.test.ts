@@ -67,25 +67,27 @@ describe("FileSystem", () => {
     expect(decorated[FileSystem.AtomicFileSystemTypeId]).toBe(executor)
   })
 
-  it("refuses to replace a descriptor-relative executor", () => {
+  it("lets a caller that read the attached executor layer over it", () => {
     const fileSystem = EffectFileSystem.makeNoop({})
     const original: FileSystem.AtomicFileSystem = { execute: () => Effect.die("not executed") }
-    const replacement: FileSystem.AtomicFileSystem = { execute: () => Effect.die("not executed") }
     const decorated = FileSystem.withAtomicFileSystem(fileSystem, original)
+    // A host attaches once. A caller that deliberately wraps the executor it
+    // read, the way `@smthrs/platform-node`'s swap suite does, keeps that
+    // decision explicit, so the attachment itself stays permissive.
+    const wrapper: FileSystem.AtomicFileSystem = {
+      execute: (request) => decorated[FileSystem.AtomicFileSystemTypeId].execute(request)
+    }
 
-    expect(() => FileSystem.withAtomicFileSystem(decorated, replacement)).toThrowError(
-      "filesystem already carries a descriptor-relative executor; a second attachment would silently replace it"
-    )
-    expect(decorated[FileSystem.AtomicFileSystemTypeId]).toBe(original)
+    expect(FileSystem.withAtomicFileSystem(decorated, wrapper)[FileSystem.AtomicFileSystemTypeId]).toBe(wrapper)
   })
 
-  it("refuses to replace a descriptor-relative executor with an isolation delegate", () => {
+  it("refuses to attest whole-filesystem isolation over a descriptor-relative executor", () => {
     const fileSystem = EffectFileSystem.makeNoop({})
     const original: FileSystem.AtomicFileSystem = { execute: () => Effect.die("not executed") }
     const decorated = FileSystem.withAtomicFileSystem(fileSystem, original)
 
     expect(() => FileSystem.withIsolatedFileSystem(decorated)).toThrowError(
-      "filesystem already carries a descriptor-relative executor; a second attachment would silently replace it"
+      "filesystem already carries a descriptor-relative executor; attesting whole-filesystem isolation would replace it"
     )
     expect(decorated[FileSystem.AtomicFileSystemTypeId]).toBe(original)
   })

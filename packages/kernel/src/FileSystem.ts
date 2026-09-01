@@ -93,6 +93,12 @@ export type AtomicHostFileSystem = EffectFileSystem.FileSystem & {
 
 /** Attaches a trusted platform's descriptor-relative executor to its service.
  *
+ * The executor is attached to the supplied object, so a later attachment over
+ * the same service replaces this one. A host attaches exactly once at its
+ * boundary; a caller that deliberately layers over an existing executor must
+ * read it first and delegate to it, which is what makes replacement its own
+ * decision rather than an accident.
+ *
  * @since 1.0.0-rc.0
  * @category security
  * @slop
@@ -100,19 +106,20 @@ export type AtomicHostFileSystem = EffectFileSystem.FileSystem & {
 export const withAtomicFileSystem = (
   fileSystem: EffectFileSystem.FileSystem,
   atomic: AtomicFileSystem
-): AtomicHostFileSystem => {
-  if (AtomicFileSystemTypeId in fileSystem) {
-    throw new Error(
-      "filesystem already carries a descriptor-relative executor; a second attachment would silently replace it"
-    )
-  }
-  return Object.assign(fileSystem, { [AtomicFileSystemTypeId]: atomic })
-}
+): AtomicHostFileSystem => Object.assign(fileSystem, { [AtomicFileSystemTypeId]: atomic })
 
 /**
  * Attests that a host filesystem is already isolated as a whole. Intended for
  * browser/test volumes whose implementation cannot address the host
  * filesystem at all; native path-based adapters must not use this shortcut.
+ *
+ * The attestation is refused for a filesystem that already carries a
+ * descriptor-relative executor. That executor is the stronger guarantee, and
+ * replacing it with a path-delegating one would route `access`, `copy`,
+ * `chmod`, `link`, `symlink`, `open`, `watch`, `sink`, `stream`, and every
+ * `makeTemp*` back through pathnames after the capability check: the exact
+ * symlink-swap window this module exists to close. The refusal is a throw at
+ * composition time, so a host cannot be assembled that way.
  *
  * @since 1.0.0-rc.0
  * @category security
@@ -120,8 +127,13 @@ export const withAtomicFileSystem = (
  */
 export const withIsolatedFileSystem = (
   fileSystem: EffectFileSystem.FileSystem
-): AtomicHostFileSystem =>
-  withAtomicFileSystem(fileSystem, {
+): AtomicHostFileSystem => {
+  if (AtomicFileSystemTypeId in fileSystem) {
+    throw new Error(
+      "filesystem already carries a descriptor-relative executor; attesting whole-filesystem isolation would replace it"
+    )
+  }
+  return withAtomicFileSystem(fileSystem, {
     isolated: fileSystem,
     execute: (request) => {
       switch (request.operation) {
@@ -163,6 +175,7 @@ export const withIsolatedFileSystem = (
       }
     }
   } as AtomicFileSystem)
+}
 
 const readableOpenFlags: ReadonlySet<EffectFileSystem.OpenFlag> = new Set([
   "r",

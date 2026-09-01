@@ -7,7 +7,7 @@
  *
  * @since 1.0.0-rc.0
  */
-import type { CapabilityPattern } from "@smthrs/capability/Capability"
+import * as Capability from "@smthrs/capability/Capability"
 import { GrantStoreError, Rule } from "@smthrs/capability/Permission"
 import * as JournalModule from "@smthrs/journal/Journal"
 import * as JournalEvent from "@smthrs/journal/JournalEvent"
@@ -45,7 +45,7 @@ export interface JournalGrantStoreOptions {
   readonly attended?: boolean
   readonly rules?: ReadonlyArray<ReadonlyArray<Rule>>
   readonly envelope?: {
-    readonly patterns: ReadonlyArray<CapabilityPattern>
+    readonly patterns: ReadonlyArray<Capability.CapabilityPattern>
     readonly scope?: "run" | "remembered" | undefined
   }
 }
@@ -66,6 +66,18 @@ const knownEventTypes: ReadonlySet<string> = new Set([
 ])
 
 const invalidReplay = (message: string): GrantStoreError => new GrantStoreError({ code: "invalid_resolution", message })
+
+const appendReplayedRule = (
+  rules: Array<Rule>,
+  seen: Set<string>,
+  pattern: Capability.CapabilityPattern
+): void => {
+  const rule = new Rule({ effect: "allow", pattern })
+  const key = Capability.format(rule.pattern)
+  if (seen.has(key)) return
+  seen.add(key)
+  rules.push(rule)
+}
 
 const validId = (value: unknown): value is string => {
   if (typeof value !== "string" || value.length === 0 || value.length > GrantStore.maximumIdentityLength) return false
@@ -126,6 +138,7 @@ const replayRememberedRules = (
   Effect.gen(function*() {
     const journal = yield* JournalModule.Journal
     const rules: Array<Rule> = []
+    const seenRules = new Set<string>()
     const envelopeSignatures = new Set<string>()
     let after: JournalEvent.Seq | undefined
 
@@ -151,14 +164,14 @@ const replayRememberedRules = (
           if (!GrantStore.isValidGrantPattern(event.pattern, event.capability, event.tier, workspaceRoot)) {
             return yield* Effect.fail(invalidReplay(`unsafe remembered grant event: ${entry.seq}`))
           }
-          rules.push(new Rule({ effect: "allow", pattern: event.pattern }))
+          appendReplayedRule(rules, seenRules, event.pattern)
           continue
         }
         if (event.eventType === "flows.kernel.grant.envelope.v1" && event.scope === "remembered") {
           if (event.patterns.some((pattern) => !GrantStore.isValidEnvelopePattern(pattern, workspaceRoot))) {
             return yield* Effect.fail(invalidReplay(`unsafe remembered envelope event: ${entry.seq}`))
           }
-          rules.push(...event.patterns.map((pattern) => new Rule({ effect: "allow" as const, pattern })))
+          for (const pattern of event.patterns) appendReplayedRule(rules, seenRules, pattern)
           envelopeSignatures.add(GrantStore.envelopeSignature(event.planDigest, event.scope, event.patterns))
           continue
         }
@@ -182,6 +195,7 @@ const replayRunRules = (
   Effect.gen(function*() {
     const journal = yield* JournalModule.Journal
     const rules: Array<Rule> = []
+    const seenRules = new Set<string>()
     const envelopeSignatures = new Set<string>()
     let after: JournalEvent.Seq | undefined
 
@@ -214,7 +228,7 @@ const replayRunRules = (
           if (!GrantStore.isValidGrantPattern(event.pattern, event.capability, event.tier, workspaceRoot)) {
             return yield* Effect.fail(invalidReplay(`unsafe run grant event: ${entry.seq}`))
           }
-          rules.push(new Rule({ effect: "allow", pattern: event.pattern }))
+          appendReplayedRule(rules, seenRules, event.pattern)
           continue
         }
         if (event.eventType === "flows.kernel.grant.envelope.v1" && event.scope === "run") {
@@ -224,7 +238,7 @@ const replayRunRules = (
           if (event.patterns.some((pattern) => !GrantStore.isValidEnvelopePattern(pattern, workspaceRoot))) {
             return yield* Effect.fail(invalidReplay(`unsafe run envelope event: ${entry.seq}`))
           }
-          rules.push(...event.patterns.map((pattern) => new Rule({ effect: "allow" as const, pattern })))
+          for (const pattern of event.patterns) appendReplayedRule(rules, seenRules, pattern)
           envelopeSignatures.add(GrantStore.envelopeSignature(event.planDigest, event.scope, event.patterns))
           continue
         }
@@ -318,8 +332,19 @@ export const make = (options: JournalGrantStoreOptions) =>
       )
     }
     const envelope = options.envelope
-    const build = () =>
-      GrantStore.make({
+    const build = () => {
+      const configuredCount = options.rules?.reduce((count, rules) => count + rules.length, 0) ?? 0
+      const rememberedCount = replayedPolicy.rules.length
+      const runCount = replayedRun.rules.length
+      const total = configuredCount + rememberedCount + runCount
+      if (total > GrantStore.maximumRules) {
+        return Effect.fail(
+          invalidReplay(
+            `policy run ${policyRunId} replayed ${rememberedCount} remembered rules; configured rules (${configuredCount}) and replayed run rules (${runCount}) bring the total to ${total}, which exceeds the ${GrantStore.maximumRules}-rule ceiling, so compact the policy journal`
+          )
+        )
+      }
+      return GrantStore.make({
         runId,
         planDigest,
         ...(options.attended === undefined ? {} : { attended: options.attended }),
@@ -340,6 +365,7 @@ export const make = (options: JournalGrantStoreOptions) =>
         }),
         persist
       })
+    }
     if (envelope === undefined || envelope.patterns.length === 0) {
       return yield* build()
     }

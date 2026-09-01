@@ -39,7 +39,9 @@
   composed over the platform layer with `Layer.provide` — instead of a widened
   redeclaration of the interface behind a second tag plus an
   `as unknown as` cast to force the guarded implementation back onto the raw
-  one. There are now **zero** casts in `packages/kernel/src`.
+  one. Those widened service-interface casts are gone; narrow casts remain for
+  the atomic filesystem extension, process and journal identities, and
+  validated immutable snapshots.
   - `FileSystem` and `ChildProcessSpawner` no longer export a kernel
     interface, tag, `make`, `makeNoop`, or `layerNoop` for the service itself;
     Effect's are the ones to use. `FileSystem` keeps `canonicalResource` and
@@ -66,12 +68,30 @@
   on the kernel that already depends on it. Every schema id is frozen and
   unchanged (`@smthrs/kernel/Capability`, `@smthrs/kernel/PermissionDenied`, …)
   because they round-trip through the grant journal.
-- `GrantStore`, `CapabilitySet`, `GrantEvent`, and `JournalGrantStore`
-  semantics are untouched: attended suspension on a `Deferred`, unattended
-  fail-fast, and terminal denial all behave exactly as before.
+- Attended suspension on a `Deferred`, unattended fail-fast, and terminal
+  denial keep their existing `GrantStore` behavior.
+- **HTTP capability resources now make non-`https` schemes explicit.** GET and
+  HEAD use `net:get` and every other method uses `net:post`. An `https:` URL
+  uses its lowercased host as the resource; every other scheme uses
+  `<scheme>//<lowercased host>`. `model:call` follows the same rule before
+  appending `/<model id>`, so a grant for an HTTPS host no longer admits a
+  cleartext downgrade.
 
 ### Added
 
+- Added `ContainedSpawner`, process middleware that applies the
+  `SIGTERM`-then-`SIGKILL` deadline to every command and records each child in
+  `ProcessLedger` until its spawn scope closes.
+- Added `ProcessLedger` with durable and in-memory layers, the
+  `SpawnedEventType`, `ExitedEventType`, `ReapedEventType`, and
+  `SkippedEventType` wire constants, and replay of process records abandoned
+  by a dead host incarnation.
+- Added the atomic-host filesystem extension:
+  `withAtomicFileSystem` installs a descriptor-relative, no-follow executor,
+  `withIsolatedFileSystem` attests a whole isolated browser or test volume, and
+  guarded filesystem operations fail closed when a host declares neither.
+- Added `canonicalEnvelopePatterns` and `envelopeSignature` so envelope
+  approvals have one deduplicated, order-independent durable identity.
 - Added `CommandLine`, which renders an `effect/unstable/process` `Command` back
   to a POSIX command line. One renderer, two callers: the `proc:spawn`
   capability resource and the interpreter or remote sandbox that executes the
@@ -91,6 +111,14 @@
 
 ### Fixed
 
+- A spawn whose ledger record fails is now signalled and removed from
+  `ProcessLedger.live` before the failed spawn returns.
+- `withIsolatedFileSystem` refuses a filesystem that already carries a
+  descriptor-relative executor instead of silently replacing it with a
+  path-delegating one.
+- Replayed remembered rules are deduplicated, and a policy journal past the
+  1,024-rule ceiling now fails with the policy run id and the configured,
+  replayed, and total rule counts.
 - Made capability sets, grant inputs/results, Host request descriptions, and
   byte buffers immutable snapshots rather than aliases to caller-owned state.
 - Added finite GrantStore policy, envelope, pending-request, metadata, event,

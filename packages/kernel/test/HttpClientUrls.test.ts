@@ -156,7 +156,10 @@ describe("HttpClient stub layer", () => {
   })
 })
 
-describe("HttpClient redirects", () => {
+// Redirect coverage lives in HttpClient.test.ts and HttpClient.integration.test.ts,
+// which drive a real Location hop. This block only pins that two independent
+// requests produce two independent checks, so it is named for what it proves.
+describe("HttpClient per-request checks", () => {
   itEffect("re-checks each request against the kernel", () => {
     const calls: Array<string> = []
     const checks: Array<Capability.Capability> = []

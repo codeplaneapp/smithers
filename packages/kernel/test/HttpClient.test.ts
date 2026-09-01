@@ -123,7 +123,7 @@ describe("HttpClient", () => {
         capability: { action: "net:get", resource: "http://api.example.com" }
       })
       expect(calls).toEqual(["https://api.example.com/x"])
-    }))
+    }).pipe(Effect.scoped))
 
   itEffect("maps a model call to model:call without granting general net:post", () => {
     const checks: Array<Capability.Capability> = []
@@ -169,7 +169,7 @@ describe("HttpClient", () => {
         capability: { action: "model:call", resource: "http://api.example.com/model-x" }
       })
       expect(calls).toEqual(["https://api.example.com/models"])
-    }))
+    }).pipe(Effect.scoped))
 
   itEffect("fails a relative or unparsable URL with a typed denial before the host client", () => {
     const checks: Array<Capability.Capability> = []

@@ -1,7 +1,13 @@
 /**
- * @since 1.0.0-rc.0
+ * Capability enforcement at the Host boundary.
  *
- * `@smthrs/kernel` — capability enforcement at the Host boundary.
+ * Every slot of the closed Host surface is decorated in place: a middleware
+ * `Layer` over the very tag a platform adapter provides, checking a capability
+ * against a `GrantStore` before it delegates. There is no second, protected
+ * tag, so code that never heard of the kernel is guarded the moment the layer
+ * is composed over its host.
+ *
+ * @since 1.0.0-rc.0
  */
 
 /**
