@@ -38,6 +38,15 @@ const DATA = 0x2000
 const R = 1n << 1n
 const W = 1n << 6n
 const RW = R | W
+const MAX_SAFE_U64 = BigInt(Number.MAX_SAFE_INTEGER)
+const TOO_LARGE_U64 = MAX_SAFE_U64 + 1n
+const U64_MAX = (1n << 64n) - 1n
+/**
+ * The value a real guest delivers for `u64::MAX`: WebAssembly hands an imported
+ * `i64` to JavaScript as a SIGNED bigint, so the bit pattern arrives negative
+ * and a bound that only tests the upper end never sees it.
+ */
+const U64_MAX_AS_WASM_PASSES_IT = -1n
 
 // These fixtures assert POSIX symlink semantics against node:fs. Windows
 // symlink creation depends on external privilege/developer-mode policy, so
@@ -612,6 +621,18 @@ describe("WasiPreview1 path_open", () => {
     expect(openErrno(h, "/dangling")).toBe(E.noent)
   })
 
+  it.skipIf(!supportsNativeSymlinks)("answers EEXIST for O_CREAT|O_EXCL on a symlink even without follow", () => {
+    // POSIX decides O_EXCL on the link before O_NOFOLLOW does: open(2) with
+    // O_CREAT|O_EXCL|O_NOFOLLOW on a symlink is EEXIST, not ELOOP.
+    const root = freshDir()
+    fsModule.symlinkSync("nowhere.txt", join(root, "excl-link"))
+    const h = host({ root })
+
+    expect(openErrno(h, "/excl-link", { oflags: OFLAG.creat | OFLAG.excl, rights: W, dirflags: 0 })).toBe(E.exist)
+    // Without O_CREAT the nofollow refusal still stands.
+    expect(openErrno(h, "/excl-link", { dirflags: 0 })).toBe(E.loop)
+  })
+
   it.skipIf(!supportsNativeSymlinks)("creates through a chain of dangling links and reports cycles as ELOOP", () => {
     const root = freshDir()
     fsModule.symlinkSync("two", join(root, "one"))
@@ -628,12 +649,141 @@ describe("WasiPreview1 path_open", () => {
 
   it.skipIf(!supportsNativeSymlinks)("creates through a dangling link with an absolute target", () => {
     const root = freshDir()
-    fsModule.symlinkSync(join(root, "abs-target.txt"), join(root, "abs-link"))
+    fsModule.symlinkSync("/abs-target.txt", join(root, "abs-link"))
     const h = host({ root })
     const fd = open(h, "/abs-link", { oflags: OFLAG.creat, rights: W })
     expect(writeAll(h, fd, "absolute")).toBe(E.success)
     h.sys.fd_close!(fd)
     expect(fsModule.readFileSync(join(root, "abs-target.txt"), "utf8")).toBe("absolute")
+  })
+
+  it.skipIf(!supportsNativeSymlinks)("re-roots namespace-absolute link targets inside the preopen", () => {
+    const root = freshDir()
+    const outside = freshDir()
+    const outsideTarget = join(outside, "escape.txt")
+    const confinedParent = join(root, outside.slice(1))
+    const confinedTarget = join(confinedParent, "escape.txt")
+    fsModule.mkdirSync(confinedParent, { recursive: true })
+    fsModule.symlinkSync(outsideTarget, join(root, "escape-link"))
+    const h = host({ root })
+    const fd = open(h, "/escape-link", { oflags: OFLAG.creat, rights: W })
+    expect(writeAll(h, fd, "confined absolute")).toBe(E.success)
+    h.sys.fd_close!(fd)
+    expect(fsModule.readFileSync(confinedTarget, "utf8")).toBe("confined absolute")
+    expect(fsModule.existsSync(outsideTarget)).toBe(false)
+  })
+
+  it.skipIf(!supportsNativeSymlinks)("clamps parent traversal in relative link targets", () => {
+    const root = freshDir()
+    fsModule.mkdirSync(join(root, "a", "b"), { recursive: true })
+    fsModule.symlinkSync("../../../outside.txt", join(root, "a", "b", "climb"))
+    const h = host({ root })
+    const fd = open(h, "/a/b/climb", { oflags: OFLAG.creat, rights: W })
+    expect(writeAll(h, fd, "confined relative")).toBe(E.success)
+    h.sys.fd_close!(fd)
+    expect(fsModule.readFileSync(join(root, "outside.txt"), "utf8")).toBe("confined relative")
+    expect(fsModule.existsSync(join(root, "..", "outside.txt"))).toBe(false)
+  })
+
+  it.skipIf(!supportsNativeSymlinks)("refuses to open an existing file outside the preopen through a link", () => {
+    const root = freshDir()
+    const outside = freshDir()
+    const outsideFile = join(outside, "secret.txt")
+    fsModule.writeFileSync(outsideFile, "outside")
+    fsModule.symlinkSync(outsideFile, join(root, "peek"))
+    const h = host({ root })
+    expect(openErrno(h, "/peek")).toBe(E.noent)
+    expect(fsModule.readFileSync(outsideFile, "utf8")).toBe("outside")
+  })
+
+  it.skipIf(!supportsNativeSymlinks)("re-roots an INTERMEDIATE absolute link component inside the preopen", () => {
+    // The lexical clamp never sees an escape here: `/gate/through.txt` is a
+    // perfectly confined namespace path. The escape is that the BACKEND follows
+    // every symlink component of whatever host path it is handed, so a link
+    // naming a directory used to smuggle the rest of the path out of the slice.
+    const root = freshDir()
+    const outside = freshDir()
+    const confined = join(root, outside.slice(1))
+    fsModule.mkdirSync(confined, { recursive: true })
+    fsModule.symlinkSync(outside, join(root, "gate"))
+    const h = host({ root })
+
+    const fd = open(h, "/gate/through.txt", { oflags: OFLAG.creat, rights: W })
+    expect(writeAll(h, fd, "confined")).toBe(E.success)
+    h.sys.fd_close!(fd)
+
+    expect(fsModule.readFileSync(join(confined, "through.txt"), "utf8")).toBe("confined")
+    expect(fsModule.existsSync(join(outside, "through.txt"))).toBe(false)
+  })
+
+  it.skipIf(!supportsNativeSymlinks)("clamps a relative intermediate link that climbs past the root", () => {
+    const root = freshDir()
+    fsModule.mkdirSync(join(root, "a"))
+    fsModule.symlinkSync("../../..", join(root, "a", "up"))
+    const h = host({ root })
+
+    const fd = open(h, "/a/up/landed.txt", { oflags: OFLAG.creat, rights: W })
+    expect(writeAll(h, fd, "clamped")).toBe(E.success)
+    h.sys.fd_close!(fd)
+
+    expect(fsModule.readFileSync(join(root, "landed.txt"), "utf8")).toBe("clamped")
+    expect(fsModule.existsSync(join(root, "..", "landed.txt"))).toBe(false)
+  })
+
+  it.skipIf(!supportsNativeSymlinks)("reports a cycle among intermediate link components as ELOOP", () => {
+    const root = freshDir()
+    fsModule.symlinkSync("b", join(root, "a"))
+    fsModule.symlinkSync("a", join(root, "b"))
+    const h = host({ root })
+
+    expect(openErrno(h, "/a/leaf.txt", { oflags: OFLAG.creat, rights: W })).toBe(E.loop)
+  })
+
+  it.skipIf(!supportsNativeSymlinks)(
+    "re-resolves a held directory fd instead of trusting the path it was opened on",
+    () => {
+      // The escape a remembered host path allows: open a directory fd, move the
+      // directory away, and leave a symlink at the name the fd was opened on. A
+      // host path recorded at open time is then a name the BACKEND follows
+      // wherever the replacement points, with no syscall ever naming an escape.
+      const root = freshDir()
+      const outside = freshDir()
+      fsModule.writeFileSync(join(outside, "secret.txt"), "outside")
+      fsModule.mkdirSync(join(root, "held"))
+      fsModule.writeFileSync(join(root, "held", "own.txt"), "inside")
+      const h = host({ root })
+      const dirFd = open(h, "/held", { oflags: OFLAG.directory, dirflags: 0 })
+
+      fsModule.renameSync(join(root, "held"), join(root, "moved"))
+      fsModule.symlinkSync(outside, join(root, "held"))
+
+      // `/held` now resolves to the re-rooted target inside the slice, which
+      // does not exist, so nothing outside is reachable through the held fd.
+      const own = h.str(PATH_A, "own.txt")
+      expect(h.sys.path_open!(dirFd, 1, own.ptr, own.len, 0, R, 0n, 0, RET)).toBe(E.noent)
+      const secret = h.str(PATH_B, "secret.txt")
+      expect(h.sys.path_open!(dirFd, 1, secret.ptr, secret.len, 0, R, 0n, 0, RET)).toBe(E.noent)
+      expect(h.sys.fd_readdir!(dirFd, BUF, 512, 0n, RET)).toBe(E.noent)
+      expect(h.sys.fd_filestat_get!(dirFd, STAT)).toBe(E.noent)
+      expect(fsModule.readFileSync(join(outside, "secret.txt"), "utf8")).toBe("outside")
+    }
+  )
+
+  it("refuses to remove or replace the preopen root itself", () => {
+    // A symlink created AT the namespace root would put the preopen's own name
+    // under the guest's control, and the backend follows it on every later call.
+    const root = freshDir()
+    const h = host({ root })
+    const slash = h.str(PATH_A, "/")
+    const elsewhere = h.str(PATH_B, "/elsewhere")
+
+    expect(h.sys.path_remove_directory!(3, slash.ptr, slash.len)).toBe(E.busy)
+    expect(h.sys.path_unlink_file!(3, slash.ptr, slash.len)).toBe(E.busy)
+    expect(h.sys.path_create_directory!(3, slash.ptr, slash.len)).toBe(E.busy)
+    expect(h.sys.path_symlink!(elsewhere.ptr, elsewhere.len, 3, slash.ptr, slash.len)).toBe(E.busy)
+    expect(h.sys.path_rename!(3, slash.ptr, slash.len, 3, elsewhere.ptr, elsewhere.len)).toBe(E.busy)
+    expect(h.sys.path_rename!(3, elsewhere.ptr, elsewhere.len, 3, slash.ptr, slash.len)).toBe(E.busy)
+    expect(fsModule.existsSync(root)).toBe(true)
   })
 
   it("caps dangling-link chain resolution instead of spinning forever", () => {
@@ -737,6 +887,58 @@ describe("WasiPreview1 read/write/seek", () => {
     expect(h.sys.fd_tell!(fd, RET)).toBe(E.success)
     expect(h.u64(RET)).toBe(0n) // cursor untouched
     expect(readAll(h, fd, 16)).toBe("01XY456789")
+  })
+
+  it("refuses lossy explicit offsets and file sizes above MAX_SAFE_INTEGER", () => {
+    const regular = {
+      size: 0,
+      atimeMs: 0,
+      mtimeMs: 0,
+      ctimeMs: 0,
+      isFile: () => true,
+      isDirectory: () => false,
+      isSymbolicLink: () => false
+    }
+    const readPositions: Array<number | null> = []
+    const writePositions: Array<number | null> = []
+    const sizes: Array<number> = []
+    const h = host({
+      fs: stubFs({
+        openSync: () => 7,
+        statSync: () => regular,
+        lstatSync: () => regular,
+        readSync: (_fd, _buffer, _offset, _length, position) => {
+          readPositions.push(position)
+          return 0
+        },
+        writeSync: (_fd, _buffer, _offset, _length, position) => {
+          writePositions.push(position)
+          return 0
+        },
+        ftruncateSync: (_fd, size) => {
+          sizes.push(size)
+        }
+      })
+    })
+    const fd = open(h, "/large", { rights: RW })
+    const byte = h.str(DATA, "x")
+    h.iovs([byte])
+
+    expect(h.sys.fd_pread!(fd, IOV, 1, MAX_SAFE_U64, RET)).toBe(E.success)
+    expect(h.sys.fd_pwrite!(fd, IOV, 1, MAX_SAFE_U64, RET)).toBe(E.success)
+    expect(h.sys.fd_filestat_set_size!(fd, MAX_SAFE_U64)).toBe(E.success)
+    expect(readPositions).toEqual([Number.MAX_SAFE_INTEGER])
+    expect(writePositions).toEqual([Number.MAX_SAFE_INTEGER])
+    expect(sizes).toEqual([Number.MAX_SAFE_INTEGER])
+
+    for (const unsafe of [TOO_LARGE_U64, U64_MAX, U64_MAX_AS_WASM_PASSES_IT]) {
+      expect(h.sys.fd_pread!(fd, IOV, 1, unsafe, RET)).toBe(E.fbig)
+      expect(h.sys.fd_pwrite!(fd, IOV, 1, unsafe, RET)).toBe(E.fbig)
+      expect(h.sys.fd_filestat_set_size!(fd, unsafe)).toBe(E.fbig)
+    }
+    expect(readPositions).toHaveLength(1)
+    expect(writePositions).toHaveLength(1)
+    expect(sizes).toHaveLength(1)
   })
 
   it("enforces the backend's fd access mode", () => {
@@ -854,6 +1056,9 @@ describe("WasiPreview1 read/write/seek", () => {
       statSync: () => {
         throw codeError("ENOENT")
       },
+      lstatSync: () => {
+        throw codeError("ENOENT")
+      },
       writeSync: () => 1
     })
     const h = host({ fs: short })
@@ -953,6 +1158,68 @@ describe("WasiPreview1 directories", () => {
     expect(h.u32(RET)).toBe(0) // cookie beyond the end
   })
 
+  it("resumes fd_readdir from the last complete record across truncated pages", () => {
+    const root = freshDir()
+    const expected = Array.from({ length: 40 }, (_, index) => `entry-${String(index).padStart(2, "0")}.txt`)
+    for (const name of expected) fsModule.writeFileSync(join(root, name), name)
+    const h = host({ root })
+    const seen: Array<string> = []
+    let cookie = 0n
+    let drained = false
+
+    for (let page = 0; page <= expected.length; page++) {
+      expect(h.sys.fd_readdir!(3, BUF, 64, cookie, RET)).toBe(E.success)
+      const used = h.u32(RET)
+      if (used === 0) {
+        drained = true
+        break
+      }
+      const complete = parseDirents(h.get(BUF, used))
+      expect(complete).not.toHaveLength(0)
+      for (const entry of complete) {
+        expect(seen).not.toContain(entry.name)
+        seen.push(entry.name)
+      }
+      cookie = complete[complete.length - 1]!.next
+    }
+
+    expect(drained).toBe(true)
+    expect(new Set(seen).size).toBe(seen.length)
+    expect([...seen].sort()).toEqual([...expected].sort())
+  })
+
+  it("tolerates a directory becoming shorter between fd_readdir calls", () => {
+    const dirent = (name: string): SyncDirentLike => ({
+      name,
+      isFile: () => true,
+      isDirectory: () => false,
+      isSymbolicLink: () => false
+    })
+    let calls = 0
+    const h = host({
+      fs: stubFs({
+        readdirSync: () => ++calls === 1 ? [dirent("one"), dirent("two"), dirent("three")] : [dirent("one")]
+      })
+    })
+    expect(h.sys.fd_readdir!(3, BUF, 512, 0n, RET)).toBe(E.success)
+    const first = parseDirents(h.get(BUF, h.u32(RET)))
+    const cookie = first[first.length - 1]!.next
+    expect(cookie).toBe(3n)
+    expect(h.sys.fd_readdir!(3, BUF, 512, cookie, RET)).toBe(E.success)
+    expect(h.u32(RET)).toBe(0)
+  })
+
+  it("rejects lossy fd_readdir cookies above MAX_SAFE_INTEGER", () => {
+    const root = freshDir()
+    const h = host({ root })
+    expect(h.sys.fd_readdir!(3, BUF, 64, MAX_SAFE_U64, RET)).toBe(E.success)
+    expect(h.u32(RET)).toBe(0)
+    expect(h.sys.fd_readdir!(3, BUF, 64, TOO_LARGE_U64, RET)).toBe(E.inval)
+    expect(h.sys.fd_readdir!(3, BUF, 64, U64_MAX, RET)).toBe(E.inval)
+    // The bit pattern as a real guest delivers it, negative across the ABI.
+    expect(h.sys.fd_readdir!(3, BUF, 64, U64_MAX_AS_WASM_PASSES_IT, RET)).toBe(E.inval)
+  })
+
   it("reports an empty directory and refuses readdir on non-directories", () => {
     const root = freshDir()
     fsModule.writeFileSync(join(root, "f.txt"), "x")
@@ -1018,6 +1285,18 @@ describe("WasiPreview1 stat & times", () => {
     expect(h.view().getUint8(STAT + 16)).toBe(4) // followed
     expect(h.sys.path_filestat_get!(3, 0, p.ptr, p.len, STAT)).toBe(E.success)
     expect(h.view().getUint8(STAT + 16)).toBe(7) // the link itself
+  })
+
+  it.skipIf(!supportsNativeSymlinks)("refuses to stat outside the preopen through a followed link", () => {
+    const root = freshDir()
+    const outside = freshDir()
+    const outsideFile = join(outside, "stat-secret.txt")
+    fsModule.writeFileSync(outsideFile, "outside stats")
+    fsModule.symlinkSync(outsideFile, join(root, "peek"))
+    const h = host({ root })
+    const p = h.str(PATH_A, "/peek")
+    expect(h.sys.path_filestat_get!(3, 1, p.ptr, p.len, STAT)).toBe(E.noent)
+    expect(fsModule.statSync(outsideFile).size).toBe(13)
   })
 
   it("sets explicit nanosecond times and 'now', keeping unset sides", () => {
@@ -1145,7 +1424,23 @@ describe("WasiPreview1 errno mapping", () => {
   })
 
   it("propagates non-ENOENT stat and lstat probes out of path_open", () => {
-    const denied = host({ fs: boomFs(codeError("EACCES")) })
+    const plain = {
+      size: 0,
+      atimeMs: 0,
+      mtimeMs: 0,
+      ctimeMs: 0,
+      isFile: () => true,
+      isDirectory: () => false,
+      isSymbolicLink: () => false
+    }
+    const denied = host({
+      fs: stubFs({
+        lstatSync: () => plain,
+        statSync: () => {
+          throw codeError("EACCES")
+        }
+      })
+    })
     expect(openErrno(denied, "/x")).toBe(E.acces)
     const locked = host({
       fs: stubFs({

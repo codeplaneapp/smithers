@@ -150,6 +150,23 @@ const fail = (errno: number): never => {
   throw new ErrnoError(errno)
 }
 
+/**
+ * A WASI `u64` narrowed to a JavaScript number. Above
+ * `Number.MAX_SAFE_INTEGER` the conversion is lossy, so the syscall refuses
+ * instead of silently addressing a different byte: sizes and offsets are
+ * EFBIG, and a directory cookie is EINVAL.
+ *
+ * WebAssembly hands an imported `i64` to JavaScript as a SIGNED bigint, so a
+ * guest's `u64::MAX` arrives as `-1n`. Reinterpreting first is what makes the
+ * bound apply to the value the guest actually passed rather than to the
+ * negative number JavaScript sees.
+ */
+const checked = (value: bigint, errno: number): number => {
+  const unsigned = BigInt.asUintN(64, value)
+  if (unsigned > BigInt(Number.MAX_SAFE_INTEGER)) return fail(errno)
+  return Number(unsigned)
+}
+
 /** The Node-style string `code` of a thrown backend error, if it has one. */
 const codeOf = (cause: unknown): string | undefined =>
   typeof cause === "object" && cause !== null && "code" in cause && typeof cause.code === "string"
@@ -178,8 +195,13 @@ interface FileFd {
 }
 interface DirFd {
   readonly kind: "dir"
+  /**
+   * The NAMESPACE path this fd names. The host path is deliberately NOT kept:
+   * a guest can rename the directory an fd was opened on and put a symlink at
+   * the old name, and a host path remembered at open time is then a name the
+   * backend follows wherever the replacement points. Every use re-resolves.
+   */
   readonly nsPath: string
-  readonly hostPath: string
   readonly preopen?: string
 }
 interface StdioFd {
@@ -188,6 +210,10 @@ interface StdioFd {
   readonly sink: ((text: string) => void) | undefined
 }
 type FdEntry = FileFd | DirFd | StdioFd
+type Resolved = { readonly nsPath: string; readonly hostPath: string }
+
+/** The meaningful segments of a path: `.` and empty drop, everything else stays. */
+const partsOf = (raw: string): Array<string> => raw.split("/").filter((segment) => segment !== "" && segment !== ".")
 
 const zeroStats = { size: 0, atimeMs: 0, mtimeMs: 0, ctimeMs: 0 }
 
@@ -276,7 +302,7 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
   fds.set(0, { kind: "stdio", input: true, sink: undefined })
   fds.set(1, { kind: "stdio", input: false, sink: options.onStdout })
   fds.set(2, { kind: "stdio", input: false, sink: options.onStderr })
-  fds.set(3, { kind: "dir", nsPath: "/", hostPath: hostPrefix === "" ? "/" : hostPrefix, preopen: "/" })
+  fds.set(3, { kind: "dir", nsPath: "/", preopen: "/" })
   let nextFd = 4
 
   const entryOf = (fd: number): FdEntry => {
@@ -308,27 +334,68 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
       : `${hostPrefix}/${segments.join("/")}`
 
   /**
-   * Resolves a WASI path relative to a directory fd, lexically: `.` and empty
-   * segments drop, `..` pops, and — as in POSIX — `..` of the namespace root
-   * is the root, so no path escapes the preopened slice.
+   * Resolves a path in NAMESPACE coordinates, so no path escapes the preopened
+   * slice: `.` and empty segments drop, `..` pops, and — as in POSIX — `..` of
+   * the namespace root is the root.
+   *
+   * Every component EXCEPT the last is followed through symlinks here, and each
+   * hop is re-rooted the same way, so a link naming a directory cannot smuggle
+   * the rest of the path out of the slice. That matters because the backend
+   * follows every symlink component of whatever host path it is handed: without
+   * this walk, `/gate/file` with `/gate` a link to `/etc` reaches `/etc/file`
+   * even though the lexical clamp never saw an escape.
+   *
+   * The last component is left as it lies. Whether it is followed belongs to
+   * the caller: `path_symlink` and `path_readlink` address the link itself, and
+   * `path_open` follows only when `symlinkFollow` is set.
    */
-  const resolvePath = (dirFd: number, ptr: number, len: number): { nsPath: string; hostPath: string } => {
+  const walk = (base: ReadonlyArray<string>, raw: string): Resolved => {
+    let resolved: Array<string> = raw.startsWith("/") ? [] : [...base]
+    const pending = partsOf(raw).reverse()
+    let hops = 0
+    for (let segment = pending.pop(); segment !== undefined; segment = pending.pop()) {
+      if (segment === "..") {
+        resolved.pop()
+        continue
+      }
+      const candidate = [...resolved, segment]
+      if (pending.length > 0 && isSymlink(hostPathOf(candidate))) {
+        if (hops++ >= 40) return fail(Errno.loop)
+        const link = fs.readlinkSync(hostPathOf(candidate))
+        if (link.startsWith("/")) resolved = []
+        pending.push(...partsOf(link).reverse())
+        continue
+      }
+      resolved = candidate
+    }
+    return { nsPath: `/${resolved.join("/")}`, hostPath: hostPathOf(resolved) }
+  }
+
+  /**
+   * The host path a directory fd names RIGHT NOW, resolved from the namespace
+   * root every time rather than remembered at open time.
+   */
+  const dirTarget = (dir: DirFd): Resolved =>
+    dir.preopen === undefined
+      ? resolveLinkTarget(walk([], dir.nsPath))
+      // The preopen is the namespace root. Nothing inside can rename or replace
+      // it (`notRoot` refuses), so its host path is fixed by construction and
+      // re-resolving it would only cost every syscall an extra `lstat`.
+      : { nsPath: "/", hostPath: hostPathOf([]) }
+
+  const resolvePath = (dirFd: number, ptr: number, len: number): Resolved => {
     const dir = dirOf(dirFd)
     const raw = decoder.decode(bytes(ptr, len))
     if (raw.length === 0) return fail(Errno.noent)
-    const segments: Array<string> = raw.startsWith("/")
-      ? []
-      : dir.nsPath.split("/").filter((segment) => segment.length > 0)
-    for (const segment of raw.split("/")) {
-      if (segment === "" || segment === ".") continue
-      if (segment === "..") {
-        segments.pop()
-        continue
-      }
-      segments.push(segment)
-    }
-    return { nsPath: `/${segments.join("/")}`, hostPath: hostPathOf(segments) }
+    return walk(partsOf(dirTarget(dir).nsPath), raw)
   }
+
+  /**
+   * Refuses a mutation addressed at the namespace root itself. Removing or
+   * replacing `/` would put the preopen's own name under the guest's control,
+   * and a symlink created there is followed by the backend on every later call.
+   */
+  const notRoot = (target: Resolved): Resolved => target.nsPath === "/" ? fail(Errno.busy) : target
 
   // == stat plumbing
 
@@ -380,6 +447,23 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
       if (codeOf(cause) === "ENOENT") return false
       throw cause
     }
+  }
+
+  /**
+   * Walks a symlink chain in namespace coordinates, so every hop goes through
+   * the same lexical clamp `resolvePath` applies: an absolute target is
+   * namespace-absolute (re-rooted at the preopen), a relative one resolves
+   * against the link's own directory, and `..` can never climb past the root.
+   * A chain longer than the depth cap is ELOOP.
+   */
+  const resolveLinkTarget = (target: Resolved): Resolved => {
+    let current = target
+    for (let depth = 0; depth < 40; depth++) {
+      if (!isSymlink(current.hostPath)) return current
+      const parent = current.nsPath.split("/").filter((segment) => segment.length > 0).slice(0, -1)
+      current = walk(parent, fs.readlinkSync(current.hostPath))
+    }
+    return fail(Errno.loop)
   }
 
   /**
@@ -524,7 +608,7 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
       writeFilestat(retPtr, FILETYPE.characterDevice, zeroStats)
       return Errno.success
     }
-    const stats = entry.kind === "file" ? fs.fstatSync(entry.osFd) : fs.statSync(entry.hostPath)
+    const stats = entry.kind === "file" ? fs.fstatSync(entry.osFd) : fs.statSync(dirTarget(entry).hostPath)
     writeFilestat(retPtr, filetypeOf(stats), stats)
     return Errno.success
   }
@@ -535,7 +619,7 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
   // freshly created, unrelated — file.
   const fdFilestatSetSize = (fd: number, size: bigint): number => {
     const entry = fileOf(fd)
-    fs.ftruncateSync(entry.osFd, Number(size))
+    fs.ftruncateSync(entry.osFd, checked(size, Errno.fbig))
     return Errno.success
   }
 
@@ -547,8 +631,9 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
       fs.futimesSync(entry.osFd, times.atimeSec, times.mtimeSec)
       return Errno.success
     }
-    const times = resolveTimes(() => fs.statSync(entry.hostPath), atim, mtim, flags)
-    fs.utimesSync(entry.hostPath, times.atimeSec, times.mtimeSec)
+    const directory = dirTarget(entry).hostPath
+    const times = resolveTimes(() => fs.statSync(directory), atim, mtim, flags)
+    fs.utimesSync(directory, times.atimeSec, times.mtimeSec)
     return Errno.success
   }
 
@@ -558,7 +643,7 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     let total = 0
     for (const iov of iovecs(iovsPtr, iovsLen)) {
       if (iov.len === 0) continue
-      const n = fs.readSync(entry.osFd, bytes(iov.ptr, iov.len), 0, iov.len, Number(position))
+      const n = fs.readSync(entry.osFd, bytes(iov.ptr, iov.len), 0, iov.len, checked(position, Errno.fbig))
       position += BigInt(n)
       total += n
       if (n < iov.len) break
@@ -591,7 +676,7 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     let total = 0
     for (const iov of iovecs(iovsPtr, iovsLen)) {
       if (iov.len === 0) continue
-      const n = fs.writeSync(entry.osFd, bytes(iov.ptr, iov.len), 0, iov.len, Number(position))
+      const n = fs.writeSync(entry.osFd, bytes(iov.ptr, iov.len), 0, iov.len, checked(position, Errno.fbig))
       position += BigInt(n)
       total += n
       if (n < iov.len) break
@@ -611,7 +696,7 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     let total = 0
     for (const iov of iovecs(iovsPtr, iovsLen)) {
       if (iov.len === 0) continue
-      const n = fs.readSync(entry.osFd, bytes(iov.ptr, iov.len), 0, iov.len, Number(entry.offset))
+      const n = fs.readSync(entry.osFd, bytes(iov.ptr, iov.len), 0, iov.len, checked(entry.offset, Errno.fbig))
       entry.offset += BigInt(n)
       total += n
       if (n < iov.len) break
@@ -622,10 +707,10 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
 
   const fdReaddir = (fd: number, bufPtr: number, bufLen: number, cookie: bigint, retPtr: number): number => {
     const dir = dirOf(fd)
-    const entries = fs.readdirSync(dir.hostPath, { withFileTypes: true })
+    const entries = fs.readdirSync(dirTarget(dir).hostPath, { withFileTypes: true })
     const len = bufLen >>> 0
     const buf = bytes(bufPtr, len)
-    const start = Number(cookie)
+    const start = checked(cookie, Errno.inval)
     let used = 0
     for (const [index, dirent] of entries.entries()) {
       if (index < start) continue
@@ -708,7 +793,7 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
       // Append targets the current end of file explicitly, so the semantics do
       // not depend on the backing fd carrying an OS-level O_APPEND — an fd can
       // acquire the flag later through fd_fdstat_set_flags.
-      const position = entry.append ? fs.fstatSync(entry.osFd).size : Number(entry.offset)
+      const position = entry.append ? fs.fstatSync(entry.osFd).size : checked(entry.offset, Errno.fbig)
       const n = fs.writeSync(entry.osFd, bytes(iov.ptr, iov.len), 0, iov.len, position)
       entry.offset = entry.append ? BigInt(position + n) : entry.offset + BigInt(n)
       total += n
@@ -719,16 +804,16 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
   }
 
   const pathCreateDirectory = (fd: number, ptr: number, len: number): number => {
-    const target = resolvePath(fd, ptr, len)
+    const target = notRoot(resolvePath(fd, ptr, len))
     fs.mkdirSync(target.hostPath)
     return Errno.success
   }
 
   const pathFilestatGet = (fd: number, lookupflags: number, ptr: number, len: number, retPtr: number): number => {
-    const target = resolvePath(fd, ptr, len)
+    const requested = resolvePath(fd, ptr, len)
     const stats = (lookupflags & LOOKUPFLAGS.symlinkFollow) !== 0
-      ? fs.statSync(target.hostPath)
-      : fs.lstatSync(target.hostPath)
+      ? fs.statSync(resolveLinkTarget(requested).hostPath)
+      : fs.lstatSync(requested.hostPath)
     writeFilestat(retPtr, filetypeOf(stats), stats)
     return Errno.success
   }
@@ -742,7 +827,11 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     mtim: bigint,
     fstflags: number
   ): number => {
-    const target = resolvePath(fd, ptr, len)
+    // The slice has no `lutimesSync`, so this always follows the last component
+    // (the documented divergence). It follows it through the confined resolver
+    // rather than through the backend, so the timestamps it sets are never
+    // those of a file outside the preopen.
+    const target = resolveLinkTarget(resolvePath(fd, ptr, len))
     const times = resolveTimes(() => fs.statSync(target.hostPath), atim, mtim, fstflags)
     fs.utimesSync(target.hostPath, times.atimeSec, times.mtimeSec)
     return Errno.success
@@ -759,24 +848,6 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
   ): number => Errno.notsup
 
   /**
-   * Creates through a `"wx"`-family (exclusive) open, with the POSIX
-   * dangling-symlink refinement: `O_CREAT` *without* `O_EXCL` on a path whose
-   * follow-stat reported "missing" can still hit EEXIST when the path is a
-   * dangling symlink — open(2) then creates the link's **target** and
-   * succeeds, while `O_CREAT|O_EXCL` stays EEXIST on any symlink. The lstat
-   * probe runs only inside the EEXIST fallback, so the common create pays no
-   * extra backend call.
-   */
-  const openCreate = (path: string, flags: string, excl: boolean): number => {
-    try {
-      return fs.openSync(path, flags)
-    } catch (cause) {
-      if (excl || codeOf(cause) !== "EEXIST" || !isSymlink(path)) throw cause
-      return fs.openSync(resolveLinkTarget(path), flags)
-    }
-  }
-
-  /**
    * WASI `oflags`/`fdflags`/rights composed onto Node **string** open flags.
    * The one combination string flags cannot express directly — `O_CREAT`
    * without `O_TRUNC` on a missing file — opens `"wx"`-family instead, which
@@ -788,7 +859,6 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     o: {
       readonly existing: boolean
       readonly creat: boolean
-      readonly excl: boolean
       readonly trunc: boolean
       readonly read: boolean
       readonly write: boolean
@@ -796,40 +866,18 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     }
   ): number => {
     if (!o.write) {
-      if (o.creat && !o.existing) fs.closeSync(openCreate(path, "wx", o.excl))
+      if (o.creat && !o.existing) fs.closeSync(fs.openSync(path, "wx"))
       return fs.openSync(path, "r")
     }
     if (o.append) return fs.openSync(path, o.read ? "a+" : "a")
     if (o.creat) {
-      if (o.trunc) return fs.openSync(path, o.excl ? (o.read ? "wx+" : "wx") : o.read ? "w+" : "w")
-      if (!o.existing) return openCreate(path, o.read ? "wx+" : "wx", o.excl)
+      if (o.trunc) return fs.openSync(path, o.read ? "w+" : "w")
+      if (!o.existing) return fs.openSync(path, o.read ? "wx+" : "wx")
       return fs.openSync(path, "r+")
     }
     const osFd = fs.openSync(path, "r+")
     if (o.trunc) fs.ftruncateSync(osFd, 0)
     return osFd
-  }
-
-  /**
-   * The final non-symlink path of a symlink chain, each target resolved
-   * against its link's own directory (absolute targets taken as-is) — the
-   * resolution the backend itself applies when following the link. Used only
-   * for the create-through-a-dangling-link case, where the backend cannot be
-   * asked to follow because nothing exists at the end yet.
-   */
-  const resolveLinkTarget = (hostPath: string): string => {
-    let current = hostPath
-    for (let depth = 0; depth < 40; depth++) {
-      if (!isSymlink(current)) return current
-      const link = fs.readlinkSync(current)
-      if (link.startsWith("/")) {
-        current = link
-      } else {
-        const at = current.lastIndexOf("/")
-        current = `${at <= 0 ? "" : current.slice(0, at)}/${link}`
-      }
-    }
-    return fail(Errno.loop)
   }
 
   const pathOpen = (
@@ -843,11 +891,17 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     fdflags: number,
     retPtr: number
   ): number => {
-    const target = resolvePath(dirFd, pathPtr, pathLen)
+    const requested = resolvePath(dirFd, pathPtr, pathLen)
     const follow = (dirflags & LOOKUPFLAGS.symlinkFollow) !== 0
-    if (!follow && isSymlink(target.hostPath)) return fail(Errno.loop)
+    const linked = isSymlink(requested.hostPath)
     const creat = (oflags & OFLAGS.creat) !== 0
     const excl = (oflags & OFLAGS.excl) !== 0
+    // POSIX: O_CREAT|O_EXCL is EEXIST on a symlink, dangling or not, and it is
+    // decided BEFORE O_NOFOLLOW, which would otherwise answer ELOOP for the
+    // same open.
+    if (linked && creat && excl) return fail(Errno.exist)
+    if (linked && !follow) return fail(Errno.loop)
+    const target = linked ? resolveLinkTarget(requested) : requested
     const trunc = (oflags & OFLAGS.trunc) !== 0
     const wantDir = (oflags & OFLAGS.directory) !== 0
     const read = (rightsBase & RIGHTS.fdRead) !== 0n
@@ -858,7 +912,7 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     if (creat && excl && existing !== undefined) return fail(Errno.exist)
     if (existing !== undefined && existing.isDirectory()) {
       if (write || trunc) return fail(Errno.isdir)
-      view().setUint32(retPtr >>> 0, newFd({ kind: "dir", nsPath: target.nsPath, hostPath: target.hostPath }), true)
+      view().setUint32(retPtr >>> 0, newFd({ kind: "dir", nsPath: target.nsPath }), true)
       return Errno.success
     }
     if (wantDir) return fail(existing === undefined ? Errno.noent : Errno.notdir)
@@ -868,7 +922,6 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     const osFd = openFile(target.hostPath, {
       existing: existing !== undefined,
       creat,
-      excl,
       trunc,
       read,
       write,
@@ -895,7 +948,7 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
   }
 
   const pathRemoveDirectory = (fd: number, ptr: number, len: number): number => {
-    const target = resolvePath(fd, ptr, len)
+    const target = notRoot(resolvePath(fd, ptr, len))
     fs.rmdirSync(target.hostPath)
     return Errno.success
   }
@@ -908,8 +961,8 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     newPtr: number,
     newLen: number
   ): number => {
-    const from = resolvePath(fd, oldPtr, oldLen)
-    const to = resolvePath(newFd, newPtr, newLen)
+    const from = notRoot(resolvePath(fd, oldPtr, oldLen))
+    const to = notRoot(resolvePath(newFd, newPtr, newLen))
     fs.renameSync(from.hostPath, to.hostPath)
     return Errno.success
   }
@@ -917,13 +970,13 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
   const pathSymlink = (oldPtr: number, oldLen: number, fd: number, newPtr: number, newLen: number): number => {
     const linkTarget = decoder.decode(bytes(oldPtr, oldLen))
     if (linkTarget.length === 0) return fail(Errno.noent)
-    const at = resolvePath(fd, newPtr, newLen)
+    const at = notRoot(resolvePath(fd, newPtr, newLen))
     fs.symlinkSync(linkTarget, at.hostPath)
     return Errno.success
   }
 
   const pathUnlinkFile = (fd: number, ptr: number, len: number): number => {
-    const target = resolvePath(fd, ptr, len)
+    const target = notRoot(resolvePath(fd, ptr, len))
     fs.unlinkSync(target.hostPath)
     return Errno.success
   }
