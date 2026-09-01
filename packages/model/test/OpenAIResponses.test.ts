@@ -314,6 +314,19 @@ describe("OpenAIResponses", () => {
     ])
   })
 
+  it("short-circuits settlement when the state becomes settled during a step", () => {
+    let reads = 0
+    const state = Object.defineProperty(
+      { ...OpenAIResponses.protocol.stream.initial(streamRequest) },
+      "settled",
+      { get: () => reads++ > 0 }
+    )
+
+    const [settled, events] = step(state, "{\"type\":\"response.incomplete\",\"response\":{}}")
+    expect(settled.settled).toBe(true)
+    expect(events).toEqual([])
+  })
+
   it("reads incomplete_details.reason instead of always reporting a token limit", () => {
     // `response.incomplete` carries WHY. A safety refusal is not a token budget,
     // and `StopReason` already distinguishes the two.

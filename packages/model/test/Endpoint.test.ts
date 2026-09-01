@@ -42,6 +42,31 @@ describe("Endpoint", () => {
     )
   })
 
+  it("rejects percent-encoded relative path segments", () => {
+    for (const path of ["%2e%2e/admin", ".%2e/admin", "%2E%2e/admin"]) {
+      const result = Endpoint.make({ url: "https://provider.test/v1", path })
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure).toMatchObject({
+          code: "invalid_request",
+          message: "Endpoint paths must not contain relative segments"
+        })
+      }
+    }
+  })
+
+  it("rejects a joined path the URL parser rewrites outside its base", () => {
+    const result = Endpoint.make({ url: "https://provider.test/v1", path: "..\\..\\admin" })
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) expect(result.failure.code).toBe("invalid_request")
+  })
+
+  it("keeps an ordinary nested path beneath its base", () => {
+    expect(make({ url: "https://provider.test/v1", path: "chat/completions" }).url).toBe(
+      "https://provider.test/v1/chat/completions"
+    )
+  })
+
   it("rejects credential-looking query parameters", () => {
     expect(failureMessage({ url: "https://example.test/?key=secret" })).toMatch(/credentials/)
     expect(failureMessage({ url: "https://example.test/?api_key=secret" })).toMatch(/credentials/)
@@ -93,6 +118,13 @@ describe("Endpoint", () => {
 
     expect(endpoint.query).toEqual([["a", "1"], ["a", "9"], ["a", "9"], ["b", "2"], ["c", "3"]])
     expect(Endpoint.render(endpoint)).toBe("https://example.test/?a=1&a=9&a=9&b=2&c=3")
+  })
+
+  it("moves a larger value after a smaller value with the same name", () => {
+    expect(make({ url: "https://example.test", query: [["a", "1"], ["a", "2"]] }).query).toEqual([
+      ["a", "1"],
+      ["a", "2"]
+    ])
   })
 
   it("treats an absent, empty, and slash-heavy path the same way", () => {

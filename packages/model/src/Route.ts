@@ -71,7 +71,8 @@ export type Route<Body, Frame, Event, State> = Config<Body, Frame, Event, State>
 
 const sensitiveHeader = (name: string): boolean => Auth.isCredentialName(name)
 
-const compareCanonical = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
+// Map keys are unique, so canonical header comparisons have only two possible orderings.
+const compareCanonical = (left: string, right: string): number => left < right ? -1 : 1
 
 const publicHeaders = (
   headers: Readonly<Record<string, string>> | undefined

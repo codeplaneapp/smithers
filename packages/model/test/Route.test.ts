@@ -213,6 +213,38 @@ describe("Route.prepare", () => {
     expect(encoded.path).toBeUndefined()
   })
 
+  it("omits the path when schema decoding fails without an issue", async () => {
+    const schemaWithoutIssue = Schema.declareConstructor<unknown>()(
+      [],
+      () => () => Effect.fail(undefined as never)
+    )
+    const malformedProtocol = Protocol.make({
+      ...protocol,
+      body: {
+        schema: schemaWithoutIssue,
+        from: () => Effect.succeed({})
+      }
+    })
+    const error = await Effect.runPromise(
+      Route.prepare(
+        Route.make({
+          id: "missing-schema-issue",
+          protocol: malformedProtocol,
+          endpoint: endpoint({ url: "https://example.test" }),
+          auth: Auth.bearer(Redacted.make("secret")),
+          framing: Framing.sse
+        }),
+        request
+      ).pipe(Effect.flip)
+    )
+
+    expect(error).toMatchObject({
+      code: "invalid_request",
+      message: "test produced an invalid provider request body"
+    })
+    expect(error.path).toBeUndefined()
+  })
+
   it("pins the exact canonical body bytes of every built-in route", async () => {
     // A sealed model step keys on these bytes. A lowering change that alters
     // them invalidates every cached step for that route, so the change has to

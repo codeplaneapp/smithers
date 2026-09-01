@@ -1,6 +1,7 @@
 import * as Capability from "@smthrs/capability/Capability"
 import * as Permission from "@smthrs/capability/Permission"
 import * as KernelHttpClient from "@smthrs/kernel/HttpClient"
+import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -776,6 +777,66 @@ describe("RequestExecutor", () => {
     expect(error.message).toContain("\"api_key\":\"<redacted>\"")
   })
 
+  it("redacts a complete sensitive string field inside a non-JSON body", async () => {
+    const error = await errorFor({
+      status: 400,
+      body: "oops: {\"api_key\":\"SECRETVALUE\"}"
+    })
+
+    expect(error.message).toContain("oops:")
+    expect(error.message).toContain("\"api_key\":\"<redacted>\"")
+    expect(error.message).not.toContain("SECRETVALUE")
+  })
+
+  it("keeps a deeply nested failed body in the typed failure channel", async () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    const nested = `${"{\"x\":".repeat(5_000)}"failure"${"}".repeat(5_000)}`
+    expect(new TextEncoder().encode(nested).byteLength).toBeLessThan(65_536)
+    const layer = executorLayer([{ status: 500, body: nested }], requests)
+
+    const exit = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function*() {
+          const executor = yield* RequestExecutor.RequestExecutor
+          const fiber = yield* execute(executor, request()).pipe(Effect.exit, Effect.forkChild)
+          yield* Effect.yieldNow
+          yield* TestClock.adjust(120_000)
+          return yield* Fiber.join(fiber)
+        }).pipe(
+          Effect.provide(layer),
+          Effect.provide(TestClock.layer()),
+          Effect.provideService(HttpClient.TracerDisabledWhen, () => true)
+        )
+      )
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBe(true)
+    expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(false)
+    if (Exit.isFailure(exit)) expectModelError(Cause.squash(exit.cause))
+    expect(requests).toHaveLength(3)
+  })
+
+  it("redacts a sensitive key at the response-body depth limit", async () => {
+    let nested: unknown = { api_key: "DEPTH-LIMIT-SECRET" }
+    for (let depth = 0; depth < 12; depth += 1) nested = { nested }
+
+    const error = await errorFor({ status: 400, body: JSON.stringify(nested) })
+    expect(error.message).toContain("<redacted>")
+    expect(error.message).not.toContain("DEPTH-LIMIT-SECRET")
+  })
+
+  it("does not crash on a request credential beyond the body depth limit", async () => {
+    let nested: unknown = { api_key: "TOO-DEEP-REQUEST-SECRET" }
+    for (let depth = 0; depth < 20; depth += 1) nested = { nested }
+    const sent = Request.setBody(
+      Request.post("https://provider.test/v1/models"),
+      HttpBody.raw(nested)
+    )
+
+    expect(await errorFor({ status: 400, body: "bad request" }, sent)).toBeInstanceOf(ModelError)
+  })
+
   it("preserves the meaning of JSON bodies without sensitive fields", async () => {
     const body = { metadata: { attempt: 2 }, error: { message: "bad tool schema" } }
     const error = await errorFor({ status: 400, body: JSON.stringify(body) })
@@ -846,6 +907,53 @@ describe("RequestExecutor", () => {
     expect(classifiedBodyLength).toBe(65_536)
     expect(expectModelError(error).message).toHaveLength(16_384)
     expect(requests).toHaveLength(1)
+  })
+
+  it("stops pulling a failed response once the raw body cap is reached", async () => {
+    const chunk = new TextEncoder().encode("x".repeat(8_192))
+    let pulls = 0
+    const client = HttpClient.make((sent) =>
+      Effect.succeed(
+        HttpClientResponse.fromWeb(
+          sent,
+          new Response(
+            new ReadableStream<Uint8Array>({
+              pull(controller) {
+                pulls += 1
+                if (pulls > 64) {
+                  controller.close()
+                  return
+                }
+                controller.enqueue(chunk)
+              }
+            }),
+            { status: 400 }
+          )
+        )
+      )
+    )
+    const layer = RequestExecutor.layer.pipe(
+      Layer.provide(Layer.succeed(KernelHttpClient.HttpClient)(client))
+    )
+
+    const error = await run(
+      Effect.gen(function*() {
+        const executor = yield* RequestExecutor.RequestExecutor
+        return yield* execute(executor, request()).pipe(Effect.flip)
+      }),
+      layer
+    )
+    const modelError = expectModelError(error) as ModelError & {
+      readonly body?: string
+      readonly bodyTruncated?: boolean
+    }
+
+    expect(pulls).toBeGreaterThanOrEqual(8)
+    expect(pulls).toBeLessThanOrEqual(9)
+    expect(pulls).toBeLessThan(64)
+    expect(modelError.bodyTruncated).toBe(true)
+    expect(modelError.body).toBeDefined()
+    expect(modelError.body?.length).toBeLessThanOrEqual(16_384)
   })
 
   it("does not inspect reset metadata beyond the response-body depth budget", async () => {
@@ -1185,6 +1293,42 @@ describe("RequestExecutor", () => {
     })
   })
 
+  it("classifies a failed response whose stream errors on its first pull", async () => {
+    let pulls = 0
+    const client = HttpClient.make((sent) =>
+      Effect.succeed(
+        HttpClientResponse.fromWeb(
+          sent,
+          new Response(
+            new ReadableStream<Uint8Array>({
+              pull(controller) {
+                pulls += 1
+                controller.error(new Error("body stream failed"))
+              }
+            }),
+            { status: 400 }
+          )
+        )
+      )
+    )
+    const layer = RequestExecutor.layer.pipe(
+      Layer.provide(Layer.succeed(KernelHttpClient.HttpClient)(client))
+    )
+
+    const error = await run(
+      Effect.gen(function*() {
+        const executor = yield* RequestExecutor.RequestExecutor
+        return yield* execute(executor, request()).pipe(Effect.flip)
+      }),
+      layer
+    )
+    const modelError = expectModelError(error) as ModelError & { readonly body?: string }
+
+    expect(pulls).toBe(1)
+    expect(modelError).toMatchObject({ code: "invalid_request", httpStatus: 400 })
+    expect(modelError.body).toBeUndefined()
+  })
+
   it("keeps a provider's own code and message when the body has no error envelope", async () => {
     expect(await errorFor({ status: 418, body: "{\"code\":\"teapot\",\"message\":\"short and stout\"}" }))
       .toMatchObject({
@@ -1229,12 +1373,21 @@ describe("RequestExecutor", () => {
     expect(await errorFor({ status: 400, body: "{\"reset_at\":\"1m30s\"}" })).toMatchObject({
       resetAtEpochMillis: NOW + 90_000
     })
+    expect(await errorFor({ status: 400, body: "{\"reset_at\":\"1h30m\"}" })).toMatchObject({
+      resetAtEpochMillis: NOW + 5_400_000
+    })
+    expect(await errorFor({ status: 400, body: "{\"reset_at\":\"1d1h1m1s1ms\"}" })).toMatchObject({
+      resetAtEpochMillis: NOW + 90_061_001
+    })
 
     // Values that cannot name an instant leave the field absent.
     for (
       const body of [
         "{\"reset_at\":\"not-a-time\"}",
         "{\"reset_at\":\"x1s\"}",
+        "{\"reset_at\":\"1x\"}",
+        "{\"reset_at\":\"1sx\"}",
+        "{\"reset_at\":\"1sX2m\"}",
         "{\"reset_at\":{\"nested\":1}}",
         "{\"reset_at\":true}",
         "{\"retry_after\":1e308}"

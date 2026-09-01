@@ -125,6 +125,11 @@ export class ModelError extends Schema.TaggedError<ModelError>()("flows/model/Mo
   requestId: Schema.optional(Schema.String),
   httpStatus: Schema.optional(Schema.Number)
 }) {
+  // Provider diagnostics are redacted, capped, and kept outside the durable
+  // schema so journal serialization does not copy an error body into state.
+  declare readonly body: string | undefined
+  declare readonly bodyTruncated: boolean | undefined
+
   /** @category getters @since 0.1.0 */
   get retryable(): boolean {
     if (this.code === "quota_exceeded") return false

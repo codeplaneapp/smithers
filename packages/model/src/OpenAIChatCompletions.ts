@@ -89,6 +89,12 @@ export type ResponseFormat = typeof ResponseFormat.Type
  * `StructuredOutput.instructions`), and a route built with one asks the
  * provider to enforce the schema instead.
  *
+ * Such a route refuses a request that declares tools with `invalid_request`,
+ * because the provider refuses `tools` and `response_format` together. The one
+ * exception is `toolChoice: "none"`: that request forbids tool use, this
+ * lowering answers it by omitting `tools`, and the two fields therefore never
+ * meet on the wire, so it is lowered rather than refused.
+ *
  * @category models
  * @since 0.1.0
  */
@@ -207,7 +213,11 @@ const fromRequest = (structuredOutput: StructuredOutput | undefined) =>
   Effect.fn("OpenAIChatCompletions.fromRequest")((
     request: ModelRequest
   ): Effect.Effect<Body, ModelError> =>
-    structuredOutput !== undefined && request.tools.length > 0
+    // `toolChoice: "none"` is the request saying no tool may be called, and
+    // this lowering already answers it by omitting `tools`, so such a request
+    // never puts `tools` and `response_format` on the wire together and there
+    // is nothing to refuse.
+    structuredOutput !== undefined && request.tools.length > 0 && request.toolChoice !== "none"
       // Refusing here costs one local failure; sending it costs a provider
       // round trip that ends in HTTP 400 with the same meaning.
       ? Effect.fail(
@@ -462,27 +472,37 @@ const providerReason = (
   message: string
 ): ModelError["code"] => {
   const normalized = `${code ?? ""} ${message}`.toLowerCase()
+  // A chat-compatible gateway reporting a failure inside an HTTP 200 stream has
+  // no status to hand us and puts the one it would have sent in `code`
+  // instead: OpenRouter sends `{"error":{"code":429}}`. A purely numeric
+  // provider code in the HTTP range therefore stands in for the status the
+  // transport never carried, so `429` classifies as a rate limit rather than
+  // falling through every phrase test to `unknown`.
+  const numeric = code === undefined ? Number.NaN : Number(code)
+  const httpLike = Number.isInteger(numeric) && numeric >= 400 && numeric <= 599 ? numeric : undefined
+  const effective = status ?? httpLike
   // One shared vocabulary for an exhausted account, so a gateway that spells it
   // "credit balance" is parked exactly like one that spells it
   // `insufficient_quota`.
   if (isQuotaExhausted(code, message)) return "quota_exceeded"
   if (
-    status === 401 || status === 403 ||
+    effective === 401 || effective === 403 ||
     /authentication|invalid[-_\s]?api[-_\s]?key|permission[-_\s]?denied/.test(normalized)
   ) {
     return "authentication"
   }
-  if (status === 429 || /rate[-_\s]?limit|too many requests/.test(normalized)) return "rate_limited"
+  if (effective === 429 || /rate[-_\s]?limit|too many requests/.test(normalized)) return "rate_limited"
   if (/content[-_\s]?policy|content[-_\s]?filter|safety/.test(normalized)) return "content_policy"
   if (isContextOverflow(code, message)) return "context_overflow"
   if (
-    status === 400 || status === 404 || status === 409 || status === 413 || status === 422 ||
+    effective === 400 || effective === 404 || effective === 409 || effective === 413 || effective === 422 ||
     /invalid[-_\s]?request/.test(normalized)
   ) {
     return "invalid_request"
   }
   if (
-    (status !== undefined && status >= 500) || /server[-_\s]?error|internal[-_\s]?error|overloaded/.test(normalized)
+    (effective !== undefined && effective >= 500) ||
+    /server[-_\s]?error|internal[-_\s]?error|overloaded/.test(normalized)
   ) {
     return "provider_internal"
   }

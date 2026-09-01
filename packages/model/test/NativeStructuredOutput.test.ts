@@ -28,13 +28,14 @@ const capital = {
   }
 } as const
 
-const request = (tools: ReadonlyArray<ModelRequest.ToolDefinition> = []) =>
+const request = (tools: ReadonlyArray<ModelRequest.ToolDefinition> = [], toolChoice?: "none") =>
   ModelRequest.ModelRequest.make({
     modelId: "gpt-oss-120b",
     system: [],
     messages: [ModelRequest.Message.user("What is the capital of France?")],
     tools,
-    params: ModelRequest.GenerationParams.make({ maxTokens: 64, temperature: 0 })
+    params: ModelRequest.GenerationParams.make({ maxTokens: 64, temperature: 0 }),
+    ...(toolChoice === undefined ? {} : { toolChoice })
   })
 
 const weather = ModelRequest.ToolDefinition.make({
@@ -92,6 +93,18 @@ describe("OpenAIChatCompletions native structured output", () => {
     expect(error).toBeInstanceOf(ModelError.ModelError)
     expect(error?.code).toBe("invalid_request")
     expect(error?.message).toContain("response_format")
+  })
+
+  it("allows declared tools when toolChoice none keeps them off the wire", async () => {
+    const prepared = await body(configured(capital) as never, request([weather], "none"))
+
+    expect(Result.isSuccess(prepared)).toBe(true)
+    const parsed = JSON.parse(Result.getOrThrow(prepared).bodyText) as Record<string, unknown>
+    expect(parsed["response_format"]).toEqual({
+      type: "json_schema",
+      json_schema: { name: "capital", schema: capital.schema, strict: true }
+    })
+    expect(parsed).not.toHaveProperty("tools")
   })
 
   it("keeps tools available on a route without the toggle", async () => {

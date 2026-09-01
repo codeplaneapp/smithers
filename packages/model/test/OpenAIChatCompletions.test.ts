@@ -46,6 +46,14 @@ const replayData = (data: ReadonlyArray<string>): ReadonlyArray<Events.ModelEven
 const body = (request: Request.ModelRequest): OpenAIChatCompletions.Body =>
   Effect.runSync(OpenAIChatCompletions.protocol.body.from(request, { native: false }))
 
+const inlineError = (payload: string): ModelError =>
+  Effect.runSync(Effect.flip(
+    OpenAIChatCompletions.protocol.stream.step(
+      OpenAIChatCompletions.protocol.stream.initial(streamRequest),
+      Schema.decodeUnknownSync(OpenAIChatCompletions.protocol.stream.event)(payload)
+    )
+  ))
+
 describe("OpenAIChatCompletions.protocol.body", () => {
   it("lowers system, user, assistant tool-call, and tool-result messages", () => {
     const request = Request.ModelRequest.make({
@@ -80,6 +88,18 @@ describe("OpenAIChatCompletions.protocol.body", () => {
     expect(decoded.tools).toEqual([
       { type: "function", function: { name: "search", description: "web search", parameters: {} } }
     ])
+  })
+
+  it("lowers assistant text without fabricating tool calls", () => {
+    const decoded = body(Request.ModelRequest.make({
+      modelId: "qwen2.5:3b",
+      system: [],
+      messages: [Request.Message.assistant("Paris", { stopReason: "stop" })],
+      tools: [],
+      params: Request.GenerationParams.make()
+    }))
+
+    expect(decoded.messages).toEqual([{ role: "assistant", content: "Paris" }])
   })
 
   it("omits declared tools when the request forbids tool use", () => {
@@ -212,14 +232,6 @@ describe("OpenAIChatCompletions.protocol.stream", () => {
     // Chat-compatible gateways answer HTTP 200 and report the real failure in
     // the stream. Reporting all of them as `provider_internal` made a rate
     // limit, an exhausted balance and a rejected key retryable.
-    const inlineError = (payload: string): ModelError =>
-      Effect.runSync(Effect.flip(
-        OpenAIChatCompletions.protocol.stream.step(
-          OpenAIChatCompletions.protocol.stream.initial(streamRequest),
-          Schema.decodeUnknownSync(OpenAIChatCompletions.protocol.stream.event)(payload)
-        )
-      ))
-
     expect(inlineError("{\"error\":{\"code\":\"invalid_api_key\",\"message\":\"bad key\"}}")).toMatchObject({
       code: "authentication",
       providerCode: "invalid_api_key"
@@ -252,6 +264,50 @@ describe("OpenAIChatCompletions.protocol.stream", () => {
       message: "Chat Completions stream reported an error",
       providerCode: undefined
     })
+  })
+
+  it("classifies numeric inline code 429 as rate limited", () => {
+    expect(inlineError("{\"error\":{\"code\":429,\"message\":\"try later\"}}")).toMatchObject({
+      code: "rate_limited",
+      providerCode: "429"
+    })
+  })
+
+  it("classifies numeric inline code 401 as authentication", () => {
+    expect(inlineError("{\"error\":{\"code\":401,\"message\":\"denied\"}}")).toMatchObject({
+      code: "authentication",
+      providerCode: "401"
+    })
+  })
+
+  it("classifies numeric inline code 500 as provider internal", () => {
+    expect(inlineError("{\"error\":{\"code\":500,\"message\":\"upstream failed\"}}")).toMatchObject({
+      code: "provider_internal",
+      providerCode: "500"
+    })
+  })
+
+  it("does not treat a numeric inline code outside the HTTP range as a status", () => {
+    expect(inlineError("{\"error\":{\"code\":42,\"message\":\"mystery\"}}")).toMatchObject({
+      code: "unknown",
+      providerCode: "42"
+    })
+  })
+
+  it("short-circuits settlement when the state becomes settled during a step", () => {
+    let reads = 0
+    const state = Object.defineProperty(
+      { ...OpenAIChatCompletions.protocol.stream.initial(streamRequest) },
+      "settled",
+      { get: () => reads++ > 0 }
+    )
+
+    const [settled, events] = step(
+      state,
+      "{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}"
+    )
+    expect(settled.settled).toBe(true)
+    expect(events).toEqual([])
   })
 
   it("recovers a tool call's index from its id when the delta omits the index", () => {
@@ -311,6 +367,14 @@ describe("OpenAIChatCompletions.protocol.stream", () => {
     ])
 
     expect(events.at(-1)).toEqual({ type: "usage", inputTokens: 3, outputTokens: 1, totalTokens: 4 })
+  })
+
+  it("reads a choice-less usage chunk before settlement", () => {
+    expect(replayData([
+      "{\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}"
+    ])).toEqual([
+      { type: "usage", inputTokens: 3, outputTokens: 1, totalTokens: 4 }
+    ])
   })
 
   it("flushes a tool call left open when the stream is cut short", () => {

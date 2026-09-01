@@ -46,15 +46,29 @@ const collectQuery = (input: MakeOptions["query"]): Array<readonly [string, stri
     ? input.map(([name, value]) => [name, value] as const)
     : Object.entries(input)
 
+// The URL parser resolves `%2e` to `.` while it normalizes a pathname, so
+// `%2e%2e` and `.%2e` are traversals wearing a disguise: comparing raw
+// segments lets them through and the assignment below then collapses them.
+const isRelativeSegment = (segment: string): boolean => {
+  const decoded = segment.replace(/%2e/gi, ".")
+  return decoded === "." || decoded === ".."
+}
+
 const joinPath = (url: URL, path: string | undefined): Result.Result<void, ModelError> => {
   if (path === undefined || path === "") return Result.succeed(undefined)
   if (path.includes("?") || path.includes("#")) {
     return Result.fail(invalid("Endpoint paths must not contain query strings or fragments"))
   }
-  if (path.split("/").some((segment) => segment === "." || segment === "..")) {
+  if (path.split("/").some(isRelativeSegment)) {
     return Result.fail(invalid("Endpoint paths must not contain relative segments"))
   }
-  url.pathname = `${url.pathname.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`
+  const base = url.pathname.replace(/\/+$/, "")
+  url.pathname = `${base}/${path.replace(/^\/+/, "")}`
+  // Belt and braces: whatever the parser did with the joined path, the result
+  // has to still extend the base rather than climb out of it.
+  if (!url.pathname.startsWith(base === "" ? "/" : `${base}/`)) {
+    return Result.fail(invalid("Endpoint paths must not contain relative segments"))
+  }
   return Result.succeed(undefined)
 }
 

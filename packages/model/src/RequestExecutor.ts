@@ -21,6 +21,7 @@ import * as Option from "effect/Option"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import * as Headers from "effect/unstable/http/Headers"
 import type * as HttpClientError from "effect/unstable/http/HttpClientError"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
@@ -157,24 +158,23 @@ const retryAfter = (headers: Record<string, string>, now: number): ResetMetadata
 const durationMillis = (value: string): number | undefined => {
   const input = value.trim().toLowerCase()
   if (input === "") return undefined
-  const token = /(\d+(?:\.\d+)?)(ms|s|m|h|d)/g
-  const factors: Record<string, number> = {
-    ms: 1,
-    s: 1_000,
-    m: 60_000,
-    h: 3_600_000,
-    d: 86_400_000
-  }
+  const token = /(?<amount>\d+(?:\.\d+)?)(?<unit>ms|s|m|h|d)/g
   let total = 0
   let consumed = 0
   let match: RegExpExecArray | null
   while ((match = token.exec(input)) !== null) {
     if (match.index !== consumed) return undefined
-    const amount = match[1]
-    const unit = match[2]
-    if (amount === undefined || unit === undefined) return undefined
-    const factor = factors[unit]
-    if (factor === undefined) return undefined
+    // Named captures make the regex-guaranteed token shape explicit without unreachable defensive branches.
+    const { amount, unit } = match.groups as { readonly amount: string; readonly unit: "ms" | "s" | "m" | "h" | "d" }
+    const factor = unit === "ms"
+      ? 1
+      : unit === "s"
+      ? 1_000
+      : unit === "m"
+      ? 60_000
+      : unit === "h"
+      ? 3_600_000
+      : 86_400_000
     total += Number(amount) * factor
     consumed = token.lastIndex
   }
@@ -416,13 +416,21 @@ const secretValues = (
   return values
 }
 
-const redactStructuredValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(redactStructuredValue)
+// The same `MAX_BODY_DEPTH` horizon the reset and secret walks already stop
+// at, for the same reason and one more: a provider body is untrusted input, V8
+// parses arbitrarily deep JSON iteratively and then overflows the stack on the
+// first recursive walk of it, so an unguarded walk here turns a hostile 5000
+// level body into a `RangeError` defect instead of a typed `ModelError`. Past
+// the horizon the subtree is replaced wholesale rather than descended, because
+// a redaction walk that merely stops looking is a redaction walk that leaks.
+const redactStructuredValue = (value: unknown, depth = 0): unknown => {
+  if (depth > MAX_BODY_DEPTH) return REDACTED
+  if (Array.isArray(value)) return value.map((item) => redactStructuredValue(item, depth + 1))
   if (!isRecord(value)) return value
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [
       key,
-      isSensitiveBodyField(key) ? REDACTED : redactStructuredValue(item)
+      isSensitiveBodyField(key) ? REDACTED : redactStructuredValue(item, depth + 1)
     ])
   )
 }
@@ -467,6 +475,36 @@ const responseBody = (
   if (redacted.length <= BODY_LIMIT) return { body: redacted }
   return { body: redacted.slice(0, BODY_LIMIT), bodyTruncated: true }
 }
+
+// A cap on a string the whole body already materialized is not a cap: by the
+// time `response.text` answers, a broken or hostile provider has already made
+// this process allocate every byte it chose to send. This bounds the *read* —
+// the stream is abandoned as soon as the accumulated text reaches
+// `RAW_BODY_LIMIT`, so nothing beyond the limit is ever held, parsed, walked or
+// redacted. A read that fails part way keeps what arrived; a read that fails
+// with nothing has no body, which is what the caller's `undefined` means.
+const cappedBody = (
+  response: HttpClientResponse.HttpClientResponse
+): Effect.Effect<string | undefined> =>
+  Effect.suspend(() => {
+    const decoder = new TextDecoder()
+    let text = ""
+    return Stream.runForEachWhile(
+      response.stream,
+      (chunk: Uint8Array) =>
+        Effect.sync(() => {
+          text += decoder.decode(chunk, { stream: true })
+          return text.length < RAW_BODY_LIMIT
+        })
+    ).pipe(
+      Effect.as(false),
+      Effect.catch(() => Effect.succeed(true)),
+      Effect.map((failed) => {
+        text += decoder.decode()
+        return failed && text === "" ? undefined : text.slice(0, RAW_BODY_LIMIT)
+      })
+    )
+  })
 
 const providerMessage = (
   status: number,
@@ -514,8 +552,7 @@ const statusError = (
   Effect.gen(function*() {
     if (response.status < 400) return response
 
-    const rawBody = yield* response.text.pipe(Effect.catch(() => Effect.succeed(undefined)))
-    const body = rawBody?.slice(0, RAW_BODY_LIMIT)
+    const body = yield* cappedBody(response)
     const headers = normalizedHeaders(response.headers)
     const now = yield* Clock.currentTimeMillis
     const retry = retryAfter(headers, now)
@@ -542,18 +579,21 @@ const statusError = (
       ? undefined
       : responseBody(classified.message, request, redactedNames).body
 
-    return yield* Effect.fail(
-      new ModelError({
-        code: classified?.code ?? reasonForStatus(response.status, body, parsed),
-        message: classifiedMessage ?? providerMessage(response.status, details),
-        retryAfterMillis: classified?.retryAfterMillis ?? retry.retryAfterMillis,
-        resetAtEpochMillis: classified?.resetAtEpochMillis ?? reset?.at,
-        resetSource: sanitizedField(classified?.resetSource ?? reset?.source, request, redactedNames),
-        providerCode: sanitizedField(classified?.providerCode ?? fields.code, request, redactedNames),
-        requestId: sanitizedField(classified?.requestId ?? requestId(headers), request, redactedNames),
-        httpStatus: response.status
-      })
-    )
+    const error = new ModelError({
+      code: classified?.code ?? reasonForStatus(response.status, body, parsed),
+      message: classifiedMessage ?? providerMessage(response.status, details),
+      retryAfterMillis: classified?.retryAfterMillis ?? retry.retryAfterMillis,
+      resetAtEpochMillis: classified?.resetAtEpochMillis ?? reset?.at,
+      resetSource: sanitizedField(classified?.resetSource ?? reset?.source, request, redactedNames),
+      providerCode: sanitizedField(classified?.providerCode ?? fields.code, request, redactedNames),
+      requestId: sanitizedField(classified?.requestId ?? requestId(headers), request, redactedNames),
+      httpStatus: response.status
+    })
+    Object.defineProperties(error, {
+      body: { value: details.body, enumerable: false },
+      bodyTruncated: { value: details.bodyTruncated, enumerable: false }
+    })
+    return yield* Effect.fail(error)
   })
 
 const transportError = (
