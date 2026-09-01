@@ -57,6 +57,13 @@
 - Included recorded-row provenance in corruption journal identities so an
   identically re-corrupted row records a new incident after healing
   ([#172](https://github.com/smithersai/flows/issues/172)).
+- Reduced a live failure value to inert JSON before it reaches the attempt row,
+  so a boundary refusal, a sandbox refusal, or any `Data.TaggedError` settles
+  the attempt instead of being refused by the store as a non-plain object. A
+  value JSON cannot express at all now records as `null` rather than as a
+  dropped key the replay decoder could not read.
+- Dropped quarantined boundary evidence by omitting the key rather than writing
+  `undefined` over it, which the attempt store refuses.
 
 ## [0.1.0] - 2026-08-05
 
