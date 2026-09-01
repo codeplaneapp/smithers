@@ -246,13 +246,14 @@ Sync shapes are on the wire, never in a table.
 | `Scope`                        | `Run` with a `runId`, or `Workspace`               |
 | `RunCursor`                    | `runId` plus `afterSeq`                            |
 | `WorkspaceCursor`              | an array of run cursors                            |
+| `Resync`                       | `runId` plus the `checkpointSeq` a compacted run resumes from |
 | `ReadRequest` / `ReadResponse` | scope, cursor, limit; entries plus the next cursor |
 | `SubscribeRequest`             | scope, cursors, and a credit count                 |
 | `EntriesFrame`                 | entries plus the next cursor                       |
 | `HeartbeatFrame`               | emitted when no entries arrive                     |
 | `ClosedFrame`                  | the single terminal frame                          |
 
-Because journal sequences may have holes, `afterSeq` means entries after this number. Credit bounds the frames one subscription emits. There is no acknowledgement RPC, so a client that needs more opens another subscription from its last durable cursor.
+Because journal sequences may have holes, `afterSeq` means entries after this number. Credit bounds the frames one subscription emits. There is no acknowledgement RPC, so a client that needs more opens another subscription from its last durable cursor. `Resync` is not a frame: it rides on `SyncError` as an optional field, set only on the `compacted` code, and it moves a cursor rather than delivering the state below the checkpoint.
 
 :::warning
 Persist a returned cursor only after applying the batch that came with it.
