@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { killScript } from "../internal/killScript.ts"
 import { gather, type GatheredRun, providerFailure, remoteProcessOf } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import type { RemoteProcess } from "../RemoteChildProcessSpawner/Provider.ts"
@@ -52,34 +53,6 @@ const parentOf = (path: string): string | undefined => {
 
 /** The session-private guest directory spawned commands record their pids in. */
 const pidDirectory = "/tmp/.smthrs-sbx"
-
-/** How long the kill script waits for a just-spawned command to record its pid. */
-const pidfileWaitSeconds = 5
-
-/**
- * The guest script that signals one recorded pid and every descendant.
- *
- * Children first, depth-first, so a parent cannot reap or respawn under the
- * walk; the recursion runs in subshells because POSIX `sh` has no local
- * variables. `kill -s` takes the un-prefixed POSIX signal name, the one form
- * busybox and dash agree on.
- *
- * It waits for the pidfile rather than treating an absent one as "nothing to
- * do". `spawn` returns once the LOCAL `docker exec` client has started, which
- * is before the guest shell has run its first line, so a caller that kills
- * immediately can arrive first. Exiting 0 there would report a delivered
- * signal while leaving the command running, which is the silent no-op kill the
- * conformance suite exists to catch. A pidfile still absent after the wait
- * means the command never started, and that is the one case where there is
- * genuinely nothing to signal.
- */
-const killScript = (pidfile: string, signal: string): string =>
-  `n=0; while [ ! -s ${pidfile} ] && [ "$n" -lt ${pidfileWaitSeconds} ]; do sleep 1; n=$((n+1)); done; ` +
-  `p=$(cat ${pidfile} 2>/dev/null) || exit 0; [ -n "$p" ] || exit 0; ` +
-  `kids() { for d in /proc/[0-9]*; do read -r _ _ _ pp _ < "$d/stat" 2>/dev/null || continue; ` +
-  `[ "$pp" = "$1" ] || continue; c=\${d#/proc/}; ( kids "$c" ); echo "$c"; done; }; ` +
-  `for k in $(kids "$p"); do kill -s ${signal} "$k" 2>/dev/null; done; ` +
-  `kill -s ${signal} "$p" 2>/dev/null; exit 0`
 
 /**
  * Builds a sandbox provider whose machines are containers this host's

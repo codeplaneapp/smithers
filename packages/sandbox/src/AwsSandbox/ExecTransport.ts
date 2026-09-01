@@ -1,0 +1,46 @@
+/**
+ * Defines the command transport an AWS session reaches its task through.
+ *
+ * @since 0.1.0
+ */
+import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+
+/**
+ * The AWS CLI and its Session Manager plugin, over an injected spawner.
+ *
+ * ECS Exec is two halves. `ExecuteCommand` on the ECS API opens an SSM session
+ * and returns its metadata, and that is all `@aws-sdk/client-ecs` implements.
+ * The data channel that carries the command's output and exit status is the
+ * Session Manager protocol, which the AWS CLI speaks by delegating to
+ * `session-manager-plugin`. A session therefore runs commands the way an
+ * operator does at a terminal: `aws ecs execute-command --interactive`, driven
+ * through the spawner a host injects, so the package still owns no host access
+ * and no dependency.
+ *
+ * Two consequences of that transport are visible to callers and stated here
+ * rather than hidden. The session is a pseudo-terminal, so a command's
+ * standard error arrives interleaved on standard output and line endings are
+ * normalized; file transfer is byte-exact regardless, because it travels as
+ * base64. And the plugin exits zero whatever the remote command did, so the
+ * provider wraps every command to print its own exit status and reads that
+ * back; a session that ends without it is reported as `aborted`, never as
+ * success.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface ExecTransport {
+  /** The spawner the AWS CLI runs through. */
+  readonly spawner: ChildProcessSpawner["Service"]
+  /** The CLI. Default `aws`. */
+  readonly program?: string | undefined
+  /** Global CLI arguments placed before the subcommand, such as `--profile`. */
+  readonly globalArgs?: ReadonlyArray<string> | undefined
+  /**
+   * The largest slice of a written file carried by one command, in bytes
+   * before base64 encoding. File contents ride inside the command line, whose
+   * length the SSM document bounds, so a write is split across as many
+   * commands as it needs. Default 3072.
+   */
+  readonly chunkBytes?: number | undefined
+}

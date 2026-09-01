@@ -44,13 +44,12 @@ const provider = Effect.gen(function*() {
 
 // The conformance suite gives every check its own session so a check that
 // leaves one unusable cannot decide the next, which costs this backend eleven
-// container starts. Container start is the one expensive step and its cost is
-// the engine's, not the provider's: measured on the development machine
-// (OrbStack, many containers resident) `create`, `exec`, and `rm` each take
-// about 50ms while `start` takes 30 SECONDS, so the same suite that runs in
-// well under a minute against a responsive engine needs minutes here. The
-// ceiling is sized for the slow engine rather than the fast one, because a
-// timeout on a loaded machine would report a conforming provider as broken.
+// container starts. Start is the one variable step and its cost is the
+// engine's, not the provider's: on the development machine the same `docker
+// start` was measured at 1 second on an idle engine and 30 seconds with many
+// containers resident, while `create`, `exec`, and `rm` stayed near 50ms
+// throughout. The ceiling is therefore sized for the loaded engine, because a
+// timeout under load would report a conforming provider as broken.
 const conformanceBudget = 900_000
 const budget = 180_000
 

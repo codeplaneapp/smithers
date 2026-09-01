@@ -32,6 +32,16 @@ export interface RemoteProcess {
 export interface RemoteOptions {
   readonly cwd?: string | undefined
   readonly env?: Record<string, string | undefined> | undefined
+  /**
+   * The command's complete standard input, as bytes.
+   *
+   * Bounded and whole rather than a stream: a remote session is reached by
+   * sending it one command, and the transports beneath the providers either
+   * take an input blob up front or take none at all. A provider that cannot
+   * deliver it leaves {@link Provider.stdin} unset, and the adapter refuses a
+   * command that supplies input instead of dropping the input on the floor.
+   */
+  readonly stdin?: Uint8Array | undefined
 }
 
 /**
@@ -68,6 +78,12 @@ export interface Provider {
   readonly kill?: ((process: RemoteProcess, signal: Signal) => Effect.Effect<void, ProviderError>) | undefined
   /** A cheap round-trip proving the remote session is still alive. */
   readonly ping?: Effect.Effect<void, ProviderError> | undefined
+  /**
+   * Whether `spawn` delivers {@link RemoteOptions.stdin}. Declared rather
+   * than assumed, because a transport that silently ignored a command's
+   * input would turn every script fed on standard input into an empty one.
+   */
+  readonly stdin?: true | undefined
 }
 
 /**

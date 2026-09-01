@@ -17,6 +17,8 @@
 export interface TestSessionState {
   readonly acquired: Array<string>
   readonly commands: Array<string>
+  /** The standard input each spawned command received, by spawn order. */
+  readonly inputs: Array<Uint8Array | undefined>
   readonly files: Map<string, Uint8Array>
   released: number
 }

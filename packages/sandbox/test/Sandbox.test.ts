@@ -5,6 +5,7 @@ import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import * as Sandbox from "../src/Sandbox/index.ts"
+import * as SandboxHealth from "../src/SandboxHealth/index.ts"
 
 const decoder = new TextDecoder()
 
@@ -473,6 +474,23 @@ describe("Sandbox.layerHost", () => {
       })
       expect(provider.state.acquired).toEqual(["host"])
       expect(provider.state.released).toBe(1)
+    }))
+
+  it.effect("serves a health probe over the machine it holds", () =>
+    Effect.gen(function*() {
+      const failing = new ProviderError({ code: "unavailable", message: "the vm is gone" })
+      const healthy = Sandbox.TestSession.make({ ping: Effect.void })
+      const dead = Sandbox.TestSession.make({ ping: Effect.fail(failing) })
+      const probe = (provider: Sandbox.TestSessionProvider) =>
+        Effect.flatMap(SandboxHealth.SandboxHealth, (health) => health.check).pipe(
+          Effect.provide(Sandbox.layerHost(provider, { session: "watched" }))
+        )
+      expect((yield* probe(healthy))._tag).toBe("Healthy")
+      const unhealthy = yield* probe(dead)
+      expect(unhealthy._tag).toBe("Unhealthy")
+      // A session with no ping cannot be asked, so nothing is watching it and
+      // the probe says healthy rather than pretending to have checked.
+      expect((yield* probe(Sandbox.TestSession.make()))._tag).toBe("Healthy")
     }))
 
   it.effect("fails to build when the machine cannot be acquired", () =>

@@ -51,6 +51,20 @@
     "./SandboxHealth/*": null,
     "./SandboxSupervision": "./src/SandboxSupervision/index.ts",
     "./SandboxSupervision/*": null,
+    "./AwsSandbox": "./src/AwsSandbox/index.ts",
+    "./AwsSandbox/*": null,
+    "./CloudflareSandbox": "./src/CloudflareSandbox/index.ts",
+    "./CloudflareSandbox/*": null,
+    "./DaytonaSandbox": "./src/DaytonaSandbox/index.ts",
+    "./DaytonaSandbox/*": null,
+    "./JustBashSandbox": "./src/JustBashSandbox/index.ts",
+    "./JustBashSandbox/*": null,
+    "./KubernetesSandbox": "./src/KubernetesSandbox/index.ts",
+    "./KubernetesSandbox/*": null,
+    "./MicrosandboxSandbox": "./src/MicrosandboxSandbox/index.ts",
+    "./MicrosandboxSandbox/*": null,
+    "./VercelSandbox": "./src/VercelSandbox/index.ts",
+    "./VercelSandbox/*": null,
     "./*": "./src/*.ts",
     "./internal/*": null,
     "./*/index": null
@@ -125,6 +139,48 @@
         "require": "./dist/cjs/SandboxSupervision/index.js"
       },
       "./SandboxSupervision/*": null,
+      "./AwsSandbox": {
+        "types": "./dist/esm/AwsSandbox/index.d.ts",
+        "import": "./dist/esm/AwsSandbox/index.js",
+        "require": "./dist/cjs/AwsSandbox/index.js"
+      },
+      "./AwsSandbox/*": null,
+      "./CloudflareSandbox": {
+        "types": "./dist/esm/CloudflareSandbox/index.d.ts",
+        "import": "./dist/esm/CloudflareSandbox/index.js",
+        "require": "./dist/cjs/CloudflareSandbox/index.js"
+      },
+      "./CloudflareSandbox/*": null,
+      "./DaytonaSandbox": {
+        "types": "./dist/esm/DaytonaSandbox/index.d.ts",
+        "import": "./dist/esm/DaytonaSandbox/index.js",
+        "require": "./dist/cjs/DaytonaSandbox/index.js"
+      },
+      "./DaytonaSandbox/*": null,
+      "./JustBashSandbox": {
+        "types": "./dist/esm/JustBashSandbox/index.d.ts",
+        "import": "./dist/esm/JustBashSandbox/index.js",
+        "require": "./dist/cjs/JustBashSandbox/index.js"
+      },
+      "./JustBashSandbox/*": null,
+      "./KubernetesSandbox": {
+        "types": "./dist/esm/KubernetesSandbox/index.d.ts",
+        "import": "./dist/esm/KubernetesSandbox/index.js",
+        "require": "./dist/cjs/KubernetesSandbox/index.js"
+      },
+      "./KubernetesSandbox/*": null,
+      "./MicrosandboxSandbox": {
+        "types": "./dist/esm/MicrosandboxSandbox/index.d.ts",
+        "import": "./dist/esm/MicrosandboxSandbox/index.js",
+        "require": "./dist/cjs/MicrosandboxSandbox/index.js"
+      },
+      "./MicrosandboxSandbox/*": null,
+      "./VercelSandbox": {
+        "types": "./dist/esm/VercelSandbox/index.d.ts",
+        "import": "./dist/esm/VercelSandbox/index.js",
+        "require": "./dist/cjs/VercelSandbox/index.js"
+      },
+      "./VercelSandbox/*": null,
       "./*": {
         "types": "./dist/esm/*.d.ts",
         "import": "./dist/esm/*.js",
@@ -162,6 +218,7 @@
     "eslint-plugin-jsdoc": "64.1.0",
     "eslint-plugin-unicorn": "61.0.2",
     "madge": "8.0.0",
+    "microsandbox": "0.6.16",
     "typescript": "6.0.3",
     "typescript-eslint": "8.65.0",
     "vitest": "4.1.9"

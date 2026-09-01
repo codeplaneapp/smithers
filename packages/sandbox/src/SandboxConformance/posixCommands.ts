@@ -12,6 +12,11 @@ import type { Commands } from "../ProviderConformance/Commands.ts"
  * unlike the spawner-level suite, this one can supply its own fixture; a
  * session whose machine speaks something else overrides it.
  *
+ * `runs` sleeps for a duration nothing else on a shared machine is likely to
+ * be sleeping for, and `survivor` looks for exactly that sleep with a pattern
+ * that cannot match its own command line. A guest without `pgrep` answers 127
+ * and the survivor question goes unanswered rather than wrongly answered.
+ *
  * @category models
  * @since 0.1.0
  */
@@ -20,6 +25,7 @@ export const posixCommands: Commands = {
   output: "sandbox conformance",
   fails: "exit 23",
   failureCode: 23,
-  runs: "sleep 60",
+  runs: "sleep 3607",
+  survivor: "pgrep -f 'sleep 360[7]'",
   shell: true
 }

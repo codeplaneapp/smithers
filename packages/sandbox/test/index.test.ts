@@ -9,14 +9,21 @@ import * as Sandbox from "../src/index.ts"
 describe("@smthrs/sandbox barrel", () => {
   it("re-exports every module as its own namespace", () => {
     expect(Object.keys(Sandbox).sort()).toEqual([
+      "AwsSandbox",
+      "CloudflareSandbox",
       "ContainerSandbox",
+      "DaytonaSandbox",
       "DirectorySandbox",
+      "JustBashSandbox",
+      "KubernetesSandbox",
+      "MicrosandboxSandbox",
       "ProviderConformance",
       "RemoteChildProcessSpawner",
       "Sandbox",
       "SandboxConformance",
       "SandboxHealth",
-      "SandboxSupervision"
+      "SandboxSupervision",
+      "VercelSandbox"
     ])
   })
 

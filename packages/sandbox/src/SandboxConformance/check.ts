@@ -30,6 +30,7 @@ const inSession = <A>(
   body: (session: Session) => Effect.Effect<A, unknown, never>
 ): Effect.Effect<Exit.Exit<A, unknown>> => Effect.exit(Effect.scoped(Effect.flatMap(provider.acquire(session), body)))
 
+/** Standard output as text plus the exit status, the shape most checks compare. */
 const output = (process: RemoteProcess): Effect.Effect<string, ProviderError> =>
   Effect.map(
     Effect.all(
@@ -39,7 +40,43 @@ const output = (process: RemoteProcess): Effect.Effect<string, ProviderError> =>
     ([stdout, code]) => `${stdout}#${code}`
   )
 
+/** Both output streams as one text, for a check that asks only whether text arrived at all. */
+const everything = (process: RemoteProcess): Effect.Effect<string, ProviderError> =>
+  Effect.map(
+    Effect.all(
+      [
+        Stream.mkString(Stream.decodeText(process.stdout)),
+        Stream.mkString(Stream.decodeText(process.stderr)),
+        process.exitCode
+      ],
+      { concurrency: "unbounded" }
+    ),
+    ([stdout, stderr, code]) => `${stdout}${stderr}#${code}`
+  )
+
+const run = (live: Session, command: string, options: Parameters<Session["spawn"]>[1] = {}) =>
+  Effect.scoped(Effect.flatMap(live.spawn(command, options), output))
+
 const conformanceBytes = new Uint8Array([0, 1, 2, 255, 254, 10, 13, 0, 7])
+
+/**
+ * A deterministic 64 KiB payload: larger than any single command line a
+ * transport could carry inline, so a provider that moves files through its
+ * shell has to slice, and full of every byte value, so a text path cannot
+ * hide.
+ */
+const largeBytes = (() => {
+  const bytes = new Uint8Array(64 * 1024)
+  let state = 0x2545f491
+  for (let index = 0; index < bytes.length; index++) {
+    state = (Math.imul(state, 1103515245) + 12345) >>> 0
+    bytes[index] = state >>> 24
+  }
+  return bytes
+})()
+
+const sameBytes = (left: Uint8Array, right: Uint8Array): boolean =>
+  left.length === right.length && left.every((byte, index) => byte === right[index])
 
 /**
  * Names the suite's session key and declared capabilities.
@@ -64,12 +101,20 @@ export interface CheckOptions {
  *
  * A provider package runs this in its own test suite and asserts the result
  * is empty, the way `ProviderConformance` is run for spawn-only transports.
- * The file checks state the contract's own obligations — byte round-trips,
- * `not_found` for absence, parent creation, the workdir default, environment
- * delivery, and a working session after release and reacquire — and the
- * spawn checks are the delegated `ProviderConformance` suite over
- * `commandProvider`, so a session provider is held to everything a spawn
- * transport is.
+ *
+ * The file checks state the contract's own obligations: byte round-trips of
+ * a small binary payload, an empty file, and a 64 KiB one; `not_found` for
+ * absence; parent creation; the workdir default and a relative `cwd`;
+ * environment delivery; standard input delivery; standard error delivery; and
+ * a working session after release and reacquire. Two checks look across
+ * surfaces on purpose. A session that served `readFile` from somewhere other
+ * than the machine its processes run on would pass every file check and
+ * every process check separately, so one check writes through `writeFile`
+ * and measures the file with a process, and another produces a file with a
+ * process and reads it back through `readFile`. The spawn checks are the
+ * delegated `ProviderConformance` suite over `commandProvider`, so a session
+ * provider is held to everything a spawn transport is, including that a
+ * declared `kill` ends the command's work and not just its shell.
  *
  * @category constructors
  * @since 0.1.0
@@ -86,6 +131,18 @@ export const check = (
         yield* live.writeFile(path, conformanceBytes)
         return yield* live.readFile(path)
       }))
+    const empty = yield* inSession(provider, session, (live) =>
+      Effect.gen(function*() {
+        const path = `${live.workdir}/conformance-empty.bin`
+        yield* live.writeFile(path, new Uint8Array())
+        return yield* live.readFile(path)
+      }))
+    const large = yield* inSession(provider, session, (live) =>
+      Effect.gen(function*() {
+        const path = `${live.workdir}/conformance-large.bin`
+        yield* live.writeFile(path, largeBytes)
+        return yield* live.readFile(path)
+      }))
     const absent = yield* inSession(provider, session, (live) =>
       Effect.flip(live.readFile(`${live.workdir}/conformance-absent`)))
     const parents = yield* inSession(provider, session, (live) =>
@@ -95,24 +152,41 @@ export const check = (
         return yield* live.readFile(path)
       }))
     const workdir = yield* inSession(provider, session, (live) =>
+      Effect.map(run(live, "pwd"), (answer) => ({ answer, expected: `${live.workdir}\n#0` })))
+    const relativeCwd = yield* inSession(provider, session, (live) =>
       Effect.gen(function*() {
-        const answer = yield* Effect.scoped(Effect.flatMap(live.spawn("pwd", {}), output))
-        return { answer, expected: `${live.workdir}\n#0` }
+        yield* run(live, "mkdir -p conformance-sub")
+        const answer = yield* run(live, "pwd", { cwd: "conformance-sub" })
+        return { answer, expected: `${live.workdir}/conformance-sub\n#0` }
       }))
     const environment = yield* inSession(provider, session, (live) =>
-      Effect.scoped(
-        Effect.flatMap(
-          live.spawn(`printf '%s' "$SANDBOX_CONFORMANCE"`, { env: { SANDBOX_CONFORMANCE: "delivered" } }),
-          output
-        )
-      ))
+      run(live, `printf '%s' "$SANDBOX_CONFORMANCE"`, { env: { SANDBOX_CONFORMANCE: "delivered" } }))
+    const stdin = yield* inSession(provider, session, (live) =>
+      Effect.gen(function*() {
+        // Compared through a file, not through stdout: a transport whose
+        // process output is a pseudo-terminal cannot carry these bytes back
+        // on stdout, and that is a documented property of output, not a
+        // failure of input.
+        const status = yield* run(live, "cat > conformance-stdin.bin", { stdin: conformanceBytes })
+        const copied = yield* live.readFile(`${live.workdir}/conformance-stdin.bin`)
+        return { status, copied }
+      }))
+    const stderr = yield* inSession(provider, session, (live) =>
+      Effect.scoped(Effect.flatMap(live.spawn(`printf 'to-stderr' >&2`, {}), everything)))
+    const fileToProcess = yield* inSession(provider, session, (live) =>
+      Effect.gen(function*() {
+        yield* live.writeFile(`${live.workdir}/conformance-cross.bin`, conformanceBytes)
+        return yield* run(live, "wc -c < conformance-cross.bin")
+      }))
+    const processToFile = yield* inSession(provider, session, (live) =>
+      Effect.gen(function*() {
+        yield* run(live, "printf 'from-process' > conformance-produced.txt")
+        return new TextDecoder().decode(yield* live.readFile(`${live.workdir}/conformance-produced.txt`))
+      }))
     const reacquired = yield* Effect.exit(
       Effect.andThen(
         Effect.scoped(Effect.asVoid(provider.acquire(session))),
-        Effect.scoped(
-          Effect.flatMap(provider.acquire(session), (live) =>
-            Effect.scoped(Effect.flatMap(live.spawn("printf 'again'", {}), output)))
-        )
+        Effect.scoped(Effect.flatMap(provider.acquire(session), (live) => run(live, "printf 'again'")))
       )
     )
     const spawnChecks = yield* check_.check(
@@ -123,17 +197,21 @@ export const check = (
       options.commands ?? posixCommands
     )
     const found: Array<Violation | undefined> = [
-      Exit.isSuccess(roundTrips) &&
-        roundTrips.value.length === conformanceBytes.length &&
-        roundTrips.value.every((byte, index) =>
-          byte === conformanceBytes[index]
-        )
-        ? undefined
-        : {
-          check: "round-trips-binary-bytes",
-          expected: "the written bytes back, unchanged",
-          actual: shown(roundTrips)
-        },
+      Exit.isSuccess(roundTrips) && sameBytes(roundTrips.value, conformanceBytes) ? undefined : {
+        check: "round-trips-binary-bytes",
+        expected: "the written bytes back, unchanged",
+        actual: shown(roundTrips)
+      },
+      Exit.isSuccess(empty) && empty.value.length === 0 ? undefined : {
+        check: "round-trips-an-empty-file",
+        expected: "an empty file back, empty",
+        actual: shown(empty)
+      },
+      Exit.isSuccess(large) && sameBytes(large.value, largeBytes) ? undefined : {
+        check: "round-trips-a-large-file",
+        expected: "64 KiB back, unchanged",
+        actual: Exit.isSuccess(large) ? `${large.value.length} bytes, or different bytes` : shown(large)
+      },
       Exit.isSuccess(absent) && absent.value instanceof ProviderError && absent.value.code === "not_found"
         ? undefined
         : {
@@ -151,10 +229,37 @@ export const check = (
         expected: "a bare spawn's working directory to be the session workdir",
         actual: shown(workdir)
       },
+      Exit.isSuccess(relativeCwd) && relativeCwd.value.answer === relativeCwd.value.expected ? undefined : {
+        check: "roots-a-relative-cwd",
+        expected: "a relative cwd to be taken under the session workdir",
+        actual: shown(relativeCwd)
+      },
       Exit.isSuccess(environment) && environment.value === "delivered#0" ? undefined : {
         check: "delivers-the-environment",
         expected: `stdout "delivered" from the spawn's env`,
         actual: shown(environment)
+      },
+      Exit.isSuccess(stdin) && stdin.value.status === "#0" && sameBytes(stdin.value.copied, conformanceBytes)
+        ? undefined
+        : {
+          check: "delivers-standard-input",
+          expected: "the bytes given as stdin to reach the command unchanged",
+          actual: shown(stdin)
+        },
+      Exit.isSuccess(stderr) && stderr.value.startsWith("to-stderr") ? undefined : {
+        check: "delivers-standard-error",
+        expected: "text a command writes to stderr to arrive on one of its output streams",
+        actual: shown(stderr)
+      },
+      Exit.isSuccess(fileToProcess) && fileToProcess.value.trim() === `${conformanceBytes.length}#0` ? undefined : {
+        check: "files-reach-processes",
+        expected: `a process to measure ${conformanceBytes.length} bytes in a file writeFile put there`,
+        actual: shown(fileToProcess)
+      },
+      Exit.isSuccess(processToFile) && processToFile.value === "from-process" ? undefined : {
+        check: "processes-reach-files",
+        expected: "readFile to return what a process wrote",
+        actual: shown(processToFile)
       },
       Exit.isSuccess(reacquired) && reacquired.value === "again#0" ? undefined : {
         check: "reacquires-its-session",
@@ -163,9 +268,7 @@ export const check = (
       }
     ]
     return [
-      ...found.filter((violation): violation is Violation =>
-        violation !== undefined
-      ),
+      ...found.filter((violation): violation is Violation => violation !== undefined),
       ...spawnChecks
     ]
   })

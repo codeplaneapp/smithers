@@ -4,7 +4,7 @@ description: "Provider-neutral remote process execution, provisioned-machine lif
 
 # @smthrs/sandbox
 
-Provider-neutral remote process execution, provisioned-machine lifecycle, conformance, liveness, and supervision. The package exports `RemoteChildProcessSpawner`, `ProviderConformance`, `Sandbox`, `SandboxConformance`, `DirectorySandbox`, `ContainerSandbox`, `SandboxHealth`, and `SandboxSupervision` as namespaces. Provider packages adapt their SDK sessions to either the spawn-only or provisioned-machine contract; this package derives Effect's host services and health machinery from those contracts.
+Provider-neutral remote process execution, provisioned-machine lifecycle, conformance, liveness, and supervision. The package exports `RemoteChildProcessSpawner`, `ProviderConformance`, `Sandbox`, `SandboxConformance`, `DirectorySandbox`, `ContainerSandbox`, `KubernetesSandbox`, `JustBashSandbox`, `MicrosandboxSandbox`, `VercelSandbox`, `DaytonaSandbox`, `AwsSandbox`, `CloudflareSandbox`, `SandboxHealth`, and `SandboxSupervision` as namespaces. Provider packages adapt their SDK sessions to either the spawn-only or provisioned-machine contract; this package derives Effect's host services and health machinery from those contracts. The nine bundled providers obey the same rule: a vendor SDK arrives as an injected structural slice and a CLI arrives as an injected spawner, so adding a backend costs this package no dependency and no host access.
 
 ```ts
 import { RemoteChildProcessSpawner } from "@smthrs/sandbox"
@@ -35,6 +35,13 @@ The package depends on `@smthrs/kernel`, for `CommandLine` rendering and quoting
 | `@smthrs/sandbox/SandboxConformance` | [src/SandboxConformance/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/SandboxConformance) |
 | `@smthrs/sandbox/DirectorySandbox` | [src/DirectorySandbox/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/DirectorySandbox) |
 | `@smthrs/sandbox/ContainerSandbox` | [src/ContainerSandbox/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/ContainerSandbox) |
+| `@smthrs/sandbox/KubernetesSandbox` | [src/KubernetesSandbox/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/KubernetesSandbox) |
+| `@smthrs/sandbox/JustBashSandbox` | [src/JustBashSandbox/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/JustBashSandbox) |
+| `@smthrs/sandbox/MicrosandboxSandbox` | [src/MicrosandboxSandbox/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/MicrosandboxSandbox) |
+| `@smthrs/sandbox/VercelSandbox` | [src/VercelSandbox/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/VercelSandbox) |
+| `@smthrs/sandbox/DaytonaSandbox` | [src/DaytonaSandbox/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/DaytonaSandbox) |
+| `@smthrs/sandbox/AwsSandbox` | [src/AwsSandbox/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/AwsSandbox) |
+| `@smthrs/sandbox/CloudflareSandbox` | [src/CloudflareSandbox/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/CloudflareSandbox) |
 | `@smthrs/sandbox/SandboxHealth` | [src/SandboxHealth/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/SandboxHealth) |
 | `@smthrs/sandbox/SandboxSupervision` | [src/SandboxSupervision/](https://github.com/smithersai/smithers/tree/main/packages/sandbox/src/SandboxSupervision) |
 
@@ -81,7 +88,7 @@ rather than when the remote process ends. Both are stated in the module header.
 
 ## API reference
 
-This page is the public API reference for the package's eight namespace exports: `RemoteChildProcessSpawner`, `ProviderConformance`, `Sandbox`, `SandboxConformance`, `DirectorySandbox`, `ContainerSandbox`, `SandboxHealth`, and `SandboxSupervision`. Provider packages adapt their SDK sessions to the spawn-only `RemoteChildProcessSpawner.Provider` or lifecycle-owning `Sandbox.Provider`; this package derives Effect host services, conformance checks, health, and supervision from those seams.
+This page is the public API reference for the package's fifteen namespace exports: `RemoteChildProcessSpawner`, `ProviderConformance`, `Sandbox`, `SandboxConformance`, the nine providers `DirectorySandbox`, `ContainerSandbox`, `KubernetesSandbox`, `JustBashSandbox`, `MicrosandboxSandbox`, `VercelSandbox`, `DaytonaSandbox`, `AwsSandbox`, and `CloudflareSandbox`, then `SandboxHealth` and `SandboxSupervision`. Provider packages adapt their SDK sessions to the spawn-only `RemoteChildProcessSpawner.Provider` or lifecycle-owning `Sandbox.Provider`; this package derives Effect host services, conformance checks, health, and supervision from those seams. Each bundled provider is one `make` that returns a `Sandbox.Provider`; the vendor surface it drives is a constructor argument.
 
 It depends on `@smthrs/kernel`, for `CommandLine` rendering and quoting alone, and nothing else in the workspace. That direction is deliberate: a sandbox is one way to satisfy `ChildProcessSpawner`, so it sits above the closed host list rather than inside it.
 
@@ -193,7 +200,7 @@ The checks run through `RemoteChildProcessSpawner.layer`, because a provider tha
 | `Provider` | interface + service tag | scoped `acquire(session)` creates or reattaches a machine and owns its teardown |
 | `CommandProviderOptions`, `commandProvider` | interface and constructor | projects a lifecycle provider onto `RemoteChildProcessSpawner.Provider` |
 | `fileSystem` | constructor | derives Effect's `FileSystem` from one session |
-| `LayerHostOptions`, `layerHost` | interface and layer | holds one machine as `ChildProcessSpawner`, `FileSystem`, and `Path` |
+| `LayerHostOptions`, `layerHost` | interface and layer | holds one machine as `ChildProcessSpawner`, `FileSystem`, `Path`, and `SandboxHealth`; `health` sets the probe deadline |
 | `TestSession`, `TestSessionProvider`, `TestSessionState` | const and interfaces | deterministic scripted lifecycle provider, guest tree, commands, and acquire/release observations |
 
 `Session` is a machine contract, not just a command transport. Its file operations and spawned commands must see the same tree.
@@ -229,10 +236,17 @@ const useMachine = Effect.scoped(
 The probe surface is intentionally honest. `stat` reports exact file size, but mode is `0` and times and ownership are absent. Directory output is line-framed, so a newline in a filename is misread. Probes require the named POSIX utilities on the machine.
 
 ```ts
-const machineHost = Sandbox.layerHost(provider, { session: "run:01J..." })
+const machineHost = Sandbox.layerHost(provider, {
+  session: "run:01J...",
+  health: { deadline: "10 seconds" }
+})
 ```
 
 `layerHost` acquires one session for the layer scope and derives `ChildProcessSpawner`, `FileSystem`, and `Path` from it. This layer context is what a caller hands to an agent's standard filesystem and shell tools to place both on the same machine. When the provider supplies isolation, the machine boundary, not a path guard, denies ambient host access. Closing the layer scope runs provider teardown.
+
+The layer also serves `SandboxHealth`, built with `SandboxHealth.fromProvider` over the held session, so a caller can ask whether the machine is still there. `options.health` is the probe's `ProbeOptions`; its `deadline` defaults to 5 seconds. A session without `ping` yields the noop probe, which always answers `Healthy`. That is not a claim the machine is alive; it says nothing is watching it.
+
+What `layerHost` deliberately does not do is what `SandboxSupervision` does for the spawn-only seam: retire an unhealthy session and open a fresh one behind the caller's back. That is right for a transport, where a command is the whole unit of work, and wrong here, because the body holding these services has been writing to this machine. Swapping it mid-action would silently discard those writes and hand the body an empty tree that still looks like its workspace. A dead machine surfaces as a failure instead, and re-provisioning belongs to whoever retries the action, which acquires the session key again.
 
 ### SandboxConformance
 
@@ -251,6 +265,22 @@ const violations = yield* SandboxConformance.check(provider, {
 ```
 
 Each check acquires a fresh session. The suite verifies byte round-trips, `not_found`, parent creation, the default workdir, environment delivery, and a working release-then-reacquire cycle. It projects the provider through `Sandbox.commandProvider` and delegates spawn, exit, ping, and real process-stop checks to `ProviderConformance`. A provider package asserts that the returned array is empty.
+
+### Providers
+
+One row per bundled provider. Every cell is read from the provider's source and its tests.
+
+| Provider | What a machine is | How the vendor surface arrives | Reattaches an existing machine on the same session key | Declares `kill` | Real-backend test in this repository |
+| --- | --- | --- | --- | --- | --- |
+| `DirectorySandbox` | one host directory under `root` | injected services: the host `FileSystem` and `ChildProcessSpawner` | yes, the recursive `makeDirectory` leaves a crash-left directory and its files in place | yes, the host handle's signal | host directories and processes (`DirectorySandbox.test.ts`) |
+| `ContainerSandbox` | one container from `image`, held on `sleep infinity` | injected spawner running a Docker-compatible CLI | yes, a name `already in use` is reattached | yes, a pidfile plus a `/proc` descendant walk | Docker (`RealContainerSandbox.integration.test.ts`, skipped without `docker info`) |
+| `KubernetesSandbox` | one Pod from `image`, held on `sleep infinity` | injected spawner running `kubectl` | yes, `AlreadyExists` is reattached | yes, the same pidfile script over `kubectl exec` | OrbStack Kubernetes (`RealKubernetesSandbox.integration.test.ts`, skipped without the `orbstack` context) |
+| `JustBashSandbox` | one directory in a shared virtual filesystem; commands are interpreted in-process | injected interpreter slice (`JustBashLike`) and `FileSystem` | n/a, in-process | no | none, fake only |
+| `MicrosandboxSandbox` | one local microVM from an image or a snapshot | injected SDK slice (`Sdk`) | yes, `sandboxAlreadyExists` connects to or restarts it; `persistence: "sticky"` keeps it running for that purpose | no | Microsandbox microVM (`RealMicrosandbox.integration.test.ts`, skipped without the `microsandbox` binary) |
+| `VercelSandbox` | one named persistent Vercel sandbox | injected SDK slice (`Sdk`) plus caller-supplied credentials | yes, `getOrCreate` with `persistent: true` and `resume: true` | no | none, fake only |
+| `DaytonaSandbox` | one named Daytona sandbox | injected SDK slice: a configured `Daytona` client | yes, `get(name)` first, `create` on a 404, `start` when attached | no | none, fake only |
+| `AwsSandbox` | one Fargate task from `RunTask` | injected SDK slice: the ECS aggregate client | no, every acquire runs a new task | no | none, fake only |
+| `CloudflareSandbox` | one Sandbox Durable Object behind a Worker binding | caller-supplied binding, through an injected `getSandbox` slice | yes, the Durable Object id is derived from the key, so the same object answers | no | none, fake only |
 
 ### DirectorySandbox
 
@@ -293,6 +323,179 @@ const provider = ContainerSandbox.make({
 The default CLI is `docker`; set `program: "podman"` for Podman or name a compatible wrapper. `acquire` deterministically names the container, runs `create` then `start`, and reattaches when that name already exists. Commands, reads, and writes all travel through `exec` to the same guest workdir. The scope finalizer runs `rm --force`, ending the container and everything still inside it.
 
 Killing the local `docker exec` client does not reliably signal the guest process. Each spawned command therefore writes its guest pid to a session-private pidfile. `kill` starts a second guest command that walks descendants through `/proc`, signals children first, and then signals the recorded process. Acquisition wipes the pidfile directory before reuse, so reattachment cannot target stale pids.
+
+### KubernetesSandbox
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `make` | constructor | builds a create-or-reattach `Sandbox.Provider` whose machines are Pods driven through an injected `kubectl` spawner; `image` is required, and `namespace`, `program`, `context`, `kubeconfig`, `workdir`, `env`, `labels`, `resources`, `serviceAccount`, `nodeSelector`, `createArgs`, and `namePrefix` shape the Pod |
+
+```ts
+import { KubernetesSandbox } from "@smthrs/sandbox"
+
+const provider = KubernetesSandbox.make({
+  spawner,
+  image: "node:22",
+  context: "orbstack",
+  namespace: "smithers-runs",
+  serviceAccount: "runner",
+  resources: {
+    requests: { cpu: "250m", memory: "512Mi" },
+    limits: { cpu: "2", memory: "2Gi" }
+  }
+})
+```
+
+`acquire` derives the Pod name from the session key (prefix `smthrs-sbx-`, lowercased, bounded to 63 characters with the key's digest kept), runs `kubectl run` with `--restart Never` and `sleep infinity`, treats an `AlreadyExists` answer as a reattach, waits for the `Ready` condition with a 300 second timeout, and prepares the workdir and a session-private pidfile directory. Options `kubectl run` has no flag for (`serviceAccount`, `nodeSelector`, `resources`) travel as a strategic-merge `--overrides` document; `context`, `namespace`, and `kubeconfig` prefix every invocation. The scope finalizer runs `kubectl delete pod --force --grace-period=0`, and a Pod that was created but never became Ready or could not prepare its workspace is deleted the same way.
+
+Commands run through `kubectl exec` under the guest `sh`, in the requested `cwd` with the requested environment exported. Files travel through the same channel as base64: a read runs guest `base64`, a write pipes base64 into `base64 -d` on the exec's stdin after `mkdir -p` of the parent, and "file contents cross the text boundary as base64 and remain byte exact". `kill` is the `ContainerSandbox` design, a pidfile per command and a second exec that signals descendants before the recorded pid. `ping` is `kubectl exec <pod> -- true`.
+
+Isolation is the cluster's, not the provider's: the image, the service account, and the namespace's policies decide what a Pod can reach, and the provider only forwards the shaping options above. The image must carry `sh` and `base64`. The Ready timeout is fixed. The real-backend suite runs against the `orbstack` context and skips wherever `kubectl cluster-info` does not answer there.
+
+### JustBashSandbox
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `JustBashLike` | interface | the structural slice of a just-bash interpreter: `run(command, { cwd, env })` resolving to `{ stdout, stderr, exitCode }` |
+| `make` | constructor | builds a `Sandbox.Provider` whose machines are subdirectories of `root` (default `/workspace`) in one virtual filesystem; `bash` and `fs` are required |
+
+```ts
+import { JustBashSandbox } from "@smthrs/sandbox"
+
+const provider = JustBashSandbox.make({
+  bash: interpreter, // a just-bash instance mounted over the same tree as `fs`
+  fs,
+  root: "/workspace"
+})
+```
+
+`acquire` creates `root/<slug>` through the injected `FileSystem` and removes it, recursively, when the scope closes. Commands go to `bash.run` with the session workdir as `cwd` and the defined entries of the spawn environment; reads, writes, and the native `files` operations (`exists`, `stat`, `readDirectory`, `makeDirectory`, `remove`, `rename`, `realPath`, `readLink`, with relative paths rooted at the workdir) go to the injected `FileSystem`. The caller must mount the interpreter and that service on the same tree: "In a browser this normally means just-bash and `BrowserFileSystem` both view the same ZenFS volume." `ping` always succeeds. There is no machine to reattach; a same-key acquire recreates the directory with a recursive `makeDirectory`, which leaves whatever the mounted tree already holds in place.
+
+"This provider is a workspace boundary, not a security boundary. An interpreted command can address anything its shared virtual filesystem permits." Runs are serialized behind one permit, because just-bash has one mutable filesystem view. A spawn completes before it returns, stdout and stderr each replay at most one chunk, and `isRunning` is already `false` by the time a caller can observe the adapted handle. There is no stdin, no signal delivery, no separately spawned process pipeline, and no incremental output, so sessions omit `kill`. The suite runs against an in-memory tree and a scripted interpreter; nothing here is proven against the real just-bash package.
+
+### MicrosandboxSandbox
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `Sdk` | interface | the structural slice of the Microsandbox SDK: `Sandbox.builder(name)` and `Sandbox.get(name)`, with the fluent builder, the single-drain command handle, the lifecycle handle, and the guest filesystem behind them |
+| `make` | constructor | builds a `Sandbox.Provider` over local Microsandbox microVMs; `image` (default `oven/bun:1`) or `snapshot`, `workdir`, `shell`, `env`, `persistence`, `cpus`, `maxCpus`, `memoryMib`, `maxMemoryMib`, `maxDurationSecs`, `idleTimeoutSecs`, `security`, `pullPolicy`, `labels`, `scripts`, `detached`, `disableNetwork` |
+
+```ts
+import * as Microsandbox from "microsandbox"
+import { MicrosandboxSandbox } from "@smthrs/sandbox"
+
+const provider = MicrosandboxSandbox.make({
+  sdk: Microsandbox,
+  image: "oven/bun:1",
+  persistence: "sticky",
+  cpus: 2,
+  memoryMib: 2048,
+  idleTimeoutSecs: 600,
+  disableNetwork: true
+})
+```
+
+The machine name is `smthrs-msb-<slug>`. `acquire` configures the builder and calls `create`; when the SDK answers `sandboxAlreadyExists` it fetches the handle and connects when the machine is running or starts it (detached, for sticky sessions) when it is stopped. "Machine creation is registered as a scoped resource before guest setup, so a microVM that boots but cannot prepare its workspace is stopped." `ephemeral` persistence, the default, stops the machine when the scope closes; `sticky` "deliberately leaves it running so the next acquire of the same session key can reconnect", and only stops a sticky machine it created but could not prepare. Commands run through `execStreamWith(shell, ["-lc", command])` with the workdir applied per execution, "because Microsandbox validates a builder workdir before the selected image has booted", and the single-drain handle is collected exactly once. Writes use the SDK's byte-safe `fs().write`; reads run guest `base64` and decode it, "because the required SDK read operation is UTF-8 text only". `ping` reads `/etc/hostname`.
+
+`image` and `snapshot` are exclusive; naming both fails with `unavailable` before any vendor call. Output is collected after the command finishes: one stdout chunk, one stderr chunk, no streaming, no stdin, and no `kill`. A stopped ephemeral machine is gone with its files. The real-backend suite runs the conformance check against a real microVM only where the `microsandbox` binary answers `--version`.
+
+### VercelSandbox
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `Credentials` | interface | `oidcToken`, or `token` together with `teamId` and `projectId` |
+| `Sdk` | interface | the portion of `@vercel/sandbox` used: `Sandbox.getOrCreate`, then `runCommand`, `readFile`, `writeFiles`, `extendTimeout`, and `stop` on the instance |
+| `make` | constructor | builds a `Sandbox.Provider` over named, persistent Vercel sandboxes; `env`, `timeoutMs`, `maxDurationMs`, `workdir` (default `/vercel/sandbox`), `runtime`, `commandEnv`, `namePrefix` (default `smthrs-`) |
+
+```ts
+import * as vercel from "@vercel/sandbox"
+import { VercelSandbox } from "@smthrs/sandbox"
+
+const provider = VercelSandbox.make({
+  sdk: vercel,
+  token,
+  teamId,
+  projectId,
+  timeoutMs: 30 * 60_000,
+  maxDurationMs: 60 * 60_000,
+  runtime: "node22"
+})
+```
+
+The machine name is `smthrs-<slug>`, lowercased. `acquire` calls `Sandbox.getOrCreate` with `persistent: true` and `resume: true`, so a name that already exists is resumed with its filesystem, and the scope finalizer calls `stop()`, which leaves the persistent sandbox in place for the next acquire. Credentials resolve in a fixed order: an explicit `oidcToken` or `VERCEL_OIDC_TOKEN` wins; otherwise `token`, `teamId`, and `projectId` are sent together or not at all; the environment consulted is `options.env`, never `process.env`. "Vercel limits the timeout accepted by one create request to five minutes. Longer requested lifetimes create at that ceiling, then call `extendTimeout` with only the remaining duration because that API extends by its argument rather than setting an absolute target." Commands run as `sh -lc` through `runCommand`, with `commandEnv` under the per-spawn environment. A read drains `readFile`'s stream, string or bytes, into one buffer, and `null` is `not_found`; a write runs `mkdir -p` for the parent and calls `writeFiles`.
+
+`timeoutMs` must be a positive finite number, `maxDurationMs` is a caller-owned cap checked before any vendor request, and `workdir` must be absolute; each refusal is a `spawn_error` raised before anything is acquired. Output arrives after the command finishes, so there is no streaming, no stdin, and no `kill`. There is no real-backend suite; the provider is proven against an SDK fake that models persistence, credential precedence, and the timeout remainder.
+
+### DaytonaSandbox
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `Sdk` | interface | the portion of a configured `Daytona` client used: `get`, `create`, `start`, `delete`, and on the instance `getWorkDir`, `process.executeCommand`, `fs.downloadFile`, `fs.uploadFileStream` |
+| `make` | constructor | builds a `Sandbox.Provider` over Daytona sandboxes; `workdir`, `commandEnv`, `namePrefix` (default `smthrs-`), `startTimeoutSeconds`, `deleteTimeoutSeconds` (default 60) |
+
+```ts
+import { DaytonaSandbox } from "@smthrs/sandbox"
+
+const provider = DaytonaSandbox.make({
+  sdk: daytona, // a configured `new Daytona(...)` client
+  workdir: "/home/daytona/workspace",
+  startTimeoutSeconds: 120
+})
+```
+
+The machine name is `smthrs-<slug>`, lowercased. `acquire` calls `get(name)` first; a 404 creates a sandbox with that name, and an existing one is started with `startTimeoutSeconds`. "Creation or attachment is registered as a scoped resource before start and workspace preparation, so any later failure still runs the blocking delete finalizer", `delete(sandbox, deleteTimeoutSeconds, true)`. The workdir is `options.workdir` or the sandbox's own `getWorkDir()`, and either must be absolute. Commands run through `process.executeCommand(command, cwd, env)`. "Daytona's byte-native download and stream-upload operations serve file transfer; shell execution creates missing parents": `downloadFile` for reads, with `FILE_NOT_FOUND` mapped to `not_found`, and `uploadFileStream` for writes.
+
+Teardown deletes the sandbox, so nothing survives a normal release; only a crash-left sandbox is found again by name. `executeCommand` returns one `result` string, so `stderr` is always empty and output arrives after the command finishes; there is no streaming, no stdin, and no `kill`. There is no real-backend suite; the provider is proven against an SDK fake.
+
+### AwsSandbox
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `Sdk` | interface | the structural slice of the AWS SDK v3 `ECS` aggregate client: `runTask`, `describeTasks`, `executeCommand`, `stopTask`, `registerTaskDefinition`, `deregisterTaskDefinition` |
+| `make` | constructor | builds a `Sandbox.Provider` over Fargate tasks; `region`, `cluster`, `subnets`, and either `taskDefinition` or `image` with `taskRoleArn` are required, and `securityGroups`, `assignPublicIp`, `container`, `workdir`, `platformVersion`, `executionRoleArn`, `env`, `pollIntervalMs`, `maxPollAttempts`, and for an image `cpu` and `memory` shape the task |
+
+```ts
+import { ECS } from "@aws-sdk/client-ecs"
+import { AwsSandbox } from "@smthrs/sandbox"
+
+const provider = AwsSandbox.make({
+  sdk: new ECS({ region: "us-west-2" }),
+  region: "us-west-2",
+  cluster: "smithers",
+  subnets: ["subnet-0abc"],
+  securityGroups: ["sg-0abc"],
+  image: "ghcr.io/acme/runner:1",
+  taskRoleArn: "arn:aws:iam::123456789012:role/runner-task",
+  executionRoleArn: "arn:aws:iam::123456789012:role/runner-exec"
+})
+```
+
+`acquire` calls `RunTask` with `enableExecuteCommand: true`, `launchType: "FARGATE"`, and a `startedBy` derived from the session key, polls `DescribeTasks` with exponential backoff (capped at 10 seconds, `maxPollAttempts` default 60) until the task is `RUNNING` and its `ExecuteCommandAgent` reports `RUNNING`, and registers `StopTask` on the scope. A task that reaches `STOPPED` first fails with `unavailable`; an exhausted poll budget fails with `timeout`. "Supplying an image registers a minimal Fargate task definition and deregisters it after the task finalizer runs": family `smthrs-<startedBy>`, `sleep infinity`, `initProcessEnabled`, `cpu` 256 and `memory` 512 by default, container `sandbox`. `env` reaches the task as container overrides, which needs a `container` name or an image-generated definition. `ping` describes the task again and requires the same readiness.
+
+AwsSandbox cannot transfer files at all. `readFile` and `writeFile` fail with `unavailable` and the reason "reading `<path>` requires the ECS Exec SSM data channel, which @aws-sdk/client-ecs does not implement" (or "writing"). `spawn` calls `ExecuteCommand`, which "returns SSM session metadata only", and then fails with "ExecuteCommand opened an SSM session, but the ECS client exposes no process data channel"; the failure carries the region and the session id and never the stream URL or token. The conformance suite records exactly eight violations for this provider: `round-trips-binary-bytes`, `reports-an-absent-file`, `creates-parent-directories`, `runs-in-its-workdir`, `delivers-the-environment`, `reacquires-its-session`, `writes-its-output`, `reports-a-nonzero-exit`. Every acquire runs a new task and nothing looks a task up by `startedBy`, so the provider cannot resume across a crash: the previous task keeps running and the next acquire starts another. There is no `kill` and no real-backend suite. "A future provider can add a separately injected, browser-safe SSM stream transport."
+
+### CloudflareSandbox
+
+| Export | Kind | Notes |
+| --- | --- | --- |
+| `Sdk<Binding>` | interface | the structural slice of `@cloudflare/sandbox`: `getSandbox(binding, id, options)` returning `mkdir`, `writeFile`, `readFile`, `exec`, `startProcess`, and `destroy`; `Binding` stays generic because the real `DurableObjectNamespace` type only exists in a Worker |
+| `make` | constructor | builds a `Sandbox.Provider` over Sandbox Durable Objects; `binding` is required, and `execution` (`exec`, the default, or `process`), `workdir`, `sleepAfter`, and `keepAlive` are optional |
+
+```ts
+import { getSandbox } from "@cloudflare/sandbox"
+import { CloudflareSandbox } from "@smthrs/sandbox"
+
+const provider = CloudflareSandbox.make({
+  sdk: { getSandbox },
+  binding: env.SANDBOX,
+  execution: "exec",
+  sleepAfter: "10m"
+})
+```
+
+"The Worker binding is the credential and infrastructure handle." `acquire` resolves the Durable Object whose id is the session slug, with `enableDefaultSession: false` so the SDK's implicit shell session is never opened, forwards `keepAlive` and `sleepAfter` only when set, registers `destroy()` on the scope, and creates the workdir. In `exec` mode a command is `sandbox.exec` and its completed result; in `process` mode it is `startProcess`, then `waitForExit`, then `getLogs`, and the exit code falls back from the exit, to the handle, to `1`. "File payloads use the SDK's base64 encoding and the text is read from the result's `content` field. This preserves arbitrary bytes without importing host modules." `FILE_NOT_FOUND` is `not_found`. `ping` runs `exec("true")` in the workdir.
+
+This provider does not create infrastructure. The Durable Object namespace, its container image, and the Worker that holds the binding are deployed by the caller, and the binding is the credential; there is nothing to configure here beyond it. Output arrives after the command completes in both modes, so there is no streaming, no stdin, and no `kill`. The finalizer destroys the object, so a normal release discards its files; only a crash-left object is found again by id. There is no real-backend suite; both execution modes are proven against a fake binding.
 
 ### Browser support
 

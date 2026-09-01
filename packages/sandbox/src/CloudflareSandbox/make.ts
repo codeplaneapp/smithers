@@ -1,0 +1,173 @@
+/**
+ * Builds a Cloudflare Sandbox provider.
+ *
+ * @since 0.1.0
+ */
+import * as Effect from "effect/Effect"
+import * as Stream from "effect/Stream"
+import { decodeBase64, encodeBase64 } from "../internal/base64.ts"
+import { sessionSlug } from "../internal/sessionSlug.ts"
+import type { RemoteProcess } from "../RemoteChildProcessSpawner/Provider.ts"
+import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
+import type { Provider } from "../Sandbox/Provider.ts"
+import type { Session } from "../Sandbox/Session.ts"
+import type { Sdk } from "./Sdk.ts"
+
+interface Options<Binding> {
+  readonly sdk: Sdk<Binding>
+  readonly binding: Binding
+  readonly execution?: "exec" | "process" | undefined
+  readonly workdir?: string | undefined
+  readonly sleepAfter?: string | number | undefined
+  readonly keepAlive?: boolean | undefined
+}
+
+const encoder = new TextEncoder()
+
+const failed = (code: ProviderError["code"], message: string, cause: unknown): ProviderError =>
+  new ProviderError({ code, message: `cloudflare sandbox: ${message}`, cause })
+
+const attempt = <A>(thunk: () => Promise<A>, code: ProviderError["code"], message: string) =>
+  Effect.tryPromise({
+    try: thunk,
+    catch: (cause) => failed(code, message, cause)
+  })
+
+const parentOf = (path: string): string | undefined => {
+  const separator = path.lastIndexOf("/")
+  return separator < 0 ? undefined : separator === 0 ? "/" : path.slice(0, separator)
+}
+
+const definedEnv = (
+  env: Readonly<Record<string, string | undefined>> | undefined
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(env ?? {}).filter((entry): entry is [string, string] => entry[1] !== undefined)
+  )
+
+const errorCodeOf = (cause: unknown): unknown =>
+  typeof cause === "object" && cause !== null && "code" in cause ? cause.code : undefined
+
+const processOf = (stdout: string, stderr: string, exitCode: number): RemoteProcess => ({
+  stdout: Stream.make(encoder.encode(stdout)),
+  stderr: Stream.make(encoder.encode(stderr)),
+  exitCode: Effect.succeed(exitCode)
+})
+
+/**
+ * Builds a provider backed by Cloudflare Sandbox Durable Objects.
+ *
+ * The Worker binding is the credential and infrastructure handle. Acquiring a
+ * session resolves its collision-proof Durable Object id, disables the SDK's
+ * implicit default shell session, and registers `destroy()` on the acquiring
+ * scope. `exec` mode uses the completed command result. `process` mode waits
+ * for the detached handle and fetches its logs before it reports an outcome.
+ *
+ * File payloads use the SDK's base64 encoding and the text is read from the
+ * result's `content` field. This preserves arbitrary bytes without importing
+ * host modules.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const make = <Binding>(options: Options<Binding>): Provider => {
+  const workdir = options.workdir ?? "/workspace"
+
+  return {
+    acquire: (sessionKey) =>
+      Effect.gen(function*() {
+        const remoteId = sessionSlug(sessionKey)
+        const sandbox = yield* Effect.acquireRelease(
+          Effect.try({
+            try: () =>
+              options.sdk.getSandbox(options.binding, remoteId, {
+                enableDefaultSession: false,
+                ...options.keepAlive === undefined ? {} : { keepAlive: options.keepAlive },
+                ...options.sleepAfter === undefined ? {} : { sleepAfter: options.sleepAfter }
+              }),
+            catch: (cause) => failed("unavailable", `could not resolve ${remoteId}`, cause)
+          }),
+          (sandbox) => Effect.ignore(attempt(() => sandbox.destroy(), "unknown", `could not destroy ${remoteId}`))
+        )
+        yield* attempt(
+          () => sandbox.mkdir(workdir, { recursive: true }),
+          "unavailable",
+          `could not create ${workdir}`
+        )
+
+        const spawn: Session["spawn"] = (command, spawnOptions) => {
+          const commandOptions = {
+            cwd: spawnOptions.cwd ?? workdir,
+            env: definedEnv(spawnOptions.env)
+          }
+          return options.execution === "process"
+            ? Effect.map(
+              attempt(
+                async () => {
+                  const started = await sandbox.startProcess(command, commandOptions)
+                  const exit = await started.waitForExit()
+                  const logs = await started.getLogs()
+                  return {
+                    ...logs,
+                    exitCode: exit.exitCode ?? started.exitCode ?? 1
+                  }
+                },
+                "spawn_error",
+                `process failed for ${command}`
+              ),
+              (result) => processOf(result.stdout, result.stderr, result.exitCode)
+            )
+            : Effect.map(
+              attempt(
+                () => sandbox.exec(command, commandOptions),
+                "spawn_error",
+                `exec failed for ${command}`
+              ),
+              (result) => processOf(result.stdout, result.stderr, result.exitCode)
+            )
+        }
+
+        const session: Session = {
+          id: sessionKey,
+          remoteId,
+          workdir,
+          spawn,
+          readFile: (path) =>
+            Effect.flatMap(
+              Effect.tryPromise({
+                try: () => sandbox.readFile(path, { encoding: "base64" }),
+                catch: (cause) =>
+                  errorCodeOf(cause) === "FILE_NOT_FOUND"
+                    ? failed("not_found", `nothing exists at ${path}`, cause)
+                    : failed("unknown", `could not read ${path}`, cause)
+              }),
+              (result) => decodeBase64(result.content, `for ${path}`)
+            ),
+          writeFile: (path, content) =>
+            Effect.gen(function*() {
+              const parent = parentOf(path)
+              if (parent !== undefined) {
+                yield* attempt(
+                  () => sandbox.mkdir(parent, { recursive: true }),
+                  "unknown",
+                  `could not create the parent of ${path}`
+                )
+              }
+              yield* attempt(
+                () => sandbox.writeFile(path, encodeBase64(content), { encoding: "base64" }),
+                "unknown",
+                `could not write ${path}`
+              )
+            }),
+          ping: Effect.flatMap(
+            attempt(() => sandbox.exec("true", { cwd: workdir }), "unavailable", `could not ping ${remoteId}`),
+            (result) =>
+              result.exitCode === 0
+                ? Effect.void
+                : Effect.fail(failed("unavailable", `${remoteId} failed its ping`, result))
+          )
+        }
+        return session
+      })
+  }
+}

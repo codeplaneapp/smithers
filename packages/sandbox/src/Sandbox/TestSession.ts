@@ -34,6 +34,7 @@ const makeTestSession = (options: {
   const state: TestSessionState = {
     acquired: [],
     commands: [],
+    inputs: [],
     files: new Map(
       Object.entries(options.files ?? {}).map(([path, content]) => [
         path,
@@ -49,8 +50,9 @@ const makeTestSession = (options: {
     id: options.session ?? "test-session",
     remoteId: options.remoteId ?? "test-remote",
     workdir: options.workdir ?? "/sandbox",
-    spawn: Effect.fnUntraced(function*(command: string) {
+    spawn: Effect.fnUntraced(function*(command: string, spawnOptions) {
       state.commands.push(command)
+      state.inputs.push(spawnOptions.stdin)
       const script = resolve(command)
       if (script.failure !== undefined) return yield* Effect.fail(script.failure)
       const process: RemoteProcess = {

@@ -12,17 +12,23 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import { make } from "../RemoteChildProcessSpawner/layer.ts"
 import type { Provider as RemoteProvider } from "../RemoteChildProcessSpawner/Provider.ts"
 import type { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
+import * as SandboxHealth from "../SandboxHealth/index.ts"
 import { fileSystem } from "./fileSystem.ts"
 import type { Provider } from "./Provider.ts"
 import type { Session } from "./Session.ts"
 
-/** A spawn-only view of a session something else already holds. */
+/**
+ * A spawn-only view of a session something else already holds. It declares
+ * `stdin` because the session contract obliges every provider to deliver it,
+ * so the adapter accepts input-fed commands instead of refusing them.
+ */
 const spawnerView = (session: Session): RemoteProvider => ({
   session: session.id,
   open: () => Effect.void,
   spawn: session.spawn,
   kill: session.kill,
-  ping: session.ping
+  ping: session.ping,
+  stdin: true
 })
 
 /**
@@ -34,6 +40,8 @@ const spawnerView = (session: Session): RemoteProvider => ({
 export interface LayerHostOptions {
   /** The session key the machine is acquired under. */
   readonly session: string
+  /** How long a liveness probe may take before the machine counts as gone. */
+  readonly health?: SandboxHealth.ProbeOptions | undefined
 }
 
 /**
@@ -53,6 +61,17 @@ export interface LayerHostOptions {
  * ambient host access here, which is why the sandbox-backed services are
  * served bare rather than kernel-decorated.
  *
+ * `SandboxHealth` is served alongside them, probing the machine this layer
+ * holds, so a caller can ask whether it is still there. What this layer
+ * deliberately does NOT do is what `SandboxSupervision` does for the spawn-only
+ * seam: retire an unhealthy session and open a fresh one behind the caller's
+ * back. That is right for a transport, where a command is the whole unit of
+ * work, and wrong here, because the body holding these services has been
+ * WRITING to this machine. Swapping it mid-action would silently discard those
+ * writes and hand the body an empty tree that still looks like its workspace.
+ * A dead machine surfaces as a failure instead, and re-provisioning belongs to
+ * whoever retries the action, which acquires the session key again.
+ *
  * @category layers
  * @since 0.1.0
  */
@@ -60,15 +79,23 @@ export const layerHost = (
   provider: Provider,
   options: LayerHostOptions
 ): Layer.Layer<
-  ChildProcessSpawner | FileSystem.FileSystem | Path.Path,
+  ChildProcessSpawner | FileSystem.FileSystem | Path.Path | SandboxHealth.Service,
   ProviderError
 > =>
   Layer.effectContext(
     Effect.gen(function*() {
       const session = yield* provider.acquire(options.session)
-      const spawner = yield* make(spawnerView(session))
+      const view = spawnerView(session)
+      const spawner = yield* make(view)
       return Context.make(ChildProcessSpawner, spawner).pipe(
-        Context.add(FileSystem.FileSystem, fileSystem(session))
+        Context.add(FileSystem.FileSystem, fileSystem(session)),
+        // A session with no `ping` yields the noop probe, which always answers
+        // healthy. That is not a claim the machine is alive; it says nothing is
+        // watching it, and `fromProvider` documents the distinction.
+        Context.add(
+          SandboxHealth.SandboxHealth,
+          SandboxHealth.fromProvider(view, options.health)
+        )
       )
     })
   ).pipe(Layer.merge(Path.layer))
