@@ -23,7 +23,19 @@ export interface Host {
   readonly env: Record<string, string | undefined>
   readonly stdout: Reporter.Terminal
   readonly stderr: Reporter.Terminal
-  readonly once: (signal: "SIGINT" | "SIGTERM", listener: () => void) => void
+  /**
+   * Registers a persistent signal listener, never a one-shot one.
+   *
+   * `ServiceSupervisor`'s orphan backstop asks `listenerCount(signal)` whether
+   * anything else owns the signal, and hard-kills the process when the answer
+   * is that it stands alone. Node's one-shot wrapper removes its listener
+   * BEFORE invoking it, so a `once` registration here surrendered ownership at
+   * exactly the moment the backstop looked: it re-raised with no handler
+   * installed and the process died instantly, before the abort this entry had
+   * just issued could unwind. Every write-set revert, scratch cleanup, and
+   * graceful service stop was skipped.
+   */
+  readonly on: (signal: "SIGINT" | "SIGTERM", listener: () => void) => void
   readonly removeListener: (signal: "SIGINT" | "SIGTERM", listener: () => void) => void
   readonly setExitCode: (code: number) => void
 }
@@ -45,17 +57,25 @@ export const main = async (host: Host): Promise<void> => {
 
   const controller = new AbortController()
   let interrupted = false
-  const interrupt = (signal: "SIGINT" | "SIGTERM"): void => {
+  const interrupt = (signal: "SIGINT" | "SIGTERM", listener: () => void): void => {
     interrupted = true
     host.setExitCode(1)
     controller.abort(new Error(`smithers build interrupted by ${signal}`))
+    // Surrender the signal only once this delivery is over. Every listener of
+    // one emit runs from a snapshot taken before the first of them, but
+    // `listenerCount` reads the live set, so removing synchronously here would
+    // show the supervisor's backstop an unowned signal within this very
+    // delivery, which is the bug a persistent registration exists to avoid.
+    // Deferring to a microtask leaves the next signal to the default
+    // disposition, so a second interrupt still stops the process at once.
+    queueMicrotask(() => host.removeListener(signal, listener))
   }
-  const onSigint = (): void => interrupt("SIGINT")
-  const onSigterm = (): void => interrupt("SIGTERM")
+  const onSigint = (): void => interrupt("SIGINT", onSigint)
+  const onSigterm = (): void => interrupt("SIGTERM", onSigterm)
   const exit = (code: number): void => host.setExitCode(code)
 
-  host.once("SIGINT", onSigint)
-  host.once("SIGTERM", onSigterm)
+  host.on("SIGINT", onSigint)
+  host.on("SIGTERM", onSigterm)
   try {
     await makeCli({
       cacheUrl,

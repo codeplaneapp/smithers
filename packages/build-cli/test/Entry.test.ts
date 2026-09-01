@@ -4,6 +4,7 @@
  * aborts the run and forces exit 1.
  */
 import * as NodeChildProcess from "node:child_process"
+import * as NodeEvents from "node:events"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
@@ -71,9 +72,19 @@ const terminal = (): Reporter.Terminal & { readonly text: () => string } => {
   }
 }
 
-/** A fake process: records listeners, exit codes, and the environment the run leaves behind. */
+/**
+ * A fake process: exit codes, the environment the run leaves behind, and a
+ * real `EventEmitter` behind the signal surface.
+ *
+ * The emitter is not decoration. `ServiceSupervisor`'s orphan backstop decides
+ * whether to hard-kill the process by asking `listenerCount(signal)`, and the
+ * difference between a persistent and a one-shot registration is visible only
+ * in a registry with Node's own semantics: a one-shot listener is removed
+ * before it is invoked. A Map-backed fake cannot tell the two apart, which is
+ * why the surrendered-signal defect was invisible here.
+ */
 const host = (argv: ReadonlyArray<string>, env: Record<string, string | undefined>) => {
-  const listeners = new Map<string, () => void>()
+  const signals = new NodeEvents.EventEmitter()
   const codes: Array<number> = []
   const stdout = terminal()
   const stderr = terminal()
@@ -82,17 +93,21 @@ const host = (argv: ReadonlyArray<string>, env: Record<string, string | undefine
     env,
     stdout,
     stderr,
-    once: (signal, listener) => {
-      listeners.set(signal, listener)
+    on: (signal, listener) => {
+      signals.on(signal, listener)
     },
-    removeListener: (signal) => {
-      listeners.delete(signal)
+    removeListener: (signal, listener) => {
+      signals.removeListener(signal, listener)
     },
     setExitCode: (code) => {
       codes.push(code)
     }
   }
-  return { value, listeners, codes, stdout, stderr }
+  const raise = (signal: "SIGINT" | "SIGTERM"): void => {
+    signals.emit(signal)
+  }
+  const owned = (signal: "SIGINT" | "SIGTERM"): number => signals.listenerCount(signal)
+  return { value, codes, stdout, stderr, raise, owned, signals }
 }
 
 describe("Entry.main", () => {
@@ -104,7 +119,8 @@ describe("Entry.main", () => {
     expect(env["SMITHERS_CACHE_URL"]).toBeUndefined()
     expect(env["SMITHERS_CACHE_TOKEN"]).toBeUndefined()
     expect(fake.codes).toEqual([])
-    expect(fake.listeners.size).toBe(0)
+    expect(fake.owned("SIGINT")).toBe(0)
+    expect(fake.owned("SIGTERM")).toBe(0)
     expect(fake.stdout.text()).toContain("ok: true")
     expect(fake.stderr.text()).toContain("//:good  ran")
   })
@@ -121,11 +137,11 @@ describe("Entry.main", () => {
     const root = await fixture()
     const fake = host(["//:good", "--workspace", root, "--ui", "plain"], { ...process.env })
     const running = Entry.main(fake.value)
-    fake.listeners.get("SIGINT")!()
+    fake.raise("SIGINT")
     await running
     expect(fake.codes[0]).toBe(1)
     expect(fake.codes.at(-1)).toBe(1)
-    expect(fake.listeners.size).toBe(0)
+    expect(fake.owned("SIGINT")).toBe(0)
     expect(fake.stdout.text()).toContain("interrupted by SIGINT")
   })
 
@@ -133,9 +149,33 @@ describe("Entry.main", () => {
     const root = await fixture()
     const fake = host(["query", "//...", "--workspace", root], { ...process.env })
     const running = Entry.main(fake.value)
-    fake.listeners.get("SIGTERM")!()
+    fake.raise("SIGTERM")
     await running
     expect(fake.codes).toContain(1)
     expect(fake.stdout.text()).toContain("interrupted by SIGTERM")
+  })
+
+  it("still owns the signal while a later listener runs, so the service backstop sees an owner", async () => {
+    // ServiceSupervisor's orphan backstop registers after this entry does and
+    // asks `listenerCount(signal)` whether anything else owns the signal. A
+    // one-shot registration is removed before its own handler runs, so the
+    // backstop saw itself alone, re-raised with no handler installed, and
+    // killed the process on the spot: the abort never unwound, so out-of-set
+    // writes stayed in the tree, scratch copies leaked, and services were
+    // SIGKILLed instead of stopped with their declared signal.
+    const root = await fixture()
+    const fake = host(["//:good", "--workspace", root, "--ui", "plain"], { ...process.env })
+    const running = Entry.main(fake.value)
+    const observed: Array<number> = []
+    fake.signals.on("SIGINT", () => observed.push(fake.owned("SIGINT")))
+    fake.raise("SIGINT")
+    // Two owners: this backstop stand-in and the entry, which has not yet let
+    // go of the signal it is still acting on.
+    expect(observed).toEqual([2])
+    await running
+    // A second interrupt is a demand to stop now, so the entry is gone from
+    // the signal by then and only the backstop stand-in remains.
+    expect(fake.owned("SIGINT")).toBe(1)
+    expect(fake.stdout.text()).toContain("interrupted by SIGINT")
   })
 })
