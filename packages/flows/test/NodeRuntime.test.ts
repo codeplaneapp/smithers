@@ -435,6 +435,45 @@ describe("the supported Node SQLite composition", () => {
     expect(readBack((database) => database.prepare("SELECT status FROM flows_runs ORDER BY run_id").all()))
       .toEqual([{ status: "completed" }, { status: "completed" }])
   }, 60_000)
+
+  it("hands back a wired context in the caller's own scope", async () => {
+    // `make` is the lower seam an integration reaches for when it wants the
+    // CONTEXT rather than a layer — the time-travel example builds a second
+    // engine-backed service over the same storage that way — and `layer` is
+    // nothing but `Layer.effectContext` around it. Two claims have to hold
+    // together: the context is fully wired when it arrives, so a flow driven
+    // straight off it settles without any further registration; and the scope
+    // that owns the database is the CALLER's, so leaving that scope is what
+    // closes the file. It is declared last in this block because it
+    // dispatches `Tally`, which the journey above counts.
+    const own = join(directory, "make-context", "engine.sqlite")
+
+    const settled = await Effect.runPromise(
+      Effect.gen(function*() {
+        const context = yield* NodeRuntime.make(
+          {
+            filename: own,
+            owner: { hostId: "make-context" },
+            isAlive: () => Effect.succeed(false)
+          },
+          StepBoundary.layer,
+          WorkspaceSandbox.layerFileSystem(),
+          registerFlows
+        )
+        return yield* Count.execute({ value: 4 }, { executionId: "make-context" }).pipe(
+          Effect.provide(context)
+        )
+      }).pipe(Effect.provide(host), Effect.scoped)
+    )
+
+    expect(settled).toBe(8)
+    const database = new DatabaseSync(own, { readOnly: true })
+    try {
+      expect(database.prepare("SELECT status FROM flows_runs").all()).toEqual([{ status: "completed" }])
+    } finally {
+      database.close()
+    }
+  }, 60_000)
 })
 
 /**
@@ -586,6 +625,47 @@ describe("the Node host composition", () => {
     readonly names: ReadonlyArray<string>
   }
   const Catalog: Context.Service<Catalog, Catalog> = Context.Service("flows/test/NodeRuntime/Catalog")
+
+  /**
+   * Naming a registry service without supplying its layer must not compile.
+   *
+   * The registry-free arities are OVERLOADS rather than a defaulted parameter,
+   * and that is the whole safety property. A defaulted parameter cannot honor
+   * a caller-chosen registry type: `layerHost<Registered, never, never,
+   * Catalog, never, never>(options, registerFlows)` would compile, and the
+   * layer it returned would CLAIM to provide `Catalog` while providing
+   * nothing — a service-not-found defect discovered when the layer builds,
+   * hours from the call that caused it. With overloads the registry type
+   * parameters exist only on the signature that also takes the argument, so
+   * the mismatch is unspellable. Every assertion below is a compile-time
+   * one: the `layerHost` call declares a layer and never builds it, and the
+   * two `Parameters` reads never run anything at all.
+   */
+  it("cannot name a registry service without supplying its layer", () => {
+    // @ts-expect-error the registry-typed overload requires the registry layer
+    const declared = NodeRuntime.layerHost<never, never, never, Catalog, never, never>(
+      { filename: hostFile, owner: { hostId: "registry-arity-host" }, signals: [] },
+      Layer.empty
+    )
+    expect(declared).toBeDefined()
+
+    // `layer` and `make` carry the same overload pair, and their boundary and
+    // sandbox arguments make an explicit instantiation unreadable. Their
+    // signature is what the assertion reads instead: once a registry type is
+    // named, the only applicable signature is the five-argument one, so the
+    // parameter list has no optional tail to omit. A defaulted parameter would
+    // report `4 | 5` here and hand back the same lying layer.
+    type Exact<A, B> = [A] extends [B] ? [B] extends [A] ? true : false : false
+    type LayerArity = Parameters<
+      typeof NodeRuntime.layer<never, never, never, never, never, never, never, Catalog, never, never>
+    >["length"]
+    type MakeArity = Parameters<
+      typeof NodeRuntime.make<never, never, never, never, never, never, never, Catalog, never, never>
+    >["length"]
+    const registryIsRequired: [Exact<LayerArity, 5>, Exact<MakeArity, 5>] = [true, true]
+
+    expect(registryIsRequired).toEqual([true, true])
+  })
 
   const readHostBack = <A>(query: (database: DatabaseSync) => A): A => {
     const database = new DatabaseSync(hostFile, { readOnly: true })
@@ -864,7 +944,7 @@ describe("the Node host composition", () => {
     const asked: Array<string> = []
     const declaredSystem = {
       isAlive: () => "dead" as const,
-      startedAtMs: () => undefined,
+      startedAtMs: () => ({ _tag: "unavailable" }) as const,
       ownGroup: () => {
         asked.push("ownGroup")
         return null
@@ -872,6 +952,10 @@ describe("the Node host composition", () => {
       bootedAtMs: () => {
         asked.push("bootedAtMs")
         return 0
+      },
+      refuseTarget: () => {
+        asked.push("refuseTarget")
+        return undefined
       },
       killTree: () => "already-gone" as const
     }

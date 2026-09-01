@@ -10,6 +10,11 @@
   `NodeRuntime`, including the batteries-included guarded host composition.
 - Bound runtime storage and Jj operations to an explicit workspace and kept
   engine snapshot authority separate from action-facing Jj permissions.
+- Added the optional `registry` seam to `NodeRuntime.make`, `NodeRuntime.layer`
+  and `NodeRuntime.layerHost`, built between the engine and the registration
+  phase so a registration reading a discovered catalog has both in hand. The
+  registry-free arities are separate overloads, so naming a registry service in
+  the type arguments without passing its layer no longer compiles.
 
 ### Removed
 

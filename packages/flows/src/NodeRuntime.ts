@@ -149,14 +149,6 @@ const validate = (options: Options): ValidatedOptions => {
   })
 }
 
-/**
- * The registry a host that discovers nothing composes: no services, no
- * requirements, no failures. Written as a function so each call site gets the
- * empty layer at its own type rather than sharing one assertion.
- */
-const emptyRegistry = <Out, Error, Requirements>(): Layer.Layer<Out, Error, Requirements> =>
-  Layer.empty as unknown as Layer.Layer<Out, Error, Requirements>
-
 const databaseLayer = (filename: string) =>
   Layer.unwrap(
     Effect.gen(function*() {
@@ -243,6 +235,40 @@ const composition = <
 }
 
 /**
+ * The registry-taking construction every public arity delegates to.
+ *
+ * {@link make}, {@link layer} and {@link layerHost} are OVERLOADED on this
+ * rather than defaulting the registry argument, because a default value cannot
+ * honor a caller-chosen registry type. With one signature and a default,
+ * `layer<..., MyRegistry, never, never>(options, boundary, sandbox, register)`
+ * compiles and returns a layer that CLAIMS to provide `MyRegistry` while
+ * providing nothing, and the disagreement surfaces as a service-not-found
+ * defect when the layer builds instead of as a type error where it was
+ * written. Splitting the arities keeps the registry type parameters on the
+ * signature that also takes the argument, so the mismatch cannot be spelled,
+ * and the empty registry the shorter arity passes is `Layer.empty` at its own
+ * `Layer<never, never, never>` type rather than an assertion.
+ */
+const makeWithRegistry = <
+  BoundaryError,
+  BoundaryRequirements,
+  SandboxError,
+  SandboxRequirements,
+  Registered,
+  RegistrationError,
+  RegistrationRequirements,
+  RegistryOut,
+  RegistryError,
+  RegistryRequirements
+>(
+  options: Options,
+  stepBoundary: Layer.Layer<StepBoundary.Service, BoundaryError, BoundaryRequirements>,
+  workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, SandboxError, SandboxRequirements>,
+  registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
+  registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements>
+) => Layer.build(composition(options, stepBoundary, workspaceSandbox, registerFlows, registry))
+
+/**
  * Builds the production service context in the current scope.
  *
  * The caller selects the filesystem boundary and workspace sandbox layers,
@@ -256,7 +282,75 @@ const composition = <
  * @category constructors
  * @slop
  */
-export const make = <
+export const make: {
+  <
+    BoundaryError,
+    BoundaryRequirements,
+    SandboxError,
+    SandboxRequirements,
+    Registered,
+    RegistrationError,
+    RegistrationRequirements
+  >(
+    options: Options,
+    stepBoundary: Layer.Layer<StepBoundary.Service, BoundaryError, BoundaryRequirements>,
+    workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, SandboxError, SandboxRequirements>,
+    registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>
+  ): ReturnType<
+    typeof makeWithRegistry<
+      BoundaryError,
+      BoundaryRequirements,
+      SandboxError,
+      SandboxRequirements,
+      Registered,
+      RegistrationError,
+      RegistrationRequirements,
+      never,
+      never,
+      never
+    >
+  >
+  <
+    BoundaryError,
+    BoundaryRequirements,
+    SandboxError,
+    SandboxRequirements,
+    Registered,
+    RegistrationError,
+    RegistrationRequirements,
+    RegistryOut,
+    RegistryError,
+    RegistryRequirements
+  >(
+    options: Options,
+    stepBoundary: Layer.Layer<StepBoundary.Service, BoundaryError, BoundaryRequirements>,
+    workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, SandboxError, SandboxRequirements>,
+    registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
+    registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements>
+  ): ReturnType<
+    typeof makeWithRegistry<
+      BoundaryError,
+      BoundaryRequirements,
+      SandboxError,
+      SandboxRequirements,
+      Registered,
+      RegistrationError,
+      RegistrationRequirements,
+      RegistryOut,
+      RegistryError,
+      RegistryRequirements
+    >
+  >
+} = (
+  options: Options,
+  stepBoundary: Layer.Layer<StepBoundary.Service, any, any>,
+  workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, any, any>,
+  registerFlows: Layer.Layer<any, any, any>,
+  registry?: Layer.Layer<any, any, any>
+) => makeWithRegistry(options, stepBoundary, workspaceSandbox, registerFlows, registry ?? Layer.empty)
+
+/** The registry-taking layer both {@link layer} arities delegate to. */
+const layerWithRegistry = <
   BoundaryError,
   BoundaryRequirements,
   SandboxError,
@@ -264,16 +358,19 @@ export const make = <
   Registered,
   RegistrationError,
   RegistrationRequirements,
-  RegistryOut = never,
-  RegistryError = never,
-  RegistryRequirements = never
+  RegistryOut,
+  RegistryError,
+  RegistryRequirements
 >(
   options: Options,
   stepBoundary: Layer.Layer<StepBoundary.Service, BoundaryError, BoundaryRequirements>,
   workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, SandboxError, SandboxRequirements>,
   registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
-  registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements> = emptyRegistry()
-) => Layer.build(composition(options, stepBoundary, workspaceSandbox, registerFlows, registry))
+  registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements>
+) =>
+  Layer.effectContext(
+    makeWithRegistry(options, stepBoundary, workspaceSandbox, registerFlows, registry)
+  )
 
 /**
  * Provides the supported scoped Node SQLite runtime.
@@ -296,24 +393,72 @@ export const make = <
  * @category layers
  * @slop
  */
-export const layer = <
-  BoundaryError,
-  BoundaryRequirements,
-  SandboxError,
-  SandboxRequirements,
-  Registered,
-  RegistrationError,
-  RegistrationRequirements,
-  RegistryOut = never,
-  RegistryError = never,
-  RegistryRequirements = never
->(
+export const layer: {
+  <
+    BoundaryError,
+    BoundaryRequirements,
+    SandboxError,
+    SandboxRequirements,
+    Registered,
+    RegistrationError,
+    RegistrationRequirements
+  >(
+    options: Options,
+    stepBoundary: Layer.Layer<StepBoundary.Service, BoundaryError, BoundaryRequirements>,
+    workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, SandboxError, SandboxRequirements>,
+    registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>
+  ): ReturnType<
+    typeof layerWithRegistry<
+      BoundaryError,
+      BoundaryRequirements,
+      SandboxError,
+      SandboxRequirements,
+      Registered,
+      RegistrationError,
+      RegistrationRequirements,
+      never,
+      never,
+      never
+    >
+  >
+  <
+    BoundaryError,
+    BoundaryRequirements,
+    SandboxError,
+    SandboxRequirements,
+    Registered,
+    RegistrationError,
+    RegistrationRequirements,
+    RegistryOut,
+    RegistryError,
+    RegistryRequirements
+  >(
+    options: Options,
+    stepBoundary: Layer.Layer<StepBoundary.Service, BoundaryError, BoundaryRequirements>,
+    workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, SandboxError, SandboxRequirements>,
+    registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
+    registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements>
+  ): ReturnType<
+    typeof layerWithRegistry<
+      BoundaryError,
+      BoundaryRequirements,
+      SandboxError,
+      SandboxRequirements,
+      Registered,
+      RegistrationError,
+      RegistrationRequirements,
+      RegistryOut,
+      RegistryError,
+      RegistryRequirements
+    >
+  >
+} = (
   options: Options,
-  stepBoundary: Layer.Layer<StepBoundary.Service, BoundaryError, BoundaryRequirements>,
-  workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, SandboxError, SandboxRequirements>,
-  registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
-  registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements> = emptyRegistry()
-) => Layer.effectContext(make(options, stepBoundary, workspaceSandbox, registerFlows, registry))
+  stepBoundary: Layer.Layer<StepBoundary.Service, any, any>,
+  workspaceSandbox: Layer.Layer<WorkspaceSandbox.Service, any, any>,
+  registerFlows: Layer.Layer<any, any, any>,
+  registry?: Layer.Layer<any, any, any>
+) => layerWithRegistry(options, stepBoundary, workspaceSandbox, registerFlows, registry ?? Layer.empty)
 
 /**
  * Configuration for the batteries-included Node host composition.
@@ -477,6 +622,7 @@ const snapshotContainment = (
       startedAtMs: system.startedAtMs,
       ownGroup: system.ownGroup,
       bootedAtMs: system.bootedAtMs,
+      refuseTarget: system.refuseTarget,
       killTree: system.killTree
     })
   return Object.freeze({
@@ -592,58 +738,18 @@ const onSignal = (
     }
   })
 
-/**
- * Provides the whole Node host, storage, kernel, and engine from one call.
- *
- * {@link layer} composes storage and the engine and leaves the host to the
- * caller: `Jj`, `FileSystem`, `Crypto`, the step boundary, and the workspace
- * sandbox are all arguments or requirements, and every embedder was wiring the
- * same eight layers in the same order to satisfy them. This composition is
- * that wiring, with the pieces a host actually has to decide left as options.
- *
- * What it adds over {@link layer}:
- *
- * - The complete Node host from `@smthrs/platform-node`, with process
- *   containment on: a spawned process gets its own process group, is signalled
- *   and then killed when its action's scope closes, and is recorded in the
- *   `ProcessLedger` so the next incarnation of this host reaps whatever a
- *   crash left running.
- * - The kernel's guarded Host surface over an unattended `GrantStore`, so an
- *   action reaches the host through the capability check rather than around
- *   it. A capability no rule in {@link HostOptions.rules} allows is denied.
- *   Engine snapshot bookkeeping uses a distinct private Jj service, so it
- *   grants no repository authority to the action context.
- * - The default `StepBoundary` and filesystem `WorkspaceSandbox`, which is the
- *   pairing that makes a sealed action's result eligible for the step cache.
- * - Signal handling: `SIGINT` or `SIGTERM` closes the runtime scope, which
- *   releases every run this host owns for another host to reclaim. A second
- *   signal, or a shutdown that outlasts
- *   {@link HostOptions.shutdownTimeoutMs}, leaves with the signal's own exit
- *   code instead of waiting on a finalizer that is not coming back.
- *
- * A program that needs a different host, a different policy, or no signals at
- * all still composes {@link layer} itself; nothing here is reachable only
- * through this function.
- *
- * The optional `registry` argument is the same seam {@link layer} takes: pass
- * `@smthrs/registry`'s `Executable.layerProject({ root })` to feed the
- * registration phase from `<root>/flows/**` and the installed packs instead of
- * a hand-written list of flows.
- *
- * @since 0.1.0
- * @category layers
- */
-export const layerHost = <
+/** The registry-taking host both {@link layerHost} arities delegate to. */
+const layerHostWithRegistry = <
   Registered,
   RegistrationError,
   RegistrationRequirements,
-  RegistryOut = never,
-  RegistryError = never,
-  RegistryRequirements = never
+  RegistryOut,
+  RegistryError,
+  RegistryRequirements
 >(
   options: HostOptions,
   registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
-  registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements> = emptyRegistry()
+  registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements>
 ) => {
   const validated = validateHost(options)
   const workspaceRoot = validated.workspaceRoot
@@ -700,6 +806,88 @@ export const layerHost = <
     return context
   }))
 }
+
+/**
+ * Provides the whole Node host, storage, kernel, and engine from one call.
+ *
+ * {@link layer} composes storage and the engine and leaves the host to the
+ * caller: `Jj`, `FileSystem`, `Crypto`, the step boundary, and the workspace
+ * sandbox are all arguments or requirements, and every embedder was wiring the
+ * same eight layers in the same order to satisfy them. This composition is
+ * that wiring, with the pieces a host actually has to decide left as options.
+ *
+ * What it adds over {@link layer}:
+ *
+ * - The complete Node host from `@smthrs/platform-node`, with process
+ *   containment on: a spawned process gets its own process group, is signalled
+ *   and then killed when its action's scope closes, and is recorded in the
+ *   `ProcessLedger` so the next incarnation of this host reaps whatever a
+ *   crash left running.
+ * - The kernel's guarded Host surface over an unattended `GrantStore`, so an
+ *   action reaches the host through the capability check rather than around
+ *   it. A capability no rule in {@link HostOptions.rules} allows is denied.
+ *   Engine snapshot bookkeeping uses a distinct private Jj service, so it
+ *   grants no repository authority to the action context.
+ * - The default `StepBoundary` and filesystem `WorkspaceSandbox`, which is the
+ *   pairing that makes a sealed action's result eligible for the step cache.
+ * - Signal handling: `SIGINT` or `SIGTERM` closes the runtime scope, which
+ *   releases every run this host owns for another host to reclaim. A second
+ *   signal, or a shutdown that outlasts
+ *   {@link HostOptions.shutdownTimeoutMs}, leaves with the signal's own exit
+ *   code instead of waiting on a finalizer that is not coming back.
+ *
+ * A program that needs a different host, a different policy, or no signals at
+ * all still composes {@link layer} itself; nothing here is reachable only
+ * through this function.
+ *
+ * The optional `registry` argument is the same seam {@link layer} takes: pass
+ * `@smthrs/registry`'s `Executable.layerProject({ root })` to feed the
+ * registration phase from `<root>/flows/**` and the installed packs instead of
+ * a hand-written list of flows.
+ *
+ * @since 0.1.0
+ * @category layers
+ */
+export const layerHost: {
+  <Registered, RegistrationError, RegistrationRequirements>(
+    options: HostOptions,
+    registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>
+  ): ReturnType<
+    typeof layerHostWithRegistry<
+      Registered,
+      RegistrationError,
+      RegistrationRequirements,
+      never,
+      never,
+      never
+    >
+  >
+  <
+    Registered,
+    RegistrationError,
+    RegistrationRequirements,
+    RegistryOut,
+    RegistryError,
+    RegistryRequirements
+  >(
+    options: HostOptions,
+    registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
+    registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements>
+  ): ReturnType<
+    typeof layerHostWithRegistry<
+      Registered,
+      RegistrationError,
+      RegistrationRequirements,
+      RegistryOut,
+      RegistryError,
+      RegistryRequirements
+    >
+  >
+} = (
+  options: HostOptions,
+  registerFlows: Layer.Layer<any, any, any>,
+  registry?: Layer.Layer<any, any, any>
+) => layerHostWithRegistry(options, registerFlows, registry ?? Layer.empty)
 
 /** Refuses a composition root that still owes a service. */
 type Complete<L> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>] ? [R] extends [never] ? true : false
