@@ -1042,7 +1042,18 @@ export const makePnpm = (options: Options): Effect.Effect<
     const spawner = yield* ChildProcessSpawner
     const fs = yield* FileSystem.FileSystem
     const normalized = normalizeOptions(options, runtime.platform)
-    const executable = normalized.executable ?? "pnpm"
+    // `pnpm` on Windows is a `pnpm.cmd` shim, and Node's spawn resolves `.exe`
+    // through the image path but never appends `PATHEXT`, so spawning the bare
+    // name fails with ENOENT before the manager runs. That took down 52 targets
+    // on the windows row of the package matrix. A caller that names its own
+    // executable keeps it verbatim, extension and all.
+    // `pnpm` on Windows is a `pnpm.cmd` shim, and Node's spawn resolves an
+    // image path through `.exe` but never appends `PATHEXT`, so spawning the
+    // bare name fails with `spawn pnpm ENOENT` before the manager runs. That
+    // took down 52 of 156 targets on the windows row of the package matrix. A
+    // caller that names its own executable keeps it verbatim, extension included.
+    const executable = normalized.executable ??
+      (normalized.platform.os === "win32" ? "pnpm.cmd" : "pnpm")
     const projectRoot = normalized.projectRoot
     const timeoutMs = normalized.timeoutMs
     const storeDirectory = `${storeRoot}/pnpm`

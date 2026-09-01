@@ -403,6 +403,31 @@ describe("PackageManager.storeRoot", () => {
   })
 
   /**
+   * The default executable carries the Windows shim's extension.
+   *
+   * `pnpm` on Windows is `pnpm.cmd`. Node's spawn resolves an image path
+   * through `.exe` and never appends `PATHEXT`, so the bare name fails with
+   * `spawn pnpm ENOENT` before the manager runs at all.
+   */
+  it("names the pnpm shim Windows actually ships when the caller names none", async () => {
+    await withFixture("package-manager-windows-shim", async (root) => {
+      // No Windows host here, so the observation is the spawn failure itself:
+      // the error names the command line it could not start, which is the
+      // executable this manager chose.
+      const refusal = await Effect.runPromise(
+        PackageManager.makePnpm({ requirement: "11.21.0", projectRoot: root }).pipe(
+          Effect.flatMap((manager) => manager.version),
+          Effect.flip,
+          Effect.map((error) => String((error as { readonly cause?: unknown }).cause)),
+          Effect.provide(NodeServices.layer),
+          Effect.provide(windowsRuntimeLayer)
+        )
+      )
+      expect(refusal).toContain("pnpm.cmd")
+    })
+  })
+
+  /**
    * Accepting a Windows name into the lookup source does not put it on a child.
    * Only the bootstrap list and the names a `.npmrc` references are selected
    * from the source, and both are portable by construction, so what the manager
