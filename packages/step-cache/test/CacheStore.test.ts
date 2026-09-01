@@ -615,9 +615,11 @@ describe("CacheStore", () => {
         const sql = yield* Effect.service(SqlClient.SqlClient)
         const store = yield* CacheStore
         yield* store.put(entry)
-        yield* sql`UPDATE flows_step_cache SET result_json = ${JSON.stringify(
-          "x".repeat(CacheStoreLive.maximumJsonBytes + 1)
-        )}`
+        yield* sql`UPDATE flows_step_cache SET result_json = ${
+          JSON.stringify(
+            "x".repeat(CacheStoreLive.maximumJsonBytes + 1)
+          )
+        }`
         return yield* Effect.flip(store.get(entry.keyDigest))
       }))
       expect(failure.code).toBe("decode_failed")

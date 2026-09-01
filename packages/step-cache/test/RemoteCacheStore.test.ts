@@ -8,10 +8,10 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import { TestClock } from "effect/testing"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
-import { TestClock } from "effect/testing"
 import * as CacheStore from "../src/CacheStore.ts"
 import * as RemoteCacheStore from "../src/RemoteCacheStore.ts"
 
@@ -246,15 +246,18 @@ describe("lookups", () => {
         { endpoint: "https://cache.example.com", maxResponseBytes: 10 }
       )
       const within = tierOf(
-        () => new Response(JSON.stringify(entry), {
-          status: 200,
-          headers: { "content-length": String(JSON.stringify(entry).length) }
-        }),
+        () =>
+          new Response(JSON.stringify(entry), {
+            status: 200,
+            headers: { "content-length": String(JSON.stringify(entry).length) }
+          }),
         { endpoint: "https://cache.example.com", maxResponseBytes: 1_000 }
       )
       const exits = yield* Effect.forEach([declared, chunked, malformed], (tier) =>
         Effect.flatMap(tier.store, (store) => store.get(entry.keyDigest)).pipe(Effect.exit))
-      expect(exits.map((exit) => errorOf(exit).code)).toEqual([
+      expect(exits.map((exit) =>
+        errorOf(exit).code
+      )).toEqual([
         "persistence_failed",
         "persistence_failed",
         "persistence_failed"
@@ -269,9 +272,10 @@ describe("lookups", () => {
         { endpoint: "https://cache.example.com", maxResponseBytes: 10 }
       )
       const failedStream = tierOf(
-        () => new Response(new ReadableStream({ start: (controller) => controller.error(new Error("stream")) }), {
-          status: 200
-        }),
+        () =>
+          new Response(new ReadableStream({ start: (controller) => controller.error(new Error("stream")) }), {
+            status: 200
+          }),
         { endpoint: "https://cache.example.com", maxResponseBytes: 10 }
       )
       for (const tier of [invalidUtf8, failedStream]) {
@@ -286,7 +290,8 @@ describe("lookups", () => {
       Effect.succeed(HttpClientResponse.fromWeb(
         request,
         new Response(new ReadableStream({ start: () => undefined }), { status: 200 })
-      )))
+      ))
+    )
     const runTimeout = (client: HttpClient.HttpClient) =>
       Effect.gen(function*() {
         const store = yield* RemoteCacheStore.make({
@@ -438,7 +443,11 @@ describe("configuration", () => {
     { endpoint: "https://cache.example.com", requestTimeout: Symbol("bad") },
     {
       endpoint: "https://cache.example.com",
-      requestTimeout: new Proxy({}, { get: () => { throw new Error("hostile") } })
+      requestTimeout: new Proxy({}, {
+        get: () => {
+          throw new Error("hostile")
+        }
+      })
     },
     { endpoint: "https://cache.example.com", maxResponseBytes: 0 },
     { endpoint: "https://cache.example.com", maxResponseBytes: 1.5 },
@@ -448,8 +457,10 @@ describe("configuration", () => {
     { endpoint: "https://cache.example.com", headers: { "bad header": "value" } },
     { endpoint: "https://cache.example.com", headers: { authorization: "line\nbreak" } },
     { endpoint: "https://cache.example.com", headers: { authorization: 1 } }
-  ] as ReadonlyArray<unknown>)("rejects invalid options %# before I/O", (options) =>
-    rejects(options as RemoteCacheStore.Options))
+  ] as ReadonlyArray<unknown>)(
+    "rejects invalid options %# before I/O",
+    (options) => rejects(options as RemoteCacheStore.Options)
+  )
 
   it.effect("rejects symbol and accessor option fields", () =>
     Effect.gen(function*() {
@@ -478,13 +489,15 @@ describe("configuration", () => {
 
   it.effect("accepts HTTPS and loopback HTTP roots with path prefixes", () =>
     Effect.gen(function*() {
-      for (const endpoint of [
-        "https://cache.example.com/base/",
-        "https://cache.example.com/base/😀",
-        "http://127.0.0.1:1234/base",
-        "http://api.localhost:1234/base",
-        "http://[::1]:1234/base"
-      ]) {
+      for (
+        const endpoint of [
+          "https://cache.example.com/base/",
+          "https://cache.example.com/base/😀",
+          "http://127.0.0.1:1234/base",
+          "http://api.localhost:1234/base",
+          "http://[::1]:1234/base"
+        ]
+      ) {
         const tier = tierOf(() => new Response(null, { status: 404 }), { endpoint })
         const store = yield* tier.store
         yield* store.get(entry.keyDigest)

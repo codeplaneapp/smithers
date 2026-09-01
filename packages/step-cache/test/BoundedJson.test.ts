@@ -93,7 +93,11 @@ describe("bounded JSON admission", () => {
     expect(reads).toBe(0)
     const symbol = Object.defineProperty({}, Symbol("value"), { value: 1, enumerable: true })
     expect(accepted(symbol)).toMatchObject({ ok: false })
-    const hostile = new Proxy({}, { ownKeys: () => { throw new Error("hostile") } })
+    const hostile = new Proxy({}, {
+      ownKeys: () => {
+        throw new Error("hostile")
+      }
+    })
     expect(accepted(hostile)).toMatchObject({ ok: false })
     const phantom = new Proxy({}, {
       ownKeys: () => ["phantom"],
