@@ -326,6 +326,17 @@ describe("MessageScroller", () => {
     expect(html).toContain("sui-chat-messages");
   });
 
+  test("ChatTranscript renders its empty state when a boolean child collapses to false", () => {
+    const messages: string[] = [];
+    const html = renderToStaticMarkup(
+      <ChatTranscript empty="No messages">
+        {messages.length > 0 && messages.map((message) => <div key={message}>{message}</div>)}
+      </ChatTranscript>,
+    );
+    expect(html).toContain("No messages");
+    expect(html).toContain("sui-chat-empty");
+  });
+
   test("renders under the dark theme", async () => {
     installDarkThemeStyles();
     document.documentElement.dataset.theme = "dark";
