@@ -6,6 +6,7 @@
 import type { Jj } from "@smthrs/jj"
 import * as Journal from "@smthrs/journal/Journal"
 import type * as JournalEvent from "@smthrs/journal/JournalEvent"
+import * as Ownership from "@smthrs/run-store/Ownership"
 import type { LivenessEvidence, OwnerId } from "@smthrs/run-store/Ownership"
 import * as RunStore from "@smthrs/run-store/RunStore"
 import type * as CacheStore from "@smthrs/step-cache/CacheStore"
@@ -13,6 +14,7 @@ import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as EffectBoundary from "../EffectBoundary.ts"
@@ -125,6 +127,17 @@ export const AuditDetail = Schema.Struct({
   compensation: Schema.optionalKey(Compensation.Result),
   warnings: Schema.Array(DetachedChildWarning),
   cancelledChildren: Schema.Array(Schema.NonEmptyString),
+  /**
+   * The children this rewind still owes a cancellation, written with the
+   * archive commit and emptied as each one lands.
+   *
+   * Cancellation runs after the commit point because it is terminal, so the
+   * plan has to be durable before the commit: an audit that recorded only the
+   * children it had already cancelled let recovery close an `archive_committed`
+   * row as complete while the operator's remaining cancellations were silently
+   * dropped. Optional so a detail written before this field still decodes.
+   */
+  pendingChildren: Schema.optionalKey(Schema.Array(Schema.NonEmptyString)),
   failure: Schema.optionalKey(Schema.String)
 })
 /**
@@ -146,6 +159,16 @@ export interface Options {
   readonly frame: Frame
   readonly owner: OwnerId
   readonly auditId?: string | undefined
+  /**
+   * The journal tail {@link validate} observed, re-checked once the run is
+   * claimed.
+   *
+   * Validation runs before the claim, so another executor can claim the idle
+   * row, append records, and release it inside that window; the later claim
+   * then succeeds and the truncation deletes records validation would have
+   * refused. Threading the observed tail through binds the two together.
+   */
+  readonly expectedTail?: Tail | undefined
   readonly pageSize?: number | undefined
   readonly detachedChildPolicy?: DetachedChildPolicy | undefined
   readonly rateLimit?: (options: {
@@ -215,6 +238,73 @@ const lineageOf = (entry: JournalEvent.Entry): string | undefined =>
   Option.getOrUndefined(Schema.decodeUnknownOption(LineageMetadata)(entry.meta))?.lineageId
 
 /**
+ * The last record a scan of a run's journal saw.
+ *
+ * It is the whole comparison a post-claim revalidation needs: a record appended
+ * between validation and the claim moves the seq, and a trampoline handoff onto
+ * a new lineage moves the lineage.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export interface Tail {
+  readonly seq: number
+  readonly lineageId: string | undefined
+}
+
+/**
+ * Reads a run's whole journal once, returning its tail and whether the frame
+ * addresses a record.
+ *
+ * FAIL CLOSED on a page that claims more and delivers nothing. The destructive
+ * paths used to treat an empty continuation as the end of history, so a journal
+ * returning a transient empty page would let boundary assessment see part of
+ * the suffix while the archive still deleted the real one. `Replay.rederive`
+ * already refuses such a page; the truncating side has more to lose by not.
+ */
+const scan = (
+  journal: Journal.Service,
+  options: { readonly runId: string; readonly frame: Frame; readonly pageSize?: number | undefined },
+  label: "validation" | "revalidation"
+): Effect.Effect<{ readonly tail: Tail | undefined; readonly atFrame: boolean }, TimeTravelFailure> =>
+  Effect.gen(function*() {
+    let after: JournalEvent.Seq | undefined
+    let tail: Tail | undefined
+    let atFrame = false
+    while (true) {
+      const page = yield* journal.entries({
+        runId: options.runId as JournalEvent.RunId,
+        ...(after === undefined ? {} : { after }),
+        limit: options.pageSize ?? 100
+      }).pipe(
+        Effect.mapError((cause) => error("unknown", `could not read journal for ${options.runId}`, cause))
+      )
+      let pageTail: JournalEvent.Seq | undefined
+      for (const entry of page.entries) {
+        if (pageTail === undefined || entry.seq > pageTail) pageTail = entry.seq
+        if (tail === undefined || entry.seq > tail.seq) tail = { seq: entry.seq, lineageId: lineageOf(entry) }
+        if (entry.seq === options.frame.seq) {
+          const lineage = lineageOf(entry)
+          if (lineage === undefined || lineage === options.frame.lineageId) atFrame = true
+        }
+      }
+      if (!page.hasMore) return { tail, atFrame }
+      if (page.entries.length === 0) {
+        return yield* Effect.fail(
+          error("invalid", `journal ${label} returned an empty continuation page for ${options.runId}`)
+        )
+      }
+      const previous = after ?? -1
+      if (pageTail === undefined || pageTail <= previous) {
+        return yield* Effect.fail(
+          error("invalid", `journal ${label} pagination did not advance for ${options.runId}`)
+        )
+      }
+      after = pageTail
+    }
+  })
+
+/**
  * The validation phase of the rewind protocol: every caller-supplied input and
  * every frame-lineage claim is checked BEFORE the first durable or workspace
  * mutation — before the ownership claim, before the audit row, before any
@@ -239,7 +329,7 @@ export const validate = (options: {
   readonly runId: string
   readonly frame: Frame
   readonly pageSize?: number | undefined
-}): Effect.Effect<void, TimeTravelFailure, Journal.Journal> =>
+}): Effect.Effect<Tail | undefined, TimeTravelFailure, Journal.Journal> =>
   Effect.gen(function*() {
     if (options.pageSize !== undefined && (!Number.isSafeInteger(options.pageSize) || options.pageSize < 1)) {
       return yield* Effect.fail(
@@ -248,41 +338,20 @@ export const validate = (options: {
     }
     const journal = yield* Journal.Journal
     const coordinate = `${options.frame.lineageId}@${options.frame.seq}`
-    let after: JournalEvent.Seq | undefined
-    let tail: JournalEvent.Entry | undefined
-    let atFrame = false
-    while (true) {
-      const page = yield* journal.entries({
-        runId: options.runId as JournalEvent.RunId,
-        ...(after === undefined ? {} : { after }),
-        limit: options.pageSize ?? 100
-      }).pipe(
-        Effect.mapError((cause) =>
-          error("unknown", `could not validate frame ${coordinate} for ${options.runId}`, cause)
-        )
+    const scanned = yield* scan(journal, options, "validation").pipe(
+      Effect.catch((failure) =>
+        failure.code === "unknown"
+          ? Effect.fail(
+            error("unknown", `could not validate frame ${coordinate} for ${options.runId}`, failure.cause)
+          )
+          : Effect.fail(failure)
       )
-      let pageTail: JournalEvent.Seq | undefined
-      for (const entry of page.entries) {
-        if (pageTail === undefined || entry.seq > pageTail) pageTail = entry.seq
-        if (tail === undefined || entry.seq > tail.seq) tail = entry
-        if (entry.seq === options.frame.seq) {
-          const lineage = lineageOf(entry)
-          if (lineage === undefined || lineage === options.frame.lineageId) atFrame = true
-        }
-      }
-      if (!page.hasMore || page.entries.length === 0) break
-      const previous = after ?? -1
-      if (pageTail === undefined || pageTail <= previous) {
-        return yield* Effect.fail(
-          error("invalid", `journal validation pagination did not advance for ${options.runId}`)
-        )
-      }
-      after = pageTail
-    }
+    )
+    const tail = scanned.tail
     if (tail === undefined) {
       // Frame zero is the state before the run wrote anything, so it is the
       // one frame an empty journal can still address.
-      if (options.frame.seq === 0) return
+      if (options.frame.seq === 0) return undefined
       return yield* Effect.fail(
         error("not_found", `frame ${coordinate} is beyond the journal tail of ${options.runId}`)
       )
@@ -292,13 +361,12 @@ export const validate = (options: {
         error("not_found", `frame ${coordinate} is beyond the journal tail of ${options.runId}`)
       )
     }
-    const tailLineage = lineageOf(tail)
-    if (tailLineage !== undefined && tailLineage !== options.frame.lineageId) {
+    if (tail.lineageId !== undefined && tail.lineageId !== options.frame.lineageId) {
       return yield* Effect.fail(
-        error("not_found", `run ${options.runId} is on lineage ${tailLineage}, not ${options.frame.lineageId}`)
+        error("not_found", `run ${options.runId} is on lineage ${tail.lineageId}, not ${options.frame.lineageId}`)
       )
     }
-    if (options.frame.seq > 0 && !atFrame) {
+    if (options.frame.seq > 0 && !scanned.atFrame) {
       return yield* Effect.fail(
         error(
           "not_found",
@@ -306,6 +374,7 @@ export const validate = (options: {
         )
       )
     }
+    return tail
   })
 
 const readSuffix = (
@@ -326,7 +395,15 @@ const readSuffix = (
         Effect.mapError((cause) => error("unknown", `could not read suffix for ${runId}`, cause))
       )
       entries.push(...page.entries)
-      if (!page.hasMore || page.entries.length === 0) return entries
+      if (!page.hasMore) return entries
+      // Fail closed: a page that claims more and delivers nothing would hide
+      // part of the suffix from boundary assessment while the archive still
+      // deleted all of it.
+      if (page.entries.length === 0) {
+        return yield* Effect.fail(
+          error("invalid", `journal suffix returned an empty continuation page for ${runId}`)
+        )
+      }
       const next = page.entries.reduce((tail, entry) => entry.seq > tail ? entry.seq : tail, after)
       if (next <= after) {
         return yield* Effect.fail(error("invalid", `journal suffix pagination did not advance for ${runId}`))
@@ -397,9 +474,26 @@ const runHook = (
 const terminal = (status: RunStore.RunStatus): boolean =>
   status === "completed" || status === "failed" || status === "cancelled"
 
+/**
+ * Resolves every descendant a rewind crosses: cancel it, disclose it, or refuse.
+ *
+ * ATTACHED CHILDREN ARE RESOLVED TOO. `archiveAndTruncate` archives and deletes
+ * every attached child's whole journal and removes its edges, fencing only the
+ * parent, and nothing here used to read those children at all: a suspended
+ * parent durably waiting on a running attached child had that child's journal
+ * emptied under it while the child kept executing and emitting into it. The
+ * store contract says exactly this - attached children "are the ones a rewind
+ * must resolve" - so a live one refuses under `block` and is cancelled under
+ * `cancel`, on the same evidence a detached one is.
+ *
+ * A child reached by more than one edge is resolved once. The edge union reads
+ * the same run twice whenever two sources describe it, and cancelling a run
+ * twice is a second terminal transition against a fence that is already gone.
+ */
 const assessChildren = (
   runs: RunStore.Service,
-  edges: ReadonlyArray<LineageEdge>,
+  attachedEdges: ReadonlyArray<LineageEdge>,
+  detachedEdges: ReadonlyArray<LineageEdge>,
   policy: DetachedChildPolicy
 ): Effect.Effect<{
   readonly warnings: ReadonlyArray<DetachedChildWarning>
@@ -408,34 +502,54 @@ const assessChildren = (
   Effect.gen(function*() {
     const warnings: Array<DetachedChildWarning> = []
     const cancellable: Array<ChildPlan> = []
-    for (const edge of edges) {
-      const child = yield* Effect.option(
-        runs.get(edge.childRunId).pipe(
-          Effect.mapError((cause) => runStoreFailure("read detached child", cause))
+    const resolved = new Set<string>()
+    const groups = [
+      { kind: "attached" as const, edges: attachedEdges },
+      { kind: "detached" as const, edges: detachedEdges }
+    ]
+    for (const group of groups) {
+      for (const edge of group.edges) {
+        if (resolved.has(edge.childRunId)) continue
+        resolved.add(edge.childRunId)
+        const child: RunStore.RunRow | undefined = yield* runs.get(edge.childRunId).pipe(
+          Effect.map((row): RunStore.RunRow | undefined => row),
+          // Only a missing ROW justifies the missing-evidence warning. Every
+          // other failure - a database outage, a decode failure - leaves the
+          // child's liveness unknown, and continuing on unknown liveness is
+          // exactly what the `block` policy exists to prevent.
+          Effect.catch((cause) =>
+            cause.code === "not_found_row"
+              ? Effect.succeed(undefined)
+              : Effect.fail(runStoreFailure(`read ${group.kind} child ${edge.childRunId}`, cause))
+          )
         )
-      )
-      if (child._tag === "None") {
-        warnings.push({
-          childRunId: edge.childRunId,
-          parentSeq: edge.parentSeq,
-          reason: "Detached child evidence is missing; the orphaned lineage edge remains disclosed."
-        })
-        continue
+        if (child === undefined) {
+          warnings.push({
+            childRunId: edge.childRunId,
+            parentSeq: edge.parentSeq,
+            reason: `${
+              group.kind === "attached" ? "Attached" : "Detached"
+            } child evidence is missing; the orphaned lineage edge remains disclosed.`
+          })
+          continue
+        }
+        if (terminal(child.status)) {
+          warnings.push({
+            childRunId: edge.childRunId,
+            parentSeq: edge.parentSeq,
+            reason: group.kind === "attached"
+              ? `Terminal attached child ${edge.childRunId} had its journal archived with parent run.`
+              : `Terminal detached child ${edge.childRunId} survives as an orphaned lineage edge.`
+          })
+          continue
+        }
+        if (policy === "block") {
+          return yield* Effect.fail(
+            error("live_child", `live ${group.kind} child ${edge.childRunId} blocks rewind`)
+          )
+        }
+        cancellable.push({ edge, row: child })
       }
-      if (terminal(child.value.status)) {
-        warnings.push({
-          childRunId: edge.childRunId,
-          parentSeq: edge.parentSeq,
-          reason: `Terminal detached child ${edge.childRunId} survives as an orphaned lineage edge.`
-        })
-        continue
-      }
-      if (policy === "block") {
-        return yield* Effect.fail(
-          error("live_child", `live detached child ${edge.childRunId} blocks rewind`)
-        )
-      }
-      cancellable.push({ edge, row: child.value })
     }
     return { warnings, cancellable }
   })
@@ -471,16 +585,16 @@ const cancelChild = (
           )
         }
         return yield* runs.steal(plan.edge.childRunId, expected, childOwner, nowMs, evidence).pipe(
-          Effect.mapError((cause) => runStoreFailure("claim detached child", cause))
+          Effect.mapError((cause) => runStoreFailure(`claim child ${plan.edge.childRunId}`, cause))
         )
       })
       : yield* runs.claim(plan.edge.childRunId, expected, childOwner, nowMs).pipe(
-        Effect.mapError((cause) => runStoreFailure("claim detached child", cause))
+        Effect.mapError((cause) => runStoreFailure(`claim child ${plan.edge.childRunId}`, cause))
       )
 
     if (claim._tag !== "Claimed") {
       return yield* Effect.fail(
-        error("live_child", `could not claim detached child ${plan.edge.childRunId} for cancellation`)
+        error("live_child", `could not claim child ${plan.edge.childRunId} for cancellation`)
       )
     }
     const activated = yield* runs.activate(
@@ -489,12 +603,12 @@ const cancelChild = (
       claim.claimedAtMs,
       expected
     ).pipe(
-      Effect.mapError((cause) => runStoreFailure("activate detached child", cause))
+      Effect.mapError((cause) => runStoreFailure(`activate child ${plan.edge.childRunId}`, cause))
     )
     if (activated._tag !== "Activated") {
       yield* Effect.ignore(runs.abandonClaim(plan.edge.childRunId, childOwner, claim.claimedAtMs))
       return yield* Effect.fail(
-        error("live_child", `detached child ${plan.edge.childRunId} lost its cancellation claim`)
+        error("live_child", `child ${plan.edge.childRunId} lost its cancellation claim`)
       )
     }
     const cancelled = yield* runs.transitionOwned(
@@ -502,11 +616,11 @@ const cancelChild = (
       childOwner,
       "cancelled"
     ).pipe(
-      Effect.mapError((cause) => runStoreFailure("cancel detached child", cause))
+      Effect.mapError((cause) => runStoreFailure(`cancel child ${plan.edge.childRunId}`, cause))
     )
     if (cancelled._tag !== "Transitioned") {
       return yield* Effect.fail(
-        error("live_child", `detached child ${plan.edge.childRunId} lost its cancellation fence`)
+        error("live_child", `child ${plan.edge.childRunId} lost its cancellation fence`)
       )
     }
   })
@@ -517,6 +631,22 @@ const toFailure = (cause: Cause.Cause<unknown>): TimeTravelFailure => {
     ? squashed
     : error("unknown", squashed instanceof Error ? squashed.message : String(squashed), cause)
 }
+
+/**
+ * What a blocking assessment is allowed to say on an encoded error.
+ *
+ * Identity and verdict, never payload: enough for a caller to name the effect
+ * that refused the rewind and look it up, and nothing an adapter's `input` or
+ * `output` could smuggle onto the wire.
+ */
+const blockingSummary = (assessment: Compensation.Assessment) => ({
+  id: assessment.effect.id,
+  kind: assessment.effect.kind,
+  tier: assessment.effect.tier,
+  seq: assessment.effect.seq,
+  classification: assessment.classification,
+  reason: assessment.reason
+})
 
 const initialDetail = (
   originalStatus: "pending" | "suspended"
@@ -567,6 +697,7 @@ export const rewind = (
         `${options.runId}:rewind:${options.owner.nonce}:${nowMs}:${options.frame.seq}`
 
       let claimed: ClaimedRun | undefined
+      let beat: Fiber.Fiber<never, never> | undefined
       let archiveCommitted = false
       let compensation: Compensation.Result = { handlerReceipts: [] }
       let detail: AuditDetail | undefined
@@ -578,6 +709,38 @@ export const rewind = (
             Effect.gen(function*() {
               claimed = yield* claimRun(runs, options, nowMs)
               const originalStatus = claimed.row.status
+              /**
+               * THE LEASE IS HELD FOR THE WHOLE PROTOCOL.
+               *
+               * `claimRun` activates the run and stamps one heartbeat, and
+               * nothing renewed it: a compensation handler, a jj restore, or a
+               * large-suffix archive slower than `heartbeatStaleAfter` left the
+               * row looking abandoned, and any engine sharing the database stole
+               * it with `lease-expired` evidence and resumed the run against a
+               * workspace this rewind had already restored. `heartbeatLoop`
+               * pulses until the fence is lost and then interrupts itself, so
+               * losing ownership is still observed rather than papered over.
+               */
+              beat = yield* Effect.forkChild(
+                Ownership.heartbeatLoop(options.runId, options.owner),
+                { startImmediately: true }
+              )
+
+              // The frame was validated before the claim, so another executor
+              // could have claimed the idle row, appended records, and released
+              // it in that window. Re-reading the tail under the claim is what
+              // binds the two together; a moved tail is `busy`, not a silent
+              // truncation of records validation would have refused.
+              const observed = yield* scan(journal, options, "revalidation")
+              if (options.expectedTail !== undefined) {
+                if (
+                  observed.tail === undefined ||
+                  observed.tail.seq !== options.expectedTail.seq ||
+                  observed.tail.lineageId !== options.expectedTail.lineageId
+                ) {
+                  return yield* Effect.fail(error("busy", `journal tail moved for ${options.runId}`))
+                }
+              }
 
               const rateLimit = options.rateLimit?.({
                 runId: options.runId,
@@ -619,6 +782,7 @@ export const rewind = (
 
               const childAssessment = yield* assessChildren(
                 runs,
+                descendants.attached,
                 descendants.detached,
                 options.detachedChildPolicy ?? "block"
               )
@@ -627,8 +791,18 @@ export const rewind = (
                 (assessment) => assessment.classification === "blocking"
               )
               if (blocking.length > 0) {
+                // The cause carries identity and verdict, never the effect's
+                // `input` or `output`. `TimeTravelError` is a `Schema.TaggedError`
+                // that ENCODES its cause, so a raw record put whatever the
+                // adapter was called with - credentials, oversized blobs - on the
+                // wire and in the logs. The full records stay on the audit
+                // detail, which is privileged storage.
                 return yield* Effect.fail(
-                  error("irreversible", `rewind is blocked by ${blocking.length} effect(s)`, blocking)
+                  error(
+                    "irreversible",
+                    `rewind is blocked by ${blocking.length} effect(s)`,
+                    blocking.map(blockingSummary)
+                  )
                 )
               }
               detail = {
@@ -644,6 +818,15 @@ export const rewind = (
 
               const handlerReceipts = yield* Compensation.compensate(plan)
               compensation = { handlerReceipts }
+              // The receipts reach durable storage BEFORE the next irreversible
+              // step. They used to land only after `restoreWorkspace`, so a
+              // process death between a handler succeeding and that write left
+              // the audit at `preflight_complete` with no compensation on it:
+              // recovery then skipped the rollback, restored the run, and the
+              // run later resumed against external state the handlers had
+              // already reversed.
+              detail = { ...detail, compensation }
+              yield* store.updateAudit(auditId, { detail })
               yield* runHook(options, "compensate-effects")
 
               // `restoreWorkspace` owns these receipts: every failure path in
@@ -678,27 +861,40 @@ export const rewind = (
                 options.owner
               )
               archiveCommitted = true
-              detail = { ...detail, phase: "archive_committed" }
+              // Child cancellation is terminal and has no inverse, so it runs
+              // only after the commit point - and the PLAN for it has to be
+              // durable before that point. An audit that recorded only the
+              // children it had already cancelled let recovery close an
+              // `archive_committed` row as complete while the cancellations the
+              // operator asked for were silently dropped.
+              const plannedChildren = [...childAssessment.cancellable].sort(
+                (left, right) => right.edge.parentSeq - left.edge.parentSeq
+              )
+              const pendingChildren = plannedChildren.map((child) => child.edge.childRunId)
+              detail = { ...detail, phase: "archive_committed", pendingChildren }
               yield* store.updateAudit(auditId, { detail })
 
-              // Detached-child cancellation is terminal and has no inverse.
-              // It therefore happens only after the archive commit point: a
-              // failed pre-commit rewind leaves every child exactly as it was.
-              for (
-                const child of [...childAssessment.cancellable].sort(
-                  (left, right) => right.edge.parentSeq - left.edge.parentSeq
-                )
-              ) {
+              for (const child of plannedChildren) {
                 yield* cancelChild(runs, options, child)
                 cancelledChildren.push(child.edge.childRunId)
-                detail = { ...detail, cancelledChildren: [...cancelledChildren] }
+                detail = {
+                  ...detail,
+                  cancelledChildren: [...cancelledChildren],
+                  pendingChildren: pendingChildren.filter((runId) => !cancelledChildren.includes(runId))
+                }
                 yield* store.updateAudit(auditId, { detail })
               }
 
+              // The run suspends with the state AT the frame, not the state the
+              // truncated future left on the row. `createFork` already derives
+              // it this way for a child; a rewound parent that kept the later
+              // payload resumed from a future its journal no longer records.
+              const frameState = yield* store.stateAt(options.runId, options.frame)
               const suspended = yield* runs.transitionOwned(
                 options.runId,
                 options.owner,
-                "suspended"
+                "suspended",
+                frameState ?? claimed.row.stateJson
               ).pipe(
                 Effect.mapError((cause) => runStoreFailure("suspend rewound run", cause))
               )
@@ -730,6 +926,17 @@ export const rewind = (
 
           if (!archiveCommitted) {
             const rollbackExit = yield* Effect.exit(Compensation.rollback(compensation))
+            /**
+             * THE RESTORATION HAS TO SUCCEED BEFORE THE AUDIT IS CLOSED.
+             *
+             * The exit used to be consulted only when there was no audit row, so
+             * a failed restoration still stamped `rolled_back` and left the run
+             * `running` under a dead rewind identity. Recovery only drains
+             * `in_progress` audits, so that run was stranded with no record any
+             * pass would revisit. A restoration that did not return
+             * `Transitioned` keeps the audit open instead, and says so.
+             */
+            let restorationProblem: string | undefined
             if (claimed !== undefined) {
               const restored = yield* runs.transitionOwned(
                 options.runId,
@@ -740,9 +947,23 @@ export const rewind = (
                 Effect.mapError((cause) => runStoreFailure("restore run state", cause)),
                 Effect.exit
               )
-              if (Exit.isFailure(restored) && detail === undefined) {
-                yield* Effect.ignore(runs.abandonClaim(options.runId, options.owner, claimed.claimedAtMs))
+              if (Exit.isFailure(restored)) {
+                restorationProblem = toFailure(restored.cause).message
+                if (detail === undefined) {
+                  yield* Effect.ignore(runs.abandonClaim(options.runId, options.owner, claimed.claimedAtMs))
+                }
+              } else if (restored.value._tag !== "Transitioned") {
+                restorationProblem = `restore run state returned ${restored.value._tag}`
               }
+            }
+            if (detail !== undefined && restorationProblem !== undefined) {
+              return yield* Effect.fail(
+                error(
+                  "unknown",
+                  `${failure.message}; ${restorationProblem}`,
+                  { rewind: protocolExit.cause, restoration: restorationProblem }
+                )
+              )
             }
             if (detail !== undefined) {
               const currentDetail = detail
@@ -789,7 +1010,14 @@ export const rewind = (
             return yield* Effect.failCause(protocolExit.cause)
           }
           return yield* Effect.fail(failure)
-        })
+        }).pipe(
+          // The lease outlives the protocol on purpose: the failure branch's
+          // restoration is itself an owned transition, so the heartbeat stops
+          // only once every ownership write this rewind performs has landed.
+          Effect.ensuring(
+            Effect.suspend(() => beat === undefined ? Effect.void : Fiber.interrupt(beat))
+          )
+        )
       )
     })
   )()

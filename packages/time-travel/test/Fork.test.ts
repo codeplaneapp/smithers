@@ -26,8 +26,10 @@ describe("fork", () => {
       const second = yield* (store.createFork("r", { lineageId: "r", seq: 0 }))
 
       expect(first.runId).not.toBe(second.runId)
-      expect(store.state().records.filter((record) => record.runId === first.runId)).toHaveLength(1)
-      expect(store.state().records.filter((record) => record.runId === second.runId)).toHaveLength(1)
+      // The copied prefix record plus the fork-created marker the SQL store
+      // also writes on the child at `frame.seq + 1`.
+      expect(store.state().records.filter((record) => record.runId === first.runId)).toHaveLength(2)
+      expect(store.state().records.filter((record) => record.runId === second.runId)).toHaveLength(2)
       expect(store.state().records.filter((record) => record.runId === "r")).toEqual(before)
     }))
 

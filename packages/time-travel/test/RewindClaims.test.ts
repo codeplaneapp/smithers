@@ -398,7 +398,7 @@ describe("Rewind detached child cancellation", () => {
 
       expect(failure).toMatchObject({
         code: "live_child",
-        message: "could not claim detached child child for cancellation"
+        message: "could not claim child child for cancellation"
       })
     }))
 
@@ -422,7 +422,7 @@ describe("Rewind detached child cancellation", () => {
       expect(abandoned).toEqual(["child"])
       expect(failure).toMatchObject({
         code: "live_child",
-        message: "detached child child lost its cancellation claim"
+        message: "child child lost its cancellation claim"
       })
     }))
 
@@ -439,7 +439,7 @@ describe("Rewind detached child cancellation", () => {
 
       expect(failure).toMatchObject({
         code: "live_child",
-        message: "detached child child lost its cancellation fence"
+        message: "child child lost its cancellation fence"
       })
     }))
 
@@ -451,7 +451,7 @@ describe("Rewind detached child cancellation", () => {
         storeWithChild()
       )
 
-      expect(failure).toMatchObject({ code: "unknown", message: "claim detached child failed" })
+      expect(failure).toMatchObject({ code: "unknown", message: "claim child child failed" })
     }))
 
   it.effect("maps every remaining child ownership persistence failure", () =>
@@ -462,21 +462,21 @@ describe("Rewind detached child cancellation", () => {
         readonly options?: Partial<Rewind.Options>
       }> = [
         {
-          message: "activate detached child failed",
+          message: "activate child child failed",
           runs: parentRuns({
             claim: () => Effect.succeed({ _tag: "Claimed" as const, claimedAtMs: 4 }),
             activate: () => Effect.fail(runError("activate", "persistence_failed"))
           })
         },
         {
-          message: "cancel detached child failed",
+          message: "cancel child child failed",
           runs: parentRuns({
             claim: () => Effect.succeed({ _tag: "Claimed" as const, claimedAtMs: 4 }),
             transitionOwned: () => Effect.fail(runError("cancel", "persistence_failed"))
           })
         },
         {
-          message: "claim detached child failed",
+          message: "claim child child failed",
           runs: parentRuns(
             { steal: () => Effect.fail(runError("steal", "persistence_failed")) },
             row("child", "running")

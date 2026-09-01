@@ -59,7 +59,19 @@ const isDuplicateColumn = (cause: unknown): boolean => {
  */
 export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* Effect.service(SqlClient.SqlClient)
-  yield* sql`CREATE TABLE IF NOT EXISTS flows_time_travel_audits (
+  /**
+   * Names the object a failing statement was creating.
+   *
+   * A driver error says what SQLite objected to ("views may not be indexed"),
+   * never which of a dozen statements raised it, and a migration failure that
+   * does not name its object is not actionable. The label is folded into the
+   * cause chain, so `make`'s typed defect carries both.
+   */
+  const step = <A, E, R>(object: string, statement: Effect.Effect<A, E, R>) =>
+    statement.pipe(
+      Effect.mapError((cause) => new Error(`time-travel migration failed creating ${object}`, { cause }))
+    )
+  yield* step("flows_time_travel_audits", sql`CREATE TABLE IF NOT EXISTS flows_time_travel_audits (
     id TEXT PRIMARY KEY CHECK (length(id) > 0),
     run_id TEXT NOT NULL CHECK (length(run_id) > 0),
     lineage_id TEXT NOT NULL CHECK (length(lineage_id) > 0),
@@ -67,38 +79,47 @@ export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect
     status TEXT NOT NULL CHECK (status IN ('in_progress', 'completed', 'failed')),
     rate_limit_json TEXT CHECK (rate_limit_json IS NULL OR json_valid(rate_limit_json)),
     detail_json TEXT CHECK (detail_json IS NULL OR json_valid(detail_json))
-  )`
-  yield* sql`CREATE INDEX IF NOT EXISTS flows_time_travel_audits_status_idx
+  )`)
+  yield* step(
+    "flows_time_travel_audits_status_idx on flows_time_travel_audits",
+    sql`CREATE INDEX IF NOT EXISTS flows_time_travel_audits_status_idx
     ON flows_time_travel_audits (status)`
-  yield* sql`CREATE TABLE IF NOT EXISTS flows_time_travel_receipts (
+  )
+  yield* step("flows_time_travel_receipts", sql`CREATE TABLE IF NOT EXISTS flows_time_travel_receipts (
     id TEXT PRIMARY KEY CHECK (length(id) > 0),
     audit_id TEXT NOT NULL CHECK (length(audit_id) > 0),
     effect_id TEXT NOT NULL CHECK (length(effect_id) > 0),
     receipt_json TEXT NOT NULL CHECK (json_valid(receipt_json))
-  )`
-  yield* sql`CREATE TABLE IF NOT EXISTS flows_time_travel_snapshots (
+  )`)
+  yield* step("flows_time_travel_snapshots", sql`CREATE TABLE IF NOT EXISTS flows_time_travel_snapshots (
     run_id TEXT NOT NULL CHECK (length(run_id) > 0),
     lineage_id TEXT NOT NULL CHECK (length(lineage_id) > 0),
     seq INTEGER NOT NULL CHECK (typeof(seq) = 'integer' AND seq >= 0 AND seq <= 9007199254740991),
     change_id TEXT NOT NULL CHECK (length(change_id) > 0),
     plan_digest TEXT CHECK (plan_digest IS NULL OR length(plan_digest) > 0),
     PRIMARY KEY (run_id, lineage_id, seq)
-  )`
+  )`)
   // Idempotent widening for a database migrated before the plan digest joined
   // the anchor. `ADD COLUMN` on a table that already has it is an error, not a
   // no-op, and there is nothing to repair when it fails — so exactly that one
   // failure is absorbed. Every other ALTER failure (a view squatting on the
   // table name, a locked or corrupt database) is real damage the migration
   // must surface, never swallow.
-  yield* sql`ALTER TABLE flows_time_travel_snapshots ADD COLUMN plan_digest TEXT`.pipe(
-    Effect.catch((cause) => isDuplicateColumn(cause) ? Effect.void : Effect.fail(cause))
+  yield* step(
+    "the flows_time_travel_snapshots plan_digest column",
+    sql`ALTER TABLE flows_time_travel_snapshots ADD COLUMN plan_digest TEXT`.pipe(
+      Effect.catch((cause) => isDuplicateColumn(cause) ? Effect.void : Effect.fail(cause))
+    )
   )
   // The frame address is `(lineageId, seq)`, and every engine record carries
   // its lineage in the open `meta` envelope. Indexing it out of `meta_json`
   // keeps a lineage-filtered replay from degenerating into a full run scan.
-  yield* sql`CREATE INDEX IF NOT EXISTS flows_journal_events_lineage_idx
+  yield* step(
+    "flows_journal_events_lineage_idx on flows_journal_events",
+    sql`CREATE INDEX IF NOT EXISTS flows_journal_events_lineage_idx
     ON flows_journal_events (run_id, json_extract(meta_json, '$.lineageId'), seq)`
-  yield* sql`CREATE TABLE IF NOT EXISTS flows_time_travel_edges (
+  )
+  yield* step("flows_time_travel_edges", sql`CREATE TABLE IF NOT EXISTS flows_time_travel_edges (
     parent_run_id TEXT NOT NULL CHECK (length(parent_run_id) > 0),
     parent_seq INTEGER NOT NULL CHECK (
       typeof(parent_seq) = 'integer' AND parent_seq >= 0 AND parent_seq <= 9007199254740991
@@ -107,10 +128,13 @@ export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect
     kind TEXT NOT NULL CHECK (kind IN ('child', 'fork', 'continuation')),
     attached INTEGER NOT NULL CHECK (attached IN (0, 1)),
     CHECK (parent_run_id <> child_run_id)
-  )`
-  yield* sql`CREATE INDEX IF NOT EXISTS flows_time_travel_edges_parent_idx
+  )`)
+  yield* step(
+    "flows_time_travel_edges_parent_idx on flows_time_travel_edges",
+    sql`CREATE INDEX IF NOT EXISTS flows_time_travel_edges_parent_idx
     ON flows_time_travel_edges (parent_run_id, parent_seq)`
-  yield* sql`CREATE TABLE IF NOT EXISTS flows_time_travel_archive (
+  )
+  yield* step("flows_time_travel_archive", sql`CREATE TABLE IF NOT EXISTS flows_time_travel_archive (
     run_id TEXT NOT NULL CHECK (length(run_id) > 0),
     seq INTEGER NOT NULL CHECK (typeof(seq) = 'integer' AND seq >= 0 AND seq <= 9007199254740991),
     event_id TEXT NOT NULL CHECK (length(event_id) > 0),
@@ -128,7 +152,7 @@ export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect
       typeof(archived_at_ms) = 'integer' AND archived_at_ms >= 0 AND archived_at_ms <= 9007199254740991
     ),
     PRIMARY KEY (run_id, seq)
-  )`
+  )`)
 })
 const Json = Schema.fromJsonString(Schema.Unknown)
 const RunStateJson = Schema.fromJsonString(RunState)
@@ -185,6 +209,11 @@ const descendantsFrom = (
   const attached: Array<LineageEdge> = []
   const detached: Array<LineageEdge> = []
   const attachedRunIds = new Set<string>()
+  // One child is one descendant. The edge union reads the same fork twice when
+  // the run also journaled a handoff naming it, and reporting the same child
+  // twice made a caller cancel it twice. The memory store already deduplicated
+  // both sides; this is what makes the two answer alike.
+  const detachedRunIds = new Set<string>()
   const queue: Array<string> = []
   const include = (edge: LineageEdge): void => {
     if (edge.attached) {
@@ -193,7 +222,9 @@ const descendantsFrom = (
       attachedRunIds.add(edge.childRunId)
       queue.push(edge.childRunId)
     } else {
+      if (detachedRunIds.has(edge.childRunId)) return
       detached.push(edge)
+      detachedRunIds.add(edge.childRunId)
     }
   }
   for (const edge of edges) {
@@ -268,7 +299,15 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
     const sql = yield* Effect.service(SqlClient.SqlClient)
     const writer = yield* DurableWriter
 
-    yield* migrate.pipe(Effect.mapError(() => undefined), Effect.orDie)
+    // The defect keeps the driver failure. Mapping the error to `undefined`
+    // first made every DDL failure - a view squatting on the table name, a
+    // locked or corrupt file - die as the literal value `undefined`: no
+    // message, no SQL, nothing to act on, which is the opposite of what
+    // `migrate`'s own comment promises about surfacing real damage.
+    yield* migrate.pipe(
+      Effect.mapError((cause) => error("unknown", "time-travel schema migration failed", cause)),
+      Effect.orDie
+    )
 
     /**
      * Every lineage edge, forks and engine child spawns as ONE tree.
@@ -484,7 +523,9 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
         ))
       ),
       updateAudit: Effect.fn("TimeTravelStore.updateAudit")((id, patch) =>
-        Effect.annotateCurrentSpan({ auditId: id }).pipe(Effect.andThen(
+        Effect.annotateCurrentSpan({ auditId: id }).pipe(
+          Effect.andThen(TimeTravelStore.validateAuditPatch(patch)),
+          Effect.andThen(
           writer.write(
             Effect.gen(function*() {
               const rows = yield* sql<
@@ -516,7 +557,8 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
               yield* sql`UPDATE flows_time_travel_audits SET status = ${next.status}, rate_limit_json = ${rateLimitJson}, detail_json = ${detailJson} WHERE id = ${id}`
             }).pipe(Effect.mapError(mapError))
           ).pipe(Effect.mapError(mapError), Effect.asVoid)
-        ))
+        )
+        )
       ),
       pendingAudits: Effect.fn("TimeTravelStore.pendingAudits")(() =>
         sql<
@@ -591,12 +633,44 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
             DELETE FROM flows_journal_events
             WHERE run_id = ${runId} AND seq > ${frame.seq}
           `
+              /**
+               * THE ATTEMPT ROWS FOLLOW THE JOURNAL THEY EXPLAIN.
+               *
+               * Truncation archived the `attempt-started` records above the
+               * frame but left `flows_attempts` untouched, so a resumed run's
+               * `probeAttempts` restored the counter and the retry origin from
+               * rows its own journal no longer records: a step whose attempts
+               * were archived came back at attempt N+1, or stayed exhausted.
+               * `createFork` already derives exactly this set for the child
+               * (`attemptsAtFrame`), and the two now agree about which attempts
+               * a prefix can explain.
+               */
+              const survivors = new Set(
+                (yield* attemptsAtFrame(runId, frame)).map((ref) => `${ref.stepKeyDigest}:${ref.attempt}`)
+              )
+              const present = yield* sql<
+                { readonly step_key_digest: string; readonly attempt: number }
+              >`
+            SELECT step_key_digest, attempt FROM flows_attempts WHERE run_id = ${runId}
+          `
+              for (const row of present) {
+                if (survivors.has(`${row.step_key_digest}:${row.attempt}`)) continue
+                yield* sql`
+              DELETE FROM flows_attempts
+              WHERE run_id = ${runId}
+                AND step_key_digest = ${row.step_key_digest}
+                AND attempt = ${row.attempt}
+            `
+              }
               for (const childRunId of descendants.attachedRunIds) {
                 const count = yield* sql<{ readonly count: number }>`
               SELECT COUNT(*) AS count FROM flows_journal_events
               WHERE run_id = ${childRunId}
             `
                 archived += Number(count[0]!.count)
+                // An archived child's journal no longer explains any attempt,
+                // so none of its attempt rows may survive it.
+                yield* sql`DELETE FROM flows_attempts WHERE run_id = ${childRunId}`
                 yield* sql`
               INSERT OR IGNORE INTO flows_time_travel_archive
               SELECT run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
@@ -675,6 +749,35 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
               WHERE child_run_id = ${currentRunId}
             `
                 currentRunId = parentEdges[0]?.parent_run_id
+              }
+              /**
+               * THE FRAME MUST ADDRESS A RECORD.
+               *
+               * Nothing validated the fork's coordinate, so a seq past the tail
+               * or a sibling lineage copied whatever `seq <= frame.seq` matched,
+               * derived no state at the frame, and fell back to the parent's
+               * LATEST `state_json` - the "state NOW" bug the fold above exists
+               * to fix - while writing a marker row that claims a frame nobody
+               * can address. Frame zero stays addressable by definition
+               * (`Frame`): it is the state before the run wrote anything. A
+               * record carrying no lineage is compatible with every frame, the
+               * same rule `prefix` reads by.
+               */
+              if (frame.seq > 0) {
+                const atFrame = yield* sql<{ readonly count: number }>`
+              SELECT COUNT(*) AS count FROM flows_journal_events
+              WHERE run_id = ${parentRunId}
+                AND seq = ${frame.seq}
+                AND (
+                  json_extract(meta_json, '$.lineageId') IS NULL
+                  OR json_extract(meta_json, '$.lineageId') = ${frame.lineageId}
+                )
+            `
+                if (Number(atFrame[0]!.count) === 0) {
+                  return yield* Effect.fail(
+                    error("not_found", TimeTravelStore.forkFrameMessage(parentRunId, frame))
+                  )
+                }
               }
               const runId = childRunId ?? (yield* nextForkIdFor(parentRunId, frame))
               const nowMs = yield* Clock.currentTimeMillis

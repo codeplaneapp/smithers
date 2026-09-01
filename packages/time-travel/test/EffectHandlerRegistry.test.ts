@@ -500,7 +500,9 @@ describe("EffectHandlerRegistry", () => {
         )
       )
 
-      expect(failure).toMatchObject({ code: "busy" })
+      // `already_crossed`, not `busy`: a caller branching on the closed code
+      // list has to tell a re-armed effect from a contended run.
+      expect(failure).toMatchObject({ code: "already_crossed" })
       expect(actionRuns).toBe(0)
       expect(owners).toEqual([boundaryAuthority.owner])
     }))

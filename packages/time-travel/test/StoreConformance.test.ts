@@ -203,6 +203,10 @@ describe("TimeTravelStore conformance", () => {
           })
           detail.nested.value = "mutated-after-write"
           const first = yield* store.pendingAudits()
+          // Snapshot before mutating: the point of the next line is that
+          // mutating what a read handed back changes nothing durable, so the
+          // value being compared has to be the one the read produced.
+          const firstDetail = structuredClone(first[0]!.detail)
           ;(first[0]!.detail as { nested: { value: string } }).nested.value = "mutated-after-read"
           const second = yield* store.pendingAudits()
           yield* store.updateAudit("audit", { detail: { allowed: true }, rateLimit: { remaining: 2 } })
@@ -211,7 +215,7 @@ describe("TimeTravelStore conformance", () => {
           )
           const updated = yield* store.pendingAudits()
           return {
-            first: first[0]!.detail,
+            first: firstDetail,
             second: second[0]!.detail,
             invalid: { code: invalid.code, message: invalid.message },
             updated: {

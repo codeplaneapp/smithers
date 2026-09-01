@@ -20,6 +20,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/logging/Logger"
 import * as Option from "effect/Option"
 import * as Random from "effect/Random"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
@@ -284,6 +285,63 @@ describe("TimeTravel", () => {
       expect(audits[0]?.detail).toMatchObject({ phase: "rolled_back" })
       // The suffix the interrupted rewind never committed is still there.
       expect(store.state().records.map((entry) => entry.seq)).toEqual([0, 1, 2])
+    }))
+
+  it.effect("refuses a detached-child policy it does not recognise before touching anything", () =>
+    Effect.gen(function*() {
+      // The policy used to be threaded through untyped, and the assessment read
+      // every value other than the literal "block" as cancel, so a JSON surface
+      // that misspelled it selected the destructive branch.
+      const store = MemoryTimeTravelStore.make({ records: [record(0, 10), record(1, 20)] })
+      const failure = yield* (
+        Effect.flip(
+          Effect.scoped(
+            Effect.gen(function*() {
+              const timeTravel = yield* TimeTravel
+              return yield* timeTravel.rewind(
+                { runId: "run", frame: { lineageId, seq: 0 } },
+                { detachedChildren: "blcok" as never }
+              )
+            }).pipe(Effect.provide(harness({ store })))
+          )
+        )
+      )
+
+      expect(failure).toMatchObject({
+        code: "invalid",
+        message: 'detachedChildren must be "block" or "cancel", not "blcok"'
+      })
+      expect(store.state().audits).toEqual([])
+      expect(store.state().records.map((entry) => entry.seq)).toEqual([0, 1])
+    }))
+
+  it.effect("reports an audit startup recovery closed as failed", () =>
+    Effect.gen(function*() {
+      // A `Failed` outcome closes the audit terminally, so the composition has
+      // to hear about it: the array used to be discarded on the floor.
+      const store = MemoryTimeTravelStore.make({ records: [record(0, 10)] })
+      yield* store.writeAudit({
+        id: "run:unrecoverable",
+        runId: "run",
+        frame: { lineageId, seq: 0 },
+        status: "in_progress",
+        detail: { version: 1, phase: "not-a-phase" }
+      }).pipe(Effect.orDie)
+      const logged: Array<string> = []
+
+      const audits = yield* run(store, () => Effect.succeed(store.state().audits)).pipe(
+        Effect.provideService(
+          Logger.CurrentLoggers,
+          new Set([
+            Logger.make(({ message }) => {
+              logged.push(String(message))
+            })
+          ])
+        )
+      )
+
+      expect(audits.map((audit) => audit.status)).toEqual(["failed"])
+      expect(logged).toContain("time-travel: startup recovery closed an audit as failed")
     }))
 })
 

@@ -67,6 +67,63 @@ const auditRow = (detail?: unknown): Audit => ({
     : detail
 })
 
+/**
+ * A run double that can actually be claimed.
+ *
+ * Recovery claims every row it acts on, including a suspended unowned one: the
+ * rollback it may run reverses external effects and restores a jj workspace,
+ * and doing that unfenced let a concurrent engine claim the run and start
+ * executing it mid-rollback. A double that refuses every claim therefore no
+ * longer describes any reachable state.
+ */
+const claimable = (
+  initial: RunStore.RunRow,
+  overrides: Partial<RunStore.Service> = {}
+): RunStore.Service & { readonly state: () => RunStore.RunRow } => {
+  let row = { ...initial }
+  const service = RunStore.makeNoop({
+    get: () => Effect.succeed({ ...row }),
+    claim: (_runId, _expected, claimant, nowMs) =>
+      Effect.sync(() => {
+        if (row.status === "running" || row.claim !== null) return { _tag: "HeartbeatFresh" as const }
+        row = { ...row, claim: claimant, claimedAtMs: nowMs }
+        return { _tag: "Claimed" as const, claimedAtMs: nowMs }
+      }),
+    activate: (_runId, claimant, claimedAtMs) =>
+      Effect.sync(() => {
+        if (row.claim?.nonce !== claimant.nonce || row.claimedAtMs !== claimedAtMs) {
+          return { _tag: "ClaimLost" as const }
+        }
+        row = {
+          ...row,
+          status: "running",
+          owner: claimant,
+          heartbeatAtMs: claimedAtMs,
+          claim: null,
+          claimedAtMs: null
+        }
+        return { _tag: "Activated" as const }
+      }),
+    heartbeat: () => Effect.succeed({ _tag: "Updated" as const }),
+    transitionOwned: (_runId, transitionOwner, status, stateJson) =>
+      Effect.sync(() => {
+        if (row.owner?.nonce !== transitionOwner.nonce) return { _tag: "FenceLost" as const }
+        row = {
+          ...row,
+          status,
+          stateJson: stateJson ?? row.stateJson,
+          owner: null,
+          heartbeatAtMs: null,
+          claim: null,
+          claimedAtMs: null
+        }
+        return { _tag: "Transitioned" as const }
+      }),
+    ...overrides
+  })
+  return Object.assign(service, { state: () => ({ ...row }) })
+}
+
 const emptyJournal = Journal.makeNoop({
   entries: () => Effect.succeed({ entries: [], hasMore: false })
 })
@@ -116,27 +173,27 @@ const runRecovery = (
 }
 
 describe("Recovery ownership arbitration", () => {
-  it.effect("completes an unowned suspended run without taking a fence", () =>
+  it.effect("claims an unowned suspended run and gives the fence back when it finishes", () =>
     Effect.gen(function*() {
       const calls: Array<string> = []
-      const runs = RunStore.makeNoop({
-        get: () => Effect.succeed(baseRow({ status: "suspended" })),
-        claim: () =>
-          Effect.sync(() => {
-            calls.push("claim")
-            return { _tag: "NotFound" as const }
-          }),
-        transitionOwned: () =>
-          Effect.sync(() => {
-            calls.push("transitionOwned")
-            return { _tag: "Transitioned" as const }
-          })
+      const runs = claimable(
+        baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }),
+        {}
+      )
+      const traced = RunStore.makeNoop({
+        ...runs,
+        claim: (...args) => Effect.sync(() => calls.push("claim")).pipe(Effect.andThen(runs.claim(...args))),
+        activate: (...args) =>
+          Effect.sync(() => calls.push("activate")).pipe(Effect.andThen(runs.activate(...args))),
+        transitionOwned: (...args) =>
+          Effect.sync(() => calls.push("transitionOwned")).pipe(Effect.andThen(runs.transitionOwned(...args)))
       })
 
-      const { audits, outcomes } = yield* runRecovery(runs)
+      const { audits, outcomes } = yield* runRecovery(traced)
 
       expect(outcomes).toEqual([{ _tag: "Completed", auditId: "audit" }])
-      expect(calls).toEqual([])
+      expect(calls).toEqual(["claim", "activate", "transitionOwned"])
+      expect(runs.state()).toMatchObject({ status: "suspended", owner: null })
       expect(audits[0]).toMatchObject({ status: "completed", detail: { phase: "completed" } })
     }))
 
@@ -260,6 +317,193 @@ describe("Recovery ownership arbitration", () => {
       expect(rows.get(childRunId)).toMatchObject({ status: "cancelled", owner: null })
     }))
 
+  it.effect("resolves a pending child that is already gone or already terminal", () =>
+    Effect.gen(function*() {
+      // Draining is a resumption, not a new decision: a child a previous pass
+      // already cancelled, or one whose row is gone, is resolved rather than
+      // retried, so the audit closes instead of looping forever.
+      const parent = claimable(baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }))
+      const runs = RunStore.makeNoop({
+        ...parent,
+        get: (runId) =>
+          runId === "run"
+            ? parent.get(runId)
+            : runId === "gone-child"
+            ? Effect.fail(
+              new RunStore.RunStoreError({
+                code: "not_found_row",
+                method: "get",
+                message: "run gone-child was not found",
+                cause: runId
+              })
+            )
+            : Effect.succeed({ ...baseRow({ status: "cancelled", owner: null, heartbeatAtMs: null }), runId })
+      })
+      const store = seeded(auditRow({
+        version: 1,
+        phase: "archive_committed",
+        originalStatus: "suspended",
+        suffixCount: 1,
+        suffixTailSeq: 1,
+        warnings: [],
+        cancelledChildren: [],
+        pendingChildren: ["gone-child", "terminal-child"]
+      } satisfies AuditDetail))
+
+      const result = yield* runRecovery(runs, { store })
+
+      expect(result.outcomes).toEqual([{ _tag: "Completed", auditId: "audit" }])
+      expect(result.audits[0]).toMatchObject({
+        status: "completed",
+        detail: { pendingChildren: [], cancelledChildren: [] }
+      })
+    }))
+
+  it.effect("propagates a pending child read failure that is not a missing row", () =>
+    Effect.gen(function*() {
+      const parent = claimable(baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }))
+      const runs = RunStore.makeNoop({
+        ...parent,
+        get: (runId) => runId === "run" ? parent.get(runId) : Effect.fail(runError("get"))
+      })
+      const store = seeded(auditRow({
+        version: 1,
+        phase: "archive_committed",
+        originalStatus: "suspended",
+        suffixCount: 1,
+        suffixTailSeq: 1,
+        warnings: [],
+        cancelledChildren: [],
+        pendingChildren: ["unreadable-child"]
+      } satisfies AuditDetail))
+
+      const result = yield* runRecovery(runs, { store })
+
+      expect(result.outcomes[0]).toMatchObject({
+        _tag: "Failed",
+        error: { code: "unknown", message: "read pending child unreadable-child failed" }
+      })
+    }))
+
+  for (
+    const scenario of [
+      {
+        name: "loses the child claim before activation",
+        overrides: { activate: () => Effect.succeed({ _tag: "ClaimLost" as const }) },
+        message: "child stuck-child lost its cancellation claim"
+      },
+      {
+        name: "loses the child fence before cancellation",
+        overrides: { transitionOwned: () => Effect.succeed({ _tag: "FenceLost" as const }) },
+        message: "child stuck-child lost its cancellation fence"
+      }
+    ] as const
+  ) {
+    it.effect(`leaves the audit pending when recovery ${scenario.name}`, () =>
+      Effect.gen(function*() {
+        const parent = claimable(baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }))
+        const runs = RunStore.makeNoop({
+          ...parent,
+          get: (runId) =>
+            runId === "run"
+              ? parent.get(runId)
+              : Effect.succeed({ ...baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }), runId }),
+          claim: (runId, ...args) =>
+            runId === "run"
+              ? parent.claim(runId, ...args)
+              : Effect.succeed({ _tag: "Claimed" as const, claimedAtMs: 5 }),
+          abandonClaim: () => Effect.succeed({ _tag: "Abandoned" as const }),
+          activate: (runId, ...args) =>
+            runId === "run"
+              ? parent.activate(runId, ...args)
+              : ("activate" in scenario.overrides
+                ? scenario.overrides.activate()
+                : Effect.succeed({ _tag: "Activated" as const })),
+          transitionOwned: (runId, ...args) =>
+            runId === "run"
+              ? parent.transitionOwned(runId, ...args)
+              : ("transitionOwned" in scenario.overrides
+                ? scenario.overrides.transitionOwned()
+                : Effect.succeed({ _tag: "Transitioned" as const }))
+        })
+        const store = seeded(auditRow({
+          version: 1,
+          phase: "archive_committed",
+          originalStatus: "suspended",
+          suffixCount: 1,
+          suffixTailSeq: 1,
+          warnings: [],
+          cancelledChildren: [],
+          pendingChildren: ["stuck-child"]
+        } satisfies AuditDetail))
+
+        const result = yield* runRecovery(runs, { store })
+
+        expect(result.outcomes[0]).toMatchObject({
+          _tag: "Busy",
+          error: { code: "busy", message: scenario.message }
+        })
+        expect(result.audits[0]).toMatchObject({
+          status: "in_progress",
+          detail: { pendingChildren: ["stuck-child"] }
+        })
+      }))
+  }
+
+  for (
+    const scenario of [
+      { name: "claim", method: "claim" as const, message: "claim pending child failing-child failed" },
+      { name: "activation", method: "activate" as const, message: "activate pending child failing-child failed" },
+      {
+        name: "cancellation",
+        method: "transitionOwned" as const,
+        message: "cancel pending child failing-child failed"
+      }
+    ] as const
+  ) {
+    it.effect(`maps a pending child ${scenario.name} persistence failure`, () =>
+      Effect.gen(function*() {
+        const parent = claimable(baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }))
+        const child = (method: "claim" | "activate" | "transitionOwned") =>
+          scenario.method === method
+            ? Effect.fail(runError(method))
+            : method === "claim"
+            ? Effect.succeed({ _tag: "Claimed" as const, claimedAtMs: 5 })
+            : method === "activate"
+            ? Effect.succeed({ _tag: "Activated" as const })
+            : Effect.succeed({ _tag: "Transitioned" as const })
+        const runs = RunStore.makeNoop({
+          ...parent,
+          get: (runId) =>
+            runId === "run"
+              ? parent.get(runId)
+              : Effect.succeed({ ...baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }), runId }),
+          claim: (runId, ...args) => runId === "run" ? parent.claim(runId, ...args) : child("claim") as never,
+          activate: (runId, ...args) =>
+            runId === "run" ? parent.activate(runId, ...args) : child("activate") as never,
+          transitionOwned: (runId, ...args) =>
+            runId === "run" ? parent.transitionOwned(runId, ...args) : child("transitionOwned") as never
+        })
+        const store = seeded(auditRow({
+          version: 1,
+          phase: "archive_committed",
+          originalStatus: "suspended",
+          suffixCount: 1,
+          suffixTailSeq: 1,
+          warnings: [],
+          cancelledChildren: [],
+          pendingChildren: ["failing-child"]
+        } satisfies AuditDetail))
+
+        const result = yield* runRecovery(runs, { store })
+
+        expect(result.outcomes[0]).toMatchObject({
+          _tag: "Failed",
+          error: { code: "unknown", message: scenario.message }
+        })
+      }))
+  }
+
   it.effect("leaves a committed audit pending when a remaining child cannot be claimed", () =>
     Effect.gen(function*() {
       const childRunId = "busy-child"
@@ -273,13 +517,22 @@ describe("Recovery ownership arbitration", () => {
         cancelledChildren: [],
         pendingChildren: [childRunId]
       } satisfies AuditDetail))
+      // The parent run claims normally; only the child refuses, so the pass
+      // gets as far as the cancellation it cannot finish.
+      const parent = claimable(baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }))
       const runs = RunStore.makeNoop({
+        ...parent,
         get: (runId) =>
-          Effect.succeed({
-            ...baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }),
-            runId
-          }),
-        claim: () => Effect.succeed({ _tag: "SnapshotChanged" as const })
+          runId === "run"
+            ? parent.get(runId)
+            : Effect.succeed({
+              ...baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }),
+              runId
+            }),
+        claim: (runId, ...args) =>
+          runId === "run"
+            ? parent.claim(runId, ...args)
+            : Effect.succeed({ _tag: "SnapshotChanged" as const })
       })
 
       const result = yield* runRecovery(runs, { store })
@@ -584,14 +837,13 @@ describe("Recovery ownership arbitration", () => {
           })
       })
       let ownerAlive = true
+      const settled = claimable(baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }))
       const runs = RunStore.makeNoop({
+        ...settled,
         get: () =>
-          Effect.succeed(
-            ownerAlive
-              ? baseRow({ status: "running", owner: stranger })
-              : baseRow({ status: "suspended", owner: null, heartbeatAtMs: null })
-          ),
-        transitionOwned: () => Effect.succeed({ _tag: "Transitioned" as const })
+          ownerAlive
+            ? Effect.succeed(baseRow({ status: "running", owner: stranger }))
+            : settled.get("run")
       })
 
       const first = yield* runRecovery(runs, { store, journal: suffixJournal })
@@ -759,10 +1011,7 @@ describe("Recovery ownership arbitration", () => {
   it.effect("rolls back without consulting the journal when the rewind archived nothing", () =>
     Effect.gen(function*() {
       let entryQueries = 0
-      const runs = RunStore.makeNoop({
-        get: () => Effect.succeed(baseRow({ status: "suspended" })),
-        transitionOwned: () => Effect.succeed({ _tag: "Transitioned" as const })
-      })
+      const runs = claimable(baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }))
 
       const { audits, outcomes } = yield* runRecovery(runs, {
         audit: auditRow(
@@ -793,7 +1042,7 @@ describe("Recovery ownership arbitration", () => {
     Effect.gen(function*() {
       let entryQueries = 0
       const { outcomes } = yield* runRecovery(
-        RunStore.makeNoop({ get: () => Effect.succeed(baseRow({ status: "suspended" })) }),
+        claimable(baseRow({ status: "suspended", owner: null, heartbeatAtMs: null })),
         {
           audit: auditRow(
             {
@@ -821,9 +1070,7 @@ describe("Recovery ownership arbitration", () => {
 
   it.effect("turns an unreadable journal into a typed terminal failure", () =>
     Effect.gen(function*() {
-      const runs = RunStore.makeNoop({
-        get: () => Effect.succeed(baseRow({ status: "suspended" }))
-      })
+      const runs = claimable(baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }))
 
       const { outcomes } = yield* runRecovery(runs, {
         audit: auditRow(

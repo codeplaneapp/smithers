@@ -6,12 +6,14 @@
 import type { Jj } from "@smthrs/jj"
 import * as Journal from "@smthrs/journal/Journal"
 import type * as JournalEvent from "@smthrs/journal/JournalEvent"
+import * as Ownership from "@smthrs/run-store/Ownership"
 import type { LivenessEvidence, OwnerId } from "@smthrs/run-store/Ownership"
 import * as RunStore from "@smthrs/run-store/RunStore"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Schema from "effect/Schema"
 import { error, TimeTravelError, type TimeTravelError as TimeTravelFailure } from "../TimeTravelError.ts"
 import { type Audit, TimeTravelStore } from "../TimeTravelStore.ts"
@@ -52,11 +54,6 @@ export type Outcome =
   | { readonly _tag: "Busy"; readonly auditId: string; readonly error: TimeTravelFailure }
   | { readonly _tag: "Failed"; readonly auditId: string; readonly error: TimeTravelFailure }
 
-interface Ownership {
-  readonly row: RunStore.RunRow
-  readonly owned: boolean
-}
-
 const isAuditDetail = Schema.is(AuditDetail)
 
 const runFailure = (operation: string, cause: RunStore.RunStoreError): TimeTravelFailure =>
@@ -81,16 +78,13 @@ const acquire = (
   runs: RunStore.Service,
   audit: Audit,
   options: Options
-): Effect.Effect<Ownership, TimeTravelFailure> =>
+): Effect.Effect<RunStore.RunRow, TimeTravelFailure> =>
   Effect.gen(function*() {
     const row = yield* runs.get(audit.runId).pipe(
       Effect.mapError((cause) => runFailure("read recovery run", cause))
     )
-    if (row.status === "suspended" && row.owner === null && row.claim === null) {
-      return { row, owned: false }
-    }
     if (row.status === "running" && row.owner !== null && sameOwner(row.owner, options.owner)) {
-      return { row, owned: true }
+      return row
     }
     if (row.claim !== null) {
       return yield* Effect.fail(error("busy", `run ${audit.runId} has an active claim`))
@@ -129,7 +123,7 @@ const acquire = (
       yield* Effect.ignore(runs.abandonClaim(audit.runId, options.owner, claimed.claimedAtMs))
       return yield* Effect.fail(error("busy", `run ${audit.runId} lost its recovery claim`))
     }
-    return { row, owned: true }
+    return row
   })
 
 const archiveCommitted = (
@@ -160,6 +154,72 @@ const archiveCommitted = (
     })
   )
 }
+
+/**
+ * Finishes the child cancellations an interrupted rewind had already planned.
+ *
+ * The plan is durable on the audit detail before the archive commit, so this is
+ * a resumption rather than a new decision: a child already terminal is skipped,
+ * and one that cannot be claimed leaves the audit open with the remainder still
+ * pending, so a later pass retries it. Idempotent by construction, because
+ * `pendingChildren` shrinks only as cancellations land.
+ */
+const cancelPending = (
+  runs: RunStore.Service,
+  audit: Audit,
+  detail: AuditDetail,
+  owner: OwnerId
+): Effect.Effect<AuditDetail, TimeTravelFailure> =>
+  Effect.gen(function*() {
+    const pending = detail.pendingChildren ?? []
+    if (pending.length === 0) return detail
+    const cancelled = [...detail.cancelledChildren]
+    for (const childRunId of pending) {
+      const row = yield* runs.get(childRunId).pipe(
+        Effect.map((value): RunStore.RunRow | undefined => value),
+        Effect.catch((cause) =>
+          cause.code === "not_found_row"
+            ? Effect.succeed(undefined)
+            : Effect.fail(runFailure(`read pending child ${childRunId}`, cause))
+        )
+      )
+      if (row === undefined || terminalStatus(row.status)) continue
+      const nowMs = yield* Clock.currentTimeMillis
+      const childOwner: OwnerId = { ...owner, nonce: `${owner.nonce}:recovery-child:${childRunId}` }
+      const expected = snapshotOf(row)
+      const claimed = yield* runs.claim(childRunId, expected, childOwner, nowMs).pipe(
+        Effect.mapError((cause) => runFailure(`claim pending child ${childRunId}`, cause))
+      )
+      if (claimed._tag !== "Claimed") {
+        // The audit keeps the whole remaining plan: nothing is written on a
+        // `busy` refusal, so the next pass sees the same list and retries it.
+        return yield* Effect.fail(
+          error("busy", `child ${childRunId} could not be claimed for cancellation`)
+        )
+      }
+      const activated = yield* runs.activate(childRunId, childOwner, claimed.claimedAtMs, expected).pipe(
+        Effect.mapError((cause) => runFailure(`activate pending child ${childRunId}`, cause))
+      )
+      if (activated._tag !== "Activated") {
+        yield* Effect.ignore(runs.abandonClaim(childRunId, childOwner, claimed.claimedAtMs))
+        return yield* Effect.fail(error("busy", `child ${childRunId} lost its cancellation claim`))
+      }
+      const done = yield* runs.transitionOwned(childRunId, childOwner, "cancelled").pipe(
+        Effect.mapError((cause) => runFailure(`cancel pending child ${childRunId}`, cause))
+      )
+      if (done._tag !== "Transitioned") {
+        return yield* Effect.fail(error("busy", `child ${childRunId} lost its cancellation fence`))
+      }
+      cancelled.push(childRunId)
+    }
+    // Reaching here means every planned child is resolved: cancelled, already
+    // terminal, or gone. A child that could not be resolved failed above and
+    // left the audit open with its plan intact.
+    return { ...detail, cancelledChildren: cancelled, pendingChildren: [] }
+  })
+
+const terminalStatus = (status: RunStore.RunStatus): boolean =>
+  status === "completed" || status === "failed" || status === "cancelled"
 
 const toFailure = (cause: Cause.Cause<unknown>): TimeTravelFailure => {
   const squashed = Cause.squash(cause)
@@ -214,25 +274,51 @@ const recoverOne = (
       )
     }
 
+    /**
+     * OWNERSHIP IS TAKEN, HELD, AND GIVEN BACK.
+     *
+     * `acquire` used to hand back an unclaimed suspended row and let the
+     * rollback run unfenced, so a concurrent engine could claim the run and
+     * start executing it while recovery restored the workspace underneath.
+     * It now claims every row it acts on. That makes the release the other half
+     * of the contract: a failure after the claim used to leave the run
+     * `running` under the recovery identity with a heartbeat nobody renews, so
+     * the ownership is restored on every exit path, and a heartbeat pulses for
+     * as long as the pass holds it.
+     */
+    let acquired: RunStore.RunRow | undefined
+    let beat: Fiber.Fiber<never, never> | undefined
+    const release = (status: RunStore.RunStatus) =>
+      Effect.suspend(() =>
+        acquired === undefined ? Effect.void : Effect.ignore(
+          runs.transitionOwned(audit.runId, options.owner, status, acquired.stateJson)
+        )
+      )
     const recoveryExit = yield* Effect.exit(
       Effect.uninterruptible(
         Effect.gen(function*() {
-          const ownership = yield* acquire(runs, audit, options)
+          acquired = yield* acquire(runs, audit, options)
+          beat = yield* Effect.forkChild(
+            Ownership.heartbeatLoop(audit.runId, options.owner),
+            { startImmediately: true }
+          )
           const committed = yield* archiveCommitted(journal, store, audit, detail)
           if (committed) {
-            if (ownership.owned) {
-              const suspended = yield* runs.transitionOwned(audit.runId, options.owner, "suspended").pipe(
-                Effect.mapError((cause) => runFailure("finish recovered suspension", cause))
+            // The cancellations the rewind planned before its commit are
+            // finished here. Closing the audit without draining them dropped
+            // exactly the work `detachedChildren: "cancel"` was asked for.
+            const drained = yield* cancelPending(runs, audit, detail, options.owner)
+            const suspended = yield* runs.transitionOwned(audit.runId, options.owner, "suspended").pipe(
+              Effect.mapError((cause) => runFailure("finish recovered suspension", cause))
+            )
+            if (suspended._tag !== "Transitioned") {
+              return yield* Effect.fail(
+                error("busy", `run ${audit.runId} lost its recovery fence`)
               )
-              if (suspended._tag !== "Transitioned") {
-                return yield* Effect.fail(
-                  error("busy", `run ${audit.runId} lost its recovery fence`)
-                )
-              }
             }
             yield* store.updateAudit(audit.id, {
               status: "completed",
-              detail: { ...detail, phase: "completed" }
+              detail: { ...drained, phase: "completed" }
             })
             return { _tag: "Completed" as const, auditId: audit.id }
           }
@@ -240,21 +326,20 @@ const recoverOne = (
           if (detail.compensation !== undefined) {
             yield* Compensation.rollback(detail.compensation)
           }
-          if (ownership.owned) {
-            const restored = yield* runs.transitionOwned(
-              audit.runId,
-              options.owner,
-              detail.originalStatus,
-              ownership.row.stateJson
-            ).pipe(
-              Effect.mapError((cause) => runFailure("restore recovered run", cause))
+          const restored = yield* runs.transitionOwned(
+            audit.runId,
+            options.owner,
+            detail.originalStatus,
+            acquired.stateJson
+          ).pipe(
+            Effect.mapError((cause) => runFailure("restore recovered run", cause))
+          )
+          if (restored._tag !== "Transitioned") {
+            return yield* Effect.fail(
+              error("busy", `run ${audit.runId} lost its rollback fence`)
             )
-            if (restored._tag !== "Transitioned") {
-              return yield* Effect.fail(
-                error("busy", `run ${audit.runId} lost its rollback fence`)
-              )
-            }
           }
+          acquired = undefined
           const { compensation: _, ...rolledBack } = detail
           yield* store.updateAudit(audit.id, {
             status: "failed",
@@ -265,7 +350,11 @@ const recoverOne = (
             }
           })
           return { _tag: "RolledBack" as const, auditId: audit.id }
-        })
+        }).pipe(
+          Effect.tap(() => Effect.sync(() => (acquired = undefined))),
+          Effect.onError(() => release(detail.originalStatus)),
+          Effect.ensuring(Effect.suspend(() => beat === undefined ? Effect.void : Fiber.interrupt(beat)))
+        )
       )
     )
     if (Exit.isSuccess(recoveryExit)) return recoveryExit.value

@@ -38,7 +38,20 @@ const makeRuns = (
 ): RunStore.Service & { readonly state: () => RunStore.RunRow } => {
   let row = { ...initial }
   const service = RunStore.makeNoop({
-    get: () => Effect.succeed({ ...row }),
+    // Only the parent has a row here. A descendant edge in this fixture stands
+    // for a child whose run row is gone, which the rewind discloses as missing
+    // evidence rather than treating as live.
+    get: (runId) =>
+      runId === initial.runId
+        ? Effect.succeed({ ...row })
+        : Effect.fail(
+          new RunStore.RunStoreError({
+            code: "not_found_row",
+            method: "get",
+            message: `run ${runId} was not found`,
+            cause: runId
+          })
+        ),
     claim: (_runId, _expected, claimant, nowMs) =>
       Effect.sync(() => {
         if (row.claim !== null) return { _tag: "AlreadyClaimed" as const }
@@ -405,12 +418,21 @@ describe("Rewind protocol fault matrix", () => {
       const store = MemoryTimeTravelStore.make({ records: records() })
       const runs = makeRuns(runRow())
       const jj = makeJj()
+      // The tail re-read under the claim happens before the audit row exists,
+      // so the suffix read is what has to fail for this case to be about an
+      // audit that is opened and then rolled back.
+      const journal = Journal.makeNoop({
+        entries: ({ after }) =>
+          after === undefined
+            ? Effect.succeed({ entries: [], hasMore: false })
+            : Effect.fail(new Journal.JournalError({ code: "read_failed", message: "journal read failed" }))
+      })
 
       const failure = yield* (
         Effect.flip(
           provide(
             Rewind.rewind({ runId: "run", frame, owner, auditId: "audit-journal-failure" }),
-            { store, runs, jj: jj.service, journal: Journal.makeNoop() }
+            { store, runs, jj: jj.service, journal }
           )
         )
       )
@@ -419,6 +441,28 @@ describe("Rewind protocol fault matrix", () => {
       expect(runs.state()).toEqual(runRow())
       expect(store.state().records).toEqual(records())
       expect(store.state().audits[0]).toMatchObject({ status: "failed", detail: { phase: "rolled_back" } })
+    }))
+
+  it.effect("refuses before opening an audit when the tail cannot be re-read", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make({ records: records() })
+      const runs = makeRuns(runRow())
+
+      const failure = yield* (
+        Effect.flip(
+          provide(
+            Rewind.rewind({ runId: "run", frame, owner, auditId: "audit-tail-failure" }),
+            { store, runs, jj: makeJj().service, journal: Journal.makeNoop() }
+          )
+        )
+      )
+
+      // The post-claim tail re-read is the first journal touch under the claim,
+      // so an unreadable journal leaves no audit row at all: the claim is
+      // released and the run is back exactly as it was found.
+      expect(failure).toMatchObject({ code: "unknown", message: "could not read journal for run" })
+      expect(runs.state()).toEqual(runRow())
+      expect(store.state().audits).toEqual([])
     }))
 
   it.effect("rejects an empty suffix continuation page without archiving history", () =>
@@ -580,7 +624,10 @@ describe("Rewind protocol fault matrix", () => {
           { store, runs, jj: makeJj().service }
         ))
 
-        expect(failure.message).toContain("original protocol failure")
+        // The hook's own text rides in the cause; the message names the step
+        // that failed and the restoration that then failed with it, because a
+        // recovery pass reads both off the audit row.
+        expect(failure.message).toContain("rewind failed at write-audit")
         expect(failure.message).toContain(scenario.restoration)
         expect(store.state().audits[0]).toMatchObject({ status: "in_progress" })
       }

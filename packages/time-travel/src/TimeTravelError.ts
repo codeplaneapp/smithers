@@ -18,7 +18,10 @@ import * as Schema from "effect/Schema"
  * run or one of its descendants is still executing, so its history is not
  * settled enough to branch from or truncate. `not_found` — the run or frame
  * does not exist. `invalid` — a caller-supplied option is malformed, refused
- * before the operation touches anything. `rate_limited` — the rewind rate
+ * before the operation touches anything. `already_crossed` — the effect already
+ * recorded a durable `intended` boundary, so executing it a second time was
+ * refused; it is a re-armed effect, never a contended run, which is why it is
+ * not `busy`. `rate_limited` — the rewind rate
  * limiter rejected the attempt. `compensation_failed` — a side effect's
  * rollback handler failed, so the rewind stopped rather than leave the world
  * half-reverted. `irreversible` — an effect in the truncated range cannot be
@@ -36,6 +39,7 @@ export const TimeTravelErrorCode = Schema.Literals([
   "live_child",
   "not_found",
   "invalid",
+  "already_crossed",
   "rate_limited",
   "compensation_failed",
   "irreversible",

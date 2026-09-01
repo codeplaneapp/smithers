@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import type { LineageEdge } from "../src/Frame.ts"
+import { forkCreatedEventType, type LineageEdge } from "../src/Frame.ts"
 import * as Memory from "../src/MemoryTimeTravelStore.ts"
 import { TimeTravelStore } from "../src/TimeTravelStore.ts"
 
@@ -64,8 +64,15 @@ describe("truncation", () => {
       expect(yield* (store.pendingAudits())).toEqual([])
       expect(store.state()).toMatchObject({ receipts: [{ id: "receipt" }], audits: [{ status: "completed" }] })
       const fork = yield* (store.createFork("parent", { lineageId: "parent/root", seq: 0 }))
+      // The copied prefix plus the fork-created marker the SQL store also
+      // writes at `frame.seq + 1`, naming the parent and the offset it cut at.
       expect(store.state().records.filter((record) => record.runId === fork.runId)).toEqual([
-        expect.objectContaining({ eventId: `fork:${fork.runId}:0` })
+        expect.objectContaining({ eventId: `fork:${fork.runId}:0` }),
+        expect.objectContaining({
+          eventId: `fork:${fork.runId}:created`,
+          eventType: forkCreatedEventType,
+          payload: { parentRunId: "parent", forkJournalOffset: 0, childRunId: fork.runId }
+        })
       ])
       const failed = Memory.make({ records, failAt: "recordReceipt" })
       yield* (Effect.flip(failed.recordReceipt({ id: "r", auditId: "a", effectId: "e", receipt: null })))

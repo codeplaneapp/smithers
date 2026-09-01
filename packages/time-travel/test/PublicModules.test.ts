@@ -117,9 +117,12 @@ describe("public time-travel modules", () => {
       "live_parent",
       "live_child",
       "not_found",
+      "invalid",
+      "already_crossed",
       "rate_limited",
       "compensation_failed",
       "irreversible",
+      "fence_lost",
       "unknown"
     ])
     const failures = codes.map((code) => error(code, code))

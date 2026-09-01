@@ -6,10 +6,10 @@ import { RunStore } from "@smthrs/run-store"
 import * as Ownership from "@smthrs/run-store/Ownership"
 import type { OwnerId } from "@smthrs/run-store/Ownership"
 import * as Deferred from "effect/Deferred"
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import { TestClock } from "effect/testing"
 import type { EffectRecord } from "../src/EffectBoundary.ts"
 import type { Result as CompensationResult } from "../src/internal/Compensation.ts"
 import * as EffectHandlerRegistry from "../src/internal/EffectHandlerRegistry.ts"
@@ -250,14 +250,19 @@ describe("Recovery", () => {
 
   it.effect("heartbeats throughout recovery rollback and stops after ownership restoration", () =>
     Effect.gen(function*() {
+      // Recovery's rollback runs external handlers and a jj restore while it
+      // holds the run, so the lease has to be renewed for exactly as long as it
+      // does and no longer. The clock is virtual, so this is a fact about the
+      // protocol rather than a race against wall time.
       const store = MemoryTimeTravelStore.make()
       seed(store, audit("compensated", compensation))
-      const pulses: Array<{ readonly runId: string; readonly owner: OwnerId; readonly nowMs: number }> = []
-      const intervalMs = Duration.toMillis(Ownership.heartbeatInterval)
+      const pulses: Array<{ readonly runId: string; readonly owner: OwnerId }> = []
+      const rolling = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
       const runs = makeRuns({
-        heartbeat: (runId, heartbeatOwner, nowMs) =>
+        heartbeat: (runId, heartbeatOwner) =>
           Effect.sync(() => {
-            pulses.push({ runId, owner: heartbeatOwner, nowMs })
+            pulses.push({ runId, owner: heartbeatOwner })
             return { _tag: "Updated" as const }
           })
       })
@@ -268,22 +273,24 @@ describe("Recovery", () => {
           requiresIdempotencyKey: true,
           residue: () => "message residue",
           revert: () => Effect.succeed({ value: "sent" }),
-          rollback: () => Effect.sleep(Duration.millis(intervalMs + 100))
+          rollback: () =>
+            Deferred.succeed(rolling, undefined).pipe(Effect.andThen(Deferred.await(release)))
         }])
       )
 
-      const outcomes = yield* runRecovery(
-        store,
-        runs,
-        Jj.makeNoop({ restore: () => Effect.void }),
-        registry,
-        true
+      const fiber = yield* Effect.forkChild(
+        runRecovery(store, runs, Jj.makeNoop({ restore: () => Effect.void }), registry, true),
+        { startImmediately: true }
       )
+      yield* Deferred.await(rolling)
+      yield* TestClock.adjust(Ownership.heartbeatInterval)
+      expect(pulses).toEqual([{ runId: "run", owner }])
+      yield* Deferred.succeed(release, undefined)
+      const outcomes = yield* Fiber.join(fiber)
 
       expect(outcomes).toEqual([{ _tag: "RolledBack", auditId: "audit-compensated" }])
-      expect(pulses).toEqual([expect.objectContaining({ runId: "run", owner })])
       const afterReturn = pulses.length
-      yield* Effect.sleep(Duration.millis(intervalMs + 100))
+      yield* TestClock.adjust(Ownership.heartbeatInterval)
       expect(pulses).toHaveLength(afterReturn)
     }))
 

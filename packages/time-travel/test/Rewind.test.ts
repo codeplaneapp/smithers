@@ -6,10 +6,12 @@ import { RunStore } from "@smthrs/run-store"
 import * as Ownership from "@smthrs/run-store/Ownership"
 import type { OwnerId } from "@smthrs/run-store/Ownership"
 import { CacheStore } from "@smthrs/step-cache"
-import * as Duration from "effect/Duration"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import { TestClock } from "effect/testing"
 import * as EffectBoundary from "../src/EffectBoundary.ts"
 import type { LineageEdge } from "../src/Frame.ts"
 import * as EffectHandlerRegistry from "../src/internal/EffectHandlerRegistry.ts"
@@ -712,38 +714,49 @@ describe("Rewind", () => {
 
   it.effect("heartbeats while stalled and stops heartbeating after rewind returns", () =>
     Effect.gen(function*() {
-      const pulses: Array<{ readonly runId: string; readonly owner: OwnerId; readonly nowMs: number }> = []
-      const intervalMs = Duration.toMillis(Ownership.heartbeatInterval)
+      // The lease is what stops a co-located engine sweeping this run as stale
+      // while a compensation handler is still running, so the assertion is that
+      // a pulse lands DURING the protocol and none lands after it returns. The
+      // clock is virtual: a real sleep would make the test a race.
+      const pulses: Array<{ readonly runId: string; readonly owner: OwnerId }> = []
+      const stalled = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
       const runs = makeRuns([row("run")], {
-        heartbeat: (runId, heartbeatOwner, nowMs) =>
+        heartbeat: (runId, heartbeatOwner) =>
           Effect.sync(() => {
-            pulses.push({ runId, owner: heartbeatOwner, nowMs })
+            pulses.push({ runId, owner: heartbeatOwner })
             return { _tag: "Updated" as const }
           })
       })
       const store = MemoryTimeTravelStore.make({ records: [baseline()] })
 
-      yield* provide(
-        Rewind.rewind({
-          runId: "run",
-          frame,
-          owner,
-          auditId: "audit-heartbeat",
-          hooks: {
-            beforeStep: (step) =>
-              step === "compensate-effects"
-                ? Effect.sleep(Duration.millis(intervalMs + 100))
-                : Effect.void
-          }
-        }),
-        { store, runs, jj: makeJj("current").service }
+      const fiber = yield* Effect.forkChild(
+        provide(
+          Rewind.rewind({
+            runId: "run",
+            frame,
+            owner,
+            auditId: "audit-heartbeat",
+            hooks: {
+              beforeStep: (step) =>
+                step === "compensate-effects"
+                  ? Deferred.succeed(stalled, undefined).pipe(Effect.andThen(Deferred.await(release)))
+                  : Effect.void
+            }
+          }),
+          { store, runs, jj: makeJj("current").service }
+        ),
+        { startImmediately: true }
       )
 
-      expect(pulses).toEqual([
-        expect.objectContaining({ runId: "run", owner })
-      ])
+      yield* Deferred.await(stalled)
+      yield* TestClock.adjust(Ownership.heartbeatInterval)
+      expect(pulses).toEqual([{ runId: "run", owner }])
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(fiber)
+
       const afterReturn = pulses.length
-      yield* Effect.sleep(Duration.millis(intervalMs + 100))
+      yield* TestClock.adjust(Ownership.heartbeatInterval)
       expect(pulses).toHaveLength(afterReturn)
     }))
 

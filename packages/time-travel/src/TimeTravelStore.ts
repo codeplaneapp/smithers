@@ -120,6 +120,64 @@ export const Audit = Schema.Struct({
  */
 export type Audit = typeof Audit.Type
 /**
+ * The keys an open audit row may be advanced through.
+ *
+ * `Partial<Audit>` also accepted `id`, `runId`, and `frame`, and the two stores
+ * disagreed about them: the memory store merged them, so patching `id` made the
+ * audit unreachable by its original key, while the SQL store computed the same
+ * merged object and then wrote only these three columns. Naming the patch is
+ * what makes the two behavioural peers again, and a store refuses any other key
+ * with `invalid` rather than accepting a write it will not perform.
+ *
+ * @since 0.1.0
+ * @category schemas
+ */
+export const AuditPatch = Schema.Struct({
+  status: Schema.optionalKey(Audit.fields.status),
+  rateLimit: Schema.optionalKey(Schema.Unknown),
+  detail: Schema.optionalKey(Schema.Unknown)
+})
+/**
+ * The value form of {@link AuditPatch}.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type AuditPatch = typeof AuditPatch.Type
+/**
+ * The keys {@link AuditPatch} admits, in the order a store reports them.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export const auditPatchKeys: ReadonlyArray<string> = ["status", "rateLimit", "detail"]
+/**
+ * Refuses a patch carrying a key {@link AuditPatch} does not admit.
+ *
+ * The check is a runtime one because the offending caller is an untyped one:
+ * a JSON surface, or a `Partial<Audit>` value that predates this contract.
+ *
+ * @since 0.1.0
+ * @category validators
+ */
+export const validateAuditPatch = (patch: AuditPatch): Effect.Effect<AuditPatch, TimeTravelError> => {
+  const unknown = Object.keys(patch).find((key) => !auditPatchKeys.includes(key))
+  return unknown === undefined
+    ? Effect.succeed(patch)
+    : Effect.fail(error("invalid", `audit patch contains unknown key ${unknown}`))
+}
+/**
+ * The refusal both stores raise for a fork whose frame addresses no record.
+ *
+ * One message rather than two: the stores are behavioural peers, and a caller
+ * that branches on the refusal must get the same answer from either.
+ *
+ * @since 0.1.0
+ * @category constructors
+ */
+export const forkFrameMessage = (parentRunId: string, frame: Frame): string =>
+  `frame ${frame.lineageId}@${frame.seq} is not a record of ${parentRunId}`
+/**
  * Proof that one side effect was compensated during a rewind.
  *
  * A rewind reverts effects by calling their registered rollback handlers; each
@@ -236,8 +294,14 @@ export interface Service {
    * find.
    */
   readonly writeAudit: (audit: Audit) => Effect.Effect<void, TimeTravelError>
-  /** Advances an open audit row — normally to `completed` or `failed`. */
-  readonly updateAudit: (id: string, patch: Partial<Audit>) => Effect.Effect<void, TimeTravelError>
+  /**
+   * Advances an open audit row — normally to `completed` or `failed`.
+   *
+   * The patch is an {@link AuditPatch}: an audit's identity is fixed when it is
+   * written, so `id`, `runId`, and `frame` are refused with `invalid` rather
+   * than applied by one store and dropped by the other.
+   */
+  readonly updateAudit: (id: string, patch: AuditPatch) => Effect.Effect<void, TimeTravelError>
   /**
    * Every audit row still `in_progress`: the rewinds a crash interrupted.
    * Recovery drains this on layer build.

@@ -14,9 +14,10 @@
  *
  * @since 0.1.0
  */
+import type { OwnerId } from "@smthrs/journal/OwnerId"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import type { Frame, LineageEdge } from "./Frame.ts"
+import { forkCreatedEventType, type Frame, type LineageEdge } from "./Frame.ts"
 import { error, TimeTravelError } from "./TimeTravelError.ts"
 import * as TimeTravelStore from "./TimeTravelStore.ts"
 
@@ -35,7 +36,15 @@ export interface JournalRecord {
   readonly runId: string
   readonly seq: number
   readonly eventId: string
-  readonly lineageId: string
+  /**
+   * The lineage the record was written on, when it carries one.
+   *
+   * Absent means "written before lineage was minted, or by a producer outside
+   * the engine". The SQL store keeps such a record in every lineage-filtered
+   * read, because dropping it would silently shorten the fold, and this store
+   * answers the same way.
+   */
+  readonly lineageId?: string | undefined
   readonly payload: unknown
   /**
    * The engine record type this stands in for, when a test drives the derived
@@ -63,6 +72,8 @@ export interface MemoryState {
   readonly receipts: ReadonlyArray<TimeTravelStore.Receipt>
   readonly snapshots: ReadonlyArray<TimeTravelStore.Snapshot>
   readonly liveRuns: ReadonlySet<string>
+  /** The owner each run records, which is what `archiveAndTruncate` fences on. */
+  readonly runOwners: ReadonlyMap<string, OwnerId>
 }
 /**
  * The history a memory store starts life holding, plus the one knob that makes
@@ -83,6 +94,16 @@ export interface Options {
    * refused with `live_parent` or `live_child`.
    */
   readonly liveRuns?: ReadonlySet<string>
+  /**
+   * The owner each run records.
+   *
+   * `archiveAndTruncate` is fenced on the caller's ownership, and this store
+   * used to accept the `owner` argument and drop it, so `fence_lost` was
+   * reachable only on SQL and every memory rewind suite was blind to a
+   * superseded owner. A run named here refuses a mismatched owner; a run absent
+   * from the map records no owner and so has no fence to lose.
+   */
+  readonly runOwners?: ReadonlyMap<string, OwnerId>
   /**
    * Throws an `unknown`-coded {@link TimeTravelError} at the named internal
    * step, so a test can interrupt a rewind mid-flight and then assert that
@@ -145,6 +166,23 @@ const descendantsFrom = (
  * @category constructors
  */
 export const make = (options: Options = {}): TimeTravelStore.Service & { readonly state: () => MemoryState } => {
+  /**
+   * Copies the values a caller hands in and the values a reader takes out.
+   *
+   * Audits and receipts are the two collections carrying OPAQUE caller
+   * payloads: `rateLimit`, `detail`, and `receipt` are `Schema.Unknown`, so the
+   * store held the caller's own object graph. Mutating it after the write, or
+   * mutating what a read handed back, rewrote recorded history, which the SQL
+   * store cannot do because it serializes. A value that cannot be cloned is a
+   * typed refusal rather than a raw throw.
+   */
+  const clone = <A>(value: A, label: string): A => {
+    try {
+      return structuredClone(value)
+    } catch (cause) {
+      throw error("invalid", `could not clone ${label}`, cause)
+    }
+  }
   let records = [...(options.records ?? [])]
   let archived: Array<JournalRecord> = []
   let edges = [...(options.edges ?? [])]
@@ -152,6 +190,7 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
   let receipts: Array<TimeTravelStore.Receipt> = []
   let snapshots = [...(options.snapshots ?? [])]
   const liveRuns = new Set(options.liveRuns ?? [])
+  const runOwners = new Map(options.runOwners ?? [])
   let sequence = 0
   const fail = (step: string): void => {
     if (options.failAt === step) throw error("unknown", `injected failure at ${step}`)
@@ -160,12 +199,20 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
     records: [...records],
     archived: [...archived],
     edges: [...edges],
-    audits: [...audits],
-    receipts: [...receipts],
+    audits: clone([...audits], "audits"),
+    receipts: clone([...receipts], "receipts"),
     snapshots: [...snapshots],
-    liveRuns: new Set(liveRuns)
+    liveRuns: new Set(liveRuns),
+    runOwners: new Map(runOwners)
   })
-  /** The lineage-filtered prefix of one record type, mirroring the SQL store. */
+  /**
+   * The lineage-filtered prefix of one record type, mirroring the SQL store.
+   *
+   * A record carrying no lineage is kept, exactly as `SqlTimeTravelStore`'s
+   * `prefix` keeps a NULL `meta.lineageId`: it predates lineage minting, or
+   * came from a producer outside the engine, and it is still evidence of the
+   * run.
+   */
   const framed = (
     runId: string,
     frame: Frame,
@@ -176,7 +223,7 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
         record.runId === runId &&
         record.seq <= frame.seq &&
         record.eventType === eventType &&
-        record.lineageId === frame.lineageId
+        (record.lineageId === undefined || record.lineageId === frame.lineageId)
       )
       .sort((left, right) => left.seq - right.seq)
   const atomic = <A>(body: () => A): Effect.Effect<A, TimeTravelError> =>
@@ -195,6 +242,8 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
           snapshots = [...before.snapshots]
           liveRuns.clear()
           for (const runId of before.liveRuns) liveRuns.add(runId)
+          runOwners.clear()
+          for (const [runId, runOwner] of before.runOwners) runOwners.set(runId, runOwner)
           sequence = beforeSequence
           throw cause
         }
@@ -221,15 +270,16 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
         seq: snapshot.frame.seq
       }).pipe(Effect.andThen(atomic(() => {
         fail("recordSnapshot")
+        const recorded = snapshot
         snapshots = [
           ...snapshots.filter((existing) =>
             !(
-              existing.runId === snapshot.runId &&
-              existing.frame.lineageId === snapshot.frame.lineageId &&
-              existing.frame.seq === snapshot.frame.seq
+              existing.runId === recorded.runId &&
+              existing.frame.lineageId === recorded.frame.lineageId &&
+              existing.frame.seq === recorded.frame.seq
             )
           ),
-          snapshot
+          recorded
         ]
       })))
     ),
@@ -279,24 +329,39 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
         seq: audit.frame.seq
       }).pipe(Effect.andThen(atomic(() => {
         fail("writeAudit")
-        audits.push(audit)
+        audits.push(clone(audit, "audit"))
       })))
     ),
     updateAudit: Effect.fn("TimeTravelStore.updateAudit")((id, patch) =>
-      Effect.annotateCurrentSpan({ auditId: id }).pipe(Effect.andThen(atomic(() => {
-        fail("updateAudit")
-        const index = audits.findIndex((audit) => audit.id === id)
-        if (index < 0) throw error("not_found", `audit ${id} was not found`)
-        audits[index] = { ...audits[index]!, ...patch }
-      })))
+      Effect.annotateCurrentSpan({ auditId: id }).pipe(
+        Effect.andThen(TimeTravelStore.validateAuditPatch(patch)),
+        Effect.andThen(atomic(() => {
+          fail("updateAudit")
+          const index = audits.findIndex((audit) => audit.id === id)
+          if (index < 0) throw error("not_found", `audit ${id} was not found`)
+          audits[index] = clone({ ...audits[index]!, ...patch }, "audit")
+        }))
+      )
     ),
     pendingAudits: Effect.fn("TimeTravelStore.pendingAudits")(() =>
-      Effect.sync(() => audits.filter((audit) => audit.status === "in_progress"))
+      Effect.sync(() => clone(audits.filter((audit) => audit.status === "in_progress"), "audits"))
     ),
-    archiveAndTruncate: Effect.fn("TimeTravelStore.archiveAndTruncate")((runId, frame, newReceipts) =>
+    archiveAndTruncate: Effect.fn("TimeTravelStore.archiveAndTruncate")((runId, frame, newReceipts, owner) =>
       Effect.annotateCurrentSpan({ runId, lineageId: frame.lineageId, seq: frame.seq }).pipe(
         Effect.andThen(atomic(() => {
           fail("archiveAndTruncate:start")
+          // The same commit-time owner predicate the SQL store asserts: a
+          // superseded rewinder never truncates history behind the live owner.
+          const recorded = runOwners.get(runId)
+          if (
+            recorded !== undefined &&
+            (recorded.hostId !== owner.hostId || recorded.pid !== owner.pid || recorded.nonce !== owner.nonce)
+          ) {
+            throw error(
+              "fence_lost",
+              `run ${runId} is no longer owned by ${owner.hostId}:${owner.pid}:${owner.nonce}`
+            )
+          }
           const descendants = descendantsFrom(edges, runId, frame)
           const doomed = records.filter((record) =>
             (record.runId === runId && record.seq > frame.seq) ||
@@ -313,7 +378,7 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
           )
           const attachedChildren = new Set(descendants.attached.map((edge) => edge.childRunId))
           edges = edges.filter((edge) => !attachedChildren.has(edge.childRunId))
-          receipts.push(...newReceipts)
+          receipts.push(...clone([...newReceipts], "receipts"))
           fail("archiveAndTruncate:commit")
           return { archived: doomed.length, orphaned: descendants.detached }
         }))
@@ -342,10 +407,35 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
             }
             currentRunId = edges.find((edge) => edge.childRunId === currentRunId)?.parentRunId
           }
+          // The frame must address a record, exactly as the SQL store now
+          // re-checks inside its own transaction. Frame zero stays addressable
+          // by definition, and a record carrying no lineage is compatible with
+          // every frame.
+          if (
+            frame.seq > 0 &&
+            !records.some((record) =>
+              record.runId === parentRunId &&
+              record.seq === frame.seq &&
+              (record.lineageId === undefined || record.lineageId === frame.lineageId)
+            )
+          ) {
+            throw error("not_found", TimeTravelStore.forkFrameMessage(parentRunId, frame))
+          }
           const runId = childRunId ?? `${parentRunId}:fork:${++sequence}`
           const prefix = records.filter((record) => record.runId === parentRunId && record.seq <= frame.seq)
           fail("createFork:copy")
           records.push(...prefix.map((record) => ({ ...record, runId, eventId: `fork:${runId}:${record.seq}` })))
+          // The fork-created marker the SQL store writes at `frame.seq + 1`,
+          // naming the parent and the offset the child was cut at, so a
+          // forensic walk can start from any child on either store.
+          records.push({
+            runId,
+            seq: frame.seq + 1,
+            eventId: `fork:${runId}:created`,
+            lineageId: frame.lineageId,
+            eventType: forkCreatedEventType,
+            payload: { parentRunId, forkJournalOffset: frame.seq, childRunId: runId }
+          })
           // The frame's anchors cross the fork with the prefix, mirroring the
           // SQL store: the child's history must be self-contained without a
           // later projection of its copied journal.
@@ -375,7 +465,7 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
         effectId: receipt.effectId
       }).pipe(Effect.andThen(atomic(() => {
         fail("recordReceipt")
-        receipts.push(receipt)
+        receipts.push(clone(receipt, "receipt"))
       })))
     )
   })

@@ -44,7 +44,7 @@ import * as Recovery from "./internal/Recovery.ts"
 import * as Replay from "./internal/Replay.ts"
 import * as Rewind from "./internal/Rewind.ts"
 import * as SnapshotProjector from "./internal/SnapshotProjector.ts"
-import type { TimeTravelError } from "./TimeTravelError.ts"
+import { error, type TimeTravelError } from "./TimeTravelError.ts"
 import type { Fork as ForkRecord, TimeTravelStore } from "./TimeTravelStore.ts"
 
 /**
@@ -279,10 +279,25 @@ export const makeWith = (
     // finished or rolled back before this service accepts new work. An audit
     // whose run is still held elsewhere is declined rather than closed, so it
     // survives for the next build to pick up.
-    yield* provided(Recovery.recover({
+    const outcomes = yield* provided(Recovery.recover({
       owner,
       livenessEvidence: recoveryEvidence(options.isAlive ?? Ownership.leaseLiveness())
     }))
+    // A `Failed` outcome closes an audit terminally. Discarding the array made
+    // that invisible to the composition, so an operator learned about a rewind
+    // recovery could not finish only by reading the audit table by hand.
+    yield* Effect.forEach(
+      outcomes.filter((outcome) => outcome._tag === "Failed"),
+      (outcome) =>
+        Effect.logError("time-travel: startup recovery closed an audit as failed").pipe(
+          Effect.annotateLogs({
+            auditId: outcome.auditId,
+            code: outcome.error.code,
+            reason: outcome.error.message
+          })
+        ),
+      { discard: true }
+    )
 
     /**
      * Folds the run's journal into its frame anchors before a verb reads them.
@@ -345,19 +360,42 @@ export const makeWith = (
             // The validation phase runs before anything durable: a refused page
             // size or a frame that is not on this run's lineage leaves no claim,
             // no audit row, and no refreshed anchor behind.
-            Rewind.validate({
-              runId: position.runId,
-              frame: position.frame,
-              ...(options?.pageSize === undefined ? {} : { pageSize: options.pageSize })
-            }).pipe(
-              Effect.andThen(refreshAnchors(position.runId)),
-              Effect.andThen(Rewind.rewind({
-                runId: position.runId,
-                frame: position.frame,
-                owner,
-                detachedChildPolicy: options?.detachedChildren ?? "block",
-                ...(options?.pageSize === undefined ? {} : { pageSize: options.pageSize })
-              }))
+            Schema.decodeUnknownEffect(Rewind.DetachedChildPolicy)(
+              options?.detachedChildren ?? "block"
+            ).pipe(
+              // The policy is decoded before anything durable happens. An
+              // untyped caller writing "blcok" used to select the DESTRUCTIVE
+              // branch, because the assessment treated every value other than
+              // the literal "block" as cancel.
+              Effect.mapError(() =>
+                error(
+                  "invalid",
+                  `detachedChildren must be "block" or "cancel", not ${JSON.stringify(options?.detachedChildren)}`
+                )
+              ),
+              Effect.flatMap((detachedChildPolicy) =>
+                Rewind.validate({
+                  runId: position.runId,
+                  frame: position.frame,
+                  ...(options?.pageSize === undefined ? {} : { pageSize: options.pageSize })
+                }).pipe(
+                  Effect.flatMap((expectedTail) =>
+                    refreshAnchors(position.runId).pipe(
+                      Effect.andThen(Rewind.rewind({
+                        runId: position.runId,
+                        frame: position.frame,
+                        owner,
+                        detachedChildPolicy,
+                        // The tail validation observed, re-checked under the
+                        // claim: nothing else binds the refusal to the
+                        // truncation it was asked about.
+                        ...(expectedTail === undefined ? {} : { expectedTail }),
+                        ...(options?.pageSize === undefined ? {} : { pageSize: options.pageSize })
+                      }))
+                    )
+                  )
+                )
+              )
             )
           )
         })()

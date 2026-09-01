@@ -227,8 +227,15 @@ export const guard = <A, E, R>(
       Effect.gen(function*() {
         const intended = yield* emit(journal, validated, "intended")
         if (intended._tag === "Duplicate") {
+          // `already_crossed` rather than `busy`: the closed code list exists so
+          // a caller can branch on WHY, and `busy` is the code a contended run
+          // raises. A re-armed effect and a rewind holding the run are different
+          // answers to "why was this refused", and they need different codes.
           return yield* Effect.fail(
-            error("busy", `effect ${validated.id} already crossed its durable boundary; refusing to execute it again`)
+            error(
+              "already_crossed",
+              `effect ${validated.id} already crossed its durable boundary; refusing to execute it again`
+            )
           )
         }
         const actionExit = yield* Effect.exit(restore(action))
