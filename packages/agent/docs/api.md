@@ -127,7 +127,7 @@ plane approved, bound nothing until `Budget` existed.
 `Budget.layer(policy)` states one directly.
 
 Enforcement sits at the model boundary, which every model call passes through,
-so a step that assembles its own loop cannot evade a run-wide budget. Three
+so a step that assembles its own loop cannot evade a run-wide budget. Four
 rules make it usable:
 
 - **The accumulator is keyed by the model step's content key, and it is

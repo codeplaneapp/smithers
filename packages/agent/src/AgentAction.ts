@@ -19,8 +19,8 @@
  * call has exactly one.
  *
  * Structured output is enforced at this boundary by
- * `@smthrs/harness/StructuredOutput`, following
- * `docs/specs/Concepts/Structured Output.md`: the declared schema is rendered
+ * `@smthrs/harness/StructuredOutput`, whose own module documentation states
+ * the recovery contract: the declared schema is rendered
  * into the run's system teaching, the final `complete` transition's `output` is
  * decoded by it, and a decode miss spends a correction slot on a re-prompt
  * before it becomes a typed `StructuredOutputFailure`.

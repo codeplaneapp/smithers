@@ -33,14 +33,18 @@
  * without one. Confinement is `WorkspaceSandbox`'s job and it composes
  * independently.
  *
- * Governing design: `docs/specs/Concepts/Checkpoints.md`.
+ * Governing design: the "Checkpoints and worktree lanes" row of
+ * `docs/migration/rc-contract.md` section 5.2, which defines an rc.0 checkpoint
+ * as a pinned git tree per cell call, and the `@smthrs/std` `Checkpoints`
+ * module that mints and stores those trees.
  *
  * @since 0.1.0
  */
 import * as Cell from "@smthrs/harness/Cell"
 import type { HarnessError } from "@smthrs/harness/HarnessError"
 import * as Checkpoints from "@smthrs/std/Checkpoints"
-import { Effect, Option } from "effect"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import type * as FlowEngineLike from "./FlowEngineLike.ts"
 
 /** A refusal the cell observes as an ordinary catchable failure. */

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-rc.0] - 2026-09-01
+
 ### Added
 
 - Added `defaultModelRetryWindowMillis` (45,000 ms), a wall clock on the transport retry ladder. Five rungs bounds how many attempts are made, not what they cost: r92 of the SWE-bench full benchmark burned ten `transport` retries and $0.85 across two instances against a socket that stayed dead for half a minute, and each of those attempts re-sent a whole prompt and streamed a partial body before dying. The window is the declared ladder's own jittered ceiling plus a rung's headroom, so a transport that fails fast still gets all five rungs, while one whose attempts are slow stops when the window closes. Elapsed time is the schedule's own, on the injected clock.
@@ -22,33 +24,6 @@
   A host with a different route passes its own transport; a host with neither
   docker nor podman fails the spawn with the shell's own "not found", which is
   the honest answer.
-
-### Changed
-
-- Renamed the package from `@smthrs/engine-harness` to `@smthrs/agent`. The
-  package is named for what it ships: the Smithers agent, plus the two adapters
-  that run it.
-- Renamed `CellHarness` to `Agent` and made it a `Context.Service`. The loop is
-  reached through the `Agent` tag rather than a bare `run` export, so a future
-  agent that drives a foreign CLI is another implementation of the same service.
-  `Agent.layer` provides the production one, `Agent.layerNoop` a silent one, and
-  `Agent.layerDefaults` the browser-safe sandbox and steering defaults the old
-  `CellHarness.layer` provided.
-- Renamed `HarnessExecutor` to `AgentSession`, and its durable flow id from
-  `engine-harness/agent` to `agent/run`.
-- Collapsed `Options.seat` / `model` / `route` / `contextWindowTokens` into one
-  resolved `Seat.Seat`. There is now exactly one resolved-seat record, produced
-  only by a `SeatResolver`.
-- Changed the composition identity folded into every step key this package
-  derives from `flows/engine-harness/composition/v1:` to
-  `flows/agent/composition/v1:` (`FlowEngineLike.ts`). Every step cached under
-  the old prefix therefore misses. That is intentional: pre-release identity
-  strings track module paths, and the package moved.
-- Changed the failure an `AgentAction` reports when the host cannot serve its
-  declared seat. It is now `Seat.SeatUnresolved` rather than a `HarnessError`,
-  and `AgentAction.AgentFailure` carries the new member.
-
-### Added
 
 - Journaled `control.agent.discipline-armed` once at run start with the
   read-only and frame caps and every effective sandbox limit, so a run that
@@ -81,6 +56,68 @@
 - Added workspace-relative file boundary conversion for cell calls.
 - Added transient sealed-model retries while preserving non-retryable model
   failures.
+
+- Added package-owned documentation: `Package.ts`, `docs/`, and
+  `scripts/docs.mjs` generate `docs/pages/api/agent.md` from the package's own
+  JSDoc and prose, so the API page has one source rather than three.
+
+### Changed
+
+- Renamed the cost field of the durable `flows.agent.usage.v1` payload from
+  `tokens` to `spent`, and gave the payload an owning schema,
+  `Budget.UsageRecord`. `@smthrs/journal`'s redactor strips one trailing plural
+  and tests the suffix, so `tokens` read as a credential and the production
+  `SqlJournal` persisted `"[REDACTED]"` where the number was. Every usage record
+  written under a real journal therefore came back unreadable, and the old read
+  side dropped it silently, so a resumed run recovered nothing and was handed
+  its whole token allowance again. Records written under the old name do not
+  decode; they never carried a readable number either.
+- Made durable budget recovery fail closed. A `flows.agent.usage.v1` or
+  `flows.agent.budget-started.v1` record that does not decode now raises
+  `Budget.AccountingUnavailable` naming the entry's sequence and journal source,
+  instead of contributing nothing to the ledger.
+- Made the latency budget's clock zero durable. The first budget question of a
+  run writes `Budget.budgetStartedEvent`, and a later incarnation recovers the
+  earliest recorded zero, so a park, reclaim, or process restart no longer
+  re-arms the whole `milliseconds` allowance.
+- Fixed `QuotaPolicy.parseDelay` reading "retry after 5 minutes" as five
+  seconds. The `retry-after` pattern made its unit optional, so a minute- or
+  hour-scale wait woke sixty or thirty-six hundred times too early and burned
+  every park the step was allowed.
+- Made a latched `skip-remaining` budget report the refusal it actually latched
+  on. A latency latch previously answered every later call with a fabricated
+  `tokens` scope and `max: 0`.
+- Added `cause` to `Budget.AccountingUnavailable`, so the journal error under an
+  accounting failure keeps its tag and fields instead of being stringified.
+- Renamed the package from `@smthrs/engine-harness` to `@smthrs/agent`. The
+  package is named for what it ships: the Smithers agent, plus the two adapters
+  that run it.
+- Renamed `CellHarness` to `Agent` and made it a `Context.Service`. The loop is
+  reached through the `Agent` tag rather than a bare `run` export, so a future
+  agent that drives a foreign CLI is another implementation of the same service.
+  `Agent.layer` provides the production one, `Agent.layerNoop` a silent one, and
+  `Agent.layerDefaults` the browser-safe sandbox and steering defaults the old
+  `CellHarness.layer` provided.
+- Renamed `HarnessExecutor` to `AgentSession`, and its durable flow id from
+  `engine-harness/agent` to `agent/run`.
+- Collapsed `Options.seat` / `model` / `route` / `contextWindowTokens` into one
+  resolved `Seat.Seat`. There is now exactly one resolved-seat record, produced
+  only by a `SeatResolver`.
+- Changed the composition identity folded into every step key this package
+  derives from `flows/engine-harness/composition/v1:` to
+  `flows/agent/composition/v1:` (`FlowEngineLike.ts`). Every step cached under
+  the old prefix therefore misses. That is intentional: pre-release identity
+  strings track module paths, and the package moved.
+- Changed the failure an `AgentAction` reports when the host cannot serve its
+  declared seat. It is now `Seat.SeatUnresolved` rather than a `HarnessError`,
+  and `AgentAction.AgentFailure` carries the new member.
+
+### Removed
+
+- Removed `FlowEngineLike.ChildRunner`, `FlowEngineLike.appendBatch`,
+  `FlowEngineLike.Options.children`, and `FlowEngineLike.Options.plan`.
+  `splice` now refuses an elaborated batch because the cell loop superseded
+  the provider-tool-call path, and rc.0 does not ship API it does not support.
 
 ## [0.1.0] - 2026-08-05
 
