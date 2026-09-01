@@ -1040,6 +1040,40 @@ export const layer = (applicationConfig: Application.Config) => {
   )
 }
 
+/** Refuses a composition root that still owes a service. */
+type Complete<L> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>] ? [R] extends [never] ? true : false
+  : false
+
+/** Refuses a composition root whose allowed requirement channel is not exact. */
+type RequirementsAre<L, Expected> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>]
+  ? [R] extends [Expected] ? [Expected] extends [R] ? true : false : false
+  : false
+
+/** Fails to compile unless its argument is `true`. */
+type Expect<T extends true> = T
+
+/**
+ * Pins the executor and both complete control-plane compositions.
+ *
+ * The executor is installed beneath `Application.layer`, so its control
+ * runtime, journal, notification queue, and registry are deliberate inputs.
+ * `layerControl` supplies them, and the final command-handler root owes
+ * nothing.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type CompositionRootsAreComplete = [
+  Expect<
+    RequirementsAre<
+      ReturnType<typeof layerExecutor>,
+      ControlRuntime.ControlRuntime | Journal.Journal | NotificationQueue.NotificationQueue | Registry.Registry
+    >
+  >,
+  Expect<Complete<ReturnType<typeof layerControl>>>,
+  Expect<Complete<ReturnType<typeof layer>>>
+]
+
 /**
  * Provides the memory store a `--remote` invocation gets: none, said out loud.
  *
