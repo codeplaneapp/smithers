@@ -6,7 +6,7 @@
   "smthrs": {
     "group": "engine"
   },
-  "description": "Thin Effect SQL client and SQLite write-retry service for flows",
+  "description": "A driver-neutral SQL contract with a bounded write-retry seam, plus the composed migration ladder",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
