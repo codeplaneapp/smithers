@@ -420,14 +420,18 @@ describe("an invocation that never runs a command answers before the control pla
     })
   })
 
-  it("classifies every declared verb as a real command, not an unknown subcommand", () => {
+  it("classifies every shipped verb as a real command, not an unknown subcommand", () => {
     // The resolver is the command tree, so every name the tree declares has to
     // resolve through it. A verb that stopped resolving would reach an
-    // operator as a did-you-mean list for a verb that exists.
+    // operator as a did-you-mean list for a verb that exists. The removed
+    // verbs are swept by `scripts/docs-removals.test.mjs`, which spawns all 75
+    // of them; this covers the surviving half.
     const declared = cli.subcommands.flatMap((group) => group.commands.map((command) => command.name))
+    const shipped = Verb.subcommands.map((verb) => verb.name)
 
-    expect(declared.length).toBeGreaterThan(0)
-    for (const name of declared) {
+    expect(shipped.length).toBeGreaterThan(0)
+    for (const name of shipped) {
+      expect(declared, name).toContain(name)
       const result = inEmptyDirectory((cwd) => ({ ...runIn(cwd, [name, "--help"]), files: readdirSync(cwd) }))
 
       expect(result.stderr, name).not.toContain("Unknown subcommand")

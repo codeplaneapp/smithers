@@ -584,7 +584,7 @@ describe("owned-run settlement", () => {
       if (kind === "control.run.pending") {
         expect(Exit.isFailure(exit)).toBe(true)
         expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : "")).toContain(
-          "the executor did not take it"
+          "no executor took it"
         )
         continue
       }
