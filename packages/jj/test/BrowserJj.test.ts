@@ -158,7 +158,9 @@ describe("BrowserJj over the fake ABI module", () => {
       const invalid = yield* flip({ wasm: missing, fs: slice }, (jj) => jj.restore("zzz"))
       expect(invalid.code).toBe("invalid_ref")
       expect(invalid.message).toBe("jj restore: no such revision")
-      expect(invalid.command).toBeUndefined()
+      // The guest named no command, so the operation's own command stands: a
+      // failure a caller has to act on never arrives without one.
+      expect(invalid.command).toBe("jj restore")
 
       const absent = fakeFlowsJjWasm({ response: "{\"err\":{\"code\":\"not_installed\",\"message\":\"n\"}}" })
       expect((yield* flip({ wasm: absent, fs: slice }, (jj) => jj.status())).code).toBe("not_installed")
@@ -206,15 +208,39 @@ describe("BrowserJj over the fake ABI module", () => {
       }
     }))
 
-  it.effect("reports instantiation failure per operation and retries on the next", () =>
+  it.effect("reports instantiation failure per operation and retries with the SAME module", () =>
     Effect.gen(function*() {
-      const options: BrowserJj.BrowserJjOptions = { wasm: new Uint8Array([1, 2, 3]), fs: slice }
+      const options: { wasm: WebAssembly.Module | BufferSource; fs: typeof slice } = {
+        wasm: new Uint8Array([1, 2, 3]),
+        fs: slice
+      }
       const jj = yield* (Effect.provide(Jj, BrowserJj.layer(options)))
       const first = yield* (Effect.flip(jj.status()))
       expect(first.code).toBe("unknown")
       expect(first.message).toContain("failed to instantiate flows_jj.wasm")
+
+      // Instantiation is retried per operation, so re-reading the option would
+      // let a caller swap the module in between. It is taken exactly once.
+      options.wasm = fakeFlowsJjWasm({ response: "{\"ok\":{\"changeId\":\"zzz\"}}" })
       const second = yield* (Effect.flip(jj.snapshot()))
       expect(second.message).toContain("failed to instantiate flows_jj.wasm")
+    }))
+
+  it.effect("reads the wasm option once even when the read itself throws", () =>
+    Effect.gen(function*() {
+      let reads = 0
+      const options: BrowserJj.BrowserJjOptions = {
+        fs: slice,
+        get wasm(): WebAssembly.Module {
+          reads++
+          throw "boom" // eslint-disable-line no-throw-literal
+        }
+      }
+      const jj = yield* (Effect.provide(Jj, BrowserJj.layer(options)))
+
+      expect((yield* (Effect.flip(jj.status()))).message).toBe("jj status: failed to instantiate flows_jj.wasm: boom")
+      expect((yield* (Effect.flip(jj.status()))).message).toBe("jj status: failed to instantiate flows_jj.wasm: boom")
+      expect(reads).toBe(1)
     }))
 
   it.effect("names every missing export of a module that does not speak the ABI", () =>
@@ -224,16 +250,19 @@ describe("BrowserJj over the fake ABI module", () => {
       expect(error.message).toContain("missing: memory, _initialize, flows_jj_alloc, flows_jj_free, flows_jj_call")
     }))
 
-  it.effect("stringifies non-Error instantiation failures", () =>
+  it.effect("names the operation that asked for the module on an instantiation failure", () =>
     Effect.gen(function*() {
-      const options: BrowserJj.BrowserJjOptions = {
-        fs: slice,
-        get wasm(): WebAssembly.Module {
-          throw "boom" // eslint-disable-line no-throw-literal
-        }
-      }
-      const error = yield* flip(options, (jj) => jj.status())
-      expect(error.message).toBe("jj: failed to instantiate flows_jj.wasm: boom")
+      // Instantiation is shared by every operation, so the failure has no
+      // method of its own. It is still a failure of the operation the caller
+      // made, and `@smthrs/kernel` reads `.method` off it.
+      const error = yield* flip({ wasm: new Uint8Array([1, 2, 3]), fs: slice }, (jj) => jj.diff("a", "b"))
+      expect(error).toMatchObject({
+        code: "unknown",
+        module: "BrowserJj",
+        method: "diff",
+        command: "jj diff"
+      })
+      expect(error.message).toMatch(/^jj diff: failed to instantiate flows_jj\.wasm: /)
     }))
 
   it.effect("frees the request and response buffers on the success path", () =>
@@ -310,6 +339,13 @@ describe("BrowserJj over the fake ABI module", () => {
       expect(outside).toMatchObject({ code: "unknown", module: "BrowserJj", method: "root", command: "jj root" })
       expect(outside.message).toContain("is not inside the workspace root /repo")
       expect((yield* (Effect.map(Effect.flip(jj.root!("/repository-elsewhere")), jjError))).code).toBe("unknown")
+      // A raw prefix comparison accepted these: `..` climbs out of the slice,
+      // and a relative path names nothing in the namespace at all.
+      expect((yield* (Effect.map(Effect.flip(jj.root!("/repo/../outside")), jjError))).code).toBe("unknown")
+      expect((yield* (Effect.map(Effect.flip(jj.root!("repo/nested")), jjError))).code).toBe("unknown")
+      // And these are inside however they are spelled.
+      expect(yield* (jj.root!("/repo/"))).toBe("/repo")
+      expect(yield* (jj.root!("/repo/./deep/../nest"))).toBe("/repo")
     }))
 
   it.effect("answers any absolute path when the slice root is the whole namespace", () =>
@@ -362,19 +398,28 @@ describe("BrowserJj over the fake ABI module", () => {
       expect(error.message.endsWith("…")).toBe(true)
     }))
 
-  it.effect("names the module and the method on every failure it produces", () =>
+  it.effect("names the module, the method, and the command on every failure it produces", () =>
     Effect.gen(function*() {
       // `@smthrs/kernel` reads `.method` off a `JjError`, and a UI that maps a
-      // failure to remediation cannot parse English for the operation.
+      // failure to remediation cannot parse English for the operation. Every
+      // shape a failure can take is driven here, including the ones that never
+      // reach the ABI at all.
       const failing = fakeFlowsJjWasm({ response: "{\"err\":{\"code\":\"conflict\",\"message\":\"m\"}}" })
       expect(yield* flip({ wasm: failing, fs: slice }, (jj) => jj.snapshot("x")))
-        .toMatchObject({ module: "BrowserJj", method: "snapshot" })
+        .toMatchObject({ module: "BrowserJj", method: "snapshot", command: "jj snapshot" })
+      // an ok payload missing its field
       expect(yield* flip({ wasm: fakeFlowsJjWasm({ response: "{\"ok\":{}}" }), fs: slice }, (jj) => jj.diff("a", "b")))
-        .toMatchObject({ module: "BrowserJj", method: "diff" })
+        .toMatchObject({ module: "BrowserJj", method: "diff", command: "jj diff" })
+      // a response outside the envelope
       expect(yield* flip({ wasm: fakeFlowsJjWasm({ response: "nope" }), fs: slice }, (jj) => jj.status()))
-        .toMatchObject({ module: "BrowserJj", method: "status" })
+        .toMatchObject({ module: "BrowserJj", method: "status", command: "jj status" })
+      // a trap
       expect(yield* flip({ wasm: fakeFlowsJjWasm({ trap: true }), fs: slice }, (jj) => jj.workspaceForget("l")))
-        .toMatchObject({ module: "BrowserJj", method: "workspaceForget" })
+        .toMatchObject({ module: "BrowserJj", method: "workspaceForget", command: "jj workspace forget" })
+      // a module that never instantiates: the failure happens before any
+      // operation reaches the ABI, and used to arrive with neither field.
+      expect(yield* flip({ wasm: new Uint8Array([1, 2, 3]), fs: slice }, (jj) => jj.restore("z")))
+        .toMatchObject({ module: "BrowserJj", method: "restore", command: "jj restore" })
     }))
 
   it.effect("keeps the filesystem and the stdio sinks it was given at construction", () =>
