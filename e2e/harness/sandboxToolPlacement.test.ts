@@ -54,6 +54,15 @@ const placeTools = (provider: Sandbox.Provider, options: ToolPlacementOptions) =
         writes: [options.output]
       }).pipe(Effect.provide(services))
       const product = yield* Read.run({ path: options.output }).pipe(Effect.provide(services))
+      // Script mode is the tool's stdin path: the program text reaches the
+      // interpreter on standard input, which every sandbox must deliver.
+      const scripted = yield* Bash.run({
+        mode: "hermetic",
+        interpreter: "sh",
+        script: `wc -c < ${CommandLine.quote(options.output)} | tr -d " "`,
+        reads: [options.output],
+        writes: []
+      }).pipe(Effect.provide(services))
 
       let osRelease: Bash.Output | undefined
       if (options.probeAlpine === true) {
@@ -65,7 +74,7 @@ const placeTools = (provider: Sandbox.Provider, options: ToolPlacementOptions) =
         }).pipe(Effect.provide(services))
       }
 
-      return { write, read, edit, bash, product, hostInputExistsAfterWrite, osRelease }
+      return { write, read, edit, bash, product, scripted, hostInputExistsAfterWrite, osRelease }
     })
   )
 
@@ -107,6 +116,8 @@ const expectRoundTrip = (result: ToolPlacement, input: string, output: string) =
     totalLines: 3,
     truncated: false
   })
+  expect(result.scripted).toMatchObject({ exitCode: 0, stderr: "" })
+  expect(result.scripted.stdout.trim()).toBe(String(new TextEncoder().encode(edited).byteLength))
   expect(result.write.path).toBe(input)
   expect(result.product.content).toBe(edited)
   expect(output).not.toBe(input)

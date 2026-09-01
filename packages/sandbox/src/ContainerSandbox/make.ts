@@ -67,6 +67,18 @@ const pidDirectory = "/tmp/.smthrs-sbx"
  * holds — a crashed run's leftover — is reattached rather than refused, so
  * resuming a session key lands in the machine it had.
  *
+ * `spawn` honors the whole session contract, not just the command line. A
+ * command's `stdin` bytes travel on the exec's own input channel
+ * (`--interactive`), a relative `cwd` is resolved under {@link Session.workdir}
+ * before it reaches `--workdir` (which requires an absolute path), and the
+ * exec's argv names `/bin/sh` absolutely, because the engine resolves a bare
+ * `sh` through the exec environment's `PATH` and a caller's `env` override
+ * would otherwise break the wrapper before the command ever ran. Closing a
+ * spawn's scope is the process's lifetime ending: the local CLI client is torn
+ * down and, unless the command was already observed to end, the guest process
+ * is signalled through the same pid-walk `kill` uses, so a scope cannot close
+ * on a still-running guest.
+ *
  * Per-command `kill` is real, and it has to be indirect: signalling the local
  * CLI client does not reach the guest process (Docker's exec client detaches
  * from it), which is exactly the silent-no-op kill the conformance suite
@@ -138,7 +150,7 @@ export const make = (options: ContainerSandboxOptions): Provider => {
               )
             }
           }),
-          () => Effect.ignore(run(["rm", "--force", name]))
+          () => Effect.ignore(run(["rm", "--force", name]), { log: "Warn" })
         )
         yield* step(`the container ${name} could not be started`, ["start", name])
         yield* step(`the workspace ${workdir} could not be prepared in ${name}`, [
@@ -153,28 +165,69 @@ export const make = (options: ContainerSandboxOptions): Provider => {
         // collide with a previous incarnation's files.
         let nextPidfile = 0
         const pidfiles = new WeakMap<RemoteProcess, string>()
+        const resolveCwd = (cwd: string | undefined): string =>
+          cwd === undefined || cwd.startsWith("/")
+            ? cwd ?? workdir
+            : `${workdir}/${cwd.replace(/^(\.\/)+/, "")}`.replace(/\/\.?$/, "")
+        const deliver = (pidfile: string, signal: string): Effect.Effect<void, ProviderError> =>
+          Effect.flatMap(
+            run(["exec", name, "sh", "-c", killScript(pidfile, signal.replace(/^SIG/, ""))]),
+            (result) =>
+              result.code === 0 ? Effect.void : Effect.fail(
+                new ProviderError({
+                  code: "unknown",
+                  message: `the signal ${signal} could not be delivered in ${name}: ${result.stderr.trim()}`
+                })
+              )
+          )
         const session: Session = {
           id: sessionKey,
           remoteId: name,
           workdir,
           spawn: Effect.fnUntraced(function*(command, spawnOptions) {
             const pidfile = `${pidDirectory}/${nextPidfile++}.pid`
+            const stdin = spawnOptions.stdin
             const args = [
               "exec",
+              // The exec has a real input channel; it is asked for only when
+              // there is input to carry, so an input-less command sees EOF.
+              ...stdin === undefined ? [] : ["--interactive"],
+              // `--workdir` requires an absolute guest path, so a relative
+              // cwd is rooted at the session workdir before it gets here.
               "--workdir",
-              spawnOptions.cwd ?? workdir,
+              resolveCwd(spawnOptions.cwd),
               ...Object.entries(spawnOptions.env ?? {}).flatMap(([key, value]) =>
                 value === undefined ? [] : ["--env", `${key}=${value}`]
               ),
               name,
-              "sh",
+              // Absolute on purpose: the engine resolves the exec's argv
+              // through the exec environment's PATH, so a caller's PATH
+              // override would keep a bare `sh` from ever starting.
+              "/bin/sh",
               "-c",
               `echo $$ > ${pidfile}; exec sh -c ${CommandLine.quote(command)}`
             ]
-            const handle = yield* options.spawner.spawn(ChildProcess.make(program, args)).pipe(
+            const handle = yield* options.spawner.spawn(
+              ChildProcess.make(program, args, stdin === undefined ? {} : { stdin: Stream.make(stdin) })
+            ).pipe(
               Effect.mapError(providerFailure("spawn_error", `\`${command}\` could not start in ${name}`))
             )
-            const process = remoteProcessOf(handle, command)
+            const raw = remoteProcessOf(handle, command)
+            let ended = false
+            const process: RemoteProcess = {
+              ...raw,
+              exitCode: Effect.tap(raw.exitCode, () =>
+                Effect.sync(() => {
+                  ended = true
+                }))
+            }
+            // Closing the process scope ends the local CLI client, which the
+            // guest does not notice. The contract says the scope IS the
+            // process's lifetime, so the finalizer signals the guest side
+            // too, unless the command has already been seen to end.
+            yield* Effect.addFinalizer(() =>
+              ended ? Effect.void : Effect.ignore(deliver(pidfile, "SIGTERM"), { log: "Warn" })
+            )
             pidfiles.set(process, pidfile)
             return process
           }),
@@ -185,16 +238,7 @@ export const make = (options: ContainerSandboxOptions): Provider => {
               if (pidfile === undefined) {
                 return Effect.fail(new ProviderError({ code: "unknown", message: "unrecognized process" }))
               }
-              return Effect.flatMap(
-                run(["exec", name, "sh", "-c", killScript(pidfile, signal.replace(/^SIG/, ""))]),
-                (result) =>
-                  result.code === 0 ? Effect.void : Effect.fail(
-                    new ProviderError({
-                      code: "unknown",
-                      message: `the signal ${signal} could not be delivered in ${name}: ${result.stderr.trim()}`
-                    })
-                  )
-              )
+              return deliver(pidfile, signal)
             }),
           readFile: (path) =>
             Effect.flatMap(

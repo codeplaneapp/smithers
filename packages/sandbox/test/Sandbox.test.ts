@@ -75,6 +75,7 @@ describe("Sandbox.TestSession", () => {
             Effect.flatMap(session.spawn("resolved", {}), (process) => process.exitCode)
           )
           const refused = yield* Effect.flip(Effect.scoped(Effect.asVoid(session.spawn("anything", {}))))
+          yield* Effect.scoped(Effect.asVoid(session.spawn("direct", { stdin: new Uint8Array([9, 0, 9]) })))
           yield* session.ping!
           return { direct, resolved, refused, id: session.id, remoteId: session.remoteId, workdir: session.workdir }
         }))
@@ -86,7 +87,11 @@ describe("Sandbox.TestSession", () => {
         workdir: "/work"
       })
       expect(outcome.refused).toBe(failure)
-      expect(provider.state.commands).toEqual(["direct", "resolved", "anything"])
+      expect(provider.state.commands).toEqual(["direct", "resolved", "anything", "direct"])
+      // The double records the standard input each spawn received, so
+      // projection tests can assert delivery without a real machine.
+      expect(provider.state.inputs.slice(0, 3)).toEqual([undefined, undefined, undefined])
+      expect(Array.from(provider.state.inputs[3]!)).toEqual([9, 0, 9])
     }))
 
   it.effect("fails acquisition when scripted to", () =>

@@ -143,4 +143,47 @@ describe("ProviderConformance", () => {
       ProviderConformance.format([{ check: "writes-its-output", expected: "hello", actual: "goodbye" }])
     ).toBe("writes-its-output: expected hello, got goodbye")
   })
+
+  it.effect("convicts a kill whose wrapper died while the command's work survived", () =>
+    Effect.gen(function*() {
+      // The wrapper stops (a captured exit), and the machine still answers
+      // the survivor probe with 0: the shell died, the work did not.
+      const surviving = RemoteChildProcessSpawner.TestRemote.make({
+        kill: true,
+        scripts: {
+          holding: { pending: true },
+          "still-there": { exitCode: 0 }
+        }
+      })
+      const survivors = yield* ProviderConformance.check(surviving, {
+        writes: "printf-fixture",
+        output: "",
+        fails: "fails-fixture",
+        failureCode: 127,
+        runs: "holding",
+        survivor: "still-there"
+      })
+      expect(survivors.map(({ check }) => check)).toContain("signals-a-running-command")
+      expect(survivors.find(({ check }) => check === "signals-a-running-command")?.actual).toContain(
+        "work was still running"
+      )
+
+      // A survivor probe that finds nothing leaves a working kill conforming.
+      const clean = RemoteChildProcessSpawner.TestRemote.make({
+        kill: true,
+        scripts: {
+          holding: { pending: true },
+          "still-there": { exitCode: 1 }
+        }
+      })
+      const none = yield* ProviderConformance.check(clean, {
+        writes: "printf-fixture",
+        output: "",
+        fails: "fails-fixture",
+        failureCode: 127,
+        runs: "holding",
+        survivor: "still-there"
+      })
+      expect(none.map(({ check }) => check)).not.toContain("signals-a-running-command")
+    }))
 })
