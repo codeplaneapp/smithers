@@ -3,8 +3,8 @@
  *
  * The wire protocol mirrors Bazel's dumb-HTTP remote cache, class
  * `HttpCacheClient` in `com.google.devtools.build.lib.remote.http`, which
- * documents it as: "CAS (Content Addressable Storage) blobs are stored under the path
- * `/cas/base16-key`", uploaded with `PUT`, downloaded with `GET`. We add
+ * documents it as: "CAS (Content Addressable Storage) blobs are stored under
+ * the path `/cas/base16-key`", uploaded with `PUT`, downloaded with `GET`. We add
  * `HEAD /cas/{digest}` for a single existence probe and
  * `POST /cas/findMissing` for the batched one, because Bazel's HTTP client has
  * no `findMissingDigests` at all — it answers "everything is missing" and
@@ -136,8 +136,7 @@ export interface Options {
    * rather than park it forever — the combined composition treats a remote
    * failure as a miss it can live with, but it can do nothing with a read
    * that never returns. Defaults to 60 seconds, Bazel's `--remote_timeout`
-   * default for the same REST protocol
-   * (its `RemoteOptions`: "For the REST
+   * default for the same REST protocol (its `RemoteOptions`: "For the REST
    * cache, this is both the connect and the read timeout").
    */
   readonly downloadTimeout?: Duration.Input | undefined

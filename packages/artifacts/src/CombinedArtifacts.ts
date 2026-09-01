@@ -3,8 +3,8 @@
  * write-back into the local tier.
  *
  * This is the shape of Bazel's `CombinedCache`
- * (`com.google.devtools.build.lib.remote.CombinedCache`): a read consults the disk
- * cache, falls back to the remote cache only on a miss, and *uploads what it
+ * (`com.google.devtools.build.lib.remote.CombinedCache`): a read consults the
+ * disk cache, falls back to the remote cache only on a miss, and *uploads what it
  * found back into the disk cache* so the next read is local
  * (`downloadActionResultFromRemote`, lines 230-303). A write goes to both.
  *
@@ -269,7 +269,7 @@ export const make = (
   })
 
 /**
- * Provides a combined artifact store as the `ArtifactStore` tag.
+ * The two tiers as effects, plus the options {@link make} takes.
  *
  * Both tiers are supplied as *effects* rather than layers because they inhabit
  * the same tag: composing two `Layer<ArtifactStore>` would just shadow one
@@ -277,7 +277,7 @@ export const make = (
  * `Effect.sync`) or `Effect.map(FileSystem.FileSystem, ...)` with
  * `RemoteArtifacts.make`.
  *
- * @category layers
+ * @category models
  * @since 1.0.0-rc.0
  * @slop
  */
@@ -289,7 +289,8 @@ export interface LayerOptions<EL, RL, ER, RR> {
 }
 
 /**
- * Provides a local-first artifact store backed by local and remote effects.
+ * Provides a local-first artifact store, backed by local and remote effects, as
+ * the `ArtifactStore` tag.
  *
  * @category layers
  * @since 1.0.0-rc.0

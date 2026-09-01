@@ -7,8 +7,8 @@
  * tier can neither enumerate its address space nor accept a delete — Bazel
  * draws the same line: its disk-cache collector
  * (class `DiskCacheGarbageCollector` in
- * `com.google.devtools.build.lib.remote.disk`) walks the
- * local directory, while the remote tier owns its own retention. Only the
+ * `com.google.devtools.build.lib.remote.disk`) walks the local directory, while
+ * the remote tier owns its own retention. Only the
  * host-local filesystem store implements this.
  *
  * The *policy* — which digests are live, how old a dead blob must be before it

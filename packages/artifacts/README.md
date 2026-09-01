@@ -17,9 +17,16 @@ SQL, and bundles for the browser.
 | `ArtifactStore.ArtifactMissing`                                            | The typed miss — the answer a read-through composition acts on                                                                          |
 | `ArtifactStore.ArtifactCorruption`                                         | Bytes at an address no longer hash to it                                                                                                |
 | `ArtifactStore.ArtifactStoreError`                                         | Typed digest, configuration, host, crypto, and transport failures                                                                       |
+| `ArtifactStore.Digest`                                                     | Schema and branded type for exactly 64 lowercase hexadecimal SHA-256 characters                                                         |
+| `ArtifactStore.ArtifactStoreErrorCode`                                     | Schema and type for the stable store error codes                                                                                        |
+| `ArtifactStore.validateDigest`                                             | Validates an untrusted string before a tier logs it or uses it in a path or URL                                                         |
+| `ArtifactStore.measureBytes`                                               | Measures an immutable byte snapshot with the injected `Crypto` service                                                                  |
+| `ArtifactStore.snapshotBytes`                                              | Copies caller-owned bytes when the returned Effect begins                                                                               |
 | `ArtifactStore.makeFileSystem`, `.layerFileSystem`                         | Over Effect's `FileSystem` tag                                                                                                          |
+| `ArtifactStore.FileSystemOptions.coordination`                             | `process` keeps in-process serialization but gives up cross-process writer/sweeper exclusion; the paired sweep also skips backup leases |
 | `ArtifactStore.makeMemory`, `.layerMemory`                                 | For tests and browser hosts with no durable filesystem                                                                                  |
 | `ArtifactStore.makeNoop`, `.layerNoop`                                     | Everything unavailable, with per-method overrides                                                                                       |
+| `ArtifactBackupLease.withLease`, `.unlessActive`                           | Cross-process exclusion between a filesystem backup and sweep deletion                                                                  |
 | `ArtifactSweep.ArtifactSweep`                                              | The sweep tag. Identity `@smthrs/artifacts/ArtifactSweep`                                                                               |
 | `ArtifactSweep.Service`                                                    | `inventory`, `remove(digest, { ifUnmodifiedSinceMs })` — host-local enumeration and mtime-fenced deletion for the engine's `ArtifactGc` |
 | `ArtifactSweep.makeFileSystem`, `.layerFileSystem`                         | Over the same objects directory the store publishes into                                                                                |
@@ -27,7 +34,9 @@ SQL, and bundles for the browser.
 | `RemoteArtifacts.make`, `.layer`                                           | The shared tier over Effect's `HttpClient` tag, with `chunkBytes` for resumable `Content-Range` uploads                                 |
 | `RemoteArtifacts.Service`                                                  | An `ArtifactStore.Service` that also declares its `downloadPolicy`                                                                      |
 | `RemoteArtifacts.DownloadPolicy`, `.downloadPolicies`, `.downloadPolicyOf` | `all` \| `toplevel` \| `minimal`, the list of them, and the reader that answers `undefined` for a store declaring none                  |
-| `CombinedArtifacts.make`, `.layer`                                         | Local-first, remote-second, with local write-back under `all` and `toplevel` and none under `minimal`                                   |
+| `CombinedArtifacts.make`, `.layer`                                         | Local-first, remote-second, with local write-back under `all` and `toplevel`; `minimal` writes back only to repair a corrupt address    |
+| `ArtifactStoreMetrics.puts`                                                | `flows_artifact_puts`, updated by successful filesystem and memory puts                                                                 |
+| `ArtifactStoreMetrics.gets`                                                | `flows_artifact_gets`, updated by successful filesystem and memory gets                                                                 |
 
 ## Resource and failure contract
 
@@ -52,6 +61,8 @@ caller-owned buffer, and every successful `get` returns a new byte array.
 import { ArtifactStore, CombinedArtifacts, RemoteArtifacts } from "@smthrs/artifacts"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+
+declare const token: string
 
 const layer = CombinedArtifacts.layer({
   local: Effect.map(FileSystem.FileSystem, (fs) => ArtifactStore.makeFileSystem(fs)),
@@ -80,8 +91,10 @@ const layer = CombinedArtifacts.layer({
   address.
 - **The endpoint and its credentials are a capability, never an input.** They
   arrive as layer construction options: they are not hashed into a step key, not
-  journaled, and not part of any recorded result. Endpoint validation and error
-  messages never retain embedded credentials.
+  journaled, and not part of any recorded result. `RemoteArtifacts` refuses a
+  non-HTTPS endpoint and any endpoint carrying credentials, a query, or a
+  fragment at construction as `invalid_configuration`. The sanitized message
+  names only the violated rule, so the failure text never echoes the endpoint.
 
 ## Prior art
 
@@ -90,15 +103,14 @@ The contract's ergonomics follow Effect's own `KeyValueStore`
 operations over one address space, so memory, filesystem, and network
 implementations are the same shape.
 
-Everything else is Bazel's remote-cache layer
-(`reference/bazel/src/main/java/com/google/devtools/build/lib/remote/`):
+Everything else follows Bazel's remote-cache Java classes:
 
-| Taken from                         | What                                                                                                                              |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `common/MissingDigestsFinder.java` | `findMissing` as one batched probe whose result is guaranteed to be a subset of its input                                         |
-| `disk/DiskCacheClient.java`        | The two-hex-prefix fanout layout, "to bypass possible folder file count limits", and the fsync of the temp file before the rename |
-| `http/HttpCacheClient.java`        | The wire protocol: CAS blobs under `/cas/base16-key`, `PUT` to upload, `GET` to download                                          |
-| `CombinedCache.java` (230-303)     | Local first, remote second, write back what the remote returned                                                                   |
+| Taken from                                                                                                                                                                | What                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| [`common/MissingDigestsFinder.java`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/remote/common/MissingDigestsFinder.java) | `findMissing` as one batched probe whose result is guaranteed to be a subset of its input                                         |
+| [`disk/DiskCacheClient.java`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/remote/disk/DiskCacheClient.java)               | The two-hex-prefix fanout layout, "to bypass possible folder file count limits", and the fsync of the temp file before the rename |
+| [`http/HttpCacheClient.java`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/remote/http/HttpCacheClient.java)               | The wire protocol: CAS blobs under `/cas/base16-key`, `PUT` to upload, `GET` to download                                          |
+| [`CombinedCache.java`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/remote/CombinedCache.java) (230-303)                   | Local first, remote second, write back what the remote returned                                                                   |
 
 **Deviations.** Bazel's HTTP client has no `findMissingDigests` at all — it
 answers "everything is missing" and re-uploads — so `POST /cas/findMissing` and

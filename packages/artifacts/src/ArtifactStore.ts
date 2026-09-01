@@ -325,8 +325,7 @@ const isNotFound = (cause: unknown): boolean =>
  * Bazel's `DiskCacheClient.toPath` layout: a two-hex-prefix subdirectory
  * "to bypass possible folder file count limits"
  * (class `DiskCacheClient` in `com.google.devtools.build.lib.remote.disk`). The
- * store moved out
- * of `StepBoundary` with a flat `${dir}/${digest}` layout, which puts every
+ * store moved out of `StepBoundary` with a flat `${dir}/${digest}` layout, which puts every
  * artifact a workspace ever spilled into one directory. The rc.0 contract has
  * no compatibility shim for the provisional flat layout; old addresses are
  * cache misses that re-publish.
