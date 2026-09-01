@@ -12,7 +12,7 @@ import type * as Scope from "effect/Scope"
 import * as CatchUp from "./CatchUp.ts"
 import * as Cron from "./Cron.ts"
 import { TriggerError } from "./TriggerError.ts"
-import { type Claim, isReservation, type Registered, TriggerStore } from "./TriggerStore.ts"
+import { type Claim, isReservation, type Registered, reservationOccurrence, TriggerStore } from "./TriggerStore.ts"
 
 /**
  * Arguments used to launch one scheduled flow.
@@ -371,6 +371,17 @@ export const make = (
     const stillRunning = (runId: string): Effect.Effect<boolean, TriggerError> =>
       isReservation(runId) ? Effect.succeed(true) : runner.isActive(runId)
 
+    const occurrenceOf = (
+      triggerId: string,
+      runId: string
+    ): Effect.Effect<number, TriggerError> => {
+      const reserved = reservationOccurrence(runId)
+      if (reserved !== undefined) return Effect.succeed(reserved)
+      return store.activeOccurrence(triggerId, runId).pipe(
+        Effect.map((occurrence) => Option.isSome(occurrence) ? occurrence.value : Number.NEGATIVE_INFINITY)
+      )
+    }
+
     // A recovered monitor cannot report the runtime's detailed terminal
     // status, but the same poll ending in this process records `completed`.
     // Recording that result also clears the matching active run atomically.
@@ -394,22 +405,45 @@ export const make = (
           // a live monitor and there is nothing left to ask. An entry without
           // one was recovered from the store, and only the runtime can say
           // whether that run is still going.
-          if (local.fiber !== undefined || (yield* stillRunning(local.runId))) return local
-          yield* settleRecovered(trigger.id, local.occurrence, local.runId)
-          yield* removeActive(trigger.id, local.occurrence)
+          if (local.fiber !== undefined) return local
+          if (!isReservation(local.runId)) {
+            if (yield* stillRunning(local.runId)) return local
+            yield* settleRecovered(trigger.id, local.occurrence, local.runId)
+            yield* removeActive(trigger.id, local.occurrence)
+          } else {
+            // A recovered reservation has no monitor that can remove it. Ask
+            // the store on every tick so its lease can expire and re-arm the
+            // occurrence instead of pinning this local cache forever.
+            const stored = yield* store.activeRun(trigger.id)
+            if (Option.isNone(stored)) {
+              yield* removeActive(trigger.id, local.occurrence)
+              return undefined
+            }
+            if (stored.value === local.runId) return local
+            yield* removeActive(trigger.id, local.occurrence)
+            const occurrence = yield* occurrenceOf(trigger.id, stored.value)
+            if (!(yield* stillRunning(stored.value))) {
+              yield* settleRecovered(trigger.id, occurrence, stored.value)
+              return undefined
+            }
+            const recovered: Active = { occurrence, runId: stored.value }
+            yield* Ref.update(active, (current) => new Map(current).set(trigger.id, recovered))
+            return recovered
+          }
         }
         const stored = yield* store.activeRun(trigger.id)
         if (Option.isNone(stored)) return undefined
+        const occurrence = yield* occurrenceOf(trigger.id, stored.value)
         if (!(yield* stillRunning(stored.value))) {
           yield* settleRecovered(
             trigger.id,
-            trigger.lastFiredAt ?? Number.NEGATIVE_INFINITY,
+            occurrence,
             stored.value
           )
           return undefined
         }
         const recovered: Active = {
-          occurrence: trigger.lastFiredAt ?? Number.NEGATIVE_INFINITY,
+          occurrence,
           runId: stored.value
         }
         yield* Ref.update(active, (current) => new Map(current).set(trigger.id, recovered))
@@ -446,8 +480,8 @@ export const make = (
             input: trigger.input,
             idempotencyKey: idempotencyKey(trigger.id, occurrence)
           })
-          const started = runId
-          yield* updateActive(trigger.id, occurrence, (entry) => ({ ...entry, runId: started }))
+          const startedRunId = runId
+          yield* updateActive(trigger.id, occurrence, (entry) => ({ ...entry, runId: startedRunId }))
           yield* store.recordResult({
             triggerId: trigger.id,
             occurrence,
@@ -472,13 +506,24 @@ export const make = (
                 yield* recordFailed(trigger, occurrence, error, runId).pipe(Effect.ignore)
                 return
               }
-              if (preserveBuffered) {
+              if (runId !== undefined) {
+                // The runtime accepted the idempotent launch, but its run id
+                // did not reach durable state. Re-arm before releasing the
+                // reservation so a failed compensation still falls back to
+                // lease recovery. Marking this occurrence failed would lose
+                // the only retry path even though work is already running.
+                yield* store.setPending({ triggerId: trigger.id, occurrence }).pipe(
+                  Effect.andThen(store.clearActive(trigger.id, reservation)),
+                  Effect.ignore
+                )
+              } else if (preserveBuffered) {
                 yield* store.clearActive(trigger.id, reservation).pipe(Effect.ignore)
               } else {
                 yield* recordFailed(trigger, occurrence, error, runId).pipe(Effect.ignore)
               }
               yield* Deferred.fail(started, error)
-            })),
+            })
+          ),
           // Interrupting this fiber detaches the monitor; it never cancels the
           // run. The run is durable and outlives this process, so a deploy or
           // any other scope closure must leave it alone: the next incarnation
@@ -507,11 +552,41 @@ export const make = (
     // of its own to record the supersession against.
     const cancelActive = (
       trigger: Registered,
-      prior: Active
+      prior: Active,
+      replacementOccurrence: number,
+      queueReplacement: boolean
     ): Effect.Effect<void, TriggerError> =>
       Effect.gen(function*() {
-        if (prior.fiber !== undefined) yield* Fiber.interrupt(prior.fiber)
-        if (!isReservation(prior.runId)) yield* runner.cancel(prior.runId)
+        if (!isReservation(prior.runId)) {
+          yield* runner.cancel(prior.runId).pipe(
+            Effect.catch((error) => {
+              // The claim already replaced the prior run with the new launch
+              // reservation. If cancellation fails, restore that run as active
+              // and queue the replacement so neither side of the hand-off is
+              // lost. Keep its monitor attached: it is still running.
+              const restore = Number.isFinite(prior.occurrence)
+                ? store.recordResult({
+                  triggerId: trigger.id,
+                  occurrence: prior.occurrence,
+                  outcome: "launched",
+                  runId: prior.runId
+                })
+                : Effect.void
+              return restore.pipe(
+                Effect.ignore,
+                Effect.andThen(
+                  queueReplacement
+                    ? store.setPending({
+                      triggerId: trigger.id,
+                      occurrence: replacementOccurrence
+                    }).pipe(Effect.ignore)
+                    : Effect.void
+                ),
+                Effect.andThen(Effect.fail(error))
+              )
+            })
+          )
+        }
         if (Number.isFinite(prior.occurrence)) {
           yield* store.recordResult({
             triggerId: trigger.id,
@@ -520,6 +595,10 @@ export const make = (
             runId: prior.runId
           })
         }
+        // Keep the monitor attached until the terminal write succeeds. If the
+        // store refuses it after cancellation, the monitor can still observe
+        // the stopped run and record a terminal result on its next poll.
+        if (prior.fiber !== undefined) yield* Fiber.interrupt(prior.fiber)
         yield* removeActive(trigger.id, prior.occurrence)
       })
 
@@ -565,9 +644,11 @@ export const make = (
                 local !== undefined && local.runId === superseded
                   ? { ...local, runId: superseded }
                   : {
-                    occurrence: trigger.lastFiredAt ?? Number.NEGATIVE_INFINITY,
+                    occurrence: yield* occurrenceOf(trigger.id, superseded),
                     runId: superseded
-                  }
+                  },
+                occurrence,
+                !resumeBuffered
               )
             }
             yield* Ref.update(
@@ -630,32 +711,34 @@ export const make = (
           triggerId: current.id,
           expectedRevision: current.revision
         }).pipe(
-          Effect.flatMap((pending) =>
-            Option.isNone(pending) || !pending.value.claim.claimed
-              ? Effect.void
-              : dispatchClaimed(
-                current,
-                pending.value.occurrence,
-                pending.value.claim,
-                true
-              ).pipe(
-                Effect.onError(() =>
-                  (
-                    pending.value.claim.action === "fire" || pending.value.claim.action === "supersede"
-                      ? store.clearActive(current.id, pending.value.claim.reservationId)
-                      : Effect.void
-                  ).pipe(
-                    Effect.andThen(
-                      store.setPending({
-                        triggerId: current.id,
-                        occurrence: pending.value.occurrence
-                      })
-                    ),
-                    Effect.ignore
-                  )
+          Effect.flatMap((pending) => {
+            if (Option.isNone(pending)) return Effect.void
+            const occurrence = pending.value.occurrence
+            const claim = pending.value.claim
+            if (!claim.claimed) return Effect.void
+            return dispatchClaimed(
+              current,
+              occurrence,
+              claim,
+              true
+            ).pipe(
+              Effect.onError(() =>
+                (
+                  claim.action === "fire" || claim.action === "supersede"
+                    ? store.clearActive(current.id, claim.reservationId)
+                    : Effect.void
+                ).pipe(
+                  Effect.andThen(
+                    store.setPending({
+                      triggerId: current.id,
+                      occurrence
+                    })
+                  ),
+                  Effect.ignore
                 )
               )
-          )
+            )
+          })
         ))
 
     // A bound the declaration cannot honour is a statement about how much
@@ -725,7 +808,7 @@ export const make = (
     ): Effect.Effect<void, TriggerError> =>
       Effect.gen(function*() {
         const running = yield* resolveActive(trigger)
-        if (running === undefined) yield* resumePending(trigger)
+        if (running === undefined || trigger.overlap === "supersede") yield* resumePending(trigger)
         const due = yield* dueOccurrences(trigger, now)
         let dispatched: number | undefined
         let interrupted = false

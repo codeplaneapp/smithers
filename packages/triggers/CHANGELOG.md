@@ -45,6 +45,14 @@
 - `TriggerStore.Claim` is a discriminated union: a claim that hands the caller
   work to launch carries a required `reservationId`, and a claim that only
   records a decision carries none.
+- `TriggerStore.Service` gained `activeOccurrence(triggerId, runId)`, and
+  `TriggerStore.reservationOccurrence` reads the occurrence out of a reservation
+  id. A recovered run is settled against the occurrence it actually launched,
+  which `lastFiredAt` cannot name once a later occurrence has been skipped or
+  buffered past it.
+- A supersede claim records the run it is displacing on the occurrence that
+  displaced it, so a claimant that dies before it can cancel leaves the
+  predecessor's run id behind for the next incarnation to find.
 - The package documentation is colocated. `packages/triggers/docs/` and the
   JSDoc in `src/` own the contract, and `packages/triggers/scripts/docs.mjs`
   generates `README.md` from them. `//packages/triggers:docsPages` drift-checks
@@ -71,6 +79,24 @@
 - A schema the migrator cannot apply arrives as a typed `store` failure instead
   of a defect that escapes a constructor whose signature promises
   `TriggerError`.
+- A launch no longer resolves the wrong `started` handle. An inner binding
+  shadowed the `Deferred` the launch awaits, so `Deferred.succeed` was handed the
+  run id string: every scheduler tick that launched a run waited forever.
+- A recovered launch reservation is re-read from the store on every tick rather
+  than cached as live, so its lease can expire and re-arm the occurrence it
+  holds instead of pinning the trigger until the process restarts.
+- An expired reservation over an occurrence that was claimed but never launched
+  re-arms that occurrence instead of leaving it with no outcome, no active run,
+  and nothing pointing at it.
+- `claimPending` clears the buffer only when the claim it made is not itself a
+  buffer, so an occurrence the overlap policy re-buffers is no longer discarded.
+- A supersede whose cancellation fails restores the run it displaced and queues
+  the replacement occurrence, and it records the terminal result before it
+  detaches the only monitor that could have written one.
+- A launch whose `launched` result cannot be persisted is left to a later poll
+  rather than recorded failed while its run is still executing.
+- A terminal result carrying no run id no longer clears a newer run's active
+  pointer.
 - Coverage thresholds are 100 on all four metrics. The ratchet that stood at
   68/67/81/80 is what let every defect above ship untested.
 

@@ -121,6 +121,18 @@ export const isReservation = (runId: string | undefined): boolean =>
   runId !== undefined && runId.startsWith(reservationPrefix)
 
 /**
+ * Reads the occurrence encoded in a launch reservation.
+ *
+ * @category getters
+ * @since 0.1.0
+ */
+export const reservationOccurrence = (runId: string): number | undefined => {
+  if (!isReservation(runId)) return undefined
+  const occurrence = Number(runId.slice(runId.lastIndexOf(":") + 1))
+  return Number.isFinite(occurrence) ? occurrence : undefined
+}
+
+/**
  * How a claimed occurrence ended.
  *
  * @category models
@@ -166,8 +178,9 @@ export interface Service {
    * Claims the buffered occurrence, when one exists.
    *
    * One transaction reads the occurrence, applies the same claim protocol as
-   * {@link Service.claimFire}, and clears the buffer only after a successful
-   * claim. No failure can land between reading the buffer and claiming it.
+   * {@link Service.claimFire}, and clears the buffer only when the decision
+   * consumes it. A concurrent buffer decision keeps it pending. No failure can
+   * land between reading the buffer and claiming it.
    */
   readonly claimPending: (fire: {
     readonly triggerId: string
@@ -180,6 +193,16 @@ export interface Service {
   readonly setPending: (fire: Fire) => Effect.Effect<void, TriggerError>
   readonly takePending: (triggerId: string) => Effect.Effect<Option.Option<number>, TriggerError>
   readonly activeRun: (triggerId: string) => Effect.Effect<Option.Option<string>, TriggerError>
+  /**
+   * Returns the occurrence owned by one active run or launch reservation.
+   *
+   * `lastFiredAt` cannot answer this: later skipped and buffered occurrences
+   * advance that cursor while an older run remains active.
+   */
+  readonly activeOccurrence: (
+    triggerId: string,
+    runId: string
+  ) => Effect.Effect<Option.Option<number>, TriggerError>
   readonly clearActive: (triggerId: string, runId: string) => Effect.Effect<void, TriggerError>
 }
 
@@ -212,6 +235,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service => ({
   setPending: () => unavailable("setPending"),
   takePending: () => unavailable("takePending"),
   activeRun: () => unavailable("activeRun"),
+  activeOccurrence: () => unavailable("activeOccurrence"),
   clearActive: () => unavailable("clearActive"),
   ...overrides
 })

@@ -29,6 +29,12 @@ describe("TestTriggers", () => {
         const registered = yield* store.register(trigger)
         yield* store.register({ ...trigger, id: "other" })
         yield* store.claimFire({ triggerId: trigger.id, occurrence: 5, expectedRevision: registered.revision })
+        yield* store.recordResult({
+          triggerId: trigger.id,
+          occurrence: 5,
+          outcome: "launched",
+          runId: "run-5"
+        })
         const replaced = yield* store.register({ ...trigger, flowId: "next" })
         return { all: yield* store.list(), enabled: yield* store.listEnabled(), replaced }
       })
@@ -44,6 +50,12 @@ describe("TestTriggers", () => {
         const store = yield* TriggerStore.TriggerStore
         const registered = yield* store.register(trigger)
         yield* store.claimFire({ triggerId: trigger.id, occurrence: 20, expectedRevision: registered.revision })
+        yield* store.recordResult({
+          triggerId: trigger.id,
+          occurrence: 20,
+          outcome: "completed",
+          runId: "run-20"
+        })
         yield* store.recordResult({ triggerId: trigger.id, occurrence: 10, outcome: "completed" })
         return yield* store.get(trigger.id)
       })

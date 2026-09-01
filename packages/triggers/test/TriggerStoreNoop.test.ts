@@ -44,6 +44,8 @@ const call = (store: TriggerStore.Service, method: keyof TriggerStore.Service) =
       return store.takePending("daily")
     case "activeRun":
       return store.activeRun("daily")
+    case "activeOccurrence":
+      return store.activeOccurrence("daily", "run-1")
     case "claimPending":
       return store.claimPending({ triggerId: "daily", expectedRevision: 1 })
     case "clearActive":
@@ -61,6 +63,7 @@ const methods: ReadonlyArray<keyof TriggerStore.Service> = [
   "setPending",
   "takePending",
   "activeRun",
+  "activeOccurrence",
   "claimPending",
   "clearActive"
 ]
@@ -116,6 +119,9 @@ describe("TriggerStore reservation ids", () => {
     expect(TriggerStore.isReservation(TriggerStore.reservationId("hourly", 0))).toBe(true)
     expect(TriggerStore.isReservation("run-1")).toBe(false)
     expect(TriggerStore.isReservation(undefined)).toBe(false)
+    expect(TriggerStore.reservationOccurrence(TriggerStore.reservationId("hourly", 3_600_000))).toBe(3_600_000)
+    expect(TriggerStore.reservationOccurrence("run-1")).toBeUndefined()
+    expect(TriggerStore.reservationOccurrence(`${TriggerStore.reservationPrefix}hourly:nope`)).toBeUndefined()
   })
 })
 

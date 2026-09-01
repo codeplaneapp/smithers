@@ -38,22 +38,31 @@ fails with `trigger_disabled`.
 
 A launch-capable claim writes a reservation before it starts a run.
 `TriggerStore.reservationPrefix` is `trigger-reservation:`, and
-`TriggerStore.reservationId` appends the trigger ID and occurrence. The
+`TriggerStore.reservationId` appends the trigger ID and occurrence;
+`TriggerStore.reservationOccurrence` reads that occurrence back. The
 `SqlTriggerStore.reservationLeaseMs` lease is 300,000 milliseconds, or 5
 minutes. `TriggerStore.reservationLeaseMs` owns the shared value and
 `SqlTriggerStore` re-exports it. Both store implementations reclaim an expired
-reservation.
+reservation and restore its unfinished occurrence to pending work, whether the
+lease expires during an active-run read or a later claim. A supersede
+reservation also retains the predecessor run ID: recovery re-attaches to that
+run and cancels it before launching the pending replacement.
 
 `TriggerStore.claimPending` reads the buffered occurrence, applies the same
-claim rules as `claimFire`, and clears the buffer only after a successful claim
-inside one transaction. A refused or failed claim leaves the buffer intact. If
-a process dies after claiming buffered work but before launching it, expiration
-of that launch reservation restores the buffered occurrence.
+claim rules as `claimFire`, and clears the buffer only when the decision
+consumes it, inside one transaction. A refused claim leaves the buffer intact,
+and a concurrent active run that buffers it again keeps it pending. If a
+process dies after claiming ordinary or buffered work but before launching it,
+expiration of that launch reservation restores the occurrence.
 
-The persisted `last_fired_at_ms` watermark only moves forward. SQL updates use
-the greater of the stored value and the completed occurrence. The scheduler's
-in-process watermark advances only past occurrences that it finished
-dispatching. It leaves a failed occurrence available to a later poll.
+The persisted `last_fired_at_ms` watermark only moves forward. A completed
+skip or buffer advances it inside the claim transaction; a fire or supersede
+reservation does not advance it until the launched run ID is durable. SQL
+updates use the greater of the stored value and the completed occurrence. A
+late terminal result with no run ID is fenced to the run recorded for its own
+occurrence, so it cannot clear a newer active run. The scheduler's in-process
+watermark advances only past occurrences that it finished dispatching. It
+leaves a failed occurrence available to a later poll.
 
 On its first poll, a newly registered trigger with no prior fire establishes a
 watermark at the latest boundary without firing that boundary. It fires from

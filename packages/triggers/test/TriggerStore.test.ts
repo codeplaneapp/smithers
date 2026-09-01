@@ -442,6 +442,51 @@ describe("TriggerStore", () => {
     expect(result.pending).toBe(2)
   })
 
+  it("clears a malformed expired reservation without inventing an occurrence", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        const store = yield* TriggerStore.TriggerStore
+        const registered = yield* store.register({ ...trigger, overlap: "supersede" })
+        const malformed = `${TriggerStore.reservationPrefix}${trigger.id}:not-a-number`
+        yield* sql`UPDATE flows_triggers
+          SET active_run_id = ${malformed}, active_claimed_at_ms = 0
+          WHERE trigger_id = ${trigger.id}`
+        const claim = yield* store.claimFire({
+          triggerId: trigger.id,
+          occurrence: 1,
+          expectedRevision: registered.revision
+        })
+        yield* sql`UPDATE flows_triggers
+          SET active_run_id = ${malformed}, active_claimed_at_ms = NULL
+          WHERE trigger_id = ${trigger.id}`
+        const reclaimed = yield* store.claimFire({
+          triggerId: trigger.id,
+          occurrence: 2,
+          expectedRevision: registered.revision
+        })
+        yield* sql`UPDATE flows_triggers
+          SET active_run_id = ${malformed}, active_claimed_at_ms = NULL
+          WHERE trigger_id = ${trigger.id}`
+        const occurrence = yield* store.activeOccurrence(trigger.id, malformed)
+        const active = yield* store.activeRun(trigger.id)
+        const rows = yield* sql<{ readonly pending_at_ms: number | null }>`
+          SELECT pending_at_ms FROM flows_triggers WHERE trigger_id = ${trigger.id}
+        `
+        return { malformed, claim, reclaimed, occurrence, active, pending: rows[0]?.pending_at_ms }
+      }).pipe(Effect.provide(layerWithSql), Effect.provide(TestClock.layer()))
+    )
+    expect(result.claim).toMatchObject({
+      claimed: true,
+      action: "supersede",
+      activeRunId: result.malformed
+    })
+    expect(result.reclaimed).toMatchObject({ claimed: true, action: "fire" })
+    expect(result.occurrence).toMatchObject({ _tag: "None" })
+    expect(result.active).toMatchObject({ _tag: "None" })
+    expect(result.pending).toBeNull()
+  })
+
   it("reports a row it cannot decode as a store failure", async () => {
     const error = await Effect.runPromise(
       Effect.gen(function*() {
