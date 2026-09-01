@@ -24,6 +24,23 @@ const nodeModules = S.Npm.NodeModules({
   workspaces: workspaceConfig
 })
 
+// Every S.Cargo.* target in crates/flows-jj resolves cargo through this layer.
+// A workspace that declares none refuses those targets by name rather than
+// running whatever cargo sits on PATH (PackageExec.ts, the CargoBin branch).
+//
+// The pin is the checked-in rust-toolchain.toml, which fixes channel 1.89.0
+// plus the minimal profile, clippy, rustfmt, and the wasm32-wasip1 target that
+// the committed packages/jj/wasm/flows_jj.wasm was built with. Naming the file
+// instead of restating the channel keeps one source of truth and reproduces
+// ci.yml's bare `rustup toolchain install`, which reads the file and installs
+// the components and targets with it. Cargo.lock is declared because the repo
+// commits one and every cargo target runs --locked.
+const rust = S.Rust.Toolchain({
+  workspace: S.file("//Cargo.toml"),
+  toolchain: S.file("//rust-toolchain.toml"),
+  lockfile: S.file("//Cargo.lock")
+})
+
 // The binaries CI actually installs (ci.yml): git checks out and drives the
 // working copy, jj backs the Jujutsu host service and the fault matrix, bun
 // runs apps/* and the ci/BUILD.ts matrix, cargo builds crates/flows-jj and
@@ -38,6 +55,7 @@ export const Workspace = S.Workspace("smithers", {
   runtime,
   packageManager,
   nodeModules,
+  toolchains: [rust],
   host,
   agents,
   gitHooks: {
