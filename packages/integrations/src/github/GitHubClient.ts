@@ -5,13 +5,22 @@
  *
  * - **Rate limits.** GitHub signals them as a 429 *and* as a 403 whose
  *   `x-ratelimit-remaining` is `0` or whose body mentions the secondary or
- *   abuse limit. All three are retried, waiting the server's `Retry-After` or
+ *   abuse limit. All three are retried for every method, because a rejected
+ *   request was not performed, waiting the server's `Retry-After` or
  *   `x-ratelimit-reset`, capped so a skewed clock cannot park a call for hours.
- * - **Pagination.** `paginate` follows RFC 5988 `Link: rel="next"`.
+ *   A 5xx or a transport failure is retried only for a read: on a POST, PATCH,
+ *   PUT, or DELETE the outcome is unknown, so the client reports
+ *   `outcomeUnknown` rather than posting the comment twice. A caller that
+ *   knows its endpoint is idempotent opts in with `retryUnsafeWrites`.
+ * - **Pagination.** `paginate` follows RFC 5988 `Link: rel="next"` within a
+ *   declared page budget and says when it ran out.
  * - **Token hygiene.** The token reaches the `Authorization` header and
  *   nothing else, not a message, not `details`, not a log line, and every
  *   request URL, including a `rel="next"` target, is pinned to the configured
- *   API origin so a redirected link cannot carry the token elsewhere.
+ *   API origin so a redirected link cannot carry the token elsewhere. The
+ *   origin pin is not a path pin: a caller that builds a path from
+ *   provider data uses `repositoryPath` from `ListenerRegistry`, which
+ *   validates each segment, because `new URL` resolves `..` inside a path.
  *
  * Interruption is forwarded to `fetch`, so interrupting the fiber aborts the
  * request in flight rather than leaving it running.
@@ -28,12 +37,50 @@ import { type GitHubConfig, resolve } from "./Config.ts"
 const MAX_RETRY_AFTER_MS = 60_000
 
 /**
+ * The largest `per_page` GitHub accepts.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const MAX_PER_PAGE = 100
+
+/**
+ * The default page budget {@link GitHubClient.paginate} spends, and the
+ * largest one it accepts.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const DEFAULT_MAX_PAGES = 10
+
+/**
+ * The largest page budget {@link GitHubClient.paginate} accepts.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const MAX_PAGES_LIMIT = 1000
+
+/**
  * The REST verbs this client issues.
  *
  * @category models
  * @since 1.0.0
  */
 export type RequestMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE"
+
+/**
+ * The verbs whose effect the server may already have applied when the answer
+ * is lost.
+ *
+ * A 5xx or a dropped connection on one of these does not say whether the
+ * write happened, so the client does not repeat it: see
+ * {@link RequestOptions.retryUnsafeWrites}.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const UNSAFE_METHODS: ReadonlyArray<RequestMethod> = ["POST", "PATCH", "PUT", "DELETE"]
 
 /**
  * Per-request options.
@@ -45,6 +92,32 @@ export interface RequestOptions<A> {
   /** Decodes the response body. Omit it to receive the parsed JSON. */
   readonly schema?: Schema.Schema<A> | undefined
   readonly query?: Readonly<Record<string, string | number | boolean | undefined>> | undefined
+  /**
+   * Repeat a POST, PATCH, PUT, or DELETE whose outcome is unknown.
+   *
+   * Off by default. A 5xx or a transport failure on a write is the classic
+   * ambiguous case: GitHub may have committed it and lost the answer, so
+   * repeating posts a second comment or creates a second hook. Only a caller
+   * that knows the endpoint is idempotent should turn this on. Rate limits are
+   * retried for every method regardless, because a rejected request was not
+   * performed.
+   */
+  readonly retryUnsafeWrites?: boolean | undefined
+}
+
+/**
+ * One `paginate` walk's result.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface Page {
+  readonly items: ReadonlyArray<unknown>
+  /**
+   * True when the page budget ran out with a `rel="next"` link still
+   * outstanding, so `items` is a prefix of the resource rather than all of it.
+   */
+  readonly truncated: boolean
 }
 
 /**
@@ -60,11 +133,19 @@ export interface GitHubClient {
     body?: unknown,
     options?: RequestOptions<A>
   ) => Effect.Effect<A, IntegrationError>
-  /** Follows `Link: rel="next"` and concatenates the pages. */
+  /**
+   * Follows `Link: rel="next"` and concatenates the pages.
+   *
+   * The walk is bounded: `perPage` defaults to {@link MAX_PER_PAGE} and
+   * `maxPages` to {@link DEFAULT_MAX_PAGES}, so the default ceiling is a
+   * thousand items. Hitting the ceiling is reported as `truncated`, never as a
+   * short but complete answer, because a caller that reconciles against a
+   * truncated list plans work for resources it simply did not see.
+   */
   readonly paginate: (
     path: string,
     options?: { readonly perPage?: number | undefined; readonly maxPages?: number | undefined }
-  ) => Effect.Effect<ReadonlyArray<unknown>, IntegrationError>
+  ) => Effect.Effect<Page, IntegrationError>
 }
 
 /**
@@ -134,6 +215,33 @@ export const nextPageUrl = (linkHeader: string | null): string | null => {
 }
 
 /**
+ * A caller-supplied bound, or a typed `invalid-config` failure.
+ *
+ * `Infinity` as a page budget is an unbounded walk against a paid API, and a
+ * fractional one silently truncates, so both are refused before the first
+ * request rather than producing a strange result.
+ */
+const bounded = (
+  name: string,
+  value: number | undefined,
+  fallback: number,
+  min: number,
+  max: number
+): Effect.Effect<number, IntegrationError> => {
+  if (value === undefined) return Effect.succeed(fallback)
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    return Effect.fail(
+      new IntegrationError(
+        "invalid-config",
+        `GitHub ${name} must be an integer between ${min} and ${max}.`,
+        { [name]: value, retryable: false }
+      )
+    )
+  }
+  return Effect.succeed(value)
+}
+
+/**
  * Builds a REST client bound to `config`.
  *
  * `env` is the fallback source for anything `config` omits. Passing one
@@ -151,6 +259,13 @@ export const make = (
   const resolved = resolve(config, env)
   const baseUrl = resolved.apiBaseUrl.replace(/\/+$/, "")
   const apiOrigin = new URL(baseUrl).origin
+  if (!Number.isSafeInteger(resolved.maxRetries) || resolved.maxRetries < 0 || resolved.maxRetries > 10) {
+    throw new IntegrationError(
+      "invalid-config",
+      "GitHub maxRetries must be an integer between 0 and 10.",
+      { maxRetries: resolved.maxRetries, retryable: false }
+    )
+  }
 
   // Every request carries the bearer token, so an absolute request URL and a
   // `rel="next"` target must stay on the configured API origin. A foreign
@@ -166,20 +281,41 @@ export const make = (
     }
   }
 
+  // `new URL` throws a bare TypeError for anything starting with "http" that
+  // is not a URL (`httpx`, say). That throw runs before the request effect, so
+  // it would escape the declared IntegrationError channel as a defect.
   const buildUrl = (path: string, query?: RequestOptions<unknown>["query"]): string => {
-    const url = new URL(path.startsWith("http") ? path : `${baseUrl}${path.startsWith("/") ? "" : "/"}${path}`)
+    const absolute = path.startsWith("http") ? path : `${baseUrl}${path.startsWith("/") ? "" : "/"}${path}`
+    if (!URL.canParse(absolute)) {
+      throw new IntegrationError("invalid-config", `GitHub request path is not a URL: ${path}`, {
+        path,
+        retryable: false
+      })
+    }
+    const url = new URL(absolute)
     for (const [key, value] of Object.entries(query ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value))
     }
     return url.toString()
   }
 
+  const urlFor = (
+    path: string,
+    query?: RequestOptions<unknown>["query"]
+  ): Effect.Effect<string, IntegrationError> =>
+    Effect.try({ try: () => buildUrl(path, query), catch: (cause) => cause as IntegrationError })
+
   const attemptOnce = (
     method: RequestMethod,
     url: string,
-    body?: unknown
-  ): Effect.Effect<{ readonly json: unknown; readonly headers: Headers }, IntegrationError> =>
-    Effect.tryPromise({
+    body?: unknown,
+    retryUnsafeWrites: boolean = false
+  ): Effect.Effect<{ readonly json: unknown; readonly headers: Headers }, IntegrationError> => {
+    // A rate limit is a refusal: the request was not performed, so repeating
+    // it is safe for every verb. A 5xx or a dropped connection on a write is
+    // not, because GitHub may have applied it and lost the answer.
+    const mayRepeatAmbiguously = retryUnsafeWrites || !UNSAFE_METHODS.includes(method)
+    return Effect.tryPromise({
       try: async (signal) => {
         assertApiOrigin(url)
         const headers: Record<string, string> = {
@@ -206,19 +342,24 @@ export const make = (
         }
         if (response.ok) return { json, headers: response.headers }
         const rateLimited = isRateLimitResponse(response.status, response.headers, json)
-        const retryable = rateLimited || response.status >= 500
+        const serverError = response.status >= 500
+        const outcomeUnknown = serverError && !mayRepeatAmbiguously
+        const retryable = rateLimited || (serverError && mayRepeatAmbiguously)
         const message = typeof json === "object" && json !== null && "message" in json
           ? String(json.message)
           : response.statusText
         throw new IntegrationError(
           "delivery-failed",
-          `GitHub request failed: ${method} ${new URL(url).pathname} -> ${response.status} ${message}`,
+          `GitHub request failed: ${method} ${new URL(url).pathname} -> ${response.status} ${message}${
+            outcomeUnknown ? " (outcome unknown: the write was not repeated)" : ""
+          }`,
           {
             status: response.status,
             method,
             path: new URL(url).pathname,
             retryable,
             rateLimited,
+            outcomeUnknown,
             retryAfterMs: retryable ? retryAfterMs(response.headers) : null,
             ratelimitRemaining: response.headers.get("x-ratelimit-remaining")
           }
@@ -227,16 +368,20 @@ export const make = (
       catch: (cause) =>
         cause instanceof IntegrationError ? cause : new IntegrationError(
           "delivery-failed",
-          `GitHub request failed: ${method} - ${cause instanceof Error ? cause.message : String(cause)}`,
-          { method, retryable: true },
+          `GitHub request failed: ${method} - ${cause instanceof Error ? cause.message : String(cause)}${
+            mayRepeatAmbiguously ? "" : " (outcome unknown: the write was not repeated)"
+          }`,
+          { method, retryable: mayRepeatAmbiguously, outcomeUnknown: !mayRepeatAmbiguously },
           { cause }
         )
     })
+  }
 
   const requestUrl = (
     method: RequestMethod,
     url: string,
-    body?: unknown
+    body?: unknown,
+    retryUnsafeWrites?: boolean
   ): Effect.Effect<{ readonly json: unknown; readonly headers: Headers }, IntegrationError> => {
     const schedule = Schedule.exponential("250 millis").pipe(
       Schedule.upTo({ times: resolved.maxRetries }),
@@ -249,7 +394,7 @@ export const make = (
         return Effect.succeed(typeof wait === "number" && wait > 0 ? Duration.millis(wait) : Duration.zero)
       })
     )
-    return attemptOnce(method, url, body).pipe(Effect.retry(schedule))
+    return attemptOnce(method, url, body, retryUnsafeWrites).pipe(Effect.retry(schedule))
   }
 
   const request = <A>(
@@ -258,7 +403,8 @@ export const make = (
     body?: unknown,
     options?: RequestOptions<A>
   ): Effect.Effect<A, IntegrationError> =>
-    requestUrl(method, buildUrl(path, options?.query), body).pipe(
+    urlFor(path, options?.query).pipe(
+      Effect.flatMap((url) => requestUrl(method, url, body, options?.retryUnsafeWrites)),
       Effect.flatMap(({ json }) => {
         const schema = options?.schema
         if (schema === undefined) return Effect.succeed(json as A)
@@ -277,10 +423,10 @@ export const make = (
 
   const paginate: GitHubClient["paginate"] = (path, options) =>
     Effect.gen(function*() {
-      const perPage = options?.perPage ?? 100
-      const maxPages = options?.maxPages ?? 10
+      const perPage = yield* bounded("perPage", options?.perPage, MAX_PER_PAGE, 1, MAX_PER_PAGE)
+      const maxPages = yield* bounded("maxPages", options?.maxPages, DEFAULT_MAX_PAGES, 1, MAX_PAGES_LIMIT)
       const items: Array<unknown> = []
-      let url: string | null = buildUrl(path, { per_page: perPage })
+      let url: string | null = yield* urlFor(path, { per_page: perPage })
       let pages = 0
       while (url !== null && pages < maxPages) {
         const page: { readonly json: unknown; readonly headers: Headers } = yield* requestUrl("GET", url)
@@ -289,7 +435,7 @@ export const make = (
         url = nextPageUrl(page.headers.get("link"))
         pages += 1
       }
-      return items
+      return { items, truncated: url !== null }
     })
 
   return GitHubClient.of({ request, paginate })

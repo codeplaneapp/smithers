@@ -6,10 +6,16 @@
  * only when its numeric GitHub id appears in the workspace's own state file. A
  * matching callback URL is not proof of ownership, because anyone can point a
  * hook at any URL, so an unowned hook on a declared URL is reported as a
- * `conflict` and never modified. Deletes additionally require an explicit
- * `allowDelete`, and ownership is persisted after every remote mutation so a
- * failure halfway through a run leaves a state file the next run can converge
- * from.
+ * `conflict` and never modified. Every `create` runs that check, not only the
+ * one for a listener with no ownership entry, because a listener that moved
+ * repositories or whose hook was deleted remotely lands in a repository that
+ * may already have somebody else's hook on the same URL. Deletes additionally
+ * require an explicit `allowDelete`.
+ *
+ * Ownership is written before and after every remote mutation. The `pending`
+ * record written first is what makes a crash converge: the next run recognizes
+ * the hook it was about to claim and adopts it, instead of reporting a
+ * `conflict` against a hook it created itself one second earlier.
  *
  * There is no `smithers listeners` verb at 1.0. This is library code an
  * application calls.
@@ -20,9 +26,11 @@ import { Effect } from "effect"
 import { createHash } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { dirname, resolve as resolvePath } from "node:path"
-import { IntegrationError } from "../core/IntegrationError.ts"
+import { IntegrationError, isIntegrationError } from "../core/IntegrationError.ts"
+import * as Environment from "../Environment.ts"
 import { DEFAULT_API_BASE_URL, resolve as resolveConfig } from "./Config.ts"
 import { type GitHubClient, make as makeClient } from "./GitHubClient.ts"
+import { fullNamePath } from "./Repository.ts"
 
 /**
  * Where the declaration lives, relative to the workspace root.
@@ -106,6 +114,22 @@ export interface Ownership {
 }
 
 /**
+ * A create this workspace had started but not yet confirmed.
+ *
+ * Written before the POST and cleared after the ownership write, so a process
+ * that dies in between leaves a record the next run can recognize. Without it
+ * the next run sees an unowned hook on a declared URL and refuses forever.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface PendingCreate {
+  readonly listenerId: string
+  readonly repository: string
+  readonly callbackUrl: string
+}
+
+/**
  * The workspace's ownership state.
  *
  * @category models
@@ -114,6 +138,8 @@ export interface Ownership {
 export interface OwnershipState {
   readonly version: 1
   readonly github: ReadonlyArray<Ownership>
+  /** Creates started but not confirmed. Empty in the steady state. */
+  readonly pending?: ReadonlyArray<PendingCreate> | undefined
 }
 
 /**
@@ -329,7 +355,78 @@ const parseOwnership = (value: unknown, path: string): OwnershipState => {
       secretDigest: entry["secretDigest"]
     })
   }
-  return { version: 1, github }
+  const rawPending = value["pending"]
+  if (rawPending !== undefined && !Array.isArray(rawPending)) throw bad()
+  const pending: Array<PendingCreate> = []
+  for (const entry of rawPending ?? []) {
+    if (
+      !isRecord(entry) || typeof entry["listenerId"] !== "string" || typeof entry["repository"] !== "string" ||
+      typeof entry["callbackUrl"] !== "string"
+    ) {
+      throw bad()
+    }
+    pending.push({
+      listenerId: entry["listenerId"],
+      repository: entry["repository"],
+      callbackUrl: entry["callbackUrl"]
+    })
+  }
+  return { version: 1, github, pending }
+}
+
+/**
+ * Decodes the hook list GitHub returned for one repository.
+ *
+ * `paginate` hands back `unknown`, and `plan` reads `hook.id`,
+ * `hook.config.url`, `hook.events`, and `hook.active`. A malformed member
+ * would produce a raw `TypeError` inside `Effect.gen`, which dies as a defect
+ * rather than failing `decode-failed`, and a wrong-typed `id` would silently
+ * misclassify ownership. So the array is decoded once, here, and the failure
+ * names the member and the field rather than carrying the body.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const parseRemoteHooks = (value: ReadonlyArray<unknown>, repository: string): ReadonlyArray<RemoteHook> => {
+  const bad = (index: number, field: string): never => {
+    throw new IntegrationError(
+      "decode-failed",
+      `GitHub returned a hook this workspace cannot read for ${repository}: hooks[${index}].${field}.`,
+      { repository, index, field }
+    )
+  }
+  const hooks: Array<RemoteHook> = []
+  for (const [index, entry] of value.entries()) {
+    if (!isRecord(entry)) bad(index, "")
+    const hook = entry as Record<string, unknown>
+    const id = hook["id"]
+    if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) bad(index, "id")
+    const config = hook["config"]
+    if (!isRecord(config)) bad(index, "config")
+    const url = (config as Record<string, unknown>)["url"]
+    if (url !== undefined && typeof url !== "string") bad(index, "config.url")
+    const contentType = (config as Record<string, unknown>)["content_type"]
+    if (contentType !== undefined && typeof contentType !== "string") bad(index, "config.content_type")
+    const insecure = (config as Record<string, unknown>)["insecure_ssl"]
+    if (insecure !== undefined && typeof insecure !== "string" && typeof insecure !== "number") {
+      bad(index, "config.insecure_ssl")
+    }
+    const events = hook["events"]
+    if (!Array.isArray(events) || events.some((event) => typeof event !== "string")) bad(index, "events")
+    const active = hook["active"]
+    if (typeof active !== "boolean") bad(index, "active")
+    hooks.push({
+      id: id as number,
+      active: active as boolean,
+      events: events as ReadonlyArray<string>,
+      config: {
+        url: url as string | undefined,
+        content_type: contentType as string | undefined,
+        insecure_ssl: insecure as string | number | undefined
+      }
+    })
+  }
+  return hooks
 }
 
 /**
@@ -395,24 +492,57 @@ export const plan = (input: PlanInput): ReadonlyArray<PlanAction> => {
   const desiredById = new Map(input.registry.listeners.map((listener) => [listener.id, listener]))
   const ownershipById = new Map(input.state.github.map((owned) => [owned.listenerId, owned]))
   const ownedHookKeys = new Set(input.state.github.map((owned) => `${owned.repository}:${owned.hookId}`))
+  const pendingKeys = new Set(
+    (input.state.pending ?? []).map((entry) => `${entry.listenerId} ${entry.repository} ${entry.callbackUrl}`)
+  )
   const actions: Array<PlanAction> = []
+
+  // Every `create` runs the same preflight. An unowned hook already holding
+  // the declared callback URL means a second hook would double every delivery
+  // to that endpoint, which is exactly what `conflict` exists to prevent, and
+  // it is just as true for a listener that moved repositories or whose hook
+  // was deleted remotely as for one this workspace has never seen. The one
+  // exception is a hook a previous run of this workspace was recorded as
+  // creating: that one is ours, so it is adopted rather than refused.
+  const createOrClaim = (listener: Listener, reason: string): PlanAction => {
+    const collision = hooksFor(listener.repository).find((hook) => hook.config.url === listener.callbackUrl)
+    if (collision === undefined) {
+      return {
+        action: "create",
+        listenerId: listener.id,
+        repository: listener.repository,
+        hookId: null,
+        reason,
+        destructive: false
+      }
+    }
+    const key = `${listener.id} ${listener.repository} ${listener.callbackUrl}`
+    if (pendingKeys.has(key)) {
+      return {
+        action: "update",
+        listenerId: listener.id,
+        repository: listener.repository,
+        hookId: collision.id,
+        reason: "adopting the GitHub hook an interrupted run of this workspace created",
+        destructive: false
+      }
+    }
+    return {
+      action: "conflict",
+      listenerId: listener.id,
+      repository: listener.repository,
+      hookId: collision.id,
+      reason: "matching callback URL is not owned by this workspace",
+      destructive: false
+    }
+  }
 
   for (const listener of input.registry.listeners) {
     const owned = ownershipById.get(listener.id)
     const hooks = hooksFor(listener.repository)
     const remote = owned === undefined ? undefined : hooks.find((hook) => hook.id === owned.hookId)
     if (owned === undefined) {
-      const collision = hooks.find((hook) => hook.config.url === listener.callbackUrl)
-      actions.push({
-        action: collision === undefined ? "create" : "conflict",
-        listenerId: listener.id,
-        repository: listener.repository,
-        hookId: collision?.id ?? null,
-        reason: collision === undefined
-          ? "declared listener is missing"
-          : "matching callback URL is not owned by this workspace",
-        destructive: false
-      })
+      actions.push(createOrClaim(listener, "declared listener is missing"))
       continue
     }
     if (owned.repository !== listener.repository) {
@@ -424,25 +554,11 @@ export const plan = (input: PlanInput): ReadonlyArray<PlanAction> => {
         reason: "owned listener moved repositories",
         destructive: true
       })
-      actions.push({
-        action: "create",
-        listenerId: listener.id,
-        repository: listener.repository,
-        hookId: null,
-        reason: "declared listener moved repositories",
-        destructive: false
-      })
+      actions.push(createOrClaim(listener, "declared listener moved repositories"))
       continue
     }
     if (remote === undefined) {
-      actions.push({
-        action: "create",
-        listenerId: listener.id,
-        repository: listener.repository,
-        hookId: null,
-        reason: "owned GitHub hook was removed remotely",
-        destructive: false
-      })
+      actions.push(createOrClaim(listener, "owned GitHub hook was removed remotely"))
       continue
     }
     const digest = input.secretDigests?.get(listener.id)
@@ -478,16 +594,17 @@ export const plan = (input: PlanInput): ReadonlyArray<PlanAction> => {
   }
 
   // Report each unowned hook once per repository, not once per declared
-  // listener in it, and never alongside the `conflict` that already covers it.
-  const conflictKeys = new Set(
+  // listener in it, and never alongside an action that already names it: the
+  // `conflict` that covers it, or the `update` that adopts it.
+  const addressedKeys = new Set(
     actions
-      .filter((action) => action.action === "conflict" && action.hookId !== null)
+      .filter((action) => action.action !== "leave" && action.hookId !== null)
       .map((action) => `${action.repository}:${action.hookId}`)
   )
   for (const repository of new Set(input.registry.listeners.map((listener) => listener.repository))) {
     for (const hook of hooksFor(repository)) {
       const key = `${repository}:${hook.id}`
-      if (ownedHookKeys.has(key) || conflictKeys.has(key)) continue
+      if (ownedHookKeys.has(key) || addressedKeys.has(key)) continue
       actions.push({
         action: "leave",
         listenerId: null,
@@ -508,6 +625,12 @@ export const plan = (input: PlanInput): ReadonlyArray<PlanAction> => {
  * @since 1.0.0
  */
 export interface ReconcileOptions {
+  /**
+   * Where `.smithers/listeners.json` and its state file live. Defaults to the
+   * host's working directory, through the named `Environment` accessor rather
+   * than a bare `process.cwd()`, so the ambient read is a decision the module
+   * states rather than one a missing argument makes.
+   */
   readonly workspaceRoot?: string | undefined
   /** An in-memory declaration, instead of reading the workspace file. */
   readonly registry?: Registry | undefined
@@ -524,7 +647,15 @@ export interface ReconcileOptions {
    * account the hooks are created under.
    */
   readonly env?: Readonly<Record<string, string | undefined>> | undefined
-  /** An already-built client, for a caller that has one. */
+  /**
+   * An already-built client, for a caller that has one.
+   *
+   * A client carries its own credential, so supplying one skips the GitHub
+   * token check entirely: a host that injects an authenticated client does not
+   * also have to invent a `GITHUB_TOKEN` to get past a check about a request
+   * this module will never make. Each listener's webhook-secret variable is
+   * still required, because the secret goes into the hook body.
+   */
   readonly client?: GitHubClient | undefined
 }
 
@@ -568,28 +699,54 @@ const permissionError = (repository: string, cause: IntegrationError): Integrati
   return cause
 }
 
-const repositoryPath = (repository: string): string => repository.split("/").map(encodeURIComponent).join("/")
+/**
+ * Runs a synchronous boundary inside the typed failure channel.
+ *
+ * `readRegistry`, `readOwnershipState`, and `writeOwnershipState` all throw:
+ * a missing declaration, an unparseable state file, an EACCES on the write.
+ * A throw inside `Effect.gen` is a defect, not a failure, so a caller's
+ * `catchTag` on `IntegrationError` would miss the single most common operator
+ * error. Every one of those calls goes through this instead.
+ */
+const attempt = <A>(run: () => A): Effect.Effect<A, IntegrationError> =>
+  Effect.try({
+    try: run,
+    catch: (cause) =>
+      isIntegrationError(cause)
+        ? cause
+        : configError(
+          `GitHub listener reconciliation could not read or write its workspace files: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`,
+          undefined,
+          cause
+        )
+  })
 
 /**
  * Plans, and optionally applies, the declaration against GitHub.
  *
- * Ownership is written after every remote mutation, so a failure partway
- * through leaves a state file the next run converges from rather than a set of
- * hooks nothing claims.
+ * A create is recorded as pending before the POST and confirmed as ownership
+ * after it, so a process that dies in between leaves a state file the next run
+ * converges from: it recognizes the hook it was creating and adopts it, rather
+ * than reporting a permanent `conflict` against its own work.
  *
  * @category constructors
  * @since 1.0.0
  */
 export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<ReconcileResult, IntegrationError> =>
   Effect.gen(function*() {
-    const workspaceRoot = resolvePath(options.workspaceRoot ?? process.cwd())
+    const workspaceRoot = resolvePath(options.workspaceRoot ?? Environment.ambientWorkingDirectory())
     const registryPath = resolvePath(workspaceRoot, DEFAULT_REGISTRY_PATH)
     const statePath = resolvePath(workspaceRoot, DEFAULT_STATE_PATH)
-    const registry = options.registry ?? readRegistry(workspaceRoot)
-    const state = readOwnershipState(workspaceRoot)
-    const env = options.env ?? process.env
+    const registry = options.registry ?? (yield* attempt(() => readRegistry(workspaceRoot)))
+    const state = yield* attempt(() => readOwnershipState(workspaceRoot))
+    const env = options.env ?? Environment.ambientEnvironment()
     const resolved = listenerConfig(options, env)
-    if (resolved.token === undefined) {
+    // An injected client carries its own credential, so the ambient token is
+    // neither read nor required: requiring one would be a check about a
+    // request this module is not going to make.
+    if (options.client === undefined && resolved.token === undefined) {
       return yield* Effect.fail(
         new IntegrationError(
           "credentials-missing",
@@ -620,10 +777,23 @@ export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<Reconci
     ])
     const hooksByRepository = new Map<string, ReadonlyArray<RemoteHook>>()
     for (const repository of repositories) {
-      const hooks = yield* client.paginate(`/repos/${repositoryPath(repository)}/hooks`, { maxPages: 10 }).pipe(
+      const path = yield* attempt(() => fullNamePath(repository))
+      const page = yield* client.paginate(`/repos/${path}/hooks`, { maxPages: 10 }).pipe(
         Effect.mapError((cause) => permissionError(repository, cause))
       )
-      hooksByRepository.set(repository, hooks as ReadonlyArray<RemoteHook>)
+      // A truncated list is not a short list. Planning against it would emit a
+      // `create` for an owned hook that is simply past the page budget, so the
+      // repository would end up with a second hook on the same URL.
+      if (page.truncated) {
+        return yield* Effect.fail(
+          new IntegrationError(
+            "delivery-failed",
+            `GitHub returned more webhooks for ${repository} than one reconciliation can read, so the plan would be built from an incomplete list.`,
+            { repository, retryable: false }
+          )
+        )
+      }
+      hooksByRepository.set(repository, yield* attempt(() => parseRemoteHooks(page.items, repository)))
     }
     const actions = plan({ registry, state, hooksByRepository, secretDigests: digests })
     const summary: ReconcilePlan = {
@@ -661,6 +831,11 @@ export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<Reconci
         .map((action) => action.listenerId as string)
     )
     let github: Array<Ownership> = state.github.map((owned) => ({ ...owned }))
+    // The pending set carries over: an entry stays until the create it records
+    // has been confirmed as ownership, so two interrupted runs in a row still
+    // converge.
+    let pending: Array<PendingCreate> = (state.pending ?? []).map((entry) => ({ ...entry }))
+    const commit = () => attempt(() => writeOwnershipState(workspaceRoot, { version: 1, github, pending }))
     const applied: Array<PlanAction> = []
     const skipped: Array<PlanAction> = []
     for (const action of actions) {
@@ -673,7 +848,7 @@ export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<Reconci
         skipped.push(action)
         continue
       }
-      const path = repositoryPath(action.repository)
+      const path = yield* attempt(() => fullNamePath(action.repository))
       if (action.action === "delete") {
         yield* client.request("DELETE", `/repos/${path}/hooks/${action.hookId}`)
         github = github.filter((owned) => !(owned.repository === action.repository && owned.hookId === action.hookId))
@@ -694,6 +869,16 @@ export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<Reconci
             insecure_ssl: "0",
             secret: secrets.get(listener.id)
           }
+        }
+        if (action.action === "create") {
+          // Recorded before the POST, so a crash between GitHub accepting the
+          // hook and this workspace claiming it leaves evidence the next run
+          // reads as "this is mine" instead of "somebody else owns this URL".
+          pending = [
+            ...pending.filter((entry) => entry.listenerId !== listener.id),
+            { listenerId: listener.id, repository: listener.repository, callbackUrl: listener.callbackUrl }
+          ]
+          yield* commit()
         }
         const hook = action.action === "create"
           ? yield* client.request<{ readonly id?: unknown }>("POST", `/repos/${path}/hooks`, body)
@@ -716,10 +901,11 @@ export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<Reconci
           callbackUrl: listener.callbackUrl,
           secretDigest: digests.get(listener.id)
         })
+        pending = pending.filter((entry) => entry.listenerId !== listener.id)
       }
-      writeOwnershipState(workspaceRoot, { version: 1, github })
+      yield* commit()
       applied.push(action)
     }
-    writeOwnershipState(workspaceRoot, { version: 1, github })
+    yield* commit()
     return { ...summary, applied, skipped }
   })
