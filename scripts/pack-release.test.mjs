@@ -344,3 +344,41 @@ test("every published package packs the markdown inside the source tree it ships
 
   assert.deepEqual(unpacked, [], "these markdown files sit in a packed source tree and no files glob packs them")
 })
+
+test("the install line pins @effect/platform-node-shared beside @effect/platform-node", () => {
+  // Measured against the live registry on the 40 packed tarballs: a consumer
+  // that names @effect/platform-node-shared in its own dependencies resolves
+  // one copy at the pinned version under npm 11.16.0, Bun 1.4.0, and pnpm
+  // 11.21.0. The five published manifests that already pin it exactly cannot
+  // do this for the consumer, because a dependency's manifest does not rewrite
+  // the range a sibling declares; only an edge the consumer owns does.
+  //
+  // The install line is the edge the consumer owns, so the pin belongs there.
+  // Without it npm nests @effect/platform-node-shared@4.0.0-rc.112 under
+  // @effect/platform-node and `npm ls --all` exits 1.
+  const manifests = readWorkspaceManifests()
+  const pins = new Set(
+    workspaces
+      .map((directory) => manifests.get(directory))
+      .map((manifest) => manifest.dependencies?.effect ?? manifest.peerDependencies?.effect)
+      .filter((range) => typeof range === "string")
+  )
+  const pin = [...pins][0]
+
+  for (const relative of ["README.md", join("docs", "pages", "installation.md")]) {
+    const source = readFileSync(join(repoRoot, relative), "utf8")
+    const installLines = source
+      .split("\n")
+      .filter((line) => /^(pnpm add|npm install|npm i|bun add|yarn add) /.test(line))
+      .filter((line) => /@effect\/platform-node@/.test(line))
+    assert.ok(installLines.length > 0, `${relative} must show an install command naming @effect/platform-node`)
+    const unpinned = installLines.filter(
+      (line) => !line.includes(`@effect/platform-node-shared@${pin}`)
+    )
+    assert.deepEqual(
+      unpinned,
+      [],
+      `${relative} install lines must name @effect/platform-node-shared@${pin} beside @effect/platform-node`
+    )
+  }
+})
