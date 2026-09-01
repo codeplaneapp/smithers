@@ -196,6 +196,58 @@ export const defaultLimit = 1000
  */
 const chunkSize = 500
 
+/**
+ * One table a deleted run leaves rows in.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface RunScopedTable {
+  readonly table: string
+  /** The column naming the run. */
+  readonly column: string
+  /**
+   * Whether the migration ladder this package composes installs the table.
+   *
+   * A ladder table missing from an engine database is a broken schema, so
+   * {@link installedTables} can be asked to keep it and let the delete refuse.
+   * A table beyond the ladder belongs to a store the host may simply not have
+   * composed, and is skipped when the catalog does not list it.
+   */
+  readonly ladder: boolean
+}
+
+/**
+ * Every table a deleted run leaves rows in, and the column naming the run.
+ *
+ * ONE inventory, because two passes read it: {@link Service.retain} over the
+ * engine ladder, and `Retention.collect` over whatever a host's file holds. A
+ * table listed by only one of them is a table the other leaks forever. Tables
+ * are listed rather than discovered from foreign keys because the set spans
+ * six packages that migrate into one database, and a silently missing entry is
+ * exactly that leak.
+ *
+ * The run rows themselves are not here: they go last and in generation order,
+ * which {@link deleteRuns} does after this list.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const runScopedTables: ReadonlyArray<RunScopedTable> = [
+  { table: "flows_deferred_completions", column: "execution_id", ladder: true },
+  { table: "flows_clock_deadlines", column: "execution_id", ladder: true },
+  { table: "flows_attempts", column: "run_id", ladder: true },
+  { table: "flows_journal_events", column: "run_id", ladder: true },
+  { table: "flows_journal_checkpoints", column: "run_id", ladder: true },
+  { table: "flows_step_cache_recorded", column: "recorded_run_id", ladder: true },
+  { table: "flows_time_travel_archive", column: "run_id", ladder: false },
+  { table: "flows_time_travel_snapshots", column: "run_id", ladder: false },
+  { table: "flows_time_travel_audits", column: "run_id", ladder: false },
+  { table: "flows_time_travel_edges", column: "child_run_id", ladder: false },
+  { table: "control_run_messages", column: "run_id", ladder: false },
+  { table: "control_runs", column: "run_id", ladder: false }
+]
+
 /** The statuses a run can never leave. */
 const terminalStatuses = ["completed", "failed", "cancelled"]
 
@@ -282,7 +334,13 @@ const chunksOf = (ids: ReadonlyArray<string>): ReadonlyArray<ReadonlyArray<strin
   return chunks
 }
 
-interface Candidate {
+/**
+ * A run a pass proposes to delete, and the run it names as its parent.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Candidate {
   readonly runId: string
   readonly parentRunId: string | null
 }
@@ -292,6 +350,208 @@ interface ChildEdge {
   readonly runId: string
   readonly parentRunId: string
 }
+
+/**
+ * What one deletion pass removed, or would remove under `dryRun`.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface DeletionReport {
+  /** The candidates deleted, in the order they were given. */
+  readonly runIds: ReadonlyArray<string>
+  /** Candidates kept because a run outside the pass still names them. */
+  readonly pinned: ReadonlyArray<string>
+  /**
+   * Rows counted per table, `flows_runs` included, zeroes omitted. Counted
+   * whether or not the pass deletes, so a dry run reports the same numbers.
+   */
+  readonly deleted: Readonly<Record<string, number>>
+}
+
+/**
+ * The {@link runScopedTables} entries this database actually has.
+ *
+ * `assumeLadder` keeps every entry the ladder installs whether the catalog
+ * lists it or not. {@link Service.retain} passes `true`: this package composes
+ * the run-store, journal, step-cache and engine migrations, so a ladder table
+ * missing from the file it is pointed at is a broken schema, and a delete that
+ * refuses says so. `Retention.collect` passes `false`, because it also runs
+ * against the control plane's database, which migrates the run store and the
+ * journal and nothing else; there a missing ladder table is a host that
+ * composed fewer stores, and the pass still owes it a complete sweep of what
+ * it has.
+ *
+ * The catalog read is SQLite-specific, like the lineage prelude above and the
+ * `flows_run_parents_gc` trigger this package ships. rc.0 is SQLite-only.
+ *
+ * @category getters
+ * @since 0.1.0
+ */
+export const installedTables = (
+  sql: SqlClient.SqlClient,
+  options: { readonly assumeLadder: boolean }
+): Effect.Effect<ReadonlyArray<RunScopedTable>, RetentionError> =>
+  sql<{ readonly name: string }>`SELECT name FROM sqlite_master WHERE type = 'table'`.pipe(
+    Effect.map((rows) => {
+      const present = new Set(rows.map((row) => row.name))
+      return runScopedTables.filter((entry) => (options.assumeLadder && entry.ladder) || present.has(entry.table))
+    }),
+    Effect.mapError(scanning("the schema catalog"))
+  )
+
+const countIn = (sql: SqlClient.SqlClient, table: string, column: string, ids: ReadonlyArray<string>) =>
+  Effect.reduce(chunksOf(ids), () => 0, (total, chunk) =>
+    sql<{ readonly total: number }>`
+      SELECT COUNT(*) AS total FROM ${sql.unsafe(table)} WHERE ${sql.in(column, chunk)}
+    `.pipe(
+      Effect.map((rows) => rows.reduce((sum, row) => sum + Number(row.total), total)),
+      Effect.mapError(deleting(table))
+    ))
+
+const deleteIn = (sql: SqlClient.SqlClient, table: string, column: string, ids: ReadonlyArray<string>) =>
+  Effect.forEach(
+    chunksOf(ids),
+    (chunk) =>
+      sql`DELETE FROM ${sql.unsafe(table)} WHERE ${sql.in(column, chunk)}`.pipe(
+        Effect.mapError(deleting(table))
+      ),
+    { discard: true }
+  )
+
+/** Every run whose parent is a candidate, candidates included. */
+const childrenOf = (sql: SqlClient.SqlClient, candidateIds: ReadonlyArray<string>) =>
+  Effect.reduce(
+    chunksOf(candidateIds),
+    (): Array<ChildEdge> => [],
+    (accumulated, chunk) =>
+      // `parent_run_id` is the match predicate, so every row this returns
+      // has one.
+      sql<{ readonly run_id: string; readonly parent_run_id: string }>`
+        SELECT run_id, parent_run_id FROM flows_runs WHERE ${sql.in("parent_run_id", chunk)}
+      `.pipe(
+        Effect.map((rows) => {
+          for (const row of rows) {
+            accumulated.push({ runId: row.run_id, parentRunId: row.parent_run_id })
+          }
+          return accumulated
+        }),
+        Effect.mapError(scanning("the run lineage"))
+      )
+  )
+
+/**
+ * Drops from `doomed` every candidate that must outlive this pass, and
+ * every ancestor of one.
+ *
+ * A candidate whose child is not being deleted has to stay: `flows_runs`
+ * carries a self-referential foreign key on `parent_run_id`, so deleting
+ * it would orphan a row that still exists. Retention is upward-closed for
+ * the same reason — once a candidate is retained, the candidate it points
+ * at is still referenced and is retained too.
+ */
+const pinAncestors = (
+  doomed: Set<string>,
+  retained: Set<string>,
+  parentOf: ReadonlyMap<string, string | null>,
+  from: string
+): void => {
+  let current: string | undefined = from
+  while (current !== undefined && doomed.has(current)) {
+    doomed.delete(current)
+    retained.add(current)
+    current = parentOf.get(current) ?? undefined
+  }
+}
+
+/**
+ * Groups the doomed runs so that no group holds a run and one of its
+ * doomed descendants. Deleting a parent while its child row still exists
+ * violates the foreign key, and SQLite evaluates it per row rather than at
+ * commit, so the delete runs deepest generation first.
+ */
+const generations = (
+  doomed: ReadonlySet<string>,
+  parentOf: ReadonlyMap<string, string | null>
+): ReadonlyArray<ReadonlyArray<string>> => {
+  const depths = new Map<string, number>()
+  const depthOf = (runId: string): number => {
+    const known = depths.get(runId)
+    if (known !== undefined) return known
+    const parent = parentOf.get(runId) ?? undefined
+    const depth = parent !== undefined && doomed.has(parent) ? depthOf(parent) + 1 : 0
+    depths.set(runId, depth)
+    return depth
+  }
+  const byDepth = new Map<number, Array<string>>()
+  for (const runId of doomed) {
+    const depth = depthOf(runId)
+    const bucket = byDepth.get(depth)
+    if (bucket === undefined) byDepth.set(depth, [runId])
+    else bucket.push(runId)
+  }
+  return Array.from(byDepth.keys())
+    .sort((left, right) => right - left)
+    .map((depth) => byDepth.get(depth)!)
+}
+
+/**
+ * Deletes `candidates` and every row the inventory says names them.
+ *
+ * The one deletion in this package. Both passes call it, so neither can be
+ * holding a shorter table list than the other, and neither can be deleting
+ * run rows in an order the self-referential foreign key refuses: a handoff
+ * parent always sorts before its successor, so a pass that deleted in age
+ * order broke as soon as one lineage straddled a chunk boundary.
+ *
+ * The caller owns the transaction. Nothing here is atomic on its own, and a
+ * pass that removed the dependents of every candidate and then refused on the
+ * run rows would have destroyed history it could not put back.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const deleteRuns = (
+  sql: SqlClient.SqlClient,
+  candidates: ReadonlyArray<Candidate>,
+  options: { readonly dryRun: boolean; readonly assumeLadder: boolean }
+): Effect.Effect<DeletionReport, RetentionError> =>
+  Effect.gen(function*() {
+    const tables = yield* installedTables(sql, { assumeLadder: options.assumeLadder })
+    const candidateIds = candidates.map((candidate) => candidate.runId)
+    const parentOf = new Map(candidates.map((candidate) => [candidate.runId, candidate.parentRunId]))
+    const doomed = new Set(candidateIds)
+    const pinned = new Set<string>()
+    const candidateSet = new Set(candidateIds)
+    // The foreign key, which no lineage filter covers: a child row that is
+    // terminal and simply outside this pass — younger than the cutoff, or past
+    // the bound — still points at its parent.
+    for (const child of yield* childrenOf(sql, candidateIds)) {
+      if (candidateSet.has(child.runId)) continue
+      pinAncestors(doomed, pinned, parentOf, child.parentRunId)
+    }
+    // `candidates` arrives oldest first, so this reads in the order the pass
+    // collected.
+    const runIds = candidateIds.filter((runId) => doomed.has(runId))
+
+    const deleted: Record<string, number> = {}
+    for (const entry of tables) {
+      const total = yield* countIn(sql, entry.table, entry.column, runIds)
+      if (total > 0) deleted[entry.table] = total
+    }
+    if (runIds.length > 0) deleted["flows_runs"] = runIds.length
+
+    if (!options.dryRun) {
+      for (const entry of tables) yield* deleteIn(sql, entry.table, entry.column, runIds)
+      // Last, and deepest generation first. The `flows_run_parents_gc`
+      // trigger drops each run's DAG edges as its row goes.
+      for (const generation of generations(doomed, parentOf)) {
+        yield* deleteIn(sql, "flows_runs", "run_id", generation)
+      }
+    }
+
+    return { runIds, pinned: Array.from(pinned), deleted }
+  })
 
 /**
  * Builds the retention operation over the composition's own durable tables.
@@ -307,20 +567,6 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
   Effect.gen(function*() {
     const sql = yield* Effect.service(SqlClient.SqlClient)
     const journal = yield* Journal.Journal
-
-    /**
-     * Whether the time-travel archive exists here. Block 5000 is not part of
-     * the engine ladder the CLI installs, so an ordinary engine database has
-     * no archive table and retention has nothing to delete from it. The
-     * catalog read is SQLite-specific, like the `flows_run_parents_gc` trigger
-     * this package already ships; rc.0 is SQLite-only.
-     */
-    const archiveInstalled = sql<{ readonly name: string }>`
-      SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'flows_time_travel_archive'
-    `.pipe(
-      Effect.map((rows) => rows.length > 0),
-      Effect.mapError(scanning("the schema catalog"))
-    )
 
     /**
      * Aged terminal runs no live run stands above or below, oldest first,
@@ -347,27 +593,6 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
           rows.map((row) => ({ runId: row.run_id, parentRunId: row.parent_run_id }))
         ),
         Effect.mapError(scanning("the run table"))
-      )
-
-    /** Every run whose parent is a candidate, candidates included. */
-    const childrenOf = (candidateIds: ReadonlyArray<string>) =>
-      Effect.reduce(
-        chunksOf(candidateIds),
-        (): Array<ChildEdge> => [],
-        (accumulated, chunk) =>
-          // `parent_run_id` is the match predicate, so every row this returns
-          // has one.
-          sql<{ readonly run_id: string; readonly parent_run_id: string }>`
-            SELECT run_id, parent_run_id FROM flows_runs WHERE ${sql.in("parent_run_id", chunk)}
-          `.pipe(
-            Effect.map((rows) => {
-              for (const row of rows) {
-                accumulated.push({ runId: row.run_id, parentRunId: row.parent_run_id })
-              }
-              return accumulated
-            }),
-            Effect.mapError(scanning("the run lineage"))
-          )
       )
 
     /**
@@ -397,139 +622,43 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
         LIMIT ${limit}
       `.pipe(Effect.mapError(scanning("the run lineage")))
 
-    const countIn = (table: string, column: string, ids: ReadonlyArray<string>) =>
-      Effect.reduce(chunksOf(ids), () => 0, (total, chunk) =>
-        sql<{ readonly total: number }>`
-          SELECT COUNT(*) AS total FROM ${sql.unsafe(table)} WHERE ${sql.in(column, chunk)}
-        `.pipe(
-          Effect.map((rows) => rows.reduce((sum, row) => sum + Number(row.total), total)),
-          Effect.mapError(deleting(table))
-        ))
-
-    const deleteIn = (table: string, column: string, ids: ReadonlyArray<string>) =>
-      Effect.forEach(
-        chunksOf(ids),
-        (chunk) =>
-          sql`DELETE FROM ${sql.unsafe(table)} WHERE ${sql.in(column, chunk)}`.pipe(
-            Effect.mapError(deleting(table))
-          ),
-        { discard: true }
-      )
-
-    /**
-     * Drops from `doomed` every candidate that must outlive this pass, and
-     * every ancestor of one.
-     *
-     * A candidate whose child is not being deleted has to stay: `flows_runs`
-     * carries a self-referential foreign key on `parent_run_id`, so deleting
-     * it would orphan a row that still exists. Retention is upward-closed for
-     * the same reason — once a candidate is retained, the candidate it points
-     * at is still referenced and is retained too.
-     */
-    const pinAncestors = (
-      doomed: Set<string>,
-      retained: Set<string>,
-      parentOf: ReadonlyMap<string, string | null>,
-      from: string
-    ): void => {
-      let current: string | undefined = from
-      while (current !== undefined && doomed.has(current)) {
-        doomed.delete(current)
-        retained.add(current)
-        current = parentOf.get(current) ?? undefined
-      }
-    }
-
-    /**
-     * Groups the doomed runs so that no group holds a run and one of its
-     * doomed descendants. Deleting a parent while its child row still exists
-     * violates the foreign key, and SQLite evaluates it per row rather than at
-     * commit, so the delete runs deepest generation first.
-     */
-    const generations = (
-      doomed: ReadonlySet<string>,
-      parentOf: ReadonlyMap<string, string | null>
-    ): ReadonlyArray<ReadonlyArray<string>> => {
-      const depths = new Map<string, number>()
-      const depthOf = (runId: string): number => {
-        const known = depths.get(runId)
-        if (known !== undefined) return known
-        const parent = parentOf.get(runId) ?? undefined
-        const depth = parent !== undefined && doomed.has(parent) ? depthOf(parent) + 1 : 0
-        depths.set(runId, depth)
-        return depth
-      }
-      const byDepth = new Map<number, Array<string>>()
-      for (const runId of doomed) {
-        const depth = depthOf(runId)
-        const bucket = byDepth.get(depth)
-        if (bucket === undefined) byDepth.set(depth, [runId])
-        else bucket.push(runId)
-      }
-      return Array.from(byDepth.keys())
-        .sort((left, right) => right - left)
-        .map((depth) => byDepth.get(depth)!)
-    }
-
-    const pass = (options: RetainOptions, cutoffMs: number, hasArchive: boolean) =>
+    const pass = (options: RetainOptions, cutoffMs: number) =>
       Effect.gen(function*() {
         // Clamped, not interpolated: SQLite reads a negative `LIMIT` as no
         // limit at all, which would make a mistyped bound a full sweep.
         const limit = Math.max(0, options.limit ?? defaultLimit)
         const candidates = yield* candidatesOf(cutoffMs, limit)
-        const candidateIds = candidates.map((candidate) => candidate.runId)
-        const parentOf = new Map(candidates.map((candidate) => [candidate.runId, candidate.parentRunId]))
-        const doomed = new Set(candidateIds)
         const retained = new Set<string>()
         const retainedAbove = new Set<string>()
-        const candidateSet = new Set(candidateIds)
-        // The foreign key, which the lineage filters do not cover: a child row
-        // that is terminal and simply outside this pass — younger than the
-        // cutoff, or past the bound — still points at its parent.
-        for (const child of yield* childrenOf(candidateIds)) {
-          if (candidateSet.has(child.runId)) continue
-          pinAncestors(doomed, retained, parentOf, child.parentRunId)
-        }
         // Why the workspace kept aged runs this pass. These never entered the
-        // candidate set, so this only classifies them.
+        // candidate set, so this only classifies them. It runs before the
+        // deletes so the report describes the file the pass was handed.
         for (const held of yield* retainedByLineage(cutoffMs, limit)) {
           if (Number(held.live_descendant) > 0) retained.add(held.run_id)
           else retainedAbove.add(held.run_id)
         }
-        // `candidateIds` is already oldest first, so the report reads in the
-        // order the pass collected.
-        const runIds = candidateIds.filter((runId) => doomed.has(runId))
-
-        const counts = yield* Effect.all({
-          attempts: countIn("flows_attempts", "run_id", runIds),
-          clockDeadlines: countIn("flows_clock_deadlines", "execution_id", runIds),
-          deferredCompletions: countIn("flows_deferred_completions", "execution_id", runIds),
-          journalEntries: countIn("flows_journal_events", "run_id", runIds),
-          journalCheckpoints: countIn("flows_journal_checkpoints", "run_id", runIds),
-          archiveEntries: hasArchive ? countIn("flows_time_travel_archive", "run_id", runIds) : Effect.succeed(0)
+        // The whole deletion, shared with `Retention.collect` so the two
+        // passes cannot hold different table lists or different orders. This
+        // database is the engine's own ladder, so a table of it that the
+        // catalog does not list is a broken schema and the delete says so.
+        const removed = yield* deleteRuns(sql, candidates, {
+          dryRun: options.dryRun === true,
+          assumeLadder: true
         })
-
-        if (options.dryRun !== true) {
-          yield* deleteIn("flows_deferred_completions", "execution_id", runIds)
-          yield* deleteIn("flows_clock_deadlines", "execution_id", runIds)
-          yield* deleteIn("flows_attempts", "run_id", runIds)
-          yield* deleteIn("flows_journal_events", "run_id", runIds)
-          yield* deleteIn("flows_journal_checkpoints", "run_id", runIds)
-          if (hasArchive) yield* deleteIn("flows_time_travel_archive", "run_id", runIds)
-          // Last, and deepest generation first. The `flows_run_parents_gc`
-          // trigger drops each run's DAG edges as its row goes.
-          for (const generation of generations(doomed, parentOf)) {
-            yield* deleteIn("flows_runs", "run_id", generation)
-          }
-        }
+        for (const runId of removed.pinned) retained.add(runId)
 
         return {
           cutoffMs,
-          runIds,
+          runIds: removed.runIds,
           retainedForLiveDescendants: Array.from(retained).sort(),
           retainedForLiveAncestors: Array.from(retainedAbove).sort(),
-          runs: runIds.length,
-          ...counts,
+          runs: removed.runIds.length,
+          attempts: removed.deleted["flows_attempts"] ?? 0,
+          clockDeadlines: removed.deleted["flows_clock_deadlines"] ?? 0,
+          deferredCompletions: removed.deleted["flows_deferred_completions"] ?? 0,
+          journalEntries: removed.deleted["flows_journal_events"] ?? 0,
+          journalCheckpoints: removed.deleted["flows_journal_checkpoints"] ?? 0,
+          archiveEntries: removed.deleted["flows_time_travel_archive"] ?? 0,
           dryRun: options.dryRun === true
         } satisfies RetainReport
       })
@@ -538,14 +667,13 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
       Effect.gen(function*() {
         const nowMs = yield* Clock.currentTimeMillis
         const cutoffMs = nowMs - Math.max(0, options.olderThanMs)
-        const hasArchive = yield* archiveInstalled
         // One commit: `transact` joins the run-row deletes, the dependent
         // deletes, and the journal truncation into a single write transaction,
         // so a crash can never leave a run without its history or history
         // without its run. A transaction that cannot commit fails as the
         // `JournalError` it is rather than being laundered into a retention
         // code that would claim to know why.
-        return yield* journal.transact(pass(options, cutoffMs, hasArchive))
+        return yield* journal.transact(pass(options, cutoffMs))
       })
     )
 

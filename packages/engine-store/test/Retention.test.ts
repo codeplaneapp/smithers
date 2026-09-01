@@ -99,6 +99,7 @@ const footprint = (runId: string) =>
     deferreds: countOf("flows_deferred_completions", "execution_id", runId),
     journal: countOf("flows_journal_events", "run_id", runId),
     checkpoints: countOf("flows_journal_checkpoints", "run_id", runId),
+    stepCache: countOf("flows_step_cache_recorded", "recorded_run_id", runId),
     archive: countOf("flows_time_travel_archive", "run_id", runId),
     childEdges: countOf("flows_run_parents", "child_id", runId),
     parentEdges: countOf("flows_run_parents", "parent_id", runId)
@@ -162,6 +163,13 @@ const seedDependents = (runId: string) =>
     // through the service.
     yield* sql`INSERT INTO flows_journal_checkpoints (run_id, seq, state_json, created_at_ms)
       VALUES (${runId}, ${receipt.seq}, ${"{}"}, ${0})`.pipe(Effect.orDie)
+    // The step cache's provenance row. It is on the engine ladder and it keys
+    // on a run, and this pass used to leave it: `Retention.collect` swept it
+    // and `retain` did not, so an engine workspace collected by `retain` kept
+    // one row per cached step of every run it deleted.
+    yield* sql`INSERT INTO flows_step_cache_recorded
+      (key_digest, result_json, meta_json, created_at_ms, recorded_run_id, recorded_event_seq)
+      VALUES (${`${runId}-digest`}, ${"{}"}, ${"{}"}, ${0}, ${runId}, ${0})`.pipe(Effect.orDie)
     yield* archive(runId, 0)
   })
 
@@ -252,6 +260,7 @@ describe("retention", () => {
             deferreds: 0,
             journal: 0,
             checkpoints: 0,
+            stepCache: 0,
             archive: 0,
             childEdges: 0,
             parentEdges: 0

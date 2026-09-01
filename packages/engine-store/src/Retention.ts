@@ -44,6 +44,15 @@ export {
   Retention,
   RetentionError,
   RetentionErrorCode,
+  type RunScopedTable,
+  /**
+   * Every table a deleted run leaves rows in. One inventory serves this pass
+   * and {@link Service.retain}, so neither can leak what the other deletes.
+   *
+   * @category constants
+   * @since 1.0.0
+   */
+  runScopedTables,
   type Service
 } from "./internal/RetentionOps.ts"
 
@@ -54,33 +63,6 @@ export {
  * @since 1.0.0
  */
 export const terminalStatuses: ReadonlyArray<string> = ["completed", "failed", "cancelled"]
-
-/**
- * Every table a deleted run leaves rows in, and the column naming the run.
- *
- * Tables are listed rather than discovered from foreign keys because the set
- * spans four packages that migrate into one database, and a silently missing
- * entry is exactly the leak this module exists to close. A table that is not
- * present in the database is skipped: a host that composed only some of the
- * stores still gets a complete sweep of the ones it has.
- *
- * @category constants
- * @since 1.0.0
- */
-export const runScopedTables: ReadonlyArray<readonly [table: string, column: string]> = [
-  ["flows_attempts", "run_id"],
-  ["flows_deferred_completions", "execution_id"],
-  ["flows_clock_deadlines", "execution_id"],
-  ["flows_journal_events", "run_id"],
-  ["flows_journal_checkpoints", "run_id"],
-  ["flows_step_cache_recorded", "recorded_run_id"],
-  ["flows_time_travel_archive", "run_id"],
-  ["flows_time_travel_snapshots", "run_id"],
-  ["flows_time_travel_audits", "run_id"],
-  ["flows_time_travel_edges", "child_run_id"],
-  ["control_run_messages", "run_id"],
-  ["control_runs", "run_id"]
-]
 
 /**
  * What one retention pass would delete, or did.
@@ -123,7 +105,8 @@ const hasTable = (table: string): Effect.Effect<boolean, SqlError, SqlClient.Sql
   })
 
 /**
- * The terminal runs eligible for deletion, oldest first.
+ * The terminal runs eligible for deletion, oldest first, each with the run it
+ * names as its parent.
  *
  * A run is excluded whenever a live run stands above or below it in the
  * lineage. Downward, deleting a parent whose child is still running would
@@ -131,13 +114,10 @@ const hasTable = (table: string): Effect.Effect<boolean, SqlError, SqlClient.Sql
  * the `flows_run_parents_gc` trigger. Upward, a parked parent still reads a
  * settled child's result out of its run row through `agent/await`, and it can
  * be parked for longer than the threshold before it ever asks.
- *
- * @category getters
- * @since 1.0.0
  */
-export const eligible = (
+const eligibleCandidates = (
   olderThanMs: number
-): Effect.Effect<ReadonlyArray<string>, SqlError, SqlClient.SqlClient> =>
+): Effect.Effect<ReadonlyArray<RetentionOps.Candidate>, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function*() {
     const sql = yield* SqlClient.SqlClient
     if (!(yield* hasTable("flows_runs"))) return []
@@ -146,29 +126,45 @@ export const eligible = (
     // drops that half of the walk there and keeps the `parent_run_id` half, so
     // one guard covers both files.
     const prelude = RetentionOps.lineagePrelude({ parentEdges: yield* hasTable("flows_run_parents") })
-    const rows = yield* sql<{ readonly run_id: string }>`
+    const rows = yield* sql<{ readonly run_id: string; readonly parent_run_id: string | null }>`
       ${sql.unsafe(prelude)}
-      SELECT run_id FROM flows_runs
+      SELECT run_id, parent_run_id FROM flows_runs
       WHERE status IN ('completed', 'failed', 'cancelled')
         AND COALESCE(finished_at_ms, created_at_ms) < ${olderThanMs}
         AND run_id NOT IN (SELECT run_id FROM under_live)
         AND run_id NOT IN (SELECT run_id FROM over_live)
       ORDER BY COALESCE(finished_at_ms, created_at_ms) ASC
     `
-    return rows.map((row) => row.run_id)
+    return rows.map((row) => ({ runId: row.run_id, parentRunId: row.parent_run_id }))
   })
 
-/** One `IN` list is one bound parameter per id, and SQLite caps how many one statement may carry. */
-const chunkSize = 500
-
-const chunks = (ids: ReadonlyArray<string>): ReadonlyArray<ReadonlyArray<string>> => {
-  const out: Array<ReadonlyArray<string>> = []
-  for (let index = 0; index < ids.length; index += chunkSize) out.push(ids.slice(index, index + chunkSize))
-  return out
-}
+/**
+ * The terminal runs eligible for deletion, oldest first.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const eligible = (
+  olderThanMs: number
+): Effect.Effect<ReadonlyArray<string>, SqlError, SqlClient.SqlClient> =>
+  Effect.map(eligibleCandidates(olderThanMs), (candidates) => candidates.map((candidate) => candidate.runId))
 
 /**
  * Runs one retention pass.
+ *
+ * The deletion itself is {@link RetentionOps.deleteRuns}, the same one
+ * {@link Service.retain} runs, so this pass cannot hold a shorter table list
+ * than that one and cannot delete run rows in an order the self-referential
+ * `parent_run_id` foreign key refuses. A handoff parent always sorts before
+ * its successor, so deleting in age order broke as soon as one lineage
+ * straddled a chunk boundary, and it broke AFTER the dependent rows of every
+ * eligible run were already gone. `assumeLadder: false` because this pass also
+ * runs against the control plane's database, which composed fewer stores.
+ *
+ * One transaction, for the reason `retain` opens one: a pass that removed a
+ * run's history and then refused on its row would have destroyed what it could
+ * not put back, and a workspace whose next pass refuses the same way can never
+ * be collected again.
  *
  * Under `dryRun` nothing is written and `deleted` is empty: the report names
  * exactly the runs a real pass would remove, which is what makes
@@ -179,43 +175,19 @@ const chunks = (ids: ReadonlyArray<string>): ReadonlyArray<ReadonlyArray<string>
  */
 export const collect = (
   options: Options
-): Effect.Effect<Report, SqlError, SqlClient.SqlClient> =>
+): Effect.Effect<Report, SqlError | RetentionOps.RetentionError, SqlClient.SqlClient> =>
   Effect.gen(function*() {
     const sql = yield* SqlClient.SqlClient
-    const runs = yield* eligible(options.olderThanMs)
+    const candidates = yield* eligibleCandidates(options.olderThanMs)
     const dryRun = options.dryRun === true
-    const report: Report = {
+    const removed = yield* sql.withTransaction(
+      RetentionOps.deleteRuns(sql, candidates, { dryRun, assumeLadder: false })
+    )
+    return {
       database: options.database ?? "",
       olderThanMs: options.olderThanMs,
-      runs,
-      deleted: {},
+      runs: removed.runIds,
+      deleted: dryRun ? {} : removed.deleted,
       dryRun
     }
-    if (dryRun || runs.length === 0) return report
-
-    const deleted: Record<string, number> = {}
-    // Child rows first, then the run rows they reference: the parent delete
-    // would otherwise fail the foreign keys the schema declares. Ids are
-    // chunked because one `IN` list is one bound parameter per id, and SQLite
-    // caps how many a statement may carry.
-    for (const [table, column] of runScopedTables) {
-      if (!(yield* hasTable(table))) continue
-      let count = 0
-      for (const chunk of chunks(runs)) {
-        const rows = yield* sql<{ readonly total: number }>`
-          SELECT COUNT(*) AS total FROM ${sql.literal(table)} WHERE ${sql.in(column, chunk)}
-        `
-        // Summed rather than read out of `rows[0]`: an aggregate returns
-        // exactly one row, so the index-and-default form was a branch no test
-        // could ever take.
-        for (const row of rows) count += row.total
-        yield* sql`DELETE FROM ${sql.literal(table)} WHERE ${sql.in(column, chunk)}`
-      }
-      if (count > 0) deleted[table] = count
-    }
-    for (const chunk of chunks(runs)) {
-      yield* sql`DELETE FROM flows_runs WHERE ${sql.in("run_id", chunk)}`
-    }
-    deleted["flows_runs"] = runs.length
-    return { ...report, deleted }
   })

@@ -29,6 +29,7 @@ import * as ActionPersistence from "./internal/ActionPersistence.ts"
 import * as AttemptAdmission from "./internal/AttemptAdmission.ts"
 import * as AttemptProbe from "./internal/AttemptProbe.ts"
 import * as DeferredPersistence from "./internal/DeferredPersistence.ts"
+import * as EngineJj from "./internal/EngineJj.ts"
 import * as RunDriver from "./internal/RunDriver.ts"
 import * as OwnerIdentity from "./OwnerIdentity.ts"
 import * as StepBoundary from "./StepBoundary.ts"
@@ -87,6 +88,7 @@ type Requirements =
   // requirement of the composition (`docs/specs/Concepts/Trampoline Loops.md`).
   | Crypto.Crypto
   | DurableEngineState.DurableEngineState
+  | EngineJj.EngineJj
   | Journal.Journal
   | Jj.Jj
   | OwnerIdentity.OwnerIdentity
@@ -121,7 +123,8 @@ export const make = (
     const attemptStore = yield* AttemptStore.AttemptStore
     const cacheStore = yield* CacheStore.CacheStore
     const journal = yield* Journal.Journal
-    const jj = yield* Jj.Jj
+    const actionJj = yield* Jj.Jj
+    const engineJj = yield* EngineJj.EngineJj
     const runStore = yield* RunStore.RunStore
     const stepBoundary = yield* StepBoundary.StepBoundary
     /**
@@ -228,7 +231,8 @@ export const make = (
         Effect.provideService(AttemptStore.AttemptStore, attemptStore),
         Effect.provideService(CacheStore.CacheStore, cacheStore),
         Effect.provideService(Journal.Journal, journal),
-        Effect.provideService(Jj.Jj, jj),
+        Effect.provideService(Jj.Jj, actionJj),
+        Effect.provideService(EngineJj.EngineJj, engineJj),
         Effect.provideService(RunStore.RunStore, runStore),
         Effect.provideService(StepBoundary.StepBoundary, stepBoundary),
         (dispatch) =>
@@ -333,7 +337,7 @@ export const make = (
  * @category layers
  * @slop
  */
-export const layer = (
+const layerBase = (
   options: Options
 ): Layer.Layer<
   FlowEngine.SnapshotBoundary | FlowRuntime.FlowRuntime,
@@ -342,7 +346,7 @@ export const layer = (
 > => {
   const snapshotBoundary = Layer.effect(
     FlowEngine.SnapshotBoundary,
-    Effect.map(Jj.Jj, (jj) =>
+    Effect.map(EngineJj.EngineJj, (jj) =>
       FlowEngine.SnapshotBoundary.of({
         snapshot: Effect.fn("SnapshotBoundary.snapshot")(({ key, attempt }) =>
           Effect.annotateCurrentSpan({ key, attempt }).pipe(
@@ -371,3 +375,30 @@ export const layer = (
     snapshotBoundary
   )
 }
+
+/**
+ * Provides the durable engine using the ambient `Jj` for both action and
+ * engine contexts. Host compositions that guard action access should use
+ * {@link layerWithPrivilegedJj} instead.
+ *
+ * @since 0.1.0
+ * @category layers
+ * @slop
+ */
+export const layer = (options: Options) =>
+  layerBase(options).pipe(Layer.provide(EngineJj.layerFromJj))
+
+/**
+ * Provides the durable engine with a private repository implementation for
+ * engine bookkeeping while retaining ambient `Jj` for action bodies.
+ *
+ * @since 1.0.0
+ * @category layers
+ */
+export const layerWithPrivilegedJj = <E, R>(
+  options: Options,
+  privilegedJj: Layer.Layer<Jj.Jj, E, R>
+) =>
+  layerBase(options).pipe(
+    Layer.provide(EngineJj.layerFromJj.pipe(Layer.provide(privilegedJj)))
+  )

@@ -34,6 +34,7 @@ import * as StepSandbox from "../StepSandbox.ts"
 import * as WorkspaceSandbox from "../WorkspaceSandbox.ts"
 import * as AttemptAdmission from "./AttemptAdmission.ts"
 import * as CachePublication from "./CachePublication.ts"
+import * as EngineJj from "./EngineJj.ts"
 import * as EffectRecords from "./EffectRecords.ts"
 import * as JournalRecords from "./JournalRecords.ts"
 import * as SandboxedExecution from "./SandboxedExecution.ts"
@@ -1487,7 +1488,7 @@ export const make = (deps: Dependencies) => {
             )
           }
           if (input.tier === "compensable") {
-            const jj = yield* Jj.Jj
+            const jj = yield* EngineJj.EngineJj
             if (adopted && runningMeta?.snapshotId !== undefined) {
               // The dead incarnation persisted this attempt's own pre-image
               // before mutating the workspace (issue #87): restore it so the

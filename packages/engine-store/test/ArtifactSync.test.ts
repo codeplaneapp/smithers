@@ -355,7 +355,7 @@ describe("the download policy", () => {
       // `toplevel` differs from `minimal` at the combined read seam, not here:
       // both admit the replay without a download, and the combined store then
       // writes the blob back under `toplevel` and does not under `minimal`.
-      const combined = CombinedArtifacts.make({ local, remote: remote.service, downloadPolicy: "toplevel" })
+      const combined = yield* CombinedArtifacts.make({ local, remote: remote.service, downloadPolicy: "toplevel" })
       expect(yield* withCrypto(combined.get(digest))).toBeDefined()
       expect(remote.gets).toEqual([digest])
       expect(yield* withCrypto(local.has(digest))).toBe(true)
