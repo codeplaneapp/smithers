@@ -62,14 +62,15 @@ members still in flight.
 
 ## `Quarantine`
 
-`Quarantine.all(members, { policy })` wraps each member in a recovery arm that
-succeeds with `{ _tag: "Quarantined", member, error }`, so one failure never
-takes its siblings down. `policy: "halt"` is a plain join that does interrupt
-them. `Quarantine.run(members, { policy, concurrency? })` is the Effect form,
-and `Quarantine.settle(result)` turns a result holding quarantined members into
-a `quarantined` failure for callers that want to halt after the join.
-`isQuarantined` narrows one joined entry. Quarantine isolates typed failures; a
-defect and an interruption still propagate.
+`Quarantine.all(members, { policy: "quarantine" })` settles every member in an
+explicit envelope: `{ _tag: "Succeeded", member, value }` or
+`{ _tag: "Quarantined", member, error }`. Nesting successful values makes the
+protocol unambiguous even when a user value has either complete wire shape.
+`policy: "halt"` is a plain join that preserves raw successful values and does
+interrupt siblings. `Quarantine.run` is the Effect form, and
+`Quarantine.settle` unwraps successes or returns a `quarantined` failure.
+`isSucceeded` and `isQuarantined` narrow joined entries. Typed failures are
+isolated; defects and interruptions still propagate.
 
 ## `Panel`
 

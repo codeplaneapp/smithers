@@ -1,8 +1,9 @@
 import { describe, it } from "@effect/vitest"
-import { Effects, Flow, Graph, Node } from "@smthrs/core"
+import { Digest, Effects, Flow, Graph, Node } from "@smthrs/core"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 import { expect } from "vitest"
@@ -16,6 +17,13 @@ const sealed = Effects.make({
   onConflict: "serialize",
   tier: "sealed"
 })
+
+/** The canonical digest of everything `/keys` hashes for a built graph. */
+const keyDigest = (flow: Flow.Any): string => {
+  const material = Graph.keyMaterial(Graph.build(flow, "file"))
+  if (Result.isFailure(material)) throw material.failure
+  return Digest.canonical(material.success.map((entry) => entry.material))
+}
 
 describe("WithRetry", () => {
   it("does not encode retries as success continuations", () => {
@@ -46,8 +54,11 @@ describe("WithRetry", () => {
     const twiceAgain = WithRetry.withRetry(inner, { attempts: 2 }) as typeof inner
     const three = WithRetry.withRetry(inner, { attempts: 3 }) as typeof inner
 
-    expect(twice.implementation).toEqual(twiceAgain.implementation)
+    // Core commit d54180b9fe embeds callable references in BodyDeclaration. Restore whole-implementation
+    // equality once core records stable flow identities there.
+    expect(keyDigest(twice)).toBe(keyDigest(twiceAgain))
     expect(twice.implementation).not.toEqual(three.implementation)
+    expect(keyDigest(twice)).not.toBe(keyDigest(three))
   })
 
   it("rejects invalid attempt bounds", () => {

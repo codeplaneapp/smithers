@@ -50,7 +50,8 @@ export type TrellisErrorCode = typeof TrellisErrorCode.Type
  *
  * Trellis owns this failure rather than reusing `PatternError` because every
  * rejection carries a plan path, and a path is what an author has to read to
- * repair the plan.
+ * repair the plan. `cause` carries the reported execution residue. It never
+ * carries the caller input.
  *
  * @category errors
  * @since 0.1.0
@@ -58,7 +59,8 @@ export type TrellisErrorCode = typeof TrellisErrorCode.Type
 export class TrellisError extends Schema.TaggedError<TrellisError>()("flows/patterns/TrellisError", {
   code: TrellisErrorCode,
   path: Schema.String,
-  message: Schema.String
+  message: Schema.String,
+  cause: Schema.optional(Schema.Unknown)
 }) {}
 
 /**
@@ -574,7 +576,17 @@ export const run = <E, R, E2, R2, E3 = never, R3 = never>(
       let authored: unknown = yield* options.author({ prompt, round: 1, previous: undefined, remaining })
       for (let round = 1;; round++) {
         const refusals = validate(authored, envelope)
-        if (refusals.length > 0) return yield* Effect.fail(refusals[0] as TrellisError)
+        if (refusals.length > 0) {
+          const refusal = refusals[0] as TrellisError
+          return yield* Effect.fail(
+            new TrellisError({
+              code: refusal.code,
+              path: refusal.path,
+              message: refusal.message,
+              cause: { rounds: [...rounds], remaining }
+            })
+          )
+        }
         const plan = authored as Plan
         const cost = leaves(plan).length
         if (cost > remaining) {
@@ -582,7 +594,8 @@ export const run = <E, R, E2, R2, E3 = never, R3 = never>(
             new TrellisError({
               code: "fuel_exhausted",
               path: "root",
-              message: `Round ${round} needs ${cost} leaf calls but only ${remaining} fuel remains`
+              message: `Round ${round} needs ${cost} leaf calls but only ${remaining} fuel remains`,
+              cause: { rounds: [...rounds], remaining }
             })
           )
         }

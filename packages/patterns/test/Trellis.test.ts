@@ -369,10 +369,14 @@ describe("Trellis", () => {
   it.effect("fails fuel_exhausted before running the third leaf", () =>
     Effect.gen(function*() {
       const trace: Array<string> = []
+      const first: Trellis.Plan = {
+        sequence: [{ agent: { goal: "a" } }, { agent: { goal: "b" } }]
+      }
+      const second: Trellis.Plan = { agent: { goal: "c" } }
       const failure = yield* Trellis.run("ship it", {
         envelope: { fuel: 2, depth: 2, fanout: 2 },
-        author: () => Effect.succeed({ sequence: [{ agent: { goal: "a" } }, { agent: { goal: "b" } }] }),
-        continue: () => Effect.succeed({ agent: { goal: "c" } }),
+        author: () => Effect.succeed(first),
+        continue: () => Effect.succeed(second),
         leaf: ({ goal }) =>
           Effect.sync(() => {
             trace.push(goal)
@@ -383,6 +387,10 @@ describe("Trellis", () => {
       expect(failure.code).toBe("fuel_exhausted")
       expect(failure.path).toBe("root")
       expect(failure.message).toBe("Round 2 needs 1 leaf calls but only 0 fuel remains")
+      expect((failure as Trellis.TrellisError & { readonly cause?: unknown }).cause).toEqual({
+        rounds: [{ plan: first, result: ["a", "b"] }],
+        remaining: 0
+      })
       expect(trace).toEqual(["a", "b"])
     }))
 

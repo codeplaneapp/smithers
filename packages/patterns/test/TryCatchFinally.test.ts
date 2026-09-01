@@ -1,6 +1,7 @@
 import { describe, it } from "@effect/vitest"
 import { Flow, Graph, Node } from "@smthrs/core"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Schema from "effect/Schema"
 import { expect } from "vitest"
@@ -138,7 +139,7 @@ describe("TryCatchFinally", () => {
       .map((node) => (node.keyMaterial.body as { readonly handler: { readonly algorithm: string } }).handler.algorithm)
 
     expect(material()).toEqual(material())
-    expect(handlers).toEqual(["sha256-source-captures/v3", "sha256-source-captures/v3"])
+    expect(handlers).toEqual(["sha256-source-captures/v4", "sha256-source-captures/v4"])
   })
 
   it.effect("runs the finalizer once after a successful body", () =>
@@ -154,6 +155,49 @@ describe("TryCatchFinally", () => {
 
       expect(value).toBe("request-ok")
       expect(finalized).toBe(1)
+    }))
+
+  it.effect("defers protected body construction and rebuilds it for every execution", () =>
+    Effect.gen(function*() {
+      let constructions = 0
+      const protectedBody = TryCatchFinally.run("request", {
+        try: (input) => {
+          constructions += 1
+          return Effect.succeed(`${input}-${constructions}`)
+        }
+      })
+
+      expect(constructions).toBe(0)
+      expect(yield* protectedBody).toBe("request-1")
+      expect(constructions).toBe(1)
+      expect(yield* protectedBody).toBe("request-2")
+      expect(constructions).toBe(2)
+    }))
+
+  it.effect("reports a synchronously thrown body factory as a defect and still finalizes", () =>
+    Effect.gen(function*() {
+      const defect = new Error("factory exploded")
+      let finalized = false
+      const protectedBody = TryCatchFinally.run("request", {
+        try: (): Effect.Effect<never> => {
+          throw defect
+        },
+        finally: () =>
+          Effect.sync(() => {
+            finalized = true
+          })
+      })
+
+      expect(finalized).toBe(false)
+      const exit = yield* Effect.exit(protectedBody)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        expect(exit.cause.reasons.find((reason) => reason._tag === "Die")).toMatchObject({
+          _tag: "Die",
+          defect
+        })
+      }
+      expect(finalized).toBe(true)
     }))
 
   it.effect("recovers a matching failure and still runs the finalizer", () =>

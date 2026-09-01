@@ -348,6 +348,45 @@ describe("Supervisor", () => {
       expect(ran).toBe(0)
     }))
 
+  it.effect("rejects an empty runtime plan through the typed channel", () =>
+    Effect.gen(function*() {
+      let callbacks = 0
+      const failure = yield* Supervisor.run("goal", {
+        maxRounds: 2,
+        concurrency: 1,
+        plan: () => Effect.succeed({ tasks: [] }),
+        worker: () => Effect.sync(() => (callbacks += 1, "ok")),
+        review: () => Effect.sync(() => (callbacks += 1, { allDone: true })),
+        finalize: () => Effect.sync(() => (callbacks += 1, "done"))
+      }).pipe(Effect.flip)
+
+      expect(failure).toBeInstanceOf(PatternError)
+      expect((failure as PatternError).code).toBe("invalid_decorator")
+      expect((failure as PatternError).message).toBe("Supervisor input must contain at least one task")
+      expect(callbacks).toBe(0)
+    }))
+
+  it.effect("rejects malformed runtime plans through the typed channel", () =>
+    Effect.gen(function*() {
+      const malformedPlans: ReadonlyArray<unknown> = [{ tasks: "nope" }, {}]
+      for (const malformed of malformedPlans) {
+        let callbacks = 0
+        const failure = yield* Supervisor.run("goal", {
+          maxRounds: 2,
+          concurrency: 1,
+          plan: () => Effect.succeed(malformed as Supervisor.Plan),
+          worker: () => Effect.sync(() => (callbacks += 1, "ok")),
+          review: () => Effect.sync(() => (callbacks += 1, { allDone: true })),
+          finalize: () => Effect.sync(() => (callbacks += 1, "done"))
+        }).pipe(Effect.flip)
+
+        expect(failure).toBeInstanceOf(PatternError)
+        expect((failure as PatternError).code).toBe("invalid_decorator")
+        expect((failure as PatternError).message).toBe("Supervisor input must contain a tasks array")
+        expect(callbacks).toBe(0)
+      }
+    }))
+
   it.effect("rejects invalid runtime bounds", () =>
     Effect.gen(function*() {
       const failure = yield* Supervisor.run("goal", {

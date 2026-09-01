@@ -146,4 +146,24 @@ describe("MapReduce", () => {
       expect(succeeded).toEqual([])
       expect(reduced).toBe(0)
     }))
+
+  it.effect("defers empty-shard reduction and rebuilds it for every execution", () =>
+    Effect.gen(function*() {
+      let constructions = 0
+      const reduced = MapReduce.run({ shards: [] as ReadonlyArray<number> }, {
+        concurrency: 1,
+        onEmpty: "reduce",
+        map: ({ shard }) => Effect.succeed(shard * 2),
+        reduce: ({ mapped }) => {
+          constructions += 1
+          return Effect.succeed(mapped.length + constructions)
+        }
+      })
+
+      expect(constructions).toBe(0)
+      expect(yield* reduced).toBe(1)
+      expect(constructions).toBe(1)
+      expect(yield* reduced).toBe(2)
+      expect(constructions).toBe(2)
+    }))
 })

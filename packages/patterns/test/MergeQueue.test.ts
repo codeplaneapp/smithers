@@ -20,6 +20,8 @@ const members = [
   { id: "feature", flow: land }
 ]
 
+const invalidPriorities = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 1.5, 2 ** 53]
+
 const literals = (graph: Graph.Graph): ReadonlyArray<Record<string, unknown>> =>
   Graph.nodes(graph)
     .filter((node) => node.kind === "FlowCall")
@@ -113,8 +115,28 @@ describe("MergeQueue", () => {
       })
     )
     expect(() => MergeQueue.make(members, { priority: 1.5, failurePolicy: "halt" })).toThrow(
-      expect.objectContaining({ code: "invalid_decorator", message: "MergeQueue priority must be a safe integer" })
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "MergeQueue priority for member \"docs\" must be a safe integer, received 1.5"
+      })
     )
+  })
+
+  it("refuses every unsafe member priority at declaration time", () => {
+    for (const priority of invalidPriorities) {
+      expect(() => MergeQueue.ordered([{ id: "unstable", priority }], MergeQueue.DefaultPriority)).toThrow(
+        expect.objectContaining({
+          code: "invalid_decorator",
+          message: `MergeQueue priority for member "unstable" must be a safe integer, received ${priority}`
+        })
+      )
+      expect(() => MergeQueue.make([{ id: "unstable", flow: land, priority }], { failurePolicy: "halt" })).toThrow(
+        expect.objectContaining({
+          code: "invalid_decorator",
+          message: `MergeQueue priority for member "unstable" must be a safe integer, received ${priority}`
+        })
+      )
+    }
   })
 
   it.effect("lands members one at a time in priority then declaration order", () =>
@@ -263,6 +285,24 @@ describe("MergeQueue", () => {
       expect(duplicate).toBeInstanceOf(PatternError)
       expect(duplicate.code).toBe("invalid_decorator")
       expect(duplicate.message).toBe("MergeQueue member ids must be unique")
+    }))
+
+  it.effect("refuses every unsafe member priority before running the queue", () =>
+    Effect.gen(function*() {
+      let ran = 0
+      for (const priority of invalidPriorities) {
+        const failure = yield* MergeQueue.run("main", {
+          members: [{ id: "unstable", priority, run: () => Effect.sync(() => (ran += 1, "landed")) }],
+          failurePolicy: "halt"
+        }).pipe(Effect.flip)
+
+        expect(failure).toBeInstanceOf(PatternError)
+        expect((failure as PatternError).code).toBe("invalid_decorator")
+        expect((failure as PatternError).message).toBe(
+          `MergeQueue priority for member "unstable" must be a safe integer, received ${priority}`
+        )
+      }
+      expect(ran).toBe(0)
     }))
 
   it("gives a halting queue and a quarantining queue different topology and identity", () => {

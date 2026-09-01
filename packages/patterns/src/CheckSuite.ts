@@ -94,13 +94,10 @@ const merge = (left: unknown, right: unknown): Record<string, unknown> => ({
  * Classifies one check's row as a pass.
  *
  * A missing row is a failure: the check produced nothing. A
- * {@link Quarantine.Quarantined} marker is a failure too: the check itself
- * failed and the join isolated it, so the suite has no row to read. An object
- * row fails when it carries `passed: false`, `ok: false`, `failed: true`, or an
+ * object row fails when it carries `passed: false`, `ok: false`, `failed: true`, or an
  * `error` other than `undefined`, `null`, or `false`. Anything else passes.
- * The quarantine marker is a structural tag on the wire. A successful value
- * with that full shape is indistinguishable, so callers whose values can carry
- * a `_tag` should wrap them before returning them as check rows.
+ * Quarantine protocol envelopes are interpreted by {@link rows}, where the
+ * caller explicitly declares that the record came from a tolerant join.
  *
  * @category introspection
  * @since 0.1.0
@@ -108,7 +105,6 @@ const merge = (left: unknown, right: unknown): Record<string, unknown> => ({
 export const passed = (row: unknown): boolean => {
   if (row === null || row === undefined) return false
   if (typeof row !== "object") return true
-  if (Quarantine.isQuarantined(row)) return false
   const record = row as Record<string, unknown>
   if (record.passed === false || record.ok === false || record.failed === true) return false
   return record.error === undefined || record.error === null || record.error === false
@@ -123,9 +119,21 @@ export const passed = (row: unknown): boolean => {
  * @category introspection
  * @since 0.1.0
  */
-export const rows = (values: unknown, ids: ReadonlyArray<string>): ReadonlyArray<CheckResult> => {
+export const rows = (
+  values: unknown,
+  ids: ReadonlyArray<string>,
+  quarantineOutcomes = false
+): ReadonlyArray<CheckResult> => {
   const record = (typeof values === "object" && values !== null ? values : {}) as Record<string, unknown>
-  return ids.map((id) => ({ id, passed: Object.hasOwn(record, id) ? passed(record[id]) : false }))
+  return ids.map((id) => {
+    if (!Object.hasOwn(record, id)) return { id, passed: false }
+    const row = record[id]
+    if (!quarantineOutcomes) return { id, passed: passed(row) }
+    return {
+      id,
+      passed: Quarantine.isSucceeded(row) ? passed(row.value) : false
+    }
+  })
 }
 
 /**
@@ -163,10 +171,11 @@ const bound = (value: number): boolean => Number.isSafeInteger(value) && value >
  *
  * `continueOnFail` picks the join. A tolerant suite joins each batch with
  * {@link Quarantine.all} under the `quarantine` policy: every check gains a
- * recovery arm, a failing check settles as a {@link Quarantine.Quarantined}
- * marker its siblings ignore, and {@link passed} reads that marker as a failed
- * check. A fail-fast suite joins under `halt`, which is the plain `Node.all`
- * that fails on the first failing member and interrupts the rest.
+ * recovery arm, and every check settles in an explicit
+ * {@link Quarantine.Settled} envelope. {@link rows} unwraps successful rows
+ * and classifies quarantined failures. A fail-fast suite joins under `halt`,
+ * which is the plain `Node.all` that fails on the first failing member and
+ * interrupts the rest.
  *
  * @category constructors
  * @since 0.1.0
@@ -204,9 +213,9 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
             call(flow, { check: id, input })
           ])
         ) as Record<string, Node.Any>
-        return Quarantine.all(members, {
-          policy: options.continueOnFail ? "quarantine" : "halt"
-        })
+        return options.continueOnFail
+          ? Quarantine.all(members, { policy: "quarantine" })
+          : Quarantine.all(members, { policy: "halt" })
       }
       let batches = batchAt(0)
       for (let offset = options.concurrency; offset < declared.length; offset += options.concurrency) {
@@ -221,7 +230,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
       }
       return Node.map(
         batches,
-        Node.capture(captures, (values) => verdict(rows(values, ids), options.strategy))
+        Node.capture(captures, (values) => verdict(rows(values, ids, options.continueOnFail), options.strategy))
       )
     })
   })

@@ -154,8 +154,8 @@ describe("DelegationChain", () => {
         plan: () => Effect.succeed({ sequence: [{ agent: { goal: "a" } }] }),
         derisk: () => Effect.succeed({ approved: true }),
         execute: {
-          weak: () => Effect.suspend(() => (attempts += 1, Effect.fail("no"))),
-          strong: () => Effect.suspend(() => (attempts += 1, Effect.fail("no")))
+          weak: () => Effect.suspend(() => (attempts += 1, Effect.fail("weak failed"))),
+          strong: () => Effect.suspend(() => (attempts += 1, Effect.fail("strong failed")))
         },
         review: () => Effect.succeed({ approved: true }),
         settle: ({ leaves }) => Effect.succeed(leaves)
@@ -167,6 +167,10 @@ describe("DelegationChain", () => {
       expect((failure as DelegationChain.DelegationError).message).toBe(
         "No tier settled the leaf at root.sequence[0] within 2 attempts each"
       )
+      expect((failure as DelegationChain.DelegationError & { readonly cause?: unknown }).cause).toEqual([
+        { tier: "weak", error: "weak failed" },
+        { tier: "strong", error: "strong failed" }
+      ])
       expect(attempts).toBe(bounds.tierOrder.length * bounds.maxAttempts)
     }))
 
@@ -208,6 +212,10 @@ describe("DelegationChain", () => {
       expect((failure as DelegationChain.DelegationError).message).toBe(
         "No tier settled the leaf at root.sequence[0] within 2 attempts each"
       )
+      expect((failure as DelegationChain.DelegationError & { readonly cause?: unknown }).cause).toEqual([
+        { tier: "weak", rejected: true },
+        { tier: "strong", rejected: true }
+      ])
       expect(attempts).toEqual(new Map([["weak", bounds.maxAttempts], ["strong", bounds.maxAttempts]]))
       expect(reviewed).toEqual(["weak", "strong"])
       expect(settled).toBe(false)
@@ -303,6 +311,7 @@ describe("DelegationChain", () => {
 
   it.effect("wraps a leaf-review PatternError with the exact leaf refusal", () =>
     Effect.gen(function*() {
+      const reviewFailure = new PatternError({ code: "invalid_decorator", message: "review unavailable" })
       const failure = yield* DelegationChain.run("ship it", {
         ...bounds,
         refine: () => Effect.succeed("goal"),
@@ -311,7 +320,7 @@ describe("DelegationChain", () => {
         execute: { weak: () => Effect.succeed("candidate"), strong: () => Effect.succeed("unused") },
         review: (request) =>
           request.stage === "leaf"
-            ? Effect.fail(new PatternError({ code: "invalid_decorator", message: "review unavailable" }))
+            ? Effect.fail(reviewFailure)
             : Effect.succeed({ approved: true }),
         settle: ({ leaves }) => Effect.succeed(leaves)
       }).pipe(Effect.flip)
@@ -322,6 +331,7 @@ describe("DelegationChain", () => {
       expect((failure as DelegationChain.DelegationError).message).toBe(
         "No tier settled the leaf at root within 2 attempts each"
       )
+      expect((failure as DelegationChain.DelegationError & { readonly cause?: unknown }).cause).toBe(reviewFailure)
     }))
 
   it("declares the documented number of flow calls", () => {

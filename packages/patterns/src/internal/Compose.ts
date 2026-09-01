@@ -61,6 +61,24 @@ export const accepted = (value: unknown): boolean => {
   )
 }
 
+/**
+ * Refuses a priority before a pattern sorts, annotates, or runs its member.
+ *
+ * @since 1.0.0
+ * @private
+ */
+export const safeIntegerPriorityRefusal = (
+  pattern: string,
+  member: string,
+  value: unknown
+): PatternError | undefined =>
+  typeof value === "number" && Number.isSafeInteger(value)
+    ? undefined
+    : new PatternError({
+      code: "invalid_decorator",
+      message: `${pattern} priority for member "${member}" must be a safe integer, received ${value}`
+    })
+
 const normalized = (values: Iterable<string>): ReadonlyArray<string> => [...new Set(values)].sort()
 
 const intersectPaths = (

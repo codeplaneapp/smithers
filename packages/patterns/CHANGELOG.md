@@ -63,7 +63,8 @@
   declaration records with prototype-shaped check ids.
 - `Kanban` rejects empty runtime item lists and duplicate column names,
   snapshots columns, supports prototype-shaped names, evaluates `until` on
-  the final allowed pass, and runs `onComplete` exactly once after settlement.
+  the final allowed pass, requires `maxIterations` whenever `until` is
+  supplied, and runs `onComplete` exactly once after settlement.
 - `MergeQueue` uses `id` in declaration call payloads to match runtime and
   safely handles prototype-shaped member ids.
 - `Optimizer.run` refuses non-finite evaluator scores before continuing.
@@ -71,9 +72,10 @@
   compatibility failures, distinct from JSON Schema conversion failures.
 - `PatternError` carries an optional `cause` for the error or errors it
   reports.
-- `Quarantine` validates the complete structural marker, treats near-miss
-  values as successes, supports prototype-shaped names, and preserves member
-  errors in the `settle` failure cause.
+- `Quarantine` settles both success and failure in explicit `Succeeded` and
+  `Quarantined` envelopes, eliminating collisions with user values of any
+  shape. It supports prototype-shaped names and preserves member errors in the
+  `settle` failure cause.
 - `Runbook.run` snapshots steps and safely records outputs for
   prototype-shaped step ids.
 - `Saga.run` snapshots steps, safely records prototype-shaped ids, and reports
@@ -91,6 +93,26 @@
   empty slot, so `WithRetry`, `WithCache`, `WithApproval`, and
   `Pattern.decorate` no longer produce names such as `withRetry(, attempts=2)`
   or the empty string.
+
+### Fixed
+
+- `DelegationError` carries an optional `cause`, and exhausted delegation
+  ladders preserve per-tier execution errors, review rejections, or an escaped
+  `PatternError`.
+- `MergeQueue` and `Bounded` reject every non-safe-integer effective member
+  priority before sorting, declaring, or running work.
+- `Supervisor.run` validates and snapshots non-empty task plans before worker,
+  review, or finalize callbacks run.
+- `TryCatchFinally.run` and empty-shard `MapReduce.run` defer callback
+  construction until execution and rebuild it on every execution.
+- `Recursion` validates parent envelopes, rejects non-array child collections,
+  and recognizes branch fields only when they are own properties.
+- `Debate.run` freezes each transcript turn wrapper so later participants
+  cannot rewrite prior rounds.
+- `Sidecar.delta` and `Sidecar.run` reject non-finite scores and overflowing
+  score differences.
+- `TrellisError` carries an optional `cause`, and mid-trampoline refusals
+  preserve completed rounds and remaining fuel.
 
 [Unreleased]: https://github.com/smithersai/smithers/compare/v1.0.0-rc.0...HEAD
 [1.0.0-rc.0]: https://github.com/smithersai/smithers/releases/tag/v1.0.0-rc.0

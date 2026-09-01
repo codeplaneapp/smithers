@@ -170,7 +170,7 @@ export const run = <
     }
     return options.onEmpty === "succeed"
       ? Effect.succeed([])
-      : options.reduce({ input, mapped: [] })
+      : Effect.suspend(() => options.reduce({ input, mapped: [] }))
   }
   return Effect.flatMap(
     Effect.forEach(

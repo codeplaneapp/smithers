@@ -27,7 +27,7 @@ describe("Debate", () => {
     expect(Graph.nodes(graph).filter((node) => node.kind === "FlowCall")).toHaveLength(5)
     expect(debate.implementation?._tag).toBe("Body")
     if (debate.implementation?._tag === "Body") {
-      expect(debate.implementation.algorithm).toBe("sha256-source-captures/v3")
+      expect(debate.implementation.algorithm).toBe("sha256-source-captures/v4")
     }
   })
 
@@ -103,6 +103,40 @@ describe("Debate", () => {
 
       expect(retained.every(Object.isFrozen)).toBe(true)
       expect(retained.map((transcript) => transcript.length)).toEqual([0, 0, 1, 1, 2])
+      expect(result).toEqual([
+        { proponent: "p1", opponent: "o1" },
+        { proponent: "p2", opponent: "o2" }
+      ])
+    }))
+
+  it.effect("freezes turn wrappers so a participant cannot rewrite history", () =>
+    Effect.gen(function*() {
+      let reassignment: unknown
+      let deletion: unknown
+      const result = yield* Debate.run("topic", {
+        rounds: 2,
+        proponent: ({ round, transcript }) => {
+          if (round === 2) {
+            const first = transcript[0] as { proponent?: string; opponent?: string }
+            try {
+              first.proponent = "forged"
+            } catch (error) {
+              reassignment = error
+            }
+            try {
+              delete first.opponent
+            } catch (error) {
+              deletion = error
+            }
+          }
+          return Effect.succeed(`p${round}`)
+        },
+        opponent: ({ round }) => Effect.succeed(`o${round}`),
+        judge: ({ transcript }) => Effect.succeed(transcript)
+      })
+
+      expect(reassignment).toBeInstanceOf(TypeError)
+      expect(deletion).toBeInstanceOf(TypeError)
       expect(result).toEqual([
         { proponent: "p1", opponent: "o1" },
         { proponent: "p2", opponent: "o2" }

@@ -70,6 +70,13 @@ const sealedRead = () =>
     body: () => Node.dynamic({ output: Schema.String })
   })
 
+/** The canonical digest of everything `/keys` hashes for a built graph. */
+const keyDigest = (flow: Flow.Any): string => {
+  const material = Graph.keyMaterial(Graph.build(flow, "file"))
+  if (Result.isFailure(material)) throw material.failure
+  return Digest.canonical(material.success.map((entry) => entry.material))
+}
+
 describe("WithCache policy", () => {
   it("names every declared field in the wrapper", () => {
     const cached = WithCache.withCache(sealedRead(), { ttlMs: 1000, scope: "run", version: "v2" })
@@ -82,11 +89,13 @@ describe("WithCache policy", () => {
   })
 
   it("leaves an undeclared policy at the pre-policy declaration", () => {
-    const cached = WithCache.withCache(sealedRead())
+    const inner = sealedRead()
+    const cached = WithCache.withCache(inner)
+    const emptyPolicy = WithCache.withCache(inner, {})
     expect((cached as ReturnType<typeof sealedRead>).name).toBe("withCache(read)")
-    expect((cached as ReturnType<typeof sealedRead>).implementation).toEqual(
-      (WithCache.withCache(sealedRead(), {}) as ReturnType<typeof sealedRead>).implementation
-    )
+    // Core commit d54180b9fe embeds callable references in BodyDeclaration. Restore whole-implementation
+    // equality once core records stable flow identities there.
+    expect(keyDigest(cached)).toBe(keyDigest(emptyPolicy))
   })
 
   it("folds the policy into declaration key material", () => {
@@ -97,10 +106,15 @@ describe("WithCache policy", () => {
     const runScoped = WithCache.withCache(inner, { ttlMs: 1000, scope: "run" }) as typeof inner
     const versioned = WithCache.withCache(inner, { ttlMs: 1000, version: "v2" }) as typeof inner
 
-    expect(oneSecond.implementation).toEqual(oneSecondAgain.implementation)
+    // Core commit d54180b9fe embeds callable references in BodyDeclaration. Restore whole-implementation
+    // equality once core records stable flow identities there.
+    expect(keyDigest(oneSecond)).toBe(keyDigest(oneSecondAgain))
     expect(oneSecond.implementation).not.toEqual(twoSeconds.implementation)
+    expect(keyDigest(oneSecond)).not.toBe(keyDigest(twoSeconds))
     expect(oneSecond.implementation).not.toEqual(runScoped.implementation)
+    expect(keyDigest(oneSecond)).not.toBe(keyDigest(runScoped))
     expect(oneSecond.implementation).not.toEqual(versioned.implementation)
+    expect(keyDigest(oneSecond)).not.toBe(keyDigest(versioned))
   })
 
   it("refuses a time to live no clock reading satisfies", () => {
@@ -146,13 +160,6 @@ describe("WithCache policy", () => {
 /** The annotation bag a built flow carries; `Flow.Any` hides the field. */
 const annotationsOf = (flow: Flow.Any): Context.Context<never> =>
   (flow as unknown as { readonly annotations: Context.Context<never> }).annotations
-
-/** The canonical digest of everything `/keys` hashes for a built graph. */
-const keyDigest = (flow: Flow.Any): string => {
-  const material = Graph.keyMaterial(Graph.build(flow, "file"))
-  if (Result.isFailure(material)) throw material.failure
-  return Digest.canonical(material.success.map((entry) => entry.material))
-}
 
 describe("WithCache policy annotation", () => {
   it("annotates the wrapper with the policy the engine reads at dispatch", () => {

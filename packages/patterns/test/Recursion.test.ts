@@ -100,6 +100,58 @@ describe("Recursion", () => {
     )
   })
 
+  it("admits an equal or attenuated parent envelope", () => {
+    expect(Flow.isFlow(Recursion.recurse({
+      child,
+      fuel: 2,
+      depth: 1,
+      fanout: 1,
+      parent: { fuel: 2, depth: 2, fanout: 2 }
+    }))).toBe(true)
+  })
+
+  it("refuses invalid parent envelope fields before attenuation", () => {
+    const invalidParents = [
+      ["fuel", Number.NaN],
+      ["depth", Number.POSITIVE_INFINITY],
+      ["fanout", 1.5]
+    ] as const
+
+    for (const [field, value] of invalidParents) {
+      const parent = { fuel: 2, depth: 2, fanout: 2, [field]: value }
+      expect(() => Recursion.recurse({ child, fuel: 1, depth: 1, fanout: 1, parent })).toThrow(
+        expect.objectContaining({
+          code: "recursion_bound",
+          message: `Recursion parent ${field} must be a positive safe integer, received ${value}`
+        })
+      )
+    }
+  })
+
+  it("refuses non-array branch children with a typed bound error", () => {
+    const recursive = Recursion.recurse({ child, fuel: 3, depth: 3, fanout: 2 })
+    const invalidChildren = [
+      ["x", "string"],
+      [{ input: "nested" }, "object"]
+    ] as const
+
+    for (const [children, received] of invalidChildren) {
+      expect(() => Graph.build(recursive, { input: "root", children })).toThrow(
+        expect.objectContaining({
+          code: "recursion_bound",
+          message: `Recursive branch children must be an array when present, received ${received}`
+        })
+      )
+    }
+  })
+
+  it("treats inherited input and children as an opaque leaf", () => {
+    const recursive = Recursion.recurse({ child, fuel: 3, depth: 3, fanout: 2 })
+    const inherited = Object.create({ input: "forged", children: [{ input: "nested" }] })
+
+    expect(recursive.body?.(inherited).ast._tag).toBe("FlowCall")
+  })
+
   it("admits the declared depth and refuses one level past it", () => {
     const recursive = Recursion.recurse({ child, fuel: 4, depth: 3, fanout: 1 })
     const atBound = {

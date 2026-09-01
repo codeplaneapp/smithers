@@ -18,6 +18,8 @@ const worker = Flow.make({
 const members = (names: ReadonlyArray<string>): Record<string, Node.Any> =>
   Object.fromEntries(names.map((name) => [name, worker(name) as Node.Any]))
 
+const invalidPriorities = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 1.5, 2 ** 53]
+
 const graphOf = (node: Node.Node<unknown, unknown>): Graph.Graph =>
   Graph.build(Flow.make({ input: Schema.Unknown, output: Schema.Unknown, body: () => node }), undefined)
 
@@ -69,6 +71,17 @@ describe("Bounded", () => {
         message: "Bounded concurrency must be a positive safe integer, received 0"
       })
     )
+  })
+
+  it("refuses every unsafe effective member priority at declaration time", () => {
+    for (const priority of invalidPriorities) {
+      expect(() => Bounded.all(members(["unstable"]), { concurrency: 1, priority })).toThrow(
+        expect.objectContaining({
+          code: "invalid_decorator",
+          message: `Bounded priority for member "unstable" must be a safe integer, received ${priority}`
+        })
+      )
+    }
   })
 
   it.effect("keeps run within the concurrency bound and starts the highest priority first", () =>
@@ -178,19 +191,23 @@ describe("Bounded", () => {
       }
     }))
 
-  it.effect("refuses a non-finite member priority before running a member", () =>
+  it.effect("refuses every unsafe member priority before running a member", () =>
     Effect.gen(function*() {
       let ran = 0
-      const failure = yield* Effect.flip(
-        Bounded.run(
-          { unstable: Effect.sync(() => (ran += 1)) },
-          { concurrency: 1, priorities: { unstable: Number.NaN } }
+      for (const priority of invalidPriorities) {
+        const failure = yield* Effect.flip(
+          Bounded.run(
+            { unstable: Effect.sync(() => (ran += 1)) },
+            { concurrency: 1, priorities: { unstable: priority } }
+          )
         )
-      )
 
-      expect(failure).toBeInstanceOf(PatternError)
-      expect(failure.code).toBe("invalid_decorator")
-      expect(failure.message).toBe("Bounded priority for member \"unstable\" must be a finite number, received NaN")
+        expect(failure).toBeInstanceOf(PatternError)
+        expect(failure.code).toBe("invalid_decorator")
+        expect(failure.message).toBe(
+          `Bounded priority for member "unstable" must be a safe integer, received ${priority}`
+        )
+      }
       expect(ran).toBe(0)
     }))
 

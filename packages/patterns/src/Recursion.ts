@@ -69,14 +69,21 @@ export const recurse = (options: RecurseOptions): Flow.Flow<typeof Schema.Unknow
     return boundError("Recursion bounds must be positive safe integers")
   }
   const parent = options.parent
-  if (
-    parent !== undefined && (
+  if (parent !== undefined) {
+    for (const field of ["fuel", "depth", "fanout"] as const) {
+      if (!valid(parent[field])) {
+        return boundError(
+          `Recursion parent ${field} must be a positive safe integer, received ${parent[field]}`
+        )
+      }
+    }
+    if (
       options.fuel > parent.fuel ||
       options.depth > parent.depth ||
       options.fanout > parent.fanout
-    )
-  ) {
-    return boundError("Nested recursion may attenuate but cannot widen its parent envelope")
+    ) {
+      return boundError("Nested recursion may attenuate but cannot widen its parent envelope")
+    }
   }
   return Flow.make({
     input: Schema.Unknown,
@@ -92,10 +99,19 @@ export const recurse = (options: RecurseOptions): Flow.Flow<typeof Schema.Unknow
         depth: number
       ): FlowNode<unknown, unknown> => {
         if (ledger.remaining < 1) return boundError("Recursion fuel is exhausted")
-        const branch: Branch = typeof value === "object" && value !== null && "input" in value
-          ? value
+        const branch: Branch = typeof value === "object" && value !== null && Object.hasOwn(value, "input")
+          ? value as unknown as Branch
           : { input: value }
-        const children = branch.children ?? []
+        let children: ReadonlyArray<Branch> = []
+        if (Object.hasOwn(branch, "children")) {
+          const declaredChildren = (branch as { readonly children?: unknown }).children
+          if (!Array.isArray(declaredChildren)) {
+            return boundError(
+              `Recursive branch children must be an array when present, received ${typeof declaredChildren}`
+            )
+          }
+          children = declaredChildren as ReadonlyArray<Branch>
+        }
         if (children.length > options.fanout) {
           return boundError("Recursive child fan-out exceeds the envelope")
         }

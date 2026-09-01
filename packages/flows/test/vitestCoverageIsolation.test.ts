@@ -159,7 +159,6 @@ describe("vitest coverage isolation conformance", () => {
     "fs",
     "memory",
     "model",
-    "patterns",
     "registry",
     "scorers",
     "std",

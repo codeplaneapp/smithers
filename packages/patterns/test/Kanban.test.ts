@@ -33,7 +33,9 @@ describe("Kanban", () => {
 
     expect(Graph.nodes(graph).filter((node) => node.kind === "FlowCall")).toHaveLength(7)
     expect(Graph.nodes(graph).filter((node) => node.kind === "All")).toHaveLength(4)
-    expect(Graph.nodes(graph).filter((node) => node.kind === "Map")).toHaveLength(2)
+    // Six maps wrap successful card values in unambiguous quarantine-protocol
+    // envelopes; the other two merge each column's batches.
+    expect(Graph.nodes(graph).filter((node) => node.kind === "Map")).toHaveLength(8)
   })
 
   it("declares one recovery arm per card so a rejected card leaves its column alone", () => {

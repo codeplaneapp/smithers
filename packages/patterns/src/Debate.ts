@@ -20,7 +20,9 @@ export interface Turn {
 }
 
 /**
- * One typed contribution produced by {@link run}.
+ * One typed contribution produced by {@link run}. The turn wrapper is frozen,
+ * while its proponent and opponent payloads remain opaque caller-owned
+ * references and are not recursively frozen.
  *
  * @category models
  * @since 0.1.0
@@ -146,7 +148,7 @@ export const run = <I, Proponent, Opponent, Judge, E, R, E2, R2, E3, R3>(
     for (let round = 1; round <= options.rounds; round++) {
       const proponent = yield* options.proponent({ input, transcript: snapshot(), round })
       const opponent = yield* options.opponent({ input, transcript: snapshot(), proponent, round })
-      transcript.push({ proponent, opponent })
+      transcript.push(Object.freeze({ proponent, opponent }))
     }
     return yield* options.judge({ input, transcript: snapshot() })
   })

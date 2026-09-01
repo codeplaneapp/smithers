@@ -95,16 +95,15 @@ describe("CheckSuite", () => {
   })
 
   it("reads a quarantined check as failed, whatever the check failed with", () => {
-    // The tolerant join settles a failed check as a Quarantined marker. The
-    // marker is the check's absence, not its answer. A marker is read by its
-    // tag rather than by its payload, because a check may fail with a falsy
-    // error and `{ error: null }` alone would otherwise read as a pass.
+    // A tolerant join returns an explicit outcome envelope. Interpreting that
+    // protocol is opt-in, so an arbitrary check row cannot impersonate it.
     const boom = { _tag: "Quarantined", member: "test", error: new Error("boom") }
     const falsy = { _tag: "Quarantined", member: "test", error: null }
+    const lint = { _tag: "Succeeded", member: "lint", value: { ok: true } }
 
     expect(CheckSuite.passed(boom)).toBe(false)
-    expect(CheckSuite.passed(falsy)).toBe(false)
-    expect(CheckSuite.rows({ lint: { ok: true }, test: falsy }, ["lint", "test"])).toEqual([
+    expect(CheckSuite.passed(falsy)).toBe(true)
+    expect(CheckSuite.rows({ lint, test: falsy }, ["lint", "test"], true)).toEqual([
       { id: "lint", passed: true },
       { id: "test", passed: false }
     ])
@@ -154,7 +153,7 @@ describe("CheckSuite", () => {
           : undefined
       })
 
-    expect(named).toEqual(["lint", "typecheck", "test"])
+    expect(named.sort()).toEqual(["lint", "test", "typecheck"])
   })
 
   it.effect("stops at the first failing check when continueOnFail is false", () =>

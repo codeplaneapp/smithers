@@ -151,10 +151,11 @@ export const run = <I, A, E, R, B = A, E2 = never, R2 = never, E3 = never, R3 = 
     )
   }
   const handler = options.catch
+  const attempt = Effect.suspend(() => options.try(input))
   const guarded: Effect.Effect<A | B, E | E2, R | R2> = handler === undefined
-    ? options.try(input)
+    ? attempt
     : Effect.catchIf(
-      options.try(input),
+      attempt,
       (error): error is E => options.catchErrors === undefined || options.catchErrors(error),
       (error) => handler(error, input)
     )

@@ -15,6 +15,7 @@
 import { Annotations, Node } from "@smthrs/core"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Compose from "./internal/Compose.ts"
 import { PatternError } from "./PatternError.ts"
 
 /**
@@ -69,14 +70,6 @@ const nonEmptyRefusal = (names: ReadonlyArray<string>): PatternError | undefined
     ? new PatternError({ code: "invalid_decorator", message: "Bounded requires at least one member" })
     : undefined
 
-const priorityRefusal = (name: string, value: unknown): PatternError | undefined =>
-  typeof value === "number" && Number.isFinite(value)
-    ? undefined
-    : new PatternError({
-      code: "invalid_decorator",
-      message: `Bounded priority for member "${name}" must be a finite number, received ${value}`
-    })
-
 const width = (concurrency: number): void => {
   const refusal = widthRefusal(concurrency)
   if (refusal !== undefined) throw refusal
@@ -116,8 +109,16 @@ export const all = (
   options: AllOptions
 ): Node.Node<Readonly<Record<string, unknown>>, unknown> => {
   width(options.concurrency)
-  nonEmpty(Object.keys(members))
-  const order = ranked(members, (_name, member) => declaredPriority(member) ?? options.priority ?? 0)
+  const names = Object.keys(members)
+  nonEmpty(names)
+  const priorities = new Map<string, number>()
+  for (const name of names) {
+    const value = declaredPriority(members[name]!) ?? options.priority ?? 0
+    const refusal = Compose.safeIntegerPriorityRefusal("Bounded", name, value)
+    if (refusal !== undefined) throw refusal
+    priorities.set(name, value)
+  }
+  const order = ranked(members, (name) => priorities.get(name)!)
   let joined: Node.Node<Readonly<Record<string, unknown>>, unknown> = Node.succeed({})
   for (let offset = 0; offset < order.length; offset += options.concurrency) {
     const batch = Object.fromEntries(
@@ -173,7 +174,7 @@ export const run = <A, E, R>(
       const value: unknown = options.priorities !== undefined && Object.hasOwn(options.priorities, name)
         ? options.priorities[name]
         : options.priority ?? 0
-      const invalid = priorityRefusal(name, value)
+      const invalid = Compose.safeIntegerPriorityRefusal("Bounded", name, value)
       if (invalid !== undefined) return Effect.fail(invalid)
       priorities.set(name, value as number)
     }
