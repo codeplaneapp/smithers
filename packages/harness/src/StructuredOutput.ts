@@ -5,7 +5,7 @@
  * A model may answer with a bare JSON document, prose wrapped around a JSON
  * document, a fenced block, or JSON of the wrong shape. Downstream nodes must
  * never receive that ambiguity, so this module implements the recovery
- * contract in `docs/specs/Concepts/Structured Output.md`:
+ * contract in `packages/harness/docs/concepts.md#structured-output`:
  *
  * 1. parse the complete, BOM-stripped response and decode it;
  * 2. otherwise scan once for balanced JSON containers, take the container
@@ -39,6 +39,55 @@
 import * as Digest from "@smthrs/core/Digest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as SchemaIssue from "effect/SchemaIssue"
+import * as elide from "./internal/elide.ts"
+
+/**
+ * Stable reasons a structured-output boundary failed.
+ *
+ * `invalid_json` means candidate text was not JSON. `schema_mismatch` means
+ * JSON parsed but the declared schema refused it. `no_candidate` means the
+ * answer contained no candidate text. `correction_exhausted` means the
+ * boundary had already spent its correction budget.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ * @slop
+ */
+export const StructuredOutputFailureCode = Schema.Literals([
+  "invalid_json",
+  "schema_mismatch",
+  "no_candidate",
+  "correction_exhausted"
+])
+
+/**
+ * Stable reasons a structured-output boundary failed.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ * @slop
+ */
+export type StructuredOutputFailureCode = typeof StructuredOutputFailureCode.Type
+
+/**
+ * One bounded issue raised while decoding structured output.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ * @slop
+ */
+export class OutputIssue extends Schema.Class<OutputIssue>("flows/harness/StructuredOutput/OutputIssue")({
+  /** The JSON path of the offending value, dot/bracket joined; empty for the root. */
+  path: Schema.String,
+  /** What the decoder wanted there. */
+  message: Schema.String
+}) {
+  /** Renders the issue for existing prose-oriented consumers. */
+  override toString(): string {
+    return this.path === "" ? this.message : `${this.path}: ${this.message}`
+  }
+}
 
 /**
  * The terminal failure of one structured-output boundary.
@@ -55,6 +104,8 @@ import * as Schema from "effect/Schema"
 export class StructuredOutputFailure extends Schema.TaggedError<StructuredOutputFailure>()(
   "/harness/StructuredOutputFailure",
   {
+    /** The stable reason this boundary failed. */
+    code: StructuredOutputFailureCode,
     /** The declared output schema's canonical digest. */
     schema: Schema.String,
     /** SHA-256 of the text the decoder was last offered. */
@@ -63,8 +114,8 @@ export class StructuredOutputFailure extends Schema.TaggedError<StructuredOutput
     corrections: Schema.Number,
     /** The correction budget the boundary was declared with. */
     limit: Schema.Number,
-    /** At most {@link maxIssues} rendered validation issues. */
-    issues: Schema.Array(Schema.String),
+    /** At most {@link maxIssues} structured validation issues. */
+    issues: Schema.Array(OutputIssue),
     message: Schema.String
   }
 ) {}
@@ -144,7 +195,9 @@ ${JSON.stringify(jsonSchema(schema), null, 2)}
  * @since 0.1.0
  */
 export const issuesDigest = (failure: StructuredOutputFailure): string =>
-  Digest.digest(Digest.canonical([...failure.issues]))
+  Digest.digest(
+    Digest.canonical(failure.issues.map((issue) => ({ path: issue.path, message: issue.message })))
+  )
 
 /**
  * The correction teaching appended when a candidate failed to decode.
@@ -237,11 +290,29 @@ export const candidates = (text: string): ReadonlyArray<string> => {
   return balanced === undefined || balanced === stripped ? [stripped] : [stripped, balanced]
 }
 
-const issuesOf = (error: unknown): ReadonlyArray<string> => {
-  /* v8 ignore next -- both callers pass an `Error`: `JSON.parse` throws `SyntaxError`, and `Schema.decodeUnknownEffect` fails with `SchemaError`, which extends `Data.TaggedError` and so extends `Error`; the `String` arm only discharges the `unknown` a `catch` binding and a schema failure channel are typed as */
-  const rendered = error instanceof Error ? error.message : String(error)
-  return rendered.split("\n").map((line) => line.trim()).filter((line) => line.length > 0).slice(0, maxIssues)
+const issueMessage = (message: string): string => elide.head(message, 240, "reissue the answer to see the whole issue")
+
+const issuePath = (path: ReadonlyArray<PropertyKey>): string =>
+  path.map((segment, index) =>
+    typeof segment === "number" ? `[${segment}]` : `${index === 0 ? "" : "."}${String(segment)}`
+  ).join("")
+
+type FormattedIssue = {
+  readonly message: string
+  readonly path: ReadonlyArray<PropertyKey>
 }
+
+const formatSchemaIssues = SchemaIssue.makeFormatterStandardSchemaV1()
+
+const schemaIssuesOf = (error: Schema.SchemaError): ReadonlyArray<OutputIssue> =>
+  (formatSchemaIssues(error.issue).issues as ReadonlyArray<FormattedIssue>).slice(0, maxIssues).map((issue) =>
+    new OutputIssue({ path: issuePath(issue.path), message: issueMessage(issue.message) })
+  )
+
+const textIssuesOf = (message: string): ReadonlyArray<OutputIssue> =>
+  message.split("\n").map((line) => line.trim()).filter((line) => line.length > 0).slice(0, maxIssues).map((line) =>
+    new OutputIssue({ path: "", message: issueMessage(line) })
+  )
 
 /**
  * Decodes one agent answer with the declared output schema.
@@ -263,20 +334,31 @@ export const decode = <S extends Schema.Top>(
   Effect.gen(function*() {
     const offered = candidates(text)
     const decoder = Schema.decodeUnknownEffect(schema)
-    let issues: ReadonlyArray<string> = ["the answer held no JSON document"]
+    let code: StructuredOutputFailureCode = "no_candidate"
+    let issues: ReadonlyArray<OutputIssue> = [
+      new OutputIssue({ path: "", message: "the answer held no JSON document" })
+    ]
     for (const candidate of offered) {
+      if (candidate.length === 0) continue
       let parsed: unknown
       try {
         parsed = JSON.parse(candidate)
       } catch (error) {
-        issues = issuesOf(error)
+        code = "invalid_json"
+        // The ECMAScript JSON parser throws a SyntaxError with a message.
+        issues = textIssuesOf((error as SyntaxError).message)
         continue
       }
       const result = yield* Effect.result(decoder(parsed))
       if (result._tag === "Success") return result.success
-      issues = issuesOf(result.failure)
+      code = "schema_mismatch"
+      issues = schemaIssuesOf(result.failure)
     }
     return yield* new StructuredOutputFailure({
+      // Once the budget is spent, exhaustion is the actionable classification;
+      // the issue records retain whether the last candidate was invalid JSON or
+      // failed schema decoding.
+      code: attempt.corrections >= attempt.limit ? "correction_exhausted" : code,
       schema: digest(schema),
       candidate: Digest.digest(offered[offered.length - 1]!),
       corrections: attempt.corrections,

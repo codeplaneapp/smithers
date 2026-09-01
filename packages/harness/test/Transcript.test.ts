@@ -1,7 +1,7 @@
 /**
- * Pi §6 and OpenCode message-projection parity:
- * `docs/specs/Research/Pi Reference Findings 2026-07-27.md`.
- * Coverage manifest: `docs/reference/test-parity.md`.
+ * Journal-to-transcript projection: what a resumed run rebuilds from what the
+ * loop journaled, and what it refuses to rebuild from a payload that no longer
+ * decodes. See `packages/harness/docs/concepts.md#durable-cell-loop`.
  */
 import type { JournalEvent } from "@smthrs/journal"
 import { ModelEvent, ModelRequest } from "@smthrs/model"
@@ -258,6 +258,7 @@ describe("Transcript", () => {
     expect(state.replaced).toBeUndefined()
     expect(state.cell).toEqual({
       produced: [],
+      printed: [],
       callsStarted: [],
       callsSettled: [],
       settled: [],
@@ -266,6 +267,65 @@ describe("Transcript", () => {
       aborts: []
     })
     expect(Result.getOrThrow(Transcript.projectResult([]))).toEqual([])
+  })
+
+  it("rebuilds the window the next turn read, prints included", () => {
+    // `CellPrinted` was journaled and never projected, so a transcript rebuilt
+    // from a harness-native journal was missing the entire context channel:
+    // what a cell printed IS what the next model turn reads. An empty buffer
+    // contributes nothing, because the absence of a print is not a user message.
+    const source = Cell.source("console.log(\"found it\")")
+    const events: ReadonlyArray<AgentEvent.AgentEvent> = [
+      new AgentEvent.ModelSettled({
+        eventType: AgentEvent.eventType.modelSettled,
+        message: ModelRequest.Message.assistant("here is the cell", { stopReason: "stop" }),
+        usage: ModelEvent.Usage.make({ inputTokens: 1, outputTokens: 1 })
+      }),
+      new AgentEvent.CellProduced({ eventType: AgentEvent.eventType.cellProduced, cell: source }),
+      new AgentEvent.CellPrinted({
+        eventType: AgentEvent.eventType.cellPrinted,
+        cell: source.digest,
+        text: "found it"
+      }),
+      new AgentEvent.CellSettled({
+        eventType: AgentEvent.eventType.cellSettled,
+        cell: source.digest,
+        outcome: new Cell.Settled({ transition: new Cell.Continue({}) })
+      }),
+      new AgentEvent.CellPrinted({
+        eventType: AgentEvent.eventType.cellPrinted,
+        cell: source.digest,
+        text: ""
+      })
+    ]
+    const entries = events.map((event, index) =>
+      entry(index + 1, event.eventType, Schema.encodeSync(AgentEvent.AgentEvent)(event))
+    )
+
+    const state = Result.getOrThrow(Transcript.projectStateResult(entries))
+
+    expect(state.messages.map((item) => item.message.role)).toEqual(["assistant", "user"])
+    expect(state.messages[1]?.message).toEqual(ModelRequest.Message.user("found it"))
+    expect(state.cell.printed.map((event) => event.text)).toEqual(["found it", ""])
+  })
+
+  it("refuses a malformed print buffer rather than projecting a window without it", () => {
+    const result = Transcript.projectStateResult([
+      entry(1, AgentEvent.eventType.cellPrinted, { eventType: AgentEvent.eventType.cellPrinted, cell: 7 })
+    ])
+
+    expect(Result.isFailure(result) && result.failure.code).toBe("projection_failed")
+  })
+
+  it("keeps the journal event-type table in step with the event union", () => {
+    // The literal used to be written three times: on the class, in the
+    // controller's emitter, and again in this projection's decoder. A decoder
+    // reading a literal the emitter no longer writes returns an empty
+    // transcript and fails nothing.
+    const declared = Object.values(AgentEvent.eventType)
+
+    expect(new Set(declared).size).toBe(declared.length)
+    for (const value of declared) expect(value).toMatch(/^flows\.harness\.[a-z-]+\.v1$/)
   })
 
   it("rejects malformed drained steering rather than projecting a partial turn", () => {

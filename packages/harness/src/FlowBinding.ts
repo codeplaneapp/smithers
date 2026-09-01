@@ -32,8 +32,8 @@
  * permission requirement, an abort, a suspension — stays in the typed error
  * channel, and an interruption is never caught at all.
  *
- * Governing design: `docs/specs/Concepts/Durable Cell Loop.md` and
- * `docs/specs/Concepts/Flow Registry.md`.
+ * Governing design: `packages/harness/docs/concepts.md#durable-cell-loop` and
+ * `packages/harness/docs/concepts.md#flow-registry`.
  *
  * @since 0.1.0
  */
@@ -43,9 +43,11 @@ import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
 import type { Context, Schema as SchemaTypes } from "effect"
 import { Effect, Option, Result, Schema } from "effect"
+import { width as callLedgerWidth } from "./CallLedger.ts"
 import type * as Cell from "./Cell.ts"
 import { CallResult } from "./Cell.ts"
 import { HarnessError } from "./HarnessError.ts"
+import * as elide from "./internal/elide.ts"
 
 /**
  * The declaration half of a binding.
@@ -194,7 +196,8 @@ export interface Binding<R = never> {
 /**
  * A refusal the cell observes as a catchable exception.
  */
-const refused = (message: string): CallResult => new CallResult({ outcome: "failure", value: null, message })
+const refused = (code: Cell.CallFailureCode, message: string): CallResult =>
+  new CallResult({ outcome: "failure", value: null, code, message })
 
 /**
  * Renders an arbitrary failure value as stable text for the next frame.
@@ -203,8 +206,17 @@ const describe = (error: unknown): string => {
   if (typeof error === "string") return error
   if (error instanceof Error) return error.message
   const message = (error as { readonly message?: unknown } | null)?.message
-  return typeof message === "string" ? message : JSON.stringify(error) ?? String(error)
+  if (typeof message === "string") return message
+  try {
+    return JSON.stringify(error) ?? String(error)
+  } catch {
+    return String(error)
+  }
 }
+
+/** Bounds a failure before it enters the journal and every later frame. */
+const describeFailure = (error: unknown): string =>
+  elide.head(describe(error), callLedgerWidth * 4, "reissue the call to see the whole failure")
 
 /**
  * Decides whether a handler failure is the cell's business.
@@ -299,8 +311,9 @@ export const make = <
         const decoded = decodeCall(call.input)
         if (decoded._tag === "Failure") {
           return refused(
+            "invalid_input",
             `Flow ${descriptor.name} rejected its input: ${
-              describe(decoded.failure)
+              describeFailure(decoded.failure)
             }. Re-read ctx.flows and reissue the call.`
           )
         }
@@ -308,15 +321,15 @@ export const make = <
         if (produced._tag === "Failure") {
           const escalate = escalated(produced.failure)
           if (escalate !== undefined) return yield* Effect.fail(escalate)
-          return refused(`Flow ${descriptor.name} failed: ${describe(produced.failure)}`)
+          return refused("flow_failed", `Flow ${descriptor.name} failed: ${describeFailure(produced.failure)}`)
         }
         const encoded = encodeOutput(produced.success)
         if (encoded._tag === "Failure") {
-          return refused(`Flow ${descriptor.name} produced output its own schema rejects.`)
+          return refused("flow_failed", `Flow ${descriptor.name} produced output its own schema rejects.`)
         }
         const json = asJson(encoded.success)
         if (json._tag === "Failure") {
-          return refused(`Flow ${descriptor.name} produced output that is not serializable.`)
+          return refused("flow_failed", `Flow ${descriptor.name} produced output that is not serializable.`)
         }
         return new CallResult({ outcome: "success", value: json.success })
       })

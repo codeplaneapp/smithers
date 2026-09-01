@@ -9,11 +9,12 @@
  */
 import type { Schema } from "effect"
 import { describe, expect, it } from "vitest"
+import * as bytes from "../src/internal/bytes.ts"
 import * as elide from "../src/internal/elide.ts"
 import * as printChannel from "../src/internal/printChannel.ts"
 import * as Sandbox from "../src/Sandbox.ts"
 
-const statement = (text: string): printChannel.Statement => ({ text, bytes: text.length })
+const statement = (text: string): printChannel.Statement => ({ text, bytes: bytes.size(text) })
 
 const record = (file: string, line: number, text: string): Schema.Json => ({ file, line, text })
 
@@ -63,7 +64,7 @@ describe("printChannel.buffer", () => {
         Array.from({ length: 400 }, (_, index) => statement(`line ${index} ${"z".repeat(index)}`))
       ]
     ) {
-      expect(printChannel.buffer(frame, 0).length).toBeLessThanOrEqual(Sandbox.printFrameBytes)
+      expect(bytes.size(printChannel.buffer(frame, 0))).toBeLessThanOrEqual(Sandbox.printFrameBytes)
     }
   })
 
@@ -76,7 +77,7 @@ describe("printChannel.buffer", () => {
     expect(out.split("\n")).toHaveLength(200)
     expect(out).toContain("line 100")
     expect(out).not.toContain("elided")
-    expect(out.length).toBeLessThanOrEqual(Sandbox.printFrameBytes)
+    expect(bytes.size(out)).toBeLessThanOrEqual(Sandbox.printFrameBytes)
   })
 
   it("shows a statement at or under the statement floor whole, however many there are", () => {
@@ -86,7 +87,7 @@ describe("printChannel.buffer", () => {
     // Whole statements went; the ones that stayed were not shortened, because a
     // statement the floor covers is never worth replacing with a notice.
     expect(out).not.toContain("bytes elided from the middle")
-    expect(out.length).toBeLessThanOrEqual(Sandbox.printFrameBytes)
+    expect(bytes.size(out)).toBeLessThanOrEqual(Sandbox.printFrameBytes)
   })
 
   it("drops whole statements from the middle rather than cutting each to a notice", () => {
@@ -99,7 +100,7 @@ describe("printChannel.buffer", () => {
     // The two ends of the frame are what survive, as they do inside a statement.
     expect(out.startsWith("0:")).toBe(true)
     expect(out.endsWith(":79")).toBe(true)
-    expect(out.length).toBeLessThanOrEqual(Sandbox.printFrameBytes)
+    expect(bytes.size(out)).toBeLessThanOrEqual(Sandbox.printFrameBytes)
   })
 
   it("states the statements the host never copied out, with or without others", () => {
@@ -124,12 +125,12 @@ describe("printChannel.buffer", () => {
     // against the shapes that put pressure on each part of the sizing: one value
     // far over the budget, values exactly at the statement floor and one either
     // side of it, and frames of every count from one to thousands.
-    for (const bytes of [0, 1, 8, 511, 512, 513, 4_000, 16_384, 40_000, 500_000]) {
+    for (const byteCount of [0, 1, 8, 511, 512, 513, 4_000, 16_384, 40_000, 500_000]) {
       for (const count of [1, 2, 12, 32, 33, 200, 5_000]) {
         for (const unread of [0, 4_000]) {
-          const frame = Array.from({ length: count }, () => statement("x".repeat(Math.min(bytes, 20_000))))
-            .map((held) => ({ text: held.text, bytes }))
-          expect(printChannel.buffer(frame, unread).length, `bytes=${bytes} count=${count} unread=${unread}`)
+          const frame = Array.from({ length: count }, () => statement("x".repeat(Math.min(byteCount, 20_000))))
+            .map((held) => ({ text: held.text, bytes: byteCount }))
+          expect(bytes.size(printChannel.buffer(frame, unread)), `bytes=${byteCount} count=${count} unread=${unread}`)
             .toBeLessThanOrEqual(Sandbox.printFrameBytes)
         }
       }
@@ -248,39 +249,65 @@ describe("printChannel.capacity", () => {
   })
 })
 
-describe("elide cuts around a surrogate pair", () => {
-  const smile = "\u{1F600}"
+describe("elide slices by UTF-8 byte boundaries", () => {
+  const samples = [
+    ["ASCII", "A"],
+    ["CJK", "界"],
+    ["combining mark", "\u0301"],
+    ["astral character", "\u{1F600}"]
+  ] as const
+  const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/u
+  const valid = (slice: string, limit: number): void => {
+    const points = [...slice]
+    expect(bytes.size(slice)).toBeLessThanOrEqual(limit)
+    expect(slice).toBe(points.join(""))
+    expect([...points.join("")]).toHaveLength(points.length)
+    expect(loneSurrogate.test(slice)).toBe(false)
+  }
 
-  it("gives back a unit rather than splitting a pair at the head", () => {
-    // "A😀😀": a cut at 2 would land between the halves of the first pair.
-    expect(elide.headSlice(`A${smile}${smile}`, 2)).toBe("A")
-    expect(elide.headSlice(`A${smile}${smile}`, 3)).toBe(`A${smile}`)
+  it.each(samples)("keeps %s whole only when the head budget reaches its byte size", (_name, sample) => {
+    const exact = bytes.size(sample)
+    for (const limit of [exact - 1, exact, exact + 1]) {
+      const slice = elide.headSlice(`${sample}Z`, limit)
+      valid(slice, limit)
+      expect(slice).toBe(limit < exact ? "" : limit === exact ? sample : `${sample}Z`)
+    }
+  })
+
+  it.each(samples)("keeps %s whole only when the tail budget reaches its byte size", (_name, sample) => {
+    const exact = bytes.size(sample)
+    for (const limit of [exact - 1, exact, exact + 1]) {
+      const slice = elide.tailSlice(`A${sample}`, limit)
+      valid(slice, limit)
+      expect(slice).toBe(limit < exact ? "" : limit === exact ? sample : `A${sample}`)
+    }
+  })
+
+  it("keeps the ASCII slicing contract unchanged", () => {
     expect(elide.headSlice("plain", 3)).toBe("pla")
     expect(elide.headSlice("plain", 0)).toBe("")
     expect(elide.headSlice("plain", 99)).toBe("plain")
-  })
-
-  it("starts after a pair rather than inside it at the tail", () => {
-    expect(elide.tailSlice(`${smile}${smile}A`, 2)).toBe("A")
-    expect(elide.tailSlice(`${smile}${smile}A`, 3)).toBe(`${smile}A`)
     expect(elide.tailSlice("plain", 3)).toBe("ain")
     expect(elide.tailSlice("plain", 99)).toBe("plain")
   })
 
   it("leaves no half of a pair in a middle elision, and counts what it kept", () => {
+    const smile = "\u{1F600}"
     const text = `${"a".repeat(9)}${smile.repeat(20)}${"z".repeat(9)}`
-    const out = elide.middleFrom(text, text.length, 21, printChannel.recall)
-    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(out)).toBe(false)
-    const kept = out.length - elide.noticeCost(text.length, printChannel.recall)
-    expect(Number(/… (\d+) of/.exec(out)![1])).toBe(text.length - Math.max(0, kept))
-    expect(out.length).toBeLessThanOrEqual(21 + elide.noticeCost(text.length, printChannel.recall))
+    const whole = bytes.size(text)
+    const out = elide.middleFrom(text, whole, 21, printChannel.recall)
+    expect(loneSurrogate.test(out)).toBe(false)
+    const kept = bytes.size(out) - elide.noticeCost(whole, printChannel.recall)
+    expect(Number(/… (\d+) of/.exec(out)![1])).toBe(whole - Math.max(0, kept))
+    expect(bytes.size(out)).toBeLessThanOrEqual(21 + elide.noticeCost(whole, printChannel.recall))
   })
 
   it("keeps a head elision off a pair too, and says what it really dropped", () => {
+    const smile = "\u{1F600}"
     const text = `${smile.repeat(10)}tail`
     const out = elide.head(text, 5, "recall")
-    expect(out.startsWith(smile.repeat(2))).toBe(true)
-    expect(out).toContain(`+${text.length - 4}b`)
+    expect(out.startsWith(smile)).toBe(true)
+    expect(out).toContain(`+${bytes.size(text) - bytes.size(smile)}b`)
   })
 })
 

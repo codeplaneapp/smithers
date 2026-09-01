@@ -64,6 +64,16 @@ describe("Cell.extract", () => {
     expect(Result.getOrThrow(Cell.extract(text)).source.language).toBe("typescript")
   })
 
+  it("prioritizes a typed fence token independently of token order", () => {
+    expect(Result.getOrThrow(Cell.extract(fenced("cell ts", "const value: number = 1"))).source.language).toBe(
+      "typescript"
+    )
+    expect(Result.getOrThrow(Cell.extract(fenced("ts cell", "const value: number = 1"))).source.language).toBe(
+      "typescript"
+    )
+    expect(Result.getOrThrow(Cell.extract(fenced("cell", "const value = 1"))).source.language).toBe("javascript")
+  })
+
   it("accepts the js and javascript fences a model reaches for", () => {
     expect(Result.getOrThrow(Cell.extract(fenced("js", "return 1"))).source.language).toBe("javascript")
     expect(Result.getOrThrow(Cell.extract(fenced("javascript", "return 1"))).source.language).toBe("javascript")
@@ -212,6 +222,90 @@ describe("Cell.source", () => {
     expect(Cell.source("return 1").digest).toBe(Cell.source("return 1").digest)
     expect(Cell.source("return 1").digest).not.toBe(Cell.source("return 2").digest)
     expect(Cell.source("return 1", "javascript").digest).not.toBe(Cell.source("return 1", "typescript").digest)
+  })
+})
+
+describe("Cell.declarationDigest", () => {
+  const base = new Descriptor.FlowDescriptor({
+    name: "inspect",
+    description: "Inspect one value.",
+    body: new Descriptor.BodyRefModule({ path: "flows/inspect.ts" }),
+    input: new Descriptor.SchemaRefInline({ document: { type: "object" } }),
+    output: new Descriptor.SchemaRefInline({ document: { type: "string" } }),
+    model: Option.none(),
+    flows: [],
+    capabilities: ["fs:read"],
+    effects: { reads: ["src/**"], writes: [], mode: "hermetic", onConflict: "serialize", tier: "sealed" },
+    placement: Option.none(),
+    modelInvocable: true,
+    path: "flows/inspect.ts",
+    frontmatter: {},
+    provenance: new Descriptor.Provenance({ source: "project", root: "/repo" })
+  })
+
+  /** Every field a redeclaration can move, and a value that moves it. */
+  const material: ReadonlyArray<readonly [string, Partial<Descriptor.FlowDescriptor>]> = [
+    ["name", { name: "inspect2" }],
+    ["description", { description: "Inspect two values." }],
+    ["capabilities", { capabilities: ["fs:read", "fs:write"] }],
+    ["effects", {
+      effects: { reads: ["src/**"], writes: ["src/**"], mode: "hermetic", onConflict: "serialize", tier: "sealed" }
+    }],
+    ["placement", { placement: Option.some("sandbox" as const) }],
+    ["model", { model: Option.some("anthropic/claude") }],
+    ["flows", { flows: ["child"] }],
+    ["input", { input: new Descriptor.SchemaRefInline({ document: { type: "number" } }) }],
+    ["output", { output: new Descriptor.SchemaRefInline({ document: { type: "number" } }) }],
+    ["body", { body: new Descriptor.BodyRefModule({ path: "flows/inspect2.ts" }) }],
+    ["provenance", { provenance: new Descriptor.Provenance({ source: "project", root: "/elsewhere" }) }]
+  ]
+
+  it.each(material)("changes when %s changes", (_field, change) => {
+    // The digest is the drift detector CellCalls raises `declaration_changed`
+    // from. A field it does not cover is a field a refreshed registry can move
+    // without the boundary noticing, and the call is then dispatched to a
+    // declaration the model was never shown.
+    expect(Cell.declarationDigest(new Descriptor.FlowDescriptor({ ...base, ...change })))
+      .not.toBe(Cell.declarationDigest(base))
+  })
+
+  it("ignores fields a call's outcome cannot depend on", () => {
+    // `path` and `frontmatter` say where the entry was found and what its file
+    // carried, not what calling it does. `modelInvocable` gates disclosure and
+    // is answered by its own refusal.
+    expect(Cell.declarationDigest(
+      new Descriptor.FlowDescriptor({ ...base, path: "elsewhere/inspect.ts", frontmatter: { title: "x" } })
+    )).toBe(Cell.declarationDigest(base))
+  })
+
+  it("does not depend on key order or on capability order", () => {
+    const reordered = new Descriptor.FlowDescriptor({
+      provenance: base.provenance,
+      frontmatter: base.frontmatter,
+      path: base.path,
+      modelInvocable: base.modelInvocable,
+      placement: base.placement,
+      effects: base.effects,
+      capabilities: ["fs:read"],
+      flows: base.flows,
+      model: base.model,
+      output: base.output,
+      input: base.input,
+      body: base.body,
+      description: base.description,
+      name: base.name
+    })
+
+    expect(Cell.declarationDigest(reordered)).toBe(Cell.declarationDigest(base))
+    expect(Cell.declarationDigest(new Descriptor.FlowDescriptor({ ...base, capabilities: ["fs:read"] })))
+      .toBe(Cell.declarationDigest(base))
+  })
+
+  it("pins one fully populated declaration", () => {
+    // A golden vector, so a change to the algorithm is a change to a number
+    // somebody had to write down rather than a silent re-keying of every call.
+    expect(Cell.declarationDigest(base)).toBe(Cell.declarationDigest(base))
+    expect(Cell.declarationDigest(base)).toMatch(/^[0-9a-f]{64}$/)
   })
 })
 

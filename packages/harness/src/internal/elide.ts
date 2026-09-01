@@ -21,46 +21,32 @@
  * @private
  * @slop
  */
+import * as bytes from "./bytes.ts"
 
 /**
- * Whether this UTF-16 unit is the first half of a surrogate pair.
+ * The first `limit` UTF-8 bytes of `text`, stopping before a code point that
+ * would cross the bound.
  *
- * A cut between the halves of a pair is the one cut a bound may not make. It
- * does not shorten the value by a character, it replaces that character with a
- * unit that is not one: `JSON.stringify` escapes it, a `TextEncoder` turns it
- * into U+FFFD, and a model reading a Python traceback or a Chinese test name
- * sees a broken glyph at every boundary this module draws. Worse, two ends
- * joined without a marker can fuse a trailing high half onto a leading low half
- * and invent a character that was never printed.
- */
-const leading = (code: number): boolean => code >= 0xd800 && code <= 0xdbff
-
-/**
- * The first `limit` units of `text`, stopping short of splitting a pair.
- *
- * A cut lands mid-pair when the unit before it leads one, so that cut moves back
- * by one and the value loses one more unit than the caller asked it to. Every
- * bound here is a ceiling, so giving back a unit is always allowed; taking one
- * is not.
+ * UTF-8 bytes and UTF-16 indexes do not share boundaries for multibyte text, so
+ * a cut may keep fewer bytes than the caller offered. Every bound here is a
+ * ceiling: giving bytes back is allowed; taking one is not. Walking by code
+ * point also subsumes the surrogate-pair guarantee — no half of an astral
+ * character can survive on either side of a cut.
  *
  * @since 0.1.0
  * @private
  * @slop
  */
-export const headSlice = (text: string, limit: number): string =>
-  text.slice(0, limit > 0 && limit < text.length && leading(text.charCodeAt(limit - 1)) ? limit - 1 : limit)
+export const headSlice = (text: string, limit: number): string => bytes.headSlice(text, limit)
 
 /**
- * The last `limit` units of `text`, starting after a pair rather than inside it.
+ * The last `limit` UTF-8 bytes of `text`, starting on a code-point boundary.
  *
  * @since 0.1.0
  * @private
  * @slop
  */
-export const tailSlice = (text: string, limit: number): string => {
-  const from = Math.max(0, text.length - limit)
-  return text.slice(from > 0 && leading(text.charCodeAt(from - 1)) ? from + 1 : from)
-}
+export const tailSlice = (text: string, limit: number): string => bytes.tailSlice(text, limit)
 
 /**
  * Shortens an already-shortened text from the middle, counting against the
@@ -79,8 +65,8 @@ export const tailSlice = (text: string, limit: number): string => {
  * slicing the ends of the value it came from.
  *
  * The count is what the two ends actually left behind rather than `whole -
- * limit`, because a cut that stopped short of a surrogate pair keeps a unit or
- * two fewer than the limit allowed and the notice names the real number.
+ * limit`, because a cut that stopped before a multibyte code point can keep
+ * fewer bytes than the limit allowed and the notice names the real number.
  *
  * @since 0.1.0
  * @private
@@ -92,7 +78,7 @@ export const middleFrom = (text: string, whole: number, limit: number, recall: s
   const head = headSlice(text, edge)
   const tail = tailSlice(text, edge)
   return `${head}\n… ${
-    whole - head.length - tail.length
+    whole - bytes.size(head) - bytes.size(tail)
   } of ${whole} bytes elided from the middle. ${recall} …\n${tail}`
 }
 
@@ -109,7 +95,7 @@ export const middleFrom = (text: string, whole: number, limit: number, recall: s
  * @private
  * @slop
  */
-export const noticeCost = (whole: number, recall: string): number => middleFrom("", whole, 0, recall).length
+export const noticeCost = (whole: number, recall: string): number => bytes.size(middleFrom("", whole, 0, recall))
 
 /**
  * Shortens text from the middle, keeping both ends.
@@ -123,7 +109,7 @@ export const noticeCost = (whole: number, recall: string): number => middleFrom(
  * @slop
  */
 export const middle = (text: string, limit: number, recall: string): string =>
-  middleFrom(text, text.length, limit, recall)
+  middleFrom(text, bytes.size(text), limit, recall)
 
 /**
  * Shortens text from the end, keeping the head.
@@ -136,7 +122,8 @@ export const middle = (text: string, limit: number, recall: string): string =>
  * @slop
  */
 export const head = (text: string, limit: number, recall: string): string => {
-  if (text.length <= limit) return text
+  const whole = bytes.size(text)
+  if (whole <= limit) return text
   const kept = headSlice(text, limit)
-  return `${kept}… [+${text.length - kept.length}b, ${recall}]`
+  return `${kept}… [+${whole - bytes.size(kept)}b, ${recall}]`
 }

@@ -171,7 +171,10 @@ export type Handler = (
  * @slop
  */
 export interface Limits {
-  /** Maximum number of flow calls one cell may make; a non-negative safe integer. */
+  /**
+   * Maximum number of flow calls one cell may make; a non-negative safe integer.
+   * A checkpoint mint settles on the same channel and counts against this budget.
+   */
   readonly calls?: number | undefined
   /** Maximum sandbox heap, in bytes; at least {@link minimumMemoryBytes}. */
   readonly memoryBytes?: number | undefined
@@ -180,11 +183,13 @@ export interface Limits {
    *
    * A step is one interrupt check, not one bytecode operation: an interpreter
    * polls its budget periodically, so this bounds work rather than counting
-   * individual operations. The limit is a non-negative safe integer.
+   * individual operations. The limit is a safe integer of at least
+   * {@link minimumSteps}.
    */
   readonly steps?: number | undefined
   /**
-   * Maximum cell-compute time in milliseconds; a non-negative safe integer.
+   * Maximum cell-compute time in milliseconds; a safe integer of at least
+   * {@link minimumTimeMs}.
    *
    * This bounds the cell's own JavaScript execution. Time spent suspended in
    * an outstanding `ctx.call` does not count: a host call's duration belongs
@@ -253,6 +258,30 @@ export const defaultLimits = Object.freeze({
 })
 
 /**
+ * Smallest interpreter-step budget a binding can enter a realm under.
+ *
+ * A zero budget interrupts the binding's own scaffolding before any cell source
+ * runs, which escapes as a crash rather than a ceiling report, so the sandbox
+ * boundary refuses it as `unsupported`.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const minimumSteps = 1
+
+/**
+ * Smallest wall-clock budget, in milliseconds, a binding can enter a realm under.
+ *
+ * A zero budget interrupts the binding's own scaffolding before any cell source
+ * runs, which escapes as a crash rather than a ceiling report, so the sandbox
+ * boundary refuses it as `unsupported`.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const minimumTimeMs = 1
+
+/**
  * Smallest heap ceiling the QuickJS binding can initialize and tear down
  * safely.
  *
@@ -267,7 +296,7 @@ export const defaultLimits = Object.freeze({
 export const minimumMemoryBytes = 1024 * 1024
 
 /**
- * How much of one frame's whole print buffer reaches the next model turn.
+ * How many UTF-8 bytes of one frame's whole print buffer reach the next model turn.
  *
  * This is the only ceiling on the channel. A frame's statements *share* it:
  * each is middle-elided to the share it is apportioned, and a statement short
@@ -297,7 +326,7 @@ export const minimumMemoryBytes = 1024 * 1024
 export const printFrameBytes = 16 * 1024
 
 /**
- * The smallest share of {@link printFrameBytes} one print statement is given.
+ * The smallest UTF-8-byte share of {@link printFrameBytes} one print statement is given.
  *
  * A share below this is all notice and no value — a middle elision of 80 bytes
  * says less than the sentence explaining it — so a frame that printed more
@@ -320,7 +349,7 @@ export const printFrameBytes = 16 * 1024
 export const printStatementFloor = 512
 
 /**
- * How much of one frame's print buffer the host keeps while the cell still runs.
+ * How many UTF-8 bytes of one frame's print buffer the host keeps while the cell still runs.
  *
  * {@link printFrameBytes} bounds what the model is shown; this bounds what the
  * host holds to show it from, and the two are different numbers because they
@@ -353,10 +382,17 @@ const invalidLimit = (name: keyof Limits, requirement: string): SandboxError =>
 const validateLimits = (limits: Limits | undefined): SandboxError | undefined => {
   if (limits === undefined) return undefined
 
-  for (const name of ["calls", "steps", "timeMs", "totalMs", "callMs"] as const) {
+  for (const name of ["calls", "totalMs", "callMs"] as const) {
     const value = limits[name]
     if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
       return invalidLimit(name, "a non-negative safe integer")
+    }
+  }
+
+  for (const [name, minimum] of [["steps", minimumSteps], ["timeMs", minimumTimeMs]] as const) {
+    const value = limits[name]
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < minimum)) {
+      return invalidLimit(name, `a safe integer of at least ${minimum}`)
     }
   }
 

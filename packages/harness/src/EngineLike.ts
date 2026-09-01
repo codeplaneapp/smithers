@@ -2,10 +2,10 @@
  * Narrow engine port consumed by the built-in harness.
  *
  * Governing contracts:
- * `docs/specs/Concepts/Effect Harness.md`,
- * `docs/specs/Concepts/Flow Builder Brief.md`,
- * `docs/specs/Concepts/Step Keys.md`, and
- * `docs/specs/Concepts/Vendored Flow Engine.md`.
+ * `packages/harness/docs/concepts.md#durable-cell-loop`,
+ * `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary`,
+ * `packages/harness/docs/concepts.md#step-keys-and-the-model-layer`, and
+ * `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary`.
  *
  * @since 0.1.0
  */
@@ -45,6 +45,16 @@ export type SuspendReasonCode = typeof SuspendReasonCode.Type
 /**
  * A serializable request to park the current engine frame.
  *
+ * `details` is a closed JSON value rather than `Schema.Unknown`, for the reason
+ * `HarnessError`'s `cause` is a `Schema.Defect`: this value is journaled inside
+ * `AgentEvent.Suspended` and served back to whatever resumes the run, so it has
+ * to be something the durable exit schema can encode. `Schema.Unknown` accepts
+ * a live `Error`, a function, a `BigInt`, a cycle and an accessor, and the
+ * controller was in fact attaching a `Permission.PermissionRequired` — a class
+ * that extends `Error` — to every permission park. What a park carries is now
+ * encoded before it is attached, so the journal holds the same value a resumed
+ * run decodes.
+ *
  * @category models
  * @since 0.1.0
  * @slop
@@ -52,7 +62,7 @@ export type SuspendReasonCode = typeof SuspendReasonCode.Type
 export class SuspendReason extends Schema.Class<SuspendReason>("flows/harness/EngineLike/SuspendReason")({
   code: SuspendReasonCode,
   message: Schema.String,
-  details: Schema.optional(Schema.Unknown)
+  details: Schema.optional(Schema.Json)
 }) {}
 
 /**
@@ -228,14 +238,14 @@ export interface EngineLike {
    * The harness contributes the assembled-context input, resolved layer set,
    * capability envelope, effect tier, placement, and provider-neutral
    * `ModelRequest` as core key material. Route resolution happens on the
-   * step-key contract (`docs/specs/Concepts/Step Keys.md`,
-   * `docs/specs/Concepts/Model Layer.md`) requires the exact wire request in
+   * step-key contract (`packages/harness/docs/concepts.md#step-keys-and-the-model-layer`,
+   * `packages/harness/docs/concepts.md#step-keys-and-the-model-layer`) requires the exact wire request in
    * the key. An implementation MUST therefore resolve the route, run
    * `Route.prepare` (`/model/Route`), and digest the credential-free
    * `PreparedRequest` — canonical body bytes included — together with
    * declared material into the sealed-step key before executing. A provider
    * wire change must produce a new key; credentials are signed on after the
-   * digest and never enter it (`docs/reference/model.md`).
+   * digest and never enter it (`packages/harness/docs/concepts.md#step-keys-and-the-model-layer`).
    */
   readonly sealStep: (
     step: SealedModelStep
@@ -265,9 +275,18 @@ export interface EngineLike {
    * The controller's state is rebuilt by re-execution, so every read of the
    * world it makes between sealed steps must be recorded: the implementation
    * runs `execute` once, journals the outcome under a run-scoped key derived
-   * from `identity`, and serves the recorded value to any later re-execution
-   * of the same frame. A read that bypasses this boundary is a replay
-   * divergence — and, downstream of one, duplicate irreversible effects.
+   * from `name` and `identity` TOGETHER, and serves the recorded value to any
+   * later re-execution of the same frame. A read that bypasses this boundary is
+   * a replay divergence — and, downstream of one, duplicate irreversible
+   * effects.
+   *
+   * `(name, identity)` is the key, and both halves are load-bearing: one frame
+   * issues several records that share a session, a frame number and a boundary
+   * and differ only in what they are for. An implementation that keys on
+   * `identity` alone serves one frame's opening workspace measurement as its
+   * closing one. The controller also folds each boundary's purpose into
+   * `identity.boundary`, so it stays correct under an implementation that reads
+   * the contract the other way, but an implementation must key on both.
    */
   readonly record: <A>(boundary: RecordBoundary<A>) => Effect.Effect<A, HarnessError>
   /**

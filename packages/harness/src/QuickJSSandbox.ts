@@ -37,6 +37,7 @@ import type {
 import { newQuickJSWASMModuleFromVariant } from "quickjs-emscripten-core"
 import * as Cell from "./Cell.ts"
 import type { HarnessError } from "./HarnessError.ts"
+import * as bytes from "./internal/bytes.ts"
 import * as elide from "./internal/elide.ts"
 import * as printChannel from "./internal/printChannel.ts"
 import * as Sandbox from "./Sandbox.ts"
@@ -279,6 +280,9 @@ ${preludeCall(`      if (sealed !== null) return Deferred.resolve(sealed)\n`)}
     flows: freeze(${catalog}),
     done: function (output) {
       if (sealed !== null) return
+      if (arguments.length === 0) {
+        throw new Fault("ctx.done(output) takes the run's answer; call it with the value the task asked for")
+      }
       var encoded = encode("ctx.done output", output === undefined ? null : output)
       sealed = sealedEnvelope
       intent("done", encoded)
@@ -296,21 +300,23 @@ ${preludeCall(`      if (sealed !== null) return Deferred.resolve(sealed)\n`)}
   return function () { sealed = null }
 })()`
 
+const Catalog = Schema.Record(Schema.String, Cell.FlowProjection)
+
 const catalogOf = (flows: Readonly<Record<string, Cell.FlowProjection>>): string => {
-  const entries: Record<string, unknown> = {}
-  for (const [name, projection] of Object.entries(flows)) {
-    entries[name] = {
-      name: projection.name,
-      description: projection.description,
-      capabilities: [...projection.capabilities],
-      tier: projection.tier,
-      // The contract tells a cell to read `ctx.flows` before reissuing a
-      // rejected call, so the projection has to answer the question the
-      // rejection asked: what shape does this flow take?
-      ...(Option.isSome(projection.input) ? { input: projection.input.value } : {})
-    }
-  }
-  return JSON.stringify(entries)
+  const encoded = Schema.encodeSync(Catalog)(flows)
+  const normalized = Object.fromEntries(
+    Object.entries(encoded).map(([name, projection]) => [
+      name,
+      Object.fromEntries(
+        Object.entries(projection).flatMap(([field, value]) =>
+          Option.isOption(value)
+            ? Option.isSome(value) ? [[field, value.value]] : []
+            : [[field, value]]
+        )
+      )
+    ])
+  )
+  return JSON.stringify(normalized)
 }
 
 const raisedFrom = (dumped: unknown): Cell.Raised => {
@@ -534,11 +540,12 @@ const printParts = Schema.decodeUnknownSync(
 const printed = (encoded: string): printChannel.Statement => {
   const parts = printParts(JSON.parse(encoded))
   const whole = parts.map((part) => "text" in part ? part.text : printChannel.render(part.json)).join(" ")
-  if (whole.length <= Sandbox.printFrameBytes) return { text: whole, bytes: whole.length }
+  const wholeBytes = bytes.size(whole)
+  if (wholeBytes <= Sandbox.printFrameBytes) return { text: whole, bytes: wholeBytes }
   const edge = Math.floor(Sandbox.printFrameBytes / 2)
   return {
     text: `${elide.headSlice(whole, edge)}${elide.tailSlice(whole, edge)}`,
-    bytes: whole.length
+    bytes: wholeBytes
   }
 }
 
@@ -618,53 +625,136 @@ const weighDepth = 32
  * is measured here instead. See {@link openRealm}.
  */
 const panelProbe = (baseline: string): string =>
-  `(function (ownNames, keysOf, isArray, stringify, render, skip) {
+  `(function (ownNames, descriptorOf, keysOf, isArray, stringify, render, skip) {
   return function () {
     var names = ownNames(globalThis)
     var out = []
     var total = 0
     var budget = ${weighNodes}
+    var partial = false
+    var partialRoot = null
+    var partialBytes = 0
+    // The ancestors of the value being weighed, and the whole of this walk's
+    // repeat detection. A cycle is the one repeat that MUST be cut, because it
+    // never ends, and an ancestor list cuts it at the cost of the depth ceiling
+    // rather than of the whole graph. Two siblings that share one object are
+    // counted twice, which over-states such a realm: a ceiling that errs toward
+    // refusing is the safe direction, and the refusal is spent on the frame it
+    // lands in, so the next cell runs and can restructure. A Set or a WeakSet
+    // would dedupe them properly and cannot be used here: allocating either
+    // inside a realm that is at its heap ceiling, which is the realm this probe
+    // exists to weigh, leaves the runtime unable to assert itself empty at
+    // teardown and aborts the host process.
+    var path = []
     var weigh = function (value, depth) {
-      if (budget <= 0 || depth > ${weighDepth}) return 0
+      var kind = typeof value
+      if (depth > ${weighDepth}) {
+        partial = true
+        return 0
+      }
+      if (budget <= 0) {
+        partial = true
+        return 0
+      }
       budget = budget - 1
-      if (typeof value === "string") return value.length
-      if (value === null || typeof value !== "object") return 8
+      // Code units, not UTF-8 bytes, and deliberately: this walk answers "how
+      // much of the host's memory is this realm holding", and QuickJS stores a
+      // string as one or two bytes per code unit, so a unit count is the honest
+      // reading of the thing being bounded. It is also the only O(1) one, and
+      // that is load-bearing: the probe runs at frame close under the cell's own
+      // interrupt budget, so a scan of a two-hundred-megabyte realm is killed
+      // part way and a realm that cannot be weighed at all reads as weighing
+      // nothing. UTF-8 bytes are the unit of what the model is SHOWN, which is
+      // the print channel and the call ledger, not of what the realm holds.
+      if (kind === "string") return value.length
+      if (value === null || kind !== "object") return 8
+      for (var up = 0; up < path.length; up++) if (path[up] === value) return 8
+      path.push(value)
       var sum = 8
+      // An array is walked by index, and it is the one walk here that reads a
+      // value rather than its descriptor. Both of the allocation-free readings
+      // are gone otherwise: keysOf on a large array builds a second array as
+      // long as the first, and a descriptor per element builds one object per
+      // element — inside a realm that is at its ceiling, which is the realm this
+      // probe exists to weigh, either one is what throws. A walk that cannot run
+      // reports nothing at all, and reporting nothing is the failure this whole
+      // probe is here to end. An index getter is therefore reachable; a getter on
+      // an ordinary property is not, which is the shape a cell would hide weight
+      // behind.
       if (isArray(value)) {
-        for (var item = 0; item < value.length; item++) sum = sum + weigh(value[item], depth + 1)
+        var count = value.length
+        for (var item = 0; item < count && !partial; item++) sum = sum + weigh(value[item], depth + 1)
+        path.pop()
         return sum
       }
       var keys = keysOf(value)
-      for (var key = 0; key < keys.length; key++) {
-        sum = sum + keys[key].length + weigh(value[keys[key]], depth + 1)
+      for (var key = 0; key < keys.length && !partial; key++) {
+        var property = descriptorOf(value, keys[key])
+        sum = sum + keys[key].length
+        if (property === undefined || !("value" in property)) sum = sum + 8
+        else sum = sum + weigh(property.value, depth + 1)
       }
+      path.pop()
       return sum
+    }
+    var dataProperty = function (value, name, fallbackValue) {
+      var descriptor = descriptorOf(value, name)
+      return descriptor !== undefined && "value" in descriptor ? descriptor.value : fallbackValue
     }
     for (var index = 0; index < names.length; index++) {
       var name = names[index]
       if (skip.indexOf(name) >= 0) continue
+      var before = total
       try {
-        var value = globalThis[name]
+        var descriptor = descriptorOf(globalThis, name)
+        if (descriptor === undefined || !("value" in descriptor)) {
+          total = total + 8
+          out.push({ name: name, type: descriptor === undefined ? "unreadable" : "accessor", size: "", bytes: 8 })
+          continue
+        }
+        var value = descriptor.value
         var kind = typeof value
         var bytes = weigh(value, 0)
         total = total + bytes
         if (value === null) out.push({ name: name, type: "null", size: "", bytes: bytes })
         else if (kind === "undefined") out.push({ name: name, type: "unset", size: "", bytes: bytes })
         else if (kind === "string") out.push({ name: name, type: "string", size: value.length + " chars", bytes: bytes })
-        else if (kind === "function") out.push({ name: name, type: "function", size: "arity " + value.length, bytes: bytes })
-        else if (isArray(value)) out.push({ name: name, type: "array", size: value.length + " items", bytes: bytes })
+        else if (kind === "function") out.push({ name: name, type: "function", size: "arity " + dataProperty(value, "length", 0), bytes: bytes })
+        else if (isArray(value)) out.push({ name: name, type: "array", size: dataProperty(value, "length", 0) + " items", bytes: bytes })
         else if (kind === "object") out.push({ name: name, type: "object", size: keysOf(value).length + " keys", bytes: bytes })
         else out.push({ name: name, type: kind, size: render(value), bytes: bytes })
+        if (partial) {
+          partialRoot = name
+          partialBytes = bytes
+          break
+        }
       } catch (error) {
-        // A name whose value cannot even be read — a throwing accessor, a proxy
-        // that refuses its own keys. Named for what it is rather than folded into
-        // \`unset\`, which means something else: a name a throw left unassigned.
-        out.push({ name: name, type: "unreadable", size: "", bytes: 0 })
+        // A name the probe cannot read at all: a proxy that refuses reflection,
+        // or a realm so large that walking it is itself what runs out of heap.
+        // Either way this reading is a floor and not a total, so it is reported
+        // as partial rather than weighed at nothing. No accessor is invoked to
+        // get here: every property read above goes through its own descriptor.
+        total = before + 8
+        out.push({ name: name, type: "unreadable", size: "", bytes: 8 })
+        partial = true
+        partialRoot = name
+        partialBytes = 8
+        break
       }
     }
-    return stringify({ names: out, bytes: total })
+    return stringify(partialRoot === null
+      ? { names: out, bytes: total, partial: false }
+      : { names: out, bytes: total, partial: true, partialRoot: partialRoot, partialBytes: partialBytes })
   }
-})(Object.getOwnPropertyNames, Object.keys, Array.isArray, JSON.stringify, String, JSON.parse(${baseline}))`
+})(
+  Object.getOwnPropertyNames,
+  Object.getOwnPropertyDescriptor,
+  Object.keys,
+  Array.isArray,
+  JSON.stringify,
+  String,
+  JSON.parse(${baseline})
+)`
 
 /** One name as the probe reports it, before the panel drops the weight. */
 const Weighed = Schema.Struct({
@@ -674,8 +764,21 @@ const Weighed = Schema.Struct({
   bytes: Schema.Number
 })
 
+const ProbeReading = {
+  names: Schema.Array(Weighed),
+  bytes: Schema.Number
+} as const
+
 const decodeProbe = Schema.decodeUnknownSync(
-  Schema.Struct({ names: Schema.Array(Weighed), bytes: Schema.Number })
+  Schema.Union([
+    Schema.Struct({ ...ProbeReading, partial: Schema.Literal(false) }),
+    Schema.Struct({
+      ...ProbeReading,
+      partial: Schema.Literal(true),
+      partialRoot: Schema.String,
+      partialBytes: Schema.Number
+    })
+  ])
 )
 
 /**
@@ -708,6 +811,30 @@ const overBudget = (
       "and a realm still over the ceiling after that cell is refused again."
   })
 }
+
+/**
+ * States a reading the probe could not finish, in the same terms as one it could.
+ *
+ * A walk that ran out of node budget, out of depth, or out of heap stopped
+ * somewhere inside one name, so what it counted is a floor and not a total. The
+ * honest reading of a floor is "at least this much", and a ceiling that cannot
+ * be shown to be respected is a ceiling that is spent: the frame is refused
+ * exactly as an over-budget one is, and for the same recovery. Failing the other
+ * way is what let a realm holding eleven megabytes of string sit under a four
+ * megabyte ceiling, because the budget ran out before the string was reached.
+ *
+ * The name is rendered the way {@link overBudget} renders one, so a model that
+ * has read one refusal can act on the other without learning a second shape.
+ */
+const tooLargeToWeigh = (held: number, ceiling: number, root: string, bytes: number): Cell.Rejected =>
+  new Cell.Rejected({
+    code: "limit_exceeded",
+    message: `This realm is too large to measure: weighing it stopped inside ${root} (${bytes}) before it finished, ` +
+      `so the ${held} bytes counted are a floor and not a total, and this run's ceiling of ${ceiling} is treated as spent. ` +
+      "Nothing ran this frame, and your next cell does run: spend it freeing that name by assigning over it, " +
+      "because a name a cell bound can be reassigned but never deleted. Every other name is still bound, " +
+      "and a realm still too large to weigh after that cell is refused again."
+  })
 
 /**
  * Opens one QuickJS realm that lives for a whole run.
@@ -801,9 +928,27 @@ const openRealm = (
           return false
         })
         const context: QuickJSContext = runtime.newContext()
-        try {
-          const defineDataProperty = context.unwrapResult(context.evalCode(
-            `(function (defineProperty) {
+        return { runtime, context }
+      }),
+      ({ context, runtime }) =>
+        Effect.sync(() => {
+          context.dispose()
+          runtime.dispose()
+        })
+    )
+    const { context, runtime } = acquired
+
+    // Its own scoped resource rather than part of the acquire above, and that
+    // is the whole point: a helper the realm cannot evaluate used to be caught
+    // by hand, which meant a hand-written teardown and a branch no test could
+    // reach once a zero budget stopped being accepted. Registered as a second
+    // resource, the failure is ordinary: the scope closes, the finalizer above
+    // disposes the context and the runtime, and nothing leaks. Finalizers run
+    // in reverse, so this handle is still released before them.
+    const defineDataProperty = yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        context.unwrapResult(context.evalCode(
+          `(function (defineProperty) {
   return function (object, key, value) {
     defineProperty(object, key, {
       value: value,
@@ -813,22 +958,10 @@ const openRealm = (
     })
   }
 })(Object.defineProperty)`
-          ))
-          return { runtime, context, defineDataProperty }
-        } catch (error) {
-          context.dispose()
-          runtime.dispose()
-          throw error
-        }
-      }),
-      ({ context, defineDataProperty, runtime }) =>
-        Effect.sync(() => {
-          defineDataProperty.dispose()
-          context.dispose()
-          runtime.dispose()
-        })
+        ))
+      ),
+      (handle) => Effect.sync(() => handle.dispose())
     )
-    const { context, defineDataProperty, runtime } = acquired
 
     const install = (name: string, implementation: Parameters<QuickJSContext["newFunction"]>[1]): void => {
       const handle = context.newFunction(name, implementation)
@@ -899,7 +1032,7 @@ const openRealm = (
         return context.undefined
       }
       const line = printed(context.getString(partsHandle))
-      retained = retained + line.text.length + 1
+      retained = retained + bytes.size(line.text) + 1
       lines.push(line)
       return context.undefined
     })
@@ -949,6 +1082,7 @@ const openRealm = (
     let bindings: ReadonlyArray<VariablesPanel.Binding> = []
     let weighed: ReadonlyArray<typeof Weighed.Type> = []
     let held = 0
+    let unweighed: { readonly root: string; readonly bytes: number } | undefined
 
     const evaluate = (
       evaluation: Sandbox.RealmEvaluation
@@ -995,6 +1129,12 @@ const openRealm = (
         // do the one thing it was being prevented from doing. Cleared, the next
         // frame runs, the probe weighs the realm again at its close, and a realm
         // still over the ceiling is refused again.
+        if (unweighed !== undefined) {
+          const refusal = tooLargeToWeigh(held, memoryBytes, unweighed.root, unweighed.bytes)
+          unweighed = undefined
+          held = 0
+          return frameOf(refusal)
+        }
         if (held > memoryBytes) {
           const refusal = overBudget(held, memoryBytes, weighed)
           held = 0
@@ -1103,6 +1243,7 @@ const openRealm = (
           read.value.dispose()
           weighed = measured.names
           held = measured.bytes
+          unweighed = measured.partial ? { root: measured.partialRoot, bytes: measured.partialBytes } : undefined
           bindings = measured.names.map((entry) =>
             new VariablesPanel.Binding({ name: entry.name, type: entry.type, size: entry.size })
           )

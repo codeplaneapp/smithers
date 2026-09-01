@@ -118,6 +118,12 @@ export class TurnOpened extends Schema.TaggedClass<TurnOpened>(
   eventType: Schema.Literal("flows.harness.turn-opened.v1"),
   seat: Schema.String,
   modelParams: ModelRequest.GenerationParams,
+  /**
+   * Reserved surface, always empty. The cell-first controller declares no
+   * provider tools, so every turn opens with none active. The field is kept for
+   * a future foreign-adapter loop and carries no compatibility promise at
+   * 1.0.0-rc.0.
+   */
   activeToolNames: Schema.Array(Schema.String),
   contextDigest: Schema.String
 }) {}
@@ -796,3 +802,49 @@ export const AgentEvent = Schema.Union([
  * @slop
  */
 export type AgentEvent = typeof AgentEvent.Type
+
+/**
+ * The journal event type of every member of {@link AgentEvent}, by tag.
+ *
+ * One table, because the literal used to be written three times: on the class,
+ * in `CellTurn`'s emitter, and again in `Transcript`'s decoder. A projection
+ * that reads a literal the emitter no longer writes silently returns an empty
+ * transcript, and nothing failed when the two drifted. `CellTurn` and
+ * `Transcript` both read this, and `Contracts.test.ts` pins it against the
+ * union, so an event added without a row here fails a test rather than a run.
+ *
+ * @category events
+ * @since 0.1.0
+ * @slop
+ */
+export const eventType = {
+  aborted: "flows.harness.aborted.v1",
+  cellCallSettled: "flows.harness.cell-call-settled.v1",
+  cellCallStarted: "flows.harness.cell-call-started.v1",
+  cellPrinted: "flows.harness.cell-printed.v1",
+  cellProduced: "flows.harness.cell-produced.v1",
+  cellRejectedInFrame: "flows.harness.cell-rejected-in-frame.v1",
+  cellSettled: "flows.harness.cell-settled.v1",
+  checkpointMinted: "flows.harness.checkpoint-minted.v1",
+  compactionSettled: "flows.harness.compaction-settled.v1",
+  disciplineArmed: "flows.harness.discipline-armed.v1",
+  modelDelta: "flows.harness.model-delta.v1",
+  modelRetried: "flows.harness.model-retried.v1",
+  modelSettled: "flows.harness.model-settled.v1",
+  mutationObserved: "flows.harness.mutation-observed.v1",
+  narrowOnlyDemanded: "flows.harness.narrow-only-demanded.v1",
+  narrowedDemanded: "flows.harness.narrowed-demanded.v1",
+  permissionRequired: "flows.harness.permission-required.v1",
+  readOnlyDemanded: "flows.harness.read-only-demanded.v1",
+  repeatDemanded: "flows.harness.repeat-demanded.v1",
+  resolved: "flows.harness.resolved.v1",
+  steeringDrained: "flows.harness.steering-drained.v1",
+  sufficiencyObserved: "flows.harness.sufficiency-observed.v1",
+  suspended: "flows.harness.suspended.v1",
+  transitionApplied: "flows.harness.transition-applied.v1",
+  turnClosed: "flows.harness.turn-closed.v1",
+  turnOpened: "flows.harness.turn-opened.v1",
+  unmovedDemanded: "flows.harness.unmoved-demanded.v1",
+  unresolvedDemanded: "flows.harness.unresolved-demanded.v1",
+  vacuousVerificationObserved: "flows.harness.vacuous-verification-observed.v1"
+} as const

@@ -8,6 +8,10 @@ import { Schema } from "effect"
 /**
  * Stable harness failure codes.
  *
+ * The set is closed to codes this package and `@smthrs/agent` actually raise.
+ * A foreign CLI adapter declares its own error family beside the adapter in
+ * `@smthrs/agent` rather than borrowing this one.
+ *
  * @category models
  * @since 0.1.0
  * @slop
@@ -17,23 +21,10 @@ export const HarnessErrorCode = Schema.Literals([
   "render_failed",
   "projection_failed",
   "model_failed",
-  "elaboration_failed",
   "engine_failed",
-  "invalid_step",
   "read_only_cap",
-  "lazy_tool_prompt_metadata",
   "aborted",
-  "suspended",
-  "adapter_spawn_failed",
-  "adapter_quota_exhausted",
-  "adapter_session_lost",
-  "adapter_config_invalid",
-  "adapter_auth_failed",
-  "adapter_protocol_error",
-  "adapter_binary_missing",
-  "adapter_unsupported",
-  "adapter_structured_output_failed",
-  "unknown"
+  "suspended"
 ])
 
 /**

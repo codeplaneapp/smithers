@@ -84,6 +84,12 @@ describe("CallLedger.digest", () => {
     expect(CallLedger.digest([1, 2])).toBe("[2]")
   })
 
+  it("reports string members in UTF-8 bytes", () => {
+    expect(CallLedger.digest({ ascii: "A", cjk: "界", combining: "e\u0301", emoji: "\u{1F600}" })).toBe(
+      "ascii=1b cjk=3b combining=3b emoji=4b"
+    )
+  })
+
   it("clips a digest wider than the line allows", () => {
     const line = CallLedger.digest({ verylongkeyname: "x".repeat(10), other: "y".repeat(10) })
     expect(line.length).toBeLessThanOrEqual(CallLedger.width)
@@ -120,6 +126,17 @@ describe("CallLedger.remember", () => {
   it("records a failure the flow said nothing about", () => {
     const ledger = CallLedger.remember([], [{ flow: "edit", input: { path: "a/b.py" }, ok: false, value: null }])
     expect(ledger[0]?.digest).toBe("failed")
+  })
+
+  it("records canonical results in UTF-8 bytes", () => {
+    const ledger = CallLedger.remember([], [
+      settlement("ascii", null, "A"),
+      settlement("cjk", null, "界"),
+      settlement("combining", null, "e\u0301"),
+      settlement("emoji", null, "\u{1F600}")
+    ])
+
+    expect(ledger.map((entry) => entry.bytes)).toEqual([3, 5, 5, 6])
   })
 })
 

@@ -77,6 +77,31 @@ describe("ContextWindow", () => {
     expect(first.segments).toHaveLength(5)
   })
 
+  it("copies caller-owned arrays so later input mutation cannot invalidate its digest", () => {
+    const content = [Request.Message.user("first")]
+    const segments: Array<ContextWindow.SegmentInput> = [{ kind: "transcript", zone: "tail", content }]
+    const activeTools = ["read"]
+    const value = ContextWindow.make({ modelId: "test-model", segments, activeTools })
+    const before = ContextWindow.render(value)
+    const digest = value.digest
+
+    content.push(Request.Message.user("injected"))
+    segments.push({ kind: "transcript", zone: "tail", content: [Request.Message.user("also injected")] })
+    activeTools.push("write")
+
+    expect(ContextWindow.render(value)).toEqual(before)
+    expect(value.digest).toBe(digest)
+    expect(value.activeTools).toEqual(["read"])
+  })
+
+  it("freezes every array exposed by a context window", () => {
+    const value = base()
+
+    expect(() => (value.segments as Array<ContextWindow.Segment>).push(value.segments[0]!)).toThrow(TypeError)
+    expect(() => (value.activeTools as Array<string>).push("write")).toThrow(TypeError)
+    expect(() => (value.segments[0]!.content as Array<typeof system>).push(system)).toThrow(TypeError)
+  })
+
   it("uses the canonical keys SHA-256 digest for window identity", () => {
     const value = base()
     expect(value.digest).toBe(

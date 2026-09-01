@@ -1,7 +1,7 @@
 /**
  * Adapter from the durable notification queue to harness turn boundaries.
  *
- * Governing contract: `docs/specs/Concepts/Notification Queue.md`.
+ * Governing contract: `packages/harness/docs/concepts.md#notification-queue`.
  *
  * @since 0.1.0
  */
@@ -55,7 +55,7 @@ const render = (notification: Notification): ModelRequest.Message => {
  * recognize stays an insert, because a system event or a webhook body is still
  * something the run should be told about.
  */
-const steerItem = (notification: Notification): Steering.Item => {
+const steerItem = (notification: Notification): Exclude<Steering.Item, Steering.ActivateTools> => {
   const item = notification._tag === "system-event" ? undefined : SteerPayload.decode(notification.payload)
   // Zero, and not a timestamp: `admittedAt` orders items inside a queue this
   // adapter does not keep. The durable queue already decided which
@@ -73,7 +73,23 @@ const steerItem = (notification: Notification): Steering.Item => {
     case "Thinking":
       return { _tag: "ThinkingChange", delivery: "steer", admittedAt, thinking: item.thinking }
     case "Tools":
-      return { _tag: "ActivateTools", delivery: "steer", admittedAt, toolNames: item.toolNames }
+      // Refused out loud rather than dropped. The cell-first loop declares no
+      // provider tools at all — every sealed request carries `tools: []` and
+      // `toolChoice: "none"` — so a steer that activates tools by name had
+      // nothing to activate: it was drained, journaled as delivered, and did
+      // nothing, which is exactly the "appears to work partially" the release
+      // contract forbids. The operator's intent still reaches the run, as the
+      // one thing the run can act on.
+      return {
+        _tag: "Insert",
+        delivery: "steer",
+        admittedAt,
+        message: ModelRequest.Message.user(
+          `[steer ${notification.id} from ${notification.provenance.sourceActor}] An operator asked to activate `
+            + `the tools ${item.toolNames.join(", ")}. This run has no provider tools. The only authority a cell `
+            + "holds is ctx.call over the flows ctx.flows lists, so do what the operator asked for with those."
+        )
+      }
   }
 }
 
@@ -88,7 +104,6 @@ const drainOf = (receipt: NotificationQueue.DrainReceipt): Steering.Drain => {
   const notifications = receipt.notifications
   const inserts: Array<ModelRequest.Message> = []
   const seatChanges: Array<Steering.SeatChange | Steering.ThinkingChange> = []
-  const activatedToolNames: Array<string> = []
   for (const notification of notifications) {
     const item = steerItem(notification)
     switch (item._tag) {
@@ -99,17 +114,15 @@ const drainOf = (receipt: NotificationQueue.DrainReceipt): Steering.Drain => {
       case "ThinkingChange":
         seatChanges.push(item)
         break
-      case "ActivateTools":
-        for (const name of item.toolNames) {
-          if (!activatedToolNames.includes(name)) activatedToolNames.push(name)
-        }
-        break
     }
   }
   return {
     inserts,
     seatChanges,
-    activatedToolNames,
+    // Always empty: `steerItem` answers a `Tools` steer with a message saying
+    // this run has no provider tools, rather than producing an activation
+    // nothing reads. See `Steering.ActivateTools`.
+    activatedToolNames: [],
     remaining: Steering.empty(),
     queued: notifications.some((notification) => notification.delivery === "queue"),
     // The queue's own answer to "has this boundary drained before". A parked

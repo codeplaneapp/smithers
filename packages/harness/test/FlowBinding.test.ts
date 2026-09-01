@@ -207,6 +207,7 @@ describe("FlowBinding.make", () => {
 
     expect(ran).toBe(false)
     expect(Exit.isSuccess(exit) && exit.value.outcome).toBe("failure")
+    expect(Exit.isSuccess(exit) && exit.value.code).toBe("invalid_input")
     expect(Exit.isSuccess(exit) && exit.value.message).toContain("rejected its input")
   })
 
@@ -246,6 +247,7 @@ describe("FlowBinding.make", () => {
     expect(Exit.isSuccess(exit) && exit.value.message).toBe(
       `Flow count rejected its input: ${originalMessage}. Re-read ctx.flows and reissue the call.`
     )
+    expect(Exit.isSuccess(exit) && exit.value.code).toBe("invalid_input")
   })
 
   it("refuses a call input that is not an object at all", async () => {
@@ -280,6 +282,22 @@ describe("FlowBinding.make", () => {
     )
   })
 
+  it("bounds a long input rejection before it enters the call ledger", async () => {
+    const field = `required_${"x".repeat(800)}`
+    const Input = Schema.Struct({ [field]: Schema.String })
+    const binding = FlowBinding.make({
+      flow: Flow.make({ name: "bounded-input", input: Input, output: Schema.Struct({}) }),
+      handler: () => Effect.succeed({})
+    })
+
+    const exit = await run(binding.run(call("bounded-input", {})))
+    const message = Exit.isSuccess(exit) ? exit.value.message : undefined
+
+    expect(Exit.isSuccess(exit) && exit.value.code).toBe("invalid_input")
+    expect(message).toContain("reissue the call to see the whole failure")
+    expect(message?.length).toBeLessThan(700)
+  })
+
   it("preserves null when the input schema accepts it", async () => {
     const Input = Schema.Struct({ env: Schema.NullOr(Schema.String) })
     let observed: unknown
@@ -307,7 +325,19 @@ describe("FlowBinding.make", () => {
     const exit = await run(binding.run(call("echo", { text: "hi" })))
 
     expect(Exit.isSuccess(exit) && exit.value.outcome).toBe("failure")
+    expect(Exit.isSuccess(exit) && exit.value.code).toBe("flow_failed")
     expect(Exit.isSuccess(exit) && exit.value.message).toBe("Flow echo failed: the file was busy")
+  })
+
+  it("bounds a long handler failure before it enters later frames", async () => {
+    const binding = FlowBinding.make({ flow: echo, handler: () => Effect.fail("x".repeat(1_000)) })
+
+    const exit = await run(binding.run(call("echo", { text: "hi" })))
+    const message = Exit.isSuccess(exit) ? exit.value.message : undefined
+
+    expect(Exit.isSuccess(exit) && exit.value.code).toBe("flow_failed")
+    expect(message).toContain("reissue the call to see the whole failure")
+    expect(message?.length).toBeLessThan(650)
   })
 
   it("renders non-Error failure values as stable text", async () => {
@@ -346,6 +376,38 @@ describe("FlowBinding.make", () => {
       "Flow echo failed: undefined",
       "Flow echo failed: Symbol(refused)"
     ])
+  })
+
+  it("settles a cyclic handler failure as catchable data", async () => {
+    const cyclic: { self?: unknown } = {}
+    cyclic.self = cyclic
+    const binding = FlowBinding.make({ flow: echo, handler: () => Effect.fail(cyclic) })
+
+    const exit = await run(binding.run(call("echo", { text: "hi" })))
+
+    expect(exit).toMatchObject({
+      _tag: "Success",
+      value: {
+        outcome: "failure",
+        code: "flow_failed",
+        message: expect.stringContaining("Flow echo failed:")
+      }
+    })
+  })
+
+  it("settles a BigInt-bearing handler failure as catchable data", async () => {
+    const binding = FlowBinding.make({ flow: echo, handler: () => Effect.fail({ big: 1n }) })
+
+    const exit = await run(binding.run(call("echo", { text: "hi" })))
+
+    expect(exit).toMatchObject({
+      _tag: "Success",
+      value: {
+        outcome: "failure",
+        code: "flow_failed",
+        message: expect.stringContaining("Flow echo failed:")
+      }
+    })
   })
 
   it("keeps a permission requirement in the typed channel where a cell cannot swallow it", async () => {
@@ -397,6 +459,7 @@ describe("FlowBinding.make", () => {
 
     const exit = await run(binding.run(call("echo", { text: "hi" })))
 
+    expect(Exit.isSuccess(exit) && exit.value.code).toBe("flow_failed")
     expect(Exit.isSuccess(exit) && exit.value.message).toBe("Flow echo produced output its own schema rejects.")
   })
 
@@ -409,6 +472,7 @@ describe("FlowBinding.make", () => {
 
     const exit = await run(binding.run(call("clock", {})))
 
+    expect(Exit.isSuccess(exit) && exit.value.code).toBe("flow_failed")
     expect(Exit.isSuccess(exit) && exit.value.message).toBe("Flow clock produced output that is not serializable.")
   })
 })

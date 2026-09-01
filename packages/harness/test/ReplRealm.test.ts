@@ -6,10 +6,11 @@
  * the channel to the next turn, and the transition is a call rather than a
  * return.
  */
-import { Effect, Exit, Option, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Cell from "../src/Cell.ts"
 import * as CellValidation from "../src/CellValidation.ts"
+import * as bytes from "../src/internal/bytes.ts"
 import * as CellPrompt from "../src/internal/cellPrompt.ts"
 import * as QuickJSSandbox from "../src/QuickJSSandbox.ts"
 import * as Sandbox from "../src/Sandbox.ts"
@@ -36,13 +37,14 @@ const session = (
   options: {
     readonly limits?: Sandbox.Limits | undefined
     readonly call?: Sandbox.Handler | undefined
+    readonly catalog?: Readonly<Record<string, Cell.FlowProjection>> | undefined
   } = {}
 ): Promise<ReadonlyArray<Sandbox.RealmFrame>> =>
   Effect.gen(function*() {
     const sandbox = yield* QuickJSSandbox.make
     const open = sandbox.openRealm
     expect(open).toBeDefined()
-    const realm = yield* open!({ flows, limits: options.limits })
+    const realm = yield* open!({ flows: options.catalog ?? flows, limits: options.limits })
     const frames: Array<Sandbox.RealmFrame> = []
     for (const [index, text] of cells.entries()) {
       frames.push(
@@ -67,6 +69,26 @@ describe("QuickJSSandbox.openRealm", () => {
     ])
     expect(frames[1]!.prints).toBe("42")
     expect(named(frames[1]!.bindings, "kept")).toEqual({ name: "kept", type: "number", size: "41" })
+  })
+
+  it("projects every FlowProjection field into ctx.flows", async () => {
+    const input = { type: "object", properties: { path: { type: "string" } } } as const
+    const complete = new Cell.FlowProjection({
+      name: "echo",
+      description: "The echo flow.",
+      capabilities: ["fs:read:**"],
+      tier: "sealed",
+      placement: Option.some("local"),
+      input: Option.some(input)
+    })
+    const frames = await session(["console.log(JSON.stringify(ctx.flows.echo))"], {
+      catalog: { echo: complete }
+    })
+    const exposed = JSON.parse(frames[0]!.prints) as Record<string, unknown>
+
+    expect(Object.keys(exposed).sort()).toEqual(Object.keys(Cell.FlowProjection.fields).sort())
+    expect(exposed["placement"]).toBe("local")
+    expect(exposed["input"]).toEqual(input)
   })
 
   it("lets a later cell re-declare a name instead of dying on a redeclaration", async () => {
@@ -191,7 +213,15 @@ describe("QuickJSSandbox.openRealm", () => {
       .toBe(false)
     expect(frames[0]!.prints.startsWith("A\u{1F600}")).toBe(true)
     expect(frames[0]!.prints.endsWith("\u{1F600}Z")).toBe(true)
-    expect(frames[0]!.prints.length).toBeLessThanOrEqual(Sandbox.printFrameBytes)
+    expect(bytes.size(frames[0]!.prints)).toBeLessThanOrEqual(Sandbox.printFrameBytes)
+  })
+
+  it("bounds an emoji print by the real UTF-8 frame budget", async () => {
+    const count = 10_000
+    const frames = await session([`console.log("\\u{1F600}".repeat(${count}))`])
+
+    expect(frames[0]!.prints).toContain(`of ${count * 4} bytes elided`)
+    expect(bytes.size(frames[0]!.prints)).toBeLessThanOrEqual(Sandbox.printFrameBytes)
   })
 
   it("resolves a flow call and hands the result back inside the same cell", async () => {
@@ -208,6 +238,28 @@ describe("QuickJSSandbox.openRealm", () => {
     expect(outcome._tag === "settled" && outcome.transition._tag).toBe("complete")
     expect(outcome._tag === "settled" && outcome.transition._tag === "complete" && outcome.transition.output)
       .toBe("the check passes")
+  })
+
+  it("raises a catchable refusal when ctx.done omits its output", async () => {
+    const frames = await session([
+      `try { ctx.done() } catch (error) { console.log(error.message) }
+       ctx.done("caught")`
+    ])
+    const outcome = frames[0]!.outcome
+
+    expect(frames[0]!.prints).toBe(
+      "ctx.done(output) takes the run's answer; call it with the value the task asked for"
+    )
+    expect(outcome._tag === "settled" && outcome.transition._tag === "complete" && outcome.transition.output)
+      .toBe("caught")
+  })
+
+  it("accepts an explicit null completion as the string null", async () => {
+    const frames = await session(["ctx.done(null)"])
+    const outcome = frames[0]!.outcome
+
+    expect(outcome._tag === "settled" && outcome.transition._tag === "complete" && outcome.transition.output)
+      .toBe("null")
   })
 
   it("lets the first intent call win, because it took effect where it was called", async () => {
@@ -331,6 +383,87 @@ describe("QuickJSSandbox.openRealm", () => {
     expect(frames[1]!.outcome._tag === "rejected" && frames[1]!.outcome.code).toBe("limit_exceeded")
     expect(frames[1]!.outcome._tag === "rejected" && frames[1]!.outcome.message).toContain("big (")
     expect(frames[2]!.prints).toBe("recovered")
+  })
+
+  it("counts an aliased object once per reference, which over-states rather than under-states", async () => {
+    // Deliberate, and stated here so a later reader does not "fix" it: the walk
+    // detects cycles from the ancestors of the value it is on, not from a set of
+    // everything it has seen, because allocating a Set inside a realm at its
+    // heap ceiling aborts the runtime at teardown. Two references to one object
+    // are therefore weighed twice. A ceiling that errs toward refusing is the
+    // safe direction, and the refusal is spent where it lands, so the frame
+    // after it runs and can restructure.
+    const frames = await session([
+      `var shared = { payload: "x".repeat(2 * 1024 * 1024) }
+       var aliases = [shared, shared]`,
+      "console.log('measured')"
+    ], { limits: { memoryBytes: 8 * 1024 * 1024, steps: Number.MAX_SAFE_INTEGER } })
+
+    // 2 MiB held once, aliased twice, weighed as 3 x 2 MiB against an 8 MiB
+    // ceiling: still under it, and visibly more than the realm holds.
+    expect(frames[1]!.outcome._tag).toBe("settled")
+    expect(named(frames[0]!.bindings, "aliases")).toBeDefined()
+  }, 60_000)
+
+  it("weighs a cyclic object without hanging or exhausting the node budget", async () => {
+    const frames = await session([
+      "var cycle = { label: 'root' }\ncycle.self = cycle",
+      "console.log('cycle measured')"
+    ], { limits: { steps: Number.MAX_SAFE_INTEGER } })
+
+    expect(frames[1]!.outcome._tag).toBe("settled")
+    expect(frames[1]!.prints).toBe("cycle measured")
+  })
+
+  it("never invokes a global accessor while probing the realm", async () => {
+    const frames = await session([
+      `var getterCalled = false
+       Object.defineProperty(globalThis, "x", {
+         configurable: true,
+         get: function () { getterCalled = true; throw new Error("nope") }
+       })`,
+      "console.log(String(getterCalled))"
+    ])
+
+    expect(frames[0]!.outcome._tag).toBe("settled")
+    expect(named(frames[0]!.bindings, "x")).toMatchObject({ type: "accessor" })
+    expect(frames[1]!.prints).toBe("false")
+  })
+
+  it("refuses a realm whose node budget cannot measure one root, then lets the freeing frame run", async () => {
+    const frames = await session([
+      `var tooWide = []
+       for (var index = 0; index < 200100; index++) tooWide.push({})`,
+      "console.log('refused')",
+      "tooWide = undefined\nconsole.log('recovered')"
+    ], {
+      limits: {
+        memoryBytes: Sandbox.defaultLimits.memoryBytes,
+        steps: Number.MAX_SAFE_INTEGER,
+        timeMs: 60_000
+      }
+    })
+    const refusal = frames[1]!.outcome
+
+    expect(refusal).toMatchObject({ _tag: "rejected", code: "limit_exceeded" })
+    expect(refusal._tag === "rejected" && refusal.message).toContain("tooWide")
+    expect(refusal._tag === "rejected" && refusal.message).toContain("too large to measure")
+    expect(frames[1]!.prints).toBe("")
+    expect(frames[2]!.prints).toBe("recovered")
+  }, 60_000)
+
+  it("refuses a root that exceeds the probe's depth ceiling", async () => {
+    const frames = await session([
+      `var tooDeep = {}
+       var cursor = tooDeep
+       for (var depth = 0; depth < 40; depth++) { cursor.next = {}; cursor = cursor.next }`,
+      "console.log('refused')"
+    ], { limits: { steps: Number.MAX_SAFE_INTEGER } })
+    const refusal = frames[1]!.outcome
+
+    expect(refusal).toMatchObject({ _tag: "rejected", code: "limit_exceeded" })
+    expect(refusal._tag === "rejected" && refusal.message).toContain("tooDeep")
+    expect(refusal._tag === "rejected" && refusal.message).toContain("too large to measure")
   })
 
   /** Two strings each under the ceiling, together over it. */
@@ -478,16 +611,18 @@ describe("QuickJSSandbox.openRealm", () => {
     expect(failure).toMatchObject({ code: "runtime_failed", message: "The sandbox prelude failed to install" })
   })
 
-  it("dies instead of opening when a budget of zero stops the realm's own scaffolding", async () => {
-    // Recorded, not endorsed, exactly as the per-cell binding records it: a
-    // zero budget interrupts the property helper the binding evaluates before
-    // any cell exists, and that failure escapes the acquire as a defect. The
-    // runtime is still torn down, which every later case in this file proves.
-    const exit = await Effect.gen(function*() {
-      const sandbox = yield* QuickJSSandbox.make
-      return yield* sandbox.openRealm!({ flows, limits: { steps: 0 } })
-    }).pipe(Effect.scoped, Effect.exit, Effect.runPromise)
-    expect(Exit.isFailure(exit)).toBe(true)
+  it("refuses zero step and time budgets before they can interrupt realm scaffolding", async () => {
+    for (const limits of [{ steps: 0 }, { timeMs: 0 }]) {
+      const result = await Effect.gen(function*() {
+        const sandbox = yield* QuickJSSandbox.make
+        return yield* Effect.result(sandbox.openRealm!({ flows, limits }))
+      }).pipe(Effect.scoped, Effect.runPromise)
+
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: { code: "unsupported", message: expect.stringContaining(Object.keys(limits)[0]!) }
+      })
+    }
   })
 
   it("refuses source the boundary parse accepts and the realm does not", async () => {

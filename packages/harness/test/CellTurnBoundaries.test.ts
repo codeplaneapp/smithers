@@ -1313,11 +1313,20 @@ describe("CellTurn frame failures", () => {
     // A context window is durable state a host rehydrates. One whose transcript
     // no longer validates has to be stated as a render failure rather than
     // crash the frame it was handed to.
-    const corrupt = ContextWindow.make({
+    // A window whose transcript no longer validates cannot be built through the
+    // constructors: they validate, and the arrays they hand back are frozen. So
+    // it is assembled the way a host that rehydrates durable state by hand
+    // assembles one, around the prototypes rather than through the schema, which
+    // is exactly the value the controller has to survive being handed.
+    const valid = ContextWindow.make({
       modelId: "test-model",
       segments: [{ kind: "transcript", zone: "tail", content: [ModelRequest.Message.user("start")] }]
     })
-    ;(corrupt.segments[0]!.content as Array<unknown>)[0] = { role: "user" }
+    const rehydrate = <A extends object>(source: A, fields: Record<string, unknown>): A =>
+      Object.assign(Object.create(Object.getPrototypeOf(source)), source, fields) as A
+    const corrupt = rehydrate(valid, {
+      segments: [rehydrate(valid.segments[0]!, { content: [{ role: "user" }] })]
+    })
     const { events, failure } = await run({
       script: [emits(`ctx.done("done")`)],
       state: state({ contextWindow: corrupt })
@@ -1331,6 +1340,29 @@ describe("CellTurn frame failures", () => {
     // record with the digest it failed on.
     expect(of(events, "turn-opened")).toHaveLength(1)
     expect(of(events, "model-settled")).toHaveLength(0)
+  })
+})
+
+describe("CellTurn record boundaries", () => {
+  it("gives every record of one frame a distinct identity, not only a distinct name", async () => {
+    // `EngineLike.record` keys on `(name, identity)` together, but the contract
+    // did not say so, and one frame issues several records that share a session,
+    // a frame number and a boundary. An implementation that read "a key derived
+    // from identity" as "identity alone" replayed the opening workspace
+    // measurement as the closing one and the cell outcome as the steering drain.
+    // The controller now folds each boundary's purpose into the identity, so it
+    // is correct under either reading; this is the test that keeps it that way.
+    const { engine } = await run({
+      script: [emits(`await ctx.call("fs/list", { path: "." })\nctx.done("done")`)],
+      flows: [lister]
+    })
+
+    const identities = engine.recorder.records.map((boundary) =>
+      `${boundary.identity.session ?? ""}|${boundary.identity.frame}|${boundary.identity.boundary}`
+    )
+
+    expect(identities.length).toBeGreaterThan(1)
+    expect(new Set(identities).size).toBe(identities.length)
   })
 })
 

@@ -18,9 +18,9 @@
  * surface that asked for it, and the fields survive here for one purpose only:
  * decoding the journals that were written while it existed.
  *
- * Governing design: `docs/specs/Concepts/Durable Cell Loop.md`,
- * `docs/specs/Concepts/Repl Realm.md` and
- * `docs/specs/Concepts/Agent Cell Context.md`.
+ * Governing design: `packages/harness/docs/concepts.md#durable-cell-loop`,
+ * `packages/harness/docs/concepts.md#repl-realm` and
+ * `packages/harness/docs/concepts.md#agent-cell-context`.
  *
  * @since 0.1.0
  */
@@ -135,7 +135,7 @@ export class Continue extends Schema.TaggedClass<Continue>("flows/harness/Cell/C
    *
    * **Deprecated: decode-only.** The realm is the run's memory now — a name a
    * cell binds is still bound in the next cell — so there is nothing to file
-   * and nothing to re-read. See `docs/specs/Concepts/Repl Realm.md`.
+   * and nothing to re-read. See `packages/harness/docs/concepts.md#repl-realm`.
    *
    * @deprecated
    */
@@ -204,6 +204,13 @@ export class Complete extends Schema.TaggedClass<Complete>("flows/harness/Cell/C
    */
   state: Schema.optional(Schema.Json),
   output: Schema.String,
+  /**
+   * **Deprecated: decode-only.** Nothing in this release populates it and
+   * nothing reads it. It remains so journals written before the cell-first
+   * loop still decode.
+   *
+   * @deprecated
+   */
   reason: Schema.optional(Schema.String)
 }) {}
 
@@ -504,6 +511,31 @@ export class CallIdentity extends Schema.Class<CallIdentity>("flows/harness/Cell
 /**
  * Computes the declaration digest folded into a call identity.
  *
+ * Every field a call's outcome can depend on is material, and the set is stated
+ * here rather than sampled. `CellCalls` re-derives this digest at the boundary
+ * and refuses a call whose entry no longer matches with `declaration_changed`,
+ * so a field left out of the hash is a field a flow can be redeclared on
+ * between the frame that showed the model the catalog and the boundary that
+ * runs the call: the call is then dispatched to a declaration the model never
+ * saw and fails as an ordinary `invalid_input` or `flow_failed`, which teaches
+ * the model to fix a call that was never wrong.
+ *
+ * The set the digest used to cover was name, capabilities, effects, placement,
+ * the body's path and two provenance fields — so a refreshed registry could
+ * change a flow's input schema, its output schema, its description, its model
+ * or its body content behind the same path and the drift check said nothing.
+ *
+ * `capabilities` is sorted because a set is what it means; every other array is
+ * hashed in declaration order, because order is part of what was declared.
+ * `Option` fields hash as `null` when absent so an omitted field and a field
+ * that is present and null are one value, which is what they are once the
+ * descriptor has crossed JSON.
+ *
+ * `packages/chain/src/RegistryCatalog.ts` hashes the same descriptor for the
+ * same purpose. The two cover the same fields; unifying them behind one
+ * exported identity in the package that owns `FlowDescriptor` is the standing
+ * follow-up.
+ *
  * @category constructors
  * @since 0.1.0
  * @slop
@@ -512,10 +544,15 @@ export const declarationDigest = (descriptor: Descriptor.FlowDescriptor): string
   Digest.digest(
     CanonicalJson.stringify({
       name: descriptor.name,
+      description: descriptor.description,
       capabilities: [...descriptor.capabilities].sort(),
-      effects: descriptor.effects,
+      effects: { ...descriptor.effects },
       placement: Option.getOrNull(descriptor.placement),
-      body: descriptor.body.path,
+      model: Option.getOrNull(descriptor.model),
+      flows: [...descriptor.flows],
+      input: { ...descriptor.input },
+      output: { ...descriptor.output },
+      body: { ...descriptor.body },
       provenance: { source: descriptor.provenance.source, root: descriptor.provenance.root }
     })
   )
@@ -660,12 +697,9 @@ export const callFailure = (result: CallResult): Schema.Json => {
 const fenced = /```(?<info>[^\n`]*)\n(?<body>[\s\S]*?)\n?```/g
 
 const languageOf = (info: string): Language | undefined => {
-  const tokens = info.trim().toLowerCase().split(/\s+/).filter((token) => token.length > 0)
-  if (tokens.length === 0) return undefined
-  for (const token of tokens) {
-    if (token === "cell" || token === "js" || token === "javascript") return "javascript"
-    if (token === "ts" || token === "typescript") return "typescript"
-  }
+  const tokens = new Set(info.trim().toLowerCase().split(/\s+/).filter((token) => token.length > 0))
+  if (tokens.has("ts") || tokens.has("typescript")) return "typescript"
+  if (tokens.has("cell") || tokens.has("js") || tokens.has("javascript")) return "javascript"
   return undefined
 }
 

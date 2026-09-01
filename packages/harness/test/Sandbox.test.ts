@@ -327,6 +327,28 @@ describe("Sandbox", () => {
     })
   })
 
+  it("counts checkpoint mints against the shared flow-call budget", async () => {
+    const minted: Array<number> = []
+    const outcome = await evaluate(
+      `await ctx.checkpoint()
+       await ctx.checkpoint()
+       ctx.done("unreachable")`,
+      {
+        limits: { calls: 1 },
+        mint: (mint) =>
+          Effect.sync(() => {
+            minted.push(mint.ordinal)
+            return new Cell.CallResult({ outcome: "success", value: null })
+          })
+      }
+    )
+
+    expect(minted).toEqual([0])
+    expect(outcome).toStrictEqual(
+      new Cell.Rejected({ code: "limit_exceeded", message: "This cell exceeded its limit of 1 flow calls" })
+    )
+  })
+
   it("settles a stalled flow call at its own budget as a catchable failure", async () => {
     // The defect this bounds: a broad `grep` that never settled held its
     // frame for the whole 900,000 ms evaluation ceiling and was reported to
@@ -754,12 +776,14 @@ describe("Sandbox projections", () => {
 
     for (
       const limits of [
+        { timeMs: 0 },
         { timeMs: Number.POSITIVE_INFINITY },
         { timeMs: Number.NaN },
         { totalMs: Number.POSITIVE_INFINITY },
         { totalMs: Number.NaN },
         { callMs: -1 },
         { callMs: Number.NaN },
+        { steps: 0 },
         { steps: Number.POSITIVE_INFINITY },
         { steps: Number.NaN },
         { memoryBytes: 0 },

@@ -5,6 +5,11 @@
  * Two jobs live here, and both were priced off the `rerun-r95repl` lane rather
  * than chosen.
  *
+ * Every number here is a count of UTF-8 bytes, which is what the frame bound
+ * and the retention ceiling both mean by "bytes": the notices this module writes
+ * carry a `…`, three bytes wide and one UTF-16 unit, and counting them in units
+ * put a frame one byte over its own ceiling.
+ *
  * **Sharing the frame budget.** Statements used to cap independently at 4 KiB
  * each, head-first, under a 16 KiB frame bound that almost nobody reached: 197
  * of the lane's 357 printing frames had a statement cut, 191 of those while the
@@ -33,6 +38,7 @@
 import * as CanonicalJson from "@smthrs/model/CanonicalJson"
 import type { Schema } from "effect"
 import * as Sandbox from "../Sandbox.ts"
+import * as bytes from "./bytes.ts"
 import * as elide from "./elide.ts"
 
 /**
@@ -258,11 +264,11 @@ export const buffer = (statements: ReadonlyArray<Statement>, unread: number): st
   // The count-lines come out of the budget before the statements are counted,
   // and the drop line only where there is a drop — so it is priced by asking
   // twice, rather than by charging every frame for a line most never print.
-  const overhead = unread === 0 ? 0 : unreadNotice(unread).length + 1
+  const overhead = unread === 0 ? 0 : bytes.size(unreadNotice(unread)) + 1
   const roomy = capacity(statements, Sandbox.printFrameBytes - overhead)
   const affordable = roomy === statements.length
     ? roomy
-    : capacity(statements, Sandbox.printFrameBytes - overhead - droppedNotice(statements.length).length - 1)
+    : capacity(statements, Sandbox.printFrameBytes - overhead - bytes.size(droppedNotice(statements.length)) - 1)
   // More statements than the budget can floor: whole statements go from the
   // middle, counted, rather than every one of them being cut to a notice.
   const head = Math.ceil(affordable / 2)
@@ -283,7 +289,7 @@ export const buffer = (statements: ReadonlyArray<Statement>, unread: number): st
       sum + (statement.bytes > Sandbox.printStatementFloor ? elide.noticeCost(statement.bytes, recall) : 0),
     0
   ) +
-    notices.reduce((sum, line) => sum + line.length, 0) +
+    notices.reduce((sum, line) => sum + bytes.size(line), 0) +
     Math.max(0, kept.length + notices.length - 1)
   const allotted = shares(sizes, Math.max(0, Sandbox.printFrameBytes - reserve))
   const lines = kept.map((statement, index) =>

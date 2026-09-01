@@ -17,7 +17,7 @@
  * because that decision has not been made and the r90–r96 journals it can be
  * replayed against are still filing journals.
  *
- * It was live for exactly one wave. `fullbench/reports/rerun-r93.md` §1 reads
+ * It was live for exactly one wave. the r93 wave report reads
  * the result off the 45 journals, and the reason it is off is that the wave
  * cannot price it:
  *

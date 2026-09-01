@@ -723,7 +723,10 @@ console.log(kept)`
     const drains = engine.recorder.records.filter((boundary) => boundary.name === "steering-drain")
     expect(drains).toHaveLength(1)
     expect(drains[0]?.identity).toMatchObject({ session: "session-1", frame: 0 })
-    expect(drains[0]?.identity.boundary).toMatch(/^[a-f0-9]{64}$/)
+    // The purpose is folded into the boundary as well as carried in `name`, so
+    // an engine that keys on identity alone cannot serve this frame's drain
+    // record as its cell-frame record. See `EngineLike.record`.
+    expect(drains[0]?.identity.boundary).toMatch(/^steering-drain:[a-f0-9]{64}$/)
   })
 
   it("reports a model step that never settles as a typed harness failure", async () => {
@@ -2520,7 +2523,7 @@ describe("CellTurn vacuous verification, unwired", () => {
   // `VacuousVerification` is not read by the controller. The module, its own
   // suite and `AgentEvent.VacuousVerificationObserved` are kept for a
   // controlled re-measure; the live arm is off, and these are the shapes that
-  // used to fire it. `fullbench/reports/rerun-r93.md` §1 is the reason: the
+  // used to fire it. the r93 wave report is the reason: the
   // control fired twice in 45 journals, and its one consequential firing —
   // `django__django-15732`, frame 7 — preceded the wave's only revert to an
   // empty patch. Two firings is not a rate, and a control that ships beside

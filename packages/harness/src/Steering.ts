@@ -1,8 +1,8 @@
 /**
  * Turn-boundary steering values and their source contract.
  *
- * Governing designs: `docs/specs/Concepts/Notification Queue.md` and
- * `docs/specs/Specs/Harness.md`.
+ * Governing designs: `packages/harness/docs/concepts.md#notification-queue` and
+ * `packages/harness/docs/concepts.md#notification-queue`.
  *
  * @since 0.1.0
  */
@@ -87,6 +87,12 @@ export interface ThinkingChange {
 /**
  * An additive active-tool update for a future turn.
  *
+ * Reserved surface. The cell-first controller declares no provider tools and
+ * reads no activated set: `Notifications` refuses a `Tools` steer out loud
+ * instead of producing this item, and nothing else in this release constructs
+ * one. It is kept for a future foreign-adapter loop and carries no
+ * compatibility promise at 1.0.0-rc.0.
+ *
  * @category models
  * @since 0.1.0
  * @slop
@@ -128,6 +134,10 @@ export interface Queue {
 export interface Drain {
   readonly inserts: ReadonlyArray<ModelRequest.Message>
   readonly seatChanges: ReadonlyArray<SeatChange | ThinkingChange>
+  /**
+   * Reserved surface: the cell-first controller reads no activated tool set.
+   * See `ActivateTools`.
+   */
   readonly activatedToolNames: ReadonlyArray<string>
   readonly remaining: Queue
   readonly queued: boolean
@@ -194,6 +204,7 @@ const ThinkingChangeRecord = Schema.Struct({
 export const DrainRecord = Schema.Struct({
   inserts: Schema.Array(ModelRequest.Message),
   seatChanges: Schema.Array(Schema.Union([SeatChangeRecord, ThinkingChangeRecord])),
+  /** Reserved surface, always empty. See `ActivateTools`. */
   activatedToolNames: Schema.Array(Schema.String),
   queued: Schema.Boolean
 })

@@ -63,8 +63,10 @@ describe("StructuredOutput.digest", () => {
 })
 
 describe("StructuredOutput.issuesDigest", () => {
-  const failure = (issues: ReadonlyArray<string>) =>
+  const issue = (path: string, message: string) => new StructuredOutput.OutputIssue({ path, message })
+  const failure = (issues: ReadonlyArray<StructuredOutput.OutputIssue>) =>
     new StructuredOutput.StructuredOutputFailure({
+      code: "schema_mismatch",
       schema: "sha256:schema",
       candidate: "sha256:candidate",
       corrections: 1,
@@ -74,15 +76,18 @@ describe("StructuredOutput.issuesDigest", () => {
     })
 
   it("says whether two rejections were wrong in the same way", () => {
-    expect(StructuredOutput.issuesDigest(failure(["approved: expected boolean"]))).toBe(
-      StructuredOutput.issuesDigest(failure(["approved: expected boolean"]))
+    expect(StructuredOutput.issuesDigest(failure([issue("approved", "expected boolean")]))).toBe(
+      StructuredOutput.issuesDigest(failure([issue("approved", "expected boolean")]))
     )
-    expect(StructuredOutput.issuesDigest(failure(["approved: expected boolean"]))).not.toBe(
-      StructuredOutput.issuesDigest(failure(["issues: expected array"]))
+    expect(StructuredOutput.issuesDigest(failure([issue("approved", "expected boolean")]))).not.toBe(
+      StructuredOutput.issuesDigest(failure([issue("issues", "expected array")]))
     )
     // Order is part of what the validator said, so it is part of the digest.
-    expect(StructuredOutput.issuesDigest(failure(["a", "b"]))).not.toBe(
-      StructuredOutput.issuesDigest(failure(["b", "a"]))
+    expect(StructuredOutput.issuesDigest(failure([issue("", "a"), issue("", "b")]))).not.toBe(
+      StructuredOutput.issuesDigest(failure([issue("", "b"), issue("", "a")]))
+    )
+    expect(StructuredOutput.issuesDigest(failure([issue("left", "same")]))).not.toBe(
+      StructuredOutput.issuesDigest(failure([issue("right", "same")]))
     )
   })
 })
@@ -182,6 +187,7 @@ describe("StructuredOutput.decode", () => {
     expect(result._tag).toBe("Failure")
     const failure = result._tag === "Failure" ? result.failure : undefined
     expect(failure?._tag).toBe("/harness/StructuredOutputFailure")
+    expect(failure?.code).toBe("invalid_json")
     expect(failure?.schema).toBe(StructuredOutput.digest(Review))
     expect(failure?.corrections).toBe(0)
     expect(failure?.limit).toBe(1)
@@ -193,7 +199,8 @@ describe("StructuredOutput.decode", () => {
     const result = decode(Review, "Verdict: {\"approved\":\"yes\"}")
     expect(result._tag).toBe("Failure")
     const failure = result._tag === "Failure" ? result.failure : undefined
-    expect(failure?.issues.join("\n")).toContain("approved")
+    expect(failure?.code).toBe("schema_mismatch")
+    expect(failure?.issues.map((issue) => `${issue.path}: ${issue.message}`).join("\n")).toContain("approved")
   })
 
   it("renders a correction that restates only the diagnostics", () => {
@@ -201,7 +208,7 @@ describe("StructuredOutput.decode", () => {
     const failure = result._tag === "Failure" ? result.failure : undefined
     const text = StructuredOutput.correction(failure!)
     expect(text).toContain("did not validate")
-    expect(text).toContain(failure!.issues[0]!)
+    expect(text).toContain(failure!.issues[0]!.message)
     expect(text).toContain("ctx.done(output)")
   })
 
@@ -210,6 +217,7 @@ describe("StructuredOutput.decode", () => {
 
     expect(result._tag).toBe("Failure")
     const failure = result._tag === "Failure" ? result.failure : undefined
+    expect(failure?.code).toBe("no_candidate")
     expect(failure?.candidate).toBe(Digest.digest(""))
     expect(failure?.issues.length).toBeGreaterThan(0)
   })
@@ -231,26 +239,29 @@ describe("StructuredOutput.decode", () => {
     // balanced container — so an earlier valid document is not rescued.
     expect(result._tag).toBe("Failure")
     const failure = result._tag === "Failure" ? result.failure : undefined
+    expect(failure?.code).toBe("schema_mismatch")
     expect(failure?.candidate).toBe(Digest.digest("{\"approved\":\"maybe\"}"))
-    expect(failure?.issues.join("\n")).toContain("approved")
+    expect(failure?.issues.map((issue) => `${issue.path}: ${issue.message}`).join("\n")).toContain("approved")
   })
 
   it("caps the reported issues at the declared maximum", () => {
-    const Wide = Schema.Union([
-      Schema.Struct({ a: Schema.String }),
-      Schema.Struct({ b: Schema.Number }),
-      Schema.Struct({ c: Schema.Boolean }),
-      Schema.Array(Schema.String),
-      Schema.String,
-      Schema.Number,
-      Schema.Boolean
-    ])
+    const Wide = Schema.String.pipe(
+      Schema.check(
+        Schema.makeFilter(() =>
+          ["a", "b", "c", "d", "e", "f"].map((path) => ({
+            path: [path],
+            issue: `invalid ${path}`
+          }))
+        )
+      )
+    )
 
-    const result = decode(Wide, "{\"z\":1}")
+    const result = decode(Wide, "\"wrong\"")
 
     expect(result._tag).toBe("Failure")
     const failure = result._tag === "Failure" ? result.failure : undefined
     expect(failure?.issues).toHaveLength(StructuredOutput.maxIssues)
+    expect(failure?.issues.map((issue) => issue.path)).toEqual(["a", "b", "c", "d", "e"])
     expect(StructuredOutput.correction(failure!).split("\n- ")).toHaveLength(StructuredOutput.maxIssues + 1)
   })
 
@@ -276,12 +287,53 @@ describe("StructuredOutput.decode", () => {
     })
   })
 
+  it("reports a nested schema mismatch with its dot-joined path", () => {
+    const Nested = Schema.Struct({ outer: Schema.Struct({ count: Schema.Number }) })
+
+    const result = decode(Nested, "{\"outer\":{\"count\":\"many\"}}")
+    const failure = result._tag === "Failure" ? result.failure : undefined
+
+    expect(failure?.code).toBe("schema_mismatch")
+    expect(failure?.issues[0]).toMatchObject({ path: "outer.count", message: expect.stringContaining("number") })
+    expect(StructuredOutput.correction(failure!)).toContain("outer.count")
+  })
+
+  it("reports a root schema mismatch with an empty path", () => {
+    const result = decode(Schema.Number, "\"many\"")
+    const failure = result._tag === "Failure" ? result.failure : undefined
+
+    expect(failure?.code).toBe("schema_mismatch")
+    expect(failure?.issues[0]).toMatchObject({ path: "", message: expect.stringContaining("number") })
+  })
+
+  it("uses bracket notation for an array member in an issue path", () => {
+    const Nested = Schema.Struct({ items: Schema.Array(Schema.Struct({ count: Schema.Number })) })
+
+    const result = decode(Nested, "{\"items\":[{\"count\":\"many\"}]}")
+    const failure = result._tag === "Failure" ? result.failure : undefined
+
+    expect(failure?.issues[0]?.path).toBe("items[0].count")
+  })
+
+  it("bounds each structured issue message", () => {
+    const detail = "x".repeat(600)
+    const Detailed = Schema.String.pipe(Schema.check(Schema.makeFilter(() => detail)))
+
+    const result = decode(Detailed, "\"wrong\"")
+    const failure = result._tag === "Failure" ? result.failure : undefined
+    const message = failure?.issues[0]?.message
+
+    expect(message).toContain("reissue the answer to see the whole issue")
+    expect(message?.length).toBeLessThan(340)
+  })
+
   it("reports the correction budget the boundary was declared with", () => {
     const result = Effect.runSync(
       Effect.result(StructuredOutput.decode(Review, "still prose", { corrections: 2, limit: 2 }))
     )
 
     const failure = result._tag === "Failure" ? result.failure : undefined
+    expect(failure?.code).toBe("correction_exhausted")
     expect(failure?.corrections).toBe(2)
     expect(failure?.limit).toBe(2)
     expect(failure?.message).toContain("after 2 of 2 corrections")

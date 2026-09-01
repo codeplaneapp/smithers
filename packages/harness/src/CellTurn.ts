@@ -11,7 +11,7 @@
  * boundary, then apply the transition it returned. The cell owns the state that
  * carries forward and the exact context the next frame sees.
  *
- * Governing design: `docs/specs/Concepts/Durable Cell Loop.md`.
+ * Governing design: `packages/harness/docs/concepts.md#durable-cell-loop`.
  *
  * @since 0.1.0
  */
@@ -251,36 +251,8 @@ const ContextWindowTokens = NonNegativeSafeInt.pipe(
   Schema.withDecodingDefaultKey(Effect.succeed(0))
 )
 
-const eventType = {
-  aborted: "flows.harness.aborted.v1",
-  disciplineArmed: "flows.harness.discipline-armed.v1",
-  cellCallSettled: "flows.harness.cell-call-settled.v1",
-  cellCallStarted: "flows.harness.cell-call-started.v1",
-  cellPrinted: "flows.harness.cell-printed.v1",
-  cellProduced: "flows.harness.cell-produced.v1",
-  cellRejectedInFrame: "flows.harness.cell-rejected-in-frame.v1",
-  cellSettled: "flows.harness.cell-settled.v1",
-  compactionSettled: "flows.harness.compaction-settled.v1",
-  modelRetried: "flows.harness.model-retried.v1",
-  readOnlyDemanded: "flows.harness.read-only-demanded.v1",
-  repeatDemanded: "flows.harness.repeat-demanded.v1",
-  narrowedDemanded: "flows.harness.narrowed-demanded.v1",
-  narrowOnlyDemanded: "flows.harness.narrow-only-demanded.v1",
-  unmovedDemanded: "flows.harness.unmoved-demanded.v1",
-  unresolvedDemanded: "flows.harness.unresolved-demanded.v1",
-  sufficiencyObserved: "flows.harness.sufficiency-observed.v1",
-  modelDelta: "flows.harness.model-delta.v1",
-  modelSettled: "flows.harness.model-settled.v1",
-  mutationObserved: "flows.harness.mutation-observed.v1",
-  checkpointMinted: "flows.harness.checkpoint-minted.v1",
-  permissionRequired: "flows.harness.permission-required.v1",
-  resolved: "flows.harness.resolved.v1",
-  steeringDrained: "flows.harness.steering-drained.v1",
-  suspended: "flows.harness.suspended.v1",
-  transitionApplied: "flows.harness.transition-applied.v1",
-  turnClosed: "flows.harness.turn-closed.v1",
-  turnOpened: "flows.harness.turn-opened.v1"
-} as const
+/** The one journal-event-type table; see `AgentEvent.eventType`. */
+const eventType = AgentEvent.eventType
 
 /**
  * The serializable state carried across cell frames.
@@ -954,6 +926,9 @@ const assistantText = (message: ModelRequest.AssistantMessage): string =>
     .map((part) => part.text)
     .join("\n")
 
+/** The journal-safe form of a permission request, for `SuspendReason.details`. */
+const encodePermissionRequired = Schema.encodeSync(Permission.PermissionRequired)
+
 const permissionRequired = (error: unknown): Permission.PermissionRequired | undefined => {
   if (error instanceof Permission.PermissionRequired) return error
   if (error instanceof HarnessError && error.cause instanceof Permission.PermissionRequired) return error.cause
@@ -1390,7 +1365,15 @@ const witness = (
 ): Effect.Effect<Option.Option<EngineLike.Observation>, HarnessError> =>
   engine.record({
     name: `workspace-${phase}`,
-    identity: { session: state.session, frame: state.frame, boundary },
+    // The purpose is folded into the boundary as well as carried in `name`.
+    // `EngineLike.record` keys on `(name, identity)` together, and the
+    // production engine does; an engine that read the contract as keying on
+    // identity alone would replay this frame's opening measurement as its
+    // closing one, and its cell outcome as its steering drain. Folding the
+    // purpose in makes the controller correct under either reading. No released
+    // run database exists at 1.0.0-rc.0, so the labels are free to change now
+    // and will not be again.
+    identity: { session: state.session, frame: state.frame, boundary: `workspace-${phase}:${boundary}` },
     success: RecordedObservation,
     execute: engine.observe
   })
@@ -1423,7 +1406,7 @@ const pin = (
 ): Effect.Effect<Option.Option<EngineLike.Snapshot>, HarnessError> =>
   engine.record({
     name: "checkpoint",
-    identity: { session: state.session, frame: state.frame, boundary: `${cell}:${ordinal}` },
+    identity: { session: state.session, frame: state.frame, boundary: `checkpoint:${cell}:${ordinal}` },
     success: RecordedSnapshot,
     // The per-call ceiling, applied INSIDE the record for the reason
     // {@link settled} applies it inside its own: a store that hung past the
@@ -1431,7 +1414,10 @@ const pin = (
     // still in flight, so the resumed frame could be handed a snapshot the
     // original attempt was told it never got. Cut off here, "nothing was
     // pinned" is what the journal holds and what every later attempt reads.
-    execute: engine.capture({ id, identity: { session: state.session, frame: state.frame, boundary: cell } }).pipe(
+    execute: engine.capture({
+      id,
+      identity: { session: state.session, frame: state.frame, boundary: `checkpoint-capture:${cell}` }
+    }).pipe(
       Effect.timeoutOrElse({ duration: callMs, orElse: () => Effect.succeed(Option.none()) })
     )
   })
@@ -1488,7 +1474,7 @@ const issued = (
     )
     return yield* engine.record({
       name: "cell-call",
-      identity: { session: state.session, frame: state.frame, boundary: `${cell}:${ordinal}` },
+      identity: { session: state.session, frame: state.frame, boundary: `cell-call:${cell}:${ordinal}` },
       success: Cell.CallResult,
       execute: Effect.succeed(settlement)
     })
@@ -2240,7 +2226,7 @@ const frame = (
     // model calls.
     const evaluated = yield* engine.record({
       name: "cell-frame",
-      identity: { session: state.session, frame: state.frame, boundary: cell.digest },
+      identity: { session: state.session, frame: state.frame, boundary: `cell-frame:${cell.digest}` },
       success: RecordedFrame,
       execute: Effect.succeed(observedFrame)
     })
@@ -2682,7 +2668,7 @@ const frame = (
     // `VacuousVerification` was read here, between the read-only cap and the
     // completion branch, and it is not read anywhere now. The module, its
     // tests and `AgentEvent.VacuousVerificationObserved` are kept; the arm is
-    // off. `fullbench/reports/rerun-r93.md` §1 is the reason and the module's
+    // off. the r93 wave report is the reason and the module's
     // own docblock carries it. Re-wiring is one `stored`/`find` pair here plus
     // the two `State` fields it needs, and it is a controlled arm of its own
     // wave when it happens — not a change that rides along with another.
@@ -2886,7 +2872,7 @@ const frame = (
     // would rebuild a different context and re-key every later sealed step.
     const drained = yield* engine.record({
       name: "steering-drain",
-      identity: { session: state.session, frame: state.frame, boundary: cell.digest },
+      identity: { session: state.session, frame: state.frame, boundary: `steering-drain:${cell.digest}` },
       success: Steering.DrainRecord,
       execute: steering.drain({
         boundary: `${state.frame}:${cell.digest}`,
@@ -3142,7 +3128,12 @@ export const run = (
                 reason: new EngineLike.SuspendReason({
                   code: "permission-required",
                   message: `Permission ${request.requestId} is required`,
-                  details: request
+                  // Encoded, not attached: `request` is a class that extends
+                  // `Error`, and this reason is journaled inside
+                  // `AgentEvent.Suspended`. A live Error there has no JSON form,
+                  // so encoding it dies with a schema failure that replaces the
+                  // park it was carrying.
+                  details: encodePermissionRequired(request)
                 })
               } satisfies Step
             })

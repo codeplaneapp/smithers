@@ -1,7 +1,9 @@
 /**
  * The immutable, provider-neutral context assembled for one model request.
+ * Every array it exposes is frozen, so a runtime mutation throws in strict mode
+ * instead of silently invalidating the cached digest.
  *
- * Governing design: `docs/specs/Concepts/Context Window.md`.
+ * Governing design: `packages/harness/docs/concepts.md#context-window`.
  *
  * @since 0.1.0
  */
@@ -260,9 +262,12 @@ const digest = (value: unknown): string => Digest.digest(CanonicalJson.stringify
  * @slop
  */
 export const makeSegment = (input: Segment | SegmentInput): Segment => {
-  if (isSegment(input)) return input
-  const content = [...input.content]
-  return new Segment({
+  if (isSegment(input)) {
+    Object.freeze(input.content)
+    return input
+  }
+  const content = Object.freeze([...input.content])
+  const segment = new Segment({
     kind: input.kind,
     zone: input.zone,
     digest: digest({
@@ -274,6 +279,8 @@ export const makeSegment = (input: Segment | SegmentInput): Segment => {
     tokens: input.tokens ?? Tokens.count(segmentText(content)),
     content
   })
+  Object.freeze(segment.content)
+  return segment
 }
 
 const unique = (values: ReadonlyArray<string>): ReadonlyArray<string> => {
@@ -298,9 +305,9 @@ const windowDigest = (
   })
 
 const construct = (options: MakeOptions): ContextWindow => {
-  const segments = (options.segments ?? []).map(makeSegment)
-  const activeTools = unique(options.activeTools ?? [])
-  return new ContextWindow({
+  const segments = Object.freeze((options.segments ?? []).map(makeSegment))
+  const activeTools = Object.freeze(unique(options.activeTools ?? []))
+  const window = new ContextWindow({
     modelId: options.modelId,
     segments,
     activeTools,
@@ -314,6 +321,9 @@ const construct = (options: MakeOptions): ContextWindow => {
       })
     ))
   })
+  Object.freeze(window.segments)
+  Object.freeze(window.activeTools)
+  return window
 }
 
 /** Constructs a window from already-derived values.
@@ -331,6 +341,11 @@ export const make = (options: MakeOptions): ContextWindow => construct(options)
 export const empty = (modelId: string): ContextWindow => make({ modelId })
 
 /** Appends one settled assistant message and its ordered tool results.
+ *
+ * The tool-result arm is reserved surface: the cell-first controller settles no
+ * tool results, because it declares no tools. It is kept for a future
+ * foreign-adapter loop and carries no compatibility promise at 1.0.0-rc.0.
+ *
  * @category combinators
  * @since 0.1.0
  * @slop
@@ -365,6 +380,11 @@ export const appendTurn: {
  *
  * A redundant activation returns the original object, deliberately preserving
  * its digest and reference identity.
+ *
+ * Reserved surface. The cell-first controller declares no provider tools: every
+ * sealed request carries `tools: []` and `toolChoice: "none"`, so nothing in
+ * this release calls this. It is kept for a future foreign-adapter loop and
+ * carries no compatibility promise at 1.0.0-rc.0.
  *
  * @category combinators
  * @since 0.1.0

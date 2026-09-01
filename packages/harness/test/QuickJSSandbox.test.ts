@@ -261,15 +261,21 @@ describe("QuickJSSandbox limits", () => {
     expect(outcome).toMatchObject({ _tag: "settled", transition: { _tag: "complete", output: "instant" } })
   })
 
-  it("dies instead of reporting a ceiling when a budget of zero stops the prelude's own scaffolding", async () => {
-    // Recorded, not endorsed. A zero budget interrupts the property helper the
-    // binding evaluates before any cell code exists, and that failure escapes
-    // the acquire as a defect rather than as `limit_exceeded`. The runtime is
-    // still torn down, which the following frames in this file prove.
-    for (const limits of [{ steps: 0 }, { timeMs: 0 }]) {
-      const exit = await evaluate(`ctx.done("unreachable")`, { limits })
-      expect(Exit.isFailure(exit), JSON.stringify(limits)).toBe(true)
-      expect(Cause.pretty((exit as Exit.Failure<never, never>).cause)).toContain("interrupted")
+  it("refuses zero step and time budgets before they can interrupt the prelude's scaffolding", async () => {
+    for (
+      const [limits, name, minimum] of [
+        [{ steps: 0 }, "steps", Sandbox.minimumSteps],
+        [{ timeMs: 0 }, "timeMs", Sandbox.minimumTimeMs]
+      ] as const
+    ) {
+      const result = await resultOf(`ctx.done("unreachable")`, { limits })
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: {
+          code: "unsupported",
+          message: `The ${name} limit must be a safe integer of at least ${minimum}`
+        }
+      })
     }
   })
 })

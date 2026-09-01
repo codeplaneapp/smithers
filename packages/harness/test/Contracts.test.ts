@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest"
 import * as AgentEvent from "../src/AgentEvent.ts"
 import * as Cell from "../src/Cell.ts"
 import * as EngineLike from "../src/EngineLike.ts"
-import { HarnessError } from "../src/HarnessError.ts"
+import { HarnessError, HarnessErrorCode } from "../src/HarnessError.ts"
 import * as Plan from "../src/Plan.ts"
 
 const assistantMessage = ModelRequest.Message.assistant("done", { stopReason: "stop" })
@@ -193,6 +193,76 @@ describe("AgentEvent", () => {
       new AgentEvent.Resolved({
         eventType: "flows.harness.resolved.v1",
         message: assistantMessage
+      }),
+      // The ten variants this list used to omit. A round-trip suite that names
+      // two thirds of a union proves nothing about the third it skipped.
+      new AgentEvent.CellPrinted({
+        eventType: "flows.harness.cell-printed.v1",
+        cell: "cell-digest",
+        text: "printed output"
+      }),
+      new AgentEvent.CellRejectedInFrame({
+        eventType: "flows.harness.cell-rejected-in-frame.v1",
+        attempt: 1,
+        code: "compile_failed",
+        message: "SyntaxError at line 2"
+      }),
+      new AgentEvent.CheckpointMinted({
+        eventType: "flows.harness.checkpoint-minted.v1",
+        id: "cp-1",
+        ref: "jj:abcdef",
+        cell: "cell-digest",
+        ordinal: 0
+      }),
+      new AgentEvent.ModelRetried({
+        eventType: "flows.harness.model-retried.v1",
+        attempt: 2,
+        code: "overloaded",
+        delayMillis: 250
+      }),
+      new AgentEvent.MutationObserved({
+        eventType: "flows.harness.mutation-observed.v1",
+        basis: "observed",
+        mutated: true,
+        digest: "tree-digest",
+        paths: 12,
+        declaredWrites: 1
+      }),
+      new AgentEvent.NarrowOnlyDemanded({
+        eventType: "flows.harness.narrow-only-demanded.v1",
+        flow: "bash",
+        check: "pytest -k one",
+        targets: ["tests/test_one.py"],
+        currentDigest: "tree-digest",
+        nextFrame: 4
+      }),
+      new AgentEvent.ReadOnlyDemanded({
+        eventType: "flows.harness.read-only-demanded.v1",
+        streak: 12,
+        cap: 12,
+        nextFrame: 13,
+        nextAction: "write"
+      }),
+      new AgentEvent.RepeatDemanded({
+        eventType: "flows.harness.repeat-demanded.v1",
+        frames: 4,
+        cap: 4,
+        nextFrame: 5
+      }),
+      new AgentEvent.SufficiencyObserved({
+        eventType: "flows.harness.sufficiency-observed.v1",
+        flow: "bash",
+        failed: "pytest tests",
+        passed: "pytest tests",
+        epoch: 0,
+        nextFrame: 6
+      }),
+      new AgentEvent.VacuousVerificationObserved({
+        eventType: "flows.harness.vacuous-verification-observed.v1",
+        flow: "bash",
+        check: "pytest tests",
+        signature: "call-signature",
+        nextFrame: 7
       })
     ]
 
@@ -203,6 +273,54 @@ describe("AgentEvent", () => {
         )
       ).toEqual(event)
     }
+
+    // Every member of the union, and every row of the one event-type table,
+    // account for each other. The literal used to be written three times, and
+    // a projection reading a literal the emitter no longer writes returns an
+    // empty transcript with nothing failing.
+    const declared = new Set<string>(Object.values(AgentEvent.eventType))
+    const constructed = new Set<string>(events.map((event) => event.eventType))
+    expect([...constructed].filter((value) => !declared.has(value))).toEqual([])
+    expect([...declared].filter((value) => !constructed.has(value))).toEqual([])
+  })
+
+  it("pins the encoded wire shape of the events a projection reads", () => {
+    // Golden vectors. Renaming an `eventType` or a payload field is a change to
+    // what every stored journal decodes as, so it has to be a change to a
+    // literal somebody wrote down.
+    const source = Cell.source("console.log(1)")
+
+    expect(
+      Schema.encodeSync(AgentEvent.AgentEvent)(
+        new AgentEvent.CellPrinted({
+          eventType: AgentEvent.eventType.cellPrinted,
+          cell: "cell-digest",
+          text: "printed"
+        })
+      )
+    ).toEqual({
+      _tag: "cell-printed",
+      eventType: "flows.harness.cell-printed.v1",
+      cell: "cell-digest",
+      text: "printed"
+    })
+
+    expect(
+      Schema.encodeSync(AgentEvent.AgentEvent)(
+        new AgentEvent.CellProduced({ eventType: AgentEvent.eventType.cellProduced, cell: source })
+      )
+    ).toEqual({
+      _tag: "cell-produced",
+      eventType: "flows.harness.cell-produced.v1",
+      blocks: 1,
+      cell: { text: source.text, language: source.language, digest: source.digest }
+    })
+
+    expect(
+      Schema.encodeSync(AgentEvent.AgentEvent)(
+        new AgentEvent.Aborted({ eventType: AgentEvent.eventType.aborted, reason: "cancelled" })
+      )
+    ).toEqual({ _tag: "aborted", eventType: "flows.harness.aborted.v1", reason: "cancelled" })
   })
 
   it("round-trips the same variants with every optional field absent", () => {
@@ -267,34 +385,24 @@ describe("AgentEvent", () => {
 })
 
 describe("HarnessError", () => {
-  it("constructs every stable code", () => {
+  it("pins and round-trips exactly the codes this package raises", () => {
     const codes = [
       "assembly_failed",
       "render_failed",
       "projection_failed",
       "model_failed",
-      "elaboration_failed",
       "engine_failed",
-      "invalid_step",
-      "lazy_tool_prompt_metadata",
+      "read_only_cap",
       "aborted",
-      "suspended",
-      "adapter_spawn_failed",
-      "adapter_quota_exhausted",
-      "adapter_session_lost",
-      "adapter_config_invalid",
-      "adapter_auth_failed",
-      "adapter_protocol_error",
-      "adapter_binary_missing",
-      "adapter_unsupported",
-      "adapter_structured_output_failed",
-      "unknown"
+      "suspended"
     ] as const
 
+    expect(HarnessErrorCode.literals).toEqual(codes)
     for (const code of codes) {
       const error = new HarnessError({ code, message: code })
-      expect(error.code).toBe(code)
-      expect(error._tag).toBe("/harness/HarnessError")
+      expect(
+        Schema.decodeUnknownSync(HarnessError)(Schema.encodeSync(HarnessError)(error))
+      ).toEqual(error)
     }
   })
 })
@@ -452,6 +560,50 @@ describe("EngineLike", () => {
     )
 
     expect(called).toStrictEqual(settled)
+  })
+
+  it("round-trips a suspension carrying a real permission request through the journal", () => {
+    // `details` used to be `Schema.Unknown`, and the controller attached the
+    // live `PermissionRequired` — a class extending Error — to every permission
+    // park. Nothing encodes an Error to JSON, so the event that carried the park
+    // died on the way into the journal, replacing the park with a schema
+    // failure. This is that exact value, through the union, through JSON, and
+    // back.
+    const request = new Permission.PermissionRequired({
+      requestId: "perm-1",
+      runId: "run-1",
+      capability: new Capability.Capability({ action: "fs:write", resource: "src/**" }),
+      tier: "irreversible",
+      meta: { path: "src/index.ts" }
+    })
+    const suspended = new AgentEvent.Suspended({
+      eventType: "flows.harness.suspended.v1",
+      reason: new EngineLike.SuspendReason({
+        code: "permission-required",
+        message: `Permission ${request.requestId} is required`,
+        details: Schema.encodeSync(Permission.PermissionRequired)(request)
+      })
+    })
+
+    const wire = JSON.parse(JSON.stringify(Schema.encodeSync(AgentEvent.AgentEvent)(suspended)))
+    const decoded = Schema.decodeUnknownSync(AgentEvent.AgentEvent)(wire)
+
+    expect(decoded._tag).toBe("suspended")
+    expect(JSON.stringify(decoded)).toContain("perm-1")
+    expect(JSON.stringify(decoded)).toContain("fs:write")
+    expect(JSON.stringify(decoded)).toContain("src/**")
+  })
+
+  it("refuses a suspend reason whose details are not JSON", () => {
+    // The narrowing is the point: a value the journal cannot hold is refused
+    // where it is constructed rather than where it is written.
+    expect(() =>
+      new EngineLike.SuspendReason({
+        code: "engine",
+        message: "park",
+        details: (() => undefined) as never
+      })
+    ).toThrow()
   })
 
   it("keeps every stable suspend reason code decodable", () => {

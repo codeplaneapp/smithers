@@ -227,8 +227,10 @@ export const subject = (input: Schema.Json): string => clip(target(input) ?? Can
  */
 export const target = (value: Schema.Json): string | undefined => NarrowedCheck.lex(value).find(NarrowedCheck.names)
 
+const encoder = new TextEncoder()
+
 const scalar = (value: unknown): string => {
-  if (typeof value === "string") return `${value.length}b`
+  if (typeof value === "string") return `${encoder.encode(value).byteLength}b`
   if (Array.isArray(value)) return `[${value.length}]`
   if (value !== null && typeof value === "object") return "{…}"
   return String(value)
@@ -256,8 +258,6 @@ export const digest = (value: Schema.Json): string => {
   const rest = keys.length - named.length
   return clip([...named, ...(rest > 0 ? [`+${rest} more`] : [])].join(" "), width)
 }
-
-const encoder = new TextEncoder()
 
 /**
  * The bytes one call carried into the tree: the longest string in its input.
@@ -333,7 +333,7 @@ export const entry = (ordinal: number, call: Settlement): Entry => {
       : subject(call.input),
     ok: call.ok,
     digest: call.ok ? digest(call.value) : clip(call.message ?? "failed", width),
-    bytes: whole.length,
+    bytes: encoder.encode(whole).byteLength,
     mutates,
     payloadBytes: mutates ? payload(call.input) : 0,
     signature: mutates ? Digest.digest(CanonicalJson.stringify([call.flow, call.input])) : ""

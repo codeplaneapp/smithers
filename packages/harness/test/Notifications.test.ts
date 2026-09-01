@@ -330,12 +330,19 @@ describe("harness notification adapter", () => {
 
     // Only the message reaches the transcript. A seat change is not something
     // to tell the model about; it is something to do to the next turn.
-    expect(drained.inserts).toEqual([rendered("say", "ship it")])
+    // Only the message reaches the transcript, and a tool steer reaches it as a
+    // refusal: this run has no provider tools to activate, so the operator's
+    // steer is answered rather than journaled as delivered and dropped.
+    expect(drained.inserts).toHaveLength(3)
+    expect(drained.inserts[0]).toEqual(rendered("say", "ship it"))
+    expect(JSON.stringify(drained.inserts[1])).toContain("grep, edit")
+    expect(JSON.stringify(drained.inserts[1])).toContain("no provider tools")
+    expect(JSON.stringify(drained.inserts[2])).toContain("grep, read")
     expect(drained.seatChanges).toEqual([
       { _tag: "SeatChange", delivery: "steer", admittedAt: 0, seat: "reviewer" },
       { _tag: "ThinkingChange", delivery: "steer", admittedAt: 0, thinking: "high" }
     ])
-    expect(drained.activatedToolNames).toEqual(["grep", "edit", "read"])
+    expect(drained.activatedToolNames).toEqual([])
   })
 
   it("keeps a payload that is not a steering item out of the seat and tool changes", async () => {

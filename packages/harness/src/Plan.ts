@@ -3,8 +3,8 @@
  *
  * These values project the canonical registry metadata defined by
  * `packages/registry/src/Descriptor.ts` and consumed by the core contracts in
- * `docs/specs/Concepts/Flow Builder Brief.md` and the splice boundary in
- * `docs/specs/Concepts/Vendored Flow Engine.md`. Source order is retained
+ * `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary` and the splice boundary in
+ * `packages/harness/docs/concepts.md#child-plans-and-the-splice-boundary`. Source order is retained
  * only for result correlation; graph dependencies are the sole sequencing
  * signal.
  *

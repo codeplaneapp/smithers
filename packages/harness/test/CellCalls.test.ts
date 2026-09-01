@@ -210,6 +210,27 @@ describe("CellCalls.make", () => {
     expect(result.message).toContain("changed after this cell was written")
   })
 
+  it("refuses a call whose entry only changed its input schema", async () => {
+    // The digest used to cover name, capabilities, effects, placement, the
+    // body's PATH and provenance, so a refreshed registry could change what a
+    // flow accepts behind an unchanged path and the drift check said nothing.
+    // The call was then dispatched to a declaration the model had never seen
+    // and came back as `invalid_input`, which asks the model to fix a call that
+    // was right when it was written.
+    const descriptor = await discovered("list")
+    const moved = new Descriptor.FlowDescriptor({
+      ...descriptor,
+      input: new Descriptor.SchemaRefInline({ document: { type: "object", required: ["root"] } })
+    })
+    const result = await resolve(
+      callOf(descriptor, { path: "." }, { declaration: Cell.declarationDigest(moved) }),
+      { implementations: new Map([["list", () => Effect.succeed(succeeded(["never"]))]]) }
+    )
+
+    expect(result.code).toBe("declaration_changed")
+    expect(result.message).toContain("changed after this cell was written")
+  })
+
   it("lets an implementation failure travel in the error channel the cell cannot catch", async () => {
     const descriptor = await discovered("list")
     const exit = await Effect.runPromiseExit(

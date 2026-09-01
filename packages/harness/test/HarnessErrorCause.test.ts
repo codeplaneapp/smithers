@@ -38,9 +38,9 @@ describe("a harness failure carrying a non-JSON cause", () => {
   it("encodes and decodes when the cause holds a bigint and a function", () => {
     const { decoded, encoded } = roundTrip(
       HarnessError,
-      new HarnessError({ code: "adapter_quota_exhausted", message: "the quota is spent", cause: causes.raw() })
+      new HarnessError({ code: "engine_failed", message: "the quota is spent", cause: causes.raw() })
     )
-    expect(decoded.code).toBe("adapter_quota_exhausted")
+    expect(decoded.code).toBe("engine_failed")
     expect(decoded.message).toBe("the quota is spent")
     expect(JSON.stringify(encoded)).toContain("429")
   })

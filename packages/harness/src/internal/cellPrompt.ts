@@ -15,14 +15,14 @@
  * its successor's `context` by hand — is recorded as a design error rather than
  * as an arm that lost: it made the model do the realm's job, which is why it
  * never worked like a REPL. will ruled it out on 2026-08-24. The evidence and
- * the ruling are in `docs/specs/Concepts/Repl Realm.md`.
+ * the ruling are in `packages/harness/docs/concepts.md#repl-realm`.
  *
  * The teaching here is measured, not preferred, and the measurement has now run
  * both ways. The merged optimal-trace program
- * (`evals/swebench/fullbench/analysis/PROGRAM.md`) predicted that more teaching
+ * predicted that more teaching
  * would buy verdicts, and grew the contract it replaced from 8,197 to 11,312
  * characters across changes 2, 9 and 10. The re-run that settles those
- * predictions (`evals/swebench/fullbench/reports/rerun-r91.md`) says it did not:
+ * predictions says it did not:
  * resolved fell 35/45 to 30/45, cost rose 59 %, and five instances spent a whole
  * 1,200 s budget without editing one byte, held there by an unconditional
  * pre-edit reproduction rule. The same wave shows every *tool* change paying.
@@ -54,8 +54,8 @@
  * without the trace that says the failure stopped happening, and do not add one
  * without a trace that says teaching — rather than a tool — is the gap.
  *
- * Governing design: `docs/specs/Concepts/Model Authoring Surface.md` (the
- * ruling) and `docs/specs/Concepts/Agent Cell Context.md` (the surface).
+ * Governing design: `packages/harness/docs/concepts.md#model-authoring-surface` (the
+ * ruling) and `packages/harness/docs/concepts.md#agent-cell-context` (the surface).
  *
  * @since 0.1.0
  */
@@ -137,7 +137,7 @@ export interface Environment {
  * checked. That is will's ruling of 2026-08-23, and it is why the pinned length
  * in `test/CellPrompt.test.ts` moved.
  *
- * Governing design: `docs/specs/Concepts/Repl Realm.md`.
+ * Governing design: `packages/harness/docs/concepts.md#repl-realm`.
  */
 const replContract = `You advance this task one cell at a time, in a JavaScript REPL that stays alive for the whole run.
 
