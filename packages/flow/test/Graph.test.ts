@@ -486,7 +486,7 @@ describe("Graph.build composition", () => {
     }
     const one = digestOf(({ path }) => Write.call({ path, value: 1 }))
 
-    expect(one).toMatchObject({ _tag: "FunctionIdentity", algorithm: "sha256-source-captures/v3" })
+    expect(one).toMatchObject({ _tag: "FunctionIdentity", algorithm: "sha256-source-captures/v4" })
     expect(digestOf(({ path }) => Write.call({ path, value: 1 }))).toEqual(one)
     expect(digestOf(({ path }) => Write.call({ path, value: 2 }))).not.toEqual(one)
 
@@ -591,21 +591,18 @@ describe("Graph.build diagnostics", () => {
     })
   })
 
-  it("records duplicate All structural addresses while keeping the graph inspectable", () => {
-    const graph = Graph.build(Node.all({
-      "x.all.y": Node.succeed("outer"),
-      x: Node.all({ y: Node.succeed("nested") })
-    }))
-
-    expect(Graph.nodes(graph).filter((current) => current.id === "root.all.x.all.y")).toHaveLength(2)
-    expect(Graph.diagnostics(graph)).toHaveLength(1)
-    expect(Graph.diagnostics(graph)[0]).toMatchObject({
-      code: "invalid_all_member",
+  it("refuses duplicate structural addresses before returning a graph", () => {
+    expect(() =>
+      Graph.build(Node.all({
+        "x.all.y": Node.succeed("outer"),
+        x: Node.all({ y: Node.succeed("nested") })
+      }))
+    ).toThrowError(expect.objectContaining({
+      code: "duplicate_node",
       node: "root.all.x.all.y",
       path: [],
       message: expect.stringContaining("durable dispatch identity")
-    })
-    expect(() => Graph.drafts(graph)).toThrow(Graph.diagnostics(graph)[0])
+    }))
   })
 
   it("accepts dotted All member names whose structural addresses remain distinct", () => {
@@ -805,6 +802,29 @@ describe("Graph.build into a plan", () => {
       node: "root",
       message: expect.stringContaining("acyclic")
     }))
+  })
+
+  it("keeps a PlannedReference-shaped payload as data and never invokes payload accessors", () => {
+    let reads = 0
+    const shaped = { _tag: "PlannedReference", node: "ghost", path: [] }
+    const payload = Object.defineProperty({ shaped }, "active", {
+      enumerable: true,
+      get: () => {
+        reads += 1
+        return true
+      }
+    })
+
+    expect(() => Graph.build(Node.succeed(payload))).toThrowError(expect.objectContaining({
+      code: "invalid_payload",
+      message: expect.stringContaining("accessor")
+    }))
+    expect(reads).toBe(0)
+
+    const graph = Graph.build(Node.succeed(shaped))
+    expect(Graph.drafts(graph)[0]?.material.inputs).toEqual([
+      { _tag: "Literal", value: shaped }
+    ])
   })
 
   it("rejects a very deep unknown payload with a typed error instead of overflowing the stack", () => {

@@ -69,6 +69,10 @@ import * as Annotations from "./Flow/Annotations.ts"
 import type * as Flow from "./Flow/Flow.ts"
 import { TypeId as FlowTypeId } from "./Flow/TypeId.ts"
 
+const OutcomeNodeTypeId = Symbol.for("@smthrs/flow/Flow/OutcomeNode")
+const OutcomeValueTypeId = Symbol.for("@smthrs/flow/Flow/OutcomeValue")
+type OutcomeTag = "Done" | "To" | "Park"
+
 /**
  * Why one node depends on another: `value` consumes a result, `continuation`
  * is the sequencing edge a builder or a branch arm records against the
@@ -76,7 +80,6 @@ import { TypeId as FlowTypeId } from "./Flow/TypeId.ts"
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type EdgeReason = "value" | "continuation" | "failure"
 
@@ -86,7 +89,6 @@ export type EdgeReason = "value" | "continuation" | "failure"
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Edge {
   readonly from: string
@@ -103,7 +105,6 @@ export interface Edge {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface GraphNode {
   readonly id: string
@@ -141,7 +142,6 @@ export interface GraphNode {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface LayerRequest {
   readonly nodeId: string
@@ -158,7 +158,6 @@ export interface LayerRequest {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface BuildOptions {
   readonly resolveLayers?: ((request: LayerRequest) => Iterable<string>) | undefined
@@ -185,7 +184,6 @@ export interface BuildOptions {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Graph {
   readonly nodes: ReadonlyArray<GraphNode>
@@ -282,9 +280,15 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 const referenceOf = (value: unknown): PlannedRecord | undefined => {
   const live = Planned.reference(value)
   if (live !== undefined) return live
-  return Predicate.hasProperty(value, "_tag") && value._tag === "PlannedReference"
-    ? value as unknown as PlannedRecord
-    : undefined
+  return Node.plannedReference(value)
+}
+
+/** @private */
+const outcomeTagOf = (ast: Node.Ast): OutcomeTag | undefined => {
+  const descriptor = Object.getOwnPropertyDescriptor(ast, OutcomeNodeTypeId)
+  if (descriptor === undefined || !("value" in descriptor)) return undefined
+  const value = descriptor.value
+  return value === "Done" || value === "To" || value === "Park" ? value : undefined
 }
 
 /**
@@ -332,7 +336,7 @@ const maximumPayloadDepth = 1_000
 interface PayloadWalk {
   readonly at: string
   readonly resolve: (value: unknown) => { readonly value: unknown } | undefined
-  readonly keysOf: (value: Record<string, unknown>) => ReadonlyArray<string>
+  readonly keysOf: (keys: ReadonlyArray<string>) => ReadonlyArray<string>
   readonly rebuild: boolean
 }
 
@@ -346,13 +350,29 @@ interface PayloadWalk {
 interface PayloadFrame {
   readonly source: Record<string, unknown> | ReadonlyArray<unknown>
   readonly keys: ReadonlyArray<string> | undefined
+  readonly members: ReadonlyArray<unknown>
   readonly output: Record<string, unknown> | Array<unknown> | undefined
   index: number
 }
 
 /** @private */
-const isContainer = (value: unknown): value is Record<string, unknown> | ReadonlyArray<unknown> =>
-  Array.isArray(value) || isPlainObject(value)
+const container = (
+  value: unknown,
+  at: string
+): Record<string, unknown> | ReadonlyArray<unknown> | undefined => {
+  if (Array.isArray(value)) return value
+  if (typeof value !== "object" || value === null) return undefined
+  try {
+    return isPlainObject(value) ? value : undefined
+  } catch {
+    throw new GraphBuildError({
+      code: "invalid_payload",
+      node: at,
+      path: [],
+      message: `Payload at "${at}" does not expose an inert object prototype.`
+    })
+  }
+}
 
 /**
  * Walks one payload with an explicit stack. Real recursion would let a deep
@@ -379,24 +399,66 @@ const isContainer = (value: unknown): value is Record<string, unknown> | Readonl
 const walkPayload = (root: unknown, walk: PayloadWalk): unknown => {
   const resolvedRoot = walk.resolve(root)
   if (resolvedRoot !== undefined) return resolvedRoot.value
-  if (!isContainer(root)) return root
-  const open = (source: Record<string, unknown> | ReadonlyArray<unknown>): PayloadFrame =>
-    Array.isArray(source)
-      ? { source, keys: undefined, output: walk.rebuild ? [] : undefined, index: 0 }
-      : {
-        source,
-        // `Array.isArray` does not narrow a readonly array out of its else
-        // branch, so the branch re-states what `isContainer` established.
-        keys: walk.keysOf(source as Record<string, unknown>),
-        output: walk.rebuild ? Object.create(null) as Record<string, unknown> : undefined,
-        index: 0
+  const rootContainer = container(root, walk.at)
+  if (rootContainer === undefined) return root
+  const open = (source: Record<string, unknown> | ReadonlyArray<unknown>): PayloadFrame => {
+    const descriptors = (() => {
+      try {
+        return Object.getOwnPropertyDescriptors(source)
+      } catch {
+        throw new GraphBuildError({
+          code: "invalid_payload",
+          node: walk.at,
+          path: [],
+          message: `Payload at "${walk.at}" does not expose inert own properties.`
+        })
       }
-  const rootFrame = open(root)
+    })()
+    if (Array.isArray(source)) {
+      const members = Array.from({ length: source.length }, (_, index) => {
+        const descriptor = descriptors[String(index)]
+        if (descriptor === undefined) return undefined
+        if (!("value" in descriptor)) {
+          throw new GraphBuildError({
+            code: "invalid_payload",
+            node: walk.at,
+            path: [String(index)],
+            message: `Payload at "${walk.at}" contains an accessor at index ${index}. Pass inert data.`
+          })
+        }
+        return descriptor.value
+      })
+      return { source, keys: undefined, members, output: walk.rebuild ? [] : undefined, index: 0 }
+    }
+    const keys = walk.keysOf(
+      Object.keys(descriptors).filter((key) => descriptors[key]?.enumerable === true)
+    )
+    const members = keys.map((key) => {
+      const descriptor = descriptors[key]!
+      if (!("value" in descriptor)) {
+        throw new GraphBuildError({
+          code: "invalid_payload",
+          node: walk.at,
+          path: [key],
+          message: `Payload at "${walk.at}" contains accessor property "${key}". Pass inert data.`
+        })
+      }
+      return descriptor.value
+    })
+    return {
+      source,
+      keys,
+      members,
+      output: walk.rebuild ? Object.create(null) as Record<string, unknown> : undefined,
+      index: 0
+    }
+  }
+  const rootFrame = open(rootContainer)
   const frames: Array<PayloadFrame> = [rootFrame]
-  const ancestors = new Set<object>([root])
+  const ancestors = new Set<object>([rootContainer])
   while (frames.length > 0) {
     const frame = frames[frames.length - 1]!
-    if (frame.index >= (frame.keys ?? frame.source as ReadonlyArray<unknown>).length) {
+    if (frame.index >= frame.members.length) {
       frames.pop()
       ancestors.delete(frame.source)
       continue
@@ -404,9 +466,7 @@ const walkPayload = (root: unknown, walk: PayloadWalk): unknown => {
     const position = frame.index
     frame.index = position + 1
     const key = frame.keys?.[position]
-    const member = key === undefined
-      ? (frame.source as ReadonlyArray<unknown>)[position]
-      : (frame.source as Record<string, unknown>)[key]
+    const member = frame.members[position]
     const place = (produced: unknown): void => {
       if (frame.output === undefined) return
       if (key === undefined) {
@@ -426,11 +486,12 @@ const walkPayload = (root: unknown, walk: PayloadWalk): unknown => {
       place(resolved.value)
       continue
     }
-    if (!isContainer(member)) {
+    const nested = container(member, walk.at)
+    if (nested === undefined) {
       place(member)
       continue
     }
-    if (ancestors.has(member)) {
+    if (ancestors.has(nested)) {
       throw new GraphBuildError({
         code: "cyclic_payload",
         node: walk.at,
@@ -447,9 +508,9 @@ const walkPayload = (root: unknown, walk: PayloadWalk): unknown => {
           "Flatten the payload: a plan hashes and stores every level of it."
       })
     }
-    const opened = open(member)
+    const opened = open(nested)
     place(opened.output)
-    ancestors.add(member)
+    ancestors.add(nested)
     frames.push(opened)
   }
   return rootFrame.output
@@ -468,7 +529,7 @@ const hydrate = (value: unknown, substitutions: ReadonlyMap<string, string>, at:
   walkPayload(value, {
     at,
     rebuild: true,
-    keysOf: Object.keys,
+    keysOf: (keys) => keys,
     resolve: (member) => {
       const reference = referenceOf(member)
       return reference === undefined
@@ -488,7 +549,7 @@ const literal = (value: unknown, at: string): unknown =>
   walkPayload(value, {
     at,
     rebuild: true,
-    keysOf: (member) => Object.keys(member).sort(),
+    keysOf: (keys) => [...keys].sort(),
     resolve: (member) => {
       const reference = Planned.reference(member)
       return reference === undefined ? undefined : { value: { _tag: "PlannedInput", path: [...reference.path] } }
@@ -637,7 +698,7 @@ const references = (value: unknown, into: Array<PlannedRecord>, at: string): voi
   walkPayload(value, {
     at,
     rebuild: false,
-    keysOf: (member) => Object.keys(member).sort(),
+    keysOf: (keys) => [...keys].sort(),
     resolve: (member) => {
       const reference = Planned.reference(member)
       if (reference === undefined) return undefined
@@ -715,7 +776,6 @@ interface Visit {
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const build = (
   flowOrNode: Flow.Any | Node.Any,
@@ -757,26 +817,16 @@ export const build = (
     readonly payload: unknown
   }): void => {
     if (observedIds.has(entry.id)) {
-      // `invalid_all_member` is the nearest code `@smthrs/plan` publishes, and
-      // a colliding `Node.all` member name is how this is reached in practice,
-      // but the check is over EVERY structural address, so the message says
-      // what actually happened rather than naming one cause. A dedicated
-      // `duplicate_node` code belongs in `GraphBuildErrorCode`, which this
-      // package does not own; the interpreter's own refusal already carries
-      // the typed `duplicate_node_id`.
-      observedDiagnostics.push(
-        new GraphBuildError({
-          code: "invalid_all_member",
-          node: entry.id,
-          path: [],
-          message: `Node id "${entry.id}" is durable dispatch identity, so two nodes may not share one. ` +
-            "Two structural addresses in this graph collided, most often because a Node.all member name " +
-            "contains the separator a nested address also produces. Rename one of them."
-        })
-      )
-    } else {
-      observedIds.add(entry.id)
+      throw new GraphBuildError({
+        code: "duplicate_node",
+        node: entry.id,
+        path: [],
+        message: `Node id "${entry.id}" is durable dispatch identity, so two nodes may not share one. ` +
+          "Two structural addresses in this graph collided, most often because a Node.all member name " +
+          "contains the separator a nested address also produces. Rename one of them."
+      })
     }
+    observedIds.add(entry.id)
     const material: KeyMaterial.KeyMaterial = {
       version: KeyMaterial.version,
       kind: entry.tier,
@@ -899,7 +949,7 @@ export const build = (
         code: "recursion_requires_boundary",
         node: call.id,
         path: [],
-        message: `Flow "${call.flow}" calls itself inline at "${call.id}". ` +
+        message: `Flow "${call.flow}" cannot call itself inline at "${call.id}". ` +
           `Use ${call.flow}.to(payload) to hand off to the next round, or .child(payload) for an explicit boundary.`
       })
     }
@@ -1058,6 +1108,26 @@ export const build = (
       }
       case "Succeed": {
         const value = hydrate(ast.value, substitutions, id)
+        const outcome = outcomeTagOf(ast)
+        if (outcome !== undefined) {
+          const tag = typeof value === "object" && value !== null
+            ? Object.getOwnPropertyDescriptor(value, "_tag")
+            : undefined
+          if (tag === undefined || !("value" in tag) || tag.value !== outcome) {
+            throw new GraphBuildError({
+              code: "invalid_payload",
+              node: id,
+              path: [],
+              message: `Flow outcome node at "${id}" lost its ${outcome} payload.`
+            })
+          }
+          Object.defineProperty(value, OutcomeValueTypeId, {
+            configurable: false,
+            enumerable: false,
+            value: outcome,
+            writable: false
+          })
+        }
         record({
           id,
           kind: ast._tag,
@@ -1067,7 +1137,7 @@ export const build = (
           placement: undefined,
           priority,
           tier: "sealed",
-          body: { _tag: ast._tag },
+          body: outcome === undefined ? { _tag: ast._tag } : { _tag: ast._tag, outcome },
           inputs: [...payloadInputs(value, id), ...inputs],
           ast,
           payload: value
@@ -1287,7 +1357,6 @@ export const build = (
  *
  * @since 0.1.0
  * @category accessors
- * @slop
  */
 export const nodes = (graph: Graph): ReadonlyArray<GraphNode> => graph.nodes
 
@@ -1296,7 +1365,6 @@ export const nodes = (graph: Graph): ReadonlyArray<GraphNode> => graph.nodes
  *
  * @since 0.1.0
  * @category accessors
- * @slop
  */
 export const edges = (graph: Graph): ReadonlyArray<Edge> => graph.edges
 
@@ -1312,7 +1380,6 @@ export const edges = (graph: Graph): ReadonlyArray<Edge> => graph.edges
  *
  * @since 0.1.0
  * @category accessors
- * @slop
  */
 export const drafts = (graph: Graph): ReadonlyArray<Plan.NodeDraft> => {
   const refusal = graph.diagnostics[0]
@@ -1328,6 +1395,5 @@ export const drafts = (graph: Graph): ReadonlyArray<Plan.NodeDraft> => {
  *
  * @since 0.1.0
  * @category accessors
- * @slop
  */
 export const diagnostics = (graph: Graph): ReadonlyArray<GraphBuildError> => graph.diagnostics

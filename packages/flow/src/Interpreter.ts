@@ -42,6 +42,7 @@
  * @since 0.1.0
  */
 import { Key } from "@smthrs/keys"
+import type { GraphBuildError } from "@smthrs/plan/GraphBuildError"
 import * as KeyMaterial from "@smthrs/plan/KeyMaterial"
 import * as Node from "@smthrs/plan/Node"
 import * as Planned from "@smthrs/plan/Planned"
@@ -68,6 +69,8 @@ import { FlowRuntime } from "./FlowRuntime/FlowRuntime.ts"
 import { annotateWaiting } from "./FlowRuntime/WaitingAnnotation.ts"
 import * as Graph from "./Graph.ts"
 
+const OutcomeValueTypeId = Symbol.for("@smthrs/flow/Flow/OutcomeValue")
+
 /**
  * A graph the interpreter will not drive.
  *
@@ -78,7 +81,6 @@ import * as Graph from "./Graph.ts"
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class InterpreterError extends Schema.TaggedError<InterpreterError>()(
   "@smthrs/flow/InterpreterError",
@@ -104,7 +106,6 @@ export class InterpreterError extends Schema.TaggedError<InterpreterError>()(
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Interpretation {
   readonly value: unknown
@@ -144,12 +145,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
  * delimiter splicing and a changed invocation cannot alias an earlier child.
  * SHA-256 uses the same injected derivation services as the repository's
  * other durable identities. The versioned `Key` prefix is dropped because the
- * existing child-id wire format is the bare digest; finding the first `_`
- * preserves that format without hardcoding a particular prefix length.
+ * existing child-id wire format is the bare digest. `Key.digest` owns the
+ * prefix knowledge, so this package never guesses at a stored-key format.
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const childExecutionId = (
   parentExecutionId: string,
@@ -165,7 +165,7 @@ export const childExecutionId = (
       calleeTag,
       payloadDigest
     ]).pipe(Effect.orDie)
-    return tupleDigest.slice(tupleDigest.indexOf("_") + 1)
+    return Key.digest(tupleDigest)
   })
 
 /**
@@ -177,7 +177,6 @@ export const childExecutionId = (
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const interpret = (
   flowOrNode: Parameters<typeof Graph.build>[0],
@@ -187,26 +186,29 @@ export const interpret = (
   Effect.gen(function*() {
     const table = yield* Implementations
     const name = "_tag" in flowOrNode ? flowOrNode._tag : "node"
-    const graph = Graph.build(flowOrNode, payload, options)
     const refuse = (
       code: InterpreterError["code"],
       node: string,
       message: string
     ): Effect.Effect<never, InterpreterError> => Effect.fail(new InterpreterError({ code, flow: name, node, message }))
 
-    const graphNodes = Graph.nodes(graph)
-    const byId = new Map<string, Graph.GraphNode>()
-    for (const node of graphNodes) {
-      if (byId.has(node.id)) {
-        return yield* refuse(
-          "duplicate_node_id",
-          node.id,
-          `Graph of "${name}" contains duplicate node id "${node.id}". ` +
-            "A node id is durable dispatch identity, so two nodes may not share one."
-        )
+    const graph = yield* Effect.try({
+      try: () => Graph.build(flowOrNode, payload, options),
+      catch: (cause) => {
+        // Graph.build owns this synchronous boundary and normalizes every
+        // authoring refusal to GraphBuildError before it escapes.
+        const refusal = cause as GraphBuildError
+        return new InterpreterError({
+          code: refusal.code === "duplicate_node" ? "duplicate_node_id" : "incomplete_graph",
+          flow: name,
+          node: refusal.node,
+          message: refusal.message
+        })
       }
-      byId.set(node.id, node)
-    }
+    })
+
+    const graphNodes = Graph.nodes(graph)
+    const byId = new Map(graphNodes.map((node) => [node.id, node]))
 
     if (graph.diagnostics.length > 0) {
       const first = graph.diagnostics[0]!
@@ -335,6 +337,15 @@ export const interpret = (
           enumerable: true,
           value: resolve(value[key]),
           writable: true
+        })
+      }
+      const outcome = Object.getOwnPropertyDescriptor(value, OutcomeValueTypeId)
+      if (outcome !== undefined && "value" in outcome) {
+        Object.defineProperty(output, OutcomeValueTypeId, {
+          configurable: false,
+          enumerable: false,
+          value: outcome.value,
+          writable: false
         })
       }
       return output
@@ -516,11 +527,18 @@ export const interpret = (
                     Schema.encodeEffect(Schema.toCodecJson(declaration.payloadSchema))(decoded)
                   )
               ) as unknown as Effect.Effect<unknown, never, Services>
-              return {
+              const outcome = {
                 _tag: "To",
                 flow: ast.flow,
                 payload
               } satisfies Outcome.To<unknown>
+              Object.defineProperty(outcome, OutcomeValueTypeId, {
+                configurable: false,
+                enumerable: false,
+                value: "To",
+                writable: false
+              })
+              return outcome
             }
             if (ast.mode === "boundary") {
               // The real boundary of `docs/specs/Concepts/Subflows.md`: an
@@ -643,7 +661,6 @@ const settle = (value: unknown): Effect.Effect<unknown, never, FlowInstance> => 
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layer = <
   Tag extends string,

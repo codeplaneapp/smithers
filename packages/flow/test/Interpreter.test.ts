@@ -479,6 +479,26 @@ describe("Interpreter refusals", () => {
       })
     }))
 
+  it.effect("maps a synchronous graph-build refusal into the typed interpreter channel", () =>
+    Effect.gen(function*() {
+      const Recursive = Flow.make("interpreter/recursive", {
+        payload: { depth: Schema.Number },
+        success: Schema.Number,
+        body: ({ depth }): Node.Node<number> => Recursive.call({ depth })
+      })
+
+      const reason = yield* refusal(Interpreter.interpret(Recursive, { depth: 0 }))
+      expect(reason).toMatchObject({
+        error: {
+          _tag: "@smthrs/flow/InterpreterError",
+          code: "incomplete_graph",
+          flow: "interpreter/recursive",
+          node: "root.flow"
+        }
+      })
+      expect((reason as { readonly error: Error }).error.message).toContain("cannot call itself inline")
+    }))
+
   it.effect("refuses an unimplemented action before the implemented ones ahead of it run", () =>
     Effect.gen(function*() {
       calls.length = 0
