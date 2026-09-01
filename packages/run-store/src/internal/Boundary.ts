@@ -37,6 +37,36 @@ export interface JsonLimits {
 export type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly [key: string]: Json }
 
 /**
+ * Compares admitted JSON trees while ignoring object key order.
+ *
+ * Array order remains significant. `undefined` represents an absent optional
+ * tree and equals only `undefined`.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export const sameJson = (left: Json | undefined, right: Json | undefined): boolean => {
+  if (left === right) return true
+  if (left === undefined || right === undefined) return false
+  if (left === null || right === null) return false
+  if (typeof left !== "object" || typeof right !== "object") return false
+  if (Array.isArray(left)) {
+    if (!Array.isArray(right) || left.length !== right.length) return false
+    for (let index = 0; index < left.length; index++) {
+      if (!sameJson(left[index], right[index])) return false
+    }
+    return true
+  }
+  if (Array.isArray(right)) return false
+  const leftKeys = Object.keys(left)
+  if (leftKeys.length !== Object.keys(right).length) return false
+  for (const key of leftKeys) {
+    if (!Object.hasOwn(right, key) || !sameJson(left[key], right[key])) return false
+  }
+  return true
+}
+
+/**
  * Result of admitting or refusing an unknown JSON candidate.
  *
  * @since 1.0.0-rc.0

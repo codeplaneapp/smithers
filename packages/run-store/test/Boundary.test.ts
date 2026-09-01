@@ -18,6 +18,40 @@ const complaint = (value: unknown, overrides?: Partial<Boundary.JsonLimits>): st
 }
 
 describe("run-store inert JSON boundary", () => {
+  it("compares admitted JSON structurally", () => {
+    const cases: ReadonlyArray<readonly [Boundary.Json | undefined, Boundary.Json | undefined, boolean]> = [
+      [undefined, undefined, true],
+      [undefined, null, false],
+      [null, undefined, false],
+      [null, null, true],
+      [null, false, false],
+      [true, true, true],
+      [true, false, false],
+      [1, 1, true],
+      [1, 2, false],
+      ["value", "value", true],
+      ["value", "other", false],
+      [[], {}, false],
+      [[1], [1], true],
+      [[1], [1, 2], false],
+      [[1, 2], [1, 3], false],
+      [[1, 2], [2, 1], false],
+      [{ a: 1 }, { a: 1 }, true],
+      [{ a: 1 }, { a: 1, b: 2 }, false],
+      [{ a: 1, b: 2 }, { a: 1, c: 2 }, false],
+      [{ a: 1 }, { a: 2 }, false],
+      [
+        { outer: { a: 1, b: [{ c: 2, d: 3 }] }, tail: true },
+        { tail: true, outer: { b: [{ d: 3, c: 2 }], a: 1 } },
+        true
+      ]
+    ]
+
+    for (const [left, right, expected] of cases) {
+      expect(Boundary.sameJson(left, right)).toBe(expected)
+    }
+  })
+
   it("validates complete durable UTF-16 text", () => {
     expect(Boundary.isDurableText("plain")).toBe(true)
     expect(Boundary.isDurableText("\u{1f600}")).toBe(true)
