@@ -92,6 +92,12 @@ const allowedSkips = new Map([
   [
     "faults/case21-jj-pointer-integrity.test.ts",
     "Needs the jj binary to take and restore real snapshots. Skips locally without it and throws on CI."
+  ],
+  [
+    "harness/sandboxToolPlacement.test.ts",
+    "Needs a running Docker daemon to place the standard tools inside a real Alpine machine. Skips "
+      + "without one. It does not throw on CI, as the two jj cases do, because no CI job runs this suite: "
+      + "the workflow builds //e2e:check and never executes //e2e:harness."
   ]
 ])
 
