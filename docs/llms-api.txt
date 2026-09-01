@@ -3952,11 +3952,22 @@ Checkpoints and compaction, and the
 | `Redaction.isSensitiveKey` | const | predicates | Whether a field name names a credential, ignoring case and separators, so `api_key`, `apiKey`, and `x-api-key` are all recognised. |
 | `Redaction.maxDepth` | const | constants | Maximum number of container edges traversed from a redaction root. |
 | `Redaction.Options` | interface | models | Options for `redact`. |
+| `Redaction.binaryWalkLimit` | const | redaction | How many bytes a view may hold, and how many own members `redact` reads off it, before it stops reading them. |
+| `Redaction.binaryMarker` | const | redaction | The key `redact` files a binary view's size under. |
+| `Redaction.functionMarker` | const | redaction | What `redact` writes in place of a function or a class object. |
+| `Redaction.symbolMarker` | const | redaction | What `redact` writes in place of a symbol. |
+| `Redaction.depthMarker` | const | redaction | What `redact` writes past `maxDepth` under `onTooDeep: "name"`. |
 | `Redaction.redact` | const | redaction | Returns `value` with credentials removed. |
 | `Redaction.Redactor` | type | models | A redaction function, as the journal consumes it. |
 | `Redaction.make` | const | constructors | Builds a redactor over a rule set. |
 | `Redaction.redactJsonString` | const | redaction | Applies a redactor to an already-encoded JSON string, returning the re-encoded result. |
 | `Redaction.makeNoop` | const | constructors | The identity redactor, for a caller that persists payloads verbatim by choice: a trusted single-tenant store, or a suite asserting on raw input. |
+| `RedactedLogger.TypeId` | const | type | Marks a logger this module already wrapped. |
+| `RedactedLogger.isRedacted` | const | predicates | Whether `wrap` already wrapped this logger. |
+| `RedactedLogger.redactArgument` | const | redaction | Redacts one value on its way out of the logger. |
+| `RedactedLogger.redactingConsole` | const | constructors | A console that runs every value it is handed through `redactor` and then delegates to `target`. |
+| `RedactedLogger.wrap` | const | combinators | Returns `logger` with the journal's redaction rules over everything it renders. |
+| `RedactedLogger.layer` | const | layers | Replaces the active logger set with redacting wrappers of the same loggers. |
 | `Projection.Projection` | interface | models | An effectful fold over committed journal entries. |
 | `Projection.make` | const | constructors | Constructs a reproducible journal projection. |
 | `OwnerId.OwnerId` | const + type | models | A process identity scoped to a host and a unique ownership nonce. |

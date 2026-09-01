@@ -335,12 +335,17 @@ export const depthMarker = "[Deep]"
  * Objects and arrays are rebuilt: a field whose name {@link isSensitiveKey}
  * is replaced wholesale, every other string is run through the textual rules,
  * and a cycle is collapsed to `"[Circular]"` so the result always encodes.
- * Non-string leaves are returned untouched: redacting a number or a boolean
- * would destroy data without protecting anything.
+ * A number, a boolean, `null` and `undefined` are returned untouched, because
+ * redacting one destroys data without protecting anything. A function and a
+ * symbol are NAMED, {@link functionMarker} and {@link symbolMarker}: a body, an
+ * own property and a description are all text a renderer prints, and none of it
+ * can be rewritten in place.
  *
  * Traversal accepts at most {@link maxDepth} container edges. A deeper value
- * throws so the journal boundary can report a typed `invalid_event` instead
- * of overflowing the runtime stack.
+ * throws by default, so the journal boundary can report a typed `invalid_event`
+ * instead of overflowing the runtime stack. {@link Options.onTooDeep} set to
+ * `"name"` writes {@link depthMarker} in its place instead, which is what a
+ * logger wants.
  *
  * @since 0.1.0
  * @category redaction
@@ -403,7 +408,7 @@ export const redact = (value: unknown, options?: Options): unknown => {
     // of it can be redacted in place, so the value is named instead.
     if (typeof node === "function") return functionMarker
     if (typeof node === "symbol") return symbolMarker
-    if (node === null || (typeof node !== "object" && typeof node !== "function")) return node
+    if (node === null || typeof node !== "object") return node
     if (isBinary(node)) return binary(node, ancestors, depth)
     if (ancestors.has(node)) return "[Circular]"
     // A journal row is bounded by its schema, but a LOGGED value is arbitrary:
@@ -415,7 +420,6 @@ export const redact = (value: unknown, options?: Options): unknown => {
     try {
       const toJSON = (node as { toJSON?: unknown }).toJSON
       if (typeof toJSON === "function") return walk(toJSON.call(node), ancestors, depth)
-      if (typeof node === "function") return node
       if (Array.isArray(node)) {
         return node.map((element) => walk(element, ancestors, depth + 1))
       }

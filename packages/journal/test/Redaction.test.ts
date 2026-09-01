@@ -226,7 +226,7 @@ describe("Redaction", () => {
     })
   })
 
-  it("mirrors JSON.stringify for Date and callable toJSON values", () => {
+  it("mirrors JSON.stringify for Date and toJSON values, and names a callable", () => {
     const instant = "2020-01-01T00:00:00.000Z"
     const date = new Date(instant)
     expect(Redaction.redact(date)).toBe(instant)
@@ -246,10 +246,18 @@ describe("Redaction", () => {
     selfReturning.toJSON = () => selfReturning
     expect(Redaction.redact(selfReturning)).toBe("[Circular]")
 
+    // Re-pinned 2026-09-01: these expected `{ safe: 1 }` and the function
+    // itself, which was the mirror of `JSON.stringify` for a callable. A
+    // function is now NAMED instead, ahead of the `toJSON` branch, because
+    // neither its body nor its own properties are text the walk can rewrite in
+    // place and a renderer prints all of it: `[Function: deploy] { token:
+    // "sk-..." }` reached the operator's terminal that way. Naming costs the
+    // `toJSON` parity for a callable, which no journal payload has, and buys a
+    // shape carrying no caller text at all.
     const callable = Object.assign(() => "ignored", { toJSON: () => ({ safe: 1 }) })
-    expect(Redaction.redact(callable)).toEqual({ safe: 1 })
+    expect(Redaction.redact(callable)).toBe(Redaction.functionMarker)
     const plainCallable = () => "kept"
-    expect(Redaction.redact(plainCallable)).toBe(plainCallable)
+    expect(Redaction.redact(plainCallable)).toBe(Redaction.functionMarker)
   })
 
   it("accepts a value at the depth bound and rejects one beyond it", () => {

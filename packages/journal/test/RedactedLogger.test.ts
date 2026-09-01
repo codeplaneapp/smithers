@@ -126,9 +126,13 @@ describe("RedactedLogger", () => {
       )
       const text = rendered(recorded)
       expect(text).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
-      // The provider-key rule wins the span before the bearer rule reaches it,
-      // which is the journal's own order and the reason both rules exist.
-      expect(text).toContain("Bearer [REDACTED_API_KEY]")
+      // Re-pinned 2026-09-01: this expected `Bearer [REDACTED_API_KEY]`, which
+      // was the rule order on this branch before the merge, where `api-key` ran
+      // ahead of `bearer-token`. The rewritten `bearer-token` now runs first and
+      // takes the whole `Bearer <token>` span, which strictly contains the span
+      // `api-key` used to take. The credential is removed by a wider rule under
+      // a different marker, which the assertion above holds unchanged.
+      expect(text).toContain("Bearer [REDACTED_TOKEN]")
     }))
 
   it.effect("survives a cause carrying a host error the clone cannot impersonate", () =>
@@ -231,7 +235,10 @@ describe("RedactedLogger", () => {
       yield* Effect.sync(() => wrapped.log({ ...captured!, message: "bare Bearer sk-live-e2ecase22NEVERLOGTHIS" }))
       const text = JSON.stringify(seen)
       expect(text).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
-      expect(text).toContain("[REDACTED_API_KEY]")
+      // Re-pinned 2026-09-01: `bearer-token` runs ahead of `api-key` and takes
+      // the whole span, so the marker is the token one. The span is named here
+      // as well as the marker, which is stricter than the bare marker was.
+      expect(text).toContain("bare Bearer [REDACTED_TOKEN]")
     }))
 
   it.effect("redacts the span event the tracer logger exports", () =>
@@ -243,7 +250,10 @@ describe("RedactedLogger", () => {
       )
       const [name, , attributes] = onlyEvent(spans)
       expect(name).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
-      expect(name).toBe("calling https://example.test/deploy with Bearer [REDACTED_API_KEY]")
+      // Re-pinned 2026-09-01: the rewritten `bearer-token` takes the span the
+      // `api-key` rule used to take, so the exported event name carries the
+      // token marker. The annotation below is untouched by the reorder.
+      expect(name).toBe("calling https://example.test/deploy with Bearer [REDACTED_TOKEN]")
       expect(attributes.apiKey).toBe(Redaction.placeholder)
     }))
 
@@ -335,7 +345,9 @@ describe("RedactedLogger", () => {
       )
       const rendered = String(onlyEvent(spans)[2]["effect.cause"])
       expect(rendered).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
-      expect(rendered).toContain("Bearer [REDACTED_API_KEY]")
+      // Re-pinned 2026-09-01: `bearer-token` wins the span, so the defect's
+      // message reaches the span attribute under the token marker.
+      expect(rendered).toContain("Bearer [REDACTED_TOKEN]")
     }))
 
   it("survives every exotic value a log line can carry", () => {
@@ -471,7 +483,15 @@ describe("RedactedLogger", () => {
     // before the check and carried no depth, so a deep value on a cause still
     // exhausted the stack and the RangeError killed the run from inside the
     // logger. The chain here is deeper than the cap and hangs off the Error.
-    const redactor = Redaction.make()
+    //
+    // Re-pinned 2026-09-01: the redactor is built the way `wrap` builds it. The
+    // cap moved onto the `onTooDeep` seam in the merge, and a redactor left at
+    // the journal's default THROWS past `Redaction.maxDepth`; `redactArgument`
+    // catches that one frame up and replaces the whole argument with
+    // `[Unrenderable]`, which is the outcome the logger's `"name"` exists to
+    // avoid. Building the redactor here the way the logger does is what puts
+    // this case back on the logger's path.
+    const redactor = Redaction.make({ onTooDeep: "name" })
     const outer = new Error("outer") as Error & { detail?: unknown }
     let chain: Record<string, unknown> = { token: "sk-live-abcdefgh" }
     for (let level = 0; level < 400; level++) chain = { chain }
@@ -497,6 +517,32 @@ describe("RedactedLogger", () => {
     expect(rendered).not.toContain("sk-live-abcdefgh")
     expect(rendered).toContain(Redaction.depthMarker)
   })
+
+  it.effect("names a too-deep value on the line rather than losing the line", () =>
+    Effect.gen(function*() {
+      // Pinned 2026-09-01, the seam between the two depth policies. The journal
+      // path THROWS past `Redaction.maxDepth`, because a durable row quietly
+      // truncated to a marker is worse than a refused write. On a log line that
+      // throw is caught one frame up in `redactArgument`, which replaces EVERY
+      // argument with `[Unrenderable]`, so one deep member would cost the
+      // operator the whole line. `wrap` therefore builds its redactor with
+      // `onTooDeep: "name"`: the deep member is named, the rest of the line
+      // survives, and the credential under the cap is never reached at all.
+      const seen: Array<unknown> = []
+      const direct = Logger.make<unknown, void>((options) => {
+        seen.push(options.message)
+      })
+      let chain: Record<string, unknown> = { token: "sk-live-abcdefgh" }
+      for (let level = 0; level < Redaction.maxDepth + 2; level++) chain = { chain }
+      yield* Effect.logInfo("deploying", chain).pipe(
+        Effect.provide(Logger.layer([RedactedLogger.wrap(direct)]))
+      )
+      const text = JSON.stringify(seen)
+      expect(text).not.toContain("sk-live-abcdefgh")
+      expect(text).not.toContain("[Unrenderable]")
+      expect(text).toContain("deploying")
+      expect(text).toContain(Redaction.depthMarker)
+    }))
 
   it("does not leak a credential an error's own name carries", () => {
     // `plainError` copied the original's `name` verbatim while running message
@@ -822,7 +868,9 @@ describe("RedactedLogger", () => {
         )
       )
       const document = JSON.parse(String(recorded.lines.flat()[0]))
-      expect(document.message).toBe("calling https://example.test/deploy with Bearer [REDACTED_API_KEY]")
+      // Re-pinned 2026-09-01: `bearer-token` wins the span, so the structured
+      // document carries the token marker in its message.
+      expect(document.message).toBe("calling https://example.test/deploy with Bearer [REDACTED_TOKEN]")
       expect(document.annotations.apiKey).toBe(Redaction.placeholder)
     }))
 
