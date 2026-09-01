@@ -69,6 +69,7 @@ const hostCrypto = Layer.succeed(
 
 // Every eval seat is scripted, so there is no provider quota to park on. The
 // suite also has no approved plan envelope from which to derive a spend cap.
+// eslint-disable-next-line no-restricted-syntax -- offline evals have no approved envelope
 const offlinePolicy = Layer.mergeAll(QuotaPolicy.layerUnclassified(), Budget.layerUnbounded())
 
 /**
