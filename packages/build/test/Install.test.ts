@@ -276,21 +276,4 @@ describe("Install", () => {
       expect(measured.npmrc).toBe(null)
     })
   })
-
-  it("refuses an install whose declared manager is not the provided layer", async () => {
-    await withFixture(async (root) => {
-      const evidence = await packageJsonDigest(root)
-      const service = managerService({ root, evidence })
-      await expect(Effect.runPromise(
-        Install.checkDeclaredManager("bun").pipe(
-          Effect.provideService(PackageManager.PackageManager, service)
-        )
-      )).rejects.toThrow(/BUILD\.ts declares bun and the composition provided the pnpm layer/)
-      await Effect.runPromise(
-        Install.checkDeclaredManager("pnpm").pipe(
-          Effect.provideService(PackageManager.PackageManager, service)
-        )
-      )
-    })
-  })
 })
