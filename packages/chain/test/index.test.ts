@@ -5,6 +5,7 @@ describe("index", () => {
   it("exports every namespace", () => {
     expect(Object.keys(chain).sort()).toEqual([
       "Author",
+      "AuthorDeclaration",
       "Authorize",
       "CallKey",
       "Catalog",

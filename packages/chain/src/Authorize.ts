@@ -12,7 +12,7 @@
  * @since 0.1.0
  */
 import * as Capability from "@smthrs/capability/Capability"
-import type * as Permission from "@smthrs/capability/Permission"
+import * as Permission from "@smthrs/capability/Permission"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import type * as Catalog from "./Catalog.ts"
 
@@ -127,12 +127,102 @@ export const claimPattern = (declared: string): Option.Option<Capability.Capabil
   return decoded._tag === "Some" ? decoded : Option.none()
 }
 
+const decodeCapability = Schema.decodeUnknownOption(Capability.Capability)
+
 /**
- * The rules-backed seam, evaluated pattern-to-pattern with the capability
- * package's `subsumes`: an `allow` rule must subsume the whole claim, a
- * `deny` rule fires on any overlap in either direction, `deny` beats
- * `ask` beats `allow` across a request's claims, and an unmatched or
- * unparseable claim asks — the kernel's conservative posture.
+ * The claim as an exact capability, when it names one. A claim whose action
+ * is a family selector (`*`, `ns:*`) or whose resource carries a glob
+ * metacharacter selects a SET of capabilities, and `Permission.evaluate`
+ * decides one capability at a time, so those stay on the pattern path.
+ */
+const exactCapability = (claim: Capability.CapabilityPattern): Option.Option<Capability.Capability> =>
+  claim.resource.includes("*") || claim.resource.includes("?")
+    ? Option.none()
+    : decodeCapability({ action: claim.action, resource: claim.resource })
+
+const anyResource = (action: Capability.CapabilityPattern["action"]): Capability.CapabilityPattern =>
+  new Capability.CapabilityPattern({ action, resource: "**" })
+
+/**
+ * Whether two action selectors can name a common action. Selectors are `*`,
+ * `ns:*`, or an exact action, and for those three shapes overlap is exactly
+ * subsumption in one direction or the other, so this reuses the capability
+ * package's predicate over a resource both sides cover rather than
+ * re-deriving the action grammar.
+ */
+const actionsMayOverlap = (
+  left: Capability.CapabilityPattern["action"],
+  right: Capability.CapabilityPattern["action"]
+): boolean =>
+  Capability.subsumes(anyResource(left), anyResource(right)) ||
+  Capability.subsumes(anyResource(right), anyResource(left))
+
+/** The leading run of a resource glob that matches itself literally. */
+const literalPrefix = (resource: string): string => {
+  const star = resource.indexOf("*")
+  const question = resource.indexOf("?")
+  const end = Math.min(star < 0 ? resource.length : star, question < 0 ? resource.length : question)
+  return resource.slice(0, end)
+}
+
+/**
+ * Whether two resource globs can select a common resource. The answer is
+ * `false` only when disjointness is PROVABLE — two literals that differ, or
+ * literal prefixes that disagree on their shared span — and `true`
+ * otherwise. That asymmetry is the point: this predicate only ever decides
+ * whether a `deny` rule applies, so an unprovable relationship must keep
+ * the deny alive rather than fall through to a later allow.
+ */
+const resourcesMayOverlap = (left: string, right: string): boolean => {
+  const leftPrefix = literalPrefix(left)
+  const rightPrefix = literalPrefix(right)
+  if (leftPrefix === left && rightPrefix === right) return left === right
+  const shared = Math.min(leftPrefix.length, rightPrefix.length)
+  return leftPrefix.slice(0, shared) === rightPrefix.slice(0, shared)
+}
+
+const mayOverlap = (rule: Capability.CapabilityPattern, claim: Capability.CapabilityPattern): boolean =>
+  actionsMayOverlap(rule.action, claim.action) && resourcesMayOverlap(rule.resource, claim.resource)
+
+/**
+ * Evaluates one wildcard claim, which names a set of capabilities rather
+ * than a single one. An `allow` must PROVE it covers the whole set; a
+ * `deny` fires unless it is provably disjoint from it. Matching rules are
+ * last-match-wins, exactly as `Permission.evaluate` orders them.
+ */
+const evaluatePattern = (
+  rules: ReadonlyArray<Permission.Rule>,
+  claim: Capability.CapabilityPattern
+): Permission.RuleEffect => {
+  let verdict: Permission.RuleEffect = "ask"
+  for (const rule of rules) {
+    const applies = rule.effect === "deny"
+      ? mayOverlap(rule.pattern, claim)
+      : Capability.subsumes(rule.pattern, claim)
+    if (applies) {
+      verdict = rule.effect
+    }
+  }
+  return verdict
+}
+
+/**
+ * The rules-backed seam. A claim that names one exact capability is decided
+ * by `@smthrs/capability`'s own `Permission.evaluate`, so a host reusing its
+ * kernel ruleset gets the same verdict from both engines. A claim that names
+ * a SET — a family action or a resource glob — is decided pattern-to-pattern
+ * instead, since `evaluate` takes one concrete capability: an `allow` must
+ * subsume the whole set, and a `deny` fires unless it is provably disjoint
+ * from it, so an undecidable deny never falls through to a later allow.
+ *
+ * Two orderings, deliberately distinct. Across a REQUEST'S CLAIMS `deny`
+ * beats `ask` beats `allow`: any denied claim refuses the call and any
+ * asking claim outranks an allowed one. Across RULES the last match wins,
+ * which is what `Permission.evaluate` documents and implements, so a later
+ * allow does override an earlier deny.
+ *
+ * An unmatched or unparseable claim asks — the kernel's conservative
+ * posture.
  *
  * @category layers
  * @since 0.1.0
@@ -153,14 +243,10 @@ export const layerRules = (rules: ReadonlyArray<Permission.Rule>): Layer.Layer<A
               ask = ask ?? declared
               continue
             }
-            let verdict: Permission.RuleEffect | undefined
-            for (const rule of rules) {
-              const covers = Capability.subsumes(rule.pattern, parsed.value)
-              const overlaps = covers || Capability.subsumes(parsed.value, rule.pattern)
-              if (rule.effect === "deny" ? overlaps : covers) {
-                verdict = rule.effect
-              }
-            }
+            const exact = exactCapability(parsed.value)
+            const verdict = Option.isSome(exact)
+              ? Permission.evaluate([rules], exact.value)
+              : evaluatePattern(rules, parsed.value)
             if (verdict === "deny") {
               return yield* new AuthorizeError({
                 code: "denied",

@@ -19,7 +19,18 @@
 export * as Author from "./Author.ts"
 
 /**
- * Gate 4's seam: per-call authorization against the pinned envelope.
+ * The author entry's declaration: the name, description, digest, and
+ * capability claim both the trampoline and the prompt read.
+ *
+ * @category namespace exports
+ * @since 0.1.0
+ * @slop
+ */
+export * as AuthorDeclaration from "./AuthorDeclaration.ts"
+
+/**
+ * Gate 4's seam: per-call authorization against the capabilities an entry
+ * declares.
  *
  * @category namespace exports
  * @since 0.1.0

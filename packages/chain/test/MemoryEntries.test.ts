@@ -242,7 +242,8 @@ describe("MemoryEntries", () => {
         Effect.provide(MemoryEntries.layer.pipe(Layer.provide(services)))
       )
     )
-    expect(catalog).toEqual(["sys/now", "sys/random", "remember", "recall"])
+    // The system entries come last so a host entry cannot shadow them.
+    expect(catalog).toEqual(["remember", "recall", "sys/now", "sys/random"])
   })
 
   it("lets a chain script remember and recall through the one door", async () => {

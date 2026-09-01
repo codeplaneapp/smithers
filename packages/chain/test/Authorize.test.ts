@@ -1,12 +1,11 @@
-import { CapabilityPattern } from "@smthrs/capability/Capability"
-import { Rule } from "@smthrs/capability/Permission"
+import { CapabilityPattern, parse } from "@smthrs/capability/Capability"
+import { evaluate, Rule } from "@smthrs/capability/Permission"
 import { Effect, Layer, Option } from "effect"
 import { describe, expect, it } from "vitest"
-import * as Author from "../src/Author.ts"
-import * as AuthorDeclaration from "../src/AuthorDeclaration.ts"
-import * as Authorize from "../src/Authorize.ts"
-import * as Catalog from "../src/Catalog.ts"
 import type * as Event from "../src/Event.ts"
+// The barrel is the advertised surface: the seam's own suite reaches the
+// author claim the way a host must, not through the `./*` deep subpath.
+import { Author, AuthorDeclaration, Authorize, Catalog } from "../src/index.ts"
 import { countingEntry, failChain, flow, runChain } from "./harness.ts"
 
 const readEntry = (result: unknown): Catalog.Entry & { count: () => number } => {
@@ -21,6 +20,34 @@ const allowAuthor = new Rule({ effect: "allow", pattern: pattern("model:call", "
 const allowRead = new Rule({ effect: "allow", pattern: pattern("fs:read", "**") })
 const denyAll = new Rule({ effect: "deny", pattern: pattern("*", "**") })
 const allowAll = new Rule({ effect: "allow", pattern: pattern("*", "**") })
+const denyEtc = new Rule({ effect: "deny", pattern: pattern("fs:write", "/etc/*") })
+const allowRepoStar = new Rule({ effect: "allow", pattern: pattern("fs:read", "/repo/*") })
+const allowRepoGlob = new Rule({ effect: "allow", pattern: pattern("fs:read", "/repo/**") })
+const allowExact = new Rule({ effect: "allow", pattern: pattern("fs:read", "/repo/a.ts") })
+const denyMiddleStar = new Rule({ effect: "deny", pattern: pattern("fs:read", "a/*/x") })
+const denyWrite = new Rule({ effect: "deny", pattern: pattern("fs:write", "**") })
+const allowSrc = new Rule({ effect: "allow", pattern: pattern("fs:read", "src/**") })
+const denyVendor = new Rule({ effect: "deny", pattern: pattern("fs:read", "vendor/*") })
+
+/** The seam's verdict for one claim, in `Permission.evaluate`'s vocabulary. */
+const verdictOf = (
+  rules: ReadonlyArray<Rule>,
+  claim: string
+): Promise<"allow" | "ask" | "deny"> =>
+  Effect.runPromise(
+    Effect.flatMap(
+      Authorize.Authorize,
+      (seam) => seam.authorize({ capabilities: [claim], name: "probe", slot: { chain: "", link: 0, ordinal: 0 } })
+    ).pipe(
+      Effect.as("allow" as const),
+      Effect.catchTag(
+        "/chain/AuthorizeError",
+        (error) => Effect.succeed(error.code === "denied" ? "deny" as const : "ask" as const)
+      ),
+      Effect.provide(Authorize.layerRules(rules)),
+      Effect.orDie
+    )
+  )
 
 const readScript = flow(
   `const content = await ctx.call("repo/read", { path: "src/a.ts" })`,
@@ -279,6 +306,39 @@ describe("Authorize", () => {
       ).pipe(Effect.provide(authorizeWith()), Effect.orDie)
     )
     expect(error.code).toBe("approval_required")
+  })
+
+  // The seam must not be a second, weaker permission engine. Every row is a
+  // rule/claim pair the old pattern-against-pattern evaluation got wrong in
+  // one direction or the other, and each asserts the chain's verdict AND
+  // that it equals what `@smthrs/capability` decides for the same inputs.
+  it.each([
+    ["a single-star deny", [denyEtc], "fs:write:/etc/passwd", "deny"],
+    ["a single-star allow", [allowRepoStar], "fs:read:/repo/a.ts", "allow"],
+    ["a double-star allow", [allowRepoGlob], "fs:read:/repo/a.ts", "allow"],
+    ["an exact rule", [allowExact], "fs:read:/repo/a.ts", "allow"],
+    ["a deny after an allow", [allowRead, denyEtc], "fs:write:/etc/passwd", "deny"],
+    ["an allow after a deny", [denyEtc, allowRead], "fs:read:/repo/a.ts", "allow"],
+    ["no rule at all", [], "fs:read:/repo/a.ts", "ask"]
+  ] as const)("decides %s exactly as the capability kernel does", async (_case, rules, claim, expected) => {
+    const parsed = Option.getOrThrow(parse(claim))
+    expect(await verdictOf(rules, claim)).toBe(expected)
+    expect(evaluate([rules], parsed)).toBe(expected)
+  })
+
+  it("denies a wildcard claim whose overlap with a deny rule cannot be proven", async () => {
+    // `fs:read:a/b/**` plainly covers `a/b/x`, which the deny rule forbids,
+    // and the deny is placed LAST so rule ordering cannot excuse an allow.
+    // `Capability.subsumes` cannot prove that overlap, and reading "cannot
+    // prove" as "does not apply" is exactly the fail-open this pins shut.
+    expect(await verdictOf([allowRead, denyMiddleStar], "fs:read:a/b/**")).toBe("deny")
+  })
+
+  it("still allows a wildcard claim when the deny rule is provably disjoint", async () => {
+    // A different action namespace and a different literal resource prefix
+    // are both provable, so failing closed must not swallow them.
+    expect(await verdictOf([allowRead, denyWrite], "fs:read:src/**")).toBe("allow")
+    expect(await verdictOf([allowSrc, denyVendor], "fs:read:src/**")).toBe("allow")
   })
 
   it("parses claims into patterns", () => {

@@ -96,7 +96,9 @@ export const layerNoop = (overrides: Partial<Service> = {}): Layer.Layer<Journal
 export const layerMemory = (initial: ReadonlyArray<Event.Event> = []): Layer.Layer<Journal> =>
   Layer.effect(Journal)(
     Effect.gen(function*() {
-      const ref = yield* Ref.make<ReadonlyArray<Event.Event>>(initial)
+      // Copied, never retained: a caller that keeps mutating its seed array
+      // would otherwise keep rewriting the journal's history behind it.
+      const ref = yield* Ref.make<ReadonlyArray<Event.Event>>([...initial])
       return make({
         append: Effect.fn("Journal.append")((event, expectedPosition) =>
           Ref.modify(ref, (events) =>

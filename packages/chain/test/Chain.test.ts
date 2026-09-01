@@ -2,9 +2,13 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { describe, expect, it } from "vitest"
 import * as Author from "../src/Author.ts"
+import * as Catalog from "../src/Catalog.ts"
 import * as Chain from "../src/Chain.ts"
 import type * as Event from "../src/Event.ts"
+import * as Journal from "../src/Journal.ts"
+import * as Observation from "../src/Observation.ts"
 import * as ScriptRunner from "../src/ScriptRunner.ts"
+import * as SubChains from "../src/SubChains.ts"
 import { countingEntry, failChain, failingEntry, flow, runChain } from "./harness.ts"
 
 const grepResult = { files: ["a.ts", "b.ts", "c.ts", "d.ts"] }
@@ -471,5 +475,134 @@ describe("Chain", () => {
     const { outcome } = await runChain({ author })
     expect(outcome).toEqual({ _tag: "Done", value: "recovered" })
     expect((seen[1] as Author.Input).context).toEqual([])
+  })
+})
+
+// `Journal.append` takes an `expectedPosition` so an append is a
+// compare-and-swap. `Chain.run` cannot simply track the journal's length,
+// because a sub-chain legitimately appends to the same journal under its own
+// id while the parent frame is suspended — so what the run tracks is the
+// count of events in ITS OWN scope, and a second writer on that scope is a
+// conflict rather than a silent interleave.
+describe("Chain journal ownership", () => {
+  const twoCalls = flow(
+    `await ctx.call("edit", { file: "a.ts" })`,
+    `await ctx.call("edit", { file: "b.ts" })`,
+    `return done("ok")`
+  )
+
+  const sharedLayers = (entries: ReadonlyArray<Catalog.Entry>, journal: Layer.Layer<Journal.Journal>) => {
+    const base = Layer.mergeAll(journal, Author.layerFn(() => twoCalls), ScriptRunner.layerInProcess)
+    return Layer.mergeAll(base, Catalog.layer(entries).pipe(Layer.provide(base)))
+  }
+
+  it("never settles one call slot twice when two runs race over one journal", async () => {
+    const edit = countingEntry("edit", { ok: true })
+    const events = await Effect.runPromise(
+      Effect.gen(function*() {
+        yield* Effect.all(
+          [Effect.exit(Chain.run({ goal: "race" })), Effect.exit(Chain.run({ goal: "race" }))],
+          { concurrency: 2 }
+        )
+        const journal = yield* Journal.Journal
+        return yield* journal.read
+      }).pipe(Effect.provide(sharedLayers([edit.entry], Journal.layerMemory())))
+    )
+    // Effect execution is at-least-once: the losing run may dispatch a
+    // handler live before its next append conflicts. What must hold is that
+    // the JOURNAL records each slot once, so no fold ever sees a duplicate
+    // and no link ends twice. Both were violated before the run tracked the
+    // events it owns: ordinal 1 of link 1 settled twice and link 1 ended
+    // twice, with both runs reporting Done.
+    const slots = events
+      .filter((event): event is Event.CallSettled => event._tag === "CallSettled")
+      .map((event) => `${event.key.link}/${event.key.ordinal}`)
+    expect(slots).toEqual([...new Set(slots)])
+    expect(slots.filter((slot) => slot.startsWith("1/"))).toEqual(["1/0", "1/1"])
+    const ended = events.filter((event) => event._tag === "LinkEnded").map((event) => event.link)
+    expect(ended).toEqual([...new Set(ended)])
+    expect(edit.count()).toBeGreaterThanOrEqual(2)
+  })
+
+  it("fails with journal_conflict when another writer advances the same scope", async () => {
+    // The intruder stands in for a second process running this same chain:
+    // it appends an in-scope event out from under the live run.
+    let stored: ReadonlyArray<Event.Event> = []
+    const journal = Layer.succeed(Journal.Journal)(Journal.make({
+      append: (event, expectedPosition) =>
+        stored.length === expectedPosition
+          ? Effect.sync(() => {
+            stored = [...stored, event]
+          })
+          : Effect.fail(
+            new Journal.JournalError({
+              code: "journal_conflict",
+              message: `append expected journal position ${expectedPosition}, found ${stored.length}`
+            })
+          ),
+      read: Effect.sync(() => stored)
+    }))
+    const intruder: Catalog.Entry = {
+      description: "appends into this chain's scope behind the run's back",
+      handler: () =>
+        Effect.sync(() => {
+          stored = [...stored, {
+            _tag: "GateRejected",
+            link: 1,
+            observation: Observation.make("shape", "written by another process"),
+            ordinal: 9
+          }]
+          return { ok: true }
+        }),
+      name: "edit"
+    }
+    const error = await Effect.runPromise(
+      Effect.flip(Chain.run({ goal: "race" })).pipe(
+        Effect.provide(sharedLayers([intruder], journal))
+      ) as Effect.Effect<{ _tag: string; code: string }, never, never>
+    )
+    expect(error._tag).toBe("/chain/JournalError")
+    expect(error.code).toBe("journal_conflict")
+  })
+
+  it("lets a sub-chain append to the same journal without conflicting", async () => {
+    const spawn = flow(
+      `const child = await ctx.call("agent", { goal: "child work" })`,
+      `return done(child)`
+    )
+    const scripts = [spawn, flow(`return done("child done")`)]
+    const catalog = Layer.effect(Catalog.Catalog)(SubChains.make({ entries: [] }))
+    const { outcome } = await runChain({ author: Author.layerMock(scripts), catalog })
+    expect(outcome).toEqual({ _tag: "Done", value: { _tag: "Done", value: "child done" } })
+  })
+})
+
+// The author gate journals its rejection BEFORE the settled marker so a
+// crash between the two resumes through `rejectedPrior` rather than
+// replaying the marker as if it were a real author result.
+describe("Chain crash recovery", () => {
+  it("resumes a link whose rejection was journaled without its settled marker", async () => {
+    const seen: Array<Author.Input> = []
+    const author = Author.layerFn((input) => {
+      seen.push(input)
+      return doneScript
+    })
+    const initial: ReadonlyArray<Event.Event> = [
+      { _tag: "ChainStarted", envelope: null, goal: "fix TODOs" },
+      {
+        _tag: "GateRejected",
+        link: 0,
+        observation: Observation.make("shape", "no flow block"),
+        ordinal: 0
+      }
+    ]
+    const { events, outcome } = await runChain({ author, initial })
+    expect(outcome).toEqual({ _tag: "Done", value: "recovered" })
+    // Ordinal 0 replayed as the recorded rejection; the live author call is
+    // ordinal 1, and it carries the crashed attempt's observation.
+    const settled = events.filter((event): event is Event.CallSettled => event._tag === "CallSettled")
+    expect(settled.map((event) => event.key.ordinal)).toEqual([1])
+    expect(seen).toHaveLength(1)
+    expect(seen[0]?.context).toEqual(["fix TODOs", "[shape] no flow block"])
   })
 })
