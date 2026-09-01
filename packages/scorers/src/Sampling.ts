@@ -68,10 +68,15 @@ const hash = (text: string): number => {
  */
 const material = (parts: ReadonlyArray<string>): string => parts.map((part) => `${part.length}:${part}`).join("")
 
-const received = (sampling: Sampling): string =>
-  typeof sampling === "object" && sampling !== null && "ratio" in sampling
-    ? `, received ratio ${String(sampling.ratio)}`
-    : ""
+const received = (sampling: Sampling): string => {
+  try {
+    return typeof sampling === "object" && sampling !== null && "ratio" in sampling
+      ? `, received ratio ${String(sampling.ratio)}`
+      : ""
+  } catch {
+    return ""
+  }
+}
 
 const invalid = (sampling: Sampling, cause: unknown): ScorerError =>
   new ScorerError({

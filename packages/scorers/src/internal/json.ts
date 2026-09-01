@@ -8,8 +8,18 @@
  * differ only in such a member would then share one durable identity forever,
  * so the declaration is rejected instead of quietly collapsing.
  *
- * @since 1.0.0
+ * Canonical JSON also calls a `toJSON` member and hashes its replacement value.
+ * Refusing that member is the only decidable answer: anything the replacement
+ * loses is absent from the identity, while calling `toJSON` here to inspect it
+ * would execute caller code twice with no promise that both calls agree.
+ *
+ * @since 0.1.0
  */
+
+// Walking as far as the canonical encoder's 10,000-level limit overflowed the
+// JavaScript stack first. Stopping at 1,000 was the safe choice: it produced an
+// actionable path, while a bare RangeError from a plan-time constructor did not.
+const maxWalkDepth = 1_000
 
 const lossOf = (value: unknown): string | undefined => {
   const type = typeof value
@@ -27,9 +37,22 @@ const read = (node: object, key: string): { readonly value: unknown } | undefine
   }
 }
 
-const hasToJson = (node: object): boolean => {
-  const slot = read(node, "toJSON")
-  return slot !== undefined && typeof slot.value === "function"
+const keys = (
+  node: object
+): {
+  readonly enumerable: ReadonlyArray<string>
+  readonly names: ReadonlyArray<string>
+  readonly symbols: ReadonlyArray<symbol>
+} | undefined => {
+  try {
+    return {
+      enumerable: Object.keys(node),
+      names: Object.getOwnPropertyNames(node),
+      symbols: Object.getOwnPropertySymbols(node)
+    }
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -40,32 +63,43 @@ const hasToJson = (node: object): boolean => {
  * declaration failure cannot leak a configuration into an error message.
  *
  * @category predicates
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const lossyPath = (value: unknown, root: string): string | undefined => {
   const open = new Set<object>()
-  const walk = (node: unknown, path: string): string | undefined => {
+  const walk = (node: unknown, path: string, depth: number): string | undefined => {
+    if (depth > maxWalkDepth) return `${path} is nested deeper than ${maxWalkDepth} levels`
     const loss = lossOf(node)
     if (loss !== undefined) return `${path} is ${loss}`
     if (node === null || typeof node !== "object") return undefined
     if (open.has(node)) return `${path} is circular`
     open.add(node)
     try {
-      if (hasToJson(node)) return undefined
+      const toJson = read(node, "toJSON")
+      if (toJson !== undefined && typeof toJson.value === "function") return `${path} defines toJSON`
+      const own = keys(node)
+      if (own === undefined) return `${path} throws when keys are enumerated`
       if (Array.isArray(node)) {
         for (let index = 0; index < node.length; index += 1) {
           const slot = read(node, String(index))
           if (slot === undefined) return `${path}[${index}] throws when read`
-          const found = walk(slot.value, `${path}[${index}]`)
+          const found = walk(slot.value, `${path}[${index}]`, depth + 1)
           if (found !== undefined) return found
         }
+        if (own.symbols.length > 0) return `${path} has a symbol-keyed array property`
+        const extra = own.names.find((key) =>
+          key !== "length" && (String(Number(key) >>> 0) !== key || key === "4294967295")
+        )
+        if (extra !== undefined) return `${path}.${extra} is a non-index array property`
         return undefined
       }
-      if (Object.getOwnPropertySymbols(node).length > 0) return `${path} has a symbol-keyed property`
-      for (const key of Object.keys(node)) {
+      if (own.symbols.length > 0) return `${path} has a symbol-keyed property`
+      const nonEnumerable = own.names.find((key) => !own.enumerable.includes(key))
+      if (nonEnumerable !== undefined) return `${path}.${nonEnumerable} is a non-enumerable property`
+      for (const key of own.enumerable) {
         const slot = read(node, key)
         if (slot === undefined) return `${path}.${key} throws when read`
-        const found = walk(slot.value, `${path}.${key}`)
+        const found = walk(slot.value, `${path}.${key}`, depth + 1)
         if (found !== undefined) return found
       }
       return undefined
@@ -73,5 +107,5 @@ export const lossyPath = (value: unknown, root: string): string | undefined => {
       open.delete(node)
     }
   }
-  return walk(value, root)
+  return walk(value, root, 0)
 }

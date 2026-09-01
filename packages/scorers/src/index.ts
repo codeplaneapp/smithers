@@ -1,7 +1,7 @@
 /**
  * @since 0.1.0
  *
- * `/scorers` — flow-native scoring and durable observations.
+ * `/scorers`: flow-native scoring and durable observations.
  */
 
 /** @category errors @since 0.1.0 */

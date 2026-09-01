@@ -78,7 +78,7 @@ export const layer = (options: Options = {}): Layer.Layer<Runner.Runner, never, 
     Effect.gen(function*() {
       const store = yield* ScoreStore.ScoreStore
       const queue = yield* Queue.bounded<Runner.Job>(capacity(options.capacity))
-      const execute = (job: Runner.Job): Effect.Effect<ScoreStore.Observation> =>
+      const execute = (job: Runner.Job): Effect.Effect<Runner.Outcome> =>
         job.score.pipe(
           Effect.flatMap(Scorer.validate),
           Effect.map((result): ScoreStore.ScoreObservation => ({
@@ -99,10 +99,13 @@ export const layer = (options: Options = {}): Layer.Layer<Runner.Runner, never, 
           ),
           Effect.flatMap((observation) =>
             store.recordOnce(job.identity, observation).pipe(
+              Effect.map((recorded): Runner.Recorded => recorded ? "persisted" : "duplicate"),
               Effect.catch((error) =>
-                Effect.logWarning("Could not record a scorer observation", error).pipe(Effect.as(false))
+                Effect.logWarning("Could not record a scorer observation", error).pipe(
+                  Effect.as<Runner.Recorded>("failed")
+                )
               ),
-              Effect.as(observation)
+              Effect.map((recorded): Runner.Outcome => ({ identity: job.identity, observation, recorded }))
             )
           )
         )
@@ -119,12 +122,17 @@ export const layer = (options: Options = {}): Layer.Layer<Runner.Runner, never, 
           { concurrency: "unbounded", discard: true }
         )
       )
+      const runBatchCorrelated: Runner.Service["runBatchCorrelated"] = (jobs, batchOptions) =>
+        Effect.forEach(jobs, (job) => execute(snapshot(job)), {
+          concurrency: concurrency(batchOptions?.concurrency ?? options.concurrency)
+        })
       return Runner.make({
         submit: (job) => Queue.offer(queue, snapshot(job)).pipe(Effect.asVoid),
         runBatch: (jobs, batchOptions) =>
-          Effect.forEach(jobs, (job) => execute(snapshot(job)), {
-            concurrency: concurrency(batchOptions?.concurrency ?? options.concurrency)
-          })
+          runBatchCorrelated(jobs, batchOptions).pipe(
+            Effect.map((outcomes) => outcomes.map((outcome) => outcome.observation))
+          ),
+        runBatchCorrelated
       })
     })
   )

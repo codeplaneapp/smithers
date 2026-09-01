@@ -113,27 +113,30 @@ const declaration = (message: string, cause?: unknown): ScorerError =>
  *
  * This is a plan-time constructor and it *throws*, because a bad declaration is
  * a programming error with no run to fail. Every throw is a `ScorerError` with
- * code `invalid_declaration`: a blank `id` or `version`, a `config` carrying a
- * member canonical JSON would drop (a function, a symbol, an `undefined`
- * member, a symbol key, a cycle, a non-finite number), and a `config` the
- * canonical encoder refuses outright (a `Map`, a `Set`, a class instance, a
- * typed array, a `RegExp`) or whose own `toJSON` throws. The dropped-member
- * case is rejected rather than tolerated because `scorerKey` is the durable
- * identity written into every stored observation: two configurations differing
- * only in a dropped member would otherwise be one scorer forever.
- *
- * One boundary is deliberate: a member defining `toJSON` is trusted, and its
- * replacement value is hashed exactly as canonical JSON produces it. The walk
- * stops there rather than calling `toJSON` a second time to inspect it.
+ * code `invalid_declaration`: a non-string or blank `id` or `version`, a
+ * `config` carrying a member canonical JSON would drop, a `config` nested more
+ * than 1,000 levels, a non-enumerable property, or a `toJSON` member, and a
+ * `config` the canonical encoder refuses outright. These cases are rejected
+ * because `scorerKey` is the durable identity written into every stored
+ * observation: two configurations differing only in lost data would otherwise
+ * be one scorer forever. Calling `toJSON` here to inspect its replacement would
+ * execute caller code a second time with no promise that both calls agree.
  *
  * @category constructors
  * @since 0.1.0
  */
 export const make = <E = never>(options: MakeOptions<E>): Scorer<E> => {
   const { config, id, score, version, ...rest } = options
+  if (typeof id !== "string") throw declaration("A scorer id must be a string")
+  if (typeof version !== "string") throw declaration("A scorer version must be a string")
   if (id.trim().length === 0) throw declaration("A scorer id must not be empty")
   if (version.trim().length === 0) throw declaration("A scorer version must not be empty")
-  const lossy = config === undefined ? undefined : Json.lossyPath(config, "config")
+  let lossy: string | undefined
+  try {
+    lossy = config === undefined ? undefined : Json.lossyPath(config, "config")
+  } catch (cause) {
+    throw declaration("A scorer configuration could not be inspected", cause)
+  }
   if (lossy !== undefined) {
     throw declaration(`A scorer configuration must be representable as canonical JSON: ${lossy}`)
   }

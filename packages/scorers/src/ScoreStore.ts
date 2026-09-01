@@ -21,7 +21,7 @@ import { ScorerError, ScorerErrorCode } from "./ScorerError.ts"
  * rather than silently trimmed.
  *
  * @category models
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const maxReasonBytes = 1_024
 
@@ -29,7 +29,7 @@ export const maxReasonBytes = 1_024
  * Maximum stored size of an observation `meta`, encoded, in UTF-8 bytes.
  *
  * @category models
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const maxMetadataBytes = 65_536
 
@@ -37,7 +37,7 @@ export const maxMetadataBytes = 65_536
  * Maximum size of a `recordOnce` job identity, in UTF-8 bytes.
  *
  * @category models
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const maxIdentityBytes = 512
 
@@ -45,7 +45,7 @@ export const maxIdentityBytes = 512
  * Largest page {@link Service.observations} will return, and its default.
  *
  * @category models
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const maxObservations = 1_000
 
@@ -110,7 +110,7 @@ const Key = Schema.String.check(Schema.isMinLength(1))
  * and a non-integral `at` round-tripped through SQLite's REAL affinity.
  *
  * @category schemas
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const Observation = Schema.Union([
   Schema.Struct({
@@ -118,7 +118,7 @@ export const Observation = Schema.Union([
     targetStepKey: Key,
     scorerKey: Key,
     score: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
-    reason: Schema.optionalKey(Schema.String),
+    reason: Schema.optional(Schema.String),
     meta: Schema.optionalKey(Schema.Unknown),
     at: Timestamp
   }),
@@ -127,7 +127,7 @@ export const Observation = Schema.Union([
     targetStepKey: Key,
     scorerKey: Key,
     reason: Schema.String.check(Schema.isMinLength(1)),
-    code: Schema.optionalKey(ScorerErrorCode),
+    code: Schema.optional(ScorerErrorCode),
     at: Timestamp
   })
 ])
@@ -154,14 +154,20 @@ export interface Aggregate {
 /**
  * Page bounds for {@link Service.observations}.
  *
+ * `offset` is the cursor for walking the store's total `(at, insertion)`
+ * order. `before` is only a time filter and cannot advance through rows that
+ * share one timestamp.
+ *
  * @category models
- * @since 1.0.0
+ * @since 0.1.0
  */
 export interface Page {
   /** At most {@link maxObservations} rows; defaults to that bound. */
   readonly limit?: number | undefined
   /** Only observations recorded strictly before this `at` timestamp. */
   readonly before?: number | undefined
+  /** Number of rows to skip in the total observation order; defaults to zero. */
+  readonly offset?: number | undefined
 }
 
 /**
@@ -227,6 +233,15 @@ export const layerNoop: Layer.Layer<ScoreStore> = Layer.succeed(ScoreStore)(make
 
 const decodeObservation = Schema.decodeUnknownEffect(Observation)
 
+const observationLabel = (observation: Observation): string => {
+  try {
+    const kind = String(observation.kind)
+    return `${kind === "inconclusive" ? "An" : "A"} ${kind} observation`
+  } catch {
+    return "An observation"
+  }
+}
+
 /**
  * Decodes an observation against {@link Observation} before it is persisted.
  *
@@ -234,14 +249,14 @@ const decodeObservation = Schema.decodeUnknownEffect(Observation)
  * never the observation itself.
  *
  * @category validation
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const validate = (observation: Observation): Effect.Effect<Observation, ScorerError> =>
   decodeObservation(observation).pipe(
     Effect.mapError((cause) =>
       new ScorerError({
         code: "invalid_observation",
-        message: `A ${observation.kind} observation does not match the durable observation contract`,
+        message: `${observationLabel(observation)} does not match the durable observation contract`,
         cause
       })
     )

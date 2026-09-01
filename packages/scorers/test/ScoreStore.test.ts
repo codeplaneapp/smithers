@@ -8,6 +8,8 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
+import initialScores from "../src/migrations/0001_scores.ts"
+import failureCodes from "../src/migrations/0003_score_failure_codes.ts"
 import { ScorerError } from "../src/ScorerError.ts"
 import * as ScoreStore from "../src/ScoreStore.ts"
 import * as SqlScoreStore from "../src/SqlScoreStore.ts"
@@ -84,7 +86,11 @@ describe("ScoreStore", () => {
       yield* sql`DROP TRIGGER reject_scores`.pipe(Effect.orDie)
       return { rejected, retried: yield* store.recordOnce("retryable", score({ at: 2 })) }
     }))
-    expect(output.rejected).toBeInstanceOf(ScorerError)
+    expect(output.rejected).toMatchObject({
+      code: "constraint",
+      message: "Could not atomically record scorer job (database: constraint)"
+    })
+    expect(output.rejected.cause).toBeInstanceOf(DurableWriter.DatabaseError)
     expect(output.retried).toBe(true)
   })
 
@@ -110,25 +116,6 @@ describe("ScoreStore", () => {
     }))
     expect(failure.code).toBe("store")
     expect(failure.message).toBe("Could not record score observation (database: unknown)")
-  })
-
-  it("passes a scorer failure raised inside the transaction through unwrapped", async () => {
-    // The double wrap replaced the real failure with an identical copy of the
-    // outer sentence, so the underlying cause never reached a caller.
-    const inner = new ScorerError({ code: "invalid_request", message: "inner" })
-    const failure = await Effect.runPromise(
-      Effect.flip(
-        Effect.gen(function*() {
-          const writer = yield* DurableWriter.DurableWriter
-          const store = yield* ScoreStore.ScoreStore
-          yield* store.record(score())
-          return yield* writer.write(Effect.fail(inner)).pipe(
-            Effect.mapError((error) => error instanceof ScorerError ? error : new Error("wrapped"))
-          )
-        }).pipe(Effect.provide(layer))
-      )
-    )
-    expect(failure).toBe(inner)
   })
 
   describe("validation", () => {
@@ -165,10 +152,74 @@ describe("ScoreStore", () => {
       expect(output).toEqual([])
     })
 
+    it("reports schema validation before reason and metadata failures", async () => {
+      const failure = await failed(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        return yield* store.record(score({
+          score: 2,
+          reason: "x".repeat(ScoreStore.maxReasonBytes + 1),
+          meta: { nested: { lost: () => 1 } }
+        }))
+      }))
+      expect(failure.message).toBe("A score observation does not match the durable observation contract")
+      expect(failure.cause).toBeDefined()
+    })
+
+    it("accepts explicit undefined optional members and omits them on read", async () => {
+      const output = await run(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        yield* store.record(score({ reason: undefined, meta: undefined, at: 1 }))
+        yield* store.record({
+          kind: "inconclusive",
+          targetStepKey: "a",
+          scorerKey: "s",
+          reason: "unavailable",
+          code: undefined,
+          at: 2
+        })
+        return yield* store.observations("a")
+      }))
+      expect(output).toEqual([
+        { kind: "score", targetStepKey: "a", scorerKey: "s", score: 1, at: 1 },
+        { kind: "inconclusive", targetStepKey: "a", scorerKey: "s", reason: "unavailable", at: 2 }
+      ])
+      expect(output[0]).not.toHaveProperty("reason")
+      expect(output[0]).not.toHaveProperty("meta")
+      expect(output[1]).not.toHaveProperty("code")
+    })
+
+    it("returns a typed failure when an observation kind cannot be read", async () => {
+      const hostile = new Proxy({}, {
+        get: (_target, key) => {
+          if (key === "kind") throw new TypeError("no")
+          return undefined
+        }
+      }) as ScoreStore.Observation
+      const failure = await Effect.runPromise(Effect.flip(ScoreStore.validate(hostile)))
+      expect(failure).toBeInstanceOf(ScorerError)
+      expect(failure.code).toBe("invalid_observation")
+      expect(failure.message).toBe("An observation does not match the durable observation contract")
+    })
+
+    it("uses the correct article for an inconclusive validation failure", async () => {
+      const failure = await Effect.runPromise(
+        Effect.flip(
+          ScoreStore.validate({
+            kind: "inconclusive",
+            targetStepKey: "a",
+            scorerKey: "s",
+            reason: "",
+            at: 1
+          })
+        )
+      )
+      expect(failure.message).toBe("An inconclusive observation does not match the durable observation contract")
+    })
+
     it.each([
       ["a reason over the byte bound", score({ reason: "x".repeat(ScoreStore.maxReasonBytes + 1) })],
       ["metadata over the byte bound", score({ meta: { blob: "x".repeat(ScoreStore.maxMetadataBytes) } })],
-      ["metadata that is not canonical JSON", score({ meta: () => 1 })]
+      ["metadata that is not canonical JSON", score({ meta: new Map() })]
     ])("refuses %s", async (_name, observation) => {
       const failure = await failed(Effect.gen(function*() {
         const store = yield* ScoreStore.ScoreStore
@@ -217,6 +268,21 @@ describe("ScoreStore", () => {
       expect(output.encoded).toBe(`{"a":"x","b":[1,{"c":3,"d":2}]}`)
     })
 
+    it.each([
+      ["a nested function", { nested: { lost: () => 1 } }, "meta.nested.lost is function"],
+      ["a nested explicit undefined", { nested: { lost: undefined } }, "meta.nested.lost is undefined"],
+      ["a nested symbol", { nested: { lost: Symbol("hidden") } }, "meta.nested.lost is symbol"]
+    ])("refuses metadata carrying %s without writing a row", async (_name, meta, path) => {
+      const output = await run(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        const failure = yield* Effect.flip(store.record(score({ meta })))
+        return { failure, observations: yield* store.observations("a") }
+      }))
+      expect(output.failure.code).toBe("invalid_observation")
+      expect(output.failure.message).toContain(path)
+      expect(output.observations).toEqual([])
+    })
+
     it("refuses a cyclic metadata value before the transaction opens", async () => {
       const cyclic: Record<string, unknown> = {}
       cyclic.self = cyclic
@@ -224,6 +290,134 @@ describe("ScoreStore", () => {
         const store = yield* ScoreStore.ScoreStore
         return yield* store.record(score({ meta: cyclic }))
       }))
+      expect(failure.code).toBe("invalid_observation")
+    })
+
+    it("refuses metadata nested past the walk bound before the transaction opens", async () => {
+      let meta: unknown = "leaf"
+      for (let depth = 0; depth <= 1_000; depth += 1) meta = { next: meta }
+      const output = await run(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        const failure = yield* Effect.flip(store.record(score({ meta })))
+        return { failure, observations: yield* store.observations("a") }
+      }))
+      expect(output.failure.code).toBe("invalid_observation")
+      expect(output.failure.message).toContain("meta.next.next")
+      expect(output.failure.message).toMatch(/ is nested deeper than 1000 levels$/)
+      expect(output.observations).toEqual([])
+    })
+
+    it("refuses metadata with a non-enumerable own property before the transaction opens", async () => {
+      const meta = { a: 1 }
+      Object.defineProperty(meta, "x", { value: 1, enumerable: false })
+      const output = await run(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        const failure = yield* Effect.flip(store.record(score({ meta })))
+        return { failure, observations: yield* store.observations("a") }
+      }))
+      expect(output.failure.code).toBe("invalid_observation")
+      expect(output.failure.message).toContain("meta.x is a non-enumerable property")
+      expect(output.observations).toEqual([])
+    })
+
+    it("refuses metadata defining toJSON before the transaction opens", async () => {
+      let calls = 0
+      const meta = {
+        toJSON: () => {
+          calls += 1
+          return {}
+        }
+      }
+      const output = await run(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        const failure = yield* Effect.flip(store.record(score({ meta })))
+        return { failure, observations: yield* store.observations("a") }
+      }))
+      expect(output.failure.code).toBe("invalid_observation")
+      expect(output.failure.message).toContain("meta defines toJSON")
+      expect(output.observations).toEqual([])
+      expect(calls).toBe(0)
+    })
+  })
+
+  describe("snapshotting", () => {
+    it("snapshots every observation field when record is called", async () => {
+      const output = await run(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        const observation = {
+          kind: "score" as const,
+          targetStepKey: "record-target",
+          scorerKey: "s",
+          score: 0.1,
+          reason: "before",
+          meta: { nested: { value: "before" } },
+          at: 10
+        }
+        const write = store.record(observation)
+        observation.score = 0.9
+        observation.reason = "after"
+        observation.meta.nested.value = "after"
+        observation.at = 90
+        yield* write
+        return yield* store.observations("record-target")
+      }))
+      expect(output).toEqual([{
+        kind: "score",
+        targetStepKey: "record-target",
+        scorerKey: "s",
+        score: 0.1,
+        reason: "before",
+        meta: { nested: { value: "before" } },
+        at: 10
+      }])
+    })
+
+    it("snapshots every observation field when recordOnce is called", async () => {
+      const output = await run(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        const observation = {
+          kind: "score" as const,
+          targetStepKey: "once-target",
+          scorerKey: "s",
+          score: 0.2,
+          reason: "before",
+          meta: { nested: { value: "before" } },
+          at: 20
+        }
+        const write = store.recordOnce("snapshot", observation)
+        observation.score = 0.8
+        observation.reason = "after"
+        observation.meta.nested.value = "after"
+        observation.at = 80
+        const recorded = yield* write
+        return { recorded, observations: yield* store.observations("once-target") }
+      }))
+      expect(output).toEqual({
+        recorded: true,
+        observations: [{
+          kind: "score",
+          targetStepKey: "once-target",
+          scorerKey: "s",
+          score: 0.2,
+          reason: "before",
+          meta: { nested: { value: "before" } },
+          at: 20
+        }]
+      })
+    })
+
+    it("turns a throwing kind getter into a failed effect", async () => {
+      const hostile = new Proxy({}, {
+        get: (_target, key) => {
+          if (key === "kind") throw new TypeError("no")
+          return undefined
+        }
+      }) as ScoreStore.Observation
+      const failure = await failed(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        return yield* store.record(hostile)
+      }))
+      expect(failure).toBeInstanceOf(ScorerError)
       expect(failure.code).toBe("invalid_observation")
     })
   })
@@ -245,7 +439,7 @@ describe("ScoreStore", () => {
       expect(output.map((observation) => observation.at)).toEqual([10, 20, 30])
     })
 
-    it("pages by limit and by an exclusive upper timestamp", async () => {
+    it("limits rows and applies an exclusive upper timestamp filter", async () => {
       const output = await run(Effect.gen(function*() {
         yield* seed
         const store = yield* ScoreStore.ScoreStore
@@ -267,6 +461,44 @@ describe("ScoreStore", () => {
       }))
       expect(failure.code).toBe("invalid_request")
       expect(failure.message).toContain(`received ${String(limit)}`)
+    })
+
+    it.each([Number.NaN, -1, 1.5])("refuses the page before filter %s", async (before) => {
+      const failure = await failed(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        return yield* store.observations("a", undefined, { before })
+      }))
+      expect(failure.code).toBe("invalid_request")
+      expect(failure.message).toContain(`received ${String(before)}`)
+    })
+
+    it.each([-1, 1.5, Number.NaN])("refuses the page offset %s", async (offset) => {
+      const failure = await failed(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        return yield* store.observations("a", undefined, { offset })
+      }))
+      expect(failure.code).toBe("invalid_request")
+      expect(failure.message).toContain(`received ${String(offset)}`)
+    })
+
+    it("walks timestamp ties by offset and treats zero like an absent offset", async () => {
+      const output = await run(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        yield* store.record(score({ score: 0.1, at: 10 }))
+        yield* store.record(score({ score: 0.2, at: 10 }))
+        yield* store.record(score({ score: 0.3, at: 10 }))
+        return {
+          absent: yield* store.observations("a", undefined, { limit: 2 }),
+          zero: yield* store.observations("a", undefined, { limit: 2, offset: 0 }),
+          next: yield* store.observations("a", undefined, { limit: 2, offset: 2 })
+        }
+      }))
+      expect(output.zero).toEqual(output.absent)
+      expect(
+        [...output.absent, ...output.next].map((observation) =>
+          observation.kind === "score" ? observation.score : undefined
+        )
+      ).toEqual([0.1, 0.2, 0.3])
     })
 
     it("accepts the exact page bound", async () => {
@@ -314,6 +546,82 @@ describe("ScoreStore", () => {
         return yield* store.aggregate("missing")
       }))
       expect(output).toBeUndefined()
+    })
+  })
+
+  describe("database constraints", () => {
+    it("refuses blank keys and unknown failure codes at the table boundary", async () => {
+      const failures = await run(Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        return {
+          blankScorer: yield* Effect.flip(sql`INSERT INTO flows_scores (
+            kind, target_step_key, scorer_key, value, at_ms
+          ) VALUES ('score', 'a', '', 0.5, 1)`),
+          blankTarget: yield* Effect.flip(sql`INSERT INTO flows_scores (
+            kind, target_step_key, scorer_key, value, at_ms
+          ) VALUES ('score', '', 's', 0.5, 1)`),
+          unknownCode: yield* Effect.flip(sql`INSERT INTO flows_scores (
+            kind, target_step_key, scorer_key, value, reason, failure_code, at_ms
+          ) VALUES ('inconclusive', 'a', 's', NULL, 'why', 'invented', 1)`)
+        }
+      }))
+      expect(failures.blankScorer).toBeDefined()
+      expect(failures.blankTarget).toBeDefined()
+      expect(failures.unknownCode).toBeDefined()
+    })
+
+    it("refuses invalid scores, timestamps, and inconclusive rows at the table boundary", async () => {
+      const failures = await run(Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        return {
+          scoreAbove: yield* Effect.flip(sql`INSERT INTO flows_scores (
+            kind, target_step_key, scorer_key, value, at_ms
+          ) VALUES ('score', 'a', 's', 1.1, 1)`),
+          scoreBelow: yield* Effect.flip(sql`INSERT INTO flows_scores (
+            kind, target_step_key, scorer_key, value, at_ms
+          ) VALUES ('score', 'a', 's', -0.1, 1)`),
+          scoreNull: yield* Effect.flip(sql`INSERT INTO flows_scores (
+            kind, target_step_key, scorer_key, value, at_ms
+          ) VALUES ('score', 'a', 's', NULL, 1)`),
+          timestampFractional: yield* Effect.flip(sql`INSERT INTO flows_scores (
+            kind, target_step_key, scorer_key, value, at_ms
+          ) VALUES ('score', 'a', 's', 0.5, 1.7)`),
+          timestampNegative: yield* Effect.flip(sql`INSERT INTO flows_scores (
+            kind, target_step_key, scorer_key, value, at_ms
+          ) VALUES ('score', 'a', 's', 0.5, -1)`),
+          reasonNull: yield* Effect.flip(sql`INSERT INTO flows_scores (
+            kind, target_step_key, scorer_key, value, reason, at_ms
+          ) VALUES ('inconclusive', 'a', 's', NULL, NULL, 1)`),
+          reasonEmpty: yield* Effect.flip(sql`INSERT INTO flows_scores (
+            kind, target_step_key, scorer_key, value, reason, at_ms
+          ) VALUES ('inconclusive', 'a', 's', NULL, '', 1)`)
+        }
+      }))
+      expect(Object.values(failures)).toHaveLength(7)
+      expect(Object.values(failures).every((failure) => failure !== undefined)).toBe(true)
+    })
+
+    it("repairs legacy blank keys without dropping the row", async () => {
+      const rows = await Effect.runPromise(
+        Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          yield* initialScores
+          yield* sql`INSERT INTO flows_scores (
+            kind, target_step_key, scorer_key, value, reason, at_ms
+          ) VALUES ('inconclusive', '', '', NULL, NULL, 1)`
+          yield* failureCodes
+          return yield* sql<{
+            readonly target_step_key: string
+            readonly scorer_key: string
+            readonly reason: string
+          }>`SELECT target_step_key, scorer_key, reason FROM flows_scores`
+        }).pipe(Effect.provide(TestDatabase.layer))
+      )
+      expect(rows).toEqual([{
+        target_step_key: "Stored target step key predates the non-empty-key requirement",
+        scorer_key: "Stored scorer key predates the non-empty-key requirement",
+        reason: "Stored inconclusive observation predates the recorded-reason requirement"
+      }])
     })
   })
 

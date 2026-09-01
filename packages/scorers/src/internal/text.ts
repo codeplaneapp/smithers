@@ -6,7 +6,7 @@
  * counts UTF-16 units and disagrees with the stored size for any non-ASCII
  * text.
  *
- * @since 1.0.0
+ * @since 0.1.0
  */
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -15,7 +15,7 @@ const decoder = new TextDecoder()
  * Returns the UTF-8 byte length of `text`.
  *
  * @category measuring
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const byteLength = (text: string): number => encoder.encode(text).length
 
@@ -27,7 +27,7 @@ export const byteLength = (text: string): number => encoder.encode(text).length
  * be stored as replacement characters and read back as corruption.
  *
  * @category converting
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const truncate = (text: string, maxBytes: number): string => {
   const buffer = new Uint8Array(maxBytes)

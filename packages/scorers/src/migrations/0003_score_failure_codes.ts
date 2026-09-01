@@ -9,7 +9,7 @@
  * target, and a non-integral `at_ms` survived REAL affinity. `failure_code`
  * carries the classification the reason prose used to be the only record of.
  *
- * @since 1.0.0
+ * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
@@ -18,10 +18,11 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  * Rebuilds the score table with a failure code and the tightened checks.
  *
  * @category migrations
- * @since 1.0.0
+ * @since 0.1.0
  */
 const migration: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
+  // ScorerErrorCode in ../ScorerError.ts is the source of truth for this SQL literal list.
   yield* sql`CREATE TABLE flows_scores_rebuilt (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL CHECK (kind IN ('score', 'inconclusive')),
@@ -29,12 +30,19 @@ const migration: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(
     scorer_key TEXT NOT NULL,
     value REAL,
     reason TEXT,
-    failure_code TEXT,
+    failure_code TEXT CHECK (
+      failure_code IS NULL OR failure_code IN (
+        'invalid_declaration', 'invalid_score', 'invalid_sampling', 'invalid_observation',
+        'invalid_request', 'inconclusive', 'constraint', 'store'
+      )
+    ),
     metadata_json TEXT CHECK (metadata_json IS NULL OR json_valid(metadata_json)),
     at_ms INTEGER NOT NULL CHECK (at_ms >= 0 AND at_ms = cast(at_ms AS INTEGER)),
     CHECK (
-      (kind = 'score' AND value IS NOT NULL AND value >= 0 AND value <= 1 AND failure_code IS NULL) OR
-      (kind = 'inconclusive' AND value IS NULL AND reason IS NOT NULL AND length(reason) > 0)
+      length(target_step_key) > 0 AND length(scorer_key) > 0 AND (
+        (kind = 'score' AND value IS NOT NULL AND value >= 0 AND value <= 1 AND failure_code IS NULL) OR
+        (kind = 'inconclusive' AND value IS NULL AND reason IS NOT NULL AND length(reason) > 0)
+      )
     )
   )`
   // Rows written before these checks existed are repaired, never dropped and
@@ -46,8 +54,16 @@ const migration: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(
   SELECT
     id,
     kind,
-    target_step_key,
-    scorer_key,
+    CASE
+      WHEN length(target_step_key) = 0
+      THEN 'Stored target step key predates the non-empty-key requirement'
+      ELSE target_step_key
+    END,
+    CASE
+      WHEN length(scorer_key) = 0
+      THEN 'Stored scorer key predates the non-empty-key requirement'
+      ELSE scorer_key
+    END,
     value,
     CASE
       WHEN kind = 'inconclusive' AND (reason IS NULL OR length(reason) = 0)

@@ -71,6 +71,31 @@ describe("Scorer", () => {
     expect(failure.message).toContain(expected)
   })
 
+  it("refuses a configuration nested past the walk bound by path", () => {
+    let config: unknown = "leaf"
+    for (let depth = 0; depth <= 1_000; depth += 1) config = { next: config }
+    const failure = declarationFailure(() =>
+      Scorer.make({ id: "id", version: "1", config, score: () => Effect.succeed({ score: 1 }) })
+    )
+    expect(failure.code).toBe("invalid_declaration")
+    expect(failure.message).toContain("config.next.next")
+    expect(failure.message).toMatch(/ is nested deeper than 1000 levels$/)
+  })
+
+  it("refuses a non-enumerable own property instead of sharing the plain configuration key", () => {
+    const config = { a: 1 }
+    Object.defineProperty(config, "x", { value: 1, enumerable: false })
+    const failure = declarationFailure(() =>
+      Scorer.make({ id: "id", version: "1", config, score: () => Effect.succeed({ score: 1 }) })
+    )
+    expect(failure.code).toBe("invalid_declaration")
+    expect(failure.message).toContain("config.x is a non-enumerable property")
+    expect(
+      Scorer.make({ id: "id", version: "1", config: { a: 1 }, score: () => Effect.succeed({ score: 1 }) })
+        .scorerKey
+    ).toMatch(/^[0-9a-f]{64}$/)
+  })
+
   it("refuses a configuration with a symbol key or a cycle", () => {
     const cyclic: Record<string, unknown> = {}
     cyclic.self = cyclic
@@ -89,6 +114,63 @@ describe("Scorer", () => {
         })
       ).message
     ).toContain("has a symbol-keyed property")
+  })
+
+  it("refuses a non-index property on an array instead of sharing the plain array key", () => {
+    const decorated = Object.assign([], { extra: 1 })
+    const failure = declarationFailure(() =>
+      Scorer.make({
+        id: "id",
+        version: "1",
+        config: { a: decorated },
+        score: () => Effect.succeed({ score: 1 })
+      })
+    )
+    expect(failure.code).toBe("invalid_declaration")
+    expect(failure.message).toContain("config.a.extra is a non-index array property")
+    const nonEnumerable: unknown[] = []
+    Object.defineProperty(nonEnumerable, "extra", { value: 1 })
+    expect(
+      declarationFailure(() =>
+        Scorer.make({
+          id: "id",
+          version: "1",
+          config: { a: nonEnumerable },
+          score: () => Effect.succeed({ score: 1 })
+        })
+      ).message
+    ).toContain("config.a.extra is a non-index array property")
+    expect(
+      Scorer.make({
+        id: "id",
+        version: "1",
+        config: { a: [] },
+        score: () => Effect.succeed({ score: 1 })
+      }).scorerKey
+    ).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it("refuses a symbol-keyed property on an array", () => {
+    const hidden = Symbol("hidden")
+    const array = Object.assign([], { [hidden]: 1 })
+    const failure = declarationFailure(() =>
+      Scorer.make({ id: "id", version: "1", config: { a: array }, score: () => Effect.succeed({ score: 1 }) })
+    )
+    expect(failure.code).toBe("invalid_declaration")
+    expect(failure.message).toContain("config.a has a symbol-keyed array property")
+  })
+
+  it("normalizes a configuration whose keys cannot be enumerated", () => {
+    const hostile = new Proxy({}, {
+      ownKeys: () => {
+        throw new TypeError("no")
+      }
+    })
+    const failure = declarationFailure(() =>
+      Scorer.make({ id: "id", version: "1", config: { a: hostile }, score: () => Effect.succeed({ score: 1 }) })
+    )
+    expect(failure.code).toBe("invalid_declaration")
+    expect(failure.message).toContain("config.a throws when keys are enumerated")
   })
 
   it("refuses a configuration whose member throws when read", () => {
@@ -130,24 +212,59 @@ describe("Scorer", () => {
     expect(failure.message).toBe("A scorer configuration could not be canonicalized")
   })
 
-  it("normalizes a canonicalization failure the lossless walk cannot see", () => {
-    // A `toJSON` is legitimate, so the walk stops at it; the failure it raises
-    // must still arrive as a scorer error, not as a raw SchemaError.
+  it("refuses a configuration defining toJSON without calling it", () => {
+    let calls = 0
     const config = {
       toJSON: () => {
-        throw new TypeError("no")
+        calls += 1
+        return {}
       }
     }
     const failure = declarationFailure(() =>
       Scorer.make({ id: "id", version: "1", config, score: () => Effect.succeed({ score: 1 }) })
     )
     expect(failure.code).toBe("invalid_declaration")
-    expect(failure.message).toBe("A scorer configuration could not be canonicalized")
+    expect(failure.message).toContain("config defines toJSON")
+    expect(calls).toBe(0)
+    expect(
+      declarationFailure(() =>
+        Scorer.make({ id: "id", version: "1", config: { at: new Date(0) }, score: () => Effect.succeed({ score: 1 }) })
+      ).message
+    ).toContain("config.at defines toJSON")
+  })
+
+  it("refuses both toJSON replacements that would otherwise share a scorer key", () => {
+    const failures = [
+      { t: { toJSON: () => ({ f: () => 1 }) } },
+      { t: { toJSON: () => ({}) } }
+    ].map((config) =>
+      declarationFailure(() =>
+        Scorer.make({ id: "id", version: "1", config, score: () => Effect.succeed({ score: 1 }) })
+      )
+    )
+    expect(failures.map((failure) => failure.code)).toEqual(["invalid_declaration", "invalid_declaration"])
+    expect(failures.map((failure) => failure.message)).toEqual([
+      expect.stringContaining("config.t defines toJSON"),
+      expect.stringContaining("config.t defines toJSON")
+    ])
+  })
+
+  it("normalizes an unexpected lossless-walk failure", () => {
+    const config = new Proxy([], {
+      get: (target, key, receiver) => {
+        if (key === "length") throw new TypeError("no")
+        return Reflect.get(target, key, receiver)
+      }
+    })
+    const failure = declarationFailure(() =>
+      Scorer.make({ id: "id", version: "1", config, score: () => Effect.succeed({ score: 1 }) })
+    )
+    expect(failure.code).toBe("invalid_declaration")
+    expect(failure.message).toBe("A scorer configuration could not be inspected")
     expect(failure.cause).toBeDefined()
   })
 
   it.each([
-    ["a member defining toJSON", { at: new Date(0) }],
     ["a nested array of plain values", { weights: [1, 2, { a: null }] }],
     ["an explicit null", null]
   ])("accepts a configuration carrying %s", (_name, config) => {
@@ -164,6 +281,15 @@ describe("Scorer", () => {
     ["id", { id: " ", version: "1" }, "A scorer id must not be empty"],
     ["version", { id: "id", version: "" }, "A scorer version must not be empty"]
   ])("names the blank %s", (_name, options, expected) => {
+    const failure = declarationFailure(() => Scorer.make({ ...options, score: () => Effect.succeed({ score: 1 }) }))
+    expect(failure.code).toBe("invalid_declaration")
+    expect(failure.message).toBe(expected)
+  })
+
+  it.each([
+    ["id", { id: 1 as unknown as string, version: "1" }, "A scorer id must be a string"],
+    ["version", { id: "id", version: 1 as unknown as string }, "A scorer version must be a string"]
+  ])("names a non-string %s", (_name, options, expected) => {
     const failure = declarationFailure(() => Scorer.make({ ...options, score: () => Effect.succeed({ score: 1 }) }))
     expect(failure.code).toBe("invalid_declaration")
     expect(failure.message).toBe(expected)

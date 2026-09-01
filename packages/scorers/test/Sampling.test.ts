@@ -101,4 +101,19 @@ describe("Sampling", () => {
     expect(failure.code).toBe("invalid_sampling")
     expect(failure.message).not.toContain("received ratio")
   })
+
+  it("returns a typed failure when a rejected ratio cannot be read", async () => {
+    const hostile = new Proxy({ seed: "v1" }, {
+      has: (_target, key) => key === "ratio",
+      get: (_target, key) => {
+        if (key === "ratio") throw new TypeError("no")
+        return "v1"
+      }
+    }) as Sampling.Sampling
+    const failure = await Effect.runPromise(
+      Effect.flip(Sampling.decide(hostile, "target", "scorer"))
+    )
+    expect(failure.code).toBe("invalid_sampling")
+    expect(failure.message).not.toContain("received ratio")
+  })
 })

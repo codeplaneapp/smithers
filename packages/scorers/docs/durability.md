@@ -8,25 +8,44 @@ serialized and retried under the same policy as the rest of the durable stores.
 
 ## What the store refuses to persist
 
-The store validates before the transaction opens, so a rejection never leaves a
-partial row and never holds the single-writer lock. `ScoreStore.Observation` is
-the contract, and `flows_scores` carries the same rules as SQL `CHECK`
-constraints so no writer can bypass them:
+`ScoreStore.Observation` is the contract, and the store decodes against it and
+fully encodes `meta` before the transaction opens, so a rejection never leaves a
+partial row and never holds the single-writer lock. Both entry points snapshot
+what they are given as they are _called_, so a caller that mutates the object
+before running the returned Effect cannot change what is stored.
 
-- `targetStepKey` and `scorerKey` are non-empty.
-- `at` is a non-negative safe integer. It used to be a bare number, and
-  SQLite's REAL affinity kept `1.7` intact.
-- A score is finite and within `[0, 1]`.
-- An inconclusive observation carries a non-empty `reason`. Accepting one
-  without a reason used to make every later `observations()` call for that
-  target fail, with no row id to find the offender.
-- `reason` is at most `maxReasonBytes` UTF-8 bytes. Producers inside this
-  package truncate on a code-point boundary; a direct caller is told rather
-  than silently trimmed.
+`flows_scores` repeats the rules a bad row could otherwise make unreadable as
+SQL `CHECK` constraints, so no writer, including a hand-written `INSERT`, can
+bypass them:
+
+- `target_step_key` and `scorer_key` are non-empty. The read path requires a
+  non-empty key, so one blank-keyed row made every later `observations()` call
+  for that target fail.
+- `at_ms` is a non-negative integer. It used to be a bare number, and SQLite's
+  REAL affinity kept `1.7` intact.
+- A score is non-null and within `[0, 1]`; an inconclusive row has no value and
+  a non-empty `reason`. Accepting a reasonless row used to poison the same read.
+- `failure_code` is `NULL` or one of the eight `ScorerErrorCode` literals, which
+  the read path decodes as a closed union.
+- `metadata_json` is `NULL` or valid JSON.
+
+The remaining rules have no useful SQL spelling and are enforced by the store
+alone, before the write:
+
+- `reason` is at most `maxReasonBytes` UTF-8 bytes and `meta` at most
+  `maxMetadataBytes` encoded. Producers inside this package truncate on a
+  code-point boundary; a direct caller is told rather than silently trimmed. A
+  legacy row over either bound still reads back, so neither is a poison vector.
+- `meta` must be losslessly representable as canonical JSON, the same rule
+  `Scorer.make` applies to a scorer configuration. A nested function, symbol, or
+  explicit `undefined`, a non-enumerable own property, a value nested more than
+  1,000 levels, or a `toJSON` member is refused by path rather than silently
+  dropped or substituted. A `Date` is refused because its `toJSON` conversion
+  to a string loses the original value type.
 - `meta` is encoded through the same canonical JSON the scorer key uses, so key
-  order is stable, and is at most `maxMetadataBytes` UTF-8 bytes. Encoding
-  happens before the transaction opens: a bare `JSON.stringify` ran caller
-  getters, Proxy traps, and `toJSON` while holding the write lock.
+  order is stable. Encoding happens before the transaction opens: a bare
+  `JSON.stringify` ran caller getters, Proxy traps, and `toJSON` while holding
+  the write lock.
 
 A read decodes every row against that same contract and names the row id in the
 failure, so a hand-edited database produces an actionable error rather than an
@@ -48,11 +67,20 @@ proves the claim survives a process restart against the same file.
 
 ## Reading
 
-`observations(targetStepKey, scorerKey?, page?)` orders by `(at_ms, id)` so the
-`(target_step_key, scorer_key, at_ms)` index serves the ordering, with `id`
-only breaking ties inside one millisecond. It is always bounded: `page.limit`
-defaults to and may not exceed `maxObservations`, and `page.before` takes an
-exclusive upper `at` bound for walking a long history.
+`observations(targetStepKey, scorerKey?, page?)` orders by `(at_ms, id)`, with
+`id` only breaking ties inside one millisecond. A read that also filters
+`scorer_key` is served by the `(target_step_key, scorer_key, at_ms)` index; a
+read across every scorer sorts, because the index's second column is
+`scorer_key`.
+
+It is always bounded, and every bound must be a safe integer in range or the
+call fails with `invalid_request` naming the value. `page.limit` defaults to and
+may not exceed `maxObservations`. `page.offset` is the cursor: `(at_ms, id)` is
+a total order, so walking `offset` in steps of `limit` reaches every row,
+including rows that share one millisecond. `page.before` is a time _filter_, an
+exclusive upper `at` bound, and not a cursor: it walks nothing on its own, and a
+page of rows sharing the last timestamp would leave the rest of that
+millisecond permanently unreachable.
 
 `aggregate` reports `count`, `mean`, and `min` over successful scores plus
 `inconclusive`, the count of failures. Without that denominator a target scored

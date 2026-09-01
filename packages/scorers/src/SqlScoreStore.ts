@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as Json from "./internal/json.ts"
 import * as Text from "./internal/text.ts"
 import * as Migrations from "./migrations/index.ts"
 import { ScorerError } from "./ScorerError.ts"
@@ -93,43 +94,89 @@ const invalid = (message: string, cause?: unknown): ScorerError =>
 const metadataJson = (observation: ScoreStore.Observation): Effect.Effect<string | null, ScorerError> => {
   if (observation.kind === "inconclusive" || observation.meta === undefined) return Effect.succeed(null)
   const meta = observation.meta
-  return Effect.try({
-    try: () => Digest.canonical(meta),
-    catch: (cause) => invalid("Score observation metadata is not representable as canonical JSON", cause)
-  }).pipe(
-    Effect.flatMap((encoded) =>
-      Text.byteLength(encoded) > ScoreStore.maxMetadataBytes
-        ? Effect.fail(
-          invalid(
-            `Score observation metadata exceeds ${ScoreStore.maxMetadataBytes} UTF-8 bytes`
-          )
-        )
-        : Effect.succeed(encoded)
+  const lossy = Json.lossyPath(meta, "meta")
+  if (lossy !== undefined) {
+    return Effect.fail(
+      invalid(`Score observation metadata is not representable as canonical JSON: ${lossy}`)
     )
-  )
+  }
+  let encoded: string
+  try {
+    encoded = Digest.canonical(meta)
+  } catch (cause) {
+    return Effect.fail(invalid("Score observation metadata is not representable as canonical JSON", cause))
+  }
+  return Text.byteLength(encoded) > ScoreStore.maxMetadataBytes
+    ? Effect.fail(
+      invalid(
+        `Score observation metadata exceeds ${ScoreStore.maxMetadataBytes} UTF-8 bytes`
+      )
+    )
+    : Effect.succeed(encoded)
 }
 
 const withinReasonBound = (observation: ScoreStore.Observation): Effect.Effect<void, ScorerError> =>
-  observation.reason !== undefined && Text.byteLength(observation.reason) > ScoreStore.maxReasonBytes
+  typeof observation.reason === "string" && Text.byteLength(observation.reason) > ScoreStore.maxReasonBytes
     ? Effect.fail(invalid(`An observation reason exceeds ${ScoreStore.maxReasonBytes} UTF-8 bytes`))
     : Effect.void
 
-const prepare = (observation: ScoreStore.Observation): Effect.Effect<Insertable, ScorerError> =>
-  Effect.gen(function*() {
-    const valid = yield* ScoreStore.validate(observation)
-    yield* withinReasonBound(valid)
-    const metadata = yield* metadataJson(valid)
-    return {
-      kind: valid.kind,
-      targetStepKey: valid.targetStepKey,
-      scorerKey: valid.scorerKey,
-      value: valid.kind === "score" ? valid.score : null,
-      reason: valid.reason ?? null,
-      failureCode: valid.kind === "inconclusive" ? valid.code ?? null : null,
-      metadataJson: metadata,
-      at: valid.at
-    }
-  })
+/**
+ * Snapshots and fully encodes an observation at the moment `record` or
+ * `recordOnce` is *called*.
+ *
+ * Everything here runs eagerly, in the function body, and the returned Effect
+ * only reports the outcome. Building this inside `Effect.gen` read the caller's
+ * object when the Effect ran instead: a caller could construct
+ * `record(observation)`, change the score, and then run it, and the changed
+ * score is what the store persisted. `readonly` is a compile-time promise only.
+ *
+ * The whole capture is guarded because a caller can hand this a hostile object.
+ * A throwing getter has to become a failed Effect; throwing synchronously out
+ * of `record()` would escape a caller who is only building a program.
+ *
+ * @internal
+ */
+const prepare = (observation: ScoreStore.Observation): Effect.Effect<Insertable, ScorerError> => {
+  try {
+    const kind = observation.kind
+    const snapshot: ScoreStore.Observation = kind === "inconclusive"
+      ? {
+        kind,
+        targetStepKey: observation.targetStepKey,
+        scorerKey: observation.scorerKey,
+        reason: observation.reason,
+        code: observation.code,
+        at: observation.at
+      }
+      : {
+        kind,
+        targetStepKey: observation.targetStepKey,
+        scorerKey: observation.scorerKey,
+        score: observation.score,
+        reason: observation.reason,
+        meta: observation.meta,
+        at: observation.at
+      }
+    const reasonBound = withinReasonBound(snapshot)
+    const metadata = metadataJson(snapshot)
+    return ScoreStore.validate(snapshot).pipe(
+      Effect.andThen(reasonBound),
+      Effect.andThen(metadata),
+      Effect.map((encoded): Insertable => ({
+        kind: snapshot.kind,
+        targetStepKey: snapshot.targetStepKey,
+        scorerKey: snapshot.scorerKey,
+        value: snapshot.kind === "score" ? snapshot.score : null,
+        reason: snapshot.reason ?? null,
+        failureCode: snapshot.kind === "inconclusive" ? snapshot.code ?? null : null,
+        metadataJson: encoded,
+        at: snapshot.at
+      }))
+    )
+  } catch (cause) {
+    return Effect.fail(invalid("An observation could not be snapshotted", cause))
+  }
+}
 
 const identity = (value: string): Effect.Effect<string, ScorerError> => {
   if (value.trim().length === 0) {
@@ -156,6 +203,32 @@ const pageLimit = (page: ScoreStore.Page | undefined): Effect.Effect<number, Sco
         message: `An observation page limit must be an integer in [1, ${ScoreStore.maxObservations}], received ${
           String(limit)
         }`
+      })
+    )
+}
+
+const pageBefore = (page: ScoreStore.Page | undefined): Effect.Effect<number | undefined, ScorerError> => {
+  const before = page?.before
+  if (before === undefined) return Effect.succeed(undefined)
+  return Number.isSafeInteger(before) && before >= 0
+    ? Effect.succeed(before)
+    : Effect.fail(
+      new ScorerError({
+        code: "invalid_request",
+        message: `An observation page before must be a non-negative safe integer, received ${String(before)}`
+      })
+    )
+}
+
+const pageOffset = (page: ScoreStore.Page | undefined): Effect.Effect<number, ScorerError> => {
+  const offset = page?.offset
+  if (offset === undefined) return Effect.succeed(0)
+  return Number.isSafeInteger(offset) && offset >= 0
+    ? Effect.succeed(offset)
+    : Effect.fail(
+      new ScorerError({
+        code: "invalid_request",
+        message: `An observation page offset must be a non-negative safe integer, received ${String(offset)}`
       })
     )
 }
@@ -223,24 +296,24 @@ export const make: Effect.Effect<
   yield* Migrations.run.pipe(Effect.mapError(failure("Could not run score-store migrations")))
 
   const observations: ScoreStore.Service["observations"] = (targetStepKey, scorerKey, page) =>
-    pageLimit(page).pipe(
-      Effect.flatMap((limit) => {
-        const scorerFilter = scorerKey === undefined ? sql`` : sql`AND scorer_key = ${scorerKey}`
-        const beforeFilter = page?.before === undefined ? sql`` : sql`AND at_ms < ${page.before}`
-        // `at_ms` first so the (target_step_key, scorer_key, at_ms) index can
-        // serve the ordering; `id` only breaks ties, preserving insertion
-        // order within one millisecond.
-        return sql<ObservationRow>`SELECT id, kind, target_step_key, scorer_key, value, reason, failure_code,
-            metadata_json, at_ms
-          FROM flows_scores
-          WHERE target_step_key = ${targetStepKey} ${scorerFilter} ${beforeFilter}
-          ORDER BY at_ms, id
-          LIMIT ${limit}`.pipe(
-          Effect.mapError(failure("Could not read score observations")),
-          Effect.flatMap((rows) => Effect.forEach(rows, decode))
-        )
-      })
-    )
+    Effect.gen(function*() {
+      const limit = yield* pageLimit(page)
+      const before = yield* pageBefore(page)
+      const offset = yield* pageOffset(page)
+      const scorerFilter = scorerKey === undefined ? sql`` : sql`AND scorer_key = ${scorerKey}`
+      const beforeFilter = before === undefined ? sql`` : sql`AND at_ms < ${before}`
+      // The lookup index serves this ordering only when scorer_key is filtered.
+      // Unscoped reads use SQLite's temporary ordering B-tree; `id` breaks
+      // timestamp ties in insertion order for both query shapes.
+      const rows = yield* sql<ObservationRow>`SELECT id, kind, target_step_key, scorer_key, value, reason, failure_code,
+          metadata_json, at_ms
+        FROM flows_scores
+        WHERE target_step_key = ${targetStepKey} ${scorerFilter} ${beforeFilter}
+        ORDER BY at_ms, id
+        LIMIT ${limit}
+        OFFSET ${offset}`.pipe(Effect.mapError(failure("Could not read score observations")))
+      return yield* Effect.forEach(rows, decode)
+    })
 
   const aggregate: ScoreStore.Service["aggregate"] = (targetStepKey, scorerKey) => {
     const scorerFilter = scorerKey === undefined ? sql`` : sql`AND scorer_key = ${scorerKey}`
@@ -280,19 +353,22 @@ export const make: Effect.Effect<
     )`.pipe(Effect.mapError(DurableWriter.fromSqlError))
 
   return ScoreStore.make({
-    record: (observation) =>
-      prepare(observation).pipe(
+    record: (observation) => {
+      const prepared = prepare(observation)
+      return prepared.pipe(
         Effect.flatMap((row) =>
           writer.write(insert(row)).pipe(
             Effect.asVoid,
             Effect.mapError(classify("Could not record score observation"))
           )
         )
-      ),
-    recordOnce: (jobIdentity, observation) =>
-      Effect.gen(function*() {
+      )
+    },
+    recordOnce: (jobIdentity, observation) => {
+      const prepared = prepare(observation)
+      return Effect.gen(function*() {
         const claim = yield* identity(jobIdentity)
-        const row = yield* prepare(observation)
+        const row = yield* prepared
         return yield* writer.write(
           Effect.gen(function*() {
             const claimed = yield* sql`INSERT INTO flows_score_jobs (identity, created_at_ms)
@@ -312,7 +388,8 @@ export const make: Effect.Effect<
             return true
           })
         ).pipe(Effect.mapError(classify("Could not atomically record scorer job")))
-      }),
+      })
+    },
     observations,
     aggregate
   })

@@ -1,8 +1,9 @@
 # Changelog
 
-`@smthrs/scorers` is workspace-private and versioned independently of the
-published `1.0.0-rc.0` packages. `publishConfig` is staged for a later publish
-and is inert while `private` is set.
+`@smthrs/scorers` is workspace-private at `0.1.0` and versioned independently of
+the published `1.0.0-rc.0` packages, so every `@since` tag in `src/` reads
+`0.1.0`. `publishConfig` is staged for a later publish and is inert while
+`private` is set.
 
 ## [Unreleased]
 
@@ -13,14 +14,21 @@ and is inert while `private` is set.
   runners.
 - Added `Runner.jobIdentity`, a length-prefixed constructor for the durable
   idempotency key, so two different tuples cannot produce one identity.
+- Added `Runner.runBatchCorrelated`, which tags every observation with its job
+  identity and reports whether the durable write was persisted, duplicated, or
+  failed. `runBatch` keeps its existing observation-only contract.
 - Added `ScoreStore.Observation` as a runtime schema plus `ScoreStore.validate`,
   and the documented bounds `maxReasonBytes`, `maxMetadataBytes`,
   `maxIdentityBytes`, and `maxObservations`.
-- Added a page bound to `ScoreStore.observations` (`limit`, `before`), an
-  `inconclusive` count to `Aggregate`, and an optional `code` to an
+- Added a page bound to `ScoreStore.observations` (`limit`, `offset`, `before`),
+  an `inconclusive` count to `Aggregate`, and an optional `code` to an
   inconclusive observation, persisted in a new `failure_code` column by
-  migration `0003_score_failure_codes`.
-- Added colocated documentation under `docs/`.
+  migration `0003_score_failure_codes`. `offset` is the cursor; `before` is a
+  time filter, and on its own it could never walk past a page of rows sharing
+  one timestamp.
+- Added colocated documentation under `docs/`, with `test/docs.test.ts` as its
+  drift owner: the reference table in `docs/api.md` and the `@category` JSDoc in
+  `src/` must agree.
 
 ### Changed
 
@@ -42,6 +50,10 @@ and is inert while `private` is set.
   `version` was blank, and refuses a configuration carrying a member canonical
   JSON would drop, which would otherwise give two different scorers one durable
   key.
+- `Scorer.make` and observation metadata now refuse values nested more than
+  1,000 levels, non-enumerable own properties, and `toJSON` members by path.
+  These values either overflowed the lossless walk or disappeared from the
+  durable identity after canonical JSON transformed them.
 - `Aggregate.mean` and `Aggregate.min` are `undefined` when no score succeeded.
 - `SqlScoreStore` encodes `meta` through canonical JSON before the transaction
   opens rather than with a bare `JSON.stringify` inside it, reads its
@@ -60,6 +72,10 @@ and is inert while `private` is set.
   `coverageFloorDeferred` set.
 
 ### Fixed
+
+- `Scorer.make` now rejects a non-string `id` or `version` with
+  `invalid_declaration` and maps an unexpected configuration-walk failure to
+  the same typed error instead of leaking a host `TypeError` or `RangeError`.
 
 - `recordOnce` no longer loses an observation forever under
   `SqlClient.SafeIntegers`: the bigint affected-row count was read as "already

@@ -109,7 +109,7 @@ describe("Runner", () => {
     expect(observation?.reason).toHaveLength(ScoreStore.maxReasonBytes)
   })
 
-  it("logs a store failure instead of reporting an observation that was never persisted", async () => {
+  it("reports and logs a failed durable write by job identity", async () => {
     const logged: Array<unknown> = []
     const capture = Logger.make<unknown, void>(({ message }) => {
       logged.push(message)
@@ -119,7 +119,7 @@ describe("Runner", () => {
       Effect.scoped(
         Effect.gen(function*() {
           const runner = yield* Runner.Runner
-          return yield* runner.runBatch([job()])
+          return yield* runner.runBatchCorrelated([job()])
         }).pipe(
           Effect.provide(RunnerLive.layer()),
           Effect.provideService(ScoreStore.ScoreStore, sink.store),
@@ -127,12 +127,57 @@ describe("Runner", () => {
         )
       )
     )
-    expect(output).toHaveLength(1)
+    expect(output).toMatchObject([{
+      identity: "job",
+      observation: { targetStepKey: "t", scorerKey: "s", kind: "score", score: 1, at: 1 },
+      recorded: "failed"
+    }])
     const written = JSON.stringify(logged)
     expect(written).toContain("Could not record a scorer observation")
     // The cause has to travel with the line. Naming only the sentence would
     // leave a reader unable to tell a full disk from a rejected observation.
     expect(written).toContain("no room")
+  })
+
+  it("correlates persisted and duplicate observations by job identity", async () => {
+    const claimed = new Set(["duplicate"])
+    const sink = recorder((identity) =>
+      Effect.sync(() => {
+        if (claimed.has(identity)) return false
+        claimed.add(identity)
+        return true
+      })
+    )
+    const output = await withRunner(
+      sink.store,
+      (runner) =>
+        runner.runBatchCorrelated([
+          job({ identity: "fresh", at: 1 }),
+          job({ identity: "duplicate", at: 2 })
+        ]),
+      { concurrency: 1 }
+    )
+    expect(output.map(({ identity, recorded }) => ({ identity, recorded }))).toEqual([
+      { identity: "fresh", recorded: "persisted" },
+      { identity: "duplicate", recorded: "duplicate" }
+    ])
+    expect(output.map((outcome) => outcome.observation.at)).toEqual([1, 2])
+  })
+
+  it("returns runBatch observations in job order", async () => {
+    const sink = recorder()
+    const output = await withRunner(
+      sink.store,
+      (runner) =>
+        runner.runBatch([
+          job({ identity: "slow", score: Effect.sleep("10 millis").pipe(Effect.as({ score: 0.25 })), at: 1 }),
+          job({ identity: "fast", score: Effect.succeed({ score: 0.75 }), at: 2 })
+        ], { concurrency: 2 })
+    )
+    expect(output.map((observation) => observation.kind === "score" ? observation.score : undefined)).toEqual([
+      0.25,
+      0.75
+    ])
   })
 
   it("propagates fiber interruption rather than recording an inconclusive observation", async () => {
@@ -254,6 +299,7 @@ describe("Runner", () => {
       const noop = Runner.makeNoop()
       await Effect.runPromise(noop.submit(job()))
       expect(await Effect.runPromise(noop.runBatch([job()]))).toEqual([])
+      expect(await Effect.runPromise(noop.runBatchCorrelated([job()]))).toEqual([])
     })
 
     it("is provided by layerNoop", async () => {

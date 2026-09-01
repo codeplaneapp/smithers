@@ -45,6 +45,32 @@ export interface BatchOptions {
 }
 
 /**
+ * Whether a batch job's observation reached the durable store.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Recorded = "persisted" | "duplicate" | "failed"
+
+/**
+ * One batch result tagged with the job it came from and what the store did with it.
+ *
+ * The method is named `runBatchCorrelated` because `@smthrs/evals` already
+ * declares that optional method on its structural `ScoreBatchRunner` in
+ * `packages/evals/src/Runner.ts`. Its results carry job identities, so this
+ * service lets that consumer correlate by identity instead of by position
+ * without a change in `@smthrs/evals`.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export interface Outcome {
+  readonly identity: string
+  readonly observation: Observation
+  readonly recorded: Recorded
+}
+
+/**
  * Runtime scorer runner implementation.
  *
  * @category services
@@ -56,6 +82,10 @@ export interface Service {
     jobs: ReadonlyArray<Job>,
     options?: BatchOptions | undefined
   ) => Effect.Effect<ReadonlyArray<Observation>>
+  readonly runBatchCorrelated: (
+    jobs: ReadonlyArray<Job>,
+    options?: BatchOptions | undefined
+  ) => Effect.Effect<ReadonlyArray<Outcome>>
 }
 
 /**
@@ -83,7 +113,8 @@ export const make = (service: Service): Service => Runner.of(service)
 export const makeNoop = (): Service =>
   Runner.of({
     submit: () => Effect.void,
-    runBatch: () => Effect.succeed([])
+    runBatch: () => Effect.succeed([]),
+    runBatchCorrelated: () => Effect.succeed([])
   })
 
 /**
@@ -103,7 +134,7 @@ export const layerNoop: Layer.Layer<Runner> = Layer.succeed(Runner)(makeNoop())
  * identity by `NUL`-joining five unconstrained strings.
  *
  * @category constructors
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const jobIdentity = (parts: ReadonlyArray<string>): string =>
   `v1${parts.map((part) => `:${part.length}:${part}`).join("")}`
