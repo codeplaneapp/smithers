@@ -1024,7 +1024,10 @@ export const execute = async (options: ExecuteOptions): Promise<Summary> => {
       options.packageName,
       options.signal
     )
-    if (!Exit.isSuccess(exit)) return fail(describeFailure(Cause.squash(exit.cause)))
+    if (!Exit.isSuccess(exit)) {
+      console.error("DEBUG TARGET FAILURE", target.attrs, Cause.pretty(exit.cause), Cause.squash(exit.cause))
+      return fail(describeFailure(Cause.squash(exit.cause)))
+    }
     // A success is not a success until the target's declared outputs are on
     // disk and match what it reported. An implementation that returns without
     // its manifest fails here rather than caching green.
