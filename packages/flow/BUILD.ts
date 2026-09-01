@@ -73,6 +73,37 @@ export const docs = Smithers.DocsParity({
 })
 
 /**
+ * The package's own documentation, projected into the site.
+ *
+ * `scripts/docs.mjs` stitches `package.json`'s description, the narrative in
+ * `docs/api.md`, and the JSDoc on every exported declaration into
+ * `docs/pages/api/flow.md`, and projects `docs/testing.md` into the
+ * `flow-testing` region of the shared `docs/pages/api-tests.md`. `Generate`
+ * runs under the `run` and `lint` verbs: `smithers-build run` writes the pages
+ * and `smithers-build lint` fails on drift, and the recursive
+ * `smithers-build ci '//packages/...'` pattern includes the lint form, so a
+ * JSDoc edit that changes a published page cannot land without regenerating
+ * it.
+ *
+ * The test files are inputs because the script also gates the suite count the
+ * shared inventory table publishes for this package against the files on disk.
+ *
+ * @since 0.1.0
+ * @category docs
+ */
+export const docsPages = Smithers.Generate({
+  script: Smithers.file("//packages/flow/scripts/docs.mjs"),
+  data: [
+    Smithers.file("//packages/flow/Package.ts"),
+    Smithers.glob("//packages/flow/src/**/*.ts"),
+    Smithers.glob("//packages/flow/test/**/*.test.ts"),
+    Smithers.glob("//packages/flow/docs/*.md"),
+    Smithers.file("//packages/flow/package.json")
+  ],
+  changes: ["docs/pages/api/flow.md", "docs/pages/api-tests.md"]
+})
+
+/**
  * The package's circular-dependency guard, run under the declared runtime.
  *
  * @since 0.1.0
