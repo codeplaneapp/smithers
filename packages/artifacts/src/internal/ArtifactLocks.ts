@@ -59,117 +59,146 @@ export const withDigest = <A, E, R, E2>(
   effect: Effect.Effect<A, E, R>,
   failure: (cause: unknown) => E2,
   coordination: "required" | "process" = "required"
-): Effect.Effect<A, E | E2, R> => {
-  let byDigest = locks.get(fs)
-  if (byDigest === undefined) {
-    byDigest = new Map()
-    locks.set(fs, byDigest)
-  }
-  let entry = byDigest.get(digest)
-  if (entry === undefined) {
-    entry = { semaphore: Semaphore.makeUnsafe(1), users: 0 }
-    byDigest.set(digest, entry)
-  }
-  entry.users += 1
-  const held = entry
-  const table = byDigest
+): Effect.Effect<A, E | E2, R> =>
+  // Every execution of the returned effect claims its own share of the entry,
+  // which is why the whole body is suspended rather than run when `withDigest`
+  // is called. A count taken at construction is wrong in both directions: an
+  // effect built and discarded pins an entry nothing will ever release, and one
+  // built once and run repeatedly — `ArtifactBackupLease` builds its gate once
+  // and runs it on every heartbeat — retires the entry underneath a live holder,
+  // so the next caller mints a second semaphore for the same digest and the two
+  // serialize against nothing.
+  Effect.suspend(() => {
+    let byDigest = locks.get(fs)
+    if (byDigest === undefined) {
+      byDigest = new Map()
+      locks.set(fs, byDigest)
+    }
+    let entry = byDigest.get(digest)
+    if (entry === undefined) {
+      entry = { semaphore: Semaphore.makeUnsafe(1), users: 0 }
+      byDigest.set(digest, entry)
+    }
+    entry.users += 1
+    const held = entry
+    const table = byDigest
 
-  const coordinated = coordination === "process"
-    ? effect
-    : Effect.gen(function*() {
-      const owner = yield* token
-      const lockDirectory = `${directory}/${directoryName}`
-      const lockPath = `${lockDirectory}/${digest}.lock`
-      yield* fs.makeDirectory(lockDirectory, { recursive: true }).pipe(Effect.mapError(failure))
-      /**
-       * Whether this call created the lock file, and therefore owes a release.
-       * It is set in the same uninterruptible step that creates the file, so
-       * interruption striking between the two cannot leak a lock nothing
-       * releases — the only party that would ever reclaim it is a later
-       * acquirer of the same digest, which may never come.
-       */
-      let acquired = false
+    const coordinated = coordination === "process"
+      ? effect
+      : Effect.gen(function*() {
+        const owner = yield* token
+        const lockDirectory = `${directory}/${directoryName}`
+        const lockPath = `${lockDirectory}/${digest}.lock`
+        yield* fs.makeDirectory(lockDirectory, { recursive: true }).pipe(Effect.mapError(failure))
+        /**
+         * Whether this call created the lock file, and therefore owes a release.
+         * It is set in the same uninterruptible step that creates the file, so
+         * interruption striking between the two cannot leak a lock nothing
+         * releases — the only party that would ever reclaim it is a later
+         * acquirer of the same digest, which may never come.
+         */
+        let acquired = false
 
-      const acquire = Effect.gen(function*() {
-        while (true) {
-          const created = yield* Effect.uninterruptible(
-            fs.writeFileString(lockPath, owner, { flag: "wx", mode: 0o600 }).pipe(
-              Effect.andThen(Effect.sync(() => {
-                acquired = true
-                return true
-              })),
-              Effect.catch((cause): Effect.Effect<boolean, E2> =>
-                isReason(cause, "AlreadyExists") ? Effect.succeed(false) : Effect.fail(failure(cause))
-              )
-            )
-          )
-          if (created) return
-
-          const info = yield* fs.stat(lockPath).pipe(
-            Effect.map(Option.some),
-            Effect.catch((cause): Effect.Effect<Option.Option<FileSystem.File.Info>, E2> =>
-              isReason(cause, "NotFound") ? Effect.succeed(Option.none()) : Effect.fail(failure(cause))
-            )
-          )
-          if (Option.isSome(info)) {
-            const modified = Option.getOrUndefined(info.value.mtime)
-            const now = yield* Clock.currentTimeMillis
-            if (modified !== undefined && now - modified.getTime() > staleAfterMs) {
-              const tombstone = `${lockPath}.stale-${owner}`
-              const reaped = yield* fs.rename(lockPath, tombstone).pipe(
-                Effect.as(true),
+        const acquire = Effect.gen(function*() {
+          while (true) {
+            const created = yield* Effect.uninterruptible(
+              fs.writeFileString(lockPath, owner, { flag: "wx", mode: 0o600 }).pipe(
+                Effect.andThen(Effect.sync(() => {
+                  acquired = true
+                  return true
+                })),
                 Effect.catch((cause): Effect.Effect<boolean, E2> =>
-                  isReason(cause, "NotFound") ? Effect.succeed(false) : Effect.fail(failure(cause))
+                  isReason(cause, "AlreadyExists") ? Effect.succeed(false) : Effect.fail(failure(cause))
                 )
               )
-              if (reaped) yield* fs.remove(tombstone).pipe(Effect.ignore)
-              continue
-            }
-          }
-          yield* Effect.sleep(retryEvery)
-        }
-      }).pipe(
-        Effect.timeout(acquireWithin),
-        Effect.catchTag("TimeoutError", (cause) => Effect.fail(failure(cause)))
-      )
+            )
+            if (created) return
 
-      const release = fs.readFileString(lockPath).pipe(
-        Effect.flatMap((found) => found === owner ? fs.remove(lockPath) : Effect.void),
-        // A concurrent stale-lock reaper can win release. `NotFound`
-        // means no lock remains for this owner to release or leak.
-        Effect.catch((cause): Effect.Effect<void, E2> =>
-          isReason(cause, "NotFound") ? Effect.void : Effect.fail(failure(cause))
-        )
-      )
-
-      // The finalizer is attached around acquisition itself, not just around
-      // the protected effect, so a lock created moments before an interruption
-      // is still released. A call that never created one owes nothing and must
-      // not touch a file another owner holds.
-      return yield* acquire.pipe(
-        Effect.andThen(Effect.scoped(Effect.gen(function*() {
-          yield* Effect.forkScoped(
-            Effect.forever(
-              Effect.sleep(heartbeatEvery).pipe(
-                Effect.andThen(Clock.currentTimeMillis),
-                Effect.flatMap((now) => {
-                  const timestamp = new Date(now)
-                  return fs.utimes(lockPath, timestamp, timestamp)
-                }),
-                Effect.ignore
+            const info = yield* fs.stat(lockPath).pipe(
+              Effect.map(Option.some),
+              Effect.catch((cause): Effect.Effect<Option.Option<FileSystem.File.Info>, E2> =>
+                isReason(cause, "NotFound") ? Effect.succeed(Option.none()) : Effect.fail(failure(cause))
               )
             )
-          )
-          return yield* effect
-        }))),
-        Effect.onExit(() => acquired ? release : Effect.void)
-      )
-    })
+            if (Option.isSome(info)) {
+              const modified = Option.getOrUndefined(info.value.mtime)
+              const now = yield* Clock.currentTimeMillis
+              if (modified !== undefined && now - modified.getTime() > staleAfterMs) {
+                const tombstone = `${lockPath}.stale-${owner}`
+                const reaped = yield* fs.rename(lockPath, tombstone).pipe(
+                  Effect.as(true),
+                  Effect.catch((cause): Effect.Effect<boolean, E2> =>
+                    isReason(cause, "NotFound") ? Effect.succeed(false) : Effect.fail(failure(cause))
+                  )
+                )
+                if (reaped) yield* fs.remove(tombstone).pipe(Effect.ignore)
+                continue
+              }
+            }
+            yield* Effect.sleep(retryEvery)
+          }
+        }).pipe(
+          Effect.timeout(acquireWithin),
+          Effect.catchTag("TimeoutError", (cause) => Effect.fail(failure(cause)))
+        )
 
-  return held.semaphore.withPermit(coordinated).pipe(
-    Effect.ensuring(Effect.sync(() => {
-      held.users -= 1
-      if (held.users === 0 && table.get(digest) === held) table.delete(digest)
-    }))
-  )
-}
+        const release = fs.readFileString(lockPath).pipe(
+          Effect.flatMap((found) => found === owner ? fs.remove(lockPath) : Effect.void),
+          // A concurrent stale-lock reaper can win release. `NotFound`
+          // means no lock remains for this owner to release or leak.
+          Effect.catch((cause): Effect.Effect<void, E2> =>
+            isReason(cause, "NotFound") ? Effect.void : Effect.fail(failure(cause))
+          )
+        )
+
+        // The finalizer is attached around acquisition itself, not just around
+        // the protected effect, so a lock created moments before an interruption
+        // is still released. A call that never created one owes nothing and must
+        // not touch a file another owner holds.
+        return yield* acquire.pipe(
+          Effect.andThen(Effect.scoped(Effect.gen(function*() {
+            yield* Effect.forkScoped(
+              Effect.gen(function*() {
+                while (true) {
+                  yield* Effect.sleep(heartbeatEvery)
+                  // Freshen only a lock this call still owns, the same comparison
+                  // the release below makes. A holder stalled past the stale
+                  // bound has already been reaped and replaced, and touching that
+                  // pathname anyway would hold a stranger's lock fresh forever: a
+                  // replacement that is then hard-killed could never be judged
+                  // stale while this zombie ran, so every later acquirer of the
+                  // digest would burn the full two-minute deadline and fail.
+                  const beat = yield* fs.readFileString(lockPath).pipe(
+                    Effect.map((found) => found === owner ? "own" as const : "foreign" as const),
+                    Effect.catch((cause) =>
+                      Effect.succeed(isReason(cause, "NotFound") ? "gone" as const : "unreadable" as const)
+                    )
+                  )
+                  if (beat === "own") {
+                    const timestamp = new Date(yield* Clock.currentTimeMillis)
+                    yield* Effect.ignore(fs.utimes(lockPath, timestamp, timestamp))
+                    continue
+                  }
+                  // A read the host refused for any other reason is no evidence
+                  // either way, so this beat is skipped and the next one retries.
+                  // Ending the heartbeat on it would retire a lock this call
+                  // still holds: the file goes stale within the minute, another
+                  // process reaps it, and this holder keeps working unfenced.
+                  if (beat === "unreadable") continue
+                  return
+                }
+              })
+            )
+            return yield* effect
+          }))),
+          Effect.onExit(() => acquired ? release : Effect.void)
+        )
+      })
+
+    return held.semaphore.withPermit(coordinated).pipe(
+      Effect.ensuring(Effect.sync(() => {
+        held.users -= 1
+        if (held.users === 0 && table.get(digest) === held) table.delete(digest)
+      }))
+    )
+  })

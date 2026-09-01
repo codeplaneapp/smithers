@@ -45,3 +45,18 @@
   directory.
 - Classified a backup-lease marker another process already reaped as a clean
   release rather than logging a release failure.
+- Stopped a lock heartbeat from freshening a lock file it no longer owns. A
+  holder reaped as stale and replaced kept touching that path every 10 seconds,
+  which held the replacement fresh past every stale bound, so a replacement that
+  was then hard-killed blocked the digest for as long as the reaped holder ran.
+  A lock that is gone or now names another owner ends the heartbeat; a read the
+  host refused for any other reason skips one beat and retries, so a transient
+  refusal cannot retire a lock still held.
+- Made per-digest lock bookkeeping per execution rather than per construction.
+  A lock effect built once and run repeatedly, which is how the backup lease
+  heartbeats, retired its entry underneath a live holder, and the next caller
+  minted a second in-process semaphore for the same digest.
+- Documented that reclaiming a stale lock measures and then removes in separate
+  steps, so simultaneous reclaims of one stale lock can both proceed, and that
+  `ifUnmodifiedSinceMs` and the backup lease are the fences that do not depend
+  on it.

@@ -250,6 +250,22 @@ describe("uploads", () => {
       expect(upload.headers["content-type"]).toBe("application/octet-stream")
     }))
 
+  it.effect("never lets a configured content-length describe a body it does not measure", () =>
+    Effect.gen(function*() {
+      // `content-length` is the one protocol header a body carries rather than
+      // a header the request sets, so applying caller headers first does not
+      // displace it. A stale configured length would describe a body the client
+      // never sent, and a tier that honors it stores a truncated blob under a
+      // correct address, which only a later read discovers as corruption.
+      const tier = remote(() => new Response(null, { status: 200 }), {
+        headers: { "content-length": "1" }
+      })
+      yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(artifact))))
+      const upload = tier.calls[0]!
+      expect(upload.body).toBe(artifact)
+      expect(upload.headers["content-length"]).toBe(String(bytes(artifact).byteLength))
+    }))
+
   it.effect("fails on a non-2xx answer", () =>
     Effect.gen(function*() {
       const tier = remote(() => new Response(null, { status: 500 }))

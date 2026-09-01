@@ -50,6 +50,14 @@ cross-process exclusion between writers and sweep deletion. A sweep using
 `process` also skips the backup lease. Build a store and its sweep with the
 same directory and coordination mode; no runtime check can detect a mismatch.
 
+`required` bounds the writer-versus-sweeper race rather than eliminating it. A
+lock is heartbeated every 10 seconds, reclaimed once it is 60 seconds stale, and
+acquisition gives up after 2 minutes. Reclaiming a stale lock measures the file
+and then removes it in a separate step, so once some holder has gone stale, two
+processes reclaiming at the same moment can both proceed. The deletion fences
+that do not depend on this lock still stand in that case:
+`RemoveOptions.ifUnmodifiedSinceMs` and the backup lease.
+
 `ArtifactStore.makeMemory` copies both boundaries around a private map. It does
 not rehash a read because no caller-owned reference aliases stored bytes.
 `makeNoop` supplies typed `unavailable` failures and accepts per-method

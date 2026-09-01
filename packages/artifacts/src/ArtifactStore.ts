@@ -285,6 +285,19 @@ export interface FileSystemOptions {
    * whose host stalls past the stale bound can therefore be reaped while it is
    * still running.
    *
+   * Reclaiming a stale lock is a measurement followed by a separate removal,
+   * not one atomic compare-and-swap, so the exposure outlives the stalled
+   * holder: two processes that both measure the same lock as stale both go on
+   * to reclaim it, and the second reclaims whatever now sits at that path,
+   * including the fresh lock the first just took. A release is the same shape,
+   * reading the owner and then removing the path. Both windows open only after
+   * some holder has already gone stale, and both leave the deletion fences that
+   * do not depend on this lock — `ArtifactSweep`'s `ifUnmodifiedSinceMs` and the
+   * backup lease — still standing, which is why they bound damage rather than
+   * causing it. Treat `required` as a strong guard against the ordinary
+   * writer-versus-sweeper overlap, not as mutual exclusion that survives a
+   * crashed holder plus a simultaneous reclaim.
+   *
    * It also only fences parties that agree. An `ArtifactSweep` over the same
    * directory must be built with the same `coordination`: a store on `process`
    * paired with a sweep on `required` takes lock files no writer observes, so
@@ -391,6 +404,15 @@ export const makeFileSystem = (fs: FileSystem.FileSystem, options: FileSystemOpt
    * measured says nothing about its owner, so both survive. Every step is
    * best-effort — a missing directory or failing host never fails the
    * publication.
+   *
+   * It measures and then removes, which is not atomic, so a lock file replaced
+   * between those two steps is removed on the strength of its predecessor's
+   * age. The hour-long threshold is what keeps that narrow: a live holder
+   * heartbeats its lock every 10 seconds, so only a path abandoned for an hour
+   * is ever a candidate, and only a reclaim landing inside that one gap loses
+   * its lock. It is the same non-atomic reclamation `FileSystemOptions`'
+   * `coordination` documents, applied to the files that reclamation leaves
+   * behind.
    *
    * This is a sweep of scratch files, not garbage collection. Reclaiming
    * *published* artifacts is `ArtifactSweep` driven by an explicit
