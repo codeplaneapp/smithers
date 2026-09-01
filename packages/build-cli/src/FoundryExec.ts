@@ -78,13 +78,14 @@ const miseVersion = async (root: string, config: unknown, name: string): Promise
 export const resolveMiseBin = async (
   root: string,
   workspace: WorkspaceDeclaration.WorkspaceDeclaration,
-  name: string
+  name: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env
 ): Promise<ResolvedTool> => {
   const mise = toolchainsOf(workspace).find((entry) => entry["_tag"] === "Mise")
   const config = mise?.["config"]
   const authority = await digestDeclared(root, config)
   const pinned = await miseVersion(root, config, name)
-  const path = PackageTree.findOnPath("mise")
+  const path = PackageTree.findOnPath("mise", environment)
   const identity = { tag: "MiseBin", name, authority, pinned }
   if (mise === undefined) {
     return {

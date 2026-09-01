@@ -24,7 +24,8 @@ const workspace = async (): Promise<string> => {
 
 const serve = async (
   root: string,
-  args: ReadonlyArray<string>
+  args: ReadonlyArray<string>,
+  config: Parameters<typeof makeCli>[0] = {}
 ): Promise<{ readonly exitCode: number; readonly output: string; readonly logs: string }> => {
   let exitCode = 0
   let output = ""
@@ -35,7 +36,7 @@ const serve = async (
     return true
   }) as typeof process.stderr.write
   try {
-    await makeCli({}).serve([...normalizeArgv(args), "--workspace", root], {
+    await makeCli(config).serve([...normalizeArgv(args), "--workspace", root], {
       exit: (code) => {
         exitCode = code
       },
@@ -225,6 +226,22 @@ describe("Docker service spec", () => {
 })
 
 describe("host refusals and Anvil secret resolution", () => {
+  it("resolves Mise from the configured environment instead of the ambient PATH", async () => {
+    const root = await workspace()
+    const bin = NodePath.join(root, "test-bin")
+    const mise = NodePath.join(bin, "mise")
+    await Fs.mkdir(bin)
+    await Fs.writeFile(mise, "#!/bin/sh\nprintf 'mise test 1.0\\n'\n", "utf8")
+    await Fs.chmod(mise, 0o755)
+
+    const result = await serve(root, ["//:miseTool", "--plan"], {
+      environment: { ...process.env, PATH: bin }
+    })
+    expect(result.exitCode).toBe(0)
+    expect(result.output).toContain(mise)
+    expect(result.output).not.toContain("not present on PATH")
+  })
+
   it("plans a typed Mise refusal from the declared config when mise is absent", async () => {
     const root = await workspace()
     await Fs.writeFile(NodePath.join(root, "mise.toml"), "[tools]\nmockery = \"2.53.6\"\n", "utf8")
@@ -248,7 +265,9 @@ export const Package = S.Package({ targets: { tool } })
 `,
       "utf8"
     )
-    const result = await serve(root, ["//:tool", "--plan"])
+    const result = await serve(root, ["//:tool", "--plan"], {
+      environment: { ...process.env, PATH: "" }
+    })
     expect(result.exitCode).toBe(0)
     expect(result.output).toContain("host binary")
     expect(result.output).toContain("mise")

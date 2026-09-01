@@ -1189,7 +1189,12 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
       }
     }
   } else if (tag === "MiseBin") {
-    const resolved = await FoundryExec.resolveMiseBin(context.root, context.index.workspace, String(reference["name"]))
+    const resolved = await FoundryExec.resolveMiseBin(
+      context.root,
+      context.index.workspace,
+      String(reference["name"]),
+      context.environment
+    )
     outcome = resolved.ok
       ? { _tag: "resolved", tool: { path: resolved.path, identity: resolved.identity } }
       : { _tag: "refused", tool: { refusal: resolved.refusal, identity: resolved.identity } }

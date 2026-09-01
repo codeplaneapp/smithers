@@ -56,8 +56,11 @@ export const digestFileBytes = async (path: string): Promise<string> => {
  * @category tools
  * @since 0.1.0
  */
-export const findOnPath = (name: string): string | undefined => {
-  return findAllOnPath(name)[0]
+export const findOnPath = (
+  name: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env
+): string | undefined => {
+  return findAllOnPath(name, environment)[0]
 }
 
 /**
@@ -66,9 +69,12 @@ export const findOnPath = (name: string): string | undefined => {
  * @category tools
  * @since 0.1.0
  */
-export const findAllOnPath = (name: string): ReadonlyArray<string> => {
+export const findAllOnPath = (
+  name: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env
+): ReadonlyArray<string> => {
   const found: Array<string> = []
-  const environmentPath = process.env["PATH"] ?? ""
+  const environmentPath = environment["PATH"] ?? ""
   for (const entry of environmentPath.split(NodePath.delimiter)) {
     if (entry === "") continue
     const candidate = NodePath.join(entry, name)
