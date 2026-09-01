@@ -121,6 +121,28 @@ describe("RedactedLogger", () => {
       expect(text).toContain("Bearer [REDACTED_API_KEY]")
     }))
 
+  it.effect("keeps a credential out of a log span's label", () =>
+    Effect.gen(function*() {
+      // A span label reaches the same line by a different route: Effect
+      // sanitizes it first, folding `token=` into `token_`, and `_` is a word
+      // character, so a rule anchored on `\b` could never fire after it.
+      const recorded = yield* logged(
+        Effect.logInfo("deploying").pipe(Effect.withLogSpan("fetch token=sk-live-e2ecase22NEVERLOGTHIS"))
+      )
+      expect(rendered(recorded)).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+    }))
+
+  it.effect("keeps a credential out of a logged function's own properties", () =>
+    Effect.gen(function*() {
+      // The walker returned anything that was neither a string nor an object
+      // untouched, so `util.inspect` printed a function's own properties in
+      // full: `[Function: deploy] { token: 'sk-...' }` on the operator's
+      // terminal, on the path case 22 guards.
+      const handler = Object.assign(() => undefined, { token: "sk-live-e2ecase22NEVERLOGTHIS" })
+      const recorded = yield* logged(Effect.logInfo("handler installed", handler))
+      expect(rendered(recorded)).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+    }))
+
   it.effect("applies the documented textual rules to a logged message", () =>
     Effect.gen(function*() {
       const recorded = yield* logged(Effect.gen(function*() {
@@ -438,6 +460,79 @@ describe("RedactedLogger", () => {
     const rendered = inspect(RedactedLogger.redactArgument(nested, redactor), { depth: null })
     expect(rendered).not.toContain("sk-live-abcdefgh")
     expect(rendered).toContain(Redaction.depthMarker)
+  })
+
+  it("does not leak a credential carried by a function or a symbol", () => {
+    // The shared walker returns anything that is neither a string nor an
+    // object untouched, so a function's own properties never met a rule and
+    // `util.inspect` printed them: `[Function: deploy] { token: 'sk-...' }`
+    // reached the operator's terminal on the very path case 22 guards.
+    const redactor = Redaction.make()
+    const handler = Object.assign(() => undefined, { token: "sk-live-abcdefgh" })
+    expect(inspect(RedactedLogger.redactArgument(handler, redactor))).not.toContain("sk-live-abcdefgh")
+    expect(inspect(RedactedLogger.redactArgument(Symbol("sk-live-abcdefgh"), redactor))).not.toContain(
+      "sk-live-abcdefgh"
+    )
+    class Holder {
+      static readonly token = "sk-live-abcdefgh"
+    }
+    expect(inspect(RedactedLogger.redactArgument(Holder, redactor))).not.toContain("sk-live-abcdefgh")
+  })
+
+  it("does not leak a credential a log span carries", () => {
+    // Effect's span sanitizer folds `token=` into `token_`, and `_` is a word
+    // character, so the api-key rule's leading \b could never fire after it.
+    // The assignment rule documents this exact hazard and already guards it.
+    const redactor = Redaction.make()
+    expect(String(redactor("fetch_token_sk-live-abcdefgh=0ms"))).not.toContain("sk-live-abcdefgh")
+    expect(String(redactor("ANTHROPIC_sk-ant-api03-abcdefghij"))).not.toContain("sk-ant-api03-abcdefghij")
+  })
+
+  it("keeps a binary view whole instead of one key per byte", () => {
+    // The collapse rebuilds a value from its entries, which turns a buffer
+    // into an object with one key per byte: a 100 kB buffer rendered 1.4 MB of
+    // stderr. A binary view holds no strings, so there is nothing to redact.
+    const redactor = Redaction.make()
+    const bytes = Buffer.alloc(1_000, 7)
+    const rendered = RedactedLogger.redactArgument(bytes, redactor)
+    expect(ArrayBuffer.isView(rendered)).toBe(true)
+    expect(inspect(rendered).length).toBeLessThan(500)
+  })
+
+  it("does not leak a credential the walk cannot reach when the console refuses", () => {
+    // Round 5's leak: the delegate's fallback rendered a value the rules had
+    // never seen. These are the two shapes that exposed it.
+    const redactor = Redaction.make()
+    const seen: Array<ReadonlyArray<unknown>> = []
+    const brittle = {
+      ...console,
+      log: (...args: ReadonlyArray<unknown>) => {
+        if (seen.length === 0) {
+          seen.push(args)
+          throw new TypeError("cannot render that")
+        }
+        seen.push(args)
+      }
+    } as unknown as Console.Console
+    const view = RedactedLogger.redactingConsole(brittle, redactor)
+    const hidden = { toJSON: (): string => "Bearer sk-live-abcdefgh" }
+    const leaky = Object.assign(() => "sk-live-abcdefgh", { note: "sk-live-abcdefgh" })
+    expect(() => view.log(hidden, leaky)).not.toThrow()
+    const printed = seen.map((entry) => entry.map((value) => inspect(value)).join(" ")).join("\n")
+    expect(printed).not.toContain("sk-live-abcdefgh")
+  })
+
+  it("survives a console that refuses every call", () => {
+    // The marker retry sits inside the first catch with no guard of its own.
+    const redactor = Redaction.make()
+    const always = {
+      ...console,
+      log: () => {
+        throw new TypeError("always refuse")
+      }
+    } as unknown as Console.Console
+    const view = RedactedLogger.redactingConsole(always, redactor)
+    expect(() => view.log("token=sk-live-abcdefgh")).not.toThrow()
   })
 
   it("does not leak a credential a RegExp was built from", () => {

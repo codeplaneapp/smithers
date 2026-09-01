@@ -65,7 +65,12 @@ export const placeholder = "[REDACTED]"
 export const defaultRules: ReadonlyArray<Rule> = [
   {
     id: "api-key",
-    pattern: /\b(?:sk|pk)[-_][A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g,
+    // Not `\b`, for the reason the assignment rule below gives: an underscore
+    // is a word character, so `\bsk` never fires after `ANTHROPIC_` or after
+    // Effect's log-span sanitizer folds `token=` into `token_`. The lookbehind
+    // excludes only letters and digits, so a key still reads as a key when an
+    // underscore or a hyphen runs into it.
+    pattern: /(?<![A-Za-z0-9])(?:sk|pk)[-_][A-Za-z0-9][A-Za-z0-9_-]{7,}/g,
     replace: "[REDACTED_API_KEY]"
   },
   {
@@ -119,6 +124,24 @@ export interface Options {
 }
 
 /**
+ * What {@link redact} writes in place of a function or a class object.
+ *
+ * @since 0.1.0
+ * @category redaction
+ * @slop
+ */
+export const functionMarker = "[Function]"
+
+/**
+ * What {@link redact} writes in place of a symbol.
+ *
+ * @since 0.1.0
+ * @category redaction
+ * @slop
+ */
+export const symbolMarker = "[Symbol]"
+
+/**
  * How deep {@link redact} walks before it names a value instead.
  *
  * @since 0.1.0
@@ -153,7 +176,16 @@ export const redact = (value: unknown, options?: Options): unknown => {
   const rules = options?.rules ?? defaultRules
   const walk = (node: unknown, ancestors: WeakSet<object>, depth = 0): unknown => {
     if (typeof node === "string") return redactString(node, rules)
+    // A function, a class object or a symbol carries text a walk never reaches
+    // (own properties, a description, a body), and the renderer prints it. None
+    // of it can be redacted in place, so the value is named instead.
+    if (typeof node === "function") return functionMarker
+    if (typeof node === "symbol") return symbolMarker
     if (node === null || typeof node !== "object") return node
+    // A binary view holds bytes, not strings, so there is nothing to redact and
+    // rebuilding it from its entries would render one key per byte: a 100 kB
+    // buffer became 1.4 MB of output.
+    if (ArrayBuffer.isView(node) || node instanceof ArrayBuffer) return node
     if (ancestors.has(node)) return "[Circular]"
     // A journal row is bounded by its schema, but a LOGGED value is arbitrary:
     // the logger sends every non-Error value here, and a chain deep enough to

@@ -491,7 +491,7 @@ describe("vitest coverage isolation conformance", () => {
     // lane advisory, so a matrix that runs but cannot fail the pipeline is
     // exactly the state this deliverable left behind, and it would read as
     // green from every other pin in this file. Slice the job out by its own
-    // key rather than searching the whole document, because three other lanes
+    // key rather than searching the whole document, because two other lanes
     // legitimately carry the line.
     const faultsJob = ci.slice(ci.indexOf("\n  e2e-faults:") + 1).split(/\n {2}(?=\S)/)[0]!
     expect(faultsJob).toContain("//e2e:faults")

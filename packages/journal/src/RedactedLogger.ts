@@ -241,10 +241,16 @@ export const redactingConsole = (target: Console.Console, redactor: Redaction.Re
         try {
           return method(...redacted)
         } catch {
-          // The delegate renders what we hand it, and a value that survives
-          // redaction can still break the renderer. Falling back to the text
-          // keeps the line, and the run, alive.
-          return method(...redacted.map(() => unrenderableMarker))
+          // The delegate refused what we handed it. Retry with markers, never
+          // with a rendering of the values: a rendering has not been through
+          // the rules, and printing one is how a credential reached the
+          // terminal before. A delegate that refuses the markers too is out of
+          // options, and a log line is not worth the run.
+          try {
+            return method(...redacted.map(() => unrenderableMarker))
+          } catch {
+            return undefined
+          }
         }
       }
       : method

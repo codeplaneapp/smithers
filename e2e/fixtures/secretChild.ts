@@ -42,6 +42,13 @@ const registration = Interpreter.layer(Deploy).pipe(
       // killed the run, so this line proves the log survives as well as hides.
       Effect.logInfo(`calling ${endpoint} with Bearer ${apiKey}`).pipe(
         Effect.andThen(Effect.logInfo("request headers", new Headers({ authorization: `Bearer ${apiKey}` }))),
+        // The third line carries the credential in a log span rather than in
+        // the message. Effect sanitizes a span label before it is rendered,
+        // folding `token=` into `token_`, so a rule anchored on a word
+        // boundary never fired and the label printed the key in full.
+        Effect.andThen(
+          Effect.logInfo("deploy finished").pipe(Effect.withLogSpan(`fetch token=${apiKey}`))
+        ),
         Effect.as(`deployed ${endpoint} token=${apiKey}`)
       )
     )
