@@ -139,15 +139,15 @@ Release candidates publish to the `rc` dist-tag. The `@rc` suffix is required:
 :::code-group
 
 ```bash [pnpm]
-pnpm add @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108
+pnpm add @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
 ```
 
 ```bash [npm]
-npm install @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108
+npm install @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
 ```
 
 ```bash [bun]
-bun add @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108
+bun add @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
 ```
 
 :::
@@ -162,13 +162,29 @@ that exact version for `effect` and for the `@effect/*` packages that follow
 Effect's own version line. A project that resolves two Effect versions is
 unsupported, because schema internals are not interoperable between instances.
 
-### Override the drifted peer
+### Why the install line names `@effect/platform-node-shared`
 
-Pin one transitive package as well. `@effect/platform-node@4.0.0-rc.108` asks
-for `@effect/platform-node-shared` `^4.0.0-rc.108`, the registry answers
-`4.0.0-rc.112`, and that version's own peer range demands Effect
-`4.0.0-rc.112`. Your project still runs on a single Effect copy, and `npm ls`
-exits 1 with `invalid: "^4.0.0-rc.112"` until you override the range.
+`@effect/platform-node@4.0.0-rc.108` asks for `@effect/platform-node-shared`
+`^4.0.0-rc.108`, the registry answers `4.0.0-rc.112`, and that version's own
+peer range demands Effect `4.0.0-rc.112`. Naming the package in your own
+dependencies settles the range: npm 11, Bun 1.4, and pnpm 11 each resolve one
+copy, at `4.0.0-rc.108`. A dependency cannot do this for you, because a
+manifest does not rewrite the range a sibling declares, and the published
+Smithers packages that depend on `@effect/platform-node` already pin the shared
+package exactly without changing the outcome.
+
+If you installed without it, `npm ls --all` exits 1 with
+`invalid: "^4.0.0-rc.112"`. Bare `npm ls` prints direct dependencies only, so it
+exits 0 with the drifted copy nested below that depth. Adding the package
+repairs the tree in place, with no reinstall:
+
+```bash
+npm install --save-exact @effect/platform-node-shared@4.0.0-rc.108
+```
+
+#### The overrides alternative
+
+An `overrides` pin reaches the same tree and is the heavier route.
 
 :::code-group
 
@@ -189,8 +205,11 @@ overrides:
 
 pnpm 11 no longer reads a `pnpm` field from `package.json`, so a
 `pnpm.overrides` block there is ignored with a warning and the drifted version
-is installed anyway. With the pin applied, `npm ls` exits 0 and the tree holds
-one `@effect/platform-node-shared@4.0.0-rc.108`.
+is installed anyway. npm does not reconcile a tree that is already on disk when
+`overrides` changes: with `node_modules` and `package-lock.json` present it
+answers `up to date` and leaves the drifted copy nested. Add the pin before the
+first install, or delete `node_modules` and the lockfile (`package-lock.json` or
+`bun.lock`) and install again.
 
 ### Install the command
 
