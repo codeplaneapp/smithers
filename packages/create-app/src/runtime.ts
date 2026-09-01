@@ -11,6 +11,8 @@
  */
 import * as Agent from "@smthrs/agent/Agent"
 import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Budget from "@smthrs/agent/Budget"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import * as Capability from "@smthrs/capability/Capability"
@@ -166,7 +168,12 @@ export const layerFor = (options: LayerOptions) => {
         )
       )
   })
+  // Routed apps spend real model calls, so a reset-bearing refusal should
+  // park. This boundary has no approved plan envelope, so an invented ceiling
+  // would be policy the app author never chose.
+  const agentPolicy = Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())
   return Layer.mergeAll(host, seats, Agent.layer).pipe(
+    Layer.provideMerge(agentPolicy),
     Layer.provideMerge(Agent.layerDefaults),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),
