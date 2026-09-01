@@ -273,8 +273,7 @@ describe("Recovery", () => {
           requiresIdempotencyKey: true,
           residue: () => "message residue",
           revert: () => Effect.succeed({ value: "sent" }),
-          rollback: () =>
-            Deferred.succeed(rolling, undefined).pipe(Effect.andThen(Deferred.await(release)))
+          rollback: () => Deferred.succeed(rolling, undefined).pipe(Effect.andThen(Deferred.await(release)))
         }])
       )
 

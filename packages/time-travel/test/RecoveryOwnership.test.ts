@@ -183,8 +183,7 @@ describe("Recovery ownership arbitration", () => {
       const traced = RunStore.makeNoop({
         ...runs,
         claim: (...args) => Effect.sync(() => calls.push("claim")).pipe(Effect.andThen(runs.claim(...args))),
-        activate: (...args) =>
-          Effect.sync(() => calls.push("activate")).pipe(Effect.andThen(runs.activate(...args))),
+        activate: (...args) => Effect.sync(() => calls.push("activate")).pipe(Effect.andThen(runs.activate(...args))),
         transitionOwned: (...args) =>
           Effect.sync(() => calls.push("transitionOwned")).pipe(Effect.andThen(runs.transitionOwned(...args)))
       })
@@ -292,16 +291,18 @@ describe("Recovery ownership arbitration", () => {
             return { _tag: "Transitioned" as const }
           })
       })
-      const store = seeded(auditRow({
-        version: 1,
-        phase: "archive_committed",
-        originalStatus: "suspended",
-        suffixCount: 1,
-        suffixTailSeq: 1,
-        warnings: [],
-        cancelledChildren: [],
-        pendingChildren: [childRunId]
-      } satisfies AuditDetail))
+      const store = seeded(auditRow(
+        {
+          version: 1,
+          phase: "archive_committed",
+          originalStatus: "suspended",
+          suffixCount: 1,
+          suffixTailSeq: 1,
+          warnings: [],
+          cancelledChildren: [],
+          pendingChildren: [childRunId]
+        } satisfies AuditDetail
+      ))
 
       const first = yield* runRecovery(runs, { store })
 
@@ -339,16 +340,18 @@ describe("Recovery ownership arbitration", () => {
             )
             : Effect.succeed({ ...baseRow({ status: "cancelled", owner: null, heartbeatAtMs: null }), runId })
       })
-      const store = seeded(auditRow({
-        version: 1,
-        phase: "archive_committed",
-        originalStatus: "suspended",
-        suffixCount: 1,
-        suffixTailSeq: 1,
-        warnings: [],
-        cancelledChildren: [],
-        pendingChildren: ["gone-child", "terminal-child"]
-      } satisfies AuditDetail))
+      const store = seeded(auditRow(
+        {
+          version: 1,
+          phase: "archive_committed",
+          originalStatus: "suspended",
+          suffixCount: 1,
+          suffixTailSeq: 1,
+          warnings: [],
+          cancelledChildren: [],
+          pendingChildren: ["gone-child", "terminal-child"]
+        } satisfies AuditDetail
+      ))
 
       const result = yield* runRecovery(runs, { store })
 
@@ -366,16 +369,18 @@ describe("Recovery ownership arbitration", () => {
         ...parent,
         get: (runId) => runId === "run" ? parent.get(runId) : Effect.fail(runError("get"))
       })
-      const store = seeded(auditRow({
-        version: 1,
-        phase: "archive_committed",
-        originalStatus: "suspended",
-        suffixCount: 1,
-        suffixTailSeq: 1,
-        warnings: [],
-        cancelledChildren: [],
-        pendingChildren: ["unreadable-child"]
-      } satisfies AuditDetail))
+      const store = seeded(auditRow(
+        {
+          version: 1,
+          phase: "archive_committed",
+          originalStatus: "suspended",
+          suffixCount: 1,
+          suffixTailSeq: 1,
+          warnings: [],
+          cancelledChildren: [],
+          pendingChildren: ["unreadable-child"]
+        } satisfies AuditDetail
+      ))
 
       const result = yield* runRecovery(runs, { store })
 
@@ -426,16 +431,18 @@ describe("Recovery ownership arbitration", () => {
                 ? scenario.overrides.transitionOwned()
                 : Effect.succeed({ _tag: "Transitioned" as const }))
         })
-        const store = seeded(auditRow({
-          version: 1,
-          phase: "archive_committed",
-          originalStatus: "suspended",
-          suffixCount: 1,
-          suffixTailSeq: 1,
-          warnings: [],
-          cancelledChildren: [],
-          pendingChildren: ["stuck-child"]
-        } satisfies AuditDetail))
+        const store = seeded(auditRow(
+          {
+            version: 1,
+            phase: "archive_committed",
+            originalStatus: "suspended",
+            suffixCount: 1,
+            suffixTailSeq: 1,
+            warnings: [],
+            cancelledChildren: [],
+            pendingChildren: ["stuck-child"]
+          } satisfies AuditDetail
+        ))
 
         const result = yield* runRecovery(runs, { store })
 
@@ -479,21 +486,22 @@ describe("Recovery ownership arbitration", () => {
               ? parent.get(runId)
               : Effect.succeed({ ...baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }), runId }),
           claim: (runId, ...args) => runId === "run" ? parent.claim(runId, ...args) : child("claim") as never,
-          activate: (runId, ...args) =>
-            runId === "run" ? parent.activate(runId, ...args) : child("activate") as never,
+          activate: (runId, ...args) => runId === "run" ? parent.activate(runId, ...args) : child("activate") as never,
           transitionOwned: (runId, ...args) =>
             runId === "run" ? parent.transitionOwned(runId, ...args) : child("transitionOwned") as never
         })
-        const store = seeded(auditRow({
-          version: 1,
-          phase: "archive_committed",
-          originalStatus: "suspended",
-          suffixCount: 1,
-          suffixTailSeq: 1,
-          warnings: [],
-          cancelledChildren: [],
-          pendingChildren: ["failing-child"]
-        } satisfies AuditDetail))
+        const store = seeded(auditRow(
+          {
+            version: 1,
+            phase: "archive_committed",
+            originalStatus: "suspended",
+            suffixCount: 1,
+            suffixTailSeq: 1,
+            warnings: [],
+            cancelledChildren: [],
+            pendingChildren: ["failing-child"]
+          } satisfies AuditDetail
+        ))
 
         const result = yield* runRecovery(runs, { store })
 
@@ -507,16 +515,18 @@ describe("Recovery ownership arbitration", () => {
   it.effect("leaves a committed audit pending when a remaining child cannot be claimed", () =>
     Effect.gen(function*() {
       const childRunId = "busy-child"
-      const store = seeded(auditRow({
-        version: 1,
-        phase: "archive_committed",
-        originalStatus: "suspended",
-        suffixCount: 1,
-        suffixTailSeq: 1,
-        warnings: [],
-        cancelledChildren: [],
-        pendingChildren: [childRunId]
-      } satisfies AuditDetail))
+      const store = seeded(auditRow(
+        {
+          version: 1,
+          phase: "archive_committed",
+          originalStatus: "suspended",
+          suffixCount: 1,
+          suffixTailSeq: 1,
+          warnings: [],
+          cancelledChildren: [],
+          pendingChildren: [childRunId]
+        } satisfies AuditDetail
+      ))
       // The parent run claims normally; only the child refuses, so the pass
       // gets as far as the cancellation it cannot finish.
       const parent = claimable(baseRow({ status: "suspended", owner: null, heartbeatAtMs: null }))
@@ -610,16 +620,18 @@ describe("Recovery ownership arbitration", () => {
           data: { value: "sent" }
         }]
       } as const
-      const store = seeded(auditRow({
-        version: 1,
-        phase: "compensated",
-        originalStatus: "suspended",
-        suffixCount: 1,
-        suffixTailSeq: 1,
-        compensation,
-        warnings: [],
-        cancelledChildren: []
-      } satisfies AuditDetail))
+      const store = seeded(auditRow(
+        {
+          version: 1,
+          phase: "compensated",
+          originalStatus: "suspended",
+          suffixCount: 1,
+          suffixTailSeq: 1,
+          compensation,
+          warnings: [],
+          cancelledChildren: []
+        } satisfies AuditDetail
+      ))
       const registry = Effect.runSync(EffectHandlerRegistry.make([{
         kind: "send",
         tier: "irreversible",
@@ -634,19 +646,27 @@ describe("Recovery ownership arbitration", () => {
       const suffixJournal = Journal.makeNoop({
         entries: () => Effect.succeed({ entries: [{ seq: 1 }] as never, hasMore: false })
       })
-      const fiber = yield* Effect.forkChild(runRecovery(runs, {
-        store,
-        registry,
-        journal: suffixJournal
-      }), { startImmediately: true })
+      const fiber = yield* Effect.forkChild(
+        runRecovery(runs, {
+          store,
+          registry,
+          journal: suffixJournal
+        }),
+        { startImmediately: true }
+      )
 
       yield* Deferred.await(entered)
       expect(current).toMatchObject({ status: "running", owner })
-      const concurrent = yield* runs.claim("run", {
-        status: current.status,
-        owner: current.owner,
-        heartbeatAtMs: current.heartbeatAtMs
-      }, stranger, 99)
+      const concurrent = yield* runs.claim(
+        "run",
+        {
+          status: current.status,
+          owner: current.owner,
+          heartbeatAtMs: current.heartbeatAtMs
+        },
+        stranger,
+        99
+      )
       expect(concurrent._tag).not.toBe("Claimed")
       yield* Deferred.succeed(release, undefined)
       const result = yield* Fiber.join(fiber)

@@ -71,7 +71,9 @@ export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect
     statement.pipe(
       Effect.mapError((cause) => new Error(`time-travel migration failed creating ${object}`, { cause }))
     )
-  yield* step("flows_time_travel_audits", sql`CREATE TABLE IF NOT EXISTS flows_time_travel_audits (
+  yield* step(
+    "flows_time_travel_audits",
+    sql`CREATE TABLE IF NOT EXISTS flows_time_travel_audits (
     id TEXT PRIMARY KEY CHECK (length(id) > 0),
     run_id TEXT NOT NULL CHECK (length(run_id) > 0),
     lineage_id TEXT NOT NULL CHECK (length(lineage_id) > 0),
@@ -79,26 +81,33 @@ export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect
     status TEXT NOT NULL CHECK (status IN ('in_progress', 'completed', 'failed')),
     rate_limit_json TEXT CHECK (rate_limit_json IS NULL OR json_valid(rate_limit_json)),
     detail_json TEXT CHECK (detail_json IS NULL OR json_valid(detail_json))
-  )`)
+  )`
+  )
   yield* step(
     "flows_time_travel_audits_status_idx on flows_time_travel_audits",
     sql`CREATE INDEX IF NOT EXISTS flows_time_travel_audits_status_idx
     ON flows_time_travel_audits (status)`
   )
-  yield* step("flows_time_travel_receipts", sql`CREATE TABLE IF NOT EXISTS flows_time_travel_receipts (
+  yield* step(
+    "flows_time_travel_receipts",
+    sql`CREATE TABLE IF NOT EXISTS flows_time_travel_receipts (
     id TEXT PRIMARY KEY CHECK (length(id) > 0),
     audit_id TEXT NOT NULL CHECK (length(audit_id) > 0),
     effect_id TEXT NOT NULL CHECK (length(effect_id) > 0),
     receipt_json TEXT NOT NULL CHECK (json_valid(receipt_json))
-  )`)
-  yield* step("flows_time_travel_snapshots", sql`CREATE TABLE IF NOT EXISTS flows_time_travel_snapshots (
+  )`
+  )
+  yield* step(
+    "flows_time_travel_snapshots",
+    sql`CREATE TABLE IF NOT EXISTS flows_time_travel_snapshots (
     run_id TEXT NOT NULL CHECK (length(run_id) > 0),
     lineage_id TEXT NOT NULL CHECK (length(lineage_id) > 0),
     seq INTEGER NOT NULL CHECK (typeof(seq) = 'integer' AND seq >= 0 AND seq <= 9007199254740991),
     change_id TEXT NOT NULL CHECK (length(change_id) > 0),
     plan_digest TEXT CHECK (plan_digest IS NULL OR length(plan_digest) > 0),
     PRIMARY KEY (run_id, lineage_id, seq)
-  )`)
+  )`
+  )
   // Idempotent widening for a database migrated before the plan digest joined
   // the anchor. `ADD COLUMN` on a table that already has it is an error, not a
   // no-op, and there is nothing to repair when it fails — so exactly that one
@@ -119,7 +128,9 @@ export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect
     sql`CREATE INDEX IF NOT EXISTS flows_journal_events_lineage_idx
     ON flows_journal_events (run_id, json_extract(meta_json, '$.lineageId'), seq)`
   )
-  yield* step("flows_time_travel_edges", sql`CREATE TABLE IF NOT EXISTS flows_time_travel_edges (
+  yield* step(
+    "flows_time_travel_edges",
+    sql`CREATE TABLE IF NOT EXISTS flows_time_travel_edges (
     parent_run_id TEXT NOT NULL CHECK (length(parent_run_id) > 0),
     parent_seq INTEGER NOT NULL CHECK (
       typeof(parent_seq) = 'integer' AND parent_seq >= 0 AND parent_seq <= 9007199254740991
@@ -128,13 +139,16 @@ export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect
     kind TEXT NOT NULL CHECK (kind IN ('child', 'fork', 'continuation')),
     attached INTEGER NOT NULL CHECK (attached IN (0, 1)),
     CHECK (parent_run_id <> child_run_id)
-  )`)
+  )`
+  )
   yield* step(
     "flows_time_travel_edges_parent_idx on flows_time_travel_edges",
     sql`CREATE INDEX IF NOT EXISTS flows_time_travel_edges_parent_idx
     ON flows_time_travel_edges (parent_run_id, parent_seq)`
   )
-  yield* step("flows_time_travel_archive", sql`CREATE TABLE IF NOT EXISTS flows_time_travel_archive (
+  yield* step(
+    "flows_time_travel_archive",
+    sql`CREATE TABLE IF NOT EXISTS flows_time_travel_archive (
     run_id TEXT NOT NULL CHECK (length(run_id) > 0),
     seq INTEGER NOT NULL CHECK (typeof(seq) = 'integer' AND seq >= 0 AND seq <= 9007199254740991),
     event_id TEXT NOT NULL CHECK (length(event_id) > 0),
@@ -152,7 +166,8 @@ export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect
       typeof(archived_at_ms) = 'integer' AND archived_at_ms >= 0 AND archived_at_ms <= 9007199254740991
     ),
     PRIMARY KEY (run_id, seq)
-  )`)
+  )`
+  )
 })
 const Json = Schema.fromJsonString(Schema.Unknown)
 const RunStateJson = Schema.fromJsonString(RunState)
@@ -526,38 +541,38 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
         Effect.annotateCurrentSpan({ auditId: id }).pipe(
           Effect.andThen(TimeTravelStore.validateAuditPatch(patch)),
           Effect.andThen(
-          writer.write(
-            Effect.gen(function*() {
-              const rows = yield* sql<
-                {
-                  readonly id: string
-                  readonly run_id: string
-                  readonly lineage_id: string
-                  readonly seq: number
-                  readonly status: TimeTravelStore.Audit["status"]
-                  readonly rate_limit_json: string | null
-                  readonly detail_json: string | null
+            writer.write(
+              Effect.gen(function*() {
+                const rows = yield* sql<
+                  {
+                    readonly id: string
+                    readonly run_id: string
+                    readonly lineage_id: string
+                    readonly seq: number
+                    readonly status: TimeTravelStore.Audit["status"]
+                    readonly rate_limit_json: string | null
+                    readonly detail_json: string | null
+                  }
+                >`SELECT * FROM flows_time_travel_audits WHERE id = ${id}`
+                if (rows[0] === undefined) return yield* Effect.fail(error("not_found", `audit ${id} was not found`))
+                const row = rows[0]
+                const rateLimit = yield* decodeJson(row.rate_limit_json)
+                const detail = yield* decodeJson(row.detail_json)
+                const audit = {
+                  id: row.id,
+                  runId: row.run_id,
+                  frame: { lineageId: row.lineage_id, seq: row.seq },
+                  status: row.status,
+                  rateLimit,
+                  detail
                 }
-              >`SELECT * FROM flows_time_travel_audits WHERE id = ${id}`
-              if (rows[0] === undefined) return yield* Effect.fail(error("not_found", `audit ${id} was not found`))
-              const row = rows[0]
-              const rateLimit = yield* decodeJson(row.rate_limit_json)
-              const detail = yield* decodeJson(row.detail_json)
-              const audit = {
-                id: row.id,
-                runId: row.run_id,
-                frame: { lineageId: row.lineage_id, seq: row.seq },
-                status: row.status,
-                rateLimit,
-                detail
-              }
-              const next = { ...audit, ...patch }
-              const rateLimitJson = next.rateLimit === undefined ? null : yield* encodeJson(next.rateLimit)
-              const detailJson = next.detail === undefined ? null : yield* encodeJson(next.detail)
-              yield* sql`UPDATE flows_time_travel_audits SET status = ${next.status}, rate_limit_json = ${rateLimitJson}, detail_json = ${detailJson} WHERE id = ${id}`
-            }).pipe(Effect.mapError(mapError))
-          ).pipe(Effect.mapError(mapError), Effect.asVoid)
-        )
+                const next = { ...audit, ...patch }
+                const rateLimitJson = next.rateLimit === undefined ? null : yield* encodeJson(next.rateLimit)
+                const detailJson = next.detail === undefined ? null : yield* encodeJson(next.detail)
+                yield* sql`UPDATE flows_time_travel_audits SET status = ${next.status}, rate_limit_json = ${rateLimitJson}, detail_json = ${detailJson} WHERE id = ${id}`
+              }).pipe(Effect.mapError(mapError))
+            ).pipe(Effect.mapError(mapError), Effect.asVoid)
+          )
         )
       ),
       pendingAudits: Effect.fn("TimeTravelStore.pendingAudits")(() =>

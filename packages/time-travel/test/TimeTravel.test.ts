@@ -20,7 +20,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
-import * as Logger from "effect/logging/Logger"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Random from "effect/Random"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
@@ -309,7 +309,7 @@ describe("TimeTravel", () => {
 
       expect(failure).toMatchObject({
         code: "invalid",
-        message: 'detachedChildren must be "block" or "cancel", not "blcok"'
+        message: "detachedChildren must be \"block\" or \"cancel\", not \"blcok\""
       })
       expect(store.state().audits).toEqual([])
       expect(store.state().records.map((entry) => entry.seq)).toEqual([0, 1])
@@ -330,13 +330,8 @@ describe("TimeTravel", () => {
       const logged: Array<string> = []
 
       const audits = yield* run(store, () => Effect.succeed(store.state().audits)).pipe(
-        Effect.provideService(
-          Logger.CurrentLoggers,
-          new Set([
-            Logger.make(({ message }) => {
-              logged.push(String(message))
-            })
-          ])
+        Effect.provide(
+          Logger.layer([Logger.make<unknown, void>(({ message }) => logged.push(String(message)))])
         )
       )
 
