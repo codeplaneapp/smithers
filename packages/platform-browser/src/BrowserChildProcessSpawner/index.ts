@@ -17,13 +17,20 @@
  *   mean what they mean under `NodeChildProcessSpawner` — `"inherit"` and
  *   `"ignore"` yield an empty stream, and a `Sink` is transduced through —
  *   they are just applied to captured text rather than to a live readable.
- * - **No stdin.** just-bash `exec` accepts a string `stdin` option, but the
- *   adapter does not use it yet: `stdin` is a `Sink` that fails, and a command
- *   that supplies a `Stream` for stdin is rejected at spawn time rather than
- *   losing its input silently.
+ * - **No stdin.** just-bash `exec` accepts a string `stdin`, but this adapter
+ *   runs the interpreter once with captured output and has nowhere to stream
+ *   into: `stdin` is a `Sink` that fails, and a command that supplies a
+ *   `Stream` for stdin is rejected at spawn time rather than losing its input
+ *   silently.
  * - **Abort-only signals.** Scope closure, interruption, timeout, and `kill`
- *   abort the interpreter through just-bash's `AbortSignal`. Signal names are
- *   not distinguishable in a browser tab.
+ *   abort the interpreter through just-bash's `AbortSignal`, and every
+ *   observable on the handle then reports a `PlatformError` naming the abort
+ *   rather than replaying the interrupt into the caller's fiber. Signal names
+ *   are not distinguishable in a browser tab, so `killSignal` is ignored, and
+ *   there is no harder stop after the abort, so `forceKillAfter` is rejected.
+ * - **One run at a time.** Runs are serialized behind a permit held until the
+ *   interpreter promise settles, abort included, so two interpreters never
+ *   mutate the mount at once.
  * - **No process identity.** `pid` is a per-layer counter, not an OS pid, and
  *   `unref` is a no-op: there is no parent process reference count in a tab.
  * - **No pipelines between processes.** A `PipedCommand` is rejected; write the
@@ -35,10 +42,13 @@
  * - **No custom shell or detached process.** `shell: true` means the in-page
  *   bash interpreter, but a shell path and `detached: true` cannot be honored
  *   in a tab and are rejected.
- * - **`extendEnv` is ignored.** There is no ambient process environment in a
- *   tab to extend; only `env` reaches the interpreter.
+ * - **`extendEnv` is a request to the interpreter.** just-bash merges `env`
+ *   into the interpreter's environment unless asked for `replaceEnv`, so the
+ *   adapter asks for it whenever the caller did not set `extendEnv: true`,
+ *   which is Effect's replacement default.
  *
  * @since 0.1.0
  */
 export * from "./JustBashLike.ts"
 export * from "./layer.ts"
+export * from "./make.ts"
