@@ -105,17 +105,25 @@ describe("the fault matrix is wired to a gate", () => {
   })
 
   it("selects the matrix from the generated CI workflow", () => {
-    const ci = read(".github", "workflows", "ci.yml")
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/e2e:faults'$/m)
+    // The package-mode port replaced the single generated ci.yml with one file
+    // per lane, and the matrix has its own advisory lane because case 22 is a
+    // required red gate rc.0 cannot pass.
+    const ci = read(".github", "workflows", "ci-faults.yml")
+    expect(ci).toMatch(/^\s*(?:- )?run: pnpm exec smithers-build '\/\/e2e:faults'$/m)
   })
 
-  it("typechecks the matrix from the generated CI workflow", () => {
+  it("typechecks the matrix from the required gate suite", () => {
     // A stale fixture is the cheapest way for this directory to rot:
     // `fixtures/claimChild.ts` called `Control.pause`, which rc.0 removed, and
-    // died at runtime in every case that spawned it. `//e2e:check` catches
-    // that in seconds and is a required step, while the matrix itself is
-    // advisory.
-    const ci = read(".github", "workflows", "ci.yml")
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build build '\/\/e2e:check'$/m)
+    // died at runtime in every case that spawned it. The typecheck catches that
+    // in seconds, so it is a required step while the matrix itself is advisory.
+    // `ci-test.yml` runs `//:gates`, and the root package puts `e2e.ci` in that
+    // suite; `e2e.ci` is `check` alone, which is the typecheck.
+    const ci = read(".github", "workflows", "ci-test.yml")
+    expect(ci).toMatch(/^\s*(?:- )?run: pnpm exec smithers-build '\/\/:gates'$/m)
+    const root = read("PACKAGE.ts")
+    expect(root).toMatch(/^\s*e2e\.ci$/m)
+    const declaration = read("e2e", "PACKAGE.ts")
+    expect(declaration).toMatch(/const ci = S\.Suite\(\{ tests: \[check\] \}\)/)
   })
 })

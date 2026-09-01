@@ -807,7 +807,7 @@ Route: /architecture/browser-support
 
 Browser support is a hard requirement of this repository, and it is met the only way an Effect codebase can meet it: **host access goes through a layer**, so a module that only depends on contracts never resolves a `node:` built-in. This page states exactly which entry points honour that today, which do not, and what proves it.
 
-Nothing here is a claim about what *should* bundle. Every row is executed by `scripts/browser-check.mjs`, `pnpm run browser` locally, one step in [CI](https://github.com/smithersai/smithers/blob/main/.github/workflows/ci.yml), which bundles each entry point with esbuild's `platform: "browser"`.
+Nothing here is a claim about what *should* bundle. Every row is executed by `scripts/browser-check.mjs`, `pnpm run browser` locally, one step in [CI](https://github.com/smithersai/smithers/blob/main/.github/workflows/ci-browser.yml), which bundles each entry point with esbuild's `platform: "browser"`.
 
 ### Browser entry points
 

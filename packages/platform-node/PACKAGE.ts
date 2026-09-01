@@ -20,10 +20,20 @@ const check = S.Shell.Test({
   data: [srcs, tests, testTsconfig, tsconfig, rootTsconfig, lib]
 })
 
+// Two separate restrictions land on this suite, and only the wider one is
+// decisive. src/ProcessReaper.ts and NodeHostContainment.integration.test.ts
+// read the machine's process table through /bin/ps, which is setuid root; a
+// sandboxed process may never gain privileges, so sandbox-exec refuses the
+// exec with "spawnSync ps EPERM" under every profile, including one that
+// allows everything. That is an exec restriction, not a network one, so no
+// `network` value reaches it and "none" is the only declaration that runs the
+// suite. It also covers the NodeHostDefaults and NodeHostRedirect contract
+// servers on 127.0.0.1, which would otherwise need the loopback profile.
 const test = S.Shell.Test({
   bin: S.NodeModule.Bin("vitest"),
   args: ["run"],
   cwd,
+  sandbox: "none",
   data: [srcs, tests, S.file("vitest.config.ts"), lib]
 })
 

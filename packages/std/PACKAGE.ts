@@ -20,10 +20,18 @@ const check = S.Shell.Test({
   data: [srcs, tests, testTsconfig, tsconfig, rootTsconfig, lib]
 })
 
+// ExecContainment.test.ts reads the machine's process table through /bin/ps,
+// and the contained spawner it asserts escalates through the same binary.
+// /bin/ps is setuid root, and a sandboxed process may never gain privileges,
+// so sandbox-exec refuses the exec with "spawnSync ps EPERM" under every
+// profile, including one that allows everything. This is an exec restriction,
+// not a network one: no `network` value reaches it, and "none" is the only
+// declaration that runs the suite.
 const test = S.Shell.Test({
   bin: S.NodeModule.Bin("vitest"),
   args: ["run"],
   cwd,
+  sandbox: "none",
   data: [srcs, tests, S.file("vitest.config.ts"), lib]
 })
 

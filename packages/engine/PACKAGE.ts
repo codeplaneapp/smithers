@@ -21,10 +21,16 @@ const check = S.Shell.Test({
   data: [srcs, tests, testTsconfig, tsconfig, rootTsconfig, lib, flow.lib]
 })
 
+// FlowProxyServer.test.ts serves the API on a real listener through
+// NodeHttpServer.layerTest, which passes `{ port: 0 }` with no host, so Node
+// binds the wildcard address rather than 127.0.0.1. The loopback profile
+// still admits that bind and the client's loopback connect back to it, so
+// the wildcard does not force `{ network: true }`; egress stays denied.
 const test = S.Shell.Test({
   bin: S.NodeModule.Bin("vitest"),
   args: ["run"],
   cwd,
+  sandbox: { network: "loopback" },
   data: [srcs, tests, S.file("vitest.config.ts"), lib, flow.lib]
 })
 

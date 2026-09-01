@@ -20,10 +20,17 @@ const check = S.Shell.Test({
   data: [srcs, tests, testTsconfig, tsconfig, rootTsconfig, lib]
 })
 
+// test/Fixture.ts stands every provider up as a real HTTP server on
+// 127.0.0.1. The default profile refuses the bind, and because the fixture
+// resolves on the listening callback the refusal never settles the promise
+// and the suite hangs rather than failing, so the target declares the
+// loopback profile. Egress stays denied, which also keeps GitHubLive.test.ts
+// and its siblings on their skipIf-no-token path.
 const test = S.Shell.Test({
   bin: S.NodeModule.Bin("vitest"),
   args: ["run"],
   cwd,
+  sandbox: { network: "loopback" },
   data: [srcs, tests, S.file("vitest.config.ts"), lib]
 })
 

@@ -20,10 +20,15 @@ const check = S.Shell.Test({
   data: [srcs, tests, testTsconfig, tsconfig, rootTsconfig, lib]
 })
 
+// HttpClient.integration.test.ts serves the redirect chain it guards from a
+// real HTTP listener on 127.0.0.1, which the default profile refuses with
+// "listen EPERM", so the target declares the loopback profile. Egress stays
+// denied.
 const test = S.Shell.Test({
   bin: S.NodeModule.Bin("vitest"),
   args: ["run"],
   cwd,
+  sandbox: { network: "loopback" },
   data: [srcs, tests, S.file("vitest.config.ts"), lib]
 })
 

@@ -20,10 +20,15 @@ const check = S.Shell.Test({
   data: [srcs, tests, testTsconfig, tsconfig, rootTsconfig, lib]
 })
 
+// ControlSurface, NodeComposition, and Bin all bind the control server on
+// 127.0.0.1:0 and call it back, which the default profile refuses with
+// "listen EPERM", so the target declares the loopback profile. Egress stays
+// denied.
 const test = S.Shell.Test({
   bin: S.NodeModule.Bin("vitest"),
   args: ["run"],
   cwd,
+  sandbox: { network: "loopback" },
   data: [srcs, tests, S.file("vitest.config.ts"), lib]
 })
 

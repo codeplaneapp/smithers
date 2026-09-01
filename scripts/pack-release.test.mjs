@@ -16,7 +16,16 @@ import {
 } from "./pack-release.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
-const workflow = (name) => readFileSync(join(repoRoot, ".github", "workflows", name), "utf8")
+const workflowsDir = join(repoRoot, ".github", "workflows")
+const workflow = (name) => readFileSync(join(workflowsDir, name), "utf8")
+
+/**
+ * The CI workflows, which `//:githubCi` renders as one `ci-<lane>.yml` per
+ * lane. Reading the directory keeps the gate comparison attached to the lanes
+ * the generator writes today: the single hand-owned ci.yml it replaced is
+ * gone, and the lane set changes as the target graph does.
+ */
+const ciWorkflows = () => readdirSync(workflowsDir).filter((name) => /^ci-.*\.yml$/.test(name))
 
 /**
  * Extracts the commands a workflow runs as gates: `pnpm run <script>`,
@@ -180,11 +189,19 @@ test("release.yml publishes exactly the packed workspaces, in the packed order",
   assert.deepEqual([...release.matchAll(/@smthrs\/[\w-]+/g)].map((match) => match[0]), [])
 })
 
-test("every gate in ci.yml also runs in release.yml", () => {
-  const missing = [...gateCommands(workflow("ci.yml"))]
-    .filter((gate) => !gateCommands(workflow("release.yml")).has(gate))
+test("every gate the CI workflows run also runs in release.yml", () => {
+  const lanes = ciWorkflows()
+  // An empty read would pass the comparison below without checking anything,
+  // which is how a rename of the generated set could retire this gate in
+  // silence.
+  assert.ok(lanes.length > 0, "no ci-*.yml workflow to compare against release.yml")
 
-  assert.deepEqual(missing, [])
+  const released = gateCommands(workflow("release.yml"))
+  const missing = lanes
+    .flatMap((lane) => [...gateCommands(workflow(lane))])
+    .filter((gate) => !released.has(gate))
+
+  assert.deepEqual([...new Set(missing)].sort(), [])
 })
 
 test("dependencyOrder is a topological order with an alphabetical tiebreak", () => {

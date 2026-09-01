@@ -12,6 +12,9 @@ packages/*/dist-firefox/
 
 # Cargo build output (crates/flows-jj and friends)
 /target
+# Cargo's home for the fetch target: crates/flows-jj/PACKAGE.ts declares it as
+# an outDir of S.Cargo.Fetch and PackageExec.ts pins CARGO_HOME to it.
+/.cargo-home
 
 # Electrobun build output
 app/.electrobun/

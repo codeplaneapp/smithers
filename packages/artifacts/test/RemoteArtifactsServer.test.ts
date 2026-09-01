@@ -29,7 +29,11 @@ const digest = sha256(payload)
 
 /** How the server answers a ranged `PUT`. */
 type RangeMode =
-  /** Accepts ranges, and drops the connection once, after `failAfterChunks` chunks. */
+  /**
+   * Accepts ranges, and kills one transfer: once `failAfterChunks` chunks have
+   * landed, every further chunk of that transfer has its connection dropped,
+   * until the next probe starts a fresh transfer.
+   */
   | { readonly _tag: "Accept"; readonly failAfterChunks?: number }
   /** Refuses ranged bodies with this status, accepting the whole blob instead. */
   | { readonly _tag: "Refuse"; readonly status: 411 | 416 }
@@ -70,7 +74,10 @@ const startTier = (mode: RangeMode): Promise<Tier> => {
   let prefix = new Uint8Array(0)
   let complete: Uint8Array | undefined
   let chunks = 0
+  /** Whether the one transfer this tier kills has already been killed. */
   let interrupted = false
+  /** Whether the transfer in flight is the killed one, so its chunks all die. */
+  let interrupting = false
   const server: Server = createServer((request, response) => {
     const range = request.headers["content-range"]
     requests.push(`${request.method} ${range ?? "-"}`)
@@ -124,6 +131,9 @@ const startTier = (mode: RangeMode): Promise<Tier> => {
       }
       const total = Number(parsed[3])
       if (parsed[1] === undefined) {
+        // A probe opens a transfer, so it ends the interruption held over the
+        // previous one.
+        interrupting = false
         // The probe. Nothing held yet is still a 308: the client starts at 0.
         if (prefix.byteLength === total) {
           response.writeHead(200).end()
@@ -133,6 +143,14 @@ const startTier = (mode: RangeMode): Promise<Tier> => {
         return
       }
       const start = Number(parsed[1])
+      if (interrupting) {
+        // RFC 9110 section 9.2.2 lets a client resend an idempotent request
+        // whose connection closed before any response, and Bun's fetch does
+        // resend a `PUT` sent on a pooled connection. So the interruption has
+        // to outlast that resend, or the transfer heals itself and never dies.
+        request.socket.destroy()
+        return
+      }
       if (start !== prefix.byteLength) {
         response.writeHead(416).end()
         return
@@ -141,6 +159,7 @@ const startTier = (mode: RangeMode): Promise<Tier> => {
       const failAfter = mode._tag === "Accept" ? mode.failAfterChunks : undefined
       if (failAfter !== undefined && chunks > failAfter && !interrupted) {
         interrupted = true
+        interrupting = true
         // The transfer dies mid-flight: the prefix the server already committed
         // survives, which is the whole point of resuming.
         request.socket.destroy()
@@ -224,6 +243,10 @@ describe("a real server", () => {
       const first = await Effect.runPromise(Effect.exit(withCrypto(put)))
       expect(first._tag).toBe("Failure")
       expect(tier.stored()).toBeUndefined()
+      // Where the dead transfer stopped. A count rather than a literal index,
+      // because a client that resends the dropped chunk on a fresh connection
+      // spends a request here without changing what the resumed transfer does.
+      const died = tier.requests.length
 
       // The second one asks what the tier holds, probes, is told `0-3`, and
       // sends the rest: chunk one never travels twice. The closing `HEAD` is
@@ -232,13 +255,14 @@ describe("a real server", () => {
       const resumed = await Effect.runPromise(withCrypto(put))
       expect(resumed).toBe(digest)
       expect(text(tier.stored())).toBe(artifact)
-      expect(tier.requests.slice(4)).toEqual([
+      expect(tier.requests.slice(died)).toEqual([
         "HEAD -",
         "PUT bytes */10",
         "PUT bytes 4-7/10",
         "PUT bytes 8-9/10",
         "HEAD -"
       ])
+      expect(tier.requests.filter((request) => request === "PUT bytes 0-3/10")).toEqual(["PUT bytes 0-3/10"])
     }))
 
   it("serves back exactly what a resumed upload assembled", () =>

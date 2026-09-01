@@ -20,10 +20,15 @@ const check = S.Shell.Test({
   data: [srcs, tests, testTsconfig, tsconfig, rootTsconfig, lib]
 })
 
+// The BunHostRedirect contract suite starts an HTTP server on 127.0.0.1 to
+// serve the redirect chain it guards, which the default profile refuses with
+// "listen EPERM", so the target declares the loopback profile. Egress stays
+// denied.
 const test = S.Shell.Test({
   bin: S.NodeModule.Bin("vitest"),
   args: ["run"],
   cwd,
+  sandbox: { network: "loopback" },
   data: [srcs, tests, S.file("vitest.config.ts"), lib]
 })
 

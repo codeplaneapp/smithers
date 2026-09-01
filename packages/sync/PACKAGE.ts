@@ -20,10 +20,15 @@ const check = S.Shell.Test({
   data: [srcs, tests, testTsconfig, tsconfig, rootTsconfig, lib]
 })
 
+// test/fixtures/sync-process-server-child.ts is a spawned follower that binds
+// 127.0.0.1:0 for the replication cases, which the default profile refuses
+// with "listen EPERM", so the target declares the loopback profile. The
+// profile covers the spawned child too. Egress stays denied.
 const test = S.Shell.Test({
   bin: S.NodeModule.Bin("vitest"),
   args: ["run"],
   cwd,
+  sandbox: { network: "loopback" },
   data: [srcs, tests, S.file("vitest.config.ts"), lib]
 })
 

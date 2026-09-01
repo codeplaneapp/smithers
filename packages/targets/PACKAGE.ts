@@ -25,10 +25,16 @@ const check = S.Shell.Test({
   data: [srcs, tests, S.file("tsconfig.test.json"), S.file("tsconfig.json"), rootTsconfig, lib]
 })
 
+// Secret.test.ts exercises src/SecretProxy.ts, which binds 127.0.0.1 on an
+// ephemeral port, against an upstream the test binds the same way. The
+// default profile refuses both with "listen EPERM", so the target declares
+// the loopback profile. Egress stays denied, which is what the proxy's own
+// containment claim expects.
 const test = S.Shell.Test({
   bin: S.NodeModule.Bin("vitest"),
   args: ["run"],
   cwd,
+  sandbox: { network: "loopback" },
   data: [srcs, tests, S.file("vitest.config.ts"), lib]
 })
 

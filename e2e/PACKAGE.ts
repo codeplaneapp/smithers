@@ -33,10 +33,24 @@ const check = S.Shell.Test({
 // machine's process table, so the suite re-runs on every invocation. That is
 // the point of the tier. Coverage stays off because the matrix asserts
 // process-level behavior, not line reach.
+// Two restrictions land on this matrix. harness/dropWebSocket.test.ts and
+// harness/serveProcess.ts bind 127.0.0.1:0, which the default profile refuses
+// with "listen EPERM"; the loopback profile answers that one. The decisive
+// one is harness/killProcess.ts, whose `parentPid` reads the machine's
+// process table through /bin/ps. /bin/ps is setuid root, and a sandboxed
+// process may never gain privileges, so sandbox-exec refuses the exec under
+// every profile, including one that allows everything. That is an exec
+// restriction, not a network one, so no `network` value reaches it and "none"
+// is the only declaration that runs the matrix. It is also the only safe one:
+// `parentPid` catches the failure and returns undefined, which reads as "the
+// process is gone", so under a sandbox the orphan assertions in
+// harness/killProcess.test.ts and case31 either invert or pass for the wrong
+// reason.
 const faults = S.Shell.Test({
   bin: S.NodeModule.Bin("vitest"),
   args: ["run", "--coverage.enabled=false"],
   cwd,
+  sandbox: "none",
   data: [harness, tests, S.file("vitest.config.ts")]
 })
 

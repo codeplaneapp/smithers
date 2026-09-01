@@ -22,10 +22,21 @@ const check = S.Shell.Test({
   data: [srcs, tests, testTsconfig, tsconfig, rootTsconfig, lib]
 })
 
+// This suite drives the host's sandbox facility directly, so it cannot run
+// inside one. test/PackageExecution.test.ts spawns smithers-build against
+// fixture packages that declare every sandbox value, and the child then
+// applies each target's own profile. macOS permits a nested sandbox_apply
+// only when the inner profile is byte-identical to the outer one; any other
+// profile is refused with "sandbox_apply: Operation not permitted" and exit
+// 71. Whichever profile this target picked, the fixtures asserting the other
+// values would fail, and the suite's own listener on 127.0.0.1 would need the
+// loopback opening on top. "none" is the honest declaration: the suite is the
+// one place that tests the sandbox rather than running under it.
 const test = S.Shell.Test({
   bin: S.NodeModule.Bin("vitest"),
   args: ["run"],
   cwd,
+  sandbox: "none",
   data: [srcs, tests, S.file("vitest.config.ts"), lib]
 })
 

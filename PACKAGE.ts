@@ -1,10 +1,11 @@
 // Root package for the package-mode port (docs/migration/package-mode-port.md).
-// Coexists with BUILD.ts until the flip commit renames
-// .smithers/WORKSPACE.staged.ts to .smithers/WORKSPACE.ts; in BUILD mode this
-// file is inert. Wave-2 produced one PACKAGE.ts per directory and this file
-// composes them: every `<dir>.ci` feeds `gates`, the cheap static checks feed
-// `preCommit`, and the generated CI workflows cover the jobs
-// .github/workflows/ci.yml runs today.
+// `.smithers/WORKSPACE.ts` exists, so discovery runs the repository in package
+// mode and this file is the root of the live graph. It composes the one
+// PACKAGE.ts per directory that wave-2 produced: every `<dir>.ci` feeds
+// `gates`, the cheap static checks feed `preCommit`, and `githubCi` renders
+// every .github/workflows/ci-*.yml from the workflow declarations below. The
+// hand-owned .github/workflows/ci.yml is deleted; the workflows the generator
+// must not touch are listed in `githubCi.preserve`.
 //
 // Import direction is one-way. A lane under workflows/ imports the root
 // Package; the root never imports a lane that does, because
