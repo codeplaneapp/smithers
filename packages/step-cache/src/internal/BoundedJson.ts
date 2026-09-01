@@ -37,7 +37,18 @@ export type Result =
   | { readonly ok: true; readonly value: Json }
   | { readonly ok: false; readonly complaint: string }
 
-/** Encoded JSON-string bytes without allocating an encoded copy. */
+/** Backspace, tab, newline, form feed, and carriage return. */
+const shortEscaped = new Set([0x08, 0x09, 0x0a, 0x0c, 0x0d])
+
+/**
+ * Encoded JSON-string bytes without allocating an encoded copy.
+ *
+ * The count has to match what the canonical encoder emits, or the budget
+ * refuses a value whose encoded form is inside it. RFC 8785 and
+ * `JSON.stringify` write the five controls above as a two-character escape and
+ * every other C0 control as `\u00XX`, so those five cost two bytes here and the
+ * rest cost six.
+ */
 const stringBytes = (value: string, maximum: number): number | undefined => {
   let bytes = 2
   for (let index = 0; index < value.length; index++) {
@@ -47,7 +58,7 @@ const stringBytes = (value: string, maximum: number): number | undefined => {
       if (!(low >= 0xdc00 && low <= 0xdfff)) return undefined
       bytes += 4
     } else if (unit >= 0xdc00 && unit <= 0xdfff) return undefined
-    else if (unit === 0x22 || unit === 0x5c) bytes += 2
+    else if (unit === 0x22 || unit === 0x5c || shortEscaped.has(unit)) bytes += 2
     else if (unit <= 0x1f) bytes += 6
     else if (unit <= 0x7f) bytes++
     else if (unit <= 0x7ff) bytes += 2

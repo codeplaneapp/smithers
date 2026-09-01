@@ -46,6 +46,29 @@ describe("bounded JSON admission", () => {
     expect(accepted("a", { maxBytes: 2 })).toMatchObject({ ok: false })
   })
 
+  // The byte budget models what the canonical encoder emits, and canonical
+  // JSON escapes backspace, tab, newline, form feed, and carriage return as two
+  // characters rather than as `\u00XX`. Charging six for them refused values
+  // whose encoded form sat well inside the advertised bound, which is exactly
+  // the shape a newline-heavy step result takes.
+  it("charges a control character what its canonical escape actually costs", () => {
+    const shortEscaped = "\b\t\n\f\r"
+    const shortBytes = JSON.stringify(shortEscaped).length
+    expect(shortBytes).toBe(12)
+    expect(accepted(shortEscaped, { maxBytes: shortBytes, maxStringBytes: shortBytes }))
+      .toMatchObject({ ok: true })
+    expect(accepted(shortEscaped, { maxBytes: shortBytes - 1, maxStringBytes: shortBytes - 1 }))
+      .toMatchObject({ ok: false })
+
+    const longEscaped = "\u0001"
+    const longBytes = JSON.stringify(longEscaped).length
+    expect(longBytes).toBe(8)
+    expect(accepted(longEscaped, { maxBytes: longBytes, maxStringBytes: longBytes }))
+      .toMatchObject({ ok: true })
+    expect(accepted(longEscaped, { maxBytes: longBytes - 1, maxStringBytes: longBytes - 1 }))
+      .toMatchObject({ ok: false })
+  })
+
   it("rejects cyclic, sparse, accessor-backed, and augmented arrays", () => {
     const cycle: Array<unknown> = []
     cycle.push(cycle)

@@ -63,7 +63,11 @@ export const miss: Metric.Metric<number, Metric.CounterState<number>> = Metric.w
  * One `CombinedCacheStore.put` can register two outcomes. The local tier
  * records its own, and a shared tier answering `Conflict` adds a `conflict`,
  * because a differing result under one digest on another machine is
- * cross-host divergence that reaches an operator nowhere else.
+ * cross-host divergence that reaches an operator nowhere else. That extra count
+ * assumes the shared tier keeps no counters, which is true of the tier this
+ * package ships: a `RemoteCacheStore` updates none. Composing a second
+ * counter-keeping store as the shared tier instead records the same conflict
+ * twice, once from that store's own `put` and once from the composition.
  *
  * @category metrics
  * @since 0.1.0
