@@ -30,6 +30,10 @@ import { sha256, withCrypto } from "./Sha256.ts"
 const ownerA: Ownership.OwnerId = { hostId: "failure-host-a", pid: 1, nonce: "failure-owner-a" }
 const ownerB: Ownership.OwnerId = { hostId: "failure-host-b", pid: 2, nonce: "failure-owner-b" }
 
+let getterInvoked = false
+let toJsonInvoked = false
+let proxyGetInvoked = false
+
 const hardBoundary: ActionPersistence.BoundaryMetadata = {
   readSet: [],
   writeSet: ["declared.txt"],
@@ -128,6 +132,19 @@ const journalState = (runId: string) =>
     return entries.entries.map((entry) => ({ eventType: entry.eventType, payload: entry.payload }))
   })
 
+const settleCause = (runId: string, cause: Cause.Cause<unknown>) => {
+  const key = `failure/${runId}`
+  return run(Effect.gen(function*() {
+    yield* activate(runId, ownerA)
+    const exit = yield* executor({ runId, execute: () => Effect.failCause(cause) })(input(key)).pipe(Effect.exit)
+    const attempts = yield* AttemptStore.AttemptStore
+    const row = yield* attempts.get({ runId, stepKeyDigest: sha256(key), attempt: 1 })
+    return { exit, row }
+  }))
+}
+
+const settleDefect = (runId: string, defect: unknown) => settleCause(runId, Cause.die(defect))
+
 describe("action executor failure paths", () => {
   it.effect("records a failed finish and journals a failed attempt-finished when execute fails", () =>
     Effect.gen(function*() {
@@ -175,7 +192,10 @@ describe("action executor failure paths", () => {
    * machinery reads that as a crash.
    */
   const unserializable: ReadonlyArray<readonly [string, string, () => unknown]> = [
+    ["undefined", "die-undefined", () => undefined],
     ["a symbol", "die-symbol", () => Symbol("no JSON form")],
+    ["a function", "die-function", () => () => "no JSON form"],
+    ["a bigint", "die-bigint", () => 1n],
     ["a cycle", "die-cycle", () => {
       const cyclic: Record<string, unknown> = {}
       cyclic["self"] = cyclic
@@ -204,6 +224,280 @@ describe("action executor failure paths", () => {
         expect(row.error).toEqual({ reasons: [{ _tag: "Die", defect: null }] })
       }))
   }
+
+  it.effect("copies JSON leaves without invoking accessors and applies JSON omission rules", () =>
+    Effect.gen(function*() {
+      getterInvoked = false
+      const list: Array<unknown> = [
+        undefined,
+        Symbol("omitted array symbol"),
+        () => "omitted array function",
+        1n,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        null,
+        true,
+        2.5,
+        "kept"
+      ]
+      Object.defineProperty(list, "10", {
+        enumerable: true,
+        configurable: true,
+        get: () => {
+          getterInvoked = true
+          throw new Error("array getter ran")
+        }
+      })
+      list.length = 12
+      const defect = {
+        nothing: null,
+        yes: true,
+        no: false,
+        finite: -2.5,
+        notANumber: Number.NaN,
+        infinite: Number.NEGATIVE_INFINITY,
+        text: "kept",
+        astral: "😀",
+        privateUse: "\ue000",
+        list,
+        nested: {
+          omittedUndefined: undefined,
+          omittedSymbol: Symbol("omitted object symbol"),
+          omittedFunction: () => "omitted object function",
+          omittedBigint: 2n,
+          kept: "nested"
+        }
+      }
+      Object.defineProperty(defect, "accessor", {
+        enumerable: true,
+        get: () => {
+          getterInvoked = true
+          throw new Error("object getter ran")
+        }
+      })
+      Object.defineProperty(defect, "hidden", { enumerable: false, value: "omitted" })
+      Object.defineProperty(defect, Symbol("hidden symbol"), { enumerable: true, value: "omitted" })
+
+      const result = yield* settleDefect("inert-json-leaves", defect)
+
+      expect(Exit.isFailure(result.exit)).toBe(true)
+      expect(getterInvoked).toBe(false)
+      expect(Option.getOrThrow(result.row)).toMatchObject({
+        state: "failed",
+        error: {
+          reasons: [{
+            _tag: "Die",
+            defect: {
+              nothing: null,
+              yes: true,
+              no: false,
+              finite: -2.5,
+              notANumber: null,
+              infinite: null,
+              text: "kept",
+              astral: "😀",
+              privateUse: "\ue000",
+              list: [null, null, null, null, null, null, null, true, 2.5, "kept", null, null],
+              nested: { kept: "nested" }
+            }
+          }]
+        }
+      })
+    }))
+
+  it.effect("does not invoke a throwing message getter while settling a defect", () =>
+    Effect.gen(function*() {
+      getterInvoked = false
+      const defect = { stable: "kept" }
+      Object.defineProperty(defect, "message", {
+        enumerable: true,
+        get: () => {
+          getterInvoked = true
+          throw new Error("message getter ran")
+        }
+      })
+
+      const result = yield* settleDefect("getter-defect", defect)
+
+      expect(Exit.isFailure(result.exit)).toBe(true)
+      expect(getterInvoked).toBe(false)
+      expect(Option.getOrThrow(result.row)).toMatchObject({
+        state: "failed",
+        error: { reasons: [{ _tag: "Die", defect: { stable: "kept" } }] }
+      })
+    }))
+
+  it.effect("does not invoke toJSON while settling a defect", () =>
+    Effect.gen(function*() {
+      toJsonInvoked = false
+      const defect = {
+        stable: "kept",
+        toJSON: () => {
+          toJsonInvoked = true
+          throw new Error("toJSON ran")
+        }
+      }
+
+      const result = yield* settleDefect("to-json-defect", defect)
+
+      expect(Exit.isFailure(result.exit)).toBe(true)
+      expect(toJsonInvoked).toBe(false)
+      expect(Option.getOrThrow(result.row)).toMatchObject({
+        state: "failed",
+        error: { reasons: [{ _tag: "Die", defect: { stable: "kept" } }] }
+      })
+    }))
+
+  it.effect("rejects a proxy without invoking its get trap", () =>
+    Effect.gen(function*() {
+      proxyGetInvoked = false
+      const proxy = new Proxy({ stable: "hidden" }, {
+        get: (target, key, receiver) => {
+          proxyGetInvoked = true
+          return Reflect.get(target, key, receiver)
+        }
+      })
+
+      const result = yield* settleDefect("proxy-defect", { nested: [proxy] })
+
+      expect(Exit.isFailure(result.exit)).toBe(true)
+      expect(proxyGetInvoked).toBe(false)
+      expect(Option.getOrThrow(result.row)).toMatchObject({
+        state: "failed",
+        error: { reasons: [{ _tag: "Die", defect: null }] }
+      })
+    }))
+
+  it.effect("rejects a defect deeper than the inert JSON depth bound", () =>
+    Effect.gen(function*() {
+      let defect: unknown = "leaf"
+      for (let depth = 0; depth <= ActionPersistence.maxInertJsonDepth; depth++) {
+        defect = { nested: defect }
+      }
+
+      const result = yield* settleDefect("deep-defect", defect)
+
+      expect(Exit.isFailure(result.exit)).toBe(true)
+      expect(Option.getOrThrow(result.row)).toMatchObject({
+        state: "failed",
+        error: { reasons: [{ _tag: "Die", defect: null }] }
+      })
+    }))
+
+  it.effect("rejects a defect wider than the inert JSON node bound", () =>
+    Effect.gen(function*() {
+      // Numbers, so the node bound is what this case reaches: a key or string
+      // long enough to reach the node count would spend the character budget
+      // first and reject for the other reason.
+      const defect = new Array(ActionPersistence.maxInertJsonNodes).fill(0)
+
+      const result = yield* settleDefect("wide-defect", defect)
+
+      expect(Exit.isFailure(result.exit)).toBe(true)
+      expect(Option.getOrThrow(result.row)).toMatchObject({
+        state: "failed",
+        error: { reasons: [{ _tag: "Die", defect: null }] }
+      })
+    }))
+
+  it.effect("rejects a defect above the inert JSON character bound", () =>
+    Effect.gen(function*() {
+      const stringResult = yield* settleDefect(
+        "large-string-defect",
+        "x".repeat(ActionPersistence.maxInertJsonCharacters + 1)
+      )
+      const keyedDefect: Record<string, unknown> = {}
+      keyedDefect["k".repeat(ActionPersistence.maxInertJsonCharacters + 1)] = "value"
+      const keyResult = yield* settleDefect("large-key-defect", keyedDefect)
+
+      for (const result of [stringResult, keyResult]) {
+        expect(Exit.isFailure(result.exit)).toBe(true)
+        expect(Option.getOrThrow(result.row)).toMatchObject({
+          state: "failed",
+          error: { reasons: [{ _tag: "Die", defect: null }] }
+        })
+      }
+    }))
+
+  it.effect("spends one character budget across every reason of a cause", () =>
+    Effect.gen(function*() {
+      // Each half fits on its own; together they do not, so the first reason
+      // is persisted whole and the second is the one that reaches the bound.
+      const half = "y".repeat(Math.trunc(ActionPersistence.maxInertJsonCharacters * 0.75))
+      const result = yield* settleCause(
+        "shared-budget-defect",
+        Cause.fromReasons([Cause.makeDieReason(half), Cause.makeDieReason(half)])
+      )
+
+      expect(Exit.isFailure(result.exit)).toBe(true)
+      expect(Option.getOrThrow(result.row)).toMatchObject({
+        state: "failed",
+        error: { reasons: [{ _tag: "Die", defect: half }, { _tag: "Die", defect: null }] }
+      })
+    }))
+
+  /**
+   * The bounds exist to keep a failure inside the store's admission, not to
+   * shrink what a failure may say. An ordinary error, with the multi-kilobyte
+   * message and stack a provider or a parser produces, must reach the row
+   * whole: rejecting it would replace the domain error with `null`, and replay
+   * would rethrow a defect no `RetryPolicy` tag can match.
+   */
+  it.effect("persists an ordinary multi-kilobyte message and stack intact", () =>
+    Effect.gen(function*() {
+      const message = "boundary refused the write: ".repeat(256)
+      const stack = "    at frame (file.ts:1:1)\n".repeat(256)
+      const defect = { _tag: "ProviderRefused", message, stack, issues: new Array(64).fill("issue") }
+
+      const result = yield* settleDefect("large-but-admissible-defect", defect)
+
+      expect(Exit.isFailure(result.exit)).toBe(true)
+      expect(Option.getOrThrow(result.row)).toMatchObject({
+        state: "failed",
+        error: { reasons: [{ _tag: "Die", defect }] }
+      })
+    }))
+
+  it.effect("rejects ill-formed string values and keys before store admission", () =>
+    Effect.gen(function*() {
+      const keyedDefect: Record<string, unknown> = {}
+      keyedDefect["\ud800"] = "value"
+      const results = [
+        yield* settleDefect("high-surrogate-defect", "\ud800"),
+        yield* settleDefect("invalid-surrogate-pair-defect", "\ud800\ue000"),
+        yield* settleDefect("low-surrogate-defect", "\udc00"),
+        yield* settleDefect("surrogate-key-defect", keyedDefect)
+      ]
+
+      for (const result of results) {
+        expect(Exit.isFailure(result.exit)).toBe(true)
+        expect(Option.getOrThrow(result.row)).toMatchObject({
+          state: "failed",
+          error: { reasons: [{ _tag: "Die", defect: null }] }
+        })
+      }
+    }))
+
+  it.effect("settles with null when inert inspection itself refuses", () =>
+    Effect.gen(function*() {
+      const defect = { stable: "hidden" }
+      const originalOwnKeys = Reflect.ownKeys
+      Reflect.ownKeys = (target) => {
+        if (target === defect) throw new Error("inspection refused")
+        return originalOwnKeys(target)
+      }
+      try {
+        const result = yield* settleDefect("inspection-refusal", defect)
+
+        expect(Exit.isFailure(result.exit)).toBe(true)
+        expect(Option.getOrThrow(result.row)).toMatchObject({
+          state: "failed",
+          error: { reasons: [{ _tag: "Die", defect: null }] }
+        })
+      } finally {
+        Reflect.ownKeys = originalOwnKeys
+      }
+    }))
 
   it.effect("journals a hard violation and a failed finish when boundary.prepare fails", () =>
     Effect.gen(function*() {

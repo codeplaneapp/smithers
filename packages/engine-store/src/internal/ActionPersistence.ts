@@ -34,6 +34,7 @@ import * as WorkspaceSandbox from "../WorkspaceSandbox.ts"
 import * as AttemptAdmission from "./AttemptAdmission.ts"
 import * as CachePublication from "./CachePublication.ts"
 import * as EffectRecords from "./EffectRecords.ts"
+import * as HostReflection from "./HostReflection.ts"
 import * as JournalRecords from "./JournalRecords.ts"
 import * as SandboxedExecution from "./SandboxedExecution.ts"
 
@@ -391,6 +392,85 @@ const CauseJson = Schema.Struct({
 })
 
 /**
+ * Maximum nesting copied from one live failure value.
+ *
+ * The bounds here are the store's own admission limits, less the envelope
+ * `persistCause` wraps around a reduced value, and never tighter: a value the
+ * store would have persisted must not be thrown away here. `AttemptStore`
+ * admits 128 levels, and a reduced value sits three levels down, inside
+ * `{ reasons: [{ error }] }`.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const maxInertJsonDepth = AttemptStore.maximumJsonDepth - 4
+
+/**
+ * Maximum JSON values copied from one persisted cause.
+ *
+ * The budget is spent across every reason of one cause, so the reduction of a
+ * whole cause stays inside the node count `AttemptStore` admits however many
+ * reasons it carries.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const maxInertJsonNodes = AttemptStore.maximumJsonNodes - 8
+
+/**
+ * Maximum UTF-16 units copied from one persisted cause, keys included.
+ *
+ * Spent across the whole cause, like {@link maxInertJsonNodes}. JSON spends at
+ * most six bytes on one UTF-16 unit, the escape a control character needs, so
+ * this budget holds a reduced cause under the store's 4 MiB byte ceiling while
+ * still carrying every ordinary message, stack, and payload intact.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const maxInertJsonCharacters = 256 * 1024
+
+type InertJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | Array<InertJsonValue>
+  | { [key: string]: InertJsonValue }
+
+const inertJsonRejected = Symbol("inertJsonRejected")
+const inertJsonOmitted = Symbol("inertJsonOmitted")
+
+type InertJsonReduction = InertJsonValue | typeof inertJsonRejected | typeof inertJsonOmitted
+
+/** What one cause's reduction has already spent of its shared bounds. */
+interface InertJsonBudget {
+  nodes: number
+  characters: number
+}
+
+/** The store rejects unpaired surrogates, so an ill-formed string is refused. */
+const isWellFormedInertString = (value: string): boolean => {
+  for (let index = 0; index < value.length; index++) {
+    const unit = value.charCodeAt(index)
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const low = value.charCodeAt(++index)
+      if (!(low >= 0xdc00 && low <= 0xdfff)) return false
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) return false
+  }
+  return true
+}
+
+/**
+ * Charges one string, a key or a value, against the cause's character budget.
+ * Answers whether the string is admitted.
+ */
+const spend = (budget: InertJsonBudget, value: string): boolean => {
+  budget.characters += value.length
+  return budget.characters <= maxInertJsonCharacters && isWellFormedInertString(value)
+}
+
+/**
  * Projects one failure value into the inert JSON data `AttemptStore` admits.
  *
  * A `Fail` reason raised by a service rather than by `Action.executeEncoded`
@@ -400,17 +480,97 @@ const CauseJson = Schema.Struct({
  * non-plain object outright rather than serializing it, so the projection has
  * to happen on the write side, here, where the durable shape is already owned.
  *
- * The projection is the JSON the store itself used to derive from the
- * instance, so the persisted bytes do not move: `JSON.stringify` reads the
- * same own enumerable properties the SQL encode read. A value JSON cannot
- * express at all — a symbol, a function, a bigint, a cycle — becomes `null`,
- * which is the one visible change: the store previously dropped the key
- * entirely and left the reason unreadable to {@link rehydrateCause}.
+ * The reduction reads only own data-property descriptors. It never invokes a
+ * getter or `toJSON`, and a host-detected proxy is rejected before any of its
+ * traps can run. JSON leaves, arrays, and enumerable string-keyed object data
+ * keep their ordinary JSON shape. Unsupported object members are omitted and
+ * unsupported array members become `null`, matching JSON's container rules.
+ *
+ * Depth, node, and character bounds apply before the attempt store's admission
+ * boundary, and `budget` carries the node and character allowances across every
+ * reason of one cause. A cycle, proxy, inspection refusal, or exceeded bound
+ * rejects the whole value as `null`, so persistence on the failure path neither
+ * executes user code nor leaves an attempt running because its error was too
+ * large for the store. The bounds are the store's own, less the envelope
+ * {@link persistCause} adds, so a value the store would have taken is never
+ * discarded here.
  */
-const inertJson = (value: unknown): unknown => {
+const inertJson = (value: unknown, budget: InertJsonBudget): unknown => {
+  const active = new WeakSet<object>()
+
+  const reduce = (current: unknown, depth: number): InertJsonReduction => {
+    if (depth > maxInertJsonDepth) return inertJsonRejected
+    budget.nodes += 1
+    if (budget.nodes > maxInertJsonNodes) return inertJsonRejected
+
+    if (current === null) return null
+    switch (typeof current) {
+      case "boolean":
+        return current
+      case "number":
+        return Number.isFinite(current) ? current : null
+      case "string":
+        return spend(budget, current) ? current : inertJsonRejected
+      case "undefined":
+      case "symbol":
+      case "function":
+      case "bigint":
+        return inertJsonOmitted
+      case "object": {
+        if (HostReflection.host.isProxy(current) || active.has(current)) return inertJsonRejected
+        active.add(current)
+        try {
+          if (Array.isArray(current)) {
+            const lengthDescriptor = Object.getOwnPropertyDescriptor(current, "length")
+            /* v8 ignore next 3 -- A non-proxy Array always has an own data-property uint32 length. */
+            if (
+              lengthDescriptor === undefined || !("value" in lengthDescriptor) ||
+              typeof lengthDescriptor.value !== "number"
+            ) return inertJsonRejected
+            const output: Array<InertJsonValue> = []
+            for (let index = 0; index < lengthDescriptor.value; index++) {
+              const descriptor = Object.getOwnPropertyDescriptor(current, String(index))
+              const reduced = reduce(
+                descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined,
+                depth + 1
+              )
+              if (reduced === inertJsonRejected) return inertJsonRejected
+              output.push(reduced === inertJsonOmitted ? null : reduced)
+            }
+            return output
+          }
+
+          const output: Record<string, InertJsonValue> = {}
+          for (const key of Reflect.ownKeys(current)) {
+            if (typeof key !== "string") continue
+            const descriptor = Object.getOwnPropertyDescriptor(current, key)
+            /* v8 ignore next -- A key returned by Reflect.ownKeys exists on a non-proxy object. */
+            if (descriptor === undefined) continue
+            if (!descriptor.enumerable || !("value" in descriptor)) continue
+            if (!spend(budget, key)) return inertJsonRejected
+            const reduced = reduce(descriptor.value, depth + 1)
+            if (reduced === inertJsonRejected) return inertJsonRejected
+            if (reduced === inertJsonOmitted) continue
+            Object.defineProperty(output, key, {
+              value: reduced,
+              enumerable: true,
+              configurable: true,
+              writable: true
+            })
+          }
+          return output
+        } finally {
+          active.delete(current)
+        }
+      }
+    }
+    /* v8 ignore next -- The typeof switch covers every JavaScript value category. */
+    return inertJsonRejected
+  }
+
   try {
-    const text = JSON.stringify(value)
-    return text === undefined ? null : JSON.parse(text)
+    const reduced = reduce(value, 0)
+    return reduced === inertJsonRejected || reduced === inertJsonOmitted ? null : reduced
   } catch {
     return null
   }
@@ -422,17 +582,23 @@ const inertJson = (value: unknown): unknown => {
  * whatever the ambient serializer produced (`Cause.toJSON` emits
  * `{_id, failures}`, a structural walk emits `{reasons}`), so a change in
  * the store's encoding silently broke failed-attempt replay. The write side
- * now owns the shape explicitly, {@link inertJson} included.
+ * now owns the shape explicitly. {@link inertJson} makes every live leaf
+ * inert and bounded before the store sees it, against one budget shared by
+ * every reason, so a cause of many reasons is bounded as a whole and not
+ * merely one reason at a time.
  */
-const persistCause = (cause: Cause.Cause<unknown>): typeof CauseJson.Type => ({
-  reasons: cause.reasons.map((reason) =>
-    Cause.isFailReason(reason)
-      ? { _tag: "Fail" as const, error: inertJson(reason.error) }
-      : Cause.isDieReason(reason)
-      ? { _tag: "Die" as const, defect: inertJson(reason.defect) }
-      : { _tag: "Interrupt" as const, fiberId: reason.fiberId ?? null }
-  )
-})
+const persistCause = (cause: Cause.Cause<unknown>): typeof CauseJson.Type => {
+  const budget: InertJsonBudget = { nodes: 0, characters: 0 }
+  return {
+    reasons: cause.reasons.map((reason) =>
+      Cause.isFailReason(reason)
+        ? { _tag: "Fail" as const, error: inertJson(reason.error, budget) }
+        : Cause.isDieReason(reason)
+        ? { _tag: "Die" as const, defect: inertJson(reason.defect, budget) }
+        : { _tag: "Interrupt" as const, fiberId: reason.fiberId ?? null }
+    )
+  }
+}
 
 /**
  * Presents a payload this module already reduced to JSON as the attempt
@@ -2061,15 +2227,21 @@ export const make = (deps: Dependencies) => {
       // The operation's own span is annotated above once the digest exists;
       // this ambient context gives every child store, boundary, and sandbox
       // span the dispatch identity as it opens.
+      //
+      // `stepKey`, never `key`: `@smthrs/journal`'s `Redaction.isSensitiveKey`
+      // treats a standalone trailing `key` word as a credential name and
+      // replaces the value, and `RedactedLogger` applies that rule to every
+      // log annotation under a real host. The span uses the same name so a
+      // trace and a log line name the dispatch identically.
       Effect.annotateSpans({
         runId: deps.runId,
-        key: input.key,
+        stepKey: input.key,
         attempt: input.attempt,
         tier: input.tier
       }),
       Effect.annotateLogs({
         runId: deps.runId,
-        key: input.key,
+        stepKey: input.key,
         attempt: input.attempt,
         tier: input.tier
       }),
