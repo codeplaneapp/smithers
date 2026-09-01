@@ -311,6 +311,14 @@ describe("FlowEngine.layerMemory durable waits", () => {
           exit: Exit.succeed("wrong-flow")
         }))
         expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
+        const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+        expect(defect).toBeInstanceOf(FlowEngine.ExecutionIdentityConflict)
+        expect(defect).toMatchObject({
+          code: "execution_identity_conflict",
+          field: "flow",
+          expected: "Memory/KnownFlow",
+          actual: "Memory/OtherFlow"
+        })
       }).pipe(Effect.provide(FlowEngine.layerMemory))
     ))
 

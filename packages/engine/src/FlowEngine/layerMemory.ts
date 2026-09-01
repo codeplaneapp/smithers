@@ -14,6 +14,7 @@ import * as FiberMap from "effect/FiberMap"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
+import { ExecutionIdentityConflict, FlowNotRegistered } from "./Errors.ts"
 import { makeInstance } from "./FlowInstance.ts"
 import { makeUnsafe } from "./make.ts"
 
@@ -217,7 +218,12 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
       execute: Effect.fnUntraced(function*(flow, options) {
         const entry = flows.get(flow._tag)?.at(-1)
         if (!entry) {
-          return yield* Effect.orDie(Effect.fail(`Flow ${flow._tag} is not registered`))
+          return yield* Effect.die(
+            new FlowNotRegistered({
+              flowName: flow._tag,
+              message: `Flow ${flow._tag} is not registered`
+            })
+          )
         }
 
         let state = executions.get(options.executionId)
@@ -230,9 +236,14 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
         // under the SAME declaration joins the first run.
         if (state !== undefined && state.instance.flow._tag !== flow._tag) {
           return yield* Effect.die(
-            new Error(
-              `execution ${options.executionId} already belongs to flow ${state.instance.flow._tag}; it cannot be reused for flow ${flow._tag}`
-            )
+            new ExecutionIdentityConflict({
+              executionId: options.executionId,
+              field: "flow",
+              expected: state.instance.flow._tag,
+              actual: flow._tag,
+              message: `execution ${options.executionId} already belongs to flow ${state.instance.flow._tag}; ` +
+                `it cannot be reused for flow ${flow._tag}`
+            })
           )
         }
         if (options.parent !== undefined) {
@@ -345,7 +356,7 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
           }))
         )
       }),
-      poll: (_flow, executionId) =>
+      poll: (flow, executionId) =>
         Effect.suspend(() => {
           const state = executions.get(executionId)
           if (!state) {
@@ -358,6 +369,10 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
               })
             )
           }
+          // A run owned by another declaration has no settled result from
+          // this flow's view. `none` matches the durable driver's posture and
+          // avoids presenting another flow's encoded result under this one.
+          if (state.instance.flow._tag !== flow._tag) return Effect.succeedNone
           const exit = state.fiber?.pollUnsafe()
           if (!exit) {
             return Effect.succeedNone
@@ -377,10 +392,14 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
           const execution = executions.get(options.executionId)
           if (execution !== undefined && execution.instance.flow._tag !== options.flowName) {
             return Effect.die(
-              new Error(
-                `execution ${options.executionId} belongs to flow ${execution.instance.flow._tag}; ` +
+              new ExecutionIdentityConflict({
+                executionId: options.executionId,
+                field: "flow",
+                expected: execution.instance.flow._tag,
+                actual: options.flowName,
+                message: `execution ${options.executionId} belongs to flow ${execution.instance.flow._tag}; ` +
                   `a deferred for ${options.flowName} cannot complete it`
-              )
+              })
             )
           }
           const id = JSON.stringify([options.flowName, options.executionId, options.deferredName])

@@ -355,6 +355,9 @@ describe("suspended resume policy", () => {
       yield* TestClock.adjust(200)
       const exit = yield* Fiber.join(fiber)
       expect(Exit.isFailure(exit) && String(exit.cause)).toContain("suspendedRetryPolicy expired")
+      const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+      expect(defect).toBeInstanceOf(FlowEngine.SuspendedResumeGaveUp)
+      expect(defect).toMatchObject({ code: "suspended_resume_gave_up", reason: "expired" })
       expect(executions).toBe(2)
     }).pipe(
       Effect.provide(Layer.succeed(FlowRuntime.FlowRuntime)(scripted)),
@@ -394,6 +397,9 @@ describe("suspended resume policy", () => {
       const exit = yield* flow.execute({ id: "x" }, { executionId: "run-exhausted" }).pipe(Effect.exit)
       expect(Exit.isFailure(exit)).toBe(true)
       expect(Exit.isFailure(exit) && String(exit.cause)).toContain("suspendedRetryPolicy exhausted")
+      const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+      expect(defect).toBeInstanceOf(FlowEngine.SuspendedResumeGaveUp)
+      expect(defect).toMatchObject({ code: "suspended_resume_gave_up", reason: "exhausted" })
     }).pipe(Effect.provide(layer))
   })
 

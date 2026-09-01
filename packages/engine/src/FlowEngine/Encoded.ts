@@ -1,12 +1,25 @@
 // Deep reviewed and polished by a human on 2026-08-10.
 
 /**
- * The low-level engine contract, expressed over encoded payloads and results.
+ * The low-level engine contract a durable store implements. `makeUnsafe`
+ * adapts it into the typed `FlowRuntime` port that `@smthrs/flow` declares;
+ * stores implement this interface, never the typed port directly.
  *
- * `makeUnsafe` adapts an `Encoded` implementation into the typed
- * `FlowRuntime` port that `@smthrs/flow` declares, adding schema decoding and
- * encoding on the way through. Durable stores implement `Encoded`, never the
- * typed port directly.
+ * The name is narrower than it looks: only SOME members carry encoded values,
+ * and an implementation that encodes the rest produces a silently wrong
+ * system, because those members are typed `Flow.Result<unknown, unknown>` and
+ * nothing decodes them on the way out.
+ *
+ * - `actionExecute` and `deferredResult` return ENCODED values, which
+ *   `makeUnsafe` decodes through the action's `exitSchemaPartial` and the
+ *   deferred's `exitSchema`.
+ * - `deferredDone` and `deferredDoneIfWaiting` receive ENCODED exits, which
+ *   `makeUnsafe` encodes before the call.
+ * - `execute` and `poll` return DECODED results. The implementation decodes
+ *   them itself, through
+ *   `Flow.Result({ success: flow.successSchema, error: flow.errorSchema })`.
+ * - `register`, `interrupt`, `interruptUnsafe`, `resume`, and `scheduleClock`
+ *   carry no flow-declared payload at all.
  *
  * @since 0.1.0
  */
@@ -37,8 +50,13 @@ export interface ActionExecuteOptions {
 }
 
 /**
- * Low-level flow engine contract that works with encoded payloads and
- * results before `makeUnsafe` adds typed schema decoding and encoding.
+ * The low-level flow engine contract a durable store implements, over which
+ * `makeUnsafe` builds the typed `FlowRuntime` port.
+ *
+ * Only `actionExecute`, `deferredResult`, `deferredDone`, and
+ * `deferredDoneIfWaiting` carry encoded values. `execute` and `poll` return
+ * decoded results the implementation produced itself; the rest carry no
+ * flow-declared payload. See the module header for the whole split.
  *
  * @category models
  * @since 0.1.0
@@ -52,6 +70,19 @@ export interface Encoded {
       executionId: string
     ) => Effect.Effect<unknown, unknown, FlowRuntime.FlowInstance | FlowRuntime.FlowRuntime>
   ) => Effect.Effect<void, never, Scope.Scope>
+  /**
+   * Starts, or joins, one execution of `flow` and answers with its settlement.
+   *
+   * Returns a DECODED `Flow.Result`: the implementation decodes it through
+   * `Flow.Result({ success: flow.successSchema, error: flow.errorSchema })`,
+   * because `makeUnsafe` passes this member straight through.
+   *
+   * `executionId` is caller-supplied identity. A repeated id joins the run
+   * that already owns it, which is what makes a retried submission
+   * idempotent; an implementation refuses a reuse that names a different flow
+   * declaration or arrives with a different payload, rather than answering
+   * one caller with another's result.
+   */
   readonly execute: <const Discard extends boolean>(
     flow: Flow.Any,
     options: {
@@ -74,8 +105,15 @@ export interface Encoded {
     FlowRuntime.FlowCycleDetected
   >
   /**
-   * `Option.none` is a known, unsettled execution; an unknown execution id
-   * fails with `FlowRuntime.FlowExecutionNotFound`.
+   * The settlement of one execution of `flow`, when it has one.
+   *
+   * Returns a DECODED `Flow.Result` for the same reason `execute` does.
+   *
+   * `Option.none` is a known, unsettled execution, and also an execution that
+   * belongs to a DIFFERENT flow declaration: from this flow's view that run
+   * has no result, and answering with it would hand one flow's value to
+   * another flow's schemas. An execution id no engine knows fails with
+   * `FlowRuntime.FlowExecutionNotFound`.
    */
   readonly poll: (
     flow: Flow.Any,
@@ -90,6 +128,10 @@ export interface Encoded {
    *
    * Reports `FlowRuntime.CancelRequestFailed` when a durable implementation
    * could not record the request; an in-memory one never raises it.
+   *
+   * An unknown execution id is a silent no-op rather than a typed failure,
+   * unlike `poll`: the request is idempotent, and a mistyped or reaped run has
+   * nothing left to cancel.
    */
   readonly interrupt: (
     flow: Flow.Any,
@@ -97,6 +139,9 @@ export interface Encoded {
   ) => Effect.Effect<void, FlowRuntime.CancelRequestFailed>
   /**
    * Forces cancellation without guaranteeing cleanup or compensation.
+   *
+   * An unknown execution id is a silent no-op, for the same reason
+   * `interrupt` treats one that way.
    */
   readonly interruptUnsafe: (
     flow: Flow.Any,
@@ -104,6 +149,10 @@ export interface Encoded {
   ) => Effect.Effect<void, FlowRuntime.CancelRequestFailed>
   /**
    * Re-drives a durably suspended execution; it does not undo cancellation.
+   *
+   * An unknown execution id is a silent no-op: a re-drive request carries no
+   * state of its own, so there is nothing to report to a caller that named a
+   * run this engine does not hold.
    */
   readonly resume: (
     flow: Flow.Any,

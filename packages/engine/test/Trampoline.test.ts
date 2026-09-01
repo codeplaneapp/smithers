@@ -382,6 +382,9 @@ describe("a lineage on the memory engine", () => {
 
       expect(Exit.isFailure(exit)).toBe(true)
       expect(Exit.isFailure(exit) && exit.cause.toString()).toContain("is not registered with this engine")
+      const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+      expect(defect).toBeInstanceOf(FlowEngine.FlowNotRegistered)
+      expect(defect).toMatchObject({ code: "flow_not_registered", flowName: "trampoline/stranger" })
     }))
 
   // `layerMemory.register` keeps a per-tag stack with a scope-aware restore,

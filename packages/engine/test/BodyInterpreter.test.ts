@@ -251,6 +251,9 @@ describe("bodied flow on the memory engine", () => {
 
       expect(Exit.isFailure(exit)).toBe(true)
       expect(Exit.isFailure(exit) && exit.cause.toString()).toContain("requires SnapshotBoundary")
+      const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+      expect(defect).toBeInstanceOf(FlowEngine.SnapshotBoundaryRequired)
+      expect(defect).toMatchObject({ code: "snapshot_boundary_required" })
     }))
 })
 

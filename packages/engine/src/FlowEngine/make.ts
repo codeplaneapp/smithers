@@ -25,6 +25,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { actionKey, ordinalScope, uncanonicalKey } from "./ActionKey.ts"
 import type { ActionExecuteOptions, Encoded } from "./Encoded.ts"
+import { FlowNotRegistered, SnapshotBoundaryRequired, SuspendedResumeGaveUp } from "./Errors.ts"
 import * as Round from "./Round.ts"
 import { SnapshotBoundary, type SnapshotBoundaryOptions } from "./SnapshotBoundary.ts"
 
@@ -358,9 +359,10 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
           const target = declarations.get(wrapped.flow)?.at(-1)?.flow
           if (target === undefined) {
             return yield* Effect.die(
-              new Error(
-                `${roundFlow._tag} handed off to flow ${wrapped.flow}, which is not registered with this engine`
-              )
+              new FlowNotRegistered({
+                flowName: wrapped.flow,
+                message: `${roundFlow._tag} handed off to flow ${wrapped.flow}, which is not registered with this engine`
+              })
             )
           }
           // A handoff payload travels encoded, so the next round's own schema
@@ -401,8 +403,16 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
           const expired = Option.isSome(
             RetryPolicy.nextDelay(suspendedRetryPolicy, resumeAttempt)
           )
+          const reason = expired ? "expired" : "exhausted"
           return yield* Effect.die(
-            `${self._tag}.execute: suspendedRetryPolicy ${expired ? "expired" : "exhausted"}`
+            new SuspendedResumeGaveUp({
+              flowName: self._tag,
+              executionId,
+              attempt: resumeAttempt,
+              elapsedMs,
+              reason,
+              message: `${self._tag}.execute: suspendedRetryPolicy ${reason}`
+            })
           )
         }
         const sleep = Effect.sleep(delay.value)
@@ -544,7 +554,10 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
           const boundaryOption = yield* Effect.serviceOption(SnapshotBoundary)
           if (Option.isNone(boundaryOption)) {
             return yield* Effect.die(
-              `Compensable action "${action.name}" requires SnapshotBoundary`
+              new SnapshotBoundaryRequired({
+                actionName: action.name,
+                message: `Compensable action "${action.name}" requires SnapshotBoundary`
+              })
             )
           }
           const boundary = boundaryOption.value
