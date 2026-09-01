@@ -1,11 +1,12 @@
 /**
  * The error codes Smithers integration adapters raise, and their documentation.
  *
- * The table is the runtime source of truth: {@link SmithersErrorCode} is derived
- * from its keys, so adding a code and documenting it are the same edit. Smithers
- * 0.x carried 180 codes for an engine that no longer exists; 1.0 keeps only the
- * ones the `@smthrs/integrations` trees actually raise, because every other
- * package states its failures as `Schema.TaggedError` classes of its own.
+ * The table is the runtime source of truth: {@link KnownSmithersErrorCode} is
+ * derived from its keys, and {@link SmithersErrorCode} is an alias of it, so the
+ * set of codes is closed. Smithers 0.x carried 180 codes for an engine that no
+ * longer exists; 1.0 keeps only the ones the `@smthrs/integrations` trees
+ * actually raise, because every other package states its failures as
+ * `Schema.TaggedError` classes of its own.
  *
  * @since 1.0.0
  */
@@ -40,7 +41,8 @@ export const smithersErrorDefinitions = {
   INVALID_INPUT: {
     category: "integrations",
     when:
-      "An integration helper receives an argument it cannot use: a missing bot token, an approval option key containing a colon, callback data over Telegram's 64-byte limit, or a non-https Mini App URL."
+      "An integration helper receives an argument it cannot use: a missing bot token, an approval option key containing a colon, callback data over Telegram's 64-byte limit, or a non-https Mini App URL.",
+    details: "`{ [field]: value }` on the signal-name failures, otherwise none"
   },
   INTEGRATION_ERROR: {
     category: "integrations",
@@ -57,13 +59,17 @@ export const smithersErrorDefinitions = {
   TELEGRAM_INIT_DATA_INVALID: {
     category: "integrations",
     when:
-      "Telegram Mini App `initData` is empty, expired, missing its hash or signature, or fails HMAC or Ed25519 verification."
+      "Telegram Mini App `initData` is empty, expired, missing its hash or signature, or fails HMAC or Ed25519 verification.",
+    details: "`{ authDate }` on the expiry failures, otherwise none"
   },
   UNSUPPORTED: {
     category: "integrations",
     when: "The runtime lacks a primitive an integration needs, such as Web Crypto or Ed25519 verification."
   }
 } as const satisfies Record<string, SmithersErrorDefinition>
+
+Object.freeze(smithersErrorDefinitions)
+for (const definition of Object.values(smithersErrorDefinitions)) Object.freeze(definition)
 
 /**
  * A code this package documents.
@@ -74,14 +80,14 @@ export const smithersErrorDefinitions = {
 export type KnownSmithersErrorCode = keyof typeof smithersErrorDefinitions
 
 /**
- * A code carried by a {@link SmithersError}. Unknown strings are accepted so a
- * consumer can raise its own without editing this package, but only a known
- * code has a definition.
+ * A code carried by a {@link SmithersError}. The set is closed; a consumer that
+ * needs a new code adds it to {@link smithersErrorDefinitions} and to the
+ * reference page in the same edit.
  *
  * @category models
  * @since 1.0.0
  */
-export type SmithersErrorCode = KnownSmithersErrorCode | (string & {})
+export type SmithersErrorCode = KnownSmithersErrorCode
 
 /**
  * Every documented code, in declaration order.
@@ -92,6 +98,8 @@ export type SmithersErrorCode = KnownSmithersErrorCode | (string & {})
 export const knownSmithersErrorCodes: ReadonlyArray<KnownSmithersErrorCode> = Object.keys(
   smithersErrorDefinitions
 ) as Array<KnownSmithersErrorCode>
+
+Object.freeze(knownSmithersErrorCodes)
 
 /**
  * Whether `code` is one this package documents.
@@ -108,19 +116,15 @@ export const isKnownSmithersErrorCode = (code: unknown): code is KnownSmithersEr
  * @category getters
  * @since 1.0.0
  */
-export const getSmithersErrorDefinition = (code: SmithersErrorCode): SmithersErrorDefinition | undefined =>
+export const getSmithersErrorDefinition = (code: unknown): SmithersErrorDefinition | undefined =>
   isKnownSmithersErrorCode(code) ? smithersErrorDefinitions[code] : undefined
 
 /**
- * The documentation URL for `code`.
+ * The documentation URL shared by every code.
  *
- * Every code currently shares one reference page. The parameter keeps the
- * signature stable for the day a code gets its own anchor.
+ * Every code shares one reference page.
  *
  * @category getters
  * @since 1.0.0
  */
-export const getSmithersErrorDocsUrl = (code: SmithersErrorCode): string => {
-  void code
-  return ERROR_REFERENCE_URL
-}
+export const getSmithersErrorDocsUrl = (): string => ERROR_REFERENCE_URL
