@@ -63,7 +63,17 @@ const sqlHarness: Harness = {
                 owner_nonce = NULL,
                 heartbeat_at_ms = NULL
               WHERE run_id = ${runId}
-            `.pipe(Effect.orDie, Effect.asVoid)
+            `.pipe(Effect.orDie, Effect.asVoid),
+          deleteRun: (runId) =>
+            Effect.gen(function*() {
+              // Retention normally removes engine-state dependents first.
+              // Disable the test database's foreign keys briefly so this
+              // contract can leave those rows behind and exercise the
+              // run-existence join itself.
+              yield* sql`PRAGMA foreign_keys = OFF`
+              yield* sql`DELETE FROM flows_runs WHERE run_id = ${runId}`
+              yield* sql`PRAGMA foreign_keys = ON`
+            }).pipe(Effect.orDie)
         }
         return yield* body(context)
       }).pipe(Effect.provide(migratedDatabase)) as Effect.Effect<never>
@@ -98,7 +108,8 @@ const memoryHarness: Harness = {
       setStatus: (runId, status) =>
         Effect.sync(() => {
           runs.set(runId, { status, owner: null })
-        })
+        }),
+      deleteRun: (runId) => Effect.sync(() => void runs.delete(runId))
     }
     return withCrypto(body(context) as Effect.Effect<never>)
   }

@@ -36,6 +36,8 @@ export interface HarnessContext {
     runId: string,
     status: "pending" | "running" | "suspended" | "completed" | "failed" | "cancelled"
   ) => Effect.Effect<void>
+  /** Removes an already-seeded run while leaving its engine-state rows intact. */
+  readonly deleteRun: (runId: string) => Effect.Effect<void>
 }
 
 export interface Harness {
@@ -279,6 +281,41 @@ export const describeContract = (harness: Harness): void => {
 
         expect(result.due.map((row) => row.runId)).toEqual(["live-timer"])
         expect(result.all.map((row) => row.runId)).toEqual(["live-timer"])
+      }))
+
+    it.effect("excludes engine-state rows after retention deletes their run", () =>
+      Effect.gen(function*() {
+        const result = yield* harness.run((context) =>
+          Effect.gen(function*() {
+            const runId = "retained-away"
+            const flowName = "Contract/DeletedRun"
+            yield* context.seedRun(runId, owner)
+            yield* context.state.scheduleClock({
+              flowName,
+              executionId: runId,
+              clockName: "wake",
+              deferredName: "wake-deferred",
+              dueAtMs: 1_000,
+              completedAtMs: null
+            }, owner)
+            yield* context.state.completeDeferred({
+              flowName,
+              executionId: runId,
+              deferredName: "completed",
+              exit: { value: "done" },
+              completedAtMs: 10
+            })
+            yield* context.state.park(runId, { reason: "event" }, owner)
+            yield* context.deleteRun(runId)
+            return {
+              clocks: yield* context.state.pendingClocks({ executionId: runId }),
+              deferreds: yield* context.state.completedDeferreds(flowName),
+              waiting: yield* context.state.waitingRuns()
+            }
+          })
+        )
+
+        expect(result).toEqual({ clocks: [], deferreds: [], waiting: [] })
       }))
 
     it.effect("fences clock creation to the current owner of a running run", () =>

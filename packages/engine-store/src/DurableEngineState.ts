@@ -1673,16 +1673,19 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
 
   /**
    * Mirrors the SQL sweeps' run-status join: a row whose run has settled is
-   * never swept. The permissive default (no `runs` view) treats every run as
-   * live, exactly as `waitingRuns` does, and leaves the guard to the caller.
+   * never swept, and `Option.none()` from a supplied `runs` view means the run
+   * does not exist, so its orphaned engine-state rows stay hidden. The
+   * permissive default (no `runs` view) treats every run as live because a
+   * standalone memory store has no run table to consult.
    */
   const isLive = (runId: string): boolean => {
     if (options.runs === undefined) return true
     const view = options.runs(runId)
-    return Option.isNone(view) ||
+    return Option.isSome(view) && (
       view.value.status === "pending" ||
       view.value.status === "running" ||
       view.value.status === "suspended"
+    )
   }
 
   const unguarded: Omit<Service, "transaction"> = {
@@ -1844,14 +1847,7 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
           // Mirrors the SQL status predicate: a terminally closed run's
           // stale waiting row never surfaces to a sweeper (issue #28). The
           // permissive default (no `runs` view) treats every run as live.
-          .filter((row) => {
-            if (options.runs === undefined) return true
-            const view = options.runs(row.runId)
-            return Option.isNone(view) ||
-              view.value.status === "pending" ||
-              view.value.status === "running" ||
-              view.value.status === "suspended"
-          })
+          .filter((row) => isLive(row.runId))
           .filter((row) => filter?.reason === undefined || row.reason === filter.reason)
           .filter((row) =>
             filter?.dueBeforeMs === undefined ||

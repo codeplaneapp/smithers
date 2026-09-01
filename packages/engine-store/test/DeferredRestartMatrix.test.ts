@@ -650,11 +650,11 @@ describe("the in-memory sweep queries skip settled runs (B-03)", () => {
       runs.set(runId, { status, owner: null })
     })
 
-  it.effect("lists a run that can still make progress and skips one that cannot", () =>
+  it.effect("lists an existing run that can still make progress and skips one that cannot", () =>
     Effect.gen(function*() {
-      // Every live status, every terminal one, and a row whose run the view
-      // does not know — that last one stays listed, because an unknown run is
-      // not evidence of a settled one.
+      // Every live status, every terminal one, and a row whose run was removed
+      // from the supplied view. The removed run stays hidden just as it does
+      // behind the SQL implementation's flows_runs join.
       yield* seed("memory-pending", "pending")
       yield* seed("memory-running", "running")
       yield* seed("memory-suspended", "suspended")
@@ -664,7 +664,7 @@ describe("the in-memory sweep queries skip settled runs (B-03)", () => {
       yield* seed("memory-unknown", "running")
       runs.delete("memory-unknown")
 
-      const live = ["memory-pending", "memory-running", "memory-suspended", "memory-unknown"]
+      const live = ["memory-pending", "memory-running", "memory-suspended"]
       expect((yield* state.completedDeferreds(flowName)).map((row) => row.executionId).sort()).toEqual(live.sort())
       expect((yield* state.pendingClocks({ flowName })).map((row) => row.executionId).sort()).toEqual(live.sort())
     }))
