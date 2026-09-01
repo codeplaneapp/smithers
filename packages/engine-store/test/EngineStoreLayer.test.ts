@@ -116,6 +116,54 @@ describe("EngineStore.layer", () => {
       ])
     }))
 
+  it.effect("keeps engine checkpoint authority separate from the action-facing Jj service", () =>
+    Effect.gen(function*() {
+      const actionCalls: Array<JjCall> = []
+      const engineCalls: Array<JjCall> = []
+      const privileged = recordingJj(engineCalls)
+      const result = yield* withCrypto(
+        Effect.scoped(Effect.gen(function*() {
+          const boundary = yield* FlowEngine.SnapshotBoundary
+          const options: FlowEngine.SnapshotBoundaryOptions = {
+            flow: LayerFlow,
+            executionId: "private-jj-exec",
+            key: "step/private",
+            attempt: 3,
+            metadata: undefined
+          }
+          const snapshot = yield* boundary.snapshot(options)
+          const diff = yield* boundary.diff(snapshot, options)
+          yield* boundary.restore(snapshot, options)
+          return { snapshot, diff }
+        })).pipe(
+          Effect.provide(
+            EngineStore.layerWithPrivilegedJj(
+              {
+                owner: { hostId: "layer-host" },
+                journalSource: "layer-test",
+                isAlive: () => Effect.succeed(true)
+              },
+              Layer.succeed(Jj.Jj, privileged)
+            ).pipe(
+              Layer.provideMerge(
+                baseLayers(recordingJj(actionCalls), DurableEngineState.makeMemory())
+              )
+            )
+          ),
+          Effect.scoped
+        )
+      )
+
+      expect(result).toEqual({ snapshot: "change-1", diff: "diff-body" })
+      expect(actionCalls).toEqual([])
+      expect(engineCalls).toEqual([
+        { op: "snapshot", argument: "smithers action step/private attempt 3" },
+        { op: "snapshot", argument: "smithers action step/private attempt 3 settled" },
+        { op: "diff", argument: "change-1->change-2" },
+        { op: "restore", argument: "change-1" }
+      ])
+    }))
+
   it.effect("turns a Jj snapshot failure into a defect rather than a typed boundary error", () =>
     Effect.gen(function*() {
       const calls: Array<JjCall> = []

@@ -78,7 +78,8 @@ const boundaryLayer = (fs: FileSystem.FileSystem, options?: BoundaryOptions) =>
       fs,
       ArtifactStore.makeFileSystem(fs, {
         directory: options?.objectsDirectory,
-        durability: "best-effort"
+        durability: "best-effort",
+        coordination: "process"
       }),
       options
     )

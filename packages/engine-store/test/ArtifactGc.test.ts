@@ -132,7 +132,7 @@ const harness = (host: Host, options?: {
     TestStores.database
   )
   const sweep = Layer.succeed(ArtifactSweep.ArtifactSweep)(
-    options?.sweep ?? ArtifactSweep.makeFileSystem(host.fs)
+    options?.sweep ?? ArtifactSweep.makeFileSystem(host.fs, { coordination: "process" })
   )
   const policy = options?.policy === undefined
     ? Layer.empty
@@ -144,7 +144,10 @@ const harness = (host: Host, options?: {
     collector,
     durable,
     Layer.succeed(ArtifactStore.ArtifactStore)(
-      ArtifactStore.makeFileSystem(host.fs, { durability: "best-effort" })
+      ArtifactStore.makeFileSystem(host.fs, {
+        durability: "best-effort",
+        coordination: "process"
+      })
     )
   )
 }
@@ -353,7 +356,9 @@ describe("mark: durable roots keep their referenced blobs", () => {
         ArtifactGc.layer().pipe(
           Layer.provide(Layer.mergeAll(
             refusing(table),
-            Layer.succeed(ArtifactSweep.ArtifactSweep)(ArtifactSweep.makeFileSystem(host.fs))
+            Layer.succeed(ArtifactSweep.ArtifactSweep)(
+              ArtifactSweep.makeFileSystem(host.fs, { coordination: "process" })
+            )
           ))
         )
       const cacheFailure = yield* withCrypto(
@@ -451,7 +456,10 @@ describe("sweep: liveness under concurrency and crashes", () => {
       const freshened = host.seedBlob("re-referenced-output", 100 * dayMs)
       const fresh = "written-during-sweep"
       const freshDigest = sha256(bytes(fresh))
-      const store = ArtifactStore.makeFileSystem(host.fs, { durability: "best-effort" })
+      const store = ArtifactStore.makeFileSystem(host.fs, {
+        durability: "best-effort",
+        coordination: "process"
+      })
       host.hooks.beforeRemove = () =>
         // A concurrent writer publishes a brand-new blob and re-publishes the
         // bytes of an old unreferenced one — the dedupe path that freshens the
