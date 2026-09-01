@@ -37,9 +37,9 @@ const layer = Layer.mergeAll(
 
 ## Entry point
 
-| Import | Source | Platform |
-| --- | --- | --- |
-| `@smthrs/engine` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/engine/src/index.ts) | any |
+| Import           | Source                                                                                        | Platform |
+| ---------------- | --------------------------------------------------------------------------------------------- | -------- |
+| `@smthrs/engine` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/engine/src/index.ts) | any      |
 
 The service tag, `FlowInstance`, `annotateWaiting`, and `FlowCycleDetected`
 live in [`@smthrs/flow`](/api/flow). What this package owns is the
@@ -51,12 +51,12 @@ implementation.
 it into the typed `FlowRuntime` service. The seam is only partly encoded, and
 the split is part of the contract:
 
-| Member | Value crossing the seam |
-| --- | --- |
-| `actionExecute`, `deferredResult` | encoded; `makeUnsafe` decodes through the action or deferred exit schema |
-| `deferredDone`, `deferredDoneIfWaiting` | encoded; `makeUnsafe` encodes before the call |
-| `execute`, `poll` | decoded `Flow.Result` values, produced by the implementation |
-| `interrupt`, `interruptUnsafe`, `resume`, `scheduleClock`, `register` | no payload |
+| Member                                                                | Value crossing the seam                                                  |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `actionExecute`, `deferredResult`                                     | encoded; `makeUnsafe` decodes through the action or deferred exit schema |
+| `deferredDone`, `deferredDoneIfWaiting`                               | encoded; `makeUnsafe` encodes before the call                            |
+| `execute`, `poll`                                                     | decoded `Flow.Result` values, produced by the implementation             |
+| `interrupt`, `interruptUnsafe`, `resume`, `scheduleClock`, `register` | no payload                                                               |
 
 An implementation of `execute` or `poll` therefore decodes on its own, through
 `Flow.Result({ success: flow.successSchema, error: flow.errorSchema })`, before
@@ -81,9 +81,19 @@ would hand one flow's result to another flow's schemas. A reused id with a
 different payload is refused for the same reason. Both refusals are coded
 defects, listed under [Refusals](#refusals).
 
-The derived transports pass `executionId` through from the request body, so a
-multi-tenant server namespaces or rejects the client value before it reaches
-`Flow.execute`. Nothing in this package scopes it for you.
+The derived transports pass `executionId` through from the request body by
+default. Set the `executionId` option on
+`FlowProxyServer.layerRpcHandlers` or `layerHttpApi` to rewrite it in one
+server-owned place. Both layers apply the mapping to execute, discard, and
+resume requests, so resume cannot bypass the namespace. Returning `undefined`
+for execute or discard lets the engine derive the id from the flow's
+idempotency key. Returning `undefined` for resume preserves the client value.
+
+The hook is a pure function over the flow and request payload. Resume provides
+an `undefined` payload because its request carries only an execution id. The
+hook cannot read request-scoped authentication by itself. Middleware can put a
+trusted tenant in the payload, or the server can wrap the layer with a mapping
+that closes over the trusted namespace.
 
 ## Trampoline and journal identity
 
@@ -141,50 +151,51 @@ an authentication policy, or a durable engine.
 The engine's admission and configuration refusals are coded defects, so a
 control plane or a proxy classifies one without scraping prose.
 
-| Code | Raised when |
-| --- | --- |
-| `flow_not_registered` | a flow executes, or a handoff names a target, that no registration covers |
+| Code                          | Raised when                                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------------------- |
+| `flow_not_registered`         | a flow executes, or a handoff names a target, that no registration covers                 |
 | `execution_identity_conflict` | a reused execution id names another flow declaration, or arrives with a different payload |
-| `suspended_resume_gave_up` | a caller polling a suspended lineage exhausts or outlives its `suspendedRetryPolicy` |
-| `snapshot_boundary_required` | a compensable action runs with no `SnapshotBoundary` in context |
-| `invalid_round` | a trampoline identity or round budget is malformed |
-| `flow_proxy_collision` | two derived operations share one wire name |
-| `invalid_flow_tag` | a flow tag is not well-formed UTF-16, so it has no route encoding |
+| `suspended_resume_gave_up`    | a caller polling a suspended lineage exhausts or outlives its `suspendedRetryPolicy`      |
+| `snapshot_boundary_required`  | a compensable action runs with no `SnapshotBoundary` in context                           |
+| `invalid_round`               | a trampoline identity or round budget is malformed                                        |
+| `flow_proxy_collision`        | two derived operations share one wire name                                                |
+| `invalid_flow_tag`            | a flow tag is not well-formed UTF-16, so it has no route encoding                         |
 
 See [Getting started](/guides/getting-started), [Writing a flow](/guides/writing-a-flow), and [Determinism and replay](/concepts/determinism-and-replay).
 
 ## Exports
 
-| Export | Kind | Summary |
-| --- | --- | --- |
-| `FlowEngine.ActionExecuteOptions` (interface) | models | The identity and boundary information supplied to an encoded action executor. |
-| `FlowEngine.Encoded` (interface) | models | The low-level flow engine contract a durable store implements, over which `makeUnsafe` builds the typed `FlowRuntime` port. |
-| `FlowEngine.SuspendedResumeGaveUp` (class) | errors | A suspended execution spent the caller's resume retry policy. |
-| `FlowEngine.SnapshotBoundaryRequired` (class) | errors | A compensable action was admitted without a snapshot boundary. |
-| `FlowEngine.FlowNotRegistered` (class) | errors | A flow operation named a declaration this engine has not registered. |
-| `FlowEngine.ExecutionIdentityConflict` (class) | errors | A caller reused an execution id for a different flow or payload identity. |
-| `FlowEngine.makeInstance` (const) | constructors | Creates the initial `FlowInstance` state for one flow execution. |
-| `FlowEngine.layerMemory` (const) | layers | Layer that provides an in-memory `FlowRuntime`. |
-| `FlowEngine.Lineage.JournalLineageId` (type) | models | An injective journal address minted from one run and node path. |
-| `FlowEngine.Lineage.root` (const) | constructors | The lineage id of a run's root node. |
-| `FlowEngine.Lineage.make` (const) | constructors | The lineage id of a node reached by `path` from the run root. |
-| `FlowEngine.makeUnsafe` (const) | constructors | Builds a typed `FlowRuntime` service from a low-level encoded implementation. |
-| `FlowEngine.Round.Round` (interface) | models | Where one execution sits in its lineage: which lineage it belongs to, and which round of it this is, counted from zero. |
-| `FlowEngine.Round.InvalidRound` (class) | errors | A malformed trampoline identity or resource bound. |
-| `FlowEngine.Round.initial` (const) | constructors | The round a lineage starts at: ordinal zero, with the caller's execution id as the lineage id every later round derives from. |
-| `FlowEngine.Round.executionId` (const) | constructors | The execution id a round runs under. |
-| `FlowEngine.Round.next` (const) | constructors | The round that follows this one, and the execution id it runs under. |
-| `FlowEngine.SnapshotBoundaryOptions` (interface) | models | Context passed to a compensable action snapshot boundary. |
-| `FlowEngine.SnapshotBoundary` (class) | services | Minimal host snapshot boundary required by compensable actions. |
-| `FlowProxy.FlowProxyCollision` (class) | errors | Raised before proxy construction when two flow operations share one wire identity. |
-| `FlowProxy.InvalidFlowTag` (class) | errors | Raised before HTTP proxy construction when a flow tag is ill-formed UTF-16. |
-| `FlowProxy.OperationAddresses` (interface) | models | The three wire operation names one flow owns. |
-| `FlowProxy.operationAddresses` (const) | constructors | Derives operation names shared by proxy definitions and server handlers. |
-| `FlowProxy.assertNoCollisions` (const) | validation | Refuses a flow set whose generated operation names are ambiguous. |
-| `FlowProxy.toRpcGroup` (const) | constructors | Derives an `RpcGroup` from a list of flows. |
-| `FlowProxy.ConvertRpcs` (type) | converting | Maps each flow to the RPC definitions generated for execute, discard, and resume operations. |
-| `FlowProxy.toHttpApiGroup` (const) | constructors | Derives an `HttpApiGroup` from a list of flows. |
-| `FlowProxy.ConvertHttpApi` (type) | converting | Maps each flow to the HTTP API endpoints generated for execute, discard, and resume operations. |
-| `FlowProxyServer.layerHttpApi` (const) | layers | Creates handlers for a flow HTTP API group, wiring execute, discard, and resume endpoints to the supplied flows. |
-| `FlowProxyServer.layerRpcHandlers` (const) | layers | Creates RPC handlers for the supplied flows, wiring execute, discard, and resume RPCs to flow operations. |
-| `FlowProxyServer.RpcHandlers` (type) | services | Union of RPC handler services required to serve the generated flow execute, discard, and resume RPCs. |
+| Export                                           | Kind         | Summary                                                                                                                                                                 |
+| ------------------------------------------------ | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FlowEngine.ActionExecuteOptions` (interface)    | models       | The identity and boundary information supplied to an encoded action executor.                                                                                           |
+| `FlowEngine.Encoded` (interface)                 | models       | The low-level flow engine contract a durable store implements, over which `makeUnsafe` builds the typed `FlowRuntime` port.                                             |
+| `FlowEngine.SuspendedResumeGaveUp` (class)       | errors       | A suspended execution spent the caller's resume retry policy.                                                                                                           |
+| `FlowEngine.SnapshotBoundaryRequired` (class)    | errors       | A compensable action was admitted without a snapshot boundary.                                                                                                          |
+| `FlowEngine.FlowNotRegistered` (class)           | errors       | A flow operation named a declaration this engine has not registered.                                                                                                    |
+| `FlowEngine.ExecutionIdentityConflict` (class)   | errors       | A caller reused an execution id for a different flow or payload identity.                                                                                               |
+| `FlowEngine.makeInstance` (const)                | constructors | Creates the initial `FlowInstance` state for one flow execution.                                                                                                        |
+| `FlowEngine.layerMemory` (const)                 | layers       | Layer that provides an in-memory `FlowRuntime`.                                                                                                                         |
+| `FlowEngine.Lineage.JournalLineageId` (type)     | models       | An injective journal address minted from one run and node path.                                                                                                         |
+| `FlowEngine.Lineage.root` (const)                | constructors | The lineage id of a run's root node.                                                                                                                                    |
+| `FlowEngine.Lineage.make` (const)                | constructors | The lineage id of a node reached by `path` from the run root.                                                                                                           |
+| `FlowEngine.makeUnsafe` (const)                  | constructors | Builds a typed `FlowRuntime` service from a low-level encoded implementation.                                                                                           |
+| `FlowEngine.Round.Round` (interface)             | models       | Where one execution sits in its lineage: which lineage it belongs to, and which round of it this is, counted from zero.                                                 |
+| `FlowEngine.Round.InvalidRound` (class)          | errors       | A malformed trampoline identity or resource bound.                                                                                                                      |
+| `FlowEngine.Round.initial` (const)               | constructors | The round a lineage starts at: ordinal zero, with the caller's execution id as the lineage id every later round derives from.                                           |
+| `FlowEngine.Round.executionId` (const)           | constructors | The execution id a round runs under.                                                                                                                                    |
+| `FlowEngine.Round.next` (const)                  | constructors | The round that follows this one, and the execution id it runs under.                                                                                                    |
+| `FlowEngine.SnapshotBoundaryOptions` (interface) | models       | Context passed to a compensable action snapshot boundary.                                                                                                               |
+| `FlowEngine.SnapshotBoundary` (class)            | services     | Minimal host snapshot boundary required by compensable actions.                                                                                                         |
+| `FlowProxy.FlowProxyCollision` (class)           | errors       | Raised before proxy construction when two flow operations share one wire identity.                                                                                      |
+| `FlowProxy.InvalidFlowTag` (class)               | errors       | Raised before HTTP proxy construction when a flow tag is ill-formed UTF-16.                                                                                             |
+| `FlowProxy.OperationAddresses` (interface)       | models       | The three wire operation names one flow owns.                                                                                                                           |
+| `FlowProxy.operationAddresses` (const)           | constructors | Derives operation names shared by proxy definitions and server handlers.                                                                                                |
+| `FlowProxy.assertNoCollisions` (const)           | validation   | Refuses a flow set whose generated operation names are ambiguous.                                                                                                       |
+| `FlowProxy.toRpcGroup` (const)                   | constructors | Derives an `RpcGroup` from a list of flows.                                                                                                                             |
+| `FlowProxy.ConvertRpcs` (type)                   | converting   | Maps each flow to the RPC definitions generated for execute, discard, and resume operations.                                                                            |
+| `FlowProxy.toHttpApiGroup` (const)               | constructors | Derives an `HttpApiGroup` from a list of flows.                                                                                                                         |
+| `FlowProxy.ConvertHttpApi` (type)                | converting   | Maps each flow to the HTTP API endpoints generated for execute, discard, and resume operations.                                                                         |
+| `FlowProxyServer.ExecutionIdScope` (interface)   | models       | Rewrites the caller-supplied execution id before it reaches the engine, so a multi-tenant server namespaces client identity in one place instead of at every call site. |
+| `FlowProxyServer.layerHttpApi` (const)           | layers       | Creates handlers for a flow HTTP API group, wiring execute, discard, and resume endpoints to the supplied flows.                                                        |
+| `FlowProxyServer.layerRpcHandlers` (const)       | layers       | Creates RPC handlers for the supplied flows, wiring execute, discard, and resume RPCs to flow operations.                                                               |
+| `FlowProxyServer.RpcHandlers` (type)             | services     | Union of RPC handler services required to serve the generated flow execute, discard, and resume RPCs.                                                                   |

@@ -25,9 +25,9 @@ const layer = Layer.mergeAll(
 
 ## Entry point
 
-| Import | Source | Platform |
-| --- | --- | --- |
-| `@smthrs/engine` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/engine/src/index.ts) | any |
+| Import           | Source                                                                                        | Platform |
+| ---------------- | --------------------------------------------------------------------------------------------- | -------- |
+| `@smthrs/engine` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/engine/src/index.ts) | any      |
 
 The service tag, `FlowInstance`, `annotateWaiting`, and `FlowCycleDetected`
 live in [`@smthrs/flow`](/api/flow). What this package owns is the
@@ -39,12 +39,12 @@ implementation.
 it into the typed `FlowRuntime` service. The seam is only partly encoded, and
 the split is part of the contract:
 
-| Member | Value crossing the seam |
-| --- | --- |
-| `actionExecute`, `deferredResult` | encoded; `makeUnsafe` decodes through the action or deferred exit schema |
-| `deferredDone`, `deferredDoneIfWaiting` | encoded; `makeUnsafe` encodes before the call |
-| `execute`, `poll` | decoded `Flow.Result` values, produced by the implementation |
-| `interrupt`, `interruptUnsafe`, `resume`, `scheduleClock`, `register` | no payload |
+| Member                                                                | Value crossing the seam                                                  |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `actionExecute`, `deferredResult`                                     | encoded; `makeUnsafe` decodes through the action or deferred exit schema |
+| `deferredDone`, `deferredDoneIfWaiting`                               | encoded; `makeUnsafe` encodes before the call                            |
+| `execute`, `poll`                                                     | decoded `Flow.Result` values, produced by the implementation             |
+| `interrupt`, `interruptUnsafe`, `resume`, `scheduleClock`, `register` | no payload                                                               |
 
 An implementation of `execute` or `poll` therefore decodes on its own, through
 `Flow.Result({ success: flow.successSchema, error: flow.errorSchema })`, before
@@ -69,9 +69,19 @@ would hand one flow's result to another flow's schemas. A reused id with a
 different payload is refused for the same reason. Both refusals are coded
 defects, listed under [Refusals](#refusals).
 
-The derived transports pass `executionId` through from the request body, so a
-multi-tenant server namespaces or rejects the client value before it reaches
-`Flow.execute`. Nothing in this package scopes it for you.
+The derived transports pass `executionId` through from the request body by
+default. Set the `executionId` option on
+`FlowProxyServer.layerRpcHandlers` or `layerHttpApi` to rewrite it in one
+server-owned place. Both layers apply the mapping to execute, discard, and
+resume requests, so resume cannot bypass the namespace. Returning `undefined`
+for execute or discard lets the engine derive the id from the flow's
+idempotency key. Returning `undefined` for resume preserves the client value.
+
+The hook is a pure function over the flow and request payload. Resume provides
+an `undefined` payload because its request carries only an execution id. The
+hook cannot read request-scoped authentication by itself. Middleware can put a
+trusted tenant in the payload, or the server can wrap the layer with a mapping
+that closes over the trusted namespace.
 
 ## Trampoline and journal identity
 
@@ -129,14 +139,14 @@ an authentication policy, or a durable engine.
 The engine's admission and configuration refusals are coded defects, so a
 control plane or a proxy classifies one without scraping prose.
 
-| Code | Raised when |
-| --- | --- |
-| `flow_not_registered` | a flow executes, or a handoff names a target, that no registration covers |
+| Code                          | Raised when                                                                               |
+| ----------------------------- | ----------------------------------------------------------------------------------------- |
+| `flow_not_registered`         | a flow executes, or a handoff names a target, that no registration covers                 |
 | `execution_identity_conflict` | a reused execution id names another flow declaration, or arrives with a different payload |
-| `suspended_resume_gave_up` | a caller polling a suspended lineage exhausts or outlives its `suspendedRetryPolicy` |
-| `snapshot_boundary_required` | a compensable action runs with no `SnapshotBoundary` in context |
-| `invalid_round` | a trampoline identity or round budget is malformed |
-| `flow_proxy_collision` | two derived operations share one wire name |
-| `invalid_flow_tag` | a flow tag is not well-formed UTF-16, so it has no route encoding |
+| `suspended_resume_gave_up`    | a caller polling a suspended lineage exhausts or outlives its `suspendedRetryPolicy`      |
+| `snapshot_boundary_required`  | a compensable action runs with no `SnapshotBoundary` in context                           |
+| `invalid_round`               | a trampoline identity or round budget is malformed                                        |
+| `flow_proxy_collision`        | two derived operations share one wire name                                                |
+| `invalid_flow_tag`            | a flow tag is not well-formed UTF-16, so it has no route encoding                         |
 
 See [Getting started](/guides/getting-started), [Writing a flow](/guides/writing-a-flow), and [Determinism and replay](/concepts/determinism-and-replay).

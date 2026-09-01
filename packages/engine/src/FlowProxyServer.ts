@@ -30,6 +30,47 @@ import type * as Rpc from "effect/unstable/rpc/Rpc"
 import * as FlowProxy from "./FlowProxy.ts"
 
 /**
+ * Rewrites the caller-supplied execution id before it reaches the engine, so
+ * a multi-tenant server namespaces client identity in one place instead of at
+ * every call site.
+ *
+ * The server calls the function once inside each execute, discard, or resume
+ * handler. Execute and discard inputs include the decoded flow payload, while
+ * resume inputs use `undefined` because a resume request carries only an
+ * execution id. Returning `undefined` for execute or discard lets the engine
+ * derive the id from the flow's idempotency key. Returning `undefined` for
+ * resume preserves the client value because `Flow.resume` requires a string.
+ * Without this option, every client value passes through unchanged.
+ *
+ * Implementations must be pure and return for every input. The function
+ * receives the flow and request payload, but no request-scoped service. Put a
+ * trusted tenant in the payload through middleware, or wrap the layer with a
+ * mapping that closes over the trusted namespace.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface ExecutionIdScope {
+  (input: {
+    readonly flow: Flow.Any
+    readonly operation: "execute" | "discard" | "resume"
+    readonly clientValue: string | undefined
+    readonly payload: unknown
+  }): string | undefined
+}
+
+const scopeExecutionId = (
+  scope: ExecutionIdScope | undefined,
+  input: Parameters<ExecutionIdScope>[0]
+): string | undefined => {
+  if (scope === undefined) {
+    return input.clientValue
+  }
+  const scoped = scope(input)
+  return input.operation === "resume" && scoped === undefined ? input.clientValue : scoped
+}
+
+/**
  * Creates handlers for a flow HTTP API group, wiring execute, discard, and
  * resume endpoints to the supplied flows.
  *
@@ -45,7 +86,8 @@ export const layerHttpApi = <
 >(
   api: HttpApi.HttpApi<ApiId, Groups>,
   identifier: Identifier,
-  flows: Flows
+  flows: Flows,
+  options?: { readonly executionId?: ExecutionIdScope }
 ): Layer.Layer<
   HttpApiGroup.Service<ApiId, Identifier>,
   never,
@@ -72,7 +114,12 @@ export const layerHttpApi = <
               }
             }) =>
               flow.execute(request.payload, {
-                executionId: request.executionId
+                executionId: scopeExecutionId(options?.executionId, {
+                  flow,
+                  operation: "execute",
+                  clientValue: request.executionId,
+                  payload: request.payload
+                })
               }).pipe(
                 Effect.tapDefect(Effect.logError),
                 Effect.annotateLogs({
@@ -91,7 +138,12 @@ export const layerHttpApi = <
             }) =>
               flow.execute(request.payload, {
                 discard: true,
-                executionId: request.executionId
+                executionId: scopeExecutionId(options?.executionId, {
+                  flow,
+                  operation: "discard",
+                  clientValue: request.executionId,
+                  payload: request.payload
+                })
               }).pipe(
                 Effect.tapDefect(Effect.logError),
                 Effect.annotateLogs({
@@ -103,7 +155,12 @@ export const layerHttpApi = <
           .handle(
             operation.resume,
             ({ payload }: { payload: any }) =>
-              flow.resume(payload.executionId).pipe(
+              flow.resume(scopeExecutionId(options?.executionId, {
+                flow,
+                operation: "resume",
+                clientValue: payload.executionId,
+                payload: undefined
+              }) as string).pipe(
                 Effect.tapDefect(Effect.logError),
                 Effect.annotateLogs({
                   module: "FlowProxyServer",
@@ -130,6 +187,7 @@ export const layerRpcHandlers = <
   const Prefix extends string = ""
 >(flows: Flows, options?: {
   readonly prefix?: Prefix
+  readonly executionId?: ExecutionIdScope
 }): Layer.Layer<
   RpcHandlers<Flows[number], Prefix>,
   never,
@@ -156,7 +214,12 @@ export const layerRpcHandlers = <
         tag,
         handler: (request: any) =>
           flow.execute(request.payload, {
-            executionId: request.executionId
+            executionId: scopeExecutionId(options?.executionId, {
+              flow,
+              operation: "execute",
+              clientValue: request.executionId,
+              payload: request.payload
+            })
           }).pipe(
             Effect.tapDefect(Effect.logError),
             Effect.annotateLogs({ module: "FlowProxyServer", method: tag })
@@ -168,7 +231,12 @@ export const layerRpcHandlers = <
         handler: (request: any) =>
           flow.execute(request.payload, {
             discard: true,
-            executionId: request.executionId
+            executionId: scopeExecutionId(options?.executionId, {
+              flow,
+              operation: "discard",
+              clientValue: request.executionId,
+              payload: request.payload
+            })
           }).pipe(
             Effect.tapDefect(Effect.logError),
             Effect.annotateLogs({ module: "FlowProxyServer", method: tagDiscard })
@@ -178,7 +246,12 @@ export const layerRpcHandlers = <
         context,
         tag: tagResume,
         handler: (payload: any) =>
-          flow.resume(payload.executionId).pipe(
+          flow.resume(scopeExecutionId(options?.executionId, {
+            flow,
+            operation: "resume",
+            clientValue: payload.executionId,
+            payload: undefined
+          }) as string).pipe(
             Effect.tapDefect(Effect.logError),
             Effect.annotateLogs({ module: "FlowProxyServer", method: tagResume })
           ) as any

@@ -15,6 +15,9 @@
   UTF-16, which route construction previously reported as a name collision.
 - Added package-owned documentation under `packages/engine/docs`, generated
   into `docs/pages/api/engine.md` by the `//packages/engine:docsPages` target.
+- Added the `FlowProxyServer.ExecutionIdScope` option to rewrite client
+  execution identity for execute, discard, and resume requests in both derived
+  server transports.
 
 ### Breaking Changes
 
