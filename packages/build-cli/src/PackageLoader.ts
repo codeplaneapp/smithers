@@ -36,9 +36,8 @@ import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { pathToFileURL } from "node:url"
-import { tsImport } from "tsx/esm/api"
 import * as Diagnostic from "./Diagnostic.ts"
-import { installEffectResolution } from "./effect-resolution.js"
+import { importDeclarationModule, installEffectResolution } from "./effect-resolution.js"
 import type { Discovery } from "./PackageDiscovery.ts"
 import { PackageError } from "./PackageError.ts"
 import { validateWorkspaceModule } from "./WorkspaceLoader.ts"
@@ -494,10 +493,7 @@ const importGraph = async (discovery: Discovery): Promise<LoadedGraph> => {
     readonly packages: ReadonlyArray<readonly [string, unknown]>
   }
   try {
-    entry = await tsImport(pathToFileURL(entryPath).href, {
-      parentURL: import.meta.url,
-      tsconfig: false
-    }) as typeof entry
+    entry = await importDeclarationModule(pathToFileURL(entryPath).href, import.meta.url) as typeof entry
   } catch (cause) {
     if (cause instanceof PackageError) throw cause
     // The cause's own message carries what the author needs — a rejected
@@ -578,10 +574,10 @@ export const loadWorkspaceDeclaration = async (
 ): Promise<WorkspaceDeclaration.WorkspaceDeclaration> => {
   let namespace: unknown
   try {
-    namespace = await tsImport(pathToFileURL(NodePath.join(root, workspaceFile)).href, {
-      parentURL: import.meta.url,
-      tsconfig: false
-    })
+    namespace = await importDeclarationModule(
+      pathToFileURL(NodePath.join(root, workspaceFile)).href,
+      import.meta.url
+    )
   } catch (cause) {
     if (cause instanceof PackageError) throw cause
     throw new PackageError(

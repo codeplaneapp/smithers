@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
 import { Smithers } from "@smthrs/targets"
-import { tsImport } from "tsx/esm/api"
-import { installEffectResolution } from "./effect-resolution.js"
+import { importDeclarationModule, installEffectResolution } from "./effect-resolution.js"
 
 // BUILD.ts targets and the flow engine must share one Effect module instance.
 // Linked development packages can otherwise resolve physically separate peer
@@ -19,7 +18,4 @@ Object.defineProperty(globalThis, "Smithers", {
   writable: false
 })
 
-await tsImport(new URL("./main.ts", import.meta.url).href, {
-  parentURL: import.meta.url,
-  tsconfig: false
-})
+await importDeclarationModule(new URL("./main.ts", import.meta.url).href, import.meta.url)

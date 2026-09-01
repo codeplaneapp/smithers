@@ -12,9 +12,27 @@
  * repository that has only a BUILD.ts; requiring the repository to install the
  * package would make generated package.json files circular to create.
  *
+ * ## Hook order
+ *
+ * Two resolve hooks are registered, because the two jobs want opposite
+ * positions in the chain. Node runs resolve hooks newest first, and tsx
+ * registers a fresh namespace loader for every declaration module this CLI
+ * evaluates.
+ *
+ * {@link parentHooks} pins a CLI-owned specifier, and has to run BEFORE tsx's
+ * loader: tsx reads the namespace to apply from the `parentURL` it was handed
+ * and stamps it onto whatever the rest of the chain returns, so a rewrite
+ * performed underneath tsx changes the package the module is read from but not
+ * the namespace it lands in. It is therefore re-registered after every tsx
+ * registration; {@link importDeclarationModule} is what keeps that true.
+ *
+ * {@link formatHooks} pins a declaration module's format and identity, and has
+ * to run AFTER tsx's loader, because both rules read what tsx resolved. It
+ * stays where it was first registered and is never moved.
+ *
  * ## BUILD.ts module format
  *
- * The resolve hook below reports `format: "module"` for every BUILD.ts, so a
+ * The format hook below reports `format: "module"` for every BUILD.ts, so a
  * workspace whose nearest `package.json` declares no `type` still evaluates
  * its BUILD.ts as an ES module — but that override reaches tsx only when
  * these hooks were registered before tsx's loader was created. An evaluation
@@ -30,12 +48,39 @@
  *
  * @since 0.1.0
  */
-import { default as Module, registerHooks } from "node:module"
+import { randomUUID } from "node:crypto"
+import { createRequire, default as Module, registerHooks } from "node:module"
 import * as NodePath from "node:path"
 import { fileURLToPath } from "node:url"
+import { register as registerCommonJs } from "tsx/cjs/api"
+import { register as registerModule } from "tsx/esm/api"
 
 const installation = Symbol.for("smthrs/effect-resolution-installed")
+const registration = Symbol.for("smthrs/effect-resolution-registration")
 const buildModuleParameter = "smithers-build-module"
+
+/**
+ * This file's own URL with every query stripped.
+ *
+ * `import.meta.url` is not it. A declaration module imports the CLI's modules,
+ * so tsx evaluates a second copy of this file inside that module's namespace
+ * and the copy's `import.meta.url` carries `?tsx-namespace=`. Resolving from
+ * that URL asks tsx for `effect` in the very namespace this resolver exists to
+ * escape. The bare path names one installation from every copy.
+ *
+ * This is the request-side half of the single-instance guard;
+ * {@link withoutNamespace} is the result-side half. Either one alone holds the
+ * bare specifiers, which is why removing just this one changes nothing
+ * measurable. It is kept because the other half depends on resolving
+ * {@link effectRoot}, and a host layout where that resolution fails would
+ * otherwise leave the bare specifiers unguarded.
+ */
+const cliParentUrl = (() => {
+  const url = new URL(import.meta.url)
+  url.search = ""
+  url.hash = ""
+  return url.href
+})()
 
 /** The bare specifiers the CLI owns, resolved from this file, not the importer. */
 const isCliOwned = (specifier) =>
@@ -59,6 +104,51 @@ const jsExtensionSiblings = {
 
 /** tsx's marker for the CommonJS virtual module it wraps a CJS `.ts` file in. */
 const commonjsVirtualParameter = "tsx-commonjs-virtual-query"
+
+/** tsx's marker for the module registry one `tsImport` call evaluates into. */
+const namespaceParameter = "tsx-namespace"
+
+/**
+ * The directory holding the Effect installation this CLI runs on.
+ *
+ * A bare `effect` import is pinned by rewriting `parentURL`, but a declaration
+ * module may also import one of these files by absolute URL — a BUILD.ts that
+ * writes `import.meta.resolve("effect/Schema")` into a generated file does.
+ * That specifier names the right file already; what it lacks is protection
+ * from tsx stamping a namespace onto the result and producing a second
+ * instance of it. This root is what lets {@link withoutNamespace} recognize
+ * the resolutions that must stay on one instance.
+ *
+ * This is the only rule covering that absolute-URL import, which the CLI's own
+ * BUILD.ts fixtures write with `import.meta.resolve("effect/Schema")`: the
+ * specifier is not bare, so re-parenting never sees it. Removing this rule puts
+ * a second Effect instance back into such a workspace.
+ *
+ * Only Effect is pinned this way. Effect ships built JavaScript, so a
+ * namespace-free URL still loads; `@smthrs/targets` ships TypeScript sources
+ * whose namespaced form only tsx's loader compiles, and stripping a namespace
+ * it already carries hands Node a file it cannot parse. Two copies of the
+ * target definitions interoperate as long as both build their schemas out of
+ * one Effect.
+ */
+const effectRoot = (() => {
+  try {
+    return NodePath.dirname(createRequire(cliParentUrl).resolve("effect/package.json")) + NodePath.sep
+  } catch {
+    // A host without the package resolves nothing through it either.
+    return undefined
+  }
+})()
+
+/** Strips tsx's namespace from a resolution that must stay on one instance. */
+const withoutNamespace = (url) => {
+  if (effectRoot === undefined || !url.startsWith("file:") || !url.includes(namespaceParameter)) return url
+  const parsed = new URL(url)
+  if (!parsed.searchParams.has(namespaceParameter)) return url
+  if (!fileURLToPath(`${parsed.protocol}//${parsed.host}${parsed.pathname}`).startsWith(effectRoot)) return url
+  parsed.searchParams.delete(namespaceParameter)
+  return parsed.href
+}
 
 /**
  * The declaration module a resolved URL names, as a `file:` URL with no query.
@@ -112,20 +202,86 @@ const asBuildModule = (resolved, base) => {
 }
 
 /**
+ * Pins every CLI-owned specifier to this installation. Runs before tsx's
+ * loader; see the hook-order note above.
+ */
+const parentHooks = {
+  resolve(specifier, context, nextResolve) {
+    const resolved = isCliOwned(specifier)
+      ? nextResolve(specifier, { ...context, parentURL: cliParentUrl })
+      : nextResolve(specifier, context)
+    const url = withoutNamespace(resolved.url)
+    return url === resolved.url ? resolved : { ...resolved, url }
+  }
+}
+
+/**
+ * Pins a declaration module's format and identity. Runs after tsx's loader;
+ * see the hook-order note above.
+ */
+const formatHooks = {
+  resolve(specifier, context, nextResolve) {
+    const resolved = nextResolve(specifier, context)
+    const base = buildModuleBase(resolved.url)
+    return base === undefined ? resolved : asBuildModule(resolved, base)
+  }
+}
+
+/**
+ * Re-registers {@link parentHooks} so it runs before every hook registered so
+ * far.
+ *
+ * Each tsx namespace loader wraps this resolver and derives its namespace from
+ * the importer it was handed, so `effect` imported from a BUILD.ts lands in
+ * that BUILD.ts's namespace and `effect` imported from the CLI lands in the
+ * CLI's — two physical module instances whose schema internals do not
+ * interoperate. Moving this resolver back to the front after each tsx
+ * registration restores the single instance: tsx then reads the rewritten
+ * `parentURL`, which names one installation and carries no namespace, and
+ * leaves the resolution alone.
+ * @slop
+ */
+const reassert = () => {
+  const previous = globalThis[registration]
+  if (previous === undefined) return
+  previous.deregister()
+  globalThis[registration] = registerHooks(parentHooks)
+}
+
+/**
+ * Evaluates one declaration module through tsx with the parent resolver in
+ * front of tsx's namespace loader.
+ *
+ * `tsImport` registers that loader and imports in one call, which leaves no
+ * point at which the resolver can be moved back to the front. The two steps
+ * are taken separately here for that reason. The loader stays registered
+ * afterwards, as `tsImport` leaves it, so a module the declaration imports
+ * lazily still resolves.
+ * @slop
+ */
+export const importDeclarationModule = async (url, parentURL) => {
+  installEffectResolution()
+  const namespace = randomUUID()
+  // Both halves, as `tsImport` registers them. The CommonJS half is what
+  // answers a `require` that a declaration module reaches through the
+  // CommonJS bridge, and it must know this namespace or the request arrives
+  // carrying a namespace nothing resolves.
+  registerCommonJs({ namespace })
+  const loader = registerModule({ namespace, parentURL, tsconfig: false })
+  reassert()
+  return await loader.import(url, parentURL)
+}
+
+/**
  * Installs the resolvers once per process.
  * @slop
  */
 export const installEffectResolution = () => {
   if (globalThis[installation] === true) return
-  registerHooks({
-    resolve(specifier, context, nextResolve) {
-      const resolved = isCliOwned(specifier)
-        ? nextResolve(specifier, { ...context, parentURL: import.meta.url })
-        : nextResolve(specifier, context)
-      const base = buildModuleBase(resolved.url)
-      return base === undefined ? resolved : asBuildModule(resolved, base)
-    }
-  })
+  // Oldest first, so the format hook ends up behind tsx and the parent hook in
+  // front of it. See the hook-order note above.
+  registerHooks(formatHooks)
+  globalThis[registration] = registerHooks(parentHooks)
   // Everything above reaches the ES-module resolver only. On Node 22.19.0 --
   // the version this repository pins and CI runs -- tsx routes a declaration
   // module whose nearest package.json declares no `type` through a CommonJS
@@ -144,8 +300,12 @@ export const installEffectResolution = () => {
   //      to it. The fallback runs only after real resolution failed, so an
   //      existing `.js` still wins and a specifier that resolves to nothing
   //      still reports itself.
+  //
+  // Rule 2 resolves from `cliParentUrl` for the reason that constant exists: a
+  // copy of this file evaluated inside a tsx namespace must still name the one
+  // installation.
   const resolveFilename = Module._resolveFilename
-  const self = fileURLToPath(import.meta.url)
+  const self = fileURLToPath(cliParentUrl)
   const cliParent = { id: self, filename: self, paths: Module._nodeModulePaths(NodePath.dirname(self)) }
   Module._resolveFilename = function(request, parent, ...rest) {
     const specifier = typeof request === "string" && request.startsWith("file:")

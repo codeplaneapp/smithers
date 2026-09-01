@@ -21,8 +21,7 @@ import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import { pathToFileURL } from "node:url"
-import { tsImport } from "tsx/esm/api"
-import { buildModuleUrl, installEffectResolution } from "./effect-resolution.js"
+import { buildModuleUrl, importDeclarationModule, installEffectResolution } from "./effect-resolution.js"
 import * as Label from "./Label.ts"
 
 // Workspace is also imported as a library by tests and embedding hosts that do
@@ -425,10 +424,7 @@ const importNamespace = async (entry: SafeFs.Entry): Promise<unknown> => {
   const key = await moduleKey(entry)
   const existing = namespaces.get(key)
   if (existing !== undefined) return existing
-  const loaded = tsImport(buildModuleUrl(pathToFileURL(entry.path).href), {
-    parentURL: import.meta.url,
-    tsconfig: false
-  }) as Promise<unknown>
+  const loaded = importDeclarationModule(buildModuleUrl(pathToFileURL(entry.path).href), import.meta.url)
   namespaces.set(key, loaded)
   return loaded
 }
