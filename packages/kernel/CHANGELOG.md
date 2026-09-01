@@ -76,6 +76,15 @@
   `<scheme>//<lowercased host>`. `model:call` follows the same rule before
   appending `/<model id>`, so a grant for an HTTPS host no longer admits a
   cleartext downgrade.
+- **The 1,024-envelope ceiling now covers the construction envelope.**
+  `GrantStore.make` refuses a new construction envelope, rather than persisting
+  it, once the replayed signatures already fill the ceiling — the bound
+  `grantEnvelope` has always applied at reply time. A durable history can
+  therefore never outgrow what a later construction will replay.
+  `JournalGrantStore` reports an already-grown history with a message naming
+  the policy run and both signature counts, the way it already reports an
+  oversized replayed rule set, instead of the bare
+  `envelopeSignatures exceed 1024 entries`.
 
 ### Added
 

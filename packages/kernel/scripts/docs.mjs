@@ -50,19 +50,40 @@ const moduleDoc = (source) => {
   return delink(description(ungutter(match[1])))
 }
 
-const exportedDocs = (source) => {
+const exportedDocs = (source, moduleName) => {
   const entries = []
-  const pattern = /^[ \t]*\/\*\*((?:[^*]|\*(?!\/))*)\*\/[ \t]*\nexport (type|const|class|interface|function) (\w+)/gm
+  const pattern = /^[ \t]*\/\*\*((?:[^*]|\*(?!\/))*)\*\/[ \t]*\n[ \t]*(export[^\n]*)/gm
   for (let match = pattern.exec(source); match !== null; match = pattern.exec(source)) {
     const body = ungutter(match[1])
     const category = /@category (\S+)/.exec(body)?.[1]
     if (category === undefined) continue
-    entries.push({
-      name: match[3],
-      declaration: match[2],
-      category,
-      summary: firstSentence(description(body))
-    })
+    const line = match[2].trim()
+    const summary = firstSentence(description(body))
+    const direct = /^export (type|const|class|interface|function) (\w+)/.exec(line)
+    if (direct !== null) {
+      entries.push({
+        name: direct[2],
+        declaration: direct[1],
+        category,
+        summary
+      })
+      continue
+    }
+
+    const reExport = /^export (type )?\{\s*(\w+)\s*\} from "[^"]+";?$/.exec(line)
+    if (reExport !== null) {
+      entries.push({
+        name: reExport[2],
+        declaration: reExport[1] === undefined ? "re-export" : "type",
+        category,
+        summary: summary.replaceAll(" — ", ": ")
+      })
+      continue
+    }
+
+    throw new Error(
+      "kernel docs: documented module " + moduleName + " export matches no supported shape: " + line
+    )
   }
   return entries
 }
@@ -91,7 +112,7 @@ const documentedBarrelEntries = (source) => {
     if (localNamespace !== null) {
       const name = localNamespace[1]
       const moduleName = localNamespace[2]
-      const exports = exportedDocs(read(join(packageRoot, "src", moduleName + ".ts")))
+      const exports = exportedDocs(read(join(packageRoot, "src", moduleName + ".ts")), moduleName)
       if (exports.length === 0) {
         throw new Error("kernel docs: documented module " + moduleName + " yields zero documented exports")
       }

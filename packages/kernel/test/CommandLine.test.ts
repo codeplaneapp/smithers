@@ -34,6 +34,24 @@ describe("CommandLine.render", () => {
     expect(CommandLine.render(ChildProcess.make("echo", [nul]))).toBe("echo 'nul\0byte'")
   })
 
+  it("keeps a backslash literal inside the quoted rendering", () => {
+    expect(CommandLine.quote("a\\b")).toBe("'a\\b'")
+    expect(CommandLine.render(ChildProcess.make("echo", ["C:\\Windows\\system32"])))
+      .toBe("echo 'C:\\Windows\\system32'")
+    // A backslash adjacent to the escaped single quote must not swallow it:
+    // the token `a\'b` has to survive a round trip through the shell.
+    expect(CommandLine.quote("a\\'b")).toBe("'a\\'\\''b'")
+  })
+
+  it("quotes non-ASCII tokens so a lookalike never renders as a bare safe token", () => {
+    expect(CommandLine.quote("café")).toBe("'café'")
+    // U+FF47 FULLWIDTH LATIN SMALL LETTER G is not `g`, so `\uFF47it` must not
+    // render as the bare `git` a reviewer would read it as.
+    expect(CommandLine.quote("\uFF47it")).toBe("'\uFF47it'")
+    expect(CommandLine.render(ChildProcess.make("echo", ["→", "\u200b"])))
+      .toBe("echo '→' '\u200b'")
+  })
+
   it("renders shell commands verbatim so the capability names what executes", () => {
     expect(CommandLine.render(ChildProcess.make("echo", ["safe; touch /tmp/marker"], { shell: true })))
       .toBe("echo safe; touch /tmp/marker")

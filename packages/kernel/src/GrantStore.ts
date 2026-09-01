@@ -616,6 +616,13 @@ export const make = (
       } else {
         const signature = envelopeSignature(envelope.planDigest, scope, patterns)
         if (!grantedEnvelopes.has(signature)) {
+          // The same ceiling `grantEnvelope` applies at reply time. Without it
+          // the construction envelope is the one write path that can push the
+          // durable signature history past what a later construction is
+          // willing to replay, which would brick every process after this one.
+          if (grantedEnvelopes.size >= maximumRules) {
+            return yield* Effect.fail(invalid(`grant envelopes exceed ${maximumRules} entries`))
+          }
           yield* persistEvent(
             new EnvelopeGrant({
               eventType: "flows.kernel.grant.envelope.v1",

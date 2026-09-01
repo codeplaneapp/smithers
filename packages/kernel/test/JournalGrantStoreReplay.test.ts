@@ -706,6 +706,29 @@ describe("JournalGrantStore replayed rule limits", () => {
   })
 })
 
+describe("JournalGrantStore replayed envelope limits", () => {
+  itEffect("names an oversized remembered envelope policy and requests compaction", () => {
+    const entries = Array.from({ length: maximumRules + 1 }, (_, index) =>
+      entry(
+        index + 1,
+        envelopeGrant("remembered", [insidePattern], { planDigest: `plan-${index}` }),
+        options.policyRunId
+      ))
+
+    return Effect.gen(function*() {
+      const failure = yield* Effect.flip(JournalGrantStore.make(options))
+      expect(failure.code).toBe("invalid_resolution")
+      expect(failure.message).toContain(`policy run ${options.policyRunId}`)
+      expect(failure.message).toContain("compact")
+      expect(failure.message).not.toContain("envelopeSignatures exceed")
+    }).pipe(
+      Effect.provide(replayJournal(entries)),
+      Effect.provide(Workspace.layer(workspaceRoot)),
+      Effect.scoped
+    )
+  })
+})
+
 describe("JournalGrantStore paging and journal failures", () => {
   it("fails closed when a page repeats its last sequence with hasMore", () => {
     // The subprocess exists to bound the regression case — an unfixed replay

@@ -128,7 +128,10 @@ structured failure as a cause when projecting it into `PlatformError` or
 retain or print unbounded hostile input.
 
 The in-memory GrantStore is deliberately finite: at most 1,024 policy rules,
-256 patterns per envelope, and 1,024 pending requests. Metadata is limited to
+1,024 activated envelope signatures, 256 patterns per envelope, and 1,024
+pending requests. The envelope ceiling applies to the construction envelope as
+well as to `grantEnvelope`, so replayed history cannot grow past what a later
+construction is willing to read back. Metadata is limited to
 16 levels, 1,024 members, and 64 KiB of canonical JSON; one encoded event is
 limited to 256 KiB. Identity fields are at most 4,096 UTF-16 code units, and
 capability resources use `Capability.maxResourceLength` (4,096). Exceeding a

@@ -55,6 +55,53 @@ const awaitPending = (store: GrantStore.Service, count: number): Effect.Effect<
   )
 
 describe("GrantStore construction-time envelope", () => {
+  itEffect("refuses a new construction envelope at the remembered signature ceiling", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const { events, persist } = recorder()
+        const envelopeSignatures = Array.from(
+          { length: GrantStore.maximumRules },
+          (_, index) => `replayed-envelope-${index}`
+        )
+        const failure = yield* Effect.flip(
+          make({
+            planDigest: "plan-1",
+            persist,
+            envelopeSignatures,
+            envelope: { planDigest: "plan-1", patterns: [workspaceReads] }
+          })
+        )
+
+        expect(failure).toBeInstanceOf(GrantStoreError)
+        expect(failure.message).toBe(`grant envelopes exceed ${GrantStore.maximumRules} entries`)
+        expect(events).toEqual([])
+      })
+    ))
+
+  itEffect("accepts a known construction envelope at the remembered signature ceiling", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const { events, persist } = recorder()
+        const envelopeSignatures = [
+          GrantStore.envelopeSignature("plan-1", "run", [workspaceReads]),
+          ...Array.from(
+            { length: GrantStore.maximumRules - 1 },
+            (_, index) => `replayed-envelope-${index}`
+          )
+        ]
+        const store = yield* make({
+          attended: false,
+          planDigest: "plan-1",
+          persist,
+          envelopeSignatures,
+          envelope: { planDigest: "plan-1", patterns: [workspaceReads] }
+        })
+
+        yield* store.check(insideRead)
+        expect(events).toEqual([])
+      })
+    ))
+
   itEffect("activates a run envelope and records it exactly once", () =>
     Effect.scoped(
       Effect.gen(function*() {

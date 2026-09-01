@@ -121,17 +121,26 @@ describe("TestHost memory filesystem operations", () => {
       expect(Array.from(chunks).map((chunk) => decoder.decode(chunk)).join("")).toBe("alpha")
     }))
 
-  it.effect("emits nothing when `bytesToRead` is zero and clamps a negative offset to the start", () =>
+  it.effect("emits nothing when `bytesToRead` is zero and refuses a negative offset", () =>
     Effect.gen(function*() {
       const fs = fileSystem()
 
       const empty = yield* (Stream.runCollect(fs.stream("/w/a.txt", { bytesToRead: 0 })))
-      const clamped = yield* (
+      // A negative offset is a nonsense bound, not a request for the start, so
+      // the adapter refuses it rather than answering a question the caller did
+      // not ask. The double must report that refusal identically.
+      const refused = yield* Effect.flip(
         Stream.runCollect(fs.stream("/w/a.txt", { offset: -10, chunkSize: 2 }))
       )
 
       expect(Array.from(empty)).toEqual([])
-      expect(Array.from(clamped).map((chunk) => decoder.decode(chunk))).toEqual(["al", "ph", "a"])
+      expect(refused).toMatchObject({
+        reason: {
+          _tag: "BadArgument",
+          method: "stream",
+          description: "offset must be a whole, non-negative number of bytes"
+        }
+      })
     }))
 
   it.effect("truncates the final chunk when fewer bytes remain than the chunk size", () =>

@@ -180,8 +180,8 @@ const environmentNames = (command: ChildProcess.Command): ReadonlyArray<string> 
 }
 
 /**
- * The process spawner service — Effect's tag, unchanged. Re-exported so the
- * kernel namespace stays one-stop; it is the *same* tag, never a second one.
+ * Effect's own process spawner tag, unchanged. Re-exported so the kernel
+ * namespace stays one-stop; it is the *same* tag, never a second one.
  *
  * @category services
  * @since 1.0.0-rc.0

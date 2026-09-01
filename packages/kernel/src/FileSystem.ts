@@ -33,6 +33,19 @@ import { GrantStore } from "./GrantStore.ts"
 import { Workspace } from "./Workspace.ts"
 
 /**
+ * The directory name that stands in for the host's system temporary directory
+ * in a capability resource. `makeTempFile` and friends called without an
+ * explicit `directory` are checked against this name resolved one level above
+ * the workspace root, so an implicit system-temp write names a resource that
+ * is always outside the workspace envelope and is never confusable with a real
+ * workspace path.
+ *
+ * @since 1.0.0-rc.0
+ * @category models
+ */
+export const systemTemporaryDirectoryName = "<system-temp>"
+
+/**
  * Host-private extension used for race-free, descriptor-relative filesystem
  * operations. A plain path-based `FileSystem` cannot provide confinement: an
  * attacker can replace any checked component before the delegate resolves it.
@@ -450,7 +463,7 @@ export const layer: Layer.Layer<
         )
     const temp = (directory: string | undefined) =>
       directory === undefined
-        ? write(path.resolve(workspace.root, "..", "<system-temp>"))
+        ? write(path.resolve(workspace.root, "..", systemTemporaryDirectoryName))
         : write(directory)
     const snapshotOptions = <T>(value: T): T => {
       if (Array.isArray(value)) return Object.freeze(value.map(snapshotOptions)) as T
@@ -605,7 +618,11 @@ export const layer: Layer.Layer<
           return (
             atomic?.isolated === undefined
               ? Effect.fail(
-                atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempDirectory")
+                atomicUnavailable(
+                  "fs:write",
+                  captured?.directory ?? `../${systemTemporaryDirectoryName}`,
+                  "makeTempDirectory"
+                )
               )
               : temp(captured?.directory).pipe(
                 Effect.andThen(atomic.isolated.makeTempDirectory(normalizeTempOptions(captured)))
@@ -617,7 +634,11 @@ export const layer: Layer.Layer<
           return (
             atomic?.isolated === undefined
               ? Effect.fail(
-                atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempDirectoryScoped")
+                atomicUnavailable(
+                  "fs:write",
+                  captured?.directory ?? `../${systemTemporaryDirectoryName}`,
+                  "makeTempDirectoryScoped"
+                )
               )
               : temp(captured?.directory).pipe(
                 Effect.andThen(atomic.isolated.makeTempDirectoryScoped(normalizeTempOptions(captured)))
@@ -628,7 +649,13 @@ export const layer: Layer.Layer<
           const captured = snapshotOptions(options)
           return (
             atomic?.isolated === undefined
-              ? Effect.fail(atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempFile"))
+              ? Effect.fail(
+                atomicUnavailable(
+                  "fs:write",
+                  captured?.directory ?? `../${systemTemporaryDirectoryName}`,
+                  "makeTempFile"
+                )
+              )
               : temp(captured?.directory).pipe(
                 Effect.andThen(atomic.isolated.makeTempFile(normalizeTempOptions(captured)))
               )
@@ -639,7 +666,11 @@ export const layer: Layer.Layer<
           return (
             atomic?.isolated === undefined
               ? Effect.fail(
-                atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempFileScoped")
+                atomicUnavailable(
+                  "fs:write",
+                  captured?.directory ?? `../${systemTemporaryDirectoryName}`,
+                  "makeTempFileScoped"
+                )
               )
               : temp(captured?.directory).pipe(
                 Effect.andThen(atomic.isolated.makeTempFileScoped(normalizeTempOptions(captured)))

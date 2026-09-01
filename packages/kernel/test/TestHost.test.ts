@@ -211,9 +211,12 @@ describe("TestHost unsupported services", () => {
         if (!isJjError(error)) throw new Error("the test host's jj layer only fails with JjError")
         return error
       })
+      // The commands are the ones `NodeJj` would have run for each method, not
+      // the subcommand names: `snapshot` describes the working copy and
+      // `restore` restores it.
       expect(jjErrors.map((error) => error.command)).toEqual([
-        "jj commit",
-        "jj edit",
+        "jj describe",
+        "jj restore",
         "jj diff",
         "jj workspace add",
         "jj workspace forget",

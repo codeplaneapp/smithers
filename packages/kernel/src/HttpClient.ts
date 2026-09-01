@@ -95,9 +95,8 @@ const invalidRequest = (request: HttpClientRequest.HttpClientRequest): HttpClien
   })
 
 /**
- * The outgoing HTTP client service — Effect's tag, unchanged. Re-exported so
- * the kernel namespace stays one-stop; it is the *same* tag, never a second
- * one.
+ * Effect's own outgoing HTTP client tag, unchanged. Re-exported so the kernel
+ * namespace stays one-stop; it is the *same* tag, never a second one.
  *
  * @category services
  * @since 1.0.0-rc.0

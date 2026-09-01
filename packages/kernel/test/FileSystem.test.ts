@@ -8,7 +8,7 @@ import {
   FileSystem as EffectFileSystem,
   Option,
   Path as EffectPath,
-  type PlatformError,
+  PlatformError,
   Stream
 } from "effect"
 import * as FileSystem from "../src/FileSystem.ts"
@@ -69,16 +69,37 @@ describe("FileSystem", () => {
 
   it("lets a caller that read the attached executor layer over it", () => {
     const fileSystem = EffectFileSystem.makeNoop({})
-    const original: FileSystem.AtomicFileSystem = { execute: () => Effect.die("not executed") }
+    const delegated: Array<string> = []
+    const reached = PlatformError.badArgument({
+      module: "FileSystem",
+      method: "execute",
+      description: "reached the original executor"
+    })
+    const original: FileSystem.AtomicFileSystem = {
+      execute: (request) => {
+        delegated.push(request.operation)
+        return Effect.fail(reached)
+      }
+    }
     const decorated = FileSystem.withAtomicFileSystem(fileSystem, original)
     // A host attaches once. A caller that deliberately wraps the executor it
     // read, the way `@smthrs/platform-node`'s swap suite does, keeps that
-    // decision explicit, so the attachment itself stays permissive.
+    // decision explicit, so the attachment itself stays permissive. The wrapper
+    // has to capture the executor *before* replacing it: reading the property
+    // back afterwards resolves to the wrapper itself and recurs without end.
+    const previous = decorated[FileSystem.AtomicFileSystemTypeId]
     const wrapper: FileSystem.AtomicFileSystem = {
-      execute: (request) => decorated[FileSystem.AtomicFileSystemTypeId].execute(request)
+      execute: (request) => previous.execute(request)
     }
+    const relayered = FileSystem.withAtomicFileSystem(decorated, wrapper)
 
-    expect(FileSystem.withAtomicFileSystem(decorated, wrapper)[FileSystem.AtomicFileSystemTypeId]).toBe(wrapper)
+    expect(relayered[FileSystem.AtomicFileSystemTypeId]).toBe(wrapper)
+    // Identity alone would pass for a wrapper that cannot run. Invoking it
+    // proves the layering actually delegates, and terminates.
+    expect(
+      Effect.runSync(Effect.flip(relayered[FileSystem.AtomicFileSystemTypeId].execute({ operation: "exists" })))
+    ).toBe(reached)
+    expect(delegated).toEqual(["exists"])
   })
 
   it("refuses to attest whole-filesystem isolation over a descriptor-relative executor", () => {
@@ -230,6 +251,40 @@ describe("FileSystem", () => {
       }),
       host,
       scriptedStore(new Set(["fs:read:/workspace/src/**/*.ts"]), checks)
+    )
+  })
+
+  itEffect("names the resolved outside-workspace resource when a glob escapes the root", () => {
+    const checks: Array<Capability.Capability> = []
+    const calls: Array<{ readonly pattern: string; readonly root?: string | undefined }> = []
+    const host = hostFileSystem({
+      glob: (pattern, options) =>
+        Effect.sync(() => {
+          calls.push({ pattern, root: options?.root })
+          return []
+        })
+    })
+
+    return provide(
+      Effect.gen(function*() {
+        const fileSystem = yield* EffectFileSystem.FileSystem
+        // An explicit `root` outside the workspace and a pattern that climbs
+        // out of it both resolve, and the resolved absolute path is what the
+        // store is asked about. A grant written against `/workspace/**` must
+        // not silently cover either one.
+        yield* fileSystem.glob("**/*.ts", { root: "../outside" })
+        yield* fileSystem.glob("../outside/**/*.ts")
+        expect(checks).toEqual([
+          { action: "fs:read", resource: "/outside/**/*.ts" },
+          { action: "fs:read", resource: "/outside/**/*.ts" }
+        ])
+        expect(calls).toEqual([
+          { pattern: "/outside/**/*.ts", root: "/outside" },
+          { pattern: "/outside/**/*.ts", root: "/workspace" }
+        ])
+      }),
+      host,
+      scriptedStore(new Set(["fs:read:/outside/**/*.ts"]), checks)
     )
   })
 

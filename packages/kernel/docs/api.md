@@ -55,8 +55,11 @@ only the configured producer and known event types, rejects malformed or
 mis-scoped events, treats once and denied events as audit evidence only, and
 activates a run grant only for its run and current plan digest. Remembered
 rules come from the dedicated policy run and are deduplicated before store
-construction. A policy history past the 1,024-rule ceiling fails closed and
-names the policy run and the relevant counts.
+construction. A policy history past the 1,024-rule ceiling, or past the
+1,024-envelope-signature ceiling, fails closed and names the policy run and the
+relevant counts. A construction envelope is refused rather than persisted once
+the replayed signatures already fill that ceiling, so the history a later
+process must replay cannot outgrow what it will accept.
 
 ## Decorator model
 
@@ -109,11 +112,12 @@ glob, and handle operation closed.
 
 An implicit `makeTempDirectory`, `makeTempDirectoryScoped`, `makeTempFile`, or
 `makeTempFileScoped` is authorized as `fs:write` on
-`path.resolve(workspace.root, "..", "<system-temp>")`. That sentinel is
-outside the workspace root by construction, so granting an ordinary workspace
-write does not grant system temporary-directory access. The fail-closed
-description for a host without the required extension names the logical input
-`../<system-temp>`.
+`path.resolve(workspace.root, "..", FileSystem.systemTemporaryDirectoryName)`,
+where `FileSystem.systemTemporaryDirectoryName` is `"<system-temp>"`. That
+sentinel is outside the workspace root by construction, so granting an
+ordinary workspace write does not grant system temporary-directory access.
+The fail-closed description for a host without the required extension names
+the logical input `../<system-temp>`.
 
 ### HTTP resources and redirects
 

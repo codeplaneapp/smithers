@@ -344,6 +344,21 @@ export const make = (options: JournalGrantStoreOptions) =>
           )
         )
       }
+      // Envelope signatures accumulate in the policy journal exactly the way
+      // remembered rules do, and `GrantStore.make` refuses more than
+      // `maximumRules` of them with a message that names neither the journal
+      // nor the counts. Diagnose it here instead, so an operator reading the
+      // failure knows which run to compact rather than which field overflowed.
+      const policySignatureCount = replayedPolicy.envelopeSignatures.size
+      const runSignatureCount = replayedRun.envelopeSignatures.size
+      const signatureTotal = policySignatureCount + runSignatureCount
+      if (signatureTotal > GrantStore.maximumRules) {
+        return Effect.fail(
+          invalidReplay(
+            `policy run ${policyRunId} replayed ${policySignatureCount} remembered envelope signatures; replayed run envelope signatures (${runSignatureCount}) bring the total to ${signatureTotal}, which exceeds the ${GrantStore.maximumRules}-envelope-signature ceiling, so compact the policy journal`
+          )
+        )
+      }
       return GrantStore.make({
         runId,
         planDigest,

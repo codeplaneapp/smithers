@@ -67,8 +67,11 @@ only the configured producer and known event types, rejects malformed or
 mis-scoped events, treats once and denied events as audit evidence only, and
 activates a run grant only for its run and current plan digest. Remembered
 rules come from the dedicated policy run and are deduplicated before store
-construction. A policy history past the 1,024-rule ceiling fails closed and
-names the policy run and the relevant counts.
+construction. A policy history past the 1,024-rule ceiling, or past the
+1,024-envelope-signature ceiling, fails closed and names the policy run and the
+relevant counts. A construction envelope is refused rather than persisted once
+the replayed signatures already fill that ceiling, so the history a later
+process must replay cannot outgrow what it will accept.
 
 ## Decorator model
 
@@ -121,11 +124,12 @@ glob, and handle operation closed.
 
 An implicit `makeTempDirectory`, `makeTempDirectoryScoped`, `makeTempFile`, or
 `makeTempFileScoped` is authorized as `fs:write` on
-`path.resolve(workspace.root, "..", "<system-temp>")`. That sentinel is
-outside the workspace root by construction, so granting an ordinary workspace
-write does not grant system temporary-directory access. The fail-closed
-description for a host without the required extension names the logical input
-`../<system-temp>`.
+`path.resolve(workspace.root, "..", FileSystem.systemTemporaryDirectoryName)`,
+where `FileSystem.systemTemporaryDirectoryName` is `"<system-temp>"`. That
+sentinel is outside the workspace root by construction, so granting an
+ordinary workspace write does not grant system temporary-directory access.
+The fail-closed description for a host without the required extension names
+the logical input `../<system-temp>`.
 
 ### HTTP resources and redirects
 
@@ -257,6 +261,8 @@ The `proc:spawn` middleware over Effect's own `ChildProcessSpawner` tag.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `ChildProcessSpawner` (re-export) | services | Effect's own process spawner tag, unchanged. |
+| `make` (re-export) | constructors | Derives the full six-method surface from one `spawn`, so `exitCode`, `string`, `lines`, and both `stream*` helpers can never bypass whatever `spawn` was given. |
 | `makeNoop` (const) | constructors | Constructs an unavailable spawner stub. |
 | `layerNoop` (const) | layers | Provides an unavailable spawner stub. |
 | `layer` (const) | layers | Decorates the process spawner in place with a `proc:spawn` capability check. |
@@ -290,6 +296,7 @@ The `fs:read`/`fs:write` middleware over Effect's own `FileSystem` tag.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `systemTemporaryDirectoryName` (const) | models | The directory name that stands in for the host's system temporary directory in a capability resource. |
 | `AtomicFileSystemTypeId` (const) | security | Host-private extension used for race-free, descriptor-relative filesystem operations. |
 | `AtomicRequest` (interface) | security | A serializable operation executed relative to a pinned filesystem root. |
 | `AtomicFileSystem` (interface) | security | Trusted host extension implementing atomic path resolution and operation. |
@@ -365,6 +372,8 @@ The `net:get`/`net:post`/`model:call` middleware over Effect's own `HttpClient` 
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `HttpClient` (re-export) | services | Effect's own outgoing HTTP client tag, unchanged. |
+| `make` (re-export) | constructors | Constructs a client from a low-level request runner, keeping Effect's own URL construction, tracing, header redaction, and interruption behavior. |
 | `ModelCall` (const) | references | The model identity an outgoing request is made on behalf of, if any. |
 | `withModelCall` (const) | references | Runs `effect` with every outgoing request in it checked as a `model:call` on `modelId` instead of as plain network access. |
 | `toHttpClientError` (const) | constructors | Projects a permission failure into the error channel Effect's `HttpClient` tag fixes. |
@@ -379,6 +388,10 @@ The jj capability middleware over `@smthrs/jj`'s own `Jj` tag.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
+| `Jj` (re-export) | services | `@smthrs/jj`'s own Jujutsu tag, unchanged. |
+| `layerNoop` (re-export) | layers | Provides an unavailable Jujutsu stub. |
+| `make` (re-export) | constructors | Constructs a Jujutsu service from an implementation. |
+| `makeNoop` (re-export) | constructors | Constructs an unavailable Jujutsu stub. |
 | `layer` (const) | layers | Decorates the Jujutsu service in place with operation-specific capability checks. |
 
 ### JournalGrantStore
