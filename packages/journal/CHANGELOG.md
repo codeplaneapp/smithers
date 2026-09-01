@@ -17,6 +17,12 @@
   the empty string and ill-formed UTF-16 at decode. SQLite binds a lone
   surrogate as U+FFFD, so two distinct identifiers collapsed to one persisted
   key and destroyed run isolation.
+- `JournalEvent.RunId`, `JournalEvent.SourceId`, and `Input.eventType` are
+  limited to 1,024 UTF-16 code units. `Seq` and `SourceSeq` exclude
+  `Number.MAX_SAFE_INTEGER`, whose successor is not a distinct integer the
+  journal can allocate.
+- `EntriesOptions.limit` and the `entries` service reject pages above 10,000
+  entries, which would otherwise be decoded into memory in full.
 - `OwnerId.pid` is a non-negative integer. A fractional, `NaN`, or negative
   pid used to degrade into `fence_lost`, which reads as "someone else owns
   this run" and sends the caller hunting a race that never happened.

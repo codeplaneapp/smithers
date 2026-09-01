@@ -218,8 +218,12 @@ cannot mutate another's view.
 ## Resource limits
 
 `capacity` bounds the number of entries in the admission queue and the size of
-the `changes` buffer. It does not bound bytes, and there is no payload byte cap,
-so a small number of very large payloads can still be the memory bill.
+the `changes` buffer. Run ids, source ids, and event types are limited to 1,024
+UTF-16 code units, and `Seq` and `SourceSeq` stop at
+`Number.MAX_SAFE_INTEGER - 1` so the journal can always allocate the next
+sequence. `entries` reads at most 10,000 entries in one page. These limits do
+not bound payload or meta bytes, which remain uncapped, so a small number of
+very large values can still be the memory bill.
 `sourceEventCache` (default `4096`) bounds the in-process producer-idempotency
 index; the database unique constraint stays authoritative, so eviction changes
 performance, not the answer. Resident memory and startup decode are

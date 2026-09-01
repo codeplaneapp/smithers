@@ -7,11 +7,11 @@ import {
   makeEventId,
   maxIdentifierLength,
   RunId,
+  type RunId as RunIdType,
   Seq,
   SourceId,
-  SourceSeq,
-  type RunId as RunIdType,
   type SourceId as SourceIdType,
+  SourceSeq,
   type SourceSeq as SourceSeqType
 } from "../src/JournalEvent.ts"
 

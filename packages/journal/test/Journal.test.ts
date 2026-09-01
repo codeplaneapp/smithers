@@ -7,7 +7,7 @@ import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as Statement from "effect/unstable/sql/Statement"
 import { EntriesOptions, Journal, JournalError, maxEntriesLimit } from "../src/Journal.ts"
-import { Input, makeEventId, type RunId, type Seq, type SourceId, type SourceSeq } from "../src/JournalEvent.ts"
+import { Entry, Input, makeEventId, type RunId, type Seq, type SourceId, type SourceSeq } from "../src/JournalEvent.ts"
 import * as Migrations from "../src/Migrations.ts"
 import * as SqlJournal from "../src/SqlJournal.ts"
 
@@ -32,6 +32,47 @@ const input = (
     eventType,
     payload
   }, { disableChecks: true })
+
+/**
+ * Lets a valid raw sequence pass schema decode, then exposes a different value
+ * from the constructed model. The tightened public schemas now reject the
+ * allocation ceiling before the service's defensive checks, so this models a
+ * hostile untyped caller changing the public class prototype at that boundary
+ * and keeps those required runtime guards exercised.
+ */
+const withDecodedSequence = <A, E, R>(
+  model: { readonly prototype: object },
+  field: "seq" | "sourceSeq",
+  value: number,
+  use: Effect.Effect<A, E, R>
+): Effect.Effect<A, E, R> =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = Object.getOwnPropertyDescriptor(model.prototype, field)
+      Object.defineProperty(model.prototype, field, {
+        configurable: true,
+        get: () => value,
+        set: function(this: object) {
+          Object.defineProperty(this, field, {
+            configurable: true,
+            enumerable: true,
+            value,
+            writable: true
+          })
+        }
+      })
+      return previous
+    }),
+    () => use,
+    (previous) =>
+      Effect.sync(() => {
+        if (previous === undefined) {
+          Reflect.deleteProperty(model.prototype, field)
+        } else {
+          Object.defineProperty(model.prototype, field, previous)
+        }
+      })
+  )
 
 const migratedDatabase = (
   database: Layer.Layer<DurableWriter | SqlClient.SqlClient> = TestDatabase.layer
@@ -482,18 +523,30 @@ describe("Journal", () => {
           "decode_failed",
           "decode_failed"
         ])
+
+        const runtimeFailure = yield* withDecodedSequence(
+          Entry,
+          "seq",
+          Number.MAX_SAFE_INTEGER,
+          acquire({ sourceEvents: [durableSourceEvent(0, 0)] })
+        )
+        expect(runtimeFailure).toBeInstanceOf(JournalError)
+        expect(runtimeFailure instanceof JournalError ? runtimeFailure.code : undefined).toBe("decode_failed")
       })
   )
 
   effect(
     "normalizes allocation-floor read failures and rejects invalid durable cursors at emit",
     () => {
-      const emitWith = (override: InitializationOverride) =>
+      const emitWith = (
+        override: InitializationOverride,
+        submission: Input = input(runId("run"), sourceId("source"), "event", {})
+      ) =>
         Effect.flip(
           Effect.scoped(
             Effect.gen(function*() {
               const journal = yield* Journal
-              return yield* journal.emitLossy(input(runId("run"), sourceId("source"), "event", {}))
+              return yield* journal.emitLossy(submission)
             }).pipe(
               Effect.provide(SqlJournal.layer({ capacity: 1, overflow: "reject" })),
               Effect.provide(overrideInitialization(override)),
@@ -534,6 +587,24 @@ describe("Journal", () => {
           "invalid_event",
           "invalid_event"
         ])
+
+        const runtimeFailure = yield* withDecodedSequence(
+          Input,
+          "sourceSeq",
+          Number.MAX_SAFE_INTEGER,
+          emitWith(
+            { failSequences: true, sourceEvents: [] },
+            {
+              runId: runId("run"),
+              sourceId: sourceId("source"),
+              sourceSeq: sourceSeq(0),
+              eventType: "event",
+              payload: {}
+            } as Input
+          )
+        )
+        expect(runtimeFailure).toBeInstanceOf(JournalError)
+        expect(runtimeFailure instanceof JournalError ? runtimeFailure.code : undefined).toBe("invalid_event")
       })
     }
   )
@@ -726,6 +797,24 @@ describe("Journal", () => {
           )
         )
         expect(failures.every((failure) => failure.code === "invalid_event")).toBe(true)
+        yield* TestClock.setTime(0)
+
+        const runtimeFailure = yield* withDecodedSequence(
+          Input,
+          "sourceSeq",
+          Number.MAX_SAFE_INTEGER,
+          Effect.flip(
+            journal.emitDurableUnfenced({
+              runId: validRun,
+              sourceId: validSource,
+              sourceSeq: sourceSeq(0),
+              eventType: "event",
+              payload: {}
+            } as Input)
+          )
+        )
+        expect(runtimeFailure.code).toBe("invalid_event")
+        expect(runtimeFailure.message).toBe("journal sequence is outside the allocatable safe integer range")
       })
     ))
 

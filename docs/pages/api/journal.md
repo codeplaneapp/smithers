@@ -238,8 +238,12 @@ cannot mutate another's view.
 ## Resource limits
 
 `capacity` bounds the number of entries in the admission queue and the size of
-the `changes` buffer. It does not bound bytes, and there is no payload byte cap,
-so a small number of very large payloads can still be the memory bill.
+the `changes` buffer. Run ids, source ids, and event types are limited to 1,024
+UTF-16 code units, and `Seq` and `SourceSeq` stop at
+`Number.MAX_SAFE_INTEGER - 1` so the journal can always allocate the next
+sequence. `entries` reads at most 10,000 entries in one page. These limits do
+not bound payload or meta bytes, which remain uncapped, so a small number of
+very large values can still be the memory bill.
 `sourceEventCache` (default `4096`) bounds the in-process producer-idempotency
 index; the database unique constraint stays authoritative, so eviction changes
 performance, not the answer. Resident memory and startup decode are
@@ -296,6 +300,7 @@ See [Journal semantics](/concepts/journal), [Concurrency](/concepts/concurrency)
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
+| `JournalEvent.maxIdentifierLength` | const | constants | Longest identifier the journal persists. |
 | `JournalEvent.RunId` | const + type | schemas | Schema for an identifier of one durable run. |
 | `JournalEvent.Seq` | const + type | schemas | Schema for the canonical, durable sequence number within a run. |
 | `JournalEvent.SourceId` | const + type | schemas | Schema for an event producer identifier. |
@@ -313,6 +318,7 @@ See [Journal semantics](/concepts/journal), [Concurrency](/concepts/concurrency)
 | `Journal.EmitReceipt` | const + type | models | Receipt union for admission that may use the lossy queue. |
 | `Journal.DurableReceipt` | const + type | models | Result of a synchronously durable journal admission. |
 | `Journal.StreamOptions` | const + type | models | Cursor used to replay a run and then follow its committed tail. |
+| `Journal.maxEntriesLimit` | const | constants | Largest page `entries` will read. |
 | `Journal.EntriesOptions` | const + type | models | Cursor and page size for durable journal reads. |
 | `Journal.EntriesPage` | const + type | models | One page of canonical durable journal entries. |
 | `Journal.Checkpoint` | class | models | A durable checkpoint: the caller-captured state that replays a run from `seq` without the entries before it. |
