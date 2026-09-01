@@ -101,6 +101,7 @@ Signals are validated and deduplicated before installation, and
 | `maximumShutdownTimeoutMs` | const | models | Largest delay Node accepts without truncating it to a one-millisecond timer. |
 | `signalExitCode` | const | constructors | The status a process that was ended by `signal` exits with. |
 | `layerHost` | const | layers | Provides the whole Node host, storage, kernel, and engine from one call. |
+| `CompositionRootsAreComplete` | type | models | Pins every full runtime composition to its documented host boundary. |
 
 Use individual `@smthrs/*` packages when a smaller dependency surface is
 preferable.
