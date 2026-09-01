@@ -44,7 +44,8 @@ export const program = (invocation) => {
     case "backup":
       return DisasterRecovery.backup({
         directory: invocation.backupDirectory,
-        objectsDirectory: invocation.objectsDirectory
+        objectsDirectory: invocation.objectsDirectory,
+        snapshotDatabaseLayer: (databaseFile) => NodeDatabase.layer({ filename: databaseFile })
       }).pipe(
         Effect.provide(Layer.mergeAll(host, NodeDatabase.layer({ filename: invocation.databaseFile }))),
         Effect.map((manifest) =>
