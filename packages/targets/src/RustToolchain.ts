@@ -10,9 +10,9 @@
  * the only way to say "CI installs the pinned Rust toolchain and then runs
  * clippy" was a pair of shell strings in a BUILD.ts file, which put an argv
  * outside every target implementation and left the toolchain undeclared key
- * material. A declaration makes the pin a value: {@link CargoCheck} takes it as
- * an attr and asks this module for the argv, and the CI generator derives its
- * bootstrap step from the same value.
+ * material. A declaration makes the pin a content-digested input:
+ * {@link CargoCheck} takes it as an attr and asks this module for the argv, and
+ * the CI generator derives its bootstrap step from the same value.
  *
  * The declaration is a discriminated union, one variant per way of obtaining a
  * toolchain, discriminated by `name`. Only `pinned` exists today: `rustup`
@@ -53,16 +53,22 @@ export const maximumTextLength = 256
 /**
  * Schema for a toolchain obtained from a checked-in `rustup` pin.
  *
- * `pin` is the workspace-relative file `rustup` reads. It is declared rather
- * than assumed so the pin is key material: a target keyed on this declaration
- * is keyed on which file fixes the compiler it ran.
+ * `pin` is the workspace-relative file `rustup` reads. Its content digest is
+ * key material, so changing its channel cannot reuse Cargo results produced by
+ * a different compiler.
+ *
+ * Durable key change: the pin content digest now participates in every
+ * `S.Cargo.*` target key. Existing keys intentionally move because their cached
+ * compiler identity was incomplete. Operators should expect one full Cargo
+ * rebuild on the first build after this lands, then normal cache reuse until
+ * the pin contents change.
  *
  * @category schemas
  * @since 0.1.0
  */
 export const PinnedRustToolchain = Schema.Struct({
   name: Schema.Literal("pinned"),
-  pin: Schema.NonEmptyString,
+  pin: Input.File,
   rustup: Schema.NonEmptyString,
   cargo: Schema.NonEmptyString
 })
@@ -98,8 +104,8 @@ export type RustToolchain = typeof RustToolchain.Type
  * @since 0.1.0
  */
 export interface PinnedOptions {
-  /** @default "rust-toolchain.toml" */
-  readonly pin?: string | undefined
+  /** @default Input.file("rust-toolchain.toml") */
+  readonly pin?: Input.File | undefined
   /** @default "rustup" */
   readonly rustup?: string | undefined
   /** @default "cargo" */
@@ -127,6 +133,15 @@ const usable = (value: unknown, what: string): string => {
   return trimmed
 }
 
+const declaredFile = (value: unknown, what: string): Input.File => {
+  if (
+    typeof value !== "object" || value === null ||
+    (value as { readonly _tag?: unknown })._tag !== "File" ||
+    typeof (value as { readonly path?: unknown }).path !== "string"
+  ) throw new TypeError(`${what} must be an S.file declaration`)
+  return value as Input.File
+}
+
 /**
  * Declares the toolchain a checked-in `rustup` pin fixes.
  *
@@ -143,7 +158,9 @@ const usable = (value: unknown, what: string): string => {
 export const Pinned = (options: PinnedOptions = {}): PinnedRustToolchain =>
   PinnedRustToolchain.make({
     name: "pinned",
-    pin: options.pin === undefined ? "rust-toolchain.toml" : usable(options.pin, "rust toolchain pin"),
+    pin: options.pin === undefined
+      ? Input.file("rust-toolchain.toml")
+      : declaredFile(options.pin, "rust toolchain pin"),
     rustup: options.rustup === undefined ? "rustup" : usable(options.rustup, "rustup executable"),
     cargo: options.cargo === undefined ? "cargo" : usable(options.cargo, "cargo executable")
   })
@@ -241,15 +258,6 @@ export interface ToolchainOptions {
   readonly rustup?: string | undefined
   /** @default "cargo" */
   readonly cargo?: string | undefined
-}
-
-const declaredFile = (value: unknown, what: string): Input.File => {
-  if (
-    typeof value !== "object" || value === null ||
-    (value as { readonly _tag?: unknown })._tag !== "File" ||
-    typeof (value as { readonly path?: unknown }).path !== "string"
-  ) throw new TypeError(`${what} must be an S.file declaration`)
-  return value as Input.File
 }
 
 const toolchainOptionNames: ReadonlySet<string> = new Set([

@@ -7,8 +7,18 @@
  * about which files become key material and which argv installs the pin.
  */
 import { describe, expect, it } from "vitest"
+import { attrsValue } from "../../build-cli/src/Planner.ts"
 import * as Input from "../src/Input.ts"
 import * as RustToolchain from "../src/RustToolchain.ts"
+
+const pinnedKeyMaterial = (pinContents: string): unknown => {
+  const declaration = RustToolchain.Pinned({})
+  const inputDigests = new Map<Input.Declared, string>()
+  if (Input.isDeclared(declaration.pin)) {
+    inputDigests.set(declaration.pin, Input.digestText(pinContents))
+  }
+  return attrsValue(declaration, new Map(), inputDigests)
+}
 
 describe("Rust.Toolchain", () => {
   it("declares the workspace/channel form as inert data", () => {
@@ -69,6 +79,8 @@ describe("Rust.Toolchain", () => {
   })
 
   it("refuses a pin that is not a declared file input", () => {
+    expect(() => RustToolchain.Pinned({ pin: "rust-toolchain.toml" as never }))
+      .toThrow(/must be an S.file declaration/)
     expect(() => RustToolchain.Toolchain({ toolchain: "rust-toolchain.toml" as never }))
       .toThrow(/must be an S.file declaration/)
     expect(() => RustToolchain.Toolchain({ channel: "1.91", workspace: "Cargo.toml" as never }))
@@ -81,9 +93,20 @@ describe("Rust.Toolchain", () => {
     expect(RustToolchain.isToolchainDeclaration(null)).toBe(false)
   })
 
-  it("leaves the BUILD-era pin declaration exactly as it was", () => {
+  it("declares the BUILD-era default pin as a file input", () => {
     expect(RustToolchain.Pinned({}))
-      .toEqual({ name: "pinned", pin: "rust-toolchain.toml", rustup: "rustup", cargo: "cargo" })
+      .toEqual({
+        name: "pinned",
+        pin: { _tag: "File", path: "rust-toolchain.toml" },
+        rustup: "rustup",
+        cargo: "cargo"
+      })
     expect(RustToolchain.install(RustToolchain.Pinned({}))).toEqual(["rustup", "toolchain", "install"])
+  })
+
+  it("keys the BUILD-era pin on its contents", () => {
+    const stable = pinnedKeyMaterial("[toolchain]\nchannel = \"1.91\"\n")
+    expect(stable).toEqual(pinnedKeyMaterial("[toolchain]\nchannel = \"1.91\"\n"))
+    expect(stable).not.toEqual(pinnedKeyMaterial("[toolchain]\nchannel = \"1.92\"\n"))
   })
 })

@@ -83,6 +83,10 @@ export const Workspace = S.Workspace("aomi-sdk", {
 })
 ```
 
+`toolchain` is a declared file input. Its content digest, not only its path, is
+key material, so changing the channel in `rust-toolchain.toml` re-keys the Cargo
+targets that use it.
+
 The declared channel is selected, not hoped for: every cargo run carries it as
 `RUSTUP_TOOLCHAIN`, so a host without the pin fails at the start of the run
 naming the channel instead of mid-compile on a rustc the crates refuse.
@@ -162,6 +166,10 @@ declaration names one and no BUILD-era call ever passes one, so
 `Smithers.Cargo.Clippy()` is still a check value and
 `Smithers.Cargo.Clippy({ workspace: true })` is a target. A repository moving
 from `BUILD.ts` to `PACKAGE.ts` does not rename its cargo gates.
+
+The BUILD-era `RustToolchain.Pinned` declaration follows the same content rule:
+`pin` defaults to `S.file("rust-toolchain.toml")`, and Cargo targets digest it
+without callers also listing it in `srcs`.
 
 A build target may be a tool edge. `S.Shell.Build({ bin: sdk.buildCli })` and
 `S.Generate({ bin: sdk.buildCli })` spawn the one binary that build declares
