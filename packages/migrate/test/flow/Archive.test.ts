@@ -188,6 +188,50 @@ describe("Archive.rewriteGitignore", () => {
 })
 
 describe("Archive.run", () => {
+  it.effect("keeps 0.x packages through the dependencies unit and removes them only in the project unit", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      const manifestFile = join(root, "package.json")
+      const manifest = JSON.parse(readFileSync(manifestFile, "utf8")) as {
+        dependencies: Record<string, string>
+      }
+      manifest.dependencies["@smthrs/flow"] = "1.0.0-rc.0"
+      writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`)
+
+      yield* Archive.run({
+        root,
+        unit: "dependencies",
+        kind: "dependencies",
+        sources: ["package.json"],
+        targets: ["package.json"],
+        archiveDir: join(root, ".smithers-migrate", "archive"),
+        keepOldSources: false
+      })
+
+      const inherited = JSON.parse(readFileSync(manifestFile, "utf8")) as {
+        dependencies: Record<string, string>
+      }
+      expect(inherited.dependencies["@smthrs/flow"]).toBe("1.0.0-rc.0")
+      expect(inherited.dependencies["smthrs"]).toBe("0.35.0")
+      expect(inherited.dependencies["effect"]).toBe(Archive.effectVersion)
+
+      yield* Archive.run({
+        root,
+        unit: "project",
+        kind: "project",
+        sources: ["package.json"],
+        targets: ["package.json"],
+        archiveDir: join(root, ".smithers-migrate", "archive"),
+        keepOldSources: false
+      })
+
+      const final = JSON.parse(readFileSync(manifestFile, "utf8")) as {
+        dependencies: Record<string, string>
+      }
+      expect(final.dependencies["smthrs"]).toBeUndefined()
+      expect(final.dependencies["@smthrs/flow"]).toBe("1.0.0-rc.0")
+    }).pipe(Effect.provide(platform)))
+
   it.effect("moves the old sources into the archive and reports each one", () =>
     Effect.gen(function*() {
       const root = copyFixture("jsx-single")
@@ -314,8 +358,8 @@ describe("Archive.run", () => {
 
       const result = yield* Archive.run({
         root,
-        unit: "dependencies",
-        kind: "dependencies",
+        unit: "project",
+        kind: "project",
         sources: ["package.json"],
         targets: ["package.json"],
         archiveDir: join(root, ".smithers-migrate", "archive"),

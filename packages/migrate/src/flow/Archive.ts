@@ -423,10 +423,15 @@ const oldNames = (manifest: Record<string, unknown>): ReadonlyArray<string> => {
 export const rewritten = (
   file: string,
   text: string,
-  specifiers: Detect.SpecifierContext = {}
+  specifiers: Detect.SpecifierContext = {},
+  kind: "dependencies" | "project" = "project"
 ): { readonly text: string; readonly scripts: ReadonlyArray<ScriptRewrite> } | undefined => {
   const name = file.split("/").pop() ?? file
   if (name === "package.json") {
+    // Later source units still typecheck against 0.x imports, so the first unit
+    // may pin and add packages but must leave removals and CLI rewrites to the
+    // final project unit.
+    if (kind === "dependencies") return { text: pinEffect(text), scripts: [] }
     const manifest = JSON.parse(text) as Record<string, unknown>
     const rewrite = rewriteManifest(text, { remove: oldNames(manifest), add: [] })
     return { text: pinEffect(rewrite.text), scripts: rewrite.scripts }
@@ -496,7 +501,13 @@ export const run = (payload: {
       const before = yield* fs.readFileString(target).pipe(Effect.option)
       if (before._tag === "None") continue
       const result = yield* Effect.try({
-        try: () => rewritten(file, before.value, payload.specifiers ?? {}),
+        try: () =>
+          rewritten(
+            file,
+            before.value,
+            payload.specifiers ?? {},
+            payload.kind === "dependencies" ? "dependencies" : "project"
+          ),
         catch: io(`could not rewrite ${file}`)
       })
       if (result === undefined) continue
