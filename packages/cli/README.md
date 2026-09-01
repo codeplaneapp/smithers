@@ -45,12 +45,11 @@ import { Command, NodeControl, Version } from "@smthrs/cli"
 import { Effect } from "effect"
 import { Command as Cli } from "effect/unstable/cli"
 
-const config = NodeControl.makeConfig([
-  "--remote",
-  "http://127.0.0.1:3000",
-  "--credential",
-  "alpha-secret"
-])
+const config = NodeControl.makeConfig(
+  ["--remote", "http://127.0.0.1:3000", "--credential", "alpha-secret"],
+  process.env,
+  process.cwd()
+)
 
 const main = Cli.run(Command.cli, { version: Version.packageVersion }).pipe(
   Effect.provide(NodeControl.layer(config))
@@ -59,7 +58,44 @@ const main = Cli.run(Command.cli, { version: Version.packageVersion }).pipe(
 
 `@smthrs/cli/package.json` is exported for package metadata. `internal/*` and nested `*/index` subpaths are not public.
 
-Control servers bind `127.0.0.1` by default. See the [control-plane trust posture](../../docs/pages/guides/control-plane-trust.md) before opting into a non-loopback bind.
+Control servers bind `127.0.0.1` by default. See the [control-plane trust posture](https://smithers.sh/guides/control-plane-trust) before opting into a non-loopback bind.
+
+## Exit codes
+
+`smithers` uses one status vocabulary, so a script can branch on it.
+
+| Code | Meaning |
+| --- | --- |
+| `0` | The command did what it was asked. |
+| `1` | The command failed, or the run it reports settled `failed`. |
+| `2` | The invocation was wrong. Retype the command; the message names the flag or argument. |
+| `3` | The run is parked at `waiting-approval`. Answer it with `smithers approve` and resume. |
+| `130` | The run was cancelled or interrupted. |
+| `143` | The run was terminated. |
+
+Codes 3, 130, and 143 report a run outcome rather than a failure of the command, and are decided from the control receipt alone. See [the CLI pages](https://smithers.sh/cli) for the per-verb detail.
+
+## Environment
+
+rc.0 reads a closed set of variables, all listed by `Environment.names`, with four `FLOWS_*` aliases retained from the import. The ones an operator sets most often:
+
+| Variable | Meaning |
+| --- | --- |
+| `SMITHERS_REMOTE` | Fallback for `--remote`. |
+| `SMITHERS_API_KEY` | Fallback for `--credential`. |
+| `SMITHERS_MCP_CONFIG` | Fallback for `--mcp-config`. |
+| `SMITHERS_BACKEND` | SQLite only. Any other value exits 1 with `unsupported_database`. |
+| `SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS` | How long `up -d` waits for its child to report admission. |
+
+Provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) are read by the seat resolver, not by the CLI itself. `smithers doctor` reports which are present.
+
+## MCP
+
+`smithers --mcp` serves the Smithers MCP server on stdio, so an agent drives runs through the same control plane the verbs do. `smithers mcp add <agent>` writes the server entry into an agent's configuration, and `smithers mcp` lists the agents it knows.
+
+The server answers a `{ ok, data?, error? }` envelope on every tool. Ten of the twenty-one 0.x tools answer `{ ok: false, error: { code: "unsupported" } }` in rc.0; `McpServer.unsupportedTools` names them and `McpServer.unsupportedReasons` says why. Reserved `system/*` flows are not listed and cannot be launched, matching `smithers up` and `smithers ls`.
+
+`--mcp-config <path>` is the other direction: it connects MCP servers the local executor projects into a run's flow catalog. It is meaningless against `--remote`, where the executor is not this process's to configure.
 
 ## Manual smoke: run an agent flow with a real key
 
