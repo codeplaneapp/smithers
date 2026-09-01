@@ -262,6 +262,7 @@ export const main = (filename: string): Effect.Effect<Summary> =>
               ),
               // The scripted seat has no provider quota to classify, and the
               // standalone example has no approved envelope to derive a cap.
+              // eslint-disable-next-line no-restricted-syntax -- this offline example has no approved envelope
               Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerUnclassified(), Budget.layerUnbounded())),
               Layer.provideMerge(Agent.layerDefaults),
               Layer.provideMerge(Action.layerImplementations),

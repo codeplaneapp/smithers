@@ -206,6 +206,7 @@ export const main = (filename: string, root: string): Effect.Effect<Summary> =>
       Layer.provideMerge(Layer.mergeAll(host, seats, Agent.layer)),
       // The scripted seat cannot refuse for quota, and this offline example
       // has no approved plan envelope from which to derive a ceiling.
+      // eslint-disable-next-line no-restricted-syntax -- this offline example has no approved envelope
       Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerUnclassified(), Budget.layerUnbounded())),
       // The QuickJS sandbox the cell's code runs in, and the steering source it
       // drains. Both are browser-safe defaults.

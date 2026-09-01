@@ -148,6 +148,7 @@ export const liveLayer = (baseUrl: string) =>
     Layer.provideMerge(Layer.mergeAll(host, liveLocalSeats(baseUrl), Agent.layer)),
     // A local provider can still name a reset, so honor it. This standalone
     // smoke run has no approved plan envelope from which to derive a ceiling.
+    // eslint-disable-next-line no-restricted-syntax -- this standalone smoke has no approved envelope
     Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())),
     Layer.provideMerge(Agent.layerDefaults),
     Layer.provideMerge(Action.layerImplementations),

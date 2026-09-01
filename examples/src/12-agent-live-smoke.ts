@@ -121,6 +121,7 @@ export const liveLayer = (apiKey: string) =>
     Layer.provideMerge(Layer.mergeAll(host, liveOpenAiSeats(apiKey), Agent.layer)),
     // Live refusals should park when the provider gives a reset. This smoke
     // run has no approved plan envelope from which to derive a spend ceiling.
+    // eslint-disable-next-line no-restricted-syntax -- this standalone smoke has no approved envelope
     Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())),
     Layer.provideMerge(Agent.layerDefaults),
     Layer.provideMerge(Action.layerImplementations),

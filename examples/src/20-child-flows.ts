@@ -362,6 +362,7 @@ export const main = (filename: string): Effect.Effect<Summary> =>
               ),
               // The fixture model cannot report provider quota, and this
               // offline example has no approved envelope to turn into a cap.
+              // eslint-disable-next-line no-restricted-syntax -- this offline example has no approved envelope
               Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerUnclassified(), Budget.layerUnbounded())),
               Layer.provideMerge(Agent.layerDefaults)
             )

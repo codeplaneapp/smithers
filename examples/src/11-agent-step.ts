@@ -187,6 +187,7 @@ const SimpleWorkflowLayer = Layer.mergeAll(
   Layer.provideMerge(Layer.mergeAll(host, seats, Agent.layer)),
   // Pointing the resolver at a provider should park reset-bearing refusals.
   // This standalone flow has no approved envelope from which to derive a cap.
+  // eslint-disable-next-line no-restricted-syntax -- this standalone flow has no approved envelope
   Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())),
   // The sandbox a cell's code runs in and the steering source it drains. Both
   // are browser-safe defaults; a host that accepts mid-run messages provides

@@ -293,6 +293,7 @@ export const main = (filename: string): Effect.Effect<Summary> =>
                 ),
                 // The scripted seat has no provider quota, and these offline
                 // runs have no approved plan envelope to derive a ceiling.
+                // eslint-disable-next-line no-restricted-syntax -- these offline runs have no approved envelope
                 Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerUnclassified(), Budget.layerUnbounded())),
                 Layer.provideMerge(Agent.layerDefaults),
                 Layer.provideMerge(Action.layerImplementations)
