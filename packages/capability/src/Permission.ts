@@ -4,20 +4,64 @@
  * The schema ids below round-trip through the grant journal and are digested
  * into step keys, so renaming one invalidates recorded runs.
  *
- * Governing design:
- * `docs/specs/Concepts/Permission Kernel.md` and
- * `docs/specs/Concepts/Trust Granularity.md`.
+ * Governing design: `docs/pages/concepts/hosts-and-capabilities.md`, rendered
+ * at `/concepts/hosts-and-capabilities`.
  *
  * @since 0.1.0
  */
 import { Option, Schema } from "effect"
 import { type PlatformError, systemError } from "effect/PlatformError"
-import { Capability, CapabilityPattern, type EffectTier, format, matches } from "./Capability.ts"
+import { Action, Capability, CapabilityPattern, EffectTier, format, matches, withinMatchBudget } from "./Capability.ts"
+
+const PermissionMeta = Schema.Record(Schema.String, Schema.Json)
+const decodePermissionMeta = Schema.decodeUnknownSync(PermissionMeta)
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (typeof value !== "object" || value === null) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+const withoutUndefined = (value: unknown): unknown => {
+  // Array elements are deliberately retained: JSON.stringify changes an
+  // undefined element to null, so dropping it would be a real value change.
+  if (Array.isArray(value)) return value.map((element) => withoutUndefined(element))
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, nested]) => nested !== undefined)
+        .map(([key, nested]) => [key, withoutUndefined(nested)])
+    )
+  }
+  // Restrict recursion to plain objects. Object.entries(new Date()) is empty;
+  // flattening non-plain objects would silently turn an invalid Date, Map, or
+  // class instance into an accepted empty JSON record.
+  return value
+}
+
+const deepFrozenJsonSnapshot = (value: Schema.Json): Schema.Json => {
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map(deepFrozenJsonSnapshot))
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.freeze(
+      Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, deepFrozenJsonSnapshot(nested)]))
+    )
+  }
+  return value
+}
+
+const permissionMetaSnapshot = (
+  meta: Readonly<Record<string, unknown>>
+): Readonly<Record<string, Schema.Json>> =>
+  deepFrozenJsonSnapshot(decodePermissionMeta(withoutUndefined(meta))) as Readonly<Record<string, Schema.Json>>
 
 /**
  * A permission request that must be resolved by an attended surface.
  *
- * The capability is always the exact adapter request, never a wildcard.
+ * The capability is always the exact adapter request, never a wildcard. The
+ * error retains neither the caller's metadata object nor the caller's
+ * `Capability` instance, and its `meta` and `capability` slots are non-writable.
  *
  * @category errors
  * @since 0.1.0
@@ -30,8 +74,22 @@ export class PermissionRequired extends Schema.TaggedError<PermissionRequired>()
     requestId: Schema.String,
     runId: Schema.optional(Schema.String),
     capability: Capability,
-    tier: Schema.Literals(["sealed", "compensable", "irreversible"]),
-    meta: Schema.Record(Schema.String, Schema.Unknown)
+    tier: EffectTier,
+    /**
+     * Journal-safe permission context.
+     *
+     * Only JSON-representable values survive the grant journal. Construction
+     * takes a deep-frozen snapshot and does not retain the caller's object. An
+     * undefined property value is dropped, mirroring `JSON.stringify`, so the
+     * encoded payload is unchanged and a host can pass an optional field it
+     * does not have, such as a spawn with no explicit cwd. Undefined array
+     * elements are rejected because JSON serialization would change them to
+     * null rather than omit them.
+     *
+     * @since 0.1.0
+     * @category models
+     */
+    meta: PermissionMeta
   }
 ) {
   constructor(props: {
@@ -40,14 +98,34 @@ export class PermissionRequired extends Schema.TaggedError<PermissionRequired>()
     readonly runId?: string | undefined
     readonly capability: Capability
     readonly tier: EffectTier
-    readonly meta: Record<string, unknown>
+    readonly meta: Readonly<Record<string, unknown>>
   }) {
-    super({ ...props, code: "permission_required" })
+    const meta = permissionMetaSnapshot(props.meta)
+    super({ ...props, code: "permission_required", meta })
+    Object.defineProperty(this, "capability", {
+      value: new Capability({
+        action: props.capability.action,
+        resource: props.capability.resource
+      }),
+      enumerable: true,
+      writable: false,
+      configurable: false
+    })
+    Object.defineProperty(this, "meta", {
+      value: meta,
+      enumerable: true,
+      writable: false,
+      configurable: false
+    })
+    // Do not freeze a Schema.Class instance: Effect needs to populate its
+    // symbol-keyed hash and equality caches after construction.
   }
 }
 
 /**
- * A capability rejected by policy or by the current capability ceiling.
+ * A capability rejected by policy or by the current capability ceiling. The
+ * error retains a defensive copy rather than the caller's `Capability`
+ * instance, and its `capability` slot is non-writable.
  *
  * @category errors
  * @since 0.1.0
@@ -67,6 +145,15 @@ export class PermissionDenied extends Schema.TaggedError<PermissionDenied>()(
     readonly reason: string
   }) {
     super({ ...props, code: "permission_denied" })
+    Object.defineProperty(this, "capability", {
+      value: new Capability({
+        action: props.capability.action,
+        resource: props.capability.resource
+      }),
+      enumerable: true,
+      writable: false,
+      configurable: false
+    })
   }
 }
 
@@ -114,15 +201,22 @@ export class GrantStoreError extends Schema.TaggedError<GrantStoreError>()(
 ) {}
 
 /**
+ * Schema for decisions made by matching permission rules.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export const RuleEffect = Schema.Literals(["allow", "deny", "ask"] as const)
+
+/**
  * The decision made by a matching permission rule.
  *
  * @category models
  * @since 0.1.0
  * @slop
  */
-export type RuleEffect = "allow" | "deny" | "ask"
-
-const RuleEffect = Schema.Literals(["allow", "deny", "ask"])
+export type RuleEffect = typeof RuleEffect.Type
 
 /**
  * A capability pattern and the decision it applies.
@@ -131,7 +225,7 @@ const RuleEffect = Schema.Literals(["allow", "deny", "ask"])
  * @since 0.1.0
  * @slop
  */
-export class Rule extends Schema.Class<Rule>("@smthrs/capability/Permission/Rule")({
+export class Rule extends Schema.Class<Rule>("@smthrs/capability/Rule")({
   effect: RuleEffect,
   pattern: CapabilityPattern
 }) {}
@@ -140,9 +234,15 @@ export class Rule extends Schema.Class<Rule>("@smthrs/capability/Permission/Rule
  * Evaluates ordered permission rules.
  *
  * Matching rules are last-match-wins across all rulesets and the default is
- * `ask`. The configured ruleset is first reduced with that same rule before
- * an effective configured denial is treated as a hard veto. A configured deny
- * superseded by a later configured allow or ask is therefore not a veto.
+ * `ask`. `rulesets[0]` is the configured policy ruleset. The function first
+ * reduces that ruleset with the same last-match rule, then treats its effective
+ * denial as a hard veto. A configured deny superseded by a later configured
+ * allow or ask in that ruleset is therefore not a veto.
+ *
+ * A rule the matcher cannot decide within `Capability.maxMatchWork` vetoes the
+ * decision and `evaluate` returns `deny`. Skipping it could let an undecidable
+ * deny fall through to a later allow. The kernel turns that `deny` into a
+ * {@link PermissionDenied}.
  *
  * @category policy
  * @since 0.1.0
@@ -152,6 +252,14 @@ export const evaluate = (
   rulesets: ReadonlyArray<ReadonlyArray<Rule>>,
   capability: Capability
 ): RuleEffect => {
+  for (const ruleset of rulesets) {
+    for (const rule of ruleset) {
+      if (!withinMatchBudget(rule.pattern, capability)) {
+        return "deny"
+      }
+    }
+  }
+
   const configured = rulesets[0]
   let configuredEffect: RuleEffect = "ask"
   for (const rule of configured ?? []) {
@@ -194,7 +302,7 @@ export const permissionRequired = (options: {
     runId: options.runId,
     capability: options.capability,
     tier: options.tier,
-    meta: { ...options.meta }
+    meta: options.meta ?? {}
   })
 
 /**
@@ -225,21 +333,118 @@ export const permissionDenied = (capability: Capability, reason: string): Permis
 export type PermissionError = PermissionRequired | PermissionDenied | GrantStoreError
 
 /**
+ * Schema for every failure the capability kernel adds to a guarded Host call.
+ *
+ * @category schemas
+ * @since 0.1.0
+ * @slop
+ */
+export const PermissionError = Schema.Union([PermissionRequired, PermissionDenied, GrantStoreError])
+
+const isRecord = (input: unknown): input is Readonly<Record<PropertyKey, unknown>> =>
+  typeof input === "object" && input !== null
+const isAction = Schema.is(Action)
+const isEffectTier = Schema.is(EffectTier)
+const isPermissionMeta = Schema.is(PermissionMeta)
+const grantStoreErrorCodes: ReadonlySet<string> = new Set(GrantStoreErrorCode.literals)
+const isCapability = (input: unknown): boolean =>
+  isRecord(input) && typeof input.resource === "string" && isAction(input.action)
+
+/**
  * Refines an unknown value to a kernel permission failure.
  *
  * @category refinements
  * @since 0.1.0
  * @slop
  */
-export const isPermissionError = (input: unknown): input is PermissionError =>
-  typeof input === "object" && input !== null && "_tag" in input &&
-  (input._tag === "@smthrs/capability/PermissionRequired" ||
-    input._tag === "@smthrs/capability/PermissionDenied" ||
-    input._tag === "@smthrs/capability/GrantStoreError")
+export const isPermissionError = (input: unknown): input is PermissionError => {
+  if (!isRecord(input)) {
+    return false
+  }
+  // Excess fields are deliberately accepted. Real Schema.TaggedError
+  // instances carry `message`, `stack`, and `name`, so an exact structural
+  // check would reject the primary input this cross-boundary guard receives.
+  switch (input._tag) {
+    case "@smthrs/capability/PermissionRequired":
+      return input.code === "permission_required" &&
+        typeof input.requestId === "string" &&
+        (input.runId === undefined || typeof input.runId === "string") &&
+        isEffectTier(input.tier) &&
+        isCapability(input.capability) &&
+        isPermissionMeta(input.meta)
+    case "@smthrs/capability/PermissionDenied":
+      return input.code === "permission_denied" &&
+        typeof input.reason === "string" &&
+        isCapability(input.capability)
+    case "@smthrs/capability/GrantStoreError":
+      return typeof input.code === "string" &&
+        grantStoreErrorCodes.has(input.code) &&
+        (input.message === undefined || typeof input.message === "string")
+    default:
+      return false
+  }
+}
+
+/**
+ * Maximum UTF-16 length of one field in a permission-error rendering.
+ *
+ * The limit includes the visible truncation marker. It bounds unattended log
+ * output while preserving ordinary Unicode and visible control escapes.
+ *
+ * @category constants
+ * @since 0.1.0
+ * @slop
+ */
+export const maxDisplayFieldLength = 256
+
+const truncationMarker = "…[truncated]"
+
+const displayChunk = (unit: string): string => {
+  if (unit === "\n") {
+    return "\\n"
+  }
+  if (unit === "\r") {
+    return "\\r"
+  }
+  if (unit === "\t") {
+    return "\\t"
+  }
+  const codePoint = unit.codePointAt(0)!
+  return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f)
+    ? `\\u${codePoint.toString(16).toUpperCase().padStart(4, "0")}`
+    : unit
+}
+
+const displayField = (value: string): string => {
+  const chunks: Array<string> = []
+  let length = 0
+  let truncated = false
+  for (const unit of value) {
+    const chunk = displayChunk(unit)
+    if (length + chunk.length > maxDisplayFieldLength) {
+      truncated = true
+      break
+    }
+    chunks.push(chunk)
+    length += chunk.length
+  }
+  if (!truncated) {
+    return chunks.join("")
+  }
+  const contentLength = maxDisplayFieldLength - truncationMarker.length
+  while (length > contentLength) {
+    length -= chunks.pop()!.length
+  }
+  return `${chunks.join("")}${truncationMarker}`
+}
 
 /**
  * Renders a permission failure as the one-line `description` a `SystemError`
- * carries — the string a log line or an unattended report shows.
+ * carries, which is the string a log line or an unattended report shows.
+ *
+ * Every field escapes C0 and C1 controls. Each encoded field is limited to
+ * {@link maxDisplayFieldLength} UTF-16 code units and ends with a visible
+ * marker when truncated. Ordinary non-ASCII text remains unchanged.
  *
  * @category formatting
  * @since 0.1.0
@@ -248,13 +453,15 @@ export const isPermissionError = (input: unknown): input is PermissionError =>
 export const formatError = (error: PermissionError): string => {
   switch (error._tag) {
     case "@smthrs/capability/PermissionRequired":
-      return `${error.code}: ${format(error.capability)} (tier ${error.tier}, request ${error.requestId})`
+      return `${displayField(error.code)}: ${displayField(format(error.capability))} (tier ${
+        displayField(error.tier)
+      }, request ${displayField(error.requestId)})`
     case "@smthrs/capability/PermissionDenied":
-      return `${error.code}: ${format(error.capability)}: ${error.reason}`
+      return `${displayField(error.code)}: ${displayField(format(error.capability))}: ${displayField(error.reason)}`
     case "@smthrs/capability/GrantStoreError":
       // `message` is optional in the schema, but the `Error` base always
-      // materializes it — an unset one is the empty string, not `undefined`.
-      return `grant store ${error.code}${error.message ? `: ${error.message}` : ""}`
+      // materializes it. An unset one is the empty string, not `undefined`.
+      return `grant store ${displayField(error.code)}${error.message ? `: ${displayField(error.message)}` : ""}`
   }
 }
 
@@ -302,4 +509,6 @@ export const toPlatformError = (options: {
  * @slop
  */
 export const fromPlatformError = (error: PlatformError): Option.Option<PermissionError> =>
-  isPermissionError(error.reason.cause) ? Option.some(error.reason.cause) : Option.none()
+  error.reason._tag === "PermissionDenied" && isPermissionError(error.reason.cause)
+    ? Option.some(error.reason.cause)
+    : Option.none()

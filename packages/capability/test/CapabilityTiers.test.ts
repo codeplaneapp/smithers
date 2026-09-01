@@ -61,9 +61,17 @@ describe("Capability.tierOf containment boundaries", () => {
     expect(Capability.tierOf(write("/workspace"), { workspaceRoot: "/workspace/" })).toBe("compensable")
   })
 
-  it("compares Windows drive roots case-insensitively", () => {
-    expect(Capability.tierOf(write("C:/Work/file.txt"), { workspaceRoot: "c:/work" })).toBe("compensable")
-    expect(Capability.tierOf(write("C:/other/file.txt"), { workspaceRoot: "c:/work" })).toBe("irreversible")
+  it("compares drive-shaped path text exactly under POSIX lexical rules", () => {
+    expect(Capability.tierOf(write("/C:/Work/file.txt"), { workspaceRoot: "/C:/Work" }))
+      .toBe("compensable")
+    expect(Capability.tierOf(write("/C:/Work/file.txt"), { workspaceRoot: "/c:/work" }))
+      .toBe("irreversible")
+  })
+
+  it("resolves drive-shaped relative resource text beneath a relative POSIX root", () => {
+    // Neither value is an absolute POSIX path. Plain lexical containment
+    // therefore resolves the resource beneath the root, without case folding.
+    expect(Capability.tierOf(write("a:/X/file"), { workspaceRoot: "A:/x" })).toBe("compensable")
   })
 })
 
@@ -97,5 +105,10 @@ describe("Capability.format over patterns", () => {
     // serve both classes.
     expect(Capability.format({ action: "net:get", resource: "api.example.com" }))
       .toBe("net:get:api.example.com")
+  })
+
+  it("rejects an invalid structural action before rendering durable bytes", () => {
+    expect(() => Capability.format({ action: "fs" as Capability.Action, resource: "read:/x" }))
+      .toThrow(/fs/)
   })
 })

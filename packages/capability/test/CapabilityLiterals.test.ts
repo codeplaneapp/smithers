@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Option, Schema } from "effect"
+import { Option } from "effect"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -108,16 +108,14 @@ const stagedFiles = roots
   .flatMap(filesUnder)
 
 /**
- * The action selectors the kernel itself declares, read off
- * `CapabilityPattern`'s own schema rather than copied here.
+ * The action selectors the kernel itself declares, read off the package's own
+ * `PatternAction` schema rather than copied here.
  *
  * The copy is what goes stale. A hand-written `fs|net|model|proc|jj` list stops
  * covering the vocabulary the day the kernel gains a namespace, and the sweep
- * reports a clean run over a corpus it can no longer see. Reading the selectors
- * makes that impossible: the extractor is built from the same literals
- * `CapabilityPattern` validates against.
+ * reports a clean run over a corpus it can no longer see.
  */
-const selectors: ReadonlyArray<string> = Capability.CapabilityPattern.fields.action.literals
+const selectors: ReadonlyArray<string> = Capability.PatternAction.literals
 
 /** The namespace half of a selector: `fs:read` and `fs:*` are both `fs`. */
 const namespacesOf = (from: ReadonlyArray<string>): ReadonlyArray<string> =>
@@ -232,32 +230,10 @@ const witnessActions: Readonly<Record<string, Capability.Action>> = {
   "jj:*": "jj:status"
 }
 
-/** Splits a literal the way both readers do: `*` alone is the whole action. */
-const halves = (text: string): { readonly action: string; readonly resource: string } => {
-  const parts = text.split(":")
-  return parts[0] === "*"
-    ? { action: "*", resource: parts.slice(1).join(":") }
-    : { action: `${parts[0]}:${parts[1]}`, resource: parts.slice(2).join(":") }
-}
-
-const decodePattern = Schema.decodeUnknownOption(Capability.CapabilityPattern)
-
 /**
- * Reads a literal with the reader that owns its shape: `parse` for an exact
- * capability, the `CapabilityPattern` schema for one whose action selector is
- * a wildcard, which `parse` rejects by design.
+ * Reads a literal with the package parser that owns the pattern grammar.
  */
-const read = (text: string): Option.Option<Capability.CapabilityPattern> => {
-  const { action } = halves(text)
-  if (!action.includes("*")) {
-    return Option.map(
-      Capability.parse(text),
-      (capability) => new Capability.CapabilityPattern({ action: capability.action, resource: capability.resource })
-    )
-  }
-  const { resource } = halves(text)
-  return decodePattern({ action, resource })
-}
+const read = (text: string): Option.Option<Capability.CapabilityPattern> => Capability.parsePattern(text)
 
 /**
  * Why a literal grants nothing, or `undefined` when it permits a request.

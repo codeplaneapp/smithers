@@ -1,11 +1,13 @@
-import { Option } from "effect"
+import { Option, Schema } from "effect"
 import { systemError } from "effect/PlatformError"
 import { describe, expect, it } from "vitest"
-import { Capability, CapabilityPattern } from "../src/Capability.ts"
+import { Capability, CapabilityPattern, maxMatchWork } from "../src/Capability.ts"
 import {
   evaluate,
   fromPlatformError,
+  PermissionDenied,
   permissionDenied,
+  PermissionRequired,
   permissionRequired,
   Rule,
   type RuleEffect,
@@ -110,6 +112,15 @@ describe("Permission policy", () => {
     ).toBe("deny")
   })
 
+  it("treats rulesets[0] as configured policy when the same rulesets are reordered", () => {
+    const denied = [rule("deny", "fs:read", "/workspace/readme.md")]
+    const allowed = [rule("allow", "fs:read", "/workspace/readme.md")]
+    const asked = [rule("ask", "fs:read", "/workspace/readme.md")]
+
+    expect(evaluate([denied, asked, allowed], capability)).toBe("deny")
+    expect(evaluate([allowed, denied, asked], capability)).toBe("ask")
+  })
+
   it.each(
     [
       [
@@ -165,6 +176,36 @@ describe("Permission policy", () => {
     ).toBe("ask")
     expect(evaluate([], capability)).toBe("ask")
   })
+
+  it("vetoes a decision when any rule cannot be matched within the work budget", () => {
+    const big = new Capability({ action: "proc:spawn", resource: "x".repeat(100_000) })
+    const allow = new Rule({
+      effect: "allow",
+      pattern: new CapabilityPattern({ action: "proc:spawn", resource: "*" })
+    })
+    const deny = new Rule({
+      effect: "deny",
+      pattern: new CapabilityPattern({ action: "proc:spawn", resource: `${"x".repeat(170)}*` })
+    })
+
+    expect(deny.pattern.resource.length * big.resource.length).toBeGreaterThan(maxMatchWork)
+    expect(evaluate([[deny], [allow]], big)).toBe("deny")
+    expect(evaluate([[allow, deny]], big)).toBe("deny")
+  })
+
+  it("does not veto for an over-budget rule whose action does not select the capability", () => {
+    const big = new Capability({ action: "proc:spawn", resource: "x".repeat(100_000) })
+    const deny = new Rule({
+      effect: "deny",
+      pattern: new CapabilityPattern({ action: "fs:read", resource: `${"x".repeat(170)}*` })
+    })
+    const allow = new Rule({
+      effect: "allow",
+      pattern: new CapabilityPattern({ action: "proc:spawn", resource: "*" })
+    })
+
+    expect(evaluate([[deny], [allow]], big)).toBe("allow")
+  })
 })
 
 describe("Permission construction and PlatformError projection", () => {
@@ -180,6 +221,158 @@ describe("Permission construction and PlatformError projection", () => {
     callerMeta.source = "mutated"
 
     expect(required.meta).toEqual({ source: "original" })
+  })
+
+  it("takes a deeply independent metadata snapshot", () => {
+    const callerMeta = { a: { b: 1 } }
+    const required = permissionRequired({
+      requestId: "request-1",
+      capability,
+      tier: "compensable",
+      meta: callerMeta
+    })
+
+    callerMeta.a.b = 2
+
+    expect(required.meta).toEqual({ a: { b: 1 } })
+  })
+
+  it("drops an undefined metadata property before encoding", () => {
+    const required = permissionRequired({
+      requestId: "request-1",
+      capability,
+      tier: "compensable",
+      meta: { cwd: undefined }
+    })
+    const encoded = Schema.encodeUnknownSync(PermissionRequired)(required)
+
+    expect(required.meta).toEqual({})
+    expect(required.meta).not.toHaveProperty("cwd")
+    expect(encoded.meta).toEqual({})
+    expect(encoded.meta).not.toHaveProperty("cwd")
+  })
+
+  it("drops nested undefined metadata properties", () => {
+    const required = permissionRequired({
+      requestId: "request-1",
+      capability,
+      tier: "compensable",
+      meta: { spawn: { cwd: undefined } }
+    })
+
+    expect(required.meta).toEqual({ spawn: {} })
+  })
+
+  it("rejects undefined metadata array elements rather than changing them to null", () => {
+    expect(() =>
+      permissionRequired({
+        requestId: "request-1",
+        capability,
+        tier: "compensable",
+        meta: { list: [undefined] }
+      })
+    ).toThrow(/list/)
+  })
+
+  it("rejects bigint metadata at construction and names the field", () => {
+    expect(() =>
+      permissionRequired({
+        requestId: "request-1",
+        capability,
+        tier: "compensable",
+        meta: { offendingBigint: 1n }
+      })
+    ).toThrow(/offendingBigint/)
+  })
+
+  it.each([
+    ["offendingFunction", () => undefined],
+    ["offendingDate", new Date("2026-08-31T00:00:00.000Z")]
+  ])("rejects non-JSON metadata at construction and names %s", (key, value) => {
+    expect(() =>
+      permissionRequired({
+        requestId: "request-1",
+        capability,
+        tier: "compensable",
+        meta: { [key]: value }
+      })
+    ).toThrow(new RegExp(key))
+  })
+
+  it("rejects a Date value instead of flattening the non-plain object", () => {
+    expect(() =>
+      permissionRequired({
+        requestId: "request-1",
+        capability,
+        tier: "compensable",
+        meta: { dateValue: new Date("2026-08-31T00:00:00.000Z") }
+      })
+    ).toThrow(/dateValue/)
+  })
+
+  it("deep-freezes the metadata snapshot", () => {
+    const required = permissionRequired({
+      requestId: "request-1",
+      capability,
+      tier: "compensable",
+      meta: { k: 0, nested: { value: 1 }, list: [{ value: 2 }] }
+    })
+
+    expect(Object.isFrozen(required.meta)).toBe(true)
+    expect(Object.isFrozen(required.meta.nested)).toBe(true)
+    const list = required.meta.list
+    expect(Array.isArray(list)).toBe(true)
+    if (!Array.isArray(list)) throw new Error("expected metadata list")
+    expect(Object.isFrozen(list)).toBe(true)
+    expect(Object.isFrozen(list[0])).toBe(true)
+    expect(() => {
+      ;(required.meta as Record<string, unknown>).k = 1
+    }).toThrow()
+  })
+
+  it("makes the metadata slot non-writable", () => {
+    const required = permissionRequired({
+      requestId: "request-1",
+      capability,
+      tier: "compensable",
+      meta: { source: "original" }
+    })
+
+    expect(() => {
+      ;(required as any).meta = { unsafe: 1n }
+    }).toThrow()
+    expect(required.meta).toEqual({ source: "original" })
+    expect(() => Schema.encodeUnknownSync(PermissionRequired)(required)).not.toThrow()
+  })
+
+  it("does not retain the caller's capability in a permission request", () => {
+    const callerCapability = new Capability({ action: "fs:read", resource: "/a" })
+    const required = permissionRequired({
+      requestId: "request-1",
+      capability: callerCapability,
+      tier: "sealed"
+    })
+    ;(callerCapability as any).resource = "/b"
+
+    expect(required.capability.resource).toBe("/a")
+  })
+
+  it("does not retain the caller's capability in a permission denial", () => {
+    const callerCapability = new Capability({ action: "fs:read", resource: "/a" })
+    const denied = permissionDenied(callerCapability, "no")
+    ;(callerCapability as any).resource = "/b"
+
+    expect(denied.capability.resource).toBe("/a")
+  })
+
+  it.each([
+    permissionRequired({ requestId: "request-1", capability, tier: "sealed" }),
+    permissionDenied(capability, "no")
+  ])("makes a permission failure's capability slot non-writable", (error) => {
+    expect(() => {
+      ;(error as any).capability = new Capability({ action: "fs:read", resource: "/replacement" })
+    }).toThrow()
+    expect(error.capability.resource).toBe("/workspace/readme.md")
   })
 
   it("preserves a numeric file descriptor in the PlatformError projection", () => {

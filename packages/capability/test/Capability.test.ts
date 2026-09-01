@@ -1,4 +1,4 @@
-import { Option, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { FastCheck } from "effect/testing"
 import { spawnSync } from "node:child_process"
 import { describe, expect, it } from "vitest"
@@ -27,6 +27,27 @@ describe("Capability", () => {
     expect(Option.isNone(Capability.parse("unknown:action:resource"))).toBe(true)
     expect(Option.isNone(Capability.parse("fs:read"))).toBe(true)
   })
+
+  it.each(
+    [
+      ["*:**", "*", "**"],
+      ["*:", "*", ""],
+      ["fs:*:/workspace/**", "fs:*", "/workspace/**"],
+      ["fs:read:/a:b", "fs:read", "/a:b"],
+      ["fs:read:", "fs:read", ""]
+    ] as const
+  )("parses the capability pattern %s", (input, action, resource) => {
+    // `*:**` is the whole-authority envelope that one production reader could
+    // not recover from the durable format.
+    expect(Option.getOrThrow(Capability.parsePattern(input))).toEqual(pattern(action, resource))
+  })
+
+  it.each(["*", "fs:read", "nope:read:/a", ":fs:read:x"])(
+    "rejects the malformed capability pattern %s",
+    (input) => {
+      expect(Capability.parsePattern(input)).toStrictEqual(Option.none())
+    }
+  )
 
   it("round trips formatted capabilities", () => {
     const action = FastCheck.constantFrom<Capability.Action>(
@@ -59,21 +80,87 @@ describe("Capability", () => {
     [pattern("fs:read", "src/?.ts"), capability("fs:read", "src/a.ts"), true],
     [pattern("fs:read", "src/?.ts"), capability("fs:read", "src/ab.ts"), false],
     [pattern("fs:read", "src/**/Capability.ts"), capability("fs:read", "src/nested/Capability.ts"), true],
-    [pattern("fs:*", "C:/work/**"), capability("fs:write", "C:\\work\\nested\\a.ts"), true],
+    // Windows is unsupported: a backslash is literal and never matches `/`.
+    [pattern("fs:*", "C:/work/**"), capability("fs:write", "C:\\work\\nested\\a.ts"), false],
     [pattern("jj:*", "repository"), capability("jj:diff", "repository"), true],
     [pattern("model:*", "api.example.test/**"), capability("model:call", "api.example.test/large"), true],
     [pattern("*", "**"), capability("proc:spawn", "git status"), true],
     [pattern("proc:spawn", "npm *"), capability("proc:spawn", "npm"), true],
-    [pattern("fs:read", "c:/work/**"), capability("fs:read", "C:\\WORK\\nested\\a.ts"), true],
+    // Matching never normalizes separators or folds case, including drive-shaped text.
+    [pattern("fs:read", "c:/work/**"), capability("fs:read", "C:\\WORK\\nested\\a.ts"), false],
     [pattern("net:*", "example.test"), capability("net:post", "other.test"), false]
   ])("matches %o against %o", (selectedPattern, selectedCapability, expected) => {
     expect(Capability.matches(selectedPattern, selectedCapability)).toBe(expected)
   })
 
+  it("keeps POSIX backslashes literal during resource matching", () => {
+    expect(
+      Capability.matches(pattern("fs:write", "/workspace/**"), capability("fs:write", "/workspace\\evil"))
+    ).toBe(false)
+    expect(Capability.matches(pattern("fs:read", "/a\\b"), capability("fs:read", "/a\\b"))).toBe(true)
+  })
+
+  it("treats drive-shaped resources as byte-exact text", () => {
+    // Drive-shaped strings have no special matching behavior on the supported
+    // POSIX hosts: neither side selects case folding or slash normalization.
+    expect(Capability.matches(pattern("fs:read", "*/Work/a"), capability("fs:read", "c:/work/a"))).toBe(false)
+    expect(Capability.matches(pattern("fs:read", "*/work/a"), capability("fs:read", "c:/work/a"))).toBe(true)
+    expect(Capability.matches(pattern("fs:read", "A:/x"), capability("fs:read", "a:/X"))).toBe(false)
+    expect(Capability.matches(pattern("fs:read", "./A:/x"), capability("fs:read", "./a:/X"))).toBe(false)
+  })
+
+  it("does not authorize a drive-shaped subtree escape by rewriting requested backslashes", () => {
+    // Slash normalization used to turn this distinct POSIX filename into
+    // `C:/x/../../etc/passwd`, widening the `C:/x/**` grant.
+    expect(
+      Capability.matches(
+        pattern("fs:write", "C:/x/**"),
+        capability("fs:write", "C:/x\\..\\..\\etc\\passwd")
+      )
+    ).toBe(false)
+  })
+
+  it("documents query-string and UTF-16 wildcard behavior", () => {
+    // The URL case is the hazard that makes patternFromCapability refuse
+    // resources containing metacharacters.
+    expect(
+      Capability.matches(
+        pattern("net:get", "https://api.test/v1?k=1"),
+        capability("net:get", "https://api.test/v1Xk=1")
+      )
+    ).toBe(true)
+    expect(Capability.matches(pattern("fs:read", "a?b"), capability("fs:read", "a\u{1F600}b"))).toBe(false)
+    expect(Capability.matches(pattern("fs:read", "a??b"), capability("fs:read", "a\u{1F600}b"))).toBe(true)
+  })
+
+  it("derives an exact pattern only when the resource grammar can express one", () => {
+    const exact = capability("fs:read", "/workspace/readme.md")
+    const derived = Option.getOrThrow(Capability.patternFromCapability(exact))
+
+    expect(Capability.matches(derived, exact)).toBe(true)
+    expect(Capability.format(derived)).toBe(Capability.format(exact))
+    expect(Option.isSome(Capability.patternFromCapability(capability("fs:read", "quoted\"\nname")))).toBe(true)
+  })
+
+  it("derives an exact grant for drive-shaped resource text", () => {
+    const exact = capability("fs:read", "A:/x")
+    const derived = Option.getOrThrow(Capability.patternFromCapability(exact))
+
+    expect(Capability.matches(derived, exact)).toBe(true)
+    expect(Capability.matches(derived, capability("fs:read", "a:/X"))).toBe(false)
+  })
+
+  it.each(["literal*name", "literal?name", "rm *.tmp"])(
+    "refuses to derive an exact pattern for the metacharacter resource %s",
+    (resource) => {
+      expect(Capability.patternFromCapability(capability("proc:spawn", resource))).toStrictEqual(Option.none())
+    }
+  )
+
   // Regression pin for the repeated-star ReDoS: the matcher is an iterative
   // glob walk, so this non-match completes instead of backtracking
   // exponentially. The subprocess keeps a regression from hanging the suite.
-  it("completes a 10k-character non-match for a repeated-star grant pattern", () => {
+  it("completes a long non-match for a repeated-star grant pattern", () => {
     const matchProcess = spawnSync(
       process.execPath,
       ["--input-type=module", "--eval", repeatedStarProgram],
@@ -109,14 +196,12 @@ describe("Capability", () => {
     ).toBe(false)
   })
 
-  it("folds Windows-path case exactly like the regex i-flag canonicalization", () => {
-    // `é` uppercases within one unit, so the fold applies; `ß` uppercases to
-    // two units and `ı` uppercases onto ASCII `I`, so the ECMA-262
-    // non-Unicode canonicalization keeps both distinct from their uppercase
-    // forms — and therefore so does the matcher.
-    expect(Capability.matches(pattern("fs:read", "c:/é"), capability("fs:read", "C:/É"))).toBe(true)
+  it("never folds case for drive-shaped resource text", () => {
+    // Windows is unsupported, so every UTF-16 code unit is compared exactly.
+    expect(Capability.matches(pattern("fs:read", "c:/é"), capability("fs:read", "C:/É"))).toBe(false)
     expect(Capability.matches(pattern("fs:read", "c:/ß"), capability("fs:read", "C:/SS"))).toBe(false)
     expect(Capability.matches(pattern("fs:read", "c:/ı"), capability("fs:read", "C:/I"))).toBe(false)
+    expect(Capability.matches(pattern("fs:read", "c:/é"), capability("fs:read", "c:/é"))).toBe(true)
   })
 
   it("preserves resource delimiters and newlines after a valid action while rejecting a malformed action prefix", () => {
@@ -168,6 +253,102 @@ describe("Capability", () => {
     expect(Capability.subsumes(pattern("fs:read", "src/**"), pattern("fs:read", "src/a/b"))).toBe(true)
   })
 
+  it("keeps matches and subsumes aligned on drive-shaped case", () => {
+    // Neither predicate folds case. `subsumes` remains deliberately
+    // conservative, but the former case-fold asymmetry is gone.
+    const grant = pattern("fs:read", "c:/work/**")
+    const requestedPattern = pattern("fs:read", "C:/work/a")
+    const requestedCapability = capability("fs:read", "C:/work/a")
+
+    expect(Capability.subsumes(grant, requestedPattern)).toBe(false)
+    expect(Capability.matches(grant, requestedCapability)).toBe(false)
+  })
+
+  it("exports validators for action selectors and effect tiers", () => {
+    expect(Schema.is(Capability.Action)("fs:read")).toBe(true)
+    expect(Schema.is(Capability.Action)("fs:delete")).toBe(false)
+    expect(Schema.is(Capability.PatternAction)("fs:*")).toBe(true)
+    expect(Schema.is(Capability.PatternAction)("fs:delete")).toBe(false)
+    expect(Schema.is(Capability.EffectTier)("compensable")).toBe(true)
+    expect(Schema.is(Capability.EffectTier)("reversible")).toBe(false)
+  })
+
+  it("bounds pattern resources without bounding exact capabilities", () => {
+    const boundary = "x".repeat(Capability.maxResourceLength)
+    const overlong = `${boundary}x`
+    const exactBoundary = capability("proc:spawn", boundary)
+
+    expect(capability("fs:read", boundary).resource).toBe(boundary)
+    expect(pattern("fs:read", boundary).resource).toBe(boundary)
+    expect(capability("fs:read", overlong).resource).toBe(overlong)
+    expect(() => pattern("fs:read", overlong)).toThrow("Schema validation failed")
+    expect(Schema.decodeUnknownResult(Capability.Capability)({ action: "fs:read", resource: overlong }))
+      .toMatchObject({ success: { resource: overlong } })
+    expect(Schema.decodeUnknownResult(Capability.CapabilityPattern)({ action: "fs:read", resource: overlong }))
+      .toMatchObject({ failure: { _tag: "SchemaError" } })
+    expect(Option.getOrThrow(Capability.parse(`fs:read:${overlong}`)).resource).toBe(overlong)
+    expect(Capability.parsePattern(`fs:read:${overlong}`)).toStrictEqual(Option.none())
+    expect(Capability.parsePattern(`*:${overlong}`)).toStrictEqual(Option.none())
+    expect(Capability.patternFromCapability(capability("proc:spawn", overlong))).toStrictEqual(Option.none())
+    expect(
+      Capability.matches(Option.getOrThrow(Capability.patternFromCapability(exactBoundary)), exactBoundary)
+    ).toBe(true)
+  })
+
+  it("constructs a long exact capability as an Effect success rather than a defect", () => {
+    const resource = "x".repeat(5000)
+    const exit = Effect.runSyncExit(
+      Effect.suspend(() => Effect.succeed(Capability.make("proc:spawn", resource)))
+    )
+
+    expect(exit).toMatchObject({ _tag: "Success", value: { resource } })
+  })
+
+  it("round trips a formatted long exact capability", () => {
+    const formatted = Capability.format({ action: "proc:spawn", resource: "x".repeat(5000) })
+    const parsed = Option.getOrThrow(Capability.parse(formatted))
+
+    expect(Capability.format(parsed)).toBe(formatted)
+  })
+
+  it("matches a short command grant against a long realistic resource", () => {
+    expect(
+      Capability.matches(
+        pattern("proc:spawn", "node *"),
+        capability("proc:spawn", `node ${"x".repeat(20_000)}`)
+      )
+    ).toBe(true)
+  })
+
+  it("fails closed when glob matching would exceed the work budget", () => {
+    const maximalPattern = pattern("fs:read", "*".repeat(Capability.maxResourceLength))
+    const overBudget = capability("fs:read", "x".repeat(Capability.maxResourceLength + 1))
+
+    expect(maximalPattern.resource.length * overBudget.resource.length).toBeGreaterThan(Capability.maxMatchWork)
+    expect(Capability.matches(maximalPattern, overBudget)).toBe(false)
+  })
+
+  it("reports whether a pattern and capability can be matched within the budget", () => {
+    const big = capability("proc:spawn", "x".repeat(100_000))
+    const maximalPattern = pattern("proc:spawn", "x".repeat(Capability.maxResourceLength))
+
+    expect(Capability.withinMatchBudget(pattern("proc:spawn", "*"), big)).toBe(true)
+    expect(Capability.withinMatchBudget(pattern("proc:spawn", `${"x".repeat(170)}*`), big)).toBe(false)
+    expect(Capability.withinMatchBudget(pattern("fs:read", `${"x".repeat(170)}*`), big)).toBe(true)
+    expect(
+      Capability.withinMatchBudget(
+        maximalPattern,
+        capability("proc:spawn", "x".repeat(Capability.maxResourceLength))
+      )
+    ).toBe(true)
+    expect(
+      Capability.withinMatchBudget(
+        maximalPattern,
+        capability("proc:spawn", "x".repeat(Capability.maxResourceLength + 1))
+      )
+    ).toBe(false)
+  })
+
   it.each([
     [capability("fs:read", "anything"), "sealed"],
     [capability("net:get", "example.test"), "sealed"],
@@ -196,13 +377,17 @@ describe("Capability", () => {
     expect(Capability.requiresIdempotencyKey("irreversible")).toBe(true)
   })
 
-  it.each([
-    ["C:/Work", "c:/work/src/a.ts"],
-    ["C:/", "c:/src/a.ts"],
-    ["c:\\", "C:\\src\\a.ts"]
-  ])("classifies Windows writes inside workspace %s case-insensitively", (workspaceRoot, resource) => {
+  it.each(
+    [
+      ["/C:/Work", "/C:/Work/src/a.ts", "compensable"],
+      ["/C:/Work", "/c:/work/src/a.ts", "irreversible"],
+      ["/c:/", "/C:/src/a.ts", "irreversible"]
+    ] as const
+  )("compares drive-shaped POSIX workspace text exactly under %s", (workspaceRoot, resource, expected) => {
+    // Drive syntax has no special meaning on supported hosts; lexical
+    // containment compares slash-separated POSIX text exactly.
     expect(
       Capability.tierOf(capability("fs:write", resource), { workspaceRoot })
-    ).toBe("compensable")
+    ).toBe(expected)
   })
 })

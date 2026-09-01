@@ -18,4 +18,12 @@ describe("Capability.tierOf lexical escape boundaries", () => {
   it("classifies parent traversal that escapes the workspace as irreversible", () => {
     expect(Capability.tierOf(write("a/../../outside"), { workspaceRoot: "/workspace" })).toBe("irreversible")
   })
+
+  it("keeps POSIX backslashes literal when classifying workspace writes", () => {
+    expect(Capability.tierOf(write("/workspace\\evil"), { workspaceRoot: "/workspace" }))
+      .toBe("irreversible")
+    expect(
+      Capability.tierOf(write("/tmp/evil\\..\\..\\workspace\\x"), { workspaceRoot: "/workspace" })
+    ).toBe("irreversible")
+  })
 })
