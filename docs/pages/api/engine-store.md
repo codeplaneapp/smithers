@@ -149,7 +149,7 @@ interface Service {
 }
 ```
 
-`execute` is speculative and never touches the host. It seeds the transaction with exactly the declared read set, an undeclared file is simply not there, which is `docs/specs/Concepts/Effect Taxonomy.md`'s strong enforcement tier, serves it through both the `Workspace` tag and a re-rooted Effect `FileSystem`, and diffs the whole map at settlement. An execution whose observations contradict its declaration is `Invalidated` in hard mode, and that shape carries provenance and violations _only_: there is no accessor for the candidate output, files, or queued effects.
+`execute` is speculative and never touches the host. It seeds the transaction with exactly the declared read set, an undeclared file is simply not there, which is the strong enforcement tier, serves it through both the `Workspace` tag and a re-rooted Effect `FileSystem`, and diffs the whole map at settlement. An execution whose observations contradict its declaration is `Invalidated` in hard mode, and that shape carries provenance and violations _only_: there is no accessor for the candidate output, files, or queued effects.
 
 `materialize` is the single host write and is all-or-nothing: every `FileChange.beforeDigest` is compared against the live host before a byte lands, so a bundle whose base moved is refused whole with `MaterializationConflict` and `ActionPersistence` rebases a bounded number of times. `beforeDigest` describes what is really on the host, including for a declared output the body never declared as a read: the `Host.baseline` seam is what supplies it, because "absent from the seed" is not "absent from the host".
 
@@ -157,7 +157,7 @@ interface Service {
 
 `makeMemory` is the deterministic, browser-safe conformance implementation (it seeds the whole tree, so an undeclared read is observable); `makeFileSystem` / `layerFileSystem` back the transaction with the kernel `FileSystem`, the kernel `Workspace` root, and `@smthrs/artifacts` for products too large to carry inline. Both are `makeHosted` over one `Host`, so the transaction, the diff, the violation check, and the provenance cannot drift between them.
 
-It is a **deterministic transaction model, not a security boundary**. A body reaching the host through a service the transaction does not seed is outside it; denying that ambient access is the VM/`SandboxProvider` story in `docs/specs/Concepts/Agent Adapters.md`. The human diff-review gate of `docs/specs/Concepts/Diff Review.md` is not implemented, a settled bundle is applied without it (`.smithers/tickets/diff-review-gate.md`), and the transaction's `FileSystem` surface is deliberately partial (`.smithers/tickets/sandbox-filesystem-surface.md`).
+It is a **deterministic transaction model, not a security boundary**. A body reaching the host through a service the transaction does not seed is outside it; denying that ambient access is the VM/`SandboxProvider` story in [`@smthrs/sandbox`](/api/sandbox). The human diff-review gate is not implemented and a settled bundle is applied without it, which [Known limitations](/release/known-limitations) records, and the transaction's `FileSystem` surface is deliberately partial.
 
 ### `PlanScheduler`
 
@@ -175,13 +175,13 @@ interface Service {
 
 Ready nodes dispatch through the same `internal/ActionPersistence` seam every action uses, so the shared step cache, [`WorkspaceSandbox`](#workspacesandbox)'s execute→materialize transaction, attempt rows, and the fenced journal all apply unchanged. The dispatch key folds the plan-time node key together with the boundary the host measured immediately before dispatch: two runs whose input files differ declare the same graph, and serving one the other's result is exactly the staleness the boundary exists to prevent.
 
-Skyframe's `AbstractParallelEvaluator` is the prior art, with two deliberate deviations. There is **no reverse-dependency index and no invalidating node visitor**: `docs/specs/Concepts/Engine Hardening Round 1.md` rejects both, because a node is dirty iff the key it would dispatch under moved and the dispatch-time recheck already computes that. And dependency discovery is a **wavefront** rather than Skyframe's restart-based discovery, because the plan declares its edges before anything runs.
+Skyframe's `AbstractParallelEvaluator` is the prior art, with two deliberate deviations. There is **no reverse-dependency index and no invalidating node visitor**, because a node is dirty iff the key it would dispatch under moved and the dispatch-time recheck already computes that. And dependency discovery is a **wavefront** rather than Skyframe's restart-based discovery, because the plan declares its edges before anything runs.
 
-Each node settles as one of four outcomes, `built`, `clean` (the shared cache served it and nothing ran), `failed`, and `skipped` (its cone failed, or `stop-merge` stopped it), journaled as `node-settled`. Admission is `docs/specs/Concepts/Concurrency.md`'s middle limit only: `concurrency.steps` caps leaf execution and `concurrency.agents` caps the agent subset within it. Both default to unbounded and both floor at one, because a cap of zero admits nothing and a round that admits nothing settles nothing. Ready work is ordered by declared `priority` plus one point per round waited, so priority changes latency without permitting starvation.
+Each node settles as one of four outcomes, `built`, `clean` (the shared cache served it and nothing ran), `failed`, and `skipped` (its cone failed, or `stop-merge` stopped it), journaled as `node-settled`. Admission is the middle limit only: `concurrency.steps` caps leaf execution and `concurrency.agents` caps the agent subset within it. Both default to unbounded and both floor at one, because a cap of zero admits nothing and a round that admits nothing settles nothing. Ready work is ordered by declared `priority` plus one point per round waited, so priority changes latency without permitting starvation.
 
-Source paths, read by the plan, written by nothing in it, are measured **once** before the first dispatch and pinned for the whole run; produced paths are measured after their producer settles. That is `docs/specs/Concepts/Staleness.md`'s torn-run rule: a rebase re-observes our own outputs, never the world.
+Source paths, read by the plan, written by nothing in it, are measured **once** before the first dispatch and pinned for the whole run; produced paths are measured after their producer settles. That is the torn-run rule [Support matrix](/release/support-matrix) records: a rebase re-observes our own outputs, never the world.
 
-The runtime conflict strategies of `docs/specs/Concepts/Runtime Conflict Strategies.md` ride the plan's pair annotations. **delay/rebase** holds the dependents and re-executes against the newly recorded base, the re-measure re-keys, so it is a new attempt rather than a retry of one identity, journaled as `node-invalidated`, bounded by `rebaseLimit`. **stop/merge** stops the loser and appends a merge node to the _same_ plan as an ordinary elaboration, with no rebase budget of its own per `Worktree Lanes`' restart-or-fail landing contract. A conflict neither absorbs goes to [`Reconciliation`](#reconciliation).
+The runtime conflict strategies ride the plan's pair annotations. **delay/rebase** holds the dependents and re-executes against the newly recorded base, the re-measure re-keys, so it is a new attempt rather than a retry of one identity, journaled as `node-invalidated`, bounded by `rebaseLimit`. **stop/merge** stops the loser and appends a merge node to the _same_ plan as an ordinary elaboration, with no rebase budget of its own, because a lane that loses a landing race restarts or fails rather than rebasing. A conflict neither absorbs goes to [`Reconciliation`](#reconciliation).
 
 `NodeExecutor` is the DI seam that turns a `NodeInput` into work: the scheduler owns identity, admission, caching, and journaling, and deliberately owns nothing about what a node _means_.
 
@@ -202,7 +202,7 @@ Pluggability is dependency injection at the owning seam, per the repository's ex
 
 The scheduler attributes every deviation on a journal page before judging any of it, so two steps that produced the same undeclared paths both see each other: deviating identically is a symmetric fact, and which of the pair the journal happened to list first must not decide the verdict.
 
-A model-backed reconciler is a different `Layer`. It lives in the agent repository and is tracked in `.smithers/tickets/agent-reconciliation-flow.md`; this package has no model dependency and must not grow one.
+A model-backed reconciler is a different `Layer`. It lives in the agent packages; this package has no model dependency and must not grow one.
 
 ### `Selection`
 

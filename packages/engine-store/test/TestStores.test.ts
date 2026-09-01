@@ -1,6 +1,6 @@
 /**
  * The engine composes the journal, the run store, and the step cache over one
- * database — see `docs/specs/Concepts/Journal Split.md`. This pins that the
+ * database — see `docs/pages/concepts/journal.md`. This pins that the
  * bundle really is one database with one migrated schema.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"

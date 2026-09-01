@@ -601,10 +601,24 @@ describe("copy-back conflict retry", () => {
       const first = yield* withCrypto(identity(forward, "new-b"))
       const reordered = yield* withCrypto(identity(reverse, "new-b"))
       const changed = yield* withCrypto(identity(forward, "different-b"))
+      const removed = yield* withCrypto(Effect.gen(function*() {
+        const memory = yield* WorkspaceSandbox.makeMemory({ "a.txt": "old-a" })
+        const settlement = yield* SandboxedExecution.execute({
+          sandbox: memory.service,
+          descriptor: { readSet: [], writeSet: ["a.txt"], boundaryMode: "hard" },
+          workflow: Effect.gen(function*() {
+            const inner = yield* WorkspaceSandbox.Workspace
+            yield* inner.removeFile("a.txt")
+            return null
+          })
+        })
+        return settlement.bundleIdentity
+      }))
 
       expect(first).toMatch(/^key1_[0-9a-f]{64}$/)
       expect(reordered).toBe(first)
       expect(changed).not.toBe(first)
+      expect(removed).toMatch(/^key1_[0-9a-f]{64}$/)
     }))
 })
 

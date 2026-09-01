@@ -148,7 +148,7 @@ describe("EngineStoreMetrics", () => {
 
     const boundary = spans.find((span) => span.name === "StepBoundary.prepare")
     expect(boundary?.attributes.get("runId")).toBe("run-metrics")
-    expect(boundary?.attributes.get("key")).toEqual(expect.any(String))
+    expect(boundary?.attributes.get("stepKey")).toEqual(expect.any(String))
     expect(boundary?.attributes.get("attempt")).toBe(1)
   })
 

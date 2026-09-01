@@ -233,6 +233,27 @@ const retention = Effect.gen(function*() {
 })
 
 describe("retention", () => {
+  it.effect("discovers optional run-scoped tables and retains assumed ladder tables", () =>
+    Effect.gen(function*() {
+      const result = yield* withCrypto(
+        Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          yield* createArchiveTable
+          yield* seedTimeTravelReceipt("outside-empty-pass")
+          return {
+            discovered: yield* RetentionOps.installedTables(sql, { assumeLadder: false }),
+            assumed: yield* RetentionOps.installedTables(sql, { assumeLadder: true }),
+            empty: yield* RetentionOps.deleteRuns(sql, [], { dryRun: true, assumeLadder: false })
+          }
+        }).pipe(Effect.provide(stores))
+      )
+
+      expect(result.discovered.map((entry) => entry.table)).toContain("flows_time_travel_archive")
+      expect(result.discovered.map((entry) => entry.table)).not.toContain("flows_time_travel_snapshots")
+      expect(result.assumed).toEqual(result.discovered)
+      expect(result.empty.deleted).toEqual({})
+    }))
+
   it.effect("deletes receipts through doomed audits and preserves a live run's receipt", () =>
     withCrypto(
       Effect.gen(function*() {

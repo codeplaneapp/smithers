@@ -1,7 +1,7 @@
 /**
  * The engine writes the effect-boundary evidence a rewind assesses.
  *
- * `docs/specs/Concepts/Time Travel Compensation.md` requires one durable entry
+ * `docs/pages/concepts/time-travel.md` requires one durable entry
  * before the adapter begins and a terminal entry after it settles, for tier-3
  * work only. These cases pin both halves and the shape the decoder in
  * `@smthrs/time-travel` reads them under.

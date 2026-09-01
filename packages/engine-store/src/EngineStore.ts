@@ -172,7 +172,14 @@ const makeWithEngineJj = (
       yield* Effect.annotateCurrentSpan({
         runId: parent.executionId,
         action: input.action.name,
-        key: input.key,
+        // `stepKey`, never `key`. `@smthrs/journal`'s redaction replaces the
+        // value of any field whose name is a standalone trailing `key` word,
+        // and `RedactedLogger` applies that rule to every log line this
+        // package emits under a real host. A field named `key` reached the
+        // operator as `[REDACTED]`, destroying the one field that says which
+        // dispatch the line describes. The span carries the same name so the
+        // trace and the log agree.
+        stepKey: input.key,
         attempt: input.attempt,
         tier: input.tier
       })
@@ -197,7 +204,7 @@ const makeWithEngineJj = (
       const logContext = {
         runId: parent.executionId,
         action: input.action.name,
-        key: input.key,
+        stepKey: input.key,
         attempt: input.attempt,
         tier: input.tier
       }
@@ -365,7 +372,7 @@ const layerBase = (
     Effect.map(EngineJj.EngineJj, (jj) =>
       FlowEngine.SnapshotBoundary.of({
         snapshot: Effect.fn("SnapshotBoundary.snapshot")(({ key, attempt }) =>
-          Effect.annotateCurrentSpan({ key, attempt }).pipe(
+          Effect.annotateCurrentSpan({ stepKey: key, attempt }).pipe(
             Effect.andThen(jj.snapshot(`smithers action ${key} attempt ${attempt}`)),
             Effect.orDie,
             Effect.map((snapshot) => snapshot.changeId)
@@ -378,7 +385,7 @@ const layerBase = (
           )
         ),
         diff: Effect.fn("SnapshotBoundary.diff")((snapshot, { key, attempt }) =>
-          Effect.annotateCurrentSpan({ key, attempt }).pipe(
+          Effect.annotateCurrentSpan({ stepKey: key, attempt }).pipe(
             Effect.andThen(jj.snapshot(`smithers action ${key} attempt ${attempt} settled`)),
             Effect.orDie,
             Effect.flatMap((current) => jj.diff(snapshot as never, current.changeId).pipe(Effect.orDie))

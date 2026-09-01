@@ -37,9 +37,25 @@
 - Removed the internal `@slop` review markers from every published JSDoc block.
   They shipped in `src/**/*.ts` and the generated declarations, so a consumer's
   editor hover showed a repository to-do instead of the contract.
-- Repointed every JSDoc design reference at its published `docs/pages`
-  successor. The imported `docs/specs` tree does not exist in this repository,
-  so each pointer named a file no reader could open.
+- Repointed every JSDoc design reference, every reference in the package's own
+  `docs/` prose, and the remaining references in test headers at their published
+  `docs/pages` successors. The imported `docs/specs` tree and the
+  `.smithers/tickets` notes do not exist in this repository, so each pointer
+  named a file no reader could open.
+- Renamed the durable `flows.engine.cache-conflict` payload field `key` to
+  `cacheKey`. `@smthrs/journal` reads a field named `key` as a credential and
+  replaces its value with `[REDACTED]`, which erased the very content address
+  the conflict record exists to preserve.
+- Renamed the dispatch observability field `key` to `stepKey` on every log
+  annotation and span attribute this package writes. The same journal rule that
+  redacts a durable `key` also redacts a log annotation named `key`, and
+  `RedactedLogger` is installed by `@smthrs/flows`' `NodeRuntime` and by the
+  `smithers` binary, so every dispatch line an operator read said
+  `key=[REDACTED]` and no longer named which step it described. Span attributes
+  take the new name too, so a trace and a log line agree.
+- Validated `DisasterRecovery` `maxFileSizeBytes` at option admission. A
+  fractional, NaN, infinite, negative, or unsafe value now fails with the new
+  `invalid_options` code instead of dying inside `BigInt`.
 
 ### Fixed
 
@@ -61,7 +77,15 @@
   so a boundary refusal, a sandbox refusal, or any `Data.TaggedError` settles
   the attempt instead of being refused by the store as a non-plain object. A
   value JSON cannot express at all now records as `null` rather than as a
-  dropped key the replay decoder could not read.
+  dropped key the replay decoder could not read. The reduction reads own data
+  properties only, so persisting a failure no longer runs the failing value's
+  getters, `toJSON`, or proxy traps, and it is bounded by the depth, node, and
+  character allowances the attempt store admits, so an outsized failure records
+  as `null` instead of being refused and leaving the row `running`.
+- Enumerated a declared tree artifact in full. `.git`, `.jj`, and `node_modules`
+  are pruned from glob expansion only; pruning them from `filesUnder` and
+  `entriesUnder` left files out of a tree's captured identity and left stale
+  copies of them behind on replay.
 - Dropped quarantined boundary evidence by omitting the key rather than writing
   `undefined` over it, which the attempt store refuses.
 
