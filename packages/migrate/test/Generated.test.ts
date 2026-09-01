@@ -4,19 +4,31 @@
  * `src/internal/FacadeExports.ts` is committed so the package builds without a 0.x
  * checkout beside it. That makes it a file that can rot. This test regenerates
  * it from the old checkout and fails when the committed copy has drifted, and
- * skips with a reason on a machine that has no old checkout.
+ * skips with a reason on a machine that has no old checkout. Point
+ * `SMITHERS_0X_CHECKOUT` at a 0.x tree to run it.
  *
  * @since 0.1.0
  */
 import { describe, expect, it } from "@effect/vitest"
 import { execFileSync } from "node:child_process"
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { componentProps, facadeExports } from "../src/internal/FacadeExports.ts"
 
-const oldCheckout = "/Users/williamcory/smithers"
-const present = existsSync(join(oldCheckout, "packages/smithers/package.json"))
+// The path the 0.x tree occupied before the migration converted it in place, so
+// on this machine it now holds the 1.0 repository rather than a 0.x checkout and
+// the regeneration case below skips. Read from the environment first so a
+// machine that still keeps a 0.x tree somewhere can run the case.
+//
+// The guard identifies a 0.x tree positively rather than testing that a path
+// exists: `packages/smithers` is a 0.x-only package, and its manifest has to
+// carry the 0.x name, so a 1.0 checkout sitting at the same path can never be
+// mistaken for one and regenerated against.
+const oldCheckout = process.env["SMITHERS_0X_CHECKOUT"] ?? "/Users/williamcory/smithers"
+const legacyManifest = join(oldCheckout, "packages/smithers/package.json")
+const present = existsSync(legacyManifest) &&
+  (JSON.parse(readFileSync(legacyManifest, "utf8")) as { name?: string }).name === "smithers"
 const packageRoot = fileURLToPath(new URL("..", import.meta.url))
 
 describe("the generated catalog", () => {
