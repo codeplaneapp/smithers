@@ -49,6 +49,14 @@ const backup = (
   options: Omit<DisasterRecovery.BackupOptions, "snapshotDatabaseLayer">
 ) => DisasterRecovery.backup({ ...options, snapshotDatabaseLayer: snapshotDatabase })
 
+const invalidFileSizeLimits: ReadonlyArray<readonly [string, number]> = [
+  ["fractional", 1.5],
+  ["NaN", Number.NaN],
+  ["infinite", Number.POSITIVE_INFINITY],
+  ["negative", -1],
+  ["unsafe", Number.MAX_SAFE_INTEGER + 1]
+]
+
 /** Plants a blob at its content address inside a store objects directory. */
 const plantBlob = (objectsDirectory: string, bytes: string): string => {
   const digest = sha256(bytes)
@@ -65,6 +73,34 @@ const failure = <A>(
 }
 
 describe("backup", () => {
+  for (const [name, maxFileSizeBytes] of invalidFileSizeLimits) {
+    it.effect(`rejects a ${name} maxFileSizeBytes as invalid options`, () =>
+      Effect.gen(function*() {
+        const exit = yield* run(
+          backup({
+            directory: join(root(), "backup"),
+            maxFileSizeBytes
+          }).pipe(Effect.exit)
+        )
+        const error = failure(exit)
+        expect(error).toBeInstanceOf(DisasterRecovery.DisasterRecoveryError)
+        expect(error).toMatchObject({ code: "invalid_options", method: "backup" })
+      }))
+  }
+
+  it.effect("admits zero and the largest safe integer as file-size options", () =>
+    Effect.gen(function*() {
+      const zeroExit = yield* run(
+        backup({ directory: join(root(), "backup"), maxFileSizeBytes: 0 }).pipe(Effect.exit)
+      )
+      expect(failure(zeroExit).code).toBe("io")
+
+      const manifest = yield* run(
+        backup({ directory: join(root(), "backup"), maxFileSizeBytes: Number.MAX_SAFE_INTEGER })
+      )
+      expect(manifest.formatVersion).toBe(1)
+    }))
+
   it.effect("captures the database, the artifact blobs, and a manifest written last", () =>
     Effect.gen(function*() {
       const base = root()
@@ -294,6 +330,32 @@ describe("verify", () => {
       return { base, backupDirectory, manifest, digest }
     })
 
+  for (const [name, maxFileSizeBytes] of invalidFileSizeLimits) {
+    it.effect(`rejects a ${name} maxFileSizeBytes as invalid options`, () =>
+      Effect.gen(function*() {
+        const exit = yield* run(
+          DisasterRecovery.verify(root(), { maxFileSizeBytes }).pipe(Effect.exit)
+        )
+        const error = failure(exit)
+        expect(error).toBeInstanceOf(DisasterRecovery.DisasterRecoveryError)
+        expect(error).toMatchObject({ code: "invalid_options", method: "verify" })
+      }))
+  }
+
+  it.effect("admits zero and the largest safe integer as file-size options", () =>
+    Effect.gen(function*() {
+      const { backupDirectory, manifest } = yield* captured()
+      const zeroExit = yield* run(
+        DisasterRecovery.verify(backupDirectory, { maxFileSizeBytes: 0 }).pipe(Effect.exit)
+      )
+      expect(failure(zeroExit).code).toBe("io")
+      expect(
+        yield* run(
+          DisasterRecovery.verify(backupDirectory, { maxFileSizeBytes: Number.MAX_SAFE_INTEGER })
+        )
+      ).toEqual(manifest)
+    }))
+
   it.effect("refuses a directory with no manifest", () =>
     Effect.gen(function*() {
       const empty = root()
@@ -363,6 +425,59 @@ describe("verify", () => {
 })
 
 describe("restore", () => {
+  for (const [name, maxFileSizeBytes] of invalidFileSizeLimits) {
+    it.effect(`rejects a ${name} maxFileSizeBytes as invalid options`, () =>
+      Effect.gen(function*() {
+        const base = root()
+        const exit = yield* run(
+          DisasterRecovery.restore({
+            backupDirectory: base,
+            targetDirectory: join(base, "restored"),
+            maxFileSizeBytes
+          }).pipe(Effect.exit)
+        )
+        const error = failure(exit)
+        expect(error).toBeInstanceOf(DisasterRecovery.DisasterRecoveryError)
+        expect(error).toMatchObject({ code: "invalid_options", method: "restore" })
+      }))
+  }
+
+  it.effect("admits zero and the largest safe integer as file-size options", () =>
+    Effect.gen(function*() {
+      const base = root()
+      const backupDirectory = join(base, "backup")
+      const manifest = yield* run(backup({ directory: backupDirectory }))
+      const zeroExit = yield* run(
+        DisasterRecovery.restore({
+          backupDirectory,
+          targetDirectory: join(base, "zero"),
+          maxFileSizeBytes: 0
+        }).pipe(Effect.exit)
+      )
+      expect(failure(zeroExit).code).toBe("io")
+
+      const restored = yield* run(DisasterRecovery.restore({
+        backupDirectory,
+        targetDirectory: join(base, "large"),
+        maxFileSizeBytes: Number.MAX_SAFE_INTEGER
+      }))
+      expect(restored.manifest).toEqual(manifest)
+    }))
+
+  it.effect("restoreAndFence preserves invalid file-size option failures", () =>
+    Effect.gen(function*() {
+      const base = root()
+      const exit = yield* run(
+        DisasterRecovery.restoreAndFence({
+          backupDirectory: base,
+          targetDirectory: join(base, "restored"),
+          maxFileSizeBytes: Number.NaN,
+          databaseLayer: restoredDatabase
+        }).pipe(Effect.exit)
+      )
+      expect(failure(exit)).toMatchObject({ code: "invalid_options", method: "restore" })
+    }))
+
   it.effect("refuses a file above the configured size ceiling and restores at the boundary", () =>
     Effect.gen(function*() {
       const base = root()

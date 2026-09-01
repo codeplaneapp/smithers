@@ -162,11 +162,13 @@ const ManifestFromJsonString = Schema.fromJsonString(BackupManifest)
 
 /**
  * Stable failure codes surfaced by backup, verify, restore, and fence.
+ * `invalid_options` reports a public option that cannot be admitted safely.
  *
  * @since 0.1.0
  * @category errors
  */
 export const DisasterRecoveryErrorCode = Schema.Literals([
+  "invalid_options",
   "not_empty",
   "invalid_manifest",
   "missing_file",
@@ -213,7 +215,8 @@ export class DisasterRecoveryError extends Schema.TaggedError<DisasterRecoveryEr
 export interface FileSizeOptions {
   /**
    * Largest file, in bytes, that backup, verification, or restore may buffer.
-   * Defaults to {@link defaultMaxFileSizeBytes}.
+   * The value must be a finite non-negative safe integer. Defaults to
+   * {@link defaultMaxFileSizeBytes}.
    */
   readonly maxFileSizeBytes?: number | undefined
 }
@@ -334,10 +337,27 @@ const sqlFailure = (method: string, subject: string) => (cause: unknown): Disast
 const measure = (bytes: Uint8Array): Effect.Effect<typeof Sha256.Digest.Type, never, Crypto.Crypto> =>
   Schema.decodeUnknownEffect(Sha256)(bytes).pipe(Effect.orDie)
 
-/** Resolves the shared whole-file buffering ceiling. */
-const fileSizeLimit = (options: FileSizeOptions): number => options.maxFileSizeBytes ?? defaultMaxFileSizeBytes
+/** Resolves and validates the shared whole-file buffering ceiling. */
+const fileSizeLimit = (
+  method: string,
+  options: FileSizeOptions
+): number | DisasterRecoveryError => {
+  const limit = options.maxFileSizeBytes
+  if (limit === undefined) return defaultMaxFileSizeBytes
+  if (Number.isSafeInteger(limit) && limit >= 0) return limit
+  return error(
+    method,
+    "invalid_options",
+    `maxFileSizeBytes must be a finite non-negative safe integer; received ${String(limit)}`,
+    limit
+  )
+}
 
-/** Refuses an oversized file before a whole-file read allocates its buffer. */
+/**
+ * Refuses an oversized file before a whole-file read allocates its buffer.
+ * Every caller admits `limit` through `fileSizeLimit`, so `BigInt` cannot
+ * reject it.
+ */
 const checkFileSize = (
   fs: FileSystem.FileSystem,
   method: string,
@@ -522,10 +542,12 @@ export const backup = <R = never, E = never>(
   SqlClient.SqlClient | FileSystem.FileSystem | Crypto.Crypto | R
 > =>
   Effect.gen(function*() {
+    const limit = fileSizeLimit("backup", options)
+    if (typeof limit !== "number") return yield* Effect.fail(limit)
+    const maxFileSizeBytes = limit
     const sql = yield* Effect.service(SqlClient.SqlClient)
     const fs = yield* FileSystem.FileSystem
     const createdAtMs = yield* Clock.currentTimeMillis
-    const maxFileSizeBytes = fileSizeLimit(options)
     yield* ensureEmptyDirectory(fs, "backup", options.directory)
 
     const capture = Effect.gen(function*() {
@@ -633,8 +655,10 @@ export const verify = Effect.fn("DisasterRecovery.verify")(function*(
   backupDirectory: string,
   options: FileSizeOptions = {}
 ) {
+  const limit = fileSizeLimit("verify", options)
+  if (typeof limit !== "number") return yield* Effect.fail(limit)
+  const maxFileSizeBytes = limit
   const fs = yield* FileSystem.FileSystem
-  const maxFileSizeBytes = fileSizeLimit(options)
   const manifest = yield* readManifest(fs, "verify", backupDirectory, maxFileSizeBytes)
   yield* checkedFile(
     fs,
@@ -670,8 +694,10 @@ export const verify = Effect.fn("DisasterRecovery.verify")(function*(
  * @category operations
  */
 export const restore = Effect.fn("DisasterRecovery.restore")(function*(options: RestoreOptions) {
+  const limit = fileSizeLimit("restore", options)
+  if (typeof limit !== "number") return yield* Effect.fail(limit)
+  const maxFileSizeBytes = limit
   const fs = yield* FileSystem.FileSystem
-  const maxFileSizeBytes = fileSizeLimit(options)
   const manifest = yield* readManifest(fs, "restore", options.backupDirectory, maxFileSizeBytes)
   yield* ensureEmptyDirectory(fs, "restore", options.targetDirectory)
 
