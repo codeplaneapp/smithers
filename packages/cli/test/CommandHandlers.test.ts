@@ -644,7 +644,9 @@ describe("`gc` over a database it cannot open", () => {
         Effect.exit(runCommand(["gc", "--dry-run", "--json"])).pipe(
           Effect.provide(testControl),
           Effect.provide(services),
-          Effect.provide(Project.layer(root)),
+          // The migration root defaults the way `NodeControl` defaults it when a
+          // configuration names none, so this drives the layer the CLI builds.
+          Effect.provide(Project.layer(root, Project.legacyRoot(undefined, root))),
           Effect.provide(NodeServices.layer)
         )
       )
