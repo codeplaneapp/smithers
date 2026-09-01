@@ -58,10 +58,13 @@ export const realPath = (
 ): Effect.Effect<string, PlatformError.PlatformError> => {
   const normalized = normalizePath(path)
   const resolve = fs.realpath
+  // Called through `fs` rather than through the captured reference: a backend
+  // whose promises API is a class instance loses `this` otherwise, and every
+  // other call in this adapter goes through the object.
   return resolve === undefined
     ? Effect.as(
       Effect.tryPromise({ try: () => fs.stat(normalized), catch: platformError(method, path) }),
       normalized
     )
-    : Effect.tryPromise({ try: () => resolve(normalized), catch: platformError(method, path) })
+    : Effect.tryPromise({ try: () => resolve.call(fs, normalized), catch: platformError(method, path) })
 }

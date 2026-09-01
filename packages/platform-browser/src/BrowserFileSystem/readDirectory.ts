@@ -4,11 +4,32 @@
  * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
-import type * as PlatformError from "effect/PlatformError"
+import * as PlatformError from "effect/PlatformError"
 import { platformError } from "./platformError.ts"
 import { realPath } from "./realPath.ts"
 import type { ZenFsPromisesLike } from "./ZenFsPromisesLike.ts"
 import type { ZenFsStatsLike } from "./ZenFsStatsLike.ts"
+
+/**
+ * How many levels a walk descends when nothing else can stop it.
+ *
+ * A backend with `lstat` never follows a directory symlink, and one with
+ * `realpath` closes a loop by identity, so neither needs a ceiling and a
+ * legitimately deep tree is walked whole. A backend with neither follows the
+ * link and reports a fresh pathname at every level, so that walk, and only
+ * that walk, is bounded.
+ *
+ * @private
+ */
+const maximumDepth = 128
+
+/**
+ * `true` when the backend can neither avoid following a directory symlink nor
+ * recognize one it has already visited.
+ *
+ * @private
+ */
+const unbounded = (fs: ZenFsPromisesLike): boolean => fs.lstat === undefined && fs.realpath === undefined
 
 /**
  * The names directly inside one directory.
@@ -34,8 +55,11 @@ const inspect = (
   fs: ZenFsPromisesLike,
   at: string
 ): Effect.Effect<ZenFsStatsLike, PlatformError.PlatformError> => {
+  // `.call(fs, ...)` keeps the receiver: a backend whose promises API is a
+  // class instance loses `this` when the member is called through a captured
+  // reference.
   const stats = fs.lstat ?? fs.stat
-  return Effect.tryPromise({ try: () => stats(at), catch: platformError("readDirectory", at) })
+  return Effect.tryPromise({ try: () => stats.call(fs, at), catch: platformError("readDirectory", at) })
 }
 
 /**
@@ -48,9 +72,20 @@ const collect = (
   fs: ZenFsPromisesLike,
   directory: string,
   prefix: string,
-  seen: Set<string>
+  seen: Set<string>,
+  depth: number
 ): Effect.Effect<Array<string>, PlatformError.PlatformError> =>
   Effect.gen(function*() {
+    if (depth > maximumDepth && unbounded(fs)) {
+      return yield* Effect.fail(PlatformError.systemError({
+        _tag: "BadResource",
+        module: "FileSystem",
+        method: "readDirectory",
+        pathOrDescriptor: directory,
+        description:
+          `a directory link loops, or the tree is nested more than ${maximumDepth} levels deep, and this backend has neither lstat nor realpath to tell them apart`
+      }))
+    }
     const collected: Array<string> = []
     for (const name of yield* entriesOf(fs, directory)) {
       const relative = prefix === "" ? name : `${prefix}/${name}`
@@ -61,7 +96,9 @@ const collect = (
       const canonical = yield* realPath(fs, child, "readDirectory")
       if (seen.has(canonical)) continue
       seen.add(canonical)
-      collected.push(...yield* collect(fs, child, relative, seen))
+      // Appended rather than spread: a wide subtree spread into `push` passes
+      // one argument per entry and overflows the call stack.
+      for (const entry of yield* collect(fs, child, relative, seen, depth + 1)) collected.push(entry)
     }
     return collected
   })
@@ -88,6 +125,6 @@ export const readDirectory = (
   options?.recursive === true
     ? Effect.flatMap(
       realPath(fs, path, "readDirectory"),
-      (canonical) => collect(fs, path, "", new Set([canonical]))
+      (canonical) => collect(fs, path, "", new Set([canonical]), 0)
     )
     : entriesOf(fs, path)
