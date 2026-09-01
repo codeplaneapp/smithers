@@ -1,29 +1,27 @@
 # @smthrs/evals
 
-Fixed-suite evaluation for flows. It connects target execution and scorer runners to immutable suites, baselines, regression comparison, reports, and CI gates.
+Fixed-suite evaluation for flows: it connects target execution and scorer runners
+to validated suites, committed baselines, regression comparison, reports, and CI
+gates.
 
-```sh
-npm install @smthrs/evals
-```
-
-## Public API
-
-The root entry point exports these namespaces; each is also importable from `@smthrs/evals/<Module>`.
-
-| Module         | Public exports                                                                                                                                           | Description                                                                      |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `Baseline`     | `version`, `Record`, `Baseline`, `fromRun`, `make`, `write`, `load`, `parse`                                                                             | Creates, serializes, loads, and validates versioned evaluation baselines.        |
-| `CaseExecutor` | `Execution`, `CaseInput`, `Service`, `Implementation`, `CaseExecutor`, `make`, `makeNoop`, `layerNoop`                                                   | Defines the injectable boundary that executes one target-flow case.              |
-| `EvalError`    | `EvalErrorCode`, `EvalError`                                                                                                                             | Defines typed suite, execution, baseline, and regression failures.               |
-| `Gate`         | `Options`, `check`, `ciGrade`                                                                                                                            | Applies score thresholds and maps verdicts to CI exit grades.                    |
-| `Regression`   | `Tolerances`, `Regression`, `Nondeterminism`, `MissingObservation`, `Report`, `compare`, `check`                                                         | Compares a run with a baseline and reports regressions and missing observations. |
-| `Report`       | `json`, `renderJson`, `markdown`, `renderMarkdown`                                                                                                       | Produces machine-readable and Markdown regression reports.                       |
-| `Runner`       | `Observation`, `ScoreRequest`, `ScoreJob`, `ScoreBatchRunner`, `ScoreObservation`, `CaseResult`, `RunResult`, `RunOptions`, `Runner`, `run`, `layerNoop` | Runs suite cases with bounded concurrency and optional scorer batches.           |
-| `Suite`        | `Binding`, `Case`, `SuiteCase`, `MakeOptions`, `SuiteOptions`, `Suite`, `make`, `JsonLinesOptions`, `fromJsonLines`                                      | Validates fixed suites and decodes their JSON Lines fixture format.              |
+The package is workspace-private at 1.0.0-rc.0 and is **not published to npm**.
+It is consumed from inside this repository; `evals/agent` is the worked suite.
 
 ```ts
+import { Flow } from "@smthrs/core"
 import { CaseExecutor, Runner, Suite } from "@smthrs/evals"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
+
+const greet = Flow.make({ name: "greet" })
+
+const executor = CaseExecutor.make((suiteCase) =>
+  Effect.succeed({
+    output: `Hello, ${(suiteCase.input as { readonly name: string }).name}`,
+    stepKey: suiteCase.name,
+    latencyMs: 0,
+    target: greet
+  })
+)
 
 const program = Effect.gen(function*() {
   const suite = yield* Suite.make({
@@ -32,11 +30,22 @@ const program = Effect.gen(function*() {
     concurrency: 1
   })
   return yield* Runner.run(suite, { runId: "nightly-2026-01-01", at: "2026-01-01T00:00:00.000Z" })
-}).pipe(Effect.provide(CaseExecutor.layerNoop))
+}).pipe(Effect.provide(Layer.succeed(CaseExecutor.CaseExecutor)(executor)))
 ```
 
-`@smthrs/evals/package.json` is also exported. `internal/*` and nested `*/index` subpaths are not public.
+`Runner.run` needs only `CaseExecutor`: scoring runs in process by default.
 
-## A worked suite
+## Documentation
 
-`evals/agent/` in this repository is a committed suite built on these modules. It evaluates the Smithers agent itself — structured-output decoding, correction re-prompts, cell flow calls, the read-only frame cap, frame budgets, and seat resolution — offline against a scripted model, and gates the run on a committed baseline. Run it with `bun evals/agent/run.ts`.
+`docs/api.md` is the reference, and the JSDoc in `src/` is its source. Read it
+for the pipeline, the step-key rule that decides a regression from
+nondeterminism, the stable failure codes, the batch-runner protocol, and the
+declared size and concurrency limits.
+
+## Development
+
+```sh
+pnpm --filter @smthrs/evals test     # vitest, 100% coverage thresholds
+pnpm --filter @smthrs/evals check    # tsc over src and test
+pnpm --filter @smthrs/evals lint     # eslint + dprint
+```
