@@ -48,7 +48,22 @@ Two rules follow from the table:
 - A tinted fill that carries text in the same semantic color is capped at
   `SOFT_TINT_AMOUNT` (10%). Above that, the darkest shipped seeds fall below AA.
   This is why hover and press on `.button.primary` and `.button.danger` move the
-  border and the elevation rather than deepening the fill.
+  border and the elevation rather than deepening the fill, and why they restate
+  that fill: the generic `.button:hover` and `.button:active` rules match them
+  too and out-rank the base rule. `tests/cascade.test.ts` resolves the sheet and
+  pins what each state actually paints.
+- Every fill under text must be a pair the table can name. The muted chips and
+  inline code sit on the opaque `--surface-2` rather than the translucent
+  `--hover-subtle` and `--inline-code-bg`, so their pair does not depend on the
+  parent surface. `.top,.topbar` is the one translucent text background left,
+  and the table composites it over `--bg`.
+- The sheet sets no `::selection` rule. A brand wash leaves the foreground
+  inherited, so it lands under all nine foregrounds this sheet paints; even an
+  8% wash misses 4.5:1 in 24 (foreground, palette, mode) combinations, and the
+  0.x value was 24%. Pinning a foreground instead is worse: `::selection` is
+  global, and a downstream sheet that overrides only the selection background
+  inherits the pinned color (`@smthrs/ui`'s markdown editor does exactly that).
+  The user agent's own selection colors are contrast-guaranteed.
 - New rules add their pair to the table. A background expression that appears in
   a rule but not in `PAINTED_PAIRS` is an unaudited surface.
 
@@ -67,6 +82,9 @@ palettes. Every one traces to `scripts/generate-theme-registry.ts`:
   both modes and `one` dark collapses the first two.
 - Its `contrast()` runs on rounded channels, so the ratchet stops one step early.
 - `rose-pine` gives `success` and `info` the same hex in both modes.
+
+Every recorded contrast gap is a `solarized` neutral-token failure. Nothing on
+the list can be closed by a change to this package's CSS.
 
 `src/themes/*.ts` are byte-for-byte generator output, guarded by
 `tests/generatedThemes.test.ts`, so closing these means changing the generator

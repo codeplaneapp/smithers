@@ -10,8 +10,14 @@ import { solarized } from "./themes/solarized.ts";
 
 export const DEFAULT_THEME_KEY = "night-owl";
 
-/** `T` with every nested property marked readonly, matching `deepFreeze`. */
-export type DeepReadonly<T> = T extends (infer U)[] ? readonly DeepReadonly<U>[]
+/**
+ * `T` with every nested property marked readonly, matching `deepFreeze`.
+ *
+ * Functions are leaves, and the mapped type over an array preserves tuple keys
+ * and arity rather than collapsing to a homogeneous element type.
+ */
+export type DeepReadonly<T> = T extends (...args: never[]) => unknown ? T
+  : T extends readonly unknown[] ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
   : T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
   : T;
 

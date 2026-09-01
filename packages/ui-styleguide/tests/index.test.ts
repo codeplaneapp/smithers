@@ -103,5 +103,16 @@ describe("themeCss", () => {
 
   test("names an unregistered palette instead of emitting nothing", () => {
     expect(() => themeCss({ palettes: ["dracula"] })).toThrow(/unknown palette "dracula"/);
+    expect(() => themeCss({ palettes: ["one", "dracula"] })).toThrow(/registered: night-owl, fucory/);
+  });
+
+  test("emits registry order for any request order, and each palette once", () => {
+    const forward = themeCss({ palettes: ["one", "github"] });
+    expect(themeCss({ palettes: ["github", "one"] })).toBe(forward);
+    expect(themeCss({ palettes: ["one", "github", "one"] })).toBe(forward);
+    expect(forward.indexOf(":root[data-palette='one'] {")).toBeLessThan(
+      forward.indexOf(":root[data-palette='github'] {"),
+    );
+    expect(forward.match(/:root\[data-palette='one'\] \{/g)).toHaveLength(1);
   });
 });

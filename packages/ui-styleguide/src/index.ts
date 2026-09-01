@@ -27,7 +27,15 @@ export const workflowUiThemeCss = [
   themeCss(),
   "* { box-sizing:border-box; }",
   "body { min-width:320px; min-height:100vh; margin:0; background:var(--bg); color:var(--text); font-size:var(--fs-3); line-height:var(--lh-body); font-synthesis:none; text-rendering:optimizeLegibility; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }",
-  "::selection { background:var(--selection-bg); }",
+  // No `::selection` rule. The 0.x sheet washed the selection with 24% brand and
+  // left the foreground inherited, which puts every one of the nine foregrounds
+  // this sheet paints on an unaudited background: measured across the eight
+  // palettes, even an 8% wash misses 4.5:1 in 24 (foreground, palette, mode)
+  // combinations. Pinning a foreground instead is worse, because it is a global
+  // rule and a downstream sheet that overrides only the selection background
+  // inherits it (`@smthrs/ui`'s markdown editor does exactly that). The user
+  // agent's own selection colors are contrast-guaranteed, so the sheet leaves
+  // them alone.
   "button,input,textarea,select { font:inherit; }",
   "button { color:inherit; cursor:pointer; }",
   "button:disabled { cursor:not-allowed; }",
@@ -53,8 +61,14 @@ export const workflowUiThemeCss = [
   // 10% tint, and every deeper tint drops that pair below WCAG AA in most
   // palettes. `tests/themeRegistry.test.ts` enumerates the pairs this sheet
   // paints, so a fill added here has to clear 4.5:1 to land.
-  ".button.primary:hover,.primary:hover { border-color:var(--brand-border-strong); box-shadow:var(--shadow-2); }",
-  ".button.primary:active:not(:disabled),.primary:active:not(:disabled) { border-color:var(--brand-border-strong); box-shadow:inset 0 1px 2px rgb(var(--shadow-rgb) / 0.20); }",
+  //
+  // Each state still restates its own `background`. The generic `.button:hover`
+  // and `.button:active` rules above match `.primary`/`.danger` too and are
+  // (0,2,0)/(0,3,0), so without an explicit fill here the neutral hover and
+  // active fills would win over the (0,2,0) base rule and paint brand text on
+  // an unaudited neutral surface. `tests/index.test.ts` pins the resolution.
+  ".button.primary:hover,.primary:hover { background:var(--brand-soft); border-color:var(--brand-border-strong); box-shadow:var(--shadow-2); }",
+  ".button.primary:active:not(:disabled),.primary:active:not(:disabled) { background:var(--brand-soft); border-color:var(--brand-border-strong); box-shadow:inset 0 1px 2px rgb(var(--shadow-rgb) / 0.20); }",
   ".button.danger,.danger { border-color:var(--danger-border); color:var(--danger); }",
   ".button.danger:hover,.danger:hover { background:var(--danger-soft); }",
   ".button.danger:active:not(:disabled),.danger:active:not(:disabled) { background:var(--danger-soft); border-color:var(--danger-border-strong); box-shadow:inset 0 1px 2px rgb(var(--shadow-rgb) / 0.20); }",
@@ -64,7 +78,7 @@ export const workflowUiThemeCss = [
   ".input::placeholder,.textarea::placeholder,.prompt::placeholder,textarea::placeholder,input::placeholder { color:var(--text-placeholder); }",
   ".pill,.badge,.chip { display:inline-flex; align-items:center; gap:6px; min-width:0; max-width:100%; min-height:22px; padding:0 10px; border:1px solid var(--border); border-radius:var(--r-full); color:var(--text-muted); font-family:var(--font-mono); font-size:var(--fs-1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }",
   ".pill { border-color:var(--brand-border); background:var(--brand-soft); color:var(--brand); }",
-  ".pill.muted,.badge.muted,.chip { border-color:var(--border); background:var(--hover-subtle); color:var(--text-muted); }",
+  ".pill.muted,.badge.muted,.chip { border-color:var(--border); background:var(--surface-2); color:var(--text-muted); }",
   ".badge { font-family:inherit; font-weight:650; text-transform:uppercase; }",
   ".badge.ok,.badge.finished,.badge.success { color:var(--success); border-color:var(--success-border); background:var(--success-soft); }",
   ".badge.warn,.badge.waiting { color:var(--warning); border-color:var(--warning-border); background:var(--warning-soft); }",
@@ -74,7 +88,7 @@ export const workflowUiThemeCss = [
   // Neutral outcomes and not-started states are muted, matching the shared
   // status vocabulary in @smthrs/ui (a user cancel is not a
   // failure; pending/queued work has not started).
-  ".badge.cancelled,.badge.canceled,.badge.skipped,.badge.pending,.badge.queued { color:var(--muted); border-color:var(--border); background:var(--hover-subtle); }",
+  ".badge.cancelled,.badge.canceled,.badge.skipped,.badge.pending,.badge.queued { color:var(--muted); border-color:var(--border); background:var(--surface-2); }",
   ".card,.panel,.kpi,.stat,.slot { min-width:0; border:1px solid var(--border); border-radius:var(--r-2); background:var(--surface); box-shadow:var(--shadow-2); }",
   ".card,.panel,.slot { padding:14px; }",
   ".card-head,.panel-title,.section-head { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:10px; }",
@@ -128,7 +142,7 @@ export { serializeThemeVariant } from "./serializeThemeVariant.ts";
 export type { SerializeThemeVariantOptions } from "./serializeThemeVariant.ts";
 export { contrastRatio, contrastRatioOf, type Rgb } from "./contrastRatio.ts";
 export { mixChannels, mixColors } from "./mixColors.ts";
-export { SELECTION_TINT_AMOUNT, SOFT_TINT_AMOUNT, STRONG_TINT_AMOUNT } from "./themeTokens.ts";
+export { SOFT_TINT_AMOUNT, STRONG_TINT_AMOUNT } from "./themeTokens.ts";
 export type { PaletteThemeCssOptions } from "./paletteThemeCss.ts";
 export type { DeepReadonly } from "./themeRegistry.ts";
 export type { SmithersTheme } from "./SmithersTheme.ts";

@@ -33,15 +33,19 @@ export function paletteThemeCss(quote: "'" | '"', options: PaletteThemeCssOption
     }; } }`,
     `:root${attr("theme", "dark")} { ${serializeThemeVariant(defaults.dark)}; }`,
   ];
-  const selected = options.palettes ?? Object.keys(themeRegistry);
-  for (const key of selected) {
-    if (key === DEFAULT_THEME_KEY) continue;
-    const theme = findTheme(key);
-    if (theme === undefined) {
+  // Validate first, then walk the registry rather than the caller's array, so a
+  // reordered or repeated request still emits each palette once in registry
+  // order. Two callers asking for the same set get byte-identical CSS.
+  const requested = new Set(options.palettes ?? Object.keys(themeRegistry));
+  for (const key of requested) {
+    if (findTheme(key) === undefined) {
       throw new RangeError(
         `unknown palette ${JSON.stringify(key)}; registered: ${Object.keys(themeRegistry).join(", ")}`,
       );
     }
+  }
+  for (const [key, theme] of Object.entries(themeRegistry)) {
+    if (key === DEFAULT_THEME_KEY || !requested.has(key)) continue;
     const palette = attr("palette", key);
     rules.push(
       `:root${palette} { ${serializeThemeVariant(theme.light)}; }`,

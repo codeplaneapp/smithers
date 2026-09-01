@@ -36,7 +36,6 @@ describe("node ESM resolution", () => {
     expect(result.status).toBe(0);
     expect(result.stdout.split(",")).toEqual([
       "DEFAULT_THEME_KEY",
-      "SELECTION_TINT_AMOUNT",
       "SOFT_TINT_AMOUNT",
       "STRONG_TINT_AMOUNT",
       "contrastRatio",

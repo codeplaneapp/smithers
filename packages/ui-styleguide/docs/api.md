@@ -79,8 +79,8 @@ between the rounded 4.5033 and the rendered 4.4781.
 
 `SOFT_TINT_AMOUNT` (0.1) is the ceiling for a semantic fill that carries text in
 its own semantic color. `STRONG_TINT_AMOUNT` (0.16) is for fills that carry no
-tinted text. `SELECTION_TINT_AMOUNT` (0.14) is the `::selection` cap. The test
-suite reads these constants, so the recipes and their proof cannot drift apart.
+tinted text. The test suite reads these constants, so the recipes and their
+proof cannot drift apart.
 
 ## Types
 

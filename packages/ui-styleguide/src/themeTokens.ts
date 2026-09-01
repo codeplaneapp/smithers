@@ -16,12 +16,6 @@ export const SOFT_TINT_AMOUNT = 0.1;
  */
 export const STRONG_TINT_AMOUNT = 0.16;
 
-/**
- * The `::selection` tint. Selected text keeps its own color, so this is capped
- * at the level that keeps `--text` above 4.5:1 over both `--bg` and `--surface`
- * in every palette the generator can seed.
- */
-export const SELECTION_TINT_AMOUNT = 0.14;
 
 const softTint = (semantic: string) =>
   `--${semantic}-soft:color-mix(in srgb, var(--${semantic}) ${SOFT_TINT_AMOUNT * 100}%, var(--surface))`;
@@ -74,10 +68,6 @@ export const sharedTokens = [
   "--warning-border:color-mix(in srgb, var(--warning) 40%, transparent)",
   softTint("info"),
   "--info-border:color-mix(in srgb, var(--info) 40%, transparent)",
-  // Selection keeps the page's own text color, so the tint is capped at the
-  // level that keeps `--text` above 4.5:1 on it over both `--bg` and
-  // `--surface`. 24% (the 0.x value) dropped `one` dark to 3.86:1.
-  `--selection-bg:color-mix(in srgb, var(--brand) ${SELECTION_TINT_AMOUNT * 100}%, transparent)`,
   "--ring:color-mix(in srgb, var(--brand) 22%, transparent)",
   "--ring-border:color-mix(in srgb, var(--brand) 50%, transparent)",
   // Geometry: spacing, type scale, radii, and shared control heights.
