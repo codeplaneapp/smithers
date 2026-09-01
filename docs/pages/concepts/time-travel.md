@@ -95,7 +95,7 @@ Behind the service, an effect-handler registry maps effect kinds to assessment a
 
 Detached child policy is either `block` (the default) or `cancel`. Terminal descendants are disclosed as warnings because their external effects cannot be erased by deleting a parent suffix.
 
-Step 8 is why recovery is not an operation: building `TimeTravel.layer` finishes or rolls back any rewind a crash interrupted, before the service accepts new work.
+Step 8 is why recovery is not an operation: building `TimeTravel.layer` finishes or rolls back any rewind a crash interrupted, before the service accepts new work, except one whose run a live process still holds. That one is left exactly as the crash left it, still pending and still recoverable, so a rewind a living process still owns is never stolen. `TimeTravel.layerWith({ isAlive })` decides what counts as live; the default is the lease check the engine's run driver already applies to those rows.
 
 ## Current integration boundary
 
