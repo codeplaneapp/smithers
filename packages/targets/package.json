@@ -19,23 +19,6 @@
     "./internal/*": null,
     "./index": null
   },
-  "publishConfig": {
-    "exports": {
-      "./package.json": "./package.json",
-      ".": {
-        "types": "./dist/esm/index.d.ts",
-        "import": "./dist/esm/index.js",
-        "require": "./dist/cjs/index.js"
-      },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
-      "./internal/*": null,
-      "./*/index": null
-    }
-  },
   "files": [
     "src/**/*.ts",
     "README.md"
@@ -43,9 +26,10 @@
   "scripts": {
     "lint": "eslint src --max-warnings=0 && dprint check",
     "format": "dprint fmt",
-    "check": "tsc -b tsconfig.json && tsc -p tsconfig.test.json --noEmit",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "circular": "node scripts/circular.mjs",
-    "test": "vitest"
+    "test": "vitest",
+    "docs": "node scripts/docs.mjs"
   },
   "dependencies": {
     "@smthrs/canonical": "1.0.0-rc.0",

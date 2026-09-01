@@ -10,8 +10,18 @@ through it, so the import line never changes as a workspace grows. Library code
 that consumes this package imports the module it needs directly instead, as
 `@smthrs/targets/Target`.
 
-Every catalog target is implemented. Only the `Target.ts` stub machinery remains,
-for future catalog additions.
+Catalog rules reach execution by one of two routes, and the difference matters
+when you trace a failure:
+
+| Route | Rules | What runs |
+| --- | --- | --- |
+| Flow body | `Typecheck`, `Vitest`, `VitestCoverage`, `VitestWatch`, `EsLint`, `Dprint`, `BiomeCheck`, `DepsLint`, `PackageLint`, `DocsParity`, `LlmLint`, `SortPackageJson`, `TsBuild`, `DtsBuild`, `ToolBuild`, `ToolRun`, `NodeTest`, `NodeBinary`, `Install`, `Lockfile`, `Tsconfig`, `PnpmWorkspace`, `Filegroup`, `NewPackage`, `GithubCiGen`, `NpmPublish`, `JsrPublish`, `TypedocDocs`, `Changesets`, `Clean`, `Dev`, `Bundler.*`, `CargoLint`, `CargoTest`, `PackageJson*` | The declaration's own plan, through the shared `Exec` action. |
+| Package executor | every `Cargo.*`, `Go.*`, `Docker.*`, `Github.*`, `Npm.*`, `Git.*`, `Changesets.*`, `NodeArtifact` (`Copy`, `Literal`, `Overlay`), `Agent.*`, `Foundry.*`, `Shell.*`, `Memory.*`, `Anvil.Fork`, `Cron`, `Fetch`, `Repo.Target`, `Suite`, `Alias`, `Files.Test` | `@smthrs/build-cli`'s `PackageExec` dispatches natively by rule name. |
+
+A package-executor rule's Flow body is `Target.notImplemented`, so running one
+under a bare Flow runtime fails with `smithers-build/NotImplemented` rather than
+doing nothing quietly. That is the no-fake-green rule, not a gap: the rule runs
+under `smithers-build`.
 
 A workspace declares its toolchain once and passes it to everything that runs a
 tool. `Smithers.Runtime.Node` and `.Bun` declare a runtime;
@@ -42,13 +52,16 @@ while placeholders exist; HTTPS credentials require a brokered destination or
 a host-owned request adapter. Key material records the source and audience,
 never the value.
 
-`Smithers.Workspace` is the workspace configuration declaration the root
-`BUILD.ts` file exports. It validates and performs
-no I/O. `cacheDirectory` defaults to `.flows` and must name a single
-workspace-relative directory; `gitignored` defaults to false. The CLI resolves
-the declaration against `--cache-dir` and passes the result explicitly to
-`Input` glob expansion. `DepsLint` uses a constant plan-time token that the
-exec layer replaces with the resolved directory immediately before spawn. The
+`Smithers.Workspace(name, options)` is the workspace declaration a `WORKSPACE.ts`
+file exports. It validates and performs no I/O. The name comes first and must be
+a portable identifier; `options` carries `repository` and `cache` plus the
+optional `runtime`, `packageManager`, `nodeModules`, `toolchains`, `flags`,
+`host`, `memory`, `sandboxes`, `agents`, `gitHooks`, and `repos`. The cache
+directory lives on the cache declaration: `Smithers.Cache({ directory: ".flows" })`
+defaults to `.flows` and must name a single workspace-relative directory. The
+CLI resolves that against `--cache-dir` and passes the result explicitly to
+`Input` glob expansion. `DepsLint` uses a constant plan-time token that the exec
+layer replaces with the resolved directory immediately before spawn. The
 resolved directory is host state and never reaches target attrs, a cache key, or
 a content digest.
 
@@ -180,4 +193,6 @@ takes no `runtimeArgs`: those are flags for the JavaScript runtime a built
 binary is not, and a declaration that passes them is refused rather than run
 with a different argv.
 
-See `../API-REVIEW.md` for the review order and current API questions.
+See [`packages/build/API-REVIEW.md`](../build/API-REVIEW.md) for the review
+order and current API questions, and [`docs/`](./docs) for the package's own
+reference material.

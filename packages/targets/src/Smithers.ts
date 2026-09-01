@@ -130,7 +130,7 @@ export { PnpmWorkspace } from "./PnpmWorkspaceFile.ts"
 export { Tsconfig } from "./Tsconfig.ts"
 /** @category constructors @since 0.1.0 */
 export { Secret } from "./Secret.ts"
-/** @category constructors @since 1.0.0 */
+/** @category constructors @since 0.1.0 */
 export { HttpSecret } from "./Secret.ts"
 /** @category targets @since 0.1.0 */
 export { TsBuild } from "./TsBuild.ts"

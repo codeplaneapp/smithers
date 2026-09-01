@@ -47,21 +47,21 @@ export const maximumNameLength = 256
 /**
  * Maximum number of exact HTTP origins one credential may target.
  * @category constants
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const maximumAudiences = 32
 
 /**
  * Maximum UTF-16 length of one normalized HTTP origin.
  * @category constants
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const maximumAudienceLength = 2_048
 
 /**
  * Maximum length of a public fallback carried in a declaration.
  * @category constants
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const maximumFallbackLength = 16 * 1024
 
@@ -198,7 +198,7 @@ const loopbackHost = (hostname: string): boolean =>
  * where the request remains inside the host boundary.
  *
  * @category parsing
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const normalizeAudience = (input: string): string => {
   if (typeof input !== "string" || input === "" || input.length > maximumAudienceLength || !input.isWellFormed()) {
@@ -231,7 +231,7 @@ const normalizedAudience = (value: string): boolean => {
 /**
  * Exact normalized HTTP origin to which a credential may be sent.
  * @category schemas
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const Audience = Schema.NonEmptyString.check(
   Schema.isMaxLength(maximumAudienceLength),
@@ -247,7 +247,7 @@ export const Audience = Schema.NonEmptyString.check(
  * that endpoint part of the source declaration.
  *
  * @category schemas
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const HttpCredential = Schema.TaggedStruct("HttpCredential", {
   secret: Declaration,
@@ -257,7 +257,7 @@ export const HttpCredential = Schema.TaggedStruct("HttpCredential", {
 /**
  * A destination-bound HTTP credential declaration.
  * @category models
- * @since 1.0.0
+ * @since 0.1.0
  */
 export type HttpCredential = typeof HttpCredential.Type
 
@@ -265,7 +265,7 @@ export type HttpCredential = typeof HttpCredential.Type
  * Binds a declared secret to one or more exact HTTP origins.
  *
  * @category constructors
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const HttpSecret = (secret: Secret, audiences: ReadonlyArray<string>): HttpCredential => {
   if (!isSecret(secret)) throw new TypeError("HttpSecret requires a secret declaration")
@@ -293,7 +293,7 @@ export const HttpSecret = (secret: Secret, audiences: ReadonlyArray<string>): Ht
 /**
  * Checks whether a value is a valid destination-bound HTTP credential.
  * @category guards
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const isHttpCredential = (value: unknown): value is HttpCredential => {
   if (typeof value !== "object" || value === null || NodeUtil.isProxy(value)) return false

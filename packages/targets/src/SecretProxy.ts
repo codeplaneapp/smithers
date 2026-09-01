@@ -61,7 +61,7 @@ export class SecretUnavailable extends Error {
 /**
  * Raised before egress when a placeholder is used for the wrong origin.
  * @category errors
- * @since 1.0.0
+ * @since 0.1.0
  */
 export class SecretAudienceDenied extends Error {
   /** The environment name identifying the declaration, never its value. */
@@ -79,7 +79,7 @@ export class SecretAudienceDenied extends Error {
 /**
  * Raised when a host value cannot safely cross an HTTP request boundary.
  * @category errors
- * @since 1.0.0
+ * @since 0.1.0
  */
 export class SecretValueInvalid extends Error {
   /** The environment name identifying the declaration, never its value. */
@@ -131,14 +131,14 @@ export type Read = (name: string) => string | undefined
 /**
  * Maximum UTF-8 bytes accepted for one resolved credential.
  * @category constants
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const maximumSecretValueBytes = 16 * 1024
 
 /**
  * Request-scoped substitution and reverse-redaction state.
  * @category models
- * @since 1.0.0
+ * @since 0.1.0
  */
 export interface RequestBoundary {
   /** Replaces authorized placeholders, resolving each declaration once. */
@@ -390,21 +390,21 @@ const secretUrlPath = "/.well-known/smithers-secret-url/"
  * Maximum request body buffered for placeholder substitution.
  *
  * @category constants
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const maximumRequestBodyBytes = 16 * 1024 * 1024
 
 /**
  * Maximum upstream response buffered so resolved values can be removed.
  * @category constants
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const maximumResponseBodyBytes = 16 * 1024 * 1024
 
 /**
  * Wall-clock bound for one proxy-owned upstream request.
  * @category constants
- * @since 1.0.0
+ * @since 0.1.0
  */
 export const upstreamTimeoutMs = 2 * 60 * 1000
 

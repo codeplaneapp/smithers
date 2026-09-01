@@ -1,12 +1,11 @@
 /**
  * Standard package targets for a private, unbuilt package.
  *
- * This package ships no distribution: its tsconfig sets `noEmit`, so the
- * synthesized TsBuild `lib` target could never produce the `dist` tree it
- * declares. `lib` is therefore a Typecheck over the package tsconfig — the
- * same compiler run the build would perform, minus the emit — and keeps the
- * conventional label so dependents and the default-target convention are
- * unchanged.
+ * This package ships no distribution, so the synthesized TsBuild `lib` target
+ * could never produce the `dist` tree it declares. `lib` is therefore a
+ * Typecheck, which passes `--noEmit` on the same tsconfig the build would
+ * compile, and keeps the conventional label so dependents and the
+ * default-target convention are unchanged.
  */
 import { Smithers } from "@smthrs/targets"
 import { packageManager, rootInvariantsConfig, rootJSDocConfig, runtime } from "../../BUILD.ts"
@@ -69,6 +68,25 @@ export const docs = Smithers.DocsParity({
   readme: Smithers.file("README.md"),
   deps: [],
   cwd
+})
+
+/**
+ * The package's own generated reference material.
+ *
+ * `smithers-build run` writes it and `smithers-build lint` drift-checks it, so
+ * the catalog inventory cannot fall behind the `Target.make` declarations it
+ * is read from.
+ *
+ * @since 0.1.0
+ * @category docs
+ */
+export const docsPages = Smithers.Generate({
+  script: Smithers.file("//packages/targets/scripts/docs.mjs"),
+  data: [
+    Smithers.glob("//packages/targets/src/**/*.ts"),
+    Smithers.glob("//packages/targets/docs/*.md")
+  ],
+  changes: ["packages/targets/docs/rules.md"]
 })
 
 /**

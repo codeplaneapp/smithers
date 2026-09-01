@@ -276,7 +276,7 @@ const dependencyTargetPattern = /^[A-Za-z0-9_@+=,.-]+$/
  * pattern plus one exact exported target name.
  *
  * @category schemas
- * @since 1.0.0-rc.0
+ * @since 0.1.0
  */
 export const DependencySelector = Schema.TaggedStruct("TargetDependencySelector", {
   pattern: Schema.NonEmptyString.check(
@@ -293,7 +293,7 @@ export const DependencySelector = Schema.TaggedStruct("TargetDependencySelector"
  * A graph dependency selected from every package below one workspace subtree.
  *
  * @category models
- * @since 1.0.0-rc.0
+ * @since 0.1.0
  */
 export type DependencySelector = typeof DependencySelector.Type
 
@@ -301,7 +301,7 @@ export type DependencySelector = typeof DependencySelector.Type
  * A direct target dependency or a workspace subtree selection.
  *
  * @category schemas
- * @since 1.0.0-rc.0
+ * @since 0.1.0
  */
 export const Dependency = Schema.Union([Target, DependencySelector])
 
@@ -309,7 +309,7 @@ export const Dependency = Schema.Union([Target, DependencySelector])
  * A direct target dependency or a workspace subtree selection.
  *
  * @category models
- * @since 1.0.0-rc.0
+ * @since 0.1.0
  */
 export type Dependency = typeof Dependency.Type
 
@@ -322,7 +322,7 @@ export type Dependency = typeof Dependency.Type
  * ```
  *
  * @category constructors
- * @since 1.0.0-rc.0
+ * @since 0.1.0
  */
 export const subtree = (pattern: string, target: string): DependencySelector =>
   Object.freeze(DependencySelector.make({ pattern, target }))
@@ -432,7 +432,7 @@ const ownData = (value: object, key: PropertyKey): unknown | typeof missingPrope
  * Checks whether a value is a workspace dependency selector.
  *
  * @category guards
- * @since 1.0.0-rc.0
+ * @since 0.1.0
  */
 export const isDependencySelector = (value: unknown): value is DependencySelector => {
   if (!Predicate.isObject(value) || NodeUtil.isProxy(value)) return false
