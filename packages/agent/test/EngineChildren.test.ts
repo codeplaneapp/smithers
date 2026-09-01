@@ -379,6 +379,25 @@ describe("EngineChildren.spawn", () => {
       expect(Exit.isFailure(row)).toBe(true)
     })))
 
+  it("keeps not_found for a start attempt that succeeds without creating a child", () =>
+    run(Effect.gen(function*() {
+      const runtime = yield* engine("children-missing-row")
+      const rowless: FlowRuntime.FlowRuntime["Service"] = {
+        ...runtime,
+        execute: () => Effect.succeed("no child was registered")
+      }
+      const port = yield* children().pipe(Effect.provideService(FlowRuntime.FlowRuntime, rowless))
+      yield* runtime.register(Parent, () =>
+        port.spawn({ flow: Worker._tag, label: "missing" }).pipe(
+          Effect.map((spawned) => spawned.child),
+          Effect.catch((error) => Effect.succeed(`${(error as ChildFlows.ChildError).code}`))
+        ))
+
+      expect(yield* runtime.execute(Parent, { executionId: "spawn-missing-row", payload: {} })).toBe(
+        "not_found"
+      )
+    })))
+
   it("reports a child payload rejected by its schema as a failed start", () =>
     run(Effect.gen(function*() {
       const runtime = yield* engine("children-invalid-payload")

@@ -546,7 +546,7 @@ describe("the executor's registry seam", () => {
     expect(result.acceptance).toBe("accepted")
     expect(result.status).toBe("failed")
     expect(causeOf(record)).toContain("has a module body; only prompt flows run on the agent")
-    expect(causeOf(record)).toContain("engine_failed")
+    expect(causeOf(record)).toContain("HarnessError")
     expect(causeOf(record)).not.toContain("SeatUnresolved")
   })
 
@@ -1335,6 +1335,15 @@ describe("the settlement a failure is persisted as", () => {
     let deep: Record<string, unknown> = {}
     for (let level = 0; level < 20_000; level++) deep = { deep }
     expect(typeof AgentSession.settlementFailure(deep)).toBe("string")
+
+    // The band between the two limits, which is where a real nested cause
+    // lands: `JSON` renders and re-reads it without complaint, and the walk
+    // still refuses it, so the round trip produces a value the settlement
+    // codec would reject and the text fallback is what the row must carry.
+    let past: Record<string, unknown> = {}
+    for (let level = 0; level < 400; level++) past = { past }
+    expect(JSON.parse(JSON.stringify(past))).toEqual(past)
+    expect(typeof AgentSession.settlementFailure(past)).toBe("string")
 
     // A value that repeats a child without a cycle is still JSON.
     const shared = { id: 1 }

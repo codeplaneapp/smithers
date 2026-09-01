@@ -91,7 +91,7 @@ const run = <A, E, R>(body: Effect.Effect<A, E, R>): Promise<A> =>
 /** Plans, approves, and launches one control run through the port itself. */
 const startControlRun = Effect.gen(function*() {
   const runtime = yield* ControlRuntime
-  const card = yield* runtime.plan({ flowId: "system/test", input: { suite: "ports" } })
+  const { card } = yield* runtime.plan({ flowId: "system/test", input: { suite: "ports" } })
   const token = yield* runtime.lookupApproval(card.approval.target)
   yield* runtime.installBulkGrant(token, card.envelope, "run")
   yield* runtime.resolveApproval(token, "approved", principal)

@@ -74,8 +74,19 @@ import type { NotificationQueue } from "@smthrs/notifications"
 import { Node } from "@smthrs/plan"
 import * as Registry from "@smthrs/registry/Registry"
 import { Ownership, RunStore } from "@smthrs/run-store"
-import type { Crypto } from "effect"
-import { Cause, Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } from "effect"
+import * as Cause from "effect/Cause"
+import * as Clock from "effect/Clock"
+import type * as Crypto from "effect/Crypto"
+import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
+import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
+import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import { Agent } from "./Agent.ts"
 import type * as Budget from "./Budget.ts"
 import type * as QuotaPolicy from "./QuotaPolicy.ts"
@@ -216,6 +227,11 @@ const observationOnly = new Set(["at", "durationMillis"])
  * do not collide. A running count across the incarnation cannot make that
  * distinction, which is why one was tried and rejected.
  *
+ * The identity hashes the payload that is journaled. When {@link trace}
+ * replaces an oversized field, the deterministic marker carries the digest of
+ * the full value, so two different omitted values still produce different
+ * identity material without canonicalizing the full value a second time here.
+ *
  * Truncation is to 48 bits, comfortably inside the safe-integer range the
  * journal allocates in, and the birthday bound over a run's thousands of
  * events is around 1e-9. The failure it bounds is a dropped duplicate, never a
@@ -236,6 +252,32 @@ export const traceIdentity = (
   )
   const digest = Digest.digest(CanonicalJson.stringify({ cell, eventType, frame, material, ordinal }))
   return JournalEvent.SourceSeq.make(Number.parseInt(digest.slice(0, 12), 16))
+}
+
+/**
+ * The largest free-text or value field one trail record carries.
+ *
+ * The trail is a durable journal row, and a cell may read a multi-megabyte
+ * file into one result. Bounding the field limits both that row's storage and
+ * the canonicalization and hashing work paid for every event identity.
+ *
+ * @category projections
+ * @since 1.0.0-rc.0
+ */
+export const maxTracedBytes = 65_536
+
+const traceEncoder = new TextEncoder()
+
+const tracedField = <A extends Schema.Json | string>(value: A): A | {
+  readonly truncated: true
+  readonly bytes: number
+  readonly digest: string
+} => {
+  const canonical = CanonicalJson.stringify(value)
+  const bytes = traceEncoder.encode(typeof value === "string" ? value : canonical).byteLength
+  return bytes <= maxTracedBytes
+    ? value
+    : { truncated: true, bytes, digest: Digest.digest(canonical) }
 }
 
 /**
@@ -353,7 +395,7 @@ export const trace = (
       return {
         eventType: "control.agent.model-settled",
         payload: {
-          text: assistantText(event.message),
+          text: tracedField(assistantText(event.message)),
           usage: event.usage,
           // Wall-clock for this one sealed call. A run's total time was
           // already derivable from event stamps; per-call latency was not,
@@ -364,7 +406,7 @@ export const trace = (
     case "cell-produced":
       return {
         eventType: "control.agent.cell-produced",
-        payload: { language: event.cell.language, digest: event.cell.digest, text: event.cell.text }
+        payload: { language: event.cell.language, digest: event.cell.digest, text: tracedField(event.cell.text) }
       }
     case "cell-call-started":
       return {
@@ -378,7 +420,7 @@ export const trace = (
           flowName: event.flowName,
           outcome: event.result.outcome,
           message: event.result.message,
-          value: event.result.value
+          value: tracedField(event.result.value)
         }
       }
     case "cell-printed":
@@ -387,7 +429,7 @@ export const trace = (
       // window without re-running anything.
       return {
         eventType: "control.agent.cell-printed",
-        payload: { cell: event.cell, text: event.text }
+        payload: { cell: event.cell, text: tracedField(event.text) }
       }
     case "cell-settled":
       return { eventType: "control.agent.cell-settled", payload: { outcome: event.outcome } }
@@ -512,7 +554,7 @@ export const trace = (
     case "aborted":
       return { eventType: "control.agent.aborted", payload: { reason: event.reason } }
     case "resolved":
-      return { eventType: "control.agent.resolved", payload: { text: assistantText(event.message) } }
+      return { eventType: "control.agent.resolved", payload: { text: tracedField(assistantText(event.message)) } }
     default:
       return { eventType: `control.agent.${event._tag}`, payload: {} }
   }
@@ -574,28 +616,14 @@ const askIdentity = (
  * the built-in harness could not touch a file or run a command. It expands to
  * `{ action: "*", resource: "**" }` — `**` and not `*`, because
  * `Capability.subsumes` recognises only `**` as recursive and a grant written
- * with `*` can never be proven to cover anything.
+ * with `*` can never be proven to cover anything. The rest of the grammar is
+ * owned by `@smthrs/capability`; the bare `*` is the one token its parser does
+ * not accept.
  */
-const pattern = (formatted: string): Option.Option<Capability.CapabilityPattern> => {
-  if (formatted === "*") {
-    return Schema.decodeUnknownOption(Capability.CapabilityPattern)({ action: "*", resource: "**" })
-  }
-  const first = formatted.indexOf(":")
-  if (first < 0) return Option.none()
-  const head = formatted.slice(0, first)
-  if (head === "*") {
-    return Schema.decodeUnknownOption(Capability.CapabilityPattern)({
-      action: "*",
-      resource: formatted.slice(first + 1)
-    })
-  }
-  const second = formatted.indexOf(":", first + 1)
-  if (second < 0) return Option.none()
-  return Schema.decodeUnknownOption(Capability.CapabilityPattern)({
-    action: formatted.slice(0, second),
-    resource: formatted.slice(second + 1)
-  })
-}
+const pattern = (formatted: string): Option.Option<Capability.CapabilityPattern> =>
+  formatted === "*"
+    ? Schema.decodeUnknownOption(Capability.CapabilityPattern)({ action: "*", resource: "**" })
+    : Capability.parsePattern(formatted)
 
 /**
  * Parses a run envelope's formatted capabilities, dropping every entry
@@ -670,12 +698,15 @@ const isJsonValue = (value: unknown, ancestors: WeakSet<object> = new WeakSet(),
  * `SeatUnresolved` — so the codec rejected every one of them, `engine-store`
  * degraded the settlement into a projection, and it said so in a second WARN
  * stack beside the run's own `An agent run failed` (Phase 7 smoke observation
- * N1: two stack traces for one billing refusal). Rendering the error to the
- * same text `Cause.pretty` gives the operator makes the settlement encodable,
- * so the durable record carries the real refusal rather than a projection of
- * it and the duplicate warning has nothing to report. A value that already is
- * a JSON value is passed through untouched, and a defect stays a defect: this
- * maps the failure channel only.
+ * N1: two stack traces for one billing refusal).
+ *
+ * Values already accepted by the JSON codec retain their identity. A class
+ * instance is then round-tripped through JSON so its enumerable refusal fields
+ * — especially `_tag` — survive while its prototype and stack do not. Only a
+ * value JSON cannot render falls back to `Cause.pretty`. That order keeps typed
+ * failures machine-readable without letting a cycle throw from the failure
+ * mapper, and a defect stays a defect because this maps the failure channel
+ * only.
  *
  * @category conversions
  * @since 1.0.0
@@ -683,7 +714,16 @@ const isJsonValue = (value: unknown, ancestors: WeakSet<object> = new WeakSet(),
 export const settlementFailure = (error: unknown): unknown => {
   if (isJsonValue(error)) return error
   try {
-    return Cause.pretty(Cause.fail(error))
+    const rendered = JSON.stringify(error)
+    if (rendered !== undefined) {
+      const decoded: unknown = JSON.parse(rendered)
+      if (isJsonValue(decoded)) return decoded
+    }
+  } catch {
+    // A cycle, BigInt, or excessive depth still has the text fallback below.
+  }
+  try {
+    return String(Cause.pretty(Cause.fail(error)))
   } catch {
     // The renderer walks the value too, and a value deep enough to overflow it
     // must still not throw from the mapper: the settlement is the last thing
@@ -1299,8 +1339,8 @@ export const make = (
         const flowBody = yield* registry.loadBody(card.flowId)
         if (flowBody._tag !== "Prompt") {
           return yield* Effect.fail(
-            new Seat.SeatUnresolved({
-              seat: seatId,
+            new HarnessError.HarnessError({
+              code: "engine_failed",
               message: `Flow ${card.flowId} has a module body; only prompt flows run on the agent`
             })
           )
