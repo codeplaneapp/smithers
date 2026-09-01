@@ -89,26 +89,36 @@ describe("MigrateFlow.postconditions", () => {
       expect(written.every((check) => check.ok)).toBe(true)
     }).pipe(Effect.provide(platform)))
 
-  it.effect("refuses a manifest that still declares a 0.x package or an old effect", () =>
+  it.effect("keeps 0.x packages valid through dependencies, then requires their removal in project", () =>
     Effect.gen(function*() {
       const root = copyFixture("jsx-single")
-      const outline = yield* outlineOf(root, options(root), "dependencies")
+      const dependencies = yield* outlineOf(root, options(root), "dependencies")
+      const project = yield* outlineOf(root, options(root), "project")
 
-      const before = yield* MigrateFlow.postconditions(root, outline)
-      expect(before.find((check) => check.name === "no manifest declares a 0.x package")?.findings[0]?.message)
-        .toContain("smthrs")
-      expect(before.find((check) => check.name === "effect is pinned to the version this release ships")?.ok)
+      const dependenciesBefore = yield* MigrateFlow.postconditions(root, dependencies)
+      expect(dependenciesBefore.find((check) => check.name === "no manifest declares a 0.x package"))
+        .toBeUndefined()
+      expect(
+        dependenciesBefore.find((check) => check.name === "effect is pinned to the version this release ships")?.ok
+      )
         .toBe(false)
+      const projectBefore = yield* MigrateFlow.postconditions(root, project)
+      expect(projectBefore.find((check) => check.name === "no manifest declares a 0.x package")?.findings[0]?.message)
+        .toContain("smthrs")
 
       const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
         dependencies: Record<string, string>
       }
-      delete manifest.dependencies["smthrs"]
       manifest.dependencies["effect"] = "4.0.0-rc.108"
       writeFileSync(join(root, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`)
 
-      const after = yield* MigrateFlow.postconditions(root, outline)
-      expect(after.every((check) => check.ok)).toBe(true)
+      const dependenciesAfter = yield* MigrateFlow.postconditions(root, dependencies)
+      expect(dependenciesAfter.every((check) => check.ok)).toBe(true)
+
+      delete manifest.dependencies["smthrs"]
+      writeFileSync(join(root, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`)
+      const projectAfter = yield* MigrateFlow.postconditions(root, project)
+      expect(projectAfter.find((check) => check.name === "no manifest declares a 0.x package")?.ok).toBe(true)
     }).pipe(Effect.provide(platform)))
 
   it.effect("refuses a tsconfig that still configures the JSX runtime, and an ignore file without `.flows/`", () =>
@@ -138,6 +148,49 @@ describe("MigrateFlow.postconditions", () => {
 })
 
 describe("MigrateFlow.finish", () => {
+  it.effect("reports out-of-set damage even when verification failed before checks ran", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      const chosen = options(root)
+      const outline = yield* outlineOf(root, chosen, "workflow:simple-workflow")
+      const checkpoint = yield* Checkpoint.take({
+        root,
+        unit: outline.id,
+        files: outline.sources,
+        backupDir: join(root, ".smithers-migrate", "backup"),
+        allowNoVcs: true,
+        treeExclude: [".smithers-migrate"]
+      }).pipe(Effect.provide(platform))
+      mkdirSync(join(root, "flows", "simple-workflow"), { recursive: true })
+      writeFileSync(join(root, "flows", "simple-workflow", "flow.ts"), golden)
+      writeFileSync(join(root, "tests", "simple-workflow.test.ts"), "changed outside the unit\n")
+      mkdirSync(join(root, "scratch"), { recursive: true })
+      writeFileSync(join(root, "scratch", "operator-note.md"), "created while migration ran\n")
+
+      const outcome = yield* MigrateFlow.finish({
+        options: chosen,
+        outline,
+        checkpoint,
+        result: answered(outline.id, ["flows/simple-workflow/flow.ts"]),
+        verification: {
+          ...passing,
+          tests: { command: "test", exitCode: 1, durationMs: 1, stdoutTail: "", stderrTail: "failed" }
+        },
+        repairRounds: 0
+      }).pipe(Effect.provide(platform))
+
+      expect(outcome.status).toBe("failed")
+      const outside = outcome.unresolved.filter((entry) => entry.construct === "no write outside the unit's file set")
+      expect(outside.map((entry) => entry.file).sort()).toEqual([
+        "scratch/operator-note.md",
+        "tests/simple-workflow.test.ts"
+      ])
+      expect(outcome.unresolved.find((entry) => entry.construct === "rollback could not restore a file")?.suggestion)
+        .toContain(checkpoint.restore)
+      expect(outcome.unresolved.find((entry) => entry.construct === "rollback deleted a post-checkpoint file")?.reason)
+        .toContain("recovery copy")
+    }).pipe(Effect.provide(platform)))
+
   it.effect("restores the unit when the archive cannot finish, rather than leaving a half-moved tree", () =>
     Effect.gen(function*() {
       const root = copyFixture("jsx-single")

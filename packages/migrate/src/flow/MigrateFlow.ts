@@ -335,28 +335,30 @@ export const postconditions = (
 
     if (outline.kind === "dependencies" || outline.kind === "project") {
       const manifests = outline.sources.filter((file) => (file.split("/").pop() ?? file) === "package.json")
-      const declared: Array<{ file: string; line: number; message: string }> = []
-      for (const file of manifests) {
-        const text = yield* read(file)
-        if (text._tag === "None") continue
-        const parsed = yield* Effect.try({
-          try: () => JSON.parse(text.value) as Record<string, unknown>,
-          catch: io(`the migrated manifest "${file}" is not valid JSON`)
-        })
-        for (const field of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]) {
-          const map = parsed[field]
-          if (typeof map !== "object" || map === null) continue
-          for (const [name, version] of Object.entries(map as Record<string, string>)) {
-            if (Detect.classifyPackage(name, typeof version === "string" ? version : "") === undefined) continue
-            declared.push({
-              file,
-              line: 1,
-              message: `${field}."${name}" still declares a 0.x package`
-            })
+      if (outline.kind === "project") {
+        const declared: Array<{ file: string; line: number; message: string }> = []
+        for (const file of manifests) {
+          const text = yield* read(file)
+          if (text._tag === "None") continue
+          const parsed = yield* Effect.try({
+            try: () => JSON.parse(text.value) as Record<string, unknown>,
+            catch: io(`the migrated manifest "${file}" is not valid JSON`)
+          })
+          for (const field of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]) {
+            const map = parsed[field]
+            if (typeof map !== "object" || map === null) continue
+            for (const [name, version] of Object.entries(map as Record<string, string>)) {
+              if (Detect.classifyPackage(name, typeof version === "string" ? version : "") === undefined) continue
+              declared.push({
+                file,
+                line: 1,
+                message: `${field}."${name}" still declares a 0.x package`
+              })
+            }
           }
         }
+        check("no manifest declares a 0.x package", declared)
       }
-      check("no manifest declares a 0.x package", declared)
 
       const pins: Array<{ file: string; line: number; message: string }> = []
       for (const file of manifests) {
@@ -480,6 +482,17 @@ export const finish = (payload: typeof finishAction.payloadSchema.Type): Effect.
     // record, and it is anchored to the exact root paths an install writes.
     const installed = beyond.filter((file) => Checkpoint.generated.includes(file.path))
     const outside = beyond.filter((file) => !Checkpoint.generated.includes(file.path))
+    const outsideCheck: Checks.CheckResult = {
+      name: "no write outside the unit's file set",
+      ok: outside.length === 0,
+      findings: outside.map((file) => ({
+        file: file.path,
+        line: 1,
+        message: file.change === "added"
+          ? "the unit added a file it does not own; rollback deleted it after preserving a recovery copy"
+          : `the unit ${file.change} a file it does not own; put it back with \`${checkpoint.restore}\``
+      }))
+    }
     const changed = [...changedOwned, ...outside, ...installed].sort((left, right) =>
       left.path < right.path ? -1 : left.path > right.path ? 1 : 0
     )
@@ -500,12 +513,13 @@ export const finish = (payload: typeof finishAction.payloadSchema.Type): Effect.
       const failed = verification === null || Verify.verdict(verification) === "fail"
 
       if (failed) {
-        yield* putBack
+        const rollback = yield* putBack
         return canonical({
           payload,
           status: "failed",
           changedFiles: [],
-          checks: [],
+          checks: [outsideCheck],
+          rollback,
           now: yield* Clock.currentTimeMillis
         })
       }
@@ -526,22 +540,19 @@ export const finish = (payload: typeof finishAction.payloadSchema.Type): Effect.
           ],
           result === null ? [] : result.decisions.map((entry) => entry.construct)
         ),
-        {
-          name: "no write outside the unit's file set",
-          ok: outside.length === 0,
-          findings: outside.map((file) => ({
-            file: file.path,
-            line: 1,
-            message: file.change === "added"
-              ? "the unit added a file it does not own; it has been removed"
-              : `the unit ${file.change} a file it does not own; put it back with \`${checkpoint.restore}\``
-          }))
-        }
+        outsideCheck
       ]
 
       if (!Checks.ok(checks)) {
-        yield* putBack
-        return canonical({ payload, status: "failed", changedFiles: [], checks, now: yield* Clock.currentTimeMillis })
+        const rollback = yield* putBack
+        return canonical({
+          payload,
+          status: "failed",
+          changedFiles: [],
+          checks,
+          rollback,
+          now: yield* Clock.currentTimeMillis
+        })
       }
 
       const archived = yield* Archive.run({
@@ -558,12 +569,13 @@ export const finish = (payload: typeof finishAction.payloadSchema.Type): Effect.
 
       const settled = [...checks, ...yield* postconditions(root, outline)]
       if (!Checks.ok(settled)) {
-        yield* putBack
+        const rollback = yield* putBack
         return canonical({
           payload,
           status: "failed",
           changedFiles: [],
           checks: settled,
+          rollback,
           now: yield* Clock.currentTimeMillis
         })
       }
@@ -580,7 +592,12 @@ export const finish = (payload: typeof finishAction.payloadSchema.Type): Effect.
       // above return a failed unit rather than failing, so this is only for
       // the ones nobody wrote a branch for: an unreadable file, a full disk, a
       // refused archive, an interrupt.
-    }).pipe(Effect.onError(() => Effect.ignore(putBack)))
+    }).pipe(Effect.onError(() =>
+      putBack.pipe(
+        Effect.flatMap((rollback) => Checkpoint.recordRollback(backupDir(options), checkpoint, rollback)),
+        Effect.ignore
+      )
+    ))
   })
 
 const parentOf = (file: string): string => {
@@ -597,6 +614,7 @@ const canonical = (input: {
   readonly status: "migrated" | "failed"
   readonly changedFiles: ReadonlyArray<Report.ChangedFile>
   readonly checks: ReadonlyArray<Checks.CheckResult>
+  readonly rollback?: Checkpoint.Rollback | undefined
   readonly scripts?: ReadonlyArray<typeof Archive.UnsupportedScript.Type> | undefined
   readonly now: number
 }): UnitOutcome => {
@@ -630,6 +648,23 @@ const canonical = (input: {
           suggestion: "The check that refused this unit names the file and the line; fix it and rerun the unit."
         }))
       ),
+      ...(input.rollback?.unrestored ?? []).map((file) => ({
+        construct: "rollback could not restore a file",
+        reason: "The file changed outside the unit's declared set, and its original bytes were not in the unit backup.",
+        file,
+        line: 1,
+        suggestion:
+          `From "${payload.options.root}", run \`${payload.checkpoint.restore}\`. If the file was untracked, recover it from editor history or another backup.`
+      })),
+      ...(input.rollback?.deletedAdds ?? []).map((entry) => ({
+        construct: "rollback deleted a post-checkpoint file",
+        reason:
+          `The file did not exist at checkpoint time. Rollback deleted it and kept a recovery copy at "${entry.backup}".`,
+        file: entry.path,
+        line: 1,
+        suggestion:
+          `Copy "${entry.backup}" back to "${entry.path}" under "${payload.options.root}" if it was operator work.`
+      })),
       // A script naming a verb 1.0 does not have is left exactly as it was and
       // reported: deleting a script an operator depends on would be worse than
       // leaving one that fails loudly.
@@ -657,7 +692,10 @@ const canonical = (input: {
  * @since 0.1.0
  */
 export const finishLayer = finishAction.toLayer((payload) =>
-  Effect.tap(finish(payload), (outcome) => writeUnitReport(payload.options, outcome))
+  Effect.tap(finish(payload), (outcome) =>
+    writeUnitReport(payload.options, outcome).pipe(
+      Effect.flatMap(() => Checkpoint.clearPending(backupDir(payload.options), payload.checkpoint))
+    ))
 )
 
 const decodeUnit = Schema.decodeUnknownSync(Report.UnitReport)
