@@ -279,6 +279,83 @@ describe("FlowEngine.layerMemory durable waits", () => {
         expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
       }).pipe(Effect.provide(FlowEngine.layerMemory))
     ))
+
+  effect("atomically completes only the exact active wait and preserves the first answer", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const engine = yield* FlowRuntime.FlowRuntime
+        const Waiting = Flow.make("Memory/WaitingCas", {
+          payload: {},
+          success: Schema.Void,
+          body: () => {
+            throw new Error("registered directly")
+          }
+        })
+        yield* engine.register(Waiting, () =>
+          Effect.gen(function*() {
+            yield* FlowRuntime.annotateWaiting({ reason: "approval", token: "attempt-1" })
+            const instance = yield* FlowRuntime.FlowInstance
+            return yield* Flow.suspend(instance)
+          }))
+        yield* engine.execute(Waiting, { executionId: "waiting-cas", payload: {}, discard: true })
+        expect(Option.isSome(yield* pollSuspended(engine.poll(Waiting, "waiting-cas")))).toBe(true)
+
+        const complete = (overrides: Partial<{
+          readonly flowName: string
+          readonly executionId: string
+          readonly reason: string
+          readonly token: string
+          readonly value: string
+        }> = {}) =>
+          engine.deferredDoneIfWaiting(gate, {
+            flowName: overrides.flowName ?? Waiting._tag,
+            executionId: overrides.executionId ?? "waiting-cas",
+            deferredName: gate.name,
+            reason: overrides.reason ?? "approval",
+            token: overrides.token ?? "attempt-1",
+            exit: Exit.succeed(overrides.value ?? "first")
+          })
+
+        expect(yield* complete({ executionId: "unknown" })).toBe("NotWaiting")
+        expect(yield* complete({ flowName: "Memory/OtherFlow" })).toBe("NotWaiting")
+        expect(yield* complete({ reason: "event" })).toBe("NotWaiting")
+        expect(yield* complete({ token: "attempt-2" })).toBe("NotWaiting")
+        expect(yield* complete()).toBe("Completed")
+        expect(Option.isSome(yield* pollSuspended(engine.poll(Waiting, "waiting-cas")))).toBe(true)
+        expect(yield* complete({ value: "second" })).toBe("Existing")
+
+        const recorded = yield* engine.deferredResult(gate).pipe(
+          Effect.provideService(FlowRuntime.FlowInstance, FlowEngine.makeInstance(Waiting, "waiting-cas"))
+        )
+        expect(recorded).toEqual(Option.some(Exit.succeed("first")))
+      }).pipe(Effect.provide(FlowEngine.layerMemory))
+    ))
+
+  effect("fails closed when an encoded driver has no conditional completion primitive", () =>
+    Effect.gen(function*() {
+      const engine = FlowEngine.makeUnsafe({
+        register: () => Effect.void,
+        execute: () => Effect.die("not used"),
+        poll: () => Effect.succeedNone,
+        interrupt: () => Effect.void,
+        interruptUnsafe: () => Effect.void,
+        resume: () => Effect.void,
+        actionExecute: () => Effect.die("not used"),
+        deferredResult: () => Effect.succeedNone,
+        deferredDone: () => Effect.void,
+        scheduleClock: () => Effect.void
+      })
+      expect(
+        yield* engine.deferredDoneIfWaiting(gate, {
+          flowName: Parked._tag,
+          executionId: "missing-conditional-driver",
+          deferredName: gate.name,
+          reason: "approval",
+          token: "attempt-1",
+          exit: Exit.succeed("ignored")
+        })
+      ).toBe("NotWaiting")
+    }))
 })
 
 describe("FlowEngine.layerMemory normal interrupt of a live action", () => {
