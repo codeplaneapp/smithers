@@ -47,21 +47,54 @@ const moduleDoc = (source) => {
   return delink(description(ungutter(match[1])))
 }
 
+const entry = (namespace, publicName, declaration, body) => {
+  const category = /@category (\S+)/.exec(body)?.[1]
+  if (category === undefined) return undefined
+  return {
+    name: `${namespace}.${publicName}`,
+    declaration,
+    category,
+    summary: firstSentence(description(body))
+  }
+}
+
 const exportedDocs = (namespace, source) => {
   const entries = []
   const pattern = /\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*\nexport (type|const|class|interface) (\w+)/g
   for (let match = pattern.exec(source); match !== null; match = pattern.exec(source)) {
-    const body = ungutter(match[1])
-    const category = /@category (\S+)/.exec(body)?.[1]
-    if (category === undefined) continue
-    entries.push({
-      name: `${namespace}.${match[3]}`,
-      declaration: match[2],
-      category,
-      summary: firstSentence(description(body))
-    })
+    const made = entry(namespace, match[3], match[2], ungutter(match[1]))
+    if (made !== undefined) entries.push(made)
+  }
+  // An alias re-export (`export { catch_ as catch }`) publishes a declaration
+  // whose JSDoc sits on the internal const, so resolve the internal name.
+  for (const match of source.matchAll(/^export \{ ([^}]+) \}$/gm)) {
+    for (const piece of match[1].split(",")) {
+      const alias = /^(\w+)(?: as (\w+))?$/.exec(piece.trim())
+      if (alias === null) continue
+      const declaration = new RegExp(
+        `\\/\\*\\*((?:[^*]|\\*(?!\\/))*)\\*\\/\\s*\\nconst ${alias[1]}\\b`
+      ).exec(source)
+      if (declaration === null) continue
+      const made = entry(namespace, alias[2] ?? alias[1], "const", ungutter(declaration[1]))
+      if (made !== undefined) entries.push(made)
+    }
   }
   return entries
+}
+
+/** Every name the module exports, so no public export can silently vanish. */
+const exportedNames = (source) => {
+  const names = new Set()
+  for (const match of source.matchAll(/^export (?:type|const|class|interface|function) (\w+)/gm)) {
+    names.add(match[1])
+  }
+  for (const match of source.matchAll(/^export \{ ([^}]+) \}$/gm)) {
+    for (const piece of match[1].split(",")) {
+      const alias = /^(\w+)(?: as (\w+))?$/.exec(piece.trim())
+      if (alias !== null) names.add(alias[2] ?? alias[1])
+    }
+  }
+  return names
 }
 
 const manifest = JSON.parse(read(join(packageRoot, "package.json")))
@@ -71,10 +104,20 @@ const barrel = read(join(packageRoot, "src", "index.ts"))
 // The barrel re-exports namespaces, so every documented export is addressed as
 // `Namespace.member` and the module name is the namespace it is published under.
 const modules = [...barrel.matchAll(/export \* as (\w+) from "\.\/(\w+)\.ts"/g)].map((match) => [match[1], match[2]])
-const exports = modules.flatMap(([namespace, file]) =>
-  exportedDocs(namespace, read(join(packageRoot, "src", `${file}.ts`)))
-)
+const undocumented = []
+const exports = modules.flatMap(([namespace, file]) => {
+  const source = read(join(packageRoot, "src", `${file}.ts`))
+  const entries = exportedDocs(namespace, source)
+  const documented = new Set(entries.map((made) => made.name.slice(namespace.length + 1)))
+  for (const name of exportedNames(source)) {
+    if (!documented.has(name)) undocumented.push(`src/${file}.ts: export ${name} is missing from the API table`)
+  }
+  return entries
+})
 if (exports.length === 0) throw new Error("plan docs: no documented exports found")
+if (undocumented.length > 0) {
+  throw new Error(`plan docs: every public export needs JSDoc with @category\n${undocumented.join("\n")}`)
+}
 
 const table = [
   "| Export | Kind | Summary |",

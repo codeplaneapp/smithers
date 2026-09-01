@@ -11,7 +11,7 @@ const program = Effect.gen(function*() {
       {
         id: "read-pr",
         material: {
-          version: "flows/key-material/v1",
+          version: "flows/key-material/v2",
           kind: "sealed",
           body: { action: "read-pr", pr: 4821 },
           inputs: [],
@@ -23,7 +23,7 @@ const program = Effect.gen(function*() {
       {
         id: "run-tests",
         material: {
-          version: "flows/key-material/v1",
+          version: "flows/key-material/v2",
           kind: "sealed",
           body: { action: "run-tests" },
           inputs: [{ _tag: "Ref", from: "read-pr", path: [] }],
@@ -92,7 +92,7 @@ A plan grows and is never rewritten. `append` leaves the nodes already in it wit
 
 A compiled plan is a deep-frozen snapshot of the drafts it was given. Mutating a caller's draft after compiling cannot change the plan, its keys, or its digest.
 
-`PlanError` is a closed set of six codes.
+`PlanError` is a closed set of seven codes.
 
 | `code`               | Meaning                                                                                                               |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------- |
@@ -102,8 +102,9 @@ A compiled plan is a deep-frozen snapshot of the drafts it was given. Mutating a
 | `overlap_forbidden`  | a `fail` pair genuinely overlaps and no dependency path orders it                                                     |
 | `invalid_effects`    | a declared path is not workspace-relative, or one path is declared as both a write and a removal                      |
 | `invalid_node`       | an empty plan id, flow, or node id, a priority that is not a safe integer, or key material this release cannot decode |
+| `graph_too_large`    | a plan contains more than `Plan.maximumPlanNodes` nodes                                                               |
 
-Compilation walks with explicit stacks and never recurses per edge, so graph depth is bounded by memory alone. The conflict and reader-after-writer passes compare node pairs, so compilation is quadratic in node count.
+Compilation walks with explicit stacks and never recurses per edge. The conflict and reader-after-writer passes compare node pairs, so compilation is quadratic in node count and one plan is capped at `Plan.maximumPlanNodes`.
 
 ### Conflict annotations
 
@@ -125,7 +126,7 @@ The pure, pipeable authoring AST. Building a node records an inspectable, closur
 
 Map transforms; branch decides. Both branch arms are evaluated once, symbolically, so the exit condition and the handoff site are visible topology before anything runs. A plan is always a DAG, so there is no loop node: repetition lives one level up, in what a flow settles with.
 
-A payload is stored as its JSON mirror, exactly what canonical serialization hashes. A callable `toJSON` is honoured, so a `Date` or a `URL` keys as the value it serializes to rather than as an empty object; a function or symbol member is dropped from an object and becomes `null` in an array; shared references and cycles clone as they were written.
+A payload is stored as its inert JSON mirror. A data-valued callable `toJSON` is honoured, so a `Date` or a `URL` keys as the value it serializes to rather than as an empty object; a function or symbol member is dropped from an object and becomes `null` in an array; shared references and cycles clone as they were written. Accessors and unsupported prototypes without `toJSON` fail as `invalid_payload`.
 
 The functions an author writes, a mapper, a continuation, a branch predicate, live in `WeakMap`s keyed by the AST node they belong to, and the AST keeps only a `FunctionIdentity` digest of the function's exact source. Exact source matters, because whitespace inside a string literal is behavior. A function whose inert captures were declared with `capture` digests those captures; every other function additionally carries process-local, per-function entropy, so indistinguishable closure sources fail closed instead of sharing a cache key. `capture` refuses a capture record nested past 256 levels with a path-bearing error rather than overflowing the native stack.
 
@@ -171,7 +172,9 @@ The refusals a plan-time build raises instead of producing a wrong plan. Each ca
 | `cyclic_payload`              | a payload contains itself, so no plan could serialize or hash it                               |
 | `payload_too_deep`            | a payload is nested past the build bound                                                       |
 | `graph_too_deep`              | authored topology is nested past the build bound                                               |
+| `duplicate_node`              | two structural graph addresses resolve to one durable node id                                  |
 | `invalid_priority`            | `Node.priority` received a value that is not a safe integer                                    |
+| `invalid_payload`             | a payload member cannot be captured as inert JSON without executing code or losing identity    |
 
 `GraphBuildErrorCode` is a closed schema literal, so a caller may switch on it and a new refusal is a deliberate addition rather than a new free-form string.
 
