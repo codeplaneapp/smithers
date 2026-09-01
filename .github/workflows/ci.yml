@@ -31,6 +31,10 @@ jobs:
           tool: jj-cli@0.39.0
       - name: Initialize colocated jj repository
         run: jj git init --colocate
+      - name: Install ripgrep
+        uses: taiki-e/install-action@v2
+        with:
+          tool: ripgrep@14.1.1
       - name: Workspace targets
         run: pnpm exec smithers-build ci '//packages/...' --jobs 2
         env:
@@ -280,6 +284,10 @@ jobs:
           tool: jj-cli@0.39.0
       - name: Initialize colocated jj repository
         run: jj git init --colocate
+      - name: Install ripgrep
+        uses: taiki-e/install-action@v2
+        with:
+          tool: ripgrep@14.1.1
       - name: Package test targets
         run: pnpm exec smithers-build test '//packages/...'
         env:

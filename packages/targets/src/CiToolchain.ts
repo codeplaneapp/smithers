@@ -184,6 +184,44 @@ export const JjRelease = Schema.Literals(["0.39.0"])
 export type JjRelease = typeof JjRelease.Type
 
 /**
+ * The ripgrep releases a runner may install.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const RipgrepRelease = Schema.Literals(["14.1.1"])
+
+/**
+ * The ripgrep releases a runner may install.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type RipgrepRelease = typeof RipgrepRelease.Type
+
+/**
+ * Schema for a declared ripgrep installation.
+ *
+ * `@smthrs/std` ships two search implementations and its conformance suite runs
+ * both against each other: the portable one it implements, and the native one
+ * that drives a real `rg`. The parity is the gate, so a runner without the
+ * binary does not weaken the suite, it removes the only check that proves the
+ * portable implementation still matches ripgrep.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const RipgrepSetup = Schema.Struct({ release: RipgrepRelease })
+
+/**
+ * One declared ripgrep installation.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type RipgrepSetup = typeof RipgrepSetup.Type
+
+/**
  * Schema for a declared jj installation.
  *
  * `colocate` asks the generator for the `jj git init --colocate` step: a GitHub
@@ -205,6 +243,15 @@ export const JjSetup = Schema.Struct({
  * @since 0.1.0
  */
 export type JjSetup = typeof JjSetup.Type
+
+/**
+ * Declares that a job installs ripgrep.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const Ripgrep = (options: { readonly release: RipgrepRelease }): RipgrepSetup =>
+  RipgrepSetup.make({ release: options.release })
 
 /**
  * Declares that a job installs the jj CLI.
@@ -452,6 +499,7 @@ export const Toolchain = Schema.Struct({
   runtimes: Schema.Array(RuntimeSetup),
   rust: Schema.optional(RustSetup),
   jj: Schema.optional(JjSetup),
+  ripgrep: Schema.optional(RipgrepSetup),
   browser: Schema.optional(SystemBrowser),
   workflowLint: Schema.optional(WorkflowLint),
   artifacts: Schema.optional(ArtifactUpload)
@@ -494,6 +542,7 @@ export const Needs = (options: {
   readonly runtimes?: ReadonlyArray<RuntimeSetup> | undefined
   readonly rust?: RustSetup | undefined
   readonly jj?: JjSetup | undefined
+  readonly ripgrep?: RipgrepSetup | undefined
   readonly browser?: SystemBrowser | undefined
   readonly workflowLint?: WorkflowLint | undefined
   readonly artifacts?: ArtifactUpload | undefined
@@ -504,6 +553,7 @@ export const Needs = (options: {
     runtimes: options.runtimes ?? [],
     ...(options.rust === undefined ? {} : { rust: options.rust }),
     ...(options.jj === undefined ? {} : { jj: options.jj }),
+    ...(options.ripgrep === undefined ? {} : { ripgrep: options.ripgrep }),
     ...(options.browser === undefined ? {} : { browser: options.browser }),
     ...(options.workflowLint === undefined ? {} : { workflowLint: options.workflowLint }),
     ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts })
