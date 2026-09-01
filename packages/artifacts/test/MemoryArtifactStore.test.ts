@@ -3,8 +3,13 @@
  * a composition gets when it has no artifact store at all.
  */
 import { describe, expect, it } from "@effect/vitest"
+import { syncCrypto } from "@smthrs/crypto"
+import * as Crypto from "effect/Crypto"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
+import * as PlatformError from "effect/PlatformError"
 import * as ArtifactStore from "../src/ArtifactStore.ts"
 import { bytes, sha256, text, withCrypto } from "./Crypto.ts"
 
@@ -35,6 +40,75 @@ describe("makeMemory", () => {
       const stored = yield* withCrypto(artifacts.put(input))
       input[0] = 0x58
       expect(text(yield* withCrypto(artifacts.get(stored)))).toBe(artifact)
+    }))
+
+  it.effect("snapshots input before an asynchronous Crypto host yields", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const crypto = Crypto.make({
+        randomBytes: (size) => new Uint8Array(size),
+        digest: (algorithm, snapshot) =>
+          Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.andThen(syncCrypto.digest(algorithm, snapshot))
+          )
+      })
+      const artifacts = ArtifactStore.makeMemory()
+      const input = bytes(artifact)
+      const running = yield* artifacts.put(input).pipe(
+        Effect.provideService(Crypto.Crypto, crypto),
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* Deferred.await(entered)
+      input.fill(0)
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Fiber.join(running)).toBe(digest)
+      expect(text(yield* withCrypto(artifacts.get(digest)))).toBe(artifact)
+    }))
+
+  it.effect("maps failing, throwing, and malformed Crypto hosts to input-safe typed errors", () =>
+    Effect.gen(function*() {
+      const failure = PlatformError.systemError({
+        _tag: "Unknown",
+        module: "test",
+        method: "digest"
+      })
+      const hosts = [
+        Crypto.make({
+          randomBytes: (size) => new Uint8Array(size),
+          digest: () => Effect.fail(failure)
+        }),
+        Crypto.make({
+          randomBytes: (size) => new Uint8Array(size),
+          digest: () => {
+            throw new Error("host digest throw")
+          }
+        }),
+        Crypto.make({
+          randomBytes: (size) => new Uint8Array(size),
+          digest: () => Effect.succeed(new Uint8Array(1))
+        })
+      ]
+      const secret = "artifact-bytes-that-must-not-enter-errors"
+      for (const crypto of hosts) {
+        const exit = yield* ArtifactStore.makeMemory().put(bytes(secret)).pipe(
+          Effect.provideService(Crypto.Crypto, crypto),
+          Effect.exit
+        )
+        const error = errorOf(exit) as ArtifactStore.ArtifactStoreError
+        expect(error.code).toBe("digest_failed")
+        expect(error.message).not.toContain(secret)
+        expect(JSON.stringify(error)).not.toContain(secret)
+      }
+    }))
+
+  it.effect("reports an input buffer detached before execution as digest_failed", () =>
+    Effect.gen(function*() {
+      const input = bytes(artifact)
+      structuredClone(input.buffer, { transfer: [input.buffer as ArrayBuffer] })
+      const exit = yield* withCrypto(ArtifactStore.makeMemory().put(input).pipe(Effect.exit))
+      expect(errorOf(exit)).toMatchObject({ code: "digest_failed" })
     }))
 
   it.effect("is immune to a caller mutating the array it got", () =>

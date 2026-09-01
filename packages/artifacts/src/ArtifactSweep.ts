@@ -136,6 +136,7 @@ export const makeFileSystem = (
   options: ArtifactStore.FileSystemOptions = {}
 ): Service => {
   const directory = options.directory ?? defaultDirectory
+  const coordination = options.coordination ?? "required"
   const blobPath = (digest: string): string => `${directory}/${digest.slice(0, 2)}/${digest}`
 
   const inventory: Service["inventory"] = Effect.gen(function*() {
@@ -175,13 +176,14 @@ export const makeFileSystem = (
 
   const remove: Service["remove"] = Effect.fn("ArtifactSweep.remove")((digest, removeOptions) =>
     Effect.gen(function*() {
-      yield* Effect.annotateCurrentSpan({ digest })
-      yield* ArtifactStore.validateDigest(digest)
+      const validated = yield* ArtifactStore.validateDigest(digest)
+      yield* Effect.annotateCurrentSpan({ digest: validated })
       return yield* ArtifactLocks.withDigest(
         fs,
-        digest,
+        directory,
+        validated,
         Effect.gen(function*() {
-          const path = blobPath(digest)
+          const path = blobPath(validated)
           const bound = removeOptions?.ifUnmodifiedSinceMs
           if (bound !== undefined) {
             const info = yield* fs.stat(path).pipe(Effect.option)
@@ -202,7 +204,9 @@ export const makeFileSystem = (
               )
             )
           )
-        })
+        }),
+        hostFailure,
+        coordination
       )
     })
   )

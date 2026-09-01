@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema"
 const encoder = new TextEncoder()
 
 /** Hashes test fixtures with the concrete Node crypto layer. */
-export const sha256 = (input: string | Uint8Array): string =>
+export const sha256 = (input: string | Uint8Array): typeof Sha256.Digest.Type =>
   Effect.runSync(
     Schema.decodeUnknownEffect(Sha256)(input).pipe(Effect.provide(NodeCrypto.layer), Effect.orDie)
   )

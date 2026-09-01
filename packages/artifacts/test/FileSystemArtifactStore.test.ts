@@ -14,11 +14,14 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Clock from "effect/Clock"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as PlatformError from "effect/PlatformError"
 import { TestClock } from "effect/testing"
 import * as ArtifactStore from "../src/ArtifactStore.ts"
 import { bytes, sha256, text, withCrypto } from "./Crypto.ts"
@@ -37,6 +40,9 @@ const memoryFs = (options: {
   readonly mtimes?: Record<string, number>
   readonly failRenameTo?: string
   readonly failReadOf?: string
+  readonly vanishOnReadOf?: string
+  readonly notFoundReadOf?: string
+  readonly failExists?: boolean
   readonly failDirectoryRead?: boolean
   readonly supportsOpen?: boolean
   readonly failSyncOf?: (path: string) => boolean
@@ -50,10 +56,23 @@ const memoryFs = (options: {
   const syncs: Array<string> = []
   let directoryReads = 0
   const fs = FileSystem.makeNoop({
-    exists: ((path: string) => Effect.succeed(files.has(path))) as never,
+    exists: ((path: string) =>
+      options.failExists === true ? Effect.fail(new Error("EIO: exists")) : Effect.succeed(files.has(path))) as never,
     readFile: ((path: string) =>
       Effect.suspend(() => {
         reads.push(path)
+        if (path === options.notFoundReadOf) {
+          return Effect.fail(PlatformError.systemError({
+            _tag: "NotFound",
+            module: "test",
+            method: "readFile",
+            pathOrDescriptor: path
+          }))
+        }
+        if (path === options.vanishOnReadOf) {
+          files.delete(path)
+          return Effect.fail(new Error(`ENOENT: ${path}`))
+        }
         return files.has(path) && path !== options.failReadOf
           ? Effect.succeed(files.get(path)!)
           : Effect.fail(new Error(`ENOENT: ${path}`))
@@ -65,10 +84,14 @@ const memoryFs = (options: {
     readDirectory: ((directory: string) =>
       Effect.suspend(() => {
         directoryReads++
-        if (options.failDirectoryRead === true) return Effect.fail(new Error("ENOENT: no objects directory"))
+        if (options.failDirectoryRead === true) {
+          return Effect.fail(new Error("ENOENT: no objects directory"))
+        }
         const prefix = `${directory}/`
         return Effect.succeed(
-          [...files.keys()].filter((path) => path.startsWith(prefix)).map((path) => path.slice(prefix.length))
+          [...files.keys()].filter((path) =>
+            path.startsWith(prefix)
+          ).map((path) => path.slice(prefix.length))
         )
       })) as never,
     stat: ((path: string) => {
@@ -109,7 +132,7 @@ const memoryFs = (options: {
 }
 
 const store = (host: ReturnType<typeof memoryFs>, options?: ArtifactStore.FileSystemOptions) =>
-  ArtifactStore.makeFileSystem(host.fs, { durability: "best-effort", ...options })
+  ArtifactStore.makeFileSystem(host.fs, { durability: "best-effort", coordination: "process", ...options })
 
 const tempsOf = (host: ReturnType<typeof memoryFs>) => [...host.files.keys()].filter((path) => path.includes(".tmp-"))
 
@@ -152,6 +175,33 @@ describe("atomic publication (issues #117, #131, #138)", () => {
       expect(tempsOf(host)).toEqual([])
     }))
 
+  it.effect("publishes its start-of-effect snapshot when the caller mutates during filesystem I/O", () =>
+    Effect.gen(function*() {
+      const host = memoryFs()
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const gated = FileSystem.makeNoop({
+        ...host.fs,
+        writeFile: ((path: string, content: Uint8Array) =>
+          Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.andThen(host.fs.writeFile(path, content))
+          )) as never
+      })
+      const input = bytes(artifact)
+      const running = yield* withCrypto(
+        ArtifactStore.makeFileSystem(gated, {
+          durability: "best-effort",
+          coordination: "process"
+        }).put(input)
+      ).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(entered)
+      input.fill(0)
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Fiber.join(running)).toBe(digest)
+      expect(text(host.files.get(blobPath))).toBe(artifact)
+    }))
+
   it.effect("gives two store instances distinct temp paths for one digest", () =>
     Effect.gen(function*() {
       // The cross-process shape: each instance's temp counter starts fresh,
@@ -186,8 +236,14 @@ describe("atomic publication (issues #117, #131, #138)", () => {
       const exit = yield* withCrypto(
         Effect.all(
           [
-            ArtifactStore.makeFileSystem(firstProcess, { durability: "best-effort" }).put(bytes(artifact)),
-            ArtifactStore.makeFileSystem(secondProcess, { durability: "best-effort" }).put(bytes(artifact))
+            ArtifactStore.makeFileSystem(firstProcess, {
+              durability: "best-effort",
+              coordination: "process"
+            }).put(bytes(artifact)),
+            ArtifactStore.makeFileSystem(secondProcess, {
+              durability: "best-effort",
+              coordination: "process"
+            }).put(bytes(artifact))
           ],
           { concurrency: 2 }
         ).pipe(Effect.exit)
@@ -407,8 +463,44 @@ describe("reads, probes, and refusals", () => {
       expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("unavailable")
     }))
 
+  it.effect("classifies a blob removed between lookup and read as a typed miss", () =>
+    Effect.gen(function*() {
+      const host = memoryFs({ seed: { [blobPath]: artifact }, vanishOnReadOf: blobPath })
+      const exit = yield* withCrypto(store(host).get(digest).pipe(Effect.exit))
+      expect(errorOf(exit)).toMatchObject({
+        _tag: "@smthrs/artifacts/ArtifactMissing",
+        code: "artifact_missing",
+        digest
+      })
+    }))
+
+  it.effect("maps a host-native NotFound read directly to a typed miss", () =>
+    Effect.gen(function*() {
+      const host = memoryFs({ seed: { [blobPath]: artifact }, notFoundReadOf: blobPath })
+      const exit = yield* withCrypto(store(host).get(digest).pipe(Effect.exit))
+      expect(errorOf(exit)).toMatchObject({
+        _tag: "@smthrs/artifacts/ArtifactMissing",
+        digest
+      })
+    }))
+
+  it.effect("retains both read and existence-probe failures as unavailable", () =>
+    Effect.gen(function*() {
+      const host = memoryFs({ seed: { [blobPath]: artifact }, failReadOf: blobPath, failExists: true })
+      const exit = yield* withCrypto(store(host).get(digest).pipe(Effect.exit))
+      expect(errorOf(exit)).toMatchObject({ code: "unavailable" })
+    }))
+
   it.effect.each<[string, string]>([
     ["an empty string", ""],
+    ["a short non-digest", "not-a-sha256-digest"],
+    ["an uppercase digest", digest.toUpperCase()],
+    ["a whitespace-padded digest", ` ${digest}`],
+    ["a control-character digest", `${digest.slice(0, 63)}\n`],
+    ["a unicode digest", `${digest.slice(0, 63)}é`],
+    ["a query-shaped digest", `${digest}?token=secret`],
+    ["a fragment-shaped digest", `${digest}#fragment`],
+    ["a percent-encoded digest", `${digest.slice(0, 62)}%2f`],
     ["a path separator", "ab/cd"],
     ["a windows separator", "ab\\cd"],
     ["the current directory", "."],
@@ -453,7 +545,9 @@ describe("layers", () => {
       const published = yield* withCrypto(
         Effect.flatMap(ArtifactStore.ArtifactStore, (artifacts) => artifacts.put(bytes(artifact))).pipe(
           Effect.provide(
-            ArtifactStore.layerFileSystem().pipe(Layer.provide(Layer.succeed(FileSystem.FileSystem)(host.fs)))
+            ArtifactStore.layerFileSystem({ coordination: "process" }).pipe(
+              Layer.provide(Layer.succeed(FileSystem.FileSystem)(host.fs))
+            )
           )
         )
       )

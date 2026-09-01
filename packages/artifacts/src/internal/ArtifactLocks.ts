@@ -1,10 +1,18 @@
 /**
- * In-process coordination for filesystem artifact publication and removal.
+ * Per-digest coordination for filesystem publication and removal.
  *
- * @since 0.1.0
+ * The semaphore is the cheap in-process path. A `wx` lock file is the actual
+ * workspace-wide fence: every process that can mutate the object directory
+ * observes it, and a crashed owner is recovered after its heartbeat expires.
+ *
+ * @since 1.0.0-rc.0
  */
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
+import * as Option from "effect/Option"
+import * as PlatformError from "effect/PlatformError"
+import * as Random from "effect/Random"
 import * as Semaphore from "effect/Semaphore"
 
 interface Entry {
@@ -13,18 +21,35 @@ interface Entry {
 }
 
 const locks = new WeakMap<FileSystem.FileSystem, Map<string, Entry>>()
+const heartbeatEvery = "10 seconds"
+const staleAfterMs = 60_000
+const acquireWithin = "2 minutes"
+const retryEvery = "25 millis"
+
+const isReason = (cause: unknown, tag: PlatformError.SystemErrorTag): boolean =>
+  cause instanceof PlatformError.PlatformError && cause.reason._tag === tag
+
+const token = Effect.gen(function*() {
+  const first = yield* Random.nextIntBetween(0, Number.MAX_SAFE_INTEGER, { halfOpen: true })
+  const second = yield* Random.nextIntBetween(0, Number.MAX_SAFE_INTEGER, { halfOpen: true })
+  return `${first.toString(36)}-${second.toString(36)}-${yield* Clock.currentTimeMillis}`
+})
 
 /**
  * Coordinates publication, freshening, and sweep deletion for one digest.
+ * `process` is the explicit weaker mode for hosts without atomic create.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const withDigest = <A, E, R>(
+export const withDigest = <A, E, R, E2>(
   fs: FileSystem.FileSystem,
+  directory: string,
   digest: string,
-  effect: Effect.Effect<A, E, R>
-): Effect.Effect<A, E, R> => {
+  effect: Effect.Effect<A, E, R>,
+  failure: (cause: unknown) => E2,
+  coordination: "required" | "process" = "required"
+): Effect.Effect<A, E | E2, R> => {
   let byDigest = locks.get(fs)
   if (byDigest === undefined) {
     byDigest = new Map()
@@ -38,7 +63,81 @@ export const withDigest = <A, E, R>(
   entry.users += 1
   const held = entry
   const table = byDigest
-  return held.semaphore.withPermit(effect).pipe(
+
+  const coordinated = coordination === "process"
+    ? effect
+    : Effect.gen(function*() {
+      const owner = yield* token
+      const lockDirectory = `${directory}/.locks`
+      const lockPath = `${lockDirectory}/${digest}.lock`
+      yield* fs.makeDirectory(lockDirectory, { recursive: true }).pipe(Effect.mapError(failure))
+
+      const acquire = Effect.gen(function*() {
+        while (true) {
+          const created = yield* fs.writeFileString(lockPath, owner, { flag: "wx", mode: 0o600 }).pipe(
+            Effect.as(true),
+            Effect.catch((cause): Effect.Effect<boolean, E2> =>
+              isReason(cause, "AlreadyExists") ? Effect.succeed(false) : Effect.fail(failure(cause))
+            )
+          )
+          if (created) return
+
+          const info = yield* fs.stat(lockPath).pipe(
+            Effect.map(Option.some),
+            Effect.catch((cause): Effect.Effect<Option.Option<FileSystem.File.Info>, E2> =>
+              isReason(cause, "NotFound") ? Effect.succeed(Option.none()) : Effect.fail(failure(cause))
+            )
+          )
+          if (Option.isSome(info)) {
+            const modified = Option.getOrUndefined(info.value.mtime)
+            const now = yield* Clock.currentTimeMillis
+            if (modified !== undefined && now - modified.getTime() > staleAfterMs) {
+              const tombstone = `${lockPath}.stale-${owner}`
+              const reaped = yield* fs.rename(lockPath, tombstone).pipe(
+                Effect.as(true),
+                Effect.catch((cause): Effect.Effect<boolean, E2> =>
+                  isReason(cause, "NotFound") ? Effect.succeed(false) : Effect.fail(failure(cause))
+                )
+              )
+              if (reaped) yield* fs.remove(tombstone).pipe(Effect.ignore)
+              continue
+            }
+          }
+          yield* Effect.sleep(retryEvery)
+        }
+      }).pipe(
+        Effect.timeout(acquireWithin),
+        Effect.catchTag("TimeoutError", (cause) => Effect.fail(failure(cause)))
+      )
+
+      yield* acquire
+      return yield* Effect.acquireUseRelease(
+        Effect.void,
+        () =>
+          Effect.scoped(Effect.gen(function*() {
+            yield* Effect.forkScoped(
+              Effect.forever(
+                Effect.sleep(heartbeatEvery).pipe(
+                  Effect.andThen(Clock.currentTimeMillis),
+                  Effect.flatMap((now) => {
+                    const timestamp = new Date(now)
+                    return fs.utimes(lockPath, timestamp, timestamp)
+                  }),
+                  Effect.ignore
+                )
+              )
+            )
+            return yield* effect
+          })),
+        () =>
+          fs.readFileString(lockPath).pipe(
+            Effect.flatMap((found) => found === owner ? fs.remove(lockPath) : Effect.void),
+            Effect.catch(() => Effect.void)
+          )
+      )
+    })
+
+  return held.semaphore.withPermit(coordinated).pipe(
     Effect.ensuring(Effect.sync(() => {
       held.users -= 1
       if (held.users === 0 && table.get(digest) === held) table.delete(digest)
