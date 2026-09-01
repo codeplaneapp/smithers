@@ -518,10 +518,30 @@ describe("AgentSession", () => {
     expect(checks).toEqual(["npm test"])
     // Per-call latency is journaled next to usage, so a benchmark can measure
     // seconds per call and not only per run.
-    // At least one per frame; the park and its resumed attempt re-emit the
-    // frames they replay.
+    //
+    // KNOWN DEFECT, pinned exactly rather than tolerated. Two frames make two
+    // model calls, and this run journals FOUR `model-settled` rows: the park's
+    // resumed attempt re-executes both frames and the executor re-journals
+    // every event it replays. Each row carries `usage`, so a projection summing
+    // a run's tokens over-counts once per park. Tightening this number is the
+    // assertion a fix has to make, and the two routes to one are both blocked
+    // today:
+    //
+    // - Suppressing a replayed frame's events needs the harness to know a frame
+    //   is replaying. `EngineLike.record` returns only the value, so the marker
+    //   would need a port change, a probe boundary per frame, and a field on a
+    //   published `AgentEvent` — and it would still be wrong on the frame a
+    //   resume lands in, which replays its model step and then produces genuinely
+    //   new events after the steering drain that answered its park.
+    // - A deterministic producer identity per event (`sourceId` + `sourceSeq`)
+    //   does dedupe correctly, and deadlocks. An explicit `sourceSeq` sends
+    //   `emitLossy` through `SqlJournal`'s `preflightExplicit`, which issues a
+    //   SELECT before admission; the executor's exit flush runs inside the
+    //   engine's write transaction, so that read waits on the writer that is
+    //   waiting on it. Measured: this case runs in 410 ms without the explicit
+    //   sequence and does not finish in 120 s with it.
     const settled = outcome.agentTrail.filter((entry) => entry.eventType === "control.agent.model-settled")
-    expect(settled.length).toBeGreaterThanOrEqual(2)
+    expect(settled).toHaveLength(4)
     expect(
       settled.every((entry) =>
         typeof (entry.payload as { readonly durationMillis?: unknown }).durationMillis === "number"

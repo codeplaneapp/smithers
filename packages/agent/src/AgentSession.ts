@@ -1161,10 +1161,12 @@ export const make = (
         const flush = Effect.suspend(() =>
           Effect.forEach(
             pending.splice(0, pending.length),
-            (entry) => trail(payload.runId, entry.eventType, entry.payload),
+            // Contained per entry rather than per batch: one refused event must
+            // not take the rest of the batch down with it.
+            (entry) => Effect.ignore(trail(payload.runId, entry.eventType, entry.payload)),
             { discard: true }
           )
-        ).pipe(Effect.ignore)
+        )
         // Journaling is best-effort on purpose: a full or rejecting journal
         // must not fail an agent run that is otherwise making progress.
         // Occurrence time is stamped into the payload because the pump
