@@ -1,5 +1,74 @@
 /** Pure helpers behind `scripts/docs.mjs`, split out so they can be tested without touching docs/pages. */
 
+import * as ts from "typescript"
+
+const sourceFile = (source: string): ts.SourceFile => {
+  const parsed = ts.createSourceFile("errors-docs.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const diagnostic = (parsed as ts.SourceFile & {
+    readonly parseDiagnostics: ReadonlyArray<ts.Diagnostic>
+  }).parseDiagnostics[0]
+  if (diagnostic !== undefined) {
+    const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")
+    throw new Error(`errors docs: source has a syntax error: ${message}`)
+  }
+  return parsed
+}
+
+const hasModifier = (node: ts.Node, kind: ts.SyntaxKind): boolean =>
+  ts.canHaveModifiers(node) && ts.getModifiers(node)?.some((modifier) => modifier.kind === kind) === true
+
+const declaration = (
+  statement: ts.Statement
+): { readonly names: ReadonlyArray<string>; readonly kind: string } | undefined => {
+  if (!hasModifier(statement, ts.SyntaxKind.ExportKeyword)) return undefined
+  if (
+    hasModifier(statement, ts.SyntaxKind.DefaultKeyword) ||
+    hasModifier(statement, ts.SyntaxKind.DeclareKeyword)
+  ) return undefined
+  if (ts.isTypeAliasDeclaration(statement) && statement.name !== undefined) {
+    return { names: [statement.name.text], kind: "type" }
+  }
+  if (ts.isVariableStatement(statement)) {
+    if ((statement.declarationList.flags & ts.NodeFlags.BlockScoped) === 0) return undefined
+    const names: Array<string> = []
+    for (const entry of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(entry.name)) return undefined
+      names.push(entry.name.text)
+    }
+    return {
+      names,
+      kind: (statement.declarationList.flags & ts.NodeFlags.Const) !== 0 ? "const" : "let"
+    }
+  }
+  if (ts.isClassDeclaration(statement) && statement.name !== undefined) {
+    return { names: [statement.name.text], kind: "class" }
+  }
+  if (ts.isInterfaceDeclaration(statement)) return { names: [statement.name.text], kind: "interface" }
+  if (ts.isFunctionDeclaration(statement) && statement.name !== undefined) {
+    return { names: [statement.name.text], kind: "function" }
+  }
+  if (ts.isEnumDeclaration(statement)) return { names: [statement.name.text], kind: "enum" }
+  return undefined
+}
+
+const jsdocBody = (statement: ts.Statement, parsed: ts.SourceFile): string | undefined => {
+  const trivia = parsed.text.slice(statement.getFullStart(), statement.getStart(parsed))
+  const comments = [...trivia.matchAll(/\/\*\*((?:[^*]|\*(?!\/))*)\*\//g)]
+  const last = comments.at(-1)
+  if (last === undefined || last.index === undefined) return undefined
+  if (trivia.slice(last.index + last[0].length).trim() !== "") return undefined
+  return ungutter(last[1]!)
+}
+
+const supportedBarrel = (statement: ts.Statement): statement is ts.ExportDeclaration =>
+  ts.isExportDeclaration(statement) &&
+  !statement.isTypeOnly &&
+  statement.moduleSpecifier !== undefined &&
+  ts.isStringLiteral(statement.moduleSpecifier) &&
+  /^\.\/[^/\"]+\.ts$/.test(statement.moduleSpecifier.text) &&
+  statement.exportClause !== undefined &&
+  ts.isNamedExports(statement.exportClause)
+
 /** Removes the leading JSDoc gutter from a comment body. */
 export const ungutter = (block: string): string =>
   block.split("\n").map((line) => line.replace(/^\s*\* ?/, "")).join("\n")
@@ -58,26 +127,29 @@ export const exportedDocs = (source: string): ReadonlyArray<{
     readonly category: string
     readonly summary: string
   }> = []
-  const pattern =
-    /\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*\nexport (?:abstract |async )?(type|const|let|class|interface|function|enum) (\w+)/g
-  for (let match = pattern.exec(source); match !== null; match = pattern.exec(source)) {
-    const body = ungutter(match[1]!)
+  const parsed = sourceFile(source)
+  for (const statement of parsed.statements) {
+    const exported = declaration(statement)
+    if (exported === undefined) continue
+    const body = jsdocBody(statement, parsed)
+    if (body === undefined) continue
     const category = /@category (\S+)/.exec(body)?.[1]
     if (category === undefined) continue
-    entries.push({
-      name: match[3]!,
-      declaration: match[2]!,
-      category,
-      summary: firstSentence(description(body))
-    })
+    for (const name of exported.names) {
+      entries.push({
+        name,
+        declaration: exported.kind,
+        category,
+        summary: firstSentence(description(body))
+      })
+    }
   }
   return entries
 }
 
 /** Lists every supported top-level exported declaration name. */
 export const exportNames = (source: string): ReadonlyArray<string> =>
-  [...source.matchAll(/^export (?:abstract |async )?(?:type|const|let|class|interface|function|enum) (\w+)/gm)]
-    .map((match) => match[1]!)
+  sourceFile(source).statements.flatMap((statement) => declaration(statement)?.names ?? [])
 
 /** Lists each local name, public name, and source module exported by a barrel. */
 export const barrelExports = (source: string): ReadonlyArray<{
@@ -86,14 +158,17 @@ export const barrelExports = (source: string): ReadonlyArray<{
   readonly module: string
 }> => {
   const entries: Array<{ readonly name: string; readonly exported: string; readonly module: string }> = []
-  const pattern = /^export \{([^}]*)\} from "\.\/([^"/]+)\.ts"/gm
-  for (let match = pattern.exec(source); match !== null; match = pattern.exec(source)) {
-    const module = match[2]!
-    for (const specifier of match[1]!.split(",")) {
-      const [name, alias] = specifier.trim().replace(/^type\s+/, "").split(/\s+as\s+/)
-      if (name !== undefined && name !== "") {
-        entries.push({ name, exported: alias?.trim() ?? name, module })
-      }
+  for (const statement of sourceFile(source).statements) {
+    if (!supportedBarrel(statement)) continue
+    const clause = statement.exportClause
+    if (clause === undefined || !ts.isNamedExports(clause)) continue
+    const module = (statement.moduleSpecifier as ts.StringLiteral).text.slice(2, -3)
+    for (const specifier of clause.elements) {
+      entries.push({
+        name: specifier.propertyName?.text ?? specifier.name.text,
+        exported: specifier.name.text,
+        module
+      })
     }
   }
   return entries
@@ -102,15 +177,13 @@ export const barrelExports = (source: string): ReadonlyArray<{
 /** Lists every top-level export statement the generator cannot represent. */
 export const unsupportedExports = (source: string): ReadonlyArray<string> => {
   const unsupported: string[] = []
-  for (const match of source.matchAll(/^export\b[^\n]*/gm)) {
-    const statement = match[0]!
-    const declaration = /^export (?:abstract |async )?(?:type|const|let|class|interface|function|enum) \w+/
-    // [^}] keeps the block from leaking past its own closing brace into a
-    // later statement's `} from "./..."`, so a local export list stays flagged.
-    const barrel = /^export \{[^}]*\} from "\.\/[^"/]+\.ts"/
-    if (!declaration.test(statement) && !barrel.test(source.slice(match.index))) {
-      unsupported.push(statement.trim())
-    }
+  const parsed = sourceFile(source)
+  for (const statement of parsed.statements) {
+    const isExport = ts.isExportDeclaration(statement) ||
+      ts.isExportAssignment(statement) ||
+      hasModifier(statement, ts.SyntaxKind.ExportKeyword)
+    if (!isExport || declaration(statement) !== undefined || supportedBarrel(statement)) continue
+    unsupported.push(statement.getText(parsed).trim())
   }
   return unsupported
 }

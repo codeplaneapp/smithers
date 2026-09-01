@@ -2,9 +2,25 @@
 import { Smithers } from "@smthrs/targets"
 import { packageManager } from "../../BUILD.ts"
 
-export const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage({
+const standard = Smithers.StandardPackage({
   packageManager,
   deps: [],
+  cwd: "packages/errors"
+})
+
+export const { check, circular, docs, fmt, lib, lint } = standard
+
+// The documentation completeness suite imports the pure generator helper.
+// Declare that helper without broadening the package's published or linted
+// source surface.
+export const test = Smithers.Vitest({
+  packageManager,
+  tests: [Smithers.glob("test/**/*.test.ts")],
+  sources: [Smithers.glob("src/**/*.ts"), Smithers.file("scripts/docs-lib.ts")],
+  deps: [lib],
+  config: Smithers.file("vitest.config.ts"),
+  environment: "node",
+  passWithNoTests: false,
   cwd: "packages/errors"
 })
 
