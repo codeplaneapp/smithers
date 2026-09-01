@@ -382,4 +382,23 @@ describe("DiffHunks reveal interaction", () => {
     expect(styles[0]!.textContent).toContain(".sui-diff");
     expect(styles[0]!.textContent).toContain(".sui-diff-paginate-btn");
   });
+
+  test("a binary file renders the sized placeholder its type documents, never hunks", () => {
+    const html = renderToStaticMarkup(
+      <DiffHunks file={parseUnifiedFile("diff --git a/logo.png b/logo.png\nGIT binary patch\n", { sizeBytes: 2048 })} />,
+    );
+    expect(html).toContain('data-binary="true"');
+    expect(html).toContain("Binary file (2.0 KB)");
+    expect(html).not.toContain("sui-diff-line");
+  });
+
+  test("a text file that merely mentions a binary marker still renders its hunks", () => {
+    const html = renderToStaticMarkup(
+      <DiffHunks
+        file={parseUnifiedFile("diff --git a/notes.md b/notes.md\n@@ -0,0 +1,1 @@\n+GIT binary patch\n")}
+      />,
+    );
+    expect(html).not.toContain('data-binary="true"');
+    expect(html).toContain("sui-diff-line");
+  });
 });

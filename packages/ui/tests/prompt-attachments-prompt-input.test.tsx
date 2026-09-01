@@ -214,7 +214,7 @@ describe("PromptInput", () => {
         return <PromptInputTextarea />;
       }
       await render(
-        <PromptInput onSubmit={() => {}}>
+        <PromptInput onSubmit={() => {}} multiple>
           <Harness />
         </PromptInput>,
       );
@@ -259,7 +259,7 @@ describe("PromptInput", () => {
         return <PromptInputTextarea />;
       }
       await render(
-        <PromptInput onSubmit={(message) => submitted.push(message)}>
+        <PromptInput onSubmit={(message) => submitted.push(message)} multiple>
           <Harness />
         </PromptInput>,
       );
@@ -291,6 +291,7 @@ describe("PromptInput", () => {
     await render(
       <PromptInput
         onSubmit={() => {}}
+        multiple
         maxFiles={1}
         maxFileSizeBytes={2}
         accept=".png"
@@ -493,7 +494,7 @@ describe("PromptInput", () => {
       return <PromptInputTextarea />;
     }
     await render(
-      <PromptInput onSubmit={() => {}}>
+      <PromptInput onSubmit={() => {}} multiple>
         <Harness />
       </PromptInput>,
     );

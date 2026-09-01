@@ -173,7 +173,7 @@ describe("useAutosaveDoc", () => {
     expect(saved).toEqual([]);
   });
 
-  test("recreates the machine when resetKey switches documents", async () => {
+  test("recreates the machine when resetKey switches documents, flushing the outgoing draft", async () => {
     let api: UseAutosaveDocResult | undefined;
     const savedA: string[] = [];
     const savedB: string[] = [];
@@ -197,8 +197,76 @@ describe("useAutosaveDoc", () => {
     await act(async () => root!.render(<Probe documentId="b" initialValue="document B" />));
 
     expect(api!.value).toBe("document B");
+    // The outgoing machine held an unsaved draft well inside its 60s debounce.
+    // Switching documents writes it, exactly as unmounting does; dropping it
+    // would be silent data loss on every document switch.
+    expect(savedA).toEqual(["document A draft"]);
     await act(async () => api!.saveNow());
-    expect(savedA).toEqual([]);
     expect(savedB).toEqual(["document B"]);
+  });
+
+  test("a rapid a-to-b-to-c switch flushes every draft it passes through", async () => {
+    let api: UseAutosaveDocResult | undefined;
+    const saved: Array<string> = [];
+    function Probe({ documentId }: { documentId: "a" | "b" | "c" }) {
+      api = useAutosaveDoc({
+        resetKey: documentId,
+        initialValue: `document ${documentId}`,
+        debounceMs: 60_000,
+        save: async (value) => {
+          saved.push(`${documentId}:${value}`);
+        },
+      });
+      return null;
+    }
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root!.render(<Probe documentId="a" />));
+    await act(async () => api!.setValue("draft a"));
+    await act(async () => root!.render(<Probe documentId="b" />));
+    await act(async () => api!.setValue("draft b"));
+    await act(async () => root!.render(<Probe documentId="c" />));
+
+    expect(saved).toEqual(["a:draft a", "b:draft b"]);
+    expect(api!.value).toBe("document c");
+  });
+
+  test("switching documents under StrictMode still flushes exactly one draft", async () => {
+    let api: UseAutosaveDocResult | undefined;
+    const saved: string[] = [];
+    function Probe({ documentId }: { documentId: "a" | "b" }) {
+      api = useAutosaveDoc({
+        resetKey: documentId,
+        initialValue: `document ${documentId}`,
+        debounceMs: 60_000,
+        save: async (value) => {
+          saved.push(value);
+        },
+      });
+      return null;
+    }
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () =>
+      root!.render(
+        <StrictMode>
+          <Probe documentId="a" />
+        </StrictMode>,
+      )
+    );
+    await act(async () => api!.setValue("strict draft"));
+    await act(async () =>
+      root!.render(
+        <StrictMode>
+          <Probe documentId="b" />
+        </StrictMode>,
+      )
+    );
+
+    expect(saved).toEqual(["strict draft"]);
   });
 });

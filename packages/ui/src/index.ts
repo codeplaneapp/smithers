@@ -44,6 +44,7 @@ export {
   statusClass,
   statusColor,
   statusColors,
+  hasStatusTone,
   formatStatus,
   isTerminalRunStatus,
   type StatusClass,
@@ -617,7 +618,85 @@ export {
 } from "./canvas/WorkflowCanvas";
 
 // lane:calendar exports (integration: keep)
-export * from "./calendar";
+//
+// Named rather than `export *`: a wildcard cannot tell a pure helper from a
+// heavy renderer, so a future addition to the lane barrel would ride into this
+// bundle silently. That is exactly how d3-force reached it through the vault
+// lane. `tests/barrel-weight.test.ts` measures the result.
+export { Calendar, type CalendarProps } from "./calendar/Calendar";
+export type { CalendarEvent, CalendarView } from "./calendar/types";
+export { CALENDAR_CSS_ID, calendarCss } from "./calendar/calendarCss";
+export {
+  DAY_MS,
+  HOUR_MS,
+  MINUTE_MS,
+  addDays,
+  addMonths,
+  agendaGroups,
+  dayKey,
+  daysInMonth,
+  eventsOnDay,
+  fullDayLabel,
+  hashSource,
+  isSameDay,
+  minutesIntoDay,
+  monthGridDays,
+  monthLabel,
+  snapDown30,
+  snapUp30,
+  startOfDay,
+  timeLabel,
+  weekDays,
+  weekLabel,
+  weekdayLabel,
+  type AgendaDayGroup,
+} from "./calendar/dateUtils";
 
 // lane:vault exports (integration: keep)
-export * from "./vault";
+//
+// `KnowledgeGraph` is not here and must not be added: it renders over d3-force
+// and ships from `@smthrs/ui/adapters/knowledge-graph`.
+export {
+  NOTE_HREF,
+  joinFrontmatter,
+  noteHref,
+  noteLabel,
+  parseWikilinks,
+  pathFromHref,
+  restoreWikilinks,
+  splitFrontmatter,
+  wikilinksToMarkdown,
+  type Wikilink,
+} from "./vault/wikilinks";
+export type { VaultAdapter, VaultLink, VaultNoteMeta } from "./vault/types";
+export {
+  GRAPH_FOLDER_TINTS,
+  HUB_LABEL_MIN_DEGREE,
+  computeGraphModel,
+  folderHue,
+  folderTint,
+  folderTintIndex,
+  neighbourSet,
+  nodeRadius,
+  noteFolder,
+  shouldShowLabel,
+  type GraphFolderTint,
+  type VaultGraphEdge,
+  type VaultGraphNode,
+} from "./vault/graphModel";
+export { VAULT_CSS_ID, vaultCss } from "./vault/vaultCss";
+export { useVaultCss } from "./vault/useVaultCss";
+export { BacklinksPanel, type BacklinksPanelProps } from "./vault/BacklinksPanel";
+export { OutlineView, parseOutline, type OutlineHeading, type OutlineViewProps } from "./vault/OutlineView";
+export {
+  AUTOSAVE_STATUS_TEXT,
+  autosaveStatusText,
+  createAutosaveDoc,
+  type AutosaveDoc,
+  type AutosaveDocOptions,
+  type AutosaveFailure,
+  type AutosaveFailureCode,
+  type AutosaveSnapshot,
+  type AutosaveState,
+} from "./vault/autosaveMachine";
+export { useAutosaveDoc, type UseAutosaveDocOptions, type UseAutosaveDocResult } from "./vault/useAutosaveDoc";

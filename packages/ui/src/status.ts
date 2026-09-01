@@ -1,10 +1,20 @@
 /**
  * The shared run/feature status vocabulary. This is the single source of truth
- * consumed by StatusPill here and re-exported by
- * `@smthrs/gateway-ui` (which previously owned copies of these
- * helpers; consumer repos duplicated them again on top).
+ * consumed by StatusPill; before it existed, every consumer repository carried
+ * its own drifting copy of these helpers.
+ *
+ * A status string is host data, so every table here is looked up on a
+ * null-prototype container. A plain object literal would resolve
+ * `statusClass("constructor")` through `Object.prototype` to the `Object`
+ * constructor, which is truthy (so `??` cannot catch it) and throws
+ * "Functions are not valid as a React child" the moment it is rendered.
  */
 import { tokens } from "./tokens";
+
+/** A lookup table that cannot resolve a key through `Object.prototype`. */
+function table<T>(entries: Readonly<Record<string, T>>): Readonly<Record<string, T>> {
+  return Object.freeze(Object.assign(Object.create(null) as Record<string, T>, entries));
+}
 
 /** Lowercases, trims, and normalizes `_` to `-` so status spellings compare. */
 export function normalizeStatus(status: string | undefined): string {
@@ -51,6 +61,21 @@ const STATUS_CLASS_BY_STATUS = {
   ready: "ok",
   done: "ok",
   finished: "ok",
+  /*
+   * `continued` and `paused` below name outcomes 1.0.0-rc.0 does not produce:
+   * `docs/migration/rc-contract.md` removes the `Continued` terminal (:294) and
+   * the `Pause` RPC (:330). Both entries stay because the table is additive and
+   * drops no alias (disposition-ledger row 176) AND because both spellings are
+   * still rendered from real sources:
+   *  - `paused` is what `sandboxStateToStatus` emits for a suspended sandbox
+   *    (`src/sandbox/AgentSandbox.tsx`), which is a sandbox lifecycle, not a run
+   *    status, and is pinned by tests/sandbox-previews-agent-sandbox.test.tsx.
+   *  - `continued` is a 0.x archive status: `smithers migrate`/`doctor` list
+   *    non-terminal 0.x runs and both name it terminal (`packages/cli`
+   *    `Legacy.terminalStatuses`, `packages/migrate` `RunState.terminalStatuses`).
+   * Neither entry lets an excluded feature look available: nothing in rc.0
+   * writes them.
+   */
   continued: "ok",
   succeeded: "ok",
   "succeeded-with-failures": "warn",
@@ -99,22 +124,38 @@ const STATUS_CLASS_BY_STATUS = {
   skipped: "muted",
 } as const satisfies Readonly<Record<string, StatusClass>>;
 
+/** The same table, looked up prototype-free. */
+const STATUS_CLASS_TABLE = table<StatusClass>(STATUS_CLASS_BY_STATUS);
+
 /**
  * Token color aliases derived from the shared vocabulary. Class keys are the
- * canonical API; normalized status keys remain for gateway-ui compatibility.
+ * canonical API; normalized status keys remain so a consumer holding a raw
+ * status string resolves the same color the pill wears.
  */
-export const statusColors = Object.freeze(
-  Object.fromEntries([
-    ...Object.entries(STATUS_CLASS_COLORS),
-    ...Object.entries(STATUS_CLASS_BY_STATUS).map(([status, tone]) => [status, STATUS_CLASS_COLORS[tone]]),
-  ]),
-) as Readonly<Record<string, string>> & Readonly<Record<StatusClass, string>>;
+export const statusColors = table<string>({
+  ...STATUS_CLASS_COLORS,
+  ...Object.fromEntries(
+    Object.entries(STATUS_CLASS_BY_STATUS).map(([status, tone]) => [status, STATUS_CLASS_COLORS[tone]]),
+  ),
+}) as Readonly<Record<string, string>> & Readonly<Record<StatusClass, string>>;
 
 /** Bucket a status string into the badge tints. */
 export function statusClass(status: string | undefined): StatusClass {
   const normalized = normalizeStatus(status);
   if (normalized.startsWith("waiting-")) return "warn";
-  return STATUS_CLASS_BY_STATUS[normalized as keyof typeof STATUS_CLASS_BY_STATUS] ?? "muted";
+  return STATUS_CLASS_TABLE[normalized] ?? "muted";
+}
+
+/**
+ * Whether the vocabulary maps this status to a tone of its own, as opposed to
+ * falling through to the neutral default. The distinction `statusClass` cannot
+ * report: it returns `"muted"` both for a status deliberately bucketed neutral
+ * (`queued`, `stopped`) and for one it has never heard of.
+ */
+export function hasStatusTone(status: string | undefined): boolean {
+  const normalized = normalizeStatus(status);
+  if (normalized.startsWith("waiting-")) return true;
+  return normalized in STATUS_CLASS_TABLE;
 }
 
 /** Resolve any status alias through the shared class vocabulary to its token color. */
@@ -126,7 +167,7 @@ export function statusColor(status: string | undefined): string {
 export function formatStatus(status: string | undefined): string {
   const normalized = normalizeStatus(status);
   if (!normalized) return "Unknown";
-  const labels: Record<string, string> = {
+  const labels = table<string>({
     ok: "Complete",
     success: "Complete",
     complete: "Complete",
@@ -177,7 +218,7 @@ export function formatStatus(status: string | undefined): string {
     recovering: "Recovering",
     stale: "Stale",
     orphaned: "Orphaned",
-  };
+  });
   return (
     labels[normalized] ??
     normalized

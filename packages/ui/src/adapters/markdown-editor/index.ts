@@ -13,6 +13,10 @@ export {
   MarkdownEditorStyles,
   markdownEditorCss,
   MARKDOWN_EDITOR_STYLE_ATTR,
+  supportsRichTextEditing,
+  type MarkdownEditorError,
+  type MarkdownEditorErrorCode,
   type MarkdownEditorHandle,
+  type MarkdownEditorModule,
   type MarkdownEditorProps,
 } from "./MarkdownEditor";

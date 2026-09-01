@@ -28,12 +28,24 @@ import { crepeThemeCss } from "./crepeTheme.generated";
  * Because the Crepe editor is a heavy `@milkdown/*` dependency it lives in the
  * `adapters/` layer and is imported through the explicit
  * `@smthrs/ui/adapters/markdown-editor` subpath (never the base
- * `index` barrel). Its ProseMirror runtime never paints under `renderToString`,
- * happy-dom, or bun's test DOM, so in those environments the component degrades
- * to a plain, fully controlled `<textarea>` that honours the exact same
- * `value` / `onChange` / `readOnly` / `resetKey` contract and imperative
- * handle. This is the same fallback strategy the docs-driven-development editor
- * uses, and it keeps the whole surface testable off the real editor.
+ * `index` barrel). Its ProseMirror runtime needs a real layout engine, which
+ * `renderToString` and headless DOMs do not have, so where layout is absent the
+ * component degrades to a plain, fully controlled `<textarea>` that honours the
+ * exact same `value` / `onChange` / `readOnly` / `resetKey` contract and
+ * imperative handle.
+ *
+ * That decision is made by measuring layout ({@link supportsRichTextEditing}),
+ * never by matching a user-agent string: a real browser is never downgraded
+ * because its UA happens to carry a runtime token, and a test drives the choice
+ * explicitly through the `fallback` prop rather than by pretending to be one.
+ * A test also supplies its own {@link MarkdownEditorProps.loadEditor}, so the
+ * WYSIWYG path -- listener wiring, echo suppression, readonly, teardown -- is
+ * exercised without the real ProseMirror runtime.
+ *
+ * A real initialization failure in a real browser is reported, not swallowed:
+ * the component lands in `data-mode="failed"`, renders the seeded textarea so
+ * the document stays editable, and calls {@link MarkdownEditorProps.onError}
+ * with a stable code and the retained cause.
  */
 export type MarkdownEditorHandle = {
   /** The current serialized markdown document. */
@@ -44,6 +56,29 @@ export type MarkdownEditorHandle = {
    * or reset content without it looping back as a local edit.
    */
   setMarkdown: (markdown: string) => void;
+};
+
+/** Stable failure codes reported through {@link MarkdownEditorProps.onError}. */
+export type MarkdownEditorErrorCode =
+  /** The `@milkdown/*` modules could not be loaded. */
+  | "editor-load-failed"
+  /** The modules loaded but constructing or creating the editor threw. */
+  | "editor-create-failed";
+
+/** A reported editor failure, with the original rejection retained as `cause`. */
+export type MarkdownEditorError = {
+  readonly code: MarkdownEditorErrorCode;
+  readonly cause: unknown;
+};
+
+/**
+ * The pieces of `@milkdown/*` this adapter drives. Declared as a seam so a
+ * caller (a test, a host that bundles its own build) can supply them instead of
+ * the default dynamic imports.
+ */
+export type MarkdownEditorModule = {
+  readonly Crepe: new(options: { root: HTMLElement; defaultValue: string }) => CrepeInstance;
+  readonly replaceAll: (markdown: string, flush?: boolean) => unknown;
 };
 
 export type MarkdownEditorProps = {
@@ -78,6 +113,23 @@ export type MarkdownEditorProps = {
    * binding for a surface where the editor is the whole page.
    */
   escapeTabOrder?: boolean;
+  /**
+   * Force the controlled `<textarea>` (true) or the WYSIWYG editor (false).
+   * Defaults to the layout probe in {@link supportsRichTextEditing}.
+   */
+  fallback?: boolean;
+  /**
+   * Loads the editor modules. Defaults to the `@milkdown/crepe` and
+   * `@milkdown/kit/utils` dynamic imports; supply it to drive the WYSIWYG path
+   * from a test or from a host that bundles its own build.
+   */
+  loadEditor?: () => Promise<MarkdownEditorModule>;
+  /**
+   * Called when the WYSIWYG editor cannot start. The component has already
+   * fallen back to the seeded textarea by the time this fires; the callback is
+   * for reporting, not for recovery.
+   */
+  onError?: (error: MarkdownEditorError) => void;
 };
 
 /** Marker attribute on the injected Crepe theme `<style>` (deduped on it). */
@@ -127,18 +179,44 @@ export function MarkdownEditorStyles() {
   return <style data-smithers-markdown-editor="">{markdownEditorCss}</style>;
 }
 
+/** Cached probe result: a document either lays out or it does not. */
+let richTextSupport: boolean | undefined;
+
 /**
- * True when the ProseMirror editor cannot paint (server render, happy-dom, or
- * bun's test DOM). In those environments the component renders the controlled
- * `<textarea>` fallback so the value/onChange/readOnly/resetKey contract stays
- * exercised without the real editor.
+ * Whether this document has a layout engine, which is what ProseMirror needs to
+ * place a caret, measure a selection, and paint a decoration.
+ *
+ * The probe measures a 20x20 offscreen element: a real browser reports its
+ * size, a headless DOM (happy-dom, jsdom) reports zero because it computes no
+ * layout, and a server render has no `document` at all. This replaces the
+ * user-agent match this module used to carry, which downgraded any real browser
+ * whose UA happened to include a runtime token and made the WYSIWYG path
+ * unreachable from the package's own suite.
+ *
+ * The result is cached: it answers a property of the environment, not of a
+ * component, and it never changes within one document.
  */
-function prefersTextareaFallback(): boolean {
-  if (typeof window === "undefined" || typeof document === "undefined") return true;
-  if (typeof document.createElement !== "function") return true;
-  const agent = typeof navigator !== "undefined" ? navigator.userAgent : "";
-  return /happy-?dom|jsdom|\bBun\//i.test(agent);
+export function supportsRichTextEditing(): boolean {
+  if (richTextSupport !== undefined) return richTextSupport;
+  if (typeof document === "undefined" || typeof document.createElement !== "function") return false;
+  try {
+    const probe = document.createElement("div");
+    probe.setAttribute(
+      "style",
+      "position:absolute;top:-9999px;left:-9999px;width:20px;height:20px;visibility:hidden;",
+    );
+    document.body.appendChild(probe);
+    const rect = probe.getBoundingClientRect();
+    probe.remove();
+    richTextSupport = rect.width > 0 && rect.height > 0;
+  } catch {
+    richTextSupport = false;
+  }
+  return richTextSupport;
 }
+
+/** The editor state machine: loading the modules, running, or fallen back. */
+type EditorState = "loading" | "ready" | "failed";
 
 type CrepeListener = {
   markdownUpdated: (handler: (_ctx: unknown, markdown: string) => void) => void;
@@ -166,8 +244,25 @@ const releaseTab = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
   event.stopPropagation();
 };
 
+/** The default module loader: the two `@milkdown/*` dynamic imports. */
+const loadMilkdown = async (): Promise<MarkdownEditorModule> => {
+  const [{ Crepe }, { replaceAll }] = await Promise.all([import("@milkdown/crepe"), import("@milkdown/kit/utils")]);
+  return { Crepe: Crepe as unknown as MarkdownEditorModule["Crepe"], replaceAll };
+};
+
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor(
-  { value, onChange, readOnly = false, resetKey, className, "aria-label": ariaLabel, escapeTabOrder = true },
+  {
+    value,
+    onChange,
+    readOnly = false,
+    resetKey,
+    className,
+    "aria-label": ariaLabel,
+    escapeTabOrder = true,
+    fallback,
+    loadEditor,
+    onError,
+  },
   ref,
 ) {
   useInjectMarkdownEditorCss();
@@ -175,16 +270,35 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const hostRef = useRef<HTMLDivElement | null>(null);
   const crepeRef = useRef<CrepeInstance | null>(null);
   const readyRef = useRef(false);
-  const replaceAllRef = useRef<typeof import("@milkdown/kit/utils").replaceAll | null>(null);
+  const replaceAllRef = useRef<MarkdownEditorModule["replaceAll"] | null>(null);
   const suppressEchoRef = useRef(0);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+  const loadEditorRef = useRef(loadEditor);
+  loadEditorRef.current = loadEditor;
   // The single source of truth for `getMarkdown`; seeded from `value` and
   // updated by every local edit, external `setMarkdown`, and reseed.
   const lastMarkdownRef = useRef(value);
 
-  const useFallback = prefersTextareaFallback();
+  const useFallback = fallback ?? !supportsRichTextEditing();
   const [fallbackValue, setFallbackValue] = useState(value);
+  /**
+   * The editor's own lifecycle, reset during render whenever the document or
+   * its editability changes. Resetting here rather than in an effect puts the
+   * host div back in the tree BEFORE the init effect runs, so a retry after a
+   * failure has somewhere to mount.
+   */
+  const [attempt, setAttempt] = useState<{ key: unknown; readOnly: boolean; state: EditorState }>(() => ({
+    key: resetKey,
+    readOnly,
+    state: "loading",
+  }));
+  if (!Object.is(attempt.key, resetKey) || attempt.readOnly !== readOnly) {
+    setAttempt({ key: resetKey, readOnly, state: "loading" });
+  }
+  const editorState = attempt.state;
 
   useImperativeHandle(
     ref,
@@ -230,32 +344,57 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     let crepe: CrepeInstance | null = null;
     host.innerHTML = "";
 
-    void Promise.all([import("@milkdown/crepe"), import("@milkdown/kit/utils")])
-      .then(async ([{ Crepe }, { replaceAll }]) => {
-        if (cancelled) return;
-        replaceAllRef.current = replaceAll;
-        const editor = new Crepe({ root: host, defaultValue: seed }) as CrepeInstance;
-        crepe = editor;
-        crepeRef.current = editor;
-        editor.on((listener: CrepeListener) => {
-          listener.markdownUpdated((_ctx, markdown) => {
-            lastMarkdownRef.current = markdown;
-            if (suppressEchoRef.current > 0) return; // programmatic replaceAll echo
-            onChangeRef.current?.(markdown);
-          });
-        });
-        await editor.create();
-        if (cancelled) {
-          void editor.destroy();
-          return;
-        }
-        editor.setReadonly(readOnly);
-        readyRef.current = true;
-      })
-      .catch(() => {
-        // WYSIWYG could not initialize; getMarkdown still returns the seed and
-        // callers can fall back to their own controls.
-      });
+    /** Report and degrade: the textarea takes over with the current markdown. */
+    const fail = (code: MarkdownEditorErrorCode, cause: unknown): void => {
+      if (cancelled) return;
+      setFallbackValue(lastMarkdownRef.current);
+      setAttempt((previous) =>
+        Object.is(previous.key, resetKey) && previous.readOnly === readOnly && previous.state !== "failed"
+          ? { ...previous, state: "failed" }
+          : previous
+      );
+      onErrorRef.current?.({ code, cause });
+    };
+
+    void (loadEditorRef.current ?? loadMilkdown)()
+      .then(
+        ({ Crepe, replaceAll }) => {
+          if (cancelled) return;
+          try {
+            replaceAllRef.current = replaceAll;
+            const editor = new Crepe({ root: host, defaultValue: seed });
+            crepe = editor;
+            crepeRef.current = editor;
+            editor.on((listener: CrepeListener) => {
+              listener.markdownUpdated((_ctx, markdown) => {
+                lastMarkdownRef.current = markdown;
+                if (suppressEchoRef.current > 0) return; // programmatic replaceAll echo
+                onChangeRef.current?.(markdown);
+              });
+            });
+            return Promise.resolve(editor.create()).then(
+              () => {
+                if (cancelled) {
+                  void editor.destroy();
+                  return;
+                }
+                editor.setReadonly(readOnly);
+                readyRef.current = true;
+                setAttempt((previous) =>
+                  Object.is(previous.key, resetKey) && previous.readOnly === readOnly && previous.state === "loading"
+                    ? { ...previous, state: "ready" }
+                    : previous
+                );
+              },
+              (cause: unknown) => fail("editor-create-failed", cause),
+            );
+          } catch (cause) {
+            fail("editor-create-failed", cause);
+            return;
+          }
+        },
+        (cause: unknown) => fail("editor-load-failed", cause),
+      );
 
     return () => {
       cancelled = true;
@@ -280,13 +419,17 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     onChangeRef.current?.(next);
   };
 
-  if (useFallback) {
+  if (useFallback || editorState === "failed") {
     return (
       <textarea
         className={className ? `sui-markdown-editor-fallback ${className}` : "sui-markdown-editor-fallback"}
         data-slot="markdown-editor"
         data-testid="markdown-editor"
-        data-mode="fallback"
+        // `fallback` is the deliberate degradation (no layout engine, or the
+        // caller asked for it); `failed` is the editor that tried and could
+        // not start. A host that only wants to know "is this the real editor"
+        // still reads `data-mode !== "wysiwyg"`.
+        data-mode={useFallback ? "fallback" : "failed"}
         // A textarea never bound Tab, so the fallback already has the
         // document's focus order; the attribute reports the same setting
         // either way so a host can assert one thing.

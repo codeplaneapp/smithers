@@ -45,9 +45,16 @@ export type PromptInputMessage = {
 export type PromptInputStatus = "ready" | "submitted" | "streaming" | "error";
 
 export type PromptInputError = {
-  code: "max-files" | "max-file-size" | "accept";
+  /**
+   * `disabled` and `multiple` reject a file the component would not have
+   * accepted through its own picker; `submit-failed` reports a rejected
+   * `onSubmit`, and is the only code that carries a `cause`.
+   */
+  code: "max-files" | "max-file-size" | "accept" | "disabled" | "multiple" | "submit-failed";
   message: string;
   file?: File;
+  /** The original rejection, retained for `submit-failed`. */
+  cause?: unknown;
 };
 
 export type PromptInputProps = Omit<ComponentProps<"form">, "onSubmit" | "onError"> & {
@@ -57,6 +64,13 @@ export type PromptInputProps = Omit<ComponentProps<"form">, "onSubmit" | "onErro
   attachments?: readonly PromptInputAttachmentItem[];
   defaultAttachments?: readonly PromptInputAttachmentItem[];
   onAttachmentsChange?: (attachments: readonly PromptInputAttachmentItem[]) => void;
+  /**
+   * Handles the submitted message. A returned promise is awaited: the draft is
+   * held and the component-owned attachment object URLs stay alive until it
+   * settles, so an async handler can still read `url`/`thumbnailUrl` after its
+   * first `await`. A rejection keeps the draft and reports a `submit-failed`
+   * {@link PromptInputError}.
+   */
   onSubmit: (message: PromptInputMessage, event: FormEvent<HTMLFormElement>) => void | Promise<void>;
   onStop?: () => void;
   status?: PromptInputStatus;
@@ -261,10 +275,48 @@ export function PromptInput({
     objectUrlsRef.current.clear();
   }, []);
 
+  /**
+   * Revoke only the URLs this component minted for the given attachments.
+   * Submitting waits for an async `onSubmit`, and files added while it was in
+   * flight are not part of what was submitted: revoking everything would kill
+   * previews the user is still looking at.
+   */
+  const revokeObjectUrlsFor = useCallback((items: readonly PromptInputAttachmentItem[]) => {
+    const revocable = canCreateObjectUrl();
+    for (const item of items) {
+      const objectUrl = objectUrlsRef.current.get(item.id);
+      if (objectUrl === undefined) continue;
+      if (revocable) URL.revokeObjectURL(objectUrl);
+      objectUrlsRef.current.delete(item.id);
+    }
+  }, []);
+
   const addFiles = useCallback(
     (files: FileList | readonly File[]) => {
+      // `addFiles` is the single admission point: the hook, paste, form drop and
+      // the document-level drop registry all arrive here without passing the
+      // hidden `<input>`, so the flags the input enforces have to be enforced
+      // here too or they only apply to the picker.
+      if (disabled) {
+        for (const file of Array.from(files)) {
+          onErrorRef.current?.({
+            code: "disabled",
+            message: "This prompt is disabled and cannot accept attachments.",
+            file,
+          });
+        }
+        return;
+      }
       const accepted: PromptInputAttachmentItem[] = [];
       for (const file of Array.from(files)) {
+        if (!multiple && attachmentsRef.current.length + accepted.length >= 1) {
+          onErrorRef.current?.({
+            code: "multiple",
+            message: "Only one file can be attached.",
+            file,
+          });
+          continue;
+        }
         if (maxFiles !== undefined && attachmentsRef.current.length + accepted.length >= maxFiles) {
           onErrorRef.current?.({
             code: "max-files",
@@ -313,7 +365,7 @@ export function PromptInput({
       setAttachmentsRef.current(next);
       setAnnouncement(`${accepted.length === 1 ? accepted[0]!.name : `${accepted.length} files`} attached`);
     },
-    [accept, maxFiles, maxFileSizeBytes, idPrefix],
+    [accept, disabled, multiple, maxFiles, maxFileSizeBytes, idPrefix],
   );
 
   const addFilesRef = useRef(addFiles);
@@ -350,7 +402,9 @@ export function PromptInput({
   }, [cleanupObjectUrls]);
 
   useEffect(() => {
-    if (!globalDrop || typeof document === "undefined") return;
+    // A disabled prompt claims nothing: registering would make it the document
+    // drop owner and steal drops from an enabled prompt behind it.
+    if (!globalDrop || disabled || typeof document === "undefined") return;
     const entry: GlobalDropEntry = {
       add: (files) => addFilesRef.current(files),
       setActive: setDropActive,
@@ -362,7 +416,7 @@ export function PromptInput({
       if (index >= 0) globalDropStack.splice(index, 1);
       if (globalDropStack.length === 0) detachGlobalDropListeners();
     };
-  }, [globalDrop]);
+  }, [globalDrop, disabled]);
 
   const busy = status === "submitted" || status === "streaming";
 
@@ -370,12 +424,35 @@ export function PromptInput({
     event.preventDefault();
     if (disabled || busy) return;
     if (value.trim().length === 0 && attachments.length === 0) return;
-    void onSubmit({ text: value, attachments }, event);
-    if (valueProp === undefined) setInnerValue("");
-    if (attachmentsProp === undefined) {
-      cleanupObjectUrls();
-      setInnerAttachments([]);
+    const submitted = attachments;
+    const result = onSubmit({ text: value, attachments: submitted }, event);
+
+    /** Accept the submission: drop the draft and release its previews. */
+    const accept = (): void => {
+      if (valueProp === undefined) setInnerValue("");
+      if (attachmentsProp === undefined) {
+        revokeObjectUrlsFor(submitted);
+        setInnerAttachments([]);
+      }
+    };
+
+    // A synchronous handler settles synchronously, which is what the
+    // uncontrolled clear-on-submit behavior has always looked like. An async
+    // handler holds the draft and its blob URLs until it resolves, because the
+    // attachments it was handed are only readable while those URLs live.
+    if (typeof (result as PromiseLike<void> | undefined)?.then !== "function") {
+      accept();
+      return;
     }
+    void Promise.resolve(result).then(accept, (cause: unknown) => {
+      // The draft is deliberately retained: a failed submit that also erased
+      // what the user typed is the worst outcome available here.
+      onErrorRef.current?.({
+        code: "submit-failed",
+        message: "The prompt could not be submitted.",
+        cause,
+      });
+    });
   };
 
   const contextValue = useMemo<PromptInputContextValue>(
@@ -418,6 +495,9 @@ export function PromptInput({
         onSubmit={handleSubmit}
         onPaste={(event) => {
           onPaste?.(event);
+          // Same escape hatch the drag handlers below honor: a consumer that
+          // handled the paste itself is not overridden.
+          if (event.defaultPrevented) return;
           const files = event.clipboardData?.files;
           if (files && files.length > 0) addFiles(files);
         }}

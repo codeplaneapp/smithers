@@ -3,7 +3,14 @@ import type { ComponentProps } from "react";
 import { cn } from "./cn";
 import { useInjectUiCss } from "./styles";
 import type { DiffFile } from "./diff";
-import { fileLineCount, paginateHunks, PAGINATE_THRESHOLD, PAGINATE_VISIBLE } from "./diff-paginate";
+import {
+  binaryBodyLabel,
+  detectBinary,
+  fileLineCount,
+  paginateHunks,
+  PAGINATE_THRESHOLD,
+  PAGINATE_VISIBLE,
+} from "./diff-paginate";
 
 const SIGN: Record<string, string> = { context: " ", add: "+", del: "−" };
 
@@ -27,11 +34,24 @@ export type DiffHunksProps = Omit<ComponentProps<"div">, "children"> & {
  * caller has not revealed the tail, only the first {@link PAGINATE_VISIBLE}
  * lines render, followed by an "Expand remaining N lines" button.
  *
+ * A binary file has no hunks to show, so it renders the sized placeholder
+ * {@link binaryBodyLabel} names instead. That is the behavior `DiffFile.isBinary`
+ * has always documented ("a content pane renders a placeholder, never hunks");
+ * before this it documented nothing, because the component simply rendered an
+ * empty body for a file whose `lines` the parser had deliberately left empty.
+ *
  * `revealed` / `onReveal` are caller-threaded so the pagination state lives
  * wherever the caller keeps its state, never in this component.
  */
 export function DiffHunks({ file, revealed = true, onReveal, className, ...props }: DiffHunksProps) {
   useInjectUiCss();
+  if (detectBinary(file)) {
+    return (
+      <div data-slot="diff-hunks" data-binary="true" className={cn("sui-diff", className)} {...props}>
+        <div className="sui-diff-binary">{binaryBodyLabel(file)}</div>
+      </div>
+    );
+  }
   const total = fileLineCount(file);
   const paginated = total > PAGINATE_THRESHOLD && !revealed;
   const visibleCount = paginated ? PAGINATE_VISIBLE : total;

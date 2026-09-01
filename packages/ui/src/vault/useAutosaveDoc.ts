@@ -27,46 +27,91 @@ export type UseAutosaveDocResult = {
  * React binding for the autosave state machine. The machine is recreated when
  * `resetKey` changes; callbacks are otherwise proxied through refs so the
  * latest closures are used without resetting the active document.
+ *
+ * Both lifecycle exits flush first: switching documents and unmounting each
+ * write a dirty draft before disposing its machine, so no exit silently drops
+ * an unsaved edit.
  */
+/**
+ * One machine plus the callbacks it was rendered with. The callbacks live on
+ * the entry rather than on a hook-wide ref so a machine retired by a `resetKey`
+ * change keeps writing through ITS document's `save`. A shared ref would flush
+ * document A's outgoing draft through document B's writer.
+ */
+type DocEntry = {
+  readonly doc: AutosaveDoc;
+  save: AutosaveDocOptions["save"];
+  readExternal: AutosaveDocOptions["readExternal"];
+};
+
 export function useAutosaveDoc(options: UseAutosaveDocOptions): UseAutosaveDocResult {
-  const saveRef = useRef(options.save);
-  const readExternalRef = useRef(options.readExternal);
   const optionsRef = useRef(options);
-  // These proxies must observe callbacks from this render. Updating in an
-  // effect leaves a commit where saveNow still calls stale/absent callbacks.
-  saveRef.current = options.save;
-  readExternalRef.current = options.readExternal;
   optionsRef.current = options;
 
-  const docRef = useRef<AutosaveDoc | null>(null);
+  const entryRef = useRef<DocEntry | null>(null);
   const resetKeyRef = useRef(options.resetKey);
+  // Machines the reset below retired but that have not been flushed yet.
+  // Retiring during render must NOT dispose: `dispose()` cancels the pending
+  // debounce, so disposing here would silently drop the outgoing document's
+  // unsaved draft -- the opposite of what the unmount path below does. React
+  // may also discard a render outright, and a discarded render must not have
+  // destroyed live state. The effect after the commit owns the teardown.
+  const retiredRef = useRef<Array<DocEntry>>([]);
   if (!Object.is(resetKeyRef.current, options.resetKey)) {
-    docRef.current?.dispose();
-    docRef.current = null;
+    if (entryRef.current) retiredRef.current.push(entryRef.current);
+    entryRef.current = null;
     resetKeyRef.current = options.resetKey;
   }
-  const getDoc = useCallback((): AutosaveDoc => {
-    if (docRef.current) return docRef.current;
+  // The live machine's proxies must observe callbacks from THIS render.
+  // Updating in an effect leaves a commit where saveNow still calls
+  // stale/absent callbacks.
+  if (entryRef.current) {
+    entryRef.current.save = options.save;
+    entryRef.current.readExternal = options.readExternal;
+  }
+
+  const getEntry = useCallback((): DocEntry => {
+    const existing = entryRef.current;
+    if (existing) return existing;
     const current = optionsRef.current;
-    docRef.current = createAutosaveDoc({
-      initialValue: current.initialValue,
-      initialMtimeMs: current.initialMtimeMs,
-      debounceMs: current.debounceMs,
-      schedule: current.schedule,
-      save: (value) => saveRef.current(value),
-      // Always install the proxy so a callback supplied after mount is picked
-      // up. `undefined` distinguishes "not configured" from a configured
-      // reader that failed, which the state machine must treat as a conflict.
-      readExternal: async () => {
-        const readExternal = readExternalRef.current;
-        if (!readExternal) return undefined;
-        return readExternal();
-      },
-    });
-    return docRef.current;
+    const entry: DocEntry = {
+      save: current.save,
+      readExternal: current.readExternal,
+      doc: createAutosaveDoc({
+        initialValue: current.initialValue,
+        initialMtimeMs: current.initialMtimeMs,
+        debounceMs: current.debounceMs,
+        schedule: current.schedule,
+        save: (value) => entry.save(value),
+        // Always install the proxy so a callback supplied after mount is picked
+        // up. `undefined` distinguishes "not configured" from a configured
+        // reader that failed, which the state machine must treat as a conflict.
+        readExternal: async () => {
+          const readExternal = entry.readExternal;
+          if (!readExternal) return undefined;
+          return readExternal();
+        },
+      }),
+    };
+    entryRef.current = entry;
+    return entry;
   }, [options.resetKey]);
 
+  const getDoc = useCallback((): AutosaveDoc => getEntry().doc, [getEntry]);
+
   getDoc();
+
+  // Flush-then-dispose every machine the reset retired, after the commit that
+  // retired it. Same policy as the unmount path: a dirty document is written
+  // before its machine goes away, so switching documents never loses a draft.
+  useEffect(() => {
+    const retired = retiredRef.current.splice(0);
+    for (const entry of retired) {
+      const flush = entry.doc.getSnapshot().state === "dirty" ? entry.doc.saveNow() : Promise.resolve();
+      const dispose = () => entry.doc.dispose();
+      void flush.then(dispose, dispose);
+    }
+  });
 
   const mountedRef = useRef(false);
   useEffect(() => {
@@ -78,13 +123,14 @@ export function useAutosaveDoc(options: UseAutosaveDocOptions): UseAutosaveDocRe
       // live machine and its pending save; a real unmount still disposes it.
       queueMicrotask(() => {
         if (mountedRef.current) return;
-        const doc = docRef.current;
-        if (!doc) return;
+        const entry = entryRef.current;
+        if (!entry) return;
+        const doc = entry.doc;
         const flush = doc.getSnapshot().state === "dirty" ? doc.saveNow() : Promise.resolve();
         const dispose = () => {
-          if (mountedRef.current || docRef.current !== doc) return;
+          if (mountedRef.current || entryRef.current !== entry) return;
           doc.dispose();
-          docRef.current = null;
+          entryRef.current = null;
         };
         void flush.then(dispose, dispose);
       });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatStatus, isTerminalRunStatus, statusClass } from "../src/status";
+import { formatStatus, hasStatusTone, isTerminalRunStatus, statusClass } from "../src/status";
 
 /**
  * The rc.0 run vocabulary and the run-card phases apps/ui renders beside it.
@@ -35,9 +35,10 @@ const CARD_PHASES = [
 
 describe("the rc.0 run status vocabulary", () => {
   test("every run status has a tone, and none falls through to unknown", () => {
-    for (const status of RUN_STATUSES) {
-      expect(`${status}=${statusClass(status)}`).not.toBe(`${status}=muted-fallback`);
-    }
+    // `statusClass` returns "muted" both for a status deliberately bucketed
+    // neutral and for one it never heard of, so only `hasStatusTone`
+    // distinguishes a mapped status from the fallback.
+    expect(RUN_STATUSES.filter((status) => !hasStatusTone(status))).toEqual([]);
     expect(RUN_STATUSES.map(statusClass)).toEqual([
       "muted", // accepted: taken, nothing in flight yet
       "run",
@@ -109,5 +110,14 @@ describe("the additions are additive", () => {
   test("a status outside the vocabulary is still neutral, never invented", () => {
     expect(statusClass("something-new")).toBe("muted");
     expect(formatStatus("something-new")).toBe("Something New");
+    expect(hasStatusTone("something-new")).toBe(false);
+    // The one Object.prototype key `normalizeStatus` can produce is the same
+    // kind of miss, not a resolved constructor. See status-prototype-keys.
+    expect(statusClass("constructor")).toBe("muted");
+    expect(formatStatus("constructor")).toBe("Constructor");
+  });
+
+  test("every run-card phase is mapped rather than falling through", () => {
+    expect(CARD_PHASES.filter((phase) => !hasStatusTone(phase))).toEqual([]);
   });
 });

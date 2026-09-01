@@ -28,7 +28,10 @@ export {
 } from "./graphModel";
 export { VAULT_CSS_ID, vaultCss } from "./vaultCss";
 export { useVaultCss } from "./useVaultCss";
-export { KnowledgeGraph, type KnowledgeGraphProps } from "./KnowledgeGraph";
+// `KnowledgeGraph` is deliberately absent: it renders over `d3-force` and so
+// ships from `@smthrs/ui/adapters/knowledge-graph`, like every other heavy
+// renderer in this package. Re-exporting it here pulled d3-force into the base
+// barrel for every consumer (`tests/barrel-weight.test.ts`).
 export { BacklinksPanel, type BacklinksPanelProps } from "./BacklinksPanel";
 export { OutlineView, parseOutline, type OutlineHeading, type OutlineViewProps } from "./OutlineView";
 export {
@@ -37,6 +40,8 @@ export {
   createAutosaveDoc,
   type AutosaveDoc,
   type AutosaveDocOptions,
+  type AutosaveFailure,
+  type AutosaveFailureCode,
   type AutosaveSnapshot,
   type AutosaveState,
 } from "./autosaveMachine";

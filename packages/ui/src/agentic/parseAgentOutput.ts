@@ -82,6 +82,21 @@ function responseText(record: UnknownRecord): string | undefined {
 }
 
 /**
+ * How many nested `summary` arrays a reasoning part may carry before the walk
+ * gives up. OpenAI Responses summaries are one array of leaf parts, and no
+ * observed provider nests past two, so 16 is far beyond any real payload while
+ * still bounding a hostile or accidentally self-referential one.
+ */
+const MAX_SUMMARY_DEPTH = 16;
+
+/**
+ * How far the `output`/`result`/`data`/`response`/`message` spine is followed
+ * before the walk gives up. Harnesses wrap a provider result two or three deep;
+ * 16 leaves headroom without letting a pathological chain exhaust the stack.
+ */
+const MAX_NEST_DEPTH = 16;
+
+/**
  * Provider-safe reasoning summaries ONLY. Raw `reasoning`/`thinking`/`thought`
  * fields and text parts may contain private chain-of-thought transcripts, so
  * they are never surfaced. A summary is trusted only when the provider/harness
@@ -89,9 +104,16 @@ function responseText(record: UnknownRecord): string | undefined {
  * fields, summary-typed parts, or nested `summary` payloads on reasoning items
  * (e.g. OpenAI Responses API reasoning summary arrays). Redacted/signed parts
  * are dropped outright.
+ *
+ * The walk is bounded twice over, because a provider payload is arbitrary
+ * input: `seen` drops a part already on the current path (a live object graph
+ * can be cyclic) and `depth` stops at {@link MAX_SUMMARY_DEPTH}. Exceeding
+ * either yields no summary rather than a `RangeError` that would unmount the
+ * surface rendering it.
  */
-function summaryFromPart(value: unknown): string | undefined {
+function summaryFromPart(value: unknown, seen: WeakSet<object>, depth: number): string | undefined {
   if (!isRecord(value)) return undefined;
+  if (depth > MAX_SUMMARY_DEPTH || seen.has(value)) return undefined;
   const type = readString(value, ["type", "kind"]);
   if (type && type.toLowerCase() === "redacted_thinking") return undefined;
   if (value.signature !== undefined || value.redactedData !== undefined || value.redacted_data !== undefined) {
@@ -102,16 +124,25 @@ function summaryFromPart(value: unknown): string | undefined {
   // ...) and untyped generic content parts use `summary` for their own
   // metadata and are never reasoning text.
   if (!type || !REASONING_CONTAINER_PART_TYPES.has(type.toLowerCase())) return undefined;
-  const nested = value.summary;
-  if (typeof nested === "string") return nested.trim() ? nested : undefined;
-  if (Array.isArray(nested)) {
-    const texts = nested.map((part) => summaryFromPart(part)).filter((part): part is string => part !== undefined);
-    if (texts.length) return texts.join("\n\n");
+  seen.add(value);
+  try {
+    const nested = value.summary;
+    if (typeof nested === "string") return nested.trim() ? nested : undefined;
+    if (Array.isArray(nested)) {
+      const texts = nested
+        .map((part) => summaryFromPart(part, seen, depth + 1))
+        .filter((part): part is string => part !== undefined);
+      if (texts.length) return texts.join("\n\n");
+    }
+    if (REASONING_SUMMARY_PART_TYPES.has(type.toLowerCase())) {
+      return readString(value, ["text", "content", "value"]);
+    }
+    return undefined;
+  } finally {
+    // Path-scoped, not visit-scoped: two sibling parts may legitimately share
+    // one referenced object, and only a part reachable from itself is a cycle.
+    seen.delete(value);
   }
-  if (REASONING_SUMMARY_PART_TYPES.has(type.toLowerCase())) {
-    return readString(value, ["text", "content", "value"]);
-  }
-  return undefined;
 }
 
 function reasoningSummaryText(record: UnknownRecord): string | undefined {
@@ -122,7 +153,12 @@ function reasoningSummaryText(record: UnknownRecord): string | undefined {
     ...readArray(record, ["reasoning", "thinking", "thought"]),
     ...(Array.isArray(content) ? content : []),
   ];
-  const texts = candidates.map((part) => summaryFromPart(part)).filter((part): part is string => part !== undefined);
+  // A summary walk owns its own path set: `parseValue`'s spine set marks
+  // records it has already produced a model for, which is a different question.
+  const seen = new WeakSet<object>();
+  const texts = candidates
+    .map((part) => summaryFromPart(part, seen, 0))
+    .filter((part): part is string => part !== undefined);
   return texts.length ? texts.join("\n\n") : undefined;
 }
 
@@ -179,7 +215,12 @@ function formatError(value: unknown): string {
     if (message) return message;
   }
   try {
-    return JSON.stringify(value);
+    // `JSON.stringify` yields `undefined` (not a string) for a function, a
+    // symbol, or a bare `undefined`. The declared return type promises a
+    // string, so fall through to `String` rather than handing a consumer an
+    // `errorText` field the type says is present and the value says is not.
+    const json = JSON.stringify(value);
+    return typeof json === "string" ? json : String(value);
   } catch {
     return String(value);
   }
@@ -273,14 +314,23 @@ function mergeToolCalls(
 
 /** Parse common AI SDK and CLI-agent output shapes without claiming arbitrary rows. */
 export function parseAgentOutput(value: unknown): AgentOutputModel | null {
-  return parseValue(value, false, new WeakSet<object>());
+  return parseValue(value, false, new WeakSet<object>(), 0);
 }
 
-function parseValue(value: unknown, inheritedStreaming: boolean, seen: WeakSet<object>): AgentOutputModel | null {
+function parseValue(
+  value: unknown,
+  inheritedStreaming: boolean,
+  seen: WeakSet<object>,
+  depth: number,
+): AgentOutputModel | null {
   if (typeof value === "string") {
     return value.trim() ? { response: value, toolCalls: [], streaming: inheritedStreaming } : null;
   }
   if (!isRecord(value)) return null;
+  // A cycle through the spine is caught by `seen`; a merely very deep acyclic
+  // chain is caught by MAX_NEST_DEPTH. Both yield "nothing readable here"
+  // rather than a stack overflow.
+  if (depth > MAX_NEST_DEPTH) return null;
   if (seen.has(value)) return null;
   seen.add(value);
 
@@ -295,13 +345,13 @@ function parseValue(value: unknown, inheritedStreaming: boolean, seen: WeakSet<o
   const calls = toolCalls(value, streaming);
 
   // Agent nodes often persist the provider result under an outer output/data
-  // field. Only descend into objects so arbitrary scalar rows remain on the
-  // gateway-ui JSON fallback.
+  // field. Only descend into objects so arbitrary scalar rows fall through to
+  // the caller's JSON fallback instead of being claimed as agent output.
   let nestedModel: AgentOutputModel | null = null;
   for (const key of ["output", "result", "data", "response", "message"] as const) {
     const nested = value[key];
     if (!isRecord(nested)) continue;
-    nestedModel = parseValue(nested, streaming, seen);
+    nestedModel = parseValue(nested, streaming, seen, depth + 1);
     if (nestedModel) break;
   }
 

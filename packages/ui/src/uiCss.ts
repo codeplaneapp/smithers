@@ -496,6 +496,7 @@ export const diffCss = `
 .sui-diff-hunk-head { display:flex; align-items:center; gap:8px; padding:2px 10px; background:color-mix(in srgb, ${t.primary} 7%, ${t.card}); color:color-mix(in srgb, ${t.primary} 80%, ${t.mutedForeground}); border-top:1px solid ${t.border}; }
 .sui-diff-hunk-gutter { flex:none; width:60px; text-align:center; color:${t.placeholder}; user-select:none; }
 .sui-diff-hunk-header { white-space:pre; overflow-x:auto; }
+.sui-diff-binary { padding:12px; color:${t.mutedForeground}; font-style:italic; }
 .sui-diff-paginate { display:grid; place-items:center; padding:8px; border-top:1px solid ${t.border}; }
 .sui-diff-paginate-btn { padding:6px 12px; border:1px solid ${t.border}; border-radius:${t.radiusControl}; background:${t.card}; color:${t.primary}; font:650 12px/1 ${t.fontSans}; cursor:pointer; ${interaction} }
 .sui-diff-paginate-btn:hover { background:${t.secondary}; }

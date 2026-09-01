@@ -14,6 +14,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./adapters/knowledge-graph": {
+      "types": "./src/adapters/knowledge-graph.ts",
+      "import": "./src/adapters/knowledge-graph.ts",
+      "default": "./src/adapters/knowledge-graph.ts"
+    },
     "./adapters/chart": {
       "types": "./src/adapters/chart.tsx",
       "import": "./src/adapters/chart.tsx",
@@ -59,6 +64,7 @@
     "src/"
   ],
   "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
     "test": "bun test tests"
   },
   "dependencies": {

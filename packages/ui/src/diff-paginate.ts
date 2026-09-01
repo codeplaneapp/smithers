@@ -35,16 +35,25 @@ export function statusLetter(file: DiffFile): string {
 }
 
 /**
- * Detect a binary file. An explicit `isBinary` flag wins; otherwise we scan the
- * line text for git's binary markers (`GIT binary patch`, or a `Binary files …`
- * summary).
+ * Detect a binary file. An explicit `isBinary` flag wins; otherwise a marker is
+ * only a marker where git would have written one: on a CONTEXT line that is not
+ * a hunk header.
+ *
+ * Reading structure rather than text is what keeps this in agreement with
+ * `parseUnifiedFile`, which classifies from the raw patch with an anchored
+ * regex. Scanning every line's text, as this used to, reported a markdown file
+ * that ADDS the line `GIT binary patch` as binary while `parseUnifiedFile`
+ * correctly called it a two-line text diff, and a consumer gating on this
+ * function then hid a real diff behind a placeholder. Same class of bug as the
+ * `@@`/`+++` sniffing that commit d7222dda1f fixed by tagging headers at parse
+ * time; this is the same fix one function over.
  */
 export function detectBinary(file: DiffFile): boolean {
   if (file.isBinary) return true;
   for (const line of file.lines) {
-    const text = line.text;
-    if (text.includes("GIT binary patch")) return true;
-    if (text.startsWith("Binary files ")) return true;
+    if (line.header === true || line.kind !== "context") continue;
+    if (line.text === "GIT binary patch") return true;
+    if (line.text.startsWith("Binary files ")) return true;
   }
   return false;
 }
@@ -151,6 +160,9 @@ export function diffTotals(diff: Diff): { files: number; add: number; del: numbe
  * a plain "Binary file" upstream.
  */
 export function byteCountString(bytes: number): string {
+  // A negative or non-finite size is not a size. Rendering "NaN MB" or "-5 B"
+  // states a fact the caller does not have.
+  if (!Number.isFinite(bytes) || bytes < 0) return "unknown size";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -167,7 +179,90 @@ export function binaryBodyLabel(file: DiffFile): string {
 /* -------------------------------------------------------------------------- */
 
 const BINARY_PATCH_RE = /(^GIT binary patch$)|(^Binary files )/m;
-const HUNK_RE = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+/**
+ * Split a patch into its lines without the synthetic final token.
+ *
+ * `"…\n".split(/\r?\n/)` ends in `""`, which is the terminator, not a line. The
+ * blank-context branch used to render it as a real row and advance both side
+ * counters, so a one-line replacement produced a phantom trailing context line.
+ * Only the terminal token is dropped: a blank context line in the middle of a
+ * patch body is genuine.
+ */
+function patchRows(diffText: string): string[] {
+  const rows = diffText.split(/\r?\n/);
+  if (rows.length > 0 && rows[rows.length - 1] === "") rows.pop();
+  return rows;
+}
+
+/** Single-character C escapes git emits inside a quoted path. */
+const GIT_ESCAPES: Readonly<Record<string, number>> = {
+  a: 7,
+  b: 8,
+  t: 9,
+  n: 10,
+  v: 11,
+  f: 12,
+  r: 13,
+  '"': 34,
+  "\\": 92,
+};
+
+/**
+ * Decode the inside of a git-quoted path.
+ *
+ * Git quotes any path with a special or non-ASCII byte and escapes those bytes
+ * in octal, one escape per BYTE: `café name.ts` ships as
+ * `"caf\303\251 name.ts"`. Decoding has to reassemble the byte sequence and
+ * then read it as UTF-8, which is why this builds a byte array rather than
+ * concatenating characters.
+ */
+function unquoteGitPath(quoted: string): string {
+  const encoder = new TextEncoder();
+  const bytes: number[] = [];
+  for (let index = 0; index < quoted.length; index += 1) {
+    const character = quoted[index]!;
+    if (character !== "\\") {
+      for (const byte of encoder.encode(character)) bytes.push(byte);
+      continue;
+    }
+    const next = quoted[index + 1];
+    if (next === undefined) break;
+    const escape = GIT_ESCAPES[next];
+    if (escape !== undefined) {
+      bytes.push(escape);
+      index += 1;
+      continue;
+    }
+    const octal = quoted.slice(index + 1, index + 4);
+    if (/^[0-7]{3}$/.test(octal)) {
+      bytes.push(Number.parseInt(octal, 8));
+      index += 3;
+      continue;
+    }
+    // An escape git does not emit: keep the character it guarded.
+    for (const byte of encoder.encode(next)) bytes.push(byte);
+    index += 1;
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
+/** The quoted form of a header path, as one alternation group pair. */
+const QUOTED = String.raw`"((?:[^"\\]|\\.)*)"`;
+
+const GIT_HEADER_RE = new RegExp(String.raw`^diff --git (?:${QUOTED}|a/(.+?)) (?:${QUOTED}|b/(.+))$`, "m");
+const PLUS_HEADER_RE = new RegExp(String.raw`^\+\+\+ (?:${QUOTED}|(.+))$`, "m");
+const MINUS_HEADER_RE = new RegExp(String.raw`^--- (?:${QUOTED}|(.+))$`, "m");
+const RENAME_TO_RE = new RegExp(String.raw`^rename to (?:${QUOTED}|(.+))$`, "m");
+const RENAME_FROM_RE = new RegExp(String.raw`^rename from (?:${QUOTED}|(.+))$`, "m");
+
+/** Decode whichever alternative matched, then drop a leading `a/` or `b/`. */
+function headerPath(quoted: string | undefined, plain: string | undefined): string | undefined {
+  const raw = quoted !== undefined ? unquoteGitPath(quoted) : plain?.trim();
+  if (raw === undefined || raw === "") return undefined;
+  return raw.startsWith("a/") || raw.startsWith("b/") ? raw.slice(2) : raw;
+}
 
 /**
  * Parse the hunk body of a unified patch into flat `DiffLine`s, counting
@@ -189,34 +284,51 @@ export function parseHunks(diffText: string): {
   let newLine = 0;
   let inHunk = false;
   let sawHunk = false;
+  // Budgets from the `@@` header. They stop a hunk body deterministically
+  // instead of relying on a prefix that a file's own content might carry.
+  let oldRemaining = 0;
+  let newRemaining = 0;
 
-  for (const raw of diffText.split(/\r?\n/)) {
+  for (const raw of patchRows(diffText)) {
     const hunk = HUNK_RE.exec(raw);
     if (hunk) {
       sawHunk = true;
       inHunk = true;
       oldLine = Number(hunk[1]);
-      newLine = Number(hunk[2]);
+      newLine = Number(hunk[3]);
+      // A count-less header (`@@ -1 +1 @@`) means exactly one line per side.
+      oldRemaining = hunk[2] === undefined ? 1 : Number(hunk[2]);
+      newRemaining = hunk[4] === undefined ? 1 : Number(hunk[4]);
       lines.push({ kind: "context", header: true, text: raw });
       continue;
     }
     if (!inHunk) continue;
+    if (raw.startsWith("\\ No newline")) continue;
+    if (oldRemaining <= 0 && newRemaining <= 0) {
+      // The header's own line counts say this hunk is over; anything after it
+      // is patch metadata until the next `@@`.
+      inHunk = false;
+      continue;
+    }
     if (raw === "") {
       lines.push({ kind: "context", lnOld: oldLine, ln: newLine, text: raw });
       oldLine += 1;
       newLine += 1;
+      oldRemaining -= 1;
+      newRemaining -= 1;
       continue;
     }
-    if (raw.startsWith("\\ No newline")) continue;
     if (raw.startsWith("+")) {
       lines.push({ kind: "add", ln: newLine, text: raw.slice(1) });
       newLine += 1;
+      newRemaining -= 1;
       add += 1;
       continue;
     }
     if (raw.startsWith("-")) {
       lines.push({ kind: "del", lnOld: oldLine, text: raw.slice(1) });
       oldLine += 1;
+      oldRemaining -= 1;
       del += 1;
       continue;
     }
@@ -224,9 +336,11 @@ export function parseHunks(diffText: string): {
       lines.push({ kind: "context", lnOld: oldLine, ln: newLine, text: raw.slice(1) });
       oldLine += 1;
       newLine += 1;
+      oldRemaining -= 1;
+      newRemaining -= 1;
       continue;
     }
-    if (raw.startsWith("diff --git ") || raw.startsWith("@@ ")) {
+    if (raw.startsWith("diff --git ")) {
       inHunk = false;
     }
   }
@@ -242,27 +356,34 @@ function statusFromDiffText(diffText: string): DiffFileStatus {
 }
 
 function pathFromDiffText(diffText: string): string {
-  const git = /^diff --git a\/(.+?) b\/(.+)$/m.exec(diffText);
-  if (git) return git[2]!.trim();
-  const rename = /^rename to (.+)$/m.exec(diffText)?.[1]?.trim();
-  if (rename) return rename;
-  const plus = /^\+\+\+ b\/(.+)$/m.exec(diffText)?.[1]?.trim();
-  if (plus && plus !== "/dev/null") return plus;
-  const minus = /^--- a\/(.+)$/m.exec(diffText)?.[1]?.trim();
-  if (minus && minus !== "/dev/null") return minus;
+  const git = GIT_HEADER_RE.exec(diffText);
+  if (git) {
+    const newPath = headerPath(git[3], git[4]);
+    if (newPath) return newPath;
+  }
+  const rename = RENAME_TO_RE.exec(diffText);
+  const renamed = rename ? headerPath(rename[1], rename[2]) : undefined;
+  if (renamed) return renamed;
+  const plus = PLUS_HEADER_RE.exec(diffText);
+  const added = plus ? headerPath(plus[1], plus[2]) : undefined;
+  if (added && added !== "/dev/null") return added;
+  const minus = MINUS_HEADER_RE.exec(diffText);
+  const removed = minus ? headerPath(minus[1], minus[2]) : undefined;
+  if (removed && removed !== "/dev/null") return removed;
   return "";
 }
 
 function oldPathFrom(diffText: string): string | undefined {
-  const renamed = /^rename from (.+)$/m.exec(diffText)?.[1]?.trim();
+  const rename = RENAME_FROM_RE.exec(diffText);
+  const renamed = rename ? headerPath(rename[1], rename[2]) : undefined;
   if (renamed) return renamed;
-  const header = /^--- a\/(.+)$/m.exec(diffText)?.[1]?.trim();
+  const minus = MINUS_HEADER_RE.exec(diffText);
+  const header = minus ? headerPath(minus[1], minus[2]) : undefined;
   return header && header !== "/dev/null" ? header : undefined;
 }
 
 function modeChangesFrom(diffText: string): string[] {
-  return diffText
-    .split(/\r?\n/)
+  return patchRows(diffText)
     .filter((line) =>
       /^(old mode|new mode|deleted file mode|new file mode|similarity index|dissimilarity index) /.test(line),
     );

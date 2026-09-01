@@ -48,6 +48,104 @@ export function noteLabel(path: string): string {
   return (path.split("/").pop() ?? path).replace(/\.md$/, "");
 }
 
+/** One run of markdown text, tagged with whether it is code. */
+type Segment = { readonly text: string; readonly code: boolean };
+
+const FENCE_RE = /^\s*(`{3,}|~{3,})(.*)$/;
+
+/**
+ * Split a line into inline-code and non-code runs, CommonMark style.
+ *
+ * A code span opens on a run of N backticks and closes on the next run of
+ * EXACTLY N. The single-backtick regex this replaced (``/(`[^`]*`)/``) could not
+ * see a ``` ``double-backtick`` ``` span at all, so a wikilink inside a valid
+ * code span was rewritten into a live note link. An unterminated run is literal
+ * text, which is also what CommonMark says.
+ *
+ * Concatenating every segment's text reproduces the line exactly.
+ */
+function splitInlineCode(line: string): Segment[] {
+  const segments: Segment[] = [];
+  let plain = "";
+  let index = 0;
+  const runLength = (at: number): number => {
+    let run = 0;
+    while (line[at + run] === "`") run += 1;
+    return run;
+  };
+  while (index < line.length) {
+    if (line[index] !== "`") {
+      plain += line[index];
+      index += 1;
+      continue;
+    }
+    const open = runLength(index);
+    let search = index + open;
+    let close = -1;
+    while (search < line.length) {
+      if (line[search] !== "`") {
+        search += 1;
+        continue;
+      }
+      const run = runLength(search);
+      if (run === open) {
+        close = search;
+        break;
+      }
+      search += run;
+    }
+    if (close === -1) {
+      plain += line.slice(index, index + open);
+      index += open;
+      continue;
+    }
+    if (plain) {
+      segments.push({ text: plain, code: false });
+      plain = "";
+    }
+    segments.push({ text: line.slice(index, close + open), code: true });
+    index = close + open;
+  }
+  if (plain) segments.push({ text: plain, code: false });
+  return segments;
+}
+
+/**
+ * Scan markdown into per-line segments tagged as code or prose. The single
+ * scanner behind {@link wikilinksToMarkdown} and {@link parseWikilinks}: they
+ * used to carry independent copies of the same flawed logic, so fixing one
+ * would have left the other wrong.
+ *
+ * Fence state tracks the opening fence's CHARACTER and LENGTH. A boolean
+ * toggle, which is what this replaced, let a `~~~` line inside an open
+ * ``` ``` ``` fence close it, after which every link in the still-open block was
+ * rewritten. Only a fence of the same character, at least as long, with nothing
+ * after it, closes one; an unterminated fence runs to the end of the document.
+ */
+function scanMarkdown(markdown: string): Segment[][] {
+  const rows: Segment[][] = [];
+  let fence: { marker: string; length: number } | null = null;
+  for (const line of markdown.split("\n")) {
+    const match = FENCE_RE.exec(line);
+    const run = match?.[1];
+    if (fence) {
+      if (run && run[0] === fence.marker && run.length >= fence.length && (match?.[2] ?? "").trim() === "") {
+        fence = null;
+      }
+      rows.push([{ text: line, code: true }]);
+      continue;
+    }
+    // A backtick fence's info string may not itself contain a backtick.
+    if (run && !(run[0] === "`" && (match?.[2] ?? "").includes("`"))) {
+      fence = { marker: run[0]!, length: run.length };
+      rows.push([{ text: line, code: true }]);
+      continue;
+    }
+    rows.push(splitInlineCode(line));
+  }
+  return rows;
+}
+
 /**
  * Rewrite `[[wikilinks]]` into markdown links the shared `Markdown` primitive
  * renders, so clicking one navigates in-app. Links inside fenced or inline code
@@ -55,21 +153,12 @@ export function noteLabel(path: string): string {
  * degrades to its plain label rather than a dead anchor.
  */
 export function wikilinksToMarkdown(body: string, resolve: (target: string) => string): string {
-  let inFence = false;
-  return body
-    .split("\n")
-    .map((line) => {
-      if (/^\s*(```|~~~)/.test(line)) {
-        inFence = !inFence;
-        return line;
-      }
-      if (inFence) return line;
-      // Split on inline code so a `[[link]]` inside backticks stays literal.
-      return line
-        .split(/(`[^`]*`)/)
+  return scanMarkdown(body)
+    .map((segments) =>
+      segments
         .map((segment) => {
-          if (segment.startsWith("`")) return segment;
-          return segment.replace(/!?\[\[([^\]\n]+)\]\]/g, (_raw, inner: string) => {
+          if (segment.code) return segment.text;
+          return segment.text.replace(/!?\[\[([^\]\n]+)\]\]/g, (_raw, inner: string) => {
             const [beforeAlias = "", ...aliasParts] = inner.split("|");
             const [target = "", ...headingParts] = beforeAlias.split("#");
             const heading = headingParts.join("#").trim();
@@ -80,8 +169,8 @@ export function wikilinksToMarkdown(body: string, resolve: (target: string) => s
             return `[${label}](${noteHref(path)})`;
           });
         })
-        .join("");
-    })
+        .join("")
+    )
     .join("\n");
 }
 
@@ -106,17 +195,10 @@ export type Wikilink = {
  */
 export function parseWikilinks(markdown: string): Wikilink[] {
   const links: Wikilink[] = [];
-  let inFence = false;
-  for (const line of markdown.split("\n")) {
-    if (/^\s*(```|~~~)/.test(line)) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) continue;
-    // Split on inline code so a `[[link]]` inside backticks stays literal.
-    for (const segment of line.split(/(`[^`]*`)/)) {
-      if (segment.startsWith("`")) continue;
-      for (const match of segment.matchAll(/(!?)\[\[([^\]\n]+)\]\]/g)) {
+  for (const row of scanMarkdown(markdown)) {
+    for (const segment of row) {
+      if (segment.code) continue;
+      for (const match of segment.text.matchAll(/(!?)\[\[([^\]\n]+)\]\]/g)) {
         const inner = match[2] ?? "";
         const [beforeAlias = "", ...aliasParts] = inner.split("|");
         const [target = "", ...headingParts] = beforeAlias.split("#");
