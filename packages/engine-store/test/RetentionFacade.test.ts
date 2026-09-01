@@ -14,6 +14,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import * as Effect from "effect/Effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as RetentionOps from "../src/internal/RetentionOps.ts"
 import * as Migrations from "../src/Migrations.ts"
 import * as Retention from "../src/Retention.ts"
 
@@ -96,7 +97,58 @@ const count = (table: string) =>
     return rows[0]?.total ?? 0
   })
 
+const seedTimeTravelReceipt = (runId: string) =>
+  Effect.gen(function*() {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`CREATE TABLE IF NOT EXISTS flows_time_travel_audits (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL
+    )`
+    yield* sql`CREATE TABLE IF NOT EXISTS flows_time_travel_receipts (
+      id TEXT PRIMARY KEY,
+      audit_id TEXT NOT NULL,
+      effect_id TEXT NOT NULL,
+      receipt_json TEXT NOT NULL
+    )`
+    yield* sql`INSERT INTO flows_time_travel_audits ${sql.insert({ id: `audit-${runId}`, run_id: runId })}`
+    yield* sql`INSERT INTO flows_time_travel_receipts ${
+      sql.insert({
+        id: `receipt-${runId}`,
+        audit_id: `audit-${runId}`,
+        effect_id: `effect-${runId}`,
+        receipt_json: "{}"
+      })
+    }`
+  })
+
+const receiptIds = Effect.gen(function*() {
+  const sql = yield* SqlClient.SqlClient
+  const rows = yield* sql<{ readonly id: string }>`SELECT id FROM flows_time_travel_receipts ORDER BY id`
+  return rows.map((row) => row.id)
+})
+
 describe("Retention.collect", () => {
+  it.effect("counts and deletes receipts through doomed audits while preserving live receipts", () =>
+    migrated(Effect.gen(function*() {
+      const sql = yield* SqlClient.SqlClient
+      yield* insertRun("old", "completed", 100)
+      yield* insertRun("live", "running", null)
+      yield* seedTimeTravelReceipt("old")
+      yield* seedTimeTravelReceipt("live")
+
+      const planned = yield* RetentionOps.deleteRuns(
+        sql,
+        [{ runId: "old", parentRunId: null }],
+        { dryRun: true, assumeLadder: false }
+      )
+      expect(planned.deleted["flows_time_travel_receipts"]).toBe(1)
+      expect(yield* receiptIds).toEqual(["receipt-live", "receipt-old"])
+
+      const report = yield* Retention.collect({ olderThanMs: 500 })
+      expect(report.deleted["flows_time_travel_receipts"]).toBe(1)
+      expect(yield* receiptIds).toEqual(["receipt-live"])
+    })))
+
   it.effect("deletes a terminal run older than the threshold with every row that names it", () =>
     migrated(Effect.gen(function*() {
       yield* insertRun("old", "completed", 100)

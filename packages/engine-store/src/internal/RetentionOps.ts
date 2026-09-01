@@ -151,6 +151,8 @@ export interface RetainReport {
   readonly journalCheckpoints: number
   /** Time-travel archive rows; always zero where that table is not installed. */
   readonly archiveEntries: number
+  /** Time-travel receipt rows reached through their audits. */
+  readonly timeTravelReceipts: number
   readonly dryRun: boolean
 }
 
@@ -229,6 +231,9 @@ export interface RunScopedTable {
  *
  * The run rows themselves are not here: they go last and in generation order,
  * which {@link deleteRuns} does after this list.
+ * `flows_time_travel_receipts` is reached through its audit rather than listed
+ * here because the upstream table has no run column: its `audit_id` points to
+ * `flows_time_travel_audits.id`, whose row carries `run_id`.
  *
  * @category constants
  * @since 0.1.0
@@ -248,8 +253,13 @@ export const runScopedTables: ReadonlyArray<RunScopedTable> = [
   { table: "control_runs", column: "run_id", ladder: false }
 ]
 
-/** The statuses a run can never leave. */
-const terminalStatuses = ["completed", "failed", "cancelled"]
+/**
+ * The statuses a run can never leave.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const terminalStatuses: ReadonlyArray<string> = ["completed", "failed", "cancelled"]
 
 /** `terminalStatuses` as a SQL list, for the lineage prelude below. */
 const terminalList = terminalStatuses.map((status) => `'${status}'`).join(", ")
@@ -369,6 +379,13 @@ export interface DeletionReport {
   readonly deleted: Readonly<Record<string, number>>
 }
 
+/** Reads the installed SQLite table names once for inventory decisions. */
+const installedTableNames = (sql: SqlClient.SqlClient): Effect.Effect<ReadonlySet<string>, RetentionError> =>
+  sql<{ readonly name: string }>`SELECT name FROM sqlite_master WHERE type = 'table'`.pipe(
+    Effect.map((rows) => new Set(rows.map((row) => row.name))),
+    Effect.mapError(scanning("the schema catalog"))
+  )
+
 /**
  * The {@link runScopedTables} entries this database actually has.
  *
@@ -392,12 +409,10 @@ export const installedTables = (
   sql: SqlClient.SqlClient,
   options: { readonly assumeLadder: boolean }
 ): Effect.Effect<ReadonlyArray<RunScopedTable>, RetentionError> =>
-  sql<{ readonly name: string }>`SELECT name FROM sqlite_master WHERE type = 'table'`.pipe(
-    Effect.map((rows) => {
-      const present = new Set(rows.map((row) => row.name))
-      return runScopedTables.filter((entry) => (options.assumeLadder && entry.ladder) || present.has(entry.table))
-    }),
-    Effect.mapError(scanning("the schema catalog"))
+  installedTableNames(sql).pipe(
+    Effect.map((present) =>
+      runScopedTables.filter((entry) => (options.assumeLadder && entry.ladder) || present.has(entry.table))
+    )
   )
 
 const countIn = (sql: SqlClient.SqlClient, table: string, column: string, ids: ReadonlyArray<string>) =>
@@ -416,6 +431,32 @@ const deleteIn = (sql: SqlClient.SqlClient, table: string, column: string, ids: 
       sql`DELETE FROM ${sql.unsafe(table)} WHERE ${sql.in(column, chunk)}`.pipe(
         Effect.mapError(deleting(table))
       ),
+    { discard: true }
+  )
+
+const countTimeTravelReceipts = (sql: SqlClient.SqlClient, ids: ReadonlyArray<string>) =>
+  Effect.reduce(chunksOf(ids), () => 0, (total, chunk) =>
+    sql<{ readonly total: number }>`
+      SELECT COUNT(*) AS total
+      FROM flows_time_travel_receipts
+      WHERE audit_id IN (
+        SELECT id FROM flows_time_travel_audits WHERE ${sql.in("run_id", chunk)}
+      )
+    `.pipe(
+      Effect.map((rows) => rows.reduce((sum, row) => sum + Number(row.total), total)),
+      Effect.mapError(deleting("flows_time_travel_receipts"))
+    ))
+
+const deleteTimeTravelReceipts = (sql: SqlClient.SqlClient, ids: ReadonlyArray<string>) =>
+  Effect.forEach(
+    chunksOf(ids),
+    (chunk) =>
+      sql`
+        DELETE FROM flows_time_travel_receipts
+        WHERE audit_id IN (
+          SELECT id FROM flows_time_travel_audits WHERE ${sql.in("run_id", chunk)}
+        )
+      `.pipe(Effect.mapError(deleting("flows_time_travel_receipts"))),
     { discard: true }
   )
 
@@ -517,7 +558,12 @@ export const deleteRuns = (
   options: { readonly dryRun: boolean; readonly assumeLadder: boolean }
 ): Effect.Effect<DeletionReport, RetentionError> =>
   Effect.gen(function*() {
-    const tables = yield* installedTables(sql, { assumeLadder: options.assumeLadder })
+    const installed = yield* installedTableNames(sql)
+    const tables = runScopedTables.filter((entry) =>
+      (options.assumeLadder && entry.ladder) || installed.has(entry.table)
+    )
+    const hasTimeTravelReceipts = installed.has("flows_time_travel_receipts") &&
+      installed.has("flows_time_travel_audits")
     const candidateIds = candidates.map((candidate) => candidate.runId)
     const parentOf = new Map(candidates.map((candidate) => [candidate.runId, candidate.parentRunId]))
     const doomed = new Set(candidateIds)
@@ -535,6 +581,10 @@ export const deleteRuns = (
     const runIds = candidateIds.filter((runId) => doomed.has(runId))
 
     const deleted: Record<string, number> = {}
+    if (hasTimeTravelReceipts) {
+      const total = yield* countTimeTravelReceipts(sql, runIds)
+      if (total > 0) deleted["flows_time_travel_receipts"] = total
+    }
     for (const entry of tables) {
       const total = yield* countIn(sql, entry.table, entry.column, runIds)
       if (total > 0) deleted[entry.table] = total
@@ -542,6 +592,9 @@ export const deleteRuns = (
     if (runIds.length > 0) deleted["flows_runs"] = runIds.length
 
     if (!options.dryRun) {
+      // Receipts have no run column, so remove them through their audits
+      // before the ordinary inventory reaches and deletes those audit rows.
+      if (hasTimeTravelReceipts) yield* deleteTimeTravelReceipts(sql, runIds)
       for (const entry of tables) yield* deleteIn(sql, entry.table, entry.column, runIds)
       // Last, and deepest generation first. The `flows_run_parents_gc`
       // trigger drops each run's DAG edges as its row goes.
@@ -659,6 +712,7 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient | Jour
           journalEntries: removed.deleted["flows_journal_events"] ?? 0,
           journalCheckpoints: removed.deleted["flows_journal_checkpoints"] ?? 0,
           archiveEntries: removed.deleted["flows_time_travel_archive"] ?? 0,
+          timeTravelReceipts: removed.deleted["flows_time_travel_receipts"] ?? 0,
           dryRun: options.dryRun === true
         } satisfies RetainReport
       })

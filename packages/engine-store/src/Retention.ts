@@ -53,16 +53,9 @@ export {
    * @since 1.0.0
    */
   runScopedTables,
-  type Service
+  type Service,
+  terminalStatuses
 } from "./internal/RetentionOps.ts"
-
-/**
- * Run statuses that make a row eligible for deletion.
- *
- * @category constants
- * @since 1.0.0
- */
-export const terminalStatuses: ReadonlyArray<string> = ["completed", "failed", "cancelled"]
 
 /**
  * What one retention pass would delete, or did.
@@ -132,7 +125,7 @@ const eligibleCandidates = (
     const rows = yield* sql<{ readonly run_id: string; readonly parent_run_id: string | null }>`
       ${sql.unsafe(prelude)}
       SELECT run_id, parent_run_id FROM flows_runs
-      WHERE status IN ('completed', 'failed', 'cancelled')
+      WHERE ${sql.in("status", RetentionOps.terminalStatuses)}
         AND COALESCE(finished_at_ms, created_at_ms) < ${olderThanMs}
         AND run_id NOT IN (SELECT run_id FROM under_live)
         AND run_id NOT IN (SELECT run_id FROM over_live)

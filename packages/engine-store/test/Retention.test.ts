@@ -81,6 +81,34 @@ const archive = (runId: string, seq: number) =>
       .pipe(Effect.orDie)
   })
 
+const seedTimeTravelReceipt = (runId: string) =>
+  Effect.gen(function*() {
+    const sql = yield* Effect.service(SqlClient.SqlClient)
+    yield* sql`CREATE TABLE IF NOT EXISTS flows_time_travel_audits (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL
+    )`.pipe(Effect.orDie)
+    yield* sql`CREATE TABLE IF NOT EXISTS flows_time_travel_receipts (
+      id TEXT PRIMARY KEY,
+      audit_id TEXT NOT NULL,
+      effect_id TEXT NOT NULL,
+      receipt_json TEXT NOT NULL
+    )`.pipe(Effect.orDie)
+    yield* sql`INSERT INTO flows_time_travel_audits
+      (id, run_id) VALUES (${`audit-${runId}`}, ${runId})`.pipe(Effect.orDie)
+    yield* sql`INSERT INTO flows_time_travel_receipts
+      (id, audit_id, effect_id, receipt_json)
+      VALUES (${`receipt-${runId}`}, ${`audit-${runId}`}, ${`effect-${runId}`}, ${"{}"})`.pipe(Effect.orDie)
+  })
+
+const timeTravelReceiptIds = Effect.gen(function*() {
+  const sql = yield* Effect.service(SqlClient.SqlClient)
+  const rows = yield* sql<{ readonly id: string }>`SELECT id FROM flows_time_travel_receipts ORDER BY id`.pipe(
+    Effect.orDie
+  )
+  return rows.map((row) => row.id)
+})
+
 const countOf = (table: string, column: string, runId: string) =>
   Effect.gen(function*() {
     const sql = yield* Effect.service(SqlClient.SqlClient)
@@ -205,6 +233,36 @@ const retention = Effect.gen(function*() {
 })
 
 describe("retention", () => {
+  it.effect("deletes receipts through doomed audits and preserves a live run's receipt", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        const retain = yield* retention
+        yield* activate("receipt-doomed")
+        yield* seedTimeTravelReceipt("receipt-doomed")
+        yield* finish("receipt-doomed", "completed")
+        yield* TestClock.adjust(agingMs)
+        yield* activate("receipt-live")
+        yield* seedTimeTravelReceipt("receipt-live")
+
+        const planned = yield* retain.retain({ olderThanMs: thresholdMs, dryRun: true })
+        expect(planned.timeTravelReceipts).toBe(1)
+        expect(yield* timeTravelReceiptIds).toEqual([
+          "receipt-receipt-doomed",
+          "receipt-receipt-live"
+        ])
+
+        const report = yield* retain.retain({ olderThanMs: thresholdMs })
+
+        expect(report.runIds).toEqual(["receipt-doomed"])
+        expect(report.timeTravelReceipts).toBe(1)
+        expect(yield* timeTravelReceiptIds).toEqual(["receipt-receipt-live"])
+      }).pipe(
+        Effect.provideService(Jj.Jj, jj),
+        Effect.provide(StepBoundary.layerTest()),
+        Effect.provide(stores)
+      )
+    ))
+
   it.effect("deletes aged terminal runs with every dependent row and leaves live runs whole", () =>
     withCrypto(
       Effect.gen(function*() {
