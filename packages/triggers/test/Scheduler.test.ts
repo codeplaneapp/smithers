@@ -104,11 +104,11 @@ const seed = (
   outcome: TriggerStore.Outcome = "launched"
 ) =>
   Effect.gen(function*() {
-    yield* store.register(declaration)
+    const registered = yield* store.register(declaration)
     yield* store.claimFire({
       triggerId: declaration.id,
       occurrence: 0,
-      overlap: declaration.overlap
+      expectedRevision: registered.revision
     })
     if (outcome === "launched") fixture.active.add("seed")
     yield* store.recordResult({
@@ -474,10 +474,12 @@ describe("Scheduler", () => {
             const store = yield* TriggerStore.TriggerStore
             yield* store.register({ ...trigger("skip", "none"), id: "a-february-30", cron: "0 0 30 2 *" })
             yield* store.register({ ...trigger("skip", "none"), id: "b-hourly" })
-            yield* TestClock.setTime(hour)
+            yield* TestClock.setTime(hour + 30 * 60 * 1_000)
             const scheduler = yield* Scheduler.make().pipe(
               Effect.provideService(Scheduler.Runner, runner.service)
             )
+            yield* scheduler.runOnce
+            yield* TestClock.setTime(2 * hour)
             yield* scheduler.runOnce
             yield* Effect.yieldNow
           })
@@ -487,7 +489,7 @@ describe("Scheduler", () => {
     )
 
     expect(runner.starts.map((input) => input.idempotencyKey)).toEqual([
-      `b-hourly:${new Date(hour).toISOString()}`
+      `b-hourly:${new Date(2 * hour).toISOString()}`
     ])
   })
 
@@ -504,9 +506,14 @@ describe("Scheduler", () => {
             ...store,
             // The first tick dies the way an exhausted occurrence search used
             // to: a defect, which `Effect.catch` does not handle.
-            due: (now) => dueCalls++ === 0 ? Effect.die(new Error("Unable to find cron date")) : store.due(now)
+            listEnabled: () =>
+              dueCalls++ === 0 ? Effect.die(new Error("Unable to find cron date")) : store.listEnabled()
           })
-          yield* TestClock.setTime(hour)
+          // A minute and a half before the hour, so the tick after the failing
+          // one establishes the watermark and the tick after that crosses the
+          // boundary and fires. A supervisor that stopped at the defect never
+          // reaches either.
+          yield* TestClock.setTime(hour - 90_000)
           yield* Effect.provide(
             TestClock.adjust("2 minutes").pipe(Effect.andThen(Effect.yieldNow)),
             Scheduler.layer({ pollInterval: "1 minute" }).pipe(
@@ -526,7 +533,11 @@ describe("Scheduler", () => {
     expect(results).toHaveLength(0)
   })
 
-  it("fires the current occurrence on a newly registered trigger's first poll", async () => {
+  // A trigger that has never fired owes nothing for the occurrence that
+  // happened to pass before it existed: `catchUp: "none"` says exactly that.
+  // The first poll establishes the watermark, and the trigger fires from the
+  // next boundary.
+  it("establishes a watermark without firing a stale occurrence on a new trigger's first poll", async () => {
     const results: Array<TriggerStore.Result> = []
     const runner = runnerFixture()
     await Effect.runPromise(
@@ -535,10 +546,15 @@ describe("Scheduler", () => {
           Effect.gen(function*() {
             const store = yield* TriggerStore.TriggerStore
             yield* store.register(trigger("skip", "none"))
-            yield* TestClock.setTime(hour)
+            yield* TestClock.setTime(hour + 30 * 60 * 1_000)
             const scheduler = yield* Scheduler.make().pipe(
               Effect.provideService(Scheduler.Runner, runner.service)
             )
+            yield* scheduler.runOnce
+            yield* Effect.yieldNow
+            expect(runner.starts).toHaveLength(0)
+
+            yield* TestClock.setTime(2 * hour)
             yield* scheduler.runOnce
             yield* Effect.yieldNow
           })
@@ -548,7 +564,7 @@ describe("Scheduler", () => {
     )
     expect(runner.starts).toHaveLength(1)
     expect(runner.starts[0]?.idempotencyKey).toBe(
-      `hourly:${new Date(hour).toISOString()}`
+      `hourly:${new Date(2 * hour).toISOString()}`
     )
   })
 })

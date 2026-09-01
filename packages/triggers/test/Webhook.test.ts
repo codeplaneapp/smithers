@@ -1,8 +1,10 @@
 import * as ControlChannels from "@smthrs/control/Channels"
 import * as Control from "@smthrs/control/Control"
 import { InvalidInput } from "@smthrs/control/ControlError"
-import { Cause, Effect, Layer, Schema, Stream } from "effect"
+import type { CredentialRef } from "@smthrs/control/Credential"
+import { Cause, Effect, Layer, Redacted, Schema, Stream } from "effect"
 import { describe, expect, it } from "vitest"
+import { TriggerError } from "../src/TriggerError.ts"
 import * as Webhook from "../src/Webhook.ts"
 
 const Payload = Schema.Union([
@@ -29,17 +31,20 @@ const raw = (
   idempotencyKey
 })
 
+const credential = Redacted.make<CredentialRef>({ id: "events-secret", name: "events" })
+
 const declaration = (
   calls: Array<string>,
   onInbound: () => void = () => undefined
 ) => ({
   name: "events",
   schema: Payload,
+  credential,
   verify: Webhook.makeSignatureVerifier({
     header: "x-signature",
-    expected: (body: Uint8Array) => {
-      calls.push(`verify:${new TextDecoder().decode(body)}`)
-      return new TextEncoder().encode("valid")
+    expected: (body: Uint8Array, ref: Redacted.Redacted<CredentialRef>) => {
+      calls.push(`verify:${Redacted.value(ref).id}:${new TextDecoder().decode(body)}`)
+      return Effect.succeed(new TextEncoder().encode("valid"))
     }
   }),
   inbound: (payload: Payload) => {
@@ -126,11 +131,11 @@ describe("Webhook", () => {
     }))
     const exit = await run(
       Effect.exit(
-        webhook.ingest({
+        webhook.register.pipe(Effect.andThen(webhook.ingest({
           body: new TextEncoder().encode("{not-json"),
           headers: { "x-signature": "invalid" },
           idempotencyKey: "delivery-1"
-        })
+        })))
       ),
       calls
     )
@@ -149,7 +154,9 @@ describe("Webhook", () => {
     const webhook = Webhook.make(declaration(calls))
     const exit = await run(
       Effect.exit(
-        webhook.ingest(raw({ _tag: "start", flowId: 42, input: {} }, "delivery-2"))
+        webhook.register.pipe(
+          Effect.andThen(webhook.ingest(raw({ _tag: "start", flowId: 42, input: {} }, "delivery-2")))
+        )
       ),
       calls
     )
@@ -166,6 +173,7 @@ describe("Webhook", () => {
     const webhook = Webhook.make(declaration(calls))
     await run(
       Effect.gen(function*() {
+        yield* webhook.register
         yield* webhook.ingest(
           raw({ _tag: "start", flowId: "review", input: { pr: 42 } }, "start-1")
         )

@@ -65,12 +65,23 @@ export interface Signal {
 export type Inbound = Start | Signal
 
 /**
- * Authenticates raw request bytes and headers.
+ * Authenticates raw request bytes and headers against a credential reference.
+ *
+ * The credential arrives as a redacted reference rather than a secret, and it
+ * arrives per request rather than at declaration time: a verifier resolves it
+ * through the host's resolver when it needs the bytes. Dropping this parameter
+ * left a verifier no way to reach a secret except by closing over it in plain
+ * memory at declaration time, which is the shape the reference exists to
+ * prevent. `packages/control/src/WebhookChannel.ts` states the same contract
+ * for the control-plane side of the boundary.
  *
  * @category models
  * @since 0.1.0
  */
-export type Verify = (raw: RawInbound) => Effect.Effect<void, TriggerError>
+export type Verify = (
+  raw: RawInbound,
+  credential: Redacted.Redacted<CredentialRef>
+) => Effect.Effect<void, TriggerError>
 
 /**
  * An authority-free bidirectional channel declaration.

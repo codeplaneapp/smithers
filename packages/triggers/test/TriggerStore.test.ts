@@ -33,25 +33,26 @@ describe("TriggerStore", () => {
     const program = Effect.gen(function*() {
       const store = yield* TriggerStore.TriggerStore
       const first = yield* store.register(trigger)
-      const second = yield* store.register({ ...trigger, enabled: false })
+      const second = yield* store.register({ ...trigger, flowId: "other" })
       const claims = yield* Effect.all([
-        store.claimFire({ triggerId: trigger.id, occurrence: 1, overlap: "skip" }),
-        store.claimFire({ triggerId: trigger.id, occurrence: 1, overlap: "skip" })
+        store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: second.revision }),
+        store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: second.revision })
       ], { concurrency: "unbounded" })
       return { first, second, claims }
     }).pipe(Effect.provide(layer))
     const result = await Effect.runPromise(program)
     expect(result.first.revision).toBe(1)
     expect(result.second.revision).toBe(2)
+    expect(result.second.flowId).toBe("other")
     expect(result.claims.filter((claim) => claim.claimed)).toHaveLength(1)
   })
 
   it("retains an active run across buffered and skipped outcomes and clears it on completion", async () => {
     const program = Effect.gen(function*() {
       const store = yield* TriggerStore.TriggerStore
-      yield* store.register(trigger)
+      const registered = yield* store.register(trigger)
       for (const occurrence of [1, 2, 3]) {
-        yield* store.claimFire({ triggerId: trigger.id, occurrence, overlap: "skip" })
+        yield* store.claimFire({ triggerId: trigger.id, occurrence, expectedRevision: registered.revision })
       }
       yield* store.recordResult({
         triggerId: trigger.id,
@@ -79,10 +80,10 @@ describe("TriggerStore", () => {
   it("atomically applies overlap across different due occurrences", async () => {
     const program = Effect.gen(function*() {
       const store = yield* TriggerStore.TriggerStore
-      yield* store.register(trigger)
+      const registered = yield* store.register(trigger)
       return yield* Effect.all([
-        store.claimFire({ triggerId: trigger.id, occurrence: 1, overlap: "skip" }),
-        store.claimFire({ triggerId: trigger.id, occurrence: 2, overlap: "skip" })
+        store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: registered.revision }),
+        store.claimFire({ triggerId: trigger.id, occurrence: 2, expectedRevision: registered.revision })
       ], { concurrency: "unbounded" })
     }).pipe(Effect.provide(layer))
     const claims = await Effect.runPromise(program)
@@ -94,11 +95,11 @@ describe("TriggerStore", () => {
     const result = await Effect.runPromise(
       Effect.gen(function*() {
         const store = yield* TriggerStore.TriggerStore
-        yield* store.register(trigger)
-        const first = yield* store.claimFire({ triggerId: trigger.id, occurrence: 1, overlap: "skip" })
+        const registered = yield* store.register(trigger)
+        const first = yield* store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: registered.revision })
         yield* TestClock.adjust(SqlTriggerStore.reservationLeaseMs + 1)
         const noLongerActive = yield* store.activeRun(trigger.id)
-        const retried = yield* store.claimFire({ triggerId: trigger.id, occurrence: 1, overlap: "skip" })
+        const retried = yield* store.claimFire({ triggerId: trigger.id, occurrence: 1, expectedRevision: registered.revision })
         return { first, noLongerActive, retried }
       }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()))
     )

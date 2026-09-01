@@ -15,19 +15,23 @@ import type * as Channel from "./Channel.ts"
 import { TriggerError } from "./TriggerError.ts"
 
 /**
- * Compares two byte strings without returning early on a mismatch.
+ * Compares a supplied byte string against the expected one without returning
+ * early on a mismatch.
  *
- * The loop always examines the longest supplied input and incorporates the
- * length difference into the result.
+ * The loop runs exactly `expected.length` times, so its iteration count is
+ * fixed by the secret side of the comparison and never by the caller's. Reading
+ * the longer of the two instead let a caller lengthen its input until the work
+ * stopped growing, which reports the expected signature's length. The length
+ * difference is folded into the result, so inputs of unequal length always
+ * disagree.
  *
  * @category verification
  * @since 0.1.0
  */
-export const constantTimeEqual = (left: Uint8Array, right: Uint8Array): boolean => {
-  let difference = left.length ^ right.length
-  const length = Math.max(left.length, right.length)
-  for (let index = 0; index < length; index++) {
-    difference |= (left[index] ?? 0) ^ (right[index] ?? 0)
+export const constantTimeEqual = (expected: Uint8Array, supplied: Uint8Array): boolean => {
+  let difference = expected.length ^ supplied.length
+  for (let index = 0; index < expected.length; index++) {
+    difference |= (expected[index] ?? 0) ^ (supplied[index] ?? 0)
   }
   return difference === 0
 }
@@ -35,15 +39,23 @@ export const constantTimeEqual = (left: Uint8Array, right: Uint8Array): boolean 
 /**
  * Configuration for a raw-byte signature verifier.
  *
- * `expected` receives the original request bytes. It must return the signature
- * bytes expected in `header`.
+ * `expected` receives a private copy of the request bytes and the redacted
+ * credential reference the channel was declared with, and answers with the
+ * signature bytes the request must carry in `header`. It returns an Effect so
+ * the secret is resolved through the host's resolver per request rather than
+ * captured in a closure at declaration time, and so a resolution or HMAC
+ * failure arrives as a typed `verification_failed` instead of a defect that
+ * kills the fiber.
  *
  * @category models
  * @since 0.1.0
  */
 export interface SignatureConfig {
   readonly header: string
-  readonly expected: (body: Uint8Array) => Uint8Array
+  readonly expected: (
+    body: Uint8Array,
+    credential: Redacted.Redacted<CredentialRef>
+  ) => Effect.Effect<Uint8Array, TriggerError>
 }
 
 /**
@@ -52,29 +64,39 @@ export interface SignatureConfig {
  * @category constructors
  * @since 0.1.0
  */
-export const makeSignatureVerifier = (config: SignatureConfig): Channel.Verify => (raw) =>
+export const makeSignatureVerifier = (config: SignatureConfig): Channel.Verify => (raw, credential) =>
   Effect.suspend(() => {
     const supplied = raw.headers[config.header.toLowerCase()] ?? raw.headers[config.header]
-    const expected = config.expected(raw.body)
     const actual = supplied === undefined ? new Uint8Array() : new TextEncoder().encode(supplied)
-    return constantTimeEqual(expected, actual)
-      ? Effect.void
-      : Effect.fail(
-        new TriggerError({
-          code: "verification_failed",
-          message: `webhook signature in ${config.header} did not verify`
-        })
+    // The verifier gets its own copy: nothing it does to these bytes can reach
+    // the buffer that is about to be fingerprinted and decoded.
+    return config.expected(raw.body.slice(), credential).pipe(
+      Effect.flatMap((expected) =>
+        constantTimeEqual(expected, actual)
+          ? Effect.void
+          : Effect.fail(
+            new TriggerError({
+              code: "verification_failed",
+              message: `webhook signature in ${config.header} did not verify`
+            })
+          )
       )
+    )
   })
 
 /**
  * Webhook declaration configuration.
  *
+ * `credential` is required. It used to default to a reference named after the
+ * channel, so a webhook declared without one verified against whatever
+ * credential happened to share its name instead of being refused, and two
+ * declarations differing only in credential verified identically.
+ *
  * @category models
  * @since 0.1.0
  */
 export interface Config<Payload, Outbound = never> extends Channel.Config<Payload, RunSummary, Outbound> {
-  readonly credential?: Redacted.Redacted<CredentialRef> | undefined
+  readonly credential: Redacted.Redacted<CredentialRef>
 }
 
 /**
@@ -99,9 +121,9 @@ const toControlChannel = <Payload, Outbound>(
   const channel = ControlWebhook.make({
     name: config.name,
     schema: config.schema,
-    credential: config.credential ?? Redacted.make({ id: config.name, name: config.name }),
-    verify: (raw) =>
-      config.verify(raw).pipe(
+    credential: config.credential,
+    verify: (raw, credential) =>
+      config.verify(raw, credential).pipe(
         Effect.mapError((error) => new Unauthorized({ message: error.message }))
       ),
     map: (payload) => {
@@ -144,7 +166,12 @@ const toControlChannel = <Payload, Outbound>(
   })
   return {
     ...channel,
-    schema: Schema.Unknown,
+    // `ControlChannels.Channel<A>` is invariant in `A`, so a concretely typed
+    // channel is not assignable to the `Channel<unknown>` the registry stores.
+    // Only that variance is cast: the record keeps the declared schema, because
+    // overwriting it with `Schema.Unknown` left the registry advertising a
+    // schema its own `decode` closure disagreed with.
+    schema: channel.schema as unknown as Schema.Schema<unknown>,
     map: (payload) => channel.map(payload as Payload)
   }
 }
@@ -155,6 +182,19 @@ const toControlChannel = <Payload, Outbound>(
  *
  * Verification occurs inside `Channels.ingest` before the adapter's JSON or
  * schema decoder and before any Control operation.
+ *
+ * `ingest` does not register: a channel is registered once, deliberately,
+ * through {@link Webhook.register}, so traffic to an unregistered channel is
+ * reported as unavailable rather than silently self-registering the door it
+ * arrived at.
+ *
+ * `ingest` also copies `body`, `headers`, and `idempotencyKey` before anything
+ * reads them. Verification, delivery fingerprinting, and decoding then all see
+ * one private snapshot, so a verifier that edits the bytes it was handed, or a
+ * caller that mutates its own object between building this Effect and running
+ * it, cannot authenticate one payload and have another decoded. A
+ * `SharedArrayBuffer`-backed view is copied out of shared memory by the same
+ * step.
  *
  * @category constructors
  * @since 0.1.0
@@ -169,9 +209,13 @@ export const make = <Payload, Outbound = never>(
     register,
     ingest: (raw) =>
       Effect.gen(function*() {
+        const snapshot: Channel.RawInbound = {
+          body: raw.body.slice(),
+          headers: { ...raw.headers },
+          idempotencyKey: raw.idempotencyKey
+        }
         const channels = yield* ControlChannels.Channels
-        yield* channels.register(channel)
-        return yield* channels.ingest({ channel: config.name, raw })
+        return yield* channels.ingest({ channel: config.name, raw: snapshot })
       }).pipe(
         Effect.mapError((error) =>
           error instanceof Unauthorized
