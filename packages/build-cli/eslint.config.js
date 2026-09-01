@@ -82,7 +82,7 @@ export default tseslint.config(
   {
     files: ["src/**/*.{js,cjs,mjs}"],
     rules: {
-      "import/no-unresolved": ["error", { ignore: ["^tsx/esm/api$", "^@smthrs/targets$"] }]
+      "import/no-unresolved": ["error", { ignore: ["^tsx/cjs/api$", "^tsx/esm/api$", "^@smthrs/targets$"] }]
     }
   },
   ...jsdocConvention,

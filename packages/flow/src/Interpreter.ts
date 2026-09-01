@@ -195,14 +195,22 @@ export const interpret = (
     const graph = yield* Effect.try({
       try: () => Graph.build(flowOrNode, payload, options),
       catch: (cause) => {
-        // Graph.build owns this synchronous boundary and normalizes every
-        // authoring refusal to GraphBuildError before it escapes.
-        const refusal = cause as GraphBuildError
+        // Graph.build normalizes its own refusals to GraphBuildError, but the
+        // flow body runs inside this boundary and a body throws whatever it
+        // throws. Reading `node` and `message` off the value without checking
+        // built an InterpreterError its own schema rejects, and the
+        // constructor's "Schema validation failed" then replaced the reason
+        // the author needed. Both fields are narrowed here so a plain Error
+        // from a body arrives as a typed failure that still says why. A body
+        // that threw produced no topology, so it reports `incomplete_graph`.
+        const refusal = cause as Partial<GraphBuildError>
+        const node = typeof refusal?.node === "string" ? refusal.node : ""
+        const reported = typeof refusal?.message === "string" ? refusal.message : ""
         return new InterpreterError({
-          code: refusal.code === "duplicate_node" ? "duplicate_node_id" : "incomplete_graph",
+          code: refusal?.code === "duplicate_node" ? "duplicate_node_id" : "incomplete_graph",
           flow: name,
-          node: refusal.node,
-          message: refusal.message
+          node,
+          message: reported === "" ? `building the graph of flow ${name} threw ${String(cause)}` : reported
         })
       }
     })

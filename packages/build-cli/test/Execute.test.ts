@@ -25,6 +25,7 @@ import { Workspace } from "../src/Workspace.ts"
 
 const rulesModule = NodePath.resolve(import.meta.dirname, "../../targets/src/Smithers.ts")
 const schemaModule = import.meta.resolve("effect/Schema")
+const nodeModule = import.meta.resolve("@smthrs/plan/Node")
 const cli = NodePath.resolve(import.meta.dirname, "../src/main.js")
 
 let root: string
@@ -82,6 +83,9 @@ const runCi = async (pattern: string): Promise<Executor.Summary> => {
 
 const status = (summary: Executor.Summary, label: string): string | undefined =>
   summary.results.find((entry) => entry.label === label)?.status
+
+const reason = (summary: Executor.Summary, label: string): string | undefined =>
+  summary.results.find((entry) => entry.label === label)?.error
 
 const invoke = (args: ReadonlyArray<string>): Promise<{ readonly code: number | null; readonly output: string }> =>
   new Promise((resolve, reject) => {
@@ -276,6 +280,32 @@ describe("targets execute", () => {
     // that did not succeed.
     expect(status(summary, "//packages/dependent:downstream")).toBe("skipped")
     await expect(read("downstream-ran.txt")).rejects.toThrow()
+  })
+
+  it("reports why a target failed rather than that it failed", async () => {
+    await write("BUILD.ts", "export const root = 1\n")
+    await write(
+      "packages/base/BUILD.ts",
+      `import { Target } from "${rulesModule}"\n` +
+        `import * as Node from "${nodeModule}"\n` +
+        `import * as Schema from "${schemaModule}"\n` +
+        `export const wrong = Target.make("WrongSuccess", {\n` +
+        `  attrs: Schema.Struct({}),\n` +
+        `  kinds: ["build"],\n` +
+        `  success: Schema.Struct({ value: Schema.NonEmptyString }),\n` +
+        `  implementation: () => Node.succeed({ value: "" })\n` +
+        `})({})\n`
+    )
+    const summary = await run("build", "//...")
+
+    expect(status(summary, "//packages/base:wrong")).toBe("failed")
+    // The failure is an Effect SchemaError, whose `message` is a prototype
+    // accessor. Rendering only own data properties left every one of these
+    // reporting the bare fallback, which is a status line that says a target
+    // failed and nothing an author can act on.
+    expect(reason(summary, "//packages/base:wrong")).not.toBe("target failed")
+    expect(reason(summary, "//packages/base:wrong")).toContain("length of at least 1")
+    expect(reason(summary, "//packages/base:wrong")).toContain("value")
   })
 
   it("propagates failure through the real CLI process and still blocks dependents", async () => {

@@ -499,6 +499,52 @@ describe("Interpreter refusals", () => {
       expect((reason as { readonly error: Error }).error.message).toContain("cannot call itself inline")
     }))
 
+  it.effect("keeps the reason when a body throws something that is not a build refusal", () =>
+    Effect.gen(function*() {
+      // A body is arbitrary code: a target implementation validates its own
+      // declaration and throws a plain Error naming the fix. That value has no
+      // `node`, and reading one built an InterpreterError the schema rejected,
+      // so the author read "Schema validation failed" instead of the fix.
+      const Refusing = Flow.make("interpreter/body-throws", {
+        payload: {},
+        success: Schema.Number,
+        body: (): Node.Node<number> => {
+          throw new Error("the rendered workflow is missing required jobs: rust")
+        }
+      })
+
+      expect(yield* refusal(Interpreter.interpret(Refusing, {}))).toMatchObject({
+        error: {
+          _tag: "@smthrs/flow/InterpreterError",
+          code: "incomplete_graph",
+          flow: "interpreter/body-throws",
+          node: "",
+          message: "the rendered workflow is missing required jobs: rust"
+        }
+      })
+    }))
+
+  it.effect("names the thrown value when a body throws one that carries no message", () =>
+    Effect.gen(function*() {
+      const Refusing = Flow.make("interpreter/body-throws-bare", {
+        payload: {},
+        success: Schema.Number,
+        body: (): Node.Node<number> => {
+          throw "bare refusal"
+        }
+      })
+
+      expect(yield* refusal(Interpreter.interpret(Refusing, {}))).toMatchObject({
+        error: {
+          _tag: "@smthrs/flow/InterpreterError",
+          code: "incomplete_graph",
+          flow: "interpreter/body-throws-bare",
+          node: "",
+          message: "building the graph of flow interpreter/body-throws-bare threw bare refusal"
+        }
+      })
+    }))
+
   it.effect("refuses an unimplemented action before the implemented ones ahead of it run", () =>
     Effect.gen(function*() {
       calls.length = 0

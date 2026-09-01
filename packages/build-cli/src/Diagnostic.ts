@@ -57,6 +57,37 @@ export const message = (cause: unknown, fallback = "operation failed"): string =
 }
 
 /**
+ * Renders a rejected value, reading an accessor-backed `message` when a native
+ * Error carries none as an own data property.
+ *
+ * {@link message} never runs code the rejected value owns, which is the right
+ * posture at a boundary that hands back an arbitrary value. It also renders
+ * nothing for the errors Effect raises: `SchemaError` and the `Data.TaggedError`
+ * family define `message` as a prototype accessor, so a failure carrying a full
+ * decode diagnostic rendered as the caller's fallback and the reason was lost.
+ *
+ * A target failure is produced by code this CLI already evaluates and runs, so
+ * this renderer invokes that accessor. It admits only a string, bounds the
+ * result exactly as {@link message} does, refuses a Proxy, and answers with the
+ * fallback if the accessor throws.
+ *
+ * @category rendering
+ * @since 0.1.0
+ * @slop
+ */
+export const describe = (cause: unknown, fallback = "operation failed"): string => {
+  const rendered = message(cause, "")
+  if (rendered !== "") return rendered
+  if (!NodeUtil.isNativeError(cause) || NodeUtil.isProxy(cause)) return fallback
+  try {
+    const text: unknown = cause.message
+    return typeof text === "string" ? bounded(text, fallback) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+/**
  * Converts an arbitrary rejection into an Error whose message is safe to read.
  * Standard Errors with a bounded own data message retain their original stack.
  *
