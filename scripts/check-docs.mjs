@@ -272,7 +272,8 @@ for (const [title, argv] of [
   ["the generated pages are current", ["scripts/generate-docs-pages.mjs", "--check"]],
   ["the canonical package documentation is current", ["packages/canonical/scripts/docs.mjs", "--check"]],
   ["the crypto package documentation is current", ["packages/crypto/scripts/docs.mjs", "--check"]],
-  ["the keys package documentation is current", ["packages/keys/scripts/docs.mjs", "--check"]]
+  ["the keys package documentation is current", ["packages/keys/scripts/docs.mjs", "--check"]],
+  ["the plan package documentation is current", ["packages/plan/scripts/docs.mjs", "--check"]]
 ]) {
   const result = spawnSync(process.execPath, argv.map((entry) => (entry.startsWith("-") ? entry : join(repoRoot, entry))), {
     cwd: repoRoot,
