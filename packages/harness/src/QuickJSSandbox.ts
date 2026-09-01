@@ -1047,6 +1047,7 @@ const openRealm = (
         const outcome = yield* Sandbox.driveCell({
           pending,
           ...(evaluation.mint === undefined ? {} : { mint: evaluation.mint }),
+          ...(evaluation.bounded === undefined ? {} : { bounded: evaluation.bounded }),
           flush: () => poll(),
           finished: () => {
             poll()

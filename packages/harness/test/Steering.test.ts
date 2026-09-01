@@ -175,7 +175,8 @@ describe("Steering", () => {
       seatChanges: [],
       activatedToolNames: [],
       remaining: Steering.empty(),
-      queued: false
+      queued: false,
+      duplicate: false
     })
     expect(Object.isFrozen(drained.inserts)).toBe(true)
     expect(Object.isFrozen(drained.seatChanges)).toBe(true)
@@ -290,7 +291,8 @@ describe("Steering", () => {
         admittedAt: 2,
         message: ModelRequest.Message.user("queued")
       }),
-      queued: true
+      queued: true,
+      duplicate: false
     }
 
     const record = Steering.drainRecord(drain)
@@ -316,7 +318,8 @@ describe("Steering.Source", () => {
       seatChanges: [],
       activatedToolNames: [],
       remaining: Steering.empty(),
-      queued: false
+      queued: false,
+      duplicate: false
     })
   })
 
@@ -349,7 +352,8 @@ describe("Steering.Source", () => {
             seatChanges: [],
             activatedToolNames: [],
             remaining: Steering.empty(),
-            queued: false
+            queued: false,
+            duplicate: false
           }
         })
     })
@@ -372,7 +376,8 @@ describe("Steering.Source", () => {
                   seatChanges: [],
                   activatedToolNames: [],
                   remaining: Steering.empty(),
-                  queued: true
+                  queued: true,
+                  duplicate: false
                 })
             })
           )

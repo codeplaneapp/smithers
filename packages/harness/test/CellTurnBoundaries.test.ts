@@ -1000,7 +1000,8 @@ describe("CellTurn steering boundaries", () => {
     seatChanges: [],
     activatedToolNames: [],
     remaining: Steering.empty(),
-    queued: false
+    queued: false,
+    duplicate: false
   }
 
   it("journals an empty drain at every continuing boundary", async () => {
@@ -1422,5 +1423,417 @@ describe("CellTurn replay", () => {
     // Two frames, two distinct boundaries: a replay of frame one cannot serve
     // frame zero's recorded drain.
     expect(new Set(identities.map((identity) => identity.boundary)).size).toBe(2)
+  })
+})
+
+/**
+ * A journal of recorded boundaries, shared by two runs over one state.
+ *
+ * The scripted fixture's own `record` executes every boundary, which is a
+ * single-pass host: it can say a boundary was opened and never that a second
+ * attempt was served the first one's answer. These cases are about the second
+ * attempt, so they need the storage half — and they need it to round-trip
+ * through the declared schema, because a durable store hands back decoded JSON
+ * and never the object the first attempt held.
+ */
+const boundaryKey = (boundary: EngineLike.RecordBoundary<unknown>): string =>
+  `${boundary.name} ${boundary.identity.session ?? ""} ${boundary.identity.frame} ${boundary.identity.boundary}`
+
+/** Wraps a scripted engine so its recorded boundaries persist in `records`. */
+const journaled = (
+  fixture: ScriptedEngine.Fixture,
+  records: Map<string, unknown>
+): Layer.Layer<EngineLike.EngineLike> =>
+  EngineLike.layer(
+    EngineLike.make({
+      ...fixture.engine,
+      record: (boundary) => {
+        fixture.recorder.records.push(boundary)
+        const key = boundaryKey(boundary)
+        const held = records.get(key)
+        if (held !== undefined) {
+          return Effect.fromResult(Schema.decodeUnknownResult(boundary.success)(held)).pipe(
+            Effect.mapError((cause) =>
+              new HarnessError({ code: "engine_failed", message: `Boundary ${boundary.name} did not decode`, cause })
+            )
+          )
+        }
+        const encode = Schema.encodeUnknownSync(
+          boundary.success as unknown as Schema.Schema<unknown> & { readonly "EncodingServices": never }
+        )
+        return boundary.execute.pipe(
+          Effect.tap((value) =>
+            Effect.sync(() => {
+              records.set(key, encode(value))
+            })
+          )
+        )
+      }
+    })
+  )
+
+/**
+ * The durable notification queue, in miniature.
+ *
+ * Two properties are the whole point, and both are the shipped queue's: a drain
+ * is idempotent in its boundary string — a second drain at one boundary
+ * promotes nothing and hands back what the first promoted — and `read` answers
+ * with what has been admitted and not yet promoted. Together they are what
+ * makes a parked run answerable: a replayed park drains its own boundary again
+ * and gets its own empty answer, and only a steer admitted since then can mint
+ * a boundary the queue has never seen.
+ */
+const steeringQueue = () => {
+  const admitted: Array<ModelRequest.Message> = []
+  const promoted = new Map<string, ReadonlyArray<ModelRequest.Message>>()
+  const delivered = new Set<ModelRequest.Message>()
+  const pending = (): ReadonlyArray<ModelRequest.Message> => admitted.filter((message) => !delivered.has(message))
+  return {
+    steer: (text: string) => admitted.push(ModelRequest.Message.user(text)),
+    pending,
+    boundaries: [] as Array<string>,
+    layer: Steering.layer({
+      read: () =>
+        Effect.sync(() => ({
+          items: pending().map((message): Steering.Item => ({
+            _tag: "Insert",
+            delivery: "steer",
+            admittedAt: 0,
+            message
+          }))
+        })),
+      drain: (input) =>
+        Effect.sync(() => {
+          const prior = promoted.get(input.boundary)
+          const inserts = prior ?? pending()
+          if (prior === undefined) {
+            promoted.set(input.boundary, inserts)
+            for (const message of inserts) delivered.add(message)
+          }
+          return {
+            inserts,
+            seatChanges: [],
+            activatedToolNames: [],
+            remaining: Steering.empty(),
+            queued: false,
+            duplicate: prior !== undefined
+          }
+        })
+    })
+  }
+}
+
+/**
+ * Every observation a cell can branch on is produced by a recorded boundary.
+ *
+ * Each case runs one state twice over one journal, and changes the WORLD
+ * between the two runs in exactly the way a resumed run changes it: the host
+ * call that stalled now answers at once, the clock that cut a frame short can
+ * no longer fire, and the steering queue has an operator's message in it. What
+ * the second run must not do is settle differently from the first on the
+ * strength of that.
+ */
+describe("CellTurn recorded observations", () => {
+  it("replays a call's recorded timeout instead of re-racing the clock", async () => {
+    const records = new Map<string, unknown>()
+    const cell = `const first = await ctx.call("fs/list", { path: "." })
+       if (first.ok === false) { await ctx.call("fs/list", { path: "narrow" }) }
+       ctx.done(first.ok === false ? "timed out" : "answered at once")`
+
+    const attempt = async (stalls: boolean) => {
+      const model = ScriptedModel.make([emits(cell)])
+      const engine = ScriptedEngine.make(model.model, [], [])
+      const stub = EngineLike.make({
+        ...engine.engine,
+        call: (call) => {
+          engine.recorder.calls.push(call)
+          return stalls && call.identity.ordinal === 0
+            ? Effect.never
+            : Effect.succeed(new Cell.CallResult({ outcome: "success", value: ["alpha.md"] }))
+        }
+      })
+      const observed = await collect(
+        { state: state({ maxFrames: 2 }), flows: [lister], limits: { callMs: 50 } },
+        { engine: journaled({ ...engine, engine: stub }, records) }
+      )
+      return { ...observed, calls: engine.recorder.calls }
+    }
+
+    // The original attempt: the first call never settles and is answered at its
+    // own budget, so the cell takes the narrowing branch.
+    const first = await attempt(true)
+    expect(resolvedText(first.events)).toBe("timed out")
+
+    // The resumed attempt, in the world a resume actually finds: the call the
+    // clock cut off is journaled nowhere, so a re-execution runs it again — and
+    // it answers at once this time. Nothing about the frame may change.
+    const second = await attempt(false)
+    expect(resolvedText(second.events)).toBe("timed out")
+    // The cell issued both calls again, and the frame's own ledger still saw
+    // both — a boundary that replayed the settlement must not also erase the
+    // accounting the frame derives from it.
+    expect(of(second.events, "cell-call-started").map((event) => event.call.input)).toEqual([
+      { path: "." },
+      { path: "narrow" }
+    ])
+    expect(of(second.events, "cell-call-settled").map((event) => event.result.code)).toEqual(["timeout", undefined])
+    // And nothing reached the engine: both settlements came from the journal,
+    // so neither call was performed a second time.
+    expect(second.calls).toEqual([])
+  })
+
+  it("replays a frame's recorded time limit instead of settling the frame twice over", async () => {
+    const records = new Map<string, unknown>()
+    const cut = new Cell.Rejected({
+      code: "limit_exceeded",
+      message: "This cell exceeded its wall-clock limit of 50 milliseconds"
+    })
+    const finished: Sandbox.RealmFrame = {
+      outcome: new Cell.Settled({
+        transition: Sandbox.replTransition({ _tag: "Done", output: "finished after all" }, undefined)
+      }),
+      prints: "output the original frame never had",
+      bindings: []
+    }
+
+    const attempt = async (interrupted: boolean) => {
+      const model = ScriptedModel.make([
+        emits(`ctx.done("unreachable")`),
+        emits(`ctx.done("recovered")`)
+      ])
+      const engine = ScriptedEngine.make(model.model, [], [])
+      return {
+        ...await collect(
+          { state: state({ maxFrames: 3 }), flows: [lister] },
+          {
+            engine: journaled(engine, records),
+            sandbox: Sandbox.layer({
+              capabilities: { calls: true, memoryBytes: false, steps: false, timeMs: false },
+              openRealm: () =>
+                Effect.succeed(
+                  {
+                    evaluate: (evaluation: Sandbox.RealmEvaluation) =>
+                      Effect.succeed(
+                        evaluation.frame !== 0
+                          ? {
+                            outcome: new Cell.Settled({
+                              transition: Sandbox.replTransition({ _tag: "Done", output: "recovered" }, undefined)
+                            }),
+                            prints: "",
+                            bindings: []
+                          }
+                          : interrupted
+                          ? { outcome: cut, prints: "", bindings: [] }
+                          : finished
+                      )
+                  } as Sandbox.Realm
+                )
+            })
+          }
+        ),
+        model
+      }
+    }
+
+    // The original attempt: the whole-frame ceiling fired, so the frame settled
+    // as a rejection with nothing printed and the run asked for another cell.
+    const first = await attempt(true)
+    expect(of(first.events, "cell-settled")[0]?.outcome).toMatchObject({ _tag: "rejected", code: "limit_exceeded" })
+    expect(resolvedText(first.events)).toBe("recovered")
+
+    // The resumed attempt cannot re-fire that clock: every host call it makes
+    // replays instantly, so the frame runs to completion. The recorded outcome
+    // is what the loop must judge, or the run forks into a completion the
+    // original never reached and re-buys every key below it.
+    const second = await attempt(false)
+    expect(of(second.events, "cell-settled")[0]?.outcome).toMatchObject({ _tag: "rejected", code: "limit_exceeded" })
+    expect(resolvedText(second.events)).toBe("recovered")
+    expect(messagesOf(second.model, 1)).not.toContain("output the original frame never had")
+  })
+
+  it("answers a parked run with a steer admitted while it was parked", async () => {
+    const records = new Map<string, unknown>()
+    const queue = steeringQueue()
+
+    const attempt = async () => {
+      const model = ScriptedModel.make([
+        emits(`ctx.park("waiting-input", "which branch?")`),
+        emits(`ctx.done("answered")`)
+      ])
+      const engine = ScriptedEngine.make(model.model, [], [])
+      return {
+        ...await collect(
+          { state: state({ maxFrames: 3, approvalChannel: true }), flows: [lister] },
+          { engine: journaled(engine, records), steering: queue.layer }
+        ),
+        model
+      }
+    }
+
+    // Nothing is waiting, so the park is honored and the run suspends.
+    const parked = await attempt()
+    expect(parked.failure).toMatchObject({ code: "suspended" })
+    expect(of(parked.events, "suspended")[0]?.reason.code).toBe("waiting-input")
+
+    // An operator answers the question the run parked on.
+    queue.steer("use the release branch")
+
+    // The resumed run replays every boundary it recorded, reaches the same
+    // park, and must not park again: the steer is a boundary this run has never
+    // recorded, so it is the one read the resumed attempt performs for real.
+    const resumed = await attempt()
+    expect(resumed.failure).toBeUndefined()
+    expect(resolvedText(resumed.events)).toBe("answered")
+    expect(messagesOf(resumed.model, 1)).toContain("use the release branch")
+    // Consumed exactly once: a message the run acted on must not be waiting for
+    // it again on the next resume.
+    expect(queue.pending()).toEqual([])
+
+    // And a third attempt over the same journal replays the delivery rather
+    // than draining a queue that no longer holds it.
+    const replayed = await attempt()
+    expect(resolvedText(replayed.events)).toBe("answered")
+    expect(messagesOf(replayed.model, 1)).toContain("use the release branch")
+  })
+
+  it("ends an answered park on the budget message when it was the run's last frame", async () => {
+    const queue = steeringQueue()
+    queue.steer("finish up")
+    const model = ScriptedModel.make([emits(`ctx.park("waiting-input", "which branch?")`)])
+    const engine = ScriptedEngine.make(model.model, [], [])
+    const { events } = await collect(
+      { state: state({ maxFrames: 1, approvalChannel: true }), flows: [lister] },
+      { engine: engine.layer, steering: queue.layer }
+    )
+
+    // The steer answered the park, and the answer arrived with no frame left to
+    // spend it in. That ends the run on its budget message rather than parking
+    // it on a question somebody has already answered.
+    expect(of(events, "suspended")).toHaveLength(0)
+    expect(of(events, "steering-drained")[0]?.messages).toHaveLength(1)
+    expect(resolvedText(events)).toContain("frame budget of 1 is exhausted")
+  })
+
+  it("re-issues a call whose original attempt parked, so a later grant can answer it", async () => {
+    const records = new Map<string, unknown>()
+    const request = new Permission.PermissionRequired({
+      requestId: "perm-replayed",
+      capability: Capability.make("fs:read", "**"),
+      tier: "irreversible",
+      meta: {}
+    })
+
+    const attempt = async (granted: boolean) => {
+      const model = ScriptedModel.make([
+        emits(
+          `const listing = await ctx.call("fs/list", { path: "." })
+           ctx.done(listing.entries.join(","))`
+        )
+      ])
+      const engine = ScriptedEngine.make(model.model, [], [])
+      const stub = EngineLike.make({
+        ...engine.engine,
+        call: () =>
+          granted
+            ? Effect.succeed(new Cell.CallResult({ outcome: "success", value: { entries: ["granted.md"] } }))
+            : Effect.fail(new HarnessError({ code: "engine_failed", message: "Permission required", cause: request }))
+      })
+      return collect(
+        { state: state({ maxFrames: 2 }), flows: [lister] },
+        { engine: journaled({ ...engine, engine: stub }, records) }
+      )
+    }
+
+    // The original attempt parks: nothing was handed to the cell, so the
+    // boundary records that it settled nothing rather than recording a refusal.
+    const parked = await attempt(false)
+    expect(of(parked.events, "permission-required")[0]?.request.requestId).toBe("perm-replayed")
+
+    // The grant lands and the run resumes. A boundary that had journaled the
+    // refusal as an answer would replay it forever and no grant could ever
+    // unblock the call; this one asks again.
+    const granted = await attempt(true)
+    expect(resolvedText(granted.events)).toBe("granted.md")
+  })
+
+  it("keeps a write the answered park landed out of the read-only streak", async () => {
+    const queue = steeringQueue()
+    queue.steer("looks right, carry on")
+    const model = ScriptedModel.make([
+      emits(
+        `await ctx.call("edit", { path: "a.py", text: "fixed" })
+         ctx.park("waiting-input", "is this the right fix?")`
+      ),
+      emits(`ctx.done("done")`)
+    ])
+    const engine = ScriptedEngine.make(model.model, [], [{ _tag: "Success", value: { edited: true } }])
+    const { events } = await collect(
+      {
+        state: state({
+          maxFrames: 3,
+          approvalChannel: true,
+          readOnlyCap: 1,
+          envelope: ["fs:read:**", "fs:write:**"]
+        }),
+        flows: [lister, descriptor("edit", { capabilities: ["fs:write:**"], writes: ["/**"] })]
+      },
+      { engine: engine.layer, steering: queue.layer }
+    )
+
+    // The edit landed before the park was answered, so the frame is a write and
+    // the grace the streak had bought is spent rather than carried.
+    expect(resolvedText(events)).toBe("done")
+    expect(of(events, "read-only-demanded")).toHaveLength(0)
+  })
+
+  it("takes the shipped per-call ceiling when the binding enforces no call budget", async () => {
+    const model = ScriptedModel.make([emits(`ctx.done("done")`)])
+    const engine = ScriptedEngine.make(model.model, [], [])
+    const { events } = await collect(
+      { state: state({ maxFrames: 2 }), flows: [lister] },
+      {
+        engine: engine.layer,
+        // A binding that cannot count calls gets no `callMs` default from
+        // `withDefaults`, and the frame must still bound its settlements.
+        sandbox: Sandbox.layer({
+          capabilities: { calls: false, memoryBytes: false, steps: false, timeMs: false },
+          openRealm: () =>
+            Effect.succeed(
+              {
+                evaluate: () =>
+                  Effect.succeed({
+                    outcome: new Cell.Settled({
+                      transition: Sandbox.replTransition({ _tag: "Done", output: "done" }, undefined)
+                    }),
+                    prints: "",
+                    bindings: []
+                  })
+              } as Sandbox.Realm
+            )
+        })
+      }
+    )
+
+    expect(resolvedText(events)).toBe("done")
+  })
+
+  it("tells the cell nothing was pinned when the store runs past the per-call ceiling", async () => {
+    const model = ScriptedModel.make([
+      emits(
+        `const pinned = await ctx.checkpoint()
+         ctx.done(pinned.ok === false ? pinned.error.code : "pinned")`
+      )
+    ])
+    const engine = ScriptedEngine.make(model.model, [], [])
+    const { events } = await collect(
+      { state: state({ maxFrames: 2 }), flows: [lister], limits: { callMs: 20 } },
+      { engine: EngineLike.layer(EngineLike.make({ ...engine.engine, capture: () => Effect.never })) }
+    )
+
+    // A store that hangs past the ceiling is answered exactly as a host with no
+    // store is, and the refusal is what the boundary records — so the resumed
+    // frame cannot be handed a tree the original attempt was told it never got.
+    expect(resolvedText(events)).toBe("checkpoint_unavailable")
+    expect(of(events, "checkpoint-minted")).toHaveLength(0)
   })
 })

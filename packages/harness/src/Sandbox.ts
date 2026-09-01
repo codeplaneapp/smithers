@@ -467,6 +467,22 @@ export interface RealmEvaluation {
    * trees it may pin is the controller's, not any flow's.
    */
   readonly mint?: Minter | undefined
+  /**
+   * Whether the caller bounds each settlement itself.
+   *
+   * The loop's own {@link Limits.callMs} ceiling is a clock race it synthesizes
+   * a failure from, and that failure is journaled nowhere: the call it
+   * interrupted never settled, so nothing downstream holds a result for it. A
+   * re-executed cell runs the same call again against a world that has moved
+   * on, gets an answer this time, and takes a branch the original attempt never
+   * took — with every irreversible effect below the fork bought twice.
+   *
+   * A caller that journals its settlements applies the same ceiling INSIDE the
+   * boundary it records, and sets this so the loop adds none of its own,
+   * because two clocks racing one call means the unrecorded one wins: the
+   * loop's starts first.
+   */
+  readonly bounded?: boolean | undefined
   readonly limits?: Limits | undefined
 }
 
@@ -659,9 +675,14 @@ const seconds = (milliseconds: number): string => {
  * frame. A rejection at the whole-evaluation ceiling teaches the model nothing
  * — the frame is already gone by the time it could act.
  *
- * @private
+ * Exported so a caller that bounds its own settlements
+ * ({@link RealmEvaluation.bounded}) synthesizes the same refusal the loop would
+ * have: one ceiling means one sentence, whichever clock enforced it.
+ *
+ * @category constructors
+ * @since 0.1.0
  */
-const callTimedOut = (flow: string, callMs: number): Cell.CallResult =>
+export const callTimedOut = (flow: string, callMs: number): Cell.CallResult =>
   new Cell.CallResult({
     outcome: "failure",
     value: null,
@@ -700,6 +721,7 @@ const drive = (
   pump: Pump,
   handler: Handler,
   minter: Minter,
+  bounded: boolean,
   limits: Limits | undefined
 ): Effect.Effect<Cell.Outcome, SandboxError | HarnessError> =>
   Effect.gen(function*() {
@@ -726,14 +748,20 @@ const drive = (
             input: next.input,
             ...(next.at === undefined ? {} : { at: next.at })
           })
-        const result = yield* settling.pipe(
-          // The per-call ceiling, ahead of the interrupt cleanup below: a call
-          // that overruns is answered, not abandoned, so the cell sees a
-          // catchable failure and the frame keeps its remaining budget.
-          Effect.timeoutOrElse({
-            duration: callMs,
-            orElse: () => Effect.succeed(callTimedOut(next.flow, callMs))
-          }),
+        const result = yield* (bounded
+          // The caller bounds its own settlements, inside the boundary it
+          // journals them under. Racing a second clock here would settle the
+          // call from the one reading nothing records. See `bounded`.
+          ? settling
+          : settling.pipe(
+            // The per-call ceiling, ahead of the interrupt cleanup below: a call
+            // that overruns is answered, not abandoned, so the cell sees a
+            // catchable failure and the frame keeps its remaining budget.
+            Effect.timeoutOrElse({
+              duration: callMs,
+              orElse: () => Effect.succeed(callTimedOut(next.flow, callMs))
+            })
+          )).pipe(
           Effect.onExit((exit) =>
             Exit.isSuccess(exit)
               ? Effect.void
@@ -871,6 +899,8 @@ export const driveCell = (options: {
   readonly handler: Handler
   /** Settles a `ctx.checkpoint()`; omitted means the run pins none. */
   readonly mint?: Minter | undefined
+  /** Whether the caller bounds each settlement itself; see {@link RealmEvaluation.bounded}. */
+  readonly bounded?: boolean | undefined
   readonly limits?: Limits | undefined
 }): Effect.Effect<Cell.Outcome, SandboxError | HarnessError> =>
   drive(
@@ -883,6 +913,7 @@ export const driveCell = (options: {
     },
     options.handler,
     options.mint ?? mintUnavailable,
+    options.bounded ?? false,
     options.limits
   )
 

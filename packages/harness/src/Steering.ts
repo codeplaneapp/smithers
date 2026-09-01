@@ -131,6 +131,23 @@ export interface Drain {
   readonly activatedToolNames: ReadonlyArray<string>
   readonly remaining: Queue
   readonly queued: boolean
+  /**
+   * Whether this boundary had already drained, so the answer is the one it gave
+   * the first time.
+   *
+   * This is what makes a parked run answerable. A park resumes by re-executing
+   * its own frames, so it reaches the same boundary again and must be told the
+   * same thing — and it must also be able to find out that a NEWER boundary is
+   * the one an operator's answer is waiting at. A run walks its park's
+   * boundaries until one reports `false`, which is the first one this run has
+   * not consulted before.
+   *
+   * Host queue bookkeeping, like {@link Drain.remaining}, and deliberately not
+   * part of {@link DrainRecord}: it says which attempt asked, not what the
+   * boundary holds, and freezing it in a journaled value would tell every later
+   * attempt it was the first.
+   */
+  readonly duplicate: boolean
 }
 
 /**
@@ -282,7 +299,10 @@ export const drainAtClose = (queue: Queue, cutoff: number): Drain => {
     seatChanges: Object.freeze(seatChanges),
     activatedToolNames: Object.freeze([...activatedToolNames]),
     remaining: immutable(remaining),
-    queued: false
+    queued: false,
+    // An in-memory cutoff drain keeps no boundary ledger, so it can never say
+    // it has answered this boundary before.
+    duplicate: false
   }
 }
 
@@ -309,6 +329,18 @@ export const promoteAtIdle = (state: PromotionState): QueueInsert | undefined =>
  */
 export interface Source {
   readonly read: () => Effect.Effect<Queue, HarnessError>
+  /**
+   * Promotes what one boundary may deliver.
+   *
+   * A drain is IDEMPOTENT in its boundary string: a second drain at one
+   * boundary promotes nothing and hands back exactly what the first one
+   * promoted, with {@link Drain.duplicate} set. That is not an optimization, it
+   * is the contract a resumed run depends on — a re-executed frame drains the
+   * boundaries it already drained and must be told the same thing, or it
+   * rebuilds a different context and re-keys every later sealed step. A source
+   * that promotes afresh each time cannot answer a parked run and will deliver
+   * one message many times.
+   */
   readonly drain: (input: BoundaryInput) => Effect.Effect<Drain, HarnessError>
 }
 
@@ -358,7 +390,8 @@ export const makeNoop = (overrides: Partial<Source> = {}): Source =>
         seatChanges: [],
         activatedToolNames: [],
         remaining: empty(),
-        queued: false
+        queued: false,
+        duplicate: false
       })
     ),
     ...overrides

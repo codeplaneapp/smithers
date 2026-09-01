@@ -84,7 +84,8 @@ const steerItem = (notification: Notification): Steering.Item => {
  * deliver, so nothing is held back here: the fold sorts promoted notifications
  * into the three things a turn boundary can act on.
  */
-const drainOf = (notifications: ReadonlyArray<Notification>): Steering.Drain => {
+const drainOf = (receipt: NotificationQueue.DrainReceipt): Steering.Drain => {
+  const notifications = receipt.notifications
   const inserts: Array<ModelRequest.Message> = []
   const seatChanges: Array<Steering.SeatChange | Steering.ThinkingChange> = []
   const activatedToolNames: Array<string> = []
@@ -110,7 +111,11 @@ const drainOf = (notifications: ReadonlyArray<Notification>): Steering.Drain => 
     seatChanges,
     activatedToolNames,
     remaining: Steering.empty(),
-    queued: notifications.some((notification) => notification.delivery === "queue")
+    queued: notifications.some((notification) => notification.delivery === "queue"),
+    // The queue's own answer to "has this boundary drained before". A parked
+    // run walks its park's boundaries until one says no, which is the first one
+    // it has not already consulted. See `Steering.Drain.duplicate`.
+    duplicate: receipt.duplicate
   }
 }
 
@@ -143,7 +148,7 @@ export const make = (
           boundary: input.boundary,
           wouldIdle: input.wouldIdle
         }).pipe(
-          Effect.map((receipt) => drainOf(receipt.notifications)),
+          Effect.map(drainOf),
           Effect.mapError(mapFailure)
         )
     })
