@@ -207,13 +207,17 @@ export const make = <Payload, Outbound = never>(
   return {
     name: config.name,
     register,
-    ingest: (raw) =>
-      Effect.gen(function*() {
-        const snapshot: Channel.RawInbound = {
-          body: raw.body.slice(),
-          headers: { ...raw.headers },
-          idempotencyKey: raw.idempotencyKey
-        }
+    ingest: (raw) => {
+      // Copied here rather than inside the Effect: the copy has to happen when
+      // the caller hands the request over, not when the returned Effect
+      // eventually runs, or a caller that reuses its own buffer in between
+      // changes what gets authenticated.
+      const snapshot: Channel.RawInbound = {
+        body: raw.body.slice(),
+        headers: { ...raw.headers },
+        idempotencyKey: raw.idempotencyKey
+      }
+      return Effect.gen(function*() {
         const channels = yield* ControlChannels.Channels
         return yield* channels.ingest({ channel: config.name, raw: snapshot })
       }).pipe(
@@ -227,5 +231,6 @@ export const make = <Payload, Outbound = never>(
             : error
         )
       )
+    }
   }
 }

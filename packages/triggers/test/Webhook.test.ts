@@ -207,4 +207,228 @@ describe("Webhook", () => {
     expect("run" in webhook).toBe(false)
     expect("start" in webhook).toBe(false)
   })
+
+  it("compares over the expected signature's length, never the supplied one", () => {
+    const bytes = (text: string) => new TextEncoder().encode(text)
+    expect(Webhook.constantTimeEqual(bytes("abc"), bytes("abc"))).toBe(true)
+    expect(Webhook.constantTimeEqual(bytes("abc"), bytes("abd"))).toBe(false)
+    expect(Webhook.constantTimeEqual(bytes("abc"), bytes("abcd"))).toBe(false)
+    expect(Webhook.constantTimeEqual(bytes("abcd"), bytes("abc"))).toBe(false)
+    expect(Webhook.constantTimeEqual(new Uint8Array(), new Uint8Array())).toBe(true)
+    expect(Webhook.constantTimeEqual(new Uint8Array(), bytes("a"))).toBe(false)
+  })
+
+  it("refuses an absent header and a header longer than the expected signature", async () => {
+    const calls: Array<string> = []
+    const webhook = Webhook.make(declaration(calls))
+    for (
+      const headers of [
+        {},
+        { "x-signature": "valid-and-then-some" },
+        { "X-Signature": "wrong" }
+      ]
+    ) {
+      const exit = await run(
+        Effect.exit(
+          webhook.register.pipe(Effect.andThen(webhook.ingest({
+            body: new TextEncoder().encode("{}"),
+            headers,
+            idempotencyKey: `absent-${JSON.stringify(headers)}`
+          })))
+        ),
+        calls
+      )
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") {
+        expect(Cause.squash(exit.cause)).toMatchObject({ code: "verification_failed" })
+      }
+    }
+  })
+
+  it("accepts the signature header under its declared casing", async () => {
+    const calls: Array<string> = []
+    const webhook = Webhook.make({
+      ...declaration(calls),
+      verify: Webhook.makeSignatureVerifier({
+        header: "X-Signature",
+        expected: () => Effect.succeed(new TextEncoder().encode("valid"))
+      })
+    })
+    const receipt = await run(
+      webhook.register.pipe(
+        Effect.andThen(
+          webhook.ingest({
+            body: new TextEncoder().encode(JSON.stringify({ _tag: "start", flowId: "review", input: {} })),
+            headers: { "X-Signature": "valid" },
+            idempotencyKey: "cased-1"
+          })
+        )
+      ),
+      calls
+    )
+    expect(receipt._tag).toBe("Accepted")
+  })
+
+  // A verifier that cannot resolve its credential used to throw out of a
+  // synchronous callback, which `Effect.suspend` turns into a defect that kills
+  // the fiber rather than a refusal the caller can read.
+  it("reports a failing expected() as a typed refusal, never a defect", async () => {
+    const calls: Array<string> = []
+    const webhook = Webhook.make({
+      ...declaration(calls),
+      verify: Webhook.makeSignatureVerifier({
+        header: "x-signature",
+        expected: () =>
+          Effect.fail(
+            new TriggerError({ code: "verification_failed", message: "credential could not be resolved" })
+          )
+      })
+    })
+    const exit = await run(
+      Effect.exit(
+        webhook.register.pipe(
+          Effect.andThen(webhook.ingest(raw({ _tag: "start", flowId: "review", input: {} }, "unresolved-1")))
+        )
+      ),
+      calls
+    )
+    expect(exit._tag).toBe("Failure")
+    if (exit._tag === "Failure") {
+      expect(Cause.squash(exit.cause)).toBeInstanceOf(TriggerError)
+      expect(Cause.squash(exit.cause)).toMatchObject({
+        code: "verification_failed",
+        message: "credential could not be resolved"
+      })
+    }
+  })
+
+  it("hands the declared credential to the verifier on every request", async () => {
+    const calls: Array<string> = []
+    const webhook = Webhook.make(declaration(calls))
+    await run(
+      webhook.register.pipe(
+        Effect.andThen(webhook.ingest(raw({ _tag: "start", flowId: "review", input: {} }, "credential-1")))
+      ),
+      calls
+    )
+    expect(calls.filter((call) => call.startsWith("verify:events-secret:"))).toHaveLength(1)
+  })
+
+  // `ingest` no longer registers: a channel nobody registered used to
+  // self-register on first traffic, which defeats the failure that reports an
+  // unknown door.
+  it("refuses traffic to a channel that was never registered", async () => {
+    const calls: Array<string> = []
+    const webhook = Webhook.make(declaration(calls))
+    const exit = await run(
+      Effect.exit(webhook.ingest(raw({ _tag: "start", flowId: "review", input: {} }, "unregistered-1"))),
+      calls
+    )
+    expect(exit._tag).toBe("Failure")
+    if (exit._tag === "Failure") {
+      expect(Cause.squash(exit.cause)).toMatchObject({ _tag: "/control/Unavailable" })
+    }
+    expect(calls).toHaveLength(0)
+  })
+
+  // Verification, delivery fingerprinting, and decoding must all read one
+  // private snapshot. Without it a verifier that edits the bytes it was handed
+  // authenticates one payload and has another decoded.
+  it("decodes the bytes it authenticated even when the verifier rewrites them", async () => {
+    const calls: Array<string> = []
+    const webhook = Webhook.make({
+      ...declaration(calls),
+      verify: Webhook.makeSignatureVerifier({
+        header: "x-signature",
+        expected: (body) =>
+          Effect.sync(() => {
+            body.fill(0)
+            return new TextEncoder().encode("valid")
+          })
+      })
+    })
+    await run(
+      webhook.register.pipe(
+        Effect.andThen(webhook.ingest(raw({ _tag: "start", flowId: "review", input: { pr: 7 } }, "mutating-1")))
+      ),
+      calls
+    )
+    expect(calls).toContain("plan:review")
+  })
+
+  it("ignores a caller mutating its own request between building and running ingest", async () => {
+    const calls: Array<string> = []
+    const webhook = Webhook.make(declaration(calls))
+    const request = raw({ _tag: "start", flowId: "review", input: {} }, "swapped-1")
+    const pending = webhook.ingest(request)
+    request.body.fill(0)
+    request.headers["x-signature"] = "tampered"
+    await run(webhook.register.pipe(Effect.andThen(pending)), calls)
+    expect(calls).toContain("plan:review")
+  })
+
+  it("reports a signal payload that is not JSON as invalid input", async () => {
+    const calls: Array<string> = []
+    const webhook = Webhook.make({
+      ...declaration(calls),
+      schema: Schema.Struct({ runId: Schema.String }),
+      inbound: (payload: { readonly runId: string }) => ({
+        signal: { runId: payload.runId, stepId: "approval", value: () => undefined }
+      })
+    })
+    const exit = await run(
+      Effect.exit(
+        webhook.register.pipe(Effect.andThen(webhook.ingest(raw({ runId: "run-1" }, "unserializable-1"))))
+      ),
+      calls
+    )
+    expect(exit._tag).toBe("Failure")
+    if (exit._tag === "Failure") {
+      expect(Cause.squash(exit.cause)).toBeInstanceOf(InvalidInput)
+    }
+    expect(calls.some((call) => call.startsWith("signal:"))).toBe(false)
+  })
+
+  it("projects run state outbound only when the declaration asks for it", async () => {
+    const calls: Array<string> = []
+    const summary = { runId: "run-1", status: "running", updatedAt: 42 } as never
+    const projections = await run(
+      Effect.gen(function*() {
+        const channels = yield* ControlChannels.Channels
+        const silent = Webhook.make(declaration(calls))
+        const speaking = Webhook.make({
+          ...declaration(calls),
+          name: "loud",
+          outbound: (projected: { readonly status: string }) => `status:${projected.status}`
+        })
+        yield* silent.register
+        yield* speaking.register
+        return {
+          silent: yield* channels.project({ channel: "events", run: summary }),
+          speaking: yield* channels.project({ channel: "loud", run: summary })
+        }
+      }),
+      calls
+    )
+    expect(projections.silent).toMatchObject({ cursor: "42", operation: "noop", message: null })
+    expect(projections.speaking).toMatchObject({
+      cursor: "42",
+      operation: "post",
+      message: "status:running"
+    })
+  })
+
+  it("registers the declared schema rather than an unknown one", async () => {
+    const calls: Array<string> = []
+    const webhook = Webhook.make(declaration(calls))
+    const registered = await run(
+      Effect.gen(function*() {
+        const channels = yield* ControlChannels.Channels
+        yield* webhook.register
+        return yield* channels.lookup("events")
+      }),
+      calls
+    )
+    expect(registered.schema).toBe(Payload)
+  })
 })
