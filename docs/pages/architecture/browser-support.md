@@ -58,6 +58,29 @@ These are Node-only, deliberately. The gate asserts each one _still_ fails to bu
 | `@smthrs/flows/NodeRuntime`                      | The supported production composition: it opens a Node SQLite file and closes over a Node scope                                     |
 | `@smthrs/flows/SandboxedFlow`                    | The sandboxed child-flow tier: it bundles a host module with esbuild through `node:url` paths and starts a guest runtime           |
 
+## What the browser host serves
+
+{/* generated:platform-browser-contract start */}
+
+The [`@smthrs/platform-browser`](/api/platform-browser) bundle is the only host
+whose services are adapters over injected backends rather than over the machine,
+so its divergences from `NodeHost` are part of the browser claim. Its
+`FileSystem` honours the options a caller can set: a recursive `readDirectory`
+is walked here because the promises slice has no recursive `readdir`, `access`
+answers `readable` and `writable` from the reported mode bits because a mounted
+volume has no user identity, `makeDirectory` forwards `mode`, and `realPath`
+canonicalizes rather than echoing its input, which matters because
+`@smthrs/kernel` resolves every guarded path through it before checking the
+grant. Operations the slice cannot serve at all, symlink creation and writable
+handles and watchers among them, fail with `NotFound` rather than pretending.
+
+Its `ChildProcessSpawner` runs one command at a time behind a permit held until
+the interpreter promise settles. Interruption, timeout, and `kill` abort the
+interpreter through just-bash's `AbortSignal` and are reported on the handle as
+a `PlatformError`, never as an interrupt replayed into the caller's fiber.
+
+{/* generated:platform-browser-contract end */}
+
 ## The rule this encodes
 
 A platform-neutral package root exports **contracts**; an implementation lives in its platform package, `@smthrs/platform-node`, `@smthrs/platform-bun`, or `@smthrs/platform-browser`, the way `effect` keeps `@effect/platform-node` out of `effect`. A neutral root that re-exports an implementation resolves that implementation's imports for every consumer, including browser ones, before any bundler can tree-shake it. Package barrel tests pin the namespaces each root exports, and the browser gate pins every browser-safe entry point in this table.

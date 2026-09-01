@@ -1,0 +1,217 @@
+#!/usr/bin/env node
+/** Projects package-owned browser platform documentation into the repository site. */
+import { readFileSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+import { Package } from "../Package.ts"
+
+const check = process.argv.includes("--check")
+const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
+const repoRoot = join(packageRoot, "..", "..")
+const read = (path) => readFileSync(path, "utf8")
+
+const ungutter = (block) => block.split("\n").map((line) => line.replace(/^\s*\* ?/, "")).join("\n")
+
+const description = (body) => {
+  const lines = []
+  for (const line of body.split("\n")) {
+    if (/^@\w+/.test(line)) break
+    lines.push(line)
+  }
+  return lines.join("\n").trim()
+}
+
+const delink = (value) => value.replace(/\{@link\s+([^}]+)\}/g, "`$1`")
+
+/**
+ * Prose reflowed one paragraph per line, with fenced code blocks kept
+ * verbatim: joining the lines of a `ts` example would produce a snippet that
+ * does not compile.
+ */
+const paragraphs = (value) => {
+  const blocks = []
+  let current = []
+  let fence = null
+  const flush = () => {
+    if (current.length > 0) blocks.push(current.join(" "))
+    current = []
+  }
+  for (const line of value.split("\n")) {
+    if (fence !== null) {
+      fence.push(line)
+      if (/^\s*```/.test(line)) {
+        blocks.push(fence.join("\n"))
+        fence = null
+      }
+      continue
+    }
+    if (/^\s*```/.test(line)) {
+      flush()
+      fence = [line]
+      continue
+    }
+    if (line.trim() === "") flush()
+    else current.push(line.trim())
+  }
+  if (fence !== null) throw new Error("platform-browser docs: unterminated code fence in module JSDoc")
+  flush()
+  return blocks.join("\n\n")
+}
+
+const firstSentence = (value) => {
+  const flat = delink(value).split("\n\n")[0].split("\n").join(" ")
+  return (/^[\s\S]*?\.(?=\s|$)/.exec(flat)?.[0] ?? flat).trim()
+}
+
+const moduleDoc = (source) => {
+  const match = /\/\*\*((?:[^*]|\*(?!\/))*)\*\//.exec(source)
+  if (match === null) throw new Error("platform-browser docs: no module JSDoc block")
+  return delink(description(ungutter(match[1])))
+}
+
+/** Every export in one source file that carries an `@category` tag. */
+const exportedDocs = (source) => {
+  const entries = []
+  const pattern = /\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*\nexport (type|const|class|interface) (\w+)/g
+  for (let match = pattern.exec(source); match !== null; match = pattern.exec(source)) {
+    const body = ungutter(match[1])
+    const category = /@category (\S+)/.exec(body)?.[1]
+    if (category === undefined) continue
+    entries.push({
+      name: match[3],
+      declaration: match[2],
+      category,
+      summary: firstSentence(description(body))
+    })
+  }
+  return entries
+}
+
+/**
+ * The barrel re-exports namespaces rather than flat symbols, so a namespace is
+ * either a single module or a directory whose own barrel re-exports the modules
+ * holding the documented declarations.
+ */
+const modulesOf = (relative) => {
+  const source = read(join(packageRoot, "src", relative))
+  if (!relative.endsWith("/index.ts")) return [{ path: relative, source }]
+  const directory = relative.slice(0, relative.lastIndexOf("/"))
+  return [...source.matchAll(/export \* from "\.\/([\w./]+\.ts)"/g)].map((match) => {
+    const path = `${directory}/${match[1]}`
+    return { path, source: read(join(packageRoot, "src", path)) }
+  })
+}
+
+const manifest = JSON.parse(read(join(packageRoot, "package.json")))
+if (manifest.name !== Package.name) {
+  throw new Error("platform-browser docs: Package.ts and package.json names differ")
+}
+
+const barrel = read(join(packageRoot, "src", "index.ts"))
+const namespaces = [
+  ...barrel.matchAll(
+    /\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*\nexport \* as (\w+) from "\.\/([\w./]+\.ts)"/g
+  )
+].map((match) => ({
+  name: match[2],
+  summary: firstSentence(description(ungutter(match[1]))),
+  entry: match[3]
+}))
+if (namespaces.length === 0) throw new Error("platform-browser docs: no documented namespaces found")
+
+const exports = namespaces.flatMap((namespace) =>
+  modulesOf(namespace.entry).flatMap((module) =>
+    exportedDocs(module.source).map((entry) => ({ ...entry, namespace: namespace.name }))
+  )
+)
+if (exports.length === 0) throw new Error("platform-browser docs: no documented exports found")
+
+const subpath = (entry) => (entry.endsWith("/index.ts") ? entry.slice(0, entry.lastIndexOf("/")) : entry.slice(0, -3))
+
+const modules = [
+  "| Import | Namespace | Summary |",
+  "| --- | --- | --- |",
+  ...namespaces.map((namespace) =>
+    `| \`${manifest.name}/${subpath(namespace.entry)}\` | \`${namespace.name}\` | ${namespace.summary} |`
+  )
+].join("\n")
+
+const table = [
+  "| Export | Kind | Summary |",
+  "| --- | --- | --- |",
+  ...exports.map((entry) =>
+    `| \`${entry.namespace}.${entry.name}\` (${entry.declaration}) | ${entry.category} | ${entry.summary} |`
+  )
+].join("\n")
+
+const apiPage = `---
+description: "${manifest.description}."
+---
+
+{/* Generated by \`node packages/platform-browser/scripts/docs.mjs\` from packages/platform-browser. Edit package sources, never this file. */}
+
+# @smthrs/platform-browser
+
+${paragraphs(moduleDoc(barrel))}
+
+## Modules
+
+${modules}
+
+${read(join(packageRoot, Package.api.source)).trim()}
+
+## Exports
+
+${table}
+`
+
+const regionStart = (name) => `{/* generated:${name} start */}`
+const regionEnd = (name) => `{/* generated:${name} end */}`
+const replaceRegion = (source, name, body) => {
+  const start = source.indexOf(regionStart(name))
+  const end = source.indexOf(regionEnd(name))
+  if (start < 0 || end < 0 || end < start) throw new Error(`platform-browser docs: region ${name} is missing`)
+  return `${source.slice(0, start)}${regionStart(name)}\n\n${body.trim()}\n\n${source.slice(end)}`
+}
+
+const outputs = new Map([[Package.api.target, apiPage]])
+for (const snippet of Package.snippets) {
+  const current = outputs.get(snippet.target) ?? read(join(repoRoot, snippet.target))
+  outputs.set(snippet.target, replaceRegion(current, snippet.region, read(join(packageRoot, snippet.source))))
+}
+
+const failures = []
+for (const path of Package.references) {
+  const content = read(join(repoRoot, path))
+  if (!content.includes(Package.name) || !content.includes("/api/platform-browser")) {
+    failures.push(`${path}: must reference ${Package.name} and /api/platform-browser`)
+  }
+}
+for (const [path, content] of outputs) {
+  if (content.includes("—")) failures.push(`${path}: generated content contains an em-dash`)
+}
+
+let drifted = false
+for (const [path, content] of outputs) {
+  const absolute = join(repoRoot, path)
+  if (read(absolute) === content) continue
+  drifted = true
+  if (check) failures.push(`${path}: drifted; run node packages/platform-browser/scripts/docs.mjs`)
+  else {
+    writeFileSync(absolute, content)
+    console.log(`wrote ${path}`)
+  }
+}
+
+if (failures.length > 0) {
+  for (const failure of failures) console.error(`✗ ${failure}`)
+  process.exit(1)
+}
+
+console.log(
+  check
+    ? "✓ the platform-browser package documentation is current"
+    : drifted
+    ? "✓ platform-browser package documentation regenerated"
+    : "✓ platform-browser package documentation already current"
+)

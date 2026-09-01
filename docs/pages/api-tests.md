@@ -48,10 +48,9 @@ These are the behaviors that have to be exercised against real implementations, 
 | ------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@smthrs/platform-node`         | 2      | the shared contract suite (`@smthrs/kernel/test/contract`) against the Node bundle, once with explicit expectations and once taking every default                                                                               |
 | `@smthrs/platform-bun`          | 1      | the same suite against the Bun bundle, which runs the Node fallback under vitest                                                                                                                                                |
-| `@smthrs/platform-browser`      | 5      | the same suite against `BrowserHost`, plus the ZenFS filesystem adapter and the just-bash spawner                                                                                                                               |
+| [`@smthrs/platform-browser`](/api/platform-browser) | 8 | the shared contract suite against `BrowserHost` three ways (the full wasm-backed bundle, manual redirects, one shared mount), the ZenFS filesystem adapter and its bounded streaming against a real directory, the just-bash spawner's rendering, refusals, handle capabilities, and abort boundary, the browser bundle gate, and the barrel with its kernel isolation attestation |
 | `@smthrs/jj`                    | 4      | the contract and its no-op, the jj CLI against a real repository, error classification against a scripted binary, and the Bun and browser layers                                                                                |
 | `@smthrs/sandbox`               | 23     | the barrel, spawner adaptation and kill, the scripted and real-process providers, both conformance suites, the health probe, supervision, the session contract, and nine machine providers, three of them against real backends |
-| `@smthrs/platform-browser`      | 4      | the filesystem adapter's operations and bounded streaming against a real directory, the spawner's command rendering, rejected inputs, handle capabilities, and its serialized uninterruptible boundary, and the aggregate layer |
 | `@smthrs/journal`               | 12     | durable and lossy admission, fencing, transactions, retention, redaction, projections, migrations                                                                                                                               |
 | `@smthrs/run-store`             | 9      | run and attempt stores, ownership arbitration, run metadata, migrations                                                                                                                                                         |
 | `@smthrs/step-cache`            | 6      | cache admission, eviction, provenance, migrations                                                                                                                                                                               |
@@ -90,6 +89,26 @@ input snapshots, malformed or mutable output, missing services, exact stable
 failures with preserved causes, diagnostic redaction, and irreversibility.
 
 {/* generated:crypto-testing end */}
+
+{/* generated:platform-browser-testing start */}
+
+The package-owned
+[`@smthrs/platform-browser` suite](/api/platform-browser) runs the shared host
+contract against `BrowserHost` three ways: the full bundle over the committed
+`flows_jj.wasm`, the manual-redirect `HttpClient`, and one real mount shared by
+the filesystem, the interpreter, and jj. Beside it, the filesystem adapter is
+exercised against a real temp directory for recursive listing, permission
+checks, directory modes, symlink and relative canonicalization, and bounded
+streaming with refused bounds, and against stub backends for every error tag,
+a looping directory tree, and a backend that misreports a read length. The
+spawner suite pins the rendered command line against the kernel's own renderer
+with hostile argv tokens, every refused capability, and the abort boundary:
+an interpreter that ignores its `AbortSignal` must not let a second run start,
+and a killed handle must report a `PlatformError` rather than interrupt its
+caller. The barrel suite pins the namespace universe and the kernel isolation
+attestation that `layer` makes and `make` does not.
+
+{/* generated:platform-browser-testing end */}
 
 {/* generated:plan-testing start */}
 
