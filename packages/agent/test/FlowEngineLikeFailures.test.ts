@@ -106,7 +106,7 @@ const basePlan = (planId: string) =>
     nodes: [{
       id: "root",
       material: {
-        version: "flows/key-material/v1" as const,
+        version: "flows/key-material/v2" as const,
         kind: "sealed" as const,
         body: { activity: "root" },
         inputs: [],

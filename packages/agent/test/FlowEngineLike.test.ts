@@ -93,7 +93,7 @@ const step = (
 ): EngineLike.SealedModelStep => ({
   request: request(text),
   keyMaterial: {
-    version: "flows/key-material/v1",
+    version: "flows/key-material/v2",
     kind: "sealed",
     body: { _tag: "ModelCall", request: request(text) },
     inputs: [{

@@ -876,7 +876,7 @@ const keyMaterialFrom = (
   contextWindow: ContextWindow.ContextWindow,
   request: ModelRequest.ModelRequest
 ): KeyMaterial.KeyMaterial => ({
-  version: "flows/key-material/v1",
+  version: "flows/key-material/v2",
   kind: "sealed",
   body: { _tag: "ModelCall", request },
   inputs: [{ _tag: "Literal", value: { contextDigest: contextWindow.digest } }],

@@ -226,7 +226,7 @@ export const callMaterial = (
   call: Cell.Call,
   layers: ReadonlyArray<string> = []
 ): KeyMaterial.KeyMaterial => ({
-  version: "flows/key-material/v1",
+  version: "flows/key-material/v2",
   kind: call.effects.tier,
   body: {
     _tag: "CellCall",
@@ -267,7 +267,7 @@ const childMaterial = (
   child: Plan.Child,
   scope: { readonly layers: ReadonlyArray<string>; readonly run: string }
 ): KeyMaterial.KeyMaterial => ({
-  version: "flows/key-material/v1",
+  version: "flows/key-material/v2",
   kind: child.effects.tier,
   body: {
     _tag: "FlowChild",

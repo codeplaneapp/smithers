@@ -29,7 +29,7 @@ const child = (
   })
 
 const material = (id: string) => ({
-  version: "flows/key-material/v1" as const,
+  version: "flows/key-material/v2" as const,
   kind: "sealed" as const,
   body: { activity: id },
   inputs: [],
@@ -73,7 +73,7 @@ describe("appendBatch", () => {
       Effect.runPromise
     )
 
-    expect(appended.material.version).toBe("flows/key-material/v1")
+    expect(appended.material.version).toBe("flows/key-material/v2")
     expect(appended.material.body).toMatchObject({ _tag: "FlowChild", flowName: "fs/write" })
     expect(appended.key).toBe(expected)
   })

@@ -37,7 +37,7 @@ describe("ControlSchema", () => {
           key: storedKey("key1_11b2e91c473a67599d8110873b2a08150496946e0c0da82bfc56ffbe28df02f6"),
           kind: "agent",
           material: {
-            version: "flows/key-material/v1",
+            version: "flows/key-material/v2",
             kind: "sealed",
             body: { activity: "read-pr" },
             inputs: [],
@@ -58,7 +58,7 @@ describe("ControlSchema", () => {
           key: storedKey("key1_145095f202f310b317aa8ff75dd2244751fb12e723816e3d399d351a83be5693"),
           kind: "agent",
           material: {
-            version: "flows/key-material/v1",
+            version: "flows/key-material/v2",
             kind: "sealed",
             body: { activity: "propose-patch" },
             inputs: [],
