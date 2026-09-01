@@ -22,6 +22,12 @@ import * as Stream from "effect/Stream"
  * so a caller may retain and sort what it receives without disturbing another
  * reader.
  *
+ * `list` names each run AT MOST ONCE. Every implementation here deduplicates,
+ * and `SyncServer` deduplicates again at the seam rather than trusting a
+ * host's catalog, because both fan-out paths key a run's served position by
+ * run id: a run named twice is read twice from the same position and its
+ * entries are served twice.
+ *
  * The catalog is supplied by the host rather than derived from the journal:
  * `@smthrs/journal` has no workspace-wide list or watch contract, and
  * `@smthrs/engine-store` owns the durable run set that {@link makePolling}

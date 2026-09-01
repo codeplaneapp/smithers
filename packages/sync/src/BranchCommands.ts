@@ -219,16 +219,17 @@ const makeWith = (
         })
 
       /**
-       * Replays the branch journal forward from the last replayed sequence into
-       * the ledger. Used once on first touch, so a process that restarts
-       * mid-collaboration still recognises every command it already admitted,
-       * and again after an admission conflict, to read the command another
-       * writer admitted after this process last looked.
+       * Pages a branch's journal forward from `from`, handing each entry to
+       * `visit` along with the command identity it carries, if any.
        */
-      const replay = (branchId: BranchId): Effect.Effect<void, SyncError> =>
+      const walk = (
+        branchId: BranchId,
+        from: JournalEvent.Seq | undefined,
+        visit: (entry: JournalEvent.Entry, commandId: CommandId | undefined) => void
+      ): Effect.Effect<void, SyncError> =>
         Effect.gen(function*() {
           const runId = branchRunId(branchId)
-          let after = cursors.get(branchId)
+          let after = from
           let hasMore = true
           while (hasMore) {
             const page = yield* journal.entries({
@@ -238,20 +239,10 @@ const makeWith = (
             }).pipe(Effect.mapError(journalFailure))
             for (const entry of page.entries) {
               after = entry.seq
-              cursors.set(branchId, entry.seq)
               const submission = entry.eventType === CommandEvent
                 ? Schema.decodeUnknownOption(CommandIdentity)(entry.payload)
                 : Option.none()
-              if (Option.isSome(submission)) {
-                record(
-                  new CommandReceipt({
-                    branchId,
-                    commandId: submission.value.commandId,
-                    status: "admitted",
-                    seq: entry.seq
-                  })
-                )
-              }
+              visit(entry, Option.isSome(submission) ? submission.value.commandId : undefined)
             }
             // An empty page ends the walk whatever the page claims, the same
             // guard `SyncServer.tail` carries: `after` cannot move, so the
@@ -260,6 +251,43 @@ const makeWith = (
             if (page.entries.length === 0) return
             hasMore = page.hasMore
           }
+        })
+
+      /**
+       * Replays the branch journal forward from the last replayed sequence into
+       * the ledger. Used once on first touch, so a process that restarts
+       * mid-collaboration still recognises every command it already admitted,
+       * and again after an admission conflict, to read the command another
+       * writer admitted after this process last looked.
+       */
+      const replay = (branchId: BranchId): Effect.Effect<void, SyncError> =>
+        walk(branchId, cursors.get(branchId), (entry, commandId) => {
+          cursors.set(branchId, entry.seq)
+          if (commandId === undefined) return
+          record(new CommandReceipt({ branchId, commandId, status: "admitted", seq: entry.seq }))
+        })
+
+      /**
+       * The sequence one command was admitted at, read from the branch's whole
+       * durable history rather than from the ledger.
+       *
+       * The ledger is BOUNDED, so the receipt for a command admitted far
+       * enough back has been evicted, and a forward replay from the ledger's
+       * own cursor can never bring it back — the entry is below that cursor.
+       * The durable log still holds it, and this is the read that says so.
+       * Neither the cursor nor the ledger moves: this answers one question
+       * about history and leaves the fast path exactly as it found it.
+       */
+      const admittedSeq = (
+        branchId: BranchId,
+        commandId: CommandId
+      ): Effect.Effect<JournalEvent.Seq | undefined, SyncError> =>
+        Effect.gen(function*() {
+          let found: JournalEvent.Seq | undefined
+          yield* walk(branchId, undefined, (entry, admitted) => {
+            if (admitted === commandId) found = entry.seq
+          })
+          return found
         })
 
       const hydrate = (branchId: BranchId): Effect.Effect<void, SyncError> =>
@@ -277,6 +305,13 @@ const makeWith = (
        * replaying the branch forward must surface it; a replay that does not is
        * a journal whose conflict report and entries disagree, and that failure
        * is reported honestly instead of being masked as a duplicate.
+       *
+       * Two reads, because the ledger is bounded and the answer must not be.
+       * The forward replay picks up an admission another writer landed after
+       * this process last looked. A command this process admitted itself and
+       * has since evicted is BELOW that cursor, so only a read of the whole
+       * history finds it — and without one, bounding the ledger turned an
+       * ordinary duplicate into a report that the journal contradicts itself.
        */
       const lostRace = (
         submission: CommandSubmission,
@@ -285,8 +320,23 @@ const makeWith = (
         Effect.gen(function*() {
           yield* replay(submission.branchId)
           const known = receiptOf(submission.branchId, submission.commandId)
-          if (known === undefined) return yield* Effect.fail(journalFailure(cause))
-          return duplicateOf(known)
+          if (known !== undefined) return duplicateOf(known)
+          // A branch still under the ledger's capacity has never evicted
+          // anything, and `replay` has just read this branch to its tail, so a
+          // command missing from the ledger is missing from the journal too.
+          // Reading the whole history to confirm that would let one small
+          // request cost one full log scan.
+          const mayHaveEvicted = (ledger.get(submission.branchId)?.size ?? 0) >= ledgerCapacity
+          const seq = mayHaveEvicted
+            ? yield* admittedSeq(submission.branchId, submission.commandId)
+            : undefined
+          if (seq === undefined) return yield* Effect.fail(journalFailure(cause))
+          return new CommandReceipt({
+            branchId: submission.branchId,
+            commandId: submission.commandId,
+            status: "duplicate",
+            seq
+          })
         })
 
       const admit = (request: SubmitRequest): Effect.Effect<CommandReceipt, SyncError> =>

@@ -112,6 +112,41 @@ describe("BranchCommands identity and bounds", () => {
       expect(evicted.seq).toBe(first.seq)
     }))
 
+  // The same eviction, reached by the OTHER door. A resubmitted command whose
+  // content differs is refused by the journal's producer identity rather than
+  // deduplicated by it, and the conflict path answers out of the ledger — so
+  // an evicted receipt turned a duplicate into a report that the journal
+  // contradicts itself. The ledger is a fast path; losing an entry must not
+  // change the answer.
+  it.effect("still reports a duplicate when the evicted command is resubmitted with different content", () =>
+    Effect.gen(function*() {
+      const [first, conflicting] = yield* durable(
+        Effect.gen(function*() {
+          const commands = yield* BranchCommands.makeLiveWith({ ledgerCapacity: 2 })
+          const capability = yield* capabilityFor(branchId)
+          const submit = (id: string, args: string) =>
+            commands.submit({
+              capability,
+              submission: BranchCommands.submission({
+                branchId,
+                commandId: commandId(id),
+                participantId: alice,
+                name: BranchProtocol.SayCommand,
+                args
+              })
+            })
+          const original = yield* submit("c1", "original")
+          yield* submit("c2", "")
+          yield* submit("c3", "")
+          return [original, yield* submit("c1", "rewritten")] as const
+        })
+      )
+
+      expect(first.status).toBe("admitted")
+      expect(conflicting.status).toBe("duplicate")
+      expect(conflicting.seq).toBe(first.seq)
+    }))
+
   it.effect("refuses a ledger policy that is not a positive safe integer", () =>
     Effect.gen(function*() {
       const refusals = yield* durable(

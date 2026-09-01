@@ -291,7 +291,17 @@ const makeWith = (
       return Effect.void
     }
 
-    const covered = Effect.map(catalog.list, (ids) => [...ids].sort())
+    /**
+     * The catalog's run set: deduplicated, then ordered.
+     *
+     * `RunCatalog` is a host seam whose `list` is typed `ReadonlyArray<RunId>`,
+     * and an array is not a set. Both fan-out paths key a run's served
+     * position by run id, so a run named twice is read twice from the same
+     * position and its entries are served twice — inside one read page, and as
+     * two concurrent tails emitting identical frames. This is the one place
+     * that can rule it out for every path below, so it does.
+     */
+    const covered = Effect.map(catalog.list, (ids) => Array.from(new Set(ids)).sort())
 
     /** Whether the current request is authenticated as the workspace. */
     const workspacePrincipal: Effect.Effect<boolean> = Effect.map(
@@ -532,17 +542,24 @@ const makeWith = (
       request: SyncProtocol.SubscribeRequest
     ): Stream.Stream<SyncProtocol.Frame, SyncError> =>
       Stream.unwrap(Effect.gen(function*() {
-        // The runs this subscription serves, and how far each has been served.
-        // The set moves in both directions while the subscription is live, and
-        // `reconcile` is what moves it: the catalog's own list is the
-        // authority, and `catalog.changes` is only a low-latency wake.
+        // How far each run this subscription has ever covered was served.
+        // A run the catalog stops naming keeps its position here and simply
+        // stops being read: dropping the position instead would re-serve the
+        // run's history from the request's own cursor if the catalog ever
+        // named it again, which is the one thing this stream promises not to
+        // do. The map is bounded by the runs one subscription sees, which is
+        // what it has always been.
         const served = new Map<JournalEvent.RunId, JournalEvent.Seq | undefined>()
         // Runs the catalog names that this request may not read. Remembered so
         // one refusal costs one signature check for the life of the
         // subscription rather than one per round per run.
         const excluded = new Set<JournalEvent.RunId>()
-        // Every caller establishes that the run is not served yet: `covering`
-        // is a deduplicated list, and `reconcile` skips what it already holds.
+        // The runs the NEXT round reads: the catalog's current list, minus
+        // what this request may not read. `reconcile` is what moves it.
+        let visible: ReadonlyArray<JournalEvent.RunId> = covering
+        // Every caller establishes that the run has no position yet:
+        // `covering` is a deduplicated list, and `reconcile` skips what it
+        // already holds.
         const cover = (runId: JournalEvent.RunId): void => {
           served.set(runId, cursorOf(request.cursors, runId))
         }
@@ -554,7 +571,7 @@ const makeWith = (
         const woken = yield* PubSub.subscribe(wake)
 
         /**
-         * Re-reads the catalog and makes `served` agree with it.
+         * Re-reads the catalog and decides what the next round covers.
          *
          * Trusting the announcement feed alone broke in both directions.
          * A run created between `runIdsFor`'s list and the moment
@@ -569,20 +586,29 @@ const makeWith = (
          * re-lists.
          */
         const reconcile = Effect.gen(function*() {
-          const visible = new Set(yield* catalog.list)
-          for (const runId of served.keys()) {
-            if (!visible.has(runId)) served.delete(runId)
-          }
+          // Deduplicated at the seam: a host catalog that names a run twice
+          // would otherwise put two tails of it in one round, both reading
+          // the same served position and emitting the same frames.
+          const present = new Set(yield* catalog.list)
           for (const runId of excluded) {
-            if (!visible.has(runId)) excluded.delete(runId)
+            if (!present.has(runId)) excluded.delete(runId)
           }
-          for (const runId of visible) {
-            if (served.has(runId) || excluded.has(runId)) continue
-            // An `unauthorized` run is skipped; a signer fault propagates, so
-            // "the signer is broken" is never reported as "not authorized".
-            if (yield* canFollow(runId, request.capability)) cover(runId)
-            else excluded.add(runId)
+          const next: Array<JournalEvent.RunId> = []
+          for (const runId of present) {
+            if (excluded.has(runId)) continue
+            if (!served.has(runId)) {
+              // An `unauthorized` run is skipped; a signer fault propagates,
+              // so "the signer is broken" is never reported as "not
+              // authorized".
+              if (!(yield* canFollow(runId, request.capability))) {
+                excluded.add(runId)
+                continue
+              }
+              cover(runId)
+            }
+            next.push(runId)
           }
+          visible = next
         })
 
         /**
@@ -633,7 +659,7 @@ const makeWith = (
          */
         const round = Stream.unwrap(Effect.map(
           reconcile,
-          () => Stream.flatMap(Stream.fromIterable(Array.from(served.keys())), tail, { concurrency })
+          () => Stream.flatMap(Stream.fromIterable(visible), tail, { concurrency })
         ))
 
         // An announcement is a WAKE and nothing else: the round that follows

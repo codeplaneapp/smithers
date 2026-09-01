@@ -22,6 +22,10 @@
 - Added request limits `SyncProtocol.maxReadLimit` and `maxSubscribeCredit`,
   the branch ledger bound `BranchCommands.defaultLedgerCapacity`, and the
   roster bound `BranchPresence.defaultMaxParticipants`.
+- Added golden wire vectors: the encoded form of every frame variant, a read
+  response, a command receipt, the capability header, and both authorities'
+  signatures are frozen as literals, so a renamed field or a changed signing
+  encoding fails a test rather than a deployed follower.
 
 ### Changed
 
@@ -56,11 +60,19 @@
   without an announcement and a run it stops naming is no longer queried.
 - A workspace tail reads one bounded page per run per round, so a permanently
   busy run wakes the next round instead of holding its fan-out slot.
+- The server deduplicates `RunCatalog.list` at the seam. A host catalog that
+  named one run twice had it read twice from the same served position, so a
+  read page carried its entries twice and a subscription opened two concurrent
+  tails of it emitting identical frames.
 - `BranchCommands` keys its ledger and permit per branch, and `BranchPresence`
   keys its roster per branch, so ids sharing a delimiter no longer collide and
   one branch's replay no longer stalls another's writes.
 - `BranchCommands.replay` ends its walk on an empty page, matching the guard
   the workspace tail already carried.
+- An admission conflict on a command whose receipt the bounded ledger has
+  already evicted reads the branch's durable history for it, so it is reported
+  as the duplicate it is instead of as a journal contradicting its own conflict
+  report.
 - `Branch.MintShare` refuses a parent capability that expired mid-request
   rather than minting a link that can never authorize.
 - `BranchShare` and `WorkspaceShare` verify from a snapshot taken at entry, so
