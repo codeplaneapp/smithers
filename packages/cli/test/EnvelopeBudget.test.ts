@@ -88,7 +88,9 @@ const verdictAfterSpending = (envelope: Parameters<typeof Budget.layerFromEnvelo
     Effect.gen(function*() {
       const budget = yield* Budget.current
       yield* budget.record("review/model-call-1", { totalTokens: tokens })
-      return yield* budget.check
+      // `check` takes the step key that keys per-step counting; this helper
+      // asks the envelope-wide question, which is what `undefined` means.
+      return yield* budget.check(undefined)
     }).pipe(
       Effect.provide(Budget.layerFromEnvelope(envelope)),
       Effect.scoped,
