@@ -6,7 +6,11 @@ description: "RFC 8785 canonical JSON as an Effect Schema."
 
 # @smthrs/canonical
 
-RFC 8785 canonical JSON, the serialization every digest in `@smthrs/flows` is taken over.
+RFC 8785 canonical JSON, the serialization every digest in `@smthrs/flows` uses.
+
+`canonicalize` matches `JSON.stringify` for JSON data, `toJSON(key)`, boxed primitives, sparse arrays, getters, and proxies, while sorting object keys by UTF-16 code units. It rejects digest-unsafe non-plain built-ins. Its stable failures are `canonical_nan`, `canonical_non_finite`, `canonical_lone_surrogate`, `canonical_circular`, `canonical_unsupported_value`, `canonical_bigint`, `canonical_depth_exceeded`, `canonical_tojson_threw`, and `canonical_getter_threw`; every `CanonicalError` includes the offending JSON-style path. The supported nesting bound is 10,000 levels below `$`.
+
+Output changes are digest changes. Never alter this serialization contract without auditing every consumer that persists a digest.
 
 ```ts
 import { Canonical } from "@smthrs/canonical"
