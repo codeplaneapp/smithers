@@ -582,6 +582,36 @@ describe("requestCancel refuses a run that already settled (B-02)", () => {
       Effect.scoped
     ))
 
+  it.effect("reports NotFound when the run is deleted during the retry window", () =>
+    Effect.gen(function*() {
+      const store = yield* RunStore.RunStore
+      yield* store.create("run", "{}")
+      expect(yield* store.requestCancel("run", 500)).toEqual({ _tag: "CancelRequested", requestedAtMs: 500 })
+      expect(yield* store.requestCancel("run", 900)).toEqual({ _tag: "NotFound" })
+    }).pipe(
+      Effect.provide(
+        Layer.provideMerge(
+          RunStore.layer,
+          Layer.provideMerge(
+            interleaving(
+              "SET cancel_requested_at_ms",
+              3,
+              (base) => base`DELETE FROM flows_runs WHERE run_id = 'run'`
+            ),
+            Layer.provideMerge(
+              interleaving(
+                "SELECT cancel_requested_at_ms",
+                1,
+                (base) => base`UPDATE flows_runs SET cancel_requested_at_ms = NULL WHERE run_id = 'run'`
+              ),
+              Layer.provideMerge(Migrations.layer, TestDatabase.layer)
+            )
+          )
+        )
+      ),
+      Effect.scoped
+    ))
+
   effect("a pending, running, or suspended run still records the request", () =>
     Effect.gen(function*() {
       const store = yield* RunStore.RunStore

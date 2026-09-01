@@ -216,6 +216,20 @@ describe("sameHostPidProbe", () => {
       }
     }))
 
+  it.effect("fails closed without signaling an invalid or synthetic pid", () =>
+    Effect.gen(function*() {
+      const kill = vi.spyOn(process, "kill").mockImplementation((() => true) as typeof process.kill)
+      try {
+        for (const pid of [0, -1, 1.5, Number.NaN]) {
+          const invalid = { hostId: "probe-host", pid, nonce: "invalid" } as OwnerId
+          expect(yield* sameHostPidProbe(invalid, { claimant, heartbeatAtMs: 0, nowMs: 1 })).toBe(true)
+        }
+        expect(kill).not.toHaveBeenCalled()
+      } finally {
+        kill.mockRestore()
+      }
+    }))
+
   it.effect("reports a live pid on the claimant's own host as alive", () =>
     Effect.gen(function*() {
       expect(yield* sameHostPidProbe(self, { claimant, heartbeatAtMs: 0, nowMs: 1 })).toBe(true)

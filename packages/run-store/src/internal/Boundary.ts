@@ -129,6 +129,7 @@ export const admitJson = (input: unknown, limits: JsonLimits): JsonResult => {
     try {
       if (Array.isArray(object)) {
         const length = Object.getOwnPropertyDescriptor(object, "length")
+        /* v8 ignore next 3 -- Array length is a mandatory own non-accessor uint32 by the ECMAScript invariant. */
         if (length === undefined || !("value" in length) || !Number.isSafeInteger(length.value)) {
           return refuse("has an invalid array length")
         }

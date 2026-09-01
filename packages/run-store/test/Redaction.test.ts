@@ -2,7 +2,7 @@
  * Executable state must survive the durable round trip verbatim: journal
  * payloads are redacted, but the stores that hold resumable state are not.
  * Split out of `@smthrs/journal`'s redaction suite when the stores moved into
- * their own packages — see `docs/specs/Concepts/Journal Split.md`.
+ * their own packages; see `docs/pages/concepts/journal.md`.
  */
 import { describe, expect, it } from "@effect/vitest"
 import { DurableWriter } from "@smthrs/database/DurableWriter"

@@ -1,7 +1,7 @@
 /**
  * Trampoline lineage columns on `flows_runs`.
  *
- * Governing design: `docs/specs/Concepts/Trampoline Loops.md`. A round is its
+ * Governing design: `docs/pages/concepts/subflows.md`. A round is its
  * own run row, chained to the previous round through the `parent_run_id`
  * column this table already reserved for continue-as-new, and these two
  * columns are what make the chain readable as a lineage rather than as an

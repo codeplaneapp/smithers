@@ -4,8 +4,8 @@
  * Attempt metadata is deliberately opaque to this module. Its shape belongs to
  * the step executor, and is persisted unchanged across attempt state changes.
  *
- * Governing design: `docs/specs/Concepts/Run Ownership.md`.
- * Schema boundary: `docs/specs/Research/Smithers Deviations 2026-07-28.md`.
+ * Governing design: `docs/pages/concepts/concurrency.md`.
+ * Schema boundary: `docs/pages/concepts/durable-execution-model.md`.
  *
  * The running-state and owner fences follow Flue's
  * `reserveSubmissionSettlement`/store contract: stale attempts and repeated
@@ -359,7 +359,7 @@ export interface Service {
  * The identity string equals the defining module path, like every other
  * service identity in this repository. The pre-split
  * `flows/journal/AttemptStore` identity from
- * `docs/specs/Concepts/Journal Split.md` was retired pre-release, while no
+ * `docs/pages/concepts/journal.md` was retired pre-release, while no
  * persisted journal or step-key digest named it.
  *
  * @category services
@@ -390,8 +390,8 @@ interface RunFenceRow {
   readonly owner_nonce: string | null
 }
 
-const error = (code: AttemptStoreErrorCode, message: string, cause?: unknown): AttemptStoreError =>
-  new AttemptStoreError({ code, message, ...(cause === undefined ? {} : { cause }) })
+const error = (code: AttemptStoreErrorCode, message: string): AttemptStoreError =>
+  new AttemptStoreError({ code, message })
 
 const encode = (
   value: unknown,
@@ -415,12 +415,9 @@ const defaultMaxCheckpointBytes = 1024 * 1024
 
 const defaultInProgressStates: ReadonlyArray<string> = ["running"]
 
-const encodeCheckpointWith = (
-  maxBytes: number,
-  _encodeOptional: (value: unknown | undefined, field: string) => Effect.Effect<string | null, AttemptStoreError>
-) =>
-(value: unknown | undefined): Effect.Effect<string | null, AttemptStoreError> =>
-  value === undefined ? Effect.succeed(null) : encode(value, "checkpoint", maxBytes)
+const encodeCheckpointWith =
+  (maxBytes: number) => (value: unknown | undefined): Effect.Effect<string | null, AttemptStoreError> =>
+    value === undefined ? Effect.succeed(null) : encode(value, "checkpoint", maxBytes)
 
 const decode = (
   value: string | null,
@@ -440,13 +437,8 @@ const decodeRequired = (
   field: string,
   maxBytes = maximumValueBytes
 ): Effect.Effect<JsonValue, AttemptStoreError> =>
-  decode(value, field, maxBytes).pipe(
-    Effect.flatMap((decoded) =>
-      decoded === undefined
-        ? Effect.fail(error("decode_failed", `${field} is missing`))
-        : Effect.succeed(decoded)
-    )
-  )
+  // A non-null SQL column cannot take `decode`'s missing-value branch.
+  decode(value, field, maxBytes) as Effect.Effect<JsonValue, AttemptStoreError>
 
 const validateId = (id: AttemptId): Effect.Effect<void, AttemptStoreError> =>
   Boundary.isDurableText(id.runId) &&
@@ -756,7 +748,7 @@ export const makeWith = (
     const maxCheckpointBytes = configured.maxCheckpointBytes
     const upsert = configured.putMode === "upsert"
     const encodeOptional = encodeOptionalWith(encode)
-    const encodeCheckpoint = encodeCheckpointWith(maxCheckpointBytes, encodeOptional)
+    const encodeCheckpoint = encodeCheckpointWith(maxCheckpointBytes)
     const inProgress = sql.in("state", [...inProgressStates])
 
     const put: Service["put"] = Effect.fn("AttemptStore.put")((input, owner) =>

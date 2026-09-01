@@ -8,7 +8,7 @@
  * `heartbeatStaleAfterMs = 30_000`, and the equality between the two was held
  * only by a steal test asserting a derived timestamp. Here it is structural.
  *
- * Governing design: `docs/specs/Concepts/Run Ownership.md`.
+ * Governing design: `docs/pages/concepts/concurrency.md`.
  *
  * @since 0.1.0
  */

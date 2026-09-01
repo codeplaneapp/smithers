@@ -30,7 +30,7 @@ describe("run-store inert JSON boundary", () => {
   })
 
   it("accounts for every scalar encoding and bound", () => {
-    for (const value of [null, true, false, 0, -1.5, "ascii", "\"\\\u0001é\u{1f600}"]) {
+    for (const value of [null, true, false, 0, -1.5, "ascii", "\"\\\u0001é中\u{1f600}"]) {
       expect(Boundary.admitJson(value, limits()).ok).toBe(true)
     }
     expect(complaint(Number.NaN)).toMatch(/non-finite/)
@@ -67,6 +67,14 @@ describe("run-store inert JSON boundary", () => {
     const extra = [1] as Array<unknown> & { extra?: number }
     extra.extra = 2
     expect(complaint(extra)).toMatch(/non-index/)
+    const virtualIndex = new Proxy([1], {
+      ownKeys: (target) => [...Reflect.ownKeys(target), "2"],
+      getOwnPropertyDescriptor: (target, key) =>
+        key === "2"
+          ? { configurable: true, enumerable: true, value: 2, writable: true }
+          : Reflect.getOwnPropertyDescriptor(target, key)
+    })
+    expect(complaint(virtualIndex)).toMatch(/non-index/)
     const hidden = [1]
     Object.defineProperty(hidden, "hidden", { value: 2, enumerable: false })
     expect(Boundary.admitJson(hidden, limits()).ok).toBe(true)
@@ -99,7 +107,11 @@ describe("run-store inert JSON boundary", () => {
       getOwnPropertyDescriptor: () => undefined
     })
     expect(Boundary.admitJson(disappearing, limits())).toMatchObject({ ok: true, value: {} })
-    const hostile = new Proxy({}, { ownKeys: () => { throw new Error("hostile") } })
+    const hostile = new Proxy({}, {
+      ownKeys: () => {
+        throw new Error("hostile")
+      }
+    })
     expect(complaint(hostile)).toMatch(/without executing/)
   })
 

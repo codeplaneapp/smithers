@@ -1,7 +1,7 @@
 /**
  * Deterministic bundle of the production run and attempt services.
  *
- * Governing design: `docs/specs/Concepts/Run Ownership.md`.
+ * Governing design: `docs/pages/concepts/concurrency.md`.
  *
  * @since 0.1.0
  */

@@ -1,22 +1,19 @@
 /**
  * Fenced run persistence and ownership compare-and-swap operations.
  *
- * Governing design: `docs/specs/Concepts/Run Ownership.md`.
- * Schema boundary: `docs/specs/Research/Smithers Deviations 2026-07-28.md`.
+ * Governing design: `docs/pages/concepts/concurrency.md`.
+ * Schema boundary: `docs/pages/concepts/durable-execution-model.md`.
  *
  * The two-phase snapshot/claim/activation CAS and heartbeat fence are adapted
  * from smithers `packages/db` and `packages/engine`.
  *
- * Operations that accept or verify `LivenessEvidence` (`claim`,
- * `claimAndOwn`, `steal`, `heartbeat`, `requestCancel`, and `recoverClaim`)
- * take the caller's `nowMs` and judge it literally, including the lease cutoff
- * and exact `evidence.checkedAtMs === nowMs` freshness rule. Lifecycle stamps
- * use the Effect `Clock`: `create` writes `created_at_ms`, `activate` writes
- * `heartbeat_at_ms` and `started_at_ms`, and `transitionOwned` writes
- * `finished_at_ms`. A row can therefore carry readings from two clocks. A
- * composition must give both sources the same reading; the store trusts the
- * caller's clock completely, which is appropriate for an in-process library
- * over local SQLite and must not cross a trust boundary.
+ * Caller `nowMs` values are validated and bind one `LivenessEvidence`
+ * observation through exact `evidence.checkedAtMs === nowMs` equality. They
+ * never decide lease expiry or stamp ownership state. Claim, activation,
+ * recovery, heartbeat, transition, and steal use the injected Effect `Clock`
+ * for both comparisons and persisted timestamps, so a caller cannot expire or
+ * pin a lease. `requestCancel` is the deliberate exception: its timestamp is
+ * the request's domain data, not ownership authority.
  *
  * @since 0.1.0
  */
@@ -211,7 +208,7 @@ export interface RunRow extends RunSnapshot {
   readonly cancelRequestedAtMs: number | null
   /**
    * The trampoline lineage this run is a round of, and which round it is
-   * (`docs/specs/Concepts/Trampoline Loops.md`). `null` on every run that is
+   * (`docs/pages/concepts/subflows.md`). `null` on every run that is
    * not part of a lineage, which reads as round 0 of a lineage of one.
    *
    * Optional on the interface so a caller that builds a `RunRow` by hand —
@@ -232,7 +229,7 @@ export interface RunRow extends RunSnapshot {
  * because ancestry is walked in SQL.
  *
  * `lineageId` and `roundOrdinal` are the trampoline pair
- * (`docs/specs/Concepts/Trampoline Loops.md`): which lineage a run is a round
+ * (`docs/pages/concepts/subflows.md`): which lineage a run is a round
  * of, and which round. Both absent — the ordinary case — means the run is a
  * lineage of one, and is read back as round 0 of itself.
  *
@@ -461,7 +458,7 @@ export interface Service {
  *
  * The identity string equals the defining module path, like every other
  * service identity in this repository. The pre-split `flows/journal/RunStore`
- * identity from `docs/specs/Concepts/Journal Split.md` was retired pre-release,
+ * identity from `docs/pages/concepts/journal.md` was retired pre-release,
  * while no persisted journal or step-key digest named it.
  *
  * @since 0.1.0
@@ -670,16 +667,16 @@ const snapshotTimestamp = (
 const snapshotState = (
   method: string,
   input: unknown,
-  cause?: unknown
+  cause: unknown
 ): Effect.Effect<string, RunStoreError> => {
   const admitted = stateAdmission(input)
-  return admitted.ok && !loneSurrogate.test(admitted.value)
+  return admitted.ok
     ? Effect.succeed(admitted.value)
     : Effect.fail(
       invalidRunError(
         method,
-        cause ?? "stateJson",
-        admitted.ok ? "contains an unpaired UTF-16 surrogate" : admitted.complaint
+        cause,
+        admitted.complaint
       )
     )
 }
@@ -734,7 +731,11 @@ const snapshotExpected = (
       return yield* Effect.fail(invalidRunError(method, "expected", "contains an invalid status or heartbeat"))
     }
     const owner = rawOwner === null ? null : yield* snapshotOwner(method, "expected.owner", rawOwner)
-    if ((status === "running") !== (owner !== null && heartbeatAtMs !== null)) {
+    if (
+      status === "running"
+        ? owner === null || heartbeatAtMs === null
+        : owner !== null || heartbeatAtMs !== null
+    ) {
       return yield* Effect.fail(invalidRunError(method, "expected", "violates ownership invariants"))
     }
     return Object.freeze({ status, owner, heartbeatAtMs })
@@ -781,8 +782,9 @@ const ownerFromColumns = (
 ): OwnerId | null | undefined => {
   if (hostId === null && pid === null && nonce === null) return null
   if (hostId !== null && pid !== null && nonce !== null) {
-    const owner = Object.freeze({ hostId, pid, nonce })
-    return validOwner(owner) ? owner : undefined
+    // DatabaseRunRow already admitted all three columns through the stricter
+    // durable identifier and safe-integer schemas.
+    return Object.freeze({ hostId, pid, nonce })
   }
   return undefined
 }
@@ -894,14 +896,14 @@ const selectRun = (sql: SqlClient.SqlClient, runId: string) =>
 
 const classifyClaimLoss = (
   row: DatabaseRunRow | undefined,
-  nowMs: number
+  observedAtMs: number
 ): ClaimLossOutcome => {
   if (row === undefined) return notFound
   if (row.claimHostId !== null) return alreadyClaimed
   if (
     row.status === "running" &&
     row.heartbeatAtMs !== null &&
-    row.heartbeatAtMs >= nowMs - heartbeatStaleAfterMs
+    row.heartbeatAtMs >= observedAtMs - heartbeatStaleAfterMs
   ) {
     return heartbeatFresh
   }
@@ -911,20 +913,20 @@ const classifyClaimLoss = (
 const evidenceMatches = (
   expected: RunSnapshot,
   claimant: OwnerId,
-  nowMs: number,
+  checkedAtMs: number,
   evidence: LivenessEvidence
 ): boolean =>
   expected.status === "running" &&
   expected.owner !== null &&
-  evidenceMatchesOwner(expected.owner, claimant, nowMs, evidence)
+  evidenceMatchesOwner(expected.owner, claimant, checkedAtMs, evidence)
 
 const evidenceMatchesOwner = (
   expectedOwner: OwnerId,
   observer: OwnerId,
-  nowMs: number,
+  checkedAtMs: number,
   evidence: LivenessEvidence
 ): boolean => {
-  if (!sameOwner(expectedOwner, evidence.expectedOwner) || evidence.checkedAtMs !== nowMs) return false
+  if (!sameOwner(expectedOwner, evidence.expectedOwner) || evidence.checkedAtMs !== checkedAtMs) return false
   switch (evidence.kind) {
     // A pid means nothing outside the host that owns the process namespace.
     case "same-host-pid-dead":
@@ -933,11 +935,9 @@ const evidenceMatchesOwner = (
     // would be an unprobed guess dressed as evidence.
     case "cross-host-unreachable-stale":
       return expectedOwner.hostId !== observer.hostId
-    // The lease is host-neutral, and the claim it makes is the one the write
-    // below verifies for itself (`heartbeat_at_ms < nowMs - heartbeatStaleAfterMs`,
-    // and `claimed_at_ms` for `recoverClaim`). Accepting it from any observer
-    // is therefore not a widening of trust: an observer that lies about the
-    // lease loses the compare-and-swap.
+    // The lease is host-neutral. The write verifies staleness against the
+    // injected Effect Clock, so an observer cannot move the cutoff by lying
+    // about its observation timestamp.
     case "lease-expired":
       return true
   }
@@ -1141,10 +1141,20 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
               )
             } as const
           }
+          /* v8 ignore else -- DurableWriter serialization makes the null alternative an invariant violation. */
           if (ending.requestedAtMs !== null) {
             return { _tag: "AlreadyRequested", requestedAtMs: Number(ending.requestedAtMs) } as const
           }
-          return notFound
+          /* v8 ignore next 7 -- DurableWriter serializes this transaction: a live non-terminal row whose
+           * request is still null satisfies `record`, so that retry cannot have returned zero rows. */
+          return yield* Effect.fail(
+            runStoreError(
+              "requestCancel",
+              "persistence_failed",
+              "serialized cancellation retry reached an impossible live row",
+              { runId, stage: "retry-invariant" }
+            )
+          )
         })
       )
     }).pipe(observeOutcome<RequestCancelOutcome>())
@@ -1472,8 +1482,8 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
           // arrives late — delayed past a newer one from the same owner —
           // from moving `heartbeat_at_ms` backwards and making a live run
           // look stale to `claimAndOwn`/`steal`'s cutoff. The outcome is
-          // still `Updated`: the fence held, and the write proves liveness
-          // regardless of which caller clock reading it carried. Prior art:
+          // still `Updated`: the fence held, and the host clock proves
+          // liveness regardless of the caller's observation token. Prior art:
           // Temporal's shard `rangeID` only ever advances
           // (`reference/temporal/service/history/shard/context_impl.go`,
           // `renewRangeLocked`).
@@ -1580,7 +1590,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     }).pipe(
       observeOutcome((outcome) =>
         Metric.withAttributes(RunStoreMetrics.transition[outcome._tag], {
-          to: Schema.is(RunStatus)(toStatusInput) ? toStatusInput : "invalid"
+          to: toStatusInput
         })
       )
     )

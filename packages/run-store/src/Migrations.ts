@@ -5,8 +5,8 @@
  * id block `1000` so its ids can never collide with the journal's or the step
  * cache's — see `@smthrs/database`'s `Migrations` for how the blocks compose.
  *
- * Derived contracts: `docs/specs/Concepts/Run Ownership.md` and
- * `docs/specs/Concepts/Journal Split.md`.
+ * Derived contracts: `docs/pages/concepts/concurrency.md` and
+ * `docs/pages/concepts/journal.md`.
  *
  * @since 0.1.0
  */

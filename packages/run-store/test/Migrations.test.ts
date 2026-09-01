@@ -1,6 +1,6 @@
 /**
  * The run store owns `flows_runs` and `flows_attempts` and reserves migration
- * id block 1000 — see `docs/specs/Concepts/Journal Split.md`.
+ * id block 1000; see `docs/pages/concepts/journal.md`.
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"

@@ -7,8 +7,8 @@
  * durable appends. It is re-exported here so ownership callers keep reading it
  * as one vocabulary.
  *
- * Governing design: `docs/specs/Concepts/Run Ownership.md`.
- * Schema boundary: `docs/specs/Research/Smithers Deviations 2026-07-28.md`.
+ * Governing design: `docs/pages/concepts/concurrency.md`.
+ * Schema boundary: `docs/pages/concepts/durable-execution-model.md`.
  *
  * @since 0.1.0
  */
