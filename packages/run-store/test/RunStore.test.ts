@@ -406,7 +406,7 @@ describe("RunStore", () => {
         const expectedSnapshot = snapshot(running)
         yield* TestClock.adjust(Duration.seconds(31))
         const nowMs = yield* Clock.currentTimeMillis
-        // The store clock is past the cutoff, so the identical stale snapshot
+        // The caller clock is past the cutoff, so the identical stale snapshot
         // isolates the missing evidence rather than a fresh lease.
         const outcome = yield* store.claimAndOwn(
           running.runId,
@@ -1406,9 +1406,6 @@ describe("RunStore ownership evidence boundaries", () => {
         }> = []
         for (const variant of variants) {
           const direct = yield* activateNew(store, `evidence-direct-${variant.name}`, ownerA)
-          // The lease must be stale for this matrix to isolate evidence
-          // validation; a fresh owner correctly wins before evidence matters.
-          yield* TestClock.adjust(Duration.seconds(31))
           const claimAndOwn = yield* store.claimAndOwn(
             direct.runId,
             snapshot(direct),
@@ -1450,7 +1447,7 @@ describe("RunStore ownership evidence boundaries", () => {
       })))
     }))
 
-  it.effect("ignores caller clock skew on both sides of the stale lease boundary", () =>
+  it.effect("pins both ten-second clock-skew edges around the stale lease boundary", () =>
     Effect.gen(function*() {
       const staleAtMs = Duration.toMillis(heartbeatStaleAfter) + 1
       const skewMs = Duration.toMillis(heartbeatSkewAllowance)
@@ -1460,24 +1457,8 @@ describe("RunStore ownership evidence boundaries", () => {
         const ahead = yield* activateNew(store, "skew-ahead", ownerA)
         const behindAtMs = staleAtMs - skewMs
         const aheadAtMs = staleAtMs + skewMs
-        const behindFresh = yield* store.steal(
-          behind.runId,
-          snapshot(behind),
-          ownerC,
-          behindAtMs,
-          staleEvidence(ownerA, ownerC, behindAtMs)
-        )
-        const aheadFresh = yield* store.steal(
-          ahead.runId,
-          snapshot(ahead),
-          ownerC,
-          aheadAtMs,
-          staleEvidence(ownerA, ownerC, aheadAtMs)
-        )
-        yield* TestClock.setTime(staleAtMs)
         return {
-          aheadFresh,
-          aheadStale: yield* store.steal(
+          ahead: yield* store.steal(
             ahead.runId,
             snapshot(ahead),
             ownerC,
@@ -1485,8 +1466,7 @@ describe("RunStore ownership evidence boundaries", () => {
             staleEvidence(ownerA, ownerC, aheadAtMs)
           ),
           aheadAtMs,
-          behindFresh,
-          behindStale: yield* store.steal(
+          behind: yield* store.steal(
             behind.runId,
             snapshot(behind),
             ownerC,
@@ -1497,15 +1477,13 @@ describe("RunStore ownership evidence boundaries", () => {
         }
       }))
 
-      // The caller values bind evidence to one observation, but only the
-      // host-owned clock determines whether a lease has expired.
+      // CONTRACT: the store judges the supplied wall-clock instant literally;
+      // heartbeatLoop's write-tolerance budget, not the SQL predicate, absorbs skew.
       expect(skewMs).toBe(10_000)
       expect(result.behindAtMs).toBe(20_001)
-      expect(result.behindFresh).toEqual({ _tag: "HeartbeatFresh" })
+      expect(result.behind).toEqual({ _tag: "HeartbeatFresh" })
       expect(result.aheadAtMs).toBe(40_001)
-      expect(result.aheadFresh).toEqual({ _tag: "HeartbeatFresh" })
-      expect(result.behindStale).toEqual({ _tag: "Claimed", claimedAtMs: staleAtMs })
-      expect(result.aheadStale).toEqual({ _tag: "Claimed", claimedAtMs: staleAtMs })
+      expect(result.ahead).toEqual({ _tag: "Claimed", claimedAtMs: 40_001 })
     }))
 })
 

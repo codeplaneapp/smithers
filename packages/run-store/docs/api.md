@@ -34,13 +34,22 @@ id, and nonce. Claiming is two phase (`claim` then `activate`) or atomic
 (`claimAndOwn`). Heartbeats, attempt writes, and owned transitions compare all
 three fields in the same SQL statement as their mutation.
 
-The injected Effect `Clock` is the sole lease authority. It stamps claims,
-activation, heartbeats, recovery, steals, and terminal transitions, and it
-sets every staleness cutoff. Public `nowMs` arguments remain validated
-observation tokens so `LivenessEvidence.checkedAtMs` cannot be replayed across
-calls, but they cannot expire a live lease or pin one into the future.
-`requestCancel` is different: its timestamp is request metadata and does not
-grant ownership.
+A run row carries readings from two clock sources. Operations that accept or
+verify `LivenessEvidence` (`claim`, `claimAndOwn`, `steal`, `heartbeat`,
+`requestCancel`, and `recoverClaim`) take the caller's `nowMs` and judge it
+literally: it is the staleness cutoff they compare against and the value they
+persist. Lifecycle stamps read the Effect `Clock`: `create` writes
+`created_at_ms`, `activate` writes `started_at_ms` and `heartbeat_at_ms`, and
+`transitionOwned` writes `finished_at_ms`. A composition must give both sources
+the same reading.
+
+Every `nowMs` and `LivenessEvidence.checkedAtMs` is validated as a non-negative
+safe integer, then trusted: the store cannot distinguish a slow clock from a
+lie. That is correct for an in-process library over a local SQLite file whose
+caller can issue raw SQL itself, and it must not cross a trust boundary.
+Evidence binds to one instant by exact equality, so a probe taken at T is
+refused by a call made at T+1. Heartbeats are monotonic, so a pulse delayed
+past a newer one reports `Updated` without moving the lease backwards.
 
 `sameHostPidProbe` treats only `ESRCH` as proof of death. Permission errors,
 unexpected failures, invalid pids, and synthetic pid zero fail closed. A pid
@@ -62,10 +71,11 @@ run that settled during the transaction.
 
 Run identifiers and lineage fields are bounded, non-empty, well-formed durable
 text. State is inert JSON copied without invoking getters or `toJSON`, bounded
-by `maximumRunStateBytes`, `maximumRunJsonDepth`, and
-`maximumRunJsonNodes`, and checked again on read. Lifecycle timestamps must be
-non-negative safe integers and ordered consistently with the row status.
-Diagnostics retain field names and sizes, never executable state.
+in shape by `maximumRunJsonDepth` and `maximumRunJsonNodes` and checked again
+on read. It carries no byte ceiling: executable state is what a resume
+re-enters, so a large state has to persist. Lifecycle timestamps must be
+non-negative safe integers; they are range-checked independently, not against
+each other. Diagnostics retain field names and sizes, never executable state.
 
 ## Attempts
 
@@ -75,10 +85,14 @@ Default `put` is first-writer-wins; `putMode: "upsert"` may update an in-flight
 row but never reopen a terminal attempt. `inProgressStates` and checkpoint
 limits are validated, detached, and frozen when the store is built.
 
-Checkpoint, error, outcome, and metadata values cross the same inert bounded
-JSON admission. Inputs are snapped before persistence can yield. Attempt and
-heartbeat timestamps never move backward, and a finish before start is
-rejected. The values are not redacted: they are executable resume data, so
+Checkpoint, error, outcome, and metadata values cross the same inert JSON
+admission, which bounds depth and node count but not bytes. Only the
+checkpoint has a byte ceiling, set by `Options.maxCheckpointBytes` within
+`maximumCheckpointBytes`. Inputs are snapped before persistence can yield. An
+attempt heartbeat never moves backward, but attempt timestamps are otherwise
+range-checked independently: a finish recorded before its start persists as
+written, because the store does not adjudicate the caller's timeline. The
+values are not redacted: they are executable resume data, so
 rewriting a field because its name resembles a credential would corrupt the
 run. Secrets belong at host-owned outbound I/O boundaries instead.
 

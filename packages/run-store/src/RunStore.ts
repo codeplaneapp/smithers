@@ -7,13 +7,15 @@
  * The two-phase snapshot/claim/activation CAS and heartbeat fence are adapted
  * from smithers `packages/db` and `packages/engine`.
  *
- * Caller `nowMs` values are validated and bind one `LivenessEvidence`
- * observation through exact `evidence.checkedAtMs === nowMs` equality. They
- * never decide lease expiry or stamp ownership state. Claim, activation,
- * recovery, heartbeat, transition, and steal use the injected Effect `Clock`
- * for both comparisons and persisted timestamps, so a caller cannot expire or
- * pin a lease. `requestCancel` is the deliberate exception: its timestamp is
- * the request's domain data, not ownership authority.
+ * Operations that accept or verify `LivenessEvidence` (`claim`,
+ * `claimAndOwn`, `steal`, `heartbeat`, `requestCancel`, and `recoverClaim`)
+ * take the caller's `nowMs` and judge it literally, including the lease cutoff
+ * and exact `evidence.checkedAtMs === nowMs` rule. Lifecycle stamps use the
+ * Effect `Clock`: `create` writes `created_at_ms`, `activate` writes
+ * `started_at_ms` and `heartbeat_at_ms`, and `transitionOwned` writes
+ * `finished_at_ms`. A row can therefore carry readings from two clocks. The
+ * store trusts the caller's clock, which is right for an in-process library
+ * over local SQLite and must not cross a trust boundary.
  *
  * @since 0.1.0
  */
@@ -53,14 +55,6 @@ const durableIdentifier = Schema.NonEmptyString.check(
 )
 
 /**
- * Maximum encoded size of executable run state.
- *
- * @since 1.0.0-rc.0
- * @category constants
- */
-export const maximumRunStateBytes = 4 * 1024 * 1024
-
-/**
  * Maximum nesting admitted for executable run state.
  *
  * @since 1.0.0-rc.0
@@ -77,12 +71,9 @@ export const maximumRunJsonDepth = 128
 export const maximumRunJsonNodes = 100_000
 
 const runJsonLimits: Boundary.JsonLimits = {
-  maxBytes: maximumRunStateBytes,
   maxDepth: maximumRunJsonDepth,
   maxMembers: maximumRunJsonNodes,
-  maxNodes: maximumRunJsonNodes,
-  maxStringBytes: maximumRunStateBytes,
-  maxKeyBytes: 16 * 1024
+  maxNodes: maximumRunJsonNodes
 }
 
 /**
@@ -301,6 +292,19 @@ export type ClaimOutcome =
   | { readonly _tag: "SnapshotChanged" }
 
 /**
+ * Result of stealing an exact run snapshot after liveness evidence is checked.
+ *
+ * `LivenessUnconfirmed` means the supplied evidence did not match the
+ * snapshot's owner, the host relation its `kind` requires, or `nowMs`, so the
+ * steal was refused before any compare-and-swap ran. The other tags have the
+ * same meaning as {@link ClaimOutcome} after the comparison runs.
+ *
+ * @since 1.0.0-rc.0
+ * @category models
+ */
+export type StealOutcome = ClaimOutcome | { readonly _tag: "LivenessUnconfirmed" }
+
+/**
  * Result of claiming and activating ownership in one compare-and-swap.
  *
  * @since 0.1.0
@@ -313,11 +317,11 @@ export type ClaimAndOwnOutcome =
   | { readonly _tag: "HeartbeatFresh" }
   | { readonly _tag: "SnapshotChanged" }
   /**
-   * The caller expected a running run owned by someone else and supplied no
-   * matching `LivenessEvidence`, so it was refused before any compare-and-swap
-   * ran. Re-reading and retrying cannot make progress; supply evidence, or use
-   * `steal`. This replaces the `SnapshotChanged` this path used to report,
-   * which asserted a comparison it never performed.
+   * The caller's exact snapshot is still current, its different owner has a
+   * stale heartbeat, and no matching `LivenessEvidence` was supplied, so no
+   * compare-and-swap ran. Re-reading and retrying cannot make progress; supply
+   * evidence, or use `steal`. A current fresh heartbeat instead reports
+   * `HeartbeatFresh`, because evidence cannot satisfy the stale-lease predicate.
    */
   | { readonly _tag: "EvidenceRequired" }
 
@@ -457,6 +461,8 @@ export interface Service {
    * recorded owner. A composition builds `LivenessEvidence` with a
    * `LivenessProbe`. `evidence.checkedAtMs` must equal `nowMs` exactly, so
    * evidence probed at T is refused when this operation is called at T+1.
+   * `LivenessUnconfirmed` means the evidence did not match and no
+   * compare-and-swap ran.
    */
   readonly steal: (
     runId: string,
@@ -464,7 +470,7 @@ export interface Service {
     claimant: OwnerId,
     nowMs: number,
     evidence: LivenessEvidence
-  ) => Effect.Effect<ClaimOutcome, RunStoreError>
+  ) => Effect.Effect<StealOutcome, RunStoreError>
 }
 
 /**
@@ -836,31 +842,18 @@ const decodeRunRow = (method: string, runId: string, input: unknown): Effect.Eff
       const invalidClaim = claim === undefined ||
         (claim === null && row.claimedAtMs !== null) ||
         (claim !== null && row.claimedAtMs === null)
-      const invalidTimeline = (row.startedAtMs !== null && row.startedAtMs < row.createdAtMs) ||
-        (row.finishedAtMs !== null && (row.startedAtMs === null || row.finishedAtMs < row.startedAtMs)) ||
-        (row.heartbeatAtMs !== null && (row.startedAtMs === null || row.heartbeatAtMs < row.startedAtMs)) ||
-        (row.claimedAtMs !== null && row.claimedAtMs < row.createdAtMs) ||
-        (row.cancelRequestedAtMs !== null && row.cancelRequestedAtMs < row.createdAtMs) ||
-        (row.status === "running" && (row.startedAtMs === null || row.finishedAtMs !== null)) ||
-        (isTerminalRunStatus(row.status) && row.finishedAtMs === null) ||
-        (!isTerminalRunStatus(row.status) && row.finishedAtMs !== null)
-      if (invalidOwner || invalidClaim || invalidTimeline || !admittedState.ok) {
+      if (invalidOwner || invalidClaim || !admittedState.ok) {
         // The cause is published to logs, spans, and telemetry. Executable
         // state may carry credentials, so report only the invariants read here.
         return Effect.fail(
           runStoreError(method, "decode_failed", "flows_runs row violates durable invariants", {
             runId,
             status: row.status,
-            createdAtMs: row.createdAtMs,
-            startedAtMs: row.startedAtMs,
-            finishedAtMs: row.finishedAtMs,
             heartbeatAtMs: row.heartbeatAtMs,
             claimedAtMs: row.claimedAtMs,
-            cancelRequestedAtMs: row.cancelRequestedAtMs,
             hasClaimColumns: row.claimHostId !== null || row.claimPid !== null || row.claimNonce !== null,
             hasOwnerColumns: row.ownerHostId !== null || row.ownerPid !== null || row.ownerNonce !== null,
-            stateJsonValid,
-            timelineValid: !invalidTimeline
+            stateJsonValid
           })
         )
       }
@@ -910,14 +903,14 @@ const selectRun = (sql: SqlClient.SqlClient, runId: string) =>
 
 const classifyClaimLoss = (
   row: DatabaseRunRow | undefined,
-  observedAtMs: number
+  nowMs: number
 ): ClaimLossOutcome => {
   if (row === undefined) return notFound
   if (row.claimHostId !== null) return alreadyClaimed
   if (
     row.status === "running" &&
     row.heartbeatAtMs !== null &&
-    row.heartbeatAtMs >= observedAtMs - heartbeatStaleAfterMs
+    row.heartbeatAtMs >= nowMs - heartbeatStaleAfterMs
   ) {
     return heartbeatFresh
   }
@@ -949,9 +942,8 @@ const evidenceMatchesOwner = (
     // would be an unprobed guess dressed as evidence.
     case "cross-host-unreachable-stale":
       return expectedOwner.hostId !== observer.hostId
-    // The lease is host-neutral. The write verifies staleness against the
-    // injected Effect Clock, so an observer cannot move the cutoff by lying
-    // about its observation timestamp.
+    // The lease is host-neutral, and the write verifies the same caller-clock
+    // cutoff named by this evidence. The in-process caller owns that clock.
     case "lease-expired":
       return true
   }
@@ -1004,7 +996,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
           parentRunId,
           lineageId,
           roundOrdinal,
-          stateJsonLength: stateInput.length,
+          stateJsonLength: typeof stateInput === "string" ? stateInput.length : null,
           stateJsonValid: isJsonString(stateInput)
         })
         yield* Effect.annotateCurrentSpan({ runId })
@@ -1184,14 +1176,13 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       const runId = yield* snapshotRunId("claim", runIdInput)
       const expected = yield* snapshotExpected("claim", expectedInput)
       const claimant = yield* snapshotOwner("claim", "claimant", claimantInput)
-      yield* snapshotTimestamp(
+      const nowMs = yield* snapshotTimestamp(
         "claim",
         "nowMs",
         nowMsInput,
         { runId, nowMs: nowMsInput }
       )
       yield* Effect.annotateCurrentSpan({ runId, claimantHostId: claimant.hostId })
-      const claimedAtMs = yield* Clock.currentTimeMillis
       return yield* write(
         "claim",
         Effect.gen(function*() {
@@ -1208,7 +1199,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             claim_host_id = ${claimant.hostId},
             claim_pid = ${claimant.pid},
             claim_nonce = ${claimant.nonce},
-            claimed_at_ms = ${claimedAtMs}
+            claimed_at_ms = ${nowMs}
           WHERE run_id = ${runId}
             AND status IN ('pending', 'suspended')
             AND status = ${expected.status}
@@ -1222,11 +1213,9 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             AND claimed_at_ms IS NULL
           RETURNING run_id AS "runId"
         `
-          if (rows.length > 0) return claimed(claimedAtMs)
+          if (rows.length > 0) return claimed(nowMs)
           const current = yield* selectRun(sql, runId)
-          return current[0]?.status === "running"
-            ? snapshotChanged
-            : classifyClaimLoss(current[0], claimedAtMs)
+          return classifyClaimLoss(current[0], nowMs)
         })
       )
     }).pipe(observeOutcome((outcome) => RunStoreMetrics.claim[outcome._tag]))
@@ -1243,7 +1232,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       const runId = yield* snapshotRunId("claimAndOwn", runIdInput)
       const expected = yield* snapshotExpected("claimAndOwn", expectedInput)
       const owner = yield* snapshotOwner("claimAndOwn", "owner", ownerInput)
-      const checkedAtMs = yield* snapshotTimestamp(
+      const nowMs = yield* snapshotTimestamp(
         "claimAndOwn",
         "nowMs",
         nowMsInput,
@@ -1253,20 +1242,22 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         ? undefined
         : yield* snapshotEvidence("claimAndOwn", evidenceInput)
       yield* Effect.annotateCurrentSpan({ runId, ownerHostId: owner.hostId })
-      const observedAtMs = yield* Clock.currentTimeMillis
       return yield* Effect.suspend((): Effect.Effect<ClaimAndOwnOutcome, RunStoreError> => {
         const canReplaceExpectedOwner = expected.status !== "running" ||
           (expected.owner !== null && sameOwner(expected.owner, owner)) ||
-          (evidence !== undefined && evidenceMatches(expected, owner, checkedAtMs, evidence))
+          (evidence !== undefined && evidenceMatches(expected, owner, nowMs, evidence))
 
         if (!canReplaceExpectedOwner) {
           return read("claimAndOwn", selectRun(sql, runId)).pipe(
             Effect.map((current) => {
               const row = current[0]
-              if (row === undefined) return notFound
-              if (row.claimHostId !== null) return alreadyClaimed
-              if (rowMatchesSnapshot(row, expected)) return evidenceRequired
-              return classifyClaimLoss(row, observedAtMs)
+              // Classify the lease before upgrading an unchanged stale
+              // snapshot. Evidence cannot displace a fresh heartbeat, so
+              // naming evidence first would advise a retry the SQL must refuse.
+              const loss = classifyClaimLoss(row, nowMs)
+              return loss === snapshotChanged && row !== undefined && rowMatchesSnapshot(row, expected)
+                ? evidenceRequired
+                : loss
             })
           )
         }
@@ -1278,12 +1269,12 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
           UPDATE flows_runs
           SET
             status = 'running',
-            started_at_ms = COALESCE(started_at_ms, ${observedAtMs}),
+            started_at_ms = COALESCE(started_at_ms, ${nowMs}),
             finished_at_ms = NULL,
             owner_host_id = ${owner.hostId},
             owner_pid = ${owner.pid},
             owner_nonce = ${owner.nonce},
-            heartbeat_at_ms = ${observedAtMs}
+            heartbeat_at_ms = ${nowMs}
           WHERE run_id = ${runId}
             AND status IN ('pending', 'suspended', 'running')
             AND status = ${expected.status}
@@ -1298,13 +1289,13 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             AND (
               status <> 'running'
               OR heartbeat_at_ms IS NULL
-              OR heartbeat_at_ms < ${observedAtMs - heartbeatStaleAfterMs}
+              OR heartbeat_at_ms < ${nowMs - heartbeatStaleAfterMs}
             )
           RETURNING run_id AS "runId"
         `
             if (rows.length > 0) return activated
             const current = yield* selectRun(sql, runId)
-            return classifyClaimLoss(current[0], observedAtMs)
+            return classifyClaimLoss(current[0], nowMs)
           })
         )
       })
@@ -1434,12 +1425,11 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         timestampCause
       )
       const observer = yield* snapshotOwner("recoverClaim", "observer", observerInput)
-      const checkedAtMs = yield* snapshotTimestamp("recoverClaim", "nowMs", nowMsInput, timestampCause)
+      const nowMs = yield* snapshotTimestamp("recoverClaim", "nowMs", nowMsInput, timestampCause)
       const evidence = yield* snapshotEvidence("recoverClaim", evidenceInput)
       yield* Effect.annotateCurrentSpan({ runId, observerHostId: observer.hostId })
-      const observedAtMs = yield* Clock.currentTimeMillis
       return yield* Effect.suspend((): Effect.Effect<RecoverClaimOutcome, RunStoreError> => {
-        if (!evidenceMatchesOwner(staleClaimant, observer, checkedAtMs, evidence)) {
+        if (!evidenceMatchesOwner(staleClaimant, observer, nowMs, evidence)) {
           return Effect.succeed(livenessUnconfirmed)
         }
         return write(
@@ -1457,14 +1447,14 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             AND claim_pid = ${staleClaimant.pid}
             AND claim_nonce = ${staleClaimant.nonce}
             AND claimed_at_ms = ${claimedAtMs}
-            AND claimed_at_ms < ${observedAtMs - heartbeatStaleAfterMs}
+            AND claimed_at_ms < ${nowMs - heartbeatStaleAfterMs}
           RETURNING run_id AS "runId"
         `
             if (rows.length > 0) return recovered
             const current = yield* selectRun(sql, runId)
             if (current[0] === undefined) return notFound
             return rowMatchesClaim(current[0], staleClaimant, claimedAtMs) &&
-                claimedAtMs >= observedAtMs - heartbeatStaleAfterMs
+                claimedAtMs >= nowMs - heartbeatStaleAfterMs
               ? claimFresh
               : claimChanged
           })
@@ -1481,14 +1471,13 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     Effect.gen(function*() {
       const runId = yield* snapshotRunId("heartbeat", runIdInput)
       const owner = yield* snapshotOwner("heartbeat", "owner", ownerInput)
-      yield* snapshotTimestamp(
+      const nowMs = yield* snapshotTimestamp(
         "heartbeat",
         "nowMs",
         nowMsInput,
         { runId, nowMs: nowMsInput }
       )
       yield* Effect.annotateCurrentSpan({ runId, ownerHostId: owner.hostId })
-      const heartbeatAtMs = yield* Clock.currentTimeMillis
       return yield* write(
         "heartbeat",
         Effect.gen(function*() {
@@ -1496,14 +1485,14 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
           // arrives late — delayed past a newer one from the same owner —
           // from moving `heartbeat_at_ms` backwards and making a live run
           // look stale to `claimAndOwn`/`steal`'s cutoff. The outcome is
-          // still `Updated`: the fence held, and the host clock proves
-          // liveness regardless of the caller's observation token. Prior art:
+          // still `Updated`: the fence held, and the write proves liveness
+          // regardless of which caller clock reading it carried. Prior art:
           // Temporal's shard `rangeID` only ever advances
           // (`reference/temporal/service/history/shard/context_impl.go`,
           // `renewRangeLocked`).
           const rows = yield* sql<{ readonly runId: string }>`
           UPDATE flows_runs
-          SET heartbeat_at_ms = MAX(heartbeat_at_ms, ${heartbeatAtMs})
+          SET heartbeat_at_ms = MAX(heartbeat_at_ms, ${nowMs})
           WHERE run_id = ${runId}
             AND status = 'running'
             AND owner_host_id = ${owner.hostId}
@@ -1616,12 +1605,12 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     claimantInput: OwnerId,
     nowMsInput: number,
     evidenceInput: LivenessEvidence
-  ): Effect.Effect<ClaimOutcome, RunStoreError> =>
+  ): Effect.Effect<StealOutcome, RunStoreError> =>
     Effect.gen(function*() {
       const runId = yield* snapshotRunId("steal", runIdInput)
       const expected = yield* snapshotExpected("steal", expectedInput)
       const claimant = yield* snapshotOwner("steal", "claimant", claimantInput)
-      const checkedAtMs = yield* snapshotTimestamp(
+      const nowMs = yield* snapshotTimestamp(
         "steal",
         "nowMs",
         nowMsInput,
@@ -1629,10 +1618,9 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       )
       const evidence = yield* snapshotEvidence("steal", evidenceInput)
       yield* Effect.annotateCurrentSpan({ runId, claimantHostId: claimant.hostId })
-      const observedAtMs = yield* Clock.currentTimeMillis
-      return yield* Effect.suspend(() => {
-        if (!evidenceMatches(expected, claimant, checkedAtMs, evidence)) {
-          return Effect.succeed(snapshotChanged)
+      return yield* Effect.suspend((): Effect.Effect<StealOutcome, RunStoreError> => {
+        if (!evidenceMatches(expected, claimant, nowMs, evidence)) {
+          return Effect.succeed(livenessUnconfirmed)
         }
         const expectedOwner = expected.owner!
         return write(
@@ -1644,23 +1632,23 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             claim_host_id = ${claimant.hostId},
             claim_pid = ${claimant.pid},
             claim_nonce = ${claimant.nonce},
-            claimed_at_ms = ${observedAtMs}
+            claimed_at_ms = ${nowMs}
           WHERE run_id = ${runId}
             AND status = ${expected.status}
             AND owner_host_id IS ${expectedOwner.hostId}
             AND owner_pid IS ${expectedOwner.pid}
             AND owner_nonce IS ${expectedOwner.nonce}
             AND heartbeat_at_ms IS ${expected.heartbeatAtMs}
-            AND heartbeat_at_ms < ${observedAtMs - heartbeatStaleAfterMs}
+            AND heartbeat_at_ms < ${nowMs - heartbeatStaleAfterMs}
             AND claim_host_id IS NULL
             AND claim_pid IS NULL
             AND claim_nonce IS NULL
             AND claimed_at_ms IS NULL
           RETURNING run_id AS "runId"
         `
-            if (rows.length > 0) return claimed(observedAtMs)
+            if (rows.length > 0) return claimed(nowMs)
             const current = yield* selectRun(sql, runId)
-            return classifyClaimLoss(current[0], observedAtMs)
+            return classifyClaimLoss(current[0], nowMs)
           })
         )
       })

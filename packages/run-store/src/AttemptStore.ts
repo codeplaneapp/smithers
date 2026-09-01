@@ -35,15 +35,10 @@ const durableIdentifier = Schema.NonEmptyString.check(
 )
 
 /**
- * Default encoded-byte limit for attempt metadata, errors, and outcomes.
+ * Absolute ceiling for {@link Options.maxCheckpointBytes}.
  *
- * @category constants
- * @since 1.0.0-rc.0
- */
-export const maximumValueBytes = 4 * 1024 * 1024
-
-/**
- * Absolute encoded-byte ceiling for a configured checkpoint.
+ * This bounds only the configured checkpoint policy; metadata, errors, and
+ * outcomes have no byte ceiling.
  *
  * @category constants
  * @since 1.0.0-rc.0
@@ -66,13 +61,11 @@ export const maximumJsonDepth = 128
  */
 export const maximumJsonNodes = 100_000
 
-const jsonLimits = (maxBytes: number): Boundary.JsonLimits => ({
-  maxBytes,
+const jsonLimits = (maxBytes?: number | undefined): Boundary.JsonLimits => ({
+  ...(maxBytes === undefined ? {} : { maxBytes, maxStringBytes: maxBytes }),
   maxDepth: maximumJsonDepth,
   maxMembers: maximumJsonNodes,
-  maxNodes: maximumJsonNodes,
-  maxStringBytes: maxBytes,
-  maxKeyBytes: 16 * 1024
+  maxNodes: maximumJsonNodes
 })
 
 /**
@@ -86,7 +79,7 @@ const jsonLimits = (maxBytes: number): Boundary.JsonLimits => ({
  * @since 1.0.0-rc.0
  */
 export const JsonValue = Schema.declare<Boundary.Json>(
-  (value): value is Boundary.Json => Boundary.admitJson(value, jsonLimits(maximumCheckpointBytes)).ok,
+  (value): value is Boundary.Json => Boundary.admitJson(value, jsonLimits()).ok,
   { identifier: "@smthrs/run-store/JsonValue" }
 )
 
@@ -413,7 +406,7 @@ const encode = (
   method: AttemptStoreMethod,
   value: unknown,
   field: string,
-  maxBytes = maximumValueBytes
+  maxBytes?: number | undefined
 ): Effect.Effect<string, AttemptStoreError> =>
   Effect.suspend(() => {
     const admitted = Boundary.admitJson(value, jsonLimits(maxBytes))
@@ -440,7 +433,7 @@ const decode = (
   method: AttemptStoreMethod,
   value: string | null,
   field: string,
-  maxBytes = maximumValueBytes
+  maxBytes?: number | undefined
 ): Effect.Effect<JsonValue | undefined, AttemptStoreError> =>
   Effect.suspend(() => {
     if (value === null) return Effect.succeed(undefined)
@@ -454,7 +447,7 @@ const decodeRequired = (
   method: AttemptStoreMethod,
   value: string,
   field: string,
-  maxBytes = maximumValueBytes
+  maxBytes?: number | undefined
 ): Effect.Effect<JsonValue, AttemptStoreError> =>
   // A non-null SQL column cannot take `decode`'s missing-value branch.
   decode(method, value, field, maxBytes) as Effect.Effect<JsonValue, AttemptStoreError>
@@ -503,7 +496,7 @@ const snapshotJson = (
   method: AttemptStoreMethod,
   value: unknown,
   field: string,
-  maxBytes = maximumValueBytes
+  maxBytes?: number | undefined
 ): { readonly ok: true; readonly value: JsonValue } | { readonly ok: false; readonly error: AttemptStoreError } => {
   const admitted = Boundary.admitJson(value, jsonLimits(maxBytes))
   return admitted.ok
@@ -736,14 +729,8 @@ const mapPersistenceError = (method: AttemptStoreMethod) => (cause: unknown): At
 const decodeRow = (method: AttemptStoreMethod, input: unknown): Effect.Effect<Attempt, AttemptStoreError> =>
   Schema.decodeUnknownEffect(AttemptRow)(input).pipe(
     Effect.mapError(() => error(method, "decode_failed", "could not decode flows_attempts row")),
-    Effect.flatMap((row) => {
-      if (
-        (row.finished_at_ms !== null && row.finished_at_ms < row.started_at_ms) ||
-        (row.heartbeat_at_ms !== null && row.heartbeat_at_ms < row.started_at_ms)
-      ) {
-        return Effect.fail(error(method, "decode_failed", "flows_attempts row has a reversed lifecycle timeline"))
-      }
-      return Effect.all({
+    Effect.flatMap((row) =>
+      Effect.all({
         checkpoint: decode(method, row.checkpoint_json, "checkpoint_json", maximumCheckpointBytes),
         error: decode(method, row.error_json, "error_json"),
         outcome: decode(method, row.outcome_json, "outcome_json"),
@@ -765,7 +752,7 @@ const decodeRow = (method: AttemptStoreMethod, input: unknown): Effect.Effect<At
           })
         )
       )
-    })
+    )
   )
 
 /**
@@ -801,14 +788,6 @@ export const makeWith = (
           stepKeyDigest: attempt.stepKeyDigest,
           attempt: attempt.attempt
         })
-        if (
-          (attempt.finishedAtMs !== undefined && attempt.finishedAtMs < attempt.startedAtMs) ||
-          (attempt.heartbeatAtMs !== undefined && attempt.heartbeatAtMs < attempt.startedAtMs)
-        ) {
-          return yield* Effect.fail(
-            error("put", "invalid_attempt", "attempt lifecycle timestamps must not precede start")
-          )
-        }
         const checkpoint = yield* putEncodeCheckpoint(attempt.checkpoint)
         const attemptError = yield* putEncodeOptional(attempt.error, "error")
         const outcome = yield* putEncodeOptional(attempt.outcome, "outcome")
@@ -942,13 +921,12 @@ export const makeWith = (
             const updated = yield* sql<{ readonly attempt: number }>`
             UPDATE flows_attempts
             SET
-              heartbeat_at_ms = MAX(COALESCE(heartbeat_at_ms, started_at_ms), ${nowMs}),
+              heartbeat_at_ms = MAX(COALESCE(heartbeat_at_ms, ${nowMs}), ${nowMs}),
               checkpoint_json = COALESCE(${checkpoint}, checkpoint_json)
             WHERE run_id = ${runId}
               AND step_key_digest = ${stepKeyDigest}
               AND attempt = ${attempt}
               AND ${inProgress}
-              AND started_at_ms <= ${nowMs}
               AND EXISTS (
                 SELECT 1 FROM flows_runs
                 WHERE run_id = ${runId}
@@ -962,8 +940,8 @@ export const makeWith = (
             if (updated.length > 0) {
               return { _tag: "Updated" } as const
             }
-            const found = yield* sql<Pick<AttemptRow, "state" | "started_at_ms">>`
-            SELECT state, started_at_ms FROM flows_attempts
+            const found = yield* sql<Pick<AttemptRow, "state">>`
+            SELECT state FROM flows_attempts
             WHERE run_id = ${runId} AND step_key_digest = ${stepKeyDigest} AND attempt = ${attempt}
           `
             if (found.length === 0) {
@@ -975,11 +953,6 @@ export const makeWith = (
           `
             if (runRows.length === 0 || !ownsRunningRun(runRows[0]!, owner)) {
               return { _tag: "FenceLost" } as const
-            }
-            if (inProgressStates.includes(found[0]!.state) && nowMs < found[0]!.started_at_ms) {
-              return yield* Effect.fail(
-                error("heartbeat", "invalid_attempt", "heartbeat timestamp precedes attempt start")
-              )
             }
             return { _tag: "StateChanged" } as const
           })
@@ -1020,7 +993,6 @@ export const makeWith = (
               AND step_key_digest = ${attempt.stepKeyDigest}
               AND attempt = ${attempt.attempt}
               AND ${inProgress}
-              AND started_at_ms <= ${attempt.finishedAtMs}
               AND EXISTS (
                 SELECT 1 FROM flows_runs
                 WHERE run_id = ${attempt.runId}
@@ -1034,8 +1006,8 @@ export const makeWith = (
             if (updated.length > 0) {
               return { _tag: "Finished" } as const
             }
-            const found = yield* sql<Pick<AttemptRow, "state" | "started_at_ms">>`
-            SELECT state, started_at_ms FROM flows_attempts
+            const found = yield* sql<Pick<AttemptRow, "state">>`
+            SELECT state FROM flows_attempts
             WHERE run_id = ${attempt.runId}
               AND step_key_digest = ${attempt.stepKeyDigest}
               AND attempt = ${attempt.attempt}
@@ -1049,11 +1021,6 @@ export const makeWith = (
           `
             if (runRows.length === 0 || !ownsRunningRun(runRows[0]!, owner)) {
               return { _tag: "FenceLost" } as const
-            }
-            if (inProgressStates.includes(found[0]!.state) && attempt.finishedAtMs < found[0]!.started_at_ms) {
-              return yield* Effect.fail(
-                error("finish", "invalid_attempt", "finish timestamp precedes attempt start")
-              )
             }
             return { _tag: "StateChanged" } as const
           })

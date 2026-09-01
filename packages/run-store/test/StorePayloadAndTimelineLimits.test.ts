@@ -24,7 +24,7 @@ const own = (runs: RunStore.Service, runId: string) =>
   )
 
 describe("run-store payload and timeline limits", () => {
-  it.effect("rejects reversed attempt timelines and keeps heartbeats monotonic", () =>
+  it.effect("pins acceptance of reversed attempt finish and heartbeat timelines", () =>
     Effect.gen(function*() {
       const result = yield* migrated(
         Effect.gen(function*() {
@@ -49,39 +49,16 @@ describe("run-store payload and timeline limits", () => {
             startedAtMs: 10,
             meta: {}
           }
-          const reversedPut = yield* Effect.flip(attempts.put(reversed, owner))
-          const reversedHeartbeatPut = yield* Effect.flip(attempts.put({
-            ...running,
-            stepKeyDigest: "already-heartbeaten",
-            heartbeatAtMs: 9
-          }, owner))
+          const reversedPut = yield* attempts.put(reversed, owner)
           yield* attempts.put(running, owner)
-          const earlyHeartbeat = yield* Effect.flip(attempts.heartbeat(
+          const earlyHeartbeat = yield* attempts.heartbeat(
             running.runId,
             running.stepKeyDigest,
             running.attempt,
             owner,
             9
-          ))
-          const atStart = yield* attempts.heartbeat(
-            running.runId,
-            running.stepKeyDigest,
-            running.attempt,
-            owner,
-            10
           )
-          yield* attempts.heartbeat(running.runId, running.stepKeyDigest, running.attempt, owner, 20)
-          yield* attempts.heartbeat(running.runId, running.stepKeyDigest, running.attempt, owner, 15)
-          const earlyFinish = yield* Effect.flip(attempts.finish({
-            runId: running.runId,
-            stepKeyDigest: running.stepKeyDigest,
-            attempt: running.attempt,
-            state: "completed",
-            finishedAtMs: 9
-          }, owner))
           return {
-            atStart,
-            earlyFinish,
             earlyHeartbeat,
             heartbeatRow: Option.getOrThrow(
               yield* attempts.get({
@@ -90,21 +67,77 @@ describe("run-store payload and timeline limits", () => {
                 attempt: running.attempt
               })
             ),
-            reversedHeartbeatPut,
-            reversedPut
+            reversedPut,
+            reversedRow: Option.getOrThrow(
+              yield* attempts.get({
+                runId: reversed.runId,
+                stepKeyDigest: reversed.stepKeyDigest,
+                attempt: reversed.attempt
+              })
+            )
           }
         })
       )
 
-      expect(result.reversedPut.code).toBe("invalid_attempt")
-      expect(result.reversedHeartbeatPut.code).toBe("invalid_attempt")
-      expect(result.earlyHeartbeat.code).toBe("invalid_attempt")
-      expect(result.earlyFinish.code).toBe("invalid_attempt")
-      expect(result.atStart).toEqual({ _tag: "Updated" })
-      expect(result.heartbeatRow).toMatchObject({ startedAtMs: 10, heartbeatAtMs: 20 })
+      // CONTRACT: timestamps are range-checked independently; no relational
+      // finished >= started or heartbeat >= started constraint exists.
+      expect(result.reversedPut).toEqual({ _tag: "Inserted" })
+      expect(result.reversedRow).toMatchObject({ startedAtMs: 10, finishedAtMs: 9 })
+      expect(result.earlyHeartbeat).toEqual({ _tag: "Updated" })
+      expect(result.heartbeatRow).toMatchObject({ startedAtMs: 10, heartbeatAtMs: 9 })
     }))
 
-  it.effect("round-trips multi-megabyte run state, meta, error, and outcome within the published byte bounds", () =>
+  it.effect("keeps attempt heartbeat timestamps monotonic after the first pulse", () =>
+    Effect.gen(function*() {
+      const result = yield* migrated(
+        Effect.gen(function*() {
+          const runs = yield* RunStore.RunStore
+          const attempts = yield* AttemptStore.AttemptStore
+          yield* runs.create("monotonic-attempt-run", "{}")
+          yield* own(runs, "monotonic-attempt-run")
+          const running = {
+            runId: "monotonic-attempt-run",
+            stepKeyDigest: "monotonic-heartbeat",
+            attempt: 0,
+            state: "running",
+            startedAtMs: 10,
+            meta: {}
+          }
+          yield* attempts.put(running, owner)
+          const first = yield* attempts.heartbeat(
+            running.runId,
+            running.stepKeyDigest,
+            running.attempt,
+            owner,
+            20
+          )
+          const late = yield* attempts.heartbeat(
+            running.runId,
+            running.stepKeyDigest,
+            running.attempt,
+            owner,
+            15
+          )
+          return {
+            first,
+            late,
+            row: Option.getOrThrow(
+              yield* attempts.get({
+                runId: running.runId,
+                stepKeyDigest: running.stepKeyDigest,
+                attempt: running.attempt
+              })
+            )
+          }
+        })
+      )
+
+      expect(result.first).toEqual({ _tag: "Updated" })
+      expect(result.late).toEqual({ _tag: "Updated" })
+      expect(result.row.heartbeatAtMs).toBe(20)
+    }))
+
+  it.effect("round-trips multi-megabyte run state, meta, error, and outcome without caps", () =>
     Effect.gen(function*() {
       const large = "x".repeat(2 * 1024 * 1024)
       const result = yield* migrated(
@@ -130,36 +163,18 @@ describe("run-store payload and timeline limits", () => {
             error: { large },
             outcome: { large }
           }, owner)
-          const oversizedState = yield* Effect.flip(
-            runs.create(
-              "oversized-state-run",
-              JSON.stringify({ large: "x".repeat(RunStore.maximumRunStateBytes) })
-            )
-          )
-          const oversizedMeta = yield* Effect.flip(attempts.put({
-            ...id,
-            stepKeyDigest: "oversized-meta",
-            state: "running",
-            startedAtMs: 1,
-            meta: { large: "x".repeat(AttemptStore.maximumValueBytes) }
-          }, owner))
           return {
             attempt: Option.getOrThrow(yield* attempts.get(id)),
             finish,
-            oversizedMeta,
-            oversizedState,
             put,
             run: yield* runs.get("large-payload-run")
           }
         })
       )
 
-      // The public ceilings bound every executable JSON field. Only a
-      // checkpoint's lower configured limit may vary within its absolute cap.
+      // CONTRACT: only checkpoints have a configurable byte ceiling today.
       expect(result.put).toEqual({ _tag: "Inserted" })
       expect(result.finish).toEqual({ _tag: "Finished" })
-      expect(result.oversizedState).toMatchObject({ code: "invalid_run", method: "create" })
-      expect(result.oversizedMeta).toMatchObject({ code: "invalid_attempt", method: "put" })
       expect(result.run.stateJson.length).toBeGreaterThan(2 * 1024 * 1024)
       expect((result.attempt.meta as { readonly large: string }).large).toHaveLength(large.length)
       expect((result.attempt.error as { readonly large: string }).large).toHaveLength(large.length)

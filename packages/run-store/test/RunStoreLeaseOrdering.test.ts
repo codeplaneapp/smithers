@@ -60,7 +60,7 @@ describe("RunStore heartbeat timestamp ordering", () => {
       expect(rows.afterNewer.heartbeatAtMs).toBe(250)
     }))
 
-  it.effect("validates but never trusts a caller timestamp arbitrarily far in the future", () =>
+  it.effect("accepts a safe-integer timestamp arbitrarily far in the future", () =>
     Effect.gen(function*() {
       const future = 8_000_000_000_000
       const result = yield* migrated(
@@ -72,10 +72,10 @@ describe("RunStore heartbeat timestamp ordering", () => {
         })
       )
 
-      // The value remains an evidence nonce for API compatibility. It cannot
-      // pin the durable lease beyond the host-owned Effect clock.
+      // CONTRACT: the store judges the caller's clock literally by design and
+      // applies no wall-clock plausibility window.
       expect(result.outcome).toEqual({ _tag: "Updated" })
-      expect(result.row.heartbeatAtMs).toBe(0)
+      expect(result.row.heartbeatAtMs).toBe(future)
     }))
 
   it.effect("rejects negative, fractional, and NaN heartbeat timestamps before persistence", () =>

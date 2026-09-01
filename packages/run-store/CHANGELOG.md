@@ -41,11 +41,16 @@
 
 ### Changed
 
-- The injected Effect `Clock` is now the sole authority for ownership and
-  lifecycle timestamps. Caller timestamps bind observations but cannot expire
-  or extend leases.
-- Run and attempt state now crosses a bounded inert-JSON boundary before every
-  write and after every read.
+- Every caller timestamp is validated as a non-negative safe integer before it
+  reaches SQL, so `NaN`, a fraction, or a negative reading fails with a typed
+  `invalid_run` or `invalid_attempt` instead of a column-constraint error or a
+  success-shaped refusal. The two clock sources are unchanged and now written
+  down: evidence-bearing operations judge the caller's `nowMs` literally, while
+  `create`, `activate`, and `transitionOwned` stamp from the Effect `Clock`.
+- Run and attempt state now crosses an inert-JSON boundary before every write
+  and after every read. It bounds shape, not size: accessors, `toJSON`, cycles,
+  malformed text, excess depth, and excess nodes are refused, while run state,
+  metadata, errors, and outcomes stay uncapped in bytes.
 - Running snapshots require a complete owner and heartbeat pair; all other
   statuses reject either field, and terminal attempts and runs cannot reopen.
 - Same-host PID checks now treat only `ESRCH` as proof of death and fail closed

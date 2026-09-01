@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { DurableWriter } from "@smthrs/database/DurableWriter"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Option } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as AttemptStore from "../src/AttemptStore.ts"
 import * as Migrations from "../src/Migrations.ts"
@@ -177,7 +177,7 @@ describe("AttemptStore inert input boundary", () => {
       expect(calls).toBe(0)
     }))
 
-  it.effect("rejects lifecycle reversals already present in SQLite", () =>
+  it.effect("round-trips independently valid lifecycle timestamps already present in SQLite", () =>
     withStore((store) =>
       Effect.gen(function*() {
         const sql = yield* SqlClient.SqlClient
@@ -191,15 +191,22 @@ describe("AttemptStore inert input boundary", () => {
           UPDATE flows_attempts SET heartbeat_at_ms = 0
           WHERE run_id = 'boundary-run' AND step_key_digest = 'step-1'
         `
-        for (const attempt of [0, 1]) {
-          expect(
-            yield* failureCode(store.get({
-              runId: "boundary-run",
-              stepKeyDigest: `step-${attempt}`,
-              attempt
-            }))
-          ).toBe("decode_failed")
-        }
+        const finished = Option.getOrThrow(
+          yield* store.get({
+            runId: "boundary-run",
+            stepKeyDigest: "step-0",
+            attempt: 0
+          })
+        )
+        const heartbeat = Option.getOrThrow(
+          yield* store.get({
+            runId: "boundary-run",
+            stepKeyDigest: "step-1",
+            attempt: 1
+          })
+        )
+        expect(finished).toMatchObject({ startedAtMs: 1, finishedAtMs: 0 })
+        expect(heartbeat).toMatchObject({ startedAtMs: 1, heartbeatAtMs: 0 })
       })
     ))
 })
