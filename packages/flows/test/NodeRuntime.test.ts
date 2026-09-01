@@ -27,7 +27,10 @@
  * creation the composition owns, SHA-256 over `node:crypto`, and a `Jj` stub
  * because the flows below take no compensable snapshot.
  */
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { afterAll, describe, expect, it } from "@effect/vitest"
+import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
 import * as Capability from "@smthrs/capability/Capability"
 import * as Permission from "@smthrs/capability/Permission"
 import * as Cause from "effect/Cause"
@@ -41,6 +44,7 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { execFileSync } from "node:child_process"
 import { createHash, webcrypto } from "node:crypto"
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -256,6 +260,61 @@ describe("the supported Node SQLite composition", () => {
     expect(existsSync(filename)).toBe(false)
   })
 
+  it("stores artifacts beside the database without nesting a second .flows directory", async () => {
+    const root = join(directory, "artifact-root")
+    const database = join(root, ".flows", "engine.sqlite")
+    const payload = new TextEncoder().encode("node-runtime-artifact-root")
+    const digest = await Effect.runPromise(
+      Effect.gen(function*() {
+        const artifacts = yield* ArtifactStore.ArtifactStore
+        return yield* artifacts.put(payload)
+      }).pipe(
+        Effect.provide(NodeRuntime.storage(database, root)),
+        Effect.provide(Layer.merge(NodeFileSystem.layer, NodeCrypto.layer)),
+        Effect.scoped
+      )
+    )
+
+    expect(existsSync(join(root, ".flows", "objects", digest.slice(0, 2), digest))).toBe(true)
+    expect(existsSync(join(root, ".flows", ".flows"))).toBe(false)
+  })
+
+  it("resolves and snapshots relative storage options when the layer is declared", async () => {
+    const root = join(directory, "relative-options")
+    mkdirSync(root, { recursive: true })
+    const originalDirectory = process.cwd()
+    const mutable = {
+      filename: "state/runtime.sqlite",
+      owner: { hostId: "relative-a" },
+      isAlive: () => Effect.succeed(false)
+    }
+    const declared = (() => {
+      process.chdir(root)
+      try {
+        return NodeRuntime.layer(
+          mutable,
+          StepBoundary.layer,
+          WorkspaceSandbox.layerFileSystem(),
+          Layer.empty
+        )
+      } finally {
+        process.chdir(originalDirectory)
+      }
+    })()
+    mutable.filename = "moved/runtime.sqlite"
+    mutable.owner.hostId = "relative-b"
+    mutable.isAlive = () => Effect.succeed(true)
+
+    await Effect.runPromise(
+      Layer.build(declared).pipe(
+        Effect.provide(host),
+        Effect.scoped
+      )
+    )
+    expect(existsSync(join(root, "state", "runtime.sqlite"))).toBe(true)
+    expect(existsSync(join(originalDirectory, "moved", "runtime.sqlite"))).toBe(false)
+  })
+
   it("migrates, runs, shuts down, and resumes a parked run over one file", async () => {
     // ---------------------------------------------------------------- scope 1
     // Migrate, register, drive one flow to completion, park a second.
@@ -429,6 +488,19 @@ describe("the Node host composition", () => {
     execute: Effect.succeed("mutated")
   })
 
+  /** Tries action-facing Jj directly; engine-private authority must not leak here. */
+  const TryJjStatus = Action.make({
+    name: "flows/host/try-jj-status",
+    success: Schema.String,
+    tier: "sealed",
+    idempotencyKey: "flows/host/try-jj-status/v1",
+    execute: Effect.gen(function*() {
+      const jj = yield* Jj.Jj
+      const attempt = yield* Effect.exit(jj.status())
+      return Exit.isFailure(attempt) ? `refused: ${String(attempt.cause)}` : attempt.value
+    })
+  })
+
   /** Spawns a two-process tree and waits for it, so a released run has one to kill. */
   const Sleep = Action.make({
     name: "flows/host/sleep",
@@ -473,6 +545,7 @@ describe("the Node host composition", () => {
       if (what === "read") return yield* ReadNote
       if (what === "spawn") return yield* TrySpawn
       if (what === "mutate") return yield* Mutate
+      if (what === "jj-status") return yield* TryJjStatus
       if (what === "sleep-again") return yield* SleepAgain
       return yield* Sleep
     })
@@ -551,6 +624,83 @@ describe("the Node host composition", () => {
     expect(during).toBe(before + 1)
     expect(process.listenerCount("SIGTERM")).toBe(before)
   }, 60_000)
+
+  it("snapshots policy, signal, owner, and path options before the host builds", async () => {
+    mkdirSync(hostRoot, { recursive: true })
+    writeFileSync(note, "host note")
+    const snapshotFile = join(hostRoot, "snapshot-runtime.sqlite")
+    const movedFile = join(hostRoot, "moved-runtime.sqlite")
+    const signals: Array<NodeJS.Signals> = ["SIGUSR2", "SIGUSR2"]
+    const rules = [
+      new Permission.Rule({
+        effect: "allow",
+        pattern: new Capability.CapabilityPattern({ action: "fs:read", resource: `${hostRoot}/**` })
+      })
+    ]
+    const configured = {
+      filename: snapshotFile,
+      workspaceRoot: hostRoot,
+      owner: { hostId: "snapshot-host" },
+      signals,
+      shutdownTimeoutMs: 25,
+      rules
+    }
+    const declared = NodeRuntime.layerHost(configured, hostFlows)
+    configured.filename = movedFile
+    configured.owner.hostId = "mutated-host"
+    configured.shutdownTimeoutMs = Number.NaN
+    signals.splice(0, signals.length, "SIGTERM")
+    rules[0] = new Permission.Rule({
+      effect: "deny",
+      pattern: new Capability.CapabilityPattern({ action: "fs:read", resource: "*" })
+    })
+
+    const beforeUser = process.listenerCount("SIGUSR2")
+    const beforeTerm = process.listenerCount("SIGTERM")
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        return {
+          user: process.listenerCount("SIGUSR2"),
+          term: process.listenerCount("SIGTERM"),
+          value: yield* Host.execute({ what: "read" }, { executionId: "host-options-snapshot" })
+        }
+      }).pipe(Effect.provide(declared), Effect.scoped)
+    )
+
+    expect(observed).toEqual({ user: beforeUser + 1, term: beforeTerm, value: "host note" })
+    expect(existsSync(snapshotFile)).toBe(true)
+    expect(existsSync(movedFile)).toBe(false)
+    expect(process.listenerCount("SIGUSR2")).toBe(beforeUser)
+  }, 60_000)
+
+  it("rejects uncatchable or unknown signals and invalid shutdown timers before installing listeners", () => {
+    const before = process.listenerCount("SIGUSR2")
+    for (const signal of ["SIGKILL", "SIGSTOP", "SIGNOTASIGNAL"] as Array<NodeJS.Signals>) {
+      expect(() =>
+        NodeRuntime.layerHost(
+          { filename: hostFile, owner: { hostId: "invalid-signal" }, signals: ["SIGUSR2", signal] },
+          Layer.empty
+        )
+      ).toThrow(/cannot install signal/)
+    }
+    for (
+      const shutdownTimeoutMs of [
+        -1,
+        0.5,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        NodeRuntime.maximumShutdownTimeoutMs + 1
+      ]
+    ) {
+      expect(() =>
+        NodeRuntime.layerHost(
+          { filename: hostFile, owner: { hostId: "invalid-timeout" }, signals: [], shutdownTimeoutMs },
+          Layer.empty
+        )
+      ).toThrow(/shutdownTimeoutMs/)
+    }
+    expect(process.listenerCount("SIGUSR2")).toBe(before)
+  })
 
   it("leaves with the signal's default status when the operator signals twice", async () => {
     // The handler's two escapes only run in a process that is on its way out,
@@ -664,11 +814,8 @@ describe("the Node host composition", () => {
     expect(groupIsAlive(spawned[0]!)).toBe(false)
   }, 60_000)
 
-  it("lets the engine take a compensable action's pre-image with no jj rule configured", async () => {
-    // The engine's own `SnapshotBoundary` and `ActionPersistence` resolve the
-    // GUARDED `Jj`, so before `engineRules` existed this composition could not
-    // run a compensable action at all: the refusal arrived before the body,
-    // aimed at the engine rather than at anything the flow asked for.
+  it("takes a compensable pre-image privately without granting action-facing Jj", async () => {
+    if (!existsSync(join(hostRoot, ".jj"))) execFileSync("jj", ["git", "init", hostRoot], { stdio: "ignore" })
     const outcome = await Effect.runPromise(
       Effect.exit(Host.execute({ what: "mutate" }, { executionId: "host-mutate" })).pipe(
         Effect.provide(
@@ -681,21 +828,25 @@ describe("the Node host composition", () => {
       )
     )
 
-    // This machine has no jj repository under the temp directory, so jj itself
-    // says no. What matters is WHICH no: a jj failure means the capability
-    // check let the engine through, a permission failure means it did not.
-    const reported = Exit.isFailure(outcome) ? String(outcome.cause) : "succeeded"
-    expect(reported).not.toMatch(/Permission/)
-    expect(NodeRuntime.engineRules.map((rule) => rule.pattern.action)).toEqual([
-      "jj:snapshot",
-      "jj:restore",
-      "jj:diff"
-    ])
+    expect(outcome).toMatchObject({ _tag: "Success", value: "mutated" })
+
+    const direct = await Effect.runPromise(
+      Host.execute({ what: "jj-status" }, { executionId: "host-jj-status" }).pipe(
+        Effect.provide(
+          NodeRuntime.layerHost(
+            { filename: hostFile, owner: { hostId: "host-j" }, signals: [] },
+            hostFlows
+          )
+        ),
+        Effect.scoped
+      )
+    )
+    expect(direct).toMatch(/^refused:/)
+    expect(direct).toMatch(/Permission/)
   }, 60_000)
 
-  it("still refuses the engine's pre-image when the program denies it", async () => {
-    // `engineRules` are a DEFAULT, merged under the program's own policy: a
-    // host that means to deny jj keeps denying it.
+  it("keeps engine bookkeeping independent of an explicit action-facing Jj denial", async () => {
+    if (!existsSync(join(hostRoot, ".jj"))) execFileSync("jj", ["git", "init", hostRoot], { stdio: "ignore" })
     const outcome = await Effect.runPromise(
       Effect.exit(Host.execute({ what: "mutate" }, { executionId: "host-mutate-denied" })).pipe(
         Effect.provide(
@@ -718,8 +869,7 @@ describe("the Node host composition", () => {
       )
     )
 
-    expect(Exit.isFailure(outcome)).toBe(true)
-    expect(String(Exit.isFailure(outcome) ? outcome.cause : "")).toMatch(/Permission/)
+    expect(outcome).toMatchObject({ _tag: "Success", value: "mutated" })
   }, 60_000)
 
   it("kills what a run spawned when a SECOND driver over the same file interrupts it", async () => {

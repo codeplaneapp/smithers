@@ -26,6 +26,7 @@ import { SqlJournal } from "@smthrs/journal"
 import type * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
 import * as GrantStore from "@smthrs/kernel/GrantStore"
 import * as HostServices from "@smthrs/kernel/HostServices"
+import * as KernelJj from "@smthrs/kernel/Jj"
 import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import * as Workspace from "@smthrs/kernel/Workspace"
 import * as HostLiveness from "@smthrs/platform-node/HostLiveness"
@@ -78,6 +79,24 @@ export interface Options {
   readonly isAlive: Ownership.LivenessCheck
 }
 
+/**
+ * Stable failure raised synchronously for invalid runtime construction input.
+ *
+ * @since 1.0.0
+ * @category errors
+ */
+export class RuntimeConfigurationError extends Schema.TaggedError<RuntimeConfigurationError>()(
+  "@smthrs/flows/RuntimeConfigurationError",
+  {
+    code: Schema.Literal("invalid_runtime_configuration"),
+    field: Schema.String,
+    message: Schema.String
+  }
+) {}
+
+const invalidConfiguration = (field: string, message: string): RuntimeConfigurationError =>
+  new RuntimeConfigurationError({ code: "invalid_runtime_configuration", field, message })
+
 const Configuration = Schema.Struct({
   filename: Schema.NonEmptyString,
   workspaceRoot: Schema.optional(Schema.NonEmptyString),
@@ -97,12 +116,20 @@ const validate = (options: Options): ValidatedOptions => {
   const workspaceRoot = options.workspaceRoot
   const owner = options.owner
   const isAlive = options.isAlive
-  const decoded = Schema.decodeUnknownSync(Configuration)({
-    filename,
-    ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
-    owner
-  })
-  if (typeof isAlive !== "function") throw new TypeError("NodeRuntime isAlive must be a function")
+  const decoded = (() => {
+    try {
+      return Schema.decodeUnknownSync(Configuration)({
+        filename,
+        ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
+        owner
+      })
+    } catch {
+      throw invalidConfiguration("options", "NodeRuntime requires non-empty filename and owner.hostId values")
+    }
+  })()
+  if (typeof isAlive !== "function") {
+    throw invalidConfiguration("isAlive", "NodeRuntime isAlive must be a function")
+  }
   const absoluteFilename = resolve(decoded.filename)
   return Object.freeze({
     filename: absoluteFilename,
@@ -145,7 +172,13 @@ const databaseLayer = (filename: string) =>
  * @slop
  */
 export const storage = (filename: string, workspaceRoot?: string) => {
-  const validatedFilename = resolve(Schema.decodeUnknownSync(Schema.NonEmptyString)(filename))
+  let decodedFilename: string
+  try {
+    decodedFilename = Schema.decodeUnknownSync(Schema.NonEmptyString)(filename)
+  } catch {
+    throw invalidConfiguration("filename", "NodeRuntime filename must be a non-empty string")
+  }
+  const validatedFilename = resolve(decodedFilename)
   const databaseRoot = dirname(validatedFilename)
   const resolvedWorkspaceRoot = resolve(
     Schema.decodeUnknownSync(Schema.NonEmptyString)(workspaceRoot ?? databaseRoot)
@@ -340,7 +373,12 @@ const defaultSignals: ReadonlyArray<NodeJS.Signals> = Object.freeze(["SIGINT", "
  */
 export const defaultShutdownTimeoutMs = 30_000
 
-/** Largest delay Node accepts without truncating it to a one-millisecond timer. */
+/**
+ * Largest delay Node accepts without truncating it to a one-millisecond timer.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export const maximumShutdownTimeoutMs = 2_147_483_647
 
 const catchableSignals = new Set<NodeJS.Signals>(
@@ -353,12 +391,14 @@ const snapshotSignals = (
   signals: ReadonlyArray<NodeJS.Signals> | undefined
 ): ReadonlyArray<NodeJS.Signals> => {
   const configured = signals ?? defaultSignals
-  if (!Array.isArray(configured)) throw new TypeError("NodeRuntime signals must be an array")
+  if (!Array.isArray(configured)) {
+    throw invalidConfiguration("signals", "NodeRuntime signals must be an array")
+  }
   const snapshot: Array<NodeJS.Signals> = []
   const seen = new Set<NodeJS.Signals>()
   for (const candidate of configured as ReadonlyArray<unknown>) {
     if (typeof candidate !== "string" || !catchableSignals.has(candidate as NodeJS.Signals)) {
-      throw new TypeError(`NodeRuntime cannot install signal ${String(candidate)}`)
+      throw invalidConfiguration("signals", `NodeRuntime cannot install signal ${String(candidate)}`)
     }
     const signal = candidate as NodeJS.Signals
     if (!seen.has(signal)) {
@@ -373,7 +413,8 @@ const snapshotSignals = (
 const snapshotShutdownTimeout = (timeoutMs: number | undefined): number => {
   const timeout = timeoutMs ?? defaultShutdownTimeoutMs
   if (!Number.isSafeInteger(timeout) || timeout < 0 || timeout > maximumShutdownTimeoutMs) {
-    throw new TypeError(
+    throw invalidConfiguration(
+      "shutdownTimeoutMs",
       `NodeRuntime shutdownTimeoutMs must be an integer from 0 through ${maximumShutdownTimeoutMs}`
     )
   }
@@ -394,11 +435,15 @@ const snapshotRules = (
   rules: GrantStore.MakeOptions["rules"]
 ): GrantStore.MakeOptions["rules"] => {
   if (rules === undefined) return undefined
-  if (!Array.isArray(rules)) throw new TypeError("NodeRuntime rules must be an array")
+  if (!Array.isArray(rules)) {
+    throw invalidConfiguration("rules", "NodeRuntime rules must be an array")
+  }
   if (rules.length > 0 && Array.isArray(rules[0])) {
     return Object.freeze(
       (rules as ReadonlyArray<ReadonlyArray<Permission.Rule>>).map((ruleset) => {
-        if (!Array.isArray(ruleset)) throw new TypeError("NodeRuntime rulesets must be arrays")
+        if (!Array.isArray(ruleset)) {
+          throw invalidConfiguration("rules", "NodeRuntime rulesets must be arrays")
+        }
         return Object.freeze(ruleset.map(snapshotRule))
       })
     )
@@ -478,53 +523,6 @@ export const signalExitCode = (signal: NodeJS.Signals): number =>
   128 + ((constants.signals as Record<string, number>)[signal] ?? constants.signals.SIGTERM)
 
 /**
- * The capability rules the ENGINE's own bookkeeping runs under.
- *
- * A compensable action is snapshotted and restored by `EngineStore` itself,
- * through the same guarded `Jj` the flow body sees, because an action resolves
- * its host services from the engine's context. Without these rules a host built
- * by {@link layerHost} could not run a compensable action at all: the engine's
- * own pre-image would be refused before the body ever started, which is a
- * refusal aimed at the engine rather than at anything a flow asked for.
- *
- * They are merged UNDER a program's own {@link HostOptions.rules}, so a policy
- * that denies `jj:snapshot` still denies it. The snapshot pattern is the
- * message the engine writes and nothing else; `jj:restore` names a change id,
- * which is opaque, so it cannot be narrowed further.
- *
- * @since 0.1.0
- * @category models
- */
-export const engineRules: ReadonlyArray<Permission.Rule> = [
-  new Permission.Rule({
-    effect: "allow",
-    pattern: new Capability.CapabilityPattern({ action: "jj:snapshot", resource: "smithers action *" })
-  }),
-  new Permission.Rule({
-    effect: "allow",
-    pattern: new Capability.CapabilityPattern({ action: "jj:restore", resource: "*" })
-  }),
-  new Permission.Rule({
-    effect: "allow",
-    pattern: new Capability.CapabilityPattern({ action: "jj:diff", resource: "*" })
-  })
-]
-
-/** Puts {@link engineRules} beneath a program's configured ruleset. */
-const withEngineRules = (
-  rules: GrantStore.MakeOptions["rules"]
-): ReadonlyArray<ReadonlyArray<Permission.Rule>> => {
-  if (rules === undefined || rules.length === 0) return [engineRules]
-  const nested: ReadonlyArray<ReadonlyArray<Permission.Rule>> = Array.isArray(rules[0])
-    ? rules as ReadonlyArray<ReadonlyArray<Permission.Rule>>
-    : [rules as ReadonlyArray<Permission.Rule>]
-  // Configured policy is the FIRST ruleset and the last match in it wins, so
-  // prepending leaves a program free to deny what it does not want granted.
-  /* v8 ignore next -- the empty-`rules` case already returned, so `nested` always has a first ruleset; the fallback only discharges the optional an index read carries */
-  return [[...engineRules, ...(nested[0] ?? [])], ...nested.slice(1)]
-}
-
-/**
  * Installs the shutdown handlers and removes them when the scope closes.
  *
  * The handler closes the runtime's own scope rather than interrupting a fiber.
@@ -602,10 +600,9 @@ const onSignal = (
  *   crash left running.
  * - The kernel's guarded Host surface over an unattended `GrantStore`, so an
  *   action reaches the host through the capability check rather than around
- *   it. A capability no rule in {@link HostOptions.rules} allows is denied,
- *   with one documented exception: {@link engineRules} let the ENGINE take the
- *   pre-image a compensable action needs, because that snapshot is the
- *   engine's own bookkeeping and not something the flow asked for.
+ *   it. A capability no rule in {@link HostOptions.rules} allows is denied.
+ *   Engine snapshot bookkeeping uses a distinct private Jj service, so it
+ *   grants no repository authority to the action context.
  * - The default `StepBoundary` and filesystem `WorkspaceSandbox`, which is the
  *   pairing that makes a sealed action's result eligible for the step cache.
  * - Signal handling: `SIGINT` or `SIGTERM` closes the runtime scope, which
@@ -650,21 +647,25 @@ export const layerHost = <
   // exists for. That is why the engine is built over the kernel here and not
   // beside it: an action resolves its host services from the engine's context.
   const raw = Layer.mergeAll(NodeHost.layerAt(workspaceRoot), NodeHost.NodeCrypto.layer)
+  const privilegedJj = Layer.effect(KernelJj.Jj, KernelJj.Jj).pipe(Layer.provide(raw))
   const store = storage(validated.filename, workspaceRoot).pipe(Layer.provideMerge(raw))
   const execution = Layer.merge(StepBoundary.layer, WorkspaceSandbox.layerFileSystem()).pipe(
     Layer.provideMerge(store)
   )
   const guarded = HostServices.layer.pipe(
-    Layer.provide(Layer.orDie(GrantStore.layer({ attended: false, rules: withEngineRules(validated.rules) }))),
+    Layer.provide(Layer.orDie(GrantStore.layer({ attended: false, rules: validated.rules }))),
     Layer.provideMerge(NodeHost.layerContainedAt(workspaceRoot, validated.containment)),
     Layer.provideMerge(ProcessLedger.layer({ hostId: validated.owner.hostId, ownerPid: process.pid })),
     Layer.provideMerge(execution)
   )
-  const engine = EngineStore.layer({
-    owner: validated.owner,
-    journalSource: `${validated.owner.hostId}-engine`,
-    isAlive: validated.isAlive
-  }).pipe(Layer.provideMerge(guarded))
+  const engine = EngineStore.layerWithPrivilegedJj(
+    {
+      owner: validated.owner,
+      journalSource: `${validated.owner.hostId}-engine`,
+      isAlive: validated.isAlive
+    },
+    privilegedJj
+  ).pipe(Layer.provideMerge(guarded))
   // Registration stays the final startup phase, exactly as in `layer`: no
   // persisted run can resume through this composition before its flow is
   // registered. The registry sits directly beneath it, so a registration built
