@@ -1,14 +1,14 @@
 One thing here is bounded and the rest is sized by the host's heap. A caller
 placing an agent's file tools on a machine should know which is which.
 
-| Path | Bound |
-| --- | --- |
-| a command's standard input | 16 MiB, refused above it. The count runs as the bytes arrive, so an oversized or endless producer is stopped at the bound rather than after it finishes |
-| `Session.readFile`, `Session.writeFile` | none. A file crosses whole, in memory, on every provider |
-| a command's `stdout` and `stderr` | none. `RemoteChildProcessSpawner` and the probe helpers collect a command's output whole |
-| `Sandbox.fileSystem.readDirectory` | none, and a listing is materialized twice: once as probe output and once as the parsed entries |
-| `AwsSandbox` command output | none, and buffered whole by construction: the Session Manager channel carries one session's output as a single stream that is parsed after it ends |
-| `AwsSandbox` file writes | one remote `aws ecs execute-command` round trip per `ExecTransport.chunkBytes` bytes (default 3072 before base64). A 64 MiB write at the default is roughly 22,000 sequential invocations. The option must be a whole number of at least 1; the upper end is the SSM document's own command-length limit |
+| Path                                    | Bound                                                                                                                                                                                                                                                                                                    |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a command's standard input              | 16 MiB, refused above it. The count runs as the bytes arrive, so an oversized or endless producer is stopped at the bound rather than after it finishes                                                                                                                                                  |
+| `Session.readFile`, `Session.writeFile` | none. A file crosses whole, in memory, on every provider                                                                                                                                                                                                                                                 |
+| a command's `stdout` and `stderr`       | none. `RemoteChildProcessSpawner` and the probe helpers collect a command's output whole                                                                                                                                                                                                                 |
+| `Sandbox.fileSystem.readDirectory`      | none, and a listing is materialized twice: once as probe output and once as the parsed entries                                                                                                                                                                                                           |
+| `AwsSandbox` command output             | none, and buffered whole by construction: the Session Manager channel carries one session's output as a single stream that is parsed after it ends                                                                                                                                                       |
+| `AwsSandbox` file writes                | one remote `aws ecs execute-command` round trip per `ExecTransport.chunkBytes` bytes (default 3072 before base64). A 64 MiB write at the default is roughly 22,000 sequential invocations. The option must be a whole number of at least 1; the upper end is the SSM document's own command-length limit |
 
 Command output is byte-exact through `DirectorySandbox`, `ContainerSandbox`,
 `KubernetesSandbox`, `MicrosandboxSandbox`, and `JustBashSandbox`. It is not
