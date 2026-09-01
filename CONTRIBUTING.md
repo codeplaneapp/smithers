@@ -39,6 +39,7 @@ The cost is that one edit lands in several places. If you change:
 | Root `package.json` scripts | `packages/flows/test/vitestCoverageIsolation.test.ts` (the aggregator roster). |
 | Root `PACKAGE.ts` CI lanes, triggers, or generated-file set | The generated GitHub files (`pnpm exec smithers-build target '//:githubCi' --write`) and `packages/flows/test/vitestCoverageIsolation.test.ts` source-text pins. |
 | Any tracked file addition or removal | `known-files.d.ts` (`node scripts/generate-known-files.mjs`). |
+| The `tsconfig` declaration in root `BUILD.ts` | `tsconfig.json` (`pnpm exec smithers-build target '//:tsconfig' --write`). |
 | A dependency or package manifest | Both `pnpm-lock.yaml` and `bun.lock`. |
 | A nested `WORKSPACE.ts` or `.smithers/WORKSPACE.ts` tree | The `repos` map in `.smithers/WORKSPACE.ts`. Discovery otherwise throws `nested_workspace_undeclared`. |
 | `.github/workflows/release.yml` | `packages/flows/test/vitestCoverageIsolation.test.ts` and `scripts/release-rehearsal.test.mjs`. |

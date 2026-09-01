@@ -107,6 +107,22 @@ const knownFiles = S.Generate({
   changes: ["known-files.d.ts"]
 })
 
+// Port of BUILD.ts //:tsconfig, which commit 43f2342367 added after 51 commits
+// had touched a generated file no gate read. Package mode has no Tsconfig
+// executor, so the flip carried the declaration over without its check; the
+// generator renders the same declaration through the same renderer.
+//
+// `data` names the sources the rendered bytes depend on. A Generate check keys
+// on its script and on the checked-in file, not on what the generator reads, so
+// without `data` an edit to the declaration in BUILD.ts or to the renderer
+// passes in three milliseconds as a cache hit. That is the exact failure this
+// target exists to catch.
+const tsconfig = S.Generate({
+  script: S.file("scripts/generate-tsconfig.mjs"),
+  data: [S.file("BUILD.ts"), S.file("packages/targets/src/Tsconfig.ts")],
+  changes: ["tsconfig.json"]
+})
+
 // --- the packages/* graph ------------------------------------------------
 
 // The 51 packages that carry the shape BUILD-era PackageDefaults synthesized:
@@ -218,10 +234,11 @@ const agentLints = S.Suite({
 // --- suites -------------------------------------------------------------
 
 // Every deterministic gate the repository declares: one `<dir>.ci` per ported
-// directory plus the generated-registry drift check.
+// directory plus the two generated-file drift checks.
 const gates = S.Suite({
   tests: [
     knownFiles,
+    tsconfig,
     ...packageCi,
     ui.ci,
     uiStyleguide.ci,
@@ -250,6 +267,7 @@ const gates = S.Suite({
 const preCommit = S.Suite({
   tests: [
     knownFiles,
+    tsconfig,
     scripts.dependencyBoundaries,
     scripts.effectVersion,
     scripts.lockfilePair,
@@ -489,6 +507,7 @@ export const Package = S.Package({
   targets: {
     srcs,
     knownFiles,
+    tsconfig,
     durableIdentityGuard,
     docsReferenceSync,
     jsdocTruthfulness,

@@ -6,7 +6,7 @@
   "language": "typescript",
   "branch": "smthrs-dogfood",
   "base": "84ac43ad1e",
-  "labels": 606,
+  "labels": 607,
   "kinds": {
     "Shell.Test": 318,
     "Filegroup": 123,
@@ -181,6 +181,11 @@
       "label": "//scripts:lockfilePair",
       "kind": "deterministic",
       "evidence": "AGENTS.md invariant with no enforcer; 117 pnpm-only vs 91 bun-only commits"
+    },
+    {
+      "label": "//:tsconfig",
+      "kind": "drift check restored",
+      "evidence": "the flip dropped the BUILD-era Tsconfig gate because that rule has no package-mode executor; re-expressed as S.Generate over scripts/generate-tsconfig.mjs"
     }
   ],
   "engineDefectsFound": [
@@ -208,6 +213,11 @@
       "area": "GithubRender",
       "summary": "the root package's empty directory rendered the setup action as .//actions/setup, which GitHub rejects",
       "test": "packages/build-cli/test/GithubRender.test.ts"
+    },
+    {
+      "area": "PACKAGE.ts convention",
+      "summary": "a package that ships a Package.ts module gains a case-colliding sibling when it declares PACKAGE.ts; eslint's resolver then reads the declaration instead of the module on macOS and Windows",
+      "test": "documented in SMITHERS-NOTES.md; Linux CI unaffected"
     }
   ],
   "proposals": [

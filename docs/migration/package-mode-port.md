@@ -31,10 +31,32 @@ convention, so the repo dogfoods the same surface partners use.
 | `EsLint` / `Dprint` | `S.Shell.Test` (`eslint --max-warnings 0`, `dprint check`) |
 | `Generate` (known-files) | `S.Generate` unchanged (implemented) |
 | `GithubCiGen //:ci` | `S.Github.Ci({ workflows })` emitting `.github/workflows/*` |
-| `Tsconfig` | `S.Generate` script emitting `tsconfig.json` + drift via lint kind |
+| `Tsconfig` | `S.Generate` over `scripts/generate-tsconfig.mjs` emitting `tsconfig.json`, drift via the check kind |
 | `Lockfile` + `Install` | `WORKSPACE.ts` `packageManager` + `nodeModules: S.Npm.NodeModules` |
 | `PackageDefaults` synthesis | explicit per-package `PACKAGE.ts` (no macro in package mode) |
 | `LlmLint` (lint/BUILD.ts) | `S.Agent.Lint({ agent: S.Agents.reviewPool, prompt: workflows/lints/*.md, data: [S.gitDiff…] })` |
+
+### A rule with no executor is a gate that disappears
+
+The flip shipped without the `Tsconfig` row above, and nothing reported it:
+`query '//...'` simply stopped listing `//:tsconfig`, so the drift check that
+commit 43f2342367 added, after 51 commits had hand-edited a generated file,
+was gone while every other cell stayed green. Re-express every unexecutable
+rule before the flip, and diff the label sets across it. Silence is what this
+class of regression looks like.
+
+The tsconfig port keeps one description rather than copying the declaration
+into the script: `scripts/generate-tsconfig.mjs` reads root BUILD.ts's
+`tsconfig` declaration and renders it through `Tsconfig.render`, the function
+the BUILD-mode rule calls, so the bytes match by construction. Deleting root
+BUILD.ts moves that declaration into the script.
+
+`//:tsconfig` also declares `data`, which `//:knownFiles` does not need.
+`S.Generate` keys a check on its script, and the cached verdict already
+covers the checked-in file, but not the sources the generator reads: without
+`data`, editing the declaration and skipping the regeneration passes in three
+milliseconds as a cache hit, which is the exact failure the target exists to
+catch.
 
 ## Authoring contract (every file)
 

@@ -27,7 +27,7 @@ Every command below ran from the worktree root through
 
 | Probe | Result |
 | --- | --- |
-| `query '//...'` | 600 labels, no refusal |
+| `query '//...'` | 607 labels, no refusal |
 | `graph '//...'` | builds, `warnings: []` |
 | `target '//workflows/wave-reconciliation:waveReconciliation' --plan` | plans, `mode: execute`, key printed |
 | `target '//:ci' --plan` | plans |
@@ -39,13 +39,13 @@ Every command below ran from the worktree root through
 | `target '//packages/canonical:check'` | green, `ran 2.2s` |
 | `target '//packages/canonical:circular'` | green, `ran 909ms` |
 | `target '//:knownFiles'` | green, `ran 10.8s`, second run `hit 3.2ms` |
-| `target '//:preCommit'` | 339 targets, 335 ran, 2 hit, 1 member failed, 178.2s |
+| `target '//:preCommit'` | 343 targets, 341 ran, 1 member failed, 148.2s from cold |
 
 `//:preCommit` is the whole repository's static gate surface: every package's
 typecheck, lint, and format, plus the five root gates, plus the apps, evals,
 and examples typechecks. It runs in three minutes from cold. The single failing
-member is `//packages/build-cli:lint`, which fails identically on the
-unmodified base commit for a reason this host causes; see "Failure modes and
+member is `//packages/build-cli:lint`, which this branch causes on a
+case-insensitive filesystem and Linux CI does not see; see "Failure modes and
 host drift".
 
 The cache hits are the point. `//packages/canonical:lint` costs 7.2 seconds
@@ -57,17 +57,21 @@ cold and 3 milliseconds when nothing it reads has changed.
 
 | Rule | Labels |
 | --- | --- |
-| Shell.Test | 318 |
-| Filegroup | 123 |
-| Suite | 76 |
+| Shell.Test | 320 |
+| Filegroup | 125 |
+| Suite | 77 |
 | Shell.Build | 50 |
-| Github.Workflow | 9 |
+| Github.Workflow | 10 |
 | Shell.Run | 5 |
 | Agent.Lint | 4 |
 | Agent.Diff | 4 |
 | Alias | 2 |
+| Generate | 2 |
 | Cargo.Fetch, Cargo.Fmt, Cargo.Clippy, Cargo.Test | 1 each |
-| Github.Setup, Github.CiGen, Git.Commit, Git.Pr, Generate | 1 each |
+| Github.Setup, Github.CiGen, Git.Commit, Git.Pr | 1 each |
+
+The two `Generate` labels are the repository's generated-file drift checks,
+`//:knownFiles` and `//:tsconfig`.
 
 ## Judgment lints
 
@@ -149,6 +153,23 @@ Every one refused a real target, and each carries a red-then-green test.
    say so. `ci-faults`, `ci-node-macos`, and `ci-node-windows` are advisory by
    convention here and would be enforcing if the repository's branch
    protection required them.
+8. A declared `env` entry that names a path shadows the executor's own path
+   wiring and stays relative. A `Cargo.Fetch` data edge sets `CARGO_HOME` to
+   the fetch's delivery directory and registers it in `absoluteEnv`, which
+   `PackageExec.ts` joins with the workspace root immediately before spawn.
+   Declaring `CARGO_HOME` on the same target suppresses that, and the literal
+   string reaches the child. The port's `//crates/flows-jj:wasmReproducibility`
+   declared `CARGO_HOME: ".cargo-home"` and hit this. Cargo would have
+   resolved the relative value against the spawn cwd and read the right
+   registry, so the mistake was invisible there, but `build-wasm.mjs` turns
+   `CARGO_HOME` into a `--remap-path-prefix` operand and rustc matches that
+   prefix against absolute paths. The remap would have matched nothing and
+   baked this machine's registry path into the artifact, failing the byte
+   compare on the canonical host for a reason the message does not name. The
+   declaration now omits `CARGO_HOME` and takes the wired value. Two fixes
+   would close the class: resolve a declared workspace-relative path env the
+   way the wired one is resolved, or refuse a relative `CARGO_HOME` rather
+   than pass it through.
 
 ## The sandbox is new, and the test tier had to be declared for it
 
@@ -181,10 +202,49 @@ cache entry and re-runs that suite once.
 
 ## Failure modes and host drift
 
-- The `vendor/jj` submodule is not initialized in this worktree, so the
-  native Cargo targets refuse until `git submodule update --init`.
-- The wasm reproducibility gate needs `x86_64-unknown-linux-gnu`; this host
-  is `aarch64-apple-darwin`.
+- The `vendor/jj` submodule is not initialized in this worktree, which is what
+  makes `//crates/flows-jj:ci` red. `git submodule status` reports
+  `-47589ada70c12b3e829b5c98ab32503abad49eac vendor/jj`, and the crate takes
+  `jj-lib` as a path dependency on `vendor/jj/lib`, so cargo fails resolution
+  before it compiles anything: `//crates/flows-jj:fetch` exits 101 with
+  `failed to read .../vendor/jj/lib/Cargo.toml`. That one failure accounts for
+  four of the seven `//:gates` failures, because `cargoClippy`, `cargoTest`,
+  and `wasmReproducibility` skip behind it and `rust`, `wasm`, and `ci` go red
+  as their suites. It is not a sandbox problem: the fetch declares
+  `sandbox: { network: true }`, the plan carries it, `wrapSandbox` leaves a
+  `network: true` argv unwrapped, and the run reaches crates.io far enough to
+  print `Updating crates.io index` before the path dependency fails. The two
+  targets that need no dependency resolution stay green on this host,
+  confirmed under `--no-cache`: `cargoFmt` and `buildScript`.
+
+  The operator command is
+  `git submodule update --init --recursive vendor/jj`, run from
+  `~/smithers-smthrs-dogfood`. It needs no network here, because
+  `~/smithers/.git/modules/vendor/jj` already holds the pinned commit. It is
+  still not safe to run unprompted. This tree is a linked worktree, git keeps
+  one submodule gitdir per repository rather than per worktree, and that
+  gitdir's `core.worktree` currently resolves to `~/smithers/vendor/jj`.
+  Initializing here repoints it at this worktree and leaves the main
+  checkout's `vendor/jj` detached from its gitdir until the same command runs
+  there again. Running the cargo lane from `~/smithers`, which already has the
+  submodule checked out at the pinned commit, avoids the question. CI has no
+  such conflict: a fresh clone checks the submodule out into its own tree.
+
+  `Git.Submodules` does execute in package mode
+  (`PackageExec.ts` `implementedRules`), so the lane could declare the
+  checkout as a target instead of assuming it. It stays undeclared on purpose.
+  The rule shells out to `git submodule update --init --recursive`, so making
+  it a dependency of `fetch` would let any `//:gates` run rewrite the
+  operator's working copy as a side effect of running a test suite, and on a
+  linked worktree that side effect reaches a second checkout.
+- The wasm reproducibility gate needs `x86_64-unknown-linux-gnu`; this host is
+  `aarch64-apple-darwin`, confirmed against `canonicalHost` in
+  `crates/flows-jj/build-wasm.mjs`. The script refuses a foreign host by
+  design rather than report a byte diff, because cargo builds every build
+  script for the host and rustc folds the host triple into each `-C metadata`
+  hash. So `//crates/flows-jj:wasmReproducibility` cannot pass here even once
+  the submodule lands; it needs the container command the script prints, or
+  CI.
 - `test/ServiceSupervisor.test.ts` "SIGINT teardown" fails on this machine
   under load (load average 76 while the port ran) and fails identically on
   the unmodified base commit. It is a load-sensitive 10-second timeout, not a
@@ -196,10 +256,34 @@ cache entry and re-runs that suite once.
   @smthrs/targets/Package does not match the underlying filesystem`, and the
   other four are the `import/namespace` errors that follow from that failed
   resolution (`'metadata' not found in imported namespace 'PackageValue'` and
-  the same for `isPackage` and `targetKeyPattern`). They reproduce identically
-  on the unmodified base commit, and the rule that emits them tests the
-  filesystem's own casing behavior, so Linux CI does not see them. The lint is
-  not weakened to hide them.
+  the same for `isPackage` and `targetKeyPattern`).
+
+  An earlier revision of this file said they reproduce on the unmodified base
+  commit. That was wrong, and the correction matters more than the errors do.
+  The base check was run under `git stash`, which reverts tracked
+  modifications and leaves committed files alone, so the new `PACKAGE.ts`
+  files were still on disk and the tree under test was never the base tree.
+  `git cat-file -e 84ac43ad1e:packages/targets/PACKAGE.ts` fails: that file
+  does not exist at the base, and this branch introduced it.
+
+  The mechanism is the convention meeting a case-insensitive filesystem.
+  `packages/targets/src/Package.ts` is an ordinary source module, and the
+  package's export map sends `@smthrs/targets/Package` to it. Adding
+  `packages/targets/PACKAGE.ts` at the package root gives the resolver a
+  second file whose name differs only in case, and eslint's resolver reaches
+  the declaration file instead of the module. Probing with
+  `eslint --stdin --stdin-filename src/PackageIndex.ts` over an import of
+  `@smthrs/targets/Package` shows only `Package` resolving, never `metadata`,
+  `isPackage`, or `targetKeyPattern`, which is what the source module exports.
+
+  So this is a hazard of the PACKAGE.ts convention itself, not of this
+  repository: any package that ships a `Package.ts` module gains a
+  case-colliding sibling the moment it declares a `PACKAGE.ts`. Linux CI does
+  not see it, because there the two names are distinct files. `tsc` does not
+  see it either; `//packages/targets:check` is green. Only eslint's resolver
+  is affected. The lint is not weakened to hide it, and the fix belongs
+  upstream in either the convention or the resolver configuration rather than
+  in a suppression here.
 
 ## Open questions
 
