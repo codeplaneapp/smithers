@@ -129,4 +129,83 @@ describe("SyncClient cursors", () => {
       expect(reads[1]).toEqual([{ runId: "run", afterSeq: 1 }])
       expect(Array.from(second).map((value) => value.seq)).toEqual([2])
     }))
+
+  // The documented contract: the effective cursor is `max(caller,
+  // acknowledged)` per run. A caller whose cursor is AHEAD restored progress
+  // from its own persistence; regressing it to the acknowledged view would
+  // re-deliver entries it has already materialized, which is exactly what the
+  // client promises never to do.
+  it.effect("keeps a caller cursor that is ahead of the acknowledged view", () =>
+    Effect.gen(function*() {
+      const reads: Array<SyncProtocol.WorkspaceCursor> = []
+      const client = yield* SyncClient.make({
+        client: {
+          "Sync.Read": (request: SyncProtocol.ReadRequest) => {
+            reads.push(request.cursors)
+            return Effect.succeed({
+              entries: [entry("ahead", reads.length === 1 ? 4 : 10)],
+              cursors: [],
+              done: true
+            })
+          },
+          "Sync.Subscribe": () => Stream.empty
+        } as unknown as Parameters<typeof SyncClient.make>[0]["client"]
+      })
+      const scope = { _tag: "Run", runId: runId("ahead") } as const
+
+      yield* Stream.runDrain(client.subscribe({ scope, cursors: [] }).pipe(Stream.take(1)))
+      yield* Stream.runDrain(
+        client.subscribe({ scope, cursors: [{ runId: runId("ahead"), afterSeq: seq(9) }] }).pipe(
+          Stream.take(1)
+        )
+      )
+
+      expect(reads[0]).toEqual([])
+      expect(reads[1]).toEqual([{ runId: "ahead", afterSeq: 9 }])
+    }))
+
+  // The other direction of the same contract. A warm client cannot re-serve
+  // history it has already acknowledged without breaking that promise for the
+  // concurrent subscriptions sharing its map, so a BEHIND cursor is
+  // fast-forwarded. Rebuilding a projection from zero is a fresh client, whose
+  // acknowledged map is empty and which therefore honours the cursor exactly.
+  it.effect("fast-forwards a behind cursor on a warm client but honours it on a fresh one", () =>
+    Effect.gen(function*() {
+      const warmReads: Array<SyncProtocol.WorkspaceCursor> = []
+      const warm = yield* SyncClient.make({
+        client: {
+          "Sync.Read": (request: SyncProtocol.ReadRequest) => {
+            warmReads.push(request.cursors)
+            return Effect.succeed({
+              entries: warmReads.length === 1
+                ? [entry("rebuild", 0), entry("rebuild", 1)]
+                : [entry("rebuild", 2)],
+              cursors: [],
+              done: true
+            })
+          },
+          "Sync.Subscribe": () => Stream.empty
+        } as unknown as Parameters<typeof SyncClient.make>[0]["client"]
+      })
+      const scope = { _tag: "Run", runId: runId("rebuild") } as const
+      const behind = [{ runId: runId("rebuild"), afterSeq: seq(0) }]
+
+      yield* Stream.runDrain(warm.subscribe({ scope, cursors: [] }).pipe(Stream.take(2)))
+      yield* Stream.runDrain(warm.subscribe({ scope, cursors: behind }).pipe(Stream.take(1)))
+
+      const freshReads: Array<SyncProtocol.WorkspaceCursor> = []
+      const fresh = yield* SyncClient.make({
+        client: {
+          "Sync.Read": (request: SyncProtocol.ReadRequest) => {
+            freshReads.push(request.cursors)
+            return Effect.succeed({ entries: [entry("rebuild", 1)], cursors: [], done: true })
+          },
+          "Sync.Subscribe": () => Stream.empty
+        } as unknown as Parameters<typeof SyncClient.make>[0]["client"]
+      })
+      yield* Stream.runDrain(fresh.subscribe({ scope, cursors: behind }).pipe(Stream.take(1)))
+
+      expect(warmReads[1]).toEqual([{ runId: "rebuild", afterSeq: 1 }])
+      expect(freshReads[0]).toEqual([{ runId: "rebuild", afterSeq: 0 }])
+    }))
 })

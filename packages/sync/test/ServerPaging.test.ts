@@ -156,6 +156,45 @@ describe("SyncServer.read across a workspace", () => {
       expect(failure.code).toBe("unknown")
       expect(failure.cause).toBe(cause)
     }))
+
+  // Compaction is a recoverable refusal with a documented resume point, not an
+  // unclassified fault. Folding it into `unknown` threw away the checkpoint and
+  // with it any way for the follower to resync.
+  it.effect("surfaces a compacted journal read as a typed resync target", () =>
+    Effect.gen(function*() {
+      const cause = new Journal.JournalError({
+        code: "compacted",
+        message: "run busy-run is compacted through sequence 12; resync from its checkpoint",
+        checkpointSeq: seq(12)
+      })
+      const failure = yield* (
+        Effect.gen(function*() {
+          const server = yield* makeServer([busy], { entries: () => Effect.fail(cause) })
+          return yield* Effect.flip(server.read({ scope: workspace, cursors: [], limit: 10 }))
+        })
+      )
+
+      expect(failure.code).toBe("compacted")
+      expect(failure.resync).toEqual({ runId: busy, checkpointSeq: 12 })
+      expect(failure.cause).toBe(cause)
+    }))
+
+  // A compacted error the journal raised without a floor carries no resume
+  // point, so it stays an unclassified failure rather than pretending to one.
+  it.effect("keeps a compacted journal error without a checkpoint unclassified", () =>
+    Effect.gen(function*() {
+      const failure = yield* (
+        Effect.gen(function*() {
+          const server = yield* makeServer([busy], {
+            entries: () => Effect.fail(new Journal.JournalError({ code: "compacted", message: "no floor recorded" }))
+          })
+          return yield* Effect.flip(server.read({ scope: workspace, cursors: [], limit: 10 }))
+        })
+      )
+
+      expect(failure.code).toBe("unknown")
+      expect(failure.resync).toBeUndefined()
+    }))
 })
 
 describe("SyncServer.subscribe over a workspace scope", () => {

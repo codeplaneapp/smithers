@@ -78,6 +78,40 @@ export const WorkspaceCursor = Schema.Array(RunCursor)
 export type WorkspaceCursor = typeof WorkspaceCursor.Type
 
 /**
+ * Where a follower must resume after the server refused a cursor that starts
+ * below a run's compaction floor.
+ *
+ * Compaction deletes the entries below a checkpoint, so a cursor under the
+ * floor names history that no longer exists. `checkpointSeq` is that floor:
+ * the checkpoint's state subsumes every entry at or below it, so a follower
+ * resumes by setting the run's cursor to `checkpointSeq` and reading forward.
+ *
+ * This is deliberately the SMALLEST wire addition that answers "where do I
+ * start again". It rides on {@link SyncError} as one optional field rather
+ * than as a new frame variant or a new RPC, so a follower that never meets a
+ * compacted run sees no change at all, and the room to grow stays open: a
+ * later revision can add the checkpoint STATE here (or as its own RPC) without
+ * moving what already exists. What it does not carry today is that state, so a
+ * projection rebuilt from the sync stream alone is missing the prefix the
+ * checkpoint stands for; see `@smthrs/journal`'s `checkpointAt`.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const Resync = Schema.Struct({
+  runId: JournalEvent.RunId,
+  checkpointSeq: JournalEvent.Seq
+})
+
+/**
+ * Where a follower must resume after a compaction refusal.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Resync = typeof Resync.Type
+
+/**
  * A durable catch-up request.
  *
  * `capability` authorizes branch runs: a run whose id maps to a shared branch

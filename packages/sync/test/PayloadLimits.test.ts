@@ -124,33 +124,45 @@ describe("sync payload and frame limits", () => {
       expect(failureOf(exit)).toMatchObject({ code: "frame_too_large" })
     }))
 
-  // The ceiling bounds the aggregate response, not each entry alone: entries
-  // that are individually moderate still cannot compose into a giant page.
-  it.effect("refuses an aggregate page whose encoded entries exceed a frame ceiling", () =>
+  // Entries that individually fit but together outgrow the ceiling are
+  // ordinary traffic: branch commands are admitted up to 1 MiB each, so three
+  // 400 KB commands compose one. The read truncates the page at the budget and
+  // reports `done: false`, so the follower pages again from the cursor it was
+  // actually served instead of being wedged on an unretryable refusal.
+  it.effect("truncates an aggregate page at the byte budget and serves the rest on the next page", () =>
     Effect.gen(function*() {
       const entries = Array.from(
         { length: 4 },
         (_, sequence) => entry(sequence, "x".repeat(384 * 1024))
       )
-      const exit = yield* (
+      const read = (cursors: SyncProtocol.WorkspaceCursor) =>
         Effect.gen(function*() {
           const server = yield* SyncServer.makeLive
-          return yield* Effect.exit(
-            server.read({ scope: { _tag: "Run", runId }, cursors: [], limit: entries.length })
-          )
+          return yield* server.read({ scope: { _tag: "Run", runId }, cursors, limit: entries.length })
         }).pipe(
           Effect.provide(
             Layer.mergeAll(
-              Journal.layerNoop({ entries: () => Effect.succeed({ entries, hasMore: false }) }),
+              Journal.layerNoop({
+                entries: ({ after }) =>
+                  Effect.succeed({
+                    entries: entries.filter((candidate) => after === undefined || candidate.seq > after),
+                    hasMore: false
+                  })
+              }),
               RunCatalog.layerStatic([runId]),
               SyncPrincipal.layerWorkspace("payload-suite")
             )
           )
         )
-      )
 
-      expect(failureOf(exit)).toBeInstanceOf(SyncError)
-      expect(failureOf(exit)).toMatchObject({ code: "frame_too_large" })
+      const first = yield* read([])
+      const second = yield* read(first.cursors)
+
+      expect(first.entries.map((value) => value.seq)).toEqual([0, 1])
+      expect(first.cursors).toEqual([{ runId, afterSeq: 1 }])
+      expect(first.done).toBe(false)
+      expect(second.entries.map((value) => value.seq)).toEqual([2, 3])
+      expect(second.done).toBe(true)
     }))
 
   it.effect("honors a configured read frame ceiling below the default", () =>
