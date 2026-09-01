@@ -4,7 +4,9 @@ import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
 import type { FileBoundary } from "@smthrs/flow/FileBoundary"
 import * as KernelWorkspace from "@smthrs/kernel/Workspace"
 import * as Cause from "effect/Cause"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as PlatformError from "effect/PlatformError"
@@ -44,6 +46,84 @@ const injected = (path: string) =>
  * than the deleted `@smthrs/keys` digest module).
  */
 describe("WorkspaceSandbox conformance", () => {
+  it.effect("uses an immutable declaration even when the workflow mutates every nested field", () =>
+    Effect.gen(function*() {
+      const test = yield* withCrypto(WorkspaceSandbox.makeMemory({
+        "src/input.txt": "input",
+        "secret/value.txt": "secret",
+        "protected.txt": "keep"
+      }))
+      const readGlob = {
+        _tag: "Glob" as const,
+        include: ["src/**"] as [string, ...Array<string>],
+        exclude: ["src/ignored/**"]
+      }
+      const declaration = descriptor({
+        readSet: [readGlob],
+        writeSet: ["out/declared.txt"],
+        removes: [],
+        boundaryMode: "hard"
+      })
+      const result = yield* withCrypto(test.service.execute({
+        descriptor: declaration,
+        workflow: Effect.gen(function*() {
+          ;(readGlob.include as Array<string>).push("secret/**")
+          ;(readGlob.exclude as Array<string>).splice(0)
+          ;(declaration.readSet as Array<never>).push(read("secret/value.txt", "secret") as never)
+          ;(declaration.writeSet as Array<string>).push("out/surprise.txt")
+          ;(declaration.removes as Array<string>).push("protected.txt")
+          ;(declaration as { boundaryMode: string }).boundaryMode = "expected"
+          const fs = yield* FileSystem.FileSystem
+          yield* fs.readFileString("secret/value.txt")
+          yield* fs.writeFileString("out/surprise.txt", "surprise")
+          yield* fs.remove("protected.txt")
+          return null
+        })
+      }))
+
+      expect(result._tag).toBe("Invalidated")
+      if (result._tag !== "Invalidated") return
+      expect(result.violations.map((violation) => [violation.kind, violation.resource.id])).toEqual([
+        ["undeclared-read", "secret/value.txt"],
+        ["undeclared-write", "out/surprise.txt"],
+        ["undeclared-write", "protected.txt"]
+      ])
+      expect(text(yield* test.files, "protected.txt")).toBe("keep")
+      expect(text(yield* test.files, "out/surprise.txt")).toBeUndefined()
+    }))
+
+  it.effect("copies host snapshot buffers before an asynchronous workflow can observe mutation", () =>
+    withCrypto(Effect.scoped(Effect.gen(function*() {
+      const shared = encoder.encode("original")
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const service = WorkspaceSandbox.makeHosted({
+        root: "",
+        snapshot: () => Effect.succeed(new Map([["input.txt", shared]])),
+        baseline: () => Effect.succeed(undefined),
+        retain: (bytes) => Effect.succeed(bytes.slice()),
+        commit: () => Effect.void
+      })
+      const running = yield* service.execute({
+        descriptor: descriptor({ readSet: [read("input.txt", "original")] }),
+        workflow: Deferred.succeed(entered, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+          Effect.andThen(Effect.flatMap(FileSystem.FileSystem, (fs) => fs.readFileString("input.txt")))
+        )
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(entered)
+      shared.set(encoder.encode("mutated!"))
+      yield* Deferred.succeed(release, undefined)
+      const result = yield* Fiber.join(running)
+
+      expect(result._tag).toBe("Accepted")
+      if (result._tag !== "Accepted") return
+      expect(result.result.output).toBe("original")
+      expect(result.result.provenance.inputs).toEqual([
+        { resource: { kind: "file", id: "input.txt" }, digest: sha256("original") }
+      ])
+    }))))
+
   it.effect("returns functional files and queued effects without changing the host before materialization", () =>
     Effect.gen(function*() {
       const program = Effect.gen(function*() {
@@ -1191,7 +1271,7 @@ describe("WorkspaceSandbox filesystem host confinement", () => {
       expect(plain).toBe("plain")
     }))
 
-  it.effect("rolls back files and created directories when a real write fails mid-apply", () =>
+  it.effect("rolls back files without recursively deleting directories a concurrent writer may own", () =>
     Effect.gen(function*() {
       const program = Effect.scoped(Effect.gen(function*() {
         const { fs, root } = yield* temp
@@ -1202,7 +1282,9 @@ describe("WorkspaceSandbox filesystem host confinement", () => {
           ...fs,
           writeFile: (path, data, options) =>
             path.endsWith("poison.txt")
-              ? Effect.fail(injected(path))
+              ? fs.writeFileString(`${root}/q/concurrent.txt`, "concurrent").pipe(
+                Effect.andThen(Effect.fail(injected(path)))
+              )
               : fs.writeFile(path, data, options)
         }
         const sandbox = WorkspaceSandbox.makeFileSystem(failing, yield* ArtifactStore.ArtifactStore, root)
@@ -1222,17 +1304,19 @@ describe("WorkspaceSandbox filesystem host confinement", () => {
           a: yield* fs.readFileString(`${root}/a.txt`),
           bExists: yield* fs.exists(`${root}/b.txt`),
           qExists: yield* fs.exists(`${root}/q`),
+          concurrent: yield* fs.readFileString(`${root}/q/concurrent.txt`),
           keep: yield* fs.readFileString(`${root}/sub/keep.txt`),
           insideExists: yield* fs.exists(`${root}/sub/inside.txt`)
         }
       })).pipe(Effect.provide(nodeLayer))
 
-      const { a, bExists, insideExists, keep, qExists, refused } = yield* withCrypto(program)
+      const { a, bExists, concurrent, insideExists, keep, qExists, refused } = yield* withCrypto(program)
       expect(refused).toMatchObject({ code: "host_unavailable" })
       expect(String((refused.cause as PlatformError.PlatformError).message)).toContain("injected")
       expect(a).toBe("old-a")
       expect(bExists).toBe(false)
-      expect(qExists).toBe(false)
+      expect(qExists).toBe(true)
+      expect(concurrent).toBe("concurrent")
       expect(keep).toBe("keep")
       expect(insideExists).toBe(false)
     }))

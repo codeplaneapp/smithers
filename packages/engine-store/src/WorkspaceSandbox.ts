@@ -56,7 +56,9 @@ import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as EngineStoreMetrics from "./EngineStoreMetrics.ts"
+import * as FileBoundarySnapshot from "./internal/FileBoundarySnapshot.ts"
 import * as FileEnumeration from "./internal/FileEnumeration.ts"
+import { compareText } from "./internal/Ordering.ts"
 
 /**
  * A protocol-neutral resource named in execution provenance.
@@ -371,8 +373,10 @@ export class WorkspaceError extends Schema.TaggedError<WorkspaceError>()(
 export class MaterializationConflict extends Schema.TaggedError<MaterializationConflict>()(
   "@smthrs/engine-store/MaterializationConflict",
   {
-    paths: Schema.Array(Schema.String),
-    message: Schema.String
+    paths: Schema.Array(
+      Schema.NonEmptyString.check(Schema.isMaxLength(4_096))
+    ).check(Schema.isMaxLength(1_024)),
+    message: Schema.NonEmptyString.check(Schema.isMaxLength(16_384))
   }
 ) {}
 
@@ -385,10 +389,49 @@ export class MaterializationConflict extends Schema.TaggedError<MaterializationC
  * @since 0.1.0
  * @slop
  */
-export const isMaterializationConflict = (error: unknown): boolean =>
-  error instanceof MaterializationConflict ||
-  (typeof error === "object" && error !== null && "_tag" in error &&
-    error._tag === MaterializationConflict.identifier)
+export const isMaterializationConflict = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null) return false
+  try {
+    if (error instanceof MaterializationConflict) return true
+    const own = (name: string): unknown => {
+      const descriptor = Object.getOwnPropertyDescriptor(error, name)
+      return descriptor !== undefined && descriptor.enumerable && "value" in descriptor
+        ? descriptor.value
+        : undefined
+    }
+    const paths = own("paths")
+    const message = own("message")
+    if (
+      own("_tag") !== MaterializationConflict.identifier ||
+      typeof message !== "string" ||
+      message.length === 0 ||
+      message.length > 16_384 ||
+      !Array.isArray(paths) ||
+      Object.getPrototypeOf(paths) !== Array.prototype ||
+      paths.length > 1_024
+    ) return false
+    for (let index = 0; index < paths.length; index++) {
+      const descriptor = Object.getOwnPropertyDescriptor(paths, String(index))
+      if (
+        descriptor === undefined ||
+        !("value" in descriptor) ||
+        !descriptor.enumerable ||
+        typeof descriptor.value !== "string" ||
+        descriptor.value.length === 0 ||
+        descriptor.value.length > 4_096
+      ) return false
+    }
+    if (
+      Reflect.ownKeys(paths).some((key) =>
+        key !== "length" &&
+        (typeof key !== "string" || !/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= paths.length)
+      )
+    ) return false
+    return Reflect.ownKeys(error).every((key) => key === "_tag" || key === "paths" || key === "message")
+  } catch {
+    return false
+  }
+}
 
 /**
  * The two-phase workspace transaction service.
@@ -780,7 +823,7 @@ const transaction = (base: ReadonlyMap<string, Uint8Array>, trace: Trace, root: 
             trace.attemptedReads.push({ path: candidate, produced: produced.has(candidate) })
             entries.add(candidate.slice(prefix.length).split("/")[0]!)
           }
-          return [...entries].sort()
+          return [...entries].sort(compareText)
         }),
         Effect.mapError(refuse("readDirectory", path))
       )
@@ -793,7 +836,7 @@ const changes = Effect.fn("WorkspaceSandbox.changes")(function*(
   current: ReadonlyMap<string, Uint8Array>,
   host: Host
 ) {
-  const paths = [...new Set([...base.keys(), ...current.keys()])].sort()
+  const paths = [...new Set([...base.keys(), ...current.keys()])].sort(compareText)
   const result: Array<FileChange> = []
   for (const path of paths) {
     const before = base.get(path)
@@ -844,7 +887,7 @@ const preflight = Effect.fn("WorkspaceSandbox.preflight")(function*(
 
 const revisionOf = Effect.fn("WorkspaceSandbox.revision")(function*(base: ReadonlyMap<string, Uint8Array>) {
   const entries: Array<{ readonly path: string; readonly digest: string }> = []
-  for (const [path, content] of [...base].sort((left, right) => left[0].localeCompare(right[0]))) {
+  for (const [path, content] of [...base].sort((left, right) => compareText(left[0], right[0]))) {
     entries.push({ path, digest: yield* digestOf(content) })
   }
   return yield* digestOf(encoder.encode(JSON.stringify(entries)))
@@ -906,6 +949,7 @@ export const makeHosted = (host: Host): Service => {
   const executeBody = Effect.fnUntraced(function*<Output, Error>(
     execution: Execution<Output, Error>
   ) {
+    const boundary = FileBoundarySnapshot.make(execution.descriptor)
     const key = execution.cacheKey
     if (key !== undefined) {
       const hit = memo.get(key)
@@ -918,7 +962,11 @@ export const makeHosted = (host: Host): Service => {
         }
       }
     }
-    const base = yield* host.snapshot(execution.descriptor)
+    const captured = yield* host.snapshot(boundary)
+    // The host owns its returned buffers. Preserve the instant represented by
+    // snapshot() even if that host or another fiber mutates them while the
+    // workflow is suspended.
+    const base = new Map([...captured].map(([path, content]) => [path, content.slice()]))
     const trace: Trace = { inputs: [], attemptedReads: [], effects: [] }
     const isolated = transaction(base, trace, host.root)
     const outcome = yield* execution.workflow.pipe(
@@ -930,7 +978,7 @@ export const makeHosted = (host: Host): Service => {
     for (const input of trace.inputs) {
       inputs.push({ resource: resource(input.path), digest: yield* digestOf(input.content) })
     }
-    const descriptor = workspaceRelative(host.root, execution.descriptor)
+    const descriptor = workspaceRelative(host.root, boundary)
     const undeclaredReads = trace.attemptedReads.filter((attempt) =>
       !attempt.produced &&
       !descriptor.readSet.some((entry) =>
@@ -943,7 +991,7 @@ export const makeHosted = (host: Host): Service => {
       // own typed failure must surface as itself — converting it into an
       // isolation verdict would both harden a soft boundary and mask the
       // error the retry policy classifies on.
-      if (undeclaredReads.length > 0 && execution.descriptor.boundaryMode === "hard") {
+      if (undeclaredReads.length > 0 && boundary.boundaryMode === "hard") {
         return {
           _tag: "Invalidated" as const,
           provenance: {
@@ -985,7 +1033,7 @@ export const makeHosted = (host: Host): Service => {
     // deviation for the engine to journal and reconcile
     // (`Effect Taxonomy.md`, "Expected sets — the soft mode"). Either way
     // the host has not been touched.
-    if (invalid.length > 0 && execution.descriptor.boundaryMode === "hard") {
+    if (invalid.length > 0 && boundary.boundaryMode === "hard") {
       return { _tag: "Invalidated" as const, provenance, violations: invalid }
     }
     const result: WorkflowResult<Output> = { output, files, provenance, effects: trace.effects }
@@ -1120,7 +1168,7 @@ export const makeMemory = (
         Effect.map((current) =>
           [...current]
             .map(([path, content]) => ({ path, content }))
-            .sort((left, right) => left.path.localeCompare(right.path))
+            .sort((left, right) => compareText(left.path, right.path))
         )
       )
     }
@@ -1371,7 +1419,6 @@ export const makeFileSystem = (
         ))
         resolved.set(change.path, bytes)
       }
-      const createdDirectories: Array<string> = []
       const present = new Map<string, boolean>()
       for (const change of changes) {
         if (change.afterDigest === undefined) continue
@@ -1387,7 +1434,6 @@ export const makeFileSystem = (
           if (present.has(directory)) continue
           const exists = yield* fs.exists(directory).pipe(Effect.mapError(hostFailure))
           present.set(directory, exists)
-          if (!exists) createdDirectories.push(directory)
         }
       }
       const applied: Array<FileChange> = []
@@ -1418,14 +1464,9 @@ export const makeFileSystem = (
             yield* fs.writeFile(target, previous).pipe(Effect.mapError(hostFailure))
           }
         }
-        // Deepest first, and files before directories, so every directory
-        // this commit created is empty again by the time it is removed.
-        // `recursive` is required because the host's `rm` refuses a directory
-        // without it, empty or not — nothing can be inside except what this
-        // commit put there, and that is already gone.
-        for (const directory of [...createdDirectories].reverse()) {
-          yield* fs.remove(directory, { force: true, recursive: true }).pipe(Effect.mapError(hostFailure))
-        }
+        // Keep empty parent directories. Effect's portable FileSystem has no
+        // atomic, non-recursive rmdir; recursively deleting a directory after
+        // a separate emptiness check could erase a concurrent writer's file.
       })
       yield* apply.pipe(
         Effect.catchCause((cause) =>
