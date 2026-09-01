@@ -55,7 +55,7 @@ const rule = new Permission.Rule({
 })
 ```
 
-Capability matching normalizes path separators and matches the whole resource. `Capability.subsumes` is deliberately conservative: it returns `false` when containment cannot be proven syntactically.
+Capability matching compares the pattern against the whole resource byte-exactly and performs no path normalization and no case folding, so a backslash never matches a slash. `Capability.subsumes` is deliberately conservative: it returns `false` when containment cannot be proven syntactically.
 
 ## Ambient authority
 
