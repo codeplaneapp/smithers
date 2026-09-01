@@ -1437,19 +1437,6 @@ const pin = (
   })
 
 /**
- * The schema one settled flow call is journaled under.
- *
- * `Option` because an escape is not a settlement. A permission park, an abort,
- * or an engine failure hands the cell nothing at all, so the record says the
- * original attempt settled nothing here and a re-execution issues the call
- * again — which is exactly what a resumed park has to do, because the grant
- * that answers it landed after the record was written. Journaling the refusal
- * as though it were an answer would replay it forever and no later grant could
- * ever unblock the call.
- */
-const RecordedSettlement = Schema.Option(Cell.CallResult)
-
-/**
  * Issues one call under the run's per-call ceiling, through a journaled
  * boundary.
  *
@@ -1461,9 +1448,20 @@ const RecordedSettlement = Schema.Option(Cell.CallResult)
  * time, and takes a branch the original attempt never took — and every
  * irreversible effect below the fork is bought twice.
  *
- * So the race happens inside the record, and the drive loop is told the
- * settlement is bounded here (`Sandbox.RealmEvaluation.bounded`): two clocks
- * over one call would settle it from the reading nothing keeps.
+ * The record is written AFTER the call and read INSTEAD of it, which is the
+ * only order available and is the one that matters. The call cannot run inside
+ * the boundary: `EngineLike.call` is where a cell reaches a durable wait, and a
+ * `Flow.suspend` raised inside an enclosing activity suspends that activity's
+ * attempt rather than the run, so a cell that slept on the durable clock never
+ * woke. So this issues the call, records what the cell is about to be told, and
+ * on any later attempt hands back the recorded settlement whatever the re-issued
+ * call answered this time. The cell's branch is what has to be stable, and it
+ * is; the re-issued call is work the run pays for twice, which is what a call
+ * the ceiling cut off already cost before this existed.
+ *
+ * The drive loop is told the settlement is bounded here
+ * (`Sandbox.RealmEvaluation.bounded`): two clocks over one call would settle it
+ * from the reading nothing keeps.
  *
  * The boundary is keyed on the cell digest and the call's ordinal, which is the
  * pair a re-executed cell re-derives.
@@ -1475,32 +1473,25 @@ const issued = (
   ordinal: number,
   callMs: number,
   flow: string,
-  /** Deferred, because a boundary that replays must not reach the engine at all. */
-  issue: () => Effect.Effect<Cell.CallResult, HarnessError>
+  issue: Effect.Effect<Cell.CallResult, HarnessError>
 ): Effect.Effect<Cell.CallResult, HarnessError> =>
   Effect.gen(function*() {
-    /** The escape the original attempt took, held so it can be re-raised unrecorded. */
-    let escaped: HarnessError | undefined
-    const bounded = Effect.suspend(issue).pipe(
+    // An escape — a permission park, an abort, an engine failure — never
+    // reaches the record at all, so nothing journals it and the attempt the
+    // grant answers asks again. That is the whole reason the call sits outside
+    // the boundary rather than inside its `execute`.
+    const settlement = yield* issue.pipe(
       Effect.timeoutOrElse({
         duration: callMs,
         orElse: () => Effect.succeed(Sandbox.callTimedOut(flow, callMs))
       })
     )
-    const recorded = yield* engine.record({
+    return yield* engine.record({
       name: "cell-call",
       identity: { session: state.session, frame: state.frame, boundary: `${cell}:${ordinal}` },
-      success: RecordedSettlement,
-      execute: bounded.pipe(
-        Effect.map(Option.some),
-        Effect.catch((error) => Effect.as(Effect.sync(() => (escaped = error)), Option.none<Cell.CallResult>()))
-      )
+      success: Cell.CallResult,
+      execute: Effect.succeed(settlement)
     })
-    if (Option.isSome(recorded)) return recorded.value
-    // Nothing was handed to the cell here, so there is nothing to replay: this
-    // attempt issues the call itself, exactly as an attempt that found no
-    // record at all would.
-    return escaped === undefined ? yield* bounded : yield* Effect.fail(escaped)
   })
 
 /**
@@ -1758,7 +1749,7 @@ const callHandler = (
       invocation.ordinal,
       callMs,
       invocation.flow,
-      () => engine.call(call)
+      engine.call(call)
     )
     if (result.outcome === "success") ledger.push(...TruncatedOutput.captures(call.flowName, result.value))
     yield* emit(

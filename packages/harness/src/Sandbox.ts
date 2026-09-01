@@ -477,10 +477,10 @@ export interface RealmEvaluation {
    * on, gets an answer this time, and takes a branch the original attempt never
    * took — with every irreversible effect below the fork bought twice.
    *
-   * A caller that journals its settlements applies the same ceiling INSIDE the
-   * boundary it records, and sets this so the loop adds none of its own,
-   * because two clocks racing one call means the unrecorded one wins: the
-   * loop's starts first.
+   * A caller that journals its settlements applies the same ceiling itself, in
+   * front of the boundary that records what the ceiling produced, and sets this
+   * so the loop adds none of its own — because two clocks racing one call means
+   * the unrecorded one wins: the loop's starts first.
    */
   readonly bounded?: boolean | undefined
   readonly limits?: Limits | undefined
@@ -762,20 +762,20 @@ const drive = (
               orElse: () => Effect.succeed(callTimedOut(next.flow, callMs))
             })
           )).pipe(
-          Effect.onExit((exit) =>
-            Exit.isSuccess(exit)
-              ? Effect.void
-              : Effect.sync(() => {
-                // `next` was shifted out of `pending` before the handler ran.
-                // Settle that active bridge as well as calls queued behind it,
-                // then flush the VM so a scoped runtime has no live promise
-                // handles when a permission park or engine failure unwinds it.
-                next.abort("The cell was interrupted")
-                pump.abort("The cell was interrupted")
-                pump.flush()
-              })
+            Effect.onExit((exit) =>
+              Exit.isSuccess(exit)
+                ? Effect.void
+                : Effect.sync(() => {
+                  // `next` was shifted out of `pending` before the handler ran.
+                  // Settle that active bridge as well as calls queued behind it,
+                  // then flush the VM so a scoped runtime has no live promise
+                  // handles when a permission park or engine failure unwinds it.
+                  next.abort("The cell was interrupted")
+                  pump.abort("The cell was interrupted")
+                  pump.flush()
+                })
+            )
           )
-        )
         next.settle(result)
         pump.flush()
         continue

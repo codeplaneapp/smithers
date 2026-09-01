@@ -1569,17 +1569,19 @@ describe("CellTurn recorded observations", () => {
     // it answers at once this time. Nothing about the frame may change.
     const second = await attempt(false)
     expect(resolvedText(second.events)).toBe("timed out")
-    // The cell issued both calls again, and the frame's own ledger still saw
-    // both — a boundary that replayed the settlement must not also erase the
-    // accounting the frame derives from it.
+    // The cell issued both calls again and the frame's ledger saw both, so a
+    // boundary that replayed the settlement did not erase the accounting the
+    // frame derives from it.
     expect(of(second.events, "cell-call-started").map((event) => event.call.input)).toEqual([
       { path: "." },
       { path: "narrow" }
     ])
+    // And the first call ANSWERED this time — the engine really was asked, and
+    // really did succeed — yet the cell was still told the timeout. The
+    // settlement the cell branches on comes from the journal, not from what the
+    // clock happened to do on this attempt.
+    expect(second.calls.map((call) => call.input)).toEqual([{ path: "." }, { path: "narrow" }])
     expect(of(second.events, "cell-call-settled").map((event) => event.result.code)).toEqual(["timeout", undefined])
-    // And nothing reached the engine: both settlements came from the journal,
-    // so neither call was performed a second time.
-    expect(second.calls).toEqual([])
   })
 
   it("replays a frame's recorded time limit instead of settling the frame twice over", async () => {
@@ -1744,8 +1746,8 @@ describe("CellTurn recorded observations", () => {
       )
     }
 
-    // The original attempt parks: nothing was handed to the cell, so the
-    // boundary records that it settled nothing rather than recording a refusal.
+    // The original attempt parks. The call never settled, so it never reached
+    // the boundary and the boundary journaled nothing.
     const parked = await attempt(false)
     expect(of(parked.events, "permission-required")[0]?.request.requestId).toBe("perm-replayed")
 
