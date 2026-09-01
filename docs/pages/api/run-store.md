@@ -202,7 +202,7 @@ subpath, except the Node-only test layer, which has only its subpath.
 | --- | --- | --- |
 | `LivenessEvidence` (const) | models | Evidence that the owner in an exact run snapshot is no longer live. |
 | `LivenessEvidence` (type) | models | Evidence that the owner in an exact run snapshot is no longer live. |
-| `LivenessProbe` (type) | models | Injected liveness probe used by ownership arbitration before calling `RunStore.steal`. |
+| `LivenessProbe` (type) | models | Evidence-factory signature a composition uses for ownership arbitration. |
 | `LivenessContext` (interface) | models | What a liveness check knows about the run it is asked about, beyond the owner recorded on it. |
 | `LivenessCheck` (type) | models | The question ownership arbitration asks before it steals a run: is the recorded owner still working? |
 | `sameHostIncarnation` (const) | ownership | Whether two owner identities are incarnations on the same host. |

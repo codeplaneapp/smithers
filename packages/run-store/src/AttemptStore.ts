@@ -705,7 +705,12 @@ const sameAttempt = (stored: Attempt, expected: Attempt): boolean =>
   Boundary.sameJson(stored.outcome, expected.outcome) &&
   Boundary.sameJson(stored.meta, expected.meta)
 
-const mapPersistenceError = (method: AttemptStoreMethod, cause: unknown): AttemptStoreError => {
+/**
+ * Curried so each operation names itself once at construction and every
+ * failure travels through the one mapper, rather than through a per-call-site
+ * closure that only that operation's failing test could ever reach.
+ */
+const mapPersistenceError = (method: AttemptStoreMethod) => (cause: unknown): AttemptStoreError => {
   if (Schema.is(AttemptStoreError)(cause)) {
     return cause
   }
@@ -885,7 +890,7 @@ export const makeWith = (
               ? { _tag: "ExistingSame" } as const
               : { _tag: "Conflict" } as const
           })
-        ).pipe(Effect.mapError((cause) => mapPersistenceError("put", cause)))
+        ).pipe(Effect.mapError(mapPersistenceError("put")))
       })
     )
 
@@ -902,7 +907,7 @@ export const makeWith = (
           heartbeat_at_ms, checkpoint_json, error_json, outcome_json, meta_json
         FROM flows_attempts
         WHERE run_id = ${id.runId} AND step_key_digest = ${id.stepKeyDigest} AND attempt = ${id.attempt}
-      `.pipe(Effect.mapError((cause) => mapPersistenceError("get", cause)))
+      `.pipe(Effect.mapError(mapPersistenceError("get")))
         return rows.length === 0 ? Option.none() : yield* Effect.map(decodeRow("get", rows[0]!), Option.some)
       })
     )
@@ -970,7 +975,7 @@ export const makeWith = (
             }
             return { _tag: "StateChanged" } as const
           })
-        ).pipe(Effect.mapError((cause) => mapPersistenceError("heartbeat", cause)))
+        ).pipe(Effect.mapError(mapPersistenceError("heartbeat")))
       })
     )
 
@@ -1044,7 +1049,7 @@ export const makeWith = (
             }
             return { _tag: "StateChanged" } as const
           })
-        ).pipe(Effect.mapError((cause) => mapPersistenceError("finish", cause)))
+        ).pipe(Effect.mapError(mapPersistenceError("finish")))
       })
     )
 
@@ -1098,7 +1103,7 @@ export const makeWith = (
               ? { _tag: "NotFound" } as const
               : { _tag: "FenceLost" } as const
           })
-        ).pipe(Effect.mapError((cause) => mapPersistenceError("patch", cause)))
+        ).pipe(Effect.mapError(mapPersistenceError("patch")))
       })
     )
 
