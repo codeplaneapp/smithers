@@ -8,9 +8,9 @@ writes no spawner and no HTTP client of its own: it composes those with Effect's
 `Path`, the Bun `Jj` adapter from `@smthrs/jj`, and `@smthrs/platform-node`'s
 atomic filesystem into the complete closed five-tag Host surface.
 
-`@effect/platform-bun` is a peer dependency that both published entry points
-import at module load, and it is declared optional, so a package manager will
-not install it for you. Install it alongside this package:
+`@effect/platform-bun` is a peer dependency that the root and `BunHost` entry
+points import at module load, and it is declared optional, so a package manager
+will not install it for you. Install it alongside this package:
 
 ```sh
 npm install @smthrs/platform-bun @effect/platform-bun@4.0.0-rc.108
@@ -36,10 +36,12 @@ Effect.runPromise(Effect.provide(program, BunHost.layer))
 
 There is no shell service. Running a command is Effect's `ChildProcess` /
 `ChildProcessSpawner`; because Bun's spawner _is_ the Node one, there is no
-runtime detection here either, and the bundle works unchanged under Node. The
-suite runs on both interpreters: the package's own vitest lane under Node, which
-is where the coverage gate lives, and the `//ci:platformBun` target, which
-re-runs the same files under Bun.
+runtime detection here either, and the bundle works unchanged under Node, which
+is what every test here runs on. The `//ci:platformBun` target re-runs these
+files through Bun's package runner (`bun x vitest`, with no `--bun`), but the
+`vitest` bin that resolves to is pnpm's `/bin/sh` shim, and every branch of it
+`exec`s `node`, so that lane executes under Node as well. Running this suite on
+the Bun runtime is tracked work, not something the repository does today.
 
 There is no HTTP service either. An outgoing request is Effect's `HttpClient`,
 and the bundle provides `@effect/platform-bun`'s own fetch-backed layer with
@@ -85,9 +87,11 @@ syscalls through a CPython 3 helper: the host needs a `python3` supporting
 keeps it elsewhere builds the layer with `BunFileSystem.layerWith({ executable })`.
 Windows is unsupported.
 
-**Node-only by construction.** The bundle falls back to the
-`@effect/platform-node` adapters off Bun and resolves `node:` built-ins;
-`scripts/browser-check.mjs` at the repository root pins that.
+**Node-only in the browser-bundle sense.** The bundle falls back to the
+`@effect/platform-node` adapters off Bun and so resolves `node:` built-ins,
+which puts it on `scripts/browser-contract.mjs`'s `NODE_ONLY` list;
+`scripts/browser-check.mjs` at the repository root pins that. It runs on Bun and
+on Node. What it does not do is bundle for a browser.
 
 ## Runtimes
 

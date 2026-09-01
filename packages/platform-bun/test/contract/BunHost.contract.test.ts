@@ -1,16 +1,20 @@
 /**
  * Contract for the layer `BunHost` selects on the current runtime.
  *
- * The suite runs on both interpreters: this package's vitest lane under Node,
- * which is where the coverage gate lives, and the `//ci:platformBun` target,
- * which re-runs these same files under Bun. `@effect/platform-bun`'s
+ * This runs under Node. `//ci:platformBun` re-runs the file through Bun's
+ * package runner (`bun x vitest`, with no `--bun`), but the `vitest` bin that
+ * resolves to is pnpm's `/bin/sh` shim, and every branch of it `exec`s `node`,
+ * so that lane is Node too. It costs little here: `@effect/platform-bun`'s
  * `BunChildProcessSpawner` is `@effect/platform-node-shared`'s spawner
- * re-exported, so process spawning is literally the same implementation on
- * both runtimes and needs no separate Bun fake.
+ * re-exported, so process spawning is literally the same implementation on both
+ * runtimes and needs no Bun fake.
  *
  * The HTTP probes run against a loopback server started for the run, so the
  * success path is asserted rather than only connection refusal; a client that
  * can merely fail to reach a closed port never proves a response comes back.
+ * The server is mandatory for that reason: a bind failure throws out of this
+ * module rather than degrading to the closed-port shape, which would report
+ * green while asserting nothing about the success path this file exists for.
  */
 import { describe, expect, it } from "@effect/vitest"
 import { runHostContract } from "@smthrs/kernel/test/contract"
@@ -56,15 +60,30 @@ const server = createServer((request, response) => {
   })
 })
 server.unref()
-const listening = await new Promise<number | undefined>((resolve) => {
-  server.once("error", () => resolve(undefined))
-  server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port))
+const listening = await new Promise<number>((resolve, reject) => {
+  const onError = (error: Error) =>
+    reject(
+      new Error(
+        "the BunHost contract needs a loopback HTTP server; binding 127.0.0.1:0 failed",
+        { cause: error }
+      )
+    )
+  server.once("error", onError)
+  server.listen(0, "127.0.0.1", () => {
+    server.off("error", onError)
+    resolve((server.address() as AddressInfo).port)
+  })
+}).catch((error: unknown) => {
+  // `afterAll` is not registered yet, so the jj directories made above would
+  // outlive a bind failure unless they are removed on the way out.
+  rmSync(jjWorkspacePath, { recursive: true, force: true })
+  rmSync(jjRoot, { recursive: true, force: true })
+  throw error
 })
 
 afterAll(() => {
   rmSync(jjWorkspacePath, { recursive: true, force: true })
   rmSync(jjRoot, { recursive: true, force: true })
-  if (listening === undefined) return undefined
   return new Promise<void>((resolve, reject) => {
     server.close((error) => error === undefined ? resolve() : reject(error))
   })
@@ -82,34 +101,32 @@ runHostContract("BunHost", BunHost.layerAt(jjRoot), {
       rootFrom: jjRoot
     }
     : { expected: "failure", code: jjAvailable ? "unknown" : "not_installed" },
-  httpClient: listening === undefined
-    ? { expected: "failure", code: "TransportError" }
-    : {
-      expected: "success",
-      read: {
-        request: HttpClientRequest.get(`http://127.0.0.1:${listening}/read`),
-        assertResponse: (response) => {
-          expect(response.status).toBe(200)
-          expect(response.headers["x-host-contract"]).toBe("GET:/read")
-        }
-      },
-      write: {
-        request: HttpClientRequest.post(`http://127.0.0.1:${listening}/write`).pipe(
-          HttpClientRequest.bodyText("host-contract")
-        ),
-        assertResponse: (response) => {
-          expect(response.status).toBe(200)
-          expect(response.headers["x-host-contract"]).toBe("POST:/write")
-        }
-      },
-      redirect: {
-        request: HttpClientRequest.get(`http://127.0.0.1:${listening}/redirect`),
-        assertResponse: (response) => {
-          expect(response.status).toBe(302)
-          expect(response.headers.location).toBe("/must-not-follow")
-        }
+  httpClient: {
+    expected: "success",
+    read: {
+      request: HttpClientRequest.get(`http://127.0.0.1:${listening}/read`),
+      assertResponse: (response) => {
+        expect(response.status).toBe(200)
+        expect(response.headers["x-host-contract"]).toBe("GET:/read")
+      }
+    },
+    write: {
+      request: HttpClientRequest.post(`http://127.0.0.1:${listening}/write`).pipe(
+        HttpClientRequest.bodyText("host-contract")
+      ),
+      assertResponse: (response) => {
+        expect(response.status).toBe(200)
+        expect(response.headers["x-host-contract"]).toBe("POST:/write")
+      }
+    },
+    redirect: {
+      request: HttpClientRequest.get(`http://127.0.0.1:${listening}/redirect`),
+      assertResponse: (response) => {
+        expect(response.status).toBe(302)
+        expect(response.headers.location).toBe("/must-not-follow")
       }
     }
+  }
 })
 
 /**
@@ -118,7 +135,7 @@ runHostContract("BunHost", BunHost.layerAt(jjRoot), {
  * `Effect`. A client that returned every header and no bytes would satisfy it,
  * so the payload is observed here instead.
  */
-describe.skipIf(listening === undefined)("BunHost HttpClient payloads", () => {
+describe("BunHost HttpClient payloads", () => {
   it.effect("returns the bytes the server wrote, on both request shapes", () =>
     Effect.gen(function*() {
       const bodies = yield* Effect.gen(function*() {

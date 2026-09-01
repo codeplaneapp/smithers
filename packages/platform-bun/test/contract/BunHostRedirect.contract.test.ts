@@ -1,10 +1,10 @@
 /**
  * Redirect fail-closed contract for BunHost's HttpClient.
  *
- * Both interpreters run this file: the package's own vitest lane under Node,
- * which carries the coverage gate, and the `//ci:platformBun` target, which
- * re-runs it under Bun. `redirect: "manual"` is the whole subject, so the
- * assertion is that the second origin is never reached on either runtime.
+ * This runs under Node, like every other suite in the package: `//ci:platformBun`
+ * re-runs it through Bun's package runner, but that resolves a `/bin/sh` shim
+ * every branch of which `exec`s `node`. `redirect: "manual"` is the whole
+ * subject, so the assertion is that the second origin is never reached.
  */
 import { afterAll, beforeAll, describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"

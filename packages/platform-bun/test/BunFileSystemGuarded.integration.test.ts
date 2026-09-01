@@ -4,15 +4,20 @@
  * `BunFileSystem.layer` is `@smthrs/platform-node`'s `AtomicFileSystem.layer`,
  * and its no-follow extension does not run in-process: every guarded operation
  * is executed by a CPython 3 helper the adapter spawns. The extension being
- * *present* is a barrel assertion; whether the helper actually starts and
- * answers is a runtime question, and this package exists for a runtime the
- * helper is never otherwise exercised on, because `//ci:platformBun` re-runs
- * these files under Bun.
+ * *present* is all the barrel suite asserts, and nothing in this package had
+ * ever run it, so this suite executes it once against the adapter the Bun
+ * bundle actually installs: a guarded read, write, and rename, plus one
+ * symlink-swap refusal.
  *
- * So this suite asks only the Bun-specific question. The byte ceilings, the
- * Unicode matrix, and the full refusal matrix already run against the
- * byte-identical module in `packages/platform-node/test/AtomicFileSystem*`, and
- * are deliberately not restaged here.
+ * It runs under Node. `//ci:platformBun` re-runs the file through Bun's package
+ * runner, but that resolves a `/bin/sh` shim every branch of which `exec`s
+ * `node`, so this does not yet answer whether the helper starts under the Bun
+ * runtime.
+ *
+ * The byte ceilings, the Unicode matrix, and the full refusal matrix already
+ * run against the byte-identical module in
+ * `packages/platform-node/test/AtomicFileSystem*`, and are deliberately not
+ * restaged here.
  *
  * `it.live` throughout: the helper is a real subprocess on real elapsed time.
  */

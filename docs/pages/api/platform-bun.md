@@ -33,9 +33,10 @@ with `ERR_MODULE_NOT_FOUND`. Only
 :::
 
 :::warning
-This entry point is Node-only by construction: it falls back to the
-`@effect/platform-node` adapters off Bun and resolves `node:fs`.
-`scripts/browser-check.mjs` pins that.
+This entry point is Node-only in the browser-bundle sense: it falls back to the
+`@effect/platform-node` adapters off Bun and so resolves `node:fs`, which puts
+it on the repository's `NODE_ONLY` list. It runs on Bun and on Node; what it
+does not do is bundle for a browser. `scripts/browser-check.mjs` pins that.
 :::
 
 `BunHost` also re-exports `AtomicFileSystem`, `BunChildProcessSpawner`,
@@ -108,17 +109,23 @@ so mutating the object afterwards changes neither layer.
 The package runs the shared suite from
 [`@smthrs/kernel/test/contract`](/api/kernel) against `BunHost.layerAt`, with a
 loopback server behind the HTTP probes so the success path is asserted rather
-than only connection refusal. The suite runs on both interpreters: the package
-vitest lane under Node, which carries the coverage gate, and the
-`//ci:platformBun` target, which re-runs the same files under Bun.
+than only connection refusal. That server is mandatory: a bind failure fails the
+file rather than quietly falling back to the closed-port probe, which would
+report green while asserting nothing about the HTTP success path.
+
+Every suite here executes under Node. The `//ci:platformBun` target re-runs these
+files through Bun's package runner (`bun x vitest`, with no `--bun`), but the
+`vitest` bin that resolves to is a `/bin/sh` shim, and every branch of it
+`exec`s `node`, so that lane is Node as well. Executing this suite on the Bun
+runtime is tracked work; nothing below should be read as a claim about it.
 
 Process spawning is literally the same module on both runtimes, so there is no
 Bun-only spawn path left to fake. The filesystem is not: its no-follow extension
-runs every guarded operation in a CPython 3 subprocess, so whether that helper
-starts and answers is a per-runtime question, and a guarded read, write, rename,
-and one symlink refusal run here to settle it. The byte ceilings, the Unicode
-matrix, and the full refusal matrix are not restaged; they already run against
-the byte-identical module in
+runs every guarded operation in a CPython 3 subprocess rather than in-process, so
+a guarded read, write, rename, and one symlink refusal run here against the
+adapter this bundle actually installs. The byte ceilings, the Unicode matrix, and
+the full refusal matrix are not restaged; they already run against the
+byte-identical module in
 [@smthrs/platform-node](/api/platform-node).
 
 Containment is driven over real processes rather than doubles: a group a dead
