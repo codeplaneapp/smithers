@@ -428,6 +428,24 @@ describe("Redaction", () => {
     () => assertHazardFailures("lossy").pipe(Effect.provide(journalLayer()), Effect.scoped)
   )
 
+  it("scans a long line in linear time", () => {
+    // Every rule runs over every logged line and every journal payload, so a
+    // rule that rescans is a stall on the hot path. `url-credentials` matched
+    // `\b[a-z][a-z0-9+.-]*` before requiring `://`, and `-` is not a word
+    // character, so a run of `aaaaaaaa-` gave it 40,000 start positions and it
+    // scanned forward from each one: 400 kB took 11 seconds. Every other rule
+    // finished the same input in under 2 ms.
+    const line = "Bearer " + "aaaaaaaa-".repeat(40_000) + " api_key=" + "b".repeat(200_000)
+    expect(line.length).toBeGreaterThan(400_000)
+    const redact = Redaction.make()
+    const started = Date.now()
+    const redacted = String(redact(line))
+    // Three orders of magnitude above a linear scan, so machine load cannot
+    // fail this, and still finite, which is the whole claim.
+    expect(Date.now() - started).toBeLessThan(2_000)
+    expect(redacted).toContain(`api_key=${Redaction.placeholder}`)
+  })
+
   effect("keeps payloads verbatim when redaction is disabled", () =>
     Effect.gen(function*() {
       const journal = yield* Journal

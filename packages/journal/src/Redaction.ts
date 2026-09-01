@@ -64,7 +64,13 @@ export const placeholder = "[REDACTED]"
 export const defaultRules: ReadonlyArray<Rule> = [
   {
     id: "url-credentials",
-    pattern: /\b([a-z][a-z0-9+.-]*:\/\/[^\s:@/]+):(?!\[REDACTED\]@)[^\s:@/]+@/gi,
+    // The scheme is bounded rather than open. `-` is not a word character, so
+    // `\b[a-z][a-z0-9+.-]*` starts a fresh scan after every hyphen, and on a
+    // long run of that shape the rule rescanned the tail from each one: 400 kB
+    // of `aaaaaaaa-` cost 11 seconds, on the path every journal write and every
+    // log line takes. A scheme longer than 30 characters is not one this net is
+    // for, and the cap makes each start position cost a constant.
+    pattern: /\b([a-z][a-z0-9+.-]{0,30}:\/\/[^\s:@/]+):(?!\[REDACTED\]@)[^\s:@/]+@/gi,
     replace: "$1:[REDACTED]@"
   },
   {
