@@ -3917,6 +3917,7 @@ Checkpoints and compaction, and the
 | `JournalEvent.Seq` | const + type | schemas | Schema for the canonical, durable sequence number within a run. |
 | `JournalEvent.SourceId` | const + type | schemas | Schema for an event producer identifier. |
 | `JournalEvent.SourceSeq` | const + type | schemas | Schema for a producer-local event sequence number. |
+| `JournalEvent.Dedupe` | const + type | schemas | Schema for what a re-emitted `(runId, sourceId, sourceSeq)` identity means. |
 | `JournalEvent.Input` | class | schemas | Schema for an event submitted to the journal. |
 | `JournalEvent.Entry` | class | schemas | Schema for a committed durable journal row. |
 | `JournalEvent.makeEventId` | const | constructors | Makes a collision-free deterministic event identifier from the idempotency key `(runId, sourceId, sourceSeq)`. |
