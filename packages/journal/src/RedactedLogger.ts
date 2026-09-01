@@ -102,49 +102,6 @@ const consoleMethods = {
   warn: true
 } as const
 
-/**
- * Whether a prototype chain is one this module can rebuild faithfully.
- *
- * A chain that reaches `Object.prototype` (or ends at `null`) without passing
- * through a host constructor is a plain object or an ordinary class instance,
- * whose state is its own properties. A chain carrying anything else keeps
- * state the walk cannot see and cannot copy.
- *
- * @private
- */
-const isRebuildablePrototype = (prototype: object | null): boolean => {
-  for (let link = prototype; link !== null; link = Object.getPrototypeOf(link) as object | null) {
-    if (link === Object.prototype) return true
-    const constructor = (link as { readonly constructor?: { readonly name?: string } }).constructor
-    if (constructor !== undefined && hostConstructors.has(constructor)) return false
-  }
-  return false
-}
-
-/** The host classes whose state is invisible to a property walk. */
-const hostConstructors: ReadonlySet<unknown> = new Set<unknown>(
-  [
-    "Event",
-    "EventTarget",
-    "Headers",
-    "Request",
-    "Response",
-    "FormData",
-    "URLSearchParams",
-    "AbortController",
-    "AbortSignal",
-    "Blob",
-    "File",
-    "MessagePort",
-    "MessageChannel",
-    "ReadableStream",
-    "WritableStream",
-    "Performance",
-    "WeakRef",
-    "Promise"
-  ].map((name) => (globalThis as Record<string, unknown>)[name]).filter((value) => value !== undefined)
-)
-
 /** How deep the logger walks a value before it names it instead. */
 const renderDepthLimit = 200
 
@@ -201,9 +158,13 @@ const redactError = (
       ? descriptor.value
       : (error as unknown as Record<PropertyKey, unknown>)[key]
     Object.defineProperty(clone, key, {
-      // Through `redactRendered`, so the depth cap and the rendering rules
-      // bind under an Error exactly as they do beside one.
-      value: redactRendered(value, redactor, seen as WeakMap<object, unknown>, depth + 1),
+      // The depth cap binds under an Error exactly as it does beside one: a
+      // deep value carried on a cause can exhaust the stack just as easily.
+      value: depth + 1 >= renderDepthLimit
+        ? renderDepthMarker
+        : value instanceof Error
+        ? redactError(value, redactor, seen, depth + 1)
+        : redactor(value),
       writable: true,
       enumerable: descriptor.enumerable === true,
       configurable: true
@@ -228,183 +189,38 @@ const redactError = (
 /**
  * Redacts one value on its way out of the logger.
  *
+ * An `Error` is rebuilt so its message, stack and own members are redacted and
+ * it stays an `Error` for a renderer that special-cases one. Everything else
+ * goes through the journal's own rules, which rebuild a value from its plain
+ * data: a `Date`, a `Map`, a class instance or a host object therefore reaches
+ * the operator in that plain form rather than as itself.
+ *
+ * That collapse is deliberate. An earlier version rebuilt each value on its
+ * own prototype to keep the rendering faithful, and three rounds of review
+ * found three ways it could kill the run it was logging, because a host class
+ * keeps state a property walk cannot see and a clone of one throws the moment
+ * a brand check reads it. A log line is not worth a run, and the rendering it
+ * buys is cosmetic.
+ *
  * @since 0.1.0
  * @category redaction
  * @slop
  */
 export const redactArgument = (value: unknown, redactor: Redaction.Redactor): unknown => {
   try {
-    return redactRendered(value, redactor, new WeakMap())
+    return value instanceof Error ? redactError(value, redactor, new WeakMap()) : redactor(value)
   } catch {
-    // The last line of defence, and the one that makes this whole class of
-    // defect non-fatal. Every rule above is a guess about what an arbitrary
-    // logged value will tolerate, and a guess that is wrong throws while the
-    // line is being rendered, which kills the run the line was describing.
-    // Three rounds of review found three such guesses. So a failure here
-    // degrades to the plain redacted form, which is lossy and safe, and the
-    // run survives to be told what happened.
-    try {
-      return redactor(value)
-    } catch {
-      return unrenderableMarker
-    }
+    // A logged value is arbitrary and a throw here happens while the line is
+    // rendering, which would kill the run the line describes. The marker is
+    // deliberately NOT derived from the value: an earlier fallback rendered
+    // the value to text and printed it, and that text had never been through
+    // the rules, so a credential reached the terminal in clear.
+    return unrenderableMarker
   }
 }
 
 /** What the logger renders in place of a value that cannot be rendered. */
 const unrenderableMarker = "[Unrenderable]"
-
-/**
- * A value as text, for a renderer that refused the value itself.
- *
- * Total by construction: `JSON.stringify` throws on a BigInt and answers
- * `undefined` for `undefined`, a function, or a symbol, and `String` can throw
- * through a hostile `Symbol.toPrimitive`. Each of those falls through to the
- * next form, and the marker ends the chain.
- *
- * @private
- */
-const asText = (value: unknown): string => {
-  try {
-    if (typeof value === "string") return value
-    const json = JSON.stringify(value)
-    return json === undefined ? String(value) : json
-  } catch {
-    return unrenderableMarker
-  }
-}
-
-/**
- * Redacts a value for a log line, keeping the type the operator was given.
- *
- * `Redaction.redact` rebuilds an object from its own enumerable entries, which
- * is right for the journal, whose rows are JSON, and wrong here: a `Date`, a
- * `Map`, a `Set`, a `URL`, a `RegExp`, or a class instance would reach the
- * operator as `{}` and `layer()` promises they keep the format they had. So a
- * value that is not a plain object or an array is rebuilt on its own
- * prototype, with its contents redacted by the same rules.
- *
- * A binary view (`ArrayBuffer` and the typed arrays) passes through unchanged:
- * the rules read text, and copying a buffer per log line is a cost with no
- * redaction to show for it.
- *
- * @private
- */
-const redactRendered = (
-  value: unknown,
-  redactor: Redaction.Redactor,
-  seen: WeakMap<object, unknown>,
-  depth = 0
-): unknown => {
-  if (value === null || typeof value !== "object") return redactor(value)
-  // The cap is tested before anything else that recurses, including the Error
-  // walk: a deep value carried under an Error is as able to exhaust the stack
-  // as one carried beside it, and a RangeError raised here is raised while the
-  // line is being rendered, which kills the run over a log line.
-  if (depth >= renderDepthLimit) return renderDepthMarker
-  if (value instanceof Error) return redactError(value, redactor, seen as WeakMap<Error, Error>, depth)
-  const memoized = seen.get(value)
-  if (memoized !== undefined) return memoized
-  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return value
-  if (value instanceof Date) return value
-  // A pattern or a URL can carry a credential in its text, but redacting that
-  // text can also make it unparseable: `(?<sk_live_x>y)` becomes a capture
-  // group named `[REDACTED_API_KEY]`, and a credential-shaped host is not a
-  // host. Rebuilding is attempted and the redacted text is the fallback, since
-  // a log line must never fail to render.
-  if (value instanceof RegExp) {
-    const source = String(redactor(value.source))
-    try {
-      return new RegExp(source, value.flags)
-    } catch {
-      return source
-    }
-  }
-  if (value instanceof URL) {
-    const href = String(redactor(value.href))
-    try {
-      return new URL(href)
-    } catch {
-      return href
-    }
-  }
-  if (value instanceof Map) {
-    const clone = new Map<unknown, unknown>()
-    seen.set(value, clone)
-    for (const [key, member] of value) {
-      clone.set(
-        // The key is redacted too: a credential can be the key as easily as
-        // the value, and `isSensitiveKey` only decides whether to blank what
-        // the key points at.
-        redactRendered(key, redactor, seen, depth + 1),
-        typeof key === "string" && Redaction.isSensitiveKey(key)
-          ? Redaction.placeholder
-          : redactRendered(member, redactor, seen, depth + 1)
-      )
-    }
-    return clone
-  }
-  if (value instanceof Set) {
-    const clone = new Set<unknown>()
-    seen.set(value, clone)
-    for (const member of value) clone.add(redactRendered(member, redactor, seen, depth + 1))
-    return clone
-  }
-  const prototype = Object.getPrototypeOf(value) as object | null
-  if (Array.isArray(value)) {
-    const clone: Array<unknown> = []
-    seen.set(value, clone)
-    for (const member of value) clone.push(redactRendered(member, redactor, seen, depth + 1))
-    return clone
-  }
-  if (prototype === Object.prototype || prototype === null) {
-    // Walked here rather than handed to `Redaction.redact`, because that
-    // rebuild would collapse an exotic member one level down, which is the
-    // whole point of this function. `Object.fromEntries` keeps the
-    // `__proto__` safety the journal's walker documents: assigning that key
-    // would make the field a prototype instead of a member.
-    const entries: Array<[string, unknown]> = []
-    const clone: Record<string, unknown> = {}
-    seen.set(value, clone)
-    for (const [key, member] of Object.entries(value as Record<string, unknown>)) {
-      entries.push([
-        key,
-        Redaction.isSensitiveKey(key) ? Redaction.placeholder : redactRendered(member, redactor, seen, depth + 1)
-      ])
-    }
-    Object.assign(clone, Object.fromEntries(entries))
-    return clone
-  }
-  // Everything below this line is rebuilt, so only shapes this module can
-  // faithfully rebuild reach it. Anything else takes the plain redacted form.
-  //
-  // Whether a class is safe to clone cannot be INFERRED: a brand-checked host
-  // class keeps its state in internal slots or `#private` fields, and copying
-  // its own keys onto a fresh object of the same prototype yields an impostor
-  // that throws the moment a brand check reads it, including the inspector
-  // rendering this very line. Own-key count does not predict it either, since
-  // `Event` carries four own symbols and still fails. So the rule is an
-  // allowlist of prototypes this module vouches for, not a test on the value.
-  if (!isRebuildablePrototype(prototype)) return redactor(value)
-  const ownKeys = Reflect.ownKeys(value)
-  const clone = Object.create(prototype) as Record<PropertyKey, unknown>
-  seen.set(value, clone)
-  for (const key of ownKeys) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)!
-    // Read once and stored as data, for the reason `redactError` gives: a
-    // getter carried across would hand the unredacted value to its reader.
-    const member = "value" in descriptor ? descriptor.value : (value as Record<PropertyKey, unknown>)[key]
-    Object.defineProperty(clone, key, {
-      value: typeof key === "string" && Redaction.isSensitiveKey(key)
-        ? Redaction.placeholder
-        : redactRendered(member, redactor, seen, depth + 1),
-      writable: true,
-      enumerable: descriptor.enumerable === true,
-      configurable: true
-    })
-  }
-  return clone
-}
 
 /**
  * A console that runs every value it is handed through `redactor` and then
@@ -428,7 +244,7 @@ export const redactingConsole = (target: Console.Console, redactor: Redaction.Re
           // The delegate renders what we hand it, and a value that survives
           // redaction can still break the renderer. Falling back to the text
           // keeps the line, and the run, alive.
-          return method(...redacted.map(asText))
+          return method(...redacted.map(() => unrenderableMarker))
         }
       }
       : method
@@ -456,9 +272,9 @@ const redactedFiber = (
         return redactingConsole(current as Console.Console, redactor) as X
       }
       if (reference === (References.CurrentLogAnnotations as unknown as Context.Reference<X>)) {
-        // The same rendering the message gets, so one log event does not obey
-        // two rules: an annotated Date or Map reaches the operator as itself.
-        return redactRendered(current, redactor, new WeakMap()) as X
+        // The same treatment a message part gets, so one log event obeys one
+        // rule and an annotated Error is redacted like a logged one.
+        return redactArgument(current, redactor) as X
       }
       return current
     }
@@ -539,7 +355,9 @@ export const wrap = <Message, Output>(
  * Replaces the active logger set with redacting wrappers of the same loggers.
  *
  * It composes over whatever loggers are already installed rather than
- * choosing one, so an operator keeps the format they had and a host that
+ * choosing one, so an operator keeps the FORMAT they had, meaning their own
+ * logger and its layout, though a value inside a line is rendered from its
+ * redacted plain data rather than as its own class, and a host that
  * installed its own logger keeps it too.
  *
  * @since 0.1.0

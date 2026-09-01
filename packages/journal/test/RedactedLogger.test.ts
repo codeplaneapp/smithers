@@ -379,17 +379,24 @@ describe("RedactedLogger", () => {
     expect(inspect(RedactedLogger.redactArgument(params, redactor))).not.toContain("sk-live-abcdefgh")
   })
 
-  it("gives an annotation the same rendering the message gets", () => {
-    // Both halves of one log event obey one rule: a Date or Map annotated onto
-    // a line used to collapse to `{}` while the same value in the message
-    // rendered as itself.
+  it("gives an annotation the same treatment the message gets", () => {
+    // Restated 2026-09-01: this asserted an annotated Date stayed a Date,
+    // which was the type-preserving render. That render was removed after
+    // three rounds of review found it could kill the run it was logging, so
+    // the shared treatment is now the plain redacted form. The property the
+    // case exists for is unchanged: both halves of one log event obey one
+    // rule, and neither leaks.
     const redactor = Redaction.make()
     const annotations = RedactedLogger.redactArgument(
-      { at: new Date(0), m: new Map([["k", "v"]]) },
+      { at: new Date(0), token: "sk-live-abcdefgh", nested: { authorization: "Bearer abcdefghijkl" } },
       redactor
-    ) as { at: unknown; m: unknown }
-    expect(annotations.at).toBeInstanceOf(Date)
-    expect(annotations.m).toBeInstanceOf(Map)
+    )
+    const rendered = inspect(annotations)
+    expect(rendered).not.toContain("sk-live-abcdefgh")
+    expect(rendered).not.toContain("Bearer abcdefghijkl")
+    expect(RedactedLogger.redactArgument({ token: "sk-live-abcdefgh" }, redactor)).toEqual(
+      RedactedLogger.redactArgument({ token: "sk-live-abcdefgh" }, redactor)
+    )
   })
 
   it("redacts a credential used as a Map key", () => {
@@ -401,11 +408,46 @@ describe("RedactedLogger", () => {
     expect(inspect(keyed)).not.toContain("sk-live-abcdefgh")
   })
 
-  it("redacts a credential a RegExp was built from", () => {
+  it("stops at the depth cap on an Error's own members, not only beside one", () => {
+    // Round 4 found the cap did not bind through an Error: the Error walk ran
+    // before the check and carried no depth, so a deep value on a cause still
+    // exhausted the stack and the RangeError killed the run from inside the
+    // logger. The chain here is deeper than the cap and hangs off the Error.
     const redactor = Redaction.make()
-    const pattern = RedactedLogger.redactArgument(new RegExp("sk-live-abcdefgh"), redactor) as RegExp
-    expect(pattern).toBeInstanceOf(RegExp)
-    expect(pattern.source).not.toContain("sk-live-abcdefgh")
+    const outer = new Error("outer") as Error & { detail?: unknown }
+    let chain: Record<string, unknown> = { token: "sk-live-abcdefgh" }
+    for (let level = 0; level < 400; level++) chain = { chain }
+    outer.detail = chain
+    const redacted = RedactedLogger.redactArgument(outer, redactor) as Error & { detail?: unknown }
+    // `inspect` of an Error shows its stack, so the member is read directly.
+    const rendered = inspect(redacted.detail, { depth: null })
+    expect(rendered).not.toContain("sk-live-abcdefgh")
+    expect(rendered).toContain(Redaction.depthMarker)
+  })
+
+  it("stops at the depth cap on a long chain of nested errors", () => {
+    // The Error walk recurses through Error-valued members, so a deep cause
+    // chain is its own way to exhaust the stack. The cap binds there too.
+    const redactor = Redaction.make()
+    let nested = new Error("root token=sk-live-abcdefgh") as Error & { inner?: unknown }
+    for (let level = 0; level < 250; level++) {
+      const outer = new Error(`level ${level}`) as Error & { inner?: unknown }
+      outer.inner = nested
+      nested = outer
+    }
+    const rendered = inspect(RedactedLogger.redactArgument(nested, redactor), { depth: null })
+    expect(rendered).not.toContain("sk-live-abcdefgh")
+    expect(rendered).toContain(Redaction.depthMarker)
+  })
+
+  it("does not leak a credential a RegExp was built from", () => {
+    // Restated 2026-09-01: this asserted the value came back as a RegExp with
+    // a redacted source. Rebuilding a RegExp from redacted text can throw a
+    // SyntaxError from inside the logger, so the class is no longer preserved.
+    // What matters is unchanged and still asserted: the credential is gone.
+    const redactor = Redaction.make()
+    const rendered = inspect(RedactedLogger.redactArgument(new RegExp("sk-live-abcdefgh"), redactor))
+    expect(rendered).not.toContain("sk-live-abcdefgh")
   })
 
   it("renders a value nested past the walk's depth instead of exhausting the stack", () => {
@@ -415,78 +457,28 @@ describe("RedactedLogger", () => {
     expect(() => RedactedLogger.redactArgument(deep, redactor)).not.toThrow()
   })
 
-  it("keeps the type a logger was given, and still redacts what it holds", () => {
-    // The redactor rebuilds an object from its own enumerable entries, which
-    // turns a Date, Map, Set, URL, RegExp or class instance into `{}`. That is
-    // right for the journal, whose rows are JSON, and wrong for a log line,
-    // where the operator keeps the format they had.
+  it("collapses an exotic value to its plain redacted form", () => {
+    // Restated 2026-09-01: this pinned the type-preserving render (a Date
+    // stayed a Date, a Map a Map, a class instance its class). That render is
+    // gone: it rebuilt each value on its own prototype, and a host class keeps
+    // state a property walk cannot see, so the clone threw the moment a brand
+    // check read it and killed the run. The collapse is documented in
+    // rc-contract section 7. The invariant this case now holds is the one that
+    // matters: whatever the shape, nothing leaks and nothing throws.
     const redactor = Redaction.make()
-    const at = new Date(0)
-    expect(RedactedLogger.redactArgument(at, redactor)).toBeInstanceOf(Date)
-    expect((RedactedLogger.redactArgument(at, redactor) as Date).toISOString()).toBe(at.toISOString())
-    expect(RedactedLogger.redactArgument(/x/g, redactor)).toBeInstanceOf(RegExp)
-
-    const map = RedactedLogger.redactArgument(new Map([["apiKey", "sk-live-abcdefgh"]]), redactor) as Map<
-      string,
-      unknown
-    >
-    expect(map).toBeInstanceOf(Map)
-    expect(map.get("apiKey")).toBe(Redaction.placeholder)
-
-    const set = RedactedLogger.redactArgument(new Set(["token=sk-live-abcdefgh"]), redactor) as Set<string>
-    expect(set).toBeInstanceOf(Set)
-    expect([...set].join()).not.toContain("sk-live-abcdefgh")
-
-    class Detail {
-      readonly apiKey: string
-      readonly endpoint: string
-      constructor(apiKey: string, endpoint: string) {
-        this.apiKey = apiKey
-        this.endpoint = endpoint
-      }
+    const values: ReadonlyArray<unknown> = [
+      new Date(0),
+      new Map([["apiKey", "sk-live-abcdefgh"]]),
+      new Set(["token=sk-live-abcdefgh"]),
+      new URL("https://example.test/?token=sk-live-abcdefgh"),
+      { apiKey: "sk-live-abcdefgh", endpoint: "https://example.test" },
+      ["token=sk-live-abcdefgh"]
+    ]
+    for (const value of values) {
+      const rendered = inspect(RedactedLogger.redactArgument(value, redactor))
+      expect(rendered).not.toContain("sk-live-abcdefgh")
     }
-    const detail = RedactedLogger.redactArgument(new Detail("sk-live-abcdefgh", "https://example.test"), redactor)
-    expect(detail).toBeInstanceOf(Detail)
-    expect((detail as Detail).apiKey).toBe(Redaction.placeholder)
-    expect((detail as Detail).endpoint).toBe("https://example.test")
-
-    // A repeat reference is the same clone, a binary view passes through, a
-    // URL keeps its type with its query redacted, and a symbol-keyed member
-    // of a class instance survives with its own value.
-    const shared = new Map([["endpoint", "https://example.test"]])
-    const twice = RedactedLogger.redactArgument({ a: shared, b: shared }, redactor) as {
-      a: Map<string, unknown>
-      b: Map<string, unknown>
-    }
-    expect(twice.b).toBe(twice.a)
-    const bytes = new Uint8Array([1, 2, 3])
-    expect(RedactedLogger.redactArgument(bytes, redactor)).toBe(bytes)
-    const url = RedactedLogger.redactArgument(new URL("https://example.test/?token=sk-live-abcdefgh"), redactor)
-    expect(url).toBeInstanceOf(URL)
-    expect(String(url)).not.toContain("sk-live-abcdefgh")
-    const tag = Symbol("tag")
-    class Tagged {
-      readonly apiKey = "sk-live-abcdefgh"
-      readonly [tag] = "kept"
-    }
-    const tagged = RedactedLogger.redactArgument(new Tagged(), redactor) as Tagged
-    expect(tagged[tag]).toBe("kept")
-    expect(tagged.apiKey).toBe(Redaction.placeholder)
-
-    // A getter on a class instance is read once and stored as data, so the
-    // reader cannot pull the unredacted value back out of the original.
-    class Lazy {}
-    const lazy = new Lazy()
-    Object.defineProperty(lazy, "detail", {
-      get: () => "sent Bearer abcdefghijkl",
-      enumerable: true,
-      configurable: true
-    })
-    const rendered = RedactedLogger.redactArgument(lazy, redactor) as { detail: string }
-    expect(rendered).toBeInstanceOf(Lazy)
-    expect(rendered.detail).toBe("sent Bearer [REDACTED_TOKEN]")
-
-    // A plain object and an array still walk exactly as before.
+    // A plain object still renders as itself, with its credential replaced.
     expect(RedactedLogger.redactArgument({ a: ["token=sk-live-abcdefgh"] }, redactor)).toEqual({
       a: [`token=${Redaction.placeholder}`]
     })

@@ -119,6 +119,24 @@ export interface Options {
 }
 
 /**
+ * How deep {@link redact} walks before it names a value instead.
+ *
+ * @since 0.1.0
+ * @category redaction
+ * @slop
+ */
+export const depthLimit = 200
+
+/**
+ * What {@link redact} writes in place of a value nested past {@link depthLimit}.
+ *
+ * @since 0.1.0
+ * @category redaction
+ * @slop
+ */
+export const depthMarker = "[Deep]"
+
+/**
  * Returns `value` with credentials removed.
  *
  * Objects and arrays are rebuilt: a field whose name {@link isSensitiveKey}
@@ -133,14 +151,20 @@ export interface Options {
  */
 export const redact = (value: unknown, options?: Options): unknown => {
   const rules = options?.rules ?? defaultRules
-  const walk = (node: unknown, ancestors: WeakSet<object>): unknown => {
+  const walk = (node: unknown, ancestors: WeakSet<object>, depth = 0): unknown => {
     if (typeof node === "string") return redactString(node, rules)
     if (node === null || typeof node !== "object") return node
     if (ancestors.has(node)) return "[Circular]"
+    // A journal row is bounded by its schema, but a LOGGED value is arbitrary:
+    // the logger sends every non-Error value here, and a chain deep enough to
+    // exhaust the stack would throw while the line is rendering, killing the
+    // run the line describes. Past the cap the value is named, the way a cycle
+    // is named.
+    if (depth >= depthLimit) return depthMarker
     ancestors.add(node)
     try {
       if (Array.isArray(node)) {
-        return node.map((element) => walk(element, ancestors))
+        return node.map((element) => walk(element, ancestors, depth + 1))
       }
       // `result[key] = …` routes a literal `__proto__` key through the
       // inherited setter, so the field would silently become the result's
@@ -150,7 +174,7 @@ export const redact = (value: unknown, options?: Options): unknown => {
       return Object.fromEntries(
         Object.entries(node as Record<string, unknown>).map((
           [key, field]
-        ) => [key, isSensitiveKey(key) ? placeholder : walk(field, ancestors)])
+        ) => [key, isSensitiveKey(key) ? placeholder : walk(field, ancestors, depth + 1)])
       )
     } finally {
       ancestors.delete(node)
