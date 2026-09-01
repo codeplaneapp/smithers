@@ -410,11 +410,17 @@ describe("RemoteChildProcessSpawner", () => {
         )).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
       expect(output).toBe("echoed")
       expect(Array.from(provider.state.inputs[0]!)).toEqual([1, 2, 3])
-      // A command without input hands the provider none.
+      // A command without input hands the provider none, and so does a
+      // config whose stream is an OS disposition rather than data.
       yield* Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.string(ChildProcess.make("cat"))).pipe(
         Effect.provide(RemoteChildProcessSpawner.layer(provider))
       )
       expect(provider.state.inputs[1]).toBeUndefined()
+      yield* Effect.flatMap(ChildProcessSpawner, (spawner) =>
+        spawner.string(ChildProcess.make("cat", [], { stdin: { stream: "pipe" } }))).pipe(
+          Effect.provide(RemoteChildProcessSpawner.layer(provider))
+        )
+      expect(provider.state.inputs[2]).toBeUndefined()
     }))
 
   it.effect("feeds standard input to the first command of a pipeline only", () =>

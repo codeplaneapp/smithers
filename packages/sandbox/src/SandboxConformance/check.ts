@@ -15,7 +15,7 @@ import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
 import { commandProvider } from "../Sandbox/commandProvider.ts"
 import type { Provider } from "../Sandbox/Provider.ts"
 import type { Session } from "../Sandbox/Session.ts"
-import { posixCommands, uniquePosixCommands } from "./posixCommands.ts"
+import { uniquePosixCommands } from "./posixCommands.ts"
 
 /** Describes an unexpected outcome without leaking a stack into the report. */
 const shown = (exit: Exit.Exit<unknown, unknown>): string =>
@@ -227,7 +227,8 @@ export const check = (
       Effect.raceFirst(
         Effect.andThen(
           Effect.scoped(Effect.asVoid(provider.acquire(session))),
-          Effect.scoped(Effect.flatMap(provider.acquire(session), (live) => run(live, "printf 'again'")))
+          Effect.scoped(Effect.flatMap(provider.acquire(session), (live) =>
+            run(live, "printf 'again'")))
         ),
         expired(deadline)
       )
@@ -311,7 +312,9 @@ export const check = (
       }
     ]
     return [
-      ...found.filter((violation): violation is Violation => violation !== undefined),
+      ...found.filter((violation): violation is Violation =>
+        violation !== undefined
+      ),
       ...spawnChecks
     ]
   })

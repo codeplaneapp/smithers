@@ -95,7 +95,9 @@ const signalsARunningCommand = (provider: Provider, commands: Commands): Effect.
         // The handle is the wrapper shell, and a shell that dies while its
         // child lives on satisfies everything above. The second look asks the
         // machine itself whether the command's work is still there.
-        const survivor = yield* spawner.exitCode(ChildProcess.make(commands.survivor, { shell: commands.shell ?? false }))
+        const survivor = yield* spawner.exitCode(
+          ChildProcess.make(commands.survivor, { shell: commands.shell ?? false })
+        )
         return { stopped, survived: survivor === 0 }
       }))
     ),

@@ -529,8 +529,10 @@ export const make = (options: Options): Provider => ({
           : `${workdir}/${cwd.replace(/^(\.\/)+/, "")}`.replace(/\/\.?$/, "")
       const kill = (pidfile: string, signal: string): Effect.Effect<void, ProviderError> =>
         Effect.asVoid(
-          Effect.flatMap(run(killScript(pidfile, signal.replace(/^SIG/, ""))), (result) =>
-            settled(`signalling with ${signal}`, result))
+          Effect.flatMap(
+            run(killScript(pidfile, signal.replace(/^SIG/, ""))),
+            (result) => settled(`signalling with ${signal}`, result)
+          )
         )
 
       const pidfiles = new WeakMap<RemoteProcess, string>()
@@ -551,8 +553,11 @@ export const make = (options: Options): Provider => ({
           // three pieces of the process share one gathering of the local
           // client, taken when the first of them is consumed.
           const gathered = yield* Effect.cached(
-            Effect.flatMap(gather(handle, `${program} ecs execute-command`), (result) =>
-              result.code === 0 ? Effect.succeed(unframe(result, nonce)) : Effect.fail(transportFailure(result)))
+            Effect.flatMap(
+              gather(handle, `${program} ecs execute-command`),
+              (result) =>
+                result.code === 0 ? Effect.succeed(unframe(result, nonce)) : Effect.fail(transportFailure(result))
+            )
           )
           // Closing the process scope ends the local client, which the guest
           // does not notice. The contract says the scope IS the process's
@@ -568,8 +573,10 @@ export const make = (options: Options): Provider => ({
           )
           const process: RemoteProcess = {
             stdout: Stream.unwrap(
-              Effect.map(observed, (result) =>
-                result.payload.length === 0 ? Stream.empty : Stream.make(encoder.encode(result.payload)))
+              Effect.map(
+                observed,
+                (result) => result.payload.length === 0 ? Stream.empty : Stream.make(encoder.encode(result.payload))
+              )
             ),
             // The pseudo-terminal merges standard error into standard output.
             stderr: Stream.empty,

@@ -1,103 +1,228 @@
-import { describe, expect, it } from "@effect/vitest"
-import { Effect, PlatformError, Sink, Stream } from "effect"
-import type { ChildProcess } from "effect/unstable/process"
+import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
+import { afterAll, describe, expect, it } from "@effect/vitest"
+import { Effect, Exit, Layer, Path, PlatformError, Sink, Stream } from "effect"
+import * as Scope from "effect/Scope"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import {
-  type ChildProcessSpawner,
+  ChildProcessSpawner,
   ExitCode,
   make as makeSpawner,
   makeHandle,
   ProcessId
 } from "effect/unstable/process/ChildProcessSpawner"
+import { chmodSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import * as ContainerSandbox from "../src/ContainerSandbox/index.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import type { Session } from "../src/Sandbox/index.ts"
+import * as SandboxConformance from "../src/SandboxConformance/index.ts"
 
-const decoder = new TextDecoder()
+// -----------------------------------------------------------------------------
+// The container engine as a fake: real shells behind docker's argv contract.
+// -----------------------------------------------------------------------------
+
+// The fake emulates only what the docker CLI itself contributes — the
+// create/start/exec/rm verbs, name uniqueness, exit codes, stderr text, and
+// the engine's rule that an exec's argv is resolved through the exec
+// environment's PATH — and every guest command runs through a real `/bin/sh`
+// against a real directory, so pidfiles, signals, `cat`, and `pgrep` are all
+// genuine. The fixed guest pid directory is remapped under the test root the
+// way the AWS fake remaps it, and the guest program runs under a supervising
+// local shell so a signalled command reports `128+signal` the way the docker
+// client does instead of failing the local exit observation.
+const root = realpathSync(mkdtempSync(join(tmpdir(), "smthrs-container-sandbox-")))
+const workdir = join(root, "workspace")
+afterAll(() => {
+  rmSync(root, { recursive: true, force: true })
+})
+
+const platform = Layer.provideMerge(
+  NodeChildProcessSpawner.layer,
+  Layer.merge(NodeFileSystem.layer, Path.layer)
+)
+const local = Effect.runSync(
+  Effect.gen(function*() {
+    return yield* ChildProcessSpawner
+  }).pipe(Effect.provide(platform))
+)
+
 const encoder = new TextEncoder()
+
+// A long-running fixture whose duration is this process's own, kept below the
+// conformance suite's 4200+ range, so no concurrent vitest worker's fixture
+// can match this file's survivor probes. The probe brackets the last digit so
+// it cannot match its own command line.
+const sleepDuration = String(3700 + (process.pid % 150))
+const sleeps = `sleep ${sleepDuration}`
+const survivor = `pgrep -f 'sleep ${sleepDuration.slice(0, -1)}[${sleepDuration.slice(-1)}]'`
 
 interface Call {
   readonly file: string
   readonly args: ReadonlyArray<string>
-  readonly stdin: string | undefined
 }
 
 interface Response {
-  readonly stdout?: string | Uint8Array | undefined
+  readonly stdout?: string | undefined
   readonly stderr?: string | undefined
   readonly exitCode?: number | undefined
   readonly failSpawn?: boolean | undefined
   readonly failObserve?: boolean | undefined
 }
 
-/** A container engine as a script: every CLI invocation answered from a table. */
-const engine = (respond: (args: ReadonlyArray<string>) => Response) => {
+const remap = (token: string): string => token.replaceAll("/tmp/.smthrs-sbx", `${root}/.pids`)
+
+const engine = (fault: (args: ReadonlyArray<string>) => Response | undefined = () => undefined) => {
   const calls: Array<Call> = []
-  const chunk = (value: string | Uint8Array | undefined): Stream.Stream<Uint8Array, PlatformError.PlatformError> =>
-    value === undefined || value.length === 0
-      ? Stream.empty
-      : Stream.fromArray([typeof value === "string" ? encoder.encode(value) : value])
-  const spawner: ChildProcessSpawner["Service"] = makeSpawner((command: ChildProcess.Command) =>
+  const containers = new Map<string, { started: boolean }>()
+  const canned = (response: Response) =>
+    makeHandle({
+      pid: ProcessId(1),
+      exitCode: response.failObserve === true
+        ? Effect.fail(
+          PlatformError.badArgument({ module: "ChildProcess", method: "exitCode", description: "lost" })
+        )
+        : Effect.succeed(ExitCode(response.exitCode ?? 0)),
+      isRunning: Effect.succeed(false),
+      kill: () => Effect.void,
+      stdin: Sink.drain,
+      stdout: response.stdout === undefined ? Stream.empty : Stream.make(encoder.encode(response.stdout)),
+      stderr: response.stderr === undefined ? Stream.empty : Stream.make(encoder.encode(response.stderr)),
+      all: Stream.empty,
+      getInputFd: () => Sink.drain,
+      getOutputFd: () => Stream.empty,
+      unref: Effect.succeed(Effect.void)
+    })
+  const spawner = makeSpawner((command: ChildProcess.Command) =>
     Effect.gen(function*() {
       if (command._tag !== "StandardCommand") {
         return yield* Effect.fail(
-          PlatformError.badArgument({ module: "ChildProcess", method: "spawn", description: "no pipelines here" })
+          PlatformError.badArgument({ module: "ChildProcess", method: "spawn", description: "no pipelines" })
         )
       }
-      const stdinOption = command.options.stdin
-      const stdin = Stream.isStream(stdinOption)
-        ? decoder.decode(
-          (yield* Stream.runCollect(stdinOption as Stream.Stream<Uint8Array>))
-            .reduce((whole, part) => {
-              const next = new Uint8Array(whole.length + part.length)
-              next.set(whole, 0)
-              next.set(part, whole.length)
-              return next
-            }, new Uint8Array(0))
-        )
-        : undefined
-      const response = respond(command.args)
-      calls.push({ file: command.command, args: command.args, stdin })
-      if (response.failSpawn === true) {
+      calls.push({ file: command.command, args: command.args })
+      const injected = fault(command.args)
+      if (injected?.failSpawn === true) {
         return yield* Effect.fail(
           PlatformError.badArgument({ module: "ChildProcess", method: "spawn", description: "engine gone" })
         )
       }
+      if (injected !== undefined) return canned(injected)
+      const args = [...command.args]
+      if (args[0] === "create") {
+        const name = args[args.indexOf("--name") + 1]!
+        if (containers.has(name)) {
+          return canned({
+            exitCode: 125,
+            stderr:
+              `docker: Error response from daemon: Conflict. The container name "/${name}" is already in use by container "0123456789ab".\n`
+          })
+        }
+        containers.set(name, { started: false })
+        return canned({ stdout: "0123456789ab\n" })
+      }
+      if (args[0] === "start") {
+        const held = containers.get(args[1]!)
+        if (held === undefined) {
+          return canned({ exitCode: 1, stderr: `Error response from daemon: No such container: ${args[1]}\n` })
+        }
+        held.started = true
+        return canned({ stdout: `${args[1]}\n` })
+      }
+      if (args[0] === "rm") {
+        const name = args.at(-1)!
+        return containers.delete(name)
+          ? canned({ stdout: `${name}\n` })
+          : canned({ exitCode: 1, stderr: `Error response from daemon: No such container: ${name}\n` })
+      }
+      // exec [--interactive] [--workdir DIR] [--env K=V ...] NAME PROGRAM ARGS...
+      let index = 1
+      let interactive = false
+      let cwd = root
+      const env: Record<string, string> = {}
+      while (args[index]?.startsWith("--") === true) {
+        if (args[index] === "--interactive") {
+          interactive = true
+          index += 1
+        } else if (args[index] === "--workdir") {
+          cwd = args[index + 1]!
+          index += 2
+        } else {
+          const assignment = args[index + 1]!
+          const separator = assignment.indexOf("=")
+          env[assignment.slice(0, separator)] = assignment.slice(separator + 1)
+          index += 2
+        }
+      }
+      const name = args[index]!
+      if (containers.get(name)?.started !== true) {
+        return canned({ exitCode: 1, stderr: `Error response from daemon: container ${name} is not running\n` })
+      }
+      const program = args[index + 1]!
+      // The engine resolves the exec's argv through the exec environment's
+      // PATH, so a PATH override breaks any non-absolute program before it
+      // starts. This rule is what the provider's absolute `/bin/sh` defeats.
+      if (!program.startsWith("/") && env.PATH !== undefined) {
+        return canned({
+          exitCode: 126,
+          stderr:
+            `OCI runtime exec failed: exec failed: unable to start container process: exec: "${program}": executable file not found in $PATH: unknown\n`
+        })
+      }
+      const child = yield* local.spawn(
+        ChildProcess.make("/bin/sh", ["-c", `"$0" "$@"; exit "$?"`, program, ...args.slice(index + 2).map(remap)], {
+          cwd,
+          env,
+          extendEnv: true,
+          ...interactive && Stream.isStream(command.options.stdin)
+            ? { stdin: command.options.stdin as Stream.Stream<Uint8Array> }
+            : {}
+        })
+      )
       return makeHandle({
-        pid: ProcessId(1),
-        exitCode: response.failObserve === true
-          ? Effect.fail(
-            PlatformError.badArgument({ module: "ChildProcess", method: "exitCode", description: "lost" })
-          )
-          : Effect.succeed(ExitCode(response.exitCode ?? 0)),
-        isRunning: Effect.succeed(false),
-        kill: () => Effect.void,
+        pid: child.pid,
+        exitCode: child.exitCode,
+        isRunning: child.isRunning,
+        kill: (killOptions) => child.kill(killOptions),
         stdin: Sink.drain,
-        stdout: chunk(response.stdout),
-        stderr: chunk(response.stderr),
-        all: Stream.empty,
+        stdout: child.stdout,
+        stderr: child.stderr,
+        all: child.all,
         getInputFd: () => Sink.drain,
         getOutputFd: () => Stream.empty,
-        unref: Effect.succeed(Effect.void)
+        unref: child.unref
       })
     })
   )
-  return { spawner, calls }
+  return { calls, containers, spawner }
 }
 
 const acquired = <A, E>(
   provider: ReturnType<typeof ContainerSandbox.make>,
-  body: (session: Session) => Effect.Effect<A, E>
-): Effect.Effect<A, E | ProviderError> => Effect.scoped(Effect.flatMap(provider.acquire("run-1"), body))
+  body: (session: Session) => Effect.Effect<A, E>,
+  session = "run-1"
+): Effect.Effect<A, E | ProviderError> => Effect.scoped(Effect.flatMap(provider.acquire(session), body))
+
+const output = (session: Session, command: string, options: Parameters<Session["spawn"]>[1] = {}) =>
+  Effect.scoped(
+    Effect.gen(function*() {
+      const process = yield* session.spawn(command, options)
+      const stdout = yield* Stream.mkString(Stream.decodeText(process.stdout))
+      const code = yield* process.exitCode
+      return { stdout, code }
+    })
+  )
 
 describe("ContainerSandbox", () => {
   it.effect("drives the full container lifecycle through the engine CLI", () =>
     Effect.gen(function*() {
-      const { calls, spawner } = engine(() => ({}))
+      const spaced = join(root, "work dir")
+      const { calls, spawner } = engine()
       const provider = ContainerSandbox.make({
         spawner,
         image: "img:tag",
         program: "podman",
-        workdir: "/w",
+        workdir: spaced,
         env: { SEED: "1" },
         network: "none",
         createArgs: ["--memory", "1g"],
@@ -106,14 +231,14 @@ describe("ContainerSandbox", () => {
       const session = yield* acquired(provider, (session) => Effect.succeed(session))
       expect(session.id).toBe("run-1")
       expect(session.remoteId.startsWith("t-run-1-")).toBe(true)
-      expect(session.workdir).toBe("/w")
+      expect(session.workdir).toBe(spaced)
       expect(calls.map((call) => call.file)).toEqual(["podman", "podman", "podman", "podman"])
       expect(calls[0]!.args).toEqual([
         "create",
         "--name",
         session.remoteId,
         "--workdir",
-        "/w",
+        spaced,
         "--network",
         "none",
         "--env",
@@ -130,45 +255,57 @@ describe("ContainerSandbox", () => {
         session.remoteId,
         "sh",
         "-c",
-        "mkdir -p /w && rm -rf /tmp/.smthrs-sbx && mkdir -p /tmp/.smthrs-sbx"
+        `mkdir -p '${spaced}' && rm -rf /tmp/.smthrs-sbx && mkdir -p /tmp/.smthrs-sbx`
       ])
       expect(calls[3]!.args).toEqual(["rm", "--force", session.remoteId])
     }))
 
-  it.effect("reattaches when the name is already in use and refuses other create failures", () =>
+  it.effect("reattaches the container a crashed run left behind, workspace intact", () =>
     Effect.gen(function*() {
-      const reusing = engine((args) =>
-        args[0] === "create"
-          ? { exitCode: 125, stderr: `the container name is already in use by "abc"` }
-          : {}
-      )
-      const reused = yield* acquired(
-        ContainerSandbox.make({ spawner: reusing.spawner, image: "img" }),
-        (session) => Effect.succeed(session.remoteId)
-      )
-      expect(reused.startsWith("smthrs-sbx-")).toBe(true)
+      const fake = engine()
+      const provider = ContainerSandbox.make({ spawner: fake.spawner, image: "img", workdir })
+      // A crash is a scope whose finalizers never ran.
+      const leaked = yield* Scope.make()
+      const first = yield* Effect.provideService(provider.acquire("resume"), Scope.Scope, leaked)
+      yield* first.writeFile(`${workdir}/survivor.txt`, encoder.encode("still here"))
+      const resumed = yield* acquired(provider, (session) =>
+        Effect.gen(function*() {
+          const bytes = yield* session.readFile(`${workdir}/survivor.txt`)
+          return { remoteId: session.remoteId, text: new TextDecoder().decode(bytes) }
+        }), "resume")
+      expect(resumed.remoteId).toBe(first.remoteId)
+      expect(resumed.text).toBe("still here")
+      expect(fake.calls.filter((call) => call.args[0] === "create")).toHaveLength(2)
+      // The reacquire's release already removed the container; closing the
+      // leaked scope must tolerate that.
+      expect(Exit.isSuccess(yield* Effect.exit(Scope.close(leaked, Exit.void)))).toBe(true)
 
-      const refusing = engine((args) => args[0] === "create" ? { exitCode: 125, stderr: "no such image" } : {})
+      // No workdir given: the default applies, and the refused create keeps
+      // the fake from ever preparing /workspace on this host.
+      const refusing = engine((args) => args[0] === "create" ? { exitCode: 125, stderr: "no such image" } : undefined)
       const refusal = yield* Effect.flip(
         acquired(ContainerSandbox.make({ spawner: refusing.spawner, image: "img" }), Effect.succeed)
       )
       expect(refusal).toBeInstanceOf(ProviderError)
       expect((refusal as ProviderError).message).toContain("no such image")
-    }))
+      expect(refusing.calls[0]!.args).toContain("/workspace")
+    }), 30_000)
 
   it.effect("fails acquisition when the container cannot start or be prepared", () =>
     Effect.gen(function*() {
-      const unstartable = engine((args) => args[0] === "start" ? { exitCode: 1, stderr: "dead engine" } : {})
+      const unstartable = engine((args) => args[0] === "start" ? { exitCode: 1, stderr: "dead engine" } : undefined)
       const startFailure = yield* Effect.flip(
-        acquired(ContainerSandbox.make({ spawner: unstartable.spawner, image: "img" }), Effect.succeed)
+        acquired(ContainerSandbox.make({ spawner: unstartable.spawner, image: "img", workdir }), Effect.succeed)
       )
       expect((startFailure as ProviderError).message).toContain("could not be started")
 
       const unpreparable = engine((args) =>
-        args[1] !== undefined && args[0] === "exec" ? { exitCode: 1, stderr: "ro fs" } : {}
+        args[0] === "exec" && args.at(-1)?.startsWith("mkdir -p") === true
+          ? { exitCode: 1, stderr: "ro fs" }
+          : undefined
       )
       const prepareFailure = yield* Effect.flip(
-        acquired(ContainerSandbox.make({ spawner: unpreparable.spawner, image: "img" }), Effect.succeed)
+        acquired(ContainerSandbox.make({ spawner: unpreparable.spawner, image: "img", workdir }), Effect.succeed)
       )
       expect((prepareFailure as ProviderError).message).toContain("could not be prepared")
 
@@ -180,104 +317,119 @@ describe("ContainerSandbox", () => {
         const removed = failed.calls.find((call) => call.args[0] === "rm")
         expect(created).toBeDefined()
         expect(removed?.args).toEqual(["rm", "--force", created!.args[2]!])
+        expect(failed.containers.size).toBe(0)
       }
     }))
 
-  it.effect("spawns through exec in the right directory with only defined environment", () =>
+  it.effect("spawns with stdin, a rooted cwd, and only defined environment", () =>
     Effect.gen(function*() {
-      const { calls, spawner } = engine((args) => args.includes("sh") ? { stdout: "ran\n" } : {})
-      const provider = ContainerSandbox.make({ spawner, image: "img" })
-      const output = yield* acquired(provider, (session) =>
-        Effect.scoped(
-          Effect.flatMap(
-            session.spawn("echo ran", { env: { KEPT: "yes", DROPPED: undefined } }),
-            (process) => Stream.mkString(Stream.decodeText(process.stdout))
-          )
-        ).pipe(
-          Effect.andThen((first) =>
-            Effect.map(
-              Effect.scoped(
-                Effect.flatMap(session.spawn("pwd", { cwd: "/elsewhere" }), (process) => process.exitCode)
-              ),
-              (code) => ({ first, code })
-            )
-          )
-        ))
-      expect(output).toEqual({ first: "ran\n", code: 0 })
-      const spawnCalls = calls.filter((call) => call.args[1] === "--workdir")
-      expect(spawnCalls[0]!.args).toEqual([
-        "exec",
-        "--workdir",
-        "/workspace",
-        "--env",
-        "KEPT=yes",
-        spawnCalls[0]!.args[5]!,
-        "sh",
-        "-c",
-        "echo $$ > /tmp/.smthrs-sbx/0.pid; exec sh -c 'echo ran'"
-      ])
-      expect(spawnCalls[1]!.args.slice(0, 3)).toEqual(["exec", "--workdir", "/elsewhere"])
-    }))
-
-  it.effect("reads files back as bytes, distinguishing absence from refusal", () =>
-    Effect.gen(function*() {
-      const binary = new Uint8Array([0, 200, 10, 0, 7])
-      const { spawner } = engine((args) => {
-        const script = args.at(-1) ?? ""
-        if (args[0] !== "exec" || !args.includes("sh") || !script.includes("cat ")) return {}
-        return script.includes("present.bin")
-          ? { stdout: binary }
-          : script.includes("absent.bin")
-          ? { exitCode: 9 }
-          : { exitCode: 1, stderr: "cat: permission denied" }
-      })
-      const provider = ContainerSandbox.make({ spawner, image: "img" })
-      const outcome = yield* acquired(provider, (session) =>
-        Effect.gen(function*() {
-          const present = yield* session.readFile("/workspace/present.bin")
-          const absent = yield* Effect.flip(session.readFile("/workspace/absent.bin"))
-          const refused = yield* Effect.flip(session.readFile("/workspace/locked.bin"))
-          return { present: Array.from(present), absent, refused }
-        }))
-      expect(outcome.present).toEqual([0, 200, 10, 0, 7])
-      expect((outcome.absent as ProviderError).code).toBe("not_found")
-      expect((outcome.refused as ProviderError).code).toBe("unknown")
-      expect((outcome.refused as ProviderError).message).toContain("permission denied")
-    }))
-
-  it.effect("writes files through the exec's stdin, creating parents", () =>
-    Effect.gen(function*() {
-      const { calls, spawner } = engine((args) =>
-        args.at(-1)?.includes("refused") === true ? { exitCode: 1, stderr: "refused" } : {}
-      )
-      const provider = ContainerSandbox.make({ spawner, image: "img" })
+      const { calls, spawner } = engine()
+      const provider = ContainerSandbox.make({ spawner, image: "img", workdir })
       yield* acquired(provider, (session) =>
         Effect.gen(function*() {
-          yield* session.writeFile("/workspace/deep/tree/out.bin", new Uint8Array([1, 2]))
-          yield* session.writeFile("/rootfile", encoder.encode("top"))
-          const refused = yield* Effect.flip(session.writeFile("/workspace/refused", new Uint8Array([3])))
-          expect((refused as ProviderError).code).toBe("unknown")
+          const greeting = yield* output(session, `printf 'hello from %s' "$WHO"`, {
+            env: { WHO: "guest", DROPPED: undefined }
+          })
+          expect(greeting).toEqual({ stdout: "hello from guest", code: 0 })
+          // A bare spawn runs in the workdir; a relative cwd is rooted there.
+          expect((yield* output(session, "pwd")).stdout).toBe(`${workdir}\n`)
+          yield* output(session, "mkdir -p sub/nested")
+          expect((yield* output(session, "pwd", { cwd: "./sub/nested/" })).stdout).toBe(`${workdir}/sub/nested\n`)
+          expect((yield* output(session, "pwd", { cwd: root })).stdout).toBe(`${root}\n`)
+          // Standard input arrives on the exec's own input channel, verified
+          // through the file the command writes.
+          const bytes = new Uint8Array([0, 1, 2, 255, 254, 10, 13, 0, 7])
+          const copied = yield* output(session, "cat > stdin-copy.bin", { stdin: bytes })
+          expect(copied).toEqual({ stdout: "", code: 0 })
+          expect(Array.from(yield* session.readFile(`${workdir}/stdin-copy.bin`))).toEqual(Array.from(bytes))
         }))
-      const writes = calls.filter((call) => call.args.includes("--interactive"))
-      expect(writes[0]!.args.slice(0, 2)).toEqual(["exec", "--interactive"])
-      expect(writes[0]!.args.at(-1)).toBe("mkdir -p /workspace/deep/tree && cat > /workspace/deep/tree/out.bin")
-      expect(writes[0]!.stdin).toBe("")
-      expect(writes[1]!.args.at(-1)).toBe("cat > /rootfile")
-      expect(writes[1]!.stdin).toBe("top")
-    }))
+      const spawns = calls.filter((call) => call.args[1] === "--workdir" || call.args[1] === "--interactive")
+      expect(spawns[0]!.args).toEqual([
+        "exec",
+        "--workdir",
+        workdir,
+        "--env",
+        "WHO=guest",
+        spawns[0]!.args[5]!,
+        "/bin/sh",
+        "-c",
+        `echo $$ > /tmp/.smthrs-sbx/0.pid; exec sh -c 'printf '\\''hello from %s'\\'' "$WHO"'`
+      ])
+      expect(spawns[1]!.args.slice(0, 3)).toEqual(["exec", "--workdir", workdir])
+      expect(spawns[3]!.args.slice(1, 3)).toEqual(["--workdir", `${workdir}/sub/nested`])
+      const fed = spawns.find((call) => call.args.at(-1)?.includes("cat > stdin-copy.bin"))!
+      expect(fed.args.slice(0, 4)).toEqual(["exec", "--interactive", "--workdir", workdir])
+      // Only a command with input asks for the input channel.
+      expect(spawns.filter((call) => call.args.includes("--interactive"))).toHaveLength(1)
+    }), 30_000)
+
+  it.effect(
+    "starts the wrapper by absolute path so an env PATH override cannot break it",
+    () =>
+      Effect.gen(function*() {
+        const fake = engine()
+        const provider = ContainerSandbox.make({ spawner: fake.spawner, image: "img", workdir })
+        yield* acquired(provider, (session) =>
+          Effect.gen(function*() {
+            // The engine would refuse to resolve a bare `sh` under this PATH —
+            // the fake proves that rule still holds for a non-absolute argv.
+            const unresolved = yield* Effect.scoped(
+              Effect.flatMap(
+                fake.spawner.spawn(
+                  ChildProcess.make("docker", ["exec", "--env", "PATH=/nowhere", session.remoteId, "sh", "-c", "true"])
+                ),
+                (handle) => handle.exitCode
+              )
+            )
+            expect(unresolved).toBe(126)
+            // The provider's wrapper still starts: the failure moves inside the
+            // guest, where the command's own PATH cannot find `sh`, which is
+            // the same honest 127 a local shell would report.
+            const overridden = yield* output(session, "true", { env: { PATH: "/nowhere" } })
+            expect(overridden.code).toBe(127)
+          }))
+        const wrapped = fake.calls.filter((call) => call.args.at(-1)?.includes("exec sh -c") === true)
+        expect(wrapped.every((call) => call.args.includes("/bin/sh"))).toBe(true)
+      }),
+    30_000
+  )
+
+  it.effect(
+    "signals the guest when a spawn scope closes on a live command, and not on an ended one",
+    () =>
+      Effect.gen(function*() {
+        const fake = engine()
+        const provider = ContainerSandbox.make({ spawner: fake.spawner, image: "img", workdir })
+        yield* acquired(provider, (session) =>
+          Effect.gen(function*() {
+            const kills = () => fake.calls.filter((call) => call.args.at(-1)?.includes("kids()") === true).length
+            yield* Effect.scoped(Effect.asVoid(session.spawn(sleeps, {})))
+            expect(kills()).toBe(1)
+            expect((yield* output(session, survivor)).code).not.toBe(0)
+            yield* output(session, "true")
+            expect(kills()).toBe(1)
+          }))
+      }),
+    30_000
+  )
 
   it.effect("kills a spawned command by pid walk inside the container", () =>
     Effect.gen(function*() {
-      const { calls, spawner } = engine(() => ({}))
-      const provider = ContainerSandbox.make({ spawner, image: "img" })
+      const { calls, spawner } = engine()
+      const provider = ContainerSandbox.make({ spawner, image: "img", workdir })
       yield* acquired(provider, (session) =>
-        Effect.scoped(
-          Effect.gen(function*() {
-            const process = yield* session.spawn("sleep 60", {})
-            yield* session.kill!(process, "SIGTERM")
-          })
-        ))
-      const killCall = calls.find((call) => call.args.at(-1)?.includes("kids()"))
+        Effect.gen(function*() {
+          const signalled = yield* Effect.scoped(
+            Effect.gen(function*() {
+              const process = yield* session.spawn(sleeps, {})
+              yield* session.kill!(process, "SIGTERM")
+              return yield* process.exitCode
+            })
+          )
+          expect(signalled).toBe(143)
+          expect((yield* output(session, survivor)).code).not.toBe(0)
+        }))
+      const killCall = calls.find((call) => call.args.at(-1)?.includes("kids()") === true)
       expect(killCall).toBeDefined()
       expect(killCall!.args.at(-1)).toContain("cat /tmp/.smthrs-sbx/0.pid")
       // The script waits for a pid a just-started command has not written yet,
@@ -288,61 +440,122 @@ describe("ContainerSandbox", () => {
       expect(killCall!.args.at(-1)).toContain(`kill -s TERM "$@"`)
 
       const refusing = engine((args) =>
-        args.at(-1)?.includes("kids()") === true ? { exitCode: 1, stderr: "no exec" } : {}
+        args.at(-1)?.includes("kids()") === true ? { exitCode: 1, stderr: "no exec" } : undefined
       )
       const refusal = yield* Effect.flip(
-        acquired(ContainerSandbox.make({ spawner: refusing.spawner, image: "img" }), (session) =>
+        acquired(ContainerSandbox.make({ spawner: refusing.spawner, image: "img", workdir }), (session) =>
           Effect.scoped(
-            Effect.flatMap(session.spawn("sleep 60", {}), (process) => session.kill!(process, "SIGTERM"))
+            Effect.flatMap(session.spawn("sleep 30", {}), (process) => session.kill!(process, "SIGTERM"))
           ))
       )
       expect((refusal as ProviderError).code).toBe("unknown")
       expect((refusal as ProviderError).message).toContain("SIGTERM")
-    }))
+    }), 30_000)
+
+  it.effect("reads files back as bytes, distinguishing absence from refusal", () =>
+    Effect.gen(function*() {
+      const { spawner } = engine()
+      const provider = ContainerSandbox.make({ spawner, image: "img", workdir })
+      const outcome = yield* acquired(provider, (session) =>
+        Effect.gen(function*() {
+          const binary = new Uint8Array([0, 200, 10, 0, 7])
+          yield* session.writeFile(`${workdir}/present.bin`, binary)
+          const present = yield* session.readFile(`${workdir}/present.bin`)
+          const absent = yield* Effect.flip(session.readFile(`${workdir}/absent.bin`))
+          writeFileSync(`${workdir}/sealed.bin`, "sealed")
+          chmodSync(`${workdir}/sealed.bin`, 0)
+          const refused = yield* Effect.flip(session.readFile(`${workdir}/sealed.bin`))
+          return { present: Array.from(present), absent, refused }
+        }))
+      expect(outcome.present).toEqual([0, 200, 10, 0, 7])
+      expect((outcome.absent as ProviderError).code).toBe("not_found")
+      expect((outcome.refused as ProviderError).code).toBe("unknown")
+      expect((outcome.refused as ProviderError).message).toContain("Permission denied")
+    }), 30_000)
+
+  it.effect("writes files through the exec's stdin, creating parents", () =>
+    Effect.gen(function*() {
+      const { calls, spawner } = engine()
+      const provider = ContainerSandbox.make({ spawner, image: "img", workdir })
+      yield* acquired(provider, (session) =>
+        Effect.gen(function*() {
+          yield* session.writeFile(`${workdir}/deep/tree/out.bin`, new Uint8Array([1, 2]))
+          expect(Array.from(yield* session.readFile(`${workdir}/deep/tree/out.bin`))).toEqual([1, 2])
+          yield* session.writeFile(`${workdir}/empty.bin`, new Uint8Array())
+          expect(Array.from(yield* session.readFile(`${workdir}/empty.bin`))).toEqual([])
+          writeFileSync(`${workdir}/blocker`, "a file, not a directory")
+          const refused = yield* Effect.flip(session.writeFile(`${workdir}/blocker/child`, new Uint8Array([3])))
+          expect((refused as ProviderError).code).toBe("unknown")
+        }))
+      // The test root's path is made of shell-safe characters, so the quoter
+      // leaves it bare; the lifecycle test's spaced workdir proves quoting.
+      const writes = calls.filter((call) => call.args.includes("--interactive"))
+      expect(writes[0]!.args.slice(0, 2)).toEqual(["exec", "--interactive"])
+      expect(writes[0]!.args.at(-1)).toBe(`mkdir -p ${workdir}/deep/tree && cat > ${workdir}/deep/tree/out.bin`)
+      const rootWrite = engine()
+      yield* acquired(
+        ContainerSandbox.make({ spawner: rootWrite.spawner, image: "img", workdir }),
+        (session) => session.writeFile("rootless.bin", new Uint8Array([9]))
+      )
+      // A path with no parent to create takes the bare write.
+      expect(rootWrite.calls.some((call) => call.args.at(-1) === "cat > rootless.bin")).toBe(true)
+    }), 30_000)
 
   it.effect("answers pings from the engine and reports a dead container", () =>
     Effect.gen(function*() {
-      const { spawner } = engine((args) => args.includes("true") && args[0] === "exec" ? {} : {})
-      const alive = ContainerSandbox.make({ spawner, image: "img" })
+      const { calls, spawner } = engine()
+      const alive = ContainerSandbox.make({ spawner, image: "img", workdir })
       yield* acquired(alive, (session) => session.ping!)
+      expect(calls.some((call) => call.args.length === 3 && call.args[0] === "exec" && call.args[2] === "true"))
+        .toBe(true)
 
       const dead = engine((args) =>
-        args.includes("true") && args[0] === "exec" ? { exitCode: 1, stderr: "not running" } : {}
+        args.at(-1) === "true" && args[0] === "exec" ? { exitCode: 1, stderr: "not running" } : undefined
       )
       const refusal = yield* Effect.flip(
-        acquired(ContainerSandbox.make({ spawner: dead.spawner, image: "img" }), (session) => session.ping!)
+        acquired(ContainerSandbox.make({ spawner: dead.spawner, image: "img", workdir }), (session) => session.ping!)
       )
       expect((refusal as ProviderError).code).toBe("unavailable")
     }))
 
   it.effect("restates transport failures in the provider vocabulary", () =>
     Effect.gen(function*() {
-      const broken = engine((args) => args[0] === "create" ? { failSpawn: true } : {})
+      const broken = engine((args) => args[0] === "create" ? { failSpawn: true } : undefined)
       const spawnFailure = yield* Effect.flip(
-        acquired(ContainerSandbox.make({ spawner: broken.spawner, image: "img" }), Effect.succeed)
+        acquired(ContainerSandbox.make({ spawner: broken.spawner, image: "img", workdir }), Effect.succeed)
       )
       expect((spawnFailure as ProviderError).code).toBe("spawn_error")
 
-      const lossy = engine((args) => args[0] === "create" ? { failObserve: true } : {})
+      const lossy = engine((args) => args[0] === "create" ? { failObserve: true } : undefined)
       const observeFailure = yield* Effect.flip(
-        acquired(ContainerSandbox.make({ spawner: lossy.spawner, image: "img" }), Effect.succeed)
+        acquired(ContainerSandbox.make({ spawner: lossy.spawner, image: "img", workdir }), Effect.succeed)
       )
       expect((observeFailure as ProviderError).code).toBe("unknown")
 
-      const failingWrite = engine((args) => args.includes("--interactive") ? { failSpawn: true } : {})
+      const failingWrite = engine((args) => args.includes("--interactive") ? { failSpawn: true } : undefined)
       const writeFailure = yield* Effect.flip(
-        acquired(ContainerSandbox.make({ spawner: failingWrite.spawner, image: "img" }), (session) =>
-          session.writeFile("/workspace/out", new Uint8Array([1])))
+        acquired(ContainerSandbox.make({ spawner: failingWrite.spawner, image: "img", workdir }), (session) =>
+          session.writeFile(`${workdir}/out`, new Uint8Array([1])))
       )
       expect((writeFailure as ProviderError).code).toBe("spawn_error")
 
       const failingExec = engine((args) =>
-        args.includes("sh") ? { failSpawn: true } : {}
+        args.at(-1)?.includes("exec sh -c") === true ? { failSpawn: true } : undefined
       )
       const execFailure = yield* Effect.flip(
-        acquired(ContainerSandbox.make({ spawner: failingExec.spawner, image: "img" }), (session) =>
+        acquired(ContainerSandbox.make({ spawner: failingExec.spawner, image: "img", workdir }), (session) =>
           Effect.scoped(Effect.asVoid(session.spawn("true", {}))))
       )
       expect((execFailure as ProviderError).code).toBe("spawn_error")
     }))
+
+  it.effect("passes SandboxConformance against the faithful engine fake", () =>
+    Effect.gen(function*() {
+      const fake = engine()
+      const provider = ContainerSandbox.make({ spawner: fake.spawner, image: "alpine:3.20", workdir })
+      const violations = yield* SandboxConformance.check(provider, {
+        provides: { kill: true, ping: true }
+      })
+      expect(violations).toEqual([])
+    }), 120_000)
 })

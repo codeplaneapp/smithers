@@ -8,12 +8,12 @@
 import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Path, Stream } from "effect"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll } from "vitest"
 import * as DirectorySandbox from "../src/DirectorySandbox/index.ts"
-import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import * as Sandbox from "../src/Sandbox/index.ts"
 import * as SandboxConformance from "../src/SandboxConformance/index.ts"
@@ -51,23 +51,27 @@ const checkNames = (violations: ReadonlyArray<{ readonly check: string }>): Read
   violations.map((violation) => violation.check)
 
 describe("SandboxConformance", () => {
-  it.effect("reports nothing for a conforming provider and acquires the default session key", () =>
-    Effect.gen(function*() {
-      const acquired: Array<string> = []
-      const recording: Sandbox.Provider = {
-        acquire: (key) =>
-          Effect.suspend(() => {
-            acquired.push(key)
-            return truthful.acquire(key)
-          })
-      }
-      const violations = yield* SandboxConformance.check(recording, {
-        provides: { kill: true, ping: true }
-      })
-      expect(violations).toEqual([])
-      expect(acquired[0]).toBe("sandbox-conformance")
-      expect(new Set(acquired).size).toBe(1)
-    }), 120_000)
+  it.effect(
+    "reports nothing for a conforming provider and acquires the default session key",
+    () =>
+      Effect.gen(function*() {
+        const acquired: Array<string> = []
+        const recording: Sandbox.Provider = {
+          acquire: (key) =>
+            Effect.suspend(() => {
+              acquired.push(key)
+              return truthful.acquire(key)
+            })
+        }
+        const violations = yield* SandboxConformance.check(recording, {
+          provides: { kill: true, ping: true }
+        })
+        expect(violations).toEqual([])
+        expect(acquired[0]).toBe("sandbox-conformance")
+        expect(new Set(acquired).size).toBe(1)
+      }),
+    120_000
+  )
 
   it.effect("names a session that corrupts bytes or misreports absence", () =>
     Effect.gen(function*() {
@@ -110,40 +114,47 @@ describe("SandboxConformance", () => {
         .toContain("creates-parent-directories")
     }), 120_000)
 
-  it.effect("names a session that runs commands in the wrong place or drops env or stdin", () =>
-    Effect.gen(function*() {
-      const lost = (stdout: string): Sandbox.Session["spawn"] => () =>
-        Effect.succeed({
-          stdout: Stream.make(new TextEncoder().encode(stdout)),
-          stderr: Stream.empty,
-          exitCode: Effect.succeed(0)
-        })
-      const displaced = warped((session) => ({
-        ...session,
-        spawn: (command, options) => command === "pwd" ? lost("/elsewhere\n")(command, options) : session.spawn(command, options)
-      }))
-      expect(checkNames(yield* SandboxConformance.check(displaced, { session: "trial-workdir" })))
-        .toContain("runs-in-its-workdir")
-      const deaf = warped((session) => ({
-        ...session,
-        spawn: (command, options) => session.spawn(command, { ...options, env: undefined })
-      }))
-      expect(checkNames(yield* SandboxConformance.check(deaf, { session: "trial-env" })))
-        .toContain("delivers-the-environment")
-      const starved = warped((session) => ({
-        ...session,
-        spawn: (command, options) => session.spawn(command, { ...options, stdin: undefined })
-      }))
-      expect(checkNames(yield* SandboxConformance.check(starved, { session: "trial-stdin", checkTimeout: "10 seconds" })))
-        .toContain("delivers-standard-input")
-      const severed = warped((session) => ({
-        ...session,
-        spawn: (command, options) =>
-          Effect.map(session.spawn(command, options), (process) => ({ ...process, stderr: Stream.empty }))
-      }))
-      expect(checkNames(yield* SandboxConformance.check(severed, { session: "trial-stderr" })))
-        .toContain("delivers-standard-error")
-    }), 120_000)
+  it.effect(
+    "names a session that runs commands in the wrong place or drops env or stdin",
+    () =>
+      Effect.gen(function*() {
+        const lost = (stdout: string): Sandbox.Session["spawn"] => () =>
+          Effect.succeed({
+            stdout: Stream.make(new TextEncoder().encode(stdout)),
+            stderr: Stream.empty,
+            exitCode: Effect.succeed(0)
+          })
+        const displaced = warped((session) => ({
+          ...session,
+          spawn: (command, options) =>
+            command === "pwd" ? lost("/elsewhere\n")(command, options) : session.spawn(command, options)
+        }))
+        expect(checkNames(yield* SandboxConformance.check(displaced, { session: "trial-workdir" })))
+          .toContain("runs-in-its-workdir")
+        const deaf = warped((session) => ({
+          ...session,
+          spawn: (command, options) => session.spawn(command, { ...options, env: undefined })
+        }))
+        expect(checkNames(yield* SandboxConformance.check(deaf, { session: "trial-env" })))
+          .toContain("delivers-the-environment")
+        const starved = warped((session) => ({
+          ...session,
+          spawn: (command, options) => session.spawn(command, { ...options, stdin: undefined })
+        }))
+        expect(
+          checkNames(yield* SandboxConformance.check(starved, { session: "trial-stdin", checkTimeout: "10 seconds" }))
+        )
+          .toContain("delivers-standard-input")
+        const severed = warped((session) => ({
+          ...session,
+          spawn: (command, options) =>
+            Effect.map(session.spawn(command, options), (process) => ({ ...process, stderr: Stream.empty }))
+        }))
+        expect(checkNames(yield* SandboxConformance.check(severed, { session: "trial-stderr" })))
+          .toContain("delivers-standard-error")
+      }),
+    120_000
+  )
 
   it.effect("names a session whose files are not the machine its processes run on", () =>
     Effect.gen(function*() {
@@ -186,8 +197,7 @@ describe("SandboxConformance", () => {
                 if (!used) armed = true
               })
             )
-            const touching = <A extends ReadonlyArray<unknown>, R>(operation: (...args: A) => R) =>
-            (...args: A): R => {
+            const touching = <A extends ReadonlyArray<unknown>, R>(operation: (...args: A) => R) => (...args: A): R => {
               used = true
               return operation(...args)
             }

@@ -58,6 +58,7 @@ interface FakeEcs {
   runFault?: Fault | undefined
   describeFault?: Fault | undefined
   listFault?: Fault | undefined
+  listWithoutArns?: boolean | undefined
   stopFault?: Fault | undefined
   registerFault?: Fault | undefined
   deregisterFault?: Fault | undefined
@@ -145,6 +146,7 @@ const sdkOf = (fake: FakeEcs): AwsSandbox.Sdk => ({
     fake.events.push("list")
     const fault = takeFault(fake, "listFault")
     if (fault !== undefined) throw fault
+    if (fake.listWithoutArns === true) return {}
     return { taskArns: fake.running.filter((task) => task.startedBy === input.startedBy).map((task) => task.arn) }
   },
   async describeTasks(input): Promise<DescribeTasksOutput> {
@@ -543,6 +545,26 @@ describe("AwsSandbox", () => {
           drop = false
         }))
 
+      // The plugin failing only after acquisition maps each spawn to a
+      // transport failure rather than a fabricated exit.
+      let broken = false
+      const healthy = fakeCli()
+      const dying = fakeCli({ pluginFailure: { code: 254, stderr: "connection reset" } })
+      const decaying = transportProvider(fakeEcs(), {
+        calls: healthy.calls,
+        spawner: makeSpawner((command) => broken ? dying.spawner.spawn(command) : healthy.spawner.spawn(command))
+      })
+      yield* acquired(decaying, (session) =>
+        Effect.gen(function*() {
+          broken = true
+          const failed = yield* Effect.scoped(
+            Effect.flatMap(session.spawn("printf 'x'", {}), (process) => Effect.flip(process.exitCode))
+          )
+          expect(failed).toMatchObject({ code: "unavailable" })
+          expect(failed.message).toContain("connection reset")
+          broken = false
+        }))
+
       // An older plugin with no banner line still parses.
       const bannerless = fakeCli({ noBanner: true })
       const plain = yield* acquired(transportProvider(fakeEcs(), bannerless), (session) =>
@@ -756,6 +778,12 @@ describe("AwsSandbox", () => {
       yield* acquired(notReadyProvider, () => Effect.void, "aws/pending")
       expect(notReady.runInputs).toHaveLength(2)
       yield* Scope.close(leakedToo, Exit.void)
+
+      // A listing with no ARNs field at all reads as nothing to adopt.
+      const bare = fakeEcs()
+      bare.listWithoutArns = true
+      yield* acquired(transportProvider(bare, fakeCli()), () => Effect.void, "aws/bare")
+      expect(bare.runInputs).toHaveLength(1)
 
       // Listing or describing leftovers failing is a failure to acquire.
       const listFailed = fakeEcs()
