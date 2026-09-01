@@ -7,7 +7,7 @@ import {
   requiredOpenCodeBehaviors,
   requiredOpenCodeSources,
   rows
-} from "../src/ParityManifest.ts"
+} from "../src/internal/ParityManifest.ts"
 
 // Manifest rows keep their former superproject-relative `flows/` or `agent/`
 // prefix, but the files they name now live in this repository, so they resolve

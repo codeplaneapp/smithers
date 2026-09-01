@@ -58,7 +58,7 @@ it.scoped("restarts over the same store and executes only the frontier", () =>
     }).pipe(Effect.forkChild({ startImmediately: true }))
     yield* firstFrontierStarted.await
 
-    const resumedRun = yield* harness.killAndResume(executionId).pipe(
+    const resumedRun = yield* harness.restartAndResume(executionId).pipe(
       Effect.forkChild({ startImmediately: true })
     )
     yield* resumedFrontierStarted.await
@@ -159,4 +159,58 @@ it.scoped("kill leaves the abandoned instance running and unreleased", () =>
     // The facade now serves the fresh instance over the same store.
     const survivor = yield* harness.engine.result(executionId)
     expect(survivor.status).toBe("completed")
+  }))
+
+/**
+ * `killAndResume` is the hard-kill resume: the fresh instance re-drives the
+ * frontier while the killed instance still holds the one it was running.
+ *
+ * The method used to call `restart`, so the state it names — a durable owner
+ * still holding a run nothing released — was produced by no conformance case
+ * at all, and the orderly restart ran in its place under a name that promised
+ * the opposite.
+ */
+it.scoped("killAndResume re-drives the frontier while the killed instance still holds its own", () =>
+  Effect.gen(function*() {
+    const harness = yield* RestartableEngine.make()
+    const frontierRuns = yield* Ref.make(0)
+    const firstStarted = yield* Latch.make()
+    const secondStarted = yield* Latch.make()
+    const release = yield* Latch.make()
+    const executionId = "restartable/kill-and-resume/execution"
+    const flow: FlowSpec = {
+      name: "testing/restartable/kill-and-resume",
+      steps: [{
+        key: "restartable/kill-and-resume/step",
+        sealed: false,
+        kind: "step",
+        run: () =>
+          Effect.gen(function*() {
+            const count = yield* Ref.updateAndGet(frontierRuns, (current) => current + 1)
+            yield* (count === 1 ? firstStarted.open : secondStarted.open)
+            yield* release.await
+            return { step: "complete", attempt: count }
+          })
+      }]
+    }
+
+    const abandoned = yield* harness.engine.run({ flow, payload: undefined, executionId }).pipe(
+      Effect.forkChild({ startImmediately: true })
+    )
+    yield* firstStarted.await
+
+    const resumed = yield* harness.killAndResume(executionId).pipe(
+      Effect.forkChild({ startImmediately: true })
+    )
+    yield* secondStarted.await
+
+    // Two live attempts: the killed instance was never interrupted, so the
+    // frontier is running twice. A restart would have interrupted the first.
+    expect(yield* Ref.get(frontierRuns)).toBe(2)
+
+    yield* release.open
+    // Both settle: the abandoned attempt finishes on the instance nobody
+    // released, which is exactly the lease-reclaim state.
+    expect((yield* Fiber.join(abandoned)).status).toBe("completed")
+    expect((yield* Fiber.join(resumed)).status).toBe("completed")
   }))

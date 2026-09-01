@@ -2,13 +2,13 @@
  * Fixed-suite score gates and the graded suite runner.
  *
  * Live production observations intentionally do not enter this module: a gate
- * is evaluated only over its caller-owned, fixed sample array. Contract
- * sources: `docs/specs/Research/Smithers Testing Library Conversion
- * 2026-07-27.md` §3 sketch 6 (the `suite()` value with score gates and
- * INCONCLUSIVE grading) and the vitest-evals harness prior art at
- * `reference/flue/blueprints/tooling--vitest-evals.md` (per-case runner +
- * reporter split). The case-runner is caller-supplied until the flow runtime
- * lands; scorer samples flow through it unchanged.
+ * is evaluated only over its caller-owned, fixed sample array. The case-runner
+ * is caller-supplied, following the per-case runner and reporter split of the
+ * vitest-evals harnesses this is modelled on; scorer samples flow through it
+ * unchanged.
+ *
+ * Governing design: `packages/testing/docs/concepts.md`, "Scored suites and
+ * inconclusive grading".
  *
  * INCONCLUSIVE grades an environment fault, never a measurement. A gate the
  * scores actually missed is a finding and grades `Failed`, so a suite cannot
@@ -17,7 +17,7 @@
  * @since 0.0.0
  */
 import { Effect } from "effect"
-import { type ScoreGateCode, ScoreGateError } from "./TestingError.ts"
+import { type InvalidScoreSample, type ScoreGateCode, ScoreGateError } from "./TestingError.ts"
 
 /**
  * A score observation collected for one fixed test case and step key.
@@ -59,20 +59,33 @@ export type Verdict =
   | { readonly _tag: "Inconclusive"; readonly reasons: ReadonlyArray<string> }
 
 const invalidThreshold = (threshold: number): Effect.Effect<never, ScoreGateError> =>
-  Effect.fail(new ScoreGateError({ code: "invalid_threshold", threshold, actual: threshold }))
+  Effect.fail(new ScoreGateError({ code: "invalid_threshold", threshold }))
 
 const validateThreshold = (threshold: number): Effect.Effect<void, ScoreGateError> =>
   Number.isFinite(threshold) && threshold >= 0 && threshold <= 1
     ? Effect.void
     : invalidThreshold(threshold)
 
-const validateScores = (samples: ReadonlyArray<ScoreSample>): Effect.Effect<void, ScoreGateError> => {
+/**
+ * Rejects every score observation outside `[0, 1]`, naming each one.
+ *
+ * A gate builder validates its own samples, but a caller that constructs
+ * samples itself -- a suite runner, a reporter -- has no other way to reach
+ * this check, and an unvalidated `NaN` reaches a report as a passing number.
+ *
+ * @since 0.0.0
+ * @category gates
+ */
+export const validateSamples = (samples: ReadonlyArray<ScoreSample>): Effect.Effect<void, ScoreGateError> => {
+  const invalid: Array<InvalidScoreSample> = []
   for (const sample of samples) {
     if (sample.kind === "score" && (!Number.isFinite(sample.value) || sample.value < 0 || sample.value > 1)) {
-      return Effect.fail(new ScoreGateError({ code: "invalid_score", threshold: 0, actual: sample.value }))
+      invalid.push({ case: sample.case, stepKey: sample.stepKey, scorer: sample.scorer, value: sample.value })
     }
   }
-  return Effect.void
+  return invalid.length === 0
+    ? Effect.void
+    : Effect.fail(new ScoreGateError({ code: "invalid_score", actual: invalid[0]!.value, samples: invalid }))
 }
 
 const unique = (reasons: ReadonlyArray<string>): ReadonlyArray<string> => [...new Set(reasons)]
@@ -109,6 +122,9 @@ const undecidable = (samples: ReadonlyArray<ScoreSample>, extra: ReadonlyArray<s
 
 const scoreValues = (samples: ReadonlyArray<ScoreSample>): ReadonlyArray<number> =>
   samples.flatMap((sample) => sample.kind === "score" ? [sample.value] : [])
+
+const minimum = (values: ReadonlyArray<number>): number =>
+  values.reduce((low, value) => value < low ? value : low, Number.POSITIVE_INFINITY)
 
 /**
  * Reduces the verdicts of several gates, plus the environment faults observed
@@ -197,7 +213,7 @@ export interface ScoreExpectation {
  * @category constructors
  */
 export const expectScores = (samples: ReadonlyArray<ScoreSample>): ScoreExpectation => {
-  const validate = validateScores(samples)
+  const validate = validateSamples(samples)
 
   return {
     mean: (threshold) =>
@@ -217,7 +233,10 @@ export const expectScores = (samples: ReadonlyArray<ScoreSample>): ScoreExpectat
         yield* validate
         const values = scoreValues(samples)
         if (values.length === 0) return undecidable(samples, ["No score samples for min gate"])
-        const actual = Math.min(...values)
+        // Iterative, not `Math.min(...values)`: a spread above the engine's
+        // argument-count limit throws a RangeError out of a module whose error
+        // channel is otherwise a closed code union.
+        const actual = minimum(values)
         return actual < threshold
           ? failed(samples, [breach("min_below_threshold", threshold, actual)])
           : passed(samples)
@@ -236,7 +255,7 @@ export const expectScores = (samples: ReadonlyArray<ScoreSample>): ScoreExpectat
             unmeasured.push(`No score samples for case ${caseName}`)
             continue
           }
-          const actual = Math.min(...values)
+          const actual = minimum(values)
           if (actual < threshold) breaches.push(breach("case_below_threshold", threshold, actual))
         }
         // Every named case went unmeasured, so this gate decided nothing. One
@@ -343,7 +362,14 @@ export const suite = <I>(options: SuiteOptions<I>): Effect.Effect<SuiteReport, S
     for (const suiteCase of options.cases) {
       const exit = yield* Effect.exit(options.run(suiteCase))
       if (exit._tag === "Success") {
-        reports.push({ name: suiteCase.name, verdict: { _tag: "Scored" }, samples: exit.value })
+        reports.push({
+          name: suiteCase.name,
+          verdict: { _tag: "Scored" },
+          // Bound to the case that was actually run. Trusting the runner's own
+          // `case` field let a runner bug attribute samples to another case, so
+          // the per-case gates silently measured the wrong one.
+          samples: exit.value.map((sample) => ({ ...sample, case: suiteCase.name }))
+        })
       } else {
         reports.push({
           name: suiteCase.name,
@@ -359,6 +385,11 @@ export const suite = <I>(options: SuiteOptions<I>): Effect.Effect<SuiteReport, S
     const environmentFaults = reports.flatMap((report) =>
       report.verdict._tag === "Inconclusive" ? report.verdict.reasons : []
     )
+    // Unconditionally, before any gate branch. Validation used to live inside
+    // the individual gates, so a suite that declared none never checked its
+    // samples at all and a `NaN` reached `SuiteReport.samples` under a passing
+    // verdict.
+    yield* validateSamples(samples)
     const expectation = expectScores(samples)
     const gates = options.gates ?? {}
     const verdicts: Array<Verdict> = []
@@ -370,8 +401,29 @@ export const suite = <I>(options: SuiteOptions<I>): Effect.Effect<SuiteReport, S
       )
     )
     if (Object.keys(perCase).length > 0) verdicts.push(yield* expectation.perCase(perCase))
-    return { cases: reports, samples, verdict: combine(verdicts, environmentFaults) }
+    return { cases: reports, samples, verdict: graded(options.cases.length, samples, verdicts, environmentFaults) }
   })
+
+/**
+ * A suite that gated nothing and measured nothing decided nothing.
+ *
+ * `combine` alone answers `Passed` for an empty verdict list, so a suite with
+ * no cases, or one whose every observation was inconclusive and which declared
+ * no gate, used to report a clean pass over zero evidence.
+ */
+const graded = (
+  caseCount: number,
+  samples: ReadonlyArray<ScoreSample>,
+  verdicts: ReadonlyArray<Verdict>,
+  environmentFaults: ReadonlyArray<string>
+): Verdict => {
+  if (caseCount === 0) return { _tag: "Inconclusive", reasons: ["The suite declared no cases"] }
+  const measured = scoreValues(samples).length > 0
+  if (verdicts.length === 0 && !measured) {
+    return undecidable(samples, [...environmentFaults, "The suite produced no score observations"])
+  }
+  return combine(verdicts, environmentFaults)
+}
 
 /**
  * The CI grading of a suite report, through {@link grade}: a clean pass exits

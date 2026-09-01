@@ -4,9 +4,10 @@
  * This is the sole module in `/testing` that imports a test runner, and
  * the runner boundary is the **only** sanctioned `AbortSignal` touch in the
  * package: Vitest cancellation is converted to fiber interruption at the edge
- * (`Fiber.interrupt`), never threaded through Effect code. Adapted from
- * `reference/opencode/packages/core/test/lib/effect.ts` per
- * `docs/specs/Research/Smithers Testing Library Conversion 2026-07-27.md` §3.
+ * (`Fiber.interrupt`), never threaded through Effect code.
+ *
+ * Governing design: `packages/testing/docs/concepts.md`, "The vitest
+ * boundary".
  *
  * @since 0.0.0
  */
@@ -26,10 +27,26 @@ export { assert, describe, expect }
 /**
  * The Effect-aware `it`, with `scoped` aliased onto `it.effect`.
  *
+ * Built as a fresh callable rather than by writing into `@effect/vitest`'s own
+ * export. `Object.assign(EffectVitest.it, ...)` mutated the peer dependency's
+ * live module object, and because that module is externalized and shared
+ * across every test file in a worker process, importing this module replaced
+ * `it.scoped` for every other file in that worker with a registrar that has
+ * different semantics. It also made `sideEffects: []` false for this package.
+ *
  * @category testing
  * @since 0.0.0
  */
-export const it = Object.assign(EffectVitest.it, { scoped: EffectVitest.it.effect })
+export const it: typeof EffectVitest.it & { readonly scoped: typeof EffectVitest.it.effect } = new Proxy(
+  EffectVitest.it,
+  {
+    // A proxy rather than a copy: vitest defines the chainable members of `it`
+    // as accessors, so `Object.assign` would silently drop `effect`, `live`,
+    // `each`, and the rest. Reads are forwarded with the original as the
+    // receiver, so those accessors still see the `this` they expect.
+    get: (target, property) => property === "scoped" ? target.effect : Reflect.get(target, property)
+  }
+) as typeof EffectVitest.it & { readonly scoped: typeof EffectVitest.it.effect }
 
 type Body<A, E, R> = Effect.Effect<A, E, R> | (() => Effect.Effect<A, E, R>)
 
@@ -48,8 +65,12 @@ interface EffectTest<R> extends TestRegistration<R> {
 
 /**
  * The Effect-aware test registrars, each carrying the requirements `R` a
- * body may use: `effect` under the test clock, `live` under the real one,
- * and `scoped` with a scope provided.
+ * body may use: `effect` under the test clock and `live` under the real one.
+ *
+ * Every variant already wraps its body in `Effect.scoped`, so `scoped` is an
+ * alias of `effect` retained because a scoped body reads better under that
+ * name. It is not a third registrar, and the docstring here used to claim a
+ * three-way distinction that does not exist.
  *
  * @category testing
  * @since 0.0.0
@@ -57,6 +78,7 @@ interface EffectTest<R> extends TestRegistration<R> {
 export interface TestEffect<R> {
   readonly effect: EffectTest<R>
   readonly live: EffectTest<R>
+  /** An alias of {@link TestEffect.effect}; every variant provides a scope. */
   readonly scoped: EffectTest<R>
   readonly skip: TestRegistration<R>
   readonly only: TestRegistration<R>

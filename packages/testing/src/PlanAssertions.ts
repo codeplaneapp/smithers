@@ -3,7 +3,9 @@
  *
  * @since 0.0.0
  */
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import { compare, same } from "./internal/Structural.ts"
 import * as Plan from "./Plan.ts"
 import type { PlanLike, PlanNodeLike } from "./PlanLike.ts"
 import { type PlanAssertionCode, PlanAssertionError } from "./TestingError.ts"
@@ -117,24 +119,10 @@ const inspect = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(inspect).join(", ")}]`
   return `{ ${
     Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compare(left, right))
       .map(([key, item]) => `${key}: ${inspect(item)}`)
       .join(", ")
   } }`
-}
-
-const same = (left: unknown, right: unknown): boolean => {
-  if (Object.is(left, right)) return true
-  if (left === null || right === null || typeof left !== "object" || typeof right !== "object") return false
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
-      left.every((item, index) => same(item, right[index]))
-  }
-  const leftRecord = left as Record<string, unknown>
-  const rightRecord = right as Record<string, unknown>
-  const leftKeys = Object.keys(leftRecord).sort()
-  const rightKeys = Object.keys(rightRecord).sort()
-  return same(leftKeys, rightKeys) && leftKeys.every((key) => same(leftRecord[key], rightRecord[key]))
 }
 
 const fail = (
@@ -271,7 +259,7 @@ export const expectPlan = (plan: PlanLike): PlanAssertions => {
     nodeCount: (expected) => assertValue("node_count_mismatch", "Plan node count", expected, plan.nodes.length),
     contains: (id) => nodeOrFail(plan, id).pipe(Effect.asVoid),
     edges: (pairs, options) => {
-      const expected = pairs.map(edgePair).sort((left, right) => edgeName(left).localeCompare(edgeName(right)))
+      const expected = pairs.map(edgePair).sort((left, right) => compare(edgeName(left), edgeName(right)))
       const actual = Plan.make(plan).edges.map((edge) => [edge.from, edge.to] as const)
       const actualNames = new Set(actual.map(edgeName))
       const missing = expected.filter((pair) => !actualNames.has(edgeName(pair)))
@@ -358,6 +346,13 @@ export const expectKeyGoldens = (
  * example a poisoned Host or Model capability being reached during planning —
  * is surfaced as a `purity_violation` plan assertion error.
  *
+ * The original value travels in `actual`, not only in the message. The
+ * poisoned layers raise a `CapabilityContractError` carrying `capability` and
+ * `operation` as typed fields precisely so a consumer can separate "the plan
+ * called FileSystem.readFile" from "the plan called Jj.status" from "the input
+ * schema failed to decode"; stringifying collapsed all three into prose a test
+ * could only match with a regular expression.
+ *
  * @category assertions
  * @since 0.0.0
  */
@@ -370,7 +365,7 @@ export const expectPure = <A, E, R>(
         "purity_violation",
         `Plan computation touched a capability or failed during planning: ${String(cause)}.`,
         undefined,
-        String(cause)
+        Cause.squash(cause)
       )
     )
   )

@@ -16,6 +16,7 @@ import * as StepKey from "@smthrs/plan/StepKey"
 import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import { compare } from "./internal/Structural.ts"
 import type { PlanLike, PlanNodeLike, PlanPlacementLike } from "./PlanLike.ts"
 
 /**
@@ -98,7 +99,7 @@ const canonical = (value: unknown, seen: Set<object> = new Set()): unknown => {
   try {
     if (Array.isArray(value)) return value.map((item) => canonical(item, seen))
     const result: Record<string, unknown> = {}
-    for (const [key, item] of Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) {
+    for (const [key, item] of Object.entries(value).sort(([left], [right]) => compare(left, right))) {
       if (item !== undefined) result[key] = canonical(item, seen)
     }
     return result
@@ -174,7 +175,7 @@ const placementProjection = (placement: CorePlacement.Placement): PlanPlacementL
     options: Object.fromEntries(
       Object.entries(rest)
         .filter(([, value]) => value !== undefined)
-        .sort(([left], [right]) => left.localeCompare(right))
+        .sort(([left], [right]) => compare(left, right))
     )
   }
 }
@@ -247,8 +248,8 @@ export const make = (plan: PlanLike): Plan => ({
   ...plan,
   nodes: plan.nodes
     .map((node) => ({ ...node, effects: [...node.effects].sort() }))
-    .sort((left, right) => left.id.localeCompare(right.id)),
-  edges: [...plan.edges].sort((left, right) => left.from.localeCompare(right.from) || left.to.localeCompare(right.to))
+    .sort((left, right) => compare(left.id, right.id)),
+  edges: [...plan.edges].sort((left, right) => compare(left.from, right.from) || compare(left.to, right.to))
 })
 
 const stable = (value: unknown): string => JSON.stringify(canonical(value))

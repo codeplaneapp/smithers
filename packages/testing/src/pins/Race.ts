@@ -1,20 +1,21 @@
 /**
  * Durable race conformance pins.
  *
- * Manifest: `docs/reference/test-parity.md`.
+ * Governing design: `packages/testing/docs/concepts.md`, "Effect race
+ * semantics"; manifest: `packages/testing/src/internal/ParityManifest.ts`.
  *
  * @since 0.0.0
  */
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
-import type * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
 import * as Ref from "effect/Ref"
-import * as Schedule from "effect/Schedule"
 import * as TestClock from "effect/testing/TestClock"
 import type { ConformanceCase } from "../Conformance.ts"
 import type { EngineSubject, ExecutionResult, FlowSpec, JournalEntryLike, StepSpec } from "../EngineSubject.ts"
-import { ConformanceViolation, type EngineSubjectError } from "../TestingError.ts"
+import { assert, awaitFiber, fail, invoke, waitUntil } from "../internal/Pin.ts"
+import { same } from "../internal/Structural.ts"
+import type { ConformanceViolation, EngineSubjectError } from "../TestingError.ts"
 
 const loserInterruptedPin = "race/loser-interrupted"
 const recordedWinnerPin = "race/recorded-winner-replay"
@@ -31,75 +32,6 @@ interface RaceObservation {
   readonly loserRuns: number
   readonly loserInterruptions: number
 }
-
-const same = (left: unknown, right: unknown): boolean => {
-  if (Object.is(left, right)) return true
-  if (left === null || right === null || typeof left !== "object" || typeof right !== "object") return false
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
-      left.every((item, index) => same(item, right[index]))
-  }
-  const leftRecord = left as Readonly<Record<string, unknown>>
-  const rightRecord = right as Readonly<Record<string, unknown>>
-  const leftKeys = Object.keys(leftRecord).sort()
-  const rightKeys = Object.keys(rightRecord).sort()
-  return same(leftKeys, rightKeys) && leftKeys.every((key) => same(leftRecord[key], rightRecord[key]))
-}
-
-const fail = (
-  pin: string,
-  message: string,
-  expected?: unknown,
-  actual?: unknown
-): Effect.Effect<never, ConformanceViolation> =>
-  Effect.fail(
-    new ConformanceViolation({
-      pin,
-      message,
-      ...(expected === undefined ? {} : { expected }),
-      ...(actual === undefined ? {} : { actual })
-    })
-  )
-
-const assert = (
-  pin: string,
-  condition: boolean,
-  message: string,
-  expected?: unknown,
-  actual?: unknown
-): Effect.Effect<void, ConformanceViolation> => condition ? Effect.void : fail(pin, message, expected, actual)
-
-const invoke = <A, E>(
-  pin: string,
-  operation: string,
-  evaluate: () => Effect.Effect<A, E>
-): Effect.Effect<A, E> =>
-  Effect.suspend(evaluate).pipe(Effect.withSpan(`testing.${operation}`, { attributes: { pin } }))
-
-const waitUntil = (
-  pin: string,
-  predicate: () => boolean,
-  message: string
-): Effect.Effect<void, ConformanceViolation> =>
-  Effect.suspend(() => predicate() ? Effect.void : Effect.fail(undefined)).pipe(
-    Effect.retry({ schedule: Schedule.spaced("10 millis"), times: 99 }),
-    TestClock.withLive,
-    Effect.catch(() => fail(pin, message, "settlement within one second of live time", "still pending"))
-  )
-
-const awaitFiber = <A, E>(
-  pin: string,
-  fiber: Fiber.Fiber<A, E>,
-  message: string
-): Effect.Effect<Exit.Exit<A, E>, ConformanceViolation> =>
-  Effect.gen(function*() {
-    yield* waitUntil(pin, () => fiber.pollUnsafe() !== undefined, message)
-    const exit = fiber.pollUnsafe()
-    if (exit === undefined) {
-      return yield* fail(pin, message, "settled fiber", "pending fiber")
-    }
-    return exit
-  })
 
 const successfulFiber = <A, E>(
   pin: string,
@@ -234,8 +166,8 @@ const runRace = (
 /**
  * Pins loser fiber interruption and its journaled aborted outcome.
  *
- * Contract source:
- * `docs/specs/Open Questions/Effect Race Semantics.md`.
+ * Governing design: `packages/testing/docs/concepts.md`, "Effect race
+ * semantics".
  */
 const loserInterrupted: ConformanceCase = {
   name: loserInterruptedPin,
@@ -272,8 +204,8 @@ const loserInterrupted: ConformanceCase = {
 /**
  * Pins recorded-winner reconstruction under adversarially inverted timing.
  *
- * Contract source:
- * `docs/specs/Open Questions/Effect Race Semantics.md`.
+ * Governing design: `packages/testing/docs/concepts.md`, "Effect race
+ * semantics".
  */
 const recordedWinnerReplay: ConformanceCase = {
   name: recordedWinnerPin,
@@ -317,8 +249,8 @@ const recordedWinnerReplay: ConformanceCase = {
 /**
  * Pins replay of the loser's recorded interruption.
  *
- * Contract source:
- * `docs/specs/Open Questions/Effect Race Semantics.md`.
+ * Governing design: `packages/testing/docs/concepts.md`, "Effect race
+ * semantics".
  */
 const recordedLoserInterruption: ConformanceCase = {
   name: recordedLoserPin,
@@ -358,14 +290,14 @@ const recordedLoserInterruption: ConformanceCase = {
 /**
  * Race interruption and deterministic replay conformance cases.
  *
- * Every case pins the contract in
- * `docs/specs/Open Questions/Effect Race Semantics.md`.
+ * Every case pins the contract in `packages/testing/docs/concepts.md`,
+ * "Effect race semantics".
  *
  * @category conformance
  * @since 0.0.0
  */
-export const cases: ReadonlyArray<ConformanceCase> = [
+export const cases: ReadonlyArray<ConformanceCase> = Object.freeze([
   loserInterrupted,
   recordedWinnerReplay,
   recordedLoserInterruption
-]
+])

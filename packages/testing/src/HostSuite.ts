@@ -1,19 +1,19 @@
 /**
  * Runner-agnostic conformance cases for complete Host bundles.
  *
- * The Stratum B descendant of the Smithers testing library: one shared suite
- * parameterized by layer set. Contract sources:
- * `docs/specs/Research/Smithers Testing Library Conversion 2026-07-27.md` §4
- * ("host-layer conformance") and
- * `docs/specs/Concepts/Tickets Not Exceptions.md`.
+ * One shared suite parameterized by layer set. Governing designs:
+ * `packages/testing/docs/concepts.md`, "Host-layer conformance" and "Tickets,
+ * not exceptions".
  *
  * @since 0.0.0
  */
-import type { Jj } from "@smthrs/jj"
+import type { Jj, JjFailure } from "@smthrs/jj"
 import { Jj as JjTag } from "@smthrs/jj"
 import { Clock, Effect, Fiber, FileSystem, Path, Random, Ref, Stream } from "effect"
 import type { Layer } from "effect"
+import type * as PlatformError from "effect/PlatformError"
 import * as HttpClient from "effect/unstable/http/HttpClient"
+import type * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -54,7 +54,19 @@ export type HttpTransportExpectation =
  * @category models
  */
 export interface HostProfile {
-  /** Scratch file used by the round-trip probe; removed even when the assertion fails. */
+  /**
+   * Scratch file used by the round-trip probe; removed even when the assertion
+   * fails. It must not already exist: the suite refuses to write over a file
+   * it did not create, and removes only the file it did.
+   *
+   * When omitted, the suite builds a unique absolute path under `/tmp` from
+   * the bundle's own `Path` and `Random`. It used to default to
+   * `.flows-host-suite-value.txt`, a **relative** path resolved against the
+   * caller's working directory, so a real host bundle wrote into — and
+   * force-deleted from — the repository working tree, and two suites in one
+   * directory raced on the same fixed name. A bundle whose platform has no
+   * `/tmp` must declare a path of its own.
+   */
   readonly fileSystemScratchPath?: string | undefined
   readonly fileSystem: CapabilityExpectation
   readonly path: CapabilityExpectation
@@ -66,6 +78,24 @@ export interface HostProfile {
 }
 
 /**
+ * Every failure a host suite case may raise: the typed contract violation, and
+ * the incidental host failures a supported capability's own probe can produce
+ * (the scratch write and existence check, a jj command, an HTTP request).
+ *
+ * The channel used to be `unknown`, so a runner could not tell "this host
+ * violates the contract" from "the scratch write failed because the disk is
+ * full" — exactly what `TestingError`'s conformance-seam rule forbids.
+ *
+ * @category models
+ * @since 0.0.0
+ */
+export type HostSuiteError =
+  | CapabilityContractError
+  | PlatformError.PlatformError
+  | JjFailure
+  | HttpClientError.HttpClientError
+
+/**
  * A declarative conformance case consumable by any Effect test runner.
  *
  * @category models
@@ -73,7 +103,7 @@ export interface HostProfile {
  */
 export interface HostSuiteCase {
   readonly name: string
-  readonly run: Effect.Effect<void, unknown>
+  readonly run: Effect.Effect<void, HostSuiteError>
 }
 
 /**
@@ -141,6 +171,25 @@ const assertCapabilityError = <R>(
 
 const capabilityCode = (expectation: CapabilityExpectation): string => expectation.supported ? "" : expectation.code
 
+/**
+ * The scratch file the round-trip probe owns for one invocation.
+ *
+ * The declared path wins. Otherwise the path is absolute, under `/tmp`, and
+ * carries a random suffix drawn from the bundle's own `Random`, so two suites
+ * over the same bundle — the CI matrix runs three operating systems and vitest
+ * runs files in parallel — never collide, and nothing is ever written into the
+ * caller's working directory.
+ */
+const scratchTarget = (
+  profile: HostProfile
+): Effect.Effect<string, never, Path.Path> =>
+  Effect.gen(function*() {
+    if (profile.fileSystemScratchPath !== undefined) return profile.fileSystemScratchPath
+    const path = yield* Path.Path
+    const suffix = (yield* Random.nextIntBetween(0, 0xff_ffff)).toString(16)
+    return path.join(path.sep, "tmp", `flows-host-suite-${suffix}.txt`)
+  })
+
 const provide = <E, R>(effect: Effect.Effect<void, E, R>, bundle: HostBundle): Effect.Effect<void, E> =>
   effect.pipe(Effect.provide(bundle)) as Effect.Effect<void, E>
 
@@ -163,13 +212,19 @@ const provideNoAmbient = <E, R>(effect: Effect.Effect<void, E, R>, bundle: HostB
  * @category constructors
  */
 export const hostSuite = (bundle: HostBundle, profile: HostProfile): ReadonlyArray<HostSuiteCase> => {
-  const scratchPath = profile.fileSystemScratchPath ?? ".flows-host-suite-value.txt"
   const fileSystem = profile.fileSystem.supported
     ? provide(
       Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
         const encoder = new TextEncoder()
         const decoder = new TextDecoder()
+        const scratchPath = yield* scratchTarget(profile)
+        // Never write over a file this invocation did not create, and never
+        // remove one either: the removal below runs only after the write
+        // succeeded on a path that did not exist.
+        if (yield* fs.exists(scratchPath)) {
+          yield* failure("FileSystem", "scratchPath")
+        }
         yield* Effect.gen(function*() {
           yield* fs.writeFile(scratchPath, encoder.encode("host-suite"))
           const value = decoder.decode(yield* fs.readFile(scratchPath))

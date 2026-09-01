@@ -20,8 +20,15 @@ const declarationResult = spawnSync(process.execPath, [tsc, "-p", "tsconfig.json
 })
 if (declarationResult.status !== 0) process.exit(declarationResult.status ?? 1)
 
+// `Vitest.ts` has no CommonJS build. `vitest` refuses to load through
+// `require()` and throws a message about bundlers, so a `dist/cjs/Vitest.js`
+// would resolve and then crash inside a third-party library. The export map
+// declares `./Vitest` as ESM-only, and shipping the artifact anyway would only
+// re-create the path that entry exists to close.
+const esmOnly = new Set([resolve(packageRoot, "src/Vitest.ts")])
+
 await build({
-  entryPoints: filesWithExtension(resolve(packageRoot, "src"), ".ts"),
+  entryPoints: filesWithExtension(resolve(packageRoot, "src"), ".ts").filter((file) => !esmOnly.has(file)),
   outbase: resolve(packageRoot, "src"),
   outdir: resolve(packageRoot, "dist/cjs"),
   format: "cjs",

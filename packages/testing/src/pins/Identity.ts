@@ -1,62 +1,19 @@
 /**
  * Execution and step identity conformance pins.
  *
- * Manifest: `docs/reference/test-parity.md`.
+ * Manifest: `packages/testing/src/internal/ParityManifest.ts`.
  *
  * @since 0.0.0
  */
 import * as Effect from "effect/Effect"
 import type { ConformanceCase } from "../Conformance.ts"
 import type { FlowSpec, JournalEntryLike, StepSpec } from "../EngineSubject.ts"
-import { ConformanceViolation } from "../TestingError.ts"
+import { assert, invoke } from "../internal/Pin.ts"
+import { same } from "../internal/Structural.ts"
 
 const distinctExecutionsPin = "identity/distinct-executions"
 const idempotencyPin = "identity/idempotency-key"
 const digestPin = "identity/digest-key-stability"
-
-const same = (left: unknown, right: unknown): boolean => {
-  if (Object.is(left, right)) return true
-  if (left === null || right === null || typeof left !== "object" || typeof right !== "object") return false
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left) && Array.isArray(right) && left.length === right.length &&
-      left.every((item, index) => same(item, right[index]))
-  }
-  const leftRecord = left as Readonly<Record<string, unknown>>
-  const rightRecord = right as Readonly<Record<string, unknown>>
-  const leftKeys = Object.keys(leftRecord).sort()
-  const rightKeys = Object.keys(rightRecord).sort()
-  return same(leftKeys, rightKeys) && leftKeys.every((key) => same(leftRecord[key], rightRecord[key]))
-}
-
-const fail = (
-  pin: string,
-  message: string,
-  expected?: unknown,
-  actual?: unknown
-): Effect.Effect<never, ConformanceViolation> =>
-  Effect.fail(
-    new ConformanceViolation({
-      pin,
-      message,
-      ...(expected === undefined ? {} : { expected }),
-      ...(actual === undefined ? {} : { actual })
-    })
-  )
-
-const assert = (
-  pin: string,
-  condition: boolean,
-  message: string,
-  expected?: unknown,
-  actual?: unknown
-): Effect.Effect<void, ConformanceViolation> => condition ? Effect.void : fail(pin, message, expected, actual)
-
-const invoke = <A, E>(
-  pin: string,
-  operation: string,
-  evaluate: () => Effect.Effect<A, E>
-): Effect.Effect<A, E> =>
-  Effect.suspend(evaluate).pipe(Effect.withSpan(`testing.${operation}`, { attributes: { pin } }))
 
 const completedFor = (
   journal: ReadonlyArray<JournalEntryLike>,
@@ -286,8 +243,8 @@ const digestKeyStability: ConformanceCase = {
  * @category conformance
  * @since 0.0.0
  */
-export const cases: ReadonlyArray<ConformanceCase> = [
+export const cases: ReadonlyArray<ConformanceCase> = Object.freeze([
   distinctExecutions,
   idempotentExecutions,
   digestKeyStability
-]
+])

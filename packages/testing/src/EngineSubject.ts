@@ -8,7 +8,8 @@
  * the seam the built-in harness *consumes*. The two are never interchangeable
  * and no longer share a name.
  *
- * Governing contract: `docs/specs/Concepts/Vendored Flow Engine.md`.
+ * Governing design: `packages/testing/docs/concepts.md`, "The engine subject
+ * seam".
  *
  * @since 0.0.0
  */
@@ -19,7 +20,15 @@ import { EngineUnavailableError } from "./TestingError.ts"
 
 /**
  * One step of a conformance flow: either a body to run or a race between
- * branches. `sealed` states whether a replay may reuse a recorded result.
+ * branches.
+ *
+ * `sealed` selects the step's **identity**, not whether a replay may reuse a
+ * recorded result: both kinds replay their recorded outcome. Sealed means
+ * content identity, so every aliased occurrence of the key shares one recorded
+ * result; unsealed means occurrence (ordinal) identity, so duplicate declared
+ * keys run and journal separately. For a key that occurs once the two are
+ * indistinguishable, which is why the earlier wording — "whether a replay may
+ * reuse a recorded result" — read as a re-execution switch it never was.
  *
  * @category models
  * @since 0.0.0

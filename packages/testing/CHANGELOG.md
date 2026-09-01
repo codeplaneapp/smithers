@@ -1,25 +1,82 @@
-# /testing
+# @smthrs/testing
 
-## [Unreleased]
+## [1.0.0-rc.0]
 
 ### Added
 
-- Added the testing and conformance package scaffold.
-- Added scoped Vitest and deterministic layer adapters, core graph and journal
-  assertions, typed fixture replay, host conformance, and score gates.
+- Added the testing and conformance package: scoped Vitest and deterministic
+  layer adapters, core graph and journal assertions, typed fixture replay, host
+  conformance, and score gates.
 - Added executable identity, interruption, replay, and race conformance pins
   with restartable in-memory reference-engine coverage.
 - Added production-only Smithers parity accounting: real owning-package tests
   are linked and missing runtime contracts are explicit gaps.
-- Added behavior-level OpenCode source accounting and stable `TASK_TIMEOUT` /
-  `RALPH_MAX_REACHED` typed failures.
+- Added stable `TASK_TIMEOUT` and `RALPH_MAX_REACHED` typed failures.
+- Added package-owned documentation: `docs/api.md`, `docs/concepts.md`, and the
+  generated `docs/reference.md`, which replaces the hand-maintained module
+  table in `README.md`.
+- Added `Fixture.index`, a memoized digest-keyed lookup over a fixture's
+  recorded calls, and `ScoreGate.validateSamples`, the sample validator a suite
+  runner needs when it constructs samples itself.
+- Added `ExecutionConflictError` and `FixtureEncodingError`, and the
+  `execution_conflict`, `fixture_not_encodable`, and `effect_kind_mismatch`
+  codes.
+- Added `RestartableEngine.restartAndResume` beside `killAndResume`.
 
 ### Fixed
 
+- Fixed `Divergence`: its canonicalizer collapsed every non-plain object to
+  `{}`, so two different `Date`s, a `Map` beside a `Set`, `-0` beside `0`, and
+  `NaN` beside `Infinity` compared equal and a drifted fixture passed. It also
+  ignored `entry.index`, recursed forever on a cyclic value, and threw an
+  untyped `TypeError` on a `BigInt` out of a typed error channel.
+- Fixed `TestLayers.poisonedService`: a data-property read such as `Path.sep`
+  answered with a function instead of failing, and every method failed
+  recoverably, so an ordinary `Effect.catch` fallback let `expectPure` report an
+  impure plan as pure. Every read now raises a defect.
+- Fixed `JournalAssertions`: `.effect(key)` matched an ordinary step,
+  `idempotencyKey` reported `missing_idempotency_key` for an effect that never
+  ran and a mismatch for an entry carrying no key at all, `executed` reported an
+  empty `actual`, and `terminal` read the last array element while `prefix`
+  answered by `entry.index`.
+- Fixed `RestartableEngine.killAndResume`, which performed a restart. The
+  orderly path is now `restartAndResume`, and the hard-kill state a lease-based
+  reclaim recovers from is reachable and covered.
+- Fixed the conformance adapter's cancellation path: it used
+  `FlowRuntime.interruptUnsafe`, which the durable engine refuses by contract,
+  so no interrupt pin could have run against the engine that ships.
+- Fixed `Plan.render` and `PlanAssertions`, which sorted with locale-dependent
+  `localeCompare`; a snapshot containing a non-ASCII node id reordered on a
+  machine with a different default locale.
+- Fixed `src/Vitest.ts`, which wrote `scoped` into `@effect/vitest`'s own
+  exported `it` and so replaced that library's registrar for every other test
+  file in the worker process.
+- Fixed the record-and-replay aliasing: the request is projected when the stream
+  is acquired rather than after it ends, each event is snapshotted at emission,
+  and tool `parameters`, `stopSequences`, and `itemIds` are copied.
+- Fixed `UnscriptedModelError`, which carried the entire model request -- system
+  prompt, whole conversation, every tool schema -- into a defect a runner prints
+  in full.
+- Fixed the host suite's scratch file, a fixed relative path written and
+  force-deleted in the caller's working directory.
+- Fixed the `./Vitest` export map entry, which advertised a CommonJS path that
+  throws from inside vitest, and stopped emitting the dead CJS artifact.
+- Fixed `ScoreGate`: a suite with no gates validated no scores and graded a
+  wholly inconclusive or empty run as passed, samples were attributed by the
+  runner rather than bound to the case that produced them, and `Math.min(...)`
+  threw a `RangeError` above the engine's argument-count limit.
+- Fixed the reference engines, which accepted a duplicate execution id and
+  silently ran the original flow on the original payload, and which disagreed
+  about generated execution ids.
+- Fixed the 24 shipped JSDoc citations that named documents absent from the
+  repository; the designs are recorded in `docs/concepts.md`.
 - Removed the test-owned omnibus capability simulator and false production
   parity claims.
-- Replaced hand-written conformance polling loops with bounded Effect
-  schedules while retaining live-clock timeout behavior.
+- Replaced the hand-written polling loops in the interrupt and race pins with
+  bounded Effect schedules under a live clock, and bounded the conformance
+  adapter's publication confirmation, which was an unbounded recursion.
+- Moved `ParityManifest` under `internal/`. It is 0.x migration bookkeeping, not
+  a testing-library API, and it had no consumer outside this package.
 
 ## [0.1.0]
 

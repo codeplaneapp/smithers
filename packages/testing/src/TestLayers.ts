@@ -1,9 +1,8 @@
 /**
  * Deterministic test layer bundles.
  *
- * Contract source:
- * `docs/specs/Research/Smithers Testing Library Conversion 2026-07-27.md` §2 —
- * "a test harness is a layer set".
+ * Governing design: `packages/testing/docs/concepts.md`, "A test harness is a
+ * layer set".
  *
  * @since 0.0.0
  */
@@ -46,19 +45,63 @@ export const unit = <R, E>(
   return Layer.mergeAll(host, journal, permissions, engine)
 }
 
+/**
+ * Property names a runtime reads to classify a value rather than to use it:
+ * promise adoption, structural inspection, and test-matcher probes. They
+ * answer `undefined` so a poisoned service can still be stored, logged, and
+ * awaited past; every other read is a capability touch.
+ */
+const probes = new Set([
+  "$$typeof",
+  "_id",
+  "_op",
+  "_tag",
+  "asymmetricMatch",
+  "catch",
+  "constructor",
+  "finally",
+  "inspect",
+  "nodeType",
+  "then",
+  "toJSON",
+  "toString",
+  "valueOf"
+])
+
+/**
+ * A service whose every property read is a capability violation.
+ *
+ * Two earlier shapes were unsound. Returning a function for every property
+ * made a synchronous data read succeed: under {@link poisoned}, `Path.sep` was
+ * a function rather than `"/"`, so code that interpolated it produced garbage
+ * and the purity gate reported nothing. Returning `Effect.fail` from every
+ * method made the refusal *recoverable*: a plan body that wrapped a host read
+ * in `Effect.catch`, `Effect.option`, `Effect.orElse`, or `Effect.result` —
+ * ordinary in fallback-shaped code — swallowed the violation, the computation
+ * succeeded, and `PlanAssertions.expectPure` reported the plan as pure.
+ *
+ * A thrown `CapabilityContractError` is neither: it fires on a data read as
+ * loudly as on a method call, and it cannot be caught by `Effect.catch` or
+ * `Effect.catchTag`, which is the semantics "a plan must never touch this"
+ * requires.
+ * The read raises synchronously, so it becomes a defect wherever Effect
+ * captures the throw and a thrown error where it does not. `expectPure`
+ * catches the whole cause, so a violation inside a plan computation still
+ * surfaces as a typed `purity_violation`.
+ */
 const poisonedService = <A>(capability: string): A =>
   new Proxy(
     {},
     {
-      get: (_target, property) => () => {
-        const error = denied(capability, String(property))
-        return Effect.fail(error)
+      get: (_target, property) => {
+        if (typeof property === "symbol" || probes.has(property)) return undefined
+        throw denied(capability, property)
       }
     }
   ) as A
 
 const poisonedModel = ModelLike.of({
-  stream: () => Stream.fail(new CapabilityContractError({ capability: "model", operation: "stream" }))
+  stream: () => Stream.die(new CapabilityContractError({ capability: "model", operation: "stream" }))
 })
 
 const poisonedClock: Clock.Clock = {
@@ -104,8 +147,8 @@ export const poisonedClockAndRandom: Layer.Layer<never> = Layer.mergeAll(
 /**
  * A plan-time bundle: Host, Model, Clock, and Random access is rejected
  * instead of reaching a real environment. It deliberately does not provide an
- * engine. Contract source: the "purity poison" standing conformance job in
- * `docs/specs/Research/Smithers Testing Library Conversion 2026-07-27.md` §4.
+ * engine. Governing design: `packages/testing/docs/concepts.md`, "Purity
+ * poison".
  *
  * @since 0.0.0
  * @category layers

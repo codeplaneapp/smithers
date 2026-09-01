@@ -1,10 +1,10 @@
 /**
  * `EngineSubject` adapter over the real `/engine`.
  *
- * This is the authoritative subject for the core conformance operations in
- * `docs/specs/Research/Smithers Testing Library Conversion 2026-07-27.md`:
+ * This is the authoritative subject for the core conformance operations:
  * identity, replay, race, and interruption run against the production engine,
- * not a test-only model. Smithers capabilities absent from the production
+ * not a test-only model. Governing design:
+ * `packages/testing/docs/concepts.md`, "The engine subject seam". Smithers capabilities absent from the production
  * contract are recorded as parity gaps rather than simulated. The adapter
  * registers each `FlowSpec` as a real `Flow` whose execute function
  * runs every step as an `Action`:
@@ -43,6 +43,7 @@ import {
   type JournalEntryLike,
   type StepSpec
 } from "./EngineSubject.ts"
+import { conflict, type ExecutionConflict } from "./internal/Execution.ts"
 import type { EngineSubjectError } from "./TestingError.ts"
 import { EngineUnavailableError } from "./TestingError.ts"
 
@@ -67,9 +68,19 @@ type Subject = Flow.Flow<
 
 interface ExecutionMeta {
   readonly flow: Subject
+  /** What the execution was started with, so a re-submission can be checked. */
+  readonly submitted: ExecutionConflict
 }
 
 const unavailable = (message: string): EngineUnavailableError => new EngineUnavailableError({ message })
+
+/**
+ * How many scheduler passes `awaitResult` gives a runtime to publish a result
+ * whose body has already exited. Publication takes a handful of passes, so the
+ * budget is generous; its purpose is to convert a runtime that never publishes
+ * from a hang into a typed failure naming the execution.
+ */
+const publicationPasses = 1000
 
 const makeResult = (
   executionId: string,
@@ -239,10 +250,12 @@ const raceStep = (
  * scope), starts the execution with `discard`, and then polls the engine
  * until the execution settles as completed, aborted, failed, or suspended.
  *
- * `interrupt` uses the engine's `interruptUnsafe`, which interrupts the live
- * execution fiber directly; the cooperative `interrupt` only marks the
- * instance and waits for the next suspension point, which never arrives for
- * a step blocked in flight.
+ * `interrupt` uses the engine's cooperative `FlowRuntime.interrupt`, which
+ * delivers the interruption to the live body fiber. It is the durable engine's
+ * only cancellation path: `docs/migration/rc-contract.md` section 7 requires
+ * `interruptUnsafe` to fail there with `unsafe_interrupt_unsupported`, so an
+ * adapter built on it could not run a single interrupt pin against the engine
+ * that ships.
  *
  * @category constructors
  * @since 0.0.0
@@ -263,6 +276,13 @@ export const make = (): Effect.Effect<
     const executions = new Map<string, ExecutionMeta>()
     const idempotencyIndex = new Map<string, string>()
     const interrupted = new Set<string>()
+    // Skips ids a caller already claimed explicitly, so an anonymous run can
+    // never collide with `executionId: "engine-0"`. The memory reference
+    // engine has always done this; the two subjects must agree.
+    const freshExecutionId = (): string => {
+      while (executions.has(`engine-${nextExecutionId}`)) nextExecutionId += 1
+      return `engine-${nextExecutionId++}`
+    }
     // One completion latch per execution *attempt*. `awaitResult` waits on it
     // instead of spinning on `engine.poll`, so an execution that settles only
     // after a delay (a timer, an external signal) costs one suspension rather
@@ -353,17 +373,25 @@ export const make = (): Effect.Effect<
         // the flow body exits. Confirm publication before reporting, so
         // `resume` observes a finished execution fiber rather than a live one,
         // which the engine refuses to re-enter. This loop only spans fiber
-        // teardown -- the awaited work has already completed.
-        const confirm = (): Effect.Effect<ExecutionResult, EngineUnavailableError> =>
+        // teardown -- the awaited work has already completed -- so it yields
+        // the scheduler rather than sleeping, and it is bounded: a runtime
+        // that never publishes fails typed here instead of spinning until the
+        // runner's wall-clock timeout reports a generic hang.
+        const confirm = (attempt: number): Effect.Effect<ExecutionResult, EngineUnavailableError> =>
           Effect.gen(function*() {
             const polled = yield* Effect.exit(engine.poll(meta.flow, executionId))
             // An interrupted execution leaves `poll` with nothing to decode;
             // the attempt classification already recorded the abort.
             if (Exit.isFailure(polled) || Option.isSome(polled.value)) return settled
+            if (attempt >= publicationPasses) {
+              return yield* Effect.fail(unavailable(
+                `Execution ${executionId} settled but the flow engine did not publish its result within ${publicationPasses} scheduler passes`
+              ))
+            }
             yield* Effect.yieldNow
-            return yield* confirm()
+            return yield* confirm(attempt + 1)
           })
-        return yield* confirm()
+        return yield* confirm(0)
       })
 
     const run = (
@@ -373,13 +401,27 @@ export const make = (): Effect.Effect<
         const joinedId = options.idempotencyKey === undefined
           ? undefined
           : idempotencyIndex.get(options.idempotencyKey)
-        const executionId = joinedId ?? options.executionId ?? `engine-${nextExecutionId++}`
+        const executionId = joinedId ?? options.executionId ?? freshExecutionId()
         if (options.idempotencyKey !== undefined) {
           idempotencyIndex.set(options.idempotencyKey, executionId)
         }
-        if (!executions.has(executionId)) {
+        const known = executions.get(executionId)
+        if (known !== undefined) {
+          // A re-submission that matches joins the existing execution; one
+          // that disagrees about the flow or the payload is refused rather
+          // than silently running the original.
+          const difference = conflict(
+            executionId,
+            known.submitted,
+            { flowName: options.flow.name, payload: options.payload }
+          )
+          if (Option.isSome(difference)) return yield* Effect.fail(difference.value)
+        } else {
           const flow = yield* register(options.flow)
-          executions.set(executionId, { flow })
+          executions.set(executionId, {
+            flow,
+            submitted: { flowName: options.flow.name, payload: options.payload }
+          })
           journalFor(executionId)
           // Armed before submission so the body can never settle a latch that
           // does not exist yet.
@@ -433,7 +475,10 @@ export const make = (): Effect.Effect<
         const meta = executions.get(executionId)
         if (meta === undefined) return Effect.void
         interrupted.add(executionId)
-        return engine.interruptUnsafe(meta.flow, executionId)
+        // `interrupt`, never `interruptUnsafe`: the durable engine refuses the
+        // unsafe path with `unsafe_interrupt_unsupported` by contract, and the
+        // safe path does deliver the interruption to the live body fiber.
+        return engine.interrupt(meta.flow, executionId)
       })
 
     const resume = (executionId: string): Effect.Effect<ExecutionResult, EngineSubjectError> =>

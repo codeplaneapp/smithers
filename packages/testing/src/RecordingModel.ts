@@ -11,6 +11,7 @@ import * as Model from "@smthrs/model/Model"
 import { ModelError } from "@smthrs/model/ModelError"
 import { Effect, Exit, type Layer, Stream } from "effect"
 import { type RecordedCall, recordedRequest } from "./Fixture.ts"
+import { snapshot } from "./internal/Structural.ts"
 import type { ModelErrorLike, ModelEventLike } from "./ModelLike.ts"
 
 /**
@@ -57,12 +58,21 @@ export const make = (live: Model.Model, sink: Sink): Model.Model =>
   Model.make({
     stream: (request) =>
       Stream.suspend(() => {
+        // Projected here, at stream acquisition, rather than in `onExit` after
+        // the whole exchange has run. The projection copies, and a caller that
+        // mutates its own request while the exchange is in flight would
+        // otherwise have recorded a request the provider never saw.
+        const recorded = recordedRequest(request)
         const events: Array<ModelEventLike> = []
         let failure: ModelErrorLike | undefined
         return live.stream(request).pipe(
           Stream.tap((event) =>
             Effect.sync(() => {
-              events.push(event)
+              // Snapshot at emission for the same reason: the array used to be
+              // copied but its elements aliased, so an event object the
+              // provider reused or the caller mutated changed what the fixture
+              // recorded.
+              events.push(snapshot(event))
             })
           ),
           Stream.tapError((error) =>
@@ -76,8 +86,8 @@ export const make = (live: Model.Model, sink: Sink): Model.Model =>
           Stream.onExit((exit) =>
             Exit.isSuccess(exit) || failure !== undefined
               ? sink({
-                request: recordedRequest(request),
-                model: request.modelId,
+                request: recorded,
+                model: recorded.modelId,
                 events: [...events],
                 ...(failure === undefined ? {} : { failure })
               })

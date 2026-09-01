@@ -23,9 +23,7 @@
  * must not, so the durable application belongs in a suite that already has
  * that dependency.
  *
- * Source parity:
- * `docs/specs/Research/Smithers Test Parity 2026-07-28.md` and
- * `docs/reference/test-parity.md`.
+ * Source parity: `packages/testing/src/internal/ParityManifest.ts`.
  */
 import { FlowEngine } from "@smthrs/engine"
 import * as Effect from "effect/Effect"

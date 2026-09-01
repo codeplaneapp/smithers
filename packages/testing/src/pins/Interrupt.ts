@@ -1,8 +1,7 @@
 /**
  * Fiber interruption conformance pins.
  *
- * Source: `docs/specs/Research/Pi Reference Findings 2026-07-27.md`;
- * manifest: `docs/reference/test-parity.md`.
+ * Manifest: `packages/testing/src/internal/ParityManifest.ts`.
  *
  * @since 0.0.0
  */
@@ -12,65 +11,26 @@ import * as Exit from "effect/Exit"
 import type * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
 import * as Ref from "effect/Ref"
-import * as Schedule from "effect/Schedule"
-import * as TestClock from "effect/testing/TestClock"
 import type { ConformanceCase } from "../Conformance.ts"
 import type { ExecutionResult, FlowSpec, JournalEntryLike } from "../EngineSubject.ts"
-import { ConformanceViolation } from "../TestingError.ts"
+import * as Pin from "../internal/Pin.ts"
 
 const interruptPin = "interrupt/fiber-abort"
 
-const fail = (
-  message: string,
-  expected?: unknown,
-  actual?: unknown
-): Effect.Effect<never, ConformanceViolation> =>
-  Effect.fail(
-    new ConformanceViolation({
-      pin: interruptPin,
-      message,
-      ...(expected === undefined ? {} : { expected }),
-      ...(actual === undefined ? {} : { actual })
-    })
-  )
+// This module runs a single pin, so the shared helpers are bound to its name
+// once instead of threading it through every call site.
+const fail = (message: string, expected?: unknown, actual?: unknown) =>
+  Pin.fail(interruptPin, message, expected, actual)
 
-const assert = (
-  condition: boolean,
-  message: string,
-  expected?: unknown,
-  actual?: unknown
-): Effect.Effect<void, ConformanceViolation> => condition ? Effect.void : fail(message, expected, actual)
+const assert = (condition: boolean, message: string, expected?: unknown, actual?: unknown) =>
+  Pin.assert(interruptPin, condition, message, expected, actual)
 
-const invoke = <A, E>(
-  operation: string,
-  evaluate: () => Effect.Effect<A, E>
-): Effect.Effect<A, E> =>
-  Effect.suspend(evaluate).pipe(
-    Effect.withSpan(`testing.${operation}`, { attributes: { pin: interruptPin } })
-  )
+const invoke = <A, E>(operation: string, evaluate: () => Effect.Effect<A, E>): Effect.Effect<A, E> =>
+  Pin.invoke(interruptPin, operation, evaluate)
 
-const waitUntil = (
-  predicate: () => boolean,
-  message: string
-): Effect.Effect<void, ConformanceViolation> =>
-  Effect.suspend(() => predicate() ? Effect.void : Effect.fail(undefined)).pipe(
-    Effect.retry({ schedule: Schedule.spaced("10 millis"), times: 99 }),
-    TestClock.withLive,
-    Effect.catch(() => fail(message, "settlement within one second of live time", "still pending"))
-  )
+const waitUntil = (predicate: () => boolean, message: string) => Pin.waitUntil(interruptPin, predicate, message)
 
-const awaitFiber = <A, E>(
-  fiber: Fiber.Fiber<A, E>,
-  message: string
-): Effect.Effect<Exit.Exit<A, E>, ConformanceViolation> =>
-  Effect.gen(function*() {
-    yield* waitUntil(() => fiber.pollUnsafe() !== undefined, message)
-    const exit = fiber.pollUnsafe()
-    if (exit === undefined) {
-      return yield* fail(message, "settled fiber", "pending fiber")
-    }
-    return exit
-  })
+const awaitFiber = <A, E>(fiber: Fiber.Fiber<A, E>, message: string) => Pin.awaitFiber(interruptPin, fiber, message)
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null
@@ -221,4 +181,4 @@ const interruptInFlight: ConformanceCase = {
  * @category conformance
  * @since 0.0.0
  */
-export const cases: ReadonlyArray<ConformanceCase> = [interruptInFlight]
+export const cases: ReadonlyArray<ConformanceCase> = Object.freeze([interruptInFlight])

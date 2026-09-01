@@ -12,7 +12,7 @@ import * as Model from "@smthrs/model/Model"
 import { ModelError } from "@smthrs/model/ModelError"
 import type * as ModelEvent from "@smthrs/model/ModelEvent"
 import { Effect, type Layer, Option, Stream } from "effect"
-import { canonicalRequestDigest, type Fixture, type RecordedCall } from "./Fixture.ts"
+import { canonicalRequestDigest, type Fixture, index, type RecordedCall } from "./Fixture.ts"
 import type { FixtureStore } from "./FixtureStore.ts"
 import type { ModelErrorLike, ModelRequestLike } from "./ModelLike.ts"
 import * as RecordingModel from "./RecordingModel.ts"
@@ -39,12 +39,8 @@ export interface Options {
  * `modelId` to match by request shape and dies when the fixture was recorded
  * against a different model.
  */
-const hit = (fixture: Fixture, request: ModelRequestLike): Option.Option<RecordedCall> => {
-  const digest = canonicalRequestDigest(request)
-  return Option.fromUndefinedOr(
-    fixture.calls.find((call) => canonicalRequestDigest(call.request) === digest)
-  )
-}
+const hit = (fixture: Fixture, request: ModelRequestLike): Option.Option<RecordedCall> =>
+  Option.fromUndefinedOr(index(fixture).get(canonicalRequestDigest(request)))
 
 const asModelError = (failure: ModelErrorLike): ModelError =>
   new ModelError({

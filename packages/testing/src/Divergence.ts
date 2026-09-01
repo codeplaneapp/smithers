@@ -6,6 +6,7 @@
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type { JournalEntryLike } from "./EngineSubject.ts"
+import { canonical } from "./internal/Structural.ts"
 import { FixtureDivergenceError } from "./TestingError.ts"
 
 /**
@@ -21,19 +22,6 @@ export interface Divergence {
   readonly actual: unknown
 }
 
-const canonicalValue = (value: unknown): string => {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value) ?? "undefined"
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalValue).join(",")}]`
-  }
-  const record = value as Record<string, unknown>
-  return `{${
-    Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalValue(record[key])}`).join(",")
-  }}`
-}
-
 const entryIndex = (
   expected: JournalEntryLike | undefined,
   actual: JournalEntryLike | undefined,
@@ -42,7 +30,16 @@ const entryIndex = (
 
 /**
  * Finds the first differing journal entry, reporting the entry index and the
- * first differing field. Values are compared using canonical object-key order.
+ * first differing field.
+ *
+ * Every field a {@link JournalEntryLike} carries is compared, `index`
+ * included: two journals whose entries disagree about their own position are
+ * not the same journal. Values are compared through the shared canonical
+ * rendering, which distinguishes two different `Date`s, a `Map` from a `Set`,
+ * `-0` from `0`, `NaN` from `Infinity`, and two instances of the same class,
+ * and which reports a cycle rather than recursing into it. The rendering is
+ * total, so no journal value can throw out of the typed error channel
+ * {@link assertNoDivergence} declares.
  *
  * @category assertions
  * @since 0.0.0
@@ -63,7 +60,7 @@ export const firstDivergence = (
         actual: actualEntry
       })
     }
-    for (const field of ["stepKey", "kind", "outcome"] as const) {
+    for (const field of ["index", "stepKey", "kind", "outcome"] as const) {
       if (expectedEntry[field] !== actualEntry[field]) {
         return Option.some({
           index: entryIndex(expectedEntry, actualEntry, position),
@@ -73,7 +70,7 @@ export const firstDivergence = (
         })
       }
     }
-    if (canonicalValue(expectedEntry.value) !== canonicalValue(actualEntry.value)) {
+    if (canonical(expectedEntry.value) !== canonical(actualEntry.value)) {
       return Option.some({
         index: entryIndex(expectedEntry, actualEntry, position),
         field: "value",

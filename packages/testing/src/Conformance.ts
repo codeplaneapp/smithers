@@ -9,24 +9,32 @@ import * as Identity from "./pins/Identity.ts"
 import * as Interrupt from "./pins/Interrupt.ts"
 import * as Race from "./pins/Race.ts"
 import * as Replay from "./pins/Replay.ts"
+import type { ConformanceViolation, EngineSubjectError } from "./TestingError.ts"
 
 /**
  * A black-box assertion over an {@link EngineSubject} implementation.
+ *
+ * The error channel is the closed union every pin already produces, never
+ * `unknown`: a subject that laundered a foreign cause into `unknown` could not
+ * be matched on by the runner that reports it.
  *
  * @category models
  * @since 0.0.0
  */
 export interface ConformanceCase {
   readonly name: string
-  readonly run: (engine: EngineSubject) => Effect.Effect<void, unknown>
+  readonly run: (engine: EngineSubject) => Effect.Effect<void, ConformanceViolation | EngineSubjectError>
 }
 
-const coreCases: ReadonlyArray<ConformanceCase> = [
+// Frozen at definition. `coreSuite()` with no filter used to hand back this
+// very array, so a consumer could splice a mandatory pin out of the registry
+// and every later call in the process returned the shortened list.
+const coreCases: ReadonlyArray<ConformanceCase> = Object.freeze([
   ...Identity.cases,
   ...Interrupt.cases,
   ...Replay.cases,
   ...Race.cases
-]
+])
 
 /**
  * Builds the mandatory black-box suite every `EngineSubject` must pass:
@@ -37,9 +45,18 @@ const coreCases: ReadonlyArray<ConformanceCase> = [
  * exactly these cases, was deleted rather than kept: two names for one list
  * claimed a superset that does not exist.
  *
+ * The returned array is a frozen copy. `ReadonlyArray` is erased at runtime,
+ * and losing a mandatory pin is the worst failure a conformance registry has.
+ *
+ * The race and interrupt cases advance time through `TestClock`, so a runner
+ * must register them under a deterministic clock: `Vitest.testEffect(...)`
+ * supplies one through `.effect` (and its `scoped` alias) but not through
+ * `.live`.
+ *
  * @category constructors
  * @since 0.0.0
  */
 export const coreSuite = (options?: {
   readonly filter?: ((conformanceCase: ConformanceCase) => boolean) | undefined
-}): ReadonlyArray<ConformanceCase> => options?.filter === undefined ? coreCases : coreCases.filter(options.filter)
+}): ReadonlyArray<ConformanceCase> =>
+  Object.freeze(options?.filter === undefined ? [...coreCases] : coreCases.filter(options.filter))

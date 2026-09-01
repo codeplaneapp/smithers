@@ -21,14 +21,48 @@ describe("EngineSubject", () => {
     expect(EngineSubject.EngineSubject.key).toBe("flows/testing/EngineSubject")
   })
 
-  it.effect("fails every unavailable operation with a typed, stable-coded error", () =>
+  // Every operation, not only `result`: a noop subject whose `run` silently
+  // succeeded would let a pin report a pass against no engine at all.
+  it.effect("fails every unavailable operation with a typed, stable-coded error naming it", () =>
     Effect.gen(function*() {
       const subject = EngineSubject.makeNoop()
-      const exit = yield* Effect.exit(subject.result("nope"))
-      expect(exit._tag).toBe("Failure")
-      const error = yield* Effect.flip(subject.result("nope"))
-      expect(error._tag).toBe("EngineUnavailableError")
-      expect(error.code).toBe("engine_unavailable")
+      const operations: Record<string, Effect.Effect<unknown, TestingError.EngineSubjectError>> = {
+        run: subject.run({ flow: { name: "none", steps: [] }, payload: undefined }),
+        result: subject.result("nope"),
+        interrupt: subject.interrupt("nope"),
+        resume: subject.resume("nope"),
+        journal: subject.journal("nope")
+      }
+      for (const [operation, effect] of Object.entries(operations)) {
+        const error = yield* Effect.flip(effect)
+        expect(error._tag, operation).toBe("EngineUnavailableError")
+        expect(error.code, operation).toBe("engine_unavailable")
+        expect((error as { readonly message: string }).message, operation).toContain(operation)
+      }
+      expect(Object.keys(operations)).toHaveLength(5)
+    }))
+
+  it.effect("keeps an override and leaves the rest unavailable", () =>
+    Effect.gen(function*() {
+      const subject = EngineSubject.makeNoop({
+        name: "overridden",
+        journal: () => Effect.succeed([])
+      })
+      expect(subject.name).toBe("overridden")
+      expect(yield* subject.journal("any")).toEqual([])
+      expect((yield* Effect.flip(subject.result("any"))).code).toBe("engine_unavailable")
+    }))
+
+  it.effect("provides the same subject through its layer", () =>
+    Effect.gen(function*() {
+      const provided = yield* EngineSubject.EngineSubject.pipe(
+        Effect.provide(EngineSubject.layerNoop({ name: "layered" }))
+      )
+      expect(provided.name).toBe("layered")
+      const direct = yield* EngineSubject.EngineSubject.pipe(
+        Effect.provide(EngineSubject.layer(EngineSubject.makeNoop({ name: "direct" })))
+      )
+      expect(direct.name).toBe("direct")
     }))
 
   it("carries every subject failure in one closed typed union", () => {

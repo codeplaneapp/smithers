@@ -1,7 +1,6 @@
 /**
  * Stable source-parity failures:
- * `docs/reference/test-parity.md` and
- * `docs/specs/Research/Smithers Test Parity 2026-07-28.md`.
+ * `packages/testing/src/internal/ParityManifest.ts`.
  */
 import { describe, expect, it } from "vitest"
 import * as TestingError from "../src/TestingError.ts"

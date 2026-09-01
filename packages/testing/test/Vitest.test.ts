@@ -1,3 +1,4 @@
+import * as EffectVitest from "@effect/vitest"
 import * as Journal from "@smthrs/journal"
 import { Clock, Context, Effect, Layer, Ref } from "effect"
 import * as TestClock from "effect/testing/TestClock"
@@ -13,6 +14,16 @@ const test = testEffect(counterLayer)
 const unitTest = testEffect(TestLayers.unit(EngineSubject.layerNoop()))
 
 describe("Vitest", () => {
+  // Importing this module used to write `scoped` into `@effect/vitest`'s own
+  // exported `it`. That module is externalized and shared across every test
+  // file in a worker process, so the library's own `it.scoped` was replaced
+  // for every other file in the worker.
+  it("leaves the peer dependency's own it.scoped alone", () => {
+    expect(EffectVitest.it.scoped).not.toBe(EffectVitest.it.effect)
+    expect(it.scoped).toBe(EffectVitest.it.effect)
+    expect(it).not.toBe(EffectVitest.it)
+  })
+
   it.effect("runs Effect test bodies", () => Effect.sync(() => expect(true).toBe(true)))
 
   it.effect("surfaces failed Effects as test failures", () =>

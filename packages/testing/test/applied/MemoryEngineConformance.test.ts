@@ -33,7 +33,7 @@ describe("RestartableEngine replay, race, and interruption conformance", () => {
         const restartOnResume = makeEngineSubject({
           ...harness.engine,
           name: "RestartableEngine/restart-on-resume",
-          resume: harness.killAndResume
+          resume: harness.restartAndResume
         })
         yield* conformanceCase.run(restartOnResume)
       }))

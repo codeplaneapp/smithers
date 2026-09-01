@@ -3,9 +3,16 @@
  *
  * Every error carries a stable `code` drawn from a closed literal union, so
  * consumers can match on codes without parsing messages. The per-error code
- * schemas and the combined {@link Code} union are exported. Contract source:
- * `docs/specs/Research/Smithers Testing Library Conversion 2026-07-27.md`
- * ("errors are typed values, not string conventions").
+ * schemas and the combined {@link Code} union are exported.
+ *
+ * Governing design: `packages/testing/docs/concepts.md`, "Errors are typed
+ * values, not string conventions".
+ *
+ * Two casing conventions live in {@link Code}. Most literals are `snake_case`;
+ * `REPLAY_HARNESS_MISMATCH`, `EXACTLY_ONCE_UNSUPPORTED`, `TASK_TIMEOUT`, and
+ * `RALPH_MAX_REACHED` are inherited verbatim from the 0.x codes consumers
+ * already match on, and are kept shouted so a migrated matcher keeps working.
+ * A new code is `snake_case`.
  *
  * @since 0.0.0
  */
@@ -57,6 +64,7 @@ export const JournalAssertionCode = Schema.Literals([
   "execution_order_mismatch",
   "terminal_status_mismatch",
   "effect_not_executed",
+  "effect_kind_mismatch",
   "effect_journaled_more_than_once",
   "missing_idempotency_key",
   "idempotency_key_mismatch"
@@ -104,12 +112,14 @@ export const Code = Schema.Literals([
   ...ScoreGateCode.members.map((member) => member.literal),
   "conformance_violation",
   "unscripted_model",
+  "fixture_not_encodable",
   "REPLAY_HARNESS_MISMATCH",
   "fixture_divergence",
   "EXACTLY_ONCE_UNSUPPORTED",
   "capability_contract_violation",
   "conformance_skipped",
   "engine_unavailable",
+  "execution_conflict",
   "capability_operation_failed",
   "transaction_commit_failed",
   "rewind_failed",
@@ -169,12 +179,44 @@ export class ConformanceViolation extends Schema.TaggedError<ConformanceViolatio
 /**
  * A recorded model received a request with no matching fixture.
  *
+ * The fields are a bounded identity, not the request. This error is raised as
+ * a defect, so a runner prints it in full: carrying the whole
+ * `ModelRequestLike` put every system block, every turn of the conversation,
+ * and every tool schema into CI logs and into any attached error reporter — an
+ * unbounded payload for a replay double whose whole purpose is long agent
+ * conversations, and one that routinely holds file contents and customer data.
+ *
  * @since 0.0.0
  * @category errors
  */
 export class UnscriptedModelError extends Schema.TaggedError<UnscriptedModelError>()("UnscriptedModelError", {
   code: constantCode("unscripted_model"),
-  request: Schema.Unknown
+  modelId: Schema.String,
+  messageCount: Schema.Number,
+  toolNames: Schema.Array(Schema.String)
+}) {}
+
+/**
+ * A value a fixture must store is not representable as canonical JSON.
+ *
+ * `path` names the offending value — `$.tools[0].parameters.x` — and `reason`
+ * says which rule it broke, so a consumer matches on a stable code and a typed
+ * field instead of parsing the prose of a bare `TypeError`.
+ *
+ * @since 0.0.0
+ * @category errors
+ */
+export class FixtureEncodingError extends Schema.TaggedError<FixtureEncodingError>()("FixtureEncodingError", {
+  code: constantCode("fixture_not_encodable"),
+  path: Schema.String,
+  reason: Schema.Literals([
+    "cycle",
+    "non-plain-object",
+    "non-finite-number",
+    "symbol-key",
+    "unsupported-type",
+    "too-deep"
+  ])
 }) {}
 
 /**
@@ -271,15 +313,45 @@ export class ConformanceSkipped extends Schema.TaggedError<ConformanceSkipped>()
 }) {}
 
 /**
- * A score sample did not satisfy a configured gate.
+ * One score observation a gate rejected, identified the way `ScoreSample`
+ * identifies it, so a suite of five hundred samples names the scorer that
+ * produced the bad value rather than reporting a bare number.
+ *
+ * @since 0.0.0
+ * @category codes
+ */
+export const InvalidScoreSample = Schema.Struct({
+  case: Schema.String,
+  stepKey: Schema.String,
+  scorer: Schema.String,
+  value: Schema.Number
+})
+
+/**
+ * The decoded form of {@link InvalidScoreSample}.
+ *
+ * @since 0.0.0
+ * @category codes
+ */
+export type InvalidScoreSample = typeof InvalidScoreSample.Type
+
+/**
+ * A score sample did not satisfy a configured gate, or a gate was misused.
+ *
+ * `threshold` and `actual` are optional because not every code has both:
+ * `invalid_threshold` has no observation and `invalid_score` has no threshold,
+ * and a placeholder `0` in either position is a number a consumer would read
+ * as meaningful. `samples` names every rejected observation for
+ * `invalid_score`, so a run with ten bad scorers is diagnosed in one pass.
  *
  * @since 0.0.0
  * @category errors
  */
 export class ScoreGateError extends Schema.TaggedError<ScoreGateError>()("ScoreGateError", {
   code: ScoreGateCode,
-  threshold: Schema.Number,
-  actual: Schema.Number
+  threshold: Schema.optional(Schema.Number),
+  actual: Schema.optional(Schema.Number),
+  samples: Schema.optional(Schema.Array(InvalidScoreSample))
 }) {}
 
 /**
@@ -291,6 +363,26 @@ export class ScoreGateError extends Schema.TaggedError<ScoreGateError>()("ScoreG
 export class EngineUnavailableError extends Schema.TaggedError<EngineUnavailableError>()("EngineUnavailableError", {
   code: constantCode("engine_unavailable"),
   message: Schema.String
+}) {}
+
+/**
+ * A `run` named an execution id that already exists, with a different flow or a
+ * different payload.
+ *
+ * An engine that accepted the id and silently ran the *original* flow on the
+ * *original* payload would give a caller no signal at all that its arguments
+ * were ignored, on the seam that defines engine conformance. `expected` and
+ * `actual` are bounded renderings, never the payloads themselves.
+ *
+ * @since 0.0.0
+ * @category errors
+ */
+export class ExecutionConflictError extends Schema.TaggedError<ExecutionConflictError>()("ExecutionConflictError", {
+  code: constantCode("execution_conflict"),
+  executionId: Schema.String,
+  field: Schema.Literals(["flow", "payload"]),
+  expected: Schema.String,
+  actual: Schema.String
 }) {}
 
 /**
@@ -433,6 +525,7 @@ export class RalphMaxReachedError extends Schema.TaggedError<RalphMaxReachedErro
  */
 export type EngineSubjectError =
   | EngineUnavailableError
+  | ExecutionConflictError
   | CapabilityContractError
   | ConformanceSkipped
   | CapabilityOperationError

@@ -5,7 +5,9 @@
  */
 import type { Effect } from "effect"
 import { Schema } from "effect"
+import { compare, snapshot } from "./internal/Structural.ts"
 import type { ModelErrorLike, ModelEventLike, ModelRequestLike } from "./ModelLike.ts"
+import { FixtureEncodingError } from "./TestingError.ts"
 
 /**
  * One recorded model invocation.
@@ -209,21 +211,69 @@ export const Fixture = Schema.Struct({ calls: Schema.Array(recordedCallSchema) }
 export const decode = (input: unknown): Effect.Effect<Fixture, Schema.SchemaError> =>
   Schema.decodeUnknownEffect(Fixture)(input)
 
-const invalid = (path: string): never => {
-  throw new TypeError(`Value at ${path} is not valid JSON`)
+const invalid = (path: string, reason: FixtureEncodingError["reason"]): never => {
+  throw new FixtureEncodingError({ path, reason })
 }
 
 /**
+ * How deep a recorded value may nest.
+ *
+ * A cycle is already detected by identity, but a genuinely deep value — a
+ * thousand-level `parameters` object — still overflowed the stack, which is a
+ * host error escaping a module whose failures are a closed code union.
+ */
+const maximumDepth = 128
+
+/**
+ * The canonical JSON encoding of a request, and its replay identity.
+ *
  * Re-derived locally from `/model`'s `CanonicalJson.stringify` algorithm:
  * object keys sort recursively, array order is retained, and non-JSON values
- * are rejected. Keeping the algorithm here avoids a production-model runtime
- * dependency while preserving the recorded-model request identity contract.
+ * are rejected with a typed {@link FixtureEncodingError} naming the offending
+ * path.
+ *
+ * It returns the canonical encoding rather than a fixed-length hash, and the
+ * name is the one historical wart in this module. A fixture cache selects the
+ * recorded call to replay by this value, so a hash collision would replay
+ * another conversation's response as this one's; the package owns no
+ * synchronous cryptographic hash, and a non-cryptographic one buys shorter
+ * keys at the cost of a wrong answer nothing would detect. The cost that made
+ * the length matter — re-encoding every recorded call on every lookup — is
+ * paid once per fixture instead: see {@link index}.
  *
  * @category encoding
  * @since 0.0.0
  */
 export const canonicalRequestDigest = (request: ModelRequestLike): string =>
   JSON.stringify(canonicalize(recordedRequest(request)))
+
+/**
+ * A digest-keyed index over a fixture's recorded calls, computed once.
+ *
+ * Both model doubles used to call {@link canonicalRequestDigest} for the
+ * incoming request AND for every call already in the fixture, on every model
+ * invocation: O(n) full re-encodings of complete conversations per call, and
+ * O(n squared) per run, with every intermediate string retained long enough to
+ * compare. The index is memoized on the fixture object, so a hundred-turn
+ * agent fixture encodes its calls once.
+ *
+ * @category encoding
+ * @since 0.0.0
+ */
+export const index = (fixture: Fixture): ReadonlyMap<string, RecordedCall> => {
+  const memoized = indexes.get(fixture)
+  if (memoized !== undefined) return memoized
+  const built = new Map<string, RecordedCall>()
+  for (const call of fixture.calls) {
+    const digest = canonicalRequestDigest(call.request)
+    // First writer wins, matching the `find`-based lookup this replaces.
+    if (!built.has(digest)) built.set(digest, call)
+  }
+  indexes.set(fixture, built)
+  return built
+}
+
+const indexes = new WeakMap<Fixture, ReadonlyMap<string, RecordedCall>>()
 
 const optional = <K extends string, A>(key: K, value: A | undefined): { readonly [P in K]?: A } =>
   value === undefined ? {} : { [key]: value } as { readonly [P in K]?: A }
@@ -270,7 +320,7 @@ export const recordedRequest = (request: ModelRequestLike): ModelRequestLike => 
           }),
           stopReason: message.stopReason,
           ...optional("responseId", message.responseId),
-          ...optional("itemIds", message.itemIds)
+          ...optional("itemIds", message.itemIds === undefined ? undefined : [...message.itemIds])
         }
       case "tool":
         return {
@@ -287,7 +337,10 @@ export const recordedRequest = (request: ModelRequestLike): ModelRequestLike => 
   tools: request.tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
-    parameters: tool.parameters,
+    // Deep-copied, not aliased. Passing the caller's object through meant a
+    // harness that reused one tool array across turns and rewrote its schema
+    // retroactively rewrote already-recorded entries on the next flush.
+    parameters: snapshot(tool.parameters),
     ...optional("deferred", tool.deferred),
     ...optional("loader", tool.loader)
   })),
@@ -296,34 +349,39 @@ export const recordedRequest = (request: ModelRequestLike): ModelRequestLike => 
     ...optional("temperature", request.params.temperature),
     ...optional("topP", request.params.topP),
     ...optional("topK", request.params.topK),
-    ...optional("stopSequences", request.params.stopSequences),
+    ...optional(
+      "stopSequences",
+      request.params.stopSequences === undefined ? undefined : [...request.params.stopSequences]
+    ),
     ...optional("thinkingBudget", request.params.thinkingBudget),
     ...optional("reasoningEffort", request.params.reasoningEffort)
   },
   ...optional("toolChoice", request.toolChoice)
 })
 
-const canonicalize = (value: unknown, path = "$", ancestors = new Set<object>()): unknown => {
+const canonicalize = (value: unknown, path = "$", ancestors = new Set<object>(), depth = 0): unknown => {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value
-  if (typeof value === "number") return Number.isFinite(value) ? value : invalid(path)
+  if (typeof value === "number") return Number.isFinite(value) ? value : invalid(path, "non-finite-number")
+  if (depth >= maximumDepth) return invalid(path, "too-deep")
   if (Array.isArray(value)) {
-    if (ancestors.has(value)) return invalid(path)
+    if (ancestors.has(value)) return invalid(path, "cycle")
     ancestors.add(value)
-    const result = value.map((item, index) => canonicalize(item, `${path}[${index}]`, ancestors))
+    const result = value.map((item, index) => canonicalize(item, `${path}[${index}]`, ancestors, depth + 1))
     ancestors.delete(value)
     return result
   }
   if (typeof value === "object" && value !== null) {
     const prototype = Object.getPrototypeOf(value)
-    if (prototype !== Object.prototype && prototype !== null) return invalid(path)
-    if (ancestors.has(value) || Object.getOwnPropertySymbols(value).length > 0) return invalid(path)
+    if (prototype !== Object.prototype && prototype !== null) return invalid(path, "non-plain-object")
+    if (ancestors.has(value)) return invalid(path, "cycle")
+    if (Object.getOwnPropertySymbols(value).length > 0) return invalid(path, "symbol-key")
     ancestors.add(value)
     const result: Record<string, unknown> = {}
-    for (const key of Object.keys(value).sort()) {
-      result[key] = canonicalize((value as Record<string, unknown>)[key], `${path}.${key}`, ancestors)
+    for (const key of Object.keys(value).sort(compare)) {
+      result[key] = canonicalize((value as Record<string, unknown>)[key], `${path}.${key}`, ancestors, depth + 1)
     }
     ancestors.delete(value)
     return result
   }
-  return invalid(path)
+  return invalid(path, "unsupported-type")
 }

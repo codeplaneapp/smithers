@@ -45,6 +45,22 @@ export interface Restartable {
    * so a killed instance leaks nothing past the test that killed it.
    */
   readonly kill: Effect.Effect<void, EngineUnavailableError>
+  /**
+   * {@link restart}, then `resume` on the fresh instance: the orderly
+   * shutdown-and-restart a process performs when it is asked to stop.
+   *
+   * This is what `killAndResume` used to do under a name that promised the
+   * opposite, so every restart-flavoured conformance run exercised the orderly
+   * path and the hard-kill state no case ever reached.
+   */
+  readonly restartAndResume: (
+    executionId: string
+  ) => Effect.Effect<ExecutionResult, EngineSubjectError>
+  /**
+   * {@link kill}, then `resume` on the fresh instance while the killed one is
+   * still running and unreleased. This is the state a lease-based reclaim
+   * recovers from, and the only variant that produces it.
+   */
   readonly killAndResume: (
     executionId: string
   ) => Effect.Effect<ExecutionResult, EngineSubjectError>
@@ -134,8 +150,12 @@ export const make = (): Effect.Effect<
       engine,
       restart,
       kill,
-      killAndResume: (executionId) =>
+      restartAndResume: (executionId) =>
         restart.pipe(
+          Effect.andThen(withEngine((subject) => subject.resume(executionId)))
+        ),
+      killAndResume: (executionId) =>
+        kill.pipe(
           Effect.andThen(withEngine((subject) => subject.resume(executionId)))
         )
     }

@@ -1,8 +1,16 @@
 /**
- * Machine-readable coverage accounting for
- * `docs/specs/Research/Smithers Test Parity 2026-07-28.md`,
- * `docs/specs/Research/Pi Reference Findings 2026-07-27.md`, and
- * `docs/reference/test-parity.md`.
+ * Machine-readable coverage accounting for the 0.x-to-rc.0 test migration:
+ * which old smithers test file, and which behavior of the external reference
+ * corpus, each conformance pin or repository test answers for.
+ *
+ * This is migration bookkeeping, not a testing-library API, and it has no
+ * consumer outside this package's own suite. It lives under `internal/`, which
+ * is null-mapped in the export map and carries no compatibility promise, so it
+ * is no longer published as part of the assertion vocabulary.
+ *
+ * The parity notes it accounts for are recorded in `docs/migration/` rather
+ * than in this package; the rows carry their own `reason` text for every claim
+ * that is not `pinned`.
  *
  * @since 0.0.0
  */

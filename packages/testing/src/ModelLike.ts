@@ -1,6 +1,20 @@
 /**
  * Structural model seam coordinated read-only with `packages/model`.
  *
+ * These shapes are a structural copy of `@smthrs/model`'s request, event, and
+ * error contracts, and the copy is deliberate: a third-party engine subject or
+ * scorer implements `ModelLike` without adopting the model package's classes,
+ * and a recorded fixture stores plain data rather than a `Schema.Class`
+ * instance whose shape would change with the class.
+ *
+ * It is NOT a way to avoid depending on `@smthrs/model`. This package depends
+ * on it, and `CachedModel` and `RecordingModel` import it directly to wrap the
+ * real provider seam. That is what the earlier wording here claimed, and it was
+ * never true. The two shapes can therefore drift, and
+ * `test/ModelLikeParity.test.ts` is what stops them: it asserts, at compile
+ * time, that a production request, event, and error are assignable to the
+ * structural copies a fixture stores.
+ *
  * @since 0.0.0
  */
 import { Context } from "effect"
@@ -8,8 +22,9 @@ import type { Stream } from "effect"
 import type { CapabilityContractError } from "./TestingError.ts"
 
 /**
- * The public request shape of `/model/ModelRequest`, copied structurally
- * so this package does not depend on the unsettled model contract.
+ * The public request shape of `/model/ModelRequest`, copied structurally so a
+ * fixture stores plain data and a third-party subject need not adopt the model
+ * package's classes. See this module's header for why the copy exists.
  *
  * @since 0.0.0
  * @category models
@@ -112,8 +127,9 @@ export type ModelEventLike =
 /**
  * The tag every `/model/ModelError` carries.
  *
- * Copied as a literal for the same reason the shape below is: this package
- * does not depend on `@smthrs/model`.
+ * Copied as a literal for the same reason the shape below is: a fixture stores
+ * a refusal's fields as plain data, and a replay stamps the tag back on so a
+ * consumer that classifies the failure still recognizes it.
  *
  * @since 0.0.0
  * @category errors
@@ -121,8 +137,8 @@ export type ModelEventLike =
 export const modelErrorTag = "flows/model/ModelError"
 
 /**
- * The public error shape of `/model/ModelError`, copied structurally
- * without importing the model package.
+ * The public error shape of `/model/ModelError`, copied structurally so a
+ * fixture stores it as plain data.
  *
  * `code` is exactly `/model/ModelError`'s `ModelErrorCode`. The permission and
  * grant-store codes this union used to also carry belong to

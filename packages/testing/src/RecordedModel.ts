@@ -61,7 +61,19 @@ export interface Replay {
 // A request with no recording, and a fixture recorded against another model,
 // both say the fixture does not describe this run. Neither is a provider
 // failure, so both are defects rather than typed errors: see `ModelLikeError`.
-const noCall = (request: ModelRequestLike) => Stream.die(new UnscriptedModelError({ request }))
+//
+// The error names the request rather than carrying it. A defect is printed in
+// full by the runner, and a fixture miss in a hundred-turn agent test used to
+// dump the entire transcript — system prompt, every message, every tool
+// schema — into CI logs.
+const noCall = (request: ModelRequestLike) =>
+  Stream.die(
+    new UnscriptedModelError({
+      modelId: request.modelId,
+      messageCount: request.messages.length,
+      toolNames: request.tools.map((tool) => tool.name)
+    })
+  )
 
 type Selection =
   | { readonly _tag: "Call"; readonly call: RecordedCall }
@@ -83,13 +95,17 @@ const requestShapeDigest = (request: ModelRequestLike): string => canonicalReque
 export const make = (fixture: Fixture, options: Options = {}): Effect.Effect<Replay> =>
   Effect.gen(function*() {
     const consumed = yield* Ref.make<ReadonlyArray<boolean>>(fixture.calls.map(() => false))
+    // Encoded once per fixture rather than once per recorded call per model
+    // invocation, and read back by index rather than re-derived after the
+    // candidate is found.
+    const shapes = fixture.calls.map((call) => requestShapeDigest(call.request))
     const claim = (request: ModelRequestLike): Effect.Effect<Selection> => {
       const digest = requestShapeDigest(request)
       return Ref.modify<ReadonlyArray<boolean>, Selection>(consumed, (used) => {
         const candidate = options.strictRequestOrder
           ? used.findIndex((value) => !value)
-          : fixture.calls.findIndex((call, index) => !used[index] && requestShapeDigest(call.request) === digest)
-        if (candidate < 0 || requestShapeDigest(fixture.calls[candidate]!.request) !== digest) {
+          : shapes.findIndex((shape, index) => !used[index] && shape === digest)
+        if (candidate < 0 || shapes[candidate] !== digest) {
           return [{ _tag: "Unscripted" as const }, used] as const
         }
         const call = fixture.calls[candidate]!

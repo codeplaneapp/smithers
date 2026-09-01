@@ -35,6 +35,10 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
+    "./Vitest": {
+      "types": "./src/Vitest.ts",
+      "import": "./src/Vitest.ts"
+    },
     "./*": "./src/*.ts",
     "./internal/*": null,
     "./*/index": null
@@ -60,6 +64,10 @@
         "types": "./dist/esm/index.d.ts",
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
+      },
+      "./Vitest": {
+        "types": "./dist/esm/Vitest.d.ts",
+        "import": "./dist/esm/Vitest.js"
       },
       "./*": {
         "types": "./dist/esm/*.d.ts",

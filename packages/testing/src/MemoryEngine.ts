@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import type * as Scope from "effect/Scope"
 import {
@@ -19,7 +20,8 @@ import {
   type JournalEntryLike,
   type StepSpec
 } from "./EngineSubject.ts"
-import { EngineUnavailableError } from "./TestingError.ts"
+import { conflict, type ExecutionConflict } from "./internal/Execution.ts"
+import { EngineUnavailableError, type ExecutionConflictError } from "./TestingError.ts"
 
 type ExecutionStatus = ExecutionResult["status"] | "running"
 
@@ -515,47 +517,66 @@ const claimExecution = (
     readonly executionId?: string | undefined
     readonly idempotencyKey?: string | undefined
   }
-): Effect.Effect<StoredExecution> =>
-  Ref.modify(store[EngineStoreTypeId], (state) => {
-    const joinedId = options.idempotencyKey === undefined
-      ? undefined
-      : state.idempotencyIndex.get(options.idempotencyKey)
-    let nextExecutionId = state.nextExecutionId
-    if (joinedId === undefined && options.executionId === undefined) {
-      while (state.executions.has(`memory-${nextExecutionId}`)) {
-        nextExecutionId += 1
+): Effect.Effect<StoredExecution, ExecutionConflictError> =>
+  Ref.modify<StoreState, Effect.Effect<StoredExecution, ExecutionConflictError>>(
+    store[EngineStoreTypeId],
+    (state) => {
+      const joinedId = options.idempotencyKey === undefined
+        ? undefined
+        : state.idempotencyIndex.get(options.idempotencyKey)
+      let nextExecutionId = state.nextExecutionId
+      if (joinedId === undefined && options.executionId === undefined) {
+        while (state.executions.has(`memory-${nextExecutionId}`)) {
+          nextExecutionId += 1
+        }
       }
-    }
-    const executionId = joinedId ?? options.executionId ?? `memory-${nextExecutionId}`
-    const existing = state.executions.get(executionId)
-    if (existing !== undefined) return [existing, state] as const
+      const executionId = joinedId ?? options.executionId ?? `memory-${nextExecutionId}`
+      const existing = state.executions.get(executionId)
+      if (existing !== undefined) {
+        // A re-submission that matches joins the existing execution; one that
+        // disagrees about the flow or the payload is refused rather than
+        // silently running the original.
+        const difference = conflict(
+          executionId,
+          { flowName: existing.flow.name, payload: existing.payload } satisfies ExecutionConflict,
+          { flowName: options.flow.name, payload: options.payload } satisfies ExecutionConflict
+        )
+        return [
+          Option.match(difference, {
+            onNone: () => Effect.succeed(existing),
+            onSome: (error) => Effect.fail(error)
+          }),
+          state
+        ] as const
+      }
 
-    const execution: StoredExecution = {
-      executionId,
-      flow: options.flow,
-      payload: options.payload,
-      idempotencyKey: options.idempotencyKey,
-      journal: [],
-      status: "suspended",
-      value: undefined
-    }
-    const executions = new Map(state.executions)
-    executions.set(executionId, execution)
-    const idempotencyIndex = new Map(state.idempotencyIndex)
-    if (options.idempotencyKey !== undefined) {
-      idempotencyIndex.set(options.idempotencyKey, executionId)
-    }
-    return [
-      execution,
-      {
-        executions,
-        idempotencyIndex,
-        nextExecutionId: options.executionId === undefined
-          ? nextExecutionId + 1
-          : state.nextExecutionId
+      const execution: StoredExecution = {
+        executionId,
+        flow: options.flow,
+        payload: options.payload,
+        idempotencyKey: options.idempotencyKey,
+        journal: [],
+        status: "suspended",
+        value: undefined
       }
-    ] as const
-  })
+      const executions = new Map(state.executions)
+      executions.set(executionId, execution)
+      const idempotencyIndex = new Map(state.idempotencyIndex)
+      if (options.idempotencyKey !== undefined) {
+        idempotencyIndex.set(options.idempotencyKey, executionId)
+      }
+      return [
+        Effect.succeed(execution),
+        {
+          executions,
+          idempotencyIndex,
+          nextExecutionId: options.executionId === undefined
+            ? nextExecutionId + 1
+            : state.nextExecutionId
+        }
+      ] as const
+    }
+  ).pipe(Effect.flatten)
 
 /**
  * Creates an empty persistent store for memory-engine executions.

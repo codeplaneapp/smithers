@@ -23,9 +23,21 @@ export type TerminalStatus = JournalEntryLike["outcome"]
  */
 export interface JournalExpectations {
   readonly executed: (stepKey: string) => Effect.Effect<void, JournalAssertionError>
+  /**
+   * Asserts the keys appear as a **subsequence** of the journal: every key in
+   * turn, in this relative order, with any other entries allowed between and
+   * around them. It is not a contiguous or an exhaustive match.
+   */
   readonly executedInOrder: (keys: ReadonlyArray<string>) => Effect.Effect<void, JournalAssertionError>
+  /** Asserts the outcome of the entry with the highest `index`. */
   readonly terminal: (status: TerminalStatus) => Effect.Effect<void, JournalAssertionError>
+  /**
+   * Assertions about the journaled external **effect** entries under `key`.
+   * An ordinary step entry sharing the key never satisfies them: it fails with
+   * `effect_kind_mismatch`.
+   */
   readonly effect: (key: string) => EffectExpectations
+  /** The entries whose `index` is at most `untilIndex`, in index order. */
   readonly prefix: (untilIndex: number) => ReadonlyArray<JournalEntryLike>
 }
 
@@ -73,24 +85,54 @@ const idempotencyKeyOf = (entry: JournalEntryLike): unknown =>
   isRecord(entry.value) ? entry.value.idempotencyKey : undefined
 
 /**
+ * A journaled external effect, as distinct from an ordinary step. The
+ * `EffectExpectations` vocabulary answers about these entries only, so an
+ * engine that journaled no effect can never satisfy an at-most-once claim.
+ */
+const isEffectEntry = (entry: JournalEntryLike): boolean => entry.kind === "effect"
+
+/**
  * Builds fluent, Effect-valued assertions over journal entries.
+ *
+ * Entries are read in `entry.index` order rather than in the order the caller
+ * supplied them. `JournalEntryLike` carries an explicit `index` precisely
+ * because ordering is data: an engine that reads its journal from a store with
+ * no `ORDER BY`, or a caller that filtered and re-concatenated, hands over the
+ * same entries in another order, and every assertion here must still answer
+ * about the same entry.
  *
  * @category assertions
  * @since 0.0.0
  */
-export const expectJournal = (entries: ReadonlyArray<JournalEntryLike>): JournalExpectations => {
+export const expectJournal = (unordered: ReadonlyArray<JournalEntryLike>): JournalExpectations => {
+  const entries = [...unordered].sort((left, right) => left.index - right.index)
+  const presentKeys = entries.map((entry) => entry.stepKey)
   const effect = (key: string): EffectExpectations => {
-    const matching = entries.filter((entry) => entry.stepKey === key)
+    const named = entries.filter((entry) => entry.stepKey === key)
+    const matching = named.filter(isEffectEntry)
+    const notAnEffect = () =>
+      failure(
+        "effect_kind_mismatch",
+        `expected ${JSON.stringify(key)} to be journaled as an effect; found ${
+          named.map((entry) => JSON.stringify(entry.kind)).join(", ")
+        }`,
+        "effect",
+        named.map((entry) => entry.kind)
+      )
+    const notExecuted = () =>
+      failure(
+        "effect_not_executed",
+        `expected effect ${JSON.stringify(key)} to execute at least once`,
+        key,
+        presentKeys
+      )
     return {
       atLeastOnce: () =>
         matching.length > 0
           ? Effect.void
-          : failure(
-            "effect_not_executed",
-            `expected effect ${JSON.stringify(key)} to execute at least once`,
-            key,
-            []
-          ),
+          : named.length > 0
+          ? notAnEffect()
+          : notExecuted(),
       journaledAtMostOnce: () =>
         matching.length <= 1
           ? Effect.void
@@ -100,16 +142,25 @@ export const expectJournal = (entries: ReadonlyArray<JournalEntryLike>): Journal
             1,
             matching.length
           ),
+      // Three outcomes, three codes. `missing_idempotency_key` used to fire
+      // when the effect never ran, which is `effect_not_executed`, and an
+      // entry that carried no key at all reported a mismatch against a key it
+      // never had. A consumer matching on codes could separate none of them.
       idempotencyKey: (idempotencyKey) => {
-        const mismatch = matching.find((entry) => idempotencyKeyOf(entry) !== idempotencyKey)
-        return matching.length === 0
-          ? failure(
+        if (matching.length === 0) return named.length > 0 ? notAnEffect() : notExecuted()
+        const absent = matching.find((entry) => idempotencyKeyOf(entry) === undefined)
+        if (absent !== undefined) {
+          return failure(
             "missing_idempotency_key",
-            `expected effect ${JSON.stringify(key)} to have idempotency key ${JSON.stringify(idempotencyKey)}`,
+            `expected effect ${JSON.stringify(key)} to carry idempotency key ${
+              JSON.stringify(idempotencyKey)
+            }; the entry carries none`,
             idempotencyKey,
-            undefined
+            presentKeys
           )
-          : mismatch === undefined
+        }
+        const mismatch = matching.find((entry) => idempotencyKeyOf(entry) !== idempotencyKey)
+        return mismatch === undefined
           ? Effect.void
           : failure(
             "idempotency_key_mismatch",
@@ -131,7 +182,7 @@ export const expectJournal = (entries: ReadonlyArray<JournalEntryLike>): Journal
     executed: (stepKey) =>
       entries.some((entry) => entry.stepKey === stepKey)
         ? Effect.void
-        : failure("step_not_executed", `expected step ${JSON.stringify(stepKey)} to execute`, stepKey, []),
+        : failure("step_not_executed", `expected step ${JSON.stringify(stepKey)} to execute`, stepKey, presentKeys),
     executedInOrder: (keys) => {
       let cursor = 0
       for (const entry of entries) {

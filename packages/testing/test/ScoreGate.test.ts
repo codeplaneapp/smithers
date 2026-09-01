@@ -11,15 +11,12 @@ const samples: ReadonlyArray<ScoreGate.ScoreSample> = [
 const expectFailure = async (
   effect: Effect.Effect<unknown, ScoreGateError>,
   code: string,
-  threshold: number,
-  actual: number
+  threshold: number
 ) => {
   const error = await Effect.runPromise(effect.pipe(Effect.flip))
   expect(error).toBeInstanceOf(ScoreGateError)
   expect(error.code).toBe(code)
   expect(error.threshold).toBe(threshold)
-  if (Number.isNaN(actual)) expect(Number.isNaN(error.actual)).toBe(true)
-  else expect(error.actual).toBeCloseTo(actual)
 }
 
 // A gate the scores missed is a finding in the success channel, not a raised
@@ -95,25 +92,58 @@ describe("ScoreGate", () => {
       })
   })
 
-  it("rejects invalid scores", async () => {
-    await expectFailure(
-      ScoreGate.expectScores([{
-        case: "first",
-        stepKey: "first-key",
-        scorer: "quality",
-        kind: "score",
-        value: Number.NaN
-      }]).mean(0.5),
-      "invalid_score",
-      0,
-      Number.NaN
+  // The error used to carry `threshold: 0`, a placeholder with no meaning for
+  // this code, and nothing at all identifying which sample was invalid.
+  it("rejects invalid scores and names every offending sample", async () => {
+    const error = await Effect.runPromise(
+      ScoreGate.expectScores([
+        { case: "first", stepKey: "first-key", scorer: "quality", kind: "score", value: Number.NaN },
+        { case: "second", stepKey: "second-key", scorer: "safety", kind: "score", value: 1.5 },
+        { case: "third", stepKey: "third-key", scorer: "quality", kind: "score", value: 0.5 }
+      ]).mean(0.5).pipe(Effect.flip)
     )
+    expect(error).toBeInstanceOf(ScoreGateError)
+    expect(error.code).toBe("invalid_score")
+    expect(error.threshold).toBeUndefined()
+    expect(error.samples).toEqual([
+      { case: "first", stepKey: "first-key", scorer: "quality", value: Number.NaN },
+      { case: "second", stepKey: "second-key", scorer: "safety", value: 1.5 }
+    ])
   })
 
-  it("rejects invalid thresholds", async () => {
-    await expectFailure(ScoreGate.expectScores(samples).mean(1.1), "invalid_threshold", 1.1, 1.1)
-    await expectFailure(ScoreGate.expectScores(samples).min(Number.NaN), "invalid_threshold", Number.NaN, Number.NaN)
-    await expectFailure(ScoreGate.expectScores(samples).perCase({ first: -0.1 }), "invalid_threshold", -0.1, -0.1)
+  it("rejects invalid thresholds without echoing the threshold as an observation", async () => {
+    for (
+      const effect of [
+        ScoreGate.expectScores(samples).mean(1.1),
+        ScoreGate.expectScores(samples).min(Number.NaN),
+        ScoreGate.expectScores(samples).perCase({ first: -0.1 })
+      ]
+    ) {
+      const error = await Effect.runPromise(effect.pipe(Effect.flip))
+      expect(error.code).toBe("invalid_threshold")
+      expect(error.actual).toBeUndefined()
+    }
+    await expectFailure(ScoreGate.expectScores(samples).mean(1.1), "invalid_threshold", 1.1)
+  })
+
+  // `Math.min(...values)` throws a RangeError above the engine's
+  // argument-count limit, out of a module whose failures are otherwise a
+  // closed code union.
+  it("takes a minimum over more samples than an argument list can hold", async () => {
+    const many: ReadonlyArray<ScoreGate.ScoreSample> = Array.from({ length: 200_000 }, (_, index) => ({
+      case: "bulk",
+      stepKey: `bulk-${index}`,
+      scorer: "quality",
+      kind: "score",
+      value: index === 199_999 ? 0.2 : 0.9
+    }))
+    await expect(Effect.runPromise(ScoreGate.expectScores(many).min(0.5))).resolves.toMatchObject({
+      _tag: "Failed",
+      reasons: ["min_below_threshold: threshold 0.5, actual 0.2"]
+    })
+    await expect(Effect.runPromise(ScoreGate.expectScores(many).perCase({ bulk: 0.5 }))).resolves.toMatchObject({
+      _tag: "Failed"
+    })
   })
 })
 
@@ -197,6 +227,62 @@ describe("ScoreGate.suite", () => {
     expect(grade.exitCode).toBe(1)
     expect(grade.summary).toContain("mean_below_threshold")
     expect(grade.summary).toContain("judge unavailable")
+  })
+
+  // Validation used to live inside the individual gates, so a suite that
+  // declared none never checked its samples and a NaN reached the report under
+  // a passing verdict.
+  it("validates samples even when the suite declares no gates", async () => {
+    const error = await Effect.runPromise(
+      ScoreGate.suite({
+        cases: [{ name: "first", input: "a" }],
+        run: () => Effect.succeed([sampleFor("first", Number.NaN)])
+      }).pipe(Effect.flip)
+    )
+    expect(error.code).toBe("invalid_score")
+    expect(error.samples).toHaveLength(1)
+  })
+
+  it("grades a suite with no cases inconclusive rather than passed", async () => {
+    const report = await Effect.runPromise(ScoreGate.suite({ cases: [], run: () => Effect.succeed([]) }))
+    expect(report.verdict).toEqual({ _tag: "Inconclusive", reasons: ["The suite declared no cases"] })
+    expect(ScoreGate.ciGrade(report).exitCode).toBe(5)
+  })
+
+  it("grades a wholly inconclusive ungated suite inconclusive rather than passed", async () => {
+    const report = await Effect.runPromise(
+      ScoreGate.suite({
+        cases: [{ name: "first", input: "a" }],
+        run: () =>
+          Effect.succeed([
+            {
+              case: "first",
+              stepKey: "first-key",
+              scorer: "quality",
+              kind: "inconclusive",
+              reason: "judge unavailable"
+            } as const
+          ])
+      })
+    )
+    expect(report.verdict._tag).toBe("Inconclusive")
+    expect(ScoreGate.ciGrade(report).exitCode).toBe(5)
+  })
+
+  // A runner bug used to attribute a sample to another case, and the per-case
+  // gate then measured the wrong one.
+  it("binds every sample to the case that produced it", async () => {
+    const report = await Effect.runPromise(
+      ScoreGate.suite({
+        cases: [{ name: "first", input: "a", minScore: 0.8 }, { name: "second", input: "b" }],
+        run: (suiteCase) => Effect.succeed([sampleFor(suiteCase.name === "second" ? "first" : "first", 0.1)])
+      })
+    )
+    expect(report.samples.map((sample) => sample.case)).toEqual(["first", "second"])
+    expect(report.verdict).toMatchObject({
+      _tag: "Failed",
+      reasons: ["case_below_threshold: threshold 0.8, actual 0.1"]
+    })
   })
 
   // Nothing was measured here, so there is no finding to report: an unusable

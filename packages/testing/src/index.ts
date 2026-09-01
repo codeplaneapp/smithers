@@ -62,9 +62,6 @@ export * as MemoryEngine from "./MemoryEngine.ts"
 /** @since 0.0.0 @category layers */
 export * as FlowEngineLike from "./FlowEngineLike.ts"
 
-/** @since 0.0.0 @category conformance */
-export * as ParityManifest from "./ParityManifest.ts"
-
 /** @since 0.0.0 @category testing */
 export * as RestartableEngine from "./RestartableEngine.ts"
 
