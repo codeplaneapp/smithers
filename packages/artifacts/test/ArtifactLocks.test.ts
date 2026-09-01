@@ -175,4 +175,12 @@ describe("artifact lockfile failure and race handling", () => {
       })
       yield* run(fixture.fs, Effect.void)
     }))
+
+  it.effect("propagates a release failure while the lock still exists", () =>
+    Effect.gen(function*() {
+      const fixture = host({
+        readFileString: (() => Effect.fail(platformError("PermissionDenied", "readFileString"))) as never
+      })
+      expect(Exit.isFailure(yield* run(fixture.fs, Effect.void).pipe(Effect.exit))).toBe(true)
+    }))
 })

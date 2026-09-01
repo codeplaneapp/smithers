@@ -20,6 +20,7 @@
  */
 import { Context, Duration, Effect, Layer, Schedule, Schema } from "effect"
 import { IntegrationError, isRetryable } from "../core/IntegrationError.ts"
+import * as Environment from "../Environment.ts"
 import { type GitHubConfig, resolve } from "./Config.ts"
 
 // Upper bound on an honored Retry-After / x-ratelimit-reset, so a hostile or
@@ -145,7 +146,7 @@ export const nextPageUrl = (linkHeader: string | null): string | null => {
  */
 export const make = (
   config: GitHubConfig = {},
-  env: Readonly<Record<string, string | undefined>> = process.env
+  env: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
 ): GitHubClient => {
   const resolved = resolve(config, env)
   const baseUrl = resolved.apiBaseUrl.replace(/\/+$/, "")
@@ -302,5 +303,5 @@ export const make = (
  */
 export const layer = (
   config: GitHubConfig = {},
-  env: Readonly<Record<string, string | undefined>> = process.env
+  env: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
 ): Layer.Layer<GitHubClient> => Layer.sync(GitHubClient, () => make(config, env))

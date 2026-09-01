@@ -8,8 +8,7 @@
  * unasserted. A serverless or locked-down bundle looks exactly like this.
  */
 import * as BrowserJj from "@smthrs/jj/browser/BrowserJj"
-import * as BrowserFileSystem from "@smthrs/platform-browser/BrowserFileSystem"
-import { Effect, Layer, Path, PlatformError } from "effect"
+import { Effect, FileSystem, Layer, Path, PlatformError, Sink, Stream } from "effect"
 import { ChildProcessSpawner, make as makeSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as CommandLine from "../../src/CommandLine.ts"
 import * as HttpClient from "../../src/HttpClient.ts"
@@ -33,18 +32,51 @@ const layerSpawnerUnsupported: Layer.Layer<ChildProcessSpawner> = Layer.succeed(
   )
 )
 
-const rejecting = (): BrowserFileSystem.ZenFsPromisesLike => {
-  const denied = () => Promise.reject(new Error("filesystem is unavailable on this host"))
-  return {
-    open: denied,
-    readFile: denied,
-    writeFile: denied,
-    mkdir: denied,
-    readdir: denied,
-    stat: denied,
-    rm: denied
-  }
-}
+const unavailableFileSystemError = (method: string) =>
+  PlatformError.systemError({
+    _tag: "NotFound",
+    module: "UnsupportedHost",
+    method,
+    description: "filesystem is unavailable on this host"
+  })
+
+const unavailableFileSystem = (method: string) => Effect.fail(unavailableFileSystemError(method))
+
+const layerFileSystemUnsupported = Layer.succeed(
+  FileSystem.FileSystem,
+  FileSystem.makeNoop({
+    access: () => unavailableFileSystem("access"),
+    copy: () => unavailableFileSystem("copy"),
+    copyFile: () => unavailableFileSystem("copyFile"),
+    chmod: () => unavailableFileSystem("chmod"),
+    chown: () => unavailableFileSystem("chown"),
+    glob: () => unavailableFileSystem("glob"),
+    exists: () => unavailableFileSystem("exists"),
+    link: () => unavailableFileSystem("link"),
+    makeDirectory: () => unavailableFileSystem("makeDirectory"),
+    makeTempDirectory: () => unavailableFileSystem("makeTempDirectory"),
+    makeTempDirectoryScoped: () => unavailableFileSystem("makeTempDirectoryScoped"),
+    makeTempFile: () => unavailableFileSystem("makeTempFile"),
+    makeTempFileScoped: () => unavailableFileSystem("makeTempFileScoped"),
+    open: () => unavailableFileSystem("open"),
+    readDirectory: () => unavailableFileSystem("readDirectory"),
+    readFile: () => unavailableFileSystem("readFile"),
+    readFileString: () => unavailableFileSystem("readFileString"),
+    readLink: () => unavailableFileSystem("readLink"),
+    realPath: () => unavailableFileSystem("realPath"),
+    remove: () => unavailableFileSystem("remove"),
+    rename: () => unavailableFileSystem("rename"),
+    sink: () => Sink.fail(unavailableFileSystemError("sink")),
+    stat: () => unavailableFileSystem("stat"),
+    stream: () => Stream.fail(unavailableFileSystemError("stream")),
+    symlink: () => unavailableFileSystem("symlink"),
+    truncate: () => unavailableFileSystem("truncate"),
+    utimes: () => unavailableFileSystem("utimes"),
+    watch: () => Stream.fail(unavailableFileSystemError("watch")),
+    writeFile: () => unavailableFileSystem("writeFile"),
+    writeFileString: () => unavailableFileSystem("writeFileString")
+  })
+)
 
 const basePath = Effect.runSync(Effect.provide(Path.Path, Path.layer))
 
@@ -59,7 +91,7 @@ const layerPathUnsupported: Layer.Layer<Path.Path> = Layer.succeed(Path.Path)({
 runHostContract(
   "UnsupportedHost",
   Layer.mergeAll(
-    BrowserFileSystem.layer(rejecting()),
+    layerFileSystemUnsupported,
     layerPathUnsupported,
     layerSpawnerUnsupported,
     BrowserJj.layerUnsupported,
@@ -67,7 +99,7 @@ runHostContract(
   ),
   {
     // A `PlatformError` carries its code as `reason._tag`.
-    fileSystem: { expected: "failure", code: "Unknown" },
+    fileSystem: { expected: "failure", code: "NotFound" },
     // A thrown tagged value carries it as a bare `_tag`.
     path: { expected: "failure", code: "NoFileUrls" },
     childProcess: { expected: "failure", code: "NotFound" },

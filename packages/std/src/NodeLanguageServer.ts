@@ -173,7 +173,7 @@ export const make = (
     // response, so stderr is drained and discarded.
     yield* handle.stderr.pipe(
       Stream.runDrain,
-      Effect.catch(() => Effect.void),
+      Effect.catch((cause) => Effect.logWarning("Language server stderr stream failed", cause)),
       Effect.forkScoped({ startImmediately: true })
     )
 

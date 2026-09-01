@@ -1,7 +1,16 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Capability from "@smthrs/capability/Capability"
 import * as Permission from "@smthrs/capability/Permission"
-import { Effect, FileSystem as EffectFileSystem, Option, Path as EffectPath, type PlatformError, Stream } from "effect"
+import {
+  Deferred,
+  Effect,
+  Fiber,
+  FileSystem as EffectFileSystem,
+  Option,
+  Path as EffectPath,
+  type PlatformError,
+  Stream
+} from "effect"
 import * as FileSystem from "../src/FileSystem.ts"
 import { GrantStore } from "../src/GrantStore.ts"
 import * as Workspace from "../src/Workspace.ts"
@@ -246,6 +255,139 @@ describe("FileSystem", () => {
       }).pipe(Effect.scoped),
       host,
       scriptedStore(new Set(["fs:read:/workspace/input"]), checks)
+    )
+  })
+
+  itEffect("opens with the exact options snapshot approved before an attended wait", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const checks: Array<Capability.Capability> = []
+        const delegated: Array<unknown> = []
+        const grants = GrantStore.of({
+          check: (capability) => {
+            checks.push(capability)
+            return Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+          },
+          reply: () => Effect.die("not used by option snapshot test"),
+          list: Effect.succeed([]),
+          grantEnvelope: () => Effect.void
+        })
+        const handle: EffectFileSystem.File = {
+          [EffectFileSystem.FileTypeId]: EffectFileSystem.FileTypeId,
+          stat: Effect.succeed({} as EffectFileSystem.File.Info),
+          seek: () => Effect.succeed(EffectFileSystem.Size(0)),
+          sync: Effect.void,
+          read: () => Effect.succeed(EffectFileSystem.Size(0)),
+          readAlloc: () => Effect.succeed(Option.none()),
+          truncate: () => Effect.void,
+          write: () => Effect.succeed(EffectFileSystem.Size(0)),
+          writeAll: () => Effect.void
+        }
+        const host = hostFileSystem({
+          open: (_path, options) =>
+            Effect.sync(() => {
+              delegated.push(options)
+              return handle
+            })
+        })
+        const options: { flag: EffectFileSystem.OpenFlag; mode: number } = { flag: "r", mode: 0o400 }
+        const running = yield* Effect.gen(function*() {
+          const fileSystem = yield* EffectFileSystem.FileSystem
+          return yield* fileSystem.open("input", options)
+        }).pipe(
+          Effect.provide(FileSystem.layer),
+          Effect.provideService(EffectFileSystem.FileSystem, host),
+          Effect.provide(EffectPath.layer),
+          Effect.provide(Workspace.layer("/workspace")),
+          Effect.provideService(GrantStore, grants),
+          Effect.forkChild({ startImmediately: true })
+        )
+
+        yield* Deferred.await(entered)
+        options.flag = "w"
+        options.mode = 0o777
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(running)
+
+        expect(checks).toEqual([{ action: "fs:read", resource: "/workspace/input" }])
+        expect(delegated).toEqual([{ flag: "r", mode: 0o400 }])
+      })
+    ))
+
+  itEffect("snapshots nested glob and remove options before permission checks", () => {
+    const globOptions: { root: string; exclude: Array<string> } = { root: "src", exclude: ["safe/**"] }
+    class RemoveOptions {
+      recursive = false
+      force = false
+    }
+    const removeOptions = new RemoveOptions()
+    Object.defineProperty(removeOptions, "hidden", { enumerable: false, value: "ignored" })
+    const calls: Array<unknown> = []
+    const grants = GrantStore.of({
+      check: (capability) =>
+        Effect.sync(() => {
+          if (capability.action === "fs:read") {
+            globOptions.root = "outside"
+            globOptions.exclude[0] = "unsafe/**"
+          } else {
+            removeOptions.recursive = true
+            removeOptions.force = true
+          }
+        }),
+      reply: () => Effect.die("not used by option snapshot test"),
+      list: Effect.succeed([]),
+      grantEnvelope: () => Effect.void
+    })
+    const host = hostFileSystem({
+      glob: (_pattern, options) =>
+        Effect.sync(() => {
+          calls.push(options)
+          return []
+        }),
+      remove: (_path, options) =>
+        Effect.sync(() => {
+          calls.push(options)
+        })
+    })
+
+    return Effect.gen(function*() {
+      const fileSystem = yield* EffectFileSystem.FileSystem
+      yield* fileSystem.glob("**/*.ts", globOptions)
+      yield* fileSystem.remove("output", removeOptions)
+      expect(calls).toEqual([
+        { root: "/workspace/src", exclude: ["safe/**"] },
+        { recursive: false, force: false }
+      ])
+    }).pipe(
+      Effect.provide(FileSystem.layer),
+      Effect.provideService(EffectFileSystem.FileSystem, host),
+      Effect.provide(EffectPath.layer),
+      Effect.provide(Workspace.layer("/workspace")),
+      Effect.provideService(GrantStore, grants)
+    )
+  })
+
+  itEffect("rejects accessor-backed filesystem options without invoking them", () => {
+    let calls = 0
+    const options = Object.defineProperty({}, "recursive", {
+      enumerable: true,
+      get: () => {
+        calls += 1
+        return true
+      }
+    })
+    return provide(
+      Effect.gen(function*() {
+        const fileSystem = yield* EffectFileSystem.FileSystem
+        const exit = yield* fileSystem.remove("output", options).pipe(Effect.exit)
+        if (exit._tag === "Success") throw new Error("accessor-backed options unexpectedly succeeded")
+        expect(String(exit.cause)).toContain("data properties")
+        expect(calls).toBe(0)
+      }),
+      hostFileSystem({}),
+      scriptedStore(new Set(), [])
     )
   })
 

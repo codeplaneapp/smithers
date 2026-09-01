@@ -10,11 +10,10 @@
  * **The divergences are real and are not hidden.** just-bash runs here as a
  * buffered, run-to-completion API with no process table:
  *
- * - **No incremental output.** `spawn` runs the command to completion and the
- *   returned handle replays the captured output: `stdout` and `stderr` each
- *   emit at most one chunk, and `all` is `stdout` followed by `stderr` rather
- *   than a live interleaving. `isRunning` is therefore always `false` by the
- *   time a caller can observe it. The `stdout`/`stderr` dispositions still
+ * - **No incremental output.** The returned handle replays captured output
+ *   after completion: `stdout` and `stderr` each emit at most one chunk, and
+ *   `all` is `stdout` followed by `stderr` rather than a live interleaving.
+ *   The `stdout`/`stderr` dispositions still
  *   mean what they mean under `NodeChildProcessSpawner` — `"inherit"` and
  *   `"ignore"` yield an empty stream, and a `Sink` is transduced through —
  *   they are just applied to captured text rather than to a live readable.
@@ -22,13 +21,9 @@
  *   adapter does not use it yet: `stdin` is a `Sink` that fails, and a command
  *   that supplies a `Stream` for stdin is rejected at spawn time rather than
  *   losing its input silently.
- * - **No signals.** just-bash `exec` accepts an abort `signal`, but the
- *   adapter does not use it yet, so each run executes inside a serialized,
- *   uninterruptible boundary: interruption and `Effect.timeout` both wait for
- *   the interpreter to finish before they report, and callers never observe
- *   completion while hidden mutation of the virtual filesystem is still
- *   running. `kill` fails for the same reason — the adapter has no signal to
- *   deliver.
+ * - **Abort-only signals.** Scope closure, interruption, timeout, and `kill`
+ *   abort the interpreter through just-bash's `AbortSignal`. Signal names are
+ *   not distinguishable in a browser tab.
  * - **No process identity.** `pid` is a per-layer counter, not an OS pid, and
  *   `unref` is a no-op: there is no parent process reference count in a tab.
  * - **No pipelines between processes.** A `PipedCommand` is rejected; write the

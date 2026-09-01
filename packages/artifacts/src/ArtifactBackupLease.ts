@@ -143,11 +143,12 @@ export const withLease = <A, E, R, E2>(
           fs,
           directory,
           fs.readFileString(marker).pipe(
-            Effect.flatMap((found) => found === owner ? fs.remove(marker) : Effect.void),
-            Effect.catch(() => Effect.void)
+            Effect.flatMap((found) => found === owner ? fs.remove(marker) : Effect.void)
           ),
           failure
-        ).pipe(Effect.ignore)
+        ).pipe(
+          Effect.catch((cause) => Effect.logWarning("Artifact backup lease release failed", cause))
+        )
     )
   })
 

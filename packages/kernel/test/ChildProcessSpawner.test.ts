@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Capability from "@smthrs/capability/Capability"
 import * as Permission from "@smthrs/capability/Permission"
-import { Effect, Option, type PlatformError, Sink, Stream } from "effect"
+import { Deferred, Effect, Fiber, Option, type PlatformError, Sink, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import {
   ChildProcessSpawner as HostChildProcessSpawner,
@@ -36,10 +36,13 @@ const scriptedStore = (allowed: ReadonlySet<string>, checks: Array<Capability.Ca
   })
 
 /** A host spawner whose handle just replays a scripted stdout. */
-const hostSpawner = (options: { readonly stdout: string; readonly onSpawn?: () => void }) =>
-  makeSpawner(() =>
+const hostSpawner = (options: {
+  readonly stdout: string
+  readonly onSpawn?: (command: ChildProcess.Command) => void
+}) =>
+  makeSpawner((command) =>
     Effect.sync(() => {
-      options.onSpawn?.()
+      options.onSpawn?.(command)
       const output = Stream.fromArray([new TextEncoder().encode(options.stdout)])
       return makeHandle({
         pid: ProcessId(1),
@@ -173,6 +176,66 @@ describe("ChildProcessSpawner", () => {
     )
   })
 
+  itEffect("delegates the exact command snapshot approved before an attended wait", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const checked: Array<readonly [string, unknown]> = []
+        let delegated: ChildProcess.Command | undefined
+        const store = GrantStore.of({
+          check: (capability, context) =>
+            Effect.all([
+              Effect.sync(() => checked.push([capability.resource, context])),
+              Deferred.succeed(entered, undefined),
+              Deferred.await(release)
+            ]).pipe(Effect.asVoid),
+          reply: () => Effect.die("not used by command snapshot test"),
+          list: Effect.succeed([]),
+          grantEnvelope: () => Effect.void
+        })
+        const args = ["safe"]
+        const env: Record<string, string> = { MODE: "safe" }
+        const options: ChildProcess.CommandOptions = { cwd: "/safe", env, shell: false }
+        const command = ChildProcess.make("tool", args, options)
+
+        const running = yield* Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          return yield* spawner.string(command)
+        }).pipe(
+          Effect.provide(ChildProcessSpawner.layer),
+          Effect.provideService(
+            HostChildProcessSpawner,
+            hostSpawner({
+              stdout: "ok",
+              onSpawn: (snapshot) => {
+                delegated = snapshot
+              }
+            })
+          ),
+          Effect.provideService(GrantStore, store),
+          Effect.forkChild({ startImmediately: true })
+        )
+
+        yield* Deferred.await(entered)
+        args[0] = "unsafe"
+        env.MODE = "unsafe"
+        ;(options as { cwd?: string; shell?: boolean }).cwd = "/unsafe"
+        ;(options as { shell?: boolean }).shell = true
+        ;(command as { command: string }).command = "other-tool"
+        yield* Deferred.succeed(release, undefined)
+
+        expect(yield* Fiber.join(running)).toBe("ok")
+        expect(checked).toEqual([["tool safe", { cwd: "/safe" }]])
+        expect(delegated).toMatchObject({
+          _tag: "StandardCommand",
+          command: "tool",
+          args: ["safe"],
+          options: { cwd: "/safe", env: { MODE: "safe" }, shell: false }
+        })
+      })
+    ))
+
   itEffect("checks every derived helper, not just `spawn`", () => {
     const checks: Array<Capability.Capability> = []
 
@@ -289,6 +352,170 @@ describe("ChildProcessSpawner", () => {
       Effect.provide(ChildProcessSpawner.layer),
       Effect.provideService(HostChildProcessSpawner, hostSpawner({ stdout: "" })),
       Effect.provideService(GrantStore, scriptedStore(new Set([`proc:spawn:${line}`]), checks))
+    )
+  })
+
+  itEffect("recursively snapshots pipeline options, streams, environments, and additional descriptors", () => {
+    const checks: Array<Capability.Capability> = []
+    let delegated: ChildProcess.Command | undefined
+    const environment: Record<string, string | undefined> = { MODE: "safe", OPTIONAL: undefined }
+    const byteSink = Sink.forEach((_chunk: Uint8Array) => Effect.void)
+    Object.defineProperty(environment, "hidden", { enumerable: false, value: "ignored" })
+    const hiddenFds = Object.defineProperty({}, "fd9", {
+      enumerable: false,
+      value: { type: "input" }
+    }) as ChildProcess.CommandOptions["additionalFds"]
+    const left = ChildProcess.make("producer", ["safe"], {
+      killSignal: "SIGTERM",
+      forceKillAfter: "1 second",
+      cwd: "/work",
+      env: environment,
+      extendEnv: false,
+      shell: false,
+      detached: true,
+      windowsHide: true,
+      stdin: { stream: "ignore", endOnDone: false, encoding: "utf8" },
+      stdout: { stream: "pipe" },
+      stderr: "inherit",
+      additionalFds: {
+        fd3: { type: "input", stream: Stream.empty },
+        fd4: { type: "output", sink: byteSink as never },
+        fd5: { type: "input" },
+        fd6: { type: "output" }
+      }
+    })
+    const right = ChildProcess.make("consumer", ["safe"], {
+      stdout: {} as never,
+      additionalFds: hiddenFds
+    })
+    const pipeline = ChildProcess.pipeTo(right, { from: "stderr", to: "stdin" })(left)
+
+    return Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      expect(yield* spawner.string(pipeline)).toBe("ok")
+      expect(delegated).toMatchObject({
+        _tag: "PipedCommand",
+        options: { from: "stderr", to: "stdin" },
+        left: {
+          command: "producer",
+          args: ["safe"],
+          options: {
+            cwd: "/work",
+            env: { MODE: "safe", OPTIONAL: undefined },
+            stdin: { stream: "ignore", endOnDone: false, encoding: "utf8" },
+            additionalFds: {
+              fd3: { type: "input" },
+              fd4: { type: "output" },
+              fd5: { type: "input" },
+              fd6: { type: "output" }
+            }
+          }
+        },
+        right: { command: "consumer", args: ["safe"] }
+      })
+      expect(delegated).not.toBe(pipeline)
+      expect((delegated as ChildProcess.PipedCommand).left).not.toBe(left)
+      expect(checks).toEqual([{ action: "proc:spawn", resource: "producer safe | consumer safe" }])
+    }).pipe(
+      Effect.provide(ChildProcessSpawner.layer),
+      Effect.provideService(
+        HostChildProcessSpawner,
+        hostSpawner({ stdout: "ok", onSpawn: (command) => (delegated = command) })
+      ),
+      Effect.provideService(GrantStore, scriptedStore(new Set(["proc:spawn:producer safe | consumer safe"]), checks))
+    )
+  })
+
+  itEffect("snapshots a pipeline whose pipe options are both omitted", () => {
+    const checks: Array<Capability.Capability> = []
+    const pipeline = ChildProcess.pipeTo(ChildProcess.make("right"))(ChildProcess.make("left"))
+    return Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      expect(yield* spawner.string(pipeline)).toBe("ok")
+      expect(checks).toEqual([{ action: "proc:spawn", resource: "left | right" }])
+    }).pipe(
+      Effect.provide(ChildProcessSpawner.layer),
+      Effect.provideService(HostChildProcessSpawner, hostSpawner({ stdout: "ok" })),
+      Effect.provideService(GrantStore, scriptedStore(new Set(["proc:spawn:left | right"]), checks))
+    )
+  })
+
+  itEffect("rejects hostile or unsupported mutable command shapes before delegation", () => {
+    let delegated = false
+    const standard = (overrides: Record<string, unknown> = {}): ChildProcess.Command => ({
+      _tag: "StandardCommand",
+      command: "tool",
+      args: [],
+      options: {},
+      ...overrides
+    } as unknown as ChildProcess.Command)
+    const piped = (overrides: Record<string, unknown> = {}): ChildProcess.Command => ({
+      _tag: "PipedCommand",
+      left: standard(),
+      right: standard(),
+      options: {},
+      ...overrides
+    } as unknown as ChildProcess.Command)
+    const accessor = (name: string, base: Record<string, unknown>): ChildProcess.Command =>
+      Object.defineProperty(base, name, { enumerable: true, get: () => "unsafe" }) as unknown as ChildProcess.Command
+    const badEnvironment = Object.defineProperty({}, "TOKEN", { enumerable: true, get: () => "unsafe" })
+    const badStream = Object.defineProperty({}, "stream", { enumerable: true, get: () => "ignore" })
+    const badEnd = Object.defineProperties({}, {
+      stream: { enumerable: true, value: "ignore" },
+      endOnDone: { enumerable: true, get: () => false }
+    })
+    const badFdType = Object.defineProperty({}, "type", { enumerable: true, get: () => "input" })
+    const badInput = Object.defineProperties({}, {
+      type: { enumerable: true, value: "input" },
+      stream: { enumerable: true, get: () => Stream.empty }
+    })
+    const badOutput = Object.defineProperties({}, {
+      type: { enumerable: true, value: "output" },
+      sink: { enumerable: true, get: () => Sink.forEach((_chunk: Uint8Array) => Effect.void) }
+    })
+    const badFrom = Object.defineProperty({}, "from", { enumerable: true, get: () => "stderr" })
+    const cases: ReadonlyArray<ChildProcess.Command> = [
+      accessor("_tag", { command: "tool", args: [], options: {} }),
+      standard({ command: 1 }),
+      standard({ args: "unsafe" }),
+      standard({ args: [1] }),
+      standard({ options: null }),
+      standard({ options: { env: badEnvironment } }),
+      standard({ options: { env: { TOKEN: 1 } } }),
+      standard({ options: { stdin: badStream } }),
+      standard({ options: { stdin: badEnd } }),
+      standard({ options: { additionalFds: { fd3: null } } }),
+      standard({ options: { additionalFds: { fd3: badFdType } } }),
+      standard({ options: { additionalFds: { fd3: badInput } } }),
+      standard({ options: { additionalFds: { fd3: badOutput } } }),
+      standard({ options: { additionalFds: { fd3: { type: "unknown" } } } }),
+      piped({ left: null }),
+      piped({ right: null }),
+      piped({ options: null }),
+      piped({ options: badFrom }),
+      { _tag: "UnknownCommand" } as unknown as ChildProcess.Command
+    ]
+
+    return Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      for (const command of cases) {
+        expect(yield* Effect.flip(spawner.exitCode(command))).toMatchObject({
+          _tag: "PlatformError",
+          reason: {
+            _tag: "InvalidData",
+            module: "ChildProcessSpawner",
+            method: "spawn"
+          }
+        })
+      }
+      expect(delegated).toBe(false)
+    }).pipe(
+      Effect.provide(ChildProcessSpawner.layer),
+      Effect.provideService(
+        HostChildProcessSpawner,
+        hostSpawner({ stdout: "never", onSpawn: () => (delegated = true) })
+      ),
+      Effect.provideService(GrantStore, scriptedStore(new Set(), []))
     )
   })
 })

@@ -3465,19 +3465,24 @@ That single call provides:
 - signal handling. `SIGINT` and `SIGTERM` close the runtime scope, which is
   what releases every run this host owns.
 
-#### The engine's own jj grants
+#### The engine's own jj authority
 
 A compensable action is snapshotted and restored by the engine, not by the flow
-body, and the engine resolves the same guarded `Jj` the body does. A host with
-no `jj:*` rule could therefore not run a compensable action at all: the refusal
-would arrive before the body started and would be aimed at the engine's own
-bookkeeping.
+body. Both once resolved the same guarded `Jj`, which meant the engine's own
+bookkeeping spent the flow's capability budget: a host with no `jj:*` rule could
+not run a compensable action at all, and the refusal arrived before the body
+started, aimed at the engine rather than at anything the flow asked for.
 
-`layerHost` merges `NodeRuntime.engineRules` underneath whatever
-`HostOptions.rules` says, allowing `jj:snapshot` for the message the engine
-writes and `jj:restore` for the change id it takes back. They are defaults, not
-overrides: a program that denies `jj:snapshot` still denies it, because
-configured policy is evaluated first and a configured deny wins outright.
+The engine now holds its own authority instead. `EngineJj` is a distinct service
+tag, absent from the context an action body sees, and snapshot, restore, and
+diff resolve it rather than the public `Jj`. An engine operation therefore never
+grants the same authority to user code, and there is no rule list to keep in
+step with the calls the engine makes: a capability the engine needs cannot be
+one a host forgot to allow, because the engine does not ask the host for it.
+
+A flow body that calls `jj` itself is unaffected. It resolves the public `Jj`
+through the guarded host context and is refused or allowed by the configured
+policy exactly as before.
 
 #### Shutdown
 

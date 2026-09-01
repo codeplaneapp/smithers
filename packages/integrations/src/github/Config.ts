@@ -9,6 +9,7 @@
  *
  * @since 1.0.0
  */
+import * as Environment from "../Environment.ts"
 
 /**
  * The public REST endpoint.
@@ -79,7 +80,7 @@ const firstNonEmpty = (candidates: ReadonlyArray<string | undefined>): string | 
  */
 export const resolve = (
   config: GitHubConfig = {},
-  env: Readonly<Record<string, string | undefined>> = process.env
+  env: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
 ): ResolvedGitHubConfig => ({
   token: firstNonEmpty([config.token, env["SMITHERS_GITHUB_TOKEN"], env["GITHUB_TOKEN"]]),
   apiBaseUrl: firstNonEmpty([config.apiBaseUrl, env["SMITHERS_GITHUB_API_BASE_URL"]]) ?? DEFAULT_API_BASE_URL,

@@ -58,6 +58,38 @@ describe("JournalGrantStore", () => {
       })
     ))
 
+  itEffect("validates every journal namespace before replay", () =>
+    run(
+      Effect.gen(function*() {
+        const cases: ReadonlyArray<
+          readonly [
+            Partial<JournalGrantStore.JournalGrantStoreOptions>,
+            string
+          ]
+        > = [
+          [{ runId: "" }, "runId must be non-empty, bounded, well-formed text"],
+          [{ policyRunId: "" }, "policyRunId must be non-empty, bounded, well-formed text"],
+          [{ sourceId: "x".repeat(4_097) }, "sourceId must be non-empty, bounded, well-formed text"],
+          [{ planDigest: "bad\0digest" }, "planDigest must be non-empty, bounded, well-formed text"],
+          [{ runId: "\ud800" }, "runId must be non-empty, bounded, well-formed text"],
+          [{ runId: "\udc00" }, "runId must be non-empty, bounded, well-formed text"],
+          [{ runId: options.policyRunId }, "runId and policyRunId must be distinct"]
+        ]
+        for (const [override, message] of cases) {
+          const failure = yield* Effect.flip(JournalGrantStore.make({ ...options, ...override }))
+          expect(failure).toMatchObject({ code: "invalid_resolution", message })
+        }
+        const unicode = yield* JournalGrantStore.make({
+          ...options,
+          runId: "run-😀",
+          policyRunId: "policy-😀",
+          sourceId: "kernel-😀",
+          planDigest: "plan-😀"
+        })
+        expect(yield* unicode.list).toEqual([])
+      })
+    ))
+
   itEffect("replays remembered grants from the dedicated policy run", () =>
     run(
       Effect.gen(function*() {

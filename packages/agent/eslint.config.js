@@ -2,7 +2,7 @@ import js from "@eslint/js"
 import importPlugin from "eslint-plugin-import"
 import unicorn from "eslint-plugin-unicorn"
 import tseslint from "typescript-eslint"
-import { ambientAuthority, invariants, uninstalledSafety } from "../../eslint.invariants.js"
+import { ambientAuthority, invariants, swallowedCause, uninstalledSafety } from "../../eslint.invariants.js"
 import { jsdocConvention } from "../../eslint.jsdoc.js"
 
 export default tseslint.config(
@@ -60,7 +60,5 @@ export default tseslint.config(
     }
   },
   ...jsdocConvention,
-  // `swallowedCause` is not wired yet: 5 `Effect.catchCause(() => ...)` handlers in
-  // src/AgentSession.ts discard the cause, so an interrupt and a defect look the same.
-  ...invariants(uninstalledSafety, ambientAuthority)
+  ...invariants(uninstalledSafety, swallowedCause, ambientAuthority)
 )

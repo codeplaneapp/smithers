@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-rc.0] - 2026-08-31
+
 ### Changed
 
 - **`HttpTransport` is gone; network access is Effect's own `HttpClient`**
@@ -82,10 +84,20 @@
   (`exitCode`, `string`, `lines`, `stream*`) are rebuilt from the guarded
   `spawn` so none can route around it; and `layer` double-publishes onto
   Effect's tag, so a `Command` run as a plain `Effect` is checked too.
-- Absorbed the dissolved `@smthrs/host`: `HostError`, `HttpTransport`, the
+- Absorbed the dissolved `@smthrs/host`: `HostError`, the
   closed `HostServices` list, the shared contract suite (now
   `@smthrs/kernel/test/contract`), and the deterministic `TestHost` bundle
   (`@smthrs/kernel/test/TestHost`, Node-only) live here.
+
+### Fixed
+
+- Made capability sets, grant inputs/results, Host request descriptions, and
+  byte buffers immutable snapshots rather than aliases to caller-owned state.
+- Added finite GrantStore policy, envelope, pending-request, metadata, event,
+  and identity limits with field-specific typed failures.
+- Added complete Host conformance matrices, observable child liveness, exact
+  refused-operation codes, and clean packed-consumer coverage for the public
+  test contract.
 
 ### Removed
 

@@ -36,6 +36,16 @@ const bash: BrowserChildProcessSpawner.JustBashLike = {
       const valid = options?.cwd === "/" && options.env?.HOST_CONTRACT_ENV === "browser"
       return Promise.resolve(result(valid ? "browser-options" : "invalid-options"))
     }
+    if (command === "host-contract-interrupt") {
+      return new Promise((_resolve, reject) => {
+        const signal = options?.signal
+        if (signal?.aborted === true) {
+          reject(signal.reason)
+          return
+        }
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true })
+      })
+    }
     return Promise.resolve(result(""))
   }
 }
@@ -127,7 +137,30 @@ runHostContract(
   "BrowserHost",
   layer,
   {
-    fileSystem: { expected: "success", scratchPath: "/browser-host-contract" },
+    fileSystem: {
+      expected: "success",
+      scratchPath: "/browser-host-contract",
+      unsupported: {
+        chmod: "NotFound",
+        chown: "NotFound",
+        copy: "NotFound",
+        copyFile: "NotFound",
+        glob: "NotFound",
+        link: "NotFound",
+        makeTempDirectory: "NotFound",
+        makeTempDirectoryScoped: "NotFound",
+        makeTempFile: "NotFound",
+        makeTempFileScoped: "NotFound",
+        open: "NotFound",
+        readLink: "NotFound",
+        rename: "NotFound",
+        sink: "NotFound",
+        symlink: "NotFound",
+        truncate: "NotFound",
+        utimes: "NotFound",
+        watch: "NotFound"
+      }
+    },
     path: { expected: "success" },
     childProcess: {
       expected: "success",
@@ -143,9 +176,17 @@ runHostContract(
       // The adapter does not use just-bash's string stdin option yet, so a
       // supplied stdin stream is rejected.
       stdin: { expected: "failure", code: "BadArgument" },
+      pipeline: { expected: "failure", code: "BadArgument" },
       interruptCommand: ChildProcess.make("host-contract-interrupt")
     },
-    jj: { expected: "success" },
+    jj: {
+      expected: "success",
+      prepareChange: (phase) =>
+        Effect.sync(() => fsModule.writeFileSync(join(host, "repo", `${phase}.txt`), `${phase}\n`)),
+      workspacePath: "/host-contract-workspace",
+      rootFrom: "/repo",
+      unsupported: { revert: "not_installed" }
+    },
     httpClient: { expected: "failure", code: "TransportError" }
   }
 )

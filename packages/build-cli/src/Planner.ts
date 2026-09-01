@@ -952,6 +952,7 @@ export const make = async (
       ? {
         attrs: metadata.attrs,
         dependencies: metadata.dependencies,
+        dependencySelectors: metadata.dependencySelectors,
         inputs: metadata.inputs,
         cacheable: metadata.cacheable,
         outputs: metadata.outputs
@@ -959,7 +960,25 @@ export const make = async (
       : metadata.forKind(verb)
     const depKeys = new Map<Target.AnyTarget, string>()
     const dependencies: Array<{ readonly label: string; readonly key: string }> = []
-    for (const dependency of view.dependencies) {
+    const selectedDependencies: Array<Target.AnyTarget> = []
+    for (const selector of view.dependencySelectors) {
+      const candidates = await workspace.targets(selector.pattern)
+      let matches = 0
+      for (const candidate of candidates) {
+        const candidateLabel = await workspace.label(candidate)
+        const parsedCandidate = Label.parse(candidateLabel, "")
+        if (parsedCandidate._tag === "Exact" && parsedCandidate.target === selector.target) {
+          selectedDependencies.push(candidate)
+          matches += 1
+        }
+      }
+      if (matches === 0) {
+        throw new Error(
+          `target ${label} dependency selector ${selector.pattern}:${selector.target} matched no targets`
+        )
+      }
+    }
+    for (const dependency of [...view.dependencies, ...selectedDependencies]) {
       const planned = await visit(dependency)
       depKeys.set(dependency, planned.keyPreview)
       // The label list and the edge list are two views of one relation, so

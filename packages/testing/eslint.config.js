@@ -2,7 +2,7 @@ import js from "@eslint/js"
 import importPlugin from "eslint-plugin-import"
 import unicorn from "eslint-plugin-unicorn"
 import tseslint from "typescript-eslint"
-import { ambientAuthority, invariants } from "../../eslint.invariants.js"
+import { ambientAuthority, invariants, swallowedCause } from "../../eslint.invariants.js"
 import { jsdocConvention } from "../../eslint.jsdoc.js"
 
 export default tseslint.config(
@@ -62,7 +62,5 @@ export default tseslint.config(
   ...jsdocConvention,
   // `uninstalledSafety` is deliberately off here: an uninstalled service is what a
   // double is for, and this package's `src` is that product.
-  // `swallowedCause` is not wired yet: src/HostSuite.ts:179 cleans up scratch files
-  // through `Effect.catch(() => Effect.void)`.
-  ...invariants(ambientAuthority)
+  ...invariants(swallowedCause, ambientAuthority)
 )

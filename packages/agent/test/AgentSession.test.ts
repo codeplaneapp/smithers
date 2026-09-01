@@ -468,6 +468,10 @@ describe("AgentSession", () => {
   it("keeps cancellation and registration failures contained at the executor boundary", async () => {
     await expect(Effect.runPromise(AgentSession.preserveDriverInterrupt(() => Effect.fail("interrupted"))))
       .resolves.toBeUndefined()
+    const interruptExit = await Effect.runPromiseExit(
+      AgentSession.preserveDriverInterrupt(() => Effect.interrupt)
+    )
+    expect(Exit.isFailure(interruptExit) && Cause.hasInterruptsOnly(interruptExit.cause)).toBe(true)
     const failure = await Effect.runPromise(
       Effect.flip(AgentSession.registerDriver(() => Effect.fail("missing run"), "run-registration"))
     )
@@ -528,13 +532,12 @@ describe("AgentSession", () => {
     // resumed attempt re-executes both frames and the executor re-journals
     // every event it replays. Each row carries `usage`, so a projection summing
     // a run's tokens over-counts once per park. Tightening this number is the
-    // assertion a fix has to make, and the two routes to one are both blocked
-    // today:
+    // assertion a safe fix has to make. Three attempted routes are blocked:
     //
     // - Suppressing a replayed frame's events needs the harness to know a frame
     //   is replaying. `EngineLike.record` returns only the value, so the marker
     //   would need a port change, a probe boundary per frame, and a field on a
-    //   published `AgentEvent` — and it would still be wrong on the frame a
+    //   published `AgentEvent`. It would still be wrong on the frame a
     //   resume lands in, which replays its model step and then produces genuinely
     //   new events after the steering drain that answered its park.
     // - A deterministic producer identity per event (`sourceId` + `sourceSeq`)
@@ -544,6 +547,17 @@ describe("AgentSession", () => {
     //   engine's write transaction, so that read waits on the writer that is
     //   waiting on it. Measured: this case runs in 410 ms without the explicit
     //   sequence and does not finish in 120 s with it.
+    // - A per-incarnation high-water count can read at the start of `body`,
+    //   after activation commits and before `agent.run` opens a step
+    //   transaction, so it does not reproduce that SELECT deadlock. Its
+    //   ordinal premise is false, though. Emission is serial and deterministic
+    //   only through the branch frontier. This parked attempt writes 21
+    //   projected rows, while the resume shares only its first 18. Approval
+    //   makes row 19 a new `cell-call-settled` instead of the old
+    //   `permission-required`. The prototype skipped all 21: settlements fell
+    //   from four to two, but the trail held 25 rows instead of the required
+    //   28 and lost the new `cell-call-settled`, `cell-printed`, and
+    //   `cell-settled`, including the only settled evidence for `ask`.
     const settled = outcome.agentTrail.filter((entry) => entry.eventType === "control.agent.model-settled")
     expect(settled).toHaveLength(4)
     expect(

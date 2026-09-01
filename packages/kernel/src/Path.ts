@@ -5,7 +5,7 @@
  * `docs/specs/Concepts/Permission Kernel.md` and
  * `docs/specs/Concepts/Host Adapters.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { Layer, Path as EffectPath } from "effect"
 
@@ -13,7 +13,7 @@ import { Layer, Path as EffectPath } from "effect"
  * Effect's lexical path-service shape.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export type Path = EffectPath.Path
@@ -22,7 +22,7 @@ export type Path = EffectPath.Path
  * The unchanged underlying path-service tag.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const Path = EffectPath.Path
@@ -33,7 +33,7 @@ export const Path = EffectPath.Path
  * that every member of the Host services closed list has a kernel decision.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer: Layer.Layer<Path, never, Path> = Layer.effect(Path, Path)

@@ -77,6 +77,11 @@ describe("BrowserJj over the fake ABI module", () => {
       yield* (jj.workspaceAdd("lane", "/lane1"))
       yield* (jj.workspaceForget("lane"))
       expect(yield* (jj.status())).toBe("clean")
+      expect(yield* (jj.root!("/repo/nested"))).toBe("/repo")
+      expect(yield* (Effect.flip(jj.revert!("qpvuntsm")))).toMatchObject({
+        code: "not_installed",
+        command: "jj revert"
+      })
       expect(stderr.slice(1).map((request) => JSON.parse(request))).toEqual([
         { op: "snapshot", root: "/repo", message: "checkpoint" },
         { op: "snapshot", root: "/repo" },

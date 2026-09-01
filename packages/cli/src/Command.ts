@@ -211,6 +211,13 @@ const settled = (kind: string): boolean =>
   kind === "control.run.failed" ||
   kind === "control.run.cancelled"
 
+const recoverWatch = <A>(
+  error: unknown,
+  runId: string,
+  message: string,
+  fallback: A
+): Effect.Effect<A> => Console.error(`${message} (${runId})`, error).pipe(Effect.as(fallback))
+
 /**
  * Waits for the run to settle and reports the event kind that settled it, or
  * `undefined` when nothing was waited for.
@@ -227,7 +234,9 @@ const awaitRun = (
     Effect.map((events) => globalThis.Array.from(events)[0]?.kind),
     // A transport failure still lets the process close normally; remote CLI
     // ownership belongs to the server, and the receipt was already durable.
-    Effect.catchCause(() => Effect.succeed(undefined))
+    Effect.catch((error) =>
+      recoverWatch(error, runId, "The control watch failed while waiting for the run to settle", undefined)
+    )
   )
 
 /**
@@ -244,7 +253,9 @@ const latestPark = (
     Stream.filter((event) => event.kind === "control.run.waiting-approval"),
     Stream.runCollect,
     Effect.map((events) => events.length === 0 ? undefined : Math.max(...events.map((event) => event.sequence))),
-    Effect.catchCause(() => Effect.succeed(undefined))
+    Effect.catch((error) =>
+      recoverWatch(error, runId, "The control watch failed while finding the run's latest approval park", undefined)
+    )
   )
 
 const awaitOwnedRun = (
@@ -361,7 +372,14 @@ const reportSettlement = (settlement: string | undefined) =>
 const eventsOf = (control: ControlService.Service, runId: string) =>
   Stream.runCollect(control.watch({ runId, follow: false })).pipe(
     Effect.map((events) => globalThis.Array.from(events)),
-    Effect.catchCause(() => Effect.succeed([] as ReadonlyArray<ControlSchema.ControlEvent>))
+    Effect.catch((error) =>
+      recoverWatch(
+        error,
+        runId,
+        "The control watch failed while reading the run's event history",
+        [] as ReadonlyArray<ControlSchema.ControlEvent>
+      )
+    )
   )
 
 /** One run's summary, or undefined when the control plane has no such run. */
@@ -867,7 +885,7 @@ const init = Command.make("init", {
     yield* refuseRemoved("init", { global: config.global })
     const projectRoot = yield* Project.ProjectRoot
     const name = Option.getOrElse(config.name, () => Init.defaultName(projectRoot))
-    yield* render(yield* Effect.sync(() => Init.scaffold(projectRoot, name)))
+    yield* render(yield* Effect.sync(() => Init.scaffold(projectRoot, name, process.env)))
   })).pipe(Command.withDescription(Verb.find("init")!.help))
 
 const docs = Command.make("docs", { full: Flag.boolean("full") }, (config) =>

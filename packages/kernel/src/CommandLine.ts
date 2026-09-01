@@ -1,5 +1,5 @@
 /**
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  *
  * Rendering an `effect/unstable/process` `Command` back to a shell command
  * line.
@@ -27,7 +27,7 @@ const SAFE = /^[A-Za-z0-9_@%+=:,./-]+$/
  * Quotes one token for a POSIX shell, leaving obviously safe tokens alone.
  *
  * @category rendering
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const quote = (token: string): string =>
@@ -55,7 +55,7 @@ export const quote = (token: string): string =>
  * Capability checks therefore see the commands, never the plumbing.
  *
  * @category rendering
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const render = (command: ChildProcess.Command): string =>
@@ -73,7 +73,7 @@ export const render = (command: ChildProcess.Command): string =>
  * pipeline's own directory.
  *
  * @category rendering
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const cwd = (command: ChildProcess.Command): string | undefined =>
@@ -84,7 +84,7 @@ export const cwd = (command: ChildProcess.Command): string | undefined =>
  * a pipeline for the same reason {@link cwd} does.
  *
  * @category rendering
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const env = (

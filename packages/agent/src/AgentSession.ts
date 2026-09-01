@@ -694,6 +694,19 @@ export const waitForParked = (
     return result.value._tag === "Suspended"
   })
 
+const recoverCause = <A>(
+  cause: Cause.Cause<unknown>,
+  message: string,
+  fallback: A,
+  annotations: Readonly<Record<string, unknown>>
+): Effect.Effect<A> =>
+  Cause.hasInterruptsOnly(cause)
+    ? Effect.interrupt
+    : Effect.annotateLogs(
+      Effect.logWarning(message).pipe(Effect.as(fallback)),
+      { ...annotations, cause: Cause.pretty(cause) }
+    )
+
 /**
  * Keeps a control cancellation durable even when its engine interrupt fails.
  *
@@ -702,7 +715,10 @@ export const waitForParked = (
  */
 export const preserveDriverInterrupt = <R>(
   interrupt: () => Effect.Effect<void, unknown, R>
-): Effect.Effect<void, never, R> => interrupt().pipe(Effect.catchCause(() => Effect.void))
+): Effect.Effect<void, never, R> =>
+  interrupt().pipe(
+    Effect.catchCause((cause) => recoverCause(cause, "The engine interrupt could not be delivered", undefined, {}))
+  )
 
 /**
  * Translates a failed driver registration into the executor's launch error.
@@ -1430,7 +1446,9 @@ export const make = (
      * leaves the run to the host that has some.
      */
     const parkedHere = (runId: string, attempts: number): Effect.Effect<boolean> =>
-      awaitParked(runId, attempts).pipe(Effect.catchCause(() => Effect.succeed(false)))
+      awaitParked(runId, attempts).pipe(
+        Effect.catchCause((cause) => recoverCause(cause, "The engine park state could not be read", false, { runId }))
+      )
 
     const awaitParked = (runId: string, attempts: number): Effect.Effect<boolean, unknown> =>
       waitForParked(
@@ -1539,7 +1557,9 @@ export const make = (
         if (uptake._tag === "claimed") return true
         const parkedBy = yield* runtime.getRun(runId).pipe(
           Effect.map((run) => run.parkedBy),
-          Effect.catchCause(() => Effect.succeed(undefined))
+          Effect.catchCause((cause) =>
+            recoverCause(cause, "The parked run host could not be read", undefined, { runId })
+          )
         )
         if (parkedBy === undefined) return true
         if (parkFences.get(runId) === parkedBy) return true
@@ -1583,7 +1603,9 @@ export const make = (
           // A lost claim is a live peer holding the run, and the delegation
           // stays standing for it. Answering "resuming" here would clear a
           // delegation this executor is not going to honour.
-          Effect.catchCause(() => Effect.succeed(false))
+          Effect.catchCause((cause) =>
+            recoverCause(cause, "The parked run could not be claimed for resume", false, { runId })
+          )
         )
         if (!claimed) return "unknown" as const
         yield* drive(runId)
@@ -1633,7 +1655,9 @@ export const make = (
     const settledAlready = (runId: string): Effect.Effect<boolean> =>
       runtime.getRun(runId).pipe(
         Effect.map((run) => run.status === "completed" || run.status === "failed" || run.status === "cancelled"),
-        Effect.catchCause(() => Effect.succeed(false))
+        Effect.catchCause((cause) =>
+          recoverCause(cause, "The control run settlement could not be read", false, { runId })
+        )
       )
 
     yield* engine.register(agentFlow, (payload) =>

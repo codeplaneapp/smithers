@@ -16,6 +16,7 @@ import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
+import * as Environment from "./Environment.ts"
 
 const posix = (value: string): string => value.split(NodePath.sep).join("/")
 
@@ -58,7 +59,7 @@ export const digestFileBytes = async (path: string): Promise<string> => {
  */
 export const findOnPath = (
   name: string,
-  environment: Readonly<Record<string, string | undefined>> = process.env
+  environment: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
 ): string | undefined => {
   return findAllOnPath(name, environment)[0]
 }
@@ -71,7 +72,7 @@ export const findOnPath = (
  */
 export const findAllOnPath = (
   name: string,
-  environment: Readonly<Record<string, string | undefined>> = process.env
+  environment: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
 ): ReadonlyArray<string> => {
   const found: Array<string> = []
   const environmentPath = environment["PATH"] ?? ""

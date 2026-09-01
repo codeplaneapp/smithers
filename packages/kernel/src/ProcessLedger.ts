@@ -24,7 +24,7 @@
  * `docs/specs/Concepts/Host Adapters.md` and
  * `docs/specs/Concepts/Journal Queue.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as JournalModule from "@smthrs/journal/Journal"
 import type { JournalError } from "@smthrs/journal/Journal"
@@ -38,7 +38,7 @@ import * as Schema from "effect/Schema"
  * The event type recording that a host started a process.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const SpawnedEventType = "flows.host.process-spawned.v1"
 
@@ -46,7 +46,7 @@ export const SpawnedEventType = "flows.host.process-spawned.v1"
  * The event type recording that a recorded process ended.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const ExitedEventType = "flows.host.process-exited.v1"
 
@@ -55,7 +55,7 @@ export const ExitedEventType = "flows.host.process-exited.v1"
  * process group.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const ReapedEventType = "flows.host.process-reaped.v1"
 
@@ -70,7 +70,7 @@ export const ReapedEventType = "flows.host.process-reaped.v1"
  * re-examine a number the operating system has moved on from.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const SkippedEventType = "flows.host.process-reap-skipped.v1"
 
@@ -81,7 +81,7 @@ export const SkippedEventType = "flows.host.process-reap-skipped.v1"
  * signal a process group.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const sourceId = "@smthrs/kernel/ProcessLedger"
 
@@ -93,7 +93,7 @@ export const sourceId = "@smthrs/kernel/ProcessLedger"
  * history, which is what makes an abandoned process discoverable.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const hostRunId = (hostId: string): JournalEvent.RunId => `flows.host:${hostId}` as JournalEvent.RunId
 
@@ -106,7 +106,7 @@ export const hostRunId = (hostId: string): JournalEvent.RunId => `flows.host:${h
  * reaper could misread.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Spawned {
   readonly pid: number
@@ -118,7 +118,7 @@ export interface Spawned {
  * Schema for a recorded process, as it round-trips through the journal.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const ProcessRecord = Schema.Struct({
   pid: Schema.Int,
@@ -134,7 +134,7 @@ export const ProcessRecord = Schema.Struct({
  * started it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type ProcessRecord = typeof ProcessRecord.Type
 
@@ -157,7 +157,7 @@ const encodeRecord = Schema.encodeSync(ProcessRecord)
  * nothing durable in the first place.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Service {
   /** Records a started process and returns the durable record written for it. */
@@ -181,7 +181,7 @@ export interface Service {
  * The process-ledger service tag.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export class ProcessLedger extends Context.Service<ProcessLedger, Service>()("@smthrs/kernel/ProcessLedger") {}
 
@@ -193,7 +193,7 @@ export class ProcessLedger extends Context.Service<ProcessLedger, Service>()("@s
  * processes from an abandoned one's.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Options {
   readonly hostId: string
@@ -312,7 +312,7 @@ const makeWith = (options: Options, sink: Sink): Service => {
  * Builds a journal-backed ledger.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const make = (options: Options): Effect.Effect<Service, never, JournalModule.Journal> =>
   Effect.map(JournalModule.Journal, (journal) => makeWith(options, journalSink(options, journal)))
@@ -325,7 +325,7 @@ export const make = (options: Options): Effect.Effect<Service, never, JournalMod
  * incarnation, so {@link Service.orphans} is always empty.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const makeMemory = (options: Options): Effect.Effect<Service> => Effect.sync(() => makeWith(options, memorySink))
 
@@ -333,7 +333,7 @@ export const makeMemory = (options: Options): Effect.Effect<Service> => Effect.s
  * Provides a journal-backed ledger.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layer = (options: Options): Layer.Layer<ProcessLedger, never, JournalModule.Journal> =>
   Layer.effect(ProcessLedger, make(options))
@@ -342,7 +342,7 @@ export const layer = (options: Options): Layer.Layer<ProcessLedger, never, Journ
  * Provides a ledger that records nothing durably.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layerMemory = (options: Options): Layer.Layer<ProcessLedger> =>
   Layer.effect(ProcessLedger, makeMemory(options))

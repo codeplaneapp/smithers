@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Capability from "@smthrs/capability/Capability"
 import { permissionDenied } from "@smthrs/capability/Permission"
 import * as HostJj from "@smthrs/jj"
-import { Effect, FileSystem as EffectFileSystem, Path } from "effect"
+import { Deferred, Effect, Fiber, FileSystem as EffectFileSystem, Path } from "effect"
 import { GrantStore } from "../src/GrantStore.ts"
 import * as Jj from "../src/Jj.ts"
 import * as Workspace from "../src/Workspace.ts"
@@ -154,6 +154,79 @@ describe("Jj", () => {
       Effect.provideService(GrantStore, scriptedStore(checks))
     )
   })
+
+  itEffect("refuses a workspace destination that changes after both grants", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        let canonical = "/workspace/lane"
+        let delegated = false
+        const resolutions: Array<readonly [string, string]> = []
+        const checks: Array<Capability.Capability> = []
+        const changing = EffectFileSystem.makeNoop({
+          realPath: (value) =>
+            Effect.sync(() => {
+              const resolved = value === "/workspace" ? value : canonical
+              resolutions.push([value, resolved])
+              return resolved
+            })
+        })
+        const store = GrantStore.of({
+          check: (capability) => {
+            checks.push(capability)
+            return checks.length === 2
+              ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+              : Effect.void
+          },
+          reply: () => Effect.die("not used by workspace mutation test"),
+          list: Effect.succeed([]),
+          grantEnvelope: () => Effect.void
+        })
+        const host = HostJj.makeNoop({
+          workspaceAdd: () =>
+            Effect.sync(() => {
+              delegated = true
+            })
+        })
+        const running = yield* Effect.gen(function*() {
+          const jj = yield* Jj.Jj
+          return yield* jj.workspaceAdd("lane", "lane")
+        }).pipe(
+          Effect.provide(Jj.layer),
+          Effect.provideService(HostJj.Jj, host),
+          Effect.provideService(EffectFileSystem.FileSystem, changing),
+          Effect.provide(Path.layer),
+          Effect.provide(Workspace.layer("/workspace")),
+          Effect.provideService(GrantStore, store),
+          Effect.exit,
+          Effect.forkChild({ startImmediately: true })
+        )
+
+        yield* Deferred.await(entered)
+        canonical = "/outside/lane"
+        yield* Deferred.succeed(release, undefined)
+        const outcome = yield* Fiber.join(running)
+        if (outcome._tag === "Success") throw new Error(`unexpected delegation: ${JSON.stringify(resolutions)}`)
+        expect(outcome).toMatchObject({
+          _tag: "Failure",
+          cause: {
+            reasons: [{
+              error: {
+                code: "permission_denied",
+                capability: { action: "jj:workspace-add", resource: "/workspace/lane" },
+                reason: "workspace destination no longer names the resource that was authorized"
+              }
+            }]
+          }
+        })
+        expect(delegated).toBe(false)
+        expect(checks).toEqual([
+          { action: "jj:workspace-add", resource: "/workspace/lane" },
+          { action: "fs:write", resource: "/workspace/lane" }
+        ])
+      })
+    ))
 
   itEffect("forwards the absence of an operation a backend does not implement", () => {
     // A backend that cannot revert must keep reading as one. Wrapping the

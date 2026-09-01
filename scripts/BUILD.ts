@@ -143,7 +143,11 @@ export const releasePack = Smithers.NodeBinary({
   entry: Smithers.file("//scripts/pack-release.mjs"),
   args: [packDirectory],
   srcs: sources,
-  deps: []
+  // Most packages use workspace default-target synthesis and therefore have
+  // no BUILD.ts export this file can import. The selector is still a real
+  // graph edge: every package `lib` settles before packing, including future
+  // packages admitted under `packages/`.
+  deps: [Smithers.Target.subtree("//packages/...", "lib")]
 })
 
 /**

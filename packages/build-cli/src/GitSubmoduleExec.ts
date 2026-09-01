@@ -47,14 +47,15 @@ const configPaths = async (root: string, config: string): Promise<ReadonlyArray<
     "-z",
     "--file",
     config,
-    "--get-regexp",
-    "^submodule\\..*\\.path$"
-  ]).catch(() => "")
+    "--list"
+  ])
   const directory = NodePath.posix.dirname(config) === "." ? "" : NodePath.posix.dirname(config)
   const paths: Array<string> = []
   for (const record of raw.split("\0")) {
     const newline = record.indexOf("\n")
     if (newline < 0) continue
+    const key = record.slice(0, newline)
+    if (!/^submodule\..*\.path$/i.test(key)) continue
     const declared = record.slice(newline + 1)
     if (declared === "") continue
     paths.push(Input.resolvePath(directory, declared))
@@ -63,7 +64,7 @@ const configPaths = async (root: string, config: string): Promise<ReadonlyArray<
 }
 
 const pinnedSha = async (root: string, path: string): Promise<string | undefined> => {
-  const raw = await PackageTree.runGit(root, ["ls-files", "--stage", "--", path]).catch(() => "")
+  const raw = await PackageTree.runGit(root, ["ls-files", "--stage", "--", path])
   const match = /^160000 ([0-9a-f]{40,64}) 0\t/.exec(raw)
   return match?.[1]
 }
@@ -74,9 +75,8 @@ const stateOf = async (root: string, path: string, sha: string): Promise<Gitlink
   if (stats === undefined) return { path, sha, state: "missing" }
   if (!stats.isDirectory()) return { path, sha, state: "mismatch" }
   if ((await Fs.readdir(absolute)).length === 0) return { path, sha, state: "empty" }
-  const head = (await PackageTree.runGit(absolute, ["rev-parse", "HEAD"]).catch(() => "")).trim()
-  const dirty = (await PackageTree.runGit(absolute, ["status", "--porcelain", "--untracked-files=all"])
-    .catch(() => "unreadable")).trim() !== ""
+  const head = (await PackageTree.runGit(absolute, ["rev-parse", "HEAD"])).trim()
+  const dirty = (await PackageTree.runGit(absolute, ["status", "--porcelain", "--untracked-files=all"])).trim() !== ""
   return head === sha && !dirty
     ? { path, sha, state: "matching", head, dirty }
     : { path, sha, state: "mismatch", head, dirty }

@@ -80,6 +80,18 @@ const aliasOf = new Map(
 export type Source = Readonly<Record<string, string | undefined>>
 
 /**
+ * Reads the directory the process was started in by deliberate host choice.
+ *
+ * Using this gives up the project root resolved for an invocation. It belongs
+ * only in explicit process-backed service defaults; project operations take
+ * their configured root as an argument.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const ambientWorkingDirectory = (): string => process.cwd()
+
+/**
  * Reads one canonical name, falling back to its rc.0 `FLOWS_*` alias.
  *
  * An empty value is treated exactly like an unset one, the convention every

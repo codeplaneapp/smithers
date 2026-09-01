@@ -93,6 +93,7 @@
     "effect": "4.0.0-rc.108"
   },
   "peerDependencies": {
+    "@effect/vitest": "4.0.0-rc.108",
     "vitest": "4.1.9"
   },
   "peerDependenciesMeta": {

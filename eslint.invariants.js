@@ -135,32 +135,31 @@ export const swallowedCause = {
 }
 
 /**
- * Rule 3, ambient authority.
+ * Rule 3, ambient defaults.
  *
- * `process.cwd()` and `process.env` make a module's behavior depend on state
- * no caller can see and no test can set without leaking into its neighbours.
- * The class caused a real defect: an engine resolved checkpoints against
- * `process.cwd()`, so they landed in whatever repository the operator's shell
- * happened to be sitting in.
+ * Ambient reads are legitimate at process and child-spawn boundaries. The
+ * dangerous shape is a default parameter: the signature looks injectable,
+ * but an omitted argument silently selects process-wide state. The class
+ * caused a real defect when jj operations resolved checkpoints against the
+ * repository the operator's shell happened to be sitting in.
  *
- * The allowlist is read off the tree, not guessed. A process entry point is
- * where ambient values legitimately enter, so `src/bin.ts`, `src/**\/bin.ts`
- * (`packages/migrate/src/flow/bin.ts`) and `src/main.ts`
- * (`packages/build-cli/src/main.ts`) are exempt, together with
- * `Environment.ts`, which is `packages/cli`'s declared contract for the closed
- * set of names rc.0 reads.
+ * Two selectors are required because esquery's `>` is a child combinator.
+ * `process.env` is the AssignmentPattern's child, while the member expression
+ * in `process.cwd()` is under a CallExpression.
  */
+const ambientDefault =
+  "`process.cwd()` or `process.env` as a default parameter makes an injectable API lie: omitting one argument silently selects process-wide state, so a configured workspace or hermetic environment can be ignored with no error. This is how jj checkpoint operations once targeted the repository the shell happened to start in. Make the parameter required and thread the configured root or environment. If process state is genuinely the host default, spell that decision with the package's named `Environment.ambientWorkingDirectory()` or `Environment.ambientEnvironment()` accessor."
+
 export const ambientAuthority = {
   name: "ambient-authority",
-  entryPoints: ["src/bin.ts", "src/**/bin.ts", "src/main.ts", "src/**/Environment.ts"],
   selectors: [{
-    selector: "CallExpression[callee.object.name='process'][callee.property.name='cwd']",
-    message:
-      "`process.cwd()` is the directory an operator happened to start the process in, not the repository this run is about. An engine that resolved checkpoints this way wrote them into whichever repo the shell was sitting in. Take the root as an explicit parameter, or read the `Workspace` service, which holds the root the run is pinned to."
+    // `(cwd = process.cwd())`.
+    selector: "AssignmentPattern > CallExpression > MemberExpression[object.name='process'][property.name='cwd']",
+    message: ambientDefault
   }, {
-    selector: "MemberExpression[object.name='process'][property.name='env']",
-    message:
-      "Reading `process.env` here makes this module's behavior depend on state no caller can see and no test can set without leaking into the next one. Take the environment as a parameter typed `Readonly<Record<string, string | undefined>>` and resolve names through `Environment.read`, which `packages/cli/src/Environment.ts` defines alongside the closed list of names rc.0 reads. Only a process entry point (`src/bin.ts`, `src/main.ts`) passes `process.env` in, and this rule does not cover those files."
+    // `(environment = process.env)`.
+    selector: "AssignmentPattern > MemberExpression[object.name='process'][property.name='env']",
+    message: ambientDefault
   }]
 }
 

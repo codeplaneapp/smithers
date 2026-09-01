@@ -34,6 +34,7 @@ import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import type * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
 import { AttemptStore, type Ownership, RunStore } from "@smthrs/run-store"
 import { CacheStore } from "@smthrs/step-cache"
+import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
@@ -688,3 +689,48 @@ export const layerHost = <
     return context
   }))
 }
+
+/** Refuses a composition root that still owes a service. */
+type Complete<L> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>] ? [R] extends [never] ? true : false
+  : false
+
+/** Refuses a layer composition whose allowed requirement channel is not exact. */
+type LayerRequirementsAre<L, Expected> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>]
+  ? [R] extends [Expected] ? [Expected] extends [R] ? true : false : false
+  : false
+
+/** Refuses an effect composition whose requirement channel is not exact. */
+type EffectRequirementsAre<F, Expected> = [F] extends [Effect.Effect<infer _A, infer _E, infer R>]
+  ? [R] extends [Expected] ? [Expected] extends [R] ? true : false : false
+  : false
+
+/** Fails to compile unless its argument is `true`. */
+type Expect<T extends true> = T
+
+/**
+ * Pins every full runtime composition to its documented host boundary.
+ *
+ * `make` builds in the caller's scope, while `layer` leaves the raw host's
+ * crypto, filesystem, and Jj services to its caller. `layerHost` supplies
+ * those services and manages its own child scope. Its registration and
+ * registry arguments may still declare requirements, so the closed generic
+ * instantiation below proves only that the host itself owes nothing.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type CompositionRootsAreComplete = [
+  Expect<
+    EffectRequirementsAre<
+      ReturnType<typeof make<never, never, never, never, never, never, never>>,
+      Crypto.Crypto | FileSystem.FileSystem | KernelJj.Jj | Scope.Scope
+    >
+  >,
+  Expect<
+    LayerRequirementsAre<
+      ReturnType<typeof layer<never, never, never, never, never, never, never>>,
+      Crypto.Crypto | FileSystem.FileSystem | KernelJj.Jj
+    >
+  >,
+  Expect<Complete<ReturnType<typeof layerHost<never, never, never>>>>
+]

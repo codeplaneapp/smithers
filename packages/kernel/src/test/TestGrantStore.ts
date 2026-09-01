@@ -1,7 +1,7 @@
 /**
  * Deterministic grant-store layers for tests.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { GrantStoreError, permissionDenied } from "@smthrs/capability/Permission"
 import { Effect, Layer } from "effect"
@@ -11,7 +11,7 @@ import { GrantStore, layerNoop, type Resolution, type Service } from "../GrantSt
  * An allow-all grant store.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layerAllow: Layer.Layer<GrantStore> = layerNoop
 
@@ -19,7 +19,7 @@ export const layerAllow: Layer.Layer<GrantStore> = layerNoop
  * Provides a grant store that denies every capability.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layerDeny = (reason = "denied by test"): Layer.Layer<GrantStore> => {
   const service = GrantStore.of({
@@ -37,7 +37,7 @@ export const layerDeny = (reason = "denied by test"): Layer.Layer<GrantStore> =>
  * `deny` rejects it. Exhausting the script rejects further checks.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layerScripted = (
   replies: ReadonlyArray<Resolution>

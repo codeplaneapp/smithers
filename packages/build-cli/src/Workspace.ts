@@ -885,7 +885,7 @@ export class Workspace {
    */
   static async make(
     root: string,
-    cwd: string = process.cwd(),
+    cwd: string,
     options: {
       readonly cacheDirectory?: string | undefined
       readonly signal?: AbortSignal | undefined

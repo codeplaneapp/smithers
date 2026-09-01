@@ -77,6 +77,11 @@ export * as RecallSemantic from "./RecallSemantic.ts"
 export * as Source from "./Source.ts"
 
 /**
+ * @category services @since 0.1.0
+ */
+export * as SnapshotRecorder from "./SnapshotRecorder.ts"
+
+/**
  * @category patterns
  * @since 0.1.0
  */
