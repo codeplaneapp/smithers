@@ -533,12 +533,87 @@ describe("Compensation.restoreWorkspace", () => {
       }))
   }
 
-  it.effect("refuses a plan that needs a restore but carries no resolved pointer", () =>
+  // Every refusal rolls the receipts back, not just the two that touch jj.
+  // The caller hands ownership of them over with the call and treats the
+  // failure as "they are undone", so a path that kept them would strand a
+  // compensated effect with nothing left to reverse it.
+  for (
+    const scenario of [
+      {
+        name: "the plan is not executable at all",
+        plan: {
+          effects: [compensable],
+          assessments: [{
+            effect: compensable,
+            classification: "blocking" as const,
+            reason: "blocked",
+            residue: "residue"
+          }],
+          targetChangeId: "target"
+        },
+        code: "irreversible"
+      },
+      {
+        name: "the plan needs a restore but carries no resolved pointer",
+        plan: { effects: [compensable], assessments: [] },
+        code: "compensation_failed"
+      }
+    ]
+  ) {
+    it.effect(`rolls the receipts back when ${scenario.name}`, () =>
+      Effect.gen(function*() {
+        const rolledBack: Array<string> = []
+        const registry = registryOf([{
+          kind: "send",
+          tier: "irreversible",
+          requiresIdempotencyKey: true,
+          residue: () => "residue",
+          revert: () => Effect.succeed({}),
+          rollback: (effect) =>
+            Effect.sync(() => {
+              rolledBack.push(effect.id)
+            })
+        }])
+        const receipt = {
+          id: "send:rollback",
+          effect: record({ id: "send", kind: "send", tier: "irreversible", seq: 2 }),
+          data: {}
+        }
+
+        const failure = yield* (
+          Effect.flip(
+            Compensation.restoreWorkspace(scenario.plan, [receipt]).pipe(
+              Effect.provide(registry),
+              Effect.provide(jjOf())
+            )
+          )
+        )
+
+        expect(failure.code, scenario.name).toBe(scenario.code)
+        expect(rolledBack, scenario.name).toEqual(["send"])
+      }))
+  }
+
+  it.effect("reports a cleanup failure on a refused restore without hiding the refusal", () =>
     Effect.gen(function*() {
+      const registry = registryOf([{
+        kind: "send",
+        tier: "irreversible",
+        requiresIdempotencyKey: true,
+        residue: () => "residue",
+        revert: () => Effect.succeed({}),
+        rollback: () => Effect.fail(error("compensation_failed", "handler cleanup failed"))
+      }])
+      const receipt = {
+        id: "send:rollback",
+        effect: record({ id: "send", kind: "send", tier: "irreversible", seq: 2 }),
+        data: {}
+      }
+
       const failure = yield* (
         Effect.flip(
-          Compensation.restoreWorkspace({ effects: [compensable], assessments: [] }, []).pipe(
-            Effect.provide(registryOf([])),
+          Compensation.restoreWorkspace({ effects: [compensable], assessments: [] }, [receipt]).pipe(
+            Effect.provide(registry),
             Effect.provide(jjOf())
           )
         )

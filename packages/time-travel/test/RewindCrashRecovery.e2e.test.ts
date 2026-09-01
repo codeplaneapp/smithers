@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as EffectBoundary from "../src/EffectBoundary.ts"
 import { TimeTravel } from "../src/TimeTravel.ts"
@@ -93,12 +94,55 @@ describe.skipIf(!jjInstalled)("rewind crash recovery over file SQLite", () => {
                 })
               )
 
-              expect(recovered.audit.status).toBe(stage === "after-audit" ? "failed" : "completed")
+              // `after-audit` dies holding the run, so the first pass finds it
+              // `running` under an owner whose lease has not expired yet and
+              // declines. Declining must not CLOSE the audit: marking it
+              // `failed` dropped it out of `pendingAudits` forever, and a
+              // rewind killed after its compensation would then never be
+              // rolled back by anyone. `after-archive` dies after the run is
+              // already suspended, so nothing blocks it.
+              expect(recovered.audit.status).toBe(stage === "after-audit" ? "in_progress" : "completed")
               expect(JSON.parse(recovered.audit.detail_json).phase).toBe(
-                stage === "after-audit" ? "terminal_failure" : "completed"
+                stage === "after-audit" ? "audit_written" : "completed"
               )
               expect(recovered.live).toEqual(stage === "after-audit" ? [{ seq: 0 }, { seq: 1 }] : [{ seq: 0 }])
               expect(recovered.archived).toEqual(stage === "after-audit" ? [] : [{ seq: 1 }])
+
+              if (stage === "after-audit") {
+                // Expire the dead incarnation's lease: its last heartbeat
+                // moves to the epoch and the clock moves past the staleness
+                // window, which is exactly what wall-clock time does to a
+                // process that stopped renewing. The audit is still pending,
+                // so the next build steals the run and rolls the rewind back.
+                // That is the whole point of declining rather than failing.
+                yield* runReal(
+                  fixture.databaseFile,
+                  Effect.gen(function*() {
+                    const sql = yield* Effect.service(SqlClient.SqlClient)
+                    yield* sql`UPDATE flows_runs SET heartbeat_at_ms = 0 WHERE run_id = ${runId}`
+                  })
+                )
+                yield* TestClock.adjust("1 minute")
+                const settled = yield* runReal(
+                  fixture.databaseFile,
+                  Effect.gen(function*() {
+                    const timeTravel = yield* TimeTravel
+                    void timeTravel
+                    const sql = yield* Effect.service(SqlClient.SqlClient)
+                    const audit = yield* sql<{ readonly status: string; readonly detail_json: string }>`
+                  SELECT status, detail_json FROM flows_time_travel_audits WHERE id = ${`${runId}-audit`}
+                `
+                    const run = yield* sql<{ readonly status: string }>`
+                  SELECT status FROM flows_runs WHERE run_id = ${runId}
+                `
+                    return { audit: audit[0]!, run: run[0]! }
+                  })
+                )
+
+                expect(settled.audit.status).toBe("failed")
+                expect(JSON.parse(settled.audit.detail_json).phase).toBe("rolled_back")
+                expect(settled.run.status).toBe("suspended")
+              }
             } finally {
               yield* Effect.promise(() => killHard(child))
             }

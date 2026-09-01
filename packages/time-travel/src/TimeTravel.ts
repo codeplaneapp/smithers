@@ -11,7 +11,11 @@
  *
  * Recovery is not an operation. {@link layer} finishes or rolls back every
  * pending rewind audit while it is being built, so the service only ever hands
- * out a store whose interrupted work is already resolved.
+ * out a store whose interrupted work is already resolved. The one thing it
+ * cannot resolve is an audit whose run another live process still holds: that
+ * one is declined and left pending for a later build, rather than closed on
+ * the strength of a race. {@link Options.isAlive} decides what "still live"
+ * means.
  *
  * The tag key `@smthrs/time-travel/TimeTravel` is durable identity: step keys
  * digest the resolved service set, so renaming it invalidates recorded runs.
@@ -20,6 +24,7 @@
  */
 import type { Jj } from "@smthrs/jj"
 import type * as Journal from "@smthrs/journal/Journal"
+import * as Ownership from "@smthrs/run-store/Ownership"
 import type { OwnerId } from "@smthrs/run-store/Ownership"
 import type * as RunStore from "@smthrs/run-store/RunStore"
 import type * as CacheStore from "@smthrs/step-cache/CacheStore"
@@ -176,7 +181,54 @@ const mintOwner: Effect.Effect<OwnerId> = Effect.gen(function*() {
 })
 
 /**
- * Builds the service over the ambient contracts, recovering first.
+ * How the service is composed.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export interface Options {
+  /**
+   * Whether the owner recorded on a run is still working, asked before startup
+   * recovery takes an interrupted rewind's run over.
+   *
+   * Defaults to `Ownership.leaseLiveness()`: an owner is alive while its
+   * persisted heartbeat is younger than `Ownership.heartbeatStaleAfter`. That
+   * is the same default the engine's own run driver applies to the same rows,
+   * and it is the weakest honest answer every host can give. A deployment that
+   * can say more supplies its own check and refuses the takeover for longer.
+   */
+  readonly isAlive?: Ownership.LivenessCheck | undefined
+}
+
+/**
+ * Turns a liveness check into the evidence startup recovery hands `RunStore`.
+ *
+ * The kind is always `lease-expired`, and deliberately so. It is the only
+ * host-neutral kind, and it is the one claim `RunStore.steal` re-verifies for
+ * itself inside the same write (`heartbeat_at_ms < nowMs - staleAfter`), so a
+ * supplied check can only ever REFUSE a takeover here, never widen one. The
+ * two pid-shaped kinds would be a lie anyway: {@link mintOwner} gives every
+ * incarnation its own `hostId`, so no two time-travel owners ever look
+ * same-host, and `pid` is 0 because no process stands behind the identity.
+ *
+ * A `running` row that records no owner yields no evidence: there is nothing
+ * to be alive or dead, and `steal` refuses such a snapshot regardless.
+ */
+const recoveryEvidence = (
+  isAlive: Ownership.LivenessCheck
+): NonNullable<Recovery.Options["livenessEvidence"]> =>
+(_audit, row, claimant, nowMs) => {
+  const expectedOwner = row.owner
+  if (expectedOwner === null) return Effect.succeed(undefined)
+  return Effect.map(
+    isAlive(expectedOwner, { claimant, heartbeatAtMs: row.heartbeatAtMs, nowMs }),
+    (alive) => alive ? undefined : { expectedOwner, checkedAtMs: nowMs, kind: "lease-expired" as const }
+  )
+}
+
+/**
+ * Builds the service over the ambient contracts under an explicit policy,
+ * recovering first.
  *
  * The scope this is built in owns every fork workspace the service adds: a
  * fork lane is forgotten when the service is released, not when the call that
@@ -185,120 +237,141 @@ const mintOwner: Effect.Effect<OwnerId> = Effect.gen(function*() {
  * @since 0.1.0
  * @category constructors
  */
-export const make: Effect.Effect<Service, TimeTravelError, Requirements | Scope.Scope> = Effect.gen(function*() {
-  const scope = yield* Effect.scope
-  const services = yield* Effect.context<Requirements>()
-  const owner = yield* mintOwner
-  // The contribution door (`docs/specs/Concepts/Time Travel Service.md`
-  // §"The open gap this leaves"):
-  // handlers come from the composition that owns the effect boundary, and the
-  // registry itself stays internal. Absent service means no handlers, which is
-  // the pre-existing behaviour — every crossed irreversible effect blocks.
-  const contributed = yield* Effect.serviceOption(CompensationHandlers)
-  const registry = yield* EffectHandlerRegistry.make(
-    Option.getOrElse(contributed, () => []).map((handler) => ({
-      kind: handler.kind,
-      tier: handler.tier,
-      requiresIdempotencyKey: handler.requiresIdempotencyKey ?? false,
-      residue: handler.residue,
-      ...(handler.assess === undefined ? {} : { assess: handler.assess }),
-      revert: handler.revert,
-      rollback: handler.rollback
-    }))
-  )
-
-  const provided = <A>(
-    effect: Effect.Effect<A, TimeTravelError, Requirements | EffectHandlerRegistry.EffectHandlerRegistry | Scope.Scope>
-  ): Effect.Effect<A, TimeTravelError> =>
-    effect.pipe(
-      Effect.provideService(EffectHandlerRegistry.EffectHandlerRegistry, registry),
-      Effect.provideService(Scope.Scope, scope),
-      Effect.provideContext(services)
+export const makeWith = (
+  options: Options = {}
+): Effect.Effect<Service, TimeTravelError, Requirements | Scope.Scope> =>
+  Effect.gen(function*() {
+    const scope = yield* Effect.scope
+    const services = yield* Effect.context<Requirements>()
+    const owner = yield* mintOwner
+    // The contribution door (`docs/specs/Concepts/Time Travel Service.md`
+    // §"The open gap this leaves"):
+    // handlers come from the composition that owns the effect boundary, and the
+    // registry itself stays internal. Absent service means no handlers, which is
+    // the pre-existing behaviour — every crossed irreversible effect blocks.
+    const contributed = yield* Effect.serviceOption(CompensationHandlers)
+    const registry = yield* EffectHandlerRegistry.make(
+      Option.getOrElse(contributed, () => []).map((handler) => ({
+        kind: handler.kind,
+        tier: handler.tier,
+        requiresIdempotencyKey: handler.requiresIdempotencyKey ?? false,
+        residue: handler.residue,
+        ...(handler.assess === undefined ? {} : { assess: handler.assess }),
+        revert: handler.revert,
+        rollback: handler.rollback
+      }))
     )
 
-  // Recovery is wiring, never an operation: a rewind interrupted by a crash is
-  // finished or rolled back before this service accepts new work.
-  yield* provided(Recovery.recover({ owner }))
-
-  /**
-   * Folds the run's journal into its frame anchors before a verb reads them.
-   *
-   * BEST EFFORT on purpose. The anchor table is a cache of facts the journal
-   * already holds, so a journal that cannot project — a composition wired
-   * without the projection channel, a partial test double — must not turn a
-   * fork or a rewind into a failure. What it does instead is leave the anchors
-   * as they were, and the verbs already say what that costs: a fork with no
-   * anchor at the frame reports a warning naming the workspace it could not
-   * restore, and a rewind restores no pointer rather than a wrong one.
-   */
-  const refreshAnchors = (runId: string) =>
-    SnapshotProjector.project(runId).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("time-travel: could not refresh frame anchors", cause).pipe(
-          Effect.annotateLogs({ runId })
-        )
+    const provided = <A>(
+      effect: Effect.Effect<
+        A,
+        TimeTravelError,
+        Requirements | EffectHandlerRegistry.EffectHandlerRegistry | Scope.Scope
+      >
+    ): Effect.Effect<A, TimeTravelError> =>
+      effect.pipe(
+        Effect.provideService(EffectHandlerRegistry.EffectHandlerRegistry, registry),
+        Effect.provideService(Scope.Scope, scope),
+        Effect.provideContext(services)
       )
-    )
 
-  return {
-    inspect: <S>(position: Position, projection: Projection<S>) =>
-      Effect.fn("TimeTravel.inspect")(function*() {
-        yield* Effect.annotateCurrentSpan({
-          runId: position.runId,
-          lineageId: position.frame.lineageId,
-          seq: position.frame.seq
-        })
-        return yield* provided(
-          Replay.rederive(position.frame, projection, { runId: position.runId })
-        )
-      })(),
-    fork: (position, options) =>
-      Effect.fn("TimeTravel.fork")(function*() {
-        yield* Effect.annotateCurrentSpan({
-          runId: position.runId,
-          lineageId: position.frame.lineageId,
-          seq: position.frame.seq
-        })
-        return yield* provided(
-          // The anchors a fork restores from are a projection of the engine's
-          // own records, folded on demand: an ordinary engine run writes
-          // journal rows, never this package's tables.
-          refreshAnchors(position.runId).pipe(Effect.andThen(ForkOperation.fork({
-            parentRunId: position.runId,
-            frame: position.frame,
-            workspaceRoot: options?.workspaceRoot ?? workspaceRoot
-          })))
-        )
-      })(),
-    rewind: (position, options) =>
-      Effect.fn("TimeTravel.rewind")(function*() {
-        yield* Effect.annotateCurrentSpan({
-          runId: position.runId,
-          lineageId: position.frame.lineageId,
-          seq: position.frame.seq
-        })
-        return yield* provided(
-          // The validation phase runs before anything durable: a refused page
-          // size or a frame that is not on this run's lineage leaves no claim,
-          // no audit row, and no refreshed anchor behind.
-          Rewind.validate({
-            runId: position.runId,
-            frame: position.frame,
-            ...(options?.pageSize === undefined ? {} : { pageSize: options.pageSize })
-          }).pipe(
-            Effect.andThen(refreshAnchors(position.runId)),
-            Effect.andThen(Rewind.rewind({
-              runId: position.runId,
-              frame: position.frame,
-              owner,
-              detachedChildPolicy: options?.detachedChildren ?? "block",
-              ...(options?.pageSize === undefined ? {} : { pageSize: options.pageSize })
-            }))
+    // Recovery is wiring, never an operation: a rewind interrupted by a crash is
+    // finished or rolled back before this service accepts new work. An audit
+    // whose run is still held elsewhere is declined rather than closed, so it
+    // survives for the next build to pick up.
+    yield* provided(Recovery.recover({
+      owner,
+      livenessEvidence: recoveryEvidence(options.isAlive ?? Ownership.leaseLiveness())
+    }))
+
+    /**
+     * Folds the run's journal into its frame anchors before a verb reads them.
+     *
+     * BEST EFFORT on purpose. The anchor table is a cache of facts the journal
+     * already holds, so a journal that cannot project — a composition wired
+     * without the projection channel, a partial test double — must not turn a
+     * fork or a rewind into a failure. What it does instead is leave the anchors
+     * as they were, and the verbs already say what that costs: a fork with no
+     * anchor at the frame reports a warning naming the workspace it could not
+     * restore, and a rewind restores no pointer rather than a wrong one.
+     */
+    const refreshAnchors = (runId: string) =>
+      SnapshotProjector.project(runId).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("time-travel: could not refresh frame anchors", cause).pipe(
+            Effect.annotateLogs({ runId })
           )
         )
-      })()
-  }
-})
+      )
+
+    return {
+      inspect: <S>(position: Position, projection: Projection<S>) =>
+        Effect.fn("TimeTravel.inspect")(function*() {
+          yield* Effect.annotateCurrentSpan({
+            runId: position.runId,
+            lineageId: position.frame.lineageId,
+            seq: position.frame.seq
+          })
+          return yield* provided(
+            Replay.rederive(position.frame, projection, { runId: position.runId })
+          )
+        })(),
+      fork: (position, options) =>
+        Effect.fn("TimeTravel.fork")(function*() {
+          yield* Effect.annotateCurrentSpan({
+            runId: position.runId,
+            lineageId: position.frame.lineageId,
+            seq: position.frame.seq
+          })
+          return yield* provided(
+            // The anchors a fork restores from are a projection of the engine's
+            // own records, folded on demand: an ordinary engine run writes
+            // journal rows, never this package's tables.
+            refreshAnchors(position.runId).pipe(Effect.andThen(ForkOperation.fork({
+              parentRunId: position.runId,
+              frame: position.frame,
+              workspaceRoot: options?.workspaceRoot ?? workspaceRoot
+            })))
+          )
+        })(),
+      rewind: (position, options) =>
+        Effect.fn("TimeTravel.rewind")(function*() {
+          yield* Effect.annotateCurrentSpan({
+            runId: position.runId,
+            lineageId: position.frame.lineageId,
+            seq: position.frame.seq
+          })
+          return yield* provided(
+            // The validation phase runs before anything durable: a refused page
+            // size or a frame that is not on this run's lineage leaves no claim,
+            // no audit row, and no refreshed anchor behind.
+            Rewind.validate({
+              runId: position.runId,
+              frame: position.frame,
+              ...(options?.pageSize === undefined ? {} : { pageSize: options.pageSize })
+            }).pipe(
+              Effect.andThen(refreshAnchors(position.runId)),
+              Effect.andThen(Rewind.rewind({
+                runId: position.runId,
+                frame: position.frame,
+                owner,
+                detachedChildPolicy: options?.detachedChildren ?? "block",
+                ...(options?.pageSize === undefined ? {} : { pageSize: options.pageSize })
+              }))
+            )
+          )
+        })()
+    }
+  })
+
+/**
+ * Builds the service over the ambient contracts under the default policy,
+ * recovering first.
+ *
+ * @since 0.1.0
+ * @category constructors
+ */
+export const make: Effect.Effect<Service, TimeTravelError, Requirements | Scope.Scope> = makeWith()
 
 /**
  * The one injectable time-travel surface.
@@ -329,6 +402,18 @@ export class TimeTravel extends Context.Service<TimeTravel, Service>()(
    * @category layers
    */
   static readonly layer: Layer.Layer<TimeTravel, TimeTravelError, Requirements> = Layer.effect(TimeTravel)(make)
+
+  /**
+   * The same wiring under an explicit policy. {@link Options.isAlive} is the
+   * only knob, and it decides what startup recovery is allowed to conclude
+   * about a run an interrupted rewind left `running`.
+   *
+   * @since 0.1.0
+   * @category layers
+   */
+  static readonly layerWith = (
+    options: Options
+  ): Layer.Layer<TimeTravel, TimeTravelError, Requirements> => Layer.effect(TimeTravel)(makeWith(options))
 }
 
 /**
@@ -338,3 +423,13 @@ export class TimeTravel extends Context.Service<TimeTravel, Service>()(
  * @category layers
  */
 export const layer: Layer.Layer<TimeTravel, TimeTravelError, Requirements> = TimeTravel.layer
+
+/**
+ * Wires the machinery under an explicit policy and recovers on build.
+ *
+ * @since 0.1.0
+ * @category layers
+ */
+export const layerWith = (
+  options: Options
+): Layer.Layer<TimeTravel, TimeTravelError, Requirements> => TimeTravel.layerWith(options)
