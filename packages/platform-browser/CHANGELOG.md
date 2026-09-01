@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## 1.0.0-rc.0
+## [1.0.0-rc.0] - 2026-09-01
 
 ### Added
 
@@ -46,17 +46,26 @@
   worker's interrupt, which silently cancelled the caller's own fiber.
 - `JustBashLike.exec` options gained `signal` and `replaceEnv`. just-bash merges
   `env` into its own environment unless asked to replace it, so the adapter now
-  asks for replacement whenever the caller did not set `extendEnv: true`, which
-  is Effect's own default.
-- `kill` rejects `forceKillAfter`, which this backend cannot honour, and
-  documents `killSignal` as meaningless for an interpreter.
+  asks for replacement whenever `env` is supplied and `extendEnv` is not `true`,
+  which is Effect's own default.
+- `forceKillAfter` is rejected on both routes that can carry it. Effect's
+  `CommandOptions` extends `KillOptions`, so a command can name it without ever
+  calling `kill`; `spawn` now refuses it up front the way `kill` does, rather
+  than accepting a deadline this backend has no second, harder stop to honour.
+  `killSignal` stays accepted and documented as meaningless for an interpreter
+  that has no process to signal.
 - `cwd` is validated as a directory rather than merely as an existing path, so a
   regular file is refused instead of being handed to the interpreter.
 - `BrowserFileSystem` honours the options it used to drop: `readDirectory`
   walks the tree for `recursive`, `access` answers `readable` and `writable`
   from the reported mode bits, `makeDirectory` forwards `mode`, and `realPath`
   canonicalizes instead of returning its input, which is what makes
-  `@smthrs/kernel`'s symlink boundary resolution real over this host.
+  `@smthrs/kernel`'s symlink boundary resolution real over a backend that
+  supplies `realpath`; without that member the answer is lexical, and the
+  boundary is naming rather than resolution. Canonicalization is left to that
+  backend rather than being pre-empted: a `..` is no longer collapsed lexically
+  before the link that precedes it is followed, so `link/..` names the parent of
+  the link's target the way POSIX and `node:fs/promises` name it.
 - `exists` reports `false` only for a path that is absent; every other backend
   failure now propagates, matching effect's own derivation.
 - Backend errors map onto the `PlatformError` tag that carries their meaning:

@@ -164,6 +164,12 @@ export const make = (bash: JustBashLike) =>
       if (cmd.options.detached === true) {
         return yield* Effect.fail(rejected("spawn", "just-bash cannot detach a command from the browser tab"))
       }
+      if (cmd.options.forceKillAfter !== undefined) {
+        return yield* Effect.fail(rejected(
+          "spawn",
+          "just-bash has no force-stop after the abort, so forceKillAfter cannot be honoured"
+        ))
+      }
 
       const cwd = yield* resolveWorkingDirectory(cmd.options)
       const env = resolveEnvironment(cmd.options)
@@ -224,6 +230,13 @@ export const make = (bash: JustBashLike) =>
         )
       )
       const worker = yield* execute.pipe(
+        /**
+         * A cause carrying both a failure and an interrupt would report the
+         * abort and drop the failure. Nothing in `execute` can produce one:
+         * `Effect.promise` cannot fail, and neither the abort finalizer nor
+         * the permit release can, so the only reasons reachable here are one
+         * `Fail` or one `Interrupt`.
+         */
         Effect.onExit((exit) => {
           const reported: Exit.Exit<
             Awaited<ReturnType<JustBashLike["exec"]>>,

@@ -67,7 +67,7 @@ executes that claim on every build. [Browser support](/architecture/browser-supp
 lists every entry point and the seven that stay Node-only.
 
 ```ts
-import { BrowserHost } from "@smthrs/platform-browser/BrowserHost"
+import { BrowserHost } from "@smthrs/platform-browser"
 
 const host = BrowserHost.layer({ bash, fs, jj })
 ```

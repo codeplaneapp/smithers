@@ -20,7 +20,14 @@ import type * as BrowserChildProcessSpawner from "../../src/BrowserChildProcessS
 import * as BrowserFileSystem from "../../src/BrowserFileSystem/index.ts"
 import * as BrowserHost from "../../src/BrowserHost.ts"
 
-const rootedPromisesFs = (hostRoot: string): BrowserFileSystem.ZenFsPromisesLike => {
+/**
+ * `lstat` and `realpath` are supplied, not omitted: without them the adapter
+ * falls back to lexical canonicalization, and this mount's synchronous slice
+ * can create symlinks, so the kernel's boundary resolution would be naming
+ * rather than resolution. `realpath` answers inside the virtual namespace by
+ * stripping the canonical host root back off.
+ */
+const rootedPromisesFs = (hostRoot: string, canonicalRoot: string): BrowserFileSystem.ZenFsPromisesLike => {
   const at = (path: string): string => join(hostRoot, path)
   return {
     open: (path, flags) => fsPromises.open(at(path), flags),
@@ -29,6 +36,11 @@ const rootedPromisesFs = (hostRoot: string): BrowserFileSystem.ZenFsPromisesLike
     mkdir: (path, options) => fsPromises.mkdir(at(path), options),
     readdir: (path) => fsPromises.readdir(at(path)),
     stat: (path) => fsPromises.stat(at(path)),
+    lstat: (path) => fsPromises.lstat(at(path)),
+    realpath: (path) =>
+      fsPromises.realpath(at(path)).then((resolved) =>
+        resolved.startsWith(canonicalRoot) ? resolved.slice(canonicalRoot.length) || "/" : resolved
+      ),
     rm: (path, options) => fsPromises.rm(at(path), options)
   }
 }
@@ -80,10 +92,13 @@ if (!fsModule.existsSync(wasmPath)) {
 const wasmBytes = new Uint8Array(fsModule.readFileSync(wasmPath))
 
 const host = fsModule.mkdtempSync(join(tmpdir(), "flows-browser-host-shared-mount-"))
+// The temp root itself can sit behind a symlink (macOS /var), so the prefix
+// the adapter strips has to be the canonical one.
+const canonicalHost = fsModule.realpathSync(host)
 fsModule.mkdirSync(join(host, "repo"))
 const layer = BrowserHost.layer({
   bash: bashFor(host),
-  fs: rootedPromisesFs(host),
+  fs: rootedPromisesFs(host, canonicalHost),
   jj: { wasm: wasmBytes, fs: rootedSyncFs(host), root: "/repo" }
 })
 

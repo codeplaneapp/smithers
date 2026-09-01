@@ -228,6 +228,72 @@ describe("BrowserFileSystem error mapping", () => {
       expect(yield* (fileSystem.readDirectory("/root", { recursive: true }))).toEqual(["loop"])
     }))
 
+  /**
+   * The visited set only closes a loop for a backend that can canonicalize.
+   * One with neither `lstat` nor `realpath` follows the link and reports a
+   * fresh path at every level, so that walk, and only that walk, is bounded.
+   * A finite tree over the same shape is still walked whole.
+   */
+  it.effect("bounds a walk over a backend with neither lstat nor realpath", () =>
+    Effect.gen(function*() {
+      const directory: BrowserFileSystem.ZenFsStatsLike = {
+        size: 0,
+        mode: 0o755,
+        mtimeMs: 0,
+        isFile: () => false,
+        isDirectory: () => true,
+        isSymbolicLink: () => false
+      }
+      const helperless = (readdir: (at: string) => Promise<Array<string>>) =>
+        BrowserFileSystem.make({ ...throwingFs(codeError("ENOENT")), readdir, stat: async () => directory })
+
+      const finite = yield* (
+        helperless(async (at) => (at === "/root" ? ["only"] : [])).readDirectory("/root", { recursive: true })
+      )
+      const error = yield* (
+        Effect.flip(helperless(async () => ["loop"]).readDirectory("/root", { recursive: true }))
+      )
+
+      expect(finite).toEqual(["only"])
+      expect(error.reason).toMatchObject({ _tag: "BadResource", method: "readDirectory" })
+      expect(error.message).toContain("loops")
+    }))
+
+  /**
+   * `@zenfs/core` exposes its promises API as an object whose members read
+   * `this`. Calling an optional member through a captured reference would drop
+   * the receiver, so the optional members go through the backend object too.
+   */
+  it.effect("calls the optional backend members with the backend as their receiver", () =>
+    Effect.gen(function*() {
+      const directory: BrowserFileSystem.ZenFsStatsLike = {
+        size: 0,
+        mode: 0o755,
+        mtimeMs: 0,
+        isFile: () => false,
+        isDirectory: () => true,
+        isSymbolicLink: () => false
+      }
+      const backend = {
+        ...throwingFs(codeError("ENOENT")),
+        root: "/canonical",
+        readdir: async (): Promise<Array<string>> => ["child"],
+        // Both members read `this`, so an unbound call throws rather than
+        // quietly answering.
+        lstat: function(this: { root: string }): Promise<BrowserFileSystem.ZenFsStatsLike> {
+          return Promise.resolve(this.root === "/canonical" ? directory : { ...directory, isDirectory: () => false })
+        },
+        realpath: function(this: { root: string }): Promise<string> {
+          return Promise.resolve(this.root)
+        }
+      }
+      const fileSystem = BrowserFileSystem.make(backend)
+
+      expect(yield* (fileSystem.realPath("/root"))).toBe("/canonical")
+      // The one child canonicalizes onto the root, so the walk stops there.
+      expect(yield* (fileSystem.readDirectory("/canonical", { recursive: true }))).toEqual(["child"])
+    }))
+
   it.effect("dies rather than fails when closing a streamed handle throws", () =>
     Effect.gen(function*() {
       const backend: BrowserFileSystem.ZenFsPromisesLike = {
@@ -328,6 +394,10 @@ describe("BrowserFileSystem operations over node:fs/promises", () => {
     // A symlink, a read-only file, and a write-only file: the three shapes
     // `realPath` and `access` used to answer wrongly about.
     await NodeFsPromises.symlink(join(root, "a.txt"), join(root, "link.txt"))
+    // The target's parent differs from the link's parent so `hop/..` exposes
+    // whether `..` was applied before or after following the link.
+    await NodeFsPromises.mkdir(join(root, "elsewhere", "target"), { recursive: true })
+    await NodeFsPromises.symlink(join(root, "elsewhere", "target"), join(root, "hop"), "dir")
     await NodeFsPromises.writeFile(join(root, "ro.txt"), encoder.encode("ro"))
     await NodeFsPromises.chmod(join(root, "ro.txt"), 0o444)
     await NodeFsPromises.writeFile(join(root, "wo.txt"), encoder.encode("wo"))
@@ -467,6 +537,20 @@ describe("BrowserFileSystem operations over node:fs/promises", () => {
     }))
 
   /**
+   * Collapsing `hop/..` before following `hop` names the link's parent rather
+   * than the target's parent, weakening the kernel's workspace boundary.
+   */
+  it.effect("resolves a symlink before applying a following parent segment", () =>
+    Effect.gen(function*() {
+      const composed = `${path("hop")}/..`
+      const observed = yield* fileSystem.realPath(composed)
+      const expected = yield* Effect.promise(() => NodeFsPromises.realpath(composed))
+
+      expect(observed).toBe(expected)
+      expect(observed).not.toBe(root)
+    }))
+
+  /**
    * A volume with no `realpath` has no links to follow, so lexical
    * canonicalization is the whole answer; the path is still stat'ed so a
    * missing one fails the way Node's own `realpath` fails.
@@ -480,6 +564,12 @@ describe("BrowserFileSystem operations over node:fs/promises", () => {
       expect(yield* (Effect.flip(lexical.realPath("/nowhere/at/all")))).toMatchObject({
         reason: { _tag: "NotFound", method: "realPath" }
       })
+      // The stated limit, pinned rather than left to be discovered: without
+      // `realpath` a link resolves to its own name, so the kernel's symlink
+      // boundary over such a backend is only as strong as lexical naming. A
+      // volume that can hold links must supply `realpath`.
+      expect(yield* (lexical.realPath(path("link.txt")))).toBe(path("link.txt"))
+      expect(yield* (fileSystem.realPath(path("link.txt")))).not.toBe(path("link.txt"))
     }))
 
   /**
@@ -590,15 +680,17 @@ describe("BrowserFileSystem operations over node:fs/promises", () => {
     }))
 
   /**
-   * Clamping a negative offset to the start, or turning a NaN chunk size into
-   * an empty stream, answers a question the caller did not ask. Each of these
-   * is refused before the file is opened.
+   * Clamping a negative offset to the start, or turning a non-integral or
+   * non-finite chunk size into an empty stream, answers a question the caller
+   * did not ask. Each of these is refused before the file is opened.
    */
   it.effect.each<[string, Parameters<typeof fileSystem.stream>[1], string]>([
     ["a negative offset", { offset: -10 }, "offset must be"],
     ["a fractional offset", { offset: 1.5 }, "offset must be"],
     ["a negative bytesToRead", { bytesToRead: -1 }, "bytesToRead must be"],
     ["a NaN chunkSize", { chunkSize: Number.NaN }, "chunkSize must be"],
+    ["an infinite chunkSize", { chunkSize: Number.POSITIVE_INFINITY }, "chunkSize must be"],
+    ["a fractional chunkSize", { chunkSize: 1.5 }, "chunkSize must be"],
     ["a zero chunkSize", { chunkSize: 0 }, "chunkSize must be"],
     ["an unallocatable chunkSize", { chunkSize: 64 * 1024 * 1024 + 1 }, "chunkSize must be"]
   ])("refuses %s rather than answering with something else", ([_name, options, message]) =>
