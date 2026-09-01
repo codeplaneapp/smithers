@@ -18,6 +18,7 @@ import * as Latch from "effect/Latch"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { describe, expect, it } from "vitest"
 import * as JournalRecords from "../src/internal/JournalRecords.ts"
 import * as PlanScheduler from "../src/PlanScheduler.ts"
@@ -133,6 +134,41 @@ const scheduler = (options: Harness) =>
     ...options.options
   })
 
+describe("PlanScheduler option bounds", () => {
+  const executor: PlanScheduler.Executor = { execute: () => Effect.succeed("unused") }
+
+  it("rejects non-positive or non-integral concurrency caps synchronously", () => {
+    for (const value of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() =>
+        scheduler({
+          runId: "run-invalid-concurrency",
+          executor,
+          options: { concurrency: { steps: value, agents: 1 } }
+        })
+      ).toThrow(/concurrency\.steps must be a positive safe integer/)
+      expect(() =>
+        scheduler({
+          runId: "run-invalid-concurrency",
+          executor,
+          options: { concurrency: { steps: 1, agents: value } }
+        })
+      ).toThrow(/concurrency\.agents must be a positive safe integer/)
+    }
+  })
+
+  it("rejects negative or non-integral rebase limits synchronously", () => {
+    for (const value of [-1, Number.NaN, Number.POSITIVE_INFINITY, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() =>
+        scheduler({
+          runId: "run-invalid-rebases",
+          executor,
+          options: { rebaseLimit: value }
+        })
+      ).toThrow(/rebaseLimit must be a non-negative safe integer/)
+    }
+  })
+})
+
 describe("PlanScheduler over a static graph", () => {
   it("refuses a source glob when no filesystem service can expand it", async () => {
     const plan = await runPromise(compile([{
@@ -240,9 +276,9 @@ describe("PlanScheduler over a static graph", () => {
       }).pipe(Effect.provide(harness({ runId: "run-diamond", executor })), Effect.provide(TestStores.layer()))
     )
     expect(Object.fromEntries(report.settlements.map(({ dispatchKey, nodeId }) => [nodeId, dispatchKey]))).toEqual({
-      producer: "key1_a2f7c76258f4ab3fa6df7e1668397e17ad3ec97158279b24b8f0f7688cfb50e8",
-      left: "key1_e9e2811e03fa18cf7e5ddae49b3e6a52354f87de283b8a244c02090549c4b623",
-      right: "key1_b556bfd989cf1c299166399064880ded26b2abc2ea43398c6bcc6110352c5002"
+      producer: "key1_2b414866de9eabc533d8d5169b3836ad911d75171df37a5c46b1c0905b132389",
+      left: "key1_968ddf29a2d87d6a08afeb1aa5c49aedafbc0d652bd0d986c1e5f58b6bf0205c",
+      right: "key1_27d2679e13107ac87d6ffb4e9d1809bcf7343221f94e93df2034de9f2c994c51"
     })
   })
 
@@ -646,6 +682,34 @@ describe("PlanScheduler conflict strategies", () => {
     expect(WorkspaceSandbox.isMaterializationConflict({ ...rehydrated, _tag: "different" })).toBe(false)
   })
 
+  it("rejects malformed or hostile conflict lookalikes without throwing", () => {
+    const tag = WorkspaceSandbox.MaterializationConflict.identifier
+    const pathsWithExtraKey = ["out.txt"]
+    Object.defineProperty(pathsWithExtraKey, "extra", { value: true, enumerable: true })
+    const malformed: ReadonlyArray<unknown> = [
+      { _tag: tag },
+      { _tag: tag, paths: "out.txt", message: "raced" },
+      { _tag: tag, paths: [], message: "" },
+      { _tag: tag, paths: [""], message: "raced" },
+      { _tag: tag, paths: ["out.txt"], message: "raced", extra: true },
+      { _tag: tag, paths: pathsWithExtraKey, message: "raced" },
+      { _tag: tag, paths: ["x".repeat(4_097)], message: "raced" },
+      new Proxy({}, {
+        getPrototypeOf: () => {
+          throw new Error("hostile")
+        }
+      })
+    ]
+    const accessor = Object.defineProperty({}, "_tag", {
+      enumerable: true,
+      get: () => tag
+    })
+    for (const candidate of [...malformed, accessor]) {
+      expect(() => WorkspaceSandbox.isMaterializationConflict(candidate)).not.toThrow()
+      expect(WorkspaceSandbox.isMaterializationConflict(candidate)).toBe(false)
+    }
+  })
+
   it("delay/rebase replays a persisted conflict as a new attempt", async () => {
     const plan = await runPromise(compile([draft("replayed-racer")]))
     let dispatches = 0
@@ -997,13 +1061,13 @@ describe("PlanScheduler reconciliation", () => {
     expect(reorder?.verdict).toMatchObject({ _tag: "Reorder", dependsOn: ["writer"] })
   })
 
-  it("the default fails a deviation no declaration explains", async () => {
+  it("the default fails a deviation before journaling exactly one final settlement", async () => {
     const plan = await runPromise(compile([draft("mystery", { boundaryMode: "expected" })]))
     const executor: PlanScheduler.Executor = { execute: () => Effect.succeed("done") }
-    const report = await runPromise(
+    const { events, report } = await runPromise(
       Effect.gen(function*() {
         yield* activate("run-mystery")
-        return yield* Effect.provide(
+        const report = yield* Effect.provide(
           scheduler({ runId: "run-mystery", executor }).run(plan),
           harness({
             runId: "run-mystery",
@@ -1012,10 +1076,78 @@ describe("PlanScheduler reconciliation", () => {
             reconciliation: Reconciliation.layerDefault
           })
         )
+        const events = yield* JournalRecords.entries("run-mystery", undefined, 512)
+        return { events, report }
       }).pipe(Effect.provide(TestStores.layer()))
     )
     expect(report.verdicts[0]?.verdict._tag).toBe("Fail")
     expect(outcomes(report)).toEqual({ mystery: "failed" })
+    const settlements = events.entries.filter((entry) =>
+      entry.eventType === "flows.engine.node-settled" &&
+      (entry.payload as { readonly nodeId?: string }).nodeId === "mystery"
+    )
+    expect(settlements).toHaveLength(1)
+    expect(settlements[0]?.payload).toMatchObject({ nodeId: "mystery", outcome: "failed" })
+  })
+
+  it("does not conflate distinct path sets whose old space-joined signatures collided", async () => {
+    const plan = await runPromise(compile([
+      draft("first", { writes: ["first.out"], boundaryMode: "expected" }),
+      draft("second", { writes: ["second.out"], boundaryMode: "expected" })
+    ]))
+    const boundary = Layer.succeed(
+      StepBoundary.StepBoundary,
+      StepBoundary.make({
+        prepare: (descriptor) => Effect.succeed({ descriptor, readSnapshot: StepBoundary.exactReads(descriptor) }),
+        settle: (prepared) => {
+          const first = prepared.descriptor.writeSet.includes("first.out")
+          const paths = first ? ["a b", "c"] : ["a", "b c"]
+          const diffIdentity = first ? "first-diff" : "second-diff"
+          return Effect.succeed({
+            declaredOutputs: {},
+            diffIdentity,
+            wholeTreeWritesVerified: true as const,
+            hermeticReadsVerified: true as const,
+            deviation: { _tag: "ExpectedSetDeviation" as const, paths, diffIdentity }
+          })
+        },
+        replayOutputs: () => Effect.void
+      })
+    )
+    const executor: PlanScheduler.Executor = { execute: ({ node }) => Effect.succeed(node.id) }
+    const report = await runPromise(
+      Effect.gen(function*() {
+        yield* activate("run-signature-collision")
+        return yield* scheduler({ runId: "run-signature-collision", executor }).run(plan)
+      }).pipe(
+        Effect.provide(harness({
+          runId: "run-signature-collision",
+          executor,
+          boundary,
+          reconciliation: Reconciliation.layerDefault
+        })),
+        Effect.provide(TestStores.layer())
+      )
+    )
+
+    expect(report.verdicts).toHaveLength(2)
+    expect(report.verdicts.map((entry) => entry.verdict._tag)).toEqual(["Fail", "Fail"])
+    expect(outcomes(report)).toEqual({ first: "failed", second: "failed" })
+  })
+
+  it("deduplicates one discovered owner across several deviated paths", async () => {
+    const verdict = await runPromise(
+      Reconciliation.makeDefault().onDeviation({
+        nodeId: "deviator",
+        keyDigest: "digest",
+        attempt: 0,
+        paths: ["a", "b", "a"],
+        diffIdentity: "diff",
+        declaredBy: { a: "owner", b: "owner" },
+        alsoDeviatedBy: []
+      })
+    )
+    expect(verdict).toMatchObject({ _tag: "Reorder", dependsOn: ["owner"] })
   })
 
   it("the default factors out two nodes that deviated identically", async () => {
@@ -1087,6 +1219,70 @@ describe("PlanScheduler reconciliation", () => {
 })
 
 describe("PlanScheduler elaboration", () => {
+  it("rolls a recorded plan back when its durable lifecycle event refuses", async () => {
+    const plan = await runPromise(compile([draft("root")], "plan-atomic-record"))
+    const executor: PlanScheduler.Executor = { execute: () => Effect.succeed("unused") }
+    const observed = await runPromise(
+      Effect.gen(function*() {
+        yield* activate("run-atomic-record")
+        const sql = yield* SqlClient.SqlClient
+        const plans = yield* PlanStore.PlanStore
+        yield* sql`CREATE TRIGGER refuse_plan_record_event
+          BEFORE INSERT ON flows_journal_events
+          WHEN NEW.event_type = 'flows.engine.plan-recorded'
+          BEGIN SELECT RAISE(ABORT, 'refused'); END`
+        const exit = yield* scheduler({ runId: "run-atomic-record", executor }).record(plan).pipe(Effect.exit)
+        return { exit, stored: yield* plans.get(plan.planId) }
+      }).pipe(
+        Effect.provide(harness({ runId: "run-atomic-record", executor })),
+        Effect.provide(TestStores.layerAt(":memory:"))
+      )
+    )
+
+    expect(observed.exit).toMatchObject({
+      _tag: "Failure",
+      cause: { reasons: [{ error: { code: "store_failed" } }] }
+    })
+    expect(Option.isNone(observed.stored)).toBe(true)
+  })
+
+  it("rolls an appended generation back when its durable lifecycle event refuses", async () => {
+    const base = await runPromise(compile([draft("root")], "plan-atomic-append"))
+    const grown = await runPromise(Plan.append(base, [
+      draft("child", { inputs: [{ _tag: "Pending", from: "root" }] })
+    ]))
+    const executor: PlanScheduler.Executor = { execute: () => Effect.succeed("unused") }
+    const observed = await runPromise(
+      Effect.gen(function*() {
+        yield* activate("run-atomic-append")
+        const sql = yield* SqlClient.SqlClient
+        const plans = yield* PlanStore.PlanStore
+        const service = scheduler({ runId: "run-atomic-append", executor })
+        yield* service.record(base)
+        yield* sql`CREATE TRIGGER refuse_plan_append_event
+          BEFORE INSERT ON flows_journal_events
+          WHEN NEW.event_type = 'flows.engine.subgraph-appended'
+          BEGIN SELECT RAISE(ABORT, 'refused'); END`
+        const exit = yield* service.append(grown).pipe(Effect.exit)
+        return { exit, stored: Option.getOrThrow(yield* plans.get(base.planId)) }
+      }).pipe(
+        Effect.provide(harness({ runId: "run-atomic-append", executor })),
+        Effect.provide(TestStores.layerAt(":memory:"))
+      )
+    )
+
+    expect(observed.exit).toMatchObject({
+      _tag: "Failure",
+      cause: { reasons: [{ error: { code: "store_failed" } }] }
+    })
+    expect(observed.stored).toMatchObject({
+      planId: base.planId,
+      generation: 0,
+      digest: base.digest,
+      nodes: [{ id: "root" }]
+    })
+  })
+
   it("appends a subgraph to the same plan and journals it", async () => {
     const base = await runPromise(compile([draft("root")]))
     const grown = await runPromise(Plan.append(base, [draft("child", { inputs: [{ _tag: "Pending", from: "root" }] })]))
@@ -1372,6 +1568,27 @@ describe("PlanScheduler invalidation and journal plumbing", () => {
       }).pipe(Effect.provide(harness({ runId: "run-journal-broken", executor })), Effect.provide(TestStores.layer()))
     )
     expect(failure).toMatchObject({ code: "store_failed" })
+  })
+
+  it("normalizes a transaction-level journal refusal as a store failure", async () => {
+    const plan = await runPromise(compile([draft("solo")]))
+    const executor: PlanScheduler.Executor = { execute: ({ node }) => Effect.succeed(node.id) }
+    const refusal = new Journal.JournalError({ code: "unknown", message: "transaction refused" })
+    const closed = Journal.makeNoop({
+      transact: (() => Effect.fail(refusal)) as Journal.Service["transact"]
+    })
+    const failure = await runPromise(
+      Effect.gen(function*() {
+        yield* activate("run-transaction-broken")
+        return yield* Effect.flip(scheduler({ runId: "run-transaction-broken", executor }).record(plan)).pipe(
+          Effect.provideService(Journal.Journal, closed)
+        )
+      }).pipe(
+        Effect.provide(harness({ runId: "run-transaction-broken", executor })),
+        Effect.provide(TestStores.layer())
+      )
+    )
+    expect(failure).toMatchObject({ code: "store_failed", cause: refusal })
   })
 
   it("is reachable as a layer", async () => {
