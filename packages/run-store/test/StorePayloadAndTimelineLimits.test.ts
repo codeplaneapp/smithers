@@ -104,7 +104,7 @@ describe("run-store payload and timeline limits", () => {
       expect(result.heartbeatRow).toMatchObject({ startedAtMs: 10, heartbeatAtMs: 20 })
     }))
 
-  it.effect("round-trips multi-megabyte run state, meta, error, and outcome without caps", () =>
+  it.effect("round-trips multi-megabyte run state, meta, error, and outcome within the published byte bounds", () =>
     Effect.gen(function*() {
       const large = "x".repeat(2 * 1024 * 1024)
       const result = yield* migrated(
@@ -130,18 +130,36 @@ describe("run-store payload and timeline limits", () => {
             error: { large },
             outcome: { large }
           }, owner)
+          const oversizedState = yield* Effect.flip(
+            runs.create(
+              "oversized-state-run",
+              JSON.stringify({ large: "x".repeat(RunStore.maximumRunStateBytes) })
+            )
+          )
+          const oversizedMeta = yield* Effect.flip(attempts.put({
+            ...id,
+            stepKeyDigest: "oversized-meta",
+            state: "running",
+            startedAtMs: 1,
+            meta: { large: "x".repeat(AttemptStore.maximumValueBytes) }
+          }, owner))
           return {
             attempt: Option.getOrThrow(yield* attempts.get(id)),
             finish,
+            oversizedMeta,
+            oversizedState,
             put,
             run: yield* runs.get("large-payload-run")
           }
         })
       )
 
-      // CONTRACT: only checkpoints have a configurable byte ceiling today.
+      // The public ceilings bound every executable JSON field. Only a
+      // checkpoint's lower configured limit may vary within its absolute cap.
       expect(result.put).toEqual({ _tag: "Inserted" })
       expect(result.finish).toEqual({ _tag: "Finished" })
+      expect(result.oversizedState).toMatchObject({ code: "invalid_run", method: "create" })
+      expect(result.oversizedMeta).toMatchObject({ code: "invalid_attempt", method: "put" })
       expect(result.run.stateJson.length).toBeGreaterThan(2 * 1024 * 1024)
       expect((result.attempt.meta as { readonly large: string }).large).toHaveLength(large.length)
       expect((result.attempt.error as { readonly large: string }).large).toHaveLength(large.length)

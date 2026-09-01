@@ -371,7 +371,7 @@ describe("RunStore", () => {
       expect([ownerA, ownerB]).toContainEqual(result.row.owner)
     }))
 
-  it.effect("requires liveness evidence before replacing a different owner", () =>
+  it.effect("names the fresh lease, not the missing evidence, when a live owner holds the run", () =>
     Effect.gen(function*() {
       const result = yield* migrated(Effect.gen(function*() {
         const store = yield* RunStore
@@ -385,7 +385,9 @@ describe("RunStore", () => {
         return { outcome, row: yield* store.get(running.runId) }
       }))
 
-      expect(result.outcome).toEqual({ _tag: "EvidenceRequired" })
+      // Evidence cannot beat a fresh heartbeat, so `EvidenceRequired` would
+      // advise the caller to supply evidence for a write SQL must still refuse.
+      expect(result.outcome).toEqual({ _tag: "HeartbeatFresh" })
       expect(result.row.owner).toEqual(ownerA)
       expect(result.row.heartbeatAtMs).toBe(0)
     }))
@@ -402,12 +404,15 @@ describe("RunStore", () => {
         const store = yield* RunStore
         const running = yield* activateNew(store, "run-no-evidence", ownerA)
         const expectedSnapshot = snapshot(running)
-        // Past the staleness cutoff, so `HeartbeatFresh` is not the answer.
+        yield* TestClock.adjust(Duration.seconds(31))
+        const nowMs = yield* Clock.currentTimeMillis
+        // The store clock is past the cutoff, so the identical stale snapshot
+        // isolates the missing evidence rather than a fresh lease.
         const outcome = yield* store.claimAndOwn(
           running.runId,
           expectedSnapshot,
           ownerB,
-          Duration.toMillis(heartbeatStaleAfter) + 1
+          nowMs
         )
         // A second call sees the identical snapshot: retrying cannot help, which
         // is exactly what the outcome now says.
@@ -415,7 +420,7 @@ describe("RunStore", () => {
           running.runId,
           expectedSnapshot,
           ownerB,
-          Duration.toMillis(heartbeatStaleAfter) + 1
+          nowMs
         )
         return { outcome, again, row: yield* store.get(running.runId) }
       }))
@@ -509,7 +514,7 @@ describe("RunStore", () => {
       expect(result.row.owner).toBeNull()
     }))
 
-  it.effect("rejects an ordinary claim on every running snapshot", () =>
+  it.effect("reports the fresh lease when an ordinary claim meets a running run", () =>
     Effect.gen(function*() {
       const outcome = yield* migrated(Effect.gen(function*() {
         const store = yield* RunStore
@@ -522,7 +527,7 @@ describe("RunStore", () => {
         )
       }))
 
-      expect(outcome).toEqual({ _tag: "SnapshotChanged" })
+      expect(outcome).toEqual({ _tag: "HeartbeatFresh" })
     }))
 
   it.effect("rejects an ordinary claim on a running run even once its heartbeat is stale (D4)", () =>
@@ -536,11 +541,12 @@ describe("RunStore", () => {
       const result = yield* migrated(Effect.gen(function*() {
         const store = yield* RunStore
         const running = yield* activateNew(store, "run-stale-ordinary-claim", ownerA)
+        yield* TestClock.adjust(Duration.seconds(31))
         const outcome = yield* store.claim(
           running.runId,
           snapshot(running),
           ownerB,
-          Duration.toMillis(heartbeatStaleAfter) + 1
+          yield* Clock.currentTimeMillis
         )
         return { outcome, row: yield* store.get(running.runId) }
       }))
@@ -722,8 +728,32 @@ describe("RunStore", () => {
 
       expect(outcomes.notStale).toEqual({ _tag: "HeartbeatFresh" })
       expect(outcomes.bypass).toEqual({ _tag: "SnapshotChanged" })
-      expect(outcomes.wrongEvidence).toEqual({ _tag: "SnapshotChanged" })
+      expect(outcomes.wrongEvidence).toEqual({ _tag: "LivenessUnconfirmed" })
       expect(outcomes.stolen).toEqual({ _tag: "Claimed", claimedAtMs: 31_000 })
+    }))
+
+  it.effect("reports SnapshotChanged when matching steal evidence loses to a changed row", () =>
+    Effect.gen(function*() {
+      const outcome = yield* migrated(Effect.gen(function*() {
+        const store = yield* RunStore
+        const running = yield* activateNew(store, "run-steal-changed-snapshot", ownerA)
+        const expectedSnapshot = snapshot(running)
+        yield* TestClock.adjust(Duration.seconds(31))
+        expect(
+          yield* store.heartbeat(running.runId, ownerA, yield* Clock.currentTimeMillis)
+        ).toEqual({ _tag: "Updated" })
+        yield* TestClock.adjust(Duration.seconds(31))
+        const nowMs = yield* Clock.currentTimeMillis
+        return yield* store.steal(
+          running.runId,
+          expectedSnapshot,
+          ownerC,
+          nowMs,
+          staleEvidence(ownerA, ownerC, nowMs)
+        )
+      }))
+
+      expect(outcome).toEqual({ _tag: "SnapshotChanged" })
     }))
 
   it.effect("invalidates activation when the old owner heartbeats after the claim", () =>
@@ -1376,6 +1406,9 @@ describe("RunStore ownership evidence boundaries", () => {
         }> = []
         for (const variant of variants) {
           const direct = yield* activateNew(store, `evidence-direct-${variant.name}`, ownerA)
+          // The lease must be stale for this matrix to isolate evidence
+          // validation; a fresh owner correctly wins before evidence matters.
+          yield* TestClock.adjust(Duration.seconds(31))
           const claimAndOwn = yield* store.claimAndOwn(
             direct.runId,
             snapshot(direct),
@@ -1413,7 +1446,7 @@ describe("RunStore ownership evidence boundaries", () => {
       expect(outcomes).toEqual(variants.map(() => ({
         claimAndOwn: "EvidenceRequired",
         recoverClaim: "LivenessUnconfirmed",
-        steal: "SnapshotChanged"
+        steal: "LivenessUnconfirmed"
       })))
     }))
 

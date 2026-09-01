@@ -155,7 +155,7 @@ describe("lease-expired evidence", () => {
         )
       }))
 
-      expect(result._tag).toBe("SnapshotChanged")
+      expect(result._tag).toBe("LivenessUnconfirmed")
     }))
 })
 

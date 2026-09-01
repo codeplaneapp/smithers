@@ -112,10 +112,13 @@ run. Secrets belong at host-owned outbound I/O boundaries instead.
 
 Compare-and-swap competition is represented by tagged success values such as
 `FenceLost`, `SnapshotChanged`, `HeartbeatFresh`, `AlreadyClaimed`, and
-`EvidenceRequired`. Invalid input, corrupt durable rows, and persistence
-failures use the typed `RunStoreError` or `AttemptStoreError` channel. This
-separation lets callers retry contention without treating corruption as a
-race.
+`EvidenceRequired`. A steal with evidence that does not match its snapshot,
+host relation, or observation time reports `LivenessUnconfirmed` before any
+compare-and-swap; `SnapshotChanged` remains reserved for matching evidence
+whose comparison loses to a changed row. Invalid input, corrupt durable rows,
+and persistence failures use the typed `RunStoreError` or `AttemptStoreError`
+channel. This separation lets callers retry contention without treating
+corruption as a race.
 
 `RunStoreMetrics` provides attributed views for every claim, activation,
 recovery, heartbeat, and transition outcome. A fence loss is therefore visible
@@ -163,6 +166,7 @@ subpath, except the Node-only test layer, which has only its subpath.
 | `TransitionGuard` (type) | models | An extra compare-and-swap predicate over first-class run metadata. |
 | `RequestCancelOutcome` (type) | models | Result of recording a cancellation request. |
 | `ClaimOutcome` (type) | models | Result of acquiring claim columns for a later activation. |
+| `StealOutcome` (type) | models | Result of stealing an exact run snapshot after liveness evidence is checked. |
 | `ClaimAndOwnOutcome` (type) | models | Result of claiming and activating ownership in one compare-and-swap. |
 | `ActivateOutcome` (type) | models | Result of activating a held claim. |
 | `AbandonClaimOutcome` (type) | models | Result of clearing a held claim. |
@@ -190,7 +194,7 @@ subpath, except the Node-only test layer, which has only its subpath.
 | `activate` (const) | metrics | `claims` views for `RunStore.activate`, keyed by `ActivateOutcome` tag. |
 | `abandonClaim` (const) | metrics | `claims` views for `RunStore.abandonClaim`, keyed by outcome tag. |
 | `recoverClaim` (const) | metrics | `claims` views for `RunStore.recoverClaim`, keyed by outcome tag. |
-| `steal` (const) | metrics | `claims` views for `RunStore.steal`, keyed by `ClaimOutcome` tag. |
+| `steal` (const) | metrics | `claims` views for `RunStore.steal`, keyed by `StealOutcome` tag. |
 | `heartbeat` (const) | metrics | `heartbeats` views keyed by `HeartbeatOutcome` tag. |
 | `transition` (const) | metrics | `transitions` views keyed by `TransitionOutcome` tag. |
 

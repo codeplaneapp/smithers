@@ -128,12 +128,16 @@ export const recoverClaim = byOutcome(
 )
 
 /**
- * `claims` views for `RunStore.steal`, keyed by `ClaimOutcome` tag.
+ * `claims` views for `RunStore.steal`, keyed by `StealOutcome` tag.
  *
  * @category metrics
  * @since 0.1.0
  */
-export const steal = byOutcome(claims, { op: "steal" }, claimTags)
+export const steal = byOutcome(
+  claims,
+  { op: "steal" },
+  ["Claimed", "NotFound", "AlreadyClaimed", "HeartbeatFresh", "SnapshotChanged", "LivenessUnconfirmed"] as const
+)
 
 /**
  * `heartbeats` views keyed by `HeartbeatOutcome` tag.

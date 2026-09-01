@@ -86,10 +86,13 @@ run. Secrets belong at host-owned outbound I/O boundaries instead.
 
 Compare-and-swap competition is represented by tagged success values such as
 `FenceLost`, `SnapshotChanged`, `HeartbeatFresh`, `AlreadyClaimed`, and
-`EvidenceRequired`. Invalid input, corrupt durable rows, and persistence
-failures use the typed `RunStoreError` or `AttemptStoreError` channel. This
-separation lets callers retry contention without treating corruption as a
-race.
+`EvidenceRequired`. A steal with evidence that does not match its snapshot,
+host relation, or observation time reports `LivenessUnconfirmed` before any
+compare-and-swap; `SnapshotChanged` remains reserved for matching evidence
+whose comparison loses to a changed row. Invalid input, corrupt durable rows,
+and persistence failures use the typed `RunStoreError` or `AttemptStoreError`
+channel. This separation lets callers retry contention without treating
+corruption as a race.
 
 `RunStoreMetrics` provides attributed views for every claim, activation,
 recovery, heartbeat, and transition outcome. A fence loss is therefore visible

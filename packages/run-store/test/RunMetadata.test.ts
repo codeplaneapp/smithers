@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
 import { DurableWriter } from "@smthrs/database/DurableWriter"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Effect, Exit, Layer } from "effect"
+import { Duration, Effect, Exit, Layer } from "effect"
+import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as Statement from "effect/unstable/sql/Statement"
 import * as Migrations from "../src/Migrations.ts"
@@ -120,6 +121,19 @@ describe("run metadata", () => {
       expect(yield* store.requestCancel("missing", 900)).toEqual({ _tag: "NotFound" })
       expect((yield* store.get("run")).cancelRequestedAtMs).toBe(500)
     }))
+
+  effect("reads a cancellation timestamp from an earlier caller domain", () =>
+    Effect.gen(function*() {
+      const store = yield* RunStore.RunStore
+      yield* TestClock.adjust(Duration.seconds(10))
+      yield* store.create("earlier-cancel-clock", "{}")
+      yield* TestClock.adjust(Duration.seconds(1))
+      expect(yield* store.requestCancel("earlier-cancel-clock", 1)).toEqual({
+        _tag: "CancelRequested",
+        requestedAtMs: 1
+      })
+      expect((yield* store.get("earlier-cancel-clock")).cancelRequestedAtMs).toBe(1)
+    }).pipe(Effect.provide(TestClock.layer())))
 
   effect("a guarded completion loses to a cancel request", () =>
     Effect.gen(function*() {

@@ -21,6 +21,8 @@
 - Added `ClaimAndOwnOutcome.EvidenceRequired` for a no-evidence claim against
   another live owner, which previously asserted a `SnapshotChanged` comparison
   that branch never performed.
+- Added `StealOutcome.LivenessUnconfirmed` for evidence that does not match the
+  expected owner, host relation, or observation time before any comparison.
 - Added the `RunStoreMetrics` module: the `flows_run_claims`,
   `flows_run_transitions`, and `flows_run_heartbeats` counters plus one
   attributed view per operation outcome, including `abandon_claim` and

@@ -46,8 +46,11 @@ activation, recovery, heartbeats, steals, and terminal transitions. Public
 evidence to a call; they cannot expire or extend a lease. The binding is exact
 equality: `claimAndOwn`, `recoverClaim`, and `steal` accept evidence only when
 `evidence.checkedAtMs` equals the `nowMs` of the same call, so a probe taken at
-one instant cannot be replayed into another. `requestCancel` keeps its
-timestamp as request metadata because it grants no ownership.
+one instant cannot be replayed into another. `steal` reports
+`LivenessUnconfirmed` when evidence does not match and reserves
+`SnapshotChanged` for a matching-evidence comparison that loses to a changed
+row. `requestCancel` keeps its timestamp as request metadata because it grants
+no ownership.
 
 Every owned write compares the complete `(hostId, processId, nonce)` fence in
 the same SQL statement as its mutation. `sameHostPidProbe` treats only `ESRCH`

@@ -20,12 +20,12 @@ export const maximumIdentifierLength = 1_024
  * @private
  */
 export interface JsonLimits {
-  readonly maxBytes: number
+  readonly maxBytes?: number | undefined
   readonly maxDepth: number
   readonly maxMembers: number
   readonly maxNodes: number
-  readonly maxStringBytes: number
-  readonly maxKeyBytes: number
+  readonly maxStringBytes?: number | undefined
+  readonly maxKeyBytes?: number | undefined
 }
 
 /**
@@ -97,7 +97,7 @@ export const isDurableText = (value: unknown, maximum = maximumIdentifierLength)
 }
 
 /** Encoded JSON-string bytes without allocating an encoded copy. */
-const stringBytes = (value: string, maximum: number): number | undefined => {
+const stringBytes = (value: string, maximum?: number | undefined): number | undefined => {
   let bytes = 2
   for (let index = 0; index < value.length; index++) {
     const unit = value.charCodeAt(index)
@@ -111,7 +111,7 @@ const stringBytes = (value: string, maximum: number): number | undefined => {
     else if (unit <= 0x7f) bytes++
     else if (unit <= 0x7ff) bytes += 2
     else bytes += 3
-    if (bytes > maximum) return undefined
+    if (maximum !== undefined && bytes > maximum) return undefined
   }
   return bytes
 }
@@ -131,7 +131,7 @@ export const admitJson = (input: unknown, limits: JsonLimits): JsonResult => {
   const refuse = (complaint: string): JsonResult => ({ ok: false, complaint })
   const add = (count: number): boolean => {
     bytes += count
-    return Number.isSafeInteger(bytes) && bytes <= limits.maxBytes
+    return Number.isSafeInteger(bytes) && (limits.maxBytes === undefined || bytes <= limits.maxBytes)
   }
 
   const visit = (value: unknown, depth: number): JsonResult => {
@@ -251,7 +251,7 @@ export const admitJsonText = (
   }
   const admitted = admitJson(parsed, limits)
   if (!admitted.ok) return admitted
-  if (new TextEncoder().encode(input).byteLength > limits.maxBytes) {
+  if (limits.maxBytes !== undefined && new TextEncoder().encode(input).byteLength > limits.maxBytes) {
     return { ok: false, complaint: "exceeds the JSON byte limit" }
   }
   return { ok: true, value: input, json: admitted.value }

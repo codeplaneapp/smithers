@@ -67,7 +67,8 @@ describe("RunStoreMetrics", () => {
         "NotFound",
         "AlreadyClaimed",
         "HeartbeatFresh",
-        "SnapshotChanged"
+        "SnapshotChanged",
+        "LivenessUnconfirmed"
       ])
       expect(Object.keys(RunStoreMetrics.heartbeat)).toEqual(["Updated", "FenceLost", "NotFound"])
       expect(Object.keys(RunStoreMetrics.transition)).toEqual([
@@ -106,7 +107,8 @@ describe("RunStoreMetrics", () => {
         [RunStoreMetrics.steal.NotFound, { op: "steal", outcome: "not_found" }],
         [RunStoreMetrics.steal.AlreadyClaimed, { op: "steal", outcome: "already_claimed" }],
         [RunStoreMetrics.steal.HeartbeatFresh, { op: "steal", outcome: "heartbeat_fresh" }],
-        [RunStoreMetrics.steal.SnapshotChanged, { op: "steal", outcome: "snapshot_changed" }]
+        [RunStoreMetrics.steal.SnapshotChanged, { op: "steal", outcome: "snapshot_changed" }],
+        [RunStoreMetrics.steal.LivenessUnconfirmed, { op: "steal", outcome: "liveness_unconfirmed" }]
       ] as const
       const heartbeat = [
         [RunStoreMetrics.heartbeat.Updated, { outcome: "updated" }],
@@ -141,7 +143,7 @@ describe("RunStoreMetrics", () => {
         attributes
       })).sort((left, right) => normalized(left).localeCompare(normalized(right)))
 
-      expect(matrix).toHaveLength(53)
+      expect(matrix).toHaveLength(54)
       expect(actual).toEqual(expected)
     }))
 
@@ -196,11 +198,11 @@ describe("RunStoreMetrics", () => {
           kind: "same-host-pid-dead"
         }
         expect(yield* store.steal("run-metrics-own", pending, ownerB, nowMs, mismatched)).toEqual({
-          _tag: "SnapshotChanged"
+          _tag: "LivenessUnconfirmed"
         })
 
         expect(yield* count(RunStoreMetrics.claimAndOwn.Activated)).toBe(1)
-        expect(yield* count(RunStoreMetrics.steal.SnapshotChanged)).toBe(1)
+        expect(yield* count(RunStoreMetrics.steal.LivenessUnconfirmed)).toBe(1)
       }))
     }))
 

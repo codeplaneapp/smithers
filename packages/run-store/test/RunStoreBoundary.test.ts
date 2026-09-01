@@ -68,6 +68,15 @@ describe("RunStore inert input boundary", () => {
       expect(calls).toBe(1)
     })))
 
+  it.effect("returns invalid_run for non-string create state", () =>
+    migrated(Effect.gen(function*() {
+      const store = yield* RunStore
+      for (const [index, stateJson] of [null, 42, { value: true }].entries()) {
+        const failure = yield* Effect.flip(store.create(`invalid-create-state-${index}`, stateJson as never))
+        expect(failure).toMatchObject({ code: "invalid_run", method: "create" })
+      }
+    })))
+
   it.effect("validates create options, snapshots, evidence, guards, and state as exact records", () =>
     migrated(Effect.gen(function*() {
       const store = yield* RunStore
