@@ -6,19 +6,27 @@
  */
 import { describe, expect, it } from "vitest"
 import * as GithubTarget from "../src/GithubTarget.ts"
-import { Secret } from "../src/Secret.ts"
+import { HttpSecret, Secret } from "../src/Secret.ts"
 import type * as Target from "../src/Target.ts"
 
 const withToken = (approval?: "required"): Target.AnyTarget =>
   GithubTarget.Pr({
     gates: [],
-    secrets: [Secret("GITHUB_TOKEN")],
+    secrets: [HttpSecret(Secret("GITHUB_TOKEN"), ["https://api.github.com"])],
     ...(approval === undefined ? {} : { approval })
   })
 
 describe("refusePr", () => {
+  it("rejects an unbound secret source at the target boundary", () => {
+    expect(() => GithubTarget.Pr({ gates: [], secrets: [Secret("GITHUB_TOKEN") as never] }))
+      .toThrow(/declaration is invalid/)
+  })
+
   it("refuses a declaration that never names the GITHUB_TOKEN secret", () => {
-    const pr = GithubTarget.Pr({ gates: [], secrets: [Secret("OTHER_TOKEN")] })
+    const pr = GithubTarget.Pr({
+      gates: [],
+      secrets: [HttpSecret(Secret("OTHER_TOKEN"), ["https://api.github.com"])]
+    })
     const refusal = GithubTarget.refusePr(pr, {
       environment: { GITHUB_TOKEN: "ghp_value", OTHER_TOKEN: "x" },
       approvalGranted: true

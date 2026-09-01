@@ -204,7 +204,7 @@ export interface ExecAttrs {
   readonly args?: ReadonlyArray<string | Reference.FlagRef> | undefined
   readonly runtimeArgs?: ReadonlyArray<string> | undefined
   readonly env?: Readonly<Record<string, string>> | undefined
-  readonly secrets?: ReadonlyArray<Secret.Secret> | undefined
+  readonly secrets?: ReadonlyArray<Secret.HttpCredential> | undefined
 }
 
 const resolveArgs = (args: ReadonlyArray<string | Reference.FlagRef> | undefined): Array<string> =>

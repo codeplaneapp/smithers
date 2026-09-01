@@ -5,26 +5,26 @@
  * is inert: `Secret("SMITHERS_CACHE_TOKEN")` performs no read, so BUILD.ts
  * evaluation stays pure and a BUILD.ts file never contains a credential.
  *
- * The value is resolved lazily, at execution, and only for a target that
- * declared the secret. It is never placed in a child process's environment.
- * Instead the target is given an unguessable **placeholder**, minted per run,
- * and the substituting proxy replaces that placeholder with the real value on
- * outbound requests. A tool therefore holds a token-shaped string that is
- * worthless anywhere except through the proxy, and a tool that logs its
- * environment leaks nothing.
+ * The source declaration is still not authority to send the value. A child
+ * target must wrap it in {@link HttpSecret}, binding it to exact HTTP origins.
+ * It then receives an unguessable placeholder, minted per run, and the proxy
+ * resolves that placeholder only while constructing a request for one of
+ * those origins. A tool therefore holds a token-shaped string that is
+ * worthless anywhere except through the scoped proxy.
  *
  * Three properties follow, and each is the reason for one design choice.
  *
- * - **Explicit dependency.** A target reaches a secret only by declaring it in
- *   attrs. Placeholders are minted per run and handed only to the target that
- *   declared the secret, so a target cannot spell a placeholder itself and have
- *   the proxy substitute a credential it was never given.
+ * - **Explicit dependency and audience.** A target reaches a secret only by
+ *   declaring a destination-bound credential in attrs. Placeholders are minted
+ *   per run and handed only to that target. A guessed placeholder or a request
+ *   for another origin cannot resolve it.
  * - **No value in key material.** The declaration carries a variable name.
  *   Keys record the name; they never record the value, and a cache entry
  *   therefore cannot carry a credential between machines.
- * - **Lazy resolution.** The host variable is read when a request needs it, not
- *   when BUILD.ts is evaluated and not when a target is planned. A workspace
- *   that plans a graph it does not execute never touches the credential.
+ * - **Lazy, request-scoped resolution.** The host variable is read once when
+ *   an authorized request needs it, not when BUILD.ts is evaluated or planned.
+ *   Exact values echoed by the upstream are replaced before the response is
+ *   returned to the job.
  *
  * This replaces the previous model, where a target hardcoded an environment
  * variable name and the exec runner deleted it from every child's environment.
@@ -34,6 +34,7 @@
  * @since 0.1.0
  */
 import * as Schema from "effect/Schema"
+import * as NodeUtil from "node:util/types"
 
 /**
  * Maximum length of a declared environment-variable name.
@@ -44,7 +45,31 @@ import * as Schema from "effect/Schema"
 export const maximumNameLength = 256
 
 /**
- * Schema for one declared secret.
+ * Maximum number of exact HTTP origins one credential may target.
+ * @category constants
+ * @since 1.0.0
+ */
+export const maximumAudiences = 32
+
+/**
+ * Maximum UTF-16 length of one normalized HTTP origin.
+ * @category constants
+ * @since 1.0.0
+ */
+export const maximumAudienceLength = 2_048
+
+/**
+ * Maximum length of a public fallback carried in a declaration.
+ * @category constants
+ * @since 1.0.0
+ */
+export const maximumFallbackLength = 16 * 1024
+
+const environmentName = /^[A-Za-z_][A-Za-z0-9_]*$/
+const wellFormedText = Schema.makeFilter((value: string) => value.isWellFormed(), { title: "wellFormedText" })
+
+/**
+ * Schema for one inert secret source.
  *
  * The declaration is the variable name and nothing else. A placeholder is not
  * part of it: placeholders are minted per run by the executor, so two runs of
@@ -56,9 +81,13 @@ export const maximumNameLength = 256
  */
 export const Declaration = Schema.TaggedStruct("Secret", {
   /** The environment variable the value is read from at execution time. */
-  env: Schema.NonEmptyString,
+  env: Schema.NonEmptyString.check(
+    Schema.isMaxLength(maximumNameLength),
+    Schema.isPattern(environmentName),
+    wellFormedText
+  ),
   /** Public fallback used only when the environment variable is absent. */
-  fallback: Schema.optional(Schema.NonEmptyString)
+  fallback: Schema.optional(Schema.NonEmptyString.check(Schema.isMaxLength(maximumFallbackLength), wellFormedText))
 })
 
 /**
@@ -69,16 +98,23 @@ export const Declaration = Schema.TaggedStruct("Secret", {
  */
 export type Secret = typeof Declaration.Type
 
-const environmentName = /^[A-Za-z_][A-Za-z0-9_]*$/
+const ownData = (value: object, name: PropertyKey): unknown => {
+  const descriptor = Object.getOwnPropertyDescriptor(value, name)
+  return descriptor !== undefined && "value" in descriptor && descriptor.enumerable ? descriptor.value : undefined
+}
 
 /**
- * Declares one secret, read lazily from the named environment variable.
+ * Declares one secret source, read lazily at a host-owned request boundary.
  *
  * @example
  * ```ts
  * import { Smithers } from "@smthrs/targets"
  *
  * export const cacheToken = Smithers.Secret("SMITHERS_CACHE_TOKEN")
+ * export const github = Smithers.HttpSecret(
+ *   Smithers.Secret("GITHUB_TOKEN"),
+ *   ["https://api.github.com"]
+ * )
  * ```
  *
  * @category constructors
@@ -93,14 +129,32 @@ export const Secret = (env: string, options: { readonly fallback?: string | unde
   if (!environmentName.test(trimmed)) {
     throw new Error(`Secret name must be an environment variable name: ${JSON.stringify(env)}`)
   }
-  if (typeof options !== "object" || options === null) throw new TypeError("Secret options must be an object")
+  if (
+    typeof options !== "object" || options === null || NodeUtil.isProxy(options) ||
+    (Object.getPrototypeOf(options) !== Object.prototype && Object.getPrototypeOf(options) !== null)
+  ) throw new TypeError("Secret options must be a plain object")
+  if (Object.getOwnPropertySymbols(options).length > 0) {
+    throw new TypeError("Secret options must not contain symbol properties")
+  }
   for (const key of Object.getOwnPropertyNames(options)) {
     if (key !== "fallback") throw new TypeError(`Secret received unknown option ${JSON.stringify(key)}`)
   }
-  if (options.fallback !== undefined && options.fallback === "") {
-    throw new TypeError("Secret fallback must be non-empty text")
+  const fallbackDescriptor = Object.getOwnPropertyDescriptor(options, "fallback")
+  if (
+    fallbackDescriptor !== undefined &&
+    (!("value" in fallbackDescriptor) || fallbackDescriptor.enumerable !== true)
+  ) throw new TypeError("Secret option fallback must be an enumerable data property")
+  const fallback = fallbackDescriptor !== undefined && "value" in fallbackDescriptor
+    ? fallbackDescriptor.value
+    : undefined
+  if (
+    fallback !== undefined &&
+    (typeof fallback !== "string" || fallback === "" || fallback.length > maximumFallbackLength ||
+      !fallback.isWellFormed())
+  ) {
+    throw new TypeError("Secret fallback must be bounded non-empty well-formed text")
   }
-  return Declaration.make({ env: trimmed, ...(options.fallback === undefined ? {} : { fallback: options.fallback }) })
+  return Object.freeze(Declaration.make({ env: trimmed, ...(fallback === undefined ? {} : { fallback }) }))
 }
 
 /**
@@ -110,10 +164,168 @@ export const Secret = (env: string, options: { readonly fallback?: string | unde
  * @since 0.1.0
  */
 export const isSecret = (value: unknown): value is Secret => {
-  if (typeof value !== "object" || value === null) return false
-  const candidate = value as { readonly _tag?: unknown; readonly env?: unknown; readonly fallback?: unknown }
-  return candidate._tag === "Secret" && typeof candidate.env === "string" &&
-    (candidate.fallback === undefined || typeof candidate.fallback === "string")
+  if (typeof value !== "object" || value === null || NodeUtil.isProxy(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) return false
+  const keys = Reflect.ownKeys(value)
+  if (
+    keys.some((key) => typeof key !== "string" || !["_tag", "env", "fallback"].includes(key)) ||
+    !keys.includes("_tag") || !keys.includes("env")
+  ) return false
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (descriptor === undefined || !("value" in descriptor) || descriptor.enumerable !== true) return false
+  }
+  const own = (name: "_tag" | "env" | "fallback"): unknown => {
+    return ownData(value, name)
+  }
+  const tag = own("_tag")
+  const env = own("env")
+  const fallback = own("fallback")
+  return tag === "Secret" && typeof env === "string" && env.length <= maximumNameLength &&
+    env.isWellFormed() && environmentName.test(env) &&
+    (fallback === undefined || typeof fallback === "string" && fallback !== "" &&
+        fallback.length <= maximumFallbackLength && fallback.isWellFormed())
+}
+
+const loopbackHost = (hostname: string): boolean =>
+  hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "127.0.0.1" || hostname === "[::1]"
+
+/**
+ * Normalizes an exact HTTP origin accepted as a credential audience.
+ *
+ * Public credentials require TLS. Plain HTTP is accepted only on loopback,
+ * where the request remains inside the host boundary.
+ *
+ * @category parsing
+ * @since 1.0.0
+ */
+export const normalizeAudience = (input: string): string => {
+  if (typeof input !== "string" || input === "" || input.length > maximumAudienceLength || !input.isWellFormed()) {
+    throw new TypeError("secret audience must be bounded well-formed text")
+  }
+  let url: URL
+  try {
+    url = new URL(input)
+  } catch {
+    throw new TypeError(`secret audience must be an exact HTTP origin: ${JSON.stringify(input)}`)
+  }
+  if (
+    (url.protocol !== "https:" && url.protocol !== "http:") || url.username !== "" || url.password !== "" ||
+    url.pathname !== "/" || url.search !== "" || url.hash !== "" ||
+    (url.protocol === "http:" && !loopbackHost(url.hostname))
+  ) {
+    throw new TypeError(`secret audience must be an exact HTTPS or loopback HTTP origin: ${JSON.stringify(input)}`)
+  }
+  return url.origin
+}
+
+const normalizedAudience = (value: string): boolean => {
+  try {
+    return normalizeAudience(value) === value
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Exact normalized HTTP origin to which a credential may be sent.
+ * @category schemas
+ * @since 1.0.0
+ */
+export const Audience = Schema.NonEmptyString.check(
+  Schema.isMaxLength(maximumAudienceLength),
+  Schema.makeFilter(normalizedAudience, { title: "normalizedSecretAudience" })
+)
+
+/**
+ * A secret source bound to the exact HTTP origins allowed to receive it.
+ *
+ * The binding, not the source declaration, belongs in an exec target's
+ * `secrets` attr. Keeping the two concepts separate lets a host-owned adapter
+ * bind one source to the public endpoint it already controls without making
+ * that endpoint part of the source declaration.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const HttpCredential = Schema.TaggedStruct("HttpCredential", {
+  secret: Declaration,
+  audiences: Schema.NonEmptyArray(Audience).check(Schema.isMaxLength(maximumAudiences))
+})
+
+/**
+ * A destination-bound HTTP credential declaration.
+ * @category models
+ * @since 1.0.0
+ */
+export type HttpCredential = typeof HttpCredential.Type
+
+/**
+ * Binds a declared secret to one or more exact HTTP origins.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const HttpSecret = (secret: Secret, audiences: ReadonlyArray<string>): HttpCredential => {
+  if (!isSecret(secret)) throw new TypeError("HttpSecret requires a secret declaration")
+  if (
+    !Array.isArray(audiences) || NodeUtil.isProxy(audiences) || Object.getPrototypeOf(audiences) !== Array.prototype ||
+    audiences.length === 0 || audiences.length > maximumAudiences
+  ) throw new TypeError(`HttpSecret requires between 1 and ${maximumAudiences} audiences`)
+  const keys = Reflect.ownKeys(audiences)
+  if (keys.length !== audiences.length + 1 || !keys.includes("length") || keys.some((key) => typeof key !== "string")) {
+    throw new TypeError("HttpSecret audiences must be a dense array without extra properties")
+  }
+  const normalized: Array<string> = []
+  for (let index = 0; index < audiences.length; index += 1) {
+    const value = ownData(audiences, String(index))
+    if (typeof value !== "string") throw new TypeError("HttpSecret audiences must contain only text data")
+    normalized.push(normalizeAudience(value))
+  }
+  if (new Set(normalized).size !== normalized.length) throw new TypeError("HttpSecret audiences contain a duplicate")
+  const source = Secret(secret.env, secret.fallback === undefined ? {} : { fallback: secret.fallback })
+  const binding = HttpCredential.make({ secret: source, audiences: normalized as [string, ...Array<string>] })
+  Object.freeze(binding.audiences)
+  return Object.freeze(binding)
+}
+
+/**
+ * Checks whether a value is a valid destination-bound HTTP credential.
+ * @category guards
+ * @since 1.0.0
+ */
+export const isHttpCredential = (value: unknown): value is HttpCredential => {
+  if (typeof value !== "object" || value === null || NodeUtil.isProxy(value)) return false
+  try {
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) return false
+    const keys = Reflect.ownKeys(value)
+    if (
+      keys.length !== 3 || keys.some((key) => typeof key !== "string" || !["_tag", "secret", "audiences"].includes(key))
+    ) return false
+    if (ownData(value, "_tag") !== "HttpCredential" || !isSecret(ownData(value, "secret"))) return false
+    const audiences = ownData(value, "audiences")
+    if (
+      !Array.isArray(audiences) || NodeUtil.isProxy(audiences) ||
+      Object.getPrototypeOf(audiences) !== Array.prototype ||
+      audiences.length === 0 || audiences.length > maximumAudiences
+    ) return false
+    const audienceKeys = Reflect.ownKeys(audiences)
+    if (
+      audienceKeys.length !== audiences.length + 1 || !audienceKeys.includes("length") ||
+      audienceKeys.some((key) => typeof key !== "string")
+    ) return false
+    const seen = new Set<string>()
+    for (let index = 0; index < audiences.length; index += 1) {
+      const audience = ownData(audiences, String(index))
+      if (typeof audience !== "string" || !normalizedAudience(audience) || seen.has(audience)) return false
+      seen.add(audience)
+    }
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**

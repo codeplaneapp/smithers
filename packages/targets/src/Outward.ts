@@ -88,7 +88,7 @@ export interface Requirements {
   /** The environment-variable names the declaration must name and satisfy. */
   readonly required: ReadonlyArray<string>
   /** The secrets the declaration actually names. */
-  readonly declared: ReadonlyArray<Secret.Secret> | undefined
+  readonly declared: ReadonlyArray<Secret.HttpCredential> | undefined
   /** The declared approval attr, if any. */
   readonly approval: "required" | undefined
 }
@@ -107,12 +107,12 @@ export interface Requirements {
 export const refuse = (requirements: Requirements, invocation: Invocation): Refused | undefined => {
   const declared = requirements.declared ?? []
   for (const name of requirements.required) {
-    const secret = declared.find((entry) => entry.env === name)
+    const secret = declared.find((entry) => entry.secret.env === name)
     if (secret === undefined) {
       return new Refused(
         requirements.rule,
         "missing_secret",
-        `declares no S.Secret(${JSON.stringify(name)}) in secrets`
+        `declares no S.HttpSecret(S.Secret(${JSON.stringify(name)}), [...]) in secrets`
       )
     }
   }

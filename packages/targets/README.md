@@ -31,11 +31,16 @@ export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0",
 export const nodeModules = Smithers.Install({ packageManager })
 ```
 
-`Smithers.Secret("NAME")` declares a credential without reading it. The value is
-resolved lazily, at execution, and only for a target that declared the secret;
-what reaches a child process is an unguessable placeholder that the
-substituting proxy replaces on outbound requests. Key material records the
-variable name, never the value.
+`Smithers.Secret("NAME")` declares an inert source without reading it. A child
+target binds that source to exact origins with
+`Smithers.HttpSecret(source, ["https://api.example.com"])`; the source alone is
+not egress authority. The child receives an unguessable placeholder. The
+loopback proxy resolves it once, only after an authorized destination is known,
+and removes an exact value echoed in the bounded response. A mismatched origin
+is denied before any upstream connection. Opaque HTTPS `CONNECT` is refused
+while placeholders exist; HTTPS credentials require a brokered destination or
+a host-owned request adapter. Key material records the source and audience,
+never the value.
 
 `Smithers.Workspace` is the workspace configuration declaration the root
 `BUILD.ts` file exports. It validates and performs

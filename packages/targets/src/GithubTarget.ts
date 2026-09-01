@@ -569,11 +569,11 @@ export interface PrInvocation {
  */
 export const refusePr = (target: Target.AnyTarget, invocation: PrInvocation): PrRefused | undefined => {
   const attrs = prAttrsOf(target)
-  const token = (attrs.secrets ?? []).find((secret) => secret.env === prTokenSecret)
+  const token = (attrs.secrets ?? []).find((credential) => credential.secret.env === prTokenSecret)
   if (token === undefined) {
     return new PrRefused(
       "missing_token_secret",
-      `Github.Pr declares no S.Secret(${JSON.stringify(prTokenSecret)}) in secrets`
+      `Github.Pr declares no S.HttpSecret(S.Secret(${JSON.stringify(prTokenSecret)}), [...]) in secrets`
     )
   }
   if (attrs.approval === "required" && !invocation.approvalGranted) {

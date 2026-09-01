@@ -33,7 +33,7 @@ export const Attrs = Schema.Struct({
   env: Schema.Record(Schema.String, Schema.String).pipe(
     Schema.withConstructorDefault(Effect.succeed({}))
   ),
-  secrets: Schema.Array(Secret.Declaration).pipe(
+  secrets: Schema.Array(Secret.HttpCredential).pipe(
     Schema.withConstructorDefault(Effect.succeed([]))
   ),
   expectedExitCodes: Schema.Array(Schema.Int).pipe(

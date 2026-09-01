@@ -109,7 +109,7 @@ export const Env = Schema.Record(Schema.String, Schema.String)
  * @category schemas
  * @since 0.1.0
  */
-export const Secrets = Schema.Array(Secret.Declaration)
+export const Secrets = Schema.Array(Secret.HttpCredential)
 
 /**
  * Schema for the `using` map binding template names to tool references.

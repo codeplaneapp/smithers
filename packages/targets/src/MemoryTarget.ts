@@ -64,7 +64,7 @@ export const SmithersCloudDeclaration = Schema.TaggedStruct("MemorySmithersCloud
   autoInject: Schema.optional(Schema.Number),
   init: Schema.optional(Schema.Struct({
     script: Input.File,
-    secrets: Schema.optional(Schema.Array(Secret.Declaration))
+    secrets: Schema.optional(Schema.Array(Secret.HttpCredential))
   }))
 })
 
@@ -97,7 +97,7 @@ export const SmithersCloud = (options: {
   readonly autoInject?: number | undefined
   readonly init?: {
     readonly script: Input.File
-    readonly secrets?: ReadonlyArray<Secret.Secret> | undefined
+    readonly secrets?: ReadonlyArray<Secret.HttpCredential> | undefined
   } | undefined
 }): SmithersCloudDeclaration =>
   SmithersCloudDeclaration.make({
