@@ -136,7 +136,9 @@ export const make = (options: MakeOptions): Service => ({
             lineageId: FlowEngine.Lineage.root(event.attempted.recordedRunId)
           },
           {
-            key: event.key,
+            // `@smthrs/journal` redacts the credential word `key`. A durable
+            // content identity must use the specific, non-credential name.
+            cacheKey: event.key,
             verdict: options.verdict,
             existing: event.existing === undefined ? null : {
               recordedRunId: event.existing.recordedRunId,

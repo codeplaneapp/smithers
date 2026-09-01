@@ -115,7 +115,7 @@ describe("Inconsistency", () => {
       })
       expect(Option.getOrThrow(result.cached).result).toBe("original")
       expect(result.conflicts).toHaveLength(1)
-      expect(result.conflicts[0]!.payload).toMatchObject({ key: keyDigest, verdict: "fail" })
+      expect(result.conflicts[0]!.payload).toMatchObject({ cacheKey: keyDigest, verdict: "fail" })
     }))
 
   it.effect("journals the conflict and keeps serving the original row under layerTolerant", () =>
@@ -139,7 +139,7 @@ describe("Inconsistency", () => {
       expect(result.value).toBe("divergent")
       expect(Option.getOrThrow(result.cached).result).toBe("original")
       expect(result.conflicts).toHaveLength(1)
-      expect(result.conflicts[0]!.payload).toMatchObject({ key: keyDigest, verdict: "tolerate" })
+      expect(result.conflicts[0]!.payload).toMatchObject({ cacheKey: keyDigest, verdict: "tolerate" })
     }))
 
   it.effect("does not note Inserted or ExistingSame puts", () =>
