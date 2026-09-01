@@ -2,6 +2,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { describe, expect, it } from "@effect/vitest"
 import { DurableWriter } from "@smthrs/database"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
+import { FlowEngine } from "@smthrs/engine"
 import { DurableEngineState, EngineStore, OwnerIdentity, StepBoundary } from "@smthrs/engine-store"
 import * as Migrations from "@smthrs/engine-store/Migrations"
 import { Action, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
@@ -115,8 +116,12 @@ describe("SQL fork execution", () => {
               WHERE run_id = 'fork-parent'
             `
               const store = yield* SqlTimeTravelStore.make
+              // The frame's lineage comes from the constructor that mints it. Re-derived on
+              // 2026-09-01: `FlowEngine.Lineage` moved the root address from `<runId>/root`
+              // to a versioned encoded tuple, so the old literal named a lineage the engine
+              // no longer writes.
               const fork = yield* store.createFork("fork-parent", {
-                lineageId: "fork-parent/root",
+                lineageId: FlowEngine.Lineage.root("fork-parent"),
                 seq: maximum[0]?.seq ?? 0
               })
               const states = yield* sql<{ readonly run_id: string; readonly state_json: string }>`
