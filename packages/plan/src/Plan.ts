@@ -420,8 +420,8 @@ const annotate = (
         if (current === to) return true
         if (seen.has(current)) continue
         seen.add(current)
-        /* v8 ignore next -- every id in an edge set names a node of this plan, so the fallback is unreachable */
-        for (const next of edges.get(current) ?? []) stack.push(next)
+        // Every edge is validated against this plan before conflict analysis.
+        for (const next of edges.get(current)!) stack.push(next)
       }
       return false
     }

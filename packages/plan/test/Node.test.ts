@@ -433,6 +433,11 @@ describe("internal/node call factories", () => {
         shared: [{ literal: true }, { literal: true }]
       }
     })
+    const encoded = tagged(flow.ast, "FlowCall").payload as {
+      readonly path: internal.PlannedReference
+    }
+    expect(Node.plannedReference(encoded.path)).toBe(encoded.path)
+    expect(Node.plannedReference({ ...encoded.path })).toBeUndefined()
     expect(internal.declaration(tagged(flow.ast, "FlowCall"))).toBe(declaration)
     expect(internal.declaration(tagged(action.ast, "ActionCall"))).toBe(declaration)
     expect(JSON.parse(JSON.stringify({ flow: flow.ast, action: action.ast }))).toEqual({

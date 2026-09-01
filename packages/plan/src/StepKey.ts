@@ -136,9 +136,8 @@ export const isDigestInput = (value: unknown): value is DigestInput =>
  *
  * `runScope` is set only when `declared` is `false`: it pins the key to one
  * run, so a step whose environment identity is unknown can never serve a
- * cross-run hit. The union enforces this for typed callers and
- * {@link dispatchIdentity} validates it at run time. {@link content} accepts
- * an already-valid identity.
+ * cross-run hit. The union enforces this for typed callers; both
+ * {@link content} and {@link dispatchIdentity} validate it at run time.
  *
  * @since 0.1.0
  * @category models
