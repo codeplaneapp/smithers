@@ -17,15 +17,20 @@
  * behind the capability kernel's back; following a redirect is
  * `@smthrs/kernel`'s guarded `HttpClient.layer`, which rechecks every hop.
  *
- * @since 0.1.0
+ * The filesystem slot is `@smthrs/platform-node`'s `AtomicFileSystem`, byte for
+ * byte the layer `NodeHost` uses, so a guarded path operation is
+ * descriptor-relative and no-follow on both runtimes.
+ *
+ * @since 1.0.0-rc.0
  */
 import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
 import * as BunHttpClient from "@effect/platform-bun/BunHttpClient"
 import type { Jj } from "@smthrs/jj"
 import * as BunJj from "@smthrs/jj/bun/BunJj"
 import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
-import { HostServiceIds } from "@smthrs/kernel/HostServices"
+import type { HostServiceIds } from "@smthrs/kernel/HostServices"
 import type * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
+import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
 import * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
 import type { FileSystem } from "effect/FileSystem"
 import * as Layer from "effect/Layer"
@@ -37,20 +42,25 @@ import * as BunFileSystem from "./BunFileSystem.ts"
 /**
  * Bun platform modules for selectively providing individual services.
  *
+ * `AtomicFileSystem` is here for the same reason `NodeHost` re-exports it: it
+ * owns the only configuration escape hatch the filesystem slot has, and a Bun
+ * program whose python3 is not at `/usr/bin/python3` needs to reach
+ * `AtomicFileSystem.layerWith` without hand-composing the other four tags.
+ *
  * `BunJj` is deliberately absent: it belongs to `@smthrs/jj` and is imported
  * from there, never re-exported here.
  *
  * @category re-exports
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
-export { BunChildProcessSpawner, BunFileSystem, BunHttpClient }
+export { AtomicFileSystem, BunChildProcessSpawner, BunFileSystem, BunHttpClient }
 
 /**
  * The complete closed Host service union provided by Bun.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export type BunHost = FileSystem | Path.Path | ChildProcessSpawner | Jj | HttpClient
@@ -58,23 +68,29 @@ export type BunHost = FileSystem | Path.Path | ChildProcessSpawner | Jj | HttpCl
 /**
  * Stable implementation identities keyed by the closed Host service slots.
  *
- * Planners can digest these values in `HostServiceIds` order without learning
- * about Bun implementation modules.
+ * Each value names the module actually behind that slot. They are identity
+ * tokens rather than import specifiers: the filesystem entry is
+ * `@smthrs/platform-node/AtomicFileSystem` because that is the implementation,
+ * even though a consumer reaches it through `@smthrs/platform-bun`.
  *
- * These strings are identity tokens digested into step keys, not import
- * specifiers, so a rename invalidates every cached step run against a Bun
- * host ([[Step Keys]], `docs/pages/concepts/step-keys.md`).
+ * Nothing digests them yet. `@smthrs/plan`'s step key carries a `layers`
+ * component these values are meant to feed, but no planner derives it from a
+ * host bundle today, so changing one invalidates no cached step.
+ *
+ * The keys are written as literals rather than `HostServiceIds` positions so
+ * that reordering the closed list cannot silently pair a slot with another
+ * slot's implementation.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const implementationIds: Readonly<Record<(typeof HostServiceIds)[number], string>> = {
-  [HostServiceIds[0]]: "@smthrs/platform-bun/BunFileSystem",
-  [HostServiceIds[1]]: "effect/Path",
-  [HostServiceIds[2]]: "@effect/platform-bun/BunChildProcessSpawner",
-  [HostServiceIds[3]]: "@smthrs/jj/bun/BunJj",
-  [HostServiceIds[4]]: "@effect/platform-bun/BunHttpClient"
+  "effect/FileSystem": "@smthrs/platform-node/AtomicFileSystem",
+  "effect/Path": "effect/Path",
+  "effect/process/ChildProcessSpawner": "@effect/platform-bun/BunChildProcessSpawner",
+  "@smthrs/jj/Jj": "@smthrs/jj/bun/BunJj",
+  "effect/HttpClient": "@effect/platform-bun/BunHttpClient"
 }
 
 /** The two services `BunChildProcessSpawner` resolves paths and files with. */
@@ -91,7 +107,7 @@ const layerHttpClient: Layer.Layer<HttpClient> = Layer.provide(
  * service.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer: Layer.Layer<BunHost> = Layer.mergeAll(
@@ -105,7 +121,7 @@ export const layer: Layer.Layer<BunHost> = Layer.mergeAll(
  * Provides all five Bun Host services bound to one absolute repository root.
  *
  * @category layers
- * @since 1.0.0
+ * @since 1.0.0-rc.0
  */
 export const layerAt = (root: string): Layer.Layer<BunHost> =>
   Layer.mergeAll(
@@ -127,7 +143,7 @@ export const layerAt = (root: string): Layer.Layer<BunHost> =>
  * them unchanged.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layerContained = (
   options?: ContainedSpawner.Options & ProcessReaper.Options
@@ -151,7 +167,7 @@ export const layerContained = (
  * Provides the contained Bun host bound to one absolute repository root.
  *
  * @category layers
- * @since 1.0.0
+ * @since 1.0.0-rc.0
  */
 export const layerContainedAt = (
   root: string,

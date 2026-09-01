@@ -1,25 +1,21 @@
 /**
- * @since 0.1.0
+ * `@smthrs/platform-bun`, the Bun Host bundle.
  *
- * `@smthrs/platform-bun` — the Bun Host bundle.
+ * `BunHost.layer` composes the closed five-tag Host surface for Bun out of
+ * `@effect/platform-bun`'s child-process spawner and fetch-backed `HttpClient`,
+ * Effect's runtime-independent `Path`, the Bun `Jj` adapter from
+ * `@smthrs/jj`, and `@smthrs/platform-node`'s `AtomicFileSystem`, which is the
+ * very layer the Node bundle puts in its own filesystem slot.
  *
- * Bun runs the `@effect/platform-node` adapters unchanged for the filesystem
- * and the child-process spawner, and Effect's own fetch-backed `HttpClient`
- * for the network (`@effect/platform-bun` re-exports all three), so this
- * package adds only one `BunHost.layer` composing the complete closed five-tag
- * Host surface.
+ * Two host prerequisites come with it: `@effect/platform-bun`, which both this
+ * barrel and `@smthrs/platform-bun/BunHost` import at module load, and a
+ * CPython 3 interpreter for the filesystem slot's descriptor-relative helper.
  *
- * ```ts
- * import { BunHost } from "@smthrs/platform-bun"
- * ```
- *
- * **Node-only by construction.** The bundle falls back to the
- * `@effect/platform-node` adapters off Bun and resolves `node:` built-ins;
- * `scripts/browser-check.mjs` at the repository root pins that.
+ * @since 1.0.0-rc.0
  */
 
 /**
- * Bun's `FileSystem`, which is Effect's Node implementation.
+ * Bun's `FileSystem`, which is `@smthrs/platform-node`'s atomic filesystem.
  * @slop
  */
 export * as BunFileSystem from "./BunFileSystem.ts"
