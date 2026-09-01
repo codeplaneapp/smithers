@@ -66,6 +66,20 @@ describe("ToolStream", () => {
     expect(result.completed).toEqual({ callId: "call_1", name: "second", arguments: "{}" })
   })
 
+  it("splits one condition into a strict live policy and a lenient history policy", () => {
+    // The same partial argument text: `end` refuses it because a live stream
+    // must not hand a guess to a tool, and `flushAborted` repairs it because a
+    // halted stream is history that has to stay decodable. Both JSDoc blocks
+    // state the split; this pins it.
+    let state = ToolStream.start(ToolStream.initial(), { callId: "call_1", name: "write" })
+    state = ToolStream.delta(state, "call_1", "{\"path\":")
+
+    expect(ToolStream.end(state, "call_1")).toMatchObject({ code: "invalid_provider_output" })
+    expect(ToolStream.flushAborted(state).completed).toEqual([
+      { callId: "call_1", name: "write", arguments: "{}" }
+    ])
+  })
+
   it("flushes an accumulator that never opened a call", () => {
     expect(ToolStream.flushAborted(ToolStream.initial())).toEqual({ state: { open: [] }, completed: [] })
   })

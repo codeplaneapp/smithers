@@ -183,7 +183,11 @@ describe("ModelEvent", () => {
     expect(settled.message.content).toEqual([{ type: "text", text: "" }])
   })
 
-  it("replaces unparseable end arguments and keeps accumulated ones when none are repeated", () => {
+  // The projection is deliberately lenient where `ToolStream.end` is strict:
+  // `end` fails a live stream with `invalid_provider_output`, and this fold
+  // substitutes `{}` so an already-journaled turn stays decodable. See the
+  // JSDoc on both.
+  it("repairs unparseable end arguments to {} where ToolStream.end would fail, and keeps accumulated ones when none are repeated", () => {
     const repaired = Events.settledMessage([
       { type: "tool-call-start", id: "call", name: "write" },
       { type: "tool-call-delta", id: "call", arguments: "{\"path\":\"a\"}" },

@@ -109,6 +109,13 @@ export const delta = (state: State, callId: string, fragment: string): State => 
 /**
  * Completes a tool call and validates its reassembled argument JSON.
  *
+ * This is the strict half of the package's two policies for one condition:
+ * argument text that is not a JSON object fails with
+ * `invalid_provider_output`, because a live stream that cannot say what the
+ * model asked for must not hand a guess to a tool. {@link flushAborted} and
+ * `ModelEvent.settledMessage` take the lenient half for a stream that has
+ * already ended, substituting `"{}"` so the journaled turn stays decodable.
+ *
  * @category operations
  * @since 0.1.0
  * @slop
@@ -130,7 +137,9 @@ export const end = (state: State, callId: string): EndResult => {
 
 /**
  * Settles unfinished calls after a stream halt. Empty or partial arguments are
- * represented as `{}` so the historical assistant turn remains resumable.
+ * represented as `{}` so the historical assistant turn remains resumable. This
+ * is the lenient half of the split documented on {@link end}: a halted stream
+ * is history, and history has to stay decodable.
  *
  * @category operations
  * @since 0.1.0

@@ -34,7 +34,12 @@ const canonicalize = (value: unknown, path = "$", ancestors = new Set<object>())
     if (ancestors.has(value)) return invalid(path)
     if (Object.getOwnPropertySymbols(value).length > 0) return invalid(path)
     ancestors.add(value)
-    const result: Record<string, unknown> = {}
+    // A null-prototype accumulator, not `{}`: an own member literally named
+    // `__proto__` (which `JSON.parse` produces, and which a tool's JSON Schema
+    // may legitimately declare as a property) would otherwise reach
+    // `Object.prototype`'s setter and vanish from the encoding, so the bytes a
+    // sealed step keys on would not be the bytes sent to the provider.
+    const result: Record<string, unknown> = Object.create(null)
     for (const key of Object.keys(value).sort()) {
       const member = (value as Record<string, unknown>)[key]
       result[key] = canonicalize(member, `${path}.${key}`, ancestors)
@@ -49,6 +54,14 @@ const canonicalize = (value: unknown, path = "$", ancestors = new Set<object>())
  * Serializes a JSON value with recursively sorted object keys. Array order is
  * retained. Non-JSON values are rejected instead of being silently coerced or
  * omitted by `JSON.stringify`.
+ *
+ * This is deliberately stricter than `@smthrs/canonical`, which mirrors
+ * `JSON.stringify` exactly. A model request body is sealed-step key material:
+ * a value `JSON.stringify` would drop (`undefined`, a function) or reshape
+ * (`toJSON`, a `Date`, a `Map`) means the key and the wire body describe
+ * different requests, so it is rejected here rather than encoded. Everything
+ * both encoders accept they encode identically, including an own member named
+ * `__proto__`.
  *
  * @category encoding
  * @since 0.1.0

@@ -21,7 +21,7 @@ const request = (tools: ReadonlyArray<ToolDefinition>, messages: ReadonlyArray<M
   ModelRequest.make({ modelId: "model", system: [], messages, tools, params: {} })
 
 describe("DeferredTools", () => {
-  it("uses pi's exact native-support matrix", () => {
+  it("floors Anthropic support at 4.5 and allowlists OpenAI families", () => {
     expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-sonnet-4-5")).toBe(true)
     expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-opus-4-6")).toBe(true)
     expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-fable-4.5")).toBe(true)
@@ -38,6 +38,18 @@ describe("DeferredTools", () => {
     expect(DeferredTools.supportsDeferred("openai-responses", "gpt-5.5-pro")).toBe(false)
     expect(DeferredTools.supportsDeferred("openai-responses", "gpt-6")).toBe(false)
     expect(DeferredTools.supportsDeferred("openai-responses", "gpt-5.3")).toBe(false)
+  })
+
+  it("keeps the Anthropic floor open to unreleased families and the OpenAI allowlist closed", () => {
+    // The floor is deliberate policy, not an accident of the regex: a family
+    // Anthropic has not shipped yet reports native support on the day it does,
+    // because every generation since 4.5 has carried deferred tools.
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-sonnet-9-0")).toBe(true)
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-opus-5")).toBe(true)
+    expect(DeferredTools.supportsDeferred("anthropic-messages", "claude-sonnet-4-4")).toBe(false)
+    // The allowlist is the opposite policy: an unreleased OpenAI family stays
+    // off until somebody verifies it on the wire and adds it.
+    expect(DeferredTools.supportsDeferred("openai-responses", "gpt-9.9-sol")).toBe(false)
   })
 
   it("deduplicates normalized names and preserves a tool used before its marker", () => {

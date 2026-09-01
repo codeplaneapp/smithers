@@ -29,6 +29,21 @@ export interface Resolution {
 
 const normalizedName = (name: string): string => name.trim().toLowerCase()
 
+/**
+ * Anthropic support is a VERSION FLOOR, not an allowlist: every
+ * `claude-{sonnet,opus,fable}` id at 4.5 or later reports native support,
+ * including families that do not exist yet. Anthropic versions its Messages
+ * capabilities by family generation and has added deferred tools to every
+ * generation since 4.5, so a floor is forward-compatible and a new model works
+ * on the day it ships. A model below the floor, a dated pre-4.5 id, and haiku
+ * are all false.
+ *
+ * OpenAI support is an ALLOWLIST ({@link OPENAI_DEFERRED_MODELS}): its ids do
+ * not carry a comparable capability version, so a new family stays opt-in until
+ * its wire support has been verified against the live backend.
+ *
+ * The two policies are deliberately different. Neither is "the exact matrix".
+ */
 const isAnthropicDeferredModel = (modelId: string): boolean => {
   const match = /^claude-(sonnet|opus|fable)-(\d+)(?:[-.](\d+))?(?:-|$)/i.exec(modelId)
   if (match === null) return false
@@ -39,9 +54,8 @@ const isAnthropicDeferredModel = (modelId: string): boolean => {
   return major > 4 || (major === 4 && minor >= 5)
 }
 
-// Exact matrix copied from pi's generated model compatibility metadata; see
-// docs/specs/Research/Pi Reference Findings 2026-07-27.md §4. New families
-// remain opt-in until their wire support is verified.
+// Seeded from pi's generated model compatibility metadata. New families remain
+// opt-in until their wire support is verified against the live backend.
 const OPENAI_DEFERRED_MODELS = new Set([
   "gpt-5.4",
   "gpt-5.4-mini",
@@ -119,6 +133,13 @@ const lazyTool = (tool: ToolDefinition): ToolDefinition => ({
 /**
  * Reports whether a protocol and model pair supports pi's native deferred
  * tool-loading wire representation.
+ *
+ * The two providers follow different policies on purpose. Anthropic is a
+ * version floor: any `claude-{sonnet,opus,fable}` id at 4.5 or later answers
+ * true, including families released after this code, because Anthropic versions
+ * the capability by family generation. OpenAI is an allowlist: its ids carry no
+ * comparable version, so a new family answers false until its wire support has
+ * been verified against the live backend and added here.
  *
  * @category predicates
  * @since 0.1.0

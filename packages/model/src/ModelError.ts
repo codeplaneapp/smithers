@@ -68,6 +68,27 @@ export const isContextOverflow = (providerCode: string | undefined, message: str
   overflowSignal.test(`${providerCode ?? ""} ${message}`)
 
 /**
+ * Wire signals that mean an account has exhausted its paid balance or quota.
+ */
+const quotaExhaustedSignal =
+  /insufficient[-_ ]?quota|quota[-_ ]?exceeded|billing[-_ ]?hard[-_ ]?limit|credit[-_ ]?balance|purchase credits|no credits|payment required/i
+
+/**
+ * Whether a provider's own error code and message describe an exhausted
+ * account balance or quota rather than a transient rate limit.
+ *
+ * Protocol adapters call this before their generic bad-request and rate-limit
+ * branches so a durable consumer can park the run until the account is funded
+ * instead of retrying or terminating it as malformed.
+ *
+ * @category refinements
+ * @since 0.1.0
+ * @slop
+ */
+export const isQuotaExhausted = (providerCode: string | undefined, message: string): boolean =>
+  quotaExhaustedSignal.test(`${providerCode ?? ""} ${message}`)
+
+/**
  * Normalized provider failure. Its fields intentionally exclude credentials,
  * headers, request bodies, and client objects.
  *
@@ -85,6 +106,10 @@ export const isContextOverflow = (providerCode: string | undefined, message: str
 export class ModelError extends Schema.TaggedError<ModelError>()("flows/model/ModelError", {
   code: ModelErrorCode,
   message: Schema.String,
+  // A key path only (for example `messages[2].content[0].text` or
+  // `$.thinking.budget_tokens`), never a value: request values may contain
+  // credentials or user content.
+  path: Schema.optional(Schema.String),
   retryAfterMillis: Schema.optional(Schema.Number),
   resetAtEpochMillis: Schema.optional(Schema.Number),
   resetSource: Schema.optional(Schema.String),

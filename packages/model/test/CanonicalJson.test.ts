@@ -31,6 +31,20 @@ describe("CanonicalJson", () => {
     }
   })
 
+  it("encodes an own __proto__ member instead of dropping it", () => {
+    // `JSON.parse` produces `__proto__` as an own data property, and a tool's
+    // JSON Schema may declare a property with that name. Copying members into a
+    // `{}` literal would route it through `Object.prototype`'s setter and lose
+    // it, so the sealed-step key would not describe the body actually sent.
+    const parsed = JSON.parse("{\"a\":1,\"__proto__\":{\"changed\":true}}") as Record<string, unknown>
+
+    expect(CanonicalJson.stringify(parsed)).toBe("{\"__proto__\":{\"changed\":true},\"a\":1}")
+    expect(new TextDecoder().decode(CanonicalJson.bytes(parsed))).toBe(JSON.stringify(parsed))
+    // The member is data, never a prototype mutation.
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype)
+    expect(({} as { readonly changed?: unknown }).changed).toBeUndefined()
+  })
+
   it("keeps pi's short-hash algorithm golden-vectored", () => {
     expect(CanonicalJson.shortHash("pi-tool-search")).toBe("10rp88s7t1h18")
   })

@@ -369,6 +369,18 @@ const decodeToolArguments = Schema.decodeUnknownOption(
  * interruption, which is represented as an aborted message rather than an
  * exception so the transcript remains resumable.
  *
+ * Two policies meet here on one condition, and the split is deliberate.
+ * `ToolStream.end` refuses argument text that is not a JSON object with
+ * `invalid_provider_output`, because a live stream that cannot say what the
+ * model asked for must fail rather than execute a guess. This projection
+ * instead substitutes `"{}"`, because it folds a stream that has already
+ * happened into a transcript that must stay decodable and replayable; throwing
+ * here would make an already-journaled turn unreadable. The built-in protocols
+ * validate at `ToolStream.end` before they emit `tool-call-end`, so a repaired
+ * `"{}"` never reaches a provider: it can only appear on an aborted turn, which
+ * every built-in lowering omits from the next request. A consumer must still
+ * validate arguments before executing a tool.
+ *
  * @category destructors
  * @since 0.1.0
  * @slop

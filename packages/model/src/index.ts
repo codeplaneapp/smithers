@@ -71,6 +71,12 @@ export * as ModelRequest from "./ModelRequest.ts"
  * @since 0.1.0
  * @slop
  */
+export * as OpenAIChatCompletions from "./OpenAIChatCompletions.ts"
+
+/**
+ * @since 0.1.0
+ * @slop
+ */
 export * as OpenAIChatGPT from "./OpenAIChatGPT.ts"
 
 /**
