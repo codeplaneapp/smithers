@@ -9,14 +9,15 @@
  * why a set landing at or below the applied high-water mark is rejected rather
  * than silently assumed done.
  *
- * Derived contracts: `docs/specs/Specs/Plan.md` and
- * `docs/specs/Concepts/Journal Split.md`.
+ * The persisted plan and the journal are separate stores, which is why this
+ * package owns its own tables and its own migration block.
  *
  * @since 0.1.0
  */
 import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import * as Layer from "effect/Layer"
 import initial from "./migrations/0001_initial.ts"
+import appendOnlyHardening from "./migrations/0002_append_only_hardening.ts"
 
 /**
  * The plan store's namespaced migration set, for composition with the other
@@ -30,7 +31,8 @@ export const set: DatabaseMigrations.MigrationSet = {
   namespace: "plan",
   idOffset: DatabaseMigrations.idBlock * 4,
   migrations: {
-    "0001_initial": initial
+    "0001_initial": initial,
+    "0002_append_only_hardening": appendOnlyHardening
   }
 }
 

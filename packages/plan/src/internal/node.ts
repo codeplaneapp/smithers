@@ -1,17 +1,16 @@
 /**
  * The node AST, and the side tables the functions hang off.
  *
- * Two invariants shape every declaration here, both from
- * `docs/specs/Concepts/Unified Flow Authoring.md`. The AST is **closure-free
- * and JSON serializable**, so a plan can be shipped, stored, diffed, and
- * rendered without the process that built it; and control flow is
+ * Two invariants shape every declaration here. The AST is **closure-free**
+ * and keeps payloads as inert JSON mirrors, so a valid plan can be shipped,
+ * stored, diffed, and rendered without the process that built it; control flow is
  * **structure**, so a branch stores both arms as ASTs rather than a function
  * that would have to be run to find out what comes next.
  *
  * The functions an author does write — a mapper, a continuation, a branch
  * predicate — live in `WeakMap`s keyed by the AST node they belong to, and the
  * AST keeps only a {@link FunctionIdentity} digest of their source. The digest
- * is what enters content identity (`docs/specs/Concepts/Step Keys.md`); the
+ * is what enters content identity (https://smithers.sh/concepts/step-keys); the
  * `WeakMap` is what the run reaches for when it has the real value in hand, and
  * it drops with the AST it is keyed by.
  *
@@ -127,8 +126,7 @@ export interface AndThen extends Scheduled {
 /**
  * A decision whose arms are static topology. The predicate runs at run time on
  * the real value; both arms are already ASTs, so the exit condition and the
- * handoff site are visible before anything runs
- * (`docs/specs/Concepts/Trampoline Loops.md`).
+ * handoff site are visible before anything runs.
  *
  * @since 0.1.0
  * @private
@@ -277,8 +275,12 @@ const nonce = (): string => {
 const captureError = (path: string, reason: string): TypeError =>
   new TypeError(`Node.capture: capture at ${path} ${reason}; captures must be finite, inert data`)
 
+/** The maximum member nesting accepted in a declared capture. @private */
+const captureDepthLimit = 256
+
 /** @private */
-const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<object>): string => {
+const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<object>, depth: number): string => {
+  if (depth > captureDepthLimit) throw captureError(path, `exceeds maximum depth ${captureDepthLimit}`)
   if (input === null) return "null"
   switch (typeof input) {
     case "boolean":
@@ -315,7 +317,7 @@ const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<objec
         const descriptor = descriptors[String(index)]
         if (descriptor === undefined) throw captureError(`${path}[${index}]`, "is an array hole")
         if (!("value" in descriptor)) throw captureError(`${path}[${index}]`, "is an accessor")
-        items.push(canonicalCapture(descriptor.value, `${path}[${index}]`, ancestors))
+        items.push(canonicalCapture(descriptor.value, `${path}[${index}]`, ancestors, depth + 1))
       }
       return `["array",[${items.join(",")}]]`
     }
@@ -326,7 +328,7 @@ const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<objec
     const encoded = (keys as Array<string>).sort().map((key) => {
       const descriptor = members[key]!
       if (!("value" in descriptor)) throw captureError(`${path}.${key}`, "is an accessor")
-      return `${JSON.stringify(key)}:${canonicalCapture(descriptor.value, `${path}.${key}`, ancestors)}`
+      return `${JSON.stringify(key)}:${canonicalCapture(descriptor.value, `${path}.${key}`, ancestors, depth + 1)}`
     })
     return `["object",{${encoded.join(",")}}]`
   } finally {
@@ -339,6 +341,8 @@ const freezeCapture = (input: unknown, seen: WeakSet<object>): void => {
   if (typeof input !== "object" || input === null || seen.has(input)) return
   seen.add(input)
   for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(input))) {
+    // canonicalCapture already bounded this graph, so freezing cannot recurse
+    // beyond captureDepthLimit.
     /* v8 ignore else -- canonicalCapture rejects every accessor before freezing starts */
     if ("value" in descriptor) freezeCapture(descriptor.value, seen)
   }
@@ -346,7 +350,8 @@ const freezeCapture = (input: unknown, seen: WeakSet<object>): void => {
 }
 
 /**
- * Brands an operation with every inert value it closes over.
+ * Brands an operation with every inert value it closes over. Capture members
+ * may be nested through at most 256 levels.
  *
  * @since 0.1.0
  * @private
@@ -357,7 +362,7 @@ export const capture = <Args extends ReadonlyArray<unknown>, A>(
   operation: (...args: Args) => A
 ): (...args: Args) => A => {
   const source = Function.prototype.toString.call(operation)
-  const canonical = canonicalCapture(captures, "$", new WeakSet())
+  const canonical = canonicalCapture(captures, "$", new WeakSet(), 0)
   freezeCapture(captures, new WeakSet())
   const wrapped = function(this: unknown, ...args: ReadonlyArray<unknown>): unknown {
     return Reflect.apply(operation, this, args)
@@ -420,55 +425,78 @@ interface CloneFrame {
 }
 
 /**
- * Replaces strict planned proxies with their inert reference records while
- * preserving the shape of JSON payloads.
- *
- * The walk carries its own explicit stack rather than recursing, because a
- * payload's nesting depth is the author's data and must not be bounded by the
- * native call stack. Cycles and shared references are memoized through `seen`
- * exactly as one recursion would memoize them: the clone of an object that
- * appears twice is one object, and a payload that contains itself clones into
- * a clone that contains itself. Whether such a payload is PLANNABLE is graph
- * building's verdict, not this cloner's.
+ * Clones the JSON mirror of the input, so {@link module:StepKey.content} over
+ * the clone and the input produce the same key and the AST holds only inert
+ * JSON data. The walk uses an explicit stack, memoizes shared references and
+ * cycles, honors callable `toJSON`, omits object members without a JSON
+ * representation, and writes `null` for those values in arrays.
  *
  * @since 0.1.0
  * @private
  * @slop
  */
 export const value = (input: unknown, seen: WeakMap<object, unknown> = new WeakMap()): unknown => {
+  const missing = Symbol("missing JSON representation")
   let result: unknown
   const frames: Array<CloneFrame> = []
   /** Resolves one member, opening a frame when it is an unseen container. */
-  const enter = (current: unknown, place: (member: unknown) => void): void => {
-    const reference = Planned.reference(current)
-    if (reference !== undefined) {
-      place({ _tag: "PlannedReference", node: reference.node, path: [...reference.path] } satisfies PlannedReference)
+  const enter = (initial: unknown, place: (member: unknown | typeof missing) => void): void => {
+    let current = initial
+    const replacements: Array<object> = []
+    const resolving = new WeakSet<object>()
+    const finish = (member: unknown | typeof missing): void => {
+      for (const replacement of replacements) seen.set(replacement, member)
+      place(member)
+    }
+    while (true) {
+      const reference = Planned.reference(current)
+      if (reference !== undefined) {
+        finish({ _tag: "PlannedReference", node: reference.node, path: [...reference.path] } satisfies PlannedReference)
+        return
+      }
+      const kind = typeof current
+      if (current === null || (kind !== "object" && kind !== "function")) {
+        finish(kind === "undefined" || kind === "symbol" ? missing : current)
+        return
+      }
+      const source = current as object
+      if (seen.has(source)) {
+        finish(seen.get(source))
+        return
+      }
+      if (resolving.has(source)) {
+        finish(missing)
+        return
+      }
+      const serializable = source as { readonly toJSON: () => unknown }
+      if ("toJSON" in serializable && typeof serializable.toJSON === "function") {
+        resolving.add(source)
+        replacements.push(source)
+        current = serializable.toJSON()
+        continue
+      }
+      if (kind === "function") {
+        seen.set(source, missing)
+        finish(missing)
+        return
+      }
+      const container = current as Record<string, unknown> | ReadonlyArray<unknown>
+      const output: Record<string, unknown> | Array<unknown> = Array.isArray(container)
+        ? []
+        : Object.create(null) as Record<string, unknown>
+      seen.set(container, output)
+      finish(output)
+      frames.push({
+        source: container,
+        output,
+        keys: Array.isArray(container) ? undefined : Object.keys(container),
+        index: 0
+      })
       return
     }
-    if (current === null || typeof current !== "object") {
-      place(current)
-      return
-    }
-    const previous = seen.get(current)
-    if (previous !== undefined) {
-      place(previous)
-      return
-    }
-    const container = current as Record<string, unknown> | ReadonlyArray<unknown>
-    const output: Record<string, unknown> | Array<unknown> = Array.isArray(container)
-      ? []
-      : Object.create(null) as Record<string, unknown>
-    seen.set(container, output)
-    place(output)
-    frames.push({
-      source: container,
-      output,
-      keys: Array.isArray(container) ? undefined : Object.keys(container),
-      index: 0
-    })
   }
   enter(input, (member) => {
-    result = member
+    result = member === missing ? undefined : member
   })
   while (frames.length > 0) {
     const frame = frames[frames.length - 1]!
@@ -481,11 +509,12 @@ export const value = (input: unknown, seen: WeakMap<object, unknown> = new WeakM
     if (frame.keys === undefined) {
       const members = frame.output as Array<unknown>
       enter((frame.source as ReadonlyArray<unknown>)[position], (member) => {
-        members.push(member)
+        members.push(member === missing ? null : member)
       })
     } else {
       const key = frame.keys[position]!
       enter((frame.source as Record<string, unknown>)[key], (member) => {
+        if (member === missing) return
         Object.defineProperty(frame.output, key, {
           configurable: true,
           enumerable: true,

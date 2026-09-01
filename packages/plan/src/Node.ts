@@ -3,10 +3,9 @@
  *
  * Building a node records an inspectable AST and executes nothing — the same
  * split as Bazel's `ctx.actions.run`, which declares an action rather than
- * running one (`docs/specs/Concepts/Unified Flow Authoring.md`). A plan is
+ * running one. A plan is
  * always a DAG, so there is no loop node here and never will be: repetition
- * lives one level up, in what a flow settles with
- * (`docs/specs/Concepts/Trampoline Loops.md`).
+ * lives one level up, in what a flow settles with.
  *
  * A node also carries Effect's requirement channel, `R`, and carries it as a
  * PHANTOM: building a plan demands nothing, and every combinator here unions
@@ -222,7 +221,7 @@ export const succeed = <A>(value: A): Node<A> => internal.makeNode<A>(internal.s
  *
  * Width is fixed here, at plan time. Fanning out over something a step
  * discovered is not this: end the round and carry the list in the next flow's
- * payload, where it is real data (`docs/specs/Concepts/Trampoline Loops.md`).
+ * payload, where it is real data.
  *
  * @since 0.1.0
  * @category constructors
@@ -494,8 +493,12 @@ export const declaredPriority = (ast: Ast): number | undefined => ast.priority
  * Constructs the flow-call node used by `@smthrs/flow` without making flow
  * calls part of the public authoring surface of this package.
  *
+ * Reserved for `@smthrs/flow`, which owns flow authoring. It is not part
+ * of this package's authoring surface, and it validates nothing: an unknown
+ * flow tag becomes a call node the graph keeps as a leaf.
+ *
  * @since 0.1.0
- * @private
+ * @category engine
  * @slop
  */
 export const flowCall = <A = unknown, E = never, R = never>(
@@ -509,8 +512,12 @@ export const flowCall = <A = unknown, E = never, R = never>(
  * Constructs the action-call node used by `@smthrs/flow` without making
  * action calls part of the public authoring surface of this package.
  *
+ * Reserved for `@smthrs/flow`, which owns action authoring. It is not part
+ * of this package's authoring surface, and an unknown action tag becomes a
+ * call node the graph keeps as a leaf.
+ *
  * @since 0.1.0
- * @private
+ * @category engine
  * @slop
  */
 export const actionCall = <A = unknown, E = never, R = never>(
@@ -525,8 +532,11 @@ export const actionCall = <A = unknown, E = never, R = never>(
  * rehydrated from JSON, because the declaration lives beside the AST rather
  * than inside it — a graph built from such an AST keeps the call as a leaf.
  *
+ * Reserved for `@smthrs/flow`, which files the declaration when it builds
+ * the call. Authors never call it.
+ *
  * @since 0.1.0
- * @private
+ * @category engine
  * @slop
  */
 export const declaration = (
@@ -539,8 +549,10 @@ export const declaration = (
  * supplied a node directly — the topology is already in `next` — and for a
  * rehydrated AST, whose side table did not survive serialization.
  *
+ * Reserved for `@smthrs/flow`'s graph walk. Authors never call it.
+ *
  * @since 0.1.0
- * @private
+ * @category engine
  * @slop
  */
 export const continuation = (
@@ -553,8 +565,10 @@ export const continuation = (
  * variant, and for a rehydrated AST whose side table did not survive
  * serialization.
  *
+ * Reserved for `@smthrs/flow`'s interpreter. Authors never call it.
+ *
  * @since 0.1.0
- * @private
+ * @category engine
  * @slop
  */
 export const mapper = (ast: Ast): ((value: unknown) => unknown) | undefined =>
@@ -566,8 +580,10 @@ export const mapper = (ast: Ast): ((value: unknown) => unknown) | undefined =>
  * every other variant, and for a rehydrated AST whose side table did not
  * survive serialization.
  *
+ * Reserved for `@smthrs/flow`'s interpreter. Authors never call it.
+ *
  * @since 0.1.0
- * @private
+ * @category engine
  * @slop
  */
 export const predicate = (ast: Ast): ((value: unknown) => boolean) | undefined =>
@@ -576,22 +592,30 @@ export const predicate = (ast: Ast): ((value: unknown) => boolean) | undefined =
 /**
  * Reads the optional schema selecting failures handled by a {@link catch_}.
  *
+ * Reserved for `@smthrs/flow`'s interpreter. It is `undefined` for every
+ * variant but `catch_`, and for a rehydrated AST whose side table did not
+ * survive serialization.
+ *
  * @since 0.1.0
- * @private
+ * @category engine
  * @slop
  */
 export const catchFilter = (ast: Ast): Schema.Top | undefined => ast._tag === "Catch" ? internal.filter(ast) : undefined
 
 /**
- * Identifies a plan-time function the AST does NOT store — a flow's `body` —
+ * Identifies a plan-time function the AST does NOT store, a flow's `body`,
  * exactly as the AST identifies the mapper and continuation it does store.
  * A call that keeps its callee as a leaf still has to re-key when that
  * callee's body is edited, and this is the identity it folds in. Unannotated
  * functions fail closed with process-local identity; use {@link capture} to
  * declare inert captures and obtain deterministic identity.
  *
+ * Reserved for `@smthrs/flow`, which folds a callee body's identity into a
+ * call it keeps as a leaf. Authors never call it; it throws a `TypeError`
+ * when handed anything but a function.
+ *
  * @since 0.1.0
- * @private
+ * @category engine
  * @slop
  */
 export const functionIdentity = (operation: unknown): FunctionIdentity => internal.functionIdentity(operation)
@@ -600,9 +624,9 @@ export const functionIdentity = (operation: unknown): FunctionIdentity => intern
  * Declares the inert values a plan-time function closes over.
  *
  * The capture record is canonicalized into function identity and deeply frozen
- * immediately. Unsupported values, accessors, exotic prototypes, symbols, and
- * cycles are refused instead of producing an identity that cannot describe the
- * function's behavior.
+ * immediately. Unsupported values, accessors, exotic prototypes, symbols,
+ * cycles, and member nesting beyond 256 levels are refused instead of
+ * producing an identity that cannot describe the function's behavior.
  *
  * @since 0.1.0
  * @category constructors

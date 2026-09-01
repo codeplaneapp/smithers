@@ -1,10 +1,9 @@
 /**
  * The placeholder a body sees where a step result will be.
  *
- * A flow body runs at PLAN time (`docs/specs/Concepts/Build Phases.md`), so its
+ * A flow body runs at PLAN time, so its
  * own payload is real data while every step result is a value that does not
- * exist yet. `docs/specs/Concepts/Unified Flow Authoring.md` gives that value a
- * name and one rule: a planned value may be **passed** — into a payload field,
+ * exist yet. That value has a name and one rule: a planned value may be **passed** — into a payload field,
  * into a branch, into a map — and field access is allowed, because it records a
  * reference path. It may never be **computed on**.
  *
@@ -30,7 +29,8 @@ import { GraphBuildError } from "./GraphBuildError.ts"
 /**
  * The brand carried by every planned value, and the key its reference is read
  * from. Interned with `Symbol.for` so a value that crossed a module boundary is
- * still recognised, exactly as `StepKey.digestInput` is.
+ * still recognised. The interned symbol is a recognition aid, not a
+ * capability, so {@link reference} validates the value stored under it.
  *
  * @since 0.1.0
  * @category symbols
@@ -170,15 +170,29 @@ export const make = <T>(node: string): Planned<T> => placeholder({ node, path: [
 const carrier = (value: unknown): value is { readonly [TypeId]?: Reference } =>
   (typeof value === "object" && value !== null) || typeof value === "function"
 
+/** @private */
+const validReference = (value: unknown): value is Reference =>
+  typeof value === "object" && value !== null &&
+  typeof (value as Reference).node === "string" && (value as Reference).node.length > 0 &&
+  Array.isArray((value as Reference).path) &&
+  Array.from((value as Reference).path).every((segment) => typeof segment === "string")
+
 /**
  * Reads the reference a planned value records, or `undefined` for anything
- * else. This is how a payload is scanned for the upstream results it consumes.
+ * else. An interned symbol is a recognition aid rather than a capability, so a
+ * forged carrier is accepted only when its node and path have the complete
+ * reference shape. This is how a payload is scanned for the upstream results
+ * it consumes.
  *
  * @since 0.1.0
  * @category accessors
  * @slop
  */
-export const reference = (value: unknown): Reference | undefined => carrier(value) ? value[TypeId] : undefined
+export const reference = (value: unknown): Reference | undefined => {
+  if (!carrier(value)) return undefined
+  const candidate = value[TypeId]
+  return validReference(candidate) ? candidate : undefined
+}
 
 /**
  * Checks whether a value is a planned placeholder.

@@ -7,10 +7,10 @@
  * material is a *plan-shaped* concept. It lives here, above `@smthrs/keys`,
  * so the key package stays a leaf.
  *
- * Governing contracts: `docs/specs/Concepts/Step Keys.md`,
- * `docs/specs/Concepts/Build Phases.md` (material is computed with no I/O),
- * and `docs/specs/Concepts/Engine Hardening Round 1.md` section 3 — the
- * nominal (never shape-sniffed) `InputRef` and the hashed `version`.
+ * Governing contract: the step-key rules at
+ * https://smithers.sh/concepts/step-keys. Material is computed with no I/O,
+ * and two hardening rules shape it: the nominal, never shape-sniffed
+ * `InputRef` and the hashed `version`.
  *
  * @since 0.1.0
  */

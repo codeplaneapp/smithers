@@ -1,13 +1,19 @@
 /**
  * Static filesystem declaration vocabulary shared by planning and execution.
  *
+ * Declared paths use `/` as their canonical separator and normalize Unicode
+ * to NFC. Workspace-relative paths reject C0 controls (U+0000 through U+001F)
+ * and DEL (U+007F), which name nothing a supported filesystem can open. C1
+ * controls (U+0080 through U+009F) remain accepted because those bytes are
+ * legal in a POSIX file name.
+ *
  * @since 0.1.0
  */
 import * as Schema from "effect/Schema"
 
 /**
  * The canonical spelling of a declared path or pattern: every separator is
- * `/`.
+ * `/`, and Unicode is normalized to NFC.
  *
  * {@link workspaceRelative} accepts a backslash as a separator, so
  * `dist\same.js` and `dist/same.js` are two spellings of ONE workspace path.
@@ -19,7 +25,7 @@ import * as Schema from "effect/Schema"
  * @since 0.1.0
  * @slop
  */
-export const canonical = (path: string): string => path.replaceAll("\\", "/")
+export const canonical = (path: string): string => path.replaceAll("\\", "/").normalize("NFC")
 
 /** Workspace-relative glob pattern.
  * @category schemas
@@ -44,6 +50,10 @@ export const Pattern = Schema.NonEmptyString.check(
  * @slop
  */
 export const workspaceRelative = (pattern: string): boolean => {
+  for (let index = 0; index < pattern.length; index++) {
+    const code = pattern.charCodeAt(index)
+    if (code <= 0x1f || code === 0x7f) return false
+  }
   if (pattern.startsWith("/")) return false
   const segments = canonical(pattern).split("/")
   if (segments[0]!.endsWith(":")) return false
@@ -264,11 +274,11 @@ const beneath = (tree: string, path: string): boolean => {
  * Conservative static overlap. `true` may over-serialize; `false` proves that
  * no path can belong to both declarations.
  *
- * Exact paths compare in their {@link canonical} separator form, so the
- * backslash and slash spellings of one workspace path overlap. A glob tests
- * the path bytes it is handed — its property suite pins a backslash INSIDE a
- * path segment as literal text — so canonicalizing a measured path before
- * matching is its caller's decision, not this module's.
+ * Exact paths compare in their {@link canonical} separator and NFC form, so
+ * separator aliases and canonically equivalent Unicode spellings overlap. A
+ * glob tests the path bytes it is handed; its property suite pins a backslash
+ * inside a path segment as literal text, so canonicalizing a measured path
+ * before matching is its caller's decision, not this module's.
  *
  * @category predicates
  * @since 0.1.0

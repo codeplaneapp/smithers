@@ -11,8 +11,8 @@
  *    format.** The original minted its own prefix over a private `Digest`
  *    module. The engine dispatches under `Key` (`FlowEngine/ActionKey.ts`),
  *    so a plan whose node keys were a *different* string format could never be
- *    the thing the cache is consulted against — and that is the whole point of
- *    `docs/specs/Specs/Object Model.md`'s `Plan`. One key format, one hashing
+ *    the thing the cache is consulted against, and that is the whole point of
+ *    a `Plan`. One key format, one hashing
  *    chokepoint (canonical JSON + injected `Crypto`), one namespace field
  *    (`kind`) distinguishing content keys from ordinal ones.
  *
@@ -21,11 +21,13 @@
  * normalization, the separate environment namespace, per-variant tagging of
  * resolved references, and the hashed `version`.
  *
- * Governing contract: `docs/specs/Concepts/Step Keys.md`.
+ * Governing contract: the step-key rules at
+ * https://smithers.sh/concepts/step-keys.
  *
  * @since 0.1.0
  */
 import { Key } from "@smthrs/keys"
+import * as Cause from "effect/Cause"
 import type * as Crypto from "effect/Crypto"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -134,18 +136,27 @@ export const isDigestInput = (value: unknown): value is DigestInput =>
  *
  * `runScope` is set only when `declared` is `false`: it pins the key to one
  * run, so a step whose environment identity is unknown can never serve a
- * cross-run hit.
+ * cross-run hit. The union enforces this for typed callers and
+ * {@link dispatchIdentity} validates it at run time. {@link content} accepts
+ * an already-valid identity.
  *
  * @since 0.1.0
  * @category models
  * @slop
  */
-export interface EnvironmentIdentity {
-  readonly declared: boolean
-  readonly layers: ReadonlyArray<string>
-  readonly capabilities: Readonly<Record<string, ReadonlyArray<string>>>
-  readonly runScope?: string | undefined
-}
+export type EnvironmentIdentity =
+  | {
+    readonly declared: true
+    readonly layers: ReadonlyArray<string>
+    readonly capabilities: Readonly<Record<string, ReadonlyArray<string>>>
+    readonly runScope?: undefined
+  }
+  | {
+    readonly declared: false
+    readonly layers: ReadonlyArray<string>
+    readonly capabilities: Readonly<Record<string, ReadonlyArray<string>>>
+    readonly runScope: string
+  }
 
 /**
  * Caller-owned memoization context for projected dependency-value digests.
@@ -178,26 +189,32 @@ export interface DigestMemo {
  */
 export const makeDigestMemo = (): DigestMemo => {
   const entries = new Map<string, Deferred.Deferred<StepKey, Schema.SchemaError>>()
-  return {
-    digest: (from, path, compute) =>
-      Effect.suspend(() => {
-        const address = JSON.stringify([from, path])
-        const existing = entries.get(address)
-        if (existing !== undefined) return Deferred.await(existing)
-        const pending = Deferred.makeUnsafe<StepKey, Schema.SchemaError>()
-        entries.set(address, pending)
-        return compute.pipe(
-          Effect.onExit((exit) =>
-            Effect.gen(function*() {
-              if (Exit.isFailure(exit) && entries.get(address) === pending) {
-                entries.delete(address)
-              }
-              yield* Deferred.done(pending, exit)
-            })
-          )
+  const digest: DigestMemo["digest"] = (from, path, compute) =>
+    Effect.suspend(() => {
+      const address = JSON.stringify([from, path])
+      const existing = entries.get(address)
+      if (existing !== undefined) {
+        return Effect.flatMap(Effect.exit(Deferred.await(existing)), (exit) => {
+          if (Exit.isSuccess(exit)) return Effect.succeed(exit.value)
+          // A waiter did not request the leader's cancellation. It competes to
+          // become the replacement leader instead of inheriting that interrupt.
+          return Cause.hasInterrupts(exit.cause) ? digest(from, path, compute) : Effect.failCause(exit.cause)
+        })
+      }
+      const pending = Deferred.makeUnsafe<StepKey, Schema.SchemaError>()
+      entries.set(address, pending)
+      return compute.pipe(
+        Effect.onExit((exit) =>
+          Effect.gen(function*() {
+            if (Exit.isFailure(exit) && entries.get(address) === pending) {
+              entries.delete(address)
+            }
+            yield* Deferred.done(pending, exit)
+          })
         )
-      })
-  }
+      )
+    })
+  return { digest }
 }
 
 /**
@@ -243,7 +260,7 @@ export interface OrdinalIdentity {
  * @slop
  */
 export class KeyMaterialError extends Schema.TaggedError<KeyMaterialError>()("@smthrs/plan/KeyMaterialError", {
-  code: Schema.Literals(["missing_dependency", "non_content_material"]),
+  code: Schema.Literals(["invalid_environment", "missing_dependency", "non_content_material"]),
   message: Schema.String
 }) {}
 
@@ -395,12 +412,20 @@ export const fromKeyMaterial = (
       inputs[String(index)] = input.value
       continue
     }
-    const digest = dependencyDigests[input.from]
-    if (digest === undefined) {
+    if (!Object.hasOwn(dependencyDigests, input.from)) {
       return Effect.fail(
         new KeyMaterialError({
           code: "missing_dependency",
           message: `Missing digest for graph dependency ${input.from}`
+        })
+      )
+    }
+    const digest = (dependencyDigests as Readonly<Record<string, unknown>>)[input.from]
+    if (typeof digest !== "string") {
+      return Effect.fail(
+        new KeyMaterialError({
+          code: "missing_dependency",
+          message: `Digest for graph dependency ${input.from} must be a string`
         })
       )
     }
@@ -445,8 +470,9 @@ const materialBody = (material: KeyMaterial.KeyMaterial) => ({
 const orderingOnly = "ordering-only"
 
 /**
- * Projects a settled result along a `Ref` path. A segment that does not exist
- * yields `undefined`, which is a stable, distinct value — a projection that
+ * Projects a settled result along a `Ref` path. Only own data properties
+ * resolve, so a missing, inherited, or accessor segment yields `undefined`
+ * without invoking a getter. This is a stable, distinct value: a projection that
  * walks off the end of a result is a fact about the graph, not a failure.
  * `undefined` drops out of the canonical form, so it hashes distinctly from
  * every JSON value including `null`.
@@ -465,7 +491,9 @@ export const project = (value: unknown, path: ReadonlyArray<string>): unknown =>
   let current = value
   for (const segment of path) {
     if (typeof current !== "object" || current === null) return undefined
-    current = (current as Record<string, unknown>)[segment]
+    const descriptor = Object.getOwnPropertyDescriptor(current, segment)
+    if (descriptor === undefined || !("value" in descriptor)) return undefined
+    current = descriptor.value
   }
   return current
 }
@@ -512,6 +540,21 @@ export const dispatchIdentity = (options: {
       return yield* new KeyMaterialError({
         code: "non_content_material",
         message: `Cannot create a dispatch key for ${material.kind} material`
+      })
+    }
+    const environment = options.environment as
+      | { readonly declared: boolean; readonly runScope?: unknown }
+      | undefined
+    if (environment?.declared === false && environment.runScope === undefined) {
+      return yield* new KeyMaterialError({
+        code: "invalid_environment",
+        message: "Undeclared environment identity requires runScope"
+      })
+    }
+    if (environment?.declared === true && environment.runScope !== undefined) {
+      return yield* new KeyMaterialError({
+        code: "invalid_environment",
+        message: "Declared environment identity must not include runScope"
       })
     }
     const inputs: Record<string, unknown> = {}

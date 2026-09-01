@@ -77,6 +77,54 @@ describe("PlanStore", () => {
       expect(Option.getOrThrow(read)).toEqual(grown)
     }))
 
+  it.effect("refuses a skipped generation and rolls the attempted append back byte for byte", () =>
+    Effect.gen(function*() {
+      const base = yield* withCrypto(compile([draft("a")]))
+      const generation1 = yield* withCrypto(Plan.append(base, [draft("b")]))
+      const generation2 = yield* withCrypto(Plan.append(generation1, [
+        draft("c", { inputs: [{ _tag: "Ref", from: "b", path: [] }] })
+      ]))
+      const { after, before, failure } = yield* withStore((store) =>
+        Effect.gen(function*() {
+          yield* store.record(base, 1)
+          const before = yield* store.get(base.planId)
+          const failure = yield* Effect.flip(store.append(generation2))
+          const after = yield* store.get(base.planId)
+          return { after, before, failure }
+        })
+      )
+
+      expect(failure).toMatchObject({
+        code: "constraint",
+        message: `plan ${base.planId} was never recorded, or generation 2 was skipped or moved under the append`
+      })
+      expect(after).toEqual(before)
+    }))
+
+  it.effect("stores successive append ordinals contiguously in plan order", () =>
+    Effect.gen(function*() {
+      const base = yield* withCrypto(compile([draft("a"), draft("b")]))
+      const generation1 = yield* withCrypto(Plan.append(base, [draft("c"), draft("d")]))
+      const generation2 = yield* withCrypto(Plan.append(generation1, [
+        draft("e", { inputs: [{ _tag: "Pending", from: "d" }] })
+      ]))
+      const rows = yield* withStore((store) =>
+        Effect.gen(function*() {
+          yield* store.record(base, 1)
+          yield* store.append(generation1)
+          yield* store.append(generation2)
+          const sql = yield* SqlClient.SqlClient
+          return yield* sql<{ node_id: string; ordinal: number }>`
+            SELECT node_id, ordinal FROM flows_plan_nodes
+            WHERE plan_id = ${base.planId}
+            ORDER BY ordinal
+          `
+        })
+      )
+
+      expect(rows).toEqual(generation2.nodes.map((node, ordinal) => ({ node_id: node.id, ordinal })))
+    }))
+
   it.effect("returns none for a plan that was never recorded", () =>
     Effect.gen(function*() {
       expect(yield* withStore((store) => store.get("absent"))).toEqual(Option.none())
@@ -100,8 +148,60 @@ describe("PlanStore", () => {
           return { failure, orphans: rows[0]!.n }
         })
       )
-      expect(failure).toMatchObject({ code: "constraint" })
+      expect(failure).toMatchObject({
+        code: "constraint",
+        message: `plan ${base.planId} was never recorded, or generation 1 was skipped or moved under the append`
+      })
       expect(orphans).toBe(0)
+    }))
+
+  it.effect("refuses every non-generation-zero record shape with an exact invalid_plan error", () =>
+    Effect.gen(function*() {
+      const base = yield* withCrypto(compile([draft("root")]))
+      const grown = yield* withCrypto(Plan.append(base, [draft("late")]))
+      const other = yield* withCrypto(compile([draft("other")], "other-plan"))
+      const wrongBase: Plan.Plan = { ...base, baseDigest: other.digest }
+      const wrongNode: Plan.Plan = {
+        ...base,
+        nodes: [{ ...base.nodes[0]!, generation: 1 }]
+      }
+      const [grownFailure, baseFailure, nodeFailure] = yield* withStore((store) =>
+        Effect.all([
+          Effect.flip(store.record(grown, 1)),
+          Effect.flip(store.record(wrongBase, 1)),
+          Effect.flip(store.record(wrongNode, 1))
+        ], { concurrency: 1 })
+      )
+
+      expect(grownFailure).toMatchObject({
+        code: "invalid_plan",
+        message: `plan ${base.planId} has generation 1; record requires generation 0`
+      })
+      expect(baseFailure).toMatchObject({
+        code: "invalid_plan",
+        message: `plan ${base.planId} has base digest ${other.digest}, but generation 0 digest is ${base.digest}`
+      })
+      expect(nodeFailure).toMatchObject({
+        code: "invalid_plan",
+        message: `plan ${base.planId} node root has generation 1; record requires node generation 0`
+      })
+    }))
+
+  it.effect("refuses an append whose newest generation has no nodes", () =>
+    Effect.gen(function*() {
+      const base = yield* withCrypto(compile([draft("root")]))
+      const empty = yield* withCrypto(Plan.append(base, []))
+      const failure = yield* withStore((store) =>
+        Effect.gen(function*() {
+          yield* store.record(base, 1)
+          return yield* Effect.flip(store.append(empty))
+        })
+      )
+
+      expect(failure).toMatchObject({
+        code: "invalid_plan",
+        message: `plan ${base.planId} generation 1 has no nodes to append`
+      })
     }))
 
   it.effect("refuses a value that is not a plan", () =>
@@ -153,7 +253,65 @@ describe("PlanStore", () => {
         })
       )
       expect(failures.filter((message) => message.includes("append-only")).length).toBe(4)
-      expect(failures[4]).toContain("a plan only grows")
+      expect(failures[4]).toBe("a plan only grows")
+    }))
+
+  it.effect("refuses deleting a recorded plan row", () =>
+    Effect.gen(function*() {
+      const plan = yield* withCrypto(samplePlan())
+      const failure = yield* withStore((store) =>
+        Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          yield* store.record(plan, 1)
+          return yield* Effect.flip(sql`DELETE FROM flows_plans WHERE plan_id = ${plan.planId}`)
+        })
+      )
+
+      expect(raised(failure)).toBe("flows_plans is append-only")
+    }))
+
+  it.effect("refuses rewriting a recorded plan's flow or creation time", () =>
+    Effect.gen(function*() {
+      const plan = yield* withCrypto(samplePlan())
+      const [flow, createdAt] = yield* withStore((store) =>
+        Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          yield* store.record(plan, 1)
+          const flow = yield* Effect.flip(
+            sql`UPDATE flows_plans SET flow = 'other/Flow' WHERE plan_id = ${plan.planId}`
+          )
+          const createdAt = yield* Effect.flip(
+            sql`UPDATE flows_plans SET created_at_ms = 2 WHERE plan_id = ${plan.planId}`
+          )
+          return [flow, createdAt] as const
+        })
+      )
+
+      expect(raised(flow)).toBe("a plan only grows")
+      expect(raised(createdAt)).toBe("a plan only grows")
+    }))
+
+  it.effect("refuses two nodes with the same plan ordinal", () =>
+    Effect.gen(function*() {
+      const plan = yield* withCrypto(samplePlan())
+      const failure = yield* withStore((store) =>
+        Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          yield* store.record(plan, 1)
+          return yield* Effect.flip(sql`
+            INSERT INTO flows_plan_nodes (
+              plan_id, node_id, generation, ordinal, kind, key_digest, node_json
+            )
+            SELECT plan_id, 'duplicate-ordinal', generation, ordinal, kind, key_digest, node_json
+            FROM flows_plan_nodes
+            WHERE plan_id = ${plan.planId} AND node_id = 'root'
+          `)
+        })
+      )
+
+      expect(raised(failure)).toBe(
+        "UNIQUE constraint failed: flows_plan_nodes.plan_id, flows_plan_nodes.ordinal"
+      )
     }))
 
   it.effect("reports an undecodable node row rather than returning a broken plan", () =>

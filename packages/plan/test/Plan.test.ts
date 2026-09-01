@@ -1,13 +1,14 @@
 /**
  * Deterministic graph tests in the mould of Skyframe's `GraphTester`: a graph
  * is declared as data, compiled, and asserted on. Nothing here touches a
- * clock, a filesystem, or a network — `docs/specs/Concepts/Build Phases.md`
+ * clock, a filesystem, or a network:
  * makes that a law, and a test that needed any of them would be evidence the
  * law was broken.
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import { FastCheck } from "effect/testing"
 import * as KeyMaterial from "../src/KeyMaterial.ts"
 import * as Plan from "../src/Plan.ts"
 import * as PlanDiff from "../src/PlanDiff.ts"
@@ -52,6 +53,21 @@ export const compile = (nodes: ReadonlyArray<Plan.NodeDraft>, planId = "plan-1")
 
 const keyOf = (plan: Plan.Plan, id: string) => plan.nodes.find((node) => node.id === id)!.key
 
+const propertyParams = {
+  numRuns: Number(process.env.FC_NUM_RUNS ?? 100),
+  ...(process.env.FC_SEED === undefined ? {} : { seed: Number(process.env.FC_SEED) }),
+  interruptAfterTimeLimit: 20_000,
+  markInterruptAsFailure: true
+} satisfies FastCheck.Parameters<unknown>
+
+const draftSpec = FastCheck.tuple(
+  FastCheck.jsonValue({ stringUnit: "grapheme" }),
+  FastCheck.integer({ min: -100, max: 100 }),
+  FastCheck.constantFrom<Plan.PlanNode["kind"]>("step", "agent", "merge"),
+  FastCheck.constantFrom<Plan.PairStrategy>("serialize", "lane", "fail"),
+  FastCheck.constantFrom<Plan.RuntimeStrategy>("delay-rebase", "stop-merge")
+)
+
 describe("Plan.compile", () => {
   it.effect("orders topologically, keys every node, and defaults its annotations", () =>
     Effect.gen(function*() {
@@ -64,6 +80,134 @@ describe("Plan.compile", () => {
       expect(plan.nodes[0]).toMatchObject({ kind: "step", priority: 0, strategy: "serialize", runtime: "delay-rebase" })
       expect(plan.digest).toBe(plan.baseDigest)
       expect(plan.generation).toBe(0)
+    }))
+
+  it.effect("captures draft data before the lazy effect runs and freezes the compiled plan", () =>
+    Effect.gen(function*() {
+      const body = { x: 1 }
+      const writes = ["shared.txt"]
+      const pending = compile([
+        draft("first", { body, writes }),
+        draft("second", { writes: ["shared.txt"] })
+      ], "immutable")
+
+      body.x = 2
+      writes[0] = "changed-before-run.txt"
+      const plan = yield* withCrypto(pending)
+      const key = plan.nodes[0]!.key
+      const digest = plan.digest
+
+      body.x = 3
+      writes[0] = "changed-after-run.txt"
+
+      expect(plan.nodes[0]!.material.body).toEqual({ x: 1 })
+      expect(plan.nodes[0]!.effects.writes).toEqual(["shared.txt"])
+      expect(plan.nodes[0]!.key).toBe(key)
+      expect(plan.digest).toBe(digest)
+      expect(Object.isFrozen(plan)).toBe(true)
+      expect(Object.isFrozen(plan.nodes)).toBe(true)
+      for (const node of plan.nodes) {
+        expect(Object.isFrozen(node)).toBe(true)
+        expect(Object.isFrozen(node.dependsOn)).toBe(true)
+        expect(Object.isFrozen(node.conflicts)).toBe(true)
+        for (const conflict of node.conflicts) {
+          expect(Object.isFrozen(conflict)).toBe(true)
+          expect(Object.isFrozen(conflict.paths)).toBe(true)
+        }
+      }
+      expect(() => {
+        ;(plan.nodes[0] as unknown as { id: string }).id = "rewritten"
+      }).toThrow(TypeError)
+    }))
+
+  it.effect("preserves cycles and shared references while snapshotting material", () =>
+    Effect.gen(function*() {
+      const shared = { value: 1 }
+      const cyclic: { value: number; self?: unknown; toJSON: () => { value: number } } = {
+        value: 2,
+        toJSON() {
+          return { value: this.value }
+        }
+      }
+      cyclic.self = cyclic
+
+      const plan = yield* withCrypto(compile([draft("node", {
+        body: { cyclic, left: shared, right: shared }
+      })]))
+      const body = plan.nodes[0]!.material.body as {
+        cyclic: { self: unknown }
+        left: { value: number }
+        right: { value: number }
+      }
+
+      expect(body.cyclic).not.toBe(cyclic)
+      expect(body.cyclic.self).toBe(body.cyclic)
+      expect(body.left).not.toBe(shared)
+      expect(body.left).toBe(body.right)
+    }))
+
+  it.effect("copies supported container prototypes and passes opaque values by reference", () =>
+    Effect.gen(function*() {
+      const dictionary = Object.assign(Object.create(null) as Record<string, unknown>, { value: 1 })
+      let getterReads = 0
+      const accessor = {}
+      const getter = () => {
+        getterReads++
+        return 2
+      }
+      Object.defineProperty(accessor, "value", { enumerable: true, get: getter })
+      const opaque = new Date(0)
+      const pending = compile([draft("node", { body: { accessor, dictionary, opaque } })])
+
+      expect(getterReads).toBe(0)
+      const plan = yield* withCrypto(pending)
+      const body = plan.nodes[0]!.material.body as {
+        accessor: object
+        dictionary: object
+        opaque: Date
+      }
+
+      expect(body.dictionary).not.toBe(dictionary)
+      expect(Object.getPrototypeOf(body.dictionary)).toBe(null)
+      expect(Object.isFrozen(body.dictionary)).toBe(true)
+      expect(body.accessor).not.toBe(accessor)
+      expect(Object.getOwnPropertyDescriptor(body.accessor, "value")?.get).toBe(getter)
+      expect(body.opaque).toBe(opaque)
+      expect(Object.isFrozen(opaque)).toBe(false)
+    }))
+
+  it.effect("pins recursive-compatible ordering for a non-trivial graph", () =>
+    Effect.gen(function*() {
+      const plan = yield* withCrypto(compile([
+        draft("final", {
+          inputs: [
+            { _tag: "Ref", from: "left", path: [] },
+            { _tag: "Ref", from: "right", path: [] }
+          ]
+        }),
+        draft("right", { inputs: [{ _tag: "Ref", from: "root", path: [] }] }),
+        draft("independent"),
+        draft("left", { inputs: [{ _tag: "Ref", from: "root", path: [] }] }),
+        draft("root")
+      ]))
+
+      expect(plan.nodes.map((node) => node.id)).toEqual(["root", "left", "right", "final", "independent"])
+    }))
+
+  it.effect("compiles a 10,000-node Ref chain in both declaration orders without native recursion", () =>
+    Effect.gen(function*() {
+      const size = 10_000
+      const ids = Array.from({ length: size }, (_, index) => `chain-${index}`)
+      const nodes = ids.map((id, index) =>
+        draft(id, {
+          inputs: index === 0 ? [] : [{ _tag: "Ref", from: ids[index - 1]!, path: [] }]
+        })
+      )
+      const forward = yield* withCrypto(compile(nodes, "large-forward"))
+      const reverse = yield* withCrypto(compile([...nodes].reverse(), "large-reverse"))
+
+      expect(forward.nodes.map((node) => node.id)).toEqual(ids)
+      expect(reverse.nodes.map((node) => node.id)).toEqual(ids)
     }))
 
   it.effect("re-keys the dependent cone and nothing else when a leaf's declaration changes", () =>
@@ -118,6 +262,22 @@ describe("Plan.compile", () => {
       // The ordering edge is not key material: a serialized node computes the
       // same result, so it must keep its cache hit.
       expect(keyOf(plan, "second")).toBe(keyOf(disjoint, "second"))
+    }))
+
+  it.effect("serializes canonically equivalent Unicode writer paths", () =>
+    Effect.gen(function*() {
+      const nfc = "caf\u00e9.txt"
+      const nfd = nfc.normalize("NFD")
+      const plan = yield* withCrypto(compile([
+        draft("composed", { writes: [nfc] }),
+        draft("decomposed", { writes: [nfd] })
+      ]))
+
+      expect(plan.nodes[0]!.conflicts).toMatchObject([{ with: "decomposed", paths: [nfc] }])
+      expect(plan.nodes[1]).toMatchObject({
+        dependsOn: ["composed"],
+        conflicts: [{ with: "composed", paths: [nfc] }]
+      })
     }))
 
   it.effect("uses conservative pattern overlap for conflicts and reader-after-writer edges", () =>
@@ -186,7 +346,41 @@ describe("Plan.compile", () => {
         draft("first", { writes: ["out"], conflictStrategy: "fail" }),
         draft("second", { writes: ["out"] })
       ]))
-      expect(failure).toMatchObject({ code: "overlap_forbidden" })
+      expect(failure).toMatchObject({
+        code: "overlap_forbidden",
+        message: "Nodes first and second both write out"
+      })
+    }))
+
+  it.effect("uses newly inferred edges when deciding whether later writers are already ordered", () =>
+    Effect.gen(function*() {
+      const plan = yield* withCrypto(compile([
+        draft("A", { writes: ["f.txt", "h.txt"] }),
+        draft("B", { writes: ["f.txt"] }),
+        draft("C", { writes: ["h.txt"], inputs: [{ _tag: "Ref", from: "B", path: [] }] })
+      ]))
+
+      expect(plan.nodes.find((node) => node.id === "A")!.conflicts).toMatchObject([{ with: "B" }])
+      expect(plan.nodes.find((node) => node.id === "B")).toMatchObject({
+        dependsOn: ["A"],
+        conflicts: [{ with: "A" }]
+      })
+      expect(plan.nodes.find((node) => node.id === "C")).toMatchObject({ dependsOn: ["B"], conflicts: [] })
+    }))
+
+  it.effect("does not fail a writer already ordered through a newly inferred intermediate edge", () =>
+    Effect.gen(function*() {
+      const plan = yield* withCrypto(compile([
+        draft("A", { writes: ["f.txt", "h.txt"] }),
+        draft("B", { writes: ["f.txt"] }),
+        draft("C", {
+          writes: ["h.txt"],
+          inputs: [{ _tag: "Ref", from: "B", path: [] }],
+          conflictStrategy: "fail"
+        })
+      ]))
+
+      expect(plan.nodes.find((node) => node.id === "C")).toMatchObject({ dependsOn: ["B"], conflicts: [] })
     }))
 
   it.effect("does not call writers a dependency path already orders a conflict", () =>
@@ -222,6 +416,46 @@ describe("Plan.compile", () => {
       expect(plan.nodes.map((node) => node.id)).toEqual(["__proto__", "consumer"])
       expect(plan.nodes[1]!.dependsOn).toEqual(["__proto__"])
       expect(plan.nodes.every((node) => node.key.startsWith("key1_"))).toBe(true)
+    }))
+})
+
+describe("Plan approval digest", () => {
+  it.effect("moves for runtime and conflict strategy changes without moving node keys", () =>
+    Effect.gen(function*() {
+      const baseline = yield* withCrypto(compile([draft("node")]))
+      const runtime = yield* withCrypto(compile([draft("node", { runtimeStrategy: "stop-merge" })]))
+      const conflict = yield* withCrypto(compile([draft("node", { conflictStrategy: "fail" })]))
+
+      expect(runtime.digest).not.toBe(baseline.digest)
+      expect(runtime.baseDigest).not.toBe(baseline.baseDigest)
+      expect(conflict.digest).not.toBe(baseline.digest)
+      expect(conflict.baseDigest).not.toBe(baseline.baseDigest)
+      expect(runtime.nodes[0]!.key).toBe(baseline.nodes[0]!.key)
+      expect(conflict.nodes[0]!.key).toBe(baseline.nodes[0]!.key)
+    }))
+
+  it.effect("moves for every independently settable NodeDraft field", () =>
+    Effect.gen(function*() {
+      const original = draft("node")
+      const baseline = yield* withCrypto(compile([original]))
+      // Deliberately non-semantic allow-list: excess material properties
+      // outside the KeyMaterial schema. Admission strips them before hashing.
+      const variants: ReadonlyArray<readonly [string, Plan.NodeDraft]> = [
+        ["id", { ...original, id: "renamed" }],
+        ["material", { ...original, material: { ...original.material, body: { action: "changed" } } }],
+        ["effects", { ...original, effects: { ...original.effects, reads: ["input.txt"] } }],
+        ["kind", { ...original, kind: "agent" }],
+        ["priority", { ...original, priority: 1 }],
+        ["conflictStrategy", { ...original, conflictStrategy: "fail" }],
+        ["runtimeStrategy", { ...original, runtimeStrategy: "stop-merge" }]
+      ]
+      const moved: Array<readonly [string, boolean]> = []
+      for (const [field, variant] of variants) {
+        const changed = yield* withCrypto(compile([variant]))
+        moved.push([field, changed.digest !== baseline.digest])
+      }
+
+      expect(moved).toEqual(variants.map(([field]) => [field, true]))
     }))
 })
 
@@ -357,6 +591,20 @@ describe("Plan.compile reader-after-writer edges", () => {
 })
 
 describe("Plan.append", () => {
+  it.effect("counts a frozen generation's inferred edges toward reachability", () =>
+    Effect.gen(function*() {
+      const base = yield* withCrypto(compile([
+        draft("A", { writes: ["f.txt", "h.txt"] }),
+        draft("B", { writes: ["f.txt"] })
+      ]))
+      const grown = yield* withCrypto(Plan.append(base, [
+        draft("C", { writes: ["h.txt"], inputs: [{ _tag: "Ref", from: "B", path: [] }] })
+      ]))
+
+      expect(grown.nodes.slice(0, 2)).toEqual(base.nodes)
+      expect(grown.nodes[2]).toMatchObject({ dependsOn: ["B"], conflicts: [] })
+    }))
+
   it.effect("lands a reader-after-writer edge on the new node only", () =>
     Effect.gen(function*() {
       const base = yield* withCrypto(compile([draft("recorded-reader", { reads: ["out"] })]))
@@ -379,12 +627,41 @@ describe("Plan.append", () => {
       const grown = yield* withCrypto(
         Plan.append(base, [draft("child", { inputs: [{ _tag: "Ref", from: "root", path: [] }] })])
       )
-      expect(grown.nodes[0]).toEqual(base.nodes[0])
+      expect(grown.nodes[0]).toBe(base.nodes[0])
       expect(grown.generation).toBe(1)
       expect(grown.baseDigest).toBe(base.baseDigest)
       expect(grown.digest).not.toBe(base.digest)
       expect(Plan.generationNodes(grown).map((node) => node.id)).toEqual(["child"])
       expect(grown.nodes[1]!.generation).toBe(1)
+      expect(Object.isFrozen(grown)).toBe(true)
+      expect(Object.isFrozen(grown.nodes)).toBe(true)
+      expect(grown.nodes.every(Object.isFrozen)).toBe(true)
+      expect(grown.nodes.every((node) => Object.isFrozen(node.dependsOn) && Object.isFrozen(node.conflicts)))
+        .toBe(true)
+    }))
+
+  it.effect("captures appended draft data before the lazy effect runs", () =>
+    Effect.gen(function*() {
+      const base = yield* withCrypto(compile([draft("root")]))
+      const body = { x: 1 }
+      const writes = ["late.txt"]
+      const pending = Plan.append(base, [draft("late", { body, writes })])
+
+      body.x = 2
+      writes[0] = "changed-before-run.txt"
+      const grown = yield* withCrypto(pending)
+      const appended = grown.nodes[1]!
+      const key = appended.key
+      const digest = grown.digest
+
+      body.x = 3
+      writes[0] = "changed-after-run.txt"
+
+      expect(appended.material.body).toEqual({ x: 1 })
+      expect(appended.effects.writes).toEqual(["late.txt"])
+      expect(appended.key).toBe(key)
+      expect(grown.digest).toBe(digest)
+      expect(grown.nodes[0]).toBe(base.nodes[0])
     }))
 
   it.effect("annotates a conflict discovered during elaboration on the new node only", () =>
@@ -405,6 +682,155 @@ describe("Plan.append", () => {
     Effect.gen(function*() {
       const base = yield* withCrypto(compile([draft("root")]))
       expect(yield* withCryptoFailure(Plan.append(base, [draft("root")]))).toMatchObject({ code: "duplicate_node" })
+    }))
+})
+
+describe("Plan admission", () => {
+  it.effect.prop(
+    "every successful compile and append result decodes through the Plan schema",
+    [
+      FastCheck.array(draftSpec, { minLength: 1, maxLength: 5 }),
+      FastCheck.array(draftSpec, { minLength: 1, maxLength: 5 })
+    ],
+    ([baseSpecs, appendedSpecs]) =>
+      Effect.gen(function*() {
+        const fromSpecs = (prefix: string, specs: typeof baseSpecs) =>
+          specs.map(([body, priority, kind, conflictStrategy, runtimeStrategy], index) =>
+            draft(`${prefix}-${index}`, { body, priority, kind, conflictStrategy, runtimeStrategy })
+          )
+        const base = yield* withCrypto(compile(fromSpecs("base", baseSpecs), "schema-property"))
+        const grown = yield* withCrypto(Plan.append(base, fromSpecs("append", appendedSpecs)))
+
+        expect(yield* Schema.decodeUnknownEffect(Plan.Plan)(base)).toEqual(base)
+        expect(yield* Schema.decodeUnknownEffect(Plan.Plan)(grown)).toEqual(grown)
+      }),
+    { fastCheck: propertyParams }
+  )
+
+  it.effect("refuses empty and non-string plan identifiers with exact errors", () =>
+    Effect.gen(function*() {
+      const emptyPlanId = yield* withCryptoFailure(Plan.compile({ planId: "", flow: "flow", nodes: [] }))
+      expect(emptyPlanId).toMatchObject({
+        code: "invalid_node",
+        message: "Plan option planId must be a non-empty string, received \"\""
+      })
+
+      const nonStringPlanId = yield* withCryptoFailure(
+        Plan.compile({ planId: 1 as unknown as string, flow: "flow", nodes: [] })
+      )
+      expect(nonStringPlanId).toMatchObject({
+        code: "invalid_node",
+        message: "Plan option planId must be a non-empty string, received 1"
+      })
+    }))
+
+  it.effect("refuses empty and non-string flow identifiers with exact errors", () =>
+    Effect.gen(function*() {
+      const emptyFlow = yield* withCryptoFailure(Plan.compile({ planId: "plan", flow: "", nodes: [] }))
+      expect(emptyFlow).toMatchObject({
+        code: "invalid_node",
+        message: "Plan option flow must be a non-empty string, received \"\""
+      })
+
+      const nonStringFlow = yield* withCryptoFailure(
+        Plan.compile({ planId: "plan", flow: 1 as unknown as string, nodes: [] })
+      )
+      expect(nonStringFlow).toMatchObject({
+        code: "invalid_node",
+        message: "Plan option flow must be a non-empty string, received 1"
+      })
+    }))
+
+  it.effect("validates an incoming plan's identifiers before append graph work", () =>
+    Effect.gen(function*() {
+      const base = yield* withCrypto(compile([draft("base")]))
+      const planIdFailure = yield* withCryptoFailure(Plan.append({ ...base, planId: "" }, [draft("next")]))
+      expect(planIdFailure).toMatchObject({
+        code: "invalid_node",
+        message: "Plan option planId must be a non-empty string, received \"\""
+      })
+      const flowFailure = yield* withCryptoFailure(Plan.append({ ...base, flow: "" }, [draft("next")]))
+      expect(flowFailure).toMatchObject({
+        code: "invalid_node",
+        message: "Plan option flow must be a non-empty string, received \"\""
+      })
+    }))
+
+  it.effect("refuses an empty node id with its exact error", () =>
+    Effect.gen(function*() {
+      const failure = yield* withCryptoFailure(compile([draft("")]))
+      expect(failure).toMatchObject({
+        code: "invalid_node",
+        message: "Node id must be a non-empty string, received \"\""
+      })
+
+      const nonString = yield* withCryptoFailure(compile([{ ...draft("node"), id: 1 as unknown as string }]))
+      expect(nonString).toMatchObject({
+        code: "invalid_node",
+        message: "Node id must be a non-empty string, received 1"
+      })
+    }))
+
+  it.effect("refuses fractional and unsafe priorities with exact errors", () =>
+    Effect.gen(function*() {
+      const fractional = yield* withCryptoFailure(compile([draft("node", { priority: 1.5 })]))
+      expect(fractional).toMatchObject({
+        code: "invalid_node",
+        message: "Node node priority must be a safe integer, received 1.5"
+      })
+      const unsafe = yield* withCryptoFailure(
+        compile([draft("node", { priority: Number.MAX_SAFE_INTEGER + 1 })])
+      )
+      expect(unsafe).toMatchObject({
+        code: "invalid_node",
+        message: "Node node priority must be a safe integer, received 9007199254740992"
+      })
+    }))
+
+  it.effect("refuses a speculative material version with its schema path", () =>
+    Effect.gen(function*() {
+      const node = draft("node")
+      const material = { ...node.material, version: "flows/key-material/v2" }
+      const failure = yield* withCryptoFailure(compile([{
+        ...node,
+        material: material as unknown as KeyMaterial.KeyMaterial
+      }]))
+      expect(failure).toMatchObject({
+        code: "invalid_node",
+        message: `Node node has invalid material ${
+          JSON.stringify(material)
+        }: Expected "flows/key-material/v1"\n  at ["version"]`
+      })
+    }))
+
+  it.effect("refuses a malformed material input with its schema path", () =>
+    Effect.gen(function*() {
+      const node = draft("node")
+      const material = { ...node.material, inputs: [{ _tag: "Ref", from: "", path: [] }] }
+      const failure = yield* withCryptoFailure(compile([{
+        ...node,
+        material: material as unknown as KeyMaterial.KeyMaterial
+      }]))
+      expect(failure).toMatchObject({
+        code: "invalid_node",
+        message: `Node node has invalid material ${
+          JSON.stringify(material)
+        }: Expected a value with a length of at least 1\n  at ["inputs"][0]["from"]`
+      })
+    }))
+
+  it.effect("accepts and strips excess material fields while snapshotting schema arrays", () =>
+    Effect.gen(function*() {
+      const node = draft("node")
+      const inputs = [...node.material.inputs]
+      const material = { ...node.material, inputs, futureField: { ignored: true } }
+      const plan = yield* withCrypto(compile([{
+        ...node,
+        material: material as unknown as KeyMaterial.KeyMaterial
+      }]))
+
+      expect("futureField" in plan.nodes[0]!.material).toBe(false)
+      expect(plan.nodes[0]!.material.inputs).not.toBe(inputs)
     }))
 })
 
@@ -451,20 +877,60 @@ describe("PlanDiff.diff", () => {
       const after = yield* withCrypto(compile([
         material({
           body: 2,
+          nondeterministic: true,
           layers: ["b"],
           capabilities: ["fs:write"],
           effects: { net: true },
+          placement: { host: "other" },
           inputs: [{ _tag: "Literal", value: 2 }, { _tag: "Literal", value: 3 }]
         })
       ]))
       expect(PlanDiff.diff(before, after).rekeyed[0]!.changed).toEqual([
         "body",
-        "layers",
-        "capabilities",
+        "nondeterministic",
         "effects",
+        "placement",
         "input[0]",
-        "input[1]"
+        "input[1]",
+        "layers",
+        "capabilities"
       ])
+    }))
+
+  it.effect("attributes every hashed material field when it moves by itself", () =>
+    Effect.gen(function*() {
+      const material = (overrides: Partial<KeyMaterial.KeyMaterial> = {}): Plan.NodeDraft => ({
+        id: "node",
+        material: {
+          version: KeyMaterial.version,
+          kind: "sealed",
+          body: 1,
+          inputs: [{ _tag: "Literal", value: 1 }],
+          layers: ["a"],
+          capabilities: ["fs:read"],
+          effects: { net: false },
+          placement: { host: "a" },
+          ...overrides
+        },
+        effects: effects([], [])
+      })
+      const before = yield* withCrypto(compile([material()]))
+      const cases: ReadonlyArray<readonly [string, Partial<KeyMaterial.KeyMaterial>]> = [
+        ["body", { body: 2 }],
+        ["nondeterministic", { nondeterministic: true }],
+        ["effects", { effects: { net: true } }],
+        ["placement", { placement: { host: "b" } }],
+        ["input[0]", { inputs: [{ _tag: "Literal", value: 2 }] }],
+        ["layers", { layers: ["b"] }],
+        ["capabilities", { capabilities: ["fs:write"] }]
+      ]
+      const attributions: Array<readonly [string, ReadonlyArray<string>]> = []
+      for (const [field, overrides] of cases) {
+        const after = yield* withCrypto(compile([material(overrides)]))
+        attributions.push([field, PlanDiff.diff(before, after).rekeyed[0]!.changed])
+      }
+
+      expect(attributions).toEqual(cases.map(([field]) => [field, [field]]))
     }))
 
   it.effect("says nothing changed when nothing did", () =>
@@ -523,6 +989,28 @@ describe("PlanDiff.diff", () => {
       const reordered = yield* withCrypto(compile([node({ b: [1, "x", null], a: 1 })]))
       expect(PlanDiff.diff(before, reordered).unchanged).toEqual(["node"])
     }))
+
+  it.effect("reports bigint material in a hand-built plan without throwing", () =>
+    Effect.gen(function*() {
+      const compiled = yield* withCrypto(compile([draft("node")]))
+      const before: Plan.Plan = {
+        ...compiled,
+        nodes: [{
+          ...compiled.nodes[0]!,
+          material: { ...compiled.nodes[0]!.material, body: 1n }
+        }]
+      }
+      const after: Plan.Plan = {
+        ...before,
+        nodes: [{
+          ...before.nodes[0]!,
+          key: Schema.decodeUnknownSync(Plan.KeyDigest)(`key1_${"0".repeat(64)}`),
+          material: { ...before.nodes[0]!.material, body: 2n }
+        }]
+      }
+
+      expect(PlanDiff.diff(before, after).rekeyed[0]!.changed).toEqual(["body"])
+    }))
 })
 
 describe("Plan.compile effects validation", () => {
@@ -540,6 +1028,44 @@ describe("Plan.compile effects validation", () => {
       for (const spelling of ["../escape.txt", "./out.txt", "out//x.txt"]) {
         const error = yield* withCryptoFailure(compile([draft("node", { reads: [spelling] })]))
         expect(error).toMatchObject({ code: "invalid_effects" })
+      }
+    }))
+
+  it.effect("refuses control characters at every declared filesystem site", () =>
+    Effect.gen(function*() {
+      const declarations: ReadonlyArray<readonly [path: string, effects: Plan.NodeEffects]> = [
+        ["read\u0000.txt", { reads: ["read\u0000.txt"], writes: [], boundaryMode: "hard" }],
+        ["write\u0000.txt", { reads: [], writes: ["write\u0000.txt"], boundaryMode: "hard" }],
+        ["include\u0000/**", {
+          reads: [{ _tag: "Glob", include: ["include\u0000/**"] }],
+          writes: [],
+          boundaryMode: "hard"
+        }],
+        ["exclude\u0000/**", {
+          reads: [{ _tag: "Glob", include: ["**"], exclude: ["exclude\u0000/**"] }],
+          writes: [],
+          boundaryMode: "hard"
+        }],
+        ["tree\u0000", {
+          reads: [],
+          writes: [{ _tag: "TreeArtifact", path: "tree\u0000" }],
+          boundaryMode: "hard"
+        }],
+        ["remove\u0000.txt", {
+          reads: [],
+          writes: [],
+          removes: ["remove\u0000.txt"],
+          boundaryMode: "hard"
+        }]
+      ]
+
+      for (const [path, effects] of declarations) {
+        const error = yield* withCryptoFailure(compile([{ ...draft("node"), effects }]))
+        expect(error).toBeInstanceOf(Plan.PlanError)
+        expect((error as Plan.PlanError).code).toBe("invalid_effects")
+        expect((error as Plan.PlanError).message).toBe(
+          `Node node declares ${path}, which is not workspace-relative`
+        )
       }
     }))
 

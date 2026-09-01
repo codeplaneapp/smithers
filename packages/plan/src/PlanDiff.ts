@@ -1,7 +1,7 @@
 /**
  * `smithers plan --diff`, as a value.
  *
- * `docs/specs/Specs/Plan.md`: "which steps changed key (and _which input_
+ * A plan diff answers "which steps changed key (and _which input_
  * changed them), what entered the envelope, what joined the release set —
  * 'what is different about this run' is a set comparison, not archaeology."
  * This module is the set comparison.
@@ -27,11 +27,10 @@ export interface Rekeyed {
   readonly from: string
   readonly to: string
   /**
-   * Field labels — `"body"`, `"layers"`, `"capabilities"`, `"effects"`,
-   * `"input[0]"` — whose declaration differs, plus `"input[n]"` entries whose
-   * referenced node itself re-keyed. Empty when nothing local changed, which
-   * is the honest answer for a node re-keyed purely by an upstream edit whose
-   * reference is a `Pending` with no projection.
+   * Field labels such as `"body"`, `"layers"`, `"capabilities"`, `"effects"`,
+   * and `"input[0]"` whose declaration differs. A `Pending`-referenced
+   * upstream re-key is attributed to that input position too. `changed` is
+   * empty only when none of the compared fields moved.
    */
   readonly changed: ReadonlyArray<string>
 }
@@ -58,6 +57,7 @@ export interface PlanDiff {
  * @private
  */
 const stable = (value: unknown): string => {
+  if (typeof value === "bigint") return `${value}n`
   if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined"
   if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`
   const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left < right ? -1 : 1)
@@ -71,11 +71,15 @@ const changedFields = (
   rekeyedDependencies: ReadonlySet<string>
 ): ReadonlyArray<string> => {
   const changed: Array<string> = []
-  if (stable(previous.material.body) !== stable(next.material.body)) changed.push("body")
-  if (stable(previous.material.layers) !== stable(next.material.layers)) changed.push("layers")
-  if (stable(previous.material.capabilities) !== stable(next.material.capabilities)) changed.push("capabilities")
-  if (stable(previous.material.effects) !== stable(next.material.effects)) changed.push("effects")
+  // StepKey.materialBody is the identity list this attribution must mirror.
+  // Inputs, layers, and capabilities complete fromKeyMaterial's hashed value.
   if (previous.material.version !== next.material.version) changed.push("version")
+  if (stable(previous.material.body) !== stable(next.material.body)) changed.push("body")
+  if (stable(previous.material.nondeterministic) !== stable(next.material.nondeterministic)) {
+    changed.push("nondeterministic")
+  }
+  if (stable(previous.material.effects) !== stable(next.material.effects)) changed.push("effects")
+  if (stable(previous.material.placement) !== stable(next.material.placement)) changed.push("placement")
   const width = Math.max(previous.material.inputs.length, next.material.inputs.length)
   for (let index = 0; index < width; index++) {
     const before = previous.material.inputs[index]
@@ -86,6 +90,8 @@ const changedFields = (
     }
     if (after._tag !== "Literal" && rekeyedDependencies.has(after.from)) changed.push(`input[${index}]`)
   }
+  if (stable(previous.material.layers) !== stable(next.material.layers)) changed.push("layers")
+  if (stable(previous.material.capabilities) !== stable(next.material.capabilities)) changed.push("capabilities")
   return changed
 }
 

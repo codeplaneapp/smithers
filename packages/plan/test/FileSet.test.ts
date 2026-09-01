@@ -59,6 +59,18 @@ describe("FileSet", () => {
     )).toBe(true)
   })
 
+  it("compares canonically equivalent Unicode spellings as one path", () => {
+    const nfc = "caf\u00e9.txt"
+    const nfd = nfc.normalize("NFD")
+    const glob: FileSet.Glob = { _tag: "Glob", include: ["caf\u00e9.*"] }
+
+    expect(FileSet.canonical(nfd)).toBe(nfc)
+    expect(FileSet.overlaps(nfc, nfd)).toBe(true)
+    expect(FileSet.overlaps(nfd, nfc)).toBe(true)
+    expect(FileSet.overlaps(glob, nfd)).toBe(true)
+    expect(FileSet.overlaps(nfd, glob)).toBe(true)
+  })
+
   it("uses the conservative overlap matrix", () => {
     const all: FileSet.Glob = { _tag: "Glob", include: ["**/*.ts"] }
     expect(FileSet.overlaps("a", "a")).toBe(true)
@@ -77,8 +89,14 @@ describe("FileSet", () => {
 
 describe("FileSet.workspaceRelative", () => {
   it("admits ordinary relative paths and patterns", () => {
-    for (const path of ["a.txt", "src/deep/b.ts", "src/**/*.ts", ".env", "a*b/c"]) {
+    for (const path of ["a.txt", "src/deep/b.ts", "src/**/*.ts", ".env", "a*b/c", "caf\u00e9.txt", "a\u0080b"]) {
       expect(FileSet.workspaceRelative(path)).toBe(true)
+    }
+  })
+
+  it("refuses C0 controls and DEL", () => {
+    for (const path of ["a\u0000b", "a\u001fb", "a\u007fb"]) {
+      expect(FileSet.workspaceRelative(path)).toBe(false)
     }
   })
 
@@ -94,6 +112,9 @@ describe("FileSet.workspaceRelative", () => {
     expect(Schema.decodeUnknownResult(FileSet.Pattern)("./aliased.txt")._tag).toBe("Failure")
     expect(Schema.decodeUnknownResult(FileSet.Entry)("../escape")._tag).toBe("Failure")
     expect(Schema.decodeUnknownResult(FileSet.ReadEntry)("/absolute")._tag).toBe("Failure")
+    for (const path of ["a\u0000b", "a\u001fb", "a\u007fb"]) {
+      expect(Schema.decodeUnknownResult(FileSet.Pattern)(path)._tag).toBe("Failure")
+    }
     expect(Schema.decodeUnknownResult(FileSet.Entry)("src/ok.ts")._tag).toBe("Success")
   })
 })

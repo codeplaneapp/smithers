@@ -1,8 +1,7 @@
 /**
  * The refusals a plan-time build raises instead of producing a wrong plan.
  *
- * `docs/specs/Concepts/Unified Flow Authoring.md` requires every one of these
- * to fail LOUDLY at build time: a planned value that was computed on must not
+ * Every one of these fails LOUDLY at build time: a planned value that was computed on must not
  * bake `NaN` into a plan, an arm that returned something other than a node must
  * not silently vanish from the topology, and a recursive `.call()` must direct
  * the author to `.to()` or `.child()` rather than expanding forever. Each

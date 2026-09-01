@@ -7,8 +7,7 @@
  * run store, step cache, and engine store hold `0`, `1000`, `2000`, `3000`).
  *
  * **Append-only is enforced in the schema, not by convention.**
- * `docs/specs/Specs/Plan.md` says a plan with dynamic nodes is not invalidated
- * by elaboration, it *grows*; the triggers below make a rewritten or deleted
+ * A plan with dynamic nodes is not invalidated by elaboration, it *grows*; the triggers below make a rewritten or deleted
  * node row an error the database raises rather than a rule a caller can
  * forget. The `flows_plans` row itself moves forward — a generation and a
  * digest advance as subgraphs land — so it accepts an UPDATE, but only one

@@ -60,14 +60,22 @@ const sealed = (overrides: Partial<KeyMaterial.KeyMaterial> = {}): KeyMaterial.K
 
 describe("StepKey.project properties", () => {
   // Pinned counterexample corpus; runs before random inputs, forever.
-  const projectCorpus: Array<[unknown, Array<string>]> = [
-    [{}, ["__proto__", "constructor"]],
-    [Object.create(null), ["toString"]],
-    [[0], ["0", "valueOf", "length"]],
-    [null, [""]],
-    ["text", ["length"]],
-    [{ a: undefined }, ["a", "b"]]
+  const projectCorpus: Array<[unknown, Array<string>, unknown]> = [
+    [{}, ["__proto__", "constructor"], undefined],
+    [Object.create(null), ["toString"], undefined],
+    [[0], ["0", "valueOf", "length"], undefined],
+    [null, [""], undefined],
+    ["text", ["length"], undefined],
+    [{ a: undefined }, ["a", "b"], undefined],
+    [{ own: { value: 1 } }, ["own", "value"], 1],
+    [["first"], ["0"], "first"]
   ]
+
+  it("pins adversarial paths to explicit values", () => {
+    for (const [value, path, expected] of projectCorpus) {
+      expect(StepKey.project(value, path)).toBe(expected)
+    }
+  })
 
   it("is total and stable: any value with any hostile path yields the same value or undefined, never a throw", () => {
     FastCheck.assert(
@@ -76,7 +84,7 @@ describe("StepKey.project properties", () => {
         const second = StepKey.project(value, path)
         expect(Object.is(first, second)).toBe(true)
       }),
-      { ...params, examples: projectCorpus }
+      { ...params, examples: projectCorpus.map(([value, path]) => [value, path]) }
     )
   })
 

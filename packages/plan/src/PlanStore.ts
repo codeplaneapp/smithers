@@ -1,8 +1,8 @@
 /**
  * Durable, append-only plan persistence.
  *
- * A plan is serializable data (`docs/specs/Specs/Plan.md`, "plans are values,
- * so they diff and travel"), and this is where the value is kept: nodes,
+ * A plan is serializable data. Plans are values, so they diff and travel, and
+ * this is where the value is kept: nodes,
  * edges, computed keys, effect declarations, conflict annotations, and the
  * digest a run's approval binds to. The store never interprets a plan — it
  * records what {@link module:Plan} compiled and hands it back.
@@ -171,6 +171,34 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
   const record: Service["record"] = Effect.fn("PlanStore.record")((plan, createdAtMs) =>
     Effect.gen(function*() {
       yield* validate(plan)
+      if (plan.generation !== 0) {
+        return yield* Effect.fail(
+          error(
+            "invalid_plan",
+            `plan ${plan.planId} has generation ${plan.generation}; record requires generation 0`,
+            undefined
+          )
+        )
+      }
+      if (plan.baseDigest !== plan.digest) {
+        return yield* Effect.fail(
+          error(
+            "invalid_plan",
+            `plan ${plan.planId} has base digest ${plan.baseDigest}, but generation 0 digest is ${plan.digest}`,
+            undefined
+          )
+        )
+      }
+      const wrongGeneration = plan.nodes.find((node) => node.generation !== 0)
+      if (wrongGeneration !== undefined) {
+        return yield* Effect.fail(
+          error(
+            "invalid_plan",
+            `plan ${plan.planId} node ${wrongGeneration.id} has generation ${wrongGeneration.generation}; record requires node generation 0`,
+            undefined
+          )
+        )
+      }
       return yield* writer.write(
         Effect.gen(function*() {
           const inserted = yield* sql`
@@ -198,12 +226,27 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     Effect.gen(function*() {
       yield* validate(plan)
       const appended = Plan.generationNodes(plan)
+      if (appended.length === 0) {
+        return yield* Effect.fail(
+          error(
+            "invalid_plan",
+            `plan ${plan.planId} generation ${plan.generation} has no nodes to append`,
+            undefined
+          )
+        )
+      }
       yield* writer.write(
         Effect.gen(function*() {
-          yield* insertNodes(plan.planId, appended, plan.nodes.length - appended.length)
+          const countRows = yield* sql<{ count: number }>`
+            SELECT COUNT(*) AS count FROM flows_plan_nodes WHERE plan_id = ${plan.planId}
+          `
+          yield* insertNodes(plan.planId, appended, countRows[0]!.count)
           const advanced = yield* sql`
             UPDATE flows_plans SET digest = ${plan.digest}, generation = ${plan.generation}
             WHERE plan_id = ${plan.planId}
+              AND generation = ${plan.generation - 1}
+              AND flow = ${plan.flow}
+              AND base_digest = ${plan.baseDigest}
           `.raw
           // An elaboration grows a plan that was recorded. Without this the
           // UPDATE matching nothing is silently fine while the node rows land
@@ -213,7 +256,11 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
           // takes them back with it.
           if ((yield* affectedRows(advanced)) === 0) {
             return yield* Effect.fail(
-              error("constraint", `plan ${plan.planId} was never recorded, so nothing can be appended to it`, undefined)
+              error(
+                "constraint",
+                `plan ${plan.planId} was never recorded, or generation ${plan.generation} was skipped or moved under the append`,
+                undefined
+              )
             )
           }
         })

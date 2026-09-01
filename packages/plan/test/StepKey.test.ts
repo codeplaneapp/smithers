@@ -20,6 +20,17 @@ const material = (overrides: Partial<KeyMaterial.KeyMaterial> = {}): KeyMaterial
   ...overrides
 })
 
+const expectKeyMaterialError = (
+  failure: unknown,
+  code: StepKey.KeyMaterialError["code"],
+  message: string
+): void => {
+  expect(failure).toBeInstanceOf(StepKey.KeyMaterialError)
+  const error = failure as StepKey.KeyMaterialError
+  expect(error.code).toBe(code)
+  expect(error.message).toBe(message)
+}
+
 describe("StepKey", () => {
   it.effect("produces a key1_ digest and is stable under set reordering", () =>
     Effect.gen(function*() {
@@ -273,7 +284,37 @@ describe("StepKey", () => {
       const failure = yield* withCryptoFailure(
         StepKey.fromKeyMaterial(material({ inputs: [{ _tag: "Ref", from: "missing", path: [] }] }), {})
       )
-      expect(failure).toMatchObject({ code: "missing_dependency" })
+      expectKeyMaterialError(failure, "missing_dependency", "Missing digest for graph dependency missing")
+    }))
+
+  it.effect.each(["toString", "constructor", "valueOf", "hasOwnProperty", "__proto__"] as const)(
+    "rejects a prototype-named dependency %s against a plain digest record",
+    (dependency) =>
+      Effect.gen(function*() {
+        const failure = yield* withCryptoFailure(
+          StepKey.fromKeyMaterial(material({ inputs: [{ _tag: "Ref", from: dependency, path: [] }] }), {})
+        )
+        expectKeyMaterialError(
+          failure,
+          "missing_dependency",
+          `Missing digest for graph dependency ${dependency}`
+        )
+      })
+  )
+
+  it.effect("rejects an own dependency digest that is not a string", () =>
+    Effect.gen(function*() {
+      const failure = yield* withCryptoFailure(
+        StepKey.fromKeyMaterial(
+          material({ inputs: [{ _tag: "Ref", from: "upstream", path: [] }] }),
+          { upstream: 123 } as unknown as Readonly<Record<string, string>>
+        )
+      )
+      expectKeyMaterialError(
+        failure,
+        "missing_dependency",
+        "Digest for graph dependency upstream must be a string"
+      )
     }))
 
   it.effect("refuses non-content material", () =>
@@ -289,6 +330,33 @@ describe("StepKey", () => {
       )
       expect(failure).toBeDefined()
     }))
+})
+
+describe("StepKey.project", () => {
+  it.each(["toString", "constructor", "__proto__", "hasOwnProperty"] as const)(
+    "does not resolve inherited property %s",
+    (property) => {
+      expect(StepKey.project({}, [property])).toBeUndefined()
+    }
+  )
+
+  it("resolves own data properties and array indices", () => {
+    expect(StepKey.project({ value: { nested: 1 } }, ["value", "nested"])).toBe(1)
+    expect(StepKey.project(["first"], ["0"])).toBe("first")
+  })
+
+  it("does not invoke an accessor", () => {
+    let reads = 0
+    const value = Object.defineProperty({}, "secret", {
+      enumerable: true,
+      get: () => {
+        reads++
+        return "revealed"
+      }
+    })
+    expect(StepKey.project(value, ["secret"])).toBeUndefined()
+    expect(reads).toBe(0)
+  })
 })
 
 describe("StepKey.dispatchIdentity", () => {
@@ -363,13 +431,76 @@ describe("StepKey.dispatchIdentity", () => {
       expect(recovered).toBe("key1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
     }).pipe(Effect.provide(NodeCrypto.layer)))
 
+  it.effect("lets a parked waiter replace an interrupted digest leader", () =>
+    Effect.gen(function*() {
+      const memo = StepKey.makeDigestMemo()
+      const leaderStarted = yield* Deferred.make<void>()
+      const leaderGate = yield* Deferred.make<void>()
+      const waiterAttempted = yield* Deferred.make<void>()
+      const leaderKey = "key1_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as StepKey.StepKey
+      const waiterKey = "key1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as StepKey.StepKey
+      const leader = yield* Effect.forkChild(
+        memo.digest(
+          "upstream",
+          ["value"],
+          Deferred.succeed(leaderStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(leaderGate)),
+            Effect.as(leaderKey)
+          )
+        )
+      )
+      yield* Deferred.await(leaderStarted)
+      const waiter = yield* Effect.forkChild(
+        Deferred.succeed(waiterAttempted, undefined).pipe(
+          Effect.andThen(memo.digest("upstream", ["value"], Effect.succeed(waiterKey)))
+        )
+      )
+      yield* Deferred.await(waiterAttempted)
+      yield* Effect.yieldNow
+      yield* Fiber.interrupt(leader)
+
+      expect(yield* Fiber.join(waiter)).toBe(waiterKey)
+    }).pipe(Effect.provide(NodeCrypto.layer)))
+
+  it.effect("propagates a leader's typed SchemaError to every parked waiter", () =>
+    Effect.gen(function*() {
+      const memo = StepKey.makeDigestMemo()
+      const schemaError = yield* Effect.flip(Schema.decodeUnknownEffect(Schema.String)(123))
+      const leaderStarted = yield* Deferred.make<void>()
+      const leaderGate = yield* Deferred.make<void>()
+      const leader = yield* Effect.forkChild(
+        memo.digest(
+          "upstream",
+          ["value"],
+          Deferred.succeed(leaderStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(leaderGate)),
+            Effect.andThen(Effect.fail(schemaError))
+          )
+        )
+      )
+      yield* Deferred.await(leaderStarted)
+      const waiter = yield* Effect.forkChild(
+        memo.digest(
+          "upstream",
+          ["value"],
+          Effect.succeed("key1_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as StepKey.StepKey)
+        )
+      )
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(leaderGate, undefined)
+
+      expect(yield* Effect.flip(Fiber.join(leader))).toBe(schemaError)
+      expect(yield* Effect.flip(Fiber.join(waiter))).toBe(schemaError)
+    }).pipe(Effect.provide(NodeCrypto.layer)))
+
   it.effect("folds an engine-resolved environment without moving the absent identity", () =>
     Effect.gen(function*() {
       const absent = yield* withCrypto(dispatch({}, {}))
       const environment: StepKey.EnvironmentIdentity = {
         declared: false,
         layers: ["node-crypto", "workspace"],
-        capabilities: { fs: ["read", "write"] }
+        capabilities: { fs: ["read", "write"] },
+        runScope: "run-0"
       }
       const present = yield* withCrypto(StepKey.dispatchIdentity({
         material: material(),
@@ -386,6 +517,68 @@ describe("StepKey.dispatchIdentity", () => {
       expect(absent).toBe("key1_70bc16b1ef9256f7301167c9d11f332d39383c61d9f630d99bdc920c066b6ac2")
       expect(present).not.toBe(absent)
       expect(scoped).not.toBe(present)
+    }))
+
+  it.effect("rejects an undeclared environment without a run scope", () =>
+    Effect.gen(function*() {
+      const environment = {
+        declared: false,
+        layers: [],
+        capabilities: {}
+      } as unknown as StepKey.EnvironmentIdentity
+      const failure = yield* withCryptoFailure(StepKey.dispatchIdentity({
+        material: material(),
+        results: {},
+        hermetic,
+        environment
+      }))
+      expectKeyMaterialError(
+        failure,
+        "invalid_environment",
+        "Undeclared environment identity requires runScope"
+      )
+    }))
+
+  it.effect("rejects a declared environment carrying a run scope", () =>
+    Effect.gen(function*() {
+      const environment = {
+        declared: true,
+        layers: [],
+        capabilities: {},
+        runScope: "run-9"
+      } as unknown as StepKey.EnvironmentIdentity
+      const failure = yield* withCryptoFailure(StepKey.dispatchIdentity({
+        material: material(),
+        results: {},
+        hermetic,
+        environment
+      }))
+      expectKeyMaterialError(
+        failure,
+        "invalid_environment",
+        "Declared environment identity must not include runScope"
+      )
+    }))
+
+  it.effect("keys undeclared environments by run scope and accepts a declared environment", () =>
+    Effect.gen(function*() {
+      const dispatchWith = (environment: StepKey.EnvironmentIdentity) =>
+        StepKey.dispatchIdentity({ material: material(), results: {}, hermetic, environment })
+      const run1 = yield* withCrypto(dispatchWith({
+        declared: false,
+        layers: [],
+        capabilities: {},
+        runScope: "run-1"
+      }))
+      const run2 = yield* withCrypto(dispatchWith({
+        declared: false,
+        layers: [],
+        capabilities: {},
+        runScope: "run-2"
+      }))
+      const declared = yield* withCrypto(dispatchWith({ declared: true, layers: [], capabilities: {} }))
+      expect(run1).not.toBe(run2)
+      expect(declared).toMatch(/^key1_[0-9a-f]{64}$/)
     }))
 
   it.effect("folds declared nondeterminism without moving the absent dispatch key", () =>

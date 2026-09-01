@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 import { GraphBuildError } from "../src/GraphBuildError.ts"
+import * as Node from "../src/Node.ts"
 import * as Planned from "../src/Planned.ts"
 
 interface Result {
@@ -44,6 +45,25 @@ describe("Planned", () => {
     expect(Planned.isPlanned(1)).toBe(false)
     expect(Planned.isPlanned(() => 1)).toBe(false)
     expect(Planned.reference(undefined)).toBeUndefined()
+  })
+
+  it("rejects forged carriers whose references do not have the complete shape", () => {
+    const typeId = Symbol.for("@smthrs/plan/Planned")
+    const forged = [
+      { [typeId]: { node: "n", path: "abc" } },
+      { [typeId]: { node: 123 } },
+      { [typeId]: { node: "n", path: ["valid", 1] } },
+      { [typeId]: { node: "n", path: Array(1) } }
+    ]
+    for (const value of forged) {
+      expect(Planned.reference(value)).toBeUndefined()
+      expect(Planned.isPlanned(value)).toBe(false)
+    }
+
+    const real = Planned.make<{ readonly field: string }>("n")
+    expect(Planned.reference(real)).toEqual({ node: "n", path: [] })
+    expect(Planned.reference(real.field)).toEqual({ node: "n", path: ["field"] })
+    expect(Node.succeed(forged[0]).ast).toEqual({ _tag: "Succeed", value: {} })
   })
 
   it("refuses primitive coercion, naming the node and the fix", () => {
