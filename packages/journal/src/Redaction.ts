@@ -212,7 +212,6 @@ export interface Options {
  *
  * @since 0.1.0
  * @category redaction
- * @slop
  */
 export const binaryWalkLimit = 65_536
 
@@ -298,7 +297,6 @@ const describeBinary = (node: object, size: number | undefined): string => {
  *
  * @since 0.1.0
  * @category redaction
- * @slop
  */
 export const binaryMarker = "[Binary]"
 
@@ -307,7 +305,6 @@ export const binaryMarker = "[Binary]"
  *
  * @since 0.1.0
  * @category redaction
- * @slop
  */
 export const functionMarker = "[Function]"
 
@@ -316,7 +313,6 @@ export const functionMarker = "[Function]"
  *
  * @since 0.1.0
  * @category redaction
- * @slop
  */
 export const symbolMarker = "[Symbol]"
 
@@ -325,7 +321,6 @@ export const symbolMarker = "[Symbol]"
  *
  * @since 0.1.0
  * @category redaction
- * @slop
  */
 export const depthMarker = "[Deep]"
 

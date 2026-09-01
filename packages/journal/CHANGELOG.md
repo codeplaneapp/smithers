@@ -76,6 +76,10 @@
   another subscriber's view.
 - Module headers and the README cite pages that exist. `docs/specs/` was never
   imported into this repository.
+- The internal `@slop` review markers no longer ship in the published
+  declarations. Every export they marked now carries the prose that retires
+  them, so a consumer's editor hover shows the contract rather than a note to
+  ourselves.
 
 ## [0.1.0] - 2026-08-05
 

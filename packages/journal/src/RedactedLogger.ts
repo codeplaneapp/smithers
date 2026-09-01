@@ -63,7 +63,6 @@ import * as Redaction from "./Redaction.ts"
  *
  * @since 0.1.0
  * @category type ids
- * @slop
  */
 export const TypeId: unique symbol = Symbol.for("@smthrs/journal/RedactedLogger")
 
@@ -72,7 +71,6 @@ export const TypeId: unique symbol = Symbol.for("@smthrs/journal/RedactedLogger"
  *
  * @since 0.1.0
  * @category predicates
- * @slop
  */
 export const isRedacted = (logger: Logger.Logger<any, any>): boolean => TypeId in logger
 
@@ -118,7 +116,6 @@ const renderDepthMarker = "[Deep]"
  *
  * @since 0.1.0
  * @category redaction
- * @slop
  */
 const toArray = (message: unknown): ReadonlyArray<unknown> => Array.isArray(message) ? message : [message]
 
@@ -275,7 +272,6 @@ const redactError = (
  *
  * @since 0.1.0
  * @category redaction
- * @slop
  */
 export const redactArgument = (value: unknown, redactor: Redaction.Redactor): unknown => {
   try {
@@ -299,7 +295,6 @@ const unrenderableMarker = "[Unrenderable]"
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const redactingConsole = (target: Console.Console, redactor: Redaction.Redactor): Console.Console => {
   const methods = target as unknown as Record<string, (...args: ReadonlyArray<any>) => unknown>
@@ -392,7 +387,6 @@ const redactedCause = (
  *
  * @since 0.1.0
  * @category combinators
- * @slop
  */
 export const wrap = <Message, Output>(
   logger: Logger.Logger<Message, Output>,
@@ -442,7 +436,6 @@ export const wrap = <Message, Output>(
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layer = (options?: Redaction.Options): Layer.Layer<never> =>
   Layer.effect(
