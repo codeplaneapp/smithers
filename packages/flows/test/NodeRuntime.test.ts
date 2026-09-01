@@ -256,6 +256,18 @@ describe("the supported Node SQLite composition", () => {
       )
     ).toThrow()
     expect(() => NodeRuntime.storage("")).toThrow()
+    // `isAlive` is the one option the schema cannot check, because a function
+    // is not a JSON value. A JavaScript caller that passes the wrong shape has
+    // to hear about it here rather than at the first ownership claim, hours
+    // into a run.
+    expect(() =>
+      NodeRuntime.layer(
+        { filename, owner: { hostId: "gate" }, isAlive: "not a function" as never },
+        StepBoundary.layer,
+        WorkspaceSandbox.layerFileSystem(),
+        Layer.empty
+      )
+    ).toThrow(/isAlive must be a function/)
     // Nothing above may have created the database the journey below owns.
     expect(existsSync(filename)).toBe(false)
   })
@@ -701,6 +713,98 @@ describe("the Node host composition", () => {
     }
     expect(process.listenerCount("SIGUSR2")).toBe(before)
   })
+
+  it("refuses signal and rule configuration that is not the array it claims to be", () => {
+    // The signal and rule guards sit beside the value checks above and answer
+    // the other half of the same question: a JavaScript caller can hand these
+    // options any shape at all, and a host that iterated a string or indexed a
+    // non-array would install nonsense policy instead of refusing it. Each
+    // case names the collection it got wrong.
+    const before = process.listenerCount("SIGUSR2")
+    expect(() =>
+      NodeRuntime.layerHost(
+        { filename: hostFile, owner: { hostId: "invalid-signals" }, signals: "SIGTERM" as never },
+        Layer.empty
+      )
+    ).toThrow(/signals must be an array/)
+    expect(() =>
+      NodeRuntime.layerHost(
+        { filename: hostFile, owner: { hostId: "invalid-rules" }, signals: [], rules: "deny-everything" as never },
+        Layer.empty
+      )
+    ).toThrow(/rules must be an array/)
+    // A ruleset list is recognized by its first member, so the refusal has to
+    // reach every later member too: this one is a policy list whose second
+    // ruleset is not a list.
+    expect(() =>
+      NodeRuntime.layerHost(
+        {
+          filename: hostFile,
+          owner: { hostId: "invalid-ruleset" },
+          signals: [],
+          rules: [[], "deny-everything"] as never
+        },
+        Layer.empty
+      )
+    ).toThrow(/rulesets must be arrays/)
+    expect(process.listenerCount("SIGUSR2")).toBe(before)
+  })
+
+  it("snapshots containment and hands the reaper the seam the caller declared", async () => {
+    // Containment is the one option group whose members are callbacks and
+    // scalars a caller keeps a reference to. Every member has to survive the
+    // snapshot: dropping `system` would silently swap in the real platform
+    // seam, which reaps live process groups on the machine. None may be
+    // re-read after declaration either, because the layer builds later than
+    // the call that declared it. The reaper asks the seam for its process
+    // group and the machine boot time on every sweep, so building the layer is
+    // enough to observe which seam arrived.
+    mkdirSync(hostRoot, { recursive: true })
+    const asked: Array<string> = []
+    const declaredSystem = {
+      isAlive: () => "dead" as const,
+      startedAtMs: () => undefined,
+      ownGroup: () => {
+        asked.push("ownGroup")
+        return null
+      },
+      bootedAtMs: () => {
+        asked.push("bootedAtMs")
+        return 0
+      },
+      killTree: () => "already-gone" as const
+    }
+    const replacedSystem = {
+      ...declaredSystem,
+      ownGroup: () => {
+        asked.push("replaced")
+        return null
+      }
+    }
+    // No `graceMs`: the spawner's own default is what a caller who names only
+    // the seam is asking for, and the snapshot must not invent one.
+    const containment = {
+      platform: process.platform,
+      ownerPid: process.pid,
+      system: declaredSystem
+    }
+    const declared = NodeRuntime.layerHost(
+      {
+        filename: join(hostRoot, "containment-runtime.sqlite"),
+        owner: { hostId: "containment-host" },
+        signals: [],
+        containment
+      },
+      hostFlows
+    )
+    // Mutated after declaration and before the build. The layer already holds
+    // its own copy, so `replaced` must never be recorded below.
+    containment.system = replacedSystem
+
+    await Effect.runPromise(Effect.provide(Effect.void, declared).pipe(Effect.scoped))
+
+    expect(asked).toEqual(["ownGroup", "bootedAtMs"])
+  }, 60_000)
 
   it("leaves with the signal's default status when the operator signals twice", async () => {
     // The handler's two escapes only run in a process that is on its way out,
