@@ -172,4 +172,33 @@ describe("useAutosaveDoc", () => {
     expect(api!.state).toBe("conflict");
     expect(saved).toEqual([]);
   });
+
+  test("recreates the machine when resetKey switches documents", async () => {
+    let api: UseAutosaveDocResult | undefined;
+    const savedA: string[] = [];
+    const savedB: string[] = [];
+    function Probe({ documentId, initialValue }: { documentId: "a" | "b"; initialValue: string }) {
+      api = useAutosaveDoc({
+        resetKey: documentId,
+        initialValue,
+        debounceMs: 60_000,
+        save: async (value) => {
+          (documentId === "a" ? savedA : savedB).push(value);
+        },
+      });
+      return null;
+    }
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root!.render(<Probe documentId="a" initialValue="document A" />));
+    await act(async () => api!.setValue("document A draft"));
+    await act(async () => root!.render(<Probe documentId="b" initialValue="document B" />));
+
+    expect(api!.value).toBe("document B");
+    await act(async () => api!.saveNow());
+    expect(savedA).toEqual([]);
+    expect(savedB).toEqual(["document B"]);
+  });
 });
