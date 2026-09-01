@@ -3,6 +3,17 @@
 // translation table in docs/migration/package-mode-port.md); the release
 // steps that mutate the tree or a registry are approval-gated Shell.Run.
 import { Smithers as S } from "@smthrs/targets"
+import { Package as cli } from "../packages/cli/PACKAGE.js"
+
+// The built CLI, which every gate that spawns the binary reads.
+//
+// `packages/cli/bin/smithers.mjs` runs `dist/esm/bin.js` when one exists and
+// `src/bin.ts` otherwise, so without this edge the gate and the build race: a
+// spawn that lands mid-emit resolves half a `dist` and the gate reports a
+// module resolution failure as a documentation defect. BUILD.ts declared the
+// same edge as `Smithers.Target.subtree("//packages/cli/...", "lib")` and the
+// package-mode port dropped it; here the target is named directly.
+const cliBuild = cli.lib
 
 // Both extensions: the version guard and the invocation normalizer are
 // TypeScript, and a glob that saw only .mjs would leave an edit to either
@@ -68,7 +79,11 @@ const gate = (file: string) =>
 
 const browserContract = gate("browser-check.mjs")
 const dependencyBoundaries = gate("check-dependency-boundaries.mjs")
-const docs = gate("check-docs.mjs")
+// Spawns the working-tree CLI to read `--help`, so it reads {@link cliBuild}.
+const docs = S.Shell.Test({
+  script: S.file("check-docs.mjs"),
+  data: [srcs, cliBuild]
+})
 const llms = gate("check-llms.mjs")
 const localSmithers = gate("check-local-smithers.mjs")
 const lockfilePair = gate("check-lockfile-pair.mjs")
@@ -106,20 +121,30 @@ const npmDedupeUnit = S.Shell.Test({
 const localSmithersUnit = testRunner(["check-local-smithers.test.mjs"])
 const eslintJsdocUnit = testRunner(["eslint-jsdoc.test.mjs"])
 
-const docsUnit = testRunner([
-  "check-llms.test.mjs",
-  "docs-contract.test.mjs",
-  "docs-deploy.test.mjs",
-  "docs-links.test.mjs",
-  "docs-removals.test.mjs",
-  "docs-render.test.mjs",
-  "docs-routes.test.mjs",
-  "docs-sidebar.test.mjs",
-  "generate-docs-pages.test.mjs",
-  "generate-llms.test.mjs",
-  "llms-version-guard.test.ts",
-  "normalize-bunx.test.ts"
-])
+// docs-removals.test.mjs spawns the binary once per removed verb, so this
+// suite reads {@link cliBuild} the way the docs gate does. BUILD.ts declared
+// the edge on both targets.
+const docsUnit = S.Shell.Test({
+  bin: node,
+  args: [
+    "--test",
+    ...[
+      "check-llms.test.mjs",
+      "docs-contract.test.mjs",
+      "docs-deploy.test.mjs",
+      "docs-links.test.mjs",
+      "docs-removals.test.mjs",
+      "docs-render.test.mjs",
+      "docs-routes.test.mjs",
+      "docs-sidebar.test.mjs",
+      "generate-docs-pages.test.mjs",
+      "generate-llms.test.mjs",
+      "llms-version-guard.test.ts",
+      "normalize-bunx.test.ts"
+    ].map(suitePath)
+  ],
+  data: [srcs, cliBuild]
+})
 
 // --- release execution --------------------------------------------------
 
@@ -132,10 +157,23 @@ const releasePack = S.Shell.Build({
   outDirs: [packOutDirectory]
 })
 
+// Installs the packed tarballs into a scratch project outside the repository
+// with `pnpm add`, which resolves `typescript`, `vitest`, and every optional
+// peer against the registry. The consumer this proves has no workspace, so
+// that resolution is the point rather than an incidental fetch, and
+// .github/workflows/release.yml runs the same script on a networked runner.
+//
+// The BUILD.ts target ran unsandboxed and had the network by default; package
+// mode denies it unless declared, and under denial every metadata request
+// fails with EPERM, retries for over a minute, and then falls back to whatever
+// the local pnpm store happens to hold. Measured on this tree: 179s declared,
+// 432s of retry backoff in the install alone without it, and a green result
+// only while the store is complete.
 const releaseSmoke = S.Shell.Test({
   script: S.file("smoke-release.mjs"),
   args: [packDirectory],
-  data: [srcs, releasePack]
+  data: [srcs, releasePack],
+  sandbox: { network: true }
 })
 
 // Mutates every workspace manifest to the requested version; runs only when

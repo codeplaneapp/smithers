@@ -25,8 +25,11 @@ describe.runIf(Boolean(process.env.CI) && !jjInstalled)("NodeJj (CI guard)", () 
   it("fails loudly when CI has no jj on PATH", () => {
     throw new Error(
       "jj is not installed on this CI runner, so the real-binary NodeJj suite "
-        + "silently skipped. Install jj in .github/workflows/ci.yml (see the "
-        + "'Install jj' step) — do not let this suite no-op on CI."
+        + "silently skipped. The package-mode port retired .github/workflows/ci.yml "
+        + "and its 'Install jj' step, and a per-job toolchain declaration has no "
+        + "package-mode spelling yet: the gap is recorded beside the workflow "
+        + "declarations in the root PACKAGE.ts. Install jj on the runner that "
+        + "executes this package — do not let this suite no-op on CI."
     )
   })
 })

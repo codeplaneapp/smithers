@@ -55,9 +55,9 @@
       "id": "ci-workflow",
       "group": "everything",
       "workspace": ".",
-      "label": "//:ci",
-      "title": "CI workflow file",
-      "summary": "Regenerate and drift-check .github/workflows/ci.yml, the pipeline definition (not the run itself)."
+      "label": "//:githubCi",
+      "title": "CI workflow files",
+      "summary": "Regenerate and drift-check the generated .github/workflows/ci-*.yml lanes, the pipeline definition (not the run itself)."
     },
     {
       "id": "check-all",

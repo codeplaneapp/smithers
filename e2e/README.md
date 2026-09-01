@@ -114,19 +114,23 @@ in 262 ms with `Command "vitest" not found` and every case below had never run
 under any gate (Phase 7 blocker B6). `ci/matrixIsWired.test.ts` pins the
 membership and both CI steps.
 
-Two steps in `.github/workflows/ci.yml`, generated from the root `BUILD.ts`:
+Two lanes under `.github/workflows/`, generated from the root `PACKAGE.ts`
+`//:githubCi` declaration. The package-mode port retired the single hand-owned
+`ci.yml` and writes one `ci-<lane>.yml` per lane:
 
-- `smithers-build build '//e2e:check'`, in the required `test` job. A stale
-  fixture is how this directory rots without anybody noticing:
-  `fixtures/claimChild.ts` called `Control.pause`, which rc.0 removed, and died
-  at runtime in every case that spawned it. The typecheck catches that in
-  seconds.
-- `smithers-build test '//e2e:faults'`, in the required `e2e-faults` job. It
-  was advisory while case 22 below was required to be red at rc.0: a required
-  job would have been red on every commit for a defect no commit introduced.
-  The section 5.2 redaction deliverable landed the redacting logger, case 22
-  went green with no edit to the test, and the matrix is 67 of 67, so the root
-  `BUILD.ts` drops `continueOnError` and lists `e2e-faults` in `requiredJobs`.
+- `ci-test.yml` runs `smithers-build '//:gates'`, and the root package puts
+  `e2e.ci` in that suite; `e2e.ci` is `check` alone, so the typecheck is
+  required. A stale fixture is how this directory rots without anybody
+  noticing: `fixtures/claimChild.ts` called `Control.pause`, which rc.0
+  removed, and died at runtime in every case that spawned it. The typecheck
+  catches that in seconds.
+- `ci-faults.yml` runs `smithers-build '//e2e:faults'` as its `e2e-faults` job.
+  It was advisory while case 22 below was required to be red at rc.0: a
+  required job would have been red on every commit for a defect no commit
+  introduced. The section 5.2 redaction deliverable landed the redacting
+  logger, case 22 went green with no edit to the test, and the matrix is 67 of
+  67. Package mode has no `continueOnError` attr, so no lane can be advisory
+  and every job in the generated set is required.
   The graceful park this directory cannot reach is still broken in the product
   (`fault-gaps.md`, row `03, 05, 31`), but that is a coverage gap: no case here
   fails for it, so it cannot make this job red.

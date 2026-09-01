@@ -21,29 +21,49 @@ import {
 } from "../src/GithubWorkflow.ts"
 
 /**
- * The Smithers repository's own pipeline, read from disk. It is the workload
- * this reader exists for: seven jobs, block scalars, `continue-on-error`
- * advisory lanes, `with:` maps, `env:` maps, and heavy comment traffic.
+ * The Smithers repository's own workflow directory, read from disk. It is the
+ * workload this reader exists for: block scalars, `continue-on-error` advisory
+ * lanes, `with:` maps, `env:` maps, step conditions, and heavy comment traffic.
+ *
+ * The package-mode port retired the single hand-owned `ci.yml` — its steps
+ * called the `ci`, `docs` and `install` verbs, which refuse in package mode —
+ * and the pipeline is now one generated `ci-<lane>.yml` per lane, all rendered
+ * from the root `PACKAGE.ts` `//:githubCi` declaration. The lane set is read
+ * off the directory rather than restated here, so a lane the target graph adds
+ * or drops moves with the declaration instead of rotting in this file.
  */
-const realWorkflowPath = NodePath.resolve(
-  import.meta.dirname,
-  "../../../.github/workflows/ci.yml"
-)
+const repoRoot = NodePath.resolve(import.meta.dirname, "../../..")
+const workflowsDir = NodePath.join(repoRoot, ".github", "workflows")
 
 /**
- * The real pipeline, or a failure naming the path.
+ * Every workflow file the repository has, or a failure naming the directory.
  *
- * It used to swallow the read error and return `undefined`, and every test
- * below opened with `if (source === undefined) return`. The path was one `..`
- * short of the repository root, so it resolved to `packages/.github/workflows/
- * ci.yml`, which has never existed: three tests that claim to hold the
- * repository's own pipeline to its required jobs passed by reading nothing.
- * A missing workflow is now the failure it always was.
+ * It used to read one hard-coded path and swallow the read error, returning
+ * `undefined`, and every test below opened with `if (source === undefined)
+ * return`. The path was one `..` short of the repository root, so it resolved
+ * to `packages/.github/workflows/ci.yml`, which has never existed: three tests
+ * that claim to hold the repository's own pipeline to its required jobs passed
+ * by reading nothing. A missing workflow is still the failure it always was.
  */
-const readReal = async (): Promise<string> =>
-  Fs.readFile(realWorkflowPath, "utf8").catch((cause: unknown) => {
-    throw new Error(`the repository pipeline is missing at ${realWorkflowPath}`, { cause })
+const readWorkflows = async (): Promise<ReadonlyMap<string, string>> => {
+  const names = await Fs.readdir(workflowsDir).catch((cause: unknown) => {
+    throw new Error(`the repository workflows are missing at ${workflowsDir}`, { cause })
   })
+  const files = names.filter((name) => name.endsWith(".yml")).sort()
+  if (files.length === 0) throw new Error(`the repository workflows are missing at ${workflowsDir}`)
+  return new Map(
+    await Promise.all(
+      files.map(async (name) => [name, await Fs.readFile(NodePath.join(workflowsDir, name), "utf8")] as const)
+    )
+  )
+}
+
+/** The generated CI lanes alone: `//:githubCi` writes one file per lane. */
+const readLanes = async (): Promise<ReadonlyMap<string, string>> => {
+  const lanes = new Map([...await readWorkflows()].filter(([name]) => /^ci-.*\.yml$/.test(name)))
+  if (lanes.size === 0) throw new Error(`no generated ci-*.yml lane is present at ${workflowsDir}`)
+  return lanes
+}
 
 /** Most focused fixtures omit trigger prose; supply the smallest real trigger. */
 const parseWorkflow = (source: string): ReturnType<typeof parseStrictWorkflow> =>
@@ -438,27 +458,63 @@ describe("parseWorkflow", () => {
       .toThrow(WorkflowParseError)
   })
 
-  it("parses the Smithers repository's own pipeline", async () => {
-    const source = await readReal()
-    const workflow = parseWorkflow(source)
-    expect(workflow.name).toBe("CI")
-    expect(workflow.jobs.map((job) => job.id)).toEqual([
-      "test",
-      "apps-e2e",
-      "rust",
-      "wasm-repro",
-      "e2e-faults",
-      "bun",
-      "browser",
-      "packages"
-    ])
-    // The platform matrix parses as ONE job whose runner is the matrix
-    // expression, not as three copy-pasted jobs.
-    const matrix = workflow.jobs.find((job) => job.id === "packages")!
-    expect(matrix.runsOn).toBe("${{ matrix.os }}")
-    expect(matrix.continueOnError).toBe("${{ matrix.advisory }}")
-    // Every job has at least a checkout, so no job parsed as empty.
-    for (const job of workflow.jobs) expect(job.steps.length).toBeGreaterThan(0)
+  it("parses every workflow the Smithers repository has", async () => {
+    const files = await readWorkflows()
+    const parsed = new Map([...files].map(([name, source]) => [name, parseStrictWorkflow(source)] as const))
+    for (const [name, workflow] of parsed) {
+      expect(workflow.name, name).toBeDefined()
+      expect(workflow.jobs.length, name).toBeGreaterThan(0)
+      // Every job has at least a checkout, so no job parsed as empty.
+      for (const job of workflow.jobs) expect(job.steps.length, `${name} ${job.id}`).toBeGreaterThan(0)
+    }
+    // The generated pipeline. Each lane is named for its file, so a lane that
+    // lost its declaration cannot pass as one that merely changed shape.
+    const lanes = [...parsed.keys()].filter((name) => /^ci-.*\.yml$/.test(name))
+    for (
+      const required of [
+        "ci-test.yml",
+        "ci-faults.yml",
+        "ci-node-ubuntu.yml",
+        "ci-node-macos.yml",
+        "ci-node-windows.yml"
+      ]
+    ) {
+      expect(lanes).toContain(required)
+    }
+    for (const name of lanes) expect(parsed.get(name)!.name, name).toBe(name.replace(/\.yml$/, ""))
+    // The gate suite and the fault matrix, which the retired pipeline carried
+    // as the `test` and `e2e-faults` jobs of one file.
+    expect(parsed.get("ci-test.yml")!.jobs.map((job) => job.id)).toEqual(["gates"])
+    expect(parsed.get("ci-faults.yml")!.jobs.map((job) => job.id)).toEqual(["e2e-faults"])
+    // The package roster ran on three platforms as one matrix job whose runner
+    // was `${{ matrix.os }}`. It is three lanes now, each running its whole
+    // roster on the platform its file is named for; a job that quietly moved
+    // back to ubuntu would report a platform green that never ran.
+    for (
+      const [name, host] of [
+        ["ci-node-ubuntu.yml", "ubuntu-latest"],
+        ["ci-node-macos.yml", "macos-latest"],
+        ["ci-node-windows.yml", "windows-latest"]
+      ] as const
+    ) {
+      const jobs = parsed.get(name)!.jobs
+      expect(jobs.length, name).toBeGreaterThan(1)
+      expect([...new Set(jobs.map((job) => job.runsOn))], name).toEqual([host])
+    }
+    // The real-world constructs no fixture above supplies. The generated lanes
+    // are uniform by construction, so this coverage comes from the hand-owned
+    // deployment and release workflows in the same directory: an advisory
+    // lane, a condition, and a multi-line block scalar all have to survive the
+    // parse rather than be refused.
+    const jobs = [...parsed.values()].flatMap((workflow) => workflow.jobs)
+    const steps = jobs.flatMap((job) => job.steps)
+    expect(
+      jobs.some((job) => job.continueOnError !== undefined) || steps.some((step) => step.continueOnError !== undefined)
+    ).toBe(true)
+    expect(jobs.some((job) => job.condition !== undefined) || steps.some((step) => step.condition !== undefined)).toBe(
+      true
+    )
+    expect(steps.some((step) => (step.run ?? "").includes("\n"))).toBe(true)
   })
 
   /**
@@ -466,19 +522,25 @@ describe("parseWorkflow", () => {
    * file with one required job made conditional IN MEMORY is reported broken.
    * Nothing is written.
    */
-  it("holds the flows pipeline's required jobs to running unconditionally", async () => {
-    const source = await readReal()
-    const required = ["test", "apps-e2e", "rust", "wasm-repro", "bun", "browser", "packages"]
-    expect(missingRequiredJobs(parseWorkflow(source), required)).toEqual([])
-    const skipped = source.replace(/^ {2}bun:$/m, "  bun:\n    if: false")
+  it("holds the generated pipeline's required jobs to running unconditionally", async () => {
+    const lanes = await readLanes()
+    // Package mode has no step- or job-condition surface at all, so every job
+    // of every lane is required: the required list IS each lane's job set.
+    for (const [name, source] of lanes) {
+      const workflow = parseStrictWorkflow(source)
+      expect(workflow.jobs.length, name).toBeGreaterThan(0)
+      expect(missingRequiredJobs(workflow, workflow.jobs.map((job) => job.id)), name).toEqual([])
+    }
+    const source = lanes.get("ci-test.yml")!
+    const gate = { name: "package graph", command: "pnpm exec smithers-build '//:gates'", job: "gates" }
+    // The gate is there before the edit, so the negative control below
+    // measures the condition rather than a command that was never present.
+    expect(missingGates(parseStrictWorkflow(source), [gate])).toEqual([])
+    const skipped = source.replace(/^ {2}gates:$/m, "  gates:\n    if: false")
     expect(skipped).not.toBe(source)
-    expect(missingRequiredJobs(parseWorkflow(skipped), required)).toEqual(["bun (conditional)"])
+    expect(missingRequiredJobs(parseStrictWorkflow(skipped), ["gates"])).toEqual(["gates (conditional)"])
     // The gate pinned to that job goes with it.
-    expect(
-      missingGates(parseWorkflow(skipped), [
-        { name: "bun suites", command: "bun node_modules/vitest/vitest.mjs run", job: "bun" }
-      ]).map((gate) => gate.name)
-    ).toEqual(["bun suites"])
+    expect(missingGates(parseStrictWorkflow(skipped), [gate]).map((entry) => entry.name)).toEqual(["package graph"])
   })
 
   /**
@@ -496,12 +558,13 @@ describe("parseWorkflow", () => {
    * and the existence checks below engage the moment one appears.
    */
   it("runs only scripts and files the Smithers repository actually has", async () => {
-    const source = await readReal()
+    const lanes = await readLanes()
     const manifest = JSON.parse(
-      await Fs.readFile(NodePath.resolve(realWorkflowPath, "../../../package.json"), "utf8")
+      await Fs.readFile(NodePath.join(repoRoot, "package.json"), "utf8")
     ) as { readonly scripts?: Readonly<Record<string, string>> }
     const scripts = new Set(Object.keys(manifest.scripts ?? {}))
-    const commands = parseWorkflow(source).jobs
+    const commands = [...lanes.values()]
+      .flatMap((source) => parseStrictWorkflow(source).jobs)
       .flatMap((job) => job.steps)
       .flatMap((step) => step.run === undefined ? [] : [step.run])
       .join("\n")
@@ -509,9 +572,8 @@ describe("parseWorkflow", () => {
     // `pnpm --recursive run build` runs a PACKAGE script, so it is satisfied
     // by any workspace member; a bare `pnpm run check` needs the root one.
     const workspaceScripts = new Set<string>()
-    const root = NodePath.resolve(realWorkflowPath, "../../..")
-    for (const entry of await Fs.readdir(NodePath.join(root, "packages"))) {
-      const manifestPath = NodePath.join(root, "packages", entry, "package.json")
+    for (const entry of await Fs.readdir(NodePath.join(repoRoot, "packages"))) {
+      const manifestPath = NodePath.join(repoRoot, "packages", entry, "package.json")
       const text = await Fs.readFile(manifestPath, "utf8").catch(() => undefined)
       if (text === undefined) continue
       const parsed = JSON.parse(text) as { readonly scripts?: Readonly<Record<string, string>> }
@@ -538,11 +600,14 @@ describe("parseWorkflow", () => {
       .map((match) => match[1]!)
     expect(invokedFiles).toEqual([])
     // The run lines the pipeline DOES carry, so the two empty sets above are
-    // read against a workflow that was parsed, not an empty string.
-    expect(commands).toContain("pnpm exec smithers-build test '//packages/...'")
+    // read against workflows that were parsed, not an empty string. `//:gates`
+    // is the required lane's whole invocation, and the platform lanes name
+    // packages one at a time.
+    expect(commands).toContain("pnpm exec smithers-build '//:gates'")
+    expect(commands).toContain("pnpm exec smithers-build '//packages/targets:ci'")
     const missing: Array<string> = []
     for (const file of [...new Set(invokedFiles)]) {
-      const absolute = NodePath.resolve(realWorkflowPath, "../../..", file)
+      const absolute = NodePath.resolve(repoRoot, file)
       const present = await Fs.stat(absolute).then(() => true, () => false)
       if (!present) missing.push(file)
     }
