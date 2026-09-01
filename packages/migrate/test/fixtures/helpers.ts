@@ -100,6 +100,19 @@ export const buildBin = (): string => {
   return target
 }
 
+/**
+ * Node's own warnings, which are not the program's output.
+ *
+ * The repository pins Node 22.19.0, where `node:sqlite` is experimental and
+ * every run of a binary that opens a database prints
+ * `ExperimentalWarning: SQLite is an experimental feature` followed by the
+ * `--trace-warnings` hint. Node 24, which a developer machine may be running,
+ * prints neither, so an assertion that the program said nothing passes locally
+ * and fails on the version CI runs. Dropping the runtime's own lines keeps the
+ * assertion about the program.
+ */
+const nodeWarning = /^(?:\(node:\d+\) \w*Warning:|\(Use `node --trace-warnings).*$\n?/gm
+
 /** Runs the built bin and returns its exit code and both streams. */
 export const runBin = (
   args: ReadonlyArray<string>,
@@ -109,5 +122,9 @@ export const runBin = (
     encoding: "utf8",
     env: environment as Record<string, string>
   })
-  return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" }
+  return {
+    status: result.status ?? 1,
+    stdout: result.stdout ?? "",
+    stderr: (result.stderr ?? "").replace(nodeWarning, "")
+  }
 }
