@@ -128,11 +128,13 @@ consumer that was following when it happened. Entries published to `changes` are
 frozen, so one subscriber cannot mutate another's view.
 
 **Resource limits.** `capacity` bounds the number of entries in the admission
-queue and the size of the `changes` buffer; it does not bound bytes, and there
-is no payload byte cap today, so a small number of very large payloads can still
-be the memory bill. Redaction traverses at most `Redaction.maxDepth` container
-edges and fails a deeper payload as `invalid_event` rather than overflowing the
-stack. `sourceEventCache` bounds the in-process producer-idempotency index; the
+queue and the size of the `changes` buffer. Run ids, source ids, and event types
+are limited to 1,024 UTF-16 code units; `Seq` and `SourceSeq` stop at
+`Number.MAX_SAFE_INTEGER - 1`; and `entries` reads at most 10,000 entries per
+page. Payload and meta bytes remain uncapped, so a small number of very large
+values can still be the memory bill. Redaction fails a payload deeper than
+`Redaction.maxDepth` container edges as `invalid_event` rather than overflowing
+the stack. `sourceEventCache` bounds the in-process producer-idempotency index; the
 database unique constraint stays authoritative, so eviction changes performance,
 not the answer.
 
