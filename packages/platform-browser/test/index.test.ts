@@ -5,6 +5,7 @@
  * up — the failure mode the function signature exists to prevent.
  */
 import { describe, expect, it } from "@effect/vitest"
+import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
 import { Effect, FileSystem, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as NodeFsPromises from "node:fs/promises"
@@ -33,6 +34,29 @@ describe("@smthrs/platform-browser barrel", () => {
     expect(Index.BrowserHost.layer).toBe(BrowserHost.layer)
     expect(Index.BrowserServices.layer).toBe(BrowserServices.layer)
   })
+
+  /** Both adapters expose a constructor beside their layer, not one each. */
+  it("exposes `make` on both adapters", () => {
+    expect(typeof Index.BrowserFileSystem.make).toBe("function")
+    expect(Index.BrowserChildProcessSpawner.make).toBe(BrowserChildProcessSpawner.make)
+  })
+})
+
+describe("BrowserFileSystem kernel attestation", () => {
+  /**
+   * `layer` attests to `@smthrs/kernel` that the volume behind `fs` cannot
+   * address anything outside itself, which is what lets the guarded surface
+   * resolve paths directly. `make` makes no such claim. Nothing else pins the
+   * difference, so deleting the attestation from `layer` would break no test.
+   */
+  it.effect("attests whole-filesystem isolation on `layer` and not on `make`", () =>
+    Effect.gen(function*() {
+      const attested = yield* Effect.provide(FileSystem.FileSystem, BrowserFileSystem.layer(NodeFsPromises))
+      const bare = BrowserFileSystem.make(NodeFsPromises)
+
+      expect(Object.getOwnPropertySymbols(attested)).toContain(KernelFileSystem.AtomicFileSystemTypeId)
+      expect(Object.getOwnPropertySymbols(bare)).not.toContain(KernelFileSystem.AtomicFileSystemTypeId)
+    }))
 })
 
 describe("BrowserServices", () => {

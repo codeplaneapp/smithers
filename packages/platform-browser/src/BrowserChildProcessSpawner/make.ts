@@ -186,18 +186,26 @@ export const make = (bash: JustBashLike) =>
         Effect.flatMap(
           Effect.suspend(() => {
             const controller = new AbortController()
-            const settled: Promise<Settled> = bash.exec(line, {
-              ...(cwd === undefined ? {} : { cwd }),
-              ...(env === undefined ? {} : { env }),
-              // Effect's default is replacement; `extendEnv: true` is the
-              // merge. just-bash merges unless it is asked for `replaceEnv`,
-              // so the request has to be made rather than assumed.
-              ...(env === undefined || cmd.options.extendEnv === true ? {} : { replaceEnv: true }),
-              signal: controller.signal
-            }).then(
-              (value): Settled => ({ ok: true, value }),
-              (error): Settled => ({ ok: false, error })
-            )
+            let settled: Promise<Settled>
+            try {
+              settled = bash.exec(line, {
+                ...(cwd === undefined ? {} : { cwd }),
+                ...(env === undefined ? {} : { env }),
+                // Effect's default is replacement; `extendEnv: true` is the
+                // merge. just-bash merges unless it is asked for `replaceEnv`,
+                // so the request has to be made rather than assumed.
+                ...(env === undefined || cmd.options.extendEnv === true ? {} : { replaceEnv: true }),
+                signal: controller.signal
+              }).then(
+                (value): Settled => ({ ok: true, value }),
+                (error): Settled => ({ ok: false, error })
+              )
+            } catch (error) {
+              // An interpreter that throws synchronously never produced a
+              // promise to wait on, and it is still a failed run rather than a
+              // defect in this adapter.
+              return Effect.succeed<Settled>({ ok: false, error })
+            }
             return Effect.onInterrupt(
               Effect.promise(() => settled),
               () => Effect.andThen(Effect.sync(() => controller.abort()), Effect.promise(() => settled))

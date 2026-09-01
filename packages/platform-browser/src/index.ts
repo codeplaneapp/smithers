@@ -1,15 +1,16 @@
 /**
- * @since 0.1.0
- *
- * `@smthrs/platform-browser` — the two platform services `@effect/platform-browser`
- * does not ship.
+ * `@smthrs/platform-browser` supplies the two platform services
+ * `@effect/platform-browser` does not ship.
  *
  * `effect`'s browser platform package covers HTTP, sockets, workers, key-value
  * storage, and crypto, but a browser tab has no `node:fs` and no `fork`, so it
  * ships neither a `FileSystem` nor a `ChildProcessSpawner`. A tab *can* have
  * both, given a virtual filesystem (ZenFS) and an in-page bash interpreter
  * (just-bash). Neither is an npm dependency here: both are taken as structural
- * slices, so the page decides which backend is mounted.
+ * slices, so the page decides which backend is mounted. The package itself
+ * depends on `effect`, `@smthrs/kernel` (the command-line renderer and the
+ * filesystem isolation attestation), and `@smthrs/jj` (the wasm-backed `Jj`
+ * service the `BrowserHost` bundle composes).
  *
  * ```ts
  * import { BrowserServices } from "@smthrs/platform-browser"
@@ -19,6 +20,8 @@
  *
  * Everything in this package is browser-bundleable; `scripts/browser-check.mjs`
  * at the repository root pins that property.
+ *
+ * @since 0.1.0
  */
 
 /**

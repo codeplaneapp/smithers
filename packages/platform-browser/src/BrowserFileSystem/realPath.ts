@@ -52,14 +52,16 @@ export const normalizePath = (path: string): string => {
  */
 export const realPath = (
   fs: ZenFsPromisesLike,
-  path: string
+  path: string,
+  /** The operation to blame, for a caller that canonicalizes on the way to something else. */
+  method = "realPath"
 ): Effect.Effect<string, PlatformError.PlatformError> => {
   const normalized = normalizePath(path)
   const resolve = fs.realpath
   return resolve === undefined
     ? Effect.as(
-      Effect.tryPromise({ try: () => fs.stat(normalized), catch: platformError("realPath", path) }),
+      Effect.tryPromise({ try: () => fs.stat(normalized), catch: platformError(method, path) }),
       normalized
     )
-    : Effect.tryPromise({ try: () => resolve(normalized), catch: platformError("realPath", path) })
+    : Effect.tryPromise({ try: () => resolve(normalized), catch: platformError(method, path) })
 }

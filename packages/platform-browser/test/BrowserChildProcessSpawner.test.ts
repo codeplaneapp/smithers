@@ -1,8 +1,13 @@
 /**
  * The spawner is driven through a stub `JustBashLike`, because what is being
  * pinned is the adapter — which command line the interpreter is handed, which
- * `PlatformError` a missing capability produces, and the serialized
- * uninterruptible boundary — not just-bash's own parser.
+ * `PlatformError` a missing capability produces, and the serialized abort
+ * boundary — not just-bash's own parser.
+ *
+ * Two stub shapes matter. Most tests settle in the same turn they are aborted,
+ * which is the well-behaved interpreter; {@link deafStub} deliberately ignores
+ * the abort and settles on a timer, which is the only way the permit's real
+ * lifetime becomes observable.
  *
  * `FileSystem` comes from this package's own `BrowserFileSystem` over
  * `node:fs/promises`, so the `cwd` validation path is exercised against a real
@@ -10,7 +15,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "@effect/vitest"
 import * as CommandLine from "@smthrs/kernel/CommandLine"
-import { Deferred, Effect, Exit, Fiber, Layer, Option, Path, Sink, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Path, Sink, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -24,6 +29,7 @@ interface Call {
   readonly command: string
   readonly cwd: string | undefined
   readonly env: Readonly<Record<string, string>> | undefined
+  readonly replaceEnv: boolean | undefined
 }
 
 interface Stub {
@@ -42,10 +48,46 @@ const stub = (
     calls,
     bash: {
       exec: (commandLine, options) => {
-        calls.push({ command: commandLine, cwd: options?.cwd, env: options?.env })
+        calls.push({
+          command: commandLine,
+          cwd: options?.cwd,
+          env: options?.env,
+          replaceEnv: options?.replaceEnv
+        })
         return exec(commandLine, options?.signal)
       }
     }
+  }
+}
+
+/**
+ * An interpreter that ignores the abort and settles on its own timer.
+ *
+ * This is the shape the boundary has to survive. A stub that rejects
+ * synchronously inside its own `abort` listener settles in the same turn the
+ * permit is released, so an overlap can never be observed; this one does not,
+ * and `peak` records how many interpreter calls were ever in flight at once.
+ */
+const deafStub = (settleAfter: number) => {
+  let inFlight = 0
+  let peak = 0
+  const started: Array<() => void> = []
+  const bash: BrowserChildProcessSpawner.JustBashLike = {
+    exec: () =>
+      new Promise((resolve) => {
+        inFlight += 1
+        peak = Math.max(peak, inFlight)
+        started.shift()?.()
+        setTimeout(() => {
+          inFlight -= 1
+          resolve({ stdout: "", stderr: "", exitCode: 0 })
+        }, settleAfter)
+      })
+  }
+  return {
+    bash,
+    peak: (): number => peak,
+    whenStarted: (): Promise<void> => new Promise<void>((resolve) => started.push(resolve))
   }
 }
 
@@ -57,6 +99,7 @@ let root: string
 
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "flows-platform-browser-spawn-"))
+  await NodeFsPromises.writeFile(join(root, "file.txt"), "not a directory")
 })
 
 afterAll(async () => {
@@ -261,6 +304,28 @@ describe("BrowserChildProcessSpawner", () => {
       expect(calls[0]).toEqual({ command: "thing", cwd: undefined, env: undefined })
     }))
 
+  /**
+   * `env` without `extendEnv` is Effect's replacement case, and just-bash
+   * merges into the interpreter's own environment unless it is asked for
+   * `replaceEnv`. Not asking inverts the caller's semantics.
+   */
+  it.effect("asks the interpreter to replace its environment unless the caller extends it", () =>
+    Effect.gen(function*() {
+      const { bash, calls } = stub(ok())
+
+      yield* run(
+        bash,
+        Effect.flatMap(ChildProcessSpawner, (spawner) =>
+          Effect.all([
+            spawner.exitCode(ChildProcess.make("replaced", [], { env: { A: "1" } })),
+            spawner.exitCode(ChildProcess.make("extended", [], { env: { A: "1" }, extendEnv: true })),
+            spawner.exitCode(ChildProcess.make("neither"))
+          ]))
+      )
+
+      expect(calls.map((call) => call.replaceEnv)).toEqual([true, undefined, undefined])
+    }))
+
   it.effect("fails before running anything when cwd does not exist", () =>
     Effect.gen(function*() {
       const { bash, calls } = stub(ok())
@@ -274,6 +339,29 @@ describe("BrowserChildProcessSpawner", () => {
       )
 
       expect(Exit.isFailure(exit)).toBe(true)
+      expect(calls).toEqual([])
+    }))
+
+  /**
+   * A bare existence check passes a regular file, which is then handed to the
+   * interpreter as a working directory; Node fails ENOTDIR here.
+   */
+  it.effect("refuses a regular file given as the working directory", () =>
+    Effect.gen(function*() {
+      const { bash, calls } = stub(ok())
+
+      const error = yield* run(
+        bash,
+        Effect.flip(
+          Effect.flatMap(
+            ChildProcessSpawner,
+            (spawner) => spawner.exitCode(ChildProcess.make("thing", [], { cwd: join(root, "file.txt") }))
+          )
+        )
+      )
+
+      expect(error.reason).toMatchObject({ _tag: "BadArgument", module: "ChildProcess", method: "spawn" })
+      expect(error.message).toContain("is not a directory")
       expect(calls).toEqual([])
     }))
 
@@ -293,6 +381,31 @@ describe("BrowserChildProcessSpawner", () => {
         module: "ChildProcess",
         method: "spawn",
         description: "interpreter exploded"
+      })
+    }))
+
+  /**
+   * A synchronous throw never produced a promise to wait on, but it is still a
+   * failed run rather than a defect in this adapter.
+   */
+  it.effect("wraps an interpreter that throws before returning a promise", () =>
+    Effect.gen(function*() {
+      const bash: BrowserChildProcessSpawner.JustBashLike = {
+        exec: () => {
+          throw new Error("no interpreter mounted")
+        }
+      }
+
+      const error = yield* run(
+        bash,
+        Effect.flip(Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.exitCode(ChildProcess.make("thing"))))
+      )
+
+      expect(error.reason).toMatchObject({
+        _tag: "Unknown",
+        module: "ChildProcess",
+        method: "spawn",
+        description: "no interpreter mounted"
       })
     }))
 
@@ -345,7 +458,7 @@ describe("BrowserChildProcessSpawner rejected inputs", () => {
         )
       )
 
-      expect(error.message).toContain("cannot supply stdin")
+      expect(error.message).toContain("cannot stream stdin into it")
     }))
 
   it.effect("rejects stdin given as a config wrapping a stream", () =>
@@ -584,6 +697,199 @@ describe("BrowserChildProcessSpawner boundary", () => {
       expect(observed.thirdDidStart).toBe(true)
       expect(Exit.isSuccess(observed.thirdExit)).toBe(true)
       expect(observed.calls).toEqual(["first", "third"])
+    }))
+
+  /**
+   * The permit has to outlive the *promise*, not the fiber waiting on it.
+   * `Effect.tryPromise` aborts and resumes in the same turn, so the permit
+   * would be released with the call still writing to the mount, and a second
+   * interpreter would start on top of it.
+   */
+  it.live("holds the permit until an aborted interpreter actually settles", () =>
+    Effect.gen(function*() {
+      const { bash, peak, whenStarted } = deafStub(40)
+
+      yield* run(
+        bash,
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const started = whenStarted()
+          const fiber = yield* Effect.forkChild(spawner.exitCode(ChildProcess.make("first")), {
+            startImmediately: true
+          })
+          yield* Effect.promise(() => started)
+          yield* Fiber.interrupt(fiber)
+          yield* spawner.exitCode(ChildProcess.make("second"))
+        })
+      )
+
+      expect(peak()).toBe(1)
+    }))
+
+  it.live("holds the permit until an interpreter abandoned by a timeout settles", () =>
+    Effect.gen(function*() {
+      const { bash, peak } = deafStub(40)
+
+      yield* run(
+        bash,
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          yield* Effect.exit(Effect.timeout(spawner.exitCode(ChildProcess.make("first")), 1))
+          yield* spawner.exitCode(ChildProcess.make("second"))
+        })
+      )
+
+      expect(peak()).toBe(1)
+    }))
+
+  it.live("holds the permit until an interpreter stopped by `kill` settles", () =>
+    Effect.gen(function*() {
+      const { bash, peak, whenStarted } = deafStub(40)
+
+      yield* run(
+        bash,
+        Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const started = whenStarted()
+          yield* Effect.scoped(Effect.gen(function*() {
+            const handle = yield* spawner.spawn(ChildProcess.make("first"))
+            yield* Effect.promise(() => started)
+            yield* handle.kill()
+          }))
+          yield* spawner.exitCode(ChildProcess.make("second"))
+        })
+      )
+
+      expect(peak()).toBe(1)
+    }))
+
+  /**
+   * The observables are typed `Effect<_, PlatformError>`. Replaying the
+   * worker's interrupt through them would cancel the caller's own fiber, which
+   * is indistinguishable from someone else cancelling the whole run.
+   */
+  it.effect("reports a killed run as a PlatformError rather than interrupting the caller", () =>
+    Effect.gen(function*() {
+      const { bash } = stub((_command, signal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true })
+        })
+      )
+
+      const observed = yield* run(
+        bash,
+        Effect.scoped(Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const handle = yield* spawner.spawn(ChildProcess.make("slow"))
+          const before = yield* handle.isRunning
+          yield* handle.kill()
+          return {
+            before,
+            after: yield* handle.isRunning,
+            exit: yield* Effect.exit(handle.exitCode),
+            stdout: yield* Effect.exit(Stream.runCollect(handle.stdout))
+          }
+        }))
+      )
+
+      expect(observed.before).toBe(true)
+      expect(observed.after).toBe(false)
+      expect(Exit.hasInterrupts(observed.exit)).toBe(false)
+      expect(Exit.hasInterrupts(observed.stdout)).toBe(false)
+      const failure = Exit.isFailure(observed.exit)
+        ? Option.getOrUndefined(Cause.findErrorOption(observed.exit.cause))
+        : undefined
+      expect(failure?.reason).toMatchObject({
+        _tag: "Unknown",
+        module: "ChildProcess",
+        method: "kill",
+        description: "the interpreter run was aborted",
+        pathOrDescriptor: "slow"
+      })
+      expect(Exit.isFailure(observed.stdout)).toBe(true)
+    }))
+
+  it.effect("refuses `forceKillAfter`, which has no meaning after the abort", () =>
+    Effect.gen(function*() {
+      const { bash } = stub(ok())
+
+      const error = yield* run(
+        bash,
+        Effect.scoped(Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const handle = yield* spawner.spawn(ChildProcess.make("thing"))
+          // `killSignal` has no meaning for an interpreter and is accepted.
+          yield* handle.kill({ killSignal: "SIGTERM" })
+          return yield* Effect.flip(handle.kill({ forceKillAfter: "1 second" }))
+        }))
+      )
+
+      expect(error.reason).toMatchObject({ _tag: "BadArgument", module: "ChildProcess", method: "kill" })
+      expect(error.message).toContain("forceKillAfter")
+    }))
+
+  /**
+   * `handle.stdout` and `handle.all` both wrap the same captured text, so a
+   * disposition `Sink` has to be transduced once per consumption rather than
+   * shared between them; and `all` inherits `stdout`'s disposition, so an
+   * ignored stdout leaves `all` carrying stderr alone.
+   */
+  it.effect("applies a stdout disposition to `all` as well as to `stdout`", () =>
+    Effect.gen(function*() {
+      const { bash } = stub(ok("out", "err"))
+      let transductions = 0
+      const counting = Sink.map(Sink.collect<Uint8Array>(), (chunks) => {
+        transductions += 1
+        return new TextEncoder().encode(
+          `${transductions}:${chunks.map((chunk) => new TextDecoder().decode(chunk)).join("")}`
+        )
+      })
+
+      const observed = yield* run(
+        bash,
+        Effect.scoped(Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const sunk = yield* spawner.spawn(ChildProcess.make("thing", [], { stdout: counting }))
+          const ignored = yield* spawner.spawn(ChildProcess.make("thing", [], { stdout: "ignore" }))
+          return {
+            stdout: yield* Stream.mkString(Stream.decodeText(sunk.stdout)),
+            all: yield* Stream.mkString(Stream.decodeText(sunk.all)),
+            ignoredAll: yield* Stream.mkString(Stream.decodeText(ignored.all))
+          }
+        }))
+      )
+
+      expect(observed.stdout).toBe("1:out")
+      expect(observed.all).toBe("2:outerr")
+      expect(observed.ignoredAll).toBe("err")
+      expect(transductions).toBe(2)
+    }))
+
+  /**
+   * This adapter is the one place a rendered command line is handed back to a
+   * real shell parser, so the hostile tokens are pinned as a golden string and
+   * against `CommandLine.render` itself, which is what `proc:spawn` grants
+   * against. The two cannot drift apart.
+   */
+  it.effect("quotes hostile argv tokens the way the kernel's renderer does", () =>
+    Effect.gen(function*() {
+      const { bash, calls } = stub(ok())
+      const command = ChildProcess.make("echo", [
+        "line\nbreak",
+        "`id`",
+        "$(id)",
+        "${IFS}",
+        "it's",
+        "-x",
+        ""
+      ])
+
+      yield* run(bash, Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.exitCode(command)))
+
+      expect(calls[0]?.command).toBe(
+        "echo 'line\nbreak' '`id`' '$(id)' '${IFS}' 'it'\\''s' -x ''"
+      )
+      expect(calls[0]?.command).toBe(CommandLine.render(command))
     }))
 
   it.effect("derives `lines` and `streamLines` from the same buffered output", () =>

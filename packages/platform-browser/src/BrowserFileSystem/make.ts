@@ -74,7 +74,10 @@ const unsupported = (method: string): Effect.Effect<never, PlatformError.Platfor
  *
  * @private
  */
-const permitted = (mode: number, options: { readonly readable?: boolean | undefined; readonly writable?: boolean | undefined }): boolean =>
+const permitted = (
+  mode: number,
+  options: { readonly readable?: boolean | undefined; readonly writable?: boolean | undefined }
+): boolean =>
   (options.readable !== true || (mode & 0o444) !== 0) &&
   (options.writable !== true || (mode & 0o222) !== 0)
 

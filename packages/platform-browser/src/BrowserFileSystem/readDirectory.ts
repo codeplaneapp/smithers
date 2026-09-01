@@ -58,7 +58,7 @@ const collect = (
       const child = `${directory}/${name}`
       const stats = yield* inspect(fs, child)
       if (!stats.isDirectory()) continue
-      const canonical = yield* realPath(fs, child)
+      const canonical = yield* realPath(fs, child, "readDirectory")
       if (seen.has(canonical)) continue
       seen.add(canonical)
       collected.push(...yield* collect(fs, child, relative, seen))
@@ -86,5 +86,8 @@ export const readDirectory = (
   options?: { readonly recursive?: boolean | undefined }
 ): Effect.Effect<Array<string>, PlatformError.PlatformError> =>
   options?.recursive === true
-    ? Effect.flatMap(realPath(fs, path), (canonical) => collect(fs, path, "", new Set([canonical])))
+    ? Effect.flatMap(
+      realPath(fs, path, "readDirectory"),
+      (canonical) => collect(fs, path, "", new Set([canonical]))
+    )
     : entriesOf(fs, path)
