@@ -248,7 +248,19 @@ export const Package = S.Package({ targets: { tool } })
 `,
       "utf8"
     )
-    const result = await serve(root, ["//:tool", "--plan"])
+    // The refusal this pins happens only when `mise` is absent from PATH, and
+    // a developer machine that installs mise resolved it instead and failed
+    // the assertion. An empty PATH for the duration makes the premise hold on
+    // every host.
+    const path = process.env["PATH"]
+    process.env["PATH"] = ""
+    let result
+    try {
+      result = await serve(root, ["//:tool", "--plan"])
+    } finally {
+      if (path === undefined) delete process.env["PATH"]
+      else process.env["PATH"] = path
+    }
     expect(result.exitCode).toBe(0)
     expect(result.output).toContain("host binary")
     expect(result.output).toContain("mise")

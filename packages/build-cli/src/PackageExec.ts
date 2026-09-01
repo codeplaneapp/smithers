@@ -1633,11 +1633,13 @@ const visit = async (
       } catch {
         noteRefusal(`generator script not found: ${resolved}`)
       }
-      // Anchored to the workspace root rather than left relative, so the same
-      // argv names the same file under a declaration that sets `cwd`. The
-      // token is substituted with the tree root at spawn time, which keeps the
-      // planned argv host independent and therefore cacheable across machines.
-      return `${workspaceRootToken}/${resolved}`
+      // A script path is workspace relative, which names the wrong file once a
+      // declaration moves the working directory. Anchoring it to the root token
+      // keeps the same argv naming the same file, and the token is substituted
+      // with the tree root at spawn time, so the planned argv stays host
+      // independent and cacheable. A target that runs from the root keeps the
+      // relative form, so the common plan is unchanged.
+      return cwd === "." ? resolved : `${workspaceRootToken}/${resolved}`
     }
     if (entry === Shell.bunToken) {
       const outcome = await resolveBun(context)
