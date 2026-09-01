@@ -56,6 +56,7 @@ These are Node-only, deliberately. The gate asserts each one _still_ fails to bu
 | `@smthrs/kernel/test/TestHost`                   | `effect/testing`'s `TestClock` imports `node:assert`, so the deterministic host is Node-only even though its own adapters are pure |
 | `@smthrs/database/node/NodeDatabase`             | `node:sqlite` through `@effect/sql-sqlite-node`                                                                                    |
 | `@smthrs/flows/NodeRuntime`                      | The supported production composition: it opens a Node SQLite file and closes over a Node scope                                     |
+| `@smthrs/flows/SandboxedFlow`                    | The sandboxed child-flow tier: it bundles a host module with esbuild through `node:url` paths and starts a guest runtime           |
 
 ## The rule this encodes
 

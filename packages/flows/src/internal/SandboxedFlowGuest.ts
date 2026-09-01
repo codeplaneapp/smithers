@@ -111,12 +111,19 @@ const isFlowTagged = (value: unknown, tag: string): value is AnyFlow =>
   value._tag === tag
 
 /**
- * A `Crypto` over the platform's WebCrypto, which Node 22 and Bun both expose
- * as `globalThis.crypto`. Built here rather than imported from a platform
- * package so the guest bundle carries no dependency the entry's own
- * `node_modules` may lack.
+ * The `Crypto` the guest composition provides: WebCrypto, which Node 22 and
+ * Bun both expose as `globalThis.crypto`.
+ *
+ * Built here rather than imported from a platform package so the guest bundle
+ * carries no dependency the entry's own `node_modules` may lack. Its digests
+ * have to agree with the host's `NodeCrypto`: a child execution id derived in
+ * the guest for a `.child()` boundary is the same SHA-256 the host would
+ * derive from the same material, which the suite pins.
+ *
+ * @category services
+ * @since 1.0.0
  */
-const guestCrypto = Crypto.make({
+export const guestCrypto: Crypto.Crypto = Crypto.make({
   randomBytes: (size) => globalThis.crypto.getRandomValues(new Uint8Array(size)),
   digest: (algorithm, data) =>
     Effect.tryPromise({

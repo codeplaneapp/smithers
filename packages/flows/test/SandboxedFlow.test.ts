@@ -14,6 +14,7 @@ import { NodeChildProcessSpawner, NodeCrypto, NodeFileSystem } from "@effect/pla
 import { afterAll, describe, expect, it } from "@effect/vitest"
 import * as Node from "@smthrs/plan/Node"
 import { DirectorySandbox, RemoteChildProcessSpawner, type Sandbox } from "@smthrs/sandbox"
+import * as Crypto from "effect/Crypto"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -560,6 +561,18 @@ describe("the result schema", () => {
       files: 1000
     })
   })
+})
+
+describe("the guest crypto", () => {
+  it.live("digests exactly as the host's NodeCrypto does", () =>
+    Effect.gen(function*() {
+      const material = new TextEncoder().encode("the same key material on both sides of the machine boundary")
+      const host = yield* Crypto.Crypto
+      const inGuest = yield* Guest.guestCrypto.digest("SHA-256", material)
+      const onHost = yield* host.digest("SHA-256", material)
+      expect(inGuest).toEqual(onHost)
+      expect(Guest.guestCrypto.randomBytes(16)).toHaveLength(16)
+    }).pipe(Effect.provide(NodeCrypto.layer)))
 })
 
 describe("the guest runner in process", () => {
