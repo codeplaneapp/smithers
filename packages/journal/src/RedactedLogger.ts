@@ -35,11 +35,12 @@
  * rebuilds an object from its own enumerable entries, which is right for a row
  * that is about to be JSON-encoded and wrong for a terminal: an `Error` keeps
  * `message` and `stack` on non-enumerable properties, so rebuilding one prints
- * `{}` where the operator expected a failure. An `Error` is cloned instead:
- * the clone keeps the original prototype, so a tagged error carried by a cause
- * is still an instance of its own class when `Cause.pretty` renders it, keeps
- * the own fields that rendering copies over, and carries `message` and `stack`
- * rewritten by the rules.
+ * `{}` where the operator expected a failure. An `Error` is rebuilt as a plain
+ * `Error` instead, carrying its name, message, stack and own members with the
+ * rules applied. Its class is NOT preserved. A copy built on the original's
+ * prototype inherits everything the prototype defines, an own-key walk sees
+ * none of it, and each of `name`, `cause`, `toJSON`, `Symbol.toStringTag` and
+ * `nodejs.util.inspect.custom` carried a credential out that way.
  *
  * @since 0.1.0
  */
@@ -122,67 +123,86 @@ const renderDepthMarker = "[Deep]"
 const toArray = (message: unknown): ReadonlyArray<unknown> => Array.isArray(message) ? message : [message]
 
 /**
- * `error` with the redacted text defined on it, or `undefined` if it will not render.
+ * Reads one piece of text off `error` and runs it through the rules.
  *
- * `message` and `stack` are defined rather than assigned. `Error.stack` is an
- * optional property, so under `exactOptionalPropertyTypes` an assignment cannot
- * carry the `undefined` an already stackless error has. Everything a renderer
- * reads is then read once here: a prototype whose getters are backed by
- * internal slots the clone does not have throws on the first of them.
+ * Everything a renderer prints about an error is read here, once, and only the
+ * redacted result crosses to the copy. A caller's error can define any of these
+ * as an accessor that throws, and reading one happens while a log line is
+ * rendering, so a refusal costs that piece of text and nothing else.
  */
-const renderable = (error: Error, message: string, stack: unknown): Error | undefined => {
+const redactedText = (read: () => unknown, redactor: Redaction.Redactor, fallback: string): string => {
   try {
-    Object.defineProperty(error, "message", { value: message, writable: true, configurable: true })
-    Object.defineProperty(error, "stack", { value: stack, writable: true, configurable: true })
-    void `${error.name}${error.message}${String(error.stack)}${String(error)}`
-    return error
+    return String(redactor(String(read())))
+  } catch {
+    return fallback
+  }
+}
+
+/** `error.stack` through the rules, or `undefined` when it has none to give. */
+const redactedStack = (error: Error, redactor: Redaction.Redactor): string | undefined => {
+  try {
+    const stack = error.stack
+    // An `Error.stack` is optional. Under `exactOptionalPropertyTypes` an
+    // assignment cannot carry the `undefined` a stackless error has, so the
+    // copy defines the property instead of assigning it.
+    return typeof stack === "string" ? String(redactor(stack)) : undefined
   } catch {
     return undefined
   }
 }
 
-/** A plain `Error` standing in for one whose class cannot be impersonated. */
-const plainError = (error: Error, message: string, stack: unknown, redactor: Redaction.Redactor): Error => {
-  const plain = new Error(message)
-  // Read from the ORIGINAL, where the brand check passes. A name is the part of
-  // the class a renderer actually prints, so it survives even when the class
-  // itself cannot.
-  try {
-    // Through the rules, like the message and the stack. A name is read off the
-    // original, and for the classes that reach here it is caller data rather
-    // than a class name, so an unredacted copy exported the credential to OTLP.
-    Object.defineProperty(plain, "name", {
-      value: String(redactor(String(error.name))),
-      writable: true,
-      configurable: true
-    })
-  } catch {
-    // A name that will not even be read is not worth the log line.
-  }
-  Object.defineProperty(plain, "stack", { value: stack, writable: true, configurable: true })
-  return plain
+/**
+ * A member NAME with the rules applied, replaced outright when one fires.
+ *
+ * The treatment `Redaction.redact` gives an object key, for the same reason: a
+ * name is text a renderer prints. Rewriting one in place would change what it
+ * reads as and redaction would stop being a fixed point, so a name that matches
+ * becomes the placeholder whole.
+ */
+const redactedName = (key: string, redactor: Redaction.Redactor): string => {
+  const redacted = String(redactor(key))
+  return redacted === key ? key : Redaction.placeholder
 }
+
+/**
+ * Own names the copy never carries, because a renderer CALLS them.
+ *
+ * `name`, `message` and `stack` are defined from the rules above instead. The
+ * rest are hooks: a redacted `toString` or `valueOf` would leave a string under
+ * a name the language calls, and `String(error)` would then throw from inside
+ * the renderer, which is the failure mode this module exists to avoid.
+ */
+const renderHooks: ReadonlySet<string> = new Set([
+  "constructor",
+  "message",
+  "name",
+  "stack",
+  "toJSON",
+  "toString",
+  "valueOf"
+])
 
 /**
  * A copy of `error` carrying the same information with the rules applied.
  *
- * `Object.create` over the original prototype rather than `new Error`, so a
- * tagged error stays an instance of its own class: a cause carries the error
- * a flow failed with, and `Cause.pretty` renders it by reading `name`,
- * `stack`, and the error's own keys. Those own properties are copied by
- * descriptor for the same reason. `message` and `stack` are handled apart from
- * that loop and defined as data properties, because V8 gives an error an own
- * `stack` ACCESSOR whose getter would read the unredacted text straight back
- * out of the original.
+ * A PLAIN `Error`, never a copy built on the original's prototype. A prototype
+ * is an unbounded leak surface and an own-key walk never looks at one: an
+ * inherited `name`, `cause`, `toJSON`, `Symbol.toStringTag` or
+ * `nodejs.util.inspect.custom` each carried a credential straight to an OTLP
+ * span attribute or to the operator's terminal, one per review round, and a
+ * getter anywhere on the chain is the same hole with a different name. So
+ * nothing inherited crosses. Only redacted text does: the name, the message,
+ * the stack, and the error's own members, each read once here and stored as
+ * data, since a getter carried across unchanged would hand the unredacted
+ * value to whatever reads it next.
  *
- * The clone is then PROVEN, not assumed. A host error such as a `DOMException`,
- * which is what an `AbortSignal` carries as its reason, keeps `name` and `code`
- * in internal slots behind prototype getters, so a clone over that prototype is
- * an impostor: creating it succeeds and the brand check throws later, from
- * inside `Cause.pretty`, killing the run the line was describing. Reading what
- * a renderer reads settles that here, where a failure costs the class and
- * nothing else. Proving happens before the own-key walk, so the memo only ever
- * holds an object that renders, and a cycle can never point at an impostor.
+ * The copy is not an instance of the original's class, so a renderer that
+ * special-cases `instanceof MyError` sees a plain `Error`. That is the fidelity
+ * trade rc-contract section 7 already records for every other value, and it is
+ * the trade the same problem's earlier, crashing form was settled with: a copy
+ * on a host prototype, such as the `DOMException` an `AbortSignal` carries as
+ * its reason, is an impostor whose brand check throws from inside `Cause.pretty`
+ * and kills the run the line was describing.
  */
 const redactError = (
   error: Error,
@@ -190,39 +210,46 @@ const redactError = (
   seen: WeakMap<Error, Error>,
   depth = 0
 ): Error => {
-  // The memo holds the CLONE, not a visited mark: returning the original on a
+  // The memo holds the COPY, not a visited mark: returning the original on a
   // repeat reference put the unredacted error back into the output, so a
-  // diamond (two fields naming one error) leaked on its second field. The
-  // clone is registered before its own keys are walked, so a cycle terminates
-  // on the clone and every reference to one error is the same redacted object.
+  // diamond (two fields naming one error) leaked on its second field. The copy
+  // is registered before its own members are walked, so a cycle terminates on
+  // it and every reference to one error is the same redacted object.
   const memoized = seen.get(error)
   if (memoized !== undefined) return memoized
-  const message = String(redactor(error.message))
-  const stack = typeof error.stack === "string" ? String(redactor(error.stack)) : error.stack
-  const clone = renderable(Object.create(Object.getPrototypeOf(error)) as Error, message, stack)
-    ?? plainError(error, message, stack, redactor)
+  const clone = new Error()
   seen.set(error, clone)
-  for (const key of Reflect.ownKeys(error)) {
-    if (key === "message" || key === "stack") continue
+  const define = (key: string, value: unknown, enumerable: boolean): void => {
+    Object.defineProperty(clone, key, { value, writable: true, enumerable, configurable: true })
+  }
+  define("name", redactedText(() => error.name, redactor, "Error"), false)
+  define("message", redactedText(() => error.message, redactor, ""), false)
+  define("stack", redactedStack(error, redactor), false)
+  // Own NAMES, not `Reflect.ownKeys`. A symbol key never crosses: its
+  // description is text no walk can rewrite in place, and the three hooks with
+  // no name to skip are symbols too, `Symbol.toPrimitive`,
+  // `Symbol.toStringTag`, and `nodejs.util.inspect.custom`.
+  for (const key of Object.getOwnPropertyNames(error)) {
+    if (renderHooks.has(key)) continue
     const descriptor = Object.getOwnPropertyDescriptor(error, key)!
-    // An accessor is read once here and stored as data. The clone is a
-    // rendering, not a live object, and a getter carried across unchanged
-    // would hand the unredacted value to whatever reads it next.
     const value = "value" in descriptor
       ? descriptor.value
       : (error as unknown as Record<PropertyKey, unknown>)[key]
-    Object.defineProperty(clone, key, {
-      // The depth cap binds under an Error exactly as it does beside one: a
-      // deep value carried on a cause can exhaust the stack just as easily.
-      value: depth + 1 >= renderDepthLimit
+    define(
+      redactedName(key, redactor),
+      // A credential-named member is replaced wholesale, the way the journal's
+      // own walk replaces one, so both halves of the one rule set answer alike.
+      Redaction.isSensitiveKey(key)
+        ? Redaction.placeholder
+        // The depth cap binds under an Error exactly as it does beside one: a
+        // deep value carried on a cause can exhaust the stack just as easily.
+        : depth + 1 >= renderDepthLimit
         ? renderDepthMarker
         : value instanceof Error
         ? redactError(value, redactor, seen, depth + 1)
         : redactor(value),
-      writable: true,
-      enumerable: descriptor.enumerable === true,
-      configurable: true
-    })
+      descriptor.enumerable === true
+    )
   }
   return clone
 }
@@ -230,18 +257,21 @@ const redactError = (
 /**
  * Redacts one value on its way out of the logger.
  *
- * An `Error` is rebuilt so its message, stack and own members are redacted and
- * it stays an `Error` for a renderer that special-cases one. Everything else
- * goes through the journal's own rules, which rebuild a value from its plain
- * data: a `Date`, a `Map`, a class instance or a host object therefore reaches
- * the operator in that plain form rather than as itself.
+ * An `Error` is rebuilt as a plain `Error` whose name, message, stack and own
+ * members are redacted, so a renderer that special-cases an `Error` still gets
+ * one. Everything else goes through the journal's own rules, which rebuild a
+ * value from its plain data: a `Date`, a `Map`, a class instance or a host
+ * object therefore reaches the operator in that plain form rather than as
+ * itself.
  *
- * That collapse is deliberate. An earlier version rebuilt each value on its
- * own prototype to keep the rendering faithful, and three rounds of review
- * found three ways it could kill the run it was logging, because a host class
- * keeps state a property walk cannot see and a clone of one throws the moment
- * a brand check reads it. A log line is not worth a run, and the rendering it
- * buys is cosmetic.
+ * That collapse is deliberate, and it now covers the `Error` too. An earlier
+ * version rebuilt each value on its own prototype to keep the rendering
+ * faithful. Three rounds of review found three ways that could kill the run it
+ * was logging, because a host class keeps state a property walk cannot see and
+ * a copy of one throws the moment a brand check reads it, and four more found
+ * that the prototype an `Error` copy kept was itself the leak: everything it
+ * defines is read by a renderer and seen by no own-key walk. A log line is not
+ * worth a run, and the rendering it buys is cosmetic.
  *
  * @since 0.1.0
  * @category redaction

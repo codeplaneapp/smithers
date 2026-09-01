@@ -140,10 +140,20 @@ export interface Options {
 }
 
 /**
- * How many bytes a view may hold before {@link redact} stops reading its members.
+ * How many bytes a view may hold, and how many own members {@link redact} reads
+ * off it, before it stops reading them.
  *
  * Enumerating a view's own properties materialises one pair per byte, so the
- * walk costs the buffer's size even though the rendering does not.
+ * walk costs the buffer's size even though the rendering does not. Both halves
+ * of the bound carry load, and neither is a bound on its own. A size alone is
+ * not, because `byteLength` was read as an ordinary property and an ordinary
+ * property can be shadowed: a pooled chunk that reports the bytes it has used
+ * rather than the bytes it holds is a plain pattern, not an adversarial one,
+ * and a 4 MB chunk reporting 12 walked one property per byte anyway. A count
+ * alone is not, because a caller can hang a million properties on a ten-byte
+ * view. So the size is read from the value's own internal slot, where nothing
+ * a caller writes can answer for it, and the members are counted as they are
+ * walked.
  *
  * @since 0.1.0
  * @category redaction
@@ -151,25 +161,78 @@ export interface Options {
  */
 export const binaryWalkLimit = 65_536
 
-/** A view's byte length, or `Infinity` when it will not say, which skips the walk. */
-const byteLength = (node: object): number => {
-  try {
-    const size = (node as { byteLength?: unknown }).byteLength
-    return typeof size === "number" ? size : Number.POSITIVE_INFINITY
-  } catch {
-    return Number.POSITIVE_INFINITY
+/**
+ * The byte-length getters, taken from the prototypes rather than from a value.
+ *
+ * `%TypedArray%.prototype`, `DataView.prototype` and `ArrayBuffer.prototype`
+ * each define `byteLength` as an accessor over an internal slot, and applying
+ * one to a value that has no such slot throws. Reading the size this way is
+ * therefore a brand check as well as a measurement: a caller's own `byteLength`
+ * property, accessor or not, never answers it.
+ */
+const byteLengthGetters = [
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(Uint8Array.prototype) as object, "byteLength")!.get!,
+  Object.getOwnPropertyDescriptor(DataView.prototype, "byteLength")!.get!,
+  Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength")!.get!
+] as ReadonlyArray<() => number>
+
+/** A value's byte length from its own internal slot, or `undefined` when it has none. */
+const byteLength = (node: object): number | undefined => {
+  for (const getter of byteLengthGetters) {
+    try {
+      return Reflect.apply(getter, node, [])
+    } catch {
+      // Not that kind of view. Another getter answers, or none does and the
+      // bytes are named without the members being read.
+    }
   }
+  return undefined
+}
+
+/** The prototypes every binary view inherits from. */
+const binaryPrototypes: ReadonlySet<unknown> = new Set([
+  Object.getPrototypeOf(Uint8Array.prototype),
+  DataView.prototype,
+  ArrayBuffer.prototype
+])
+
+/** How many prototypes {@link isBinary} climbs before it stops asking. */
+const prototypeWalkLimit = 64
+
+/**
+ * Whether `node` is a binary view, including one held behind a proxy.
+ *
+ * `ArrayBuffer.isView` reads an internal slot, and a proxy has none of its own,
+ * so it answers `false` for a proxy over a view. That sent a proxied 2 MB
+ * buffer to the object branch, which rebuilt it one key per byte: 2,000 ms and
+ * 22.9 million characters for one logged value. A proxy forwards
+ * `getPrototypeOf` to its target, so the prototype chain answers where the
+ * brand check cannot. The climb is capped because a proxy is free to hand back
+ * a fresh object every time it is asked, which is an endless chain.
+ */
+const isBinary = (node: object): boolean => {
+  if (ArrayBuffer.isView(node) || node instanceof ArrayBuffer) return true
+  try {
+    let prototype = Object.getPrototypeOf(node) as object | null
+    for (let step = 0; prototype !== null && step < prototypeWalkLimit; step++) {
+      if (binaryPrototypes.has(prototype)) return true
+      prototype = Object.getPrototypeOf(prototype) as object | null
+    }
+  } catch {
+    // A revoked proxy refuses to be asked. It is not a view, and the object
+    // branch names it.
+  }
+  return false
 }
 
 /** Own keys of a binary view that name one of its bytes rather than a property. */
 const indexKey = /^(?:0|[1-9][0-9]*)$/
 
-/** `Uint8Array 1024 bytes`, or the bare marker when the view refuses to say. */
-const describeBinary = (node: object): string => {
+/** `Uint8Array 1024 bytes`, or the bare marker when the value will not say. */
+const describeBinary = (node: object, size: number | undefined): string => {
+  if (size === undefined) return binaryMarker
   try {
-    const name = node.constructor?.name
-    const size = (node as { byteLength?: unknown }).byteLength
-    return typeof name === "string" && typeof size === "number" ? `${name} ${size} bytes` : binaryMarker
+    return `${node.constructor.name} ${size} bytes`
   } catch {
     return binaryMarker
   }
@@ -245,18 +308,27 @@ export const redact = (value: unknown, options?: Options): unknown => {
    * went into a durable row in clear. Name the bytes, keep walking the text.
    */
   const binary = (node: object, ancestors: WeakSet<object>, depth: number): unknown => {
+    const size = byteLength(node)
     // The description is text read off the value, so it meets the rules like
     // any other text: a class name is caller data, and a view whose
     // constructor is named after a credential wrote it into a durable row.
-    const entries: Array<[string, unknown]> = [[binaryMarker, redactString(describeBinary(node), rules)]]
+    const entries: Array<[string, unknown]> = [[binaryMarker, redactString(describeBinary(node, size), rules)]]
     // `Object.entries` on a view materialises one pair per byte before the
     // index filter can discard them, which cost 312 ms for 1 MB on the journal
     // write path. Past the bound the bytes are named and nothing else is read,
     // so a member a caller hung on a large view is dropped rather than shown.
-    if (byteLength(node) <= binaryWalkLimit) {
+    // A value that will not answer from its internal slot, such as a proxy over
+    // a view, is named and never enumerated at all.
+    if (size !== undefined && size <= binaryWalkLimit) {
+      let walked = 0
       for (const [key, field] of Object.entries(node as Record<string, unknown>)) {
         // An index is one of the bytes just named, not a property a caller set.
         if (indexKey.test(key)) continue
+        // The size bounds the bytes, not the properties: a caller can hang a
+        // million members on a ten-byte view, and each one costs three rule
+        // scans over its name and a walk of its value.
+        if (walked >= binaryWalkLimit) break
+        walked++
         entries.push([redactKey(key, rules), isSensitiveKey(key) ? placeholder : walk(field, ancestors, depth + 1)])
       }
     }
@@ -274,7 +346,7 @@ export const redact = (value: unknown, options?: Options): unknown => {
     if (typeof node === "function") return functionMarker
     if (typeof node === "symbol") return symbolMarker
     if (node === null || typeof node !== "object") return node
-    if (ArrayBuffer.isView(node) || node instanceof ArrayBuffer) return binary(node, ancestors, depth)
+    if (isBinary(node)) return binary(node, ancestors, depth)
     if (ancestors.has(node)) return "[Circular]"
     // A journal row is bounded by its schema, but a LOGGED value is arbitrary:
     // the logger sends every non-Error value here, and a chain deep enough to

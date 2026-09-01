@@ -263,7 +263,13 @@ describe("RedactedLogger", () => {
       expect(rendered).toContain("POST https://example.test failed")
     }))
 
-  it("keeps a redacted error's class and own fields, which a rendered cause reads", () => {
+  it("keeps a redacted error's name and own fields, which a rendered cause reads", () => {
+    // Restated 2026-09-01: this asserted the copy was an instance of the
+    // original class. It is not any more, and cannot be: the copy was built on
+    // the original's prototype, and four review rounds each found one more
+    // thing a prototype defines that a renderer reads and an own-key walk never
+    // sees. What a rendered cause actually prints, the name, the message, the
+    // stack and the own fields, is unchanged and asserted here.
     class DeployError extends Error {
       readonly _tag = "DeployError"
       readonly status: number
@@ -277,12 +283,14 @@ describe("RedactedLogger", () => {
       new DeployError("POST failed: token=sk-live-abcdefgh", 502),
       Redaction.make()
     ) as DeployError
-    expect(redacted).toBeInstanceOf(DeployError)
+    expect(redacted).toBeInstanceOf(Error)
+    expect(Object.getPrototypeOf(redacted)).toBe(Error.prototype)
     expect(redacted._tag).toBe("DeployError")
     expect(redacted.status).toBe(502)
     expect(redacted.name).toBe("DeployError")
     expect(redacted.message).toBe(`POST failed: token=${Redaction.placeholder}`)
     expect(redacted.stack).not.toContain("sk-live-abcdefgh")
+    expect(inspect(redacted)).toContain("DeployError")
   })
 
   it("redacts an error's own fields, reads its getters, and stops at a cycle", () => {
@@ -823,4 +831,224 @@ describe("RedactedLogger", () => {
       const recorded = yield* logged(Effect.logInfo("plain operational line"))
       expect(rendered(recorded)).toContain("plain operational line")
     }))
+  // ---------------------------------------------------------------------------
+  // The prototype an error copy used to keep.
+  //
+  // Every case below plants a credential on a PROTOTYPE, not on the value. The
+  // copy was built with `Object.create(Object.getPrototypeOf(error))` and its
+  // own-key walk read `Reflect.ownKeys(error)`, so nothing inherited was ever
+  // offered to the rules while every renderer read it. Each case is driven
+  // through the shipped path, and the OTLP ones assert on tracer span output
+  // rather than on a console, because `redactingConsole` redacts the console's
+  // ARGUMENTS and node renders them afterwards, which hides this whole class.
+  // ---------------------------------------------------------------------------
+
+  it.effect("does not leak a credential an error's INHERITED name carries", () =>
+    Effect.gen(function*() {
+      // Effect reads `error.name` when it renders a cause. A subclass whose
+      // prototype defines `name` needs no own property to be read, so the copy
+      // inherited the credential and `effect.cause` carried it to the collector
+      // in clear.
+      class Refused extends Error {}
+      Object.defineProperty(Refused.prototype, "name", {
+        value: "sk-live-e2ecase22NEVERLOGTHIS",
+        configurable: true
+      })
+      const spans = yield* traced(Effect.logError(Cause.fail(new Refused("request refused"))))
+      const cause = String(onlyEvent(spans)[2]["effect.cause"])
+      expect(cause).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+      expect(cause).toContain("request refused")
+    }))
+
+  it.effect("does not leak a credential an error's INHERITED cause carries", () =>
+    Effect.gen(function*() {
+      // `Cause.pretty` follows `error.cause`, and a prototype can supply one.
+      class Refused extends Error {}
+      ;(Refused.prototype as { cause?: unknown }).cause = new Error("sk-live-e2ecase22NEVERLOGTHIS")
+      const spans = yield* traced(Effect.logError(Cause.fail(new Refused("request refused"))))
+      const cause = String(onlyEvent(spans)[2]["effect.cause"])
+      expect(cause).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+      expect(cause).toContain("request refused")
+    }))
+
+  it.effect("does not leak a credential an error's INHERITED toJSON returns", () =>
+    Effect.gen(function*() {
+      // The tracer logger names the span event with `toStringUnknown` of the
+      // message, which reaches `Inspectable.toJson`, which calls `toJSON`. A
+      // surviving `toJSON` was recorded as a closed leak class in commit
+      // 94416d3924; keeping the prototype reopened it from the other side.
+      class Refused extends Error {
+        toJSON(): unknown {
+          return { token: "sk-live-e2ecase22NEVERLOGTHIS" }
+        }
+      }
+      const spans = yield* traced(Effect.logInfo(new Refused("request refused")))
+      const [name, , attributes] = onlyEvent(spans)
+      expect(name).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+      expect(JSON.stringify(attributes)).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+    }))
+
+  it.effect("does not leak a credential an error's INHERITED inspect hook prints", () =>
+    Effect.gen(function*() {
+      // A symbol key on the prototype: `Reflect.ownKeys` of the value never saw
+      // it, and `util.inspect` calls it, so it reached the operator's terminal
+      // and the `.flows/logs/<runId>.log` stream under every console logger.
+      class Refused extends Error {}
+      Object.defineProperty(Refused.prototype, Symbol.for("nodejs.util.inspect.custom"), {
+        value: () => "token=sk-live-e2ecase22NEVERLOGTHIS",
+        configurable: true
+      })
+      const recorded = yield* logged(Effect.logError("action failed", new Refused("request refused")))
+      expect(rendered(recorded)).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+    }))
+
+  it.effect("does not leak a credential an error's INHERITED toStringTag carries", () =>
+    Effect.gen(function*() {
+      class Refused extends Error {}
+      Object.defineProperty(Refused.prototype, Symbol.toStringTag, {
+        value: "sk-live-e2ecase22NEVERLOGTHIS",
+        configurable: true
+      })
+      const recorded = yield* logged(Effect.logError("action failed", new Refused("request refused")))
+      expect(rendered(recorded)).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+    }))
+
+  it("does not carry an error's own render hooks onto the copy", () => {
+    // A hook is text the walk cannot rewrite in place, and naming it
+    // `[Function]` under the name the language CALLS is worse than dropping it:
+    // `String(err)` would then throw from inside the renderer, which is the
+    // failure this module exists to avoid. A non-function hook does the same.
+    const redactor = Redaction.make()
+    const hooked = new Error("request refused") as Error & Record<PropertyKey, unknown>
+    hooked["toString"] = () => "token=sk-live-abcdefgh"
+    hooked["valueOf"] = () => "token=sk-live-abcdefgh"
+    hooked["toJSON"] = () => ({ token: "sk-live-abcdefgh" })
+    Object.defineProperty(hooked, "constructor", {
+      value: { name: "sk-live-abcdefgh" },
+      enumerable: true,
+      configurable: true,
+      writable: true
+    })
+    hooked[Symbol.toPrimitive] = "sk-live-abcdefgh"
+    Object.defineProperty(hooked, Symbol.for("sk-live-abcdefgh"), { value: 1, enumerable: true })
+    const copy = RedactedLogger.redactArgument(hooked, redactor) as Error
+    expect(() => String(copy)).not.toThrow()
+    expect(() => JSON.stringify(copy)).not.toThrow()
+    expect(String(copy)).not.toContain("sk-live-abcdefgh")
+    expect(inspect(copy)).not.toContain("sk-live-abcdefgh")
+    expect(String(JSON.stringify(copy))).not.toContain("sk-live-abcdefgh")
+    expect(copy.message).toBe("request refused")
+  })
+
+  it("redacts an error's own member NAME as well as its value", () => {
+    // The object walk redacts a key; the Error walk defined the original key
+    // straight onto the copy, so the same credential-as-a-field-name reached
+    // the terminal by the Error route. A credential-NAMED member is replaced
+    // wholesale, the way the journal's own walk replaces one.
+    const redactor = Redaction.make()
+    const carrier = new Error("request refused") as Error & Record<string, unknown>
+    carrier["sk-live-abcdefgh"] = "seat"
+    carrier["apiKey"] = "hunter2"
+    const copy = RedactedLogger.redactArgument(carrier, redactor) as Record<string, unknown>
+    expect(inspect(copy)).not.toContain("sk-live-abcdefgh")
+    expect(copy["apiKey"]).toBe(Redaction.placeholder)
+  })
+
+  it("keeps rendering an error whose own text refuses to be read", () => {
+    // `name`, `message` and `stack` can each be an accessor that throws, and
+    // reading one happens while the line renders. A refusal costs that piece of
+    // text and nothing else.
+    const redactor = Redaction.make()
+    const hostile = Object.create(Error.prototype) as Error
+    for (const key of ["name", "message", "stack"]) {
+      Object.defineProperty(hostile, key, {
+        get: () => {
+          throw new TypeError("refused")
+        },
+        configurable: true
+      })
+    }
+    const copy = RedactedLogger.redactArgument(hostile, redactor) as Error
+    expect(copy).toBeInstanceOf(Error)
+    expect(copy.name).toBe("Error")
+    expect(copy.message).toBe("")
+    expect(copy.stack).toBeUndefined()
+  })
+
+  // ---------------------------------------------------------------------------
+  // What the binary walk is actually bounded by.
+  // ---------------------------------------------------------------------------
+
+  it("does not walk a view that under-reports its own size", () => {
+    // `byteLength` was read as an ordinary property, so a caller could shadow
+    // it and the bound believed the value. A pooled chunk reporting the bytes
+    // it has USED is an ordinary pattern, not an adversarial one, and a 4 MB
+    // chunk reporting 12 walked one property per byte anyway. The size now
+    // comes from the internal slot, which nothing a caller writes answers for.
+    const redactor = Redaction.make()
+    class Chunk extends Uint8Array {
+      used = 12
+      override get byteLength(): number {
+        return this.used
+      }
+    }
+    const chunk = new Chunk(4_000_000)
+    const started = Date.now()
+    const result = redactor(chunk) as Record<string, unknown>
+    expect(Date.now() - started).toBeLessThan(200)
+    // The true size, not the reported one, and no per-byte member.
+    expect(String(result[Redaction.binaryMarker])).toContain("4000000 bytes")
+    expect(Object.keys(result)).toEqual([Redaction.binaryMarker])
+  })
+
+  it("names a proxied view instead of rebuilding it one key per byte", () => {
+    // `ArrayBuffer.isView` reads an internal slot and a proxy has none of its
+    // own, so a proxied 2 MB view fell through to the object branch: 2,000 ms
+    // and 22.9 million characters for one logged value. A proxy forwards
+    // `getPrototypeOf`, so the prototype chain answers where the brand cannot.
+    const redactor = Redaction.make()
+    const proxied = new Proxy(Object.assign(new Uint8Array(2_000_000), { seat: "sk-live-abcdefgh" }), {})
+    const started = Date.now()
+    const result = redactor(proxied)
+    expect(Date.now() - started).toBeLessThan(200)
+    const text = JSON.stringify(result)
+    expect(text.length).toBeLessThan(200)
+    expect(text).not.toContain("sk-live-abcdefgh")
+    // It will not answer from an internal slot, so the bytes are named and no
+    // member is read at all.
+    expect(result).toEqual({ [Redaction.binaryMarker]: Redaction.binaryMarker })
+  })
+
+  it("stops after the member bound on a small view carrying many properties", () => {
+    // The size bounds the bytes, not the properties. A four-byte view with more
+    // members than the bound costs one rule scan per member without the second
+    // half of the bound.
+    const redactor = Redaction.make()
+    const view = new Uint8Array(4)
+    for (let index = 0; index <= Redaction.binaryWalkLimit; index++) {
+      Object.defineProperty(view, `p${index}`, { value: "token=sk-live-abcdefgh", enumerable: true })
+    }
+    const result = redactor(view) as Record<string, unknown>
+    // The `[Binary]` name plus exactly the bound, and nothing past it.
+    expect(Object.keys(result).length).toBe(Redaction.binaryWalkLimit + 1)
+    expect(JSON.stringify(result)).not.toContain("sk-live-abcdefgh")
+  })
+
+  it("names a view and a buffer whose sizes live in different slots", () => {
+    // Three prototypes define `byteLength` over an internal slot, and the walk
+    // asks each in turn. A typed array answers the first, a DataView the
+    // second, an ArrayBuffer the third.
+    const redactor = Redaction.make()
+    expect(JSON.stringify(redactor(new Uint8Array(4)))).toContain("Uint8Array 4 bytes")
+    expect(JSON.stringify(redactor(new DataView(new ArrayBuffer(8))))).toContain("DataView 8 bytes")
+    expect(JSON.stringify(redactor(new ArrayBuffer(16)))).toContain("ArrayBuffer 16 bytes")
+  })
+
+  it("stops climbing a prototype chain that never ends", () => {
+    // A proxy may hand back a fresh prototype every time it is asked, which is
+    // an endless chain and an unbounded loop inside the walk.
+    const redactor = Redaction.make()
+    const endless = new Proxy({ token: "sk-live-abcdefgh" }, { getPrototypeOf: () => ({}) })
+    expect(JSON.stringify(redactor(endless))).not.toContain("sk-live-abcdefgh")
+  })
 })
