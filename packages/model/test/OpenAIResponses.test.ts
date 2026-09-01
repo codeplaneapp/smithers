@@ -314,6 +314,37 @@ describe("OpenAIResponses", () => {
     ])
   })
 
+  it("reads incomplete_details.reason instead of always reporting a token limit", () => {
+    // `response.incomplete` carries WHY. A safety refusal is not a token budget,
+    // and `StopReason` already distinguishes the two.
+    const stopReasonFor = (response: string): string | undefined => {
+      const events = replayData([`{"type":"response.incomplete","response":${response}}`])
+      const settle = events.find((event): event is Events.Settle => event.type === "settle")
+      return settle?.stopReason
+    }
+
+    expect(stopReasonFor("{\"id\":\"r\",\"incomplete_details\":{\"reason\":\"content_filter\"}}")).toBe(
+      "content-filter"
+    )
+    expect(stopReasonFor("{\"id\":\"r\",\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}")).toBe("length")
+    expect(stopReasonFor("{\"id\":\"r\"}")).toBe("length")
+  })
+
+  it("omits declared tools when the request forbids tool use", () => {
+    const withTools = (toolChoice?: "none"): Request.ModelRequest =>
+      Request.ModelRequest.make({
+        modelId: "gpt-5.4",
+        system: [],
+        messages: [Request.Message.user("hi")],
+        tools: [Request.ToolDefinition.make({ name: "search", description: "web search", parameters: {} })],
+        params: Request.GenerationParams.make(),
+        ...(toolChoice === undefined ? {} : { toolChoice })
+      })
+
+    expect(body(withTools("none")).tools).toBeUndefined()
+    expect(body(withTools()).tools).toHaveLength(1)
+  })
+
   it("settles a completed response with neither an id nor usage", () => {
     expect(replayData(["{\"type\":\"response.completed\",\"response\":{}}"])).toEqual([
       { type: "settle", stopReason: "stop", responseId: undefined }
@@ -393,6 +424,9 @@ describe("OpenAIResponses", () => {
     const classify = OpenAIResponses.protocol.classifyError
 
     expect(classify(402, "{\"error\":{\"code\":\"insufficient_quota\"}}")).toMatchObject({ code: "quota_exceeded" })
+    expect(classify(400, "{\"error\":{\"message\":\"Your credit balance is too low\"}}")).toMatchObject({
+      code: "quota_exceeded"
+    })
     expect(classify(403, "{\"error\":{\"code\":\"permission_denied\"}}")).toMatchObject({ code: "authentication" })
     expect(classify(429, "{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"slow\"}}")).toMatchObject({
       code: "rate_limited",

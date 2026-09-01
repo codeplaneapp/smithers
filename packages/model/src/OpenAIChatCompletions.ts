@@ -11,7 +11,7 @@
  * @since 0.1.0
  */
 import { Effect, Option, Schema } from "effect"
-import { isContextOverflow, ModelError } from "./ModelError.ts"
+import { isContextOverflow, isQuotaExhausted, ModelError } from "./ModelError.ts"
 import * as ModelEvent from "./ModelEvent.ts"
 import { JsonObject, type Message, type ModelRequest, type StopReason, type ToolDefinition } from "./ModelRequest.ts"
 import * as Protocol from "./Protocol.ts"
@@ -189,7 +189,10 @@ const buildBody = (
 ): Body => ({
   model: request.modelId,
   messages: lowerMessages(request),
-  ...(structuredOutput !== undefined || request.tools.length === 0
+  // `toolChoice: "none"` forbids tool use, and both provider APIs express that
+  // by omitting `tools` rather than by a wire field, so the request is lowered
+  // as if it declared none.
+  ...(structuredOutput !== undefined || request.toolChoice === "none" || request.tools.length === 0
     ? {}
     : { tools: request.tools.map(functionTool) }),
   ...(structuredOutput === undefined ? {} : { response_format: responseFormat(structuredOutput) }),
@@ -362,11 +365,22 @@ const stepEvent = (
   event: ChatCompletionChunk
 ): { readonly state: State; readonly events: ReadonlyArray<ModelEvent.ModelEvent> } | ModelError => {
   if (event.error !== undefined) {
+    // Chat-compatible gateways answer HTTP 200 and report the real failure
+    // inside the stream: OpenRouter sends `{"error":{"code":429,...}}` this
+    // way. Classifying every one of them as `provider_internal` made a rate
+    // limit, an exhausted balance and a rejected key all retryable, so the
+    // ladder burned instead of the seat parking or the call failing typed.
     const error = event.error as { readonly message?: unknown; readonly code?: unknown }
+    const providerCode = typeof error.code === "string"
+      ? error.code
+      : typeof error.code === "number"
+      ? String(error.code)
+      : undefined
+    const message = typeof error.message === "string" ? error.message : "Chat Completions stream reported an error"
     return new ModelError({
-      code: "provider_internal",
-      message: typeof error.message === "string" ? error.message : "Chat Completions stream reported an error",
-      providerCode: typeof error.code === "string" ? error.code : undefined
+      code: providerReason(undefined, providerCode, message),
+      message,
+      providerCode
     })
   }
   const usage = usageEvent(event.usage)
@@ -442,30 +456,36 @@ const record = (value: unknown): Readonly<Record<string, unknown>> | undefined =
     ? value as Readonly<Record<string, unknown>>
     : undefined
 
-const providerReason = (status: number, code: string | undefined, message: string): ModelError["code"] => {
+const providerReason = (
+  status: number | undefined,
+  code: string | undefined,
+  message: string
+): ModelError["code"] => {
   const normalized = `${code ?? ""} ${message}`.toLowerCase()
+  // One shared vocabulary for an exhausted account, so a gateway that spells it
+  // "credit balance" is parked exactly like one that spells it
+  // `insufficient_quota`.
+  if (isQuotaExhausted(code, message)) return "quota_exceeded"
   if (
-    /insufficient[-_]?quota|quota[-_]?exceeded|billing[-_]?hard[-_]?limit|credit[-_]?balance|no credits/.test(
-      normalized
-    )
-  ) {
-    return "quota_exceeded"
-  }
-  if (
-    status === 401 || status === 403 || /authentication|invalid[-_]?api[-_]?key|permission[-_]?denied/.test(normalized)
+    status === 401 || status === 403 ||
+    /authentication|invalid[-_\s]?api[-_\s]?key|permission[-_\s]?denied/.test(normalized)
   ) {
     return "authentication"
   }
-  if (status === 429 || /rate[-_]?limit|too many requests/.test(normalized)) return "rate_limited"
-  if (/content[-_]?policy|content[-_]?filter|safety/.test(normalized)) return "content_policy"
+  if (status === 429 || /rate[-_\s]?limit|too many requests/.test(normalized)) return "rate_limited"
+  if (/content[-_\s]?policy|content[-_\s]?filter|safety/.test(normalized)) return "content_policy"
   if (isContextOverflow(code, message)) return "context_overflow"
   if (
     status === 400 || status === 404 || status === 409 || status === 413 || status === 422 ||
-    /invalid[-_]?request/.test(normalized)
+    /invalid[-_\s]?request/.test(normalized)
   ) {
     return "invalid_request"
   }
-  if (status >= 500 || /server[-_]?error|internal[-_]?error/.test(normalized)) return "provider_internal"
+  if (
+    (status !== undefined && status >= 500) || /server[-_\s]?error|internal[-_\s]?error|overloaded/.test(normalized)
+  ) {
+    return "provider_internal"
+  }
   return "unknown"
 }
 
@@ -504,7 +524,7 @@ export const protocolWith = (
       from: fromRequest(options.structuredOutput)
     },
     stream: {
-      event: Schema.fromJsonString(ChatCompletionChunk),
+      event: Protocol.jsonEvent(ChatCompletionChunk),
       initial: () => ({ tools: ToolStream.initial(), callIdByIndex: {}, textOpen: false, settled: false }),
       step,
       onHalt: finalize

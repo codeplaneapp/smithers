@@ -10,30 +10,46 @@ Full documentation, including the failure vocabulary, the retry ladder, the reda
 
 ## Public API
 
-The root entry point exports these namespaces; each is also importable from `@smthrs/model/<Namespace>`. The table below is generated from the barrel by `node packages/model/scripts/docs.mjs`.
+The root entry point exports these namespaces; each is also importable from `@smthrs/model/<Namespace>`. The list below is generated from the barrel by `node packages/model/scripts/docs.mjs`.
 
 <!-- generated:model-exports start -->
 
-| Namespace | Public exports | Description |
-| --- | --- | --- |
-| `AnthropicMessages` | `Body`, `protocol` | Anthropic Messages request lowering and streaming event parsing. |
-| `Auth` | `credentialNamePattern`, `isCredentialName`, `Redacted`, `Auth`, `apiKeyHeader`, `bearer` | Credential handling for a model route: which field names carry secrets, and how a redacted credential is resolved at request time without ever entering the request's canonical, sealed form. |
-| `CanonicalJson` | `stringify`, `bytes`, `shortHash` | Deterministic JSON encoding for model-step inputs. |
-| `DeferredTools` | `ProtocolId`, `Resolution`, `supportsDeferred`, `resolve` | Replay-safe policy for native deferred provider tool loading. |
-| `Endpoint` | `Endpoint`, `MakeOptions`, `make`, `render` | The credential-free HTTP target of a model route, and its validation. |
-| `Framing` | `Framing`, `sse`, `ndjson` | Byte-stream framing, chosen independently of the protocol that interprets the frames. |
-| `Model` | `ModelFailure`, `Model`, `make`, `layer`, `makeNoop`, `layerNoop` |  |
-| `ModelError` | `ModelErrorCode`, `isContextOverflow`, `isQuotaExhausted`, `ModelError` |  |
-| `ModelEvent` | `Usage`, `TextStart`, `TextDelta`, `TextEnd`, `ThinkingStart`, `ThinkingDelta`, `ThinkingEnd`, `ToolCallStart`, `ToolCallDelta`, `ToolCallEnd`, `ToolResult`, `UsageEvent`, `Retry`, `Settle`, `ModelEvent`, `settledMessage` |  |
-| `ModelRequest` | `JsonObject`, `StopReason`, `SystemPart`, `TextPart`, `ThinkingPart`, `ToolCallPart`, `ToolResultPart`, `ContentPart`, `AssistantContentPart`, `UserMessage`, `AssistantMessage`, `ToolMessage`, `Message`, `ToolDefinition`, `ReasoningEffort`, `GenerationParams`, `ToolChoice`, `ModelRequest` |  |
-| `OpenAIChatCompletions` | `ResponseFormat`, `StructuredOutput`, `Body`, `State`, `protocolWith`, `protocol` | OpenAI Chat Completions request lowering and SSE event handling. |
-| `OpenAIChatGPT` | `defaultBaseUrl`, `clientHeaders`, `make` | Route construction for OpenAI's ChatGPT-subscription Responses backend, the deployment the codex CLI speaks. |
-| `OpenAICompatible` | `make` | Route construction for providers that serve the OpenAI Responses API without its native extensions. |
-| `OpenAIResponses` | `Body`, `ChatGPTBody`, `State`, `protocol`, `chatgptProtocol` | OpenAI Responses request lowering and SSE event handling. |
-| `Protocol` | `Protocol`, `ProtocolBody`, `ProtocolStream`, `make`, `jsonEvent` | The wire contract of a model API family, split from the deployment that serves it. |
-| `RequestExecutor` | `ErrorClassifier`, `ExecuteOptions`, `RequestError`, `rebuildAfter`, `Transport`, `fixed`, `RequestExecutor`, `makeWith`, `make`, `layer` | Executes provider requests with bounded retries, quota classification, and credential-safe diagnostics. |
-| `Route` | `PreparedRequest`, `Config`, `Route`, `prepare`, `make`, `toModel`, `layer`, `anthropic`, `openai`, `openaiCompatible` | A resolved model route: an endpoint, a protocol, a framing, and the credentials to authorize with. |
-| `ToolStream` | `OpenToolCall`, `State`, `Completed`, `EndResult`, `FlushResult`, `initial`, `start`, `delta`, `end`, `flushAborted` | Pure accumulation of fragmented provider tool-call arguments. |
+- **`AnthropicMessages`**: Anthropic Messages request lowering and streaming event parsing.
+  `Body`, `protocol`
+- **`Auth`**: Credential handling for a model route: which field names carry secrets, and how a redacted credential is resolved at request time without ever entering the request's canonical, sealed form.
+  `credentialNamePattern`, `isCredentialName`, `Redacted`, `Auth`, `apiKeyHeader`, `bearer`
+- **`CanonicalJson`**: Deterministic JSON encoding for model-step inputs.
+  `stringify`, `bytes`, `shortHash`
+- **`DeferredTools`**: Replay-safe policy for native deferred provider tool loading.
+  `ProtocolId`, `Resolution`, `supportsDeferred`, `resolve`
+- **`Endpoint`**: The credential-free HTTP target of a model route, and its validation.
+  `Endpoint`, `MakeOptions`, `make`, `render`
+- **`Framing`**: Byte-stream framing, chosen independently of the protocol that interprets the frames.
+  `Framing`, `sse`, `ndjson`
+- **`Model`**: The one provider seam: a request in, a stream of typed events out.
+  `ModelFailure`, `Model`, `make`, `layer`, `makeNoop`, `layerNoop`
+- **`ModelError`**: The provider-neutral failure vocabulary, and the refinements that recognize a context overflow and an exhausted account in a provider's own wording.
+  `ModelErrorCode`, `isContextOverflow`, `isQuotaExhausted`, `ModelError`
+- **`ModelEvent`**: The normalized events one model call emits, and the fold that turns them back into a single durable assistant message.
+  `Usage`, `TextStart`, `TextDelta`, `TextEnd`, `ThinkingStart`, `ThinkingDelta`, `ThinkingEnd`, `ToolCallStart`, `ToolCallDelta`, `ToolCallEnd`, `ToolResult`, `UsageEvent`, `Retry`, `Settle`, `ModelEvent`, `settledMessage`
+- **`ModelRequest`**: The serializable, credential-free declaration of one model call.
+  `JsonObject`, `StopReason`, `SystemPart`, `TextPart`, `ThinkingPart`, `ToolCallPart`, `ToolResultPart`, `ContentPart`, `AssistantContentPart`, `UserMessage`, `AssistantMessage`, `ToolMessage`, `Message`, `ToolDefinition`, `ReasoningEffort`, `GenerationParams`, `ToolChoice`, `ModelRequest`
+- **`OpenAIChatCompletions`**: OpenAI Chat Completions request lowering and SSE event handling.
+  `ResponseFormat`, `StructuredOutput`, `Body`, `State`, `protocolWith`, `protocol`
+- **`OpenAIChatGPT`**: Route construction for OpenAI's ChatGPT-subscription Responses backend, the deployment the codex CLI speaks.
+  `defaultBaseUrl`, `clientHeaders`, `make`
+- **`OpenAICompatible`**: Route construction for providers that serve the OpenAI Responses API without its native extensions.
+  `make`
+- **`OpenAIResponses`**: OpenAI Responses request lowering and SSE event handling.
+  `Body`, `ChatGPTBody`, `State`, `protocol`, `chatgptProtocol`
+- **`Protocol`**: The wire contract of a model API family, split from the deployment that serves it.
+  `Protocol`, `ProtocolBody`, `ProtocolStream`, `make`, `jsonEvent`
+- **`RequestExecutor`**: Executes provider requests with bounded retries, quota classification, and credential-safe diagnostics.
+  `ErrorClassifier`, `ExecuteOptions`, `RequestError`, `rebuildAfter`, `Transport`, `fixed`, `RequestExecutor`, `makeWith`, `make`, `layer`
+- **`Route`**: A resolved model route: an endpoint, a protocol, a framing, and the credentials to authorize with.
+  `PreparedRequest`, `Config`, `Route`, `prepare`, `make`, `toModel`, `layer`, `anthropic`, `openai`, `openaiCompatible`, `openaiResponsesCompatible`, `openaiChatCompatible`
+- **`ToolStream`**: Pure accumulation of fragmented provider tool-call arguments.
+  `OpenToolCall`, `State`, `Completed`, `EndResult`, `FlushResult`, `initial`, `start`, `delta`, `end`, `flushAborted`
 
 <!-- generated:model-exports end -->
 

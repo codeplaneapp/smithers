@@ -123,17 +123,15 @@ importable as \`@smthrs/model/<Namespace>\`.
 ${sections}
 `
 
-const readmeTable = `${
-  modules
-    .map((entry) =>
-      `| \`${entry.namespace}\` | ${entry.exports.map((item) => `\`${item.name}\``).join(", ")} | ${
-        cell(entry.summary)
-      } |`
-    )
-    .join("\n")
-}`
-
-const readmeBlock = ["| Namespace | Public exports | Description |", "| --- | --- | --- |", readmeTable].join("\n")
+// A list, not a table: dprint aligns markdown table cells, and a generated
+// table would drift against its own formatted output on every run.
+const readmeBlock = modules
+  .map((entry) =>
+    `- **\`${entry.namespace}\`**: ${cell(entry.summary)}\n  ${
+      entry.exports.map((item) => `\`${item.name}\``).join(", ")
+    }`
+  )
+  .join("\n")
 
 const regionStart = (name) => `<!-- generated:${name} start -->`
 const regionEnd = (name) => `<!-- generated:${name} end -->`

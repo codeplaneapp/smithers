@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Effect, Redacted, Result, Schema } from "effect"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import * as AnthropicMessages from "../src/AnthropicMessages.ts"
@@ -15,6 +15,7 @@ import {
   ToolDefinition,
   ToolResultPart
 } from "../src/ModelRequest.ts"
+import * as Route from "../src/Route.ts"
 
 const fixture = (name: string): string =>
   readFileSync(new URL(`fixtures/anthropic/${name}.sse`, import.meta.url), "utf8")
@@ -220,6 +221,63 @@ describe("AnthropicMessages streaming", () => {
     ])
   })
 
+  it("round-trips a redacted thinking block before its tool call byte for byte", async () => {
+    const events = run("redacted-thinking-tool-call")
+    const redactedData = "EqQBCgIYAhIM1M4J8f3rVYz9"
+
+    expect(events).toEqual([
+      { type: "thinking-start", id: "thinking-0", signature: `redacted:${redactedData}` },
+      { type: "thinking-end", id: "thinking-0" },
+      { type: "tool-call-start", id: "toolu_redacted", name: "weather" },
+      { type: "tool-call-delta", id: "toolu_redacted", arguments: "{\"city\":\"Paris\"}" },
+      { type: "tool-call-end", id: "toolu_redacted", arguments: "{\"city\":\"Paris\"}" },
+      { type: "settle", stopReason: "tool-calls", responseId: "msg_redacted" }
+    ])
+
+    const followUp = ModelRequest.make({
+      modelId: "claude-sonnet-4-5",
+      system: [],
+      messages: [ModelEvent.settledMessage(events).message],
+      tools: [],
+      params: GenerationParams.make()
+    })
+    const prepared = await Effect.runPromise(
+      Route.prepare(Result.getOrThrow(Route.anthropic({ apiKey: Redacted.make("test-key") })), followUp)
+    )
+    const wire = JSON.parse(prepared.bodyText) as { readonly messages: ReadonlyArray<{ readonly content: unknown }> }
+
+    expect(wire.messages[0]?.content).toEqual([
+      { type: "redacted_thinking", data: redactedData },
+      { type: "tool_use", id: "toolu_redacted", name: "weather", input: { city: "Paris" } }
+    ])
+    expect(prepared.bodyText).toContain(redactedData)
+  })
+
+  it("carries a reasoning-token count forward when a later usage report omits it", () => {
+    const events = replay([
+      "{\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}",
+      "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":4}}",
+      "{\"type\":\"message_stop\"}"
+    ])
+
+    expect(events).toContainEqual({
+      type: "usage",
+      inputTokens: 10,
+      outputTokens: 4,
+      totalTokens: 14
+    })
+  })
+
+  it("carries a redacted thinking block that arrives without any data", () => {
+    expect(replay([
+      "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"redacted_thinking\"}}",
+      "{\"type\":\"content_block_stop\",\"index\":0}"
+    ])).toEqual([
+      { type: "thinking-start", id: "thinking-0", signature: "redacted:" },
+      { type: "thinking-end", id: "thinking-0" }
+    ])
+  })
+
   it("merges Anthropic's cache-aware usage reports", () => {
     const events = run("usage")
     expect(events).toEqual([
@@ -319,10 +377,23 @@ describe("AnthropicMessages streaming", () => {
     ])
   })
 
-  it("names a tool block by its index when the provider omits the id and name", () => {
-    expect(replay([
-      "{\"type\":\"content_block_start\",\"index\":3,\"content_block\":{\"type\":\"tool_use\"}}"
-    ])).toEqual([{ type: "tool-call-start", id: "3", name: "" }])
+  it("fails a tool block that omits its id or name instead of fabricating one", () => {
+    // This used to substitute `String(index)` and `""`, so a malformed block
+    // reached the harness as a call to a tool named "" and was reported as an
+    // unknown tool. Both OpenAI protocols fail typed on the same condition.
+    for (
+      const block of [
+        "{\"type\":\"tool_use\"}",
+        "{\"type\":\"tool_use\",\"id\":\"toolu_1\"}",
+        "{\"type\":\"tool_use\",\"name\":\"weather\"}"
+      ]
+    ) {
+      const error = replayError([`{"type":"content_block_start","index":3,"content_block":${block}}`])
+      expect(error).toMatchObject({
+        code: "invalid_provider_output",
+        message: "Anthropic Messages emitted a tool_use block without an id or name"
+      })
+    }
   })
 
   it("ignores frames that carry no addressable block", () => {
@@ -485,6 +556,21 @@ describe("AnthropicMessages streaming", () => {
 })
 
 describe("AnthropicMessages body lowering", () => {
+  it("omits declared tools when the request forbids tool use", () => {
+    const withTools = (toolChoice?: "none"): ModelRequest =>
+      ModelRequest.make({
+        modelId: "claude-sonnet-4-5",
+        system: [],
+        messages: [Message.user("hi")],
+        tools: [ToolDefinition.make({ name: "search", description: "web search", parameters: {} })],
+        params: GenerationParams.make(),
+        ...(toolChoice === undefined ? {} : { toolChoice })
+      })
+
+    expect(body(withTools("none")).tools).toBeUndefined()
+    expect(body(withTools()).tools).toHaveLength(1)
+  })
+
   it("produces byte-identical canonical bodies from differently ordered inputs", () => {
     const left = body(activatedRequest("claude-sonnet-4-5"))
     const right = body(activatedRequest("claude-sonnet-4-5", {
@@ -680,6 +766,37 @@ describe("AnthropicMessages body lowering", () => {
       providerCode: "rate_limit_error",
       httpStatus: 429
     })
+  })
+
+  it("classifies Anthropic credit exhaustion before its invalid-request envelope", () => {
+    const creditBody = JSON.stringify({
+      type: "error",
+      error: {
+        type: "invalid_request_error",
+        message:
+          "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."
+      }
+    })
+    const exhausted = AnthropicMessages.protocol.classifyError(400, creditBody)
+
+    expect(exhausted).toMatchObject({
+      code: "quota_exceeded",
+      providerCode: "invalid_request_error",
+      httpStatus: 400
+    })
+    expect(exhausted.retryable).toBe(false)
+    expect(
+      AnthropicMessages.protocol.classifyError(
+        429,
+        "{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"Rate limit exceeded\"}}"
+      )
+    ).toMatchObject({ code: "rate_limited" })
+    expect(
+      AnthropicMessages.protocol.classifyError(
+        400,
+        "{\"error\":{\"type\":\"invalid_request_error\",\"message\":\"tools.0.input_schema is invalid\"}}"
+      )
+    ).toMatchObject({ code: "invalid_request" })
   })
 
   it("classifies every HTTP failure shape, including bodies it cannot parse", () => {

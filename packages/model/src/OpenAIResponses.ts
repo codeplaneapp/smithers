@@ -6,7 +6,7 @@
 import { Effect, Option, Schema } from "effect"
 import * as CanonicalJson from "./CanonicalJson.ts"
 import * as DeferredTools from "./DeferredTools.ts"
-import { isContextOverflow, ModelError } from "./ModelError.ts"
+import { isContextOverflow, isQuotaExhausted, ModelError } from "./ModelError.ts"
 import * as ModelEvent from "./ModelEvent.ts"
 import {
   JsonObject,
@@ -309,7 +309,13 @@ const lowerInput = (
 
 const buildBody = (request: ModelRequest, options: { readonly native: boolean }): Body => {
   const native = options.native && DeferredTools.supportsDeferred("openai-responses", request.modelId)
-  const tools = DeferredTools.resolve(request, native)
+  // `toolChoice: "none"` forbids tool use, and the Responses API expresses that
+  // by omitting `tools` rather than by a wire field, so the request is lowered
+  // as if it declared none: no tool declarations and no deferred-tool search
+  // items in the input.
+  const tools = request.toolChoice === "none"
+    ? { immediate: [], deferred: [], activatedNames: [] }
+    : DeferredTools.resolve(request, native)
   const instructions = systemInstructions(request)
   return {
     model: request.modelId,
@@ -360,16 +366,17 @@ const providerReason = (
   message: string
 ): ModelError["code"] => {
   const normalized = `${code ?? ""} ${message}`.toLowerCase()
-  if (
-    /insufficient[-_]?quota|quota[-_]?exceeded|billing[-_]?hard[-_]?limit|credit[-_]?balance/.test(normalized)
-  ) return "quota_exceeded"
+  // One shared vocabulary for an exhausted account, so a provider that spells
+  // it "credit balance" is parked exactly like one that spells it
+  // `insufficient_quota`.
+  if (isQuotaExhausted(code, message)) return "quota_exceeded"
   if (
     status === 401 ||
     status === 403 ||
-    /authentication|invalid[-_]?api[-_]?key|incorrect[-_]?api[-_]?key|permission[-_]?denied/.test(normalized)
+    /authentication|invalid[-_\s]?api[-_\s]?key|incorrect[-_\s]?api[-_\s]?key|permission[-_\s]?denied/.test(normalized)
   ) return "authentication"
-  if (status === 429 || /rate[-_]?limit|too many requests/.test(normalized)) return "rate_limited"
-  if (/content[-_]?policy|content[-_]?filter|safety/.test(normalized)) return "content_policy"
+  if (status === 429 || /rate[-_\s]?limit|too many requests/.test(normalized)) return "rate_limited"
+  if (/content[-_\s]?policy|content[-_\s]?filter|safety/.test(normalized)) return "content_policy"
   // `context_length_exceeded` arrives as a 400 with an `invalid_request_error`
   // type, so it has to be recognized before the generic bad-request branch.
   if (isContextOverflow(code, message)) return "context_overflow"
@@ -379,9 +386,9 @@ const providerReason = (
     status === 409 ||
     status === 413 ||
     status === 422 ||
-    /invalid[-_]?request/.test(normalized)
+    /invalid[-_\s]?request/.test(normalized)
   ) return "invalid_request"
-  if (status !== undefined && status >= 500 || /server[-_]?error|internal[-_]?error/.test(normalized)) {
+  if (status !== undefined && status >= 500 || /server[-_\s]?error|internal[-_\s]?error/.test(normalized)) {
     return "provider_internal"
   }
   return "unknown"
@@ -647,7 +654,12 @@ const stepEvent = (
     const terminal = settle(completed, Object.keys(completed.toolNames).length === 0 ? "stop" : "tool-calls")
     return { state: terminal.state, events: [...events, ...terminal.events] }
   }
-  if (type === "response.incomplete") return settle(current, "length")
+  if (type === "response.incomplete") {
+    // The event says WHY it is incomplete. `content_filter` is a refusal, not a
+    // token budget, and `StopReason` already distinguishes the two.
+    const reason = record(record(value.response)?.["incomplete_details"])?.["reason"]
+    return settle(current, reason === "content_filter" ? "content-filter" : "length")
+  }
   if (type === "response.failed" || type === "error") {
     const error = providerError(value)
     return new ModelError({
@@ -721,7 +733,7 @@ export const protocol: Protocol.Protocol<
     from: fromRequest
   },
   stream: {
-    event: Schema.fromJsonString(OpenAIEvent),
+    event: Protocol.jsonEvent(OpenAIEvent),
     initial: () => ({
       tools: ToolStream.initial(),
       toolNames: {},
@@ -763,7 +775,7 @@ export const chatgptProtocol: Protocol.Protocol<
     from: chatgptFromRequest
   },
   stream: {
-    event: Schema.fromJsonString(OpenAIEvent),
+    event: Protocol.jsonEvent(OpenAIEvent),
     initial: () => ({
       tools: ToolStream.initial(),
       toolNames: {},

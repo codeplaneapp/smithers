@@ -1,4 +1,12 @@
-/** @since 0.1.0 */
+/**
+ * The one provider seam: a request in, a stream of typed events out.
+ *
+ * Everything a consumer needs to reach a provider is behind this service, so a
+ * flow, a harness or a test swaps the implementation without knowing which
+ * protocol, endpoint or credential answers the call.
+ *
+ * @since 0.1.0
+ */
 import type { GrantStoreError, PermissionDenied, PermissionRequired } from "@smthrs/capability/Permission"
 import { Context, Effect, Layer, Stream } from "effect"
 import type { ModelError } from "./ModelError.ts"

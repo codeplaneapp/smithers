@@ -30,6 +30,18 @@ describe("Endpoint", () => {
     expect(failureMessage({ url: "https://user:password@example.test" })).toMatch(/credentials/)
   })
 
+  it("rejects every URL scheme except http and https", () => {
+    for (const url of ["ftp://example.test/v1", "file:///etc/passwd", "data:text/plain,x"]) {
+      expect(failureMessage({ url })).toBe("Endpoint URLs must use http or https")
+    }
+  })
+
+  it("rejects relative path segments before the URL parser can collapse them", () => {
+    expect(failureMessage({ url: "https://example.test/v1", path: "../../admin" })).toBe(
+      "Endpoint paths must not contain relative segments"
+    )
+  })
+
   it("rejects credential-looking query parameters", () => {
     expect(failureMessage({ url: "https://example.test/?key=secret" })).toMatch(/credentials/)
     expect(failureMessage({ url: "https://example.test/?api_key=secret" })).toMatch(/credentials/)
@@ -40,8 +52,8 @@ describe("Endpoint", () => {
   })
 
   it("rejects an unparseable URL, a fragment, and a path carrying its own query", () => {
-    expect(failureMessage({ url: "not a url" })).toBe("Invalid endpoint URL: not a url")
-    expect(failureMessage({ url: "" })).toBe("Invalid endpoint URL: ")
+    expect(failureMessage({ url: "not a url" })).toBe("Endpoint URL could not be parsed")
+    expect(failureMessage({ url: "" })).toBe("Endpoint URL could not be parsed")
     expect(failureMessage({ url: "https://example.test/#section" })).toMatch(/fragments/)
     expect(failureMessage({ url: "https://example.test", path: "/v1?debug=1" })).toMatch(
       /must not contain query strings or fragments/
@@ -51,6 +63,18 @@ describe("Endpoint", () => {
     )
     expect(failureMessage({ url: "https://user@example.test" })).toMatch(/credentials/)
     expect(failureMessage({ url: "https://:password@example.test" })).toMatch(/credentials/)
+  })
+
+  it("does not echo a malformed URL carrying a credential-shaped value", () => {
+    const credential = "sk-secret-token-value"
+    const message = failureMessage({ url: `https://[${credential}` })
+    expect(message).toBe("Endpoint URL could not be parsed")
+    expect(message).not.toContain(credential)
+  })
+
+  it("allows public token-count query parameters", () => {
+    const endpoint = make({ url: "https://example.test/v1", query: [["max_tokens", "8"]] })
+    expect(Endpoint.render(endpoint)).toBe("https://example.test/v1?max_tokens=8")
   })
 
   it("accepts record query input and merges it with the URL's own pairs", () => {

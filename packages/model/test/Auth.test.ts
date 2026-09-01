@@ -42,13 +42,15 @@ describe("Auth", () => {
     for (const name of ["token", "x-token", "access_token", "api_key", "x-api-key", "Authorization"]) {
       expect(Auth.isCredentialName(name)).toBe(true)
     }
-    for (const name of [
-      "max_tokens",
-      "budget_tokens",
-      "max_output_tokens",
-      "max_completion_tokens",
-      "cache_read_input_tokens"
-    ]) {
+    for (
+      const name of [
+        "max_tokens",
+        "budget_tokens",
+        "max_output_tokens",
+        "max_completion_tokens",
+        "cache_read_input_tokens"
+      ]
+    ) {
       expect(Auth.isCredentialName(name)).toBe(false)
     }
   })

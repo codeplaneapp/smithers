@@ -5,10 +5,10 @@
  */
 import { Effect, Option, Result, Schema } from "effect"
 import * as DeferredTools from "./DeferredTools.ts"
-import { isContextOverflow, ModelError, type ModelErrorCode } from "./ModelError.ts"
+import { isContextOverflow, isQuotaExhausted, ModelError, type ModelErrorCode } from "./ModelError.ts"
 import { ModelEvent, type Usage } from "./ModelEvent.ts"
 import { JsonObject, type Message, type ModelRequest, type StopReason, type ToolDefinition } from "./ModelRequest.ts"
-import { make as makeProtocol, type Protocol } from "./Protocol.ts"
+import { jsonEvent, make as makeProtocol, type Protocol } from "./Protocol.ts"
 import * as ToolStream from "./ToolStream.ts"
 
 const ID = "anthropic-messages"
@@ -34,6 +34,23 @@ const ThinkingBlock = Schema.Struct({
   signature: Schema.String
 })
 
+/**
+ * Anthropic's opaque form of a reasoning block its safety systems redacted.
+ *
+ * Extended thinking requires the complete `thinking` or `redacted_thinking`
+ * blocks of the last assistant turn to be replayed whenever that turn contains
+ * `tool_use`. A redacted block carries no readable text, only `data`, so it is
+ * carried through the neutral event vocabulary as a thinking part whose
+ * `signature` is `redacted:<data>` and lowered back to this shape here.
+ */
+const RedactedThinkingBlock = Schema.Struct({
+  type: Schema.Literal("redacted_thinking"),
+  data: Schema.String
+})
+
+/** The `ThinkingPart.signature` prefix that marks a redacted Anthropic block. */
+const REDACTED_THINKING_PREFIX = "redacted:"
+
 const ToolUseBlock = Schema.Struct({
   type: Schema.Literal("tool_use"),
   id: Schema.String,
@@ -53,7 +70,7 @@ const ToolResultBlock = Schema.Struct({
 })
 
 const UserBlock = Schema.Union([TextBlock, ToolResultBlock])
-const AssistantBlock = Schema.Union([TextBlock, ThinkingBlock, ToolUseBlock])
+const AssistantBlock = Schema.Union([TextBlock, ThinkingBlock, RedactedThinkingBlock, ToolUseBlock])
 
 const AnthropicMessage = Schema.Union([
   Schema.Struct({
@@ -126,6 +143,8 @@ const ContentBlock = Schema.Struct({
   text: Schema.optional(Schema.String),
   thinking: Schema.optional(Schema.String),
   signature: Schema.optional(Schema.String),
+  // The whole payload of a `redacted_thinking` block.
+  data: Schema.optional(Schema.String),
   input: Schema.optional(Schema.Unknown)
 })
 
@@ -256,13 +275,22 @@ const lowerAssistant = (
       if (part.type === "thinking") {
         // docs/specs/Research/Pi Reference Findings 2026-07-27.md §7:
         // only a complete signed block may be replayed as Anthropic thinking.
-        if (part.signature !== undefined) {
+        if (part.signature === undefined) continue
+        if (part.signature.startsWith(REDACTED_THINKING_PREFIX)) {
+          // A turn whose reasoning was redacted still has to be replayed with
+          // its tool calls, or the next request fails with "Expected thinking
+          // or redacted_thinking, but found tool_use" and keeps failing.
           content.push({
-            type: "thinking",
-            thinking: part.text,
-            signature: part.signature
+            type: "redacted_thinking",
+            data: part.signature.slice(REDACTED_THINKING_PREFIX.length)
           })
+          continue
         }
+        content.push({
+          type: "thinking",
+          thinking: part.text,
+          signature: part.signature
+        })
         continue
       }
       if (part.type === "tool-call") {
@@ -345,7 +373,13 @@ const buildBody = (
 ): Result.Result<Body, ModelError> =>
   Result.gen(function*() {
     const native = options.native && DeferredTools.supportsDeferred(ID, request.modelId)
-    const resolution = DeferredTools.resolve(request, native)
+    // `toolChoice: "none"` forbids tool use, and Anthropic expresses that by
+    // omitting `tools` rather than by a wire field, so the request is lowered
+    // as if it declared none: no tool declarations and no deferred-tool search
+    // plumbing in the transcript.
+    const resolution = request.toolChoice === "none"
+      ? { immediate: [], deferred: [], activatedNames: [] }
+      : DeferredTools.resolve(request, native)
     const tools = [
       ...resolution.immediate.map((tool) => lowerTool(tool, false)),
       ...resolution.deferred.map((tool) => lowerTool(tool, true))
@@ -433,14 +467,14 @@ const mergeUsage = (left: Usage | undefined, right: Usage | undefined): Usage | 
   if (right === undefined) return left
   const inputTokens = right.inputTokens ?? left.inputTokens
   const outputTokens = right.outputTokens ?? left.outputTokens
-  const reasoningTokens = right.reasoningTokens ?? left.reasoningTokens
+  // Anthropic reports no reasoning-token count on this wire, so there is
+  // nothing to merge; `mapUsage` is the only producer of both operands.
   const cachedInputTokens = right.cachedInputTokens ?? left.cachedInputTokens
   const cacheWriteTokens = right.cacheWriteTokens ?? left.cacheWriteTokens
   const total = totalTokens(inputTokens, outputTokens)
   return {
     ...(inputTokens === undefined ? {} : { inputTokens }),
     ...(outputTokens === undefined ? {} : { outputTokens }),
-    ...(reasoningTokens === undefined ? {} : { reasoningTokens }),
     ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }),
     ...(cacheWriteTokens === undefined ? {} : { cacheWriteTokens }),
     ...(total === undefined ? {} : { totalTokens: total })
@@ -456,7 +490,7 @@ const onMessageStart = (state: State, event: AnthropicEvent): StepResult => ({
   events: []
 })
 
-const onContentBlockStart = (state: State, event: AnthropicEvent): StepResult => {
+const onContentBlockStart = (state: State, event: AnthropicEvent): StepResult | ModelError => {
   const index = event.index
   const content = event.content_block
   if (index === undefined || content === undefined) return { state, events: [] }
@@ -503,9 +537,27 @@ const onContentBlockStart = (state: State, event: AnthropicEvent): StepResult =>
     }
   }
 
+  if (content.type === "redacted_thinking") {
+    const id = `thinking-${index}`
+    const signature = `${REDACTED_THINKING_PREFIX}${content.data ?? ""}`
+    return {
+      state: startBlock(state, { type: "thinking", index, id, signature, started: true, fragments: [] }),
+      events: [ModelEvent.ThinkingStart({ type: "thinking-start", id, signature })]
+    }
+  }
+
   if (content.type === "tool_use") {
-    const id = content.id ?? String(index)
-    const name = content.name ?? ""
+    const id = content.id
+    const name = content.name
+    if (id === undefined || name === undefined) {
+      // Fabricating `String(index)` and `""` here handed the harness a call
+      // named "" that it reports as an unknown tool. The two OpenAI protocols
+      // fail typed on the same condition, and so does this one now.
+      return new ModelError({
+        code: "invalid_provider_output",
+        message: "Anthropic Messages emitted a tool_use block without an id or name"
+      })
+    }
     return {
       state: {
         ...startBlock(state, { type: "tool_use", index, id, name }),
@@ -686,6 +738,10 @@ const providerReason = (
   message: string
 ): ModelErrorCode => {
   const normalized = `${providerType ?? ""} ${message}`.toLowerCase()
+  // Anthropic bills a refusal as an ordinary `invalid_request_error`, so an
+  // exhausted balance has to be recognized before that branch claims it:
+  // `quota_exceeded` is what parks a seat, and `invalid_request` terminates it.
+  if (isQuotaExhausted(providerType, message)) return "quota_exceeded"
   if (status === 401 || status === 403 || normalized.includes("authentication")) return "authentication"
   if (status === 429 || normalized.includes("rate_limit")) return "rate_limited"
   if (normalized.includes("content_policy") || normalized.includes("safety")) return "content_policy"
@@ -714,7 +770,10 @@ const streamError = (event: AnthropicEvent): ModelError => {
 
 const stepEvent = (state: State, event: AnthropicEvent): Result.Result<StepResult, ModelError> => {
   if (event.type === "message_start") return Result.succeed(onMessageStart(state, event))
-  if (event.type === "content_block_start") return Result.succeed(onContentBlockStart(state, event))
+  if (event.type === "content_block_start") {
+    const started = onContentBlockStart(state, event)
+    return started instanceof ModelError ? Result.fail(started) : Result.succeed(started)
+  }
   if (event.type === "content_block_delta") return Result.succeed(onContentBlockDelta(state, event))
   if (event.type === "content_block_stop") return onContentBlockStop(state, event)
   if (event.type === "message_delta") return Result.succeed(onMessageDelta(state, event))
@@ -804,7 +863,7 @@ export const protocol: Protocol<Body, string, AnthropicEvent, State> = makeProto
     from: fromRequest
   },
   stream: {
-    event: Schema.fromJsonString(AnthropicEvent),
+    event: jsonEvent(AnthropicEvent),
     initial,
     step,
     onHalt: finalize

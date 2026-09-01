@@ -7,6 +7,7 @@
  * @since 0.1.0
  */
 import { Effect, Layer, Result, Schema, Stream } from "effect"
+import type * as SchemaIssue from "effect/SchemaIssue"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as AnthropicMessages from "./AnthropicMessages.ts"
 import * as Auth from "./Auth.ts"
@@ -90,11 +91,57 @@ const publicHeaders = (
   return Result.succeed(Object.fromEntries([...normalized].sort(([left], [right]) => compareCanonical(left, right))))
 }
 
-const preparationError = (): ModelError =>
-  new ModelError({
-    code: "invalid_request",
-    message: "Model request could not be encoded as canonical JSON"
-  })
+// A preparation failure has to say WHERE without saying WHAT: a request member
+// may hold a credential or user content, and a ModelError is serialized into
+// journals and diagnostics. Both sources of a location are key paths already.
+const issueSegments = (issue: SchemaIssue.Issue): ReadonlyArray<PropertyKey> => {
+  const segments: Array<PropertyKey> = []
+  let current: SchemaIssue.Issue | undefined = issue
+  while (current !== undefined) {
+    if (current._tag === "Pointer") {
+      segments.push(...current.path)
+      current = current.issue
+    } else if (current._tag === "Filter" || current._tag === "Encoding") {
+      current = current.issue
+    } else if (current._tag === "Composite" || current._tag === "AnyOf") {
+      // The first issue is the one a reader fixes first; the rest are usually
+      // the same member reported against the other members of a union.
+      current = current.issues[0]
+    } else {
+      current = undefined
+    }
+  }
+  return segments
+}
+
+const formatSegments = (segments: ReadonlyArray<PropertyKey>): string | undefined =>
+  segments.length === 0 ? undefined : segments.reduce<string>((text, segment) => {
+    if (typeof segment === "number") return `${text}[${segment}]`
+    return text === "" ? String(segment) : `${text}.${String(segment)}`
+  }, "")
+
+const schemaPath = (error: unknown): string | undefined => {
+  const issue = (error as { readonly issue?: SchemaIssue.Issue } | undefined)?.issue
+  return issue === undefined ? undefined : formatSegments(issueSegments(issue))
+}
+
+const withPath = (
+  code: ModelError["code"],
+  message: string,
+  path: string | undefined
+): ModelError => new ModelError({ code, message, ...(path === undefined ? {} : { path }) })
+
+// `CanonicalJson` reports the offending member in its own message, and that
+// message is the only place the path exists.
+const canonicalPath = (error: unknown): string | undefined =>
+  error instanceof Error ? /^Value at (.+) is not valid JSON$/.exec(error.message)?.[1] : undefined
+
+const preparationError = (error: unknown): ModelError =>
+  withPath(
+    "invalid_request",
+    "Model request could not be encoded as canonical JSON",
+    canonicalPath(error)
+  )
 
 /**
  * Compiles a request exactly once into its credential-free sealed-step view.
@@ -106,24 +153,40 @@ const preparationError = (): ModelError =>
 export const prepare = <Body, Frame, Event, State>(
   route: Route<Body, Frame, Event, State>,
   request: ModelRequest
-): Effect.Effect<PreparedRequest, ModelError> =>
+): Effect.Effect<PreparedRequest, ModelError> => Effect.map(compile(route, request), (compiled) => compiled.prepared)
+
+/**
+ * The request every later step reads, and the sealed view built from it.
+ *
+ * Validating once and threading the result is what keeps a call self-consistent:
+ * the caller owns the `ModelRequest` object and may mutate it while signing is
+ * pending, and without a snapshot the body, the `model:call` capability check
+ * and the protocol's initial state could each describe a different request.
+ */
+interface Compiled {
+  readonly prepared: PreparedRequest
+  readonly request: ModelRequest
+}
+
+const compile = <Body, Frame, Event, State>(
+  route: Route<Body, Frame, Event, State>,
+  request: ModelRequest
+): Effect.Effect<Compiled, ModelError> =>
   Effect.fn("flows/model/Route.prepare")(function*() {
     const validatedRequest = yield* Schema.decodeUnknownEffect(ModelRequestSchema)(request).pipe(
-      Effect.mapError(() =>
-        new ModelError({
-          code: "invalid_request",
-          message: "Model request failed Schema validation"
-        })
+      Effect.mapError((error) =>
+        withPath("invalid_request", "Model request failed Schema validation", schemaPath(error))
       )
     )
     const native = route.protocol.supportsDeferred(validatedRequest.modelId)
     const candidate = yield* route.protocol.body.from(validatedRequest, { native })
     const body = yield* Schema.decodeUnknownEffect(route.protocol.body.schema)(candidate).pipe(
-      Effect.mapError(() =>
-        new ModelError({
-          code: "invalid_request",
-          message: `${route.protocol.id} produced an invalid provider request body`
-        })
+      Effect.mapError((error) =>
+        withPath(
+          "invalid_request",
+          `${route.protocol.id} produced an invalid provider request body`,
+          schemaPath(error)
+        )
       )
     )
     const headers = yield* Effect.fromResult(publicHeaders(route.headers))
@@ -132,13 +195,16 @@ export const prepare = <Body, Frame, Event, State>(
       catch: preparationError
     })
     return {
-      routeId: route.id,
-      protocolId: route.protocol.id,
-      method: "POST" as const,
-      url: Endpoint.render(route.endpoint),
-      publicHeaders: headers,
-      body: bytes,
-      bodyText: new TextDecoder().decode(bytes)
+      prepared: {
+        routeId: route.id,
+        protocolId: route.protocol.id,
+        method: "POST" as const,
+        url: Endpoint.render(route.endpoint),
+        publicHeaders: headers,
+        body: bytes,
+        bodyText: new TextDecoder().decode(bytes)
+      },
+      request: validatedRequest
     }
   })()
 
@@ -150,14 +216,14 @@ const stream = <Body, Frame, Event, State>(
   Stream.scoped(
     Stream.unwrap(
       Effect.fn("flows/model/Route.stream")(function*() {
-        const prepared = yield* prepare(route, request)
+        const { prepared, request: snapshot } = yield* compile(route, request)
         const attempt = Effect.gen(function*() {
           const signedHeaders = yield* route.auth.sign({ ...prepared.publicHeaders })
           const httpRequest = HttpClientRequest.post(prepared.url, { headers: signedHeaders }).pipe(
             HttpClientRequest.bodyUint8Array(prepared.body, "application/json")
           )
           return yield* executor.execute(httpRequest, {
-            modelId: request.modelId,
+            modelId: snapshot.modelId,
             classifyError: route.protocol.classifyError
           })
         })
@@ -196,11 +262,12 @@ const stream = <Body, Frame, Event, State>(
           ),
           Stream.mapEffect((frame) =>
             decodeEvent(frame).pipe(
-              Effect.mapError(() =>
-                new ModelError({
-                  code: "invalid_provider_output",
-                  message: `${route.protocol.id} emitted an invalid stream event`
-                })
+              Effect.mapError((error) =>
+                withPath(
+                  "invalid_provider_output",
+                  `${route.protocol.id} emitted an invalid stream event`,
+                  schemaPath(error)
+                )
               )
             )
           ),
@@ -210,7 +277,7 @@ const stream = <Body, Frame, Event, State>(
         )
         return events.pipe(
           Stream.mapAccumEffect(
-            () => route.protocol.stream.initial(request),
+            () => route.protocol.stream.initial(snapshot),
             route.protocol.stream.step,
             route.protocol.stream.onHalt === undefined
               ? undefined
@@ -342,6 +409,11 @@ export const openai = (
  * })
  * ```
  *
+ * @deprecated Use {@link openaiChatCompatible}, which takes the provider origin
+ * and appends `/v1/chat/completions` itself. This constructor requires a base
+ * that already ends in `/v1`, and {@link OpenAICompatible.make} requires one
+ * that does not, which is how the same provider ended up configured two
+ * different ways in this repository.
  * @since 0.1.0
  * @category constructors
  */
@@ -362,6 +434,96 @@ export const openaiCompatible = (
   ModelError
 > =>
   Result.map(Endpoint.make({ url: input.baseUrl, path: "/chat/completions" }), (endpoint) =>
+    make({
+      id: input.id,
+      protocol: OpenAIChatCompletions.protocolWith(
+        input.structuredOutput === undefined ? {} : { structuredOutput: input.structuredOutput }
+      ),
+      endpoint,
+      auth: Auth.bearer(input.apiKey),
+      framing: Framing.sse
+    }))
+
+/**
+ * Creates a route for a provider that serves the OpenAI **Responses** API
+ * without OpenAI's native deferred-tool extensions.
+ *
+ * `baseUrl` is the provider origin and this constructor appends
+ * `/v1/responses` itself, so one origin can only ever produce one URL:
+ * `https://openrouter.ai/api` becomes
+ * `https://openrouter.ai/api/v1/responses`. A trailing slash is accepted.
+ *
+ * Responses and Chat Completions are different wire shapes. `api.openai.com`
+ * and OpenRouter's `/v1/responses` serve Responses; Ollama, Gemini's
+ * compatibility layer, Cerebras and most other self-hosted or third-party
+ * "OpenAI-compatible" servers serve Chat Completions and need
+ * {@link openaiChatCompatible} instead.
+ *
+ * @since 0.1.0
+ * @category constructors
+ */
+export const openaiResponsesCompatible = (
+  input: {
+    readonly id: string
+    readonly baseUrl: string
+    readonly apiKey: Auth.Redacted<string>
+    readonly headers?: Readonly<Record<string, string>>
+  }
+): Result.Result<
+  Route<
+    OpenAIResponses.Body,
+    string,
+    Parameters<typeof OpenAIResponses.protocol.stream.step>[1],
+    ReturnType<typeof OpenAIResponses.protocol.stream.initial>
+  >,
+  ModelError
+> =>
+  Result.map(Endpoint.make({ url: input.baseUrl, path: "/v1/responses" }), (endpoint) =>
+    make({
+      id: input.id,
+      protocol: { ...OpenAIResponses.protocol, supportsDeferred: () => false },
+      endpoint,
+      auth: Auth.bearer(input.apiKey),
+      framing: Framing.sse,
+      ...(input.headers === undefined ? {} : { headers: input.headers })
+    }))
+
+/**
+ * Creates a route for a provider that serves the OpenAI **Chat Completions**
+ * API: Ollama, Gemini's OpenAI-compatibility layer, Cerebras, and most other
+ * self-hosted or third-party "OpenAI-compatible" servers.
+ *
+ * `baseUrl` is the provider origin and this constructor appends
+ * `/v1/chat/completions` itself, so one origin can only ever produce one URL:
+ * `https://openrouter.ai/api` becomes
+ * `https://openrouter.ai/api/v1/chat/completions`. A trailing slash is
+ * accepted.
+ *
+ * `apiKey` may be a non-empty placeholder for a server that does not check it
+ * (Ollama ignores its `Authorization` header entirely); {@link Auth.bearer}
+ * only rejects an empty credential. `structuredOutput` behaves exactly as it
+ * does on {@link openaiCompatible}.
+ *
+ * @since 0.1.0
+ * @category constructors
+ */
+export const openaiChatCompatible = (
+  input: {
+    readonly id: string
+    readonly baseUrl: string
+    readonly apiKey: Auth.Redacted<string>
+    readonly structuredOutput?: OpenAIChatCompletions.StructuredOutput | undefined
+  }
+): Result.Result<
+  Route<
+    OpenAIChatCompletions.Body,
+    string,
+    Parameters<typeof OpenAIChatCompletions.protocol.stream.step>[1],
+    ReturnType<typeof OpenAIChatCompletions.protocol.stream.initial>
+  >,
+  ModelError
+> =>
+  Result.map(Endpoint.make({ url: input.baseUrl, path: "/v1/chat/completions" }), (endpoint) =>
     make({
       id: input.id,
       protocol: OpenAIChatCompletions.protocolWith(

@@ -1,4 +1,12 @@
-/** @since 0.1.0 */
+/**
+ * The normalized events one model call emits, and the fold that turns them
+ * back into a single durable assistant message.
+ *
+ * Every protocol lowers its own wire vocabulary into these events, so a
+ * consumer reads one stream shape whichever provider answered.
+ *
+ * @since 0.1.0
+ */
 import { Effect, Option, Schema } from "effect"
 import { AssistantMessage, JsonObject, StopReason, ToolCallPart } from "./ModelRequest.ts"
 

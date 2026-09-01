@@ -4,6 +4,7 @@ import * as Sse from "effect/unstable/encoding/Sse"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
+import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import * as Auth from "../src/Auth.ts"
 import * as Endpoint from "../src/Endpoint.ts"
@@ -122,7 +123,11 @@ describe("Route.prepare", () => {
     })
 
     const invalidBody = await Effect.runPromise(Route.prepare(route, request).pipe(Effect.flip))
-    expect(invalidBody).toMatchObject({ code: "invalid_request" })
+    expect(invalidBody).toMatchObject({
+      code: "invalid_request",
+      message: "test produced an invalid provider request body",
+      path: "z"
+    })
 
     const invalidRequest = {
       ...request,
@@ -136,7 +141,143 @@ describe("Route.prepare", () => {
         invalidRequest
       ).pipe(Effect.flip)
     )
-    expect(invalidParams).toMatchObject({ code: "invalid_request" })
+    expect(invalidParams).toMatchObject({ code: "invalid_request", path: "params.temperature" })
+  })
+
+  it("reports only the key path of the first invalid request member", async () => {
+    const offendingValue = "private-invalid-message-value"
+    const invalidRequest = {
+      ...request,
+      messages: [
+        ModelRequest.Message.user("valid"),
+        { role: "user", content: [{ type: "text", text: { offendingValue } }] }
+      ]
+    } as unknown as ModelRequest.ModelRequest
+
+    const error = await Effect.runPromise(
+      Route.prepare(
+        Result.getOrThrow(Route.openai({ apiKey: Redacted.make("secret") })),
+        invalidRequest
+      ).pipe(Effect.flip)
+    )
+
+    expect(error).toMatchObject({
+      code: "invalid_request",
+      message: "Model request failed Schema validation",
+      path: "messages[1].content[0].text"
+    })
+    expect(JSON.stringify(error)).not.toContain(offendingValue)
+  })
+
+  it("omits the path when the failure has no member to name", async () => {
+    // A request that is not a struct at all, and a body encoder that throws
+    // something other than the canonical encoder's TypeError, both fail with
+    // the same message and no `path`, rather than with an invented one.
+    const notARequest = await Effect.runPromise(
+      Route.prepare(
+        Result.getOrThrow(Route.openai({ apiKey: Redacted.make("secret") })),
+        "not a request" as unknown as ModelRequest.ModelRequest
+      ).pipe(Effect.flip)
+    )
+    expect(notARequest).toMatchObject({ code: "invalid_request", message: "Model request failed Schema validation" })
+    expect(notARequest.path).toBeUndefined()
+
+    const throwing = Protocol.make({
+      ...protocol,
+      body: {
+        schema: Schema.Unknown,
+        from: () =>
+          Effect.succeed({
+            get boom() {
+              throw "not an Error"
+            }
+          } as unknown)
+      }
+    })
+    const encoded = await Effect.runPromise(
+      Route.prepare(
+        Route.make({
+          id: "throwing",
+          protocol: throwing,
+          endpoint: endpoint({ url: "https://example.test" }),
+          auth: Auth.bearer(Redacted.make("secret")),
+          framing: Framing.sse
+        }),
+        request
+      ).pipe(Effect.flip)
+    )
+    expect(encoded).toMatchObject({
+      code: "invalid_request",
+      message: "Model request could not be encoded as canonical JSON"
+    })
+    expect(encoded.path).toBeUndefined()
+  })
+
+  it("pins the exact canonical body bytes of every built-in route", async () => {
+    // A sealed model step keys on these bytes. A lowering change that alters
+    // them invalidates every cached step for that route, so the change has to
+    // be deliberate and recorded rather than noticed later.
+    const golden = ModelRequest.ModelRequest.make({
+      modelId: "golden-model",
+      system: [ModelRequest.SystemPart.make({ text: "Be terse." })],
+      messages: [
+        ModelRequest.Message.user("What is the weather in Paris?"),
+        ModelRequest.Message.assistant(
+          ModelRequest.ToolCallPart.make({ id: "call_1", name: "weather", arguments: "{\"city\":\"Paris\"}" }),
+          { stopReason: "tool-calls" }
+        ),
+        ModelRequest.Message.tool(ModelRequest.ToolResultPart.make({ toolCallId: "call_1", content: "Sunny" }))
+      ],
+      tools: [
+        ModelRequest.ToolDefinition.make({
+          name: "weather",
+          description: "Current weather for a city",
+          parameters: { type: "object", properties: { city: { type: "string" } } }
+        })
+      ],
+      params: ModelRequest.GenerationParams.make({
+        maxTokens: 512,
+        temperature: 0.2,
+        topP: 0.9,
+        topK: 40,
+        stopSequences: ["STOP"],
+        thinkingBudget: 1024,
+        reasoningEffort: "medium"
+      })
+    })
+    const key = Redacted.make("golden-secret")
+    const prepared: ReadonlyArray<readonly [string, Route.PreparedRequest]> = [
+      [
+        "anthropic",
+        await Effect.runPromise(
+          Route.prepare(Result.getOrThrow(Route.anthropic({ apiKey: key })), golden)
+        )
+      ],
+      [
+        "openai",
+        await Effect.runPromise(
+          Route.prepare(Result.getOrThrow(Route.openai({ apiKey: key })), golden)
+        )
+      ],
+      [
+        "openai-chat",
+        await Effect.runPromise(
+          Route.prepare(
+            Result.getOrThrow(
+              Route.openaiChatCompatible({ id: "golden-chat", baseUrl: "https://compatible.test", apiKey: key })
+            ),
+            golden
+          )
+        )
+      ]
+    ]
+
+    for (const [name, request] of prepared) {
+      const expected = readFileSync(new URL(`./fixtures/${name}/prepared-body.json`, import.meta.url), "utf8").trim()
+
+      expect(request.bodyText, `${name} canonical body changed`).toBe(expected)
+      expect(new TextDecoder().decode(request.body)).toBe(expected)
+    }
   })
 
   it("keeps OpenAI-compatible routes on the portable protocol surface", async () => {
@@ -150,6 +291,80 @@ describe("Route.prepare", () => {
     expect(compatible.protocol.supportsDeferred("gpt-5.4")).toBe(false)
     expect(compatible.headers).toBeUndefined()
     await expect(Route.prepare(compatible, request).pipe(Effect.runPromise)).resolves.toMatchObject({ routeId: "groq" })
+  })
+
+  it("constructs explicitly named compatible routes from one provider origin", () => {
+    const origin = "https://openrouter.ai/api"
+    const trailingOrigin = `${origin}/`
+    const key = Redacted.make("compatible-secret")
+
+    for (const baseUrl of [origin, trailingOrigin]) {
+      expect(
+        Result.getOrThrow(Route.openaiResponsesCompatible({
+          id: "openrouter-responses",
+          baseUrl,
+          apiKey: key
+        })).endpoint.url
+      ).toBe("https://openrouter.ai/api/v1/responses")
+      expect(
+        Result.getOrThrow(Route.openaiChatCompatible({
+          id: "openrouter-chat",
+          baseUrl,
+          apiKey: key
+        })).endpoint.url
+      ).toBe("https://openrouter.ai/api/v1/chat/completions")
+    }
+
+    expect(
+      Result.getOrThrow(OpenAICompatible.make({
+        id: "legacy-responses",
+        baseUrl: origin,
+        apiKey: key
+      })).endpoint.url
+    ).toBe("https://openrouter.ai/api/v1/responses")
+    expect(
+      Result.getOrThrow(Route.openaiCompatible({
+        id: "legacy-chat",
+        baseUrl: `${origin}/v1`,
+        apiKey: key
+      })).endpoint.url
+    ).toBe("https://openrouter.ai/api/v1/chat/completions")
+  })
+
+  it("keeps the explicitly named compatible routes on their documented surfaces", async () => {
+    const key = Redacted.make("compatible-secret")
+    const responses = Result.getOrThrow(Route.openaiResponsesCompatible({
+      id: "responses-compatible",
+      baseUrl: "https://compatible.test",
+      apiKey: key,
+      headers: { "x-provider": "compatible" }
+    }))
+    // A compatible deployment does not implement OpenAI's native deferred-tool
+    // extension, whatever the model is called.
+    expect(responses.protocol.supportsDeferred("gpt-5.6-sol")).toBe(false)
+    expect(responses.headers).toEqual({ "x-provider": "compatible" })
+
+    const chat = Result.getOrThrow(Route.openaiChatCompatible({
+      id: "chat-compatible",
+      baseUrl: "https://compatible.test",
+      apiKey: key,
+      structuredOutput: { name: "capital", schema: { type: "object" } }
+    }))
+    const prepared = await Effect.runPromise(Route.prepare(chat, request))
+    expect(JSON.parse(prepared.bodyText)).toMatchObject({
+      response_format: { type: "json_schema", json_schema: { name: "capital", strict: true } }
+    })
+
+    const plainChat = Result.getOrThrow(Route.openaiChatCompatible({
+      id: "chat-compatible-plain",
+      baseUrl: "https://compatible.test",
+      apiKey: key
+    }))
+    expect(JSON.parse((await Effect.runPromise(Route.prepare(plainChat, request))).bodyText))
+      .not.toHaveProperty("response_format")
+
+    expect(Route.openaiResponsesCompatible({ id: "bad", baseUrl: "ftp://compatible.test", apiKey: key }))
+      .toMatchObject({ _tag: "Failure" })
   })
 
   it("mounts the live Chat Completions route on compatible provider base paths", async () => {
@@ -267,8 +482,35 @@ describe("Route.prepare", () => {
     const error = await Effect.runPromise(Route.prepare(route, request).pipe(Effect.flip))
     expect(error).toMatchObject({
       code: "invalid_request",
-      message: "Model request could not be encoded as canonical JSON"
+      message: "Model request could not be encoded as canonical JSON",
+      path: "$.generatedAt"
     })
+  })
+
+  it("preserves a nested canonical-encoding key path without exposing its value", async () => {
+    const uncanonical = Protocol.make({
+      ...protocol,
+      body: {
+        schema: Schema.Unknown,
+        from: () => Effect.succeed({ thinking: { budget_tokens: undefined } } as unknown)
+      }
+    })
+    const route = Route.make({
+      id: "uncanonical-nested",
+      protocol: uncanonical,
+      endpoint: endpoint({ url: "https://example.test" }),
+      auth: Auth.bearer(Redacted.make("secret")),
+      framing: Framing.sse
+    })
+
+    const error = await Effect.runPromise(Route.prepare(route, request).pipe(Effect.flip))
+
+    expect(error).toMatchObject({
+      code: "invalid_request",
+      message: "Model request could not be encoded as canonical JSON",
+      path: "$.thinking.budget_tokens"
+    })
+    expect(JSON.stringify(error)).not.toContain("undefined")
   })
 
   it("wires route, auth, executor, framing, protocol, and settlement over a fake HTTP client", async () => {
@@ -500,15 +742,118 @@ describe("Route.stream", () => {
   })
 
   it("rejects a frame the protocol cannot decode", async () => {
+    const invalidStreamValue = "private-invalid-stream-value"
+    const nestedEvent = Schema.Struct({
+      choices: Schema.Array(Schema.Struct({ delta: Schema.Struct({ text: Schema.String }) }))
+    })
+    const nestedProtocol = Protocol.make({
+      ...protocol,
+      stream: { ...protocol.stream, event: Protocol.jsonEvent(nestedEvent) }
+    })
     const error = await drainError(
-      routeOf({ protocol, framing: Framing.sse }),
-      executorOf(() => sseResponse(["{\"ok\":true}", "not-json"]))
+      routeOf({ protocol: nestedProtocol, framing: Framing.sse }),
+      executorOf(() =>
+        sseResponse([
+          JSON.stringify({ choices: [{ delta: { text: invalidStreamValue } }] }).replace(
+            JSON.stringify(invalidStreamValue),
+            JSON.stringify({ secret: invalidStreamValue })
+          )
+        ])
+      )
     )
 
     expect(error).toMatchObject({
       code: "invalid_provider_output",
-      message: "test emitted an invalid stream event"
+      message: "test emitted an invalid stream event",
+      path: "choices[0].delta.text"
     })
+    expect(JSON.stringify(error)).not.toContain(invalidStreamValue)
+  })
+
+  it("runs the halt hook of a protocol that also declares a terminal event", async () => {
+    // `takeUntil` ends the stream at the terminal frame, and the halt hook must
+    // still settle whatever the protocol left open.
+    const halting = Protocol.make({
+      ...protocol,
+      stream: {
+        ...protocol.stream,
+        terminal: (event: Record<string, unknown>) => event["done"] === true,
+        onHalt: () => [ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })]
+      }
+    })
+
+    const events = await collect(
+      routeOf({ protocol: halting, framing: Framing.sse }),
+      executorOf(() => sseResponse(["{\"done\":true}", "{\"unreached\":true}"]))
+    )
+
+    expect(events).toEqual([{ type: "settle", stopReason: "stop" }])
+  })
+
+  it("reads one validated snapshot, not the caller's object, after signing begins", async () => {
+    // The caller owns the request. Before the snapshot, a mutation landing
+    // while `Auth.sign` was pending left the body saying one model id while the
+    // capability check and the protocol state saw another.
+    const mutable = {
+      modelId: "before",
+      system: [],
+      messages: [],
+      tools: [],
+      params: ModelRequest.GenerationParams.make()
+    } as unknown as ModelRequest.ModelRequest
+    const seenByProtocol: Array<string> = []
+    const seenByExecutor: Array<string> = []
+    const observing = Protocol.make({
+      ...protocol,
+      body: { schema: Schema.Unknown, from: (request) => Effect.succeed({ model: request.modelId }) },
+      stream: {
+        ...protocol.stream,
+        initial: (request: ModelRequest.ModelRequest) => {
+          seenByProtocol.push(request.modelId)
+          return 0
+        }
+      }
+    })
+    const mutatingAuth: Auth.Auth = {
+      sign: (headers) =>
+        Effect.sync(() => {
+          ;(mutable as { modelId: string }).modelId = "after"
+          return { ...headers, Authorization: "Bearer static" }
+        })
+    }
+    const executor = RequestExecutor.RequestExecutor.of({
+      execute: (httpRequest, options) => {
+        seenByExecutor.push(options.modelId)
+        return Effect.succeed(HttpClientResponse.fromWeb(httpRequest, sseResponse([])))
+      }
+    })
+
+    const bodies: Array<string> = []
+    await Effect.runPromise(
+      Effect.scoped(
+        Route.toModel(
+          Route.make({
+            id: "snapshot",
+            protocol: observing,
+            endpoint: endpoint({ url: "https://example.test" }),
+            auth: {
+              sign: (headers) =>
+                mutatingAuth.sign(headers).pipe(Effect.tap(() => Effect.sync(() => bodies.push(mutable.modelId))))
+            },
+            framing: Framing.sse
+          })
+        ).pipe(
+          Effect.flatMap((model) => model.stream(mutable).pipe(Stream.runDrain)),
+          Effect.provideService(RequestExecutor.RequestExecutor, executor)
+        )
+      )
+    )
+
+    // The mutation did land, and nothing downstream saw it.
+    expect(mutable.modelId).toBe("after")
+    expect(bodies).toEqual(["after"])
+    expect(seenByExecutor).toEqual(["before"])
+    expect(seenByProtocol).toEqual(["before"])
   })
 
   it("stops at the protocol's terminal event and needs no halt handler", async () => {
@@ -628,6 +973,26 @@ describe("Route.stream refresh", () => {
 
     expect(error).toMatchObject({ code: "authentication" })
     expect(seen).toHaveLength(1)
+  })
+
+  it("surfaces a refresh that fails on its own terms and stops there", async () => {
+    // A refresh that cannot repair the credential is the end of the ladder:
+    // its typed failure reaches the caller and the request is not re-signed.
+    let attempts = 0
+    const auth: Auth.Auth = {
+      sign: (headers) => Effect.sync(() => ({ ...headers, Authorization: "Bearer stale-token" })),
+      refresh: Effect.fail(new ModelError({ code: "authentication", message: "refresh token revoked" }))
+    }
+    const { executor, seen } = countingExecutor(() => {
+      attempts += 1
+      return Effect.fail(refusal())
+    })
+
+    const error = await drainError(withAuth(auth), executor)
+
+    expect(error).toMatchObject({ code: "authentication", message: "refresh token revoked" })
+    expect(seen).toHaveLength(1)
+    expect(attempts).toBe(1)
   })
 
   it("does not treat other failures as refreshable", async () => {

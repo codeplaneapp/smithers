@@ -1,4 +1,12 @@
-/** @since 0.1.0 */
+/**
+ * The provider-neutral failure vocabulary, and the refinements that recognize
+ * a context overflow and an exhausted account in a provider's own wording.
+ *
+ * A consumer branches on `ModelError.code`. Provider message text is not a
+ * contract, and reading it is the mistake these codes exist to prevent.
+ *
+ * @since 0.1.0
+ */
 import { Schema } from "effect"
 
 /**

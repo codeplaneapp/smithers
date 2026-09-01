@@ -51,6 +51,9 @@ const joinPath = (url: URL, path: string | undefined): Result.Result<void, Model
   if (path.includes("?") || path.includes("#")) {
     return Result.fail(invalid("Endpoint paths must not contain query strings or fragments"))
   }
+  if (path.split("/").some((segment) => segment === "." || segment === "..")) {
+    return Result.fail(invalid("Endpoint paths must not contain relative segments"))
+  }
   url.pathname = `${url.pathname.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`
   return Result.succeed(undefined)
 }
@@ -70,9 +73,12 @@ export const make = (input: MakeOptions): Result.Result<Endpoint, ModelError> =>
   Result.gen(function*() {
     const url = yield* Result.try({
       try: () => new URL(input.url),
-      catch: () => invalid(`Invalid endpoint URL: ${input.url}`)
+      catch: () => invalid("Endpoint URL could not be parsed")
     })
 
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return yield* Result.fail(invalid("Endpoint URLs must use http or https"))
+    }
     if (url.username !== "" || url.password !== "") {
       return yield* Result.fail(invalid("Endpoint URLs must not embed credentials"))
     }

@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
+import type { ModelError } from "../src/ModelError.ts"
 import * as Events from "../src/ModelEvent.ts"
 import * as Request from "../src/ModelRequest.ts"
 import * as OpenAIChatCompletions from "../src/OpenAIChatCompletions.ts"
@@ -79,6 +80,38 @@ describe("OpenAIChatCompletions.protocol.body", () => {
     expect(decoded.tools).toEqual([
       { type: "function", function: { name: "search", description: "web search", parameters: {} } }
     ])
+  })
+
+  it("omits declared tools when the request forbids tool use", () => {
+    // `toolChoice: "none"` is a declared property of the request, and both
+    // provider APIs express it by omitting `tools`. Before this, a request that
+    // said "no tools" still put them on the wire.
+    const withTools = (toolChoice?: "none"): Request.ModelRequest =>
+      Request.ModelRequest.make({
+        modelId: "qwen2.5:3b",
+        system: [],
+        messages: [Request.Message.user("hi")],
+        tools: [Request.ToolDefinition.make({ name: "search", description: "web search", parameters: {} })],
+        params: Request.GenerationParams.make(),
+        ...(toolChoice === undefined ? {} : { toolChoice })
+      })
+
+    expect(body(withTools("none")).tools).toBeUndefined()
+    expect(body(withTools()).tools).toEqual([
+      { type: "function", function: { name: "search", description: "web search", parameters: {} } }
+    ])
+  })
+
+  it("carries the sampling parameters the wire shape accepts", () => {
+    const decoded = body(Request.ModelRequest.make({
+      modelId: "qwen2.5:3b",
+      system: [],
+      messages: [Request.Message.user("hi")],
+      tools: [],
+      params: Request.GenerationParams.make({ maxTokens: 128, temperature: 0.25, topP: 0.9 })
+    }))
+
+    expect(decoded).toMatchObject({ max_tokens: 128, temperature: 0.25, top_p: 0.9 })
   })
 
   it("omits an aborted or errored historical assistant turn", () => {
@@ -175,6 +208,173 @@ describe("OpenAIChatCompletions.protocol.stream", () => {
     expect(end?.arguments).toBe("{\"answer\":\"Paris\"}")
   })
 
+  it("classifies an inline stream error by the provider's own vocabulary", () => {
+    // Chat-compatible gateways answer HTTP 200 and report the real failure in
+    // the stream. Reporting all of them as `provider_internal` made a rate
+    // limit, an exhausted balance and a rejected key retryable.
+    const inlineError = (payload: string): ModelError =>
+      Effect.runSync(Effect.flip(
+        OpenAIChatCompletions.protocol.stream.step(
+          OpenAIChatCompletions.protocol.stream.initial(streamRequest),
+          Schema.decodeUnknownSync(OpenAIChatCompletions.protocol.stream.event)(payload)
+        )
+      ))
+
+    expect(inlineError("{\"error\":{\"code\":\"invalid_api_key\",\"message\":\"bad key\"}}")).toMatchObject({
+      code: "authentication",
+      providerCode: "invalid_api_key"
+    })
+    expect(inlineError("{\"error\":{\"code\":429,\"message\":\"Rate limit exceeded\"}}")).toMatchObject({
+      code: "rate_limited",
+      providerCode: "429"
+    })
+    expect(inlineError("{\"error\":{\"code\":\"insufficient_quota\",\"message\":\"no balance\"}}")).toMatchObject({
+      code: "quota_exceeded"
+    })
+    expect(inlineError("{\"error\":{\"message\":\"maximum context length is 8192 tokens\"}}")).toMatchObject({
+      code: "context_overflow"
+    })
+    expect(inlineError("{\"error\":{\"message\":\"blocked by content_filter\"}}")).toMatchObject({
+      code: "content_policy"
+    })
+    expect(inlineError("{\"error\":{\"code\":\"server_error\",\"message\":\"upstream died\"}}")).toMatchObject({
+      code: "provider_internal"
+    })
+    expect(inlineError("{\"error\":{\"message\":\"invalid_request: bad tool schema\"}}")).toMatchObject({
+      code: "invalid_request"
+    })
+    expect(inlineError("{\"error\":{\"message\":\"something nobody classified\"}}")).toMatchObject({
+      code: "unknown",
+      providerCode: undefined
+    })
+    expect(inlineError("{\"error\":{}}")).toMatchObject({
+      code: "unknown",
+      message: "Chat Completions stream reported an error",
+      providerCode: undefined
+    })
+  })
+
+  it("recovers a tool call's index from its id when the delta omits the index", () => {
+    const events = replayData([
+      "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"lookup\"}}]}}]}",
+      "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"id\":\"call_a\",\"function\":{\"arguments\":\"{}\"}}]}}]}",
+      "{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}"
+    ])
+
+    expect(events).toEqual([
+      { type: "tool-call-start", id: "call_a", name: "lookup" },
+      { type: "tool-call-delta", id: "call_a", arguments: "{}" },
+      { type: "tool-call-end", id: "call_a", arguments: "{}" },
+      { type: "settle", stopReason: "tool-calls" }
+    ])
+  })
+
+  it("opens a nameless tool call as a typed provider fault", () => {
+    const error = Effect.runSync(Effect.flip(
+      OpenAIChatCompletions.protocol.stream.step(
+        OpenAIChatCompletions.protocol.stream.initial(streamRequest),
+        Schema.decodeUnknownSync(OpenAIChatCompletions.protocol.stream.event)(
+          "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\"}]}}]}"
+        )
+      )
+    ))
+
+    expect(error).toMatchObject({
+      code: "invalid_provider_output",
+      message: "Chat Completions opened a tool call without a name"
+    })
+  })
+
+  it("fails a finish_reason that arrives while a tool call's arguments are still partial", () => {
+    const error = Effect.runSync(Effect.flip(
+      OpenAIChatCompletions.protocol.stream.step(
+        step(
+          OpenAIChatCompletions.protocol.stream.initial(streamRequest),
+          "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\"}}]}}]}"
+        )[0],
+        Schema.decodeUnknownSync(OpenAIChatCompletions.protocol.stream.event)(
+          "{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}"
+        )
+      )
+    ))
+
+    expect(error).toMatchObject({ code: "invalid_provider_output" })
+  })
+
+  it("reads the trailing usage-only chunk that follows the finish_reason chunk", () => {
+    // Both Ollama and api.openai.com send one final choice-less chunk carrying
+    // only `usage` after settlement, and nothing exercised that path.
+    const events = replayData([
+      "{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}",
+      "{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}",
+      "{\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}"
+    ])
+
+    expect(events.at(-1)).toEqual({ type: "usage", inputTokens: 3, outputTokens: 1, totalTokens: 4 })
+  })
+
+  it("flushes a tool call left open when the stream is cut short", () => {
+    expect(replayData(fixture("abort-mid-stream.sse"))).toEqual([
+      { type: "tool-call-start", id: "call_abort", name: "lookup" },
+      { type: "tool-call-delta", id: "call_abort", arguments: "{\"query\":\"par" },
+      { type: "tool-call-end", id: "call_abort", arguments: "{}" }
+    ])
+  })
+
+  it("ignores empty deltas, empty chunks, and chunks that arrive after settlement", () => {
+    const events = replayData([
+      // A choice-less chunk with no usage at all.
+      "{\"id\":\"chatcmpl_1\"}",
+      "{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"one\"}}]}",
+      // A second text delta on the already-open part.
+      "{\"choices\":[{\"index\":0,\"delta\":{\"content\":\" two\"}}]}",
+      "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"function\":{\"name\":\"lookup\"}}]}}]}",
+      // A tool-call delta carrying no argument fragment.
+      "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]}}]}",
+      "{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}",
+      // Everything after settlement is ignored unless it carries usage.
+      "{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"after\"}}]}"
+    ])
+
+    expect(events).toEqual([
+      { type: "text-start", id: "text-0" },
+      { type: "text-delta", id: "text-0", text: "one" },
+      { type: "text-delta", id: "text-0", text: " two" },
+      { type: "tool-call-start", id: "call_a", name: "lookup" },
+      { type: "tool-call-end", id: "call_a", arguments: "{}" },
+      { type: "text-end", id: "text-0" },
+      // A choice-less chunk is read for its usage alone, so the id it carried
+      // never reached the state.
+      { type: "settle", stopReason: "tool-calls" }
+    ])
+  })
+
+  it("opens a tool call the provider identified only by position", () => {
+    // A delta with neither an index nor an id starts the next call, and its id
+    // is synthesized from that position because there is nothing else to key on.
+    const events = replayData([
+      "{\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}]}}]}",
+      "{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}"
+    ])
+
+    expect(events).toEqual([
+      { type: "tool-call-start", id: "tool-0", name: "lookup" },
+      { type: "tool-call-delta", id: "tool-0", arguments: "{}" },
+      { type: "tool-call-end", id: "tool-0", arguments: "{}" },
+      { type: "settle", stopReason: "tool-calls" }
+    ])
+  })
+
+  it("settles exactly once when two chunks both carry a finish_reason", () => {
+    const events = replayData([
+      "{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}",
+      "{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}",
+      "{\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}"
+    ])
+
+    expect(events.filter((event) => event.type === "settle")).toHaveLength(1)
+  })
+
   it("settles once on a defect malformed chunk carrying an inline error", () => {
     const result = Effect.runSync(
       Effect.flip(
@@ -225,6 +425,12 @@ describe("OpenAIChatCompletions.protocol.classifyError", () => {
       "{\"error\":{\"message\":\"You have no credits remaining\"}}"
     )
     expect(error.code).toBe("quota_exceeded")
+    expect(
+      OpenAIChatCompletions.protocol.classifyError(
+        400,
+        "{\"error\":{\"message\":\"Your credit balance is too low\"}}"
+      ).code
+    ).toBe("quota_exceeded")
   })
 
   it("falls back to a generic message when the body is not JSON", () => {

@@ -1,6 +1,7 @@
 import * as Capability from "@smthrs/capability/Capability"
 import * as Permission from "@smthrs/capability/Permission"
 import * as KernelHttpClient from "@smthrs/kernel/HttpClient"
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -192,6 +193,83 @@ describe("RequestExecutor", () => {
       resetSource: "retry-after",
       httpStatus: 429
     })
+  })
+
+  it("surfaces a Retry-After beyond the total retry budget without sleeping", async () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    const layer = executorLayer([
+      {
+        status: 429,
+        body: JSON.stringify({ error: { message: "rate limited" } }),
+        headers: { "retry-after": "3600" }
+      },
+      { status: 200, body: "unexpected" }
+    ], requests)
+
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function*() {
+          yield* TestClock.setTime(NOW)
+          const executor = yield* RequestExecutor.RequestExecutor
+          const fiber = yield* execute(executor, request()).pipe(Effect.flip, Effect.forkChild)
+          yield* Effect.yieldNow
+          yield* Effect.yieldNow
+          return {
+            settled: fiber.pollUnsafe(),
+            now: yield* Clock.currentTimeMillis
+          }
+        }).pipe(
+          Effect.provide(layer),
+          Effect.provide(TestClock.layer()),
+          Effect.provideService(HttpClient.TracerDisabledWhen, () => true)
+        )
+      )
+    )
+
+    expect(result.now).toBe(NOW)
+    expect(requests).toHaveLength(1)
+    expect(result.settled !== undefined && Exit.isSuccess(result.settled)).toBe(true)
+    if (result.settled !== undefined && Exit.isSuccess(result.settled)) {
+      expect(expectModelError(result.settled.value)).toMatchObject({
+        code: "rate_limited",
+        retryAfterMillis: 3_600_000,
+        resetAtEpochMillis: NOW + 3_600_000
+      })
+    }
+  })
+
+  it("honors an in-budget Retry-After exactly before retrying", async () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    const layer = executorLayer([
+      {
+        status: 429,
+        body: JSON.stringify({ error: { message: "rate limited" } }),
+        headers: { "retry-after": "5" }
+      },
+      { status: 200, body: "ok" }
+    ], requests)
+
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function*() {
+          const executor = yield* RequestExecutor.RequestExecutor
+          const fiber = yield* execute(executor, request()).pipe(Effect.forkChild)
+          yield* Effect.yieldNow
+          expect(requests).toHaveLength(1)
+          yield* TestClock.adjust(4_999)
+          expect(requests).toHaveLength(1)
+          yield* TestClock.adjust(1)
+          return yield* Fiber.join(fiber)
+        }).pipe(
+          Effect.provide(layer),
+          Effect.provide(TestClock.layer()),
+          Effect.provideService(HttpClient.TracerDisabledWhen, () => true)
+        )
+      )
+    )
+
+    expect(result.status).toBe(200)
+    expect(requests).toHaveLength(2)
   })
 
   it("does not retry a 400 response", async () => {
@@ -545,6 +623,183 @@ describe("RequestExecutor", () => {
     expect(expectModelError(error).requestId).toBe("amazon-request-123")
   })
 
+  it("preserves numeric Anthropic request fields in provider diagnostics", async () => {
+    const maxTokens = await errorFor(
+      {
+        status: 400,
+        body: JSON.stringify({
+          error: {
+            type: "invalid_request_error",
+            message: "max_tokens: 4096 > 4000, which is the maximum allowed"
+          }
+        }),
+        headers: { "x-request-id": "req_4096abc" }
+      },
+      request(
+        "https://provider.test/v1/messages",
+        JSON.stringify({ model: "m", max_tokens: 4096, messages: [] })
+      )
+    )
+    expect(maxTokens.message).toContain("max_tokens: 4096 > 4000")
+    expect(maxTokens.requestId).toBe("req_4096abc")
+
+    const maxOutputTokens = await errorFor(
+      {
+        status: 400,
+        body: JSON.stringify({ error: { message: "max_output_tokens 8192 is not allowed" } })
+      },
+      request(
+        "https://provider.test/v1/responses",
+        JSON.stringify({ model: "m", max_output_tokens: 8192, input: [] })
+      )
+    )
+    expect(maxOutputTokens.message).toContain("max_output_tokens 8192")
+  })
+
+  it("preserves numeric thinking budgets in rate-limit diagnostics", async () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    const spec = {
+      status: 429,
+      body: JSON.stringify({ error: { message: "rate limit of 2,000,000 input tokens" } }),
+      headers: { "retry-after-ms": "0" }
+    }
+    const layer = executorLayer([spec, spec, spec], requests)
+    const error = await run(
+      Effect.gen(function*() {
+        const executor = yield* RequestExecutor.RequestExecutor
+        return yield* execute(
+          executor,
+          request(
+            "https://provider.test/v1/messages",
+            JSON.stringify({ model: "m", thinking: { budget_tokens: 2 } })
+          )
+        ).pipe(Effect.flip)
+      }),
+      layer
+    )
+
+    expect(expectModelError(error).message).toContain("2,000,000 input tokens")
+    expect(requests).toHaveLength(3)
+  })
+
+  it("redacts only whole credential-shaped body fields", async () => {
+    const sensitive = {
+      api_key: "sensitive-api-key-value",
+      apiKey: "sensitive-camel-api-key",
+      "x-api-key": "sensitive-header-api-key",
+      secret_key: "sensitive-secret-key",
+      private_key: "sensitive-private-key",
+      key: "sensitive-bare-key"
+    }
+    const publicFields = {
+      max_tokens: "public-max-tokens-value",
+      budget_tokens: "public-budget-tokens-value",
+      keyword: "public-keyword-value",
+      monkey: "public-monkey-value",
+      public_key_id: "public-key-id-value"
+    }
+    const diagnostic = Object.values({ ...sensitive, ...publicFields }).join(" ")
+    const error = await errorFor(
+      { status: 400, body: diagnostic },
+      request("https://provider.test/v1/models", JSON.stringify({ ...sensitive, ...publicFields }))
+    )
+
+    for (const value of Object.values(sensitive)) expect(error.message).not.toContain(value)
+    for (const value of Object.values(publicFields)) expect(error.message).toContain(value)
+  })
+
+  it("still removes a long API key from an echoed provider diagnostic", async () => {
+    const credential = "super-secret-value-1234"
+    const error = await errorFor(
+      { status: 400, body: JSON.stringify({ error: { message: credential }, api_key: credential }) },
+      request("https://provider.test/v1/models", JSON.stringify({ api_key: credential }))
+    )
+    expect(JSON.stringify(error)).not.toContain(credential)
+    expect(error.message).toContain("<redacted>")
+  })
+
+  it("does not use a short structured credential as a literal diagnostic splitter", async () => {
+    const credential = "abc123"
+    const error = await errorFor(
+      {
+        status: 400,
+        body: JSON.stringify({
+          error: { message: `${credential} is an unrelated diagnostic marker` },
+          api_key: credential
+        })
+      },
+      request("https://provider.test/v1/models", JSON.stringify({ api_key: credential }))
+    )
+
+    expect(error.message).toContain(`${credential} is an unrelated diagnostic marker`)
+    expect(error.message).toContain("\"api_key\":\"<redacted>\"")
+    expect(error.message).not.toContain(`"api_key":"${credential}"`)
+  })
+
+  it("structurally redacts object, array, and numeric values under sensitive JSON keys", async () => {
+    const cases: ReadonlyArray<readonly [unknown, string]> = [
+      [{ nested: "NESTED-SECRET" }, "NESTED-SECRET"],
+      [["ARRAY-SECRET", { deeper: "DEEP-ARRAY-SECRET" }], "ARRAY-SECRET"],
+      [987654321, "987654321"]
+    ]
+
+    for (const [value, leaked] of cases) {
+      const error = await errorFor({
+        status: 400,
+        body: JSON.stringify({ error: { message: "bad request" }, api_key: value })
+      })
+      expect(error.message).not.toContain(leaked)
+      expect(error.message).toContain("\"api_key\":\"<redacted>\"")
+    }
+  })
+
+  it("structurally redacts a sensitive JSON string containing an escaped quote", async () => {
+    const credential = "SECRET-BEFORE-\"-SECRET-AFTER"
+    const error = await errorFor({
+      status: 400,
+      body: JSON.stringify({ error: { message: "bad request" }, api_key: credential })
+    })
+
+    expect(error.message).not.toContain("SECRET-BEFORE")
+    expect(error.message).not.toContain("SECRET-AFTER")
+    expect(error.message).toContain("\"api_key\":\"<redacted>\"")
+  })
+
+  it("uses the predicate-driven text pass when a provider body is malformed JSON", async () => {
+    const credential = "MALFORMED-SECRET-VALUE"
+    const error = await errorFor({
+      status: 400,
+      body: `prefix {"api_key":"${credential}" trailing`
+    })
+
+    expect(error.message).not.toContain(credential)
+    expect(error.message).toContain("\"api_key\":\"<redacted>\"")
+  })
+
+  it("preserves the meaning of JSON bodies without sensitive fields", async () => {
+    const body = { metadata: { attempt: 2 }, error: { message: "bad tool schema" } }
+    const error = await errorFor({ status: 400, body: JSON.stringify(body) })
+    const prefix = "Provider request failed with HTTP 400: "
+
+    expect(error.message.startsWith(prefix)).toBe(true)
+    expect(JSON.parse(error.message.slice(prefix.length))).toEqual(body)
+  })
+
+  it("redacts a non-JSON diagnostic body by field name and leaves ordinary fields alone", async () => {
+    // A body that does not parse cannot be walked structurally, so the text
+    // pass has to recognize both the quoted-field and the query-string forms
+    // while leaving everything that is not credential-shaped readable.
+    const error = await errorFor({
+      status: 400,
+      body: "upstream said: \"api_key\": \"leaked-key-value\" api_key=leaked-query-value&page=2&max_tokens=4096"
+    })
+
+    expect(error.message).not.toContain("leaked-key-value")
+    expect(error.message).not.toContain("leaked-query-value")
+    expect(error.message).toContain("page=2")
+    expect(error.message).toContain("max_tokens=4096")
+  })
+
   it("redacts before capping oversized provider diagnostics", async () => {
     const secret = "credential-before-cap"
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
@@ -567,6 +822,38 @@ describe("RequestExecutor", () => {
     const serialized = JSON.stringify(expectModelError(error))
     expect(serialized).not.toContain(secret)
     expect(serialized.length).toBeLessThan(16_384)
+  })
+
+  it("caps failed response text before parsing and provider classification", async () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    const body = JSON.stringify({ error: { message: "x".repeat(200 * 1_024) } })
+    const layer = executorLayer([{ status: 400, body }], requests)
+    let classifiedBodyLength = 0
+
+    const error = await run(
+      Effect.gen(function*() {
+        const executor = yield* RequestExecutor.RequestExecutor
+        return yield* execute(executor, request(), {
+          classifyError: (_status, classifiedBody) => {
+            classifiedBodyLength = classifiedBody.length
+            return new ModelError({ code: "invalid_request", message: classifiedBody })
+          }
+        }).pipe(Effect.flip)
+      }),
+      layer
+    )
+
+    expect(classifiedBodyLength).toBe(65_536)
+    expect(expectModelError(error).message).toHaveLength(16_384)
+    expect(requests).toHaveLength(1)
+  })
+
+  it("does not inspect reset metadata beyond the response-body depth budget", async () => {
+    let nested: unknown = { reset_after: 5 }
+    for (let depth = 0; depth < 40; depth += 1) nested = { nested }
+
+    const error = await errorFor({ status: 400, body: JSON.stringify(nested) })
+    expect(error.resetAtEpochMillis).toBeUndefined()
   })
 
   it("never serializes header, query, JSON-body, or echoed credential bytes", async () => {
@@ -802,6 +1089,41 @@ describe("RequestExecutor", () => {
     }
   })
 
+  it("classifies authentication before content-policy words in a JSON diagnostic", async () => {
+    expect(
+      await errorFor({
+        status: 401,
+        body: JSON.stringify({ error: { message: "Invalid API key for safety_scanner tool" } })
+      })
+    ).toMatchObject({ code: "authentication", httpStatus: 401 })
+  })
+
+  it("classifies Anthropic's exhausted credit balance as terminal quota", async () => {
+    const error = await errorFor({
+      status: 400,
+      body: JSON.stringify({
+        type: "error",
+        error: {
+          type: "invalid_request_error",
+          message:
+            "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."
+        }
+      })
+    })
+
+    expect(error).toMatchObject({ code: "quota_exceeded", httpStatus: 400 })
+    expect(error.retryable).toBe(false)
+  })
+
+  it("ignores content-policy words outside a parsed provider error", async () => {
+    expect(
+      await errorFor({
+        status: 400,
+        body: JSON.stringify({ metadata: { pipeline: "safety" }, error: { message: "bad tool schema" } })
+      })
+    ).toMatchObject({ code: "invalid_request", httpStatus: 400 })
+  })
+
   it("classifies each status that is not a rate limit", async () => {
     expect((await errorFor({ status: 403, body: "{}" })).code).toBe("authentication")
     expect((await errorFor({ status: 400, body: "blocked by content_filter" })).code).toBe("content_policy")
@@ -811,9 +1133,10 @@ describe("RequestExecutor", () => {
     for (const status of [404, 409, 413, 422]) {
       expect((await errorFor({ status, body: "{}" })).code).toBe("invalid_request")
     }
-    // 402 is neither retryable nor one of the recognized request faults.
+    // HTTP 402 Payment Required means the account is exhausted, so a run must
+    // park for funding rather than terminate as an unknown provider fault.
     expect(await errorFor({ status: 402, body: "{}" })).toMatchObject({
-      code: "unknown",
+      code: "quota_exceeded",
       message: "Provider request failed with HTTP 402: {}"
     })
   })
@@ -937,7 +1260,7 @@ describe("RequestExecutor", () => {
     })
   })
 
-  it("scrubs credentials from raw, byte, structured, and form request bodies", async () => {
+  it("scrubs string credentials from raw, byte, structured, and form request bodies", async () => {
     const rawForm = Request.setBody(
       Request.post("https://provider.test/v1/models"),
       HttpBody.raw("api_key=raw-secret&page=1")
@@ -961,7 +1284,7 @@ describe("RequestExecutor", () => {
       rawStructured
     )
     expect(JSON.stringify(structured)).not.toContain("object-secret")
-    expect(JSON.stringify(structured)).not.toContain("987654321")
+    expect(structured.message).toContain("987654321 true")
 
     const formData = new FormData()
     formData.append("api_key", "form-secret")

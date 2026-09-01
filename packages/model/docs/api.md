@@ -19,13 +19,13 @@ const events = Effect.gen(function*() {
 
 ## Built-in routes
 
-| Constructor | Protocol | URL it builds |
-| --- | --- | --- |
-| `Route.anthropic` | Anthropic Messages | `https://api.anthropic.com/v1/messages` |
-| `Route.openai` | OpenAI Responses | `https://api.openai.com/v1/responses` |
-| `Route.openaiResponsesCompatible` | OpenAI Responses | `<origin>/v1/responses` |
-| `Route.openaiChatCompatible` | OpenAI Chat Completions | `<origin>/v1/chat/completions` |
-| `OpenAIChatGPT.make` | OpenAI Responses, ChatGPT backend | `https://chatgpt.com/backend-api/codex/responses` |
+| Constructor                       | Protocol                          | URL it builds                                     |
+| --------------------------------- | --------------------------------- | ------------------------------------------------- |
+| `Route.anthropic`                 | Anthropic Messages                | `https://api.anthropic.com/v1/messages`           |
+| `Route.openai`                    | OpenAI Responses                  | `https://api.openai.com/v1/responses`             |
+| `Route.openaiResponsesCompatible` | OpenAI Responses                  | `<origin>/v1/responses`                           |
+| `Route.openaiChatCompatible`      | OpenAI Chat Completions           | `<origin>/v1/chat/completions`                    |
+| `OpenAIChatGPT.make`              | OpenAI Responses, ChatGPT backend | `https://chatgpt.com/backend-api/codex/responses` |
 
 Both compatible constructors take the provider origin and append the rest
 themselves, so one origin cannot produce two different URLs. `Route.openaiCompatible`
@@ -44,20 +44,20 @@ Cerebras, OpenRouter's chat route and most other self-hosted or third-party
 Every failure is a `ModelError` whose `code` is the contract. Provider message
 text is not a contract and changes without notice, so branch on `code`.
 
-| Code | Meaning | Retryable |
-| --- | --- | --- |
-| `invalid_request` | The request is malformed for this provider. | no |
-| `context_overflow` | The request did not fit the model's context window. | no |
-| `no_route` | No model is configured. | no |
-| `authentication` | The credential was rejected. | no |
-| `rate_limited` | A transient limit. | yes |
-| `quota_exceeded` | The account has no usable balance or quota. | no |
-| `content_policy` | The provider refused on safety grounds. | no |
-| `provider_internal` | The provider failed on its own side. | yes |
-| `transport` | The connection failed. | yes |
-| `call_timeout` | The caller's own wall-clock budget expired. | yes |
-| `invalid_provider_output` | The provider sent something the protocol cannot read. | no |
-| `unknown` | Unclassified. | no |
+| Code                      | Meaning                                               | Retryable |
+| ------------------------- | ----------------------------------------------------- | --------- |
+| `invalid_request`         | The request is malformed for this provider.           | no        |
+| `context_overflow`        | The request did not fit the model's context window.   | no        |
+| `no_route`                | No model is configured.                               | no        |
+| `authentication`          | The credential was rejected.                          | no        |
+| `rate_limited`            | A transient limit.                                    | yes       |
+| `quota_exceeded`          | The account has no usable balance or quota.           | no        |
+| `content_policy`          | The provider refused on safety grounds.               | no        |
+| `provider_internal`       | The provider failed on its own side.                  | yes       |
+| `transport`               | The connection failed.                                | yes       |
+| `call_timeout`            | The caller's own wall-clock budget expired.           | yes       |
+| `invalid_provider_output` | The provider sent something the protocol cannot read. | no        |
+| `unknown`                 | Unclassified.                                         | no        |
 
 `quota_exceeded` is deliberately not retryable: waiting does not add credit, and
 `@smthrs/agent` parks the seat durably on `retryAfterMillis` or
@@ -107,8 +107,10 @@ at any depth. Numeric request fields such as `max_tokens` and `budget_tokens`
 are not credentials and are left intact, so a provider diagnostic quoting them
 stays readable.
 
-A failed response body is read up to 64 KiB and the text kept on the error is
-capped at 16 KiB, with `bodyTruncated` set when the cap bites. Endpoint URLs
+A failed response body is truncated to 64 KiB before it is parsed, classified
+or redacted, and both recursive walks stop at depth 12; the text kept on the
+error is capped at 16 KiB, with `bodyTruncated` set when the cap bites. The read
+itself is not yet bounded. Endpoint URLs
 must be `http` or `https`, must not embed credentials or fragments, must not
 carry credential-shaped query keys, and must not contain relative path segments.
 

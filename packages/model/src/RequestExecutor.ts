@@ -2,6 +2,12 @@
  * Executes provider requests with bounded retries, quota classification, and
  * credential-safe diagnostics.
  *
+ * One call makes at most three attempts (the first plus `MAX_RETRIES`), with a
+ * 500 ms exponential base, a 10 s delay cap, and a 60 s total retry budget.
+ * `Retry-After` replaces the computed delay without jitter and is bounded by
+ * the same 10 s cap. A provider wait beyond the total budget is surfaced to the
+ * caller intact instead of being slept inside the executor.
+ *
  * @since 0.1.0
  */
 import type * as Permission from "@smthrs/capability/Permission"
@@ -20,9 +26,11 @@ import type * as HttpClientError from "effect/unstable/http/HttpClientError"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import * as Auth from "./Auth.ts"
-import { isContextOverflow, ModelError } from "./ModelError.ts"
+import { isContextOverflow, isQuotaExhausted, ModelError } from "./ModelError.ts"
 
 const BODY_LIMIT = 16_384
+const RAW_BODY_LIMIT = 65_536
+const MAX_BODY_DEPTH = 12
 const MAX_RETRIES = 2
 const BASE_DELAY_MS = 500
 const MAX_DELAY_MS = 10_000
@@ -33,9 +41,9 @@ const REDACTED = "<redacted>"
 // fields embedded in request or response bodies.
 const SENSITIVE_NAME = Auth.credentialNamePattern
 const SHORT_QUERY_NAME = /^(key|sig)$/i
-const SENSITIVE_BODY_FIELD = new RegExp(`(?:${SENSITIVE_NAME.source}|key)`, "i")
-const REDACT_JSON_FIELD = new RegExp(`("(?:${SENSITIVE_BODY_FIELD.source})"\\s*:\\s*)"[^"]*"`, "gi")
-const REDACT_QUERY_FIELD = new RegExp(`((?:${SENSITIVE_BODY_FIELD.source})=)[^&\\s"]+`, "gi")
+const SENSITIVE_BODY_KEY = /^(?:.*(?:api[-_]?key|secret[-_]?key|private[-_]?key))$|^key$/i
+const JSON_STRING_FIELD = /"((?:[^"\\]|\\.)*)"(\s*:\s*)"((?:[^"\\]|\\.)*)"/g
+const QUERY_FIELD = /(^|[?&\s"])([A-Za-z0-9_.\-%[\]]+)=([^&\s"]+)/g
 
 interface ResetMetadata {
   readonly retryAfterMillis?: number | undefined
@@ -61,6 +69,8 @@ const isSensitiveHeaderName = (
 ): boolean => SENSITIVE_NAME.test(name) || redactedNames.some((matcher) => matchesName(name, matcher))
 
 const isSensitiveQueryName = (name: string): boolean => isSensitiveHeaderName(name) || SHORT_QUERY_NAME.test(name)
+
+const isSensitiveBodyField = (name: string): boolean => SENSITIVE_NAME.test(name) || SENSITIVE_BODY_KEY.test(name)
 
 const redactHeaders = (
   headers: Headers.Headers,
@@ -255,10 +265,12 @@ const parsedBody = (body: string | undefined): unknown =>
 const bodyResetCandidates = (
   value: unknown,
   now: number,
-  path = "body"
+  path = "body",
+  depth = 0
 ): ReadonlyArray<ResetCandidate> => {
+  if (depth > MAX_BODY_DEPTH) return []
   if (Array.isArray(value)) {
-    return value.flatMap((item, index) => bodyResetCandidates(item, now, `${path}[${index}]`))
+    return value.flatMap((item, index) => bodyResetCandidates(item, now, `${path}[${index}]`, depth + 1))
   }
   if (!isRecord(value)) return []
 
@@ -293,7 +305,7 @@ const bodyResetCandidates = (
         })
       }
     }
-    candidates.push(...bodyResetCandidates(item, now, nextPath))
+    candidates.push(...bodyResetCandidates(item, now, nextPath, depth + 1))
   }
   return candidates
 }
@@ -334,20 +346,18 @@ const addSecret = (values: Set<string>, value: string): void => {
   if (json.length >= 2) values.add(json.slice(1, -1))
 }
 
-const addStructuredSecrets = (values: Set<string>, value: unknown): void => {
+const addStructuredSecrets = (values: Set<string>, value: unknown, depth = 0): void => {
+  if (depth > MAX_BODY_DEPTH) return
   if (Array.isArray(value)) {
-    for (const item of value) addStructuredSecrets(values, item)
+    for (const item of value) addStructuredSecrets(values, item, depth + 1)
     return
   }
   if (!isRecord(value)) return
   for (const [key, item] of Object.entries(value)) {
-    if (
-      SENSITIVE_BODY_FIELD.test(key) &&
-      (typeof item === "string" || typeof item === "number" || typeof item === "boolean")
-    ) {
-      addSecret(values, String(item))
+    if (isSensitiveBodyField(key) && typeof item === "string" && item.length >= 8) {
+      addSecret(values, item)
     }
-    addStructuredSecrets(values, item)
+    addStructuredSecrets(values, item, depth + 1)
   }
 }
 
@@ -406,6 +416,33 @@ const secretValues = (
   return values
 }
 
+const redactStructuredValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(redactStructuredValue)
+  if (!isRecord(value)) return value
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      isSensitiveBodyField(key) ? REDACTED : redactStructuredValue(item)
+    ])
+  )
+}
+
+const redactTextBody = (body: string): string =>
+  body
+    .replace(
+      JSON_STRING_FIELD,
+      (field, key: string, separator: string) => isSensitiveBodyField(key) ? `"${key}"${separator}"${REDACTED}"` : field
+    )
+    .replace(
+      QUERY_FIELD,
+      (field, prefix: string, key: string) => isSensitiveQueryName(key) ? `${prefix}${key}=${REDACTED}` : field
+    )
+
+const redactFields = (body: string): string => {
+  const parsed = parsedBody(body)
+  return parsed === undefined ? redactTextBody(body) : JSON.stringify(redactStructuredValue(parsed))
+}
+
 // Structural and literal passes ensure provider echoes are scrubbed before a
 // body is truncated or incorporated into a serializable ModelError.
 const redactBody = (
@@ -417,7 +454,7 @@ const redactBody = (
     .sort((left, right) => right.length - left.length)
     .reduce(
       (text, secret) => text.split(secret).join(REDACTED),
-      body.replace(REDACT_JSON_FIELD, `$1"${REDACTED}"`).replace(REDACT_QUERY_FIELD, `$1${REDACTED}`)
+      redactFields(body)
     )
 
 const responseBody = (
@@ -442,10 +479,14 @@ const providerMessage = (
 }
 
 const reasonForStatus = (status: number, body: string | undefined, parsed: unknown): ModelError["code"] => {
-  if (/content[-_\s]?policy|content_filter|safety/i.test(body ?? "")) return "content_policy"
+  const fields = providerFields(parsed)
   if (status === 401 || status === 403) return "authentication"
-  if (quotaBody(parsed)) return "quota_exceeded"
+  if (quotaBody(parsed) || isQuotaExhausted(fields.code, fields.message ?? "") || status === 402) {
+    return "quota_exceeded"
+  }
   if (status === 429) return "rate_limited"
+  const contentSignal = isRecord(parsed) ? `${fields.code ?? ""} ${fields.message ?? ""}` : body ?? ""
+  if (/content[-_\s]?policy|content_filter|safety/i.test(contentSignal)) return "content_policy"
   // Overflow is reported as a bad request by every provider this executor
   // fronts, so it has to be recognized before the bad-request branch claims it.
   if (isContextOverflow(undefined, body ?? "")) return "context_overflow"
@@ -473,7 +514,8 @@ const statusError = (
   Effect.gen(function*() {
     if (response.status < 400) return response
 
-    const body = yield* response.text.pipe(Effect.catch(() => Effect.succeed(undefined)))
+    const rawBody = yield* response.text.pipe(Effect.catch(() => Effect.succeed(undefined)))
+    const body = rawBody?.slice(0, RAW_BODY_LIMIT)
     const headers = normalizedHeaders(response.headers)
     const now = yield* Clock.currentTimeMillis
     const retry = retryAfter(headers, now)
@@ -563,9 +605,6 @@ const retryFailures = <A, R>(
   effect: Effect.Effect<A, RequestError, R>
 ): Effect.Effect<A, RequestError, R> => {
   const schedule = Schedule.exponential(Duration.millis(BASE_DELAY_MS)).pipe(
-    Schedule.modifyDelay(({ duration }) =>
-      Effect.succeed(Duration.millis(Math.min(Duration.toMillis(duration), MAX_DELAY_MS)))
-    ),
     Schedule.jittered,
     Schedule.modifyDelay(({ duration, input }) =>
       Effect.succeed(
@@ -576,11 +615,16 @@ const retryFailures = <A, R>(
         )
       )
     ),
+    Schedule.modifyDelay(({ duration }) =>
+      Effect.succeed(Duration.millis(Math.min(Duration.toMillis(duration), MAX_DELAY_MS)))
+    ),
     Schedule.upTo({ times: MAX_RETRIES, duration: Duration.millis(MAX_RETRY_DURATION_MS) })
   )
   return Effect.retry(effect, {
     schedule,
-    while: (error): boolean => error instanceof ModelError && error.retryable
+    while: (error): boolean =>
+      error instanceof ModelError && error.retryable &&
+      (error.retryAfterMillis === undefined || error.retryAfterMillis <= MAX_RETRY_DURATION_MS)
   })
 }
 

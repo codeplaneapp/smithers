@@ -1,7 +1,10 @@
 /**
- * @since 0.1.0
- *
  * The serializable, credential-free declaration of one model call.
+ *
+ * Field declaration order is load-bearing: it is the stable serialization order
+ * a sealed model step keys on.
+ *
+ * @since 0.1.0
  */
 import { Schema } from "effect"
 
