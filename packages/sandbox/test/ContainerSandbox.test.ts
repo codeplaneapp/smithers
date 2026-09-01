@@ -352,7 +352,7 @@ describe("ContainerSandbox", () => {
         "/bin/sh",
         "-c",
         "echo $$ > /tmp/.smthrs-sbx/0.pid; if [ -e /tmp/.smthrs-sbx/0.pid.cancel ]; then exit 143; fi; "
-          + `exec env WHO=guest /bin/sh -c 'printf '\\''hello from %s'\\'' "$WHO"'`
+        + `exec env WHO=guest /bin/sh -c 'printf '\\''hello from %s'\\'' "$WHO"'`
       ])
       // The caller's variables never reach the exec environment, so they can
       // never break the wrapper the exec starts.

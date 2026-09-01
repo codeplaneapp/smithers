@@ -11,6 +11,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, PlatformError, Ref } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { cancelGuard, cancelledStatus, cancelMarker, hostKillScript, killScript } from "../src/internal/killScript.ts"
 import * as RemoteChildProcessSpawner from "../src/RemoteChildProcessSpawner/index.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import * as SandboxHealth from "../src/SandboxHealth/index.ts"
@@ -114,6 +115,58 @@ describe("RemoteChildProcessSpawner kill", () => {
       expect(provider.state.kills).toEqual([])
       expect(provider.state.cancellations).toBe(1)
     }))
+})
+
+/**
+ * The guest-side programs are shipped as text into a container, a Pod, or an
+ * ECS task and run by a shell this repository never sees. They are exercised
+ * behaviorally elsewhere, against real shells; pinned here because a refactor
+ * of the `/proc` parse or of the collect-then-signal ordering can regress the
+ * descendant walk into a silent no-op that every behavioral test still passes.
+ */
+describe("guest kill scripts", () => {
+  it("pins the pidfile-waiting guest script", () => {
+    expect(killScript("/tmp/.smthrs-sbx/0.pid", "TERM")).toBe(
+      "n=0; while [ ! -s /tmp/.smthrs-sbx/0.pid ] && [ \"$n\" -lt 5 ]; do sleep 1; n=$((n+1)); done; "
+        + "p=$(cat /tmp/.smthrs-sbx/0.pid 2>/dev/null); "
+        + "if [ -z \"$p\" ]; then : > /tmp/.smthrs-sbx/0.pid.cancel && exit 0; exit 1; fi; "
+        + "kids() { t=$1; for d in /proc/[0-9]*; do read -r s 2>/dev/null < \"$d/stat\" || continue; "
+        + "r=${s##*) }; set -- $r; [ \"$2\" = \"$t\" ] || continue; "
+        + "c=${d#/proc/}; ( kids \"$c\" ); echo \"$c\"; done; }; "
+        + "set -- $(kids \"$p\") \"$p\"; "
+        + "kill -s TERM \"$@\" 2>/dev/null && exit 0; "
+        + "kill -s TERM \"$p\" 2>/dev/null && exit 0; "
+        + "kill -0 \"$p\" 2>/dev/null || exit 0; "
+        + "exit 1"
+    )
+  })
+
+  it("pins the host-side script and its pgrep-or-proc descent", () => {
+    expect(hostKillScript(1234, "TERM")).toBe(
+      "p=1234; "
+        + "if command -v pgrep >/dev/null 2>&1; "
+        + "then kids() { for c in $(pgrep -P \"$1\" 2>/dev/null); do ( kids \"$c\" ); echo \"$c\"; done; }; "
+        + "else kids() { t=$1; for d in /proc/[0-9]*; do read -r s 2>/dev/null < \"$d/stat\" || continue; "
+        + "r=${s##*) }; set -- $r; [ \"$2\" = \"$t\" ] || continue; "
+        + "c=${d#/proc/}; ( kids \"$c\" ); echo \"$c\"; done; }; fi; "
+        + "set -- $(kids \"$p\") \"$p\"; "
+        + "kill -s TERM \"$@\" 2>/dev/null && exit 0; "
+        + "kill -s TERM \"$p\" 2>/dev/null && exit 0; "
+        + "kill -0 \"$p\" 2>/dev/null || exit 0; "
+        + "exit 1"
+    )
+  })
+
+  it("pins the cancellation marker the two halves agree on", () => {
+    // The kill writes this path when no pid was recorded yet and the wrapper
+    // reads it before becoming the command. They are two programs on two
+    // machines; only this literal keeps them talking about the same file.
+    expect(cancelMarker("/tmp/.smthrs-sbx/7.pid")).toBe("/tmp/.smthrs-sbx/7.pid.cancel")
+    expect(cancelGuard("/tmp/.smthrs-sbx/7.pid")).toBe(
+      "if [ -e /tmp/.smthrs-sbx/7.pid.cancel ]; then exit 143; fi"
+    )
+    expect(cancelledStatus).toBe(143)
+  })
 })
 
 describe("SandboxHealth from a provider", () => {

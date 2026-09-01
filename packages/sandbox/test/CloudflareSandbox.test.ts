@@ -319,11 +319,21 @@ describe("CloudflareSandbox", () => {
         instance.events.includes(`write:${workdir}/conformance-bytes.bin:base64`) &&
         instance.events.includes(`read:${workdir}/conformance-bytes.bin:base64`)
       )).toBe(true)
-      // Standard input was staged as a workspace file and read back through
-      // the redirect, then removed by the rewritten command itself.
-      expect(workerBinding.instances.some((instance) =>
-        instance.events.includes(`write:${workdir}/.smthrs-stdin-0:base64`)
-      )).toBe(true)
+      // Standard input was staged in the session-private directory under an
+      // unguessable name, and every staged file was removed again when the
+      // spawn's scope closed.
+      const staged = workerBinding.instances.flatMap((instance) =>
+        instance.events.flatMap((event) => {
+          const match = /^write:(.*\/\.smthrs-stdin\/[0-9a-f]{32}):base64$/.exec(event)
+          return match === null ? [] : [match[1]!]
+        })
+      )
+      expect(staged.length).toBeGreaterThan(0)
+      expect(new Set(staged).size).toBe(staged.length)
+      const removals = workerBinding.instances.flatMap((instance) =>
+        instance.events
+      )
+      expect(staged.every((path) => removals.includes(`exec:rm -f ${path}`))).toBe(true)
     }), 30_000)
 
   it.effect("conforms in process mode only after waiting and fetching logs", () =>
@@ -440,7 +450,7 @@ describe("CloudflareSandbox", () => {
         Effect.flatMap(provider.acquire("key"), (session) =>
           Effect.sync(() => {
             workerBinding.instances.at(-1)!.failDestroy = new Error("destroy failed")
-            expect(session.remoteId).toMatch(/^[A-Za-z0-9._-]+-[0-9a-f]{1,8}$/)
+            expect(session.remoteId).toMatch(/^[A-Za-z0-9._-]+-[0-9a-f]{16}$/)
           }))
       )
     }))
