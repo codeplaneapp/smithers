@@ -65,4 +65,18 @@ describe("JournalEvent properties", () => {
       }
     )
   })
+
+  it("pins makeEventId's persisted wire format", () => {
+    // `event_id` is written to `flows_journal_events` under a UNIQUE
+    // constraint and is looked up verbatim by `selectExisting`, and
+    // `@smthrs/time-travel` synthesizes forked rows as
+    // `'fork:' || run_id || ':' || event_id`. Changing the prefix, the
+    // separator, or the length prefixes orphans every persisted row, and the
+    // injectivity property above would stay green while it happened. These
+    // literals are a persisted wire format: they cannot change without a
+    // migration.
+    expect(makeEventId(runId("run"), sourceId("source"), sourceSeq(3))).toBe("flows:event:3:run6:source3")
+    expect(makeEventId(runId("a:1"), sourceId("b:2"), sourceSeq(10))).toBe("flows:event:3:a:13:b:210")
+    expect(makeEventId(runId(""), sourceId(""), sourceSeq(0))).toBe("flows:event:0:0:0")
+  })
 })

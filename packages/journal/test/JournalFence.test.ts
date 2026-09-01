@@ -97,43 +97,82 @@ describe("SqlJournal durable fencing", () => {
       expect((failure as JournalError).code).toBe("fence_lost")
     }))
 
-  it.effect("treats a malformed owner as a lost fence rather than a driver failure", () =>
+  it.effect("separates an unmatched owner from one that is not an OwnerId at all", () =>
     Effect.gen(function*() {
-      // `OwnerId` is `Schema.String`/`Schema.Number` with no runtime refinement,
-      // so a caller can hand the fence an empty identifier or a non-integral pid.
-      // The fence is a `WHERE EXISTS` comparison, so none of these can match the
-      // claimed row — the contract being pinned is that each is reported as the
-      // typed `fence_lost` a zombie owner gets, never a raw SQL/driver error and
-      // never a silent append behind the live owner.
-      const malformed: ReadonlyArray<OwnerId> = [
+      // Two different caller mistakes, and the journal must not conflate them.
+      //
+      // An empty `hostId` or `nonce` is a legal string that simply matches no
+      // claimed row, which is what `fence_lost` means. A fractional, `NaN`, or
+      // infinite `pid` is not a process id: it fails the `OwnerId` schema, and
+      // reporting it as `fence_lost` would tell the caller another process
+      // owns the run and send it hunting a race that never happened.
+      const unmatched: ReadonlyArray<OwnerId> = [
         { hostId: "", pid: 42, nonce: "nonce-a" },
-        { hostId: "host-a", pid: 42, nonce: "" },
+        { hostId: "host-a", pid: 42, nonce: "" }
+      ]
+      // Built through a cast: the point is that these no longer typecheck as
+      // an `OwnerId`, and that the runtime agrees.
+      const invalid = [
         { hostId: "host-a", pid: 42.5, nonce: "nonce-a" },
         { hostId: "host-a", pid: Number.NaN, nonce: "nonce-a" },
-        { hostId: "host-a", pid: Number.POSITIVE_INFINITY, nonce: "nonce-a" }
-      ]
+        { hostId: "host-a", pid: Number.POSITIVE_INFINITY, nonce: "nonce-a" },
+        { hostId: "host-a", pid: -1, nonce: "nonce-a" },
+        undefined,
+        null
+      ] as unknown as ReadonlyArray<OwnerId>
 
       const result = yield* withStack(Effect.gen(function*() {
         const journal = yield* Journal
         const sql = yield* Effect.service(SqlClient.SqlClient)
         const run = runId("fenced-malformed")
         yield* claim(sql, run, owner)
-        const failures = yield* Effect.forEach(
-          malformed,
+        const lost = yield* Effect.forEach(
+          unmatched,
           (holder, index) => Effect.flip(journal.emitDurable(input(run, sourceId("driver"), index), holder))
+        )
+        const rejected = yield* Effect.forEach(
+          invalid,
+          (holder, index) => Effect.flip(journal.emitDurable(input(run, sourceId("invalid"), index), holder))
+        )
+        // The same contract on the other two fenced methods.
+        const checkpointed = yield* Effect.flip(
+          journal.checkpoint({ runId: run, seq: 0 as Seq, state: null }, undefined as unknown as OwnerId)
+        )
+        const compacted = yield* Effect.flip(
+          journal.compact({ runId: run }, undefined as unknown as OwnerId)
         )
         const rows = yield* sql<{ readonly total: number }>`
         SELECT COUNT(*) AS total FROM flows_journal_events WHERE run_id = ${run}
       `
-        return { failures, total: Number(rows[0]!.total) }
+        const checkpoints = yield* sql<{ readonly total: number }>`
+        SELECT COUNT(*) AS total FROM flows_journal_checkpoints WHERE run_id = ${run}
+      `
+        return {
+          lost,
+          rejected,
+          checkpointed,
+          compacted,
+          total: Number(rows[0]!.total),
+          checkpointTotal: Number(checkpoints[0]!.total)
+        }
       }))
 
-      for (const failure of result.failures) {
+      for (const failure of result.lost) {
         expect(failure).toBeInstanceOf(JournalError)
         expect((failure as JournalError).code).toBe("fence_lost")
       }
-      // The legitimate owner's run gains no rows from any of them.
+      for (const failure of result.rejected) {
+        expect(failure).toBeInstanceOf(JournalError)
+        expect((failure as JournalError).code).toBe("invalid_event")
+        expect((failure as JournalError).message).toBe("emitDurable requires a well-formed owner fence")
+      }
+      expect(result.checkpointed.code).toBe("invalid_event")
+      expect(result.checkpointed.message).toBe("checkpoint requires a well-formed owner fence")
+      expect(result.compacted.code).toBe("invalid_event")
+      expect(result.compacted.message).toBe("compact requires a well-formed owner fence")
+      // Nothing was written, checkpointed, or deleted by any of them.
       expect(result.total).toBe(0)
+      expect(result.checkpointTotal).toBe(0)
     }))
 
   it.effect("stays idempotent when a fenced retry re-emits an already-committed entry", () =>

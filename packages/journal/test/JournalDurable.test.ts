@@ -276,7 +276,7 @@ describe("SqlJournal durable emission", () => {
 
 /**
  * These cases need a real file and a real Clock: the deferred-transaction
- * allocation documented in `docs/specs/Concepts/Journal Queue.md` relies on the
+ * allocation documented in `docs/pages/concepts/journal.md` relies on the
  * SQLite busy/snapshot retry in `@smthrs/database`, whose backoff sleeps.
  */
 describe("SqlJournal durable emission across connections", () => {

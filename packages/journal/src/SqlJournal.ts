@@ -5,8 +5,8 @@
  * commits them, so a process crash can lose accepted-but-unwritten telemetry.
  * Lifecycle events use `emitDurable` and return only after commit.
  *
- * Governing design: `docs/specs/Concepts/Journal Queue.md`.
- * Prior-art decision: `docs/specs/Research/Sync Decision 2026-07-28.md`.
+ * Governing design: `docs/pages/concepts/journal.md`.
+ * Prior-art decision: `docs/pages/concepts/sync.md`.
  *
  * The replay-then-follow stream follows Effect `EventJournal` and opencode
  * `packages/core/src/event.ts`. The bounded send queue deliberately deviates
@@ -51,7 +51,7 @@ import {
 } from "./Journal.ts"
 import { Entry, Input, makeEventId, type RunId, type Seq, type SourceId, type SourceSeq } from "./JournalEvent.ts"
 import * as JournalMetrics from "./JournalMetrics.ts"
-import type { OwnerId } from "./OwnerId.ts"
+import { OwnerId } from "./OwnerId.ts"
 import type { Projection } from "./Projection.ts"
 import * as Redaction from "./Redaction.ts"
 
@@ -66,19 +66,18 @@ const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown)
  * caller's replay state at the run's durable tail, writes it as a checkpoint
  * at that sequence, and compacts the entries strictly below it.
  *
- * The attempt runs post-commit in the fiber that crossed the threshold, so
- * keep `capture` to storage reads. It must not emit through this journal:
- * the triggering durable emit still holds the allocation permit, and a
- * nested emit would deadlock on it.
+ * Both lossy and durable commits run the same post-commit policy after their
+ * allocation permit is free. `capture` may therefore read or emit through the
+ * journal without blocking unrelated allocation. A capture is interrupted
+ * after 30 seconds so caller code cannot wedge journal admission indefinitely.
  *
- * A failed or refused attempt — a live stream behind the boundary, a
- * capture failure — is logged at warning, damped for `entryThreshold`
+ * A failed or refused attempt (a live stream behind the boundary, a capture
+ * failure) is logged at warning, damped for `entryThreshold`
  * further committed entries, and never surfaced to the emit that triggered
  * it.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface CompactionPolicy {
   readonly entryThreshold: number
@@ -90,26 +89,40 @@ export interface CompactionPolicy {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface SqlJournalOptions {
+  /**
+   * Bound on the number of ENTRIES held in two places at once: the lossy
+   * admission queue, where `overflow` decides what happens when it is full,
+   * and the sliding `changes` buffer, where a slow subscriber silently loses
+   * the entries that fall out of it.
+   *
+   * It bounds entries, not bytes. There is no payload byte cap, so a handful
+   * of very large payloads can still be the memory bill.
+   */
   readonly capacity: number
+  /** Policy applied when the lossy admission queue is full. */
   readonly overflow: OverflowPolicy
+  /** Entries the queued writer commits per transaction. */
   readonly batchSize?: number | undefined
   /**
-   * Upper bound on the in-process source-event index — the map that answers
+   * Upper bound on the in-process source-event index, the map that answers
    * producer idempotency from memory.
    *
-   * The index is a cache, never the authority: the writer's `insertOne` always
-   * re-checks `flows_journal_events` under the `(run_id, source_id,
-   * source_seq)` unique constraint, so an evicted entry re-emitted later is
-   * still deduplicated durably and still reports an `idempotency_conflict` on
-   * changed content. Bounding it keeps startup decode and this cache's resident
-   * memory O(bound) rather than O(total events ever written), mirroring
+   * The index is a cache, never the authority. An explicit producer sequence
+   * missed by the cache is checked against `flows_journal_events` before the
+   * journal allocates or admits it, so a retry synchronously returns the
+   * durable original or fails `idempotency_conflict`. Bounding the cache keeps
+   * startup decode and resident memory O(bound) rather than O(total events ever
+   * written), mirroring
    * Temporal's refusal to hold unbounded history in a shard
    * (`service/history`). The separate sequence-floor maps start empty and grow
    * only with runs and producers this layer instance touches; they are lazy,
    * not governed by this bound.
+   *
+   * Idempotency compares canonical persisted JSON after redaction. Two inputs
+   * that redact to the same value are therefore the same event, and JSON's
+   * encoding intentionally treats `NaN` and `null` as the same `null` value.
    */
   readonly sourceEventCache?: number | undefined
   /**
@@ -133,6 +146,9 @@ export interface SqlJournalOptions {
 
 /** Default retained window of the source-event index. */
 const defaultSourceEventCache = 4096
+
+/** Bounds caller-supplied compaction capture work before the attempt is damped. */
+const compactionCaptureTimeout = "30 seconds"
 
 interface QueuedEntry {
   readonly runId: RunId
@@ -177,6 +193,41 @@ interface Commit {
   readonly inserted: boolean
 }
 
+interface SettledCommit {
+  readonly queued: QueuedEntry
+  readonly commit: Commit
+}
+
+interface EntryLoss {
+  readonly queued: QueuedEntry
+  readonly cause: JournalError
+}
+
+interface BatchOutcome {
+  readonly commits: ReadonlyArray<SettledCommit>
+  readonly losses: ReadonlyArray<EntryLoss>
+}
+
+interface RunBarrier {
+  /**
+   * Serializes one run's admission decisions against the moment a compaction
+   * closes the run, so "read the gate, then admit" is one critical section.
+   */
+  readonly semaphore: Semaphore.Semaphore
+  /**
+   * Serializes compactions of one run. Held for the whole barrier, including
+   * the drain, so `compaction` is only ever set and cleared by its holder and
+   * a second compactor never observes a half-open barrier.
+   */
+  readonly compactionLock: Semaphore.Semaphore
+  /** Open while a compaction owns the run; every admission awaits it. */
+  compaction: Deferred.Deferred<void> | undefined
+}
+
+type RunAdmission<A> =
+  | { readonly _tag: "Done"; readonly value: A }
+  | { readonly _tag: "Wait"; readonly gate: Deferred.Deferred<void> }
+
 interface SourceEvent {
   readonly seq: Seq
   readonly eventType: string
@@ -192,8 +243,8 @@ interface State {
   /**
    * The most recent batch the optimistic writer lost. It is a *report*, not a
    * latch: the writer survives a failed batch, so a transient outage must not
-   * revoke the lossy channel — or, through `flush`, the durable delivery paths
-   * that call it — for the rest of the process's life.
+   * revoke the lossy channel, and with it the durable delivery paths that call
+   * `flush`, for the rest of the process's life.
    *
    * Each loss is reported to whoever was waiting on it (`flushWaiters`, live
    * streams) and, via `lossEpoch`, to at most one later `flush` and to every
@@ -206,6 +257,7 @@ interface State {
   /** The highest `lossEpoch` already reported to a `flush` caller. */
   flushedLossEpoch: number
   pending: number
+  readonly pendingByRun: Map<RunId, number>
   readonly sequences: Map<RunId, number>
   readonly sourceSequences: Map<string, number>
   readonly sourceEvents: Map<string, SourceEvent>
@@ -241,10 +293,60 @@ const sourceKey = (runId: RunId, sourceId: SourceId): string => `${runId.length}
 const sourceEventKey = (runId: RunId, sourceId: SourceId, sourceSeq: SourceSeq): string =>
   `${sourceKey(runId, sourceId)}:${sourceSeq}`
 
+/**
+ * Sorts the plain JSON tree used as an idempotency fingerprint.
+ *
+ * `@smthrs/canonical` is the repository's general-purpose implementation, but
+ * journal cannot add that dependency while this release's lockfiles are frozen.
+ */
+const canonicalizeFingerprint = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(canonicalizeFingerprint)
+  if (value === null || typeof value !== "object") return value
+  const record = value as Record<string, unknown>
+  return Object.fromEntries(
+    Object.keys(record).sort().map((key) => [key, canonicalizeFingerprint(record[key])])
+  )
+}
+
 const encodeJson = (value: unknown, field: string): Result.Result<string, JournalError> =>
   Schema.encodeUnknownResult(UnknownFromJsonString)(value).pipe(
     Result.mapError((cause) => error("invalid_event", `${field} must be JSON-serializable`, cause))
   )
+
+const encodeFingerprint = (value: unknown, field: string): Result.Result<string, JournalError> =>
+  encodeJson(canonicalizeFingerprint(value), field)
+
+/**
+ * Whether one write is fenced on a run's persisted ownership.
+ *
+ * The journal used to pass `OwnerId | undefined` and fence only when the value
+ * happened to be present, so an untyped caller that omitted the argument
+ * silently selected the unfenced path on three public methods. The tag makes
+ * the choice explicit: only `emitDurableUnfenced` and the internal
+ * auto-compaction path construct `unfenced`, and they say so at the call site.
+ */
+type Fence =
+  | { readonly _tag: "Owned"; readonly owner: OwnerId }
+  | { readonly _tag: "Unfenced" }
+
+/** The one unfenced write posture, named so a call site cannot mean it by accident. */
+const unfenced: Fence = { _tag: "Unfenced" }
+
+const decodeOwner = Schema.decodeUnknownResult(OwnerId)
+
+/**
+ * Decodes the mandatory owner of a fenced method.
+ *
+ * A missing, null, or malformed owner is a caller contract violation, not a
+ * lost race: reporting it as `fence_lost` would tell the caller another
+ * process owns the run and send it looking for a conflict that never
+ * happened.
+ */
+const requireFence = (owner: unknown, method: string): Result.Result<Fence, JournalError> =>
+  Result.match(decodeOwner(owner), {
+    onFailure: (cause) => Result.fail(error("invalid_event", `${method} requires a well-formed owner fence`, cause)),
+    onSuccess: (value) => Result.succeed<Fence>({ _tag: "Owned", owner: value })
+  })
 
 const decodeInput = Schema.decodeUnknownResult(Input)
 const decodeEntry = Schema.decodeUnknownEffect(Entry)
@@ -285,6 +387,23 @@ const decodeCheckpointRow = (row: CheckpointRow): Effect.Effect<Checkpoint, Jour
     Effect.mapError((cause) => error("decode_failed", "could not decode a durable checkpoint row", cause))
   )
 
+/** Freezes the one object graph shared by every changes subscriber. */
+const freezePublished = <A>(value: A): A => {
+  const seen = new WeakSet<object>()
+  const walk = (node: unknown): void => {
+    if (node === null || typeof node !== "object") return
+    /* v8 ignore next -- decoded JSON and Entry instances are acyclic, but this guard keeps the walk total */
+    if (seen.has(node)) return
+    seen.add(node)
+    for (const key of Reflect.ownKeys(node)) {
+      walk((node as Record<PropertyKey, unknown>)[key])
+    }
+    Object.freeze(node)
+  }
+  walk(value)
+  return value
+}
+
 interface ValidatedOptions {
   readonly batchSize: number
   readonly sourceEventCache: number
@@ -323,7 +442,6 @@ const isJournalError = Schema.is(JournalError)
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer = (
   options: SqlJournalOptions
@@ -343,8 +461,8 @@ export const layer = (
        * highest committed sequence the stream has read from the store, or its
        * starting `afterSequence`. `compact` refuses to truncate below a
        * registered cursor, so a live follower's next durable page is never
-       * deleted out from under it. Readers this process cannot see — pagers
-       * of `entries`, followers in other processes — are covered by the
+       * deleted out from under it. Readers this process cannot see, pagers
+       * of `entries`, followers in other processes, are covered by the
        * read-side `compacted` guard instead.
        */
       const readers = new Map<RunId, Set<{ cursor: number }>>()
@@ -368,8 +486,8 @@ export const layer = (
         Result.gen(function*() {
           // The two allocation floors start EMPTY and are filled one run at a
           // time by `ensureFloors`. They used to be seeded by two unbounded
-          // `GROUP BY` aggregations — one entry per run that ever wrote an
-          // event, one per `(run_id, source_id)` pair — so layer construction
+          // `GROUP BY` aggregations, one entry per run that ever wrote an
+          // event, one per `(run_id, source_id)` pair, so layer construction
           // scanned the whole table and built a map proportional to total
           // history, which is exactly what the bound below exists to avoid.
           const sequences = new Map<RunId, number>()
@@ -391,8 +509,8 @@ export const layer = (
             sourceEvents.set(sourceEventKey(entry.runId, entry.sourceId, entry.sourceSeq), {
               seq: entry.seq,
               eventType: entry.eventType,
-              payloadJson: yield* encodeJson(entry.payload, "payload"),
-              metaJson: yield* encodeJson(entry.meta, "meta"),
+              payloadJson: yield* encodeFingerprint(entry.payload, "payload"),
+              metaJson: yield* encodeFingerprint(entry.meta, "meta"),
               status: "committed"
             })
           }
@@ -409,6 +527,7 @@ export const layer = (
         lossEpoch: 0,
         flushedLossEpoch: 0,
         pending: 0,
+        pendingByRun: new Map(),
         sequences: initialized.sequences,
         sourceSequences: initialized.sourceSequences,
         sourceEvents: initialized.sourceEvents,
@@ -418,6 +537,169 @@ export const layer = (
       // following in-memory allocation in one critical section, or two first
       // emits can both observe the same durable floor before either raises it.
       const allocation = yield* Semaphore.make(1)
+      const runBarriers = new Map<RunId, RunBarrier>()
+      const runDrainWaiters = new Map<RunId, Set<Deferred.Deferred<void>>>()
+      const activeWritesByRun = new Map<RunId, number>()
+
+      const barrierFor = (runId: RunId): RunBarrier => {
+        const existing = runBarriers.get(runId)
+        if (existing !== undefined) return existing
+        const created: RunBarrier = {
+          semaphore: Semaphore.makeUnsafe(1),
+          compactionLock: Semaphore.makeUnsafe(1),
+          compaction: undefined
+        }
+        runBarriers.set(runId, created)
+        return created
+      }
+
+      /** Blocks new admissions while a compaction owns the run. */
+      const withRunAdmission = <A, E, R>(
+        runId: RunId,
+        effect: Effect.Effect<A, E, R>
+      ): Effect.Effect<A, E, R> =>
+        Effect.suspend(() => {
+          const barrier = barrierFor(runId)
+          return barrier.semaphore.withPermit(
+            Effect.suspend((): Effect.Effect<RunAdmission<A>, E, R> => {
+              const gate = barrier.compaction
+              return gate === undefined
+                ? Effect.map(effect, (value): RunAdmission<A> => ({ _tag: "Done", value }))
+                : Effect.succeed<RunAdmission<A>>({ _tag: "Wait", gate })
+            })
+          ).pipe(
+            Effect.flatMap((attempt): Effect.Effect<A, E, R> =>
+              attempt._tag === "Done"
+                ? Effect.succeed(attempt.value)
+                : Deferred.await(attempt.gate).pipe(
+                  Effect.andThen(withRunAdmission(runId, effect))
+                )
+            )
+          )
+        })
+
+      /** Acquires batch run permits in stable order so mixed-run batches cannot deadlock. */
+      const withRunPermits = <A, E, R>(
+        runIds: ReadonlyArray<RunId>,
+        effect: Effect.Effect<A, E, R>
+      ): Effect.Effect<A, E, R> => {
+        const ordered = [...new Set(runIds)].sort()
+        const acquire = (index: number): Effect.Effect<A, E, R> =>
+          index === ordered.length
+            ? effect
+            : barrierFor(ordered[index]!).semaphore.withPermit(acquire(index + 1))
+        return acquire(0)
+      }
+
+      const admitRunPending = (queued: QueuedEntry): void => {
+        state.pendingByRun.set(queued.runId, (state.pendingByRun.get(queued.runId) ?? 0) + 1)
+      }
+
+      const completeRunDrain = (runId: RunId): void => {
+        if ((state.pendingByRun.get(runId) ?? 0) + (activeWritesByRun.get(runId) ?? 0) > 0) return
+        const waiters = runDrainWaiters.get(runId)
+        runDrainWaiters.delete(runId)
+        for (const waiter of waiters ?? []) {
+          Deferred.doneUnsafe(waiter, Effect.void)
+        }
+      }
+
+      const settleRunPending = (batch: ReadonlyArray<QueuedEntry>): void => {
+        for (const queued of batch) {
+          // Every batched entry was counted by `admitRunPending` when it was
+          // admitted, so the run always has a count to settle here.
+          const remaining = state.pendingByRun.get(queued.runId)! - 1
+          if (remaining > 0) {
+            state.pendingByRun.set(queued.runId, remaining)
+            continue
+          }
+          state.pendingByRun.delete(queued.runId)
+          completeRunDrain(queued.runId)
+        }
+      }
+
+      const endRunWrite = (runId: RunId): void => {
+        // `withActiveRunWrite` counted this write in before running it, and
+        // releases through here exactly once.
+        const remaining = activeWritesByRun.get(runId)! - 1
+        if (remaining > 0) {
+          activeWritesByRun.set(runId, remaining)
+          return
+        }
+        activeWritesByRun.delete(runId)
+        completeRunDrain(runId)
+      }
+
+      /** Claims a durable write without yielding between the compaction check and the count. */
+      const withActiveRunWrite = <A, E, R>(
+        runId: RunId,
+        effect: Effect.Effect<A, E, R>
+      ): Effect.Effect<A, E, R> =>
+        Effect.suspend(() => {
+          const gate = barrierFor(runId).compaction
+          if (gate !== undefined) {
+            return Deferred.await(gate).pipe(
+              Effect.andThen(withActiveRunWrite(runId, effect))
+            )
+          }
+          activeWritesByRun.set(runId, (activeWritesByRun.get(runId) ?? 0) + 1)
+          return effect.pipe(Effect.ensuring(Effect.sync(() => endRunWrite(runId))))
+        })
+
+      const awaitRunDrained = (runId: RunId): Effect.Effect<void> =>
+        Effect.suspend(() => {
+          if ((state.pendingByRun.get(runId) ?? 0) + (activeWritesByRun.get(runId) ?? 0) === 0) {
+            return Effect.void
+          }
+          const waiter = Deferred.makeUnsafe<void>()
+          const waiters = runDrainWaiters.get(runId) ?? new Set()
+          waiters.add(waiter)
+          runDrainWaiters.set(runId, waiters)
+          // No cleanup on the way out: `completeRunDrain` deletes the whole
+          // set as it completes it, and an interrupted waiter is a Deferred
+          // nobody awaits that the next drain of this run discards. Deleting
+          // it here would only add an unreachable branch.
+          return Deferred.await(waiter)
+        })
+
+      /**
+       * Stops admissions, drains accepted work, then runs one compaction
+       * transaction.
+       *
+       * `compactionLock` is held across the whole barrier, so the run's gate
+       * is only ever set and cleared by its holder: a second compactor waits
+       * for the lock instead of finding a half-open barrier. The admission
+       * semaphore is taken twice and released in between, because the drain
+       * this waits for needs it: holding it across the drain would deadlock
+       * the compaction against the writer it is waiting for.
+       */
+      const withCompactionBarrier = <A, E, R>(
+        runId: RunId,
+        effect: Effect.Effect<A, E, R>
+      ): Effect.Effect<A, E, R> =>
+        Effect.suspend(() => {
+          const barrier = barrierFor(runId)
+          return barrier.compactionLock.withPermit(
+            Effect.uninterruptibleMask((restore) => {
+              const gate = Deferred.makeUnsafe<void>()
+              return barrier.semaphore.withPermit(
+                Effect.sync(() => {
+                  barrier.compaction = gate
+                })
+              ).pipe(
+                Effect.andThen(restore(
+                  awaitRunDrained(runId).pipe(
+                    Effect.andThen(barrier.semaphore.withPermit(effect))
+                  )
+                )),
+                Effect.ensuring(Effect.sync(() => {
+                  barrier.compaction = undefined
+                  Deferred.doneUnsafe(gate, Effect.void)
+                }))
+              )
+            })
+          )
+        })
 
       /**
        * Raises the in-process seq allocation floor for a run.
@@ -425,7 +707,7 @@ export const layer = (
        * Both emit paths call this at the moment they allocate, so the floor
        * never names a seq some writer has already taken. It used to move only
        * in `rememberCommitted`, which `settleCommit` parks until the outermost
-       * COMMIT — so a durable emit inside an open `transact` left the floor
+       * COMMIT, so a durable emit inside an open `transact` left the floor
        * behind, `emitLossy` allocated the same seq from it, and the lossy
        * INSERT hit `PRIMARY KEY (run_id, seq)`.
        *
@@ -473,7 +755,7 @@ export const layer = (
 
       const flushInternal: Effect.Effect<void, JournalError> = Effect.suspend(() => {
         // A loss that happened while nothing was registered still has to reach
-        // a caller, so the first flush after it reports it — once. A later
+        // a caller, so the first flush after it reports it, once. A later
         // flush has nothing to do with the lost batch and must succeed, or a
         // single transient outage would stall every durable delivery that
         // flushes (`DeferredPersistence.completeDeferred`, `recordClockScheduled`)
@@ -502,19 +784,15 @@ export const layer = (
           if (state.status !== "open") {
             return yield* Result.fail(error("journal_closed", "journal is closed"))
           }
+          // `RunId`, `SourceId`, and `Input.eventType` carry the non-empty and
+          // well-formed-UTF-16 checks themselves, so decode is the whole
+          // identifier contract. The service used to re-check emptiness here,
+          // which let a caller hold an identifier that decoded and then failed
+          // at the write.
           const validated = yield* Result.mapError(
             decodeInput(input),
             (cause) => error("invalid_event", "event violates the journal input contract", cause)
           )
-          if (
-            validated.runId.length === 0 ||
-            validated.sourceId.length === 0 ||
-            validated.eventType.length === 0
-          ) {
-            return yield* Result.fail(
-              error("invalid_event", "runId, sourceId, and eventType must not be empty")
-            )
-          }
           if (!Number.isSafeInteger(emittedAtMs) || emittedAtMs < 0) {
             return yield* Result.fail(
               error("invalid_event", "emittedAtMs must be a non-negative safe integer")
@@ -522,11 +800,94 @@ export const layer = (
           }
           // Redaction happens here, at the single point every channel funnels
           // through, so no write path can bypass it (issue #46).
+          const redactedPayload = yield* Result.try({
+            try: () => redact(validated.payload),
+            catch: (cause) => error("invalid_event", "payload could not be redacted", cause)
+          })
+          const redactedMeta = yield* Result.try({
+            try: () => redact(validated.meta ?? null),
+            catch: (cause) => error("invalid_event", "meta could not be redacted", cause)
+          })
           return {
             validated,
-            payloadJson: yield* encodeJson(redact(validated.payload), "payload"),
-            metaJson: yield* encodeJson(redact(validated.meta ?? null), "meta")
+            payloadJson: yield* encodeFingerprint(redactedPayload, "payload"),
+            metaJson: yield* encodeFingerprint(redactedMeta, "meta")
           }
+        })
+
+      const compareSourceEvent = (
+        prepared: Prepared,
+        sourceSeq: SourceSeq,
+        existing: SourceEvent
+      ): Result.Result<EmitReceipt, JournalError> => {
+        const { metaJson, payloadJson, validated } = prepared
+        if (
+          existing.eventType !== validated.eventType ||
+          existing.payloadJson !== payloadJson ||
+          existing.metaJson !== metaJson
+        ) {
+          return Result.fail(error(
+            "idempotency_conflict",
+            `source event ${validated.sourceId}:${sourceSeq} for run ${validated.runId} was reused with different content`
+          ))
+        }
+        return Result.succeed({
+          _tag: "Duplicate",
+          seq: existing.seq,
+          sourceSeq,
+          status: existing.status
+        })
+      }
+
+      /** Resolves an explicit producer retry before sequence allocation. */
+      const preflightExplicit = (prepared: Prepared): Effect.Effect<EmitReceipt | undefined, JournalError> =>
+        Effect.suspend(() => {
+          const { validated } = prepared
+          const sourceSeq = validated.sourceSeq
+          if (sourceSeq === undefined) return Effect.succeed(undefined)
+          if (
+            !Number.isSafeInteger(sourceSeq) ||
+            sourceSeq < 0 ||
+            sourceSeq === Number.MAX_SAFE_INTEGER
+          ) {
+            return Effect.fail(
+              error("invalid_event", "journal sequence is outside the allocatable safe integer range")
+            )
+          }
+          const identity = sourceEventKey(validated.runId, validated.sourceId, sourceSeq)
+          const cached = state.sourceEvents.get(identity)
+          if (cached !== undefined) {
+            return Effect.fromResult(compareSourceEvent(prepared, sourceSeq, cached))
+          }
+          return sql<JournalRow>`
+            SELECT run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+              event_type, payload_json, meta_json
+            FROM flows_journal_events
+            WHERE event_id = ${makeEventId(validated.runId, validated.sourceId, sourceSeq)}
+              OR (
+                run_id = ${validated.runId}
+                AND source_id = ${validated.sourceId}
+                AND source_seq = ${sourceSeq}
+              )
+            ORDER BY seq ASC
+            LIMIT 1
+          `.pipe(
+            Effect.mapError((cause) => error("sink_failed", "could not read durable source event", cause)),
+            Effect.flatMap((rows) => {
+              const row = rows[0]
+              if (row === undefined) return Effect.succeed(undefined)
+              const existing: SourceEvent = {
+                seq: Number(row.seq) as Seq,
+                eventType: row.event_type,
+                payloadJson: row.payload_json,
+                metaJson: row.meta_json,
+                status: "committed"
+              }
+              return Effect.fromResult(compareSourceEvent(prepared, sourceSeq, existing)).pipe(
+                Effect.tap(() => Effect.sync(() => retain(identity, existing)))
+              )
+            })
+          )
         })
 
       const queuedEmit: Service["emitLossy"] = Effect.fn("Journal.emitLossy")((input: Input) =>
@@ -535,132 +896,129 @@ export const layer = (
           sourceId: input.sourceId,
           eventType: input.eventType
         }).pipe(Effect.andThen(
-          allocation.withPermit(Effect.flatMap(Clock.currentTimeMillis, (emittedAtMs) =>
-            Effect.flatMap(
-              Effect.suspend(() => Effect.fromResult(prepare(input, emittedAtMs))),
-              (prepared) =>
-                Effect.flatMap(
-                  ensureFloors(prepared.validated.runId, prepared.validated.sourceId),
-                  (floors) =>
-                    Effect.fromResult(
-                      Result.gen(function*() {
-                        const { metaJson, payloadJson, validated } = prepared
-                        const key = sourceKey(validated.runId, validated.sourceId)
-                        const nextSourceSeq = floors.sourceSeq
-                        const sourceSeq: SourceSeq = validated.sourceSeq ?? (nextSourceSeq as SourceSeq)
-                        if (
-                          !Number.isSafeInteger(sourceSeq) ||
-                          sourceSeq < 0 ||
-                          sourceSeq === Number.MAX_SAFE_INTEGER
-                        ) {
-                          return yield* Result.fail(
-                            error("invalid_event", "journal sequence is outside the allocatable safe integer range")
-                          )
-                        }
-                        const identity = sourceEventKey(validated.runId, validated.sourceId, sourceSeq)
-                        const existing = state.sourceEvents.get(identity)
-                        if (existing !== undefined) {
-                          if (
-                            existing.eventType !== validated.eventType ||
-                            existing.payloadJson !== payloadJson ||
-                            existing.metaJson !== metaJson
-                          ) {
-                            return yield* Result.fail(error(
-                              "idempotency_conflict",
-                              `source event ${validated.sourceId}:${sourceSeq} for run ${validated.runId} was reused with different content`
-                            ))
-                          }
-                          return {
-                            _tag: "Duplicate",
-                            seq: existing.seq,
-                            sourceSeq,
-                            status: existing.status
-                          } satisfies EmitReceipt
-                        }
-                        const nextSeq = floors.seq
-                        if (
-                          !Number.isSafeInteger(nextSeq) ||
-                          nextSeq < 0 ||
-                          nextSeq === Number.MAX_SAFE_INTEGER
-                        ) {
-                          return yield* Result.fail(
-                            error("invalid_event", "journal sequence is outside the allocatable safe integer range")
-                          )
-                        }
-                        const seq = nextSeq as Seq
-                        raiseSequenceFloor(validated.runId, seq)
-                        state.sourceSequences.set(key, Math.max(nextSourceSeq, sourceSeq + 1))
+          allocation.withPermit(withRunAdmission(
+            input.runId,
+            Effect.flatMap(Clock.currentTimeMillis, (emittedAtMs) =>
+              Effect.flatMap(
+                Effect.suspend(() => Effect.fromResult(prepare(input, emittedAtMs))),
+                (prepared) =>
+                  Effect.flatMap(
+                    preflightExplicit(prepared),
+                    (preflight) =>
+                      preflight !== undefined
+                        ? Effect.succeed(preflight)
+                        : Effect.flatMap(
+                          ensureFloors(prepared.validated.runId, prepared.validated.sourceId),
+                          (floors) =>
+                            Effect.fromResult(
+                              Result.gen(function*() {
+                                const { metaJson, payloadJson, validated } = prepared
+                                const key = sourceKey(validated.runId, validated.sourceId)
+                                const nextSourceSeq = floors.sourceSeq
+                                // An explicit producer sequence was validated and
+                                // answered by `preflightExplicit`, and an implicit one
+                                // is the floor `ensureFloors` already proved to be a
+                                // non-negative safe integer. Only exhaustion is left:
+                                // the allocator cannot advance past MAX_SAFE_INTEGER,
+                                // and neither can the identity that follows it.
+                                const sourceSeq: SourceSeq = validated.sourceSeq ?? (nextSourceSeq as SourceSeq)
+                                if (sourceSeq === Number.MAX_SAFE_INTEGER) {
+                                  return yield* Result.fail(
+                                    error(
+                                      "invalid_event",
+                                      "journal sequence is outside the allocatable safe integer range"
+                                    )
+                                  )
+                                }
+                                const nextSeq = floors.seq
+                                if (nextSeq === Number.MAX_SAFE_INTEGER) {
+                                  return yield* Result.fail(
+                                    error(
+                                      "invalid_event",
+                                      "journal sequence is outside the allocatable safe integer range"
+                                    )
+                                  )
+                                }
+                                const seq = nextSeq as Seq
+                                raiseSequenceFloor(validated.runId, seq)
+                                state.sourceSequences.set(key, Math.max(nextSourceSeq, sourceSeq + 1))
 
-                        const queued: QueuedEntry = {
-                          runId: validated.runId,
-                          seq,
-                          eventId: makeEventId(validated.runId, validated.sourceId, sourceSeq),
-                          sourceId: validated.sourceId,
-                          sourceSeq,
-                          emittedAtMs,
-                          eventType: validated.eventType,
-                          payloadJson,
-                          metaJson
-                        }
-                        let evicted: QueuedEntry | undefined
-                        if (Queue.sizeUnsafe(queue) >= options.capacity && options.overflow === "drop-oldest") {
-                          const exit = Queue.takeUnsafe(queue)
-                          /* v8 ignore next -- size and take run synchronously while the journal and queue are open */
-                          if (exit === undefined || !Exit.isSuccess(exit)) {
-                            return yield* Result.fail(
-                              error("journal_closed", "journal admission queue is unavailable")
+                                const queued: QueuedEntry = {
+                                  runId: validated.runId,
+                                  seq,
+                                  eventId: makeEventId(validated.runId, validated.sourceId, sourceSeq),
+                                  sourceId: validated.sourceId,
+                                  sourceSeq,
+                                  emittedAtMs,
+                                  eventType: validated.eventType,
+                                  payloadJson,
+                                  metaJson
+                                }
+                                let evicted: QueuedEntry | undefined
+                                if (Queue.sizeUnsafe(queue) >= options.capacity && options.overflow === "drop-oldest") {
+                                  const exit = Queue.takeUnsafe(queue)
+                                  /* v8 ignore next -- size and take run synchronously while the journal and queue are open */
+                                  if (exit === undefined || !Exit.isSuccess(exit)) {
+                                    return yield* Result.fail(
+                                      error("journal_closed", "journal admission queue is unavailable")
+                                    )
+                                  }
+                                  evicted = exit.value
+                                  const evictedIdentity = sourceEventKey(
+                                    evicted.runId,
+                                    evicted.sourceId,
+                                    evicted.sourceSeq
+                                  )
+                                  state.sourceEvents.delete(evictedIdentity)
+                                  state.pending = Math.max(0, state.pending - 1)
+                                  settleRunPending([evicted])
+                                }
+                                const accepted = Queue.offerUnsafe(queue, queued)
+                                if (!accepted) {
+                                  if (options.overflow === "reject") {
+                                    return yield* Result.fail(
+                                      error("queue_overflow", "journal admission queue is full")
+                                    )
+                                  }
+                                  return {
+                                    _tag: "Dropped",
+                                    seq,
+                                    sourceSeq,
+                                    policy: "drop-newest"
+                                  } satisfies EmitReceipt
+                                }
+
+                                retain(sourceEventKey(validated.runId, validated.sourceId, sourceSeq), {
+                                  seq,
+                                  eventType: validated.eventType,
+                                  payloadJson,
+                                  metaJson,
+                                  status: "pending"
+                                })
+                                state.pending += 1
+                                admitRunPending(queued)
+                                if (evicted !== undefined) {
+                                  return {
+                                    _tag: "Accepted",
+                                    seq,
+                                    sourceSeq,
+                                    evicted: {
+                                      policy: "drop-oldest",
+                                      count: 1
+                                    }
+                                  } satisfies EmitReceipt
+                                }
+                                return {
+                                  _tag: "Accepted",
+                                  seq,
+                                  sourceSeq
+                                } satisfies EmitReceipt
+                              })
                             )
-                          }
-                          evicted = exit.value
-                          const evictedIdentity = sourceEventKey(
-                            evicted.runId,
-                            evicted.sourceId,
-                            evicted.sourceSeq
-                          )
-                          state.sourceEvents.delete(evictedIdentity)
-                          state.pending = Math.max(0, state.pending - 1)
-                        }
-                        const accepted = Queue.offerUnsafe(queue, queued)
-                        if (!accepted) {
-                          if (options.overflow === "reject") {
-                            return yield* Result.fail(error("queue_overflow", "journal admission queue is full"))
-                          }
-                          return {
-                            _tag: "Dropped",
-                            seq,
-                            sourceSeq,
-                            policy: "drop-newest"
-                          } satisfies EmitReceipt
-                        }
-
-                        retain(identity, {
-                          seq,
-                          eventType: validated.eventType,
-                          payloadJson,
-                          metaJson,
-                          status: "pending"
-                        })
-                        state.pending += 1
-                        if (evicted !== undefined) {
-                          return {
-                            _tag: "Accepted",
-                            seq,
-                            sourceSeq,
-                            evicted: {
-                              policy: "drop-oldest",
-                              count: 1
-                            }
-                          } satisfies EmitReceipt
-                        }
-                        return {
-                          _tag: "Accepted",
-                          seq,
-                          sourceSeq
-                        } satisfies EmitReceipt
-                      })
-                    )
-                )
-            ))).pipe(Effect.tap((receipt) => Metric.update(JournalMetrics.lossy[receipt._tag], 1)))
+                        )
+                  )
+              )).pipe(Effect.tap((receipt) => Metric.update(JournalMetrics.lossy[receipt._tag], 1)))
+          ))
         ))
       )
 
@@ -706,7 +1064,7 @@ export const layer = (
             ORDER BY seq ASC
             LIMIT ${pageOptions.limit + 1}
           `.pipe(
-            Effect.mapError((cause) => error("unknown", "durable journal read failed", cause))
+            Effect.mapError((cause) => error("read_failed", "durable journal read failed", cause))
           )
           // The floor is read AFTER the page. Truncation and the floor
           // advance commit atomically, so any deletion that could have
@@ -715,7 +1073,7 @@ export const layer = (
           // The converse order would let a compaction commit between the two
           // reads and hand back a silently gapped history.
           const floor = yield* compactionFloor(pageOptions.runId).pipe(
-            Effect.mapError((cause) => error("unknown", "durable journal read failed", cause))
+            Effect.mapError((cause) => error("read_failed", "durable journal read failed", cause))
           )
           if (floor !== undefined && after < floor - 1) {
             return yield* Effect.fail(
@@ -787,29 +1145,29 @@ export const layer = (
             // following, and only about those: a loss it never overlapped is
             // already spent by the time it subscribes.
             const subscribedLossEpoch = state.lossEpoch
-            const readAvailable: Effect.Effect<ReadonlyArray<Entry>, JournalError> = Effect.suspend(() =>
-              state.sinkFailure !== undefined && state.lossEpoch > subscribedLossEpoch
-                ? Effect.fail(state.sinkFailure)
-                : Effect.gen(function*() {
-                  const all: Array<Entry> = []
-                  while (true) {
-                    const page = yield* readPage({
+            const readPages = (initialCursor: number): Stream.Stream<Entry, JournalError> =>
+              Stream.paginate(initialCursor, (cursor) =>
+                Effect.suspend(() =>
+                  state.sinkFailure !== undefined && state.lossEpoch > subscribedLossEpoch
+                    ? Effect.fail(state.sinkFailure)
+                    : readPage({
                       runId: streamOptions.runId,
-                      ...(reader.cursor < 0 ? {} : { after: reader.cursor as Seq }),
+                      ...(cursor < 0 ? {} : { after: cursor as Seq }),
                       limit: batchSize
                     })
-                    all.push(...page.entries)
+                ).pipe(
+                  Effect.map((page) => {
                     const last = page.entries.at(-1)
                     if (last !== undefined) {
                       reader.cursor = last.seq
                     }
-                    if (!page.hasMore) {
-                      return all
-                    }
-                  }
-                })
-            )
-            const historical = yield* readAvailable
+                    return [
+                      page.entries,
+                      page.hasMore ? Option.some(reader.cursor) : Option.none<number>()
+                    ] as const
+                  })
+                ))
+            const historical = readPages(reader.cursor)
             // PubSub is only a local fast path. Another journal process cannot
             // publish into it, so a bounded poll must recheck both the durable
             // tail and the compaction floor while the follower is otherwise idle.
@@ -817,11 +1175,9 @@ export const layer = (
             // of merging two background streams, which also preserves a plain
             // interruption cause when the consumer is cancelled.
             const live = Stream.fromEffectRepeat(
-              Effect.raceFirst(PubSub.take(wake), Effect.sleep("1 second")).pipe(
-                Effect.andThen(readAvailable)
-              )
-            ).pipe(Stream.flattenIterable)
-            return Stream.concat(Stream.fromIterable(historical), live)
+              Effect.raceFirst(PubSub.take(wake), Effect.sleep("1 second"))
+            ).pipe(Stream.flatMap(() => readPages(reader.cursor)))
+            return Stream.concat(historical, live)
           })()
         )
 
@@ -859,12 +1215,12 @@ export const layer = (
        * The lookup covers BOTH unique constraints the insert can conflict on:
        * `UNIQUE (event_id)` and `UNIQUE (run_id, source_id, source_seq)`. It is
        * tempting to keep only the first, because `makeEventId` is injective in
-       * exactly that triple — but that argument holds only for rows this
+       * exactly that triple, but that argument holds only for rows this
        * journal minted. `TimeTravelStore.createFork` copies a parent's rows
        * under the child's `run_id` with `'fork:' || run_id || ':' || event_id`,
        * so a forked run carries rows whose triple is live and whose event id it
        * will never mint. Looking those up by event id alone finds nothing, and
-       * the caller reports the resulting empty insert as `fence_lost` — a
+       * the caller reports the resulting empty insert as `fence_lost`, a
        * healthy fork failing with "someone else owns this run".
        */
       const selectExisting = (
@@ -917,7 +1273,7 @@ export const layer = (
        * The fence outranks dedup. The duplicate lookup answers an ownerless
        * insert up front, but a fenced insert consults it only after the
        * INSERT produced no row AND `fenceGuard` has confirmed the owner in
-       * the same serialized transaction — Temporal conditions every request
+       * the same serialized transaction, Temporal conditions every request
        * on the `rangeID` before anything else. Answering a zombie's
        * resubmission from the dedup index would launder its lost fence into
        * a `Duplicate` receipt for work the live owner committed; a confirmed
@@ -926,16 +1282,43 @@ export const layer = (
        */
       const insertOne = (
         queued: QueuedEntry,
-        owner?: OwnerId
+        fence: Fence,
+        enforceCompactionFloor = false
       ): Effect.Effect<Commit, JournalError | SqlError.SqlError> =>
         Effect.gen(function*() {
-          if (owner === undefined) {
+          if (fence._tag === "Unfenced") {
             const duplicate = yield* selectExisting(queued)
             if (duplicate !== undefined) {
               return duplicate
             }
           }
-          const insert = owner === undefined
+          const insert = enforceCompactionFloor
+            ? sql<JournalRow>`
+              INSERT INTO flows_journal_events (
+                run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+                event_type, payload_json, meta_json
+              )
+              SELECT
+                ${queued.runId},
+                ${queued.seq},
+                ${queued.eventId},
+                ${queued.sourceId},
+                ${queued.sourceSeq},
+                ${queued.emittedAtMs},
+                ${queued.eventType},
+                ${queued.payloadJson},
+                ${queued.metaJson}
+              WHERE NOT EXISTS (
+                SELECT 1 FROM flows_journal_checkpoints
+                WHERE run_id = ${queued.runId}
+                  AND compacted_at_ms IS NOT NULL
+                  AND seq >= ${queued.seq}
+              )
+              ON CONFLICT DO NOTHING
+              RETURNING run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+                event_type, payload_json, meta_json
+            `
+            : fence._tag === "Unfenced"
             ? sql<JournalRow>`
               INSERT INTO flows_journal_events (
                 run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
@@ -975,9 +1358,9 @@ export const layer = (
                 FROM flows_runs
                 WHERE run_id = ${queued.runId}
                   AND status = 'running'
-                  AND owner_host_id = ${owner.hostId}
-                  AND owner_pid = ${owner.pid}
-                  AND owner_nonce = ${owner.nonce}
+                  AND owner_host_id = ${fence.owner.hostId}
+                  AND owner_pid = ${fence.owner.pid}
+                  AND owner_nonce = ${fence.owner.nonce}
               )
               ON CONFLICT DO NOTHING
               RETURNING run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
@@ -990,17 +1373,36 @@ export const layer = (
               inserted: true
             }
           }
-          if (owner !== undefined) {
+          if (fence._tag === "Owned") {
             // The fenced INSERT produced no row either because the fence
             // predicate failed or because a unique constraint fired. The
             // fence is checked first, so a lost fence is reported as
             // `fence_lost` even when the resubmitted identity already names
             // a committed entry.
-            yield* fenceGuard(queued.runId, owner)
+            yield* fenceGuard(queued.runId, fence.owner)
           }
           const racedDuplicate = yield* selectExisting(queued)
           if (racedDuplicate !== undefined) {
             return racedDuplicate
+          }
+          // The insert produced no row and names no committed identity. Before
+          // blaming a racing writer, ask whether a compaction moved the floor
+          // above this sequence: that is a drop, not a sequence conflict, and
+          // the caller needs the floor to resync from. A durable write cannot
+          // reach this case, because it allocates above the surviving
+          // checkpoint row, so the read costs nothing on that path.
+          {
+            const floor = yield* compactionFloor(queued.runId)
+            if (floor !== undefined && queued.seq <= floor) {
+              return yield* Effect.fail(
+                new JournalError({
+                  code: "compacted",
+                  message:
+                    `queued sequence ${queued.seq} for run ${queued.runId} was dropped below compaction floor ${floor}`,
+                  checkpointSeq: floor as Seq
+                })
+              )
+            }
           }
           return yield* Effect.fail(
             error(
@@ -1012,13 +1414,34 @@ export const layer = (
 
       const persistBatch = (
         batch: ReadonlyArray<QueuedEntry>
-      ): Effect.Effect<ReadonlyArray<Commit>, JournalError> =>
-        writer.write(Effect.forEach(batch, (queued) => insertOne(queued))).pipe(
-          Effect.mapError((cause) =>
-            isJournalError(cause)
-              ? cause
-              : error("sink_failed", "journal sink failed", cause)
-          )
+      ): Effect.Effect<BatchOutcome, JournalError> =>
+        writer.write(withRunPermits(
+          batch.map((queued) =>
+            queued.runId
+          ),
+          Effect.gen(function*() {
+            const results = yield* Effect.forEach(
+              batch,
+              (queued) => Effect.map(Effect.result(insertOne(queued, unfenced, true)), (result) => ({ queued, result }))
+            )
+            const commits: Array<SettledCommit> = []
+            const losses: Array<EntryLoss> = []
+            for (const settled of results) {
+              if (Result.isSuccess(settled.result)) {
+                commits.push({ queued: settled.queued, commit: settled.result.success })
+              } else if (isJournalError(settled.result.failure)) {
+                losses.push({ queued: settled.queued, cause: settled.result.failure })
+              } else {
+                return yield* Effect.fail(settled.result.failure)
+              }
+            }
+            return { commits, losses }
+          })
+        )).pipe(
+          // Every per-entry `JournalError` is settled inside the transaction
+          // above, so the only failure that escapes is the transaction itself:
+          // a database outage, which is what `sink_failed` names.
+          Effect.mapError((cause) => error("sink_failed", "journal sink failed", cause))
         )
 
       const publish = (commits: ReadonlyArray<Commit>): Effect.Effect<void> =>
@@ -1028,7 +1451,7 @@ export const layer = (
             if (!commit.inserted) {
               return Effect.void
             }
-            return PubSub.publish(changes, commit.entry).pipe(
+            return PubSub.publish(changes, freezePublished(commit.entry)).pipe(
               Effect.andThen(
                 Effect.forEach(
                   wakes.get(commit.entry.runId) ?? [],
@@ -1063,8 +1486,8 @@ export const layer = (
        * has no `beginTransaction` hook on the SQLite backends we ship
        * (`@effect/sql-sqlite-node` never forwards one), so `DurableWriter.write`
        * runs the default DEFERRED transaction. The read therefore takes a
-       * shared lock and the later INSERT upgrades it. Under WAL — enabled by
-       * `NodeDatabase` — a concurrent writer makes that upgrade fail with
+       * shared lock and the later INSERT upgrades it. Under WAL, enabled by
+       * `NodeDatabase`, a concurrent writer makes that upgrade fail with
        * `SQLITE_BUSY_SNAPSHOT`, which `WriteRetry.isRetryableSqliteWriteError`
        * classifies as retryable, so the whole transaction (floor read
        * included) replays against the committed snapshot. Allocation is
@@ -1073,7 +1496,7 @@ export const layer = (
        * `packages/journal/test/JournalDurable.test.ts` ("emitDurable never
        * collides when two connections write one run concurrently").
        *
-       * Governing design: `docs/specs/Concepts/Journal Queue.md`.
+       * Governing design: `docs/pages/concepts/journal.md`.
        */
       const nextDurable = (
         column: "seq" | "source_seq",
@@ -1096,8 +1519,8 @@ export const layer = (
        * Loads a run's allocation floors into the in-process index if they are
        * not there yet.
        *
-       * `emitLossy` allocates from the index alone — it queues rather than
-       * writing, so it cannot read the database mid-allocation — which is why
+       * `emitLossy` allocates from the index alone, it queues rather than
+       * writing, so it cannot read the database mid-allocation, which is why
        * the floors used to be seeded for every run at construction. Reading
        * them on first use instead keeps the index proportional to the runs this
        * process touches rather than to total history, and the durable read is
@@ -1143,25 +1566,24 @@ export const layer = (
         })
 
       /**
-       * Records a committed entry in the in-process index and publishes it —
+       * Records a committed entry in the in-process index and publishes it,
        * immediately outside a transaction, parked on the enclosing
        * {@link Settlements} list inside one.
        */
-      const settleCommit = (queued: QueuedEntry, commit: Commit): Effect.Effect<void> =>
+      const settleCommit = (
+        queued: QueuedEntry,
+        commit: Commit
+      ): Effect.Effect<Effect.Effect<void>> =>
         Effect.flatMap(Effect.serviceOption(Settlements), (enclosing) => {
-          const settlement = Effect.sync(() => rememberCommitted(queued, commit.entry.seq)).pipe(
-            Effect.andThen(publish([commit])),
-            // Indexing and subscriber publication are the mandatory
-            // post-COMMIT settlement. Automatic compaction may invoke an
-            // arbitrary capture effect and remains interruptible once those
-            // invariants are restored.
-            Effect.andThen(Effect.interruptible(noteCommitted(queued.runId, commit.inserted ? 1 : 0)))
+          const mandatory = Effect.sync(() => rememberCommitted(queued, commit.entry.seq)).pipe(
+            Effect.andThen(publish([commit]))
           )
+          const maintenance = Effect.interruptible(noteCommitted(queued.runId, commit.inserted ? 1 : 0))
           return Option.isNone(enclosing)
-            ? settlement
+            ? mandatory.pipe(Effect.as(maintenance))
             : Effect.sync(() => {
-              enclosing.value.push(settlement)
-            })
+              enclosing.value.push(mandatory.pipe(Effect.andThen(maintenance)))
+            }).pipe(Effect.as(Effect.void))
         })
 
       /**
@@ -1204,67 +1626,75 @@ export const layer = (
 
       const writeDurable = (
         input: Input,
-        owner: OwnerId | undefined
+        fence: Fence
       ): Effect.Effect<DurableReceipt, JournalError> =>
-        Effect.annotateCurrentSpan({
-          runId: input.runId,
-          sourceId: input.sourceId,
-          eventType: input.eventType
-        }).pipe(Effect.andThen(allocation.withPermit(Effect.flatMap(Clock.currentTimeMillis, (emittedAtMs) =>
-          Effect.flatMap(Effect.fromResult(prepare(input, emittedAtMs)), ({ metaJson, payloadJson, validated }) =>
-            Effect.uninterruptibleMask((restore) =>
-              restore(writer.write(Effect.gen(function*() {
-                const key = sourceKey(validated.runId, validated.sourceId)
-                const sourceSeq: SourceSeq = validated.sourceSeq ??
-                  (Math.max(
-                    yield* nextDurable("source_seq", validated.runId, validated.sourceId),
-                    state.sourceSequences.get(key) ?? 0
-                  ) as SourceSeq)
-                if (
-                  !Number.isSafeInteger(sourceSeq) ||
-                  sourceSeq < 0 ||
-                  sourceSeq === Number.MAX_SAFE_INTEGER
-                ) {
-                  return yield* Effect.fail(
-                    error("invalid_event", "journal sequence is outside the allocatable safe integer range")
-                  )
-                }
-                const seq = Math.max(
-                  yield* nextDurable("seq", validated.runId, undefined),
-                  state.sequences.get(validated.runId) ?? 0
-                ) as Seq
-                if (!Number.isSafeInteger(seq) || seq === Number.MAX_SAFE_INTEGER) {
-                  return yield* Effect.fail(
-                    error("invalid_event", "journal sequence is outside the allocatable safe integer range")
-                  )
-                }
-                // Claim the seq NOW, not at commit: a concurrent `emitLossy`
-                // allocates from this floor alone, and `settleCommit` parks
-                // the commit-time raise until the outermost COMMIT.
-                // Re-entering the transaction body is idempotent because the
-                // floor only rises. An abandoned attempt leaves the number
-                // unused, which is a gap: allocation is `MAX(seq) + 1` and
-                // replay is `ORDER BY seq`, so neither reads a gap as anything.
-                raiseSequenceFloor(validated.runId, seq)
-                // Claim the producer sequence at the same allocation seam.
-                // Without this, a lossy emit from the same producer can read
-                // the pre-transaction source floor and reuse this identity
-                // while an enclosing `transact` is still open.
-                raiseSourceSequenceFloor(validated.runId, validated.sourceId, sourceSeq)
-                const queued: QueuedEntry = {
-                  runId: validated.runId,
-                  seq,
-                  eventId: makeEventId(validated.runId, validated.sourceId, sourceSeq),
-                  sourceId: validated.sourceId,
-                  sourceSeq,
-                  emittedAtMs,
-                  eventType: validated.eventType,
-                  payloadJson,
-                  metaJson
-                }
-                const commit = yield* insertOne(queued, owner)
-                return { commit, queued, sourceSeq }
-              }))).pipe(
+        Effect.gen(function*() {
+          yield* Effect.annotateCurrentSpan({
+            runId: input.runId,
+            sourceId: input.sourceId,
+            eventType: input.eventType
+          })
+          const emittedAtMs = yield* Clock.currentTimeMillis
+          const prepared = yield* Effect.fromResult(prepare(input, emittedAtMs))
+          const committed = yield* withActiveRunWrite(
+            prepared.validated.runId,
+            allocation.withPermit(
+              Effect.gen(function*() {
+                const { metaJson, payloadJson, validated } = prepared
+                const written = yield* Effect.uninterruptibleMask((restore) =>
+                  restore(writer.write(Effect.gen(function*() {
+                    const key = sourceKey(validated.runId, validated.sourceId)
+                    const sourceSeq: SourceSeq = validated.sourceSeq ??
+                      (Math.max(
+                        yield* nextDurable("source_seq", validated.runId, validated.sourceId),
+                        state.sourceSequences.get(key) ?? 0
+                      ) as SourceSeq)
+                    if (
+                      !Number.isSafeInteger(sourceSeq) ||
+                      sourceSeq < 0 ||
+                      sourceSeq === Number.MAX_SAFE_INTEGER
+                    ) {
+                      return yield* Effect.fail(
+                        error("invalid_event", "journal sequence is outside the allocatable safe integer range")
+                      )
+                    }
+                    const seq = Math.max(
+                      yield* nextDurable("seq", validated.runId, undefined),
+                      state.sequences.get(validated.runId) ?? 0
+                    ) as Seq
+                    if (!Number.isSafeInteger(seq) || seq === Number.MAX_SAFE_INTEGER) {
+                      return yield* Effect.fail(
+                        error("invalid_event", "journal sequence is outside the allocatable safe integer range")
+                      )
+                    }
+                    // Claim the seq NOW, not at commit: a concurrent `emitLossy`
+                    // allocates from this floor alone, and `settleCommit` parks
+                    // the commit-time raise until the outermost COMMIT.
+                    // Re-entering the transaction body is idempotent because the
+                    // floor only rises. An abandoned attempt leaves the number
+                    // unused, which is a gap: allocation is `MAX(seq) + 1` and
+                    // replay is `ORDER BY seq`, so neither reads a gap as anything.
+                    raiseSequenceFloor(validated.runId, seq)
+                    // Claim the producer sequence at the same allocation seam.
+                    // Without this, a lossy emit from the same producer can read
+                    // the pre-transaction source floor and reuse this identity
+                    // while an enclosing `transact` is still open.
+                    raiseSourceSequenceFloor(validated.runId, validated.sourceId, sourceSeq)
+                    const queued: QueuedEntry = {
+                      runId: validated.runId,
+                      seq,
+                      eventId: makeEventId(validated.runId, validated.sourceId, sourceSeq),
+                      sourceId: validated.sourceId,
+                      sourceSeq,
+                      emittedAtMs,
+                      eventType: validated.eventType,
+                      payloadJson,
+                      metaJson
+                    }
+                    const commit = yield* insertOne(queued, fence)
+                    return { commit, queued, sourceSeq }
+                  })))
+                )
                 /**
                  * `writer.write` is a retrying transaction: its body replays on
                  * `SQLITE_BUSY(_SNAPSHOT)` and can still abort at COMMIT after the
@@ -1275,42 +1705,52 @@ export const layer = (
                  * outside `persistBatch`.
                  *
                  * Under `transact` "after the transaction returns" is not yet
-                 * "after COMMIT" — this write is a savepoint of the caller's
-                 * transaction — so `settle` parks both effects until the
-                 * outermost transaction commits.
+                 * "after COMMIT": this write is a savepoint of the caller's
+                 * transaction, so `settleCommit` parks both effects until the
+                 * outermost transaction commits. The run permit is already free,
+                 * which lets automatic compaction take the same run barrier.
                  */
-                Effect.tap(({ commit, queued }) => settleCommit(queued, commit))
+                const maintenance = yield* settleCommit(written.queued, written.commit)
+                const receipt: DurableReceipt = written.commit.inserted
+                  ? { _tag: "Accepted", seq: written.commit.entry.seq, sourceSeq: written.sourceSeq }
+                  : {
+                    _tag: "Duplicate",
+                    seq: written.commit.entry.seq,
+                    sourceSeq: written.sourceSeq,
+                    status: "committed"
+                  }
+                yield* Metric.update(JournalMetrics.durable[receipt._tag], 1)
+                return { maintenance, receipt }
+              }).pipe(
+                Effect.mapError((cause) =>
+                  isJournalError(cause) ? cause : error("sink_failed", "durable journal write failed", cause)
+                )
               )
-            ).pipe(
-              Effect.map(({ commit, sourceSeq }) =>
-                commit.inserted
-                  ? { _tag: "Accepted", seq: commit.entry.seq, sourceSeq } as const
-                  : { _tag: "Duplicate", seq: commit.entry.seq, sourceSeq, status: "committed" } as const
-              ),
-              Effect.tap((receipt) =>
-                Metric.update(JournalMetrics.durable[receipt._tag], 1)
-              ),
-              Effect.mapError((cause) =>
-                isJournalError(cause) ? cause : error("sink_failed", "durable journal write failed", cause)
-              )
-            ))))))
+            )
+          )
+          yield* committed.maintenance
+          return committed.receipt
+        })
 
       const emitDurable: Service["emitDurable"] = Effect.fn("Journal.emitDurable")((
         input: Input,
         owner: OwnerId
       ) =>
-        writeDurable(input, owner)
+        Effect.flatMap(
+          Effect.fromResult(requireFence(owner, "emitDurable")),
+          (fence) => writeDurable(input, fence)
+        )
       )
 
       const emitDurableUnfenced: Service["emitDurableUnfenced"] = Effect.fn("Journal.emitDurableUnfenced")((
         input: Input
-      ) => writeDurable(input, undefined))
+      ) => writeDurable(input, unfenced))
 
       const emitLossy: Service["emitLossy"] = queuedEmit
 
       const checkpointInternal = (
         checkpointOptions: CheckpointOptions,
-        owner: OwnerId | undefined
+        fence: Fence
       ): Effect.Effect<Checkpoint, JournalError> =>
         Effect.gen(function*() {
           yield* Effect.annotateCurrentSpan({
@@ -1324,14 +1764,20 @@ export const layer = (
             return yield* Effect.fail(error("invalid_event", "seq must be a canonical committed sequence"))
           }
           // The state round-trips verbatim: it is replay input, so redaction
-          // deliberately does not apply — rewriting it would resume the run
+          // deliberately does not apply, rewriting it would resume the run
           // with the wrong data. A secret that must not persist belongs in a
           // `Redacted` field of the caller's own state schema.
           const stateJson = yield* Effect.fromResult(encodeJson(checkpointOptions.state, "state"))
+          const receiptState = yield* Schema.decodeUnknownEffect(UnknownFromJsonString)(stateJson).pipe(
+            Effect.mapError(
+              /* v8 ignore next -- encodeJson produced these valid JSON bytes immediately above */
+              (cause) => error("decode_failed", "could not decode persisted checkpoint state", cause)
+            )
+          )
           const createdAtMs = yield* Clock.currentTimeMillis
           return yield* writer.write(Effect.gen(function*() {
-            if (owner !== undefined) {
-              yield* fenceGuard(checkpointOptions.runId, owner)
+            if (fence._tag === "Owned") {
+              yield* fenceGuard(checkpointOptions.runId, fence.owner)
             }
             // The target must be a committed entry: the surviving row is what
             // keeps the run's durable `MAX(seq)` allocation floor at or above
@@ -1367,7 +1813,7 @@ export const layer = (
             return new Checkpoint({
               runId: checkpointOptions.runId,
               seq: checkpointOptions.seq,
-              state: checkpointOptions.state,
+              state: receiptState,
               createdAtMs,
               compactedAtMs: null
             })
@@ -1381,7 +1827,12 @@ export const layer = (
       const checkpoint: Service["checkpoint"] = Effect.fn("Journal.checkpoint")((
         checkpointOptions: CheckpointOptions,
         owner: OwnerId
-      ) => checkpointInternal(checkpointOptions, owner))
+      ) =>
+        Effect.flatMap(
+          Effect.fromResult(requireFence(owner, "checkpoint")),
+          (fence) => checkpointInternal(checkpointOptions, fence)
+        )
+      )
 
       const latestCheckpoint: Service["latestCheckpoint"] = Effect.fn("Journal.latestCheckpoint")((runId: RunId) =>
         Effect.gen(function*() {
@@ -1395,7 +1846,7 @@ export const layer = (
             WHERE run_id = ${runId}
             ORDER BY seq DESC
             LIMIT 1
-          `.pipe(Effect.mapError((cause) => error("unknown", "durable checkpoint read failed", cause)))
+          `.pipe(Effect.mapError((cause) => error("read_failed", "durable checkpoint read failed", cause)))
           const row = rows[0]
           return row === undefined ? Option.none() : Option.some(yield* decodeCheckpointRow(row))
         })
@@ -1403,7 +1854,7 @@ export const layer = (
 
       const compactInternal = (
         compactOptions: CompactOptions,
-        owner: OwnerId | undefined
+        fence: Fence
       ): Effect.Effect<Compacted, JournalError> =>
         Effect.gen(function*() {
           yield* Effect.annotateCurrentSpan({
@@ -1414,81 +1865,84 @@ export const layer = (
             return yield* Effect.fail(error("invalid_event", "runId must not be empty"))
           }
           const compactedAtMs = yield* Clock.currentTimeMillis
-          return yield* writer.write(Effect.gen(function*() {
-            if (owner !== undefined) {
-              yield* fenceGuard(compactOptions.runId, owner)
-            }
-            const upTo = compactOptions.upTo
-            const rows = upTo === undefined
-              ? yield* sql<CheckpointRow>`
+          return yield* withCompactionBarrier(
+            compactOptions.runId,
+            writer.write(Effect.gen(function*() {
+              if (fence._tag === "Owned") {
+                yield* fenceGuard(compactOptions.runId, fence.owner)
+              }
+              const upTo = compactOptions.upTo
+              const rows = upTo === undefined
+                ? yield* sql<CheckpointRow>`
                 SELECT run_id, seq, state_json, created_at_ms, compacted_at_ms
                 FROM flows_journal_checkpoints
                 WHERE run_id = ${compactOptions.runId}
                 ORDER BY seq DESC
                 LIMIT 1
               `
-              : yield* sql<CheckpointRow>`
+                : yield* sql<CheckpointRow>`
                 SELECT run_id, seq, state_json, created_at_ms, compacted_at_ms
                 FROM flows_journal_checkpoints
                 WHERE run_id = ${compactOptions.runId} AND seq = ${upTo}
               `
-            const row = rows[0]
-            if (row === undefined) {
-              return yield* Effect.fail(error(
-                "checkpoint_invalid",
-                `run ${compactOptions.runId} has no checkpoint${
-                  upTo === undefined ? "" : ` at sequence ${upTo}`
-                } to compact to`
-              ))
-            }
-            const checkpointSeq = Number(row.seq) as Seq
-            if (row.compacted_at_ms !== null) {
-              // A retried compaction: the floor is already here and the rows
-              // below it are already gone.
-              return { runId: compactOptions.runId, checkpointSeq, deleted: 0 } satisfies Compacted
-            }
-            for (const reader of readers.get(compactOptions.runId) ?? []) {
-              if (reader.cursor < checkpointSeq - 1) {
-                return yield* Effect.fail(
-                  new JournalError({
-                    code: "reader_behind",
-                    message:
-                      `a live stream of run ${compactOptions.runId} still needs sequences below checkpoint ${checkpointSeq}`,
-                    checkpointSeq
-                  })
-                )
+              const row = rows[0]
+              if (row === undefined) {
+                return yield* Effect.fail(error(
+                  "checkpoint_invalid",
+                  `run ${compactOptions.runId} has no checkpoint${
+                    upTo === undefined ? "" : ` at sequence ${upTo}`
+                  } to compact to`
+                ))
               }
-            }
-            const doomed = yield* sql<{ readonly total: number }>`
+              const checkpointSeq = Number(row.seq) as Seq
+              if (row.compacted_at_ms !== null) {
+                // A retried compaction: the floor is already here and the rows
+                // below it are already gone.
+                return { runId: compactOptions.runId, checkpointSeq, deleted: 0 } satisfies Compacted
+              }
+              for (const reader of readers.get(compactOptions.runId) ?? []) {
+                if (reader.cursor < checkpointSeq - 1) {
+                  return yield* Effect.fail(
+                    new JournalError({
+                      code: "reader_behind",
+                      message:
+                        `a live stream of run ${compactOptions.runId} still needs sequences below checkpoint ${checkpointSeq}`,
+                      checkpointSeq
+                    })
+                  )
+                }
+              }
+              const doomed = yield* sql<{ readonly total: number }>`
               SELECT COUNT(*) AS total FROM flows_journal_events
               WHERE run_id = ${compactOptions.runId} AND seq < ${checkpointSeq}
             `
-            // Strictly below the checkpoint: the checkpointed entry survives,
-            // holding the run's `MAX(seq)` allocation floor. Superseded
-            // checkpoints go with their entries; the truncation and the floor
-            // advance are one transaction, so a crash between them is
-            // unrepresentable.
-            yield* sql`
+              // Strictly below the checkpoint: the checkpointed entry survives,
+              // holding the run's `MAX(seq)` allocation floor. Superseded
+              // checkpoints go with their entries; the truncation and the floor
+              // advance are one transaction, so a crash between them is
+              // unrepresentable.
+              yield* sql`
               DELETE FROM flows_journal_events
               WHERE run_id = ${compactOptions.runId} AND seq < ${checkpointSeq}
             `
-            yield* sql`
+              yield* sql`
               DELETE FROM flows_journal_checkpoints
               WHERE run_id = ${compactOptions.runId} AND seq < ${checkpointSeq}
             `
-            yield* sql`
+              yield* sql`
               UPDATE flows_journal_checkpoints
               SET compacted_at_ms = ${compactedAtMs}
               WHERE run_id = ${compactOptions.runId} AND seq = ${checkpointSeq}
             `
-            return {
-              runId: compactOptions.runId,
-              checkpointSeq,
-              deleted: Number(doomed[0]?.total ?? 0)
-            } satisfies Compacted
-          })).pipe(
-            Effect.mapError((cause) =>
-              isJournalError(cause) ? cause : error("sink_failed", "journal compaction failed", cause)
+              return {
+                runId: compactOptions.runId,
+                checkpointSeq,
+                deleted: Number(doomed[0]?.total ?? 0)
+              } satisfies Compacted
+            })).pipe(
+              Effect.mapError((cause) =>
+                isJournalError(cause) ? cause : error("sink_failed", "journal compaction failed", cause)
+              )
             )
           )
         })
@@ -1496,7 +1950,12 @@ export const layer = (
       const compact: Service["compact"] = Effect.fn("Journal.compact")((
         compactOptions: CompactOptions,
         owner: OwnerId
-      ) => compactInternal(compactOptions, owner))
+      ) =>
+        Effect.flatMap(
+          Effect.fromResult(requireFence(owner, "compact")),
+          (fence) => compactInternal(compactOptions, fence)
+        )
+      )
 
       const compactionPolicy = options.compaction
       const compactionCounts = new Map<RunId, number>()
@@ -1512,9 +1971,9 @@ export const layer = (
 
       /**
        * One automatic checkpoint-and-compact attempt at the run's durable
-       * tail. Runs post-commit; a failure or refusal is logged and damped —
+       * tail. Runs post-commit; a failure or refusal is logged and damped,
        * the counter restarts, so the next attempt waits for another
-       * `entryThreshold` commits — and is never surfaced to the emit whose
+       * `entryThreshold` commits, and is never surfaced to the emit whose
        * settlement crossed the threshold.
        */
       const policyCompact = (policy: CompactionPolicy, runId: RunId): Effect.Effect<void> =>
@@ -1527,17 +1986,25 @@ export const layer = (
             return
           }
           const upTo = Number(last) as Seq
-          const captured = yield* policy.capture(runId, upTo)
+          const captured = yield* Effect.timeoutOrElse(policy.capture(runId, upTo), {
+            duration: compactionCaptureTimeout,
+            orElse: () =>
+              Effect.fail(
+                new Error(
+                  `journal compaction capture for run ${runId} exceeded ${compactionCaptureTimeout}`
+                )
+              )
+          })
           // The policy is the journal's OWN post-commit maintenance, not a
           // caller's mutating entrypoint: it owns no run and holds no fence,
           // so it drives the internal channel. The attempt only ever
           // truncates below a tail the run's own commits produced, a retry is
           // idempotent (a re-attempt after a reclaim compacts the same
           // committed prefix the live owner also sees), and every failure is
-          // damped below — never surfaced to the emit that crossed the
+          // damped below, never surfaced to the emit that crossed the
           // threshold.
-          yield* checkpointInternal({ runId, seq: upTo, state: captured }, undefined)
-          yield* compactInternal({ runId, upTo }, undefined)
+          yield* checkpointInternal({ runId, seq: upTo, state: captured }, unfenced)
+          yield* compactInternal({ runId, upTo }, unfenced)
           compactionCounts.set(runId, yield* countEntries(runId))
         }).pipe(
           Effect.catchCause((cause) =>
@@ -1558,7 +2025,7 @@ export const layer = (
        * triggers an attempt at the threshold.
        *
        * The count is seeded lazily from the durable COUNT on the run's first
-       * committed entry in this process — mirroring `ensureFloors` — so a
+       * committed entry in this process, mirroring `ensureFloors`, so a
        * restarted process still compacts a long pre-existing history. The
        * durable COUNT already includes the rows the caller is reporting: they
        * committed before this settlement ran.
@@ -1595,12 +2062,9 @@ export const layer = (
       }
 
       const recordCommits = (
-        batch: ReadonlyArray<QueuedEntry>,
-        commits: ReadonlyArray<Commit>
+        commits: ReadonlyArray<SettledCommit>
       ): void => {
-        for (let index = 0; index < commits.length; index++) {
-          const queued = batch[index]!
-          const commit = commits[index]!
+        for (const { commit, queued } of commits) {
           retain(
             sourceEventKey(queued.runId, queued.sourceId, queued.sourceSeq),
             {
@@ -1621,11 +2085,8 @@ export const layer = (
         }
       }
 
-      // `lost` is the size of the batch this failure destroyed. The writer
-      // survives a failed batch, so only that batch leaves the pending set;
-      // entries queued behind it are still undrained and a later flush must
-      // keep waiting for them rather than vouch for unpersisted work.
-      const failSink = (cause: JournalError, batch: ReadonlyArray<QueuedEntry>): void => {
+      /** Reports entries that left the queue without durable commits. */
+      const reportLoss = (cause: JournalError, batch: ReadonlyArray<QueuedEntry>): void => {
         for (const queued of batch) {
           const identity = sourceEventKey(queued.runId, queued.sourceId, queued.sourceSeq)
           // Allocation is serialized until this batch settles, so no newer
@@ -1649,31 +2110,49 @@ export const layer = (
         }
       }
 
+      // A failed transaction loses the whole batch. Release its per-run drain
+      // counts before reporting the failure so a waiting compactor can retry
+      // against the same database outage instead of waiting forever.
+      const failSink = (cause: JournalError, batch: ReadonlyArray<QueuedEntry>): void => {
+        settleRunPending(batch)
+        reportLoss(cause, batch)
+      }
+
       // One failed batch loses that batch and is reported as such; it never
       // ends the writer. Only interruption (scope closure) stops the loop, so
       // the queue keeps draining as soon as the database is healthy again.
       const writeBatch = Queue.takeBetween(queue, 1, batchSize).pipe(
         Effect.flatMap((batch) =>
           persistBatch(batch).pipe(
-            Effect.tap((commits) => Effect.sync(() => recordCommits(batch, commits))),
-            Effect.tap(publish),
+            Effect.tap((outcome) => Effect.sync(() => recordCommits(outcome.commits))),
+            Effect.tap((outcome) => publish(outcome.commits.map(({ commit }) => commit))),
+            // The transaction has committed and publication is complete. Drop
+            // the barrier counts before policy compaction takes this run's
+            // permit, while the global flush count still waits for the policy.
+            Effect.tap(() => Effect.sync(() => settleRunPending(batch))),
             // The policy runs BEFORE the batch settles so a `flush` barrier
             // does not return while an auto-compaction it triggered is still
             // in flight.
-            Effect.tap((commits) => {
+            Effect.tap((outcome) => {
               const perRun = new Map<RunId, number>()
-              commits.forEach((commit, index) => {
+              outcome.commits.forEach(({ commit, queued }) => {
                 if (!commit.inserted) {
                   return
                 }
-                const queued = batch[index]!
                 perRun.set(queued.runId, (perRun.get(queued.runId) ?? 0) + 1)
               })
               return Effect.forEach(perRun, ([runId, committed]) => noteCommitted(runId, committed), {
                 discard: true
               })
             }),
-            Effect.tap(() => Effect.sync(() => settle(batch.length))),
+            Effect.tap((outcome) =>
+              Effect.sync(() => {
+                for (const loss of outcome.losses) {
+                  reportLoss(loss.cause, [loss.queued])
+                }
+                settle(outcome.commits.length)
+              })
+            ),
             Effect.catch((cause) => Effect.sync(() => failSink(cause, batch))),
             // Defects only: an interruption is scope closure, and it must end
             // the writer rather than be reported as a lost batch.

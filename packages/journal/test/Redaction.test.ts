@@ -30,6 +30,95 @@ const journalLayer = (options?: SqlJournal.SqlJournalOptions) =>
 const effect = <E>(name: string, body: () => Effect.Effect<void, E>) =>
   it.effect(name, () => body().pipe(Effect.provide(TestClock.layer())))
 
+const nestedValue = (depth: number, leaf: unknown = "leaf"): unknown => {
+  let value = leaf
+  for (let index = 0; index < depth; index++) value = { nested: value }
+  return value
+}
+
+interface RedactionHazard {
+  readonly id: string
+  readonly field: "payload" | "meta"
+  readonly make: (secret: string) => unknown
+}
+
+const redactionHazards: ReadonlyArray<RedactionHazard> = [
+  {
+    id: "throwing-getter-payload",
+    field: "payload",
+    make: (secret) => ({
+      visible: secret,
+      get boom(): never {
+        throw new Error("getter blew up")
+      }
+    })
+  },
+  {
+    id: "throwing-getter-meta",
+    field: "meta",
+    make: (secret) => ({
+      visible: secret,
+      get boom(): never {
+        throw new Error("getter blew up")
+      }
+    })
+  },
+  {
+    id: "hostile-proxy",
+    field: "payload",
+    make: (secret) =>
+      new Proxy({ visible: secret }, {
+        ownKeys: () => {
+          throw new Error("ownKeys blew up")
+        }
+      })
+  },
+  {
+    id: "throwing-to-json",
+    field: "payload",
+    make: (secret) => ({
+      visible: secret,
+      toJSON: () => {
+        throw new Error("toJSON blew up")
+      }
+    })
+  },
+  {
+    id: "excessive-depth",
+    field: "payload",
+    make: (secret) => nestedValue(Redaction.maxDepth + 1, secret)
+  }
+]
+
+const assertHazardFailures = (channel: "durable" | "lossy"): Effect.Effect<void, unknown, Journal> =>
+  Effect.gen(function*() {
+    const journal = yield* Journal
+    for (const hazard of redactionHazards) {
+      const secret = `secret-${channel}-${hazard.id}`
+      const run = runId(`${channel}-${hazard.id}`)
+      const hostile = hazard.make(secret)
+      const bad = hazard.field === "payload"
+        ? input(run, sourceId("hostile"), "hostile", hostile)
+        : input(run, sourceId("hostile"), "hostile", { safe: true }, hostile)
+      const failure = yield* Effect.flip(
+        channel === "durable" ? journal.emitDurableUnfenced(bad) : journal.emitLossy(bad)
+      )
+      expect(failure.code).toBe("invalid_event")
+      expect(failure.message).toBe(`${hazard.field} could not be redacted`)
+      expect(JSON.stringify(failure)).not.toContain(secret)
+
+      const good = input(run, sourceId("healthy"), "healthy", { status: "ok" })
+      if (channel === "durable") {
+        yield* journal.emitDurableUnfenced(good)
+      } else {
+        yield* journal.emitLossy(good)
+        yield* journal.flush
+      }
+      const page = yield* journal.entries({ runId: run, limit: 10 })
+      expect(page.entries.map((entry) => entry.payload)).toEqual([{ status: "ok" }])
+    }
+  })
+
 describe("Redaction", () => {
   it("redacts credential-named fields wholesale", () => {
     expect(
@@ -54,6 +143,78 @@ describe("Redaction", () => {
     })
   })
 
+  it.each([
+    ["GitHub token", "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345", Redaction.placeholder],
+    ["GitHub fine-grained token", "github_pat_11ABCDEFG0abcdefghijklmnop", Redaction.placeholder],
+    ["AWS access key", "AKIAIOSFODNN7EXAMPLE", Redaction.placeholder],
+    ["Slack token", "xoxb-123456789012-123456789012-abcdefghijkl", Redaction.placeholder],
+    ["Google API key", "AIzaSyA1234567890abcdefghijklmnopqrstuvw", Redaction.placeholder],
+    [
+      "URL password",
+      "postgres://admin:hunter2@db.internal:5432/app",
+      `postgres://admin:${Redaction.placeholder}@db.internal:5432/app`
+    ],
+    [
+      "embedded JSON token",
+      `log line: {"apiToken":"abcd1234efgh5678"}`,
+      `log line: {"apiToken":"${Redaction.placeholder}"}`
+    ],
+    ["double-quoted assignment", `PASSWORD="dummy secret"`, `PASSWORD=${Redaction.placeholder}`],
+    ["single-quoted assignment", `TOKEN='dummy secret'`, `TOKEN=${Redaction.placeholder}`],
+    ["Bearer token with plus and padding", "Bearer abcdefgh+SENSITIVE==", "Bearer [REDACTED_TOKEN]"],
+    ["Bearer token with the full b64token alphabet", "Bearer ab/cd+ef~gh=", "Bearer [REDACTED_TOKEN]"]
+  ])("redacts a %s", (_name, source, expected) => {
+    expect(Redaction.redact(source)).toBe(expected)
+  })
+
+  it("redacts mixed credential shapes in one string", () => {
+    const source =
+      "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345 AKIAIOSFODNN7EXAMPLE Bearer ab/cd+ef~gh= postgres://admin:hunter2@db.internal/app"
+    expect(Redaction.redact(source)).toBe(
+      `${Redaction.placeholder} ${Redaction.placeholder} Bearer [REDACTED_TOKEN] postgres://admin:${Redaction.placeholder}@db.internal/app`
+    )
+  })
+
+  it("preserves adjacent punctuation and redacts a one-character assignment", () => {
+    expect(Redaction.redact("(ghp_ABCDEFGHIJKLMNOPQRST), xoxb-1234567890.; TOKEN=x!"))
+      .toBe(`(${Redaction.placeholder}), ${Redaction.placeholder}.; TOKEN=${Redaction.placeholder}`)
+  })
+
+  it.each([
+    ["provider API key", "sk-1234567", "sk-12345678"],
+    ["Bearer token", "Bearer abc", "Bearer ab/c"],
+    ["GitHub token", `ghp_${"A".repeat(19)}`, `ghp_${"A".repeat(20)}`],
+    ["GitHub fine-grained token", `github_pat_${"A".repeat(19)}`, `github_pat_${"A".repeat(20)}`],
+    ["AWS access key", `AKIA${"A".repeat(15)}`, `AKIA${"A".repeat(16)}`],
+    ["Slack token", `xoxb-${"A".repeat(9)}`, `xoxb-${"A".repeat(10)}`],
+    ["Google API key", `AIza${"A".repeat(34)}`, `AIza${"A".repeat(35)}`]
+  ])("enforces the %s minimum on both sides", (_name, below, boundary) => {
+    expect(Redaction.redact(below)).toBe(below)
+    expect(Redaction.redact(boundary)).not.toBe(boundary)
+  })
+
+  it("covers every incident-derived textual rule used by Bug.ts", () => {
+    // packages/cli/src/Bug.ts is the source of truth. These literals cover
+    // every scrubText rule without importing the CLI into the journal package.
+    const bugScrubSamples = [
+      "postgres://admin:hunter2@db.internal:5432/app",
+      "Authorization: Bearer ab/cd+ef~gh=",
+      "sk-abcdefgh",
+      "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345",
+      "github_pat_11ABCDEFG0abcdefghijklmnop",
+      "AKIAIOSFODNN7EXAMPLE",
+      "xoxb-123456789012-123456789012-abcdefghijkl",
+      "AIzaSyA1234567890abcdefghijklmnopqrstuvw",
+      `SERVICE_CREDENTIAL="dummy secret"`,
+      `log line: {"apiToken":"abcd1234efgh5678"}`
+    ]
+    for (const sample of bugScrubSamples) expect(Redaction.redact(sample)).not.toBe(sample)
+  })
+
+  it("keeps every built-in textual rule global", () => {
+    expect(Redaction.defaultRules.every((rule) => rule.pattern.flags.includes("g"))).toBe(true)
+  })
+
   it("leaves non-credential data untouched and survives cycles", () => {
     const cyclic: Record<string, unknown> = { count: 3, flag: false, text: "plain" }
     cyclic["self"] = cyclic
@@ -63,6 +224,39 @@ describe("Redaction", () => {
       text: "plain",
       self: "[Circular]"
     })
+  })
+
+  it("mirrors JSON.stringify for Date and callable toJSON values", () => {
+    const instant = "2020-01-01T00:00:00.000Z"
+    const date = new Date(instant)
+    expect(Redaction.redact(date)).toBe(instant)
+    expect(Redaction.redact({ at: date, n: 1 })).toEqual({ at: instant, n: 1 })
+
+    const own = {
+      ignored: true,
+      toJSON: () => ({ note: "Bearer abcdefgh" })
+    }
+    expect(Redaction.redact(own)).toEqual({ note: "Bearer [REDACTED_TOKEN]" })
+
+    const prototype = { toJSON: () => ({ note: "sk-abcdefgh" }) }
+    const inherited = Object.assign(Object.create(prototype) as Record<string, unknown>, { ignored: true })
+    expect(Redaction.redact(inherited)).toEqual({ note: "[REDACTED_API_KEY]" })
+
+    const selfReturning: { toJSON?: () => unknown } = {}
+    selfReturning.toJSON = () => selfReturning
+    expect(Redaction.redact(selfReturning)).toBe("[Circular]")
+
+    const callable = Object.assign(() => "ignored", { toJSON: () => ({ safe: 1 }) })
+    expect(Redaction.redact(callable)).toEqual({ safe: 1 })
+    const plainCallable = () => "kept"
+    expect(Redaction.redact(plainCallable)).toBe(plainCallable)
+  })
+
+  it("accepts a value at the depth bound and rejects one beyond it", () => {
+    expect(() => Redaction.redact(nestedValue(Redaction.maxDepth))).not.toThrow()
+    expect(() => Redaction.redact(nestedValue(Redaction.maxDepth + 1))).toThrow(
+      `redaction depth exceeds ${Redaction.maxDepth}`
+    )
   })
 
   it("keeps a literal __proto__ member a member", () => {
@@ -101,6 +295,17 @@ describe("Redaction", () => {
         prompt: "call with Bearer [REDACTED_TOKEN]"
       })
       expect(entry.meta).toEqual({ authorization: Redaction.placeholder })
+    }).pipe(Effect.provide(journalLayer()), Effect.scoped))
+
+  effect("persists a Date through its JSON representation", () =>
+    Effect.gen(function*() {
+      const journal = yield* Journal
+      const run = runId("redaction-date")
+      yield* journal.emitDurableUnfenced(
+        input(run, sourceId("action"), "dated", { at: new Date("2020-01-01T00:00:00.000Z"), n: 1 })
+      )
+      const page = yield* journal.entries({ runId: run, limit: 10 })
+      expect(page.entries[0]!.payload).toEqual({ at: "2020-01-01T00:00:00.000Z", n: 1 })
     }).pipe(Effect.provide(journalLayer()), Effect.scoped))
 
   effect("never persists a secret through the lossy queue either", () =>
@@ -159,15 +364,69 @@ describe("Redaction", () => {
     expect(rules.map((rule) => rule.pattern.lastIndex)).toEqual([0, 0])
   })
 
-  it("redactJsonString returns the input when it cannot re-encode it", () => {
+  it.each([
+    ["a match without an equals sign", "my ssn is 123-45-6789", /\d{3}-\d{2}-\d{4}/g, "my ssn is [REDACTED]"],
+    ["a match with several equals signs", "value=a=b=c", /value=a=b=c/g, Redaction.placeholder]
+  ])("replaces the whole custom-rule match when replace is omitted: %s", (_name, source, pattern, expected) => {
+    expect(Redaction.redact(source, { rules: [{ id: "whole", pattern }] })).toBe(expected)
+  })
+
+  it("normalizes a non-global custom rule once and redacts every match", () => {
+    const pattern = /secretvalue/
+    expect(
+      Redaction.redact("secretvalue and secretvalue", {
+        rules: [{ id: "non-global", pattern, replace: "[X]" }]
+      })
+    ).toBe("[X] and [X]")
+    expect(pattern.lastIndex).toBe(0)
+  })
+
+  it("adds global behavior to a sticky custom rule without discarding stickiness", () => {
+    const pattern = /secret/y
+    expect(
+      Redaction.redact("secretsecret tail", {
+        rules: [{ id: "sticky", pattern, replace: "[X]" }]
+      })
+    ).toBe("[X][X] tail")
+    expect(pattern.lastIndex).toBe(0)
+  })
+
+  it("redactJsonString passes through only input that is not valid JSON", () => {
     expect(Redaction.redactJsonString("{ not json", Redaction.make())).toBe("{ not json")
-    // A redactor that drops the value entirely has nothing to encode; the
-    // caller's already-validated JSON is kept rather than corrupted.
-    expect(Redaction.redactJsonString(`{"a":1}`, () => undefined)).toBe(`{"a":1}`)
     expect(Redaction.redactJsonString(`{"token":"raw"}`, Redaction.make())).toBe(
       `{"token":"${Redaction.placeholder}"}`
     )
   })
+
+  it("redactJsonString fails closed after valid JSON has parsed", () => {
+    const secret = "s3cr3t-a5"
+    const inputJson = JSON.stringify({ password: secret })
+    const cycle: Record<string, unknown> = {}
+    cycle["self"] = cycle
+    const failingRedactors: ReadonlyArray<readonly [string, Redaction.Redactor]> = [
+      ["throws", () => {
+        throw new Error("redactor blew up")
+      }],
+      ["returns BigInt", () => ({ big: 1n })],
+      ["returns a cycle", () => cycle],
+      ["returns an unencodable value", () => undefined]
+    ]
+    for (const [name, redactor] of failingRedactors) {
+      const result = Redaction.redactJsonString(inputJson, redactor)
+      expect(result, name).toBe(JSON.stringify(Redaction.placeholder))
+      expect(result, name).not.toContain(secret)
+    }
+  })
+
+  effect(
+    "maps durable redaction hazards to typed failures and stays usable",
+    () => assertHazardFailures("durable").pipe(Effect.provide(journalLayer()), Effect.scoped)
+  )
+
+  effect(
+    "maps lossy redaction hazards to typed failures and stays usable",
+    () => assertHazardFailures("lossy").pipe(Effect.provide(journalLayer()), Effect.scoped)
+  )
 
   effect("keeps payloads verbatim when redaction is disabled", () =>
     Effect.gen(function*() {

@@ -1,9 +1,9 @@
 /**
- * Durable journal services — the immutable event history and nothing else.
+ * Durable journal services: the immutable event history and nothing else.
  *
  * Run and attempt state live in `@smthrs/run-store`, sealed step results in
  * `@smthrs/step-cache`, and the durable deferred/clock tables in
- * `@smthrs/engine-store`; see `docs/specs/Concepts/Journal Split.md`.
+ * `@smthrs/engine-store`; see `docs/pages/architecture/package-map.md`.
  *
  * This entry point is browser-bundleable: every service here is written
  * against the driver-neutral `@smthrs/database` contract. The test doubles,

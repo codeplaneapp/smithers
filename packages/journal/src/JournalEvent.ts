@@ -1,27 +1,56 @@
 /**
  * Durable event-envelope schemas for the journal.
  *
- * Governing design: `docs/specs/Concepts/Journal Queue.md`.
+ * Governing design: `docs/pages/concepts/journal.md`.
  *
  * @since 0.1.0
  */
 import * as Schema from "effect/Schema"
 
 /**
+ * A UTF-16 surrogate with no partner: a high surrogate not followed by a low
+ * one, or a low surrogate not preceded by a high one. `String.isWellFormed`
+ * answers the same question but needs the ES2024 lib, which this package does
+ * not target.
+ */
+const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+/**
+ * A persistable identifier: non-empty, and representable in the store.
+ *
+ * SQLite binds a lone UTF-16 surrogate as U+FFFD, so two ill-formed
+ * identifiers that differ only in their surrogates land on ONE persisted key.
+ * The second run's first event then dedupes into the first run's row and reads
+ * by either id return the same history, which destroys run isolation at the
+ * persistence boundary. Rejecting ill-formed text at the schema keeps the
+ * identifier the caller decoded and the identifier the database stores the
+ * same value.
+ *
+ * The empty string is rejected for a plainer reason: it names nothing, and the
+ * journal used to accept it at decode and then reject it at the service, so a
+ * caller could hold a "valid" identifier the next call refused.
+ */
+const identifier = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.makeFilter((value: string) => !loneSurrogate.test(value), { title: "wellFormedIdentifier" })
+)
+
+/**
  * Schema for an identifier of one durable run.
+ *
+ * Non-empty and free of unpaired UTF-16 surrogates, because the store cannot
+ * tell two ill-formed identifiers apart.
  *
  * @category schemas
  * @since 0.1.0
- * @slop
  */
-export const RunId = Schema.String.pipe(Schema.brand("@smthrs/journal/JournalEvent/RunId"))
+export const RunId = identifier.pipe(Schema.brand("@smthrs/journal/JournalEvent/RunId"))
 
 /**
  * Branded identifier of one durable run.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type RunId = typeof RunId.Type
 
@@ -30,7 +59,6 @@ export type RunId = typeof RunId.Type
  *
  * @category schemas
  * @since 0.1.0
- * @slop
  */
 export const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
   Schema.brand("@smthrs/journal/JournalEvent/Seq")
@@ -41,25 +69,25 @@ export const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Seq = typeof Seq.Type
 
 /**
  * Schema for an event producer identifier.
  *
+ * Non-empty and free of unpaired UTF-16 surrogates, on the same terms as
+ * `RunId`: the pair identifies a producer's retries in the database.
+ *
  * @category schemas
  * @since 0.1.0
- * @slop
  */
-export const SourceId = Schema.String.pipe(Schema.brand("@smthrs/journal/JournalEvent/SourceId"))
+export const SourceId = identifier.pipe(Schema.brand("@smthrs/journal/JournalEvent/SourceId"))
 
 /**
  * Identifier of an event producer.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type SourceId = typeof SourceId.Type
 
@@ -68,7 +96,6 @@ export type SourceId = typeof SourceId.Type
  *
  * @category schemas
  * @since 0.1.0
- * @slop
  */
 export const SourceSeq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
   Schema.brand("@smthrs/journal/JournalEvent/SourceSeq")
@@ -79,7 +106,6 @@ export const SourceSeq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type SourceSeq = typeof SourceSeq.Type
 
@@ -91,13 +117,12 @@ export type SourceSeq = typeof SourceSeq.Type
  *
  * @category schemas
  * @since 0.1.0
- * @slop
  */
 export class Input extends Schema.Class<Input>("@smthrs/journal/JournalEvent/Input")({
   runId: RunId,
   sourceId: SourceId,
   sourceSeq: Schema.optional(SourceSeq),
-  eventType: Schema.String,
+  eventType: identifier,
   payload: Schema.Unknown,
   meta: Schema.optional(Schema.Unknown)
 }) {}
@@ -111,7 +136,6 @@ export class Input extends Schema.Class<Input>("@smthrs/journal/JournalEvent/Inp
  *
  * @category schemas
  * @since 0.1.0
- * @slop
  */
 export class Entry extends Schema.Class<Entry>("@smthrs/journal/JournalEvent/Entry")({
   runId: RunId,
@@ -135,7 +159,6 @@ export class Entry extends Schema.Class<Entry>("@smthrs/journal/JournalEvent/Ent
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const makeEventId = (runId: RunId, sourceId: SourceId, sourceSeq: SourceSeq): string =>
   `flows:event:${runId.length}:${runId}${sourceId.length}:${sourceId}${sourceSeq}`

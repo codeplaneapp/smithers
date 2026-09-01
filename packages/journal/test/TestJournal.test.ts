@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Exit } from "effect"
 import { Journal, type JournalError } from "../src/Journal.ts"
-import { type RunId, type SourceId, type SourceSeq } from "../src/JournalEvent.ts"
+import { type RunId, type Seq, type SourceId, type SourceSeq } from "../src/JournalEvent.ts"
 import * as TestJournal from "../src/test/TestJournal.ts"
 
 describe("TestJournal", () => {
@@ -96,5 +96,47 @@ describe("TestJournal", () => {
         _tag: "Accepted",
         evicted: { policy: "drop-oldest", count: 1 }
       })
+    }))
+
+  it.effect("forwards the redactor, the index bound, and the compaction policy", () =>
+    Effect.gen(function*() {
+      // Each of these three options is observable only through the bundle:
+      // a suite that cannot reach them has to hand-assemble SqlJournal.layer
+      // over Migrations and TestDatabase, which is the stack this bundle
+      // exists to hide.
+      const captures: Array<number> = []
+      const run = "forwarded-run" as RunId
+      const source = "forwarded-source" as SourceId
+      const entries = yield* Effect.gen(function*() {
+        const journal = yield* Journal
+        for (let index = 0; index < 4; index++) {
+          yield* journal.emitDurableUnfenced({
+            runId: run,
+            sourceId: source,
+            sourceSeq: index as SourceSeq,
+            eventType: "forwarded",
+            payload: { apiKey: `sk-secret-${index}` }
+          })
+        }
+        // Reading from the start would fail `compacted`: the policy already
+        // truncated everything below sequence 3.
+        return yield* journal.entries({ runId: run, after: 2 as Seq, limit: 10 })
+      }).pipe(
+        Effect.provide(TestJournal.layer({
+          sourceEventCache: 1,
+          redact: (value) => value,
+          compaction: {
+            entryThreshold: 4,
+            capture: (_runId, upTo) => Effect.sync(() => (captures.push(upTo), { upTo }))
+          }
+        })),
+        Effect.scoped
+      )
+
+      // `redact` was the identity, so the credential survived verbatim. The
+      // default redactor would have replaced it with a placeholder.
+      expect(entries.entries.map((entry) => entry.payload)).toEqual([{ apiKey: "sk-secret-3" }])
+      // The policy fired at its threshold and captured the run's durable tail.
+      expect(captures).toEqual([3])
     }))
 })

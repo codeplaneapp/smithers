@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { DurableWriter } from "@smthrs/database/DurableWriter"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Deferred, Effect, Layer } from "effect"
+import { Deferred, Effect, Layer, PubSub } from "effect"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as Statement from "effect/unstable/sql/Statement"
@@ -140,10 +140,10 @@ describe("SqlJournal source-event retention", () => {
       expect(load).toBeDefined()
       expect(load).toContain("LIMIT")
       // The retained window answers from memory; everything older falls through
-      // to the durable duplicate check in the writer.
+      // to the synchronous durable duplicate check before admission.
       expect(receipts.newest._tag).toBe("Duplicate")
-      expect(receipts.oldest._tag).toBe("Accepted")
-      // The fall-through never duplicates a durable row.
+      expect(receipts.oldest._tag).toBe("Duplicate")
+      // The fall-through returns the original receipt and never duplicates a row.
       expect(yield* eventCount).toBe(6)
     }))
 
@@ -164,7 +164,7 @@ describe("SqlJournal source-event retention", () => {
         Effect.scoped
       )
       expect(receipts.newest._tag).toBe("Duplicate")
-      expect(receipts.oldest._tag).toBe("Accepted")
+      expect(receipts.oldest._tag).toBe("Duplicate")
       expect(yield* eventCount).toBe(5)
     }))
 
@@ -295,76 +295,235 @@ describe("SqlJournal allocation-floor index bounds (B9)", () => {
     }))
 })
 
-/**
- * The JSDoc on `sourceEventCache` (SqlJournal.ts:60-71) states that bounding the
- * in-process index is safe because "the writer's `insertOne` always re-checks
- * `flows_journal_events` under the `(run_id, source_id, source_seq)` unique
- * constraint, so an evicted entry re-emitted later is still deduplicated
- * durably and still reports an `idempotency_conflict` on changed content."
- *
- * The neighbouring cells drive eviction and observe the in-memory miss. Neither
- * drives the eviction and the re-emission *through the writer*, which is where
- * that claim is actually implemented — so the bound's safety argument rested on
- * an unasserted durable re-check.
- */
-describe("SqlJournal durable dedup behind an evicted index entry", () => {
-  effect("deduplicates an evicted source event durably on re-emission", () =>
+describe("SqlJournal canonical idempotency fingerprints", () => {
+  const ordered = (sequence: number, reverse: boolean): Input =>
+    new Input({
+      runId: run,
+      sourceId: source,
+      sourceSeq: sourceSeq(sequence),
+      eventType: "canonical",
+      payload: reverse
+        ? { z: 1, nested: { y: 2, x: 3 }, a: 4 }
+        : { a: 4, nested: { x: 3, y: 2 }, z: 1 },
+      meta: reverse ? { second: 2, first: 1 } : { first: 1, second: 2 }
+    }, { disableChecks: true })
+
+  effect("deduplicates reordered payloads and metadata on both channels", () =>
     Effect.gen(function*() {
-      const total = yield* Effect.gen(function*() {
+      yield* Effect.gen(function*() {
         const service = yield* Journal
-        for (let index = 0; index < 5; index++) {
-          yield* service.emitLossy(input(index))
-        }
+        const durable = yield* service.emitDurableUnfenced(ordered(100, true))
+        expect(yield* service.emitDurableUnfenced(ordered(100, false))).toEqual({
+          _tag: "Duplicate",
+          seq: durable.seq,
+          sourceSeq: 100,
+          status: "committed"
+        })
+
+        const lossy = yield* service.emitLossy(ordered(101, true))
         yield* service.flush
-        // Entry 0 is long past the two-entry window, so this is an in-memory
-        // miss: the receipt is `Accepted` and the entry reaches the queue.
-        const reEmitted = yield* service.emitLossy(input(0))
-        expect(reEmitted._tag).toBe("Accepted")
-        // The writer is what has to catch it. Flush so `insertOne` runs.
-        yield* service.flush
-        return yield* eventCount
+        expect(yield* service.emitLossy(ordered(101, false))).toEqual({
+          _tag: "Duplicate",
+          seq: lossy.seq,
+          sourceSeq: 101,
+          status: "committed"
+        })
+
+        const distinct = yield* Effect.flip(
+          service.emitDurableUnfenced(
+            new Input({
+              runId: run,
+              sourceId: source,
+              sourceSeq: sourceSeq(100),
+              eventType: "canonical",
+              payload: { a: 5, nested: { x: 3, y: 2 }, z: 1 },
+              meta: { first: 1, second: 2 }
+            }, { disableChecks: true })
+          )
+        )
+        expect(distinct.code).toBe("idempotency_conflict")
       }).pipe(
-        Effect.provide(journal({ capacity: 64, overflow: "reject", sourceEventCache: 2 })),
+        Effect.provide(journal({ capacity: 64, overflow: "reject", sourceEventCache: 8 })),
+        Effect.scoped
+      )
+    }))
+
+  effect("keeps reordered retries canonical after a fresh journal layer", () =>
+    Effect.gen(function*() {
+      const original = yield* Effect.gen(function*() {
+        const service = yield* Journal
+        const durable = yield* service.emitDurableUnfenced(ordered(200, true))
+        const lossy = yield* service.emitLossy(ordered(201, true))
+        yield* service.flush
+        return { durable, lossy }
+      }).pipe(
+        Effect.provide(journal({ capacity: 64, overflow: "reject", sourceEventCache: 8 })),
         Effect.scoped
       )
 
-      // No sixth row: the unique constraint re-check collapsed the accepted
-      // re-emission into the durable original.
-      expect(total).toBe(5)
+      yield* Effect.gen(function*() {
+        const service = yield* Journal
+        expect(yield* service.emitDurableUnfenced(ordered(200, false))).toEqual({
+          _tag: "Duplicate",
+          seq: original.durable.seq,
+          sourceSeq: 200,
+          status: "committed"
+        })
+        expect(yield* service.emitLossy(ordered(201, false))).toEqual({
+          _tag: "Duplicate",
+          seq: original.lossy.seq,
+          sourceSeq: 201,
+          status: "committed"
+        })
+      }).pipe(
+        Effect.provide(journal({ capacity: 64, overflow: "reject", sourceEventCache: 8 })),
+        Effect.scoped
+      )
+    }))
+})
+
+/** Explicit producer identities consult SQLite synchronously after cache eviction. */
+describe("SqlJournal durable dedup behind an evicted index entry", () => {
+  effect(
+    "returns the original duplicate from a fresh layer without allocating or enqueueing",
+    () =>
+      Effect.gen(function*() {
+        yield* seed(5, { capacity: 64, overflow: "reject" })
+        const queries: Array<string> = []
+        const outcome = yield* Effect.gen(function*() {
+          const service = yield* Journal
+          const subscription = yield* service.changes
+          queries.length = 0
+          const receipt = yield* service.emitLossy(input(0))
+          yield* service.flush
+          return {
+            receipt,
+            published: yield* PubSub.remaining(subscription),
+            queries: [...queries]
+          }
+        }).pipe(
+          Effect.provide(journal(
+            { capacity: 64, overflow: "reject", sourceEventCache: 2 },
+            recordingDatabase(queries)
+          )),
+          Effect.scoped
+        )
+
+        expect(outcome.receipt).toEqual({
+          _tag: "Duplicate",
+          seq: 0,
+          sourceSeq: 0,
+          status: "committed"
+        })
+        expect(outcome.published).toBe(0)
+        expect(outcome.queries.filter((query) => query.includes("WHERE event_id"))).toHaveLength(1)
+        expect(outcome.queries.some((query) => query.includes("MAX(seq) + 1"))).toBe(false)
+        expect(outcome.queries.some((query) => query.includes("MAX(source_seq) + 1"))).toBe(false)
+        expect(outcome.queries.some((query) => query.includes("INSERT INTO flows_journal_events"))).toBe(false)
+        expect(yield* eventCount).toBe(5)
+      })
+  )
+
+  effect("fails a changed retry synchronously without a delayed flush error", () =>
+    Effect.gen(function*() {
+      yield* seed(5, { capacity: 64, overflow: "reject" })
+      const queries: Array<string> = []
+      const outcome = yield* Effect.gen(function*() {
+        const service = yield* Journal
+        const subscription = yield* service.changes
+        queries.length = 0
+        const failure = yield* Effect.flip(service.emitLossy(
+          new Input({
+            runId: run,
+            sourceId: source,
+            sourceSeq: sourceSeq(0),
+            eventType: "event",
+            payload: { value: "changed" }
+          }, { disableChecks: true })
+        ))
+        yield* service.flush
+        return {
+          failure,
+          published: yield* PubSub.remaining(subscription),
+          queries: [...queries]
+        }
+      }).pipe(
+        Effect.provide(journal(
+          { capacity: 64, overflow: "reject", sourceEventCache: 2 },
+          recordingDatabase(queries)
+        )),
+        Effect.scoped
+      )
+
+      expect(outcome.failure).toBeInstanceOf(JournalError)
+      expect((outcome.failure as JournalError).code).toBe("idempotency_conflict")
+      expect(outcome.published).toBe(0)
+      expect(outcome.queries.filter((query) => query.includes("WHERE event_id"))).toHaveLength(1)
+      expect(outcome.queries.some((query) => query.includes("MAX(seq) + 1"))).toBe(false)
+      expect(outcome.queries.some((query) => query.includes("MAX(source_seq) + 1"))).toBe(false)
+      expect(outcome.queries.some((query) => query.includes("INSERT INTO flows_journal_events"))).toBe(false)
+      expect(yield* eventCount).toBe(5)
     }))
 
   effect(
-    "reports idempotency_conflict for an evicted source event re-emitted with changed content",
+    "keeps cache hits and implicit producer sequences off the durable identity lookup",
     () =>
       Effect.gen(function*() {
-        const outcome = yield* Effect.gen(function*() {
+        const queries: Array<string> = []
+        yield* Effect.gen(function*() {
           const service = yield* Journal
-          for (let index = 0; index < 5; index++) {
-            yield* service.emitLossy(input(index))
-          }
+          yield* service.emitLossy(input(0))
           yield* service.flush
-          // Same (run, source, sourceSeq) as entry 0, different payload.
+
+          queries.length = 0
+          expect((yield* service.emitLossy(input(0)))._tag).toBe("Duplicate")
+          expect(queries.some((query) => query.includes("WHERE event_id"))).toBe(false)
+
+          queries.length = 0
           yield* service.emitLossy(
             new Input({
               runId: run,
               sourceId: source,
-              sourceSeq: sourceSeq(0),
-              eventType: "event",
-              payload: { value: "changed" }
+              eventType: "implicit",
+              payload: { value: 1 }
             }, { disableChecks: true })
           )
-          const failure = yield* Effect.flip(service.flush)
-          return { failure, total: yield* eventCount }
+          expect(queries.some((query) => query.includes("WHERE event_id"))).toBe(false)
+          yield* service.flush
         }).pipe(
-          Effect.provide(journal({ capacity: 64, overflow: "reject", sourceEventCache: 2 })),
+          Effect.provide(journal(
+            { capacity: 64, overflow: "reject", sourceEventCache: 2 },
+            recordingDatabase(queries)
+          )),
           Effect.scoped
         )
+      })
+  )
 
-        // The in-memory index could not answer, so the durable re-check is what
-        // detected the reuse — the second half of the bound's safety argument.
-        expect(outcome.failure).toBeInstanceOf(JournalError)
-        expect((outcome.failure as JournalError).code).toBe("idempotency_conflict")
-        expect(outcome.total).toBe(5)
+  effect(
+    "reports a failed durable identity lookup as sink_failed, not as a fresh admission",
+    () =>
+      Effect.gen(function*() {
+        yield* Effect.gen(function*() {
+          const service = yield* Journal
+          yield* service.emitLossy(input(0))
+          yield* service.flush
+          // Evict entry 0 from the bounded index, so the retry below has to ask
+          // the database who owns this producer sequence.
+          yield* service.emitLossy(input(1))
+          yield* service.emitLossy(input(2))
+          yield* service.flush
+
+          const sql = yield* Effect.service(SqlClient.SqlClient)
+          yield* sql`DROP TABLE flows_journal_events`
+
+          const failure = yield* Effect.flip(service.emitLossy(input(0)))
+          expect(failure.code).toBe("sink_failed")
+          expect(failure.message).toBe("could not read durable source event")
+        }).pipe(
+          Effect.provide(journal({ capacity: 64, overflow: "reject", sourceEventCache: 1 })),
+          Effect.scoped
+        )
       })
   )
 })
