@@ -35,7 +35,7 @@ using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
   services = [ (name = "main", worker = .mainWorker) ],
-  sockets = [ (name = "http", address = "*:${port}", http = (), service = "main") ]
+  sockets = [ (name = "http", address = "127.0.0.1:${port}", http = (), service = "main") ]
 );
 
 const mainWorker :Workerd.Worker = (
@@ -48,6 +48,13 @@ const mainWorker :Workerd.Worker = (
   compatibilityDate = "2026-07-01"
 );
 `
+
+describe("workerd config", () => {
+  it("listens only on loopback", () => {
+    expect(config).toContain(`address = "127.0.0.1:${port}"`)
+    expect(config).not.toMatch(/address = "\*:/)
+  })
+})
 
 const suite = binary === undefined ? describe.skip : describe
 

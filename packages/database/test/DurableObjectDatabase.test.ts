@@ -13,7 +13,7 @@
  * is the only way to reach them without workerd.
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Fiber, Layer, Stream } from "effect"
+import { Cause, Effect, Exit, Fiber, Layer, Result, Stream } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlError from "effect/unstable/sql/SqlError"
 import * as DurableObjectDatabase from "../src/cloudflare/DurableObjectDatabase.ts"
@@ -44,7 +44,7 @@ const withFake = <A, E>(
   )
 
 describe("DurableObjectDatabase", () => {
-  it.effect("normalizes a blob column to Uint8Array and keeps duplicate column labels apart", () =>
+  it.effect("normalizes a blob column to Uint8Array", () =>
     Effect.gen(function*() {
       const rows = yield* withFake((sql) =>
         Effect.gen(function*() {
@@ -71,6 +71,37 @@ describe("DurableObjectDatabase", () => {
       )
 
       expect(raw).toEqual([{ id: 7 }])
+    }))
+
+  it.effect("executes an INSERT RETURNING through .raw exactly once", () =>
+    Effect.gen(function*() {
+      const result = yield* withFake((sql) =>
+        Effect.gen(function*() {
+          yield* sql`CREATE TABLE returned (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT NOT NULL)`
+          const raw = yield* sql`INSERT INTO returned (v) VALUES ('x') RETURNING id`.raw
+          const rows = yield* sql<{ readonly id: number; readonly v: string }>`SELECT id, v FROM returned`
+          return { raw, rows }
+        })
+      )
+
+      expect(result).toEqual({ raw: [{ id: 1 }], rows: [{ id: 1, v: "x" }] })
+    }))
+
+  it.effect("executes an INSERT RETURNING through .raw once inside a durable write", () =>
+    Effect.gen(function*() {
+      const result = yield* withFake((sql) =>
+        Effect.gen(function*() {
+          const writer = DurableWriter.make(sql)
+          yield* sql`CREATE TABLE returned_write (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT NOT NULL)`
+          const raw = yield* writer.write(sql`INSERT INTO returned_write (v) VALUES ('x') RETURNING id`.raw)
+          const rows = yield* sql<
+            { readonly id: number; readonly v: string }
+          >`SELECT id, v FROM returned_write`
+          return { raw, rows }
+        })
+      )
+
+      expect(result).toEqual({ raw: [{ id: 1 }], rows: [{ id: 1, v: "x" }] })
     }))
 
   it.effect("reports the affected-row count from changes(), not from rows written to indexes", () =>
@@ -110,6 +141,25 @@ describe("DurableObjectDatabase", () => {
       // Blobs are normalized in the positional path too, not only the object one.
       expect(result.prepared).toEqual([[1, "first", new Uint8Array([9])]])
       expect(result.unprepared).toEqual([[1, "first"]])
+    }))
+
+  it.effect("uses last-wins object labels while values preserves duplicate columns", () =>
+    Effect.gen(function*() {
+      const result = yield* withFake((sql) =>
+        Effect.gen(function*() {
+          yield* sql`CREATE TABLE duplicate_a (v TEXT NOT NULL)`
+          yield* sql`CREATE TABLE duplicate_b (v TEXT NOT NULL)`
+          yield* sql`INSERT INTO duplicate_a (v) VALUES ('A')`
+          yield* sql`INSERT INTO duplicate_b (v) VALUES ('B')`
+          return {
+            objects: yield* sql<{ readonly v: string }>`SELECT a.v, b.v FROM duplicate_a a, duplicate_b b`,
+            values: yield* sql`SELECT a.v, b.v FROM duplicate_a a, duplicate_b b`.values
+          }
+        })
+      )
+
+      expect(result.objects).toEqual([{ v: "B" }])
+      expect(result.values).toEqual([["A", "B"]])
     }))
 
   it.effect("streams rows through the synchronous cursor", () =>
@@ -153,6 +203,18 @@ describe("DurableObjectDatabase", () => {
       expect(SqlError.isSqlError(error)).toBe(true)
       // Nothing in the text names a SQLite condition, so it stays unknown
       // rather than being forced into a category.
+      expect(DurableWriter.fromSqlError(error).code).toBe("unknown")
+    }))
+
+  it.effect("classifies an immediately rejected stream as a SqlError", () =>
+    Effect.gen(function*() {
+      const error = yield* withFake((sql) =>
+        Effect.flip(Stream.runCollect(sql.unsafe("SELECT * FROM missing_stream_table").stream))
+      )
+
+      expect(SqlError.isSqlError(error)).toBe(true)
+      if (!SqlError.isSqlError(error)) return
+      expect(error.reason._tag).toBe("UnknownError")
       expect(DurableWriter.fromSqlError(error).code).toBe("unknown")
     }))
 
@@ -246,12 +308,80 @@ describe("DurableObjectDatabase when the platform reports its own error code", (
     }))
 })
 
+describe("DurableObjectDatabase against adversarial cursors", () => {
+  it.effect("executes a .raw SELECT exactly once", () =>
+    Effect.gen(function*() {
+      let executions = 0
+      const raw = yield* Effect.scoped(Effect.gen(function*() {
+        const sql = yield* client({
+          storage: stubStorage(rejectTransaction("unreached"), () => {
+            executions += 1
+            return { columnNames: ["id"], raw: () => [[7]].values() }
+          })
+        })
+        return yield* sql.unsafe("SELECT id").raw
+      }))
+
+      expect(raw).toEqual([{ id: 7 }])
+      expect(executions).toBe(1)
+    }))
+
+  it.effect("keeps a short cursor row legible by filling its trailing column with undefined", () =>
+    Effect.gen(function*() {
+      // A conforming cursor cannot produce this shape. Pinning it keeps a
+      // malformed platform row explicit without treating the shape as valid.
+      const rows = yield* Effect.scoped(Effect.gen(function*() {
+        const sql = yield* client({
+          storage: stubStorage(rejectTransaction("unreached"), () => ({
+            columnNames: ["first", "second"],
+            raw: () => [["A"]].values()
+          }))
+        })
+        return yield* sql.unsafe("SELECT first, second")
+      }))
+
+      expect(rows).toEqual([{ first: "A", second: undefined }])
+    }))
+
+  it.effect("classifies a cursor that throws after yielding as a SqlError", () =>
+    Effect.gen(function*() {
+      let yielded = false
+      const exit = yield* Effect.scoped(Effect.gen(function*() {
+        const sql = yield* client({
+          storage: stubStorage(rejectTransaction("unreached"), () => ({
+            columnNames: ["id"],
+            raw: function*() {
+              yielded = true
+              yield [1]
+              throw new Error("cursor failed after its first row")
+            }
+          }))
+        })
+        return yield* Effect.exit(Stream.runCollect(sql.unsafe("SELECT id").stream))
+      }))
+
+      expect(yielded).toBe(true)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (!Exit.isFailure(exit)) return
+      const failure = Cause.findError(exit.cause)
+      expect(Result.isSuccess(failure)).toBe(true)
+      if (!Result.isSuccess(failure)) return
+      expect(SqlError.isSqlError(failure.success)).toBe(true)
+      if (!SqlError.isSqlError(failure.success)) return
+      // Not just "some SqlError": the platform's own text has to survive the
+      // conversion, or an operator reading the failure learns nothing about
+      // which row the cursor died on.
+      expect(failure.success.reason._tag).toBe("UnknownError")
+      expect(String((failure.success.reason as { readonly cause: unknown }).cause))
+        .toContain("cursor failed after its first row")
+    }))
+})
+
 describe("DurableObjectDatabase when the platform transaction fails", () => {
   it.effect("surfaces a rejected transaction as a SqlError", () =>
     Effect.gen(function*() {
-      // The platform rejects the transaction itself when a commit loses a
-      // race, long after the body has run. That arrives outside the body's
-      // exit, so it has to be classified on the way out.
+      // The platform rejects before entering the transaction closure, so the
+      // body never gets a chance to run.
       const error = yield* Effect.scoped(Effect.gen(function*() {
         const sql = yield* client({ storage: stubStorage(rejectTransaction("transaction aborted")) })
         return yield* Effect.flip(DurableWriter.make(sql).write(Effect.succeed("unreached")))
@@ -259,6 +389,84 @@ describe("DurableObjectDatabase when the platform transaction fails", () => {
 
       expect(error).toBeInstanceOf(DurableWriter.DatabaseError)
       expect((error as DurableWriter.DatabaseError).code).toBe("unknown")
+    }))
+
+  it.effect("fails a successful body when the platform rejects its commit", () =>
+    Effect.gen(function*() {
+      let bodyRan = false
+      const storage = stubStorage(async (closure) => {
+        await closure({ rollback: () => {} })
+        throw new Error("commit failed: storage limit exceeded")
+      })
+
+      const exit = yield* Effect.scoped(Effect.gen(function*() {
+        const sql = yield* client({ storage })
+        return yield* Effect.exit(DurableWriter.make(sql).write(Effect.sync(() => bodyRan = true)))
+      }))
+
+      expect(bodyRan).toBe(true)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (!Exit.isFailure(exit)) return
+      const failure = Cause.findError(exit.cause)
+      expect(Result.isSuccess(failure)).toBe(true)
+      if (!Result.isSuccess(failure)) return
+      expect(failure.success).toBeInstanceOf(DurableWriter.DatabaseError)
+      expect((failure.success as DurableWriter.DatabaseError).code).toBe("unknown")
+    }))
+
+  // The stub above proves the write fails. This proves what failing means:
+  // the row the body wrote is not in the database afterwards. It needs the
+  // `node:sqlite` fake rather than the stub, because only a real transaction
+  // can be read back. The fake rolls back and rethrows whatever the closure
+  // throws, which is exactly what a platform whose commit failed does.
+  it.effect("leaves no row behind when the platform rejects the commit of a successful body", () =>
+    Effect.gen(function*() {
+      const rows = yield* Effect.acquireUseRelease(
+        Effect.sync(DurableObjectStorageFake.make),
+        (fake) =>
+          Effect.scoped(Effect.gen(function*() {
+            const storage: DurableObjectStorageLike = {
+              sql: fake.sql,
+              transaction: <A>(closure: (transaction: { rollback(): void }) => Promise<A>) =>
+                fake.transaction(async (transaction) => {
+                  await closure(transaction)
+                  throw new Error("commit failed: storage limit exceeded")
+                })
+            }
+            const sql = yield* client({ storage })
+            yield* sql`CREATE TABLE committed (id INTEGER PRIMARY KEY)`
+            const failure = yield* Effect.flip(
+              DurableWriter.make(sql).write(sql`INSERT INTO committed (id) VALUES (1)`)
+            )
+
+            expect(failure).toBeInstanceOf(DurableWriter.DatabaseError)
+            return yield* sql<{ readonly id: number }>`SELECT id FROM committed`
+          })),
+        (fake) => Effect.sync(fake.close)
+      )
+
+      expect(rows).toEqual([])
+    }))
+
+  it.effect("keeps the body error when the body and platform transaction both fail", () =>
+    Effect.gen(function*() {
+      const bodyError = new Error("body failed")
+      const storage = stubStorage(async (closure) => {
+        await closure({ rollback: () => {} })
+        throw new Error("transaction also failed")
+      })
+
+      const exit = yield* Effect.scoped(Effect.gen(function*() {
+        const sql = yield* client({ storage })
+        return yield* Effect.exit(DurableWriter.make(sql).write(Effect.fail(bodyError)))
+      }))
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (!Exit.isFailure(exit)) return
+      const failure = Cause.findError(exit.cause)
+      expect(Result.isSuccess(failure)).toBe(true)
+      if (!Result.isSuccess(failure)) return
+      expect(failure.success).toBe(bodyError)
     }))
 
   it.live("rolls back without running the body when the write is interrupted before the transaction opens", () =>

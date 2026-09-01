@@ -1,9 +1,8 @@
 /**
  * Serialized, retryable write boundary for the durable flows stores.
  *
- * Governing persistence designs:
- * `docs/specs/Concepts/Journal Queue.md` and
- * `docs/specs/Concepts/Run Ownership.md`.
+ * Governing persistence designs: `docs/pages/api/database.md` and
+ * `docs/pages/concepts/journal.md`.
  *
  * The SQL client is Effect's own `SqlClient` service and is consumed
  * directly for queries; this module adds only the write policy the durable
@@ -12,17 +11,24 @@
  *
  * @since 0.1.0
  */
-import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Cause, Context, Effect, Layer, Option, Schema } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlError from "effect/unstable/sql/SqlError"
 import * as WriteRetry from "./internal/WriteRetry.ts"
+
+/**
+ * Configuration for durable write retries.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type WriteRetryOptions = WriteRetry.WriteRetryOptions
 
 /**
  * Stable categories exposed for database failures.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const DatabaseErrorCode = Schema.Literals(["busy", "constraint", "io", "unsupported", "unknown"])
 
@@ -31,7 +37,6 @@ export const DatabaseErrorCode = Schema.Literals(["busy", "constraint", "io", "u
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type DatabaseErrorCode = typeof DatabaseErrorCode.Type
 
@@ -40,7 +45,6 @@ export type DatabaseErrorCode = typeof DatabaseErrorCode.Type
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class DatabaseError extends Schema.TaggedError<DatabaseError>()("@smthrs/database/DatabaseError", {
   code: DatabaseErrorCode,
@@ -52,7 +56,6 @@ export class DatabaseError extends Schema.TaggedError<DatabaseError>()("@smthrs/
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Service {
   readonly write: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | DatabaseError, R>
@@ -87,82 +90,57 @@ export interface Service {
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export class DurableWriter extends Context.Service<DurableWriter, Service>()("@smthrs/database/DurableWriter") {}
-
-const causeCode = (cause: unknown): string | undefined => {
-  if (typeof cause !== "object" || cause === null || !("code" in cause)) {
-    return undefined
-  }
-  const code = cause.code
-  return typeof code === "string" ? code : undefined
-}
-
-// Postgres reports a lost write race as a SQLSTATE rather than a lock error,
-// so it maps to the same stable `busy` category a SQLITE_BUSY does; a caller
-// that branches on the code sees one vocabulary across dialects (issue #78).
-const busyPostgresStates = new Set(["40001", "40P01", "55P03"])
-
-const hasCause = (cause: unknown, match: (code: string | undefined, message: string) => boolean): boolean => {
-  const seen = new Set<unknown>()
-  let current = cause
-  while (typeof current === "object" && current !== null && !seen.has(current)) {
-    seen.add(current)
-    const message = "message" in current && typeof current.message === "string" ? current.message.toLowerCase() : ""
-    if (match(causeCode(current), message)) {
-      return true
-    }
-    current = "cause" in current ? current.cause : undefined
-  }
-  return false
-}
-
-const hasIoCause = (cause: unknown): boolean =>
-  hasCause(cause, (code, message) => code?.startsWith("SQLITE_IOERR") === true || message.includes("disk i/o error"))
-
-const hasBusyCause = (cause: unknown): boolean =>
-  hasCause(
-    cause,
-    (code, message) =>
-      (code !== undefined && busyPostgresStates.has(code)) ||
-      message.includes("cannot rollback - no transaction is active") ||
-      message.includes("could not serialize access") ||
-      message.includes("deadlock detected")
-  )
 
 /**
  * Converts an Effect SQL error into the package's stable error vocabulary.
  *
+ * The category comes from `WriteRetry.classifySqlError`, the same call the
+ * retry decision reads, so the code a caller is told and the decision to replay
+ * cannot disagree about one error.
+ *
  * @category converting
  * @since 0.1.0
- * @slop
  */
 export const fromSqlError = (error: SqlError.SqlError): DatabaseError =>
-  new DatabaseError({
-    code: error.reason._tag === "LockTimeoutError" ?
-      "busy" :
-      error.reason._tag === "ConstraintError" || error.reason._tag === "UniqueViolation" ?
-      "constraint" :
-      hasIoCause(error.reason.cause)
-      ? "io"
-      : hasBusyCause(error.reason.cause)
-      ? "busy"
-      : "unknown",
-    cause: error
-  })
+  new DatabaseError({ code: WriteRetry.classifySqlError(error), cause: error })
 
-// Only a driver's own result field counts: an inherited `changes` comes from
-// a prototype, not from the statement that ran. The count must also be a safe
-// integer — above `Number.MAX_SAFE_INTEGER` the exact count is unreadable, so
-// reporting the rounded double would silently misreport the write.
+const normalizeSqlErrors = <E>(
+  cause: Cause.Cause<E | SqlError.SqlError>
+): Cause.Cause<E | DatabaseError> =>
+  Cause.map(
+    cause,
+    (error) => SqlError.isSqlError(error) ? fromSqlError(error) : error
+  ) as Cause.Cause<E | DatabaseError>
+
+// Only a driver's own data property counts: an inherited field or accessor is
+// not a result the statement returned. Safe bigint counts are exact and occur
+// when Effect SQL's SafeIntegers service is enabled; an out-of-range bigint or
+// double cannot be represented without changing the count.
 const rowCountOf = (raw: unknown, field: string): number | undefined => {
-  if (typeof raw !== "object" || raw === null || !Object.hasOwn(raw, field)) {
+  if (typeof raw !== "object" || raw === null) {
     return undefined
   }
-  const count = (raw as Record<string, unknown>)[field]
-  return typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? count : undefined
+  const descriptor = Object.getOwnPropertyDescriptor(raw, field)
+  if (descriptor === undefined || !("value" in descriptor)) {
+    return undefined
+  }
+  const count = descriptor.value
+  if (typeof count === "number") {
+    return Number.isSafeInteger(count) && count >= 0 ? count : undefined
+  }
+  if (typeof count === "bigint") {
+    return count >= 0n && count <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(count) : undefined
+  }
+  return undefined
 }
+
+const rawShape = (raw: unknown) => ({
+  type: Array.isArray(raw) ? "array" : typeof raw,
+  keys: typeof raw === "object" && raw !== null ? Object.keys(raw).slice(0, 8) : [],
+  length: Array.isArray(raw) ? raw.length : undefined
+})
 
 /**
  * Reads how many rows a write statement affected from a driver's raw result.
@@ -177,23 +155,31 @@ const rowCountOf = (raw: unknown, field: string): number | undefined => {
  *
  * @category accessors
  * @since 0.1.0
- * @slop
  */
-export const affectedRows = (raw: unknown): Effect.Effect<number, DatabaseError> => {
-  const count = rowCountOf(raw, "changes") ?? rowCountOf(raw, "rowCount")
-  return count === undefined
-    ? Effect.fail(new DatabaseError({ code: "unsupported", cause: raw }))
-    : Effect.succeed(count)
-}
+export const affectedRows = (raw: unknown): Effect.Effect<number, DatabaseError> =>
+  Effect.suspend(() => {
+    try {
+      const count = rowCountOf(raw, "changes") ?? rowCountOf(raw, "rowCount")
+      return count === undefined
+        ? Effect.fail(new DatabaseError({ code: "unsupported", cause: rawShape(raw) }))
+        : Effect.succeed(count)
+    } catch {
+      return Effect.fail(
+        new DatabaseError({
+          code: "unsupported",
+          cause: { type: typeof raw, keys: [] }
+        })
+      )
+    }
+  })
 
 /**
  * Builds the durable writer around an existing SQL client.
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
-export const make = (sql: SqlClient.SqlClient, options?: WriteRetry.WriteRetryOptions | undefined): Service =>
+export const make = (sql: SqlClient.SqlClient, options?: WriteRetryOptions | undefined): Service =>
   DurableWriter.of({
     write: Effect.fn("DurableWriter.write")(<A, E, R>(
       effect: Effect.Effect<A, E, R>
@@ -210,7 +196,7 @@ export const make = (sql: SqlClient.SqlClient, options?: WriteRetry.WriteRetryOp
                 // belongs to the outermost write only.
                 ? sql.withTransaction(effect)
                 : WriteRetry.withWriteRetry(sql.withTransaction(effect), options)).pipe(
-                  Effect.catchIf(SqlError.isSqlError, (error) => Effect.fail(fromSqlError(error)))
+                  Effect.catchCause((cause) => Effect.failCause(normalizeSqlErrors(cause)))
                 )
             )
           )
@@ -223,10 +209,9 @@ export const make = (sql: SqlClient.SqlClient, options?: WriteRetry.WriteRetryOp
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer = (
-  options?: WriteRetry.WriteRetryOptions | undefined
+  options?: WriteRetryOptions | undefined
 ): Layer.Layer<DurableWriter, never, SqlClient.SqlClient> =>
   Layer.effect(
     DurableWriter,
@@ -238,7 +223,6 @@ export const layer = (
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const makeNoop = (): Service =>
   DurableWriter.of({
@@ -250,6 +234,5 @@ export const makeNoop = (): Service =>
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerNoop: Layer.Layer<DurableWriter> = Layer.succeed(DurableWriter)(makeNoop())

@@ -29,7 +29,6 @@ import type { DurableObjectStorageLike, SqlStorageCursorLike, SqlStorageValue } 
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface DurableObjectStorageFake extends DurableObjectStorageLike {
   /** Closes the underlying database. */
@@ -55,7 +54,6 @@ const toStorageValue = (value: unknown): SqlStorageValue =>
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (): DurableObjectStorageFake => {
   const database = new DatabaseSync(":memory:")

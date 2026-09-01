@@ -31,8 +31,9 @@ export type SqlStorageValue = ArrayBuffer | string | number | null
  * The cursor `SqlStorage.exec` returns.
  *
  * Only the positional `raw()` iterator and `columnNames` are used. Reading
- * rows positionally and rebuilding each object against `columnNames` keeps
- * duplicate column labels from collapsing, which the object cursor would do.
+ * rows positionally makes duplicate labels deterministic: a trailing label
+ * overwrites an earlier one, matching `node:sqlite`, while `.values` keeps
+ * both columns when a caller needs them.
  *
  * @category models
  * @since 0.1.0

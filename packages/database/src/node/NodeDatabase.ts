@@ -1,10 +1,7 @@
 /**
  * Node SQLite driver layer.
  *
- * Backend pattern:
- * `reference/effect/packages/sql/sqlite-node/src/SqliteClient.ts`.
- * The browser counterpart is tracked against Effect's
- * `sqlite-wasm/src/OpfsWorker.ts`.
+ * Public contract: `docs/pages/api/database.md`.
  *
  * This layer provides only the SQL client — connection options and nothing
  * else. The write policy lives in `DurableWriter.layer`, composed on top.
@@ -13,7 +10,7 @@
  */
 import * as SqliteClient from "@effect/sql-sqlite-node/SqliteClient"
 
-import { Duration, Effect, Layer, Schedule, Schema } from "effect"
+import { Duration, Effect, Layer, Schedule, Schema, Scope } from "effect"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import { statSync } from "node:fs"
 import { DatabaseSync } from "node:sqlite"
@@ -23,7 +20,6 @@ import { DatabaseSync } from "node:sqlite"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface NodeDatabaseOptions {
   /** SQLite database filename. */
@@ -33,7 +29,7 @@ export interface NodeDatabaseOptions {
 }
 
 /**
- * Stable codes for the two rc.0 exclusions this driver enforces.
+ * The three stable codes covering the two rc.0 exclusions this driver enforces.
  *
  * `unsupported_runtime` refuses the durable engine under Bun (rc-contract
  * §1 and §7 "Runtimes", exclusion X-18). `unsupported_database_file` refuses a
@@ -120,10 +116,12 @@ const isLockedDefect = (defect: unknown): boolean => !isUnsupportedDatabase(defe
 /**
  * Reads the tables of a file without joining the WAL or converting it.
  *
- * Returns `undefined` when the file cannot be inspected at all: a path that
- * does not exist, a directory, an in-memory name, or a file SQLite refuses to
- * read. None of those is a 0.x database, so the driver's own open behavior
- * decides what happens next and the guard says nothing.
+ * SQLite `file:` URIs bypass the filesystem stat because the URI itself is not
+ * a pathname; `DatabaseSync` receives it directly. Returns `undefined` when
+ * the file cannot be inspected at all: a path that does not exist, a
+ * directory, an in-memory name, or a file SQLite refuses to read. None of
+ * those is a 0.x database, so the driver's own open behavior decides what
+ * happens next and the guard says nothing.
  *
  * A file a peer holds locked is not one of those cases and is rethrown, so
  * `guardOpen` outwaits the lock on the same ladder the open uses. Answering
@@ -132,10 +130,30 @@ const isLockedDefect = (defect: unknown): boolean => !isUnsupportedDatabase(defe
  * would be opened and migrated, which is the refusal rc-contract section 2
  * states without condition.
  */
+/**
+ * The database a SQLite `file:` URI names, without the query that says how to
+ * open it.
+ *
+ * The probe opens read-only, and SQLite refuses that outright when the URI
+ * itself asks for write access: `file:/path/smithers.db?mode=rw` fails with
+ * `access mode not allowed: rw` before a single table is read. Reporting
+ * "cannot inspect" there would wave a 0.x database straight through, because
+ * the client that follows opens read-write and succeeds — the exact bypass of
+ * the refusal rc-contract section 2 states without condition. Query parameters
+ * only tell SQLite how to open the file, never which tables it holds, so the
+ * probe drops them (and the fragment SQLite ignores) and asks its one question
+ * about the file itself.
+ */
+const probeTarget = (filename: string): string => {
+  if (!filename.startsWith("file:")) return filename
+  const query = filename.search(/[?#]/)
+  return query === -1 ? filename : filename.slice(0, query)
+}
+
 const readTableNames = (filename: string): ReadonlyArray<string> | undefined => {
   let db: DatabaseSync | undefined
   try {
-    if (!statSync(filename).isFile()) return undefined
+    if (!filename.startsWith("file:") && !statSync(filename).isFile()) return undefined
     db = new DatabaseSync(filename, { readOnly: true })
     return db
       .prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`)
@@ -163,7 +181,7 @@ const unsupportedOpen = (filename: string): UnsupportedDatabase | undefined => {
       message: `1.0.0-rc.0 runs the durable engine on Node.js ${nodeFloor} only`
     })
   }
-  const tables = readTableNames(filename)
+  const tables = readTableNames(probeTarget(filename))
   if (tables === undefined || tables.length === 0) return undefined
   if (tables.includes(migrationLedgerTable)) return undefined
   return new UnsupportedDatabase({
@@ -250,35 +268,52 @@ const retryWhileLocked = <A>(self: Effect.Effect<A>): Effect.Effect<A> =>
 /**
  * Retries opening a connection while SQLite reports the database as locked.
  *
- * `SqliteClient` opens the file and issues `PRAGMA journal_mode = WAL` inside
- * its constructor, with no busy timeout set. Two processes opening one file
- * concurrently collide there in two distinct ways, and neither is reachable by
- * `WriteRetry` — the failure is a raw throw during layer construction, so it
- * arrives as a *defect* rather than as the `SqlError` the retry policy
- * classifies:
+ * `SqliteClient` opens the file, sets `PRAGMA busy_timeout`, and then issues
+ * `PRAGMA journal_mode = WAL` inside its constructor. Two processes opening one
+ * file concurrently collide there in two distinct ways, and neither is
+ * reachable by `WriteRetry` — the failure is a raw throw during layer
+ * construction, so it arrives as a *defect* rather than as the `SqlError` the
+ * retry policy classifies:
  *
- * - `SQLITE_BUSY` on the conversion itself. SQLite refuses to move a database
- *   into or out of WAL while another connection has it open, and refuses
- *   immediately — it does not consult the busy handler, so no `busy_timeout`
- *   would help.
+ * - `SQLITE_BUSY` on the conversion itself. SQLite moves a database into or out
+ *   of WAL only with the file to itself, and a peer connection holding a lock
+ *   defeats that. The mode change does consult the busy handler — measured on
+ *   node:sqlite against a peer holding a shared read lock, it waits the whole
+ *   `busy_timeout` and then reports `database is locked` — so the client's
+ *   timeout sets the pace of a contended attempt, and a lock that outlasts it
+ *   still fails.
  * - `SQLITE_BUSY_RECOVERY` when opening a WAL database whose log needs
  *   recovery while a peer is already recovering it.
  *
  * Both clear on their own as soon as the peer finishes, so the open is retried
  * on the same transient vocabulary `WriteRetry` uses. This is what made
  * `DurableWaitingRestart` flake: a child process lost the race and died during
- * startup. Each attempt builds into its own scope, which `Layer.fromBuild`
- * closes on failure, so a failed open leaves no connection behind. A defect
- * that is not a lock is re-raised unchanged on the first attempt.
+ * startup. Because a contended attempt can spend up to the client's
+ * `busy_timeout` inside SQLite before the ladder's own delay, the wall-clock
+ * cost of exhausting the ladder is bounded by the timeout the caller
+ * configured, not by the delays below. Each attempt builds into its own scope,
+ * which this closes on failure, so a failed open leaves no connection behind. A
+ * defect that is not a lock is re-raised unchanged on the first attempt.
  */
 const retryLockedOpen = <A>(self: Layer.Layer<A>): Layer.Layer<A> =>
   Layer.fromBuild((_memoMap, scope) =>
-    // A fresh memo map per attempt: reusing the caller's would hand every
-    // retry the first attempt's memoized (failed) build instead of opening
-    // again. `self` is a leaf client layer, so there is nothing to share.
-    retryWhileLocked(
-      Effect.flatMap(Layer.makeMemoMap, (memoMap) => Layer.buildWithMemoMap(self, memoMap, scope))
-    )
+    retryWhileLocked(Effect.suspend(() => {
+      // Exactly what `Layer.fromBuild` does with a build that fails, done once
+      // per attempt. `Layer.fromBuild` cannot do it here: the retry lives
+      // INSIDE one build, so nothing above this closes anything until every
+      // attempt has been spent. Without the per-attempt fork, a failed attempt
+      // that registered a connection finalizer registers it in a scope that
+      // survives, and the connection it holds is one more peer for the next
+      // attempt to lose to.
+      const attempt = Scope.forkUnsafe(scope)
+      return Effect.onExit(
+        // A fresh memo map per attempt: reusing the caller's would hand every
+        // retry the first attempt's memoized (failed) build instead of opening
+        // again. `self` is a leaf client layer, so there is nothing to share.
+        Effect.flatMap(Layer.makeMemoMap, (memoMap) => Layer.buildWithMemoMap(self, memoMap, attempt)),
+        (exit) => exit._tag === "Failure" ? Scope.close(attempt, exit) : Effect.void
+      )
+    }))
   )
 
 /**
@@ -287,7 +322,6 @@ const retryLockedOpen = <A>(self: Layer.Layer<A>): Layer.Layer<A> =>
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer = (options: NodeDatabaseOptions): Layer.Layer<SqlClient.SqlClient> =>
   Layer.unwrap(Effect.as(

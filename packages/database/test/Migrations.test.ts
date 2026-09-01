@@ -4,10 +4,9 @@
  * package that mis-declares its namespace or id block must fail the migration
  * loudly rather than silently shadow its neighbour's table.
  *
- * Derived contract: `docs/specs/Concepts/Journal Split.md`.
+ * Derived contract: `docs/pages/concepts/journal.md`.
  */
 import { describe, expect, it } from "@effect/vitest"
-import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -15,6 +14,7 @@ import * as Result from "effect/Result"
 import * as Migrator from "effect/unstable/sql/Migrator"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as Migrations from "../src/Migrations.ts"
+import * as TestDatabase from "../src/test/TestDatabase.ts"
 
 const createTable = (name: string) =>
   Effect.gen(function*() {
@@ -41,6 +41,14 @@ const failureMessage = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) 
   Effect.map(provided(effect), (exit) => {
     if (exit._tag !== "Failure") throw new Error("expected the migration to fail")
     return JSON.stringify(exit.cause)
+  })
+
+const migrationFailure = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
+  Effect.map(provided(effect), (exit) => {
+    if (!Exit.isFailure(exit)) throw new Error("expected the migration to fail")
+    const failure = Result.getOrUndefined(Cause.findError(exit.cause))
+    if (!(failure instanceof Migrator.MigrationError)) throw new Error("expected a MigrationError")
+    return failure
   })
 
 describe("composed migrations", () => {
@@ -192,15 +200,25 @@ describe("composed migrations", () => {
         .toContain("Duplicate migration id offset 0 for namespace beta")
     }))
 
-  it.effect("rejects an id collision the offsets failed to prevent", () =>
+  // Two keys in one set are the only id collision the other rules still allow:
+  // distinct offsets that are multiples of `idBlock`, with every local id below
+  // `idBlock`, leave two namespaces in disjoint ranges. Zero-padding differs,
+  // the realized id does not, so the message names the two keys rather than
+  // reporting a package as colliding with itself.
+  it.effect("rejects two keys in one set that realize the same id", () =>
     Effect.gen(function*() {
       const overlapping: Migrations.MigrationSet = {
         namespace: "gamma",
-        idOffset: 1,
-        migrations: { "1000_initial": createTable("gamma_rows") }
+        idOffset: Migrations.idBlock * 2,
+        migrations: {
+          "0001_first": createTable("gamma_first"),
+          "01_second": createTable("gamma_second")
+        }
       }
-      expect(yield* failureMessage(Migrations.run([beta, overlapping])))
-        .toContain("Migration id 1001 claimed by both beta and gamma")
+      const failure = yield* migrationFailure(Migrations.run([overlapping]))
+
+      expect(failure.kind).toBe("BadState")
+      expect(failure.message).toBe(`Migration id 2001 is claimed twice: gamma "0001_first" and gamma "01_second"`)
     }))
 
   it.effect("rejects a set the migrator's high-water mark would silently skip", () =>
@@ -311,6 +329,105 @@ describe("composed migrations", () => {
 
       expect(exit._tag).toBe("Success")
       expect(exit._tag === "Success" ? exit.value : "failed").toEqual([])
+    }))
+
+  it.effect("accepts local migration ids at both block boundaries", () =>
+    Effect.gen(function*() {
+      const boundary: Migrations.MigrationSet = {
+        namespace: "boundary",
+        idOffset: 0,
+        migrations: {
+          "0000_zero": createTable("boundary_zero"),
+          "0999_last": createTable("boundary_last")
+        }
+      }
+      const exit = yield* provided(Migrations.run([boundary]))
+
+      expect(exit._tag).toBe("Success")
+      expect(exit._tag === "Success" ? exit.value : []).toEqual([
+        [0, "boundary_zero"],
+        [999, "boundary_last"]
+      ])
+    }))
+
+  it.effect("rejects a local migration id equal to idBlock", () =>
+    Effect.gen(function*() {
+      const invalid: Migrations.MigrationSet = {
+        namespace: "neighbour",
+        idOffset: 0,
+        migrations: { "1000_claim": createTable("neighbour_rows") }
+      }
+      const failure = yield* migrationFailure(Migrations.run([invalid]))
+
+      expect(failure.kind).toBe("BadState")
+      expect(failure.message).toBe(
+        `Local migration id 1000 for key "1000_claim" in namespace neighbour is outside the block range 0..999 ` +
+          `and would claim a neighbouring package's block`
+      )
+    }))
+
+  it.effect("rejects a maximum-safe-integer local migration id", () =>
+    Effect.gen(function*() {
+      const invalid: Migrations.MigrationSet = {
+        namespace: "huge_local",
+        idOffset: 0,
+        migrations: { "9007199254740991_claim": createTable("huge_local_rows") }
+      }
+      const failure = yield* migrationFailure(Migrations.run([invalid]))
+
+      expect(failure.kind).toBe("BadState")
+      expect(failure.message).toBe(
+        `Local migration id 9007199254740991 for key "9007199254740991_claim" in namespace huge_local is outside ` +
+          `the block range 0..999 and would claim a neighbouring package's block`
+      )
+    }))
+
+  it.effect("rejects a misaligned migration id offset", () =>
+    Effect.gen(function*() {
+      const invalid: Migrations.MigrationSet = {
+        namespace: "misaligned",
+        idOffset: 500,
+        migrations: { "0001_initial": createTable("misaligned_rows") }
+      }
+      const failure = yield* migrationFailure(Migrations.run([invalid]))
+
+      expect(failure.kind).toBe("BadState")
+      expect(failure.message).toBe(
+        "Invalid migration id offset 500 for namespace misaligned: an id offset must be a multiple of idBlock (1000)"
+      )
+    }))
+
+  it.effect("rejects an unsafe migration id offset", () =>
+    Effect.gen(function*() {
+      const invalid: Migrations.MigrationSet = {
+        namespace: "unsafe",
+        idOffset: 1e21,
+        migrations: { "0001_initial": createTable("unsafe_rows") }
+      }
+      const failure = yield* migrationFailure(Migrations.run([invalid]))
+
+      expect(failure.kind).toBe("BadState")
+      expect(failure.message).toBe(
+        "Invalid migration id offset 1e+21 for namespace unsafe: an id offset must be a safe integer in the range " +
+          "0..9007199254740991"
+      )
+    }))
+
+  it.effect("rejects a realized migration id outside the safe integer range", () =>
+    Effect.gen(function*() {
+      const offset = Math.floor(Number.MAX_SAFE_INTEGER / Migrations.idBlock) * Migrations.idBlock
+      const invalid: Migrations.MigrationSet = {
+        namespace: "overflow",
+        idOffset: offset,
+        migrations: { "0999_tail": createTable("overflow_rows") }
+      }
+      const failure = yield* migrationFailure(Migrations.run([invalid]))
+
+      expect(failure.kind).toBe("BadState")
+      expect(failure.message).toBe(
+        `Migration id 9007199254741000 for key "0999_tail" in namespace overflow is outside the safe integer range ` +
+          `0..${Number.MAX_SAFE_INTEGER}`
+      )
     }))
 
   it.effect("rejects a negative idOffset as bad migration state", () =>

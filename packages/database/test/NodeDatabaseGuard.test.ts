@@ -130,6 +130,83 @@ describe("NodeDatabase guard: 0.x database files (X-13)", () => {
       )
     }))
 
+  it.effect("refuses a 0.x file opened through a file: URI", () =>
+    Effect.gen(function*() {
+      const filename = tempFile("smithers.db")
+      seedZeroX(filename)
+      const uri = `file:${filename}`
+
+      const defect = defectOf(yield* build({ filename: uri }))
+
+      expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(true)
+      if (!NodeDatabase.isUnsupportedDatabase(defect)) return
+      expect(defect.code).toBe("unsupported_database_file")
+      expect(defect.message).toBe(
+        `${uri} is not a Smithers 1.0 database (1.0.0-rc.0 does not load a 0.x smithers.db)`
+      )
+    }))
+
+  it.effect("refuses a 0.x file opened through an absolute file:// URI", () =>
+    Effect.gen(function*() {
+      const filename = tempFile("smithers.db")
+      seedZeroX(filename)
+      const uri = `file://${filename}`
+
+      const defect = defectOf(yield* build({ filename: uri }))
+
+      // This Node build accepts the triple-slash absolute form, so the guard
+      // must inspect it rather than relying on the client to reject it.
+      expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(true)
+      if (!NodeDatabase.isUnsupportedDatabase(defect)) return
+      expect(defect.code).toBe("unsupported_database_file")
+      expect(defect.message).toBe(
+        `${uri} is not a Smithers 1.0 database (1.0.0-rc.0 does not load a 0.x smithers.db)`
+      )
+    }))
+
+  // The probe opens read-only, and SQLite refuses that outright when the URI
+  // asks for write access: `?mode=rw` fails with `access mode not allowed: rw`
+  // before a table is read. That failure used to read as "cannot inspect", so
+  // the guard waved the URI through and the client — which opens read-write and
+  // succeeds — loaded the 0.x database. The query says how to open the file,
+  // never which tables it holds, so the probe drops it.
+  it.effect.each([
+    { label: "mode=rw", query: "?mode=rw" },
+    { label: "mode=rwc", query: "?mode=rwc" },
+    { label: "mode=rw beside another parameter", query: "?mode=rw&cache=private" },
+    { label: "mode=rw with a fragment SQLite ignores", query: "?mode=rw#ignored" }
+  ])("refuses a 0.x file opened through a file: URI carrying $label", ({ query }) =>
+    Effect.gen(function*() {
+      const filename = tempFile("smithers.db")
+      seedZeroX(filename)
+      const uri = `file://${filename}${query}`
+
+      const defect = defectOf(yield* build({ filename: uri }))
+
+      expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(true)
+      if (!NodeDatabase.isUnsupportedDatabase(defect)) return
+      expect(defect.code).toBe("unsupported_database_file")
+      // The refusal names the URI the caller gave, not the path it was probed by.
+      expect(defect.message).toBe(
+        `${uri} is not a Smithers 1.0 database (1.0.0-rc.0 does not load a 0.x smithers.db)`
+      )
+    }))
+
+  // The mirror of the four above: dropping the query must not turn every
+  // write-mode URI into a refusal. A file that carries the migration ledger is
+  // a Smithers 1.0 database whatever mode the URI asks for, so whatever the
+  // client then makes of the URI, the guard says nothing about it.
+  it.effect("says nothing about a Smithers 1.0 database opened through a mode=rw URI", () =>
+    Effect.gen(function*() {
+      const filename = tempFile("flows.sqlite")
+      seedFlows(filename)
+
+      const exit = yield* build({ filename: `file://${filename}?mode=rw` })
+
+      const defect = exit._tag === "Failure" ? Result.getOrUndefined(Cause.findDefect(exit.cause)) : undefined
+      expect(NodeDatabase.isUnsupportedDatabase(defect)).toBe(false)
+    }))
+
   // Real elapsed time: `it.effect`'s TestClock would stall the probe's ladder.
   it.live("refuses a 0.x file whose 0.x writer holds the lock", () =>
     Effect.gen(function*() {
@@ -231,6 +308,16 @@ describe("NodeDatabase guard: 0.x database files (X-13)", () => {
   it.effect("opens an in-memory database, which has no path to probe", () =>
     Effect.gen(function*() {
       expect((yield* build({ filename: ":memory:" }))._tag).toBe("Success")
+    }))
+
+  it.effect("opens a shared in-memory file: URI", () =>
+    Effect.gen(function*() {
+      expect((yield* build({ filename: "file::memory:?cache=shared" }))._tag).toBe("Success")
+    }))
+
+  it.effect("opens a file: URI whose path does not exist yet", () =>
+    Effect.gen(function*() {
+      expect((yield* build({ filename: `file:${tempFile()}` }))._tag).toBe("Success")
     }))
 
   it.effect("leaves a path that is not a regular file to the driver", () =>

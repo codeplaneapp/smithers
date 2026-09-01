@@ -10,10 +10,11 @@
  *
  * A {@link MigrationSet} closes that hole by making the namespace part of the
  * identity: the package's `namespace` prefixes every migration name and its
- * `idOffset` reserves a disjoint block of migration ids. {@link loader}
- * rejects duplicate namespaces, duplicate offsets, and any id collision the
- * offsets failed to prevent, so a mis-declared package fails the migration
- * rather than skipping a table.
+ * `idOffset` reserves a disjoint block of migration ids. {@link loader} rejects
+ * duplicate namespaces, duplicate offsets, an offset that is not a multiple of
+ * {@link idBlock}, a local id outside one block, and two keys in one set that
+ * realize the same id — `0001_first` beside `01_second` — so a mis-declared
+ * package fails the migration rather than skipping a table.
  *
  * Blocks reintroduce a second way to skip one, which the loader also rejects:
  * `Migrator` decides what to run from a single high-water mark, so a set whose
@@ -26,7 +27,7 @@
  * the durable writer uses, so concurrent processes migrating one database
  * serialize instead of failing on the peer's `BEGIN IMMEDIATE` lock.
  *
- * Derived contract: `docs/specs/Concepts/Journal Split.md`.
+ * Derived contract: `docs/pages/concepts/journal.md`.
  *
  * @since 0.1.0
  */
@@ -43,7 +44,6 @@ import * as WriteRetry from "./internal/WriteRetry.ts"
  *
  * @category constants
  * @since 0.1.0
- * @slop
  */
 export const table = "flows_migrations"
 
@@ -57,7 +57,6 @@ export const table = "flows_migrations"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MigrationSet {
   readonly namespace: string
@@ -73,7 +72,6 @@ export interface MigrationSet {
  *
  * @category constants
  * @since 0.1.0
- * @slop
  */
 export const idBlock = 1000
 
@@ -224,6 +222,18 @@ const loaderWith = (
             `an id offset must be a non-negative integer`
         ))
       }
+      if (!Number.isSafeInteger(set.idOffset)) {
+        return Effect.fail(fail(
+          `Invalid migration id offset ${set.idOffset} for namespace ${set.namespace}: ` +
+            `an id offset must be a safe integer in the range 0..${Number.MAX_SAFE_INTEGER}`
+        ))
+      }
+      if (set.idOffset % idBlock !== 0) {
+        return Effect.fail(fail(
+          `Invalid migration id offset ${set.idOffset} for namespace ${set.namespace}: ` +
+            `an id offset must be a multiple of idBlock (${idBlock})`
+        ))
+      }
       if (offsets.has(set.idOffset)) {
         return Effect.fail(fail(`Duplicate migration id offset ${set.idOffset} for namespace ${set.namespace}`))
       }
@@ -234,12 +244,33 @@ const loaderWith = (
         if (match === null) {
           return Effect.fail(fail(`Malformed migration key "${key}" in namespace ${set.namespace}`))
         }
-        const id = set.idOffset + Number(match[1])
+        const localId = Number(match[1])
+        if (!Number.isSafeInteger(localId) || localId < 0 || localId >= idBlock) {
+          return Effect.fail(fail(
+            `Local migration id ${match[1]} for key "${key}" in namespace ${set.namespace} is outside the block ` +
+              `range 0..${idBlock - 1} and would claim a neighbouring package's block`
+          ))
+        }
+        const id = set.idOffset + localId
+        if (!Number.isSafeInteger(id)) {
+          return Effect.fail(fail(
+            `Migration id ${id} for key "${key}" in namespace ${set.namespace} is outside the safe integer range ` +
+              `0..${Number.MAX_SAFE_INTEGER}`
+          ))
+        }
+        // Both claimants are named by key as well as namespace, because the
+        // only collision the rules above still allow is two keys inside ONE
+        // set: distinct offsets that are multiples of `idBlock`, with every
+        // local id below `idBlock`, put two namespaces in disjoint ranges. A
+        // set that writes both `0001_first` and `01_second` realizes id
+        // `offset + 1` twice, and naming the namespace alone would report that
+        // as a package colliding with itself.
+        const claimant = `${set.namespace} "${key}"`
         const owner = ids.get(id)
         if (owner !== undefined) {
-          return Effect.fail(fail(`Migration id ${id} claimed by both ${owner} and ${set.namespace}`))
+          return Effect.fail(fail(`Migration id ${id} is claimed twice: ${owner} and ${claimant}`))
         }
-        ids.set(id, set.namespace)
+        ids.set(id, claimant)
         if (id === 0) {
           zero = { migration, name: `${set.namespace}_${match[2]}` }
         }
@@ -251,8 +282,9 @@ const loaderWith = (
   })
 
 /**
- * Builds a `Migrator` loader from namespaced package migration sets, in the
- * order given.
+ * Builds a `Migrator` loader from namespaced package migration sets, resolved
+ * into one list ordered by migration id rather than by the order the sets were
+ * given.
  *
  * On a fresh database the loader applies a global id-zero migration itself,
  * inside the migrator's transaction, because the migrator's high-water mark
@@ -262,7 +294,6 @@ const loaderWith = (
  *
  * @category loaders
  * @since 0.1.0
- * @slop
  */
 export const loader = (sets: ReadonlyArray<MigrationSet>): Migrator.Loader<SqlClient.SqlClient> =>
   loaderWith(sets, () => Effect.void)
@@ -279,7 +310,6 @@ export const loader = (sets: ReadonlyArray<MigrationSet>): Migrator.Loader<SqlCl
  *
  * @category migrations
  * @since 0.1.0
- * @slop
  */
 export const run = (
   sets: ReadonlyArray<MigrationSet>
@@ -310,7 +340,6 @@ export const run = (
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer = (
   sets: ReadonlyArray<MigrationSet>

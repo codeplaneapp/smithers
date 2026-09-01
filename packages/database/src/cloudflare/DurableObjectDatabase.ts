@@ -37,7 +37,7 @@
  *
  * @since 0.1.0
  */
-import { Context, Effect, Exit, Layer, Semaphore, Stream } from "effect"
+import { Cause, Context, Effect, Exit, Layer, Result, Semaphore, Stream } from "effect"
 import * as Reactivity from "effect/unstable/reactivity/Reactivity"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as SqlConnection from "effect/unstable/sql/SqlConnection"
@@ -55,7 +55,6 @@ import type {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface DurableObjectDatabaseOptions {
   /** The Durable Object's storage handle, `ctx.storage`. */
@@ -85,10 +84,9 @@ const DurableObjectTransaction = Context.Service<
  * carries an equivalent shim for the same reason, copying `errcode` onto
  * `errno` because `node:sqlite` names the field differently.
  *
- * Only the constraint family is recovered here. Busy, locked, and I/O
- * failures need no code: `DurableWriter.fromSqlError` and
- * `WriteRetry.isRetryableWriteError` already match those on the message text
- * as they walk the cause chain, because PGlite reports them the same way.
+ * Only the constraint family is recovered here. The shared durable-writer
+ * classifiers already recognize busy, locked, and I/O failures by both code
+ * and message while walking the cause chain, including PGlite's nested form.
  */
 const codeFromMessage = (message: string): string | undefined =>
   message.includes("UNIQUE constraint failed")
@@ -120,15 +118,11 @@ const normalize = (value: SqlStorageValue): unknown => value instanceof ArrayBuf
 
 /**
  * Rows are read positionally and rebuilt against `columnNames` rather than
- * taken from the object cursor, so a query selecting two columns of the same
- * name yields both rather than silently keeping the last.
+ * taken from the platform's object cursor. A trailing duplicate label
+ * deterministically overwrites an earlier one, matching `node:sqlite`; use
+ * `.values` when both columns are needed.
  */
-function* rowIterator(
-  sql: SqlStorageLike,
-  statement: string,
-  params: ReadonlyArray<unknown>
-): Generator<Record<string, unknown>> {
-  const cursor = sql.exec(statement, ...params)
+function* rowsFromCursor(cursor: SqlStorageCursorLike): Generator<Record<string, unknown>> {
   const columns = cursor.columnNames
   for (const values of cursor.raw()) {
     const row: Record<string, unknown> = {}
@@ -137,6 +131,14 @@ function* rowIterator(
     }
     yield row
   }
+}
+
+function* rowIterator(
+  sql: SqlStorageLike,
+  statement: string,
+  params: ReadonlyArray<unknown>
+): Generator<Record<string, unknown>> {
+  yield* rowsFromCursor(sql.exec(statement, ...params))
 }
 
 const valuesOf = (cursor: SqlStorageCursorLike): Array<Array<unknown>> =>
@@ -180,7 +182,7 @@ const makeConnection = (sql: SqlStorageLike): SqlConnection.Connection => {
         const cursor = sql.exec(statement, ...params)
         const columns = cursor.columnNames
         if (columns.length > 0) {
-          return Array.from(rowIterator(sql, statement, params))
+          return Array.from(rowsFromCursor(cursor))
         }
         // Drain the cursor so the statement has finished before `changes()`.
         valuesOf(cursor)
@@ -208,7 +210,19 @@ const makeConnection = (sql: SqlStorageLike): SqlConnection.Connection => {
     executeValues: runValues,
     executeValuesUnprepared: runValues,
     executeStream: (statement, params, transformRows) =>
-      Stream.suspend(() => Stream.fromIteratorSucceed(rowIterator(sql, statement, params), 128)).pipe(
+      Stream.unwrap(
+        Effect.map(
+          Effect.try({
+            try: () => sql.exec(statement, ...params),
+            catch: executeFailure
+          }),
+          (cursor) => Stream.fromIteratorSucceed(rowsFromCursor(cursor), 128)
+        )
+      ).pipe(
+        Stream.catchCause((cause) => {
+          const defect = Cause.findDefect(cause)
+          return Result.isSuccess(defect) ? Stream.fail(executeFailure(defect.success)) : Stream.failCause(cause)
+        }),
         transformRows ? Stream.mapArray((chunk) => transformRows(chunk) as any) : (self) => self
       )
   }
@@ -261,12 +275,15 @@ const withStorageTransaction = <A, E, R>(
 ): Effect.Effect<A, E | SqlError, R> =>
   Effect.callback<A, E | SqlError, R>((resume) => {
     let interrupted = false
+    let resumed = false
+    let rejection: { readonly cause: unknown } | undefined
     const settled: Promise<void> = storage.transaction((transaction) =>
       new Promise<void>((resolve) => {
         if (interrupted) {
           transaction.rollback()
           return resolve()
         }
+        resumed = true
         resume(Effect.onExit(
           Effect.provideContext(effect, Context.add(services, DurableObjectTransaction, [connection, 0])),
           (exit) => {
@@ -275,14 +292,27 @@ const withStorageTransaction = <A, E, R>(
             }
             resolve()
             // Surface the write only once the platform has settled it.
-            return Effect.promise(() => settled)
+            return Effect.promise(awaitSettled).pipe(
+              Effect.andThen(Effect.suspend(() =>
+                rejection !== undefined && Exit.isSuccess(exit)
+                  ? Effect.fail(failure(rejection.cause, "Failed transaction", "transaction"))
+                  : Effect.void
+              ))
+            )
           }
         ))
       })
-    ).catch((cause) => resume(Effect.fail(failure(cause, "Failed transaction", "transaction"))))
+    )
+    const awaitSettled = () => settled.then(() => {}, () => {})
+    void settled.catch((cause) => {
+      rejection = { cause }
+      if (!resumed) {
+        resume(Effect.fail(failure(cause, "Failed transaction", "transaction")))
+      }
+    })
     return Effect.suspend(() => {
       interrupted = true
-      return Effect.promise(() => settled)
+      return Effect.promise(awaitSettled)
     })
   })
 
@@ -305,7 +335,6 @@ const makeWithTransaction = (
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (
   options: DurableObjectDatabaseOptions
@@ -333,7 +362,6 @@ export const make = (
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer = (options: DurableObjectDatabaseOptions): Layer.Layer<SqlClient.SqlClient> =>
   Layer.effect(SqlClient.SqlClient, make(options)).pipe(Layer.provide(Reactivity.layer))

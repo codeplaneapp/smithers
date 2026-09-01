@@ -1,11 +1,11 @@
 /**
  * Write retry policy.
  *
- * Governing persistence design: `docs/specs/Concepts/Run Ownership.md`.
+ * Governing persistence design: `docs/pages/api/database.md`.
  *
- * Adapted from smithers `packages/db/src/withSqliteWriteRetryEffect.js`:
- * retry only structured transient failures, bound exponential delay, and use
- * Effect scheduling so interruption and `TestClock` remain native.
+ * Ported from the 0.x `withSqliteWriteRetryEffect`, deleted in Phase 1: retry
+ * only structured transient failures, bound exponential delay, and use Effect
+ * scheduling so interruption and `TestClock` remain native.
  *
  * Classification is dialect-blind by construction. `DurableWriter.make`
  * accepts any `SqlClient`, so a caller can already hand it a Postgres or
@@ -17,7 +17,7 @@
  *
  * @since 0.1.0
  */
-import { Cause, Duration, Effect, Metric, Result, Schedule } from "effect"
+import { Cause, Duration, Effect, Metric, Schedule } from "effect"
 import * as SqlError from "effect/unstable/sql/SqlError"
 import * as DatabaseMetrics from "../DatabaseMetrics.ts"
 
@@ -26,7 +26,6 @@ import * as DatabaseMetrics from "../DatabaseMetrics.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface WriteRetryOptions {
   /** Total attempts, including the initial write. */
@@ -77,6 +76,83 @@ const isRetryableMessage = (message: string): boolean =>
   message.includes("could not serialize access") ||
   message.includes("deadlock detected")
 
+const hasCause = (
+  cause: unknown,
+  match: (code: string | undefined, message: string) => boolean
+): boolean => {
+  const seen = new Set<unknown>()
+  let current = cause
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    seen.add(current)
+    if (SqlError.isSqlError(current)) {
+      current = current.reason.cause
+      continue
+    }
+    const message = "message" in current && typeof current.message === "string" ? current.message.toLowerCase() : ""
+    if (match(causeCode(current), message)) {
+      return true
+    }
+    current = "cause" in current ? current.cause : undefined
+  }
+  return false
+}
+
+/**
+ * Returns whether a cause chain carries a recognized transient database
+ * conflict.
+ *
+ * @category guards
+ * @since 1.0.0
+ */
+export const isBusyCause = (cause: unknown): boolean =>
+  hasCause(cause, (code, message) => isRetryableCode(code) || isRetryableMessage(message))
+
+/**
+ * Returns whether a cause chain carries a recognized SQLite I/O failure.
+ *
+ * @category guards
+ * @since 1.0.0
+ */
+export const isIoCause = (cause: unknown): boolean =>
+  hasCause(
+    cause,
+    (code, message) => code?.startsWith("SQLITE_IOERR") === true || message.includes("disk i/o error")
+  )
+
+/**
+ * The stable category a structured SQL failure normalizes to.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type SqlFailureCode = "busy" | "constraint" | "io" | "unknown"
+
+/**
+ * Classifies a structured SQL error once, for both the retry decision and the
+ * code `DurableWriter.DatabaseError` reports.
+ *
+ * One function rather than two predicates, because the two used to disagree on
+ * a mixed cause chain: an `SQLITE_IOERR` whose own cause carried `SQLITE_BUSY`
+ * was reported as `io` — the category the package documents as never replayed
+ * — and retried anyway. Precedence is decided here, in one place, so a code and
+ * a retry decision can no longer drift apart: a lock timeout is always busy, a
+ * constraint violation is never transient, and an I/O failure outranks a busy
+ * cause nested beneath it, because the write did reach the disk.
+ *
+ * @category classifying
+ * @since 1.0.0
+ */
+export const classifySqlError = (error: SqlError.SqlError): SqlFailureCode =>
+  error.reason._tag === "LockTimeoutError"
+    ? "busy"
+    : error.reason._tag === "ConstraintError" || error.reason._tag === "UniqueViolation"
+    ? "constraint"
+    : isIoCause(error.reason.cause)
+    ? "io"
+    : isBusyCause(error.reason.cause)
+    ? "busy"
+    : "unknown"
+
 /**
  * Returns whether a failure represents a transient write conflict in either
  * the SQLite or the Postgres vocabulary. The failure may be
@@ -85,11 +161,11 @@ const isRetryableMessage = (message: string): boolean =>
  * outermost `DurableWriter.write` still replays a transaction whose failing
  * savepoint a nested store already normalized into its own error type.
  * Constraint, syntax, and arbitrary application errors are deliberately never
- * retried.
+ * retried, and neither is an I/O failure with a busy cause beneath it: the
+ * classification {@link classifySqlError} makes is the whole decision.
  *
  * @category guards
  * @since 0.1.0
- * @slop
  */
 export const isRetryableWriteError = (error: unknown): boolean => {
   const seen = new Set<unknown>()
@@ -97,26 +173,50 @@ export const isRetryableWriteError = (error: unknown): boolean => {
   while (typeof current === "object" && current !== null && !seen.has(current)) {
     seen.add(current)
     if (SqlError.isSqlError(current)) {
-      if (current.reason._tag === "LockTimeoutError") return true
-      current = current.reason.cause
-      continue
-    }
-    const message = "message" in current && typeof current.message === "string" ? current.message.toLowerCase() : ""
-    if (isRetryableCode(causeCode(current)) || isRetryableMessage(message)) {
-      return true
+      return classifySqlError(current) === "busy"
     }
     current = "cause" in current ? current.cause : undefined
   }
   return false
 }
 
-const retryableFromCause = <E>(cause: Cause.Cause<E>): E | undefined => {
-  const failure = Result.getOrUndefined(Cause.findError(cause))
-  if (isRetryableWriteError(failure)) {
-    return failure
+/**
+ * A defect is retryable on the same terms a typed failure is: a busy cause the
+ * driver threw raw, and never an I/O failure that happens to carry one.
+ *
+ * rc.108 can throw its rollback failure as a raw defect, before a `SqlError`
+ * exists to provide provenance, which is why the defect channel is read at all.
+ * Typed failures never get that exception.
+ */
+const isRetryableDefect = (defect: unknown): boolean => isBusyCause(defect) && !isIoCause(defect)
+
+interface ClassifiedCause<E> {
+  readonly cause: Cause.Cause<E>
+  readonly retryable: boolean
+}
+
+/**
+ * Decides whether a cause is worth replaying, reading every reason it carries.
+ *
+ * `Cause.findError`/`findDefect` answer with the FIRST reason of a kind, so a
+ * parallel cause that pairs a busy SQL failure with an application error was
+ * retried or not depending on which half arrived first. A write that raced two
+ * effects is exactly where that shape comes from, so the whole reason list is
+ * scanned instead. Typed failures are scanned before defects so a cause that
+ * carries both is classified with the provenance a `SqlError` gives.
+ */
+const classifyCause = <E>(cause: Cause.Cause<E>): ClassifiedCause<E> => {
+  for (const reason of cause.reasons) {
+    if (Cause.isFailReason(reason) && isRetryableWriteError(reason.error)) {
+      return { cause, retryable: true }
+    }
   }
-  const defect = Result.getOrUndefined(Cause.findDefect(cause))
-  return isRetryableWriteError(defect) ? defect as E : undefined
+  for (const reason of cause.reasons) {
+    if (Cause.isDieReason(reason) && isRetryableDefect(reason.defect)) {
+      return { cause, retryable: true }
+    }
+  }
+  return { cause, retryable: false }
 }
 
 /**
@@ -125,7 +225,6 @@ const retryableFromCause = <E>(cause: Cause.Cause<E>): E | undefined => {
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const withWriteRetry = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -148,9 +247,8 @@ export const withWriteRetry = <A, E, R>(
     // the error instead.
     Schedule.tap(() => Metric.update(DatabaseMetrics.writeRetries, 1))
   )
-  const retryableEffect = Effect.catchCause(effect, (cause) => {
-    const retryable = retryableFromCause(cause)
-    return retryable === undefined ? Effect.failCause(cause) : Effect.fail(retryable)
-  })
-  return Effect.retry(retryableEffect, { schedule, while: isRetryableWriteError })
+  const retryableEffect = Effect.catchCause(effect, (cause) => Effect.fail(classifyCause(cause)))
+  return Effect.retry(retryableEffect, { schedule, while: (classified) => classified.retryable }).pipe(
+    Effect.catch((classified) => Effect.failCause(classified.cause))
+  )
 }

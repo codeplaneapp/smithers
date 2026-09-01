@@ -21,7 +21,6 @@ import * as Metric from "effect/Metric"
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const writeRetries = Metric.counter("flows_db_write_retries", {
   description: "Durable write transaction replays after transient conflicts"

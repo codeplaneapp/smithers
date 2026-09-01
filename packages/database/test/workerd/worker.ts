@@ -14,6 +14,11 @@
  *   a contract, and savepoints are the one piece of that contract the platform
  *   could plausibly reserve alongside `BEGIN`.
  *
+ * Two more are claims about the platform's cursor that the fake can only
+ * mirror: a statement read through `.raw` runs once rather than twice, and a
+ * duplicate column label leaves the last value in a row object while `.values`
+ * keeps both.
+ *
  * The class is written in the plain Durable Object form — a constructor taking
  * the object's state and a `fetch` method — rather than by extending
  * `DurableObject` from `cloudflare:workers`, and its state is typed against
@@ -64,6 +69,36 @@ const checks = (
       }))
       const rows = yield* sql<{ readonly id: number }>`SELECT id FROM savepoints ORDER BY id`
       return rows.length === 1 && rows[0]!.id === 1
+    })
+  ),
+  // The driver builds `.raw`'s rows from the cursor it already holds, because
+  // asking the platform for the same statement twice ran an INSERT twice. The
+  // fake counts executions; only workerd can say what its own cursor does, and
+  // a doubled INSERT is visible in the table either way.
+  check(
+    "a result-returning statement through .raw executes exactly once",
+    Effect.gen(function*() {
+      yield* sql`CREATE TABLE returned (id INTEGER PRIMARY KEY, label TEXT NOT NULL)`
+      const raw = yield* write(sql`INSERT INTO returned (id, label) VALUES (1, 'once') RETURNING id`.raw)
+      const rows = yield* sql<{ readonly total: number }>`SELECT count(*) AS total FROM returned`
+      return Array.isArray(raw) && raw.length === 1 &&
+        (raw[0] as { readonly id: number }).id === 1 &&
+        rows[0]!.total === 1
+    })
+  ),
+  // The driver rebuilds rows positionally against `columnNames`, and the
+  // package documents what that means for a duplicate label: the last column
+  // wins in a row object, and `.values` still carries both. That is a claim
+  // about the platform's cursor, so it belongs here rather than only against
+  // the fake.
+  check(
+    "a duplicate column label keeps the last value in a row and both in .values",
+    Effect.gen(function*() {
+      const rows = yield* sql<{ readonly v: string }>`SELECT 'A' AS v, 'B' AS v`
+      const values = yield* sql`SELECT 'A' AS v, 'B' AS v`.values
+      return rows.length === 1 && rows[0]!.v === "B" &&
+        values.length === 1 && values[0]!.length === 2 &&
+        values[0]![0] === "A" && values[0]![1] === "B"
     })
   ),
   check(

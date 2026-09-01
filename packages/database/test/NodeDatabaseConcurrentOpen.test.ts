@@ -1,25 +1,17 @@
 import { afterEach, describe, expect, it } from "@effect/vitest"
-import { Cause, Effect, Layer, Result } from "effect"
+import { Cause, Duration, Effect, Fiber, Layer, Result } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
-import { mkdtempSync, rmSync } from "node:fs"
+import { fstatSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import * as NodeDatabase from "../src/node/NodeDatabase.ts"
 
 /**
- * Gates the cases whose cost is a fixed real-time ladder rather than a
- * workload. Off by default so the package gate stays fast; on in any run that
- * wants the whole contract exercised.
+ * The exhaustion case takes about nine seconds here, so it carries a finite
+ * timeout with generous headroom over that measured cost.
  */
-const slowTests = process.env.FLOWS_SLOW_TESTS === "1"
-
-/**
- * The exhaustion case outlasts the suite's 30 s budget by design, so it
- * carries its own. Finite, and generous over the measured 238 s, so a genuine
- * hang still fails rather than parking the run.
- */
-const openLadderTimeout = 600_000
+const openLadderTimeout = 60_000
 
 const tempDirectories = new Set<string>()
 
@@ -55,6 +47,58 @@ const seedRollbackMode = (filename: string): void => {
     db.exec("CREATE TABLE seeded (id INTEGER PRIMARY KEY)")
   } finally {
     db.close()
+  }
+}
+
+/** Where this process's own open file descriptors are listed. */
+const descriptorDirectory = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd"
+
+/**
+ * This process's open file descriptors on one file.
+ *
+ * A SQLite connection holds a descriptor on its database file for as long as
+ * the connection is open, so this counts connections themselves rather than
+ * something that stands in for them. Descriptors are matched by device and
+ * inode because `/dev/fd` entries are not symlinks on macOS, so the path a
+ * descriptor points at is not readable there.
+ */
+const openHandles = (filename: string): number => {
+  const target = statSync(filename)
+  let open = 0
+  for (const entry of readdirSync(descriptorDirectory)) {
+    try {
+      const descriptor = fstatSync(Number(entry))
+      if (descriptor.dev === target.dev && descriptor.ino === target.ino) open += 1
+    } catch {
+      // Listed by `readdir` and gone before `fstat` reached it, usually
+      // `readdir`'s own descriptor. A descriptor that no longer exists is not
+      // one holding the database.
+    }
+  }
+  return open
+}
+
+/**
+ * Takes the file's shared read lock, as a peer mid-read would hold it.
+ *
+ * `BEGIN` opens a DEFERRED transaction, which takes no lock at all until a
+ * statement reads, so the read is what makes the peer contended. A shared lock
+ * is what this driver's open ladder actually races: it leaves the guard's
+ * read-only probe free to succeed, and refuses only the client's
+ * `PRAGMA journal_mode = WAL`, which needs the file exclusively.
+ */
+const holdReadLock = (filename: string): { readonly release: () => void } => {
+  const db = new DatabaseSync(filename)
+  let released = false
+  db.exec("BEGIN")
+  db.prepare("SELECT id FROM seeded").all()
+  return {
+    release: () => {
+      if (released) return
+      released = true
+      db.exec("COMMIT")
+      db.close()
+    }
   }
 }
 
@@ -104,16 +148,84 @@ describe("NodeDatabase concurrent open", () => {
       }
     }))
 
-  // Opt-in: this case spends the entire open ladder against a lock nobody
-  // releases, and `openSchedule` is deliberately not configurable, so it costs
-  // about four minutes of real time — measured at 220-240 s over two runs,
-  // because each of the 40 attempts blocks inside SQLite's own WAL-conversion
-  // wait before the jittered delay even applies. It is a known limitation of
-  // the default gate, not a broken contract: it passes when it is run.
-  // See docs/alpha-notes.md, "Known test pins".
-  //   FLOWS_SLOW_TESTS=1 pnpm --filter @smthrs/database test
-  it.live.runIf(slowTests)(
-    "dies with the original lock defect after the fixed open-retry budget is exhausted",
+  /**
+   * Real elapsed time again: the ladder between attempts is a real sleep.
+   *
+   * What this pins is the descriptor census of a contended open, measured on
+   * the file rather than inferred from anything: the count does not grow with
+   * the number of attempts a ladder spends, the successful open leaves exactly
+   * one connection, and that one goes with the layer's scope. An attempt that
+   * kept its connection would break the first two.
+   *
+   * What it does not pin is a difference SQLite itself makes. A failed
+   * `PRAGMA journal_mode = WAL` parks one descriptor on the file: closing any
+   * descriptor drops every POSIX lock this process holds on the inode, so
+   * SQLite defers that close while a peer connection here still holds one, and
+   * reuses the parked descriptor for the next open. That descriptor is
+   * accounted for below, and it is not a connection.
+   */
+  it.live("does not accumulate connections across the attempts a contended open retries", () =>
+    Effect.gen(function*() {
+      const filename = tempFile()
+      seedRollbackMode(filename)
+      const peer = holdReadLock(filename)
+      // `busyTimeout` only sets the pace. The WAL conversion does consult the
+      // busy handler under a shared lock, so the vendor's five-second default
+      // would spend five seconds on every attempt; zero makes each one refuse
+      // at once. What an attempt does is unchanged: open a connection, fail
+      // the conversion, retry.
+      const opening = NodeDatabase.layer({
+        filename,
+        sqlite: { busyTimeout: 0 }
+      }) as unknown as Layer.Layer<never>
+
+      try {
+        expect(openHandles(filename)).toBe(1)
+        let opened = false
+        const observed = yield* Effect.scoped(Effect.gen(function*() {
+          const building = yield* Effect.forkChild(
+            Effect.tap(Layer.build(opening), () => Effect.sync(() => opened = true))
+          )
+          // Two samples with roughly ten further attempts between them. Both
+          // land between attempts rather than inside one: an attempt is
+          // synchronous, so no other fiber runs while a connection of its own
+          // is open.
+          yield* Effect.sleep(Duration.millis(150))
+          const early = openHandles(filename)
+          yield* Effect.sleep(Duration.millis(600))
+          const late = openHandles(filename)
+          // The peer still holds the file, so every attempt behind those two
+          // samples failed, which is what makes them worth comparing.
+          expect(opened).toBe(false)
+          peer.release()
+          yield* Fiber.join(building)
+          return { early, late, afterOpen: openHandles(filename) }
+        }))
+
+        // Attempts spent, and nothing gained: a ladder that kept a connection
+        // per attempt would have counted ten more by the second sample.
+        expect(observed.late).toBe(observed.early)
+        // Only the connection the layer actually returned. The peer released
+        // and closed before this, and its parked descriptor went with it.
+        expect(observed.afterOpen).toBe(1)
+        // And that one goes when the layer's scope closes.
+        expect(openHandles(filename)).toBe(0)
+      } finally {
+        peer.release()
+      }
+    }))
+
+  /**
+   * Runs on every gate. It used to be pinned behind an environment variable
+   * because it cost 220-240 s: each attempt then blocked inside SQLite's own
+   * WAL-conversion wait. The guard's read-only probe now exhausts the ladder
+   * first, and against a lock nobody releases that costs 8.9 s measured here,
+   * inside the package's 30 s per-test budget and well inside the explicit
+   * timeout below. A pin whose reason has expired is a contract nobody runs,
+   * and this one states what an operator sees when a peer never lets go.
+   */
+  it.live(
+    "reports database_locked after the fixed guard-retry budget is exhausted",
     () =>
       Effect.gen(function*() {
         const filename = tempFile()
@@ -129,8 +241,13 @@ describe("NodeDatabase concurrent open", () => {
             const defect = Cause.findDefect(exit.cause)
             expect(Result.isSuccess(defect)).toBe(true)
             if (Result.isSuccess(defect)) {
-              expect(String(defect.success)).toMatch(/database is (?:locked|busy)/)
-              expect(defect.success).not.toMatchObject({ defect: expect.anything() })
+              expect(NodeDatabase.isUnsupportedDatabase(defect.success)).toBe(true)
+              if (NodeDatabase.isUnsupportedDatabase(defect.success)) {
+                expect(defect.success.code).toBe("database_locked")
+                expect(defect.success.message).toBe(
+                  `${filename} could not be inspected because another process holds it`
+                )
+              }
             }
           }
         } finally {
