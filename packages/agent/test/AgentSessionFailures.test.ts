@@ -42,6 +42,7 @@ import * as AgentSession from "../src/AgentSession.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as Seat from "../src/Seat.ts"
 import * as SeatResolver from "../src/SeatResolver.ts"
+import * as Safety from "./Safety.ts"
 
 const route: FlowEngineLike.RouteResolver = {
   prepare: () =>
@@ -298,7 +299,12 @@ const withExecutor = <A>(
   scenario: (executor: ControlExecutor.Service) => Effect.Effect<A, unknown>
 ): Promise<A> =>
   Effect.gen(function*() {
-    const executor = yield* AgentSession.make({ limits: { calls: 4 }, maxFrames: 2 })
+    const executor = yield* AgentSession.make({
+      limits: { calls: 4 },
+      maxFrames: 2,
+      quotaPolicy: Safety.quotaPolicy,
+      budget: Safety.budget
+    })
     return yield* scenario(executor)
   }).pipe(
     Effect.provide(

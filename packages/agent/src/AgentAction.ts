@@ -642,6 +642,8 @@ export const make = <
         | Sandbox.Sandbox
         | Steering.Source
         | Crypto.Crypto
+        | Budget.Budget
+        | QuotaPolicy.QuotaClassifier
       > =>
         waitOutQuota(
           session,
@@ -703,6 +705,8 @@ export const make = <
         | Sandbox.Sandbox
         | Steering.Source
         | Crypto.Crypto
+        | Budget.Budget
+        | QuotaPolicy.QuotaClassifier
         | Output["DecodingServices"]
       > => {
         const declaredRepair = options.repair
@@ -741,6 +745,8 @@ export const make = <
         | Sandbox.Sandbox
         | Steering.Source
         | Crypto.Crypto
+        | Budget.Budget
+        | QuotaPolicy.QuotaClassifier
         | Output["DecodingServices"]
       > =>
         ask(`${instance.executionId}/${tag}#${correction}`, prompt, system, options.seat, correction).pipe(

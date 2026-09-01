@@ -862,10 +862,13 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
 /**
  * A budget that accounts nothing and refuses nothing.
  *
+ * This is an explicit decision to give up plan-envelope spending enforcement,
+ * never a production default.
+ *
  * @category constructors
  * @since 0.1.0
  */
-export const makeNoop = (): Service =>
+export const makeUnbounded = (): Service =>
   Budget.of({
     check: Effect.succeed<Verdict>({ _tag: "proceed" }),
     record: () => Effect.void,
@@ -883,23 +886,26 @@ export const layer = (policy: Policy, options: Options = {}): Layer.Layer<Budget
   Layer.effect(Budget, make(policy, options))
 
 /**
- * Provides {@link makeNoop}.
+ * Explicitly provides {@link makeUnbounded}.
+ *
+ * This gives up token, call, and latency ceilings for the composed run.
  *
  * @category layers
  * @since 0.1.0
  */
-export const layerNoop = (): Layer.Layer<Budget> => Layer.succeed(Budget)(makeNoop())
+export const layerUnbounded = (): Layer.Layer<Budget> => Layer.succeed(Budget)(makeUnbounded())
 
 /**
- * Reads the budget a composition provided, or the no-op when it provided none.
+ * Reads the budget a composition explicitly provided.
+ *
+ * There is deliberately no fallback. Every production composition must bind a
+ * policy, normally with {@link layerFromEnvelope}, or explicitly opt into
+ * {@link layerUnbounded}.
  *
  * @category accessors
  * @since 0.1.0
  */
-export const current: Effect.Effect<Service> = Effect.map(
-  Effect.serviceOption(Budget),
-  Option.getOrElse(makeNoop)
-)
+export const current: Effect.Effect<Service, never, Budget> = Budget
 
 /**
  * Turns an approved plan envelope into a policy.

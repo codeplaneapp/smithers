@@ -77,6 +77,8 @@ import { Ownership, RunStore } from "@smthrs/run-store"
 import type { Crypto } from "effect"
 import { Cause, Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } from "effect"
 import { Agent } from "./Agent.ts"
+import type * as Budget from "./Budget.ts"
+import type * as QuotaPolicy from "./QuotaPolicy.ts"
 import * as Seat from "./Seat.ts"
 import { SeatResolver } from "./SeatResolver.ts"
 import * as StandardFlows from "./StandardFlows.ts"
@@ -98,6 +100,10 @@ export interface Options {
   readonly flows?: ReadonlyArray<FlowBinding.Source> | undefined
   /** The explicit sandbox budget every cell runs under. Never unlimited. */
   readonly limits: Sandbox.Limits
+  /** Required quota park/retry policy for every model call in the run. */
+  readonly quotaPolicy: Layer.Layer<QuotaPolicy.QuotaClassifier>
+  /** Builds the run-local spending policy from the plan that was approved. */
+  readonly budget: (envelope: Envelope) => Layer.Layer<Budget.Budget>
   /** Stable system teaching placed ahead of the cell contract. */
   readonly system?: ReadonlyArray<string> | undefined
   readonly maxFrames?: number | undefined
@@ -1213,6 +1219,8 @@ export const make = (
           approvalChannel: options.approvalChannel ?? false
         }).pipe(
           Stream.runForEach(record),
+          Effect.provide(options.budget(card.envelope)),
+          Effect.provide(options.quotaPolicy),
           Effect.provide(QuickJSSandbox.layer),
           Effect.provideService(Steering.Source, steering),
           // The pump is interrupted before the final flush so the two never

@@ -62,9 +62,11 @@ import type * as Descriptor from "@smthrs/registry/Descriptor"
 import type * as Registry from "@smthrs/registry/Registry"
 import { Context, Effect, Layer, Option, Stream } from "effect"
 import type * as Schedule from "effect/Schedule"
+import type * as Budget from "./Budget.ts"
 import * as CellPlugin from "./CellPlugin.ts"
 import * as Checkpointed from "./Checkpointed.ts"
 import * as FlowEngineLike from "./FlowEngineLike.ts"
+import type * as QuotaPolicy from "./QuotaPolicy.ts"
 import * as Seat from "./Seat.ts"
 
 /**
@@ -333,7 +335,12 @@ export interface Service {
   ) => Stream.Stream<
     AgentEvent.AgentEvent,
     HarnessError | PluginError,
-    FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance | Sandbox.Sandbox | Steering.Source
+    | FlowRuntime.FlowRuntime
+    | FlowRuntime.FlowInstance
+    | Sandbox.Sandbox
+    | Steering.Source
+    | Budget.Budget
+    | QuotaPolicy.QuotaClassifier
   >
 }
 

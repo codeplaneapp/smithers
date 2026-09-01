@@ -48,6 +48,7 @@ import * as AgentSession from "../src/AgentSession.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as Seat from "../src/Seat.ts"
 import * as SeatResolver from "../src/SeatResolver.ts"
+import * as Safety from "./Safety.ts"
 
 const prepared: Route.PreparedRequest = {
   routeId: "route-a",
@@ -273,6 +274,8 @@ const stack = (options: StackOptions) => {
     })
   ])
   const registration = AgentSession.layer({
+    quotaPolicy: Safety.quotaPolicy,
+    budget: Safety.budget,
     flows: options.bare === true ? undefined : [noteSource, checkSource],
     limits: { memoryBytes: 64 * 1024 * 1024, steps: 5_000_000 },
     maxFrames: 4,

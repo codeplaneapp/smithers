@@ -35,6 +35,7 @@ import { describe, expect, it } from "vitest"
 import * as Agent from "../src/Agent.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as Seat from "../src/Seat.ts"
+import * as Safety from "./Safety.ts"
 
 const prepared: Route.PreparedRequest = {
   routeId: "route-a",
@@ -185,7 +186,7 @@ const collect = (options: RunOptions) =>
       Effect.provide(Agent.layerDefaults)
     )
     return events
-  }).pipe(Effect.provide(Agent.layer))
+  }).pipe(Effect.provide(Agent.layer), Effect.provide(Safety.layer))
 
 const events = (outcome: Outcome): ReadonlyArray<AgentEvent.AgentEvent> => {
   expect(outcome._tag).toBe("completed")

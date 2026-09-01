@@ -44,6 +44,7 @@ import * as Agent from "../src/Agent.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as Seat from "../src/Seat.ts"
 import * as StandardFlows from "../src/StandardFlows.ts"
+import * as Safety from "./Safety.ts"
 
 const prepared: Route.PreparedRequest = {
   routeId: "route-a",
@@ -209,7 +210,7 @@ const collect = (options: {
       Effect.provide(Agent.layerDefaults)
     )
     return collected as ReadonlyArray<AgentEvent.AgentEvent>
-  }).pipe(Effect.provide(Agent.layer))
+  }).pipe(Effect.provide(Agent.layer), Effect.provide(Safety.layer))
 
 const settledCalls = (collected: ReadonlyArray<AgentEvent.AgentEvent>) =>
   collected.flatMap((event) => (event._tag === "cell-call-settled" ? [event] : []))

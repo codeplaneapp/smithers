@@ -23,6 +23,7 @@ import * as EventSink from "../src/EventSink.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as Seat from "../src/Seat.ts"
 import * as SeatResolver from "../src/SeatResolver.ts"
+import * as Safety from "./Safety.ts"
 
 const prepared: Route.PreparedRequest = {
   routeId: "route-a",
@@ -136,6 +137,7 @@ const run = (
         Layer.provideMerge(AgentAction.layerHost(host)),
         Layer.provideMerge(seats(scripted(cells, requests))),
         Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+        Layer.provideMerge(Safety.layer),
         Layer.provideMerge(Action.layerImplementations),
         Layer.provideMerge(FlowEngine.layerMemory),
         Layer.provideMerge(NodeCrypto.layer)
@@ -208,6 +210,7 @@ describe("AgentAction.make", () => {
                 seats(scripted([""], requests))
               ),
               Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+              Layer.provideMerge(Safety.layer),
               Layer.provideMerge(Action.layerImplementations),
               Layer.provideMerge(FlowEngine.layerMemory),
               Layer.provideMerge(NodeCrypto.layer)
@@ -254,6 +257,7 @@ const stack = <ROut, RIn>(
     Layer.provideMerge(AgentAction.layerHost(host)),
     Layer.provideMerge(seats(model)),
     Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+    Layer.provideMerge(Safety.layer),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),
     Layer.provideMerge(NodeCrypto.layer)
@@ -610,6 +614,7 @@ describe("AgentAction refusals that never reach the provider", () => {
               Layer.provideMerge(AgentAction.layerHost(host)),
               Layer.provideMerge(seats(scripted([answering(`{"approved":true,"issues":[]}`)], requests))),
               Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+              Layer.provideMerge(Safety.layer),
               Layer.provideMerge(Action.layerImplementations),
               Layer.provideMerge(FlowEngine.layerMemory),
               Layer.provideMerge(NodeCrypto.layer)
@@ -637,6 +642,7 @@ describe("AgentAction refusals that never reach the provider", () => {
                 })
               ),
               Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+              Layer.provideMerge(Safety.layer),
               Layer.provideMerge(Action.layerImplementations),
               Layer.provideMerge(FlowEngine.layerMemory),
               Layer.provideMerge(NodeCrypto.layer)

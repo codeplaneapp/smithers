@@ -192,6 +192,7 @@ const memory = <ROut, RIn>(
   steps.pipe(
     Layer.provideMerge(AgentAction.layerHost(host)),
     Layer.provideMerge(budget),
+    Layer.provideMerge(QuotaPolicy.layerUnclassified()),
     Layer.provideMerge(seats(model)),
     Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
     Layer.provideMerge(Action.layerImplementations),
@@ -425,6 +426,7 @@ describe("a budget on the durable engine", () => {
         const wiring = Layer.mergeAll(First.layer, Interpreter.layer(OneStep)).pipe(
           Layer.provideMerge(AgentAction.layerHost(host)),
           Layer.provideMerge(Budget.layer({ tokens: { max: 1_000, onExceeded: "warn" } })),
+          Layer.provideMerge(QuotaPolicy.layerUnclassified()),
           Layer.provideMerge(seats(spending(600, [thinking, answering(`{"approved":true}`)], calls))),
           Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
           Layer.provideMerge(Action.layerImplementations),
@@ -463,6 +465,7 @@ describe("a budget on the durable engine", () => {
         const wiring = Layer.mergeAll(First.layer, Second.layer, Interpreter.layer(TwoSteps)).pipe(
           Layer.provideMerge(AgentAction.layerHost(host)),
           Layer.provideMerge(Budget.layer({ tokens: { max: 1_000, onExceeded: "skip-remaining" } })),
+          Layer.provideMerge(QuotaPolicy.layerUnclassified()),
           Layer.provideMerge(seats(spending(600, [answering(`{"approved":true}`)], calls))),
           Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
           Layer.provideMerge(Action.layerImplementations),
@@ -660,6 +663,7 @@ describe("a budget refusing a resumed run", () => {
             // the step after the boundary cannot be made — but ONLY if the 600
             // the first incarnation spent is still known.
             Layer.provideMerge(Budget.layer({ tokens: { max: 1_000 } })),
+            Layer.provideMerge(QuotaPolicy.layerUnclassified()),
             Layer.provideMerge(seats(spending(600, [answering(`{"approved":true}`)], calls))),
             Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
             Layer.provideMerge(Action.layerImplementations),
@@ -930,7 +934,7 @@ describe("the envelope", () => {
   })
 })
 
-describe("a composition with no budget", () => {
+describe("an explicitly unbounded composition", () => {
   it("accounts nothing and refuses nothing", async () => {
     const observed = await Effect.runPromise(
       Effect.gen(function*() {
@@ -941,20 +945,12 @@ describe("a composition with no budget", () => {
           usage: yield* budget.usage,
           run: yield* budget.usageOf("any-run")
         }
-      })
+      }).pipe(Effect.provide(Budget.layerUnbounded()))
     )
 
     expect(observed.verdict._tag).toBe("proceed")
     expect(observed.usage).toEqual({ tokens: 0, calls: 0, largestCall: 0 })
     expect(observed.run).toEqual({ tokens: 0, calls: 0, largestCall: 0 })
-  })
-
-  it("takes the no-op layer explicitly, for a composition that says so", async () => {
-    const verdict = await Effect.runPromise(
-      Effect.flatMap(Budget.Budget, (budget) => budget.check).pipe(Effect.provide(Budget.layerNoop()))
-    )
-
-    expect(verdict._tag).toBe("proceed")
   })
 
   it("builds one straight from an approved envelope", async () => {
@@ -1121,6 +1117,7 @@ describe("a budget whose ledger cannot be written", () => {
           const wiring = Layer.mergeAll(First.layer, Interpreter.layer(OneStep)).pipe(
             Layer.provideMerge(AgentAction.layerHost(host)),
             Layer.provideMerge(Budget.layer({ tokens: { max: 10_000 } })),
+            Layer.provideMerge(QuotaPolicy.layerUnclassified()),
             Layer.provideMerge(seats(spending(600, [answering(`{"approved":true}`)], calls))),
             Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
             Layer.provideMerge(Action.layerImplementations),
@@ -1155,6 +1152,7 @@ describe("a budget shared by every run of one composition", () => {
     Layer.mergeAll(First.layer, Interpreter.layer(OneStep)).pipe(
       Layer.provideMerge(AgentAction.layerHost(host)),
       Layer.provideMerge(budget),
+      Layer.provideMerge(QuotaPolicy.layerUnclassified()),
       Layer.provideMerge(seats(model)),
       Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
       Layer.provideMerge(Action.layerImplementations)

@@ -43,6 +43,7 @@ import { TestClock } from "effect/testing"
 import { describe, expect, it } from "vitest"
 import * as Agent from "../src/Agent.ts"
 import * as AgentAction from "../src/AgentAction.ts"
+import * as Budget from "../src/Budget.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as QuotaPolicy from "../src/QuotaPolicy.ts"
 import * as Seat from "../src/Seat.ts"
@@ -248,6 +249,7 @@ const incarnation = (
     return Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)).pipe(
       Layer.provideMerge(AgentAction.layerHost(composition)),
       Layer.provideMerge(classifier),
+      Layer.provideMerge(Budget.layerUnbounded()),
       Layer.provideMerge(seats(model)),
       Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
       Layer.provideMerge(Action.layerImplementations),
@@ -266,6 +268,7 @@ const memory = (model: Model.Model, classifier: Layer.Layer<QuotaPolicy.QuotaCla
   Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)).pipe(
     Layer.provideMerge(AgentAction.layerHost(host)),
     Layer.provideMerge(classifier),
+    Layer.provideMerge(Budget.layerUnbounded()),
     Layer.provideMerge(seats(model)),
     Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
     Layer.provideMerge(Action.layerImplementations),
@@ -426,10 +429,7 @@ describe("the default classifier", () => {
     expect(QuotaPolicy.parseDelay("try again in -3 seconds")).toBeUndefined()
   })
 
-  it("defaults to the no-op classifier when a composition provides none", async () => {
-    const classifier = await Effect.runPromise(QuotaPolicy.current)
-    expect(Option.isNone(classifier.classify(rateLimited, 1_000))).toBe(true)
-
+  it("reads the classifier a composition explicitly provides", async () => {
     const provided = await Effect.runPromise(
       QuotaPolicy.current.pipe(Effect.provide(QuotaPolicy.layerDefault()))
     )
@@ -668,7 +668,7 @@ describe("a quota refusal at a model-backed step", () => {
     const exit = await Effect.runPromise(
       Effect.exit(
         ReviewFlow.execute({ diff: "-  old\n+  new" }, { executionId: "quota-noop" }).pipe(
-          Effect.provide(memory(refusingOnce(rateLimited, calls), QuotaPolicy.layerNoop()))
+          Effect.provide(memory(refusingOnce(rateLimited, calls), QuotaPolicy.layerUnclassified()))
         )
       )
     )
