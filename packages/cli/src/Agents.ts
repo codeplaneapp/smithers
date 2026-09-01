@@ -14,7 +14,7 @@
  *
  * @since 1.0.0
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -94,16 +94,45 @@ export interface Wired {
   readonly reason?: string | undefined
 }
 
-const readJson = (path: string): Record<string, unknown> => {
+/** Why an existing configuration cannot be updated in place, if it cannot. */
+interface Unusable {
+  readonly reason: string
+}
+
+const isUnusable = (value: Record<string, unknown> | Unusable): value is Unusable =>
+  typeof (value as Unusable).reason === "string"
+
+/**
+ * Reads an agent's configuration, or says why it must not be written over.
+ *
+ * A missing file is the first-run case and reads as an empty document. Every
+ * other unreadable shape is refused rather than replaced: treating a parse
+ * failure as `{}` meant one stray comma in an operator's `~/.claude.json`
+ * turned the whole file into a document holding nothing but the Smithers
+ * server entry, with no copy of what was there before.
+ */
+const readJson = (path: string): Record<string, unknown> | Unusable => {
   if (!existsSync(path)) return {}
+  let text: string
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {}
-  } catch {
-    return {}
+    text = readFileSync(path, "utf8")
+  } catch (error) {
+    return { reason: `${path} could not be read: ${error instanceof Error ? error.message : String(error)}` }
   }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch (error) {
+    return {
+      reason: `${path} is not valid JSON (${
+        error instanceof Error ? error.message : String(error)
+      }). Fix the file, then run this again.`
+    }
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { reason: `${path} has a root that is not a JSON object. Fix the file, then run this again.` }
+  }
+  return parsed as Record<string, unknown>
 }
 
 /**
@@ -117,16 +146,39 @@ export const addMcp = (agent: Agent, home: string = homedir()): Wired => {
   const entry = launchCommand()
   try {
     const document = readJson(path)
-    const servers = document["mcpServers"] !== null && typeof document["mcpServers"] === "object"
-      ? { ...document["mcpServers"] as Record<string, unknown> }
-      : {}
+    if (isUnusable(document)) return { agent: agent.id, path, status: "failed", reason: document.reason }
+    const existing = document["mcpServers"]
+    if (existing !== undefined && (existing === null || typeof existing !== "object" || Array.isArray(existing))) {
+      return {
+        agent: agent.id,
+        path,
+        status: "failed",
+        reason: `${path} has an mcpServers member that is not an object. Fix the file, then run this again.`
+      }
+    }
+    const servers = existing === undefined ? {} : { ...existing as Record<string, unknown> }
     const desired = { command: entry.command, args: [...entry.args] }
     if (JSON.stringify(servers[serverName]) === JSON.stringify(desired)) {
       return { agent: agent.id, path, status: "unchanged" }
     }
     servers[serverName] = desired
     mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(path, `${JSON.stringify({ ...document, mcpServers: servers }, null, 2)}\n`, "utf8")
+    // Temp-plus-rename, mode preserved: a crash between truncation and the
+    // last byte would otherwise leave the operator with a half-written
+    // configuration and no copy of the original.
+    const temporary = `${path}.smithers-${process.pid}.tmp`
+    writeFileSync(temporary, `${JSON.stringify({ ...document, mcpServers: servers }, null, 2)}\n`, "utf8")
+    try {
+      if (existsSync(path)) chmodSync(temporary, statSync(path).mode & 0o777)
+      renameSync(temporary, path)
+    } catch (error) {
+      try {
+        unlinkSync(temporary)
+      } catch {
+        // The temp file is already gone, which is the outcome this wanted.
+      }
+      throw error
+    }
     return { agent: agent.id, path, status: "written" }
   } catch (error) {
     return {
