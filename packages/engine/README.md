@@ -37,13 +37,13 @@ operations — both defined in `@smthrs/flow`. This package is what runs them.
 
 The root exports these namespaces, also available from matching
 `@smthrs/engine/*` subpaths. The flow-authoring namespaces live in
-[`@smthrs/flow`](../flow/README.md).
+[`@smthrs/flow`](https://www.npmjs.com/package/@smthrs/flow).
 
-| Namespace         | Public exports                                                                                                                                                                                                                                                                                  |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FlowEngine`      | Implementation boundary `Encoded` and `ActionExecuteOptions`; `makeUnsafe`, which adapts an `Encoded` implementation into `@smthrs/flow`'s `FlowRuntime`; in-memory `layerMemory`; per-run state constructor `makeInstance`; compensable-step `SnapshotBoundaryOptions` and `SnapshotBoundary`. |
-| `FlowProxy`       | `toRpcGroup` / `ConvertRpcs` and `toHttpApiGroup` / `ConvertHttpApi` derive execute, discard, and resume transports from flows.                                                                                                                                                                 |
-| `FlowProxyServer` | `layerRpcHandlers`, `layerHttpApi`, and `RpcHandlers` implement the derived transports.                                                                                                                                                                                                         |
+| Namespace         | Public exports                                                                                                                                                                                                                                                                                                                         |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FlowEngine`      | Implementation boundary `Encoded` and `ActionExecuteOptions`; `makeUnsafe`, which adapts an `Encoded` implementation into `@smthrs/flow`'s `FlowRuntime`; in-memory `layerMemory`; per-run state constructor `makeInstance`; journal `Lineage`; trampoline `Round`; compensable-step `SnapshotBoundaryOptions` and `SnapshotBoundary`. |
+| `FlowProxy`       | `toRpcGroup` / `ConvertRpcs` and `toHttpApiGroup` / `ConvertHttpApi` derive execute, discard, and resume transports from flows.                                                                                                                                                                                                        |
+| `FlowProxyServer` | `layerRpcHandlers`, `layerHttpApi`, and `RpcHandlers` implement the derived transports.                                                                                                                                                                                                                                                |
 
 ## Reference implementation
 
@@ -54,6 +54,7 @@ namespace.
 
 ```ts
 import { FlowEngine } from "@smthrs/engine"
+import { FlowRuntime } from "@smthrs/flow"
 import { Effect } from "effect"
 
 // FlowEngine is the service the flow/action/deferred/clock/queue APIs
@@ -61,14 +62,13 @@ import { Effect } from "effect"
 // @smthrs/engine-store provides the durable one. makeUnsafe builds a
 // FlowEngine from an Encoded implementation (the persistence boundary).
 const program = Effect.gen(function*() {
-  const engine = yield* FlowEngine
+  const engine = yield* FlowRuntime.FlowRuntime
   // register, execute, poll, interrupt, interruptUnsafe, resume,
   // actionExecute (ActionExecuteOptions), deferredResult,
   // deferredDone, scheduleClock
 }).pipe(Effect.provide(FlowEngine.layerMemory))
 
-// Per-execution state lives in FlowInstance (FlowInstance.initial builds
-// one). Compensable actions need a SnapshotBoundary
+// Per-execution state is created with FlowEngine.makeInstance. Compensable actions need a SnapshotBoundary
 // (SnapshotBoundaryOptions) in context. Registering a flow that executes
 // itself transitively fails with FlowCycleDetected.
 ```
@@ -77,11 +77,12 @@ const program = Effect.gen(function*() {
 
 ```ts
 import { FlowProxy, FlowProxyServer } from "@smthrs/engine"
+import { Flow } from "@smthrs/flow"
 import { Layer } from "effect"
-import { HttpApi } from "effect/unstable/http"
+import { HttpApi } from "effect/unstable/httpapi"
 import { RpcServer } from "effect/unstable/rpc"
 
-declare const Review: import("@smthrs/engine").Flow.Any
+declare const Review: Flow.Any
 
 // Each flow derives Execute / Discard / Resume endpoints
 // (ConvertRpcs / ConvertHttpApi describe the derived types).
@@ -98,9 +99,24 @@ const RpcLayer = RpcServer.layer(ReviewRpcs).pipe(
 const HttpLayer = FlowProxyServer.layerHttpApi(ReviewApi, "flows", [Review])
 ```
 
+Proxy construction refuses duplicate generated operation names before a group
+or handler map exists. HTTP routes encode a flow tag as one opaque URL-safe
+segment, preserving case, reserved characters, Unicode normalization, and
+operation identity.
+
 Both server layers drive the served bodies, so both require what those bodies
 require: `Flow.Requirements` of every flow, on top of the schema services
 `Flow.RequirementsHandler` names. Serving a flow is executing it, and a
 forgotten `Action.toLayer` is a compile error on this side of the boundary
 too. The client side is unaffected — it encodes a payload and decodes a result,
 and requires no implementation at all.
+
+## In-memory lifetime
+
+`FlowEngine.layerMemory` is a deterministic test and local-development
+runtime, not a bounded store. It retains completed executions, action
+settlements, deferred results, and clocks until the layer scope closes; there
+is no eviction option. It snapshots a flow payload through that flow's JSON
+codec at admission and decodes a fresh value on every re-drive, so caller or
+handler mutation cannot rewrite replay state. Same-key in-flight actions share
+one settlement.

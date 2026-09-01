@@ -154,6 +154,131 @@ describe("FlowEngine.layerMemory durable waits", () => {
       yield* TestClock.adjust("10 minutes")
       expect(Option.isSome(yield* read)).toBe(true)
     }).pipe(Effect.provide(FlowEngine.layerMemory)))
+
+  effect("keeps flow, execution, and wait-name tuples injective", () =>
+    Effect.gen(function*() {
+      const engine = yield* FlowRuntime.FlowRuntime
+      const Left = Flow.make("Memory/Wait/Left", {
+        payload: {},
+        success: Schema.Void,
+        body: () => {
+          throw new Error("not executed")
+        }
+      })
+      const Right = Flow.make("Memory/Wait/Right", {
+        payload: {},
+        success: Schema.Void,
+        body: () => {
+          throw new Error("not executed")
+        }
+      })
+      const left = DurableDeferred.make("c", { success: Schema.String })
+      const right = DurableDeferred.make("b/c", { success: Schema.String })
+      yield* engine.deferredDone(left, {
+        flowName: Left._tag,
+        executionId: "a/b",
+        deferredName: left.name,
+        exit: Exit.succeed("left")
+      })
+      const readLeft = engine.deferredResult(left).pipe(
+        Effect.provideService(FlowRuntime.FlowInstance, FlowEngine.makeInstance(Left, "a/b"))
+      )
+      const readRight = engine.deferredResult(right).pipe(
+        Effect.provideService(FlowRuntime.FlowInstance, FlowEngine.makeInstance(Right, "a"))
+      )
+      expect(Option.isSome(yield* readLeft)).toBe(true)
+      expect(Option.isNone(yield* readRight)).toBe(true)
+
+      const leftClock = DurableClock.make({ name: "c", duration: "1 minute" })
+      const rightClock = DurableClock.make({ name: "b/c", duration: "2 minutes" })
+      yield* engine.scheduleClock(Left, { executionId: "a/b", clock: leftClock })
+      yield* engine.scheduleClock(Right, { executionId: "a", clock: rightClock })
+      const leftClockRead = engine.deferredResult(leftClock.deferred).pipe(
+        Effect.provideService(FlowRuntime.FlowInstance, FlowEngine.makeInstance(Left, "a/b"))
+      )
+      const rightClockRead = engine.deferredResult(rightClock.deferred).pipe(
+        Effect.provideService(FlowRuntime.FlowInstance, FlowEngine.makeInstance(Right, "a"))
+      )
+      yield* TestClock.adjust("1 minute")
+      expect(Option.isSome(yield* leftClockRead)).toBe(true)
+      expect(Option.isNone(yield* rightClockRead)).toBe(true)
+      yield* TestClock.adjust("1 minute")
+      expect(Option.isSome(yield* rightClockRead)).toBe(true)
+    }).pipe(Effect.provide(FlowEngine.layerMemory)))
+
+  effect("decodes a fresh payload snapshot for every re-drive", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const engine = yield* FlowRuntime.FlowRuntime
+        const Mutable = Flow.make("Memory/PayloadSnapshot", {
+          payload: { nested: Schema.Struct({ value: Schema.String }), values: Schema.Array(Schema.String) },
+          success: Schema.String,
+          body: () => {
+            throw new Error("not executed")
+          }
+        })
+        let passes = 0
+        const entered = yield* Deferred.make<void>()
+        yield* engine.register(Mutable, (payload) =>
+          Effect.gen(function*() {
+            passes += 1
+            if (passes === 1) {
+              const mutable = payload as { nested: { value: string }; values: Array<string> }
+              mutable.nested.value = "handler-mutated"
+              mutable.values.push("handler-mutated")
+              yield* Deferred.succeed(entered, undefined)
+              const instance = yield* FlowRuntime.FlowInstance
+              return yield* Flow.suspend(instance)
+            }
+            return `${payload.nested.value}:${payload.values.join(",")}`
+          }))
+        const input = { nested: { value: "before" }, values: ["before"] }
+        const started = yield* engine.execute(Mutable, {
+          executionId: "payload-snapshot",
+          payload: input,
+          discard: true
+        })
+        yield* Deferred.await(entered)
+        expect(Option.isSome(yield* pollSuspended(engine.poll(Mutable, started)))).toBe(true)
+        input.nested.value = "caller-mutated"
+        input.values.push("caller-mutated")
+        yield* engine.resume(Mutable, started)
+        const settled = yield* pollComplete(engine.poll(Mutable, started))
+        expect(Option.isSome(settled) && settled.value._tag === "Complete" && settled.value.exit).toEqual(
+          Exit.succeed("before:before")
+        )
+      }).pipe(Effect.provide(FlowEngine.layerMemory))
+    ))
+
+  effect("refuses a deferred completion addressed to another flow", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const engine = yield* FlowRuntime.FlowRuntime
+        const Known = Flow.make("Memory/KnownFlow", {
+          payload: {},
+          success: Schema.Void,
+          body: () => {
+            throw new Error("not executed")
+          }
+        })
+        const Other = Flow.make("Memory/OtherFlow", {
+          payload: {},
+          success: Schema.Void,
+          body: () => {
+            throw new Error("not executed")
+          }
+        })
+        yield* engine.register(Known, () => Effect.succeed(undefined))
+        yield* engine.execute(Known, { executionId: "known-flow", payload: {}, discard: true })
+        const exit = yield* Effect.exit(engine.deferredDone(gate, {
+          flowName: Other._tag,
+          executionId: "known-flow",
+          deferredName: gate.name,
+          exit: Exit.succeed("wrong-flow")
+        }))
+        expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
+      }).pipe(Effect.provide(FlowEngine.layerMemory))
+    ))
 })
 
 describe("FlowEngine.layerMemory normal interrupt of a live action", () => {

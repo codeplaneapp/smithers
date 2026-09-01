@@ -8,7 +8,7 @@
  * encoding on the way through. Durable stores implement `Encoded`, never the
  * typed port directly.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import type { Action, DurableClock, DurableDeferred, Flow, FlowRuntime } from "@smthrs/flow"
 import type * as Crypto from "effect/Crypto"
@@ -41,7 +41,7 @@ export interface ActionExecuteOptions {
  * results before `makeUnsafe` adds typed schema decoding and encoding.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface Encoded {
@@ -171,6 +171,14 @@ export interface Encoded {
     readonly deferredName: string
     readonly exit: Exit.Exit<unknown, unknown>
   }) => Effect.Effect<void>
+  readonly deferredDoneIfWaiting?: ((options: {
+    readonly flowName: string
+    readonly executionId: string
+    readonly deferredName: string
+    readonly reason: string
+    readonly token: string
+    readonly exit: Exit.Exit<unknown, unknown>
+  }) => Effect.Effect<FlowRuntime.DeferredDoneIfWaitingOutcome>) | undefined
   readonly scheduleClock: (
     flow: Flow.Any,
     options: {

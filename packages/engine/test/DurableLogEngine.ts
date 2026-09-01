@@ -44,7 +44,7 @@ export interface DurableLog {
   readonly actionOutcomes: Map<string, Exit.Exit<Flow.Result<unknown, unknown>>>
   /** Attempt rows by action key. */
   readonly attempts: Map<string, AttemptRow>
-  /** Deferred exits by `executionId/deferredName`. */
+  /** Deferred exits by encoded `[flowTag, executionId, deferredName]`. */
   readonly deferreds: Map<string, Exit.Exit<unknown, unknown>>
   /** Parent edges: child execution id to parent execution id. */
   readonly parents: Map<string, string>
@@ -269,11 +269,22 @@ export const layerDurable = (log: DurableLog): Layer.Layer<FlowRuntime.FlowRunti
         // Untraced because deferred polling is a flow scheduler hot path.
         deferredResult: Effect.fnUntraced(function*(deferred) {
           const instance = yield* FlowRuntime.FlowInstance
-          return Option.fromNullishOr(log.deferreds.get(`${instance.executionId}/${deferred.name}`))
+          return Option.fromNullishOr(
+            log.deferreds.get(JSON.stringify([instance.flow._tag, instance.executionId, deferred.name]))
+          )
         }),
         deferredDone: (options) =>
           Effect.suspend(() => {
-            const id = `${options.executionId}/${options.deferredName}`
+            const execution = log.executions.get(options.executionId)
+            if (execution !== undefined && execution.flowTag !== options.flowName) {
+              return Effect.die(
+                new Error(
+                  `execution ${options.executionId} belongs to flow ${execution.flowTag}; ` +
+                    `a deferred for ${options.flowName} cannot complete it`
+                )
+              )
+            }
+            const id = JSON.stringify([options.flowName, options.executionId, options.deferredName])
             if (log.deferreds.has(id)) return Effect.void
             log.deferreds.set(id, options.exit)
             return resume(options.executionId)

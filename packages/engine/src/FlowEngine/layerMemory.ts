@@ -3,15 +3,17 @@
 /**
  * A volatile, in-memory implementation of the flow runtime port.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import { Flow, FlowRuntime } from "@smthrs/flow"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as FiberMap from "effect/FiberMap"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import { makeInstance } from "./FlowInstance.ts"
 import { makeUnsafe } from "./make.ts"
@@ -30,7 +32,7 @@ import { makeUnsafe } from "./make.ts"
  * flows that require durability.
  *
  * @category layers
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(FlowRuntime.FlowRuntime)(
@@ -51,7 +53,7 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
     const flows = new Map<string, Array<Registration>>()
 
     type ExecutionState = {
-      readonly payload: object
+      readonly payload: unknown
       readonly parent: string | undefined
       instance: FlowRuntime.FlowInstance["Service"]
       fiber: Fiber.Fiber<Flow.Result<unknown, unknown>> | undefined
@@ -103,6 +105,7 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
       })
 
     type ActionState = {
+      readonly settlement: Deferred.Deferred<Flow.Result<unknown, unknown>>
       exit: Exit.Exit<Flow.Result<unknown, unknown>> | undefined
     }
     const actions = new Map<string, ActionState>()
@@ -132,7 +135,10 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
       const instance = makeInstance(state.instance.flow, state.instance.executionId)
       instance.interrupted = state.instance.interrupted
       state.instance = instance
-      state.fiber = yield* entry.execute(state.payload, state.instance.executionId).pipe(
+      const payload = yield* Schema.decodeUnknownEffect(
+        Schema.toCodecJson(state.instance.flow.payloadSchema)
+      )(structuredClone(state.payload)).pipe(Effect.orDie) as Effect.Effect<object>
+      state.fiber = yield* entry.execute(payload, state.instance.executionId).pipe(
         // Runs as the forked body fiber's first instruction: it hands
         // `interrupt` the fiber the body runs in, and it answers a
         // cancellation that landed BEFORE the body started — the flag is
@@ -214,8 +220,14 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
           yield* recordParent(options.executionId, options.parent.executionId)
         }
         if (!state) {
+          const encodedPayload = yield* (Schema.encodeEffect(
+            Schema.toCodecJson(flow.payloadSchema)
+          )(options.payload).pipe(Effect.orDie) as Effect.Effect<unknown>)
           state = {
-            payload: options.payload,
+            // The stored representation never crosses into user code. Every
+            // drive decodes a fresh clone, so caller and handler mutation
+            // cannot alter a replay.
+            payload: structuredClone(encodedPayload),
             instance: makeInstance(flow, options.executionId),
             fiber: undefined,
             bodyFiber: undefined,
@@ -273,18 +285,22 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
         const action = options.action
         const instance = yield* FlowRuntime.FlowInstance
         const actionId = JSON.stringify([options.key, options.attempt])
-        let state = actions.get(actionId)
+        const state = actions.get(actionId)
         if (state) {
           const exit = state.exit
           if (exit && exit._tag === "Success" && exit.value._tag === "Suspended") {
-            state.exit = undefined
+            actions.delete(actionId)
           } else if (exit) {
             return yield* exit
+          } else {
+            return yield* Deferred.await(state.settlement)
           }
-        } else {
-          state = { exit: undefined }
-          actions.set(actionId, state)
         }
+        const owner: ActionState = {
+          exit: undefined,
+          settlement: yield* Deferred.make<Flow.Result<unknown, unknown>>()
+        }
+        actions.set(actionId, owner)
         const actionInstance = makeInstance(instance.flow, instance.executionId)
         actionInstance.interrupted = instance.interrupted
         // DECIDED (2026-08-11, pending review): the waiting classification is
@@ -304,8 +320,8 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
           Flow.intoResult,
           Effect.provideService(FlowRuntime.FlowInstance, actionInstance),
           Effect.onExit((exit) => {
-            state.exit = exit
-            return Effect.void
+            owner.exit = exit
+            return Deferred.done(owner.settlement, exit)
           }),
           Effect.ensuring(Effect.sync(() => {
             if (instance.waiting === waitingBefore) instance.waiting = actionInstance.waiting
@@ -336,15 +352,41 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
       // Untraced because deferred polling is a flow scheduler hot path.
       deferredResult: Effect.fnUntraced(function*(deferred) {
         const instance = yield* FlowRuntime.FlowInstance
-        const id = `${instance.executionId}/${deferred.name}`
+        const id = JSON.stringify([instance.flow._tag, instance.executionId, deferred.name])
         return Option.fromNullishOr(deferredResults.get(id))
       }),
       deferredDone: (options) =>
         Effect.suspend(() => {
-          const id = `${options.executionId}/${options.deferredName}`
+          const execution = executions.get(options.executionId)
+          if (execution !== undefined && execution.instance.flow._tag !== options.flowName) {
+            return Effect.die(
+              new Error(
+                `execution ${options.executionId} belongs to flow ${execution.instance.flow._tag}; ` +
+                  `a deferred for ${options.flowName} cannot complete it`
+              )
+            )
+          }
+          const id = JSON.stringify([options.flowName, options.executionId, options.deferredName])
           if (deferredResults.has(id)) return Effect.void
           deferredResults.set(id, options.exit)
           return resume(options.executionId)
+        }),
+      deferredDoneIfWaiting: (options) =>
+        Effect.suspend(() => {
+          const execution = executions.get(options.executionId)
+          const waiting = execution?.instance.waiting
+          if (
+            execution === undefined ||
+            execution.instance.flow._tag !== options.flowName ||
+            waiting?.reason !== options.reason ||
+            waiting.token !== options.token
+          ) {
+            return Effect.succeed("NotWaiting" as const)
+          }
+          const id = JSON.stringify([options.flowName, options.executionId, options.deferredName])
+          const outcome = deferredResults.has(id) ? "Existing" as const : "Completed" as const
+          if (outcome === "Completed") deferredResults.set(id, options.exit)
+          return resume(options.executionId).pipe(Effect.as(outcome))
         }),
       scheduleClock: (flow, options) =>
         engine.deferredDone(options.clock.deferred, {
@@ -354,7 +396,9 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
           exit: Exit.void
         }).pipe(
           Effect.delay(options.clock.duration),
-          FiberMap.run(clocks, `${options.executionId}/${options.clock.name}`, { onlyIfMissing: true }),
+          FiberMap.run(clocks, JSON.stringify([flow._tag, options.executionId, options.clock.name]), {
+            onlyIfMissing: true
+          }),
           Effect.asVoid
         )
     })

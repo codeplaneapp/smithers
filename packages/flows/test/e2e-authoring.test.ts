@@ -78,7 +78,8 @@ const hostCrypto: Layer.Layer<Crypto.Crypto> = Layer.succeed(
 const sha256 = (input: string): string => createHash("sha256").update(input).digest("hex")
 
 /** The execution id round `ordinal` of `lineageId` is derived under. */
-const roundId = (lineageId: string, ordinal: number): string => sha256(`flow-round-${lineageId}-${ordinal}`)
+const roundId = (lineageId: string, ordinal: number): string =>
+  sha256(JSON.stringify(["flow-round/v2", lineageId, ordinal]))
 
 const jj = Jj.make({
   snapshot: () => Effect.succeed({ changeId: "e2e-snapshot" as never }),
@@ -647,7 +648,7 @@ describe("a flow that calls itself is sent to a boundary", () => {
 
     expect(error.code).toBe("recursion_requires_boundary")
     expect(error.node).toBe("root.flow")
-    expect(error.message).toContain("calls itself inline")
+    expect(error.message).toContain("cannot call itself inline")
     expect(error.message).toContain("e2e/recursive-inline.to(payload)")
     expect(error.message).toContain(".child(payload)")
   })

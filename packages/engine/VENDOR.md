@@ -121,8 +121,10 @@ Upstream reruns a suspended root execution after sleeping on
 
 Smithers preserves that schedule verbatim. `FlowEngine.Encoded` additionally
 accepts optional `resumeSignal(flow, executionId)`, and each fallback sleep
-races that signal when supplied. `@smthrs/engine-store` leaves the optional
-member unimplemented in v1.
+races that signal when supplied. `@smthrs/engine-store` implements the
+process-local signal with its `WakeBus`; the race is deliberately
+miss-tolerant because polling remains the durable fallback. Cross-process
+event delivery is not part of rc.0.
 
 This permits prompt journal-backed wakeups without making the first durable
 store depend on a signal transport or removing the safe polling fallback.
