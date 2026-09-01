@@ -35,8 +35,13 @@ const registration = Interpreter.layer(Deploy).pipe(
   Layer.provideMerge(
     Use.toLayer(({ apiKey, endpoint }) =>
       // The action logs the way a careless integration would, and returns a
-      // string with the credential inside it.
+      // string with the credential inside it. The second line logs a real
+      // `Headers`: a brand-checked host object keeps its state in internal
+      // slots, and a redacting logger that rebuilt it on its prototype
+      // produced an impostor whose rendering threw from inside the logger and
+      // killed the run, so this line proves the log survives as well as hides.
       Effect.logInfo(`calling ${endpoint} with Bearer ${apiKey}`).pipe(
+        Effect.andThen(Effect.logInfo("request headers", new Headers({ authorization: `Bearer ${apiKey}` }))),
         Effect.as(`deployed ${endpoint} token=${apiKey}`)
       )
     )

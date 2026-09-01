@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Console, Effect, Logger, Tracer } from "effect"
+import { inspect } from "node:util"
 import * as RedactedLogger from "../src/RedactedLogger.ts"
 import * as Redaction from "../src/Redaction.ts"
 
@@ -278,6 +279,58 @@ describe("RedactedLogger", () => {
       expect(rendered).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
       expect(rendered).toContain("Bearer [REDACTED_API_KEY]")
     }))
+
+  it("survives a host object whose state lives in internal slots", () => {
+    // A brand-checked class (Headers, URLSearchParams, Request, ...) keeps its
+    // state in internal slots, so a clone built on its prototype with only its
+    // own keys copied is an impostor that Node's inspector rejects: rendering
+    // it threw from inside the logger and killed the fiber.
+    const redactor = Redaction.make()
+    const headers = new Headers({ authorization: "Bearer sk-live-abcdefgh" })
+    const rendered = RedactedLogger.redactArgument(headers, redactor)
+    expect(() => inspect(rendered)).not.toThrow()
+    expect(inspect(rendered)).not.toContain("sk-live-abcdefgh")
+
+    const params = new URLSearchParams({ token: "sk-live-abcdefgh" })
+    expect(() => inspect(RedactedLogger.redactArgument(params, redactor))).not.toThrow()
+    expect(inspect(RedactedLogger.redactArgument(params, redactor))).not.toContain("sk-live-abcdefgh")
+  })
+
+  it("gives an annotation the same rendering the message gets", () => {
+    // Both halves of one log event obey one rule: a Date or Map annotated onto
+    // a line used to collapse to `{}` while the same value in the message
+    // rendered as itself.
+    const redactor = Redaction.make()
+    const annotations = RedactedLogger.redactArgument(
+      { at: new Date(0), m: new Map([["k", "v"]]) },
+      redactor
+    ) as { at: unknown; m: unknown }
+    expect(annotations.at).toBeInstanceOf(Date)
+    expect(annotations.m).toBeInstanceOf(Map)
+  })
+
+  it("redacts a credential used as a Map key", () => {
+    const redactor = Redaction.make()
+    const keyed = RedactedLogger.redactArgument(new Map([["sk-live-abcdefgh", "v"]]), redactor) as Map<
+      string,
+      unknown
+    >
+    expect(inspect(keyed)).not.toContain("sk-live-abcdefgh")
+  })
+
+  it("redacts a credential a RegExp was built from", () => {
+    const redactor = Redaction.make()
+    const pattern = RedactedLogger.redactArgument(new RegExp("sk-live-abcdefgh"), redactor) as RegExp
+    expect(pattern).toBeInstanceOf(RegExp)
+    expect(pattern.source).not.toContain("sk-live-abcdefgh")
+  })
+
+  it("renders a value nested past the walk's depth instead of exhausting the stack", () => {
+    const redactor = Redaction.make()
+    let deep: Record<string, unknown> = { token: "sk-live-abcdefgh" }
+    for (let level = 0; level < 20_000; level++) deep = { deep }
+    expect(() => RedactedLogger.redactArgument(deep, redactor)).not.toThrow()
+  })
 
   it("keeps the type a logger was given, and still redacts what it holds", () => {
     // The redactor rebuilds an object from its own enumerable entries, which
