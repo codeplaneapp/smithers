@@ -44,6 +44,12 @@
   environment may not carry a `runScope` and an undeclared one must, which
   `StepKey.dispatchIdentity` also enforces at run time with the new
   `invalid_environment` code.
+- A plan may no longer contain an unbounded number of nodes. `Plan.compile` and
+  `Plan.append` refuse a plan above `Plan.maximumPlanNodes` with the new
+  `graph_too_large` code, before any pair comparison runs. The conflict pass
+  compares node pairs and adds a reachability walk per overlapping pair, so an
+  unbounded plan had an unbounded planning cost; a graph larger than the bound
+  now has to be split.
 
 ### Fixed
 
@@ -52,8 +58,6 @@
   `RegExp`, and class instances onto the same `{}` identity.
 - `StepKey.content` and `dispatchIdentity` now share one environment validator;
   undeclared environments require a non-empty run scope on both paths.
-- Plans now fail with `graph_too_large` above `Plan.maximumPlanNodes`, bounding
-  the quadratic conflict-analysis workload.
 
 - `PlanStore.append` now advances the stored plan row with a compare-and-swap
   on the previous generation, so appending a skipped generation is refused
@@ -85,14 +89,21 @@
 - `PlanDiff` attributes a key move caused by `nondeterministic` or `placement`,
   and `Node.capture` refuses a capture nested past its documented limit with a
   path-bearing error rather than overflowing the stack.
-- Filesystem declarations containing C0 controls or DEL are now rejected as
-  `invalid_effects` during planning instead of reaching a host filesystem, and
-  path comparison is Unicode NFC normalized, so two spellings of one name are
-  detected as an overlap.
+- `Plan.compile` and `Plan.append` decode `NodeDraft.effects` through
+  `NodeEffects` before keying, so a malformed declaration is a typed
+  `invalid_node` naming the node and the failing path instead of an untyped
+  defect. A filesystem declaration containing C0 controls or DEL, or one that is
+  not workspace-relative, is refused there rather than reaching a host
+  filesystem, and path comparison is Unicode NFC normalized, so two spellings of
+  one name are detected as an overlap. `invalid_effects` is now reserved for the
+  cross-field rule that one path cannot be both a write and a removal.
 - `Planned.reference` validates the reference shape, so a forged carrier can no
   longer inject a fabricated projection path into a payload.
 - Compiled and appended plans now keep the exact material and filesystem
   authority that their keys and approval digest cover, even if caller-owned
   draft objects are later mutated.
-- Persisted plans can no longer be deleted or have their flow and creation time
-  rewritten, and node order is now unique and deterministic within each plan.
+- Persisted plans can no longer be deleted or have their plan id, flow, or
+  creation time rewritten, and node order is now unique and deterministic within
+  each plan. Migration `4003` adds the plan-id pin the forward-only trigger was
+  missing, which a rename could otherwise use to strand a plan's immortal node
+  rows under an id nothing can record again.
