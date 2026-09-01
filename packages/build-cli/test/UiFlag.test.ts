@@ -190,9 +190,15 @@ describe("--ui under a pipe", () => {
     pretendTTY(false)
     const served = await serve(root, ["//:good"], false)
     expect(served.exitCode).toBe(0)
-    expect(served.stderr).toMatch(
-      /^\/\/:good {2}ran {2}\d+(?:\.\d)?m?s\n1 targets: 0 hit, 1 ran, 0 failed, 0 skipped \(/
-    )
+    const lines = served.stderr.split("\n")
+    const runLine = process.platform === "darwin" ? 0 : 1
+    if (process.platform === "darwin") {
+      expect(lines).not.toContain("//:good  sandbox: unenforced on this platform")
+    } else {
+      expect(lines[0]).toBe("//:good  sandbox: unenforced on this platform")
+    }
+    expect(lines[runLine]).toMatch(/^\/\/:good {2}ran {2}\d+(?:\.\d)?m?s$/)
+    expect(lines[runLine + 1]).toMatch(/^1 targets: 0 hit, 1 ran, 0 failed, 0 skipped \(/)
     expect(served.envelope).toContain("ok: true")
     expect(served.stdout).toBe("")
   })
