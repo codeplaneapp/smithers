@@ -14,7 +14,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { execFileSync } from "node:child_process"
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as NodeHost from "../src/NodeHost.ts"
@@ -66,6 +66,27 @@ const waitForFile = async (path: string): Promise<string> => {
 }
 
 describe("NodeHost.layerContained", () => {
+  it.live("binds ordinary jj operations to the requested repository root", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "flows-node-host-bound-jj-"))
+      writeFileSync(join(directory, "jj"), "#!/bin/sh\npwd\n")
+      chmodSync(join(directory, "jj"), 0o755)
+      const previousPath = process.env["PATH"]
+      process.env["PATH"] = `${directory}:${previousPath ?? ""}`
+
+      try {
+        const status = yield* Effect.flatMap(Jj, (jj) => jj.status()).pipe(
+          Effect.provide(NodeHost.layerAt(directory)),
+          Effect.scoped
+        )
+
+        expect(status.trim()).toBe(realpathSync(directory))
+      } finally {
+        process.env["PATH"] = previousPath
+        rmSync(directory, { recursive: true, force: true })
+      }
+    }))
+
   it.live("records what it spawns and kills the group when the scope closes", () =>
     Effect.gen(function*() {
       const ledger = yield* ProcessLedger.makeMemory({ hostId: "node-host", ownerPid: process.pid })
@@ -98,7 +119,7 @@ describe("NodeHost.layerContained", () => {
       // the observable difference: the invocation shows up in the ledger like
       // any other child.
       const directory = mkdtempSync(join(tmpdir(), "flows-contained-jj-"))
-      writeFileSync(join(directory, "jj"), "#!/bin/sh\necho 'the working copy is clean'\nexit 0\n")
+      writeFileSync(join(directory, "jj"), "#!/bin/sh\npwd\n")
       chmodSync(join(directory, "jj"), 0o755)
       const previousPath = process.env["PATH"]
       process.env["PATH"] = directory
@@ -106,7 +127,7 @@ describe("NodeHost.layerContained", () => {
       try {
         const ledger = yield* ProcessLedger.makeMemory({ hostId: "contained-jj", ownerPid: process.pid })
         const recorded: Array<string> = []
-        const host = NodeHost.layerContained({ graceMs: 300 }).pipe(
+        const host = NodeHost.layerContainedAt(directory, { graceMs: 300 }).pipe(
           Layer.provide(
             Layer.succeed(ProcessLedger.ProcessLedger)({
               ...ledger,
@@ -118,7 +139,7 @@ describe("NodeHost.layerContained", () => {
 
         const status = yield* Effect.flatMap(Jj, (jj) => jj.status()).pipe(Effect.provide(host), Effect.scoped)
 
-        expect(status).toBe("the working copy is clean\n")
+        expect(status.trim()).toBe(realpathSync(directory))
         expect(recorded).toEqual(["jj status"])
         // The invocation finished, so the record was retired with it.
         expect(yield* ledger.live).toEqual([])

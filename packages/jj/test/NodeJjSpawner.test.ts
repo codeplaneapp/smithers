@@ -116,6 +116,15 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
       expect(root).toBe("/scripted/root")
     }))
 
+  it.live("builds a repository-bound adapter over the host spawner", () =>
+    Effect.gen(function*() {
+      const output = yield* Effect.flatMap(Jj, (jj) => jj.status()).pipe(
+        Effect.provide(Layer.provide(NodeJj.layerSpawnerAt(directory), realSpawner))
+      )
+
+      expect(output).toBe("the working copy is clean\n")
+    }))
+
   it.live("classifies a nonzero exit from jj's own stderr vocabulary", () =>
     Effect.gen(function*() {
       const error = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.diff("a", "b"))), realSpawner)
@@ -148,4 +157,15 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
       expect(error.code).toBe("unknown")
       expect(error.message).toContain("jj status:")
     }))
+})
+
+describe("NodeJj repository-root validation", () => {
+  it("refuses relative roots for both process ownership modes", () => {
+    expect(() => NodeJj.layerAt("relative/repository")).toThrow(
+      "NodeJj.layerAt requires an absolute repository root"
+    )
+    expect(() => NodeJj.layerSpawnerAt("relative/repository")).toThrow(
+      "NodeJj.layerSpawnerAt requires an absolute repository root"
+    )
+  })
 })
