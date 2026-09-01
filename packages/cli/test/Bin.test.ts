@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import * as Agents from "../src/Agents.ts"
 import * as CodexAuth from "../src/CodexAuth.ts"
+import { cli } from "../src/Command.ts"
 import * as Environment from "../src/Environment.ts"
 import { Version } from "../src/index.ts"
 import * as Unsupported from "../src/Unsupported.ts"
@@ -65,6 +66,31 @@ const run = (args: ReadonlyArray<string>, environment: Readonly<Record<string, s
     rmSync(cwd, { recursive: true, force: true })
   }
 }
+
+const runIn = (
+  cwd: string,
+  args: ReadonlyArray<string>,
+  environment: Readonly<Record<string, string>> = {}
+) =>
+  spawnSync(process.execPath, ["--no-warnings", executable, ...args], {
+    cwd,
+    encoding: "utf8",
+    timeout: 180_000,
+    // `HOME` points at the same empty directory so a fallback that writes to
+    // the home tree instead of the working directory is caught by the same
+    // assertion.
+    env: { ...process.env, HOME: cwd, ...environment }
+  })
+
+const inEmptyDirectory = <A>(use: (cwd: string) => A): A => {
+  const cwd = realpathSync(mkdtempSync(temporaryDirectoryPrefix))
+  try {
+    return use(cwd)
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+}
+
 
 describe("smithers executable", processBudget, () => {
   it("reports the package version", () => {
@@ -278,30 +304,6 @@ describe("a removed verb refuses before the control plane boots", processBudget,
    * The proof is the file system: run the refusal in an empty directory and
    * assert that it is still empty afterwards.
    */
-  const runIn = (
-    cwd: string,
-    args: ReadonlyArray<string>,
-    environment: Readonly<Record<string, string>> = {}
-  ) =>
-    spawnSync(process.execPath, ["--no-warnings", executable, ...args], {
-      cwd,
-      encoding: "utf8",
-      timeout: 180_000,
-      // `HOME` points at the same empty directory so a fallback that writes to
-      // the home tree instead of the working directory is caught by the same
-      // assertion.
-      env: { ...process.env, HOME: cwd, ...environment }
-    })
-
-  const inEmptyDirectory = <A>(use: (cwd: string) => A): A => {
-    const cwd = realpathSync(mkdtempSync(temporaryDirectoryPrefix))
-    try {
-      return use(cwd)
-    } finally {
-      rmSync(cwd, { recursive: true, force: true })
-    }
-  }
-
   it("prints its sentence and leaves the working directory empty", () => {
     const ui = Unsupported.removedVerbs.find((verb) => verb.name === "ui")!
 
@@ -340,6 +342,99 @@ describe("a removed verb refuses before the control plane boots", processBudget,
       expect(JSON.parse(result.stdout)).toMatchObject({ _tag: "flows" })
       expect(readdirSync(join(cwd, ".flows")).sort()).toContain("control.db")
     })
+  })
+})
+
+describe("an invocation that never runs a command answers before the control plane boots", processBudget, () => {
+  /**
+   * A removed verb refused file-free, and every other non-running invocation
+   * did not.
+   *
+   * `smithers lss` is a typo. The parser answers it with exit 2 and a
+   * did-you-mean list, and no handler ever runs, yet the process still built
+   * `NodeControl.layer` on its way to the parse: it created `<cwd>/.flows/`
+   * and opened `engine.db` and `control.db` before printing usage. The same
+   * held for a one-token verb (`smithers "gateway status"`, the shape a shell
+   * script produces when it quotes a whole command) and for an unrecognized
+   * flag on a real verb (`smithers ps --nope`).
+   *
+   * The rule is the same one the removed verbs got: an invocation that will
+   * not run a real command touches no file. `bin.ts` now attaches the durable
+   * layer to the command's handler rather than to the program, so the command
+   * tree itself decides, and the layer is built only once a handler is about
+   * to run.
+   */
+  it("answers an unknown subcommand with usage and leaves the working directory empty", () => {
+    inEmptyDirectory((cwd) => {
+      const result = runIn(cwd, ["lss"])
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(2)
+      expect(result.stderr).toContain('Unknown subcommand "lss" for "smithers"')
+      expect(result.stdout).toContain("USAGE")
+      expect(readdirSync(cwd)).toEqual([])
+    })
+  })
+
+  it("leaves the working directory empty for a one-token command line", () => {
+    inEmptyDirectory((cwd) => {
+      const result = runIn(cwd, ["gateway status"])
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(2)
+      expect(result.stderr).toContain('Unknown subcommand "gateway status" for "smithers"')
+      expect(readdirSync(cwd)).toEqual([])
+    })
+  })
+
+  it("leaves the working directory empty for an unrecognized flag on a real verb", () => {
+    inEmptyDirectory((cwd) => {
+      const result = runIn(cwd, ["ps", "--nope"])
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(2)
+      expect(result.stderr).toContain("Unrecognized flag: --nope in command smithers ps")
+      expect(readdirSync(cwd)).toEqual([])
+    })
+  })
+
+  it("leaves the working directory empty for a missing required argument", () => {
+    inEmptyDirectory((cwd) => {
+      const result = runIn(cwd, ["output"])
+
+      expect(result.error).toBeUndefined()
+      expect(result.status).toBe(2)
+      expect(readdirSync(cwd)).toEqual([])
+    })
+  })
+
+  it("still builds the control plane for a real command", () => {
+    // The other half of the contract. Moving the layer onto the handler must
+    // not leave a shipped verb running without the services it declares, so a
+    // verb that reads the durable stores is asserted to still open them.
+    inEmptyDirectory((cwd) => {
+      const result = runIn(cwd, ["--json", "ps"])
+
+      expect(result.status).toBe(0)
+      expect(JSON.parse(result.stdout)).toMatchObject({ _tag: "runs" })
+      expect(readdirSync(join(cwd, ".flows")).sort()).toContain("control.db")
+    })
+  })
+
+  it("classifies every declared verb as a real command, not an unknown subcommand", () => {
+    // The resolver is the command tree, so every name the tree declares has to
+    // resolve through it. A verb that stopped resolving would reach an
+    // operator as a did-you-mean list for a verb that exists.
+    const declared = cli.subcommands.flatMap((group) => group.commands.map((command) => command.name))
+
+    expect(declared.length).toBeGreaterThan(0)
+    for (const name of declared) {
+      const result = inEmptyDirectory((cwd) => ({ ...runIn(cwd, [name, "--help"]), files: readdirSync(cwd) }))
+
+      expect(result.stderr, name).not.toContain("Unknown subcommand")
+      expect(result.status, name).toBe(0)
+      expect(result.files, name).toEqual([])
+    }
   })
 })
 
