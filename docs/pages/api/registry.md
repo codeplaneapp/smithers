@@ -25,6 +25,45 @@ scan that dropped an entry must say so rather than return a shorter list.
 `Provenance.pack` names the pack a descriptor came from, when it came from one.
 It is absent for every descriptor a plain source produced.
 
+## Declaring a budget
+
+A markdown flow declares what a control plane should approve for one of its
+runs:
+
+```yaml
+---
+description: Reviews a proposed change.
+budget:
+  tokens: 120000
+  milliseconds: 900000
+---
+```
+
+The two fields are the two fields of a control-plane `Envelope.budget`, so a
+host projects `FlowDescriptor.budget` into an approved envelope without
+reinterpreting either number. `@smthrs/agent`'s `Budget.layerFromEnvelope` turns
+that envelope into enforcement at the model boundary. The local CLI does exactly
+this: `NodeControl.durableFlow` reads the budget with `Descriptor.budgetOf` and
+the executor binds `Budget.layerFromEnvelope`, so a declared ceiling reaches the
+run that spends against it.
+
+`budget` is absent for a flow that declares none. `Descriptor.budgetOf` answers
+that absence with `Descriptor.budgetUnbounded`, so giving up a ceiling is a
+named value a reader can see rather than an empty object nobody wrote.
+
+A malformed budget is dropped rather than tightened, and dropping it produces a
+`DiscoveryWarning { code: "invalid_budget" }`. Every other malformed field has a
+conservative reading to fall back on; a budget has none, because its
+conservative number is zero and a zero ceiling refuses the run's first call. A
+ceiling is a number greater than zero, and each of the two is read on its own,
+so an unreadable `tokens` does not discard a valid `milliseconds`. A key the
+budget does not know is reported the same way, because a misspelled `tokens`
+would otherwise read as an unbounded run in silence.
+
+Module flows declare no budget. Discovery reads a `flow.ts` without evaluating
+it, and `budget` is absent for every descriptor it produces, so a module flow
+runs unbounded unless its host supplies a budget of its own.
+
 ## Discovery and Registry
 
 `Discovery.scan(source)` reads one source. `Registry` is the service the harness
