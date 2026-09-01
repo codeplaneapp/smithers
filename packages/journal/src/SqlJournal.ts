@@ -863,13 +863,14 @@ export const layer = (
        * issue a SELECT here for every explicit sequence. The executor's exit
        * flush in `@smthrs/agent` runs inside the engine's write transaction,
        * so that read waited on the writer that was waiting on the flush and
-       * the run stalled at 0% CPU; the same case runs in ~1.5 s with the read
-       * gone. What the read used to answer, a producer identity that is
-       * already durable but no longer in the bounded index, the unique index
-       * `(run_id, source_id, source_seq)` answers at insert time instead:
-       * `insertOne` inserts first and reads only the row it actually
-       * collided with, inside the writer's own transaction where a read
-       * cannot deadlock against it.
+       * the run stalled at 0% CPU: measured, that case did not finish in
+       * 120 s with the read and takes about half a second without it. What the
+       * read used to answer, a producer identity that is already durable but
+       * no longer in the bounded index, the unique index
+       * `(run_id, source_id, source_seq)` answers at insert time instead: the
+       * queued insert runs first and reads only the row it actually collided
+       * with, inside the writer's own transaction where a read cannot
+       * deadlock against it.
        *
        * A cache miss therefore admits optimistically. The receipt is
        * `Accepted` where it would once have been `Duplicate`, which the lossy
@@ -1221,16 +1222,14 @@ export const layer = (
         })
 
       /**
-       * Reads the row a duplicate emit collided with, AFTER the insert that
-       * collided with it.
+       * Reads the row a duplicate emit collides with.
        *
-       * Nothing calls this before an insert any more. The unique index is the
-       * admission decision on every channel, and this reads only the row a
-       * refused insert names, so the one duplicate lookup a write can cost
-       * happens inside the writer's own transaction. A read before the insert
-       * would be a read some caller has to take while a transaction it does
-       * not own is open, which is how the lossy channel deadlocked against a
-       * producer flushing from inside the engine's write transaction.
+       * On the queued channel this runs only AFTER the insert, on the row that
+       * insert's `ON CONFLICT DO NOTHING` actually refused: the unique index is
+       * the admission decision there, so a batch of entries that collide with
+       * nothing costs no lookups at all, and the one a collision costs happens
+       * inside the writer's own transaction. See {@link insertOne} for why the
+       * durable channel still asks first.
        *
        * The lookup covers BOTH unique constraints the insert can conflict on:
        * `UNIQUE (event_id)` and `UNIQUE (run_id, source_id, source_seq)`. It is
@@ -1292,19 +1291,26 @@ export const layer = (
        * `renewRangeLocked`) reduced to one SQL predicate: a zombie owner whose
        * run was reclaimed cannot append, and fails with `fence_lost`.
        *
-       * The fence outranks dedup, and so does the constraint. Every insert
-       * runs first and every duplicate lookup runs after it, on the row the
-       * `ON CONFLICT DO NOTHING` actually refused: an ownerless insert used to
-       * read the dedup index up front, which cost a read on the common path
-       * where nothing collides and put that read outside the statement that
-       * decides. A fenced insert consults the index only after the INSERT
-       * produced no row AND `fenceGuard` has confirmed the owner in the same
-       * serialized transaction, Temporal conditions every request on the
-       * `rangeID` before anything else. Answering a zombie's resubmission
-       * from the dedup index would launder its lost fence into a `Duplicate`
-       * receipt for work the live owner committed; a confirmed owner's
-       * conflict, by contrast, is a genuine duplicate (its own earlier
-       * commit, or a forked run's copied row).
+       * The fence outranks dedup. A fenced insert consults the dedup index
+       * only after the INSERT produced no row AND `fenceGuard` has confirmed
+       * the owner in the same serialized transaction, Temporal conditions
+       * every request on the `rangeID` before anything else. Answering a
+       * zombie's resubmission from the dedup index would launder its lost
+       * fence into a `Duplicate` receipt for work the live owner committed; a
+       * confirmed owner's conflict, by contrast, is a genuine duplicate (its
+       * own earlier commit, or a forked run's copied row).
+       *
+       * The queued channel is decided by the constraint alone. The ownerless
+       * DURABLE path keeps its up-front lookup, and the reason is measured
+       * rather than aesthetic: with two connections open on one file, removing
+       * it left `emitDurableUnfenced` transactions overlapping, so one of them
+       * blocked in SQLite's synchronous busy wait until the driver's
+       * `busy_timeout` expired. The two-connection case in `JournalDurable`
+       * went from 17 ms and no write retries to 5.4 s and one, three runs each
+       * way. That is a read this channel is buying scheduling room with, and
+       * it is affordable here: a durable emit already reads its allocation
+       * floor in the same transaction, and its caller is by definition not
+       * flushing from inside somebody else's.
        */
       const insertOne = (
         queued: QueuedEntry,
@@ -1312,11 +1318,6 @@ export const layer = (
         enforceCompactionFloor = false
       ): Effect.Effect<Commit, JournalError | SqlError.SqlError> =>
         Effect.gen(function*() {
-          // The queued channel lets the unique index decide: its entries are
-          // telemetry a producer may re-emit by identity, and reading the
-          // dedup index before every insert costs a query per entry on the
-          // path where nothing collides. The durable channel keeps its
-          // lookup, below.
           if (fence._tag === "Unfenced" && !enforceCompactionFloor) {
             const duplicate = yield* selectExisting(queued)
             if (duplicate !== undefined) {
