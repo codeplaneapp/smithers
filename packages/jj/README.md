@@ -93,6 +93,12 @@ authoritative even when it cannot be executed, so a broken explicit path is
 reported rather than a different binary being quietly substituted. An override
 that names nothing falls through to `PATH`, and `smithers doctor` says so.
 
+One invocation buffers at most **64 MiB of each output stream**. jj is not an
+attacker, but the engine outlives any one command, so a child that never stops
+printing is killed and the operation fails with `unknown` rather than filling a
+buffer nobody will read. Both Node layers apply the same ceiling, since routing
+jj through the host's spawner must not change what a caller observes.
+
 The tag key and the error `_tag` are durable identity: step keys digest the
 resolved service set and `JjError` round-trips through the journal, so
 renaming either invalidates recorded runs. `cause` is a projection onto plain

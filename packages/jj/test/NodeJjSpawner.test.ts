@@ -102,6 +102,34 @@ const realSpawner = Layer.succeed(ChildProcessSpawner)(
   )
 )
 
+/**
+ * A spawner whose child never stops talking.
+ *
+ * No process is started: the ceiling is a property of how the adapter reads a
+ * handle's streams, and eighty mebibytes of scripted output reaches it faster
+ * than a real child could produce them.
+ */
+const flood = Layer.succeed(ChildProcessSpawner)(
+  makeSpawner(() =>
+    Effect.sync(() => {
+      const chunk = new Uint8Array(1024 * 1024).fill("x".charCodeAt(0))
+      return makeHandle({
+        pid: ProcessId(0),
+        exitCode: Effect.succeed(ExitCode(0)),
+        isRunning: Effect.succeed(false),
+        kill: () => Effect.void,
+        stdin: Sink.drain,
+        stdout: Stream.fromIterable(Array.from({ length: 80 }, () => chunk)),
+        stderr: Stream.empty,
+        all: Stream.empty,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+        unref: Effect.succeed(Effect.void)
+      })
+    })
+  )
+)
+
 /** A spawner that reports what a host reports for a binary that is not there. */
 const missingBinary = Layer.succeed(ChildProcessSpawner)(
   makeSpawner(() =>
@@ -179,6 +207,19 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
 
       expect(error.code).toBe("unknown")
       expect(error.message).toBe(`jj status: cannot run in ${missing}: not a directory`)
+    }))
+
+  it.effect("refuses output past the same ceiling the self-spawning layer applies", () =>
+    Effect.gen(function*() {
+      // `Stream.mkString` is as unbounded as string concatenation, so without a
+      // bound this layer would buffer what `NodeJj.layer` refuses — a behavior
+      // difference bought by the containment routing, which is the one thing
+      // routing through a spawner must not cost.
+      const error = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.status())), flood)
+
+      expect(error.code).toBe("unknown")
+      expect(error.message).toBe("jj status: output exceeded the 67108864-character ceiling")
+      expect(error).toMatchObject({ module: "NodeJj", method: "status", command: "jj status" })
     }))
 
   it.effect("reports any other spawn failure as `unknown`", () =>

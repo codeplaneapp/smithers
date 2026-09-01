@@ -31,7 +31,7 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import * as ChildProcess from "node:child_process"
 import { statSync } from "node:fs"
 import { dirname, isAbsolute } from "node:path"
-import { Jj, JjError, jjErrorCause } from "../Jj.ts"
+import { isJjError, Jj, JjError, jjErrorCause } from "../Jj.ts"
 import { resolveJjBinary } from "./resolveJjBinary.ts"
 
 /** The `module` every failure this adapter produces names. */
@@ -199,6 +199,29 @@ const spawnFailure = (
     : new JjError({ ...shared, code: "unknown", message: `jj ${method}: ${shared.cause.message}` })
 }
 
+/**
+ * How much of one stream a single `jj` invocation may buffer, in decoded
+ * characters.
+ *
+ * The engine is a long-lived process and a child's output is unbounded, so a
+ * command that never stops printing would otherwise be a memory leak no caller
+ * can see. The ceiling is far above anything jj prints for a working copy a
+ * step snapshots — a `jj diff --git` of a very large change is single-digit
+ * megabytes — so reaching it means the output is not one a run can journal
+ * anyway, and a named failure is a better answer than an exhausted host.
+ */
+const outputLimit = 64 * 1024 * 1024
+
+/** The one wording both runners use when a child outran {@link outputLimit}. */
+const outputTooLarge = (method: string, args: ReadonlyArray<string>): JjError =>
+  new JjError({
+    code: "unknown",
+    module: MODULE,
+    method,
+    command: commandOf(args),
+    message: `jj ${method}: output exceeded the ${outputLimit}-character ceiling`
+  })
+
 /** How one `jj` invocation reaches the operating system. */
 type Run = (method: string, args: ReadonlyArray<string>, cwd?: string) => Effect.Effect<string, JjError>
 
@@ -223,22 +246,40 @@ const jj: Run = (method, args, cwd) =>
     }
     let stdout = ""
     let stderr = ""
+    // The first outcome wins. Stopping an over-talkative child makes its
+    // `close` arrive after the invocation has already failed, and a spawn
+    // `error` is followed by a `close` of its own.
+    let settled = false
+    const finish = (outcome: Effect.Effect<Output, JjError>): void => {
+      if (settled) return
+      settled = true
+      resume(outcome)
+    }
     // `setEncoding` puts Node's own `StringDecoder` on the stream, so a
     // multibyte code point split across two chunks decodes once rather than
     // becoming two replacement characters. `layerSpawner` gets that property
     // from `Stream.decodeText`, and the two layers must not disagree.
     child.stdout?.setEncoding("utf8")
     child.stderr?.setEncoding("utf8")
+    // Past the ceiling the child is stopped rather than read further: leaving
+    // it running would keep filling a buffer nobody will ever look at.
+    const bound = (length: number): void => {
+      if (length <= outputLimit) return
+      child.kill("SIGKILL")
+      finish(Effect.fail(outputTooLarge(method, args)))
+    }
     child.stdout?.on("data", (chunk: string) => {
       stdout += chunk
+      bound(stdout.length)
     })
     child.stderr?.on("data", (chunk: string) => {
       stderr += chunk
+      bound(stderr.length)
     })
     child.on("error", (error: NodeJS.ErrnoException) =>
-      resume(Effect.fail(spawnFailure(method, args, cwd, hint, error, error.code === "ENOENT"))))
+      finish(Effect.fail(spawnFailure(method, args, cwd, hint, error, error.code === "ENOENT"))))
     child.on("close", (exitCode: number | null) =>
-      resume(Effect.succeed({ stdout, stderr, exitCode: exitCode ?? 1 })))
+      finish(Effect.succeed({ stdout, stderr, exitCode: exitCode ?? 1 })))
     return Effect.sync(() => {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill("SIGKILL")
@@ -258,24 +299,40 @@ const jj: Run = (method, args, cwd) =>
 const viaSpawner = (spawner: ChildProcessSpawner["Service"]): Run => (method, args, cwd) =>
   Effect.suspend(() => {
     const { command, hint } = resolveCommand()
+    /**
+     * One stream as text, refused rather than buffered past
+     * {@link outputLimit}. `Stream.mkString` is as unbounded as string
+     * concatenation is, and the two layers owe callers the same answer.
+     */
+    const boundedText = (
+      stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>
+    ): Effect.Effect<string, PlatformError.PlatformError | JjError> => {
+      let length = 0
+      return Stream.mkString(
+        Stream.mapEffect(Stream.decodeText(stream), (chunk) => {
+          length += chunk.length
+          return length > outputLimit ? Effect.fail(outputTooLarge(method, args)) : Effect.succeed(chunk)
+        })
+      )
+    }
     return Effect.scoped(
       Effect.gen(function*() {
         const handle = yield* spawner.spawn(
           EffectChildProcess.make(command, [...args], cwd === undefined ? {} : { cwd })
         )
         const [stdout, stderr, exitCode] = yield* Effect.all(
-          [
-            Stream.mkString(Stream.decodeText(handle.stdout)),
-            Stream.mkString(Stream.decodeText(handle.stderr)),
-            handle.exitCode
-          ],
+          [boundedText(handle.stdout), boundedText(handle.stderr), handle.exitCode],
           { concurrency: 3 }
         )
         return { stdout, stderr, exitCode }
       })
     ).pipe(
-      Effect.catch((error: PlatformError.PlatformError) =>
-        Effect.fail(spawnFailure(method, args, cwd, hint, error, error.reason._tag === "NotFound"))
+      Effect.catch((error: PlatformError.PlatformError | JjError) =>
+        Effect.fail(
+          isJjError(error)
+            ? error
+            : spawnFailure(method, args, cwd, hint, error, error.reason._tag === "NotFound")
+        )
       ),
       Effect.flatMap((output) => settle(method, args, output))
     )

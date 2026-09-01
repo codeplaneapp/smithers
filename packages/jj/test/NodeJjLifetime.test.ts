@@ -49,9 +49,16 @@ process.on("exit", () => rmSync(directory, { recursive: true, force: true }))
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
-/** Every process on this machine whose command line names the shim. */
+/**
+ * Every process on this machine whose command line names the shim.
+ *
+ * `maxBuffer` is raised well past `execFileSync`'s one-mebibyte default: this
+ * lists the WHOLE process table with full command lines, which on a loaded
+ * developer machine or a busy CI runner exceeds that default and turns the
+ * containment assertion into `spawnSync ps ENOBUFS`.
+ */
 const survivors = (): ReadonlyArray<string> =>
-  execFileSync("ps", ["-A", "-o", "pid=,ppid=,args="], { encoding: "utf8" })
+  execFileSync("ps", ["-A", "-o", "pid=,ppid=,args="], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
     .split("\n")
     .filter((line) => line.includes(marker))
 

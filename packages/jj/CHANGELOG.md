@@ -49,6 +49,11 @@
   file, escaped as an Effect defect. A working directory that is missing or is
   not a directory is now reported as such instead of as `not_installed`, which
   is what `spawn` reports it as.
+- Both Node layers bound how much of a child's output they buffer, at 64 MiB
+  per stream. The engine outlives any one invocation, so a jj that never stops
+  printing was an unbounded buffer in a long-lived process; it is now killed and
+  the operation fails with `unknown`. The direct runner and the spawner-routed
+  runner apply the same ceiling and report it identically.
 - The direct Node runner decodes child output with a streaming decoder, so a
   multibyte code point split across two chunks is no longer two replacement
   characters. `layerSpawner` already behaved this way, and the two layers are

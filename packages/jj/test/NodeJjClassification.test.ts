@@ -32,6 +32,11 @@ case "$FLOWS_FAKE_JJ" in
   revset-parse) echo "Error: Failed to parse revset: Syntax error" 1>&2; exit 1 ;;
   stdout-only) echo "Error: reported on stdout"; exit 1 ;;
   utf8-split) printf 'caf\\303'; /bin/sleep 0.2; printf '\\251 au lait\\n'; exit 0 ;;
+  flood) echo $$ > "$FLOWS_FAKE_JJ_MARKER.pid"
+    line=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    line="$line$line$line$line"; line="$line$line$line$line"
+    line="$line$line$line$line"; line="$line$line$line$line"
+    while :; do printf '%s' "$line"; done ;;
   signal) kill -9 $$ ;;
   slow) echo $$ > "$FLOWS_FAKE_JJ_MARKER.pid"; : > "$FLOWS_FAKE_JJ_MARKER.started"; /bin/sleep 1; : > "$FLOWS_FAKE_JJ_MARKER" ;;
   orphan) echo $$ > "$FLOWS_FAKE_JJ_MARKER.pid"
@@ -275,6 +280,25 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
       expect(error.code).toBe("unknown")
       expect(error.message).toContain("null bytes")
       expect(error).toMatchObject({ module: "NodeJj", method: "snapshot" })
+    }))
+
+  it.live("stops a child that never stops printing, instead of buffering it", () =>
+    Effect.gen(function*() {
+      // The engine outlives any one invocation, so an unbounded child is an
+      // unbounded buffer in a long-lived process. The fake never exits on its
+      // own: it is the ceiling that ends it.
+      const marker = join(directory, "flood")
+      process.env.FLOWS_FAKE_JJ = "flood"
+      process.env.FLOWS_FAKE_JJ_MARKER = marker
+
+      const error = yield* status("flood")
+
+      expect(error.code).toBe("unknown")
+      expect(error.message).toBe("jj status: output exceeded the 67108864-character ceiling")
+      expect(error).toMatchObject({ module: "NodeJj", method: "status", command: "jj status" })
+      // Refusing the output is only half the answer: the child has to be gone,
+      // not left filling a pipe nobody reads.
+      yield* waitForExit(Number(readFileSync(`${marker}.pid`, "utf8").trim()))
     }))
 
   it.live("kills a still-running `jj` when the fiber is interrupted", () =>
