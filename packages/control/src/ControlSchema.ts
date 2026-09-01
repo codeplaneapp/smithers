@@ -439,6 +439,19 @@ export const RunSummary = Schema.Struct({
  */
 export type RunSummary = typeof RunSummary.Type
 
+/**
+ * The bookkeeping every steer variant carries.
+ *
+ * `principal` stays here even though `CancelInput` argues a wire principal is
+ * a client naming someone else, and the difference is who the callers are. A
+ * cancel is only ever an operator command, so the server can be its sole
+ * source of identity. A steer is not: `agent/send` steers a child run and
+ * attributes the message to the parent flow, which is an identity no
+ * authenticator knows and no operator issued. Dropping the field would erase
+ * that attribution, so the field remains and `ControlServer` overwrites it
+ * with the authenticated principal on every steer that arrives over RPC. An
+ * in-process caller keeps naming its own.
+ */
 const steerEnvelope = {
   messageId: Schema.String,
   runId: RunId,

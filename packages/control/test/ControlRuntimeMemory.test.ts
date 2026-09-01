@@ -255,12 +255,17 @@ describe("ControlRuntime.layerMemory", () => {
     expect(observed.absent).toBeUndefined()
   })
 
-  it("stamps the configured principal over a submitted one and its own clock", async () => {
+  it("stamps a submitted principal over the composition's own, on its own clock", async () => {
+    // The submitted identity is the one the server authenticated, and the
+    // configured one is the composition's fallback for a caller that named
+    // none. A composition default that won would silently rename every
+    // authenticated operator to whatever the host was built with.
     const observed = await withRuntime(
       (runtime) =>
         Effect.gen(function*() {
-          const configured = yield* runtime.stampPrincipal({ id: "attacker", kind: "attacker", stampedAt: 99 })
-          return { configured }
+          const submitted = yield* runtime.stampPrincipal({ id: "remote", kind: "bearer", stampedAt: 99 })
+          const unnamed = yield* runtime.stampPrincipal()
+          return { submitted, unnamed }
         }),
       { principal: { id: "server", kind: "operator" }, now: () => 7 }
     )
@@ -269,7 +274,8 @@ describe("ControlRuntime.layerMemory", () => {
       runtime.stampPrincipal({ id: "cli", kind: "human", stampedAt: 99 })
     )
 
-    expect(observed.configured).toEqual({ id: "server", kind: "operator", stampedAt: 7 })
+    expect(observed.submitted).toEqual({ id: "remote", kind: "bearer", stampedAt: 7 })
+    expect(observed.unnamed).toEqual({ id: "server", kind: "operator", stampedAt: 7 })
     expect(defaulted).toMatchObject({ id: "memory", kind: "test" })
     // With nothing configured, a submitted identity is accepted but restamped.
     expect(submitted).toMatchObject({ id: "cli", kind: "human" })
