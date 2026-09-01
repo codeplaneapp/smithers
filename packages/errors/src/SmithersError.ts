@@ -1,7 +1,7 @@
 /**
  * The error class the integration adapters raise.
  *
- * `SmithersError` carries a machine-readable {@link KnownSmithersErrorCode}, a
+ * `SmithersError` carries a machine-readable {@link SmithersErrorCode}, a
  * human summary, caller-supplied `details`, and a documentation URL appended
  * to the message. It stores context verbatim and does not redact it.
  * Integration adapters must remove credentials before constructing it.
@@ -10,7 +10,7 @@
  *
  * @since 1.0.0
  */
-import { getSmithersErrorDocsUrl, isKnownSmithersErrorCode, type KnownSmithersErrorCode } from "./ErrorCode.ts"
+import { ERROR_REFERENCE_URL, isSmithersErrorCode, type SmithersErrorCode } from "./ErrorCode.ts"
 
 /**
  * Construction options for a {@link SmithersError}.
@@ -29,7 +29,11 @@ export interface SmithersErrorOptions {
   readonly cause?: unknown
   /** Set `false` to leave the documentation URL out of the message. */
   readonly includeDocsUrl?: boolean
-  /** The `name` the error reports. Defaults to `"SmithersError"`. */
+  /**
+   * The `name` the error reports. Defaults to `"SmithersError"`. The name is
+   * installed as a non-enumerable own property, like `Error.prototype.name`,
+   * and `details` is an own property only when the caller supplies one.
+   */
   readonly name?: string
 }
 
@@ -41,7 +45,7 @@ export interface SmithersErrorOptions {
  */
 export class SmithersError extends Error {
   /** The machine-readable classification. */
-  readonly code: KnownSmithersErrorCode
+  readonly code: SmithersErrorCode
   /** The message without the appended documentation URL. */
   readonly summary: string
   /** Where the code is documented. */
@@ -53,16 +57,15 @@ export class SmithersError extends Error {
    * reference and are not deep-frozen, so a caller must not mutate an attached
    * nested record. Callers must redact credentials.
    */
-  readonly details: Readonly<Record<string, unknown>> | undefined
-  override readonly name: string
+  declare readonly details: Readonly<Record<string, unknown>> | undefined
 
   constructor(
-    code: KnownSmithersErrorCode,
+    code: SmithersErrorCode,
     summary: string,
     details?: Record<string, unknown>,
     options: SmithersErrorOptions = {}
   ) {
-    const docsUrl = getSmithersErrorDocsUrl()
+    const docsUrl = ERROR_REFERENCE_URL
     const suffix = ` See ${docsUrl}`
     let summaryWithoutDocsUrl = summary
     for (;;) {
@@ -77,11 +80,16 @@ export class SmithersError extends Error {
     // Subclasses reach here through `super`, so `new.target` is what restores
     // their prototype after `Error` resets it under a transpiled target.
     Object.setPrototypeOf(this, new.target.prototype)
-    this.name = options.name ?? "SmithersError"
+    Object.defineProperty(this, "name", {
+      value: options.name ?? "SmithersError",
+      enumerable: false,
+      writable: true,
+      configurable: true
+    })
     this.code = code
     this.summary = summaryWithoutDocsUrl
     this.docsUrl = docsUrl
-    this.details = details === undefined ? undefined : Object.freeze({ ...details })
+    if (details !== undefined) this.details = Object.freeze({ ...details })
   }
 }
 
@@ -103,12 +111,16 @@ export const isSmithersError = (value: unknown): value is SmithersError => value
  * another module instance and needs more assurance than a forgeable `name`
  * check. The value must still be an `Error` with a code from the documented
  * closed vocabulary and string summary and documentation URL fields.
+ * `details`, when present, must be a non-null object.
  *
  * @category refinements
  * @since 1.0.0
  */
-export const hasSmithersErrorShape = (value: unknown): value is SmithersError =>
-  value instanceof Error &&
-  isKnownSmithersErrorCode((value as SmithersError).code) &&
-  typeof (value as SmithersError).summary === "string" &&
-  typeof (value as SmithersError).docsUrl === "string"
+export const hasSmithersErrorShape = (value: unknown): value is SmithersError => {
+  if (!(value instanceof Error)) return false
+  const details = (value as SmithersError).details
+  return isSmithersErrorCode((value as SmithersError).code) &&
+    typeof (value as SmithersError).summary === "string" &&
+    typeof (value as SmithersError).docsUrl === "string" &&
+    (details === undefined || (typeof details === "object" && details !== null && !Array.isArray(details)))
+}

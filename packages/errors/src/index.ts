@@ -6,10 +6,8 @@
 export {
   ERROR_REFERENCE_URL,
   getSmithersErrorDefinition,
-  getSmithersErrorDocsUrl,
-  isKnownSmithersErrorCode,
-  type KnownSmithersErrorCode,
-  knownSmithersErrorCodes,
+  isSmithersErrorCode,
+  smithersErrorCodes,
   type SmithersErrorCode,
   type SmithersErrorDefinition,
   smithersErrorDefinitions

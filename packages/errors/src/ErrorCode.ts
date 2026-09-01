@@ -1,12 +1,11 @@
 /**
  * The error codes Smithers integration adapters raise, and their documentation.
  *
- * The table is the runtime source of truth: {@link KnownSmithersErrorCode} is
- * derived from its keys, and {@link SmithersErrorCode} is an alias of it, so the
- * set of codes is closed. Smithers 0.x carried 180 codes for an engine that no
- * longer exists; 1.0 keeps only the ones the `@smthrs/integrations` trees
- * actually raise, because every other package states its failures as
- * `Schema.TaggedError` classes of its own.
+ * The table is the runtime source of truth: {@link SmithersErrorCode} is
+ * derived from its keys, so the set of codes is closed. Smithers 0.x carried
+ * 180 codes for an engine that no longer exists; 1.0 keeps only the ones the
+ * `@smthrs/integrations` trees actually raise, because every other package
+ * states its failures as `Schema.TaggedError` classes of its own.
  *
  * @since 1.0.0
  */
@@ -26,7 +25,6 @@ export const ERROR_REFERENCE_URL = "https://smithers.sh/reference/errors"
  * @since 1.0.0
  */
 export interface SmithersErrorDefinition {
-  readonly category: "integrations"
   readonly when: string
   readonly details?: string
 }
@@ -39,31 +37,26 @@ export interface SmithersErrorDefinition {
  */
 export const smithersErrorDefinitions = {
   INVALID_INPUT: {
-    category: "integrations",
     when:
       "An integration helper receives an argument it cannot use: a missing bot token, an approval option key containing a colon, callback data over Telegram's 64-byte limit, or a non-https Mini App URL.",
     details: "`{ [field]: value }` on the signal-name failures, otherwise none"
   },
   INTEGRATION_ERROR: {
-    category: "integrations",
     when:
       "An integration client, webhook source, or listener reconciliation fails. `reason` classifies the failure so a caller can map it to a transport status.",
     details: "{ reason, ...providerSafeDetails }"
   },
   TELEGRAM_API_ERROR: {
-    category: "integrations",
     when:
       "The Telegram Bot API answers a call with `ok: false`, a non-JSON body, or a transport failure. The bot token is redacted from the message and details.",
     details: "{ method, errorCode, description, retryAfterSeconds }"
   },
   TELEGRAM_INIT_DATA_INVALID: {
-    category: "integrations",
     when:
       "Telegram Mini App `initData` is empty, expired, missing its hash or signature, or fails HMAC or Ed25519 verification.",
     details: "`{ authDate }` on the expiry failures, otherwise none"
   },
   UNSUPPORTED: {
-    category: "integrations",
     when: "The runtime lacks a primitive an integration needs, such as Web Crypto or Ed25519 verification."
   }
 } as const satisfies Record<string, SmithersErrorDefinition>
@@ -72,22 +65,15 @@ Object.freeze(smithersErrorDefinitions)
 for (const definition of Object.values(smithersErrorDefinitions)) Object.freeze(definition)
 
 /**
- * A code this package documents.
- *
- * @category models
- * @since 1.0.0
- */
-export type KnownSmithersErrorCode = keyof typeof smithersErrorDefinitions
-
-/**
- * A code carried by a {@link SmithersError}. The set is closed; a consumer that
- * needs a new code adds it to {@link smithersErrorDefinitions} and to the
+ * A code carried by a `SmithersError`. The union is derived from the keys of
+ * `smithersErrorDefinitions`, so the set is closed; a consumer that needs a
+ * new code adds a row to `smithersErrorDefinitions` and regenerates the
  * reference page in the same edit.
  *
  * @category models
  * @since 1.0.0
  */
-export type SmithersErrorCode = KnownSmithersErrorCode
+export type SmithersErrorCode = keyof typeof smithersErrorDefinitions
 
 /**
  * Every documented code, in declaration order.
@@ -95,11 +81,11 @@ export type SmithersErrorCode = KnownSmithersErrorCode
  * @category models
  * @since 1.0.0
  */
-export const knownSmithersErrorCodes: ReadonlyArray<KnownSmithersErrorCode> = Object.keys(
+export const smithersErrorCodes: ReadonlyArray<SmithersErrorCode> = Object.keys(
   smithersErrorDefinitions
-) as Array<KnownSmithersErrorCode>
+) as Array<SmithersErrorCode>
 
-Object.freeze(knownSmithersErrorCodes)
+Object.freeze(smithersErrorCodes)
 
 /**
  * Whether `code` is one this package documents.
@@ -107,7 +93,7 @@ Object.freeze(knownSmithersErrorCodes)
  * @category refinements
  * @since 1.0.0
  */
-export const isKnownSmithersErrorCode = (code: unknown): code is KnownSmithersErrorCode =>
+export const isSmithersErrorCode = (code: unknown): code is SmithersErrorCode =>
   typeof code === "string" && Object.hasOwn(smithersErrorDefinitions, code)
 
 /**
@@ -117,14 +103,4 @@ export const isKnownSmithersErrorCode = (code: unknown): code is KnownSmithersEr
  * @since 1.0.0
  */
 export const getSmithersErrorDefinition = (code: unknown): SmithersErrorDefinition | undefined =>
-  isKnownSmithersErrorCode(code) ? smithersErrorDefinitions[code] : undefined
-
-/**
- * The documentation URL shared by every code.
- *
- * Every code shares one reference page.
- *
- * @category getters
- * @since 1.0.0
- */
-export const getSmithersErrorDocsUrl = (): string => ERROR_REFERENCE_URL
+  isSmithersErrorCode(code) ? smithersErrorDefinitions[code] : undefined
