@@ -453,10 +453,17 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service =>
 /**
  * Provides the production agent.
  *
+ * The policy services are requirements of the layer so a composition cannot
+ * erase them before {@link Service.run} reaches the model boundary.
+ *
  * @category layers
  * @since 0.1.0
  */
-export const layer: Layer.Layer<Agent> = Layer.succeed(Agent)(make({ run: runProduction }))
+export const layer: Layer.Layer<
+  Agent,
+  never,
+  QuotaPolicy.QuotaClassifier | Budget.Budget
+> = Layer.succeed(Agent)(make({ run: runProduction }))
 
 /**
  * Provides {@link makeNoop}.
