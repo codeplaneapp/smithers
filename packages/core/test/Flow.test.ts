@@ -66,6 +66,31 @@ describe("Flow", () => {
       flows: [callable],
       output: Schema.String
     })
+    expect(withModel.model).toBe("smart")
+    expect(withModel.flows).toBeUndefined()
+    expect(withModel.prompt).toBe("Answer exactly.")
+    expect(withFlows.flows).toEqual([callable])
+  })
+
+  it("records advisory model, collaborator, and prompt metadata on a body flow", () => {
+    const collaborators: Array<Flow.Reference> = ["helper"]
+    const body = (value: string) => Node.succeed(value)
+    const flow = Flow.make({
+      input: Schema.String,
+      output: Schema.String,
+      model: "fast",
+      flows: collaborators,
+      prompt: "P",
+      body
+    })
+
+    collaborators.push("mutated-later")
+
+    expect(flow.model).toBe("fast")
+    expect(flow.flows).toEqual(["helper"])
+    expect(flow.prompt).toBe("P")
+    expect(flow.body).toBe(body)
+    expect(flow.implementation?._tag).toBe("Body")
   })
 
   it("forwards agent construction to make", () => {
@@ -189,6 +214,10 @@ describe("Flow", () => {
     const rebound = Flow.withFlows(original, [second, "by-name"])
 
     expect(rebound).not.toBe(original)
+    expect(rebound.body).not.toBe(original.body)
+    expect(rebound.model).toBe("smart")
+    expect(rebound.flows).toEqual([second, "by-name"])
+    expect(rebound.prompt).toBe("delegate")
     expect(rebound.implementation).toEqual({
       _tag: "Dynamic",
       model: "smart",
@@ -213,9 +242,124 @@ describe("Flow", () => {
     // The body the rebuild produces declares the new collaborators, not the old ones.
     const dynamicNode = Graph.nodes(Graph.build(rebound, "x")).find((node) => node.kind === "Dynamic")
     expect(JSON.stringify(dynamicNode?.keyMaterial)).toContain("shell")
-    // A flow with a body reaches its collaborators by calling them, so it is untouched.
-    const bodied = Flow.make({ input: Schema.String, output: Schema.String, body: (input) => Node.succeed(input) })
-    expect(Flow.withFlows(bodied, [second])).toBe(bodied)
+  })
+
+  it("keeps a body flow's digest while rebinding the collaborators it keys on", () => {
+    const body = (input: string) => Node.succeed(input)
+    const original = Flow.make({
+      input: Schema.String,
+      output: Schema.String,
+      flows: ["first"],
+      body
+    })
+    const originalDigest = original.implementation?._tag === "Body"
+      ? original.implementation.digest
+      : undefined
+
+    const rebound = Flow.withFlows(original, ["second"])
+
+    expect(rebound).not.toBe(original)
+    expect(original.flows).toEqual(["first"])
+    expect(rebound.flows).toEqual(["second"])
+    expect(rebound.body).toBe(body)
+    // The body still identifies the code that runs, so the digest is unchanged.
+    expect(rebound.implementation?._tag === "Body" && rebound.implementation.digest).toBe(originalDigest)
+    // The declaration is what changed, and it is part of the implementation, so
+    // a reader of key material can see the rebind.
+    expect(original.implementation).toEqual({
+      _tag: "Body",
+      algorithm: "sha256-source-ephemeral/v4",
+      digest: originalDigest,
+      declaration: { flows: ["first"] }
+    })
+    expect(rebound.implementation).toEqual({
+      _tag: "Body",
+      algorithm: "sha256-source-ephemeral/v4",
+      digest: originalDigest,
+      declaration: { flows: ["second"] }
+    })
+  })
+
+  it("records collaborators on a declaration-only flow without inventing an implementation", () => {
+    const declarationOnly = Flow.make({ name: "unimplemented", input: Schema.String })
+    expect(declarationOnly.implementation).toBeUndefined()
+
+    const rebound = Flow.withFlows(declarationOnly, ["helper"])
+
+    expect(rebound.flows).toEqual(["helper"])
+    expect(rebound.implementation).toBeUndefined()
+    expect(() => rebound("x")).toThrow(Flow.FlowError)
+  })
+
+  it("records a body flow's declaration in key material and omits it when undeclared", () => {
+    const body = (input: string) => Node.succeed(input)
+    const declared = Flow.make({ input: Schema.String, model: "fast", prompt: "P", body })
+    const plain = Flow.make({ input: Schema.String, body })
+
+    expect(declared.implementation).toEqual({
+      _tag: "Body",
+      algorithm: "sha256-source-ephemeral/v4",
+      digest: expect.any(String),
+      declaration: { model: "fast", prompt: "P" }
+    })
+    expect(plain.implementation).toEqual({
+      _tag: "Body",
+      algorithm: "sha256-source-ephemeral/v4",
+      digest: expect.any(String)
+    })
+    expect(plain.implementation).not.toHaveProperty("declaration")
+
+    const material = (flow: Flow.Flow<typeof Schema.String, typeof Schema.Unknown, never>): unknown =>
+      Graph.nodes(Graph.build(flow("x")))[0]?.keyMaterial.body
+
+    expect(material(declared)).not.toEqual(material(plain))
+    expect(JSON.stringify(material(declared))).toContain("\"model\":\"fast\"")
+  })
+
+  it("preserves declared model, collaborators, prompt, and name through every combinator", () => {
+    const Metadata = Context.Service<{ readonly value: string }>("test/Flow/Metadata")
+    const effects = Effects.make({
+      reads: ["src/**"],
+      writes: ["out/**"],
+      mode: "expected",
+      onConflict: "serialize"
+    })
+    const replacementEffects = Effects.make({
+      reads: [],
+      writes: [],
+      mode: "hermetic",
+      onConflict: "fail"
+    })
+    const original = Flow.make({
+      name: "metadata",
+      input: Schema.String,
+      output: Schema.String,
+      model: "fast",
+      flows: ["helper"],
+      prompt: "P",
+      effects,
+      body: Node.succeed
+    })
+    const variants = [
+      Flow.withCapabilities(original, ["read"]),
+      Flow.within(original, Placement.remote()),
+      Flow.annotate(original, Metadata, { value: "kept" }),
+      Flow.withEffects(original, replacementEffects),
+      Flow.sealed(original)
+    ]
+
+    for (const variant of variants) {
+      expect(variant.name).toBe("metadata")
+      expect(variant.model).toBe("fast")
+      expect(variant.flows).toEqual(["helper"])
+      expect(variant.prompt).toBe("P")
+    }
+
+    const rebound = Flow.withFlows(original, ["replacement"])
+    expect(rebound.name).toBe("metadata")
+    expect(rebound.model).toBe("fast")
+    expect(rebound.flows).toEqual(["replacement"])
+    expect(rebound.prompt).toBe("P")
   })
 
   it("seals an empty effect envelope when no declaration exists", () => {
@@ -250,7 +394,18 @@ describe("Flow", () => {
     })
     const updated = original.pipe(Flow.withCapabilities(["admin", "read"]))
 
-    expect(original.capabilities).toEqual(["write", "read", "write"])
+    expect(original.capabilities).toEqual(["read", "write"])
     expect(updated.capabilities).toEqual(["admin", "read", "write"])
+  })
+
+  it("keeps function name semantics without leaking an enumerable name", () => {
+    const unnamed = Flow.make({ output: Schema.String, body: () => Node.succeed("ok") })
+    const named = Flow.make({ name: "named", output: Schema.String, body: () => Node.succeed("ok") })
+
+    expect(unnamed.name).toBe("")
+    expect(Object.keys({ ...unnamed })).not.toContain("name")
+    expect(named.name).toBe("named")
+    expect(Object.keys({ ...named })).not.toContain("name")
+    expect(named.pipe(Flow.withCapabilities(["read"]), Flow.sealed()).name).toBe("named")
   })
 })

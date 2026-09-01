@@ -1,9 +1,8 @@
 /**
  * Internal AST and runtime representation for pipeable flow nodes.
  *
- * Governing contracts:
- * `docs/specs/Concepts/Schema Shaped Builder.md` and
- * `docs/specs/Concepts/Build Phases.md`.
+ * Governing contract: `packages/core/docs/api.md`, published as
+ * https://smithers.sh/api/core.
  *
  * @since 0.0.0
  */
@@ -169,6 +168,19 @@ const nonce = (): string => {
   return ephemeralNonce
 }
 
+/**
+ * Returns the process-local nonce shared by every ephemeral identity.
+ *
+ * Exposed so a second ephemeral encoding, such as the projection of an
+ * unregistered symbol, folds in the same per-process value and can never
+ * collide with a different value observed by another process.
+ *
+ * @since 0.1.0
+ * @private
+ * @slop
+ */
+export const processNonce = (): string => nonce()
+
 /** @private */
 const captureError = (path: string, reason: string): TypeError =>
   new TypeError(`Node.capture: capture at ${path} ${reason}; captures must be finite, inert data`)
@@ -252,8 +264,13 @@ export const capture = <Args extends ReadonlyArray<unknown>, A>(
   captures: Readonly<Record<string, unknown>>,
   operation: (...args: Args) => A
 ): (...args: Args) => A => {
-  const source = Function.prototype.toString.call(operation)
-  const canonical = canonicalCapture(captures, "$", new WeakSet())
+  if (typeof operation !== "function") throw new TypeError("Node.capture requires a function operation")
+  const metadata = (operation as CapturedFunction)[CapturedTypeId]
+  const source = metadata?.source ?? Function.prototype.toString.call(operation)
+  const outerCanonical = canonicalCapture(captures, "$", new WeakSet())
+  const canonical = metadata === undefined
+    ? outerCanonical
+    : `["nested",${outerCanonical},${metadata.captures}]`
   freezeCapture(captures, new WeakSet())
   const wrapped = function(this: unknown, ...args: ReadonlyArray<unknown>): unknown {
     return Reflect.apply(operation, this, args)

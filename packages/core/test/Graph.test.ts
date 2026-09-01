@@ -80,7 +80,7 @@ describe("Graph", () => {
     })
 
     expect(Graph.diagnostics(Graph.build(flow))).toMatchObject([
-      { code: "effect_outside_envelope", paths: ["secret.txt"] }
+      { code: "effect_outside_envelope", paths: ["secret.txt"], nodeId: "root" }
     ])
   })
 
@@ -144,7 +144,8 @@ describe("Graph", () => {
     expect(Graph.diagnostics(Graph.build(parent))).toMatchObject([
       {
         code: "effect_outside_envelope",
-        paths: ["secret.txt"]
+        paths: ["secret.txt"],
+        nodeId: "root"
       }
     ])
   })
@@ -159,15 +160,23 @@ describe("Graph", () => {
       body: () => child(undefined)
     })
 
-    expect(Graph.nodes(Graph.build(parent)).find((node) => node.id === "root.flow")?.capabilities).toEqual([
+    const graph = Graph.build(parent)
+    expect(Graph.nodes(graph).find((node) => node.id === "root.flow")?.capabilities).toEqual([
       "fs:read:/workspace/**"
     ])
+    expect(Graph.diagnostics(graph)).toMatchObject([{
+      code: "capability_outside_grant",
+      paths: ["proc:spawn:**"],
+      nodeId: "root"
+    }])
   })
 
   it("returns a typed failure when a node has no key material", () => {
-    const graph = Graph.build(Node.succeed("ok"))
-    const node = (graph as unknown as { nodes: Array<{ keyMaterial?: unknown }> }).nodes[0]
-    if (node !== undefined) delete node.keyMaterial
+    const built = Graph.build(Node.succeed("ok"))
+    const graph = {
+      ...built,
+      nodes: Graph.nodes(built).map((node) => ({ ...node, keyMaterial: undefined }))
+    } as unknown as Graph.Graph
 
     expect(Graph.keyMaterial(graph)).toMatchObject({
       _tag: "Failure",

@@ -89,6 +89,53 @@ describe("Skill", () => {
     expect(errorCode("---\nname: 'pdf\ndescription: Extract files\n---\nPrompt")).toBe("skill_invalid_frontmatter")
   })
 
+  it("redacts source text from bounded YAML parser diagnostics", () => {
+    const result = Markdown.parseSkill(
+      "---\nname: n\ndescription: d\nmetadata: [sk-live-SECRETVALUE\n---\nPrompt"
+    )
+
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isSuccess(result)) return
+    expect(result.failure.code).toBe("skill_invalid_frontmatter")
+    expect(result.failure.message).not.toContain("sk-live-SECRETVALUE")
+    expect(result.failure.message).toContain("line 4")
+    expect(result.failure.message.length).toBeLessThanOrEqual(200)
+  })
+
+  it("keeps the stable code for a second malformed YAML document", () => {
+    expect(errorCode("---\nname: n\ndescription: d\nmetadata: {unterminated\n---\nPrompt")).toBe(
+      "skill_invalid_frontmatter"
+    )
+  })
+
+  it("retains hostile unknown keys as frozen own data properties", () => {
+    const skill = parse([
+      "---",
+      "name: guarded",
+      "description: Guard hostile keys",
+      "__proto__:",
+      "  admin: yes",
+      "constructor: construct",
+      "prototype:",
+      "  enabled: true",
+      "---",
+      "Prompt"
+    ].join("\n"))
+
+    expect(Object.keys(skill.extra)).toEqual(["__proto__", "constructor", "prototype"])
+    expect(Object.getOwnPropertyDescriptor(skill.extra, "__proto__")).toEqual({
+      value: { admin: "yes" },
+      enumerable: true,
+      writable: false,
+      configurable: false
+    })
+    expect(Object.getOwnPropertyDescriptor(skill.extra, "constructor")?.value).toBe("construct")
+    expect(Object.getOwnPropertyDescriptor(skill.extra, "prototype")?.value).toEqual({ enabled: "true" })
+    expect(Object.getPrototypeOf(skill.extra)).toBeNull()
+    expect(Object.isFrozen(skill.extra)).toBe(true)
+    expect(({} as Record<string, unknown>).admin).toBeUndefined()
+  })
+
   it("retains unknown keys without treating them as errors", () => {
     const skill = parse([
       "---",
@@ -102,7 +149,10 @@ describe("Skill", () => {
       "Prompt"
     ].join("\n"))
 
-    expect(skill.extra).toEqual({
+    expect(Object.keys(skill.extra)).toEqual(["license", "metadata"])
+    expect(Object.hasOwn(skill.extra, "license")).toBe(true)
+    expect(Object.hasOwn(skill.extra, "metadata")).toBe(true)
+    expect({ ...skill.extra }).toEqual({
       license: "Apache-2.0",
       metadata: {
         author: "document-tools",

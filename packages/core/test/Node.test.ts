@@ -239,6 +239,39 @@ describe("Node", () => {
     expect(() => Node.capture({ value: Number.NaN }, () => undefined)).toThrow(/is not finite/)
   })
 
+  it("composes nested capture identity without erasing the inner operation", () => {
+    const identity = (operation: (value: number) => number) => {
+      const ast = Node.map(Node.succeed(1), operation).ast
+      if (ast._tag !== "Map") throw new Error("expected Map")
+      return ast.mapper
+    }
+    const add = (value: number) => value + 1
+    const multiply = (value: number) => value * 2
+
+    expect(identity(Node.capture({ outer: 1 }, Node.capture({ inner: 2 }, add))))
+      .not.toEqual(identity(Node.capture({ outer: 1 }, Node.capture({ inner: 2 }, multiply))))
+    expect(identity(Node.capture({ outer: 1 }, Node.capture({ inner: 2 }, add))))
+      .not.toEqual(identity(Node.capture({ outer: 1 }, Node.capture({ inner: 3 }, add))))
+  })
+
+  it("keeps identical nested captures stable and distinct from a single capture", () => {
+    const operation = (value: number) => value + 1
+    const identity = (captured: (value: number) => number) => {
+      const ast = Node.map(Node.succeed(1), captured).ast
+      if (ast._tag !== "Map") throw new Error("expected Map")
+      return ast.mapper
+    }
+    const nested = () => Node.capture({ outer: 1 }, Node.capture({ inner: 2 }, operation))
+
+    expect(identity(nested())).toEqual(identity(nested()))
+    expect(identity(nested())).not.toEqual(identity(Node.capture({ inner: 2, outer: 1 }, operation)))
+  })
+
+  it("rejects a malformed capture operation with the package-shaped message", () => {
+    expect(() => Node.capture({}, "nope" as unknown as () => unknown))
+      .toThrow(new TypeError("Node.capture requires a function operation"))
+  })
+
   it("canonicalizes every supported capture shape and rejects ambiguous data", () => {
     const operation = () => undefined
     const identity = (captures: Readonly<Record<string, unknown>>) => {
@@ -289,5 +322,17 @@ describe("Node", () => {
         member: "invalid"
       })
     }
+  })
+
+  it("retains prototype-like Node.all member names", () => {
+    const combined = Node.all({
+      ["__proto__"]: Node.succeed("proto"),
+      constructor: Node.succeed("constructor"),
+      prototype: Node.succeed("prototype")
+    })
+
+    if (combined.ast._tag !== "All") throw new Error("expected All")
+    expect(Object.getPrototypeOf(combined.ast.nodes)).toBeNull()
+    expect(Object.keys(combined.ast.nodes)).toEqual(["__proto__", "constructor", "prototype"])
   })
 })

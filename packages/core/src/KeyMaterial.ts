@@ -1,9 +1,8 @@
 /**
  * Digest-free input to `/keys`.
  *
- * Governing contracts:
- * `docs/specs/Concepts/Step Keys.md` and
- * `docs/specs/Concepts/Vendored Flow Engine.md`.
+ * Governing contract: `packages/core/docs/api.md`, published as
+ * https://smithers.sh/api/core.
  *
  * Graph-local ids may occur only inside dependency references. The key
  * compiler replaces those references with dependency digests; names and tree

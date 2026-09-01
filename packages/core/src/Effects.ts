@@ -1,7 +1,8 @@
 /**
  * Pure effect declarations used to describe flow read and write envelopes.
  *
- * Governing contract: `docs/specs/Concepts/Effect Taxonomy.md`.
+ * Governing contract: `packages/core/docs/api.md`, published as
+ * https://smithers.sh/api/core.
  *
  * @since 0.0.0
  */
@@ -25,6 +26,10 @@ export interface Declaration {
 /**
  * Input accepted by {@link make}. Iterables are normalized into sorted,
  * duplicate-free arrays so declarations are deterministic key material.
+ * Envelope entries and declared paths must already be path-normalized: no
+ * separator or dot-segment rewriting is performed. A declared path containing
+ * a whole `.` or `..` segment is never covered and therefore surfaces from
+ * {@link narrow} as an `effect_outside_envelope` diagnostic.
  *
  * @category models
  * @since 0.0.0
@@ -70,21 +75,30 @@ export const make = (input: MakeOptions): Declaration => ({
   ...(input.tier === undefined ? {} : { tier: input.tier })
 })
 
+const hasDotSegment = (path: string): boolean => path.split("/").some((segment) => segment === "." || segment === "..")
+
 /**
  * Checks whether `path` is covered by an envelope entry.
  *
- * The supported subset is exact paths plus prefix globs ending in `*` or
- * `/**`. A prefix glob matches every path beginning with the text before its
- * final star; this is intentionally not full minimatch syntax.
+ * The grammar is exhaustive: an exact path matches itself; `*` and `**` match
+ * everything; `prefix*` matches by string prefix; and `prefix/**` matches
+ * `prefix/` and everything below it, but not bare `prefix`. This is
+ * intentionally not full minimatch syntax. Envelope entries and declared paths
+ * must be normalized. A path containing a whole `.` or `..` segment is never
+ * covered, so {@link narrow} reports it as `effect_outside_envelope` rather
+ * than silently accepting an escape.
  *
  * @category predicates
  * @since 0.0.0
  * @slop
  */
-export const covers = (envelope: string, path: string): boolean =>
-  envelope === path ||
-  (envelope.endsWith("/**") && path.startsWith(envelope.slice(0, -2))) ||
-  (envelope.endsWith("*") && path.startsWith(envelope.slice(0, -1)))
+export const covers = (envelope: string, path: string): boolean => {
+  if (hasDotSegment(path)) return false
+  if (envelope === "*" || envelope === "**") return true
+  return envelope === path ||
+    (envelope.endsWith("/**") && path.startsWith(envelope.slice(0, -2))) ||
+    (envelope.endsWith("*") && path.startsWith(envelope.slice(0, -1)))
+}
 
 const outside = (envelope: ReadonlyArray<string>, paths: ReadonlyArray<string>): ReadonlyArray<string> =>
   paths.filter((path) => !envelope.some((entry) => covers(entry, path)))
@@ -123,6 +137,12 @@ export const narrow = (envelope: Declaration, step: Declaration): NarrowResult =
  * Returns the concrete or narrower write declarations shared by two effect
  * declarations. The result is sorted and duplicate-free.
  *
+ * Two declarations of the same literal path always overlap, including a path
+ * {@link covers} refuses to match because it carries a `.` or `..` segment.
+ * Glob coverage stays strict for those paths, so an unnormalized declaration
+ * still escapes no envelope, but two writers naming the same unnormalized path
+ * are still detected as writing the same resource.
+ *
  * @category analysis
  * @since 0.0.0
  * @slop
@@ -131,7 +151,7 @@ export const overlaps = (a: Declaration, b: Declaration): ReadonlyArray<string> 
   const matches: Array<string> = []
   for (const left of a.writes) {
     for (const right of b.writes) {
-      if (covers(left, right)) {
+      if (left === right || covers(left, right)) {
         matches.push(right)
       } else if (covers(right, left)) {
         matches.push(left)

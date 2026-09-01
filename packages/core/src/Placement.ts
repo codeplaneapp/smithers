@@ -1,7 +1,8 @@
 /**
  * Serializable placement annotations for flow graph values.
  *
- * Governing contract: `docs/specs/Concepts/Placement.md`.
+ * Governing contract: `packages/core/docs/api.md`, published as
+ * https://smithers.sh/api/core.
  *
  * @since 0.0.0
  */

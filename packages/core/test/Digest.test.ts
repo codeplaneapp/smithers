@@ -53,6 +53,32 @@ describe("Digest", () => {
       expect(Digest.canonical(value)).toBe(injected)
     })))
 
+  it("throws the canonical SchemaError unchanged for unrepresentable values", () => {
+    const cyclic: Record<string, unknown> = {}
+    cyclic.self = cyclic
+
+    for (const value of [() => 1, Symbol("value"), cyclic]) {
+      let thrown: unknown
+      try {
+        Digest.canonical(value)
+      } catch (error) {
+        thrown = error
+      }
+
+      expect(thrown).toBeInstanceOf(Schema.SchemaError)
+      expect(thrown).toEqual(expect.objectContaining({ _tag: "SchemaError", issue: expect.anything() }))
+    }
+  })
+
+  it("produces byte-stable canonical output for differently ordered records", () => {
+    const first = Digest.canonical({ z: 3, nested: { b: 2, a: 1 }, a: "first" })
+    const second = Digest.canonical({ a: "first", nested: { a: 1, b: 2 }, z: 3 })
+
+    expect(first).toBe("{\"a\":\"first\",\"nested\":{\"a\":1,\"b\":2},\"z\":3}")
+    expect(second).toBe(first)
+    expect(JSON.parse(first)).toEqual({ a: "first", nested: { a: 1, b: 2 }, z: 3 })
+  })
+
   it.effect("runs an Effect-shaped hashing program synchronously", () =>
     Effect.sync(() => {
       const key = Digest.runSync(Schema.decodeUnknownEffect(Sha256)("abc"))

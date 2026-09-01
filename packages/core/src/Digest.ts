@@ -6,7 +6,7 @@
  * `Sha256` and canonicalization to `@smthrs/canonical`'s `Canonical`.
  *
  * The agent side computes content fingerprints inside *pure, synchronous*
- * constructors — a prompt section's identity, a context-window segment, a
+ * constructors: a prompt section's identity, a context-window segment, a
  * cell's source digest, a plan card's digest. `@smthrs/crypto` now owns that
  * policy and its only handwritten implementation. This module delegates to
  * `digestSync` and retains its old `crypto`, `layer`, and `runSync` names for
@@ -82,8 +82,10 @@ export const digest = digestSync
 /**
  * Returns the RFC 8785 canonical JSON serialization of a value.
  *
- * Throws on a value canonical JSON cannot represent, which is the contract the
- * agent-side callers were written against.
+ * A function, symbol, `bigint`, cyclic object, non-finite number, or top-level
+ * `undefined` has no canonical JSON representation. For those values this
+ * throws the `SchemaError` from `effect/Schema` raised through
+ * `Effect.runSync`; the canonical package's failure is not wrapped.
  *
  * @category serialization
  * @since 0.1.0
