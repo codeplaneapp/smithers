@@ -634,7 +634,7 @@ export const make = (
 
         const expected = snapshot(row)
         const nowMs = yield* Clock.currentTimeMillis
-        let claim: RunStore.ClaimOutcome
+        let claim: RunStore.StealOutcome
         let stealEvidenceKind: Ownership.LivenessEvidence["kind"] | undefined
 
         if (row.status === "running") {
