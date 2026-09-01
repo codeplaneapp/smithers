@@ -391,22 +391,66 @@ const CauseJson = Schema.Struct({
 })
 
 /**
+ * Projects one failure value into the inert JSON data `AttemptStore` admits.
+ *
+ * A `Fail` reason raised by a service rather than by `Action.executeEncoded`
+ * carries a live class instance — `StepBoundary.UnsupportedBoundary`, a
+ * `StepSandbox` refusal, any `Data.TaggedError` — and a `Die` reason carries
+ * an arbitrary defect. `@smthrs/run-store`'s attempt boundary refuses a
+ * non-plain object outright rather than serializing it, so the projection has
+ * to happen on the write side, here, where the durable shape is already owned.
+ *
+ * The projection is the JSON the store itself used to derive from the
+ * instance, so the persisted bytes do not move: `JSON.stringify` reads the
+ * same own enumerable properties the SQL encode read. A value JSON cannot
+ * express at all — a symbol, a function, a bigint, a cycle — becomes `null`,
+ * which is the one visible change: the store previously dropped the key
+ * entirely and left the reason unreadable to {@link rehydrateCause}.
+ */
+const inertJson = (value: unknown): unknown => {
+  try {
+    const text = JSON.stringify(value)
+    return text === undefined ? null : JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+/**
  * Encodes a live `Cause` into the plain tagged-reason JSON `rehydrateCause`
  * decodes. Persisting the `Cause` object itself left the durable shape to
  * whatever the ambient serializer produced (`Cause.toJSON` emits
  * `{_id, failures}`, a structural walk emits `{reasons}`), so a change in
  * the store's encoding silently broke failed-attempt replay. The write side
- * now owns the shape explicitly.
+ * now owns the shape explicitly, {@link inertJson} included.
  */
 const persistCause = (cause: Cause.Cause<unknown>): typeof CauseJson.Type => ({
   reasons: cause.reasons.map((reason) =>
     Cause.isFailReason(reason)
-      ? { _tag: "Fail" as const, error: reason.error }
+      ? { _tag: "Fail" as const, error: inertJson(reason.error) }
       : Cause.isDieReason(reason)
-      ? { _tag: "Die" as const, defect: reason.defect }
+      ? { _tag: "Die" as const, defect: inertJson(reason.defect) }
       : { _tag: "Interrupt" as const, fiberId: reason.fiberId ?? null }
   )
 })
+
+/**
+ * Presents a payload this module already reduced to JSON as the attempt
+ * store's `JsonValue`.
+ *
+ * `@smthrs/run-store` types the `meta`, `error`, and `outcome` columns as
+ * `JsonValue` and admits every write through its own inert-JSON boundary,
+ * which refuses anything that boundary rejects with `AttemptStoreError`. The
+ * values handed here are already reduced: `AttemptMeta` is a schema whose
+ * optional fields are omitted rather than written as `undefined`,
+ * {@link persistCause} passes every leaf through {@link inertJson}, and an
+ * action `outcome` is the encoded result the caller's own codec produced.
+ * TypeScript still refuses the assignment because an optional property's type
+ * includes `undefined` and a JSON index signature does not, and because a
+ * schema-level `unknown` leaf cannot be proven JSON statically. The store's
+ * admission is the check; this is the type-level statement of what it checks.
+ */
+const attemptPayload = (value: unknown): AttemptStore.JsonValue => value as AttemptStore.JsonValue
 
 /**
  * Rebuilds the persisted failure of a `failed` attempt row so replay can
@@ -1243,16 +1287,24 @@ export const make = (deps: Dependencies) => {
                     // lands while `flows_runs` still records `deps.owner` —
                     // and the heartbeat both refreshes the lease and reports
                     // the loss as a run-store outcome before the patch runs.
+                    // `boundary` is dropped by omitting the key, never by
+                    // writing `undefined` over it: the attempt store admits
+                    // inert JSON, and an own property holding `undefined` is
+                    // not JSON, so the patch would be refused outright.
+                    const { boundary: _quarantined, ...retainedMeta } = meta
                     const quarantinedMeta: AttemptMeta = {
-                      ...meta,
-                      boundary: undefined,
+                      ...retainedMeta,
                       boundaryQuarantined: true
                     }
                     const quarantined = yield* atomically(Effect.gen(function*() {
                       const quarantineAtMs = yield* Clock.currentTimeMillis
                       const fence = yield* runs.heartbeat(deps.runId, deps.owner, quarantineAtMs)
                       if (fence._tag !== "Updated") return false
-                      const patched = yield* attempts.patch(attemptId, { meta: quarantinedMeta }, deps.owner)
+                      const patched = yield* attempts.patch(
+                        attemptId,
+                        { meta: attemptPayload(quarantinedMeta) },
+                        deps.owner
+                      )
                       return patched._tag === "Patched"
                     }))
                     if (!quarantined) return yield* Effect.interrupt
@@ -1468,7 +1520,7 @@ export const make = (deps: Dependencies) => {
               const now = yield* Clock.currentTimeMillis
               const initialMeta: AttemptMeta = { ...declarationMeta, admittedBy: deps.owner }
               const put = yield* attempts.put(
-                { ...attemptId, state: "running", startedAtMs: now, meta: initialMeta },
+                { ...attemptId, state: "running", startedAtMs: now, meta: attemptPayload(initialMeta) },
                 deps.owner
               )
               if (put._tag === "FenceLost" || put._tag === "RunNotFound") {
@@ -1499,7 +1551,9 @@ export const make = (deps: Dependencies) => {
               // durable state moved under us — surface it as self-interruption
               // like the other fence losses.
               const rehomed = yield* attempts.patch(attemptId, {
-                meta: { ...runningMeta, ...declarationMeta, admittedBy: deps.owner } satisfies AttemptMeta
+                meta: attemptPayload(
+                  { ...runningMeta, ...declarationMeta, admittedBy: deps.owner } satisfies AttemptMeta
+                )
               }, deps.owner)
               if (rehomed._tag !== "Patched") return yield* Effect.interrupt
             }
@@ -1588,7 +1642,7 @@ export const make = (deps: Dependencies) => {
               ...attemptId,
               state: "failed",
               finishedAtMs,
-              error: persistCause(preparedResult.cause),
+              error: attemptPayload(persistCause(preparedResult.cause)),
               // A boundary is prepared only for sealed work, while snapshots are
               // created only for compensable work. The two capabilities are
               // disjoint, so a preparation failure can never carry a snapshot.
@@ -1632,7 +1686,7 @@ export const make = (deps: Dependencies) => {
               ...attemptId,
               state: "failed",
               finishedAtMs,
-              error: persistCause(opened.cause),
+              error: attemptPayload(persistCause(opened.cause)),
               meta: { ...declarationMeta, hardViolation: true }
             }, [
               JournalRecords.hardViolation(attemptSource("hard-violation"), {
@@ -1743,7 +1797,10 @@ export const make = (deps: Dependencies) => {
                 if (record !== undefined) yield* emitLifecycle(record)
                 const patched = yield* attempts.patch(
                   attemptId,
-                  { ...patch, meta: { ...dispatchMeta, effectCrossing: crossing } satisfies AttemptMeta },
+                  {
+                    ...patch,
+                    meta: attemptPayload({ ...dispatchMeta, effectCrossing: crossing } satisfies AttemptMeta)
+                  },
                   deps.owner
                 )
                 return patched._tag === "Patched"
@@ -1759,7 +1816,7 @@ export const make = (deps: Dependencies) => {
                 yield* Exit.isSuccess(exit)
                   ? recordCrossing(
                     "succeeded",
-                    { outcome: exit.value },
+                    { outcome: attemptPayload(exit.value) },
                     EffectRecords.boundary(effect, "succeeded", exit.value)
                   )
                   // A park leaves the boundary OPEN. The terminal record says
@@ -1823,7 +1880,7 @@ export const make = (deps: Dependencies) => {
               ...attemptId,
               state: "failed",
               finishedAtMs,
-              error: persistCause(outcome.cause),
+              error: attemptPayload(persistCause(outcome.cause)),
               meta: {
                 ...declarationMeta,
                 ...(violation ? { hardViolation: true as const } : {}),
@@ -1898,7 +1955,7 @@ export const make = (deps: Dependencies) => {
               ...attemptId,
               state: "failed",
               finishedAtMs: failedAtMs,
-              error: persistCause(settled.cause),
+              error: attemptPayload(persistCause(settled.cause)),
               // Settlement, like preparation, runs only for sealed work; a
               // compensable snapshot is therefore unreachable on this path.
               meta: { ...declarationMeta, hardViolation: true }
@@ -1958,7 +2015,13 @@ export const make = (deps: Dependencies) => {
             ...(readSetVerified ? { readSetVerified: true as const } : {})
           }
           const finished = yield* settleAttempt(
-            { ...attemptId, state: "succeeded", finishedAtMs, outcome: outcome.value, meta },
+            {
+              ...attemptId,
+              state: "succeeded",
+              finishedAtMs,
+              outcome: attemptPayload(outcome.value),
+              meta: attemptPayload(meta)
+            },
             [
               ...(evidence?.deviation === undefined ? [] : [
                 JournalRecords.expectedSetDeviation(attemptSource("deviation"), {
