@@ -309,7 +309,7 @@ No shipped runtime reads `FlowInstance.awaitedDeferreds`. It is reserved for a r
 ### Exports
 
 The tables below are generated from the JSDoc above each exported declaration, so every export the
-barrel publishes with an `@category` tag appears here. 216 declarations across
+barrel publishes with an `@category` tag appears here. 230 declarations across
 14 namespaces.
 
 #### `Action`
@@ -375,7 +375,7 @@ Durable clock and timer services.
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
 | `DurableClock` | interface | models | Represents a durable flow timer with a name, duration, and deferred completed when the timer wakes. |
-| `make` | const | constructors | Creates a durable clock definition and its associated deferred wake-up signal. |
+| `make` | const | constructors | Declares one durable clock after validating its finite nonnegative duration. |
 | `sleep` | const | sleeping | Waits inside a flow, using an in-memory action for durations at or below the threshold and scheduling a durable clock for longer durations. |
 
 #### `DurableDeferred`
@@ -489,6 +489,7 @@ The execution contract flow authoring APIs are written against.
 | `FlowCycleDetected` | class | errors | Raised when executing a flow would close a cycle in the persisted parent-execution chain, which is a child asking to execute an execution id that already appears among its own ancestors. |
 | `FlowExecutionNotFound` | class | errors | Raised when `poll` is asked about an execution id the runtime never recorded. |
 | `FlowInstance` | class | services | Service that contains flow runtime state for one execution. |
+| `DeferredDoneIfWaitingOutcome` | type | models | Result of atomically completing a deferred only while its run is parked. |
 | `FlowRuntime` | class | services | Service that represents a flow runtime, responsible for registering and executing flows and coordinating actions, durable deferreds, interrupts, resumes, and clocks. |
 | `WaitingAnnotation` | interface | models | The waiting classification a flow can declare before suspending. |
 | `annotateWaiting` | const | combinators | Declares how the flow is about to wait, so a durable driver parks the run with that reason and token instead of the derived `timer`/`event` default. |
@@ -520,11 +521,24 @@ Asking a person something: typed answers, re-asking, and a deadline.
 | `Kind` | type | models | The shape a person is asked for. |
 | `Kind` | const | schemas | The schema the `kind` payload field is declared with. |
 | `HumanTaskFailed` | class | errors | A question that ended without an answer the task could accept. |
+| `HumanAnswerInvalid` | class | errors | An answer refused before it could consume durable storage. |
 | `tag` | const | constructors | The tag the human-task declaration is catalogued and resolved under. |
 | `defaultMaxAttempts` | const | constructors | The attempt budget a task that names none is asked under. |
 | `maxSchemaDepth` | const | constructors | The deepest supported JSON Schema path, counting the root as depth zero. |
 | `maxSchemaNodes` | const | constructors | The most schema objects one human-task request may contain. |
+| `maxSchemaValueNodes` | const | constructors | The most JSON values embedded across schema keywords such as `enum`. |
+| `maxSchemaValueDepth` | const | constructors | The deepest JSON value embedded in a schema, including enum members. |
 | `maxAnswerNodes` | const | constructors | The most JSON values one answer validation may visit. |
+| `maxAnswerBytes` | const | constructors | The largest encoded JSON answer that can enter the durable store. |
+| `maxSchemaBytes` | const | constructors | The largest encoded JSON Schema carried by one question. |
+| `maxAnswerDepth` | const | constructors | The deepest admitted answer tree. |
+| `maxJsonStringBytes` | const | constructors | The largest encoded string value admitted in a request or answer. |
+| `maxJsonKeyBytes` | const | constructors | The largest encoded object key admitted in a request or answer. |
+| `maxJsonMembers` | const | constructors | The most members admitted in one JSON array or object. |
+| `maxTaskNameBytes` | const | constructors | The largest encoded task name. |
+| `maxPromptBytes` | const | constructors | The largest encoded prompt. |
+| `maxOptions` | const | constructors | The largest option list on one select question. |
+| `maxOptionBytes` | const | constructors | The largest encoded select option. |
 | `maxAttemptBudget` | const | constructors | The largest attempt budget one human task may declare. |
 | `maxDiagnosticChars` | const | constructors | The most caller-supplied characters retained in one rendered diagnostic. |
 | `maxRetainedRejectionChars` | const | constructors | The most characters retained across a terminal failure's rejection list. |
@@ -718,9 +732,9 @@ Route: /api/flows
 ## @smthrs/flows
 
 The aggregate entry point re-exports every durable-engine package without
-flattening neighboring constructors. `@smthrs/flow` authoring names are flat,
-and `TimeTravel` is a flat service key; infrastructure packages remain
-namespaces.
+flattening neighboring constructors. `@smthrs/flow` authoring
+names are flat, and `TimeTravel` is a flat service key; infrastructure packages
+remain namespaces.
 
 ```sh
 pnpm add @smthrs/flows@rc
@@ -765,6 +779,9 @@ Platform bundles are deliberately absent. A program chooses
 The `Capability` namespace re-exports `@smthrs/capability`; its exact-resource
 bounds, pattern grammar, and permission failures are documented in the
 capability API.
+
+The `Plan` namespace re-exports `@smthrs/plan`, which owns step
+identity, graph compilation, static effect declarations, and plan storage.
 
 ### NodeRuntime
 
@@ -1846,8 +1863,8 @@ The pure plan-time data model for flows.
 Every value this package constructs is inert. A flow is a schema-described declaration, a node is a pipeable AST, and a graph is the topology those two reveal when planned. Nothing here executes a step, resolves a registry name, or touches a host.
 
 A flow is a schema-described declaration. A node is an inert, pipeable value
-that records an AST. Nothing in this package runs anything: `Graph.build`
-evaluates pure flow bodies and pure `Node.andThen` builders exactly once
+that records an AST. Production code in this package executes no steps:
+`Graph.build` evaluates pure flow bodies and pure `Node.andThen` builders exactly once
 against symbolic predecessor values so the complete static topology is visible
 before the first step executes.
 
@@ -1865,6 +1882,19 @@ const greeting = Flow.make({
 const graph = Graph.build(greeting, { name: "world" })
 const material = Graph.keyMaterial(graph)
 ```
+
+### Testing declarations
+
+`TestRuntime.evaluate` is a pure, synchronous test helper that executes the
+deferred maps, continuations, and recovery arms stored in one in-memory Node
+AST. Dynamic nodes and flow-call leaves cross an explicit deterministic
+resolver. `evaluateInline` additionally enters called flows that carry an
+in-memory body.
+
+It intentionally does not model capabilities, persistence, scheduling,
+retries, cache, concurrency, or output-schema enforcement. Higher-order
+builder packages use it for declaration behavior; durable-engine integration
+tests remain responsible for host semantics.
 
 ### Identity and caching
 
@@ -2131,6 +2161,23 @@ Serializable placement annotations for flow graph values.
 | `Placement` (type) | models | A serializable directive describing where a flow node should run. |
 | `remote` (const) | constructors | Creates a placement directive for a remote control-plane host. |
 | `sandbox` (const) | constructors | Creates a placement directive for an isolated sandbox host. |
+
+#### TestRuntime
+
+Pure, synchronous execution support for tests of node-building libraries.
+
+Production hosts execute compiled plans through the durable engine. A higher-order builder still needs to test the deferred maps, continuations, and recovery arms it records in a `Node.Node`. This module evaluates that in-memory AST without capabilities, persistence, scheduling, or any other host behavior. Dynamic nodes and flow calls cross one explicit resolver boundary supplied by the test.
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `DynamicRequest` (interface) | models | A dynamic-model request presented to a test resolver. |
+| `evaluate` (const) | testing | Evaluates a node's in-memory declaration with a deterministic leaf resolver. |
+| `evaluateInline` (const) | testing | Evaluates a node while recursively entering every called flow that carries an in-memory body. |
+| `EvaluationError` (class) | errors | A malformed or unresolved declaration encountered by the test evaluator. |
+| `EvaluationErrorCode` (type) | models | Stable failure codes emitted by the test evaluator itself. |
+| `FlowCallRequest` (interface) | models | A declared flow call presented to a test resolver. |
+| `Request` (type) | models | An execution leaf whose value the pure evaluator cannot invent. |
+| `Resolver` (type) | models | Supplies deterministic values or typed failures for execution leaves. |
 
 ---
 
@@ -4233,7 +4280,7 @@ encodings: `key2_` is invalid until a complete version-two contract is added.
 `Key` remains the one-way schema transformation used by existing callers.
 Decoding through it always derives a fresh key. Passing `key1_...` as its input
 hashes that text; it does not validate and return it. Its attached
-`Key.derive`, `Key.StoredKey`, and `Key.KeyV1` properties mirror the named
+`Key.derive`, `Key.digest`, `Key.StoredKey`, and `Key.KeyV1` properties mirror the named
 exports.
 
 Prefer `deriveKey` for ordinary Effect code because it exposes typed failures.
@@ -4296,6 +4343,7 @@ issue annotation. Invalid `StoredKey` and `KeyV1` text produce an ordinary
 | `KeyV1` (type) | models | A validated version-one stored key. |
 | `StoredKey` (const) | schemas | Every stored-key representation this release understands. |
 | `StoredKey` (type) | models | A stored key supported by this release. |
+| `digest` (const) | accessors | Returns the validated SHA-256 payload of a stored key. |
 | `Key` (type) | models | Compatibility name for the validated key value produced by `Key`. |
 | `KeyDerivationErrorCode` (const) | schemas | Stable failure codes returned by `deriveKey`. |
 | `KeyDerivationErrorCode` (type) | models | Stable failure codes returned by `deriveKey`. |
@@ -4690,7 +4738,7 @@ or errors.
 | `Recursion`       | `@smthrs/patterns/Recursion`       | Trellis-style bounded recursive expansion declarations.                                                                                                            | `Envelope`, `RecurseOptions`, `Branch`, `recurse`                                                                                                                                                                                        |
 | `Bounded`         | `@smthrs/patterns/Bounded`         | Bounded fan-out: a fixed set of members run at most `concurrency` at a time, highest priority first.                                                               | `AllOptions`, `RuntimeOptions`, `all`, `run`                                                                                                                                                                                             |
 | `TryCatchFinally` | `@smthrs/patterns/TryCatchFinally` | Scoped error boundary: a protected body, a filtered recovery arm, and a finalizer that runs on every path.                                                         | `MakeOptions`, `RuntimeOptions`, `make`, `run`                                                                                                                                                                                           |
-| `Quarantine`      | `@smthrs/patterns/Quarantine`      | Continue-on-failure fan-out.                                                                                                                                       | `Policy`, `Quarantined`, `AllOptions`, `RuntimeOptions`, `isQuarantined`, `all`, `run`, `settle`                                                                                                                                         |
+| `Quarantine`      | `@smthrs/patterns/Quarantine`      | Continue-on-failure fan-out.                                                                                                                                       | `Policy`, `Quarantined`, `Succeeded`, `Settled`, `AllOptions`, `RuntimeOptions`, `isQuarantined`, `isSucceeded`, `settle`                                                                                                                |
 | `Saga`            | `@smthrs/patterns/Saga`            | Forward steps with compensations that unwind in reverse.                                                                                                           | `OnFailure`, `Step`, `MakeOptions`, `RuntimeStep`, `RuntimeOptions`, `Compensated`, `make`, `run`                                                                                                                                        |
 | `Trellis`         | `@smthrs/patterns/Trellis`         | Model-authored bounded delegation plans.                                                                                                                           | `TrellisErrorCode`, `TrellisError`, `Envelope`, `Agent`, `Plan`, `Leaf`, `leaves`, `validate`, `CompileOptions`, `compile`, `MakeOptions`, `make`, `Authoring`, `Continuation`, `Round`, `RunResult`, `RuntimeOptions`, `execute`, `run` |
 | `DelegationChain` | `@smthrs/patterns/DelegationChain` | The fixed delegation chain: refine, plan, derisk, execute, review, settle.                                                                                         | `DelegationErrorCode`, `DelegationError`, `Budget`, `Bounds`, `MakeOptions`, `Work`, `ReviewRequest`, `DeriskRequest`, `PlanRequest`, `Settlement`, `RuntimeOptions`, `accepted`, `bound`, `make`, `run`                                 |
@@ -4724,14 +4772,15 @@ members still in flight.
 
 ### `Quarantine`
 
-`Quarantine.all(members, { policy })` wraps each member in a recovery arm that
-succeeds with `{ _tag: "Quarantined", member, error }`, so one failure never
-takes its siblings down. `policy: "halt"` is a plain join that does interrupt
-them. `Quarantine.run(members, { policy, concurrency? })` is the Effect form,
-and `Quarantine.settle(result)` turns a result holding quarantined members into
-a `quarantined` failure for callers that want to halt after the join.
-`isQuarantined` narrows one joined entry. Quarantine isolates typed failures; a
-defect and an interruption still propagate.
+`Quarantine.all(members, { policy: "quarantine" })` settles every member in an
+explicit envelope: `{ _tag: "Succeeded", member, value }` or
+`{ _tag: "Quarantined", member, error }`. Nesting successful values makes the
+protocol unambiguous even when a user value has either complete wire shape.
+`policy: "halt"` is a plain join that preserves raw successful values and does
+interrupt siblings. `Quarantine.run` is the Effect form, and
+`Quarantine.settle` unwraps successes or returns a `quarantined` failure.
+`isSucceeded` and `isQuarantined` narrow joined entries. Typed failures are
+isolated; defects and interruptions still propagate.
 
 ### `Panel`
 
@@ -5642,7 +5691,7 @@ An empty suite never passes under any strategy.
 
 `make` declares one call per check, batched into `Node.all` groups of `concurrency` members, then one pure verdict map. Each call is a `Node.all` member named by its check id. `continueOnFail` changes the topology and is captured as well, so a tolerant suite and a fail-fast suite have different step identity.
 
-`continueOnFail` picks the join. A tolerant suite joins each batch with `Quarantine.all` under the `quarantine` policy, so every check carries a recovery arm, a failing check settles as a `Quarantined` marker its siblings ignore, and `passed` reads that marker as a failed check. A fail-fast suite joins under `halt`, the plain `Node.all` that fails on the first failing member and interrupts the rest.
+`continueOnFail` picks the join. A tolerant suite joins each batch with `Quarantine.all` under the `quarantine` policy, so every check settles as an explicit `Succeeded` or `Quarantined` envelope. `rows` unwraps successful rows and classifies quarantined failures. A fail-fast suite joins under `halt`, the plain `Node.all` that fails on the first failing member and interrupts the rest.
 
 `make` throws a `PatternError` when the record is empty, when an id is the empty string, or when `concurrency` is not a positive safe integer.
 
@@ -5681,7 +5730,7 @@ Every call receives `{ column, item, previous }`. `previous` refers to the same 
 
 `make` throws a `PatternError` when there are no columns, no items, a duplicate item id, a duplicate column name, or a concurrency that is not a positive safe integer.
 
-A column joins its batch with `Quarantine.all` under the `quarantine` policy, the same call `run` makes: one rejected card does not interrupt the cards beside it, and it settles as a `Quarantined` marker naming the item. The declaration does not drop a quarantined card from the later columns, because a plan has no branch: the card travels on with its marker as `previous`, and `run`, which has the value in hand, drops it. A board's declared call count is an upper bound on the calls a pass makes.
+A column joins its batch with `Quarantine.all` under the `quarantine` policy: every card settles as a `Succeeded` or `Quarantined` envelope, so one rejected card does not interrupt the cards beside it. The declaration does not drop a quarantined card from later columns because a plan has no runtime branch: the envelope travels on as `previous`. `run`, which has the value in hand, drops the failed card. A board's declared call count is an upper bound on the calls a pass makes.
 
 #### Execution
 
@@ -5774,9 +5823,9 @@ A member without its own priority gets `MergeQueue.DefaultPriority`, which is `1
 
 `concurrency` defaults to 1: a merge queue serializes landings unless a caller widens it deliberately. At concurrency 1 the queue is a plain `Node.andThen` chain with no `Node.all` at all, so the declared plan admits exactly one landing at a time. Above 1, members are batched into `Node.all` groups of `concurrency` and the batches are sequenced.
 
-Each call carries `{ id, position, input }`, so a built graph names each member's place in the queue. A member's effective priority reaches the plan as a `Node.priority` annotation, which is what lets the scheduler start the higher-priority ready landing first. Priority stays out of key material, so raising a member's number without changing the resulting order re-uses the same steps rather than re-landing the queue. Under the quarantine policy, a failed declaration settles to the structural wire marker `{ _tag: "Quarantined", member, error }` produced by `Quarantine.all`; the marker's `member` key is intentional and is not the landing-call payload.
+Each call carries `{ id, position, input }`, so a built graph names each member's place in the queue. A member's effective priority reaches the plan as a `Node.priority` annotation, which is what lets the scheduler start the higher-priority ready landing first. Priority stays out of key material, so raising a member's number without changing the resulting order re-uses the same steps rather than re-landing the queue. Under the quarantine policy, a failed declaration settles to MergeQueue's structural wire marker `{ _tag: "Quarantined", member, error }`; the marker's `member` key is intentional and is not the landing-call payload.
 
-`failurePolicy` picks the topology and is captured as well. Under `quarantine` every landing carries a recovery arm settling it as the `Quarantined` marker `Quarantine.all` produces, so a failing member neither breaks the serial chain nor interrupts its batch: the queue `run` lands. Under `halt` the chain has no continuation past a failed member, and a batch join fails on the first failing member and interrupts the rest.
+`failurePolicy` picks the topology and is captured as well. Under `quarantine` every landing carries a recovery arm settling it as MergeQueue's `Quarantined` result, so a failing member neither breaks the serial chain nor interrupts its batch: the queue `run` lands. Under `halt` the chain has no continuation past a failed member, and a batch join fails on the first failing member and interrupts the rest.
 
 `make` throws a `PatternError` when there are no members, when two members share an id, when `concurrency` is not a positive safe integer, or when `priority` is not a safe integer.
 
@@ -5824,7 +5873,7 @@ const program = Effect.gen(function*() {
       {
         id: "read-pr",
         material: {
-          version: "flows/key-material/v1",
+          version: "flows/key-material/v2",
           kind: "sealed",
           body: { action: "read-pr", pr: 4821 },
           inputs: [],
@@ -5836,7 +5885,7 @@ const program = Effect.gen(function*() {
       {
         id: "run-tests",
         material: {
-          version: "flows/key-material/v1",
+          version: "flows/key-material/v2",
           kind: "sealed",
           body: { action: "run-tests" },
           inputs: [{ _tag: "Ref", from: "read-pr", path: [] }],
@@ -5881,7 +5930,7 @@ Structural node ids are lookup addresses only and never enter the hashed value. 
 
 The brand behind `digestInput` is private, so a plain object that merely has a `digest` field hashes as a literal. That closes a collision where shape sniffing hashed a genuine upstream-result reference and an ordinary content hash identically.
 
-`environment` is hashed in its own namespace rather than merged into the caller's declarations, so `caller{fs:["a"]} + env{fs:["b"]}` cannot alias `caller{fs:["a","b"]} + env{}`. Environment layers keep declaration order because composition order can change behavior; caller-owned layers are set-normalized. `EnvironmentIdentity` is a discriminated union: a declared environment carries no `runScope`, and an undeclared one must carry one, pinning the key to a single run so a step whose environment identity is unknown never serves a cross-run hit. `dispatchIdentity` enforces that at run time with `invalid_environment`.
+`environment` is hashed in its own namespace rather than merged into the caller's declarations, so `caller{fs:["a"]} + env{fs:["b"]}` cannot alias `caller{fs:["a","b"]} + env{}`. Environment layers keep declaration order because composition order can change behavior; caller-owned layers are set-normalized. `EnvironmentIdentity` is a discriminated union: a declared environment carries no `runScope`, and an undeclared one must carry a non-empty one, pinning the key to a single run so a step whose environment identity is unknown never serves a cross-run hit. Both `content` and `dispatchIdentity` enforce that at run time with `invalid_environment`.
 
 `project` is the one projection semantics for the value channel. It resolves only own data properties, so a path segment that is missing, inherited, or an accessor yields `undefined` and no getter runs during key derivation.
 
@@ -5905,7 +5954,7 @@ A plan grows and is never rewritten. `append` leaves the nodes already in it wit
 
 A compiled plan is a deep-frozen snapshot of the drafts it was given. Mutating a caller's draft after compiling cannot change the plan, its keys, or its digest.
 
-`PlanError` is a closed set of six codes.
+`PlanError` is a closed set of seven codes.
 
 | `code`               | Meaning                                                                                                               |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------- |
@@ -5915,8 +5964,9 @@ A compiled plan is a deep-frozen snapshot of the drafts it was given. Mutating a
 | `overlap_forbidden`  | a `fail` pair genuinely overlaps and no dependency path orders it                                                     |
 | `invalid_effects`    | a declared path is not workspace-relative, or one path is declared as both a write and a removal                      |
 | `invalid_node`       | an empty plan id, flow, or node id, a priority that is not a safe integer, or key material this release cannot decode |
+| `graph_too_large`    | a plan contains more than `Plan.maximumPlanNodes` nodes                                                               |
 
-Compilation walks with explicit stacks and never recurses per edge, so graph depth is bounded by memory alone. The conflict and reader-after-writer passes compare node pairs, so compilation is quadratic in node count.
+Compilation walks with explicit stacks and never recurses per edge. The conflict and reader-after-writer passes compare node pairs, so compilation is quadratic in node count and one plan is capped at `Plan.maximumPlanNodes`.
 
 #### Conflict annotations
 
@@ -5938,7 +5988,7 @@ The pure, pipeable authoring AST. Building a node records an inspectable, closur
 
 Map transforms; branch decides. Both branch arms are evaluated once, symbolically, so the exit condition and the handoff site are visible topology before anything runs. A plan is always a DAG, so there is no loop node: repetition lives one level up, in what a flow settles with.
 
-A payload is stored as its JSON mirror, exactly what canonical serialization hashes. A callable `toJSON` is honoured, so a `Date` or a `URL` keys as the value it serializes to rather than as an empty object; a function or symbol member is dropped from an object and becomes `null` in an array; shared references and cycles clone as they were written.
+A payload is stored as its inert JSON mirror. A data-valued callable `toJSON` is honoured, so a `Date` or a `URL` keys as the value it serializes to rather than as an empty object; a function or symbol member is dropped from an object and becomes `null` in an array; shared references and cycles clone as they were written. Accessors and unsupported prototypes without `toJSON` fail as `invalid_payload`.
 
 The functions an author writes, a mapper, a continuation, a branch predicate, live in `WeakMap`s keyed by the AST node they belong to, and the AST keeps only a `FunctionIdentity` digest of the function's exact source. Exact source matters, because whitespace inside a string literal is behavior. A function whose inert captures were declared with `capture` digests those captures; every other function additionally carries process-local, per-function entropy, so indistinguishable closure sources fail closed instead of sharing a cache key. `capture` refuses a capture record nested past 256 levels with a path-bearing error rather than overflowing the native stack.
 
@@ -5984,7 +6034,9 @@ The refusals a plan-time build raises instead of producing a wrong plan. Each ca
 | `cyclic_payload`              | a payload contains itself, so no plan could serialize or hash it                               |
 | `payload_too_deep`            | a payload is nested past the build bound                                                       |
 | `graph_too_deep`              | authored topology is nested past the build bound                                               |
+| `duplicate_node`              | two structural graph addresses resolve to one durable node id                                  |
 | `invalid_priority`            | `Node.priority` received a value that is not a safe integer                                    |
+| `invalid_payload`             | a payload member cannot be captured as inert JSON without executing code or losing identity    |
 
 `GraphBuildErrorCode` is a closed schema literal, so a caller may switch on it and a new refusal is a deliberate addition rather than a new free-form string.
 
@@ -6056,6 +6108,7 @@ Append-only is enforced in SQL rather than by convention. `0001_initial` creates
 | `Node.TypeId` (type) | type | The type-level form of `TypeId`. |
 | `Node.Ast` (type) | models | The inspectable AST a node stores: closure-free, and JSON serializable for every JSON payload an author puts in it. |
 | `Node.FunctionIdentity` (type) | models | The serializable stand-in an AST keeps for a plan-time function: a digest of its normalized source, hashed in place of a closure that could not be shipped, stored, or compared. |
+| `Node.plannedReference` (const) | accessors | Reads the inert AST reference created for a planned value. |
 | `Node.Node` (interface) | models | A pure graph-building value, covariant in what it will succeed and fail with and in what it will need to run. |
 | `Node.Any` (type) | models | Any node, whatever it succeeds or fails with and whatever it requires. |
 | `Node.Success` (type) | models | The success type of a node. |
@@ -6082,6 +6135,7 @@ Append-only is enforced in SQL rather than by convention. `0001_initial` creates
 | `Node.catchFilter` (const) | engine | Reads the optional schema selecting failures handled by a `catch_`. |
 | `Node.functionIdentity` (const) | engine | Identifies a plan-time function the AST does NOT store, a flow's `body`, exactly as the AST identifies the mapper and continuation it does store. |
 | `Node.capture` (const) | constructors | Declares the inert values a plan-time function closes over. |
+| `Node.catch` (const) | sequencing | Recovers from matching typed failures with static failure topology. |
 | `Plan.KeyDigest` (const) | schemas | Compatibility name for the storage-facing key schema owned by `@smthrs/keys`. |
 | `Plan.NodeEffects` (const) | schemas | What a node does to the world, declared. |
 | `Plan.NodeEffects` (type) | models | The value form of `NodeEffects`. |
@@ -6097,6 +6151,7 @@ Append-only is enforced in SQL rather than by convention. `0001_initial` creates
 | `Plan.Plan` (type) | models | The value form of `Plan`. |
 | `Plan.NodeDraft` (interface) | models | What a planner hands `compile`: a node without its key. |
 | `Plan.PlanError` (class) | errors | A graph the compiler refuses. |
+| `Plan.maximumPlanNodes` (const) | limits | Maximum number of nodes retained by one compiled plan. |
 | `Plan.compile` (const) | constructors | Compiles drafts into a plan: topological order, dependency-digest substitution, overlap annotation, and the plan digest. |
 | `Plan.append` (const) | constructors | Appends an elaborated subgraph to an existing plan. |
 | `Plan.generationNodes` (const) | accessors | The nodes added by the newest generation: what `module:PlanStore` appends and what the `subgraph-appended` journal record names. |
