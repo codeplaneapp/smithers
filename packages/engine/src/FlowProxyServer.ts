@@ -61,9 +61,10 @@ export const layerHttpApi = <
     Effect.fnUntraced(function*(handlers: any) {
       for (const flow_ of flows) {
         const flow = flow_ as Flow.AnyWithProps
+        const operation = FlowProxy.operationAddresses(flow._tag)
         handlers = handlers
           .handle(
-            flow._tag,
+            operation.execute,
             ({ payload: request }: {
               payload: {
                 payload: any
@@ -76,12 +77,12 @@ export const layerHttpApi = <
                 Effect.tapDefect(Effect.logError),
                 Effect.annotateLogs({
                   module: "FlowProxyServer",
-                  method: flow._tag
+                  method: operation.execute
                 })
               )
           )
           .handle(
-            flow._tag + "Discard",
+            operation.discard,
             ({ payload: request }: {
               payload: {
                 payload: any
@@ -95,18 +96,18 @@ export const layerHttpApi = <
                 Effect.tapDefect(Effect.logError),
                 Effect.annotateLogs({
                   module: "FlowProxyServer",
-                  method: flow._tag + "Discard"
+                  method: operation.discard
                 })
               )
           )
           .handle(
-            flow._tag + "Resume",
+            operation.resume,
             ({ payload }: { payload: any }) =>
               flow.resume(payload.executionId).pipe(
                 Effect.tapDefect(Effect.logError),
                 Effect.annotateLogs({
                   module: "FlowProxyServer",
-                  method: flow._tag + "Resume"
+                  method: operation.resume
                 })
               )
           )
@@ -156,7 +157,10 @@ export const layerRpcHandlers = <
         handler: (request: any) =>
           flow.execute(request.payload, {
             executionId: request.executionId
-          }) as any
+          }).pipe(
+            Effect.tapDefect(Effect.logError),
+            Effect.annotateLogs({ module: "FlowProxyServer", method: tag })
+          ) as any
       } as any)
       handlers.set(keyDiscard, {
         context,
@@ -165,12 +169,19 @@ export const layerRpcHandlers = <
           flow.execute(request.payload, {
             discard: true,
             executionId: request.executionId
-          }) as any
+          }).pipe(
+            Effect.tapDefect(Effect.logError),
+            Effect.annotateLogs({ module: "FlowProxyServer", method: tagDiscard })
+          ) as any
       } as any)
       handlers.set(keyResume, {
         context,
         tag: tagResume,
-        handler: (payload: any) => flow.resume(payload.executionId) as any
+        handler: (payload: any) =>
+          flow.resume(payload.executionId).pipe(
+            Effect.tapDefect(Effect.logError),
+            Effect.annotateLogs({ module: "FlowProxyServer", method: tagResume })
+          ) as any
       } as any)
     }
     return Context.makeUnsafe(handlers)

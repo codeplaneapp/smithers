@@ -1,9 +1,10 @@
 // Deep reviewed and polished by a human on 2026-08-10.
 
 import { describe, expect, it } from "@effect/vitest"
-import { Action, Flow, Interpreter } from "@smthrs/flow"
-import { Effect, Layer, Schema } from "effect"
+import { Action, Flow, Interpreter, RetryPolicy } from "@smthrs/flow"
+import { Cause, Effect, Exit, Layer, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
+import { TestClock } from "effect/testing"
 import { FlowEngine } from "../src/index.ts"
 import { withCrypto } from "./Crypto.ts"
 
@@ -44,12 +45,14 @@ describe("action durability tiers", () => {
   })
 
   effect("rejects irreversible retries without an idempotency key", () => {
+    let attempts = 0
     const step = Action.make({
       name: "Tiers/irreversible-no-key",
       tier: "irreversible",
       success: Schema.Void,
       error: Schema.String,
-      execute: Effect.fail("retry")
+      retryPolicy: RetryPolicy.make({ initialMs: 60_000, factor: 1, maxMs: 60_000 }),
+      execute: Effect.sync(() => attempts++).pipe(Effect.andThen(Effect.fail("retry")))
     })
     const flowActionDeclaration = Action.make("Tiers/irreversible-no-key/action", {
       payload: { id: Schema.String },
@@ -63,7 +66,7 @@ describe("action durability tiers", () => {
       body: (payload) => flowActionDeclaration.call(payload)
     })
     const layer = Layer.mergeAll(
-      flowActionDeclaration.toLayer(() => Action.retry(step, { times: 1 })),
+      flowActionDeclaration.toLayer(() => step),
       Interpreter.layer(flow)
     ).pipe(
       Layer.provideMerge(Action.layerImplementations)
@@ -71,10 +74,24 @@ describe("action durability tiers", () => {
       Layer.provideMerge(FlowEngine.layerMemory)
     )
     return Effect.gen(function*() {
-      const exit = yield* flow.execute({ id: "one" }, { executionId: "run" }).pipe(Effect.exit)
-      expect(exit._tag).toBe("Failure")
-      expect(exit._tag === "Failure" && exit.cause.toString()).toContain("IrreversibleRetryRequiresIdempotencyKey")
-    }).pipe(Effect.provide(layer))
+      const fiber = yield* flow.execute({ id: "one" }, { executionId: "run" }).pipe(
+        Effect.forkChild({ startImmediately: true })
+      )
+      for (let index = 0; index < 20 && fiber.pollUnsafe() === undefined; index++) {
+        yield* Effect.yieldNow
+      }
+      // No TestClock adjustment: configuration refusal must happen before
+      // the backoff sleep that would otherwise park this fiber.
+      const exit = fiber.pollUnsafe()
+      expect(exit).toBeDefined()
+      expect(exit !== undefined && Exit.isFailure(exit)).toBe(true)
+      const defect = exit !== undefined && Exit.isFailure(exit)
+        ? exit.cause.reasons.find(Cause.isDieReason)?.defect
+        : undefined
+      expect(defect).toBeInstanceOf(Action.IrreversibleRetryRequiresIdempotencyKey)
+      expect(defect).toMatchObject({ attempt: 2 })
+      expect(attempts).toBe(1)
+    }).pipe(Effect.provide(layer), Effect.provide(TestClock.layer()))
   })
 
   effect("allows irreversible retries when an idempotency key is supplied", () => {

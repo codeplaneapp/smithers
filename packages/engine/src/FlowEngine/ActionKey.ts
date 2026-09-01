@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import type * as SchemaIssue from "effect/SchemaIssue"
 import * as SchemaRepresentation from "effect/SchemaRepresentation"
 
 /**
@@ -67,6 +68,50 @@ export const ordinalScope = (
     site
   })
 
+const renderIssuePath = (segments: ReadonlyArray<PropertyKey>): string =>
+  segments.reduce(
+    (path, segment) => path + (typeof segment === "number" ? `[${segment}]` : `.${String(segment)}`),
+    "$"
+  )
+
+/**
+ * Returns the first leaf's accumulated pointer path from a schema error.
+ *
+ * The walk is bounded so a pathological issue tree cannot diverge. It reads
+ * only issue tags, pointer segments, and child links; rejected input values
+ * are never copied into the returned diagnostic.
+ *
+ * @category utilities
+ * @private
+ * @since 1.0.0
+ */
+export const schemaErrorPath = (error: Schema.SchemaError): string => {
+  const segments: Array<PropertyKey> = []
+  let issue: SchemaIssue.Issue = error.issue
+  for (let depth = 0; depth < 64; depth++) {
+    switch (issue._tag) {
+      case "Pointer":
+        segments.push(...issue.path)
+        issue = issue.issue
+        continue
+      case "Filter":
+      case "Encoding":
+        issue = issue.issue
+        continue
+      case "Composite":
+      case "AnyOf": {
+        const first = issue.issues[0]
+        if (first === undefined) return renderIssuePath(segments)
+        issue = first
+        continue
+      }
+      default:
+        return renderIssuePath(segments)
+    }
+  }
+  return renderIssuePath(segments)
+}
+
 /**
  * A caller-declared identity carried material canonicalization rejects
  * (issue #151): the failure surfaces as a recorded typed completion — the
@@ -89,7 +134,7 @@ export const uncanonicalKey = (
       new Action.UncanonicalIdempotencyKey({
         actionName,
         reason: "canonicalize_failed",
-        path: "$",
+        path: schemaErrorPath(error),
         message: error.message
       })
     )

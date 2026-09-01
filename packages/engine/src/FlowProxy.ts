@@ -40,6 +40,23 @@ export class FlowProxyCollision extends Error {
 }
 
 /**
+ * Raised before HTTP proxy construction when a flow tag is ill-formed UTF-16.
+ *
+ * @category errors
+ * @since 1.0.0
+ */
+export class InvalidFlowTag extends Error {
+  readonly code = "invalid_flow_tag"
+  readonly tag: string
+
+  constructor(tag: string) {
+    super(`Flow tag ${JSON.stringify(tag)} is not well-formed UTF-16`)
+    this.name = "InvalidFlowTag"
+    this.tag = tag
+  }
+}
+
+/**
  * The three wire operation names one flow owns.
  *
  * @category models
@@ -261,7 +278,7 @@ const wellFormed = (value: string): boolean => {
 }
 
 const tagToPath = (tag: string): string => {
-  if (!wellFormed(tag)) throw new FlowProxyCollision(tag)
+  if (!wellFormed(tag)) throw new InvalidFlowTag(tag)
   // Routers disagree about whether a percent-encoded slash is decoded before
   // matching. UTF-16 hex is injective, URL-safe, and remains one segment in
   // every adapter while preserving case and normalization distinctions.

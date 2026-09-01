@@ -22,6 +22,9 @@ describe("memory engine execution surface", () => {
       const exit = yield* flow.execute({ id: "x" }, { executionId: "run" }).pipe(Effect.exit)
       expect(Exit.isFailure(exit)).toBe(true)
       expect(Exit.isFailure(exit) && exit.cause.toString()).toContain("is not registered")
+      const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+      expect(defect).toBeInstanceOf(FlowEngine.FlowNotRegistered)
+      expect(defect).toMatchObject({ code: "flow_not_registered", flowName: "Memory/unregistered" })
     }).pipe(Effect.provide(FlowEngine.layerMemory))
   })
 
@@ -230,22 +233,61 @@ describe("execution identity", () => {
       const exit = yield* flowB.execute({ id: "x" }, { executionId: "shared-id" }).pipe(Effect.exit)
       expect(Exit.isFailure(exit)).toBe(true)
       expect(Exit.isFailure(exit) && exit.cause.toString()).toContain("already belongs to flow Memory/reuse-a")
+      const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+      expect(defect).toBeInstanceOf(FlowEngine.ExecutionIdentityConflict)
+      expect(defect).toMatchObject({
+        code: "execution_identity_conflict",
+        field: "flow",
+        expected: "Memory/reuse-a",
+        actual: "Memory/reuse-b"
+      })
     }).pipe(Effect.provide(layer))
   })
 
-  effect("dedupes on the execution id alone: a second execute with another payload joins the first", () => {
-    // The execution id is the run's whole identity. A caller that reuses an
-    // id with a different payload gets the FIRST payload's answer back, and
-    // the second payload is never planned or dispatched — id/payload
-    // consistency is the caller's contract, pinned here so a change to the
-    // join semantics is a deliberate decision.
+  effect("poll only observes executions owned by the supplied flow", () => {
+    const flowA = Flow.make("Memory/poll-owner-a", {
+      payload: { id: Schema.String },
+      success: Schema.Number,
+      body: () => Node.succeed(7)
+    })
+    const flowB = Flow.make("Memory/poll-owner-b", {
+      payload: { id: Schema.String },
+      success: Schema.String,
+      body: () => Node.succeed("other")
+    })
+    const layer = Layer.mergeAll(Interpreter.layer(flowA), Interpreter.layer(flowB)).pipe(
+      Layer.provideMerge(Action.layerImplementations),
+      Layer.provideMerge(FlowEngine.layerMemory)
+    )
+    return Effect.gen(function*() {
+      expect(yield* flowA.execute({ id: "x" }, { executionId: "poll-owner" })).toBe(7)
+
+      const owned = yield* flowA.poll("poll-owner")
+      expect(Option.isSome(owned)).toBe(true)
+      expect(
+        Option.isSome(owned) && owned.value._tag === "Complete" && Exit.isSuccess(owned.value.exit) &&
+          owned.value.exit.value
+      ).toBe(7)
+
+      // From another declaration's view this id names no settled result.
+      expect(Option.isNone(yield* flowB.poll("poll-owner"))).toBe(true)
+    }).pipe(Effect.provide(layer))
+  })
+
+  effect("reusing an execution id with an equal nested payload joins the first run", () => {
     const calls: Array<string> = []
     const flowActionDeclaration = Action.make("Memory/reuse-payload/action", {
-      payload: { id: Schema.String },
+      payload: {
+        id: Schema.String,
+        nested: Schema.Struct({ values: Schema.Array(Schema.Number) })
+      },
       success: Schema.String
     })
     const flow = Flow.make("Memory/reuse-payload", {
-      payload: { id: Schema.String },
+      payload: {
+        id: Schema.String,
+        nested: Schema.Struct({ values: Schema.Array(Schema.Number) })
+      },
       success: Schema.String,
       body: (payload) => flowActionDeclaration.call(payload)
     })
@@ -261,11 +303,173 @@ describe("execution identity", () => {
       Layer.provideMerge(Action.layerImplementations)
     ).pipe(Layer.provideMerge(FlowEngine.layerMemory))
     return Effect.gen(function*() {
-      expect(yield* flow.execute({ id: "first" }, { executionId: "pin-id" })).toBe("ran:first")
-      expect(yield* flow.execute({ id: "second" }, { executionId: "pin-id" })).toBe("ran:first")
+      expect(
+        yield* flow.execute({ id: "first", nested: { values: [1, 2] } }, { executionId: "pin-id" })
+      ).toBe("ran:first")
+      expect(
+        yield* flow.execute({ id: "first", nested: { values: [1, 2] } }, { executionId: "pin-id" })
+      ).toBe("ran:first")
       expect(calls).toEqual(["first"])
     }).pipe(Effect.provide(layer))
   })
+
+  effect("refuses to reuse an execution id with a different payload", () => {
+    const calls: Array<string> = []
+    const declaration = Action.make("Memory/reuse-different-payload/action", {
+      payload: { id: Schema.String },
+      success: Schema.String
+    })
+    const flow = Flow.make("Memory/reuse-different-payload", {
+      payload: { id: Schema.String },
+      success: Schema.String,
+      body: (payload) => declaration.call(payload)
+    })
+    const layer = Layer.mergeAll(
+      declaration.toLayer(({ id }) => Effect.sync(() => (calls.push(id), `ran:${id}`))),
+      Interpreter.layer(flow)
+    ).pipe(
+      Layer.provideMerge(Action.layerImplementations),
+      Layer.provideMerge(FlowEngine.layerMemory)
+    )
+    return Effect.gen(function*() {
+      expect(yield* flow.execute({ id: "first" }, { executionId: "payload-conflict" })).toBe("ran:first")
+      const exit = yield* flow.execute({ id: "second" }, { executionId: "payload-conflict" }).pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+      expect(defect).toBeInstanceOf(FlowEngine.ExecutionIdentityConflict)
+      expect(defect).toMatchObject({
+        code: "execution_identity_conflict",
+        executionId: "payload-conflict",
+        field: "payload",
+        expected: "the payload the execution was admitted with",
+        actual: "a different payload"
+      })
+      expect(calls).toEqual(["first"])
+    }).pipe(Effect.provide(layer))
+  })
+
+  effect("compares payload shape conservatively across key, array, depth, and opaque boundaries", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const engine = yield* FlowRuntime.FlowRuntime
+        const conflict = <F extends Flow.Any>(
+          flow: F,
+          first: object,
+          second: object,
+          executionId: string
+        ) =>
+          Effect.gen(function*() {
+            yield* engine.register(flow, () => Effect.void)
+            yield* engine.execute(flow, { executionId, payload: first as never, discard: true })
+            const exit = yield* engine.execute(flow, {
+              executionId,
+              payload: second as never,
+              discard: true
+            }).pipe(Effect.exit)
+            expect(Exit.isFailure(exit)).toBe(true)
+            const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+            expect(defect).toMatchObject({ field: "payload" })
+          })
+        const join = <F extends Flow.Any>(
+          flow: F,
+          first: object,
+          second: object,
+          executionId: string
+        ) =>
+          Effect.gen(function*() {
+            yield* engine.register(flow, () => Effect.void)
+            yield* engine.execute(flow, { executionId, payload: first as never, discard: true })
+            const exit = yield* engine.execute(flow, {
+              executionId,
+              payload: second as never,
+              discard: true
+            }).pipe(Effect.exit)
+            expect(Exit.isSuccess(exit)).toBe(true)
+          })
+
+        const OptionalKeys = Flow.make("Memory/payload-optional-keys", {
+          payload: {
+            left: Schema.optional(Schema.String),
+            right: Schema.optional(Schema.String)
+          },
+          success: Schema.Void,
+          body: () => Node.succeed(undefined)
+        })
+        // Different key counts.
+        yield* conflict(OptionalKeys, { left: "x" }, { left: "x", right: "x" }, "payload-key-count")
+        // Same key count, but the right snapshot does not own the left key.
+        yield* conflict(OptionalKeys, { left: "x" }, { right: "x" }, "payload-missing-key")
+
+        const ArrayOrObject = Flow.make("Memory/payload-array-or-object", {
+          payload: {
+            value: Schema.Union([
+              Schema.Array(Schema.String),
+              Schema.Struct({ "0": Schema.String }),
+              Schema.String,
+              Schema.Null
+            ])
+          },
+          success: Schema.Void,
+          body: () => Node.succeed(undefined)
+        })
+        yield* conflict(ArrayOrObject, { value: ["x"] }, { value: { "0": "x" } }, "payload-array-object")
+        yield* conflict(ArrayOrObject, { value: { "0": "x" } }, { value: "x" }, "payload-right-primitive")
+        yield* conflict(ArrayOrObject, { value: { "0": "x" } }, { value: null }, "payload-right-null")
+        yield* conflict(ArrayOrObject, { value: null }, { value: { "0": "x" } }, "payload-left-null")
+
+        let deepSchema: Schema.Top = Schema.String
+        let firstDeep: unknown = "leaf"
+        let secondDeep: unknown = "leaf"
+        for (let index = 0; index < 70; index++) {
+          deepSchema = Schema.Struct({ next: deepSchema })
+          firstDeep = { next: firstDeep }
+          secondDeep = { next: secondDeep }
+        }
+        const Deep = Flow.make("Memory/payload-depth-bound", {
+          payload: { value: deepSchema },
+          success: Schema.Void,
+          body: () => Node.succeed(undefined)
+        })
+        yield* conflict(Deep, { value: firstDeep }, { value: secondDeep }, "payload-depth-bound")
+
+        const Opaque = Schema.declare<object>((_value): _value is object => true)
+        const Hostile = Flow.make("Memory/payload-hostile-opaque", {
+          payload: { value: Opaque },
+          success: Schema.Void,
+          body: () => Node.succeed(undefined)
+        })
+        class OpaqueValue {}
+        yield* conflict(
+          Hostile,
+          { value: new OpaqueValue() },
+          { value: new OpaqueValue() },
+          "payload-left-non-plain"
+        )
+        yield* conflict(Hostile, { value: {} }, { value: new OpaqueValue() }, "payload-right-non-plain")
+        yield* join(
+          Hostile,
+          { value: Object.create(null) },
+          { value: Object.create(null) },
+          "payload-null-prototypes"
+        )
+        const firstProxy = Proxy.revocable({}, {})
+        const secondProxy = Proxy.revocable({}, {})
+        yield* engine.register(Hostile, () => Effect.void)
+        yield* engine.execute(Hostile, {
+          executionId: "payload-hostile-opaque",
+          payload: { value: firstProxy.proxy },
+          discard: true
+        })
+        firstProxy.revoke()
+        secondProxy.revoke()
+        const hostileExit = yield* engine.execute(Hostile, {
+          executionId: "payload-hostile-opaque",
+          payload: { value: secondProxy.proxy },
+          discard: true
+        }).pipe(Effect.exit)
+        expect(Exit.isFailure(hostileExit)).toBe(true)
+      }).pipe(Effect.provide(FlowEngine.layerMemory))
+    ))
 })
 
 describe("compensable snapshot boundary", () => {
@@ -294,6 +498,9 @@ describe("compensable snapshot boundary", () => {
       const exit = yield* flow.execute({ id: "x" }, { executionId: "run" }).pipe(Effect.exit)
       expect(Exit.isFailure(exit)).toBe(true)
       expect(Exit.isFailure(exit) && exit.cause.toString()).toContain("requires SnapshotBoundary")
+      const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+      expect(defect).toBeInstanceOf(FlowEngine.SnapshotBoundaryRequired)
+      expect(defect).toMatchObject({ code: "snapshot_boundary_required" })
     }).pipe(Effect.provide(layer))
   })
 

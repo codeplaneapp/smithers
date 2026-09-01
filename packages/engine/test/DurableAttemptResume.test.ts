@@ -11,7 +11,7 @@ import type * as Crypto from "effect/Crypto"
 import { describe, expect, it } from "@effect/vitest"
 import { Action, Flow, FlowRuntime, RetryPolicy } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
-import { Cause, Effect, Exit, Layer, Option, Schema } from "effect"
+import { Cause, Effect, Exit, Layer, Logger, Option, Schema } from "effect"
 import { FlowEngine } from "../src/index.ts"
 import { withCrypto } from "./Crypto.ts"
 
@@ -86,6 +86,56 @@ describe("durable attempt counter resume", () => {
         expect(result.exit).toEqual(Exit.succeed(4))
       }
     }).pipe((self) => provideInstance(self, engine))
+  })
+
+  effect("the top-of-loop guard refuses a resumed irreversible keyless attempt", () => {
+    const attempts: Array<number> = []
+    const action = Action.make({
+      name: "AttemptResume/irreversible-keyless",
+      tier: "irreversible",
+      success: Schema.Number,
+      error: Schema.String,
+      retryPolicy: RetryPolicy.make({ initialMs: 1, factor: 1, maxMs: 1 }),
+      execute: Effect.die("scripted driver dispatches instead")
+    })
+    const engine = scriptedWith({ latestAttempt: Option.some(2), attempts })
+    return Effect.gen(function*() {
+      const exit = yield* engine.actionExecute(action, 1).pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
+      expect(defect).toBeInstanceOf(Action.IrreversibleRetryRequiresIdempotencyKey)
+      expect(defect).toMatchObject({ attempt: 2 })
+      expect(attempts).toEqual([])
+    }).pipe((self) => provideInstance(self, engine))
+  })
+
+  liveEffect("rejects a fractional durable attempt, falls back to the caller, and logs it", () => {
+    const attempts: Array<number> = []
+    const logs: Array<{ readonly message: unknown; readonly logLevel: string }> = []
+    const capture = Logger.make((entry) => {
+      logs.push({ message: entry.message, logLevel: entry.logLevel })
+    })
+    const action = Action.make({
+      name: "AttemptResume/fractional",
+      success: Schema.Number,
+      error: Schema.String,
+      retryPolicy: RetryPolicy.make({ initialMs: 1, factor: 1, maxMs: 1, maxAttempts: 10 }),
+      execute: Effect.die("scripted driver dispatches instead")
+    })
+    const engine = scriptedWith({ latestAttempt: Option.some(2.5), attempts })
+    return Effect.gen(function*() {
+      const result = yield* engine.actionExecute(action, 1)
+      expect(result._tag).toBe("Complete")
+      expect(attempts).toEqual([1, 2, 3, 4])
+      const warnings = logs.filter((entry) =>
+        entry.logLevel === "Warn" && String(entry.message).includes("AttemptResume/fractional")
+      )
+      expect(warnings.length).toBe(1)
+      expect(String(warnings[0]?.message)).toContain("2.5")
+    }).pipe(
+      (self) => provideInstance(self, engine),
+      Effect.provide(Logger.layer([capture]))
+    )
   })
 
   liveEffect("keeps the caller's attempt when the persisted sequence is not ahead", () => {

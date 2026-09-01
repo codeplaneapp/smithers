@@ -132,6 +132,47 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
       value: unknown
     ): Effect.Effect<unknown> => Effect.orDie(flow.payloadSchema.makeEffect(value as never))
 
+    /**
+     * Structural identity of two rebuilt payload snapshots.
+     *
+     * `snapshot` rebuilds each struct, array, and record the payload schema
+     * declares and hands back declared-opaque values by reference, so
+     * recursing into plain objects and arrays and comparing every leaf with
+     * `Object.is` is exactly the identity the schema describes. It is bounded
+     * so a self-referential declared value cannot make the comparison diverge.
+     */
+    const samePayload = (left: unknown, right: unknown, depth: number): boolean => {
+      if (Object.is(left, right)) return true
+      if (depth === 0) return false
+      if (typeof left !== "object" || left === null) return false
+      if (typeof right !== "object" || right === null) return false
+      try {
+        const leftArray = Array.isArray(left)
+        const rightArray = Array.isArray(right)
+        if (leftArray !== rightArray) return false
+        if (!leftArray) {
+          const leftPrototype = Object.getPrototypeOf(left)
+          const rightPrototype = Object.getPrototypeOf(right)
+          if (leftPrototype !== Object.prototype && leftPrototype !== null) return false
+          if (rightPrototype !== Object.prototype && rightPrototype !== null) return false
+        }
+        const leftKeys = Object.keys(left)
+        const rightKeys = Object.keys(right)
+        if (leftKeys.length !== rightKeys.length) return false
+        for (const key of leftKeys) {
+          if (!Object.hasOwn(right, key)) return false
+          if (!samePayload(
+            (left as Record<string, unknown>)[key],
+            (right as Record<string, unknown>)[key],
+            depth - 1
+          )) return false
+        }
+        return true
+      } catch {
+        return false
+      }
+    }
+
     // Untraced because resume recursively drives suspended executions.
     const resume = Effect.fnUntraced(function*(executionId: string): Effect.fn.Return<void> {
       const state = executions.get(executionId)
@@ -227,13 +268,11 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
         }
 
         let state = executions.get(options.executionId)
-        // An execution id names one run of ONE flow declaration. Joining
-        // another declaration's fiber would answer that flow's result under
-        // this flow's declared schemas — cross-flow result leakage — so the
-        // identity clash is refused, exactly as the durable driver's
-        // `ensureCreatedRun` refuses a row that belongs to a different flow
-        // tag. Payload identity stays the caller's contract: a reused id
-        // under the SAME declaration joins the first run.
+        // An execution id names one run of one flow declaration and one
+        // rebuilt payload snapshot. A reused id may join only when both
+        // identities match, exactly as the durable driver's `ensureCreatedRun`
+        // does. The id is caller-supplied identity, so a multi-tenant server
+        // must namespace it before requests share an engine.
         if (state !== undefined && state.instance.flow._tag !== flow._tag) {
           return yield* Effect.die(
             new ExecutionIdentityConflict({
@@ -245,6 +284,21 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
                 `it cannot be reused for flow ${flow._tag}`
             })
           )
+        }
+        if (state !== undefined) {
+          const requestedPayload = yield* snapshot(flow, options.payload)
+          if (!samePayload(state.payload, requestedPayload, 64)) {
+            return yield* Effect.die(
+              new ExecutionIdentityConflict({
+                executionId: options.executionId,
+                field: "payload",
+                expected: "the payload the execution was admitted with",
+                actual: "a different payload",
+                message: `execution ${options.executionId} already belongs to the payload it was admitted with; ` +
+                  "it cannot be reused for a different payload"
+              })
+            )
+          }
         }
         if (options.parent !== undefined) {
           yield* recordParent(options.executionId, options.parent.executionId)

@@ -14,8 +14,9 @@ import type * as Crypto from "effect/Crypto"
 import { describe, expect, it } from "@effect/vitest"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
 import * as StepIdentity from "@smthrs/flow/StepIdentity"
-import { Cause, Effect, Exit, Layer, Schema } from "effect"
+import { Cause, Effect, Exit, Layer, Schema, SchemaIssue } from "effect"
 import { FlowEngine } from "../src/index.ts"
+import { schemaErrorPath } from "../src/FlowEngine/ActionKey.ts"
 import { invocationKey, runSync, withCrypto } from "./Crypto.ts"
 
 const effect = (name: string, body: () => Effect.Effect<void, unknown, Crypto.Crypto>) =>
@@ -69,9 +70,57 @@ describe("rejected declaration material surfaces typed, not as fiber death (issu
       expect(error.code).toBe("uncanonical_idempotency_key")
       expect(error.actionName).toBe("Uncanonical/sealed")
       expect(error.reason).toBe("canonicalize_failed")
+      // This is the offending path inside the declared identity. The
+      // canonical schema reports this particular refusal at its root.
       expect(error.path).toBe("$")
       expect(outcome.executions).toBe(0)
     }))
+
+  effect("compensable identity rejection uses the same typed path before the action runs", () =>
+    Effect.gen(function*() {
+      const outcome = yield* runRejected("compensable", { count: 1n })
+      const defect = dieOf(outcome.exit)
+      expect(defect).toBeInstanceOf(Action.UncanonicalIdempotencyKey)
+      expect(defect).toMatchObject({ path: "$", reason: "canonicalize_failed" })
+      expect(outcome.executions).toBe(0)
+    }))
+
+  it("walks the first schema-issue leaf and renders accumulated pointer segments", () => {
+    const leaf = new SchemaIssue.InvalidValue()
+    const nested = new Schema.SchemaError(
+      new SchemaIssue.Pointer(["body"], new SchemaIssue.Pointer(["items", 0, "count"], leaf))
+    )
+    expect(schemaErrorPath(nested)).toBe("$.body.items[0].count")
+
+    const wrapped = new Schema.SchemaError(
+      new SchemaIssue.Composite(Schema.String.ast, [
+        new SchemaIssue.AnyOf(Schema.Union([Schema.String, Schema.Number]).ast as never, [
+          new SchemaIssue.Encoding(
+            Schema.String.ast,
+            new SchemaIssue.Filter(Schema.String.ast as never, new SchemaIssue.Pointer(["nested"], leaf))
+          )
+        ])
+      ])
+    )
+    expect(schemaErrorPath(wrapped)).toBe("$.nested")
+  })
+
+  it("falls back to the root when no path is available or the walk reaches its bound", () => {
+    expect(schemaErrorPath(new Schema.SchemaError(new SchemaIssue.InvalidValue()))).toBe("$")
+    expect(
+      schemaErrorPath(
+        new Schema.SchemaError(
+          new SchemaIssue.AnyOf(Schema.Union([Schema.String, Schema.Number]).ast as never, [])
+        )
+      )
+    ).toBe("$")
+
+    let issue: SchemaIssue.Issue = new SchemaIssue.InvalidValue()
+    for (let index = 0; index < 70; index++) {
+      issue = new SchemaIssue.Encoding(Schema.String.ast, issue)
+    }
+    expect(schemaErrorPath(new Schema.SchemaError(issue))).toBe("$")
+  })
 })
 
 describe("StepIdentity typed derivations (issue #151)", () => {

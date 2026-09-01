@@ -74,4 +74,56 @@ describe("a recorded outcome that fails the action's exit schema", () => {
       Effect.provide(Logger.layer([capture]))
     ) as Effect.Effect<void>
   })
+
+  effect("bounds a circular recorded action failure while preserving the schema-mismatch defect", () => {
+    const logs: Array<
+      { readonly message: unknown; readonly logLevel: string; readonly annotations: Readonly<Record<string, unknown>> }
+    > = []
+    const capture = Logger.make((options) => {
+      logs.push({
+        message: options.message,
+        logLevel: options.logLevel,
+        annotations: options.fiber.getRef(References.CurrentLogAnnotations)
+      })
+    })
+    const action = Action.make({
+      name: "RecordedExitSchemaMismatch/circular-error",
+      success: Schema.Number,
+      error: Schema.String,
+      execute: Effect.die("scripted driver dispatches instead")
+    })
+    const circular: { self?: unknown } = {}
+    circular.self = circular
+    const engine = FlowEngine.makeUnsafe({
+      register: () => Effect.void,
+      execute: () => Effect.die("not used"),
+      poll: () => Effect.succeedNone,
+      interrupt: () => Effect.void,
+      interruptUnsafe: () => Effect.void,
+      resume: () => Effect.void,
+      actionExecute: () => Effect.succeed(new Flow.Complete({ exit: Exit.fail(circular as never) })),
+      deferredResult: () => Effect.succeedNone,
+      deferredDone: () => Effect.void,
+      scheduleClock: () => Effect.void
+    })
+    return Effect.gen(function*() {
+      const exit = yield* Effect.exit(engine.actionExecute(action, 1))
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
+      const reported = logs.filter((entry) =>
+        entry.logLevel === "Error" &&
+        String(entry.message).includes("does not match the action's declared schemas")
+      )
+      expect(reported.length).toBe(1)
+      expect(reported[0]?.annotations["action"]).toBe("RecordedExitSchemaMismatch/circular-error")
+      expect(String(reported[0]?.annotations["exit"])).toContain("[object]")
+      expect(String(reported[0]?.annotations["exit"])).not.toContain("self")
+    }).pipe(
+      Effect.provideService(
+        FlowRuntime.FlowInstance,
+        FlowEngine.makeInstance(flow, "recorded-exit-circular-run")
+      ),
+      Effect.provide(Layer.succeed(FlowRuntime.FlowRuntime)(engine)),
+      Effect.provide(Logger.layer([capture]))
+    ) as Effect.Effect<void>
+  })
 })

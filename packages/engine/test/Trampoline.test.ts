@@ -126,6 +126,21 @@ describe("FlowEngine.Round", () => {
       expect(first).toMatch(/^[0-9a-f]{64}$/)
     }))
 
+  it.effect("pins the durable round execution-id vectors", () =>
+    Effect.gen(function*() {
+      // These pin SHA-256(JSON.stringify(["flow-round/v2", lineageId,
+      // ordinal])). Changing either value is a durable-identity break that
+      // orphans in-flight lineages and therefore requires a migration.
+      const [first, second] = yield* withCrypto(
+        Effect.all([
+          FlowEngine.Round.executionId({ lineageId: "run-a", ordinal: 1 }),
+          FlowEngine.Round.executionId({ lineageId: "run-a", ordinal: 2 })
+        ])
+      )
+      expect(first).toBe("5a80d3d6fbc2c69076f7407e3763e77a777de0cac9e77bda5b687ade914ba44a")
+      expect(second).toBe("8627b589098ec7ce254852fc5064dcc32b0b64e4d04a75e7c774c02222408726")
+    }))
+
   it.effect("advances within an unbounded lineage and within a budget that has room", () =>
     Effect.gen(function*() {
       const unbounded = yield* withCrypto(

@@ -515,9 +515,19 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
           `FlowEngine.actionExecute: no durable retry origin for "${action.name}"; the expirationMs budget restarts from the current clock`
         )
       }
-      const retryStartMs = Option.isSome(durableOrigin)
-        ? durableOrigin.value
-        : yield* Clock.currentTimeMillis
+      const now = yield* Clock.currentTimeMillis
+      const origin = Option.getOrUndefined(durableOrigin)
+      const unusableOrigin = origin !== undefined && (!Number.isFinite(origin) || origin > now)
+      if (unusableOrigin) {
+        yield* Effect.logWarning(
+          `FlowEngine.actionExecute: unusable durable retry origin for "${action.name}": ` +
+            `reported ${String(origin)} while the current clock is ${now}; the expirationMs budget starts now`
+        )
+      }
+      const usableOrigin = origin !== undefined && Number.isFinite(origin)
+        ? Math.min(origin, now)
+        : undefined
+      const retryStartMs = usableOrigin ?? now
       // Resume the durable attempt counter (issue #59): a persisted attempt
       // sequence keeps its numbering across process death, so replayed
       // failed attempts do not re-sleep the backoff ladder from attempt 1
@@ -525,8 +535,16 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
       const latestAttempt = options.actionLatestAttempt !== undefined
         ? yield* options.actionLatestAttempt({ key })
         : Option.none<number>()
-      let currentAttempt = Option.isSome(latestAttempt) && latestAttempt.value > attempt
-        ? latestAttempt.value
+      const durableAttempt = Option.getOrUndefined(latestAttempt)
+      const usableAttempt = durableAttempt !== undefined && Number.isSafeInteger(durableAttempt)
+      if (durableAttempt !== undefined && !usableAttempt) {
+        yield* Effect.logWarning(
+          `FlowEngine.actionExecute: rejected unusable durable latest attempt for "${action.name}": ` +
+            `${String(durableAttempt)} is not a safe integer; using caller attempt ${attempt}`
+        )
+      }
+      let currentAttempt = usableAttempt && durableAttempt > attempt
+        ? durableAttempt
         : attempt
       while (true) {
         if (
@@ -618,6 +636,14 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
               elapsedMs: (yield* Clock.currentTimeMillis) - retryStartMs
             })
             if (decision._tag === "RetryAfter") {
+              if (action.tier === "irreversible" && action.idempotencyKey === undefined) {
+                return yield* Effect.die(
+                  new Action.IrreversibleRetryRequiresIdempotencyKey({
+                    actionName: action.name,
+                    attempt: currentAttempt + 1
+                  })
+                )
+              }
               yield* Effect.sleep(decision.delayMs)
               currentAttempt = currentAttempt + 1
               continue

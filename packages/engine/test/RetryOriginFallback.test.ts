@@ -109,4 +109,100 @@ describe("retry origin fallback when the durable hook yields none", () => {
       Effect.provide(TestClock.layer())
     ) as Effect.Effect<void>
   })
+
+  const runWithOrigin = (
+    actionName: string,
+    origin: number,
+    options: { readonly advanceMs?: number | undefined } = {}
+  ) => {
+    const attempts: Array<number> = []
+    const logs: Array<{ readonly message: unknown; readonly logLevel: string }> = []
+    const capture = Logger.make((entry) => {
+      logs.push({ message: entry.message, logLevel: entry.logLevel })
+    })
+    const action = Action.make({
+      name: actionName,
+      success: Schema.Number,
+      error: Schema.String,
+      retryPolicy: RetryPolicy.make({
+        initialMs: 1,
+        factor: 1,
+        maxMs: 1,
+        maxAttempts: 2,
+        expirationMs: 5
+      }),
+      execute: Effect.die("scripted driver dispatches instead")
+    })
+    const engine = FlowEngine.makeUnsafe({
+      register: () => Effect.void,
+      execute: () => Effect.die("not used"),
+      poll: () => Effect.succeedNone,
+      interrupt: () => Effect.void,
+      interruptUnsafe: () => Effect.void,
+      resume: () => Effect.void,
+      actionExecute: (input) =>
+        Effect.sync(() => {
+          attempts.push(input.attempt)
+          return new Flow.Complete({ exit: Exit.fail("still-failing") })
+        }),
+      actionRetryOrigin: () => Effect.succeedSome(origin),
+      deferredResult: () => Effect.succeedNone,
+      deferredDone: () => Effect.void,
+      scheduleClock: () => Effect.void
+    })
+    return Effect.gen(function*() {
+      yield* TestClock.setTime(1_000)
+      const fiber = yield* engine.actionExecute(action, 1).pipe(
+        Effect.forkChild({ startImmediately: true })
+      )
+      if (options.advanceMs !== undefined) yield* TestClock.adjust(options.advanceMs)
+      const result = yield* Fiber.join(fiber)
+      return { attempts, logs, result }
+    }).pipe(
+      Effect.provideService(
+        FlowRuntime.FlowInstance,
+        FlowEngine.makeInstance(flow, `retry-origin-${actionName}`)
+      ),
+      Effect.provide(Layer.succeed(FlowRuntime.FlowRuntime)(engine)),
+      Effect.provide(Logger.layer([capture])),
+      Effect.provide(TestClock.layer())
+    ) as Effect.Effect<{
+      readonly attempts: Array<number>
+      readonly logs: Array<{ readonly message: unknown; readonly logLevel: string }>
+      readonly result: Flow.Result<number, string>
+    }>
+  }
+
+  effect("clamps a future durable origin to the local clock and logs the skew", () =>
+    Effect.gen(function*() {
+      const outcome = yield* runWithOrigin("RetryOriginFallback/future", 61_000, { advanceMs: 1 })
+      expect(outcome.attempts).toEqual([1, 2])
+      const warnings = outcome.logs.filter((entry) => entry.logLevel === "Warn")
+      expect(warnings.length).toBe(1)
+      expect(String(warnings[0]?.message)).toContain("RetryOriginFallback/future")
+      expect(String(warnings[0]?.message)).toContain("61000")
+      expect(String(warnings[0]?.message)).toContain("1000")
+    }))
+
+  effect("replaces a non-finite durable origin with the local clock and logs the corrupt value", () =>
+    Effect.gen(function*() {
+      const outcome = yield* runWithOrigin("RetryOriginFallback/non-finite", Number.NaN, { advanceMs: 1 })
+      expect(outcome.attempts).toEqual([1, 2])
+      const warnings = outcome.logs.filter((entry) => entry.logLevel === "Warn")
+      expect(warnings.length).toBe(1)
+      expect(String(warnings[0]?.message)).toContain("RetryOriginFallback/non-finite")
+      expect(String(warnings[0]?.message)).toContain("NaN")
+      expect(String(warnings[0]?.message)).toContain("1000")
+    }))
+
+  effect("keeps a valid past durable origin as consumed expiration budget without a warning", () =>
+    Effect.gen(function*() {
+      const outcome = yield* runWithOrigin("RetryOriginFallback/past", 990)
+      expect(outcome.attempts).toEqual([1])
+      expect(outcome.logs.filter((entry) => entry.logLevel === "Warn")).toEqual([])
+      expect(outcome.result._tag).toBe("Complete")
+      if (outcome.result._tag === "Complete" && Exit.isFailure(outcome.result.exit)) {
+        expect(Cause.squash(outcome.result.exit.cause)).toBeInstanceOf(RetryPolicy.RetryPolicyExpired)
+      }
+    }))
 })

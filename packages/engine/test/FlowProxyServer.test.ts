@@ -4,7 +4,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import { describe, expect, expectTypeOf, it } from "@effect/vitest"
 import { Action, DurableDeferred, Flow, Interpreter } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
-import { Effect, Exit, FileSystem, Layer, Option, Path, Schema, Scope } from "effect"
+import { Effect, Exit, FileSystem, Layer, Logger, Option, Path, References, Schema, Scope } from "effect"
 import { Etag, HttpPlatform, HttpRouter } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder, HttpApiClient, HttpApiTest } from "effect/unstable/httpapi"
 import { RpcTest } from "effect/unstable/rpc"
@@ -338,6 +338,76 @@ describe("FlowProxyServer.layerHttpApi", () => {
       }
     }).pipe(provide(layer))
   })
+
+  effect("logs annotated execute defects through both HTTP and RPC adapters", () => {
+    const DyingAction = Action.make("Proxy/Dies/action", {
+      payload: { id: Schema.String },
+      success: Schema.Void
+    })
+    const Dying = Flow.make("Proxy/Dies", {
+      payload: { id: Schema.String },
+      success: Schema.Void,
+      body: (payload) => DyingAction.call(payload)
+    })
+    const dyingFlows = [Dying] as const
+    class DyingApi extends HttpApi.make("dying").add(
+      FlowProxy.toHttpApiGroup("flows", dyingFlows)
+    ) {}
+    const dyingLayer = Layer.mergeAll(
+      DyingAction.toLayer(() => Effect.die("proxy-handler-defect")),
+      Interpreter.layer(Dying)
+    ).pipe(
+      Layer.provideMerge(Action.layerImplementations),
+      Layer.provideMerge(FlowEngine.layerMemory)
+    )
+    const logs: Array<{
+      readonly message: unknown
+      readonly logLevel: string
+      readonly annotations: Readonly<Record<string, unknown>>
+    }> = []
+    const capture = Logger.make((entry) => {
+      logs.push({
+        message: entry.message,
+        logLevel: entry.logLevel,
+        annotations: entry.fiber.getRef(References.CurrentLogAnnotations)
+      })
+    })
+    const proxyErrors = () => logs.filter((entry) =>
+      entry.logLevel === "Error" &&
+      entry.annotations["module"] === "FlowProxyServer" &&
+      entry.annotations["method"] === FlowProxy.operationAddresses(Dying._tag).execute
+    )
+    return Effect.gen(function*() {
+      const httpExit = yield* Effect.gen(function*() {
+        const httpClient = yield* HttpApiTest.groups(DyingApi, ["flows"])
+        return yield* httpClient.flows["Proxy/Dies"]({
+          payload: { payload: { id: "http" }, executionId: "proxy-dies-http" }
+        })
+      }).pipe(
+        Effect.exit,
+        Effect.provide(
+          FlowProxyServer.layerHttpApi(DyingApi, "flows", dyingFlows).pipe(Layer.provideMerge(dyingLayer))
+        ),
+        Effect.provide(HttpTestServices)
+      )
+      expect(Exit.isFailure(httpExit)).toBe(true)
+      expect(proxyErrors().length).toBe(1)
+
+      const rpcExit = yield* Effect.gen(function*() {
+        const rpcClient = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(dyingFlows))
+        return yield* rpcClient["Proxy/Dies"]({
+          payload: { id: "rpc" },
+          executionId: "proxy-dies-rpc"
+        })
+      }).pipe(
+        Effect.exit,
+        Effect.provide(FlowProxyServer.layerRpcHandlers(dyingFlows).pipe(Layer.provideMerge(dyingLayer)))
+      )
+      expect(Exit.isFailure(rpcExit)).toBe(true)
+      expect(proxyErrors().length).toBe(2)
+      expect(proxyErrors().every((entry) => String(entry.message).includes("proxy-handler-defect"))).toBe(true)
+    }).pipe(Effect.provideService(Logger.CurrentLoggers, new Set([capture])))
+  })
 })
 
 describe("FlowProxy.toHttpApiGroup path lowering", () => {
@@ -403,9 +473,14 @@ describe("FlowProxy.toHttpApiGroup path lowering", () => {
         success: Schema.Void,
         body: () => Node.succeed(undefined)
       })
-      expect(() => FlowProxy.toHttpApiGroup("invalid", [Invalid])).toThrow(
-        FlowProxy.FlowProxyCollision
-      )
+      let error: unknown
+      try {
+        FlowProxy.toHttpApiGroup("invalid", [Invalid])
+      } catch (cause) {
+        error = cause
+      }
+      expect(error).toBeInstanceOf(FlowProxy.InvalidFlowTag)
+      expect(error).toMatchObject({ code: "invalid_flow_tag", tag })
     }
   })
 })
