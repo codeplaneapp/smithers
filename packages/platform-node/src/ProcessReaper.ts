@@ -203,6 +203,11 @@ const ps = (
   const result = spawnSync(executable, ["-o", `${column}=`, "-p", String(pid)], {
     encoding: "utf8",
     timeout: psTimeoutMs,
+    // `SIGKILL` rather than the default `SIGTERM`, because this call blocks the
+    // event loop while a host is being built: `spawnSync` keeps waiting past
+    // the deadline for a process that ignores the signal, so a `TERM` the probe
+    // can decline is not a deadline at all.
+    killSignal: "SIGKILL",
     // An empty-ish environment for the same reason the interpreter in
     // `AtomicFileSystem` gets one: nothing the caller exported may change what
     // this answers. `LC_ALL` pins the one column format `Date.parse` can read.
@@ -244,6 +249,14 @@ export interface SystemOptions {
    * through; it is never a `PATH` lookup.
    */
   readonly psExecutable?: string | undefined
+  /**
+   * The pid this system must never signal, nor signal the group of. Default
+   * `process.pid`. {@link Options.ownerPid} is the same identity at the sweep
+   * level; this one is what {@link System.killTree} enforces on its own,
+   * because that function is exported and a caller can reach it without going
+   * through {@link reap}.
+   */
+  readonly ownerPid?: number | undefined
 }
 
 /**
@@ -286,27 +299,39 @@ const refuseWindowsTarget = (record: ProcessLedger.ProcessRecord): Refusal | und
  * @category constructors
  * @since 1.0.0-rc.0
  */
-export const posixSystemWith = (options?: SystemOptions): System => ({
-  isAlive: liveness,
-  startedAtMs: startedAtMs(options?.psExecutable ?? defaultPsExecutable),
-  ownGroup: ownGroup(options?.psExecutable ?? defaultPsExecutable),
-  bootedAtMs,
-  refuseTarget: refusePosixTarget,
-  killTree: (record) => {
-    // Repeated here and not only in `refuse`: this function is exported, and
-    // the negation below is the one place a stored number becomes a signal.
-    if (refusePosixTarget(record) !== undefined) return "failed"
-    try {
-      process.kill(-(record.pgid as number), "SIGKILL")
-      return "signalled"
-    } catch (cause) {
-      // The group settled between the liveness check and the signal: the end
-      // state is the one that was wanted. Anything else is a kill that did NOT
-      // happen, and saying so is what gets the record tried again.
-      return errorCode(cause) === "ESRCH" ? "already-gone" : "failed"
+export const posixSystemWith = (options?: SystemOptions): System => {
+  const readOwnGroup = ownGroup(options?.psExecutable ?? defaultPsExecutable)
+  const ownerPid = options?.ownerPid ?? process.pid
+  return {
+    isAlive: liveness,
+    startedAtMs: startedAtMs(options?.psExecutable ?? defaultPsExecutable),
+    ownGroup: readOwnGroup,
+    bootedAtMs,
+    refuseTarget: refusePosixTarget,
+    killTree: (record) => {
+      // Repeated here and not only in `refuse`: this function is exported, and
+      // the negation below is the one place a stored number becomes a signal.
+      if (refusePosixTarget(record) !== undefined) return "failed"
+      // The host's own identity, repeated for the same reason. `refuse` holds
+      // one `ownGroup` reading for the whole sweep; a caller that reaches this
+      // function directly has made no such reading, and `process.kill(-pgid)`
+      // does not care which way the number arrived. A group that cannot be
+      // read is a comparison that did not happen, so nothing is signalled.
+      if (record.pid === ownerPid || record.pgid === ownerPid) return "failed"
+      const group = readOwnGroup()
+      if (group === null || record.pid === group || record.pgid === group) return "failed"
+      try {
+        process.kill(-(record.pgid as number), "SIGKILL")
+        return "signalled"
+      } catch (cause) {
+        // The group settled between the liveness check and the signal: the end
+        // state is the one that was wanted. Anything else is a kill that did NOT
+        // happen, and saying so is what gets the record tried again.
+        return errorCode(cause) === "ESRCH" ? "already-gone" : "failed"
+      }
     }
   }
-})
+}
 
 /**
  * Reaping on a POSIX host: one `SIGKILL` to the abandoned process group, with
@@ -316,6 +341,36 @@ export const posixSystemWith = (options?: SystemOptions): System => ({
  * @since 0.1.0
  */
 export const posixSystem: System = posixSystemWith()
+
+/**
+ * Reaping on Windows, with the identity the sweep must never signal
+ * configured.
+ *
+ * @category constructors
+ * @since 1.0.0-rc.0
+ */
+export const windowsSystemWith = (options?: SystemOptions): System => {
+  const ownerPid = options?.ownerPid ?? process.pid
+  return {
+    isAlive: liveness,
+    startedAtMs: () => ({ _tag: "unsupported" }),
+    ownGroup: () => null,
+    bootedAtMs,
+    refuseTarget: refuseWindowsTarget,
+    killTree: (record) => {
+      if (refuseWindowsTarget(record) !== undefined) return "failed"
+      // `taskkill /T` walks the tree DOWN from the pid it is given, so a record
+      // naming this host takes the host and everything it started with it.
+      if (record.pid === ownerPid) return "failed"
+      const result = spawnSync("taskkill", ["/pid", String(record.pid), "/T", "/F"], { stdio: "ignore" })
+      if (result.error !== undefined) return "failed"
+      // 128 is `taskkill`'s "no such process", which is the same end state a
+      // successful kill produces.
+      if (result.status === 0) return "signalled"
+      return result.status === 128 ? "already-gone" : "failed"
+    }
+  }
+}
 
 /**
  * Reaping on Windows, which has no process groups: `taskkill /T /F` by pid.
@@ -336,22 +391,7 @@ export const posixSystem: System = posixSystemWith()
  * @category constructors
  * @since 0.1.0
  */
-export const windowsSystem: System = {
-  isAlive: liveness,
-  startedAtMs: () => ({ _tag: "unsupported" }),
-  ownGroup: () => null,
-  bootedAtMs,
-  refuseTarget: refuseWindowsTarget,
-  killTree: (record) => {
-    if (refuseWindowsTarget(record) !== undefined) return "failed"
-    const result = spawnSync("taskkill", ["/pid", String(record.pid), "/T", "/F"], { stdio: "ignore" })
-    if (result.error !== undefined) return "failed"
-    // 128 is `taskkill`'s "no such process", which is the same end state a
-    // successful kill produces.
-    if (result.status === 0) return "signalled"
-    return result.status === 128 ? "already-gone" : "failed"
-  }
-}
+export const windowsSystem: System = windowsSystemWith()
 
 /**
  * Selects the reaping implementation a platform needs.

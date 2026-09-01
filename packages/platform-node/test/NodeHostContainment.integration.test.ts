@@ -34,9 +34,16 @@ const waitForExit = async (pid: number, budgetMs: number): Promise<boolean> => {
   }
 }
 
-/** Every process on this machine whose command line names `path`. */
+/**
+ * Every process on this machine whose command line names `path`.
+ *
+ * The buffer is sized rather than left at `execFileSync`'s 1 MiB default: this
+ * lists EVERY process with its full argument vector, and on a loaded machine
+ * that is more than a megabyte, at which point the call throws `ENOBUFS` and
+ * the assertion below reads as a containment failure it is not.
+ */
 const survivors = (path: string): ReadonlyArray<string> =>
-  execFileSync("ps", ["-A", "-o", "pid=,ppid=,args="], { encoding: "utf8" })
+  execFileSync("ps", ["-A", "-o", "pid=,ppid=,args="], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
     .split("\n")
     .filter((line) => line.includes(path))
 
