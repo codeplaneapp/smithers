@@ -89,6 +89,7 @@ export const agentHost = (environment: Readonly<Record<string, string | undefine
  * review launcher has no approved plan budget envelope, so a numeric ceiling
  * here would be one no reviewer selected.
  */
+// eslint-disable-next-line no-restricted-syntax -- no approved envelope exists, see above
 const agentPolicy = Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())
 
 /**
