@@ -43,6 +43,12 @@ export * as ArtifactStoreMetrics from "./ArtifactStoreMetrics.ts"
 
 /**
  * @category services
+ * @since 1.0.0-rc.0
+ */
+export * as ArtifactBackupLease from "./ArtifactBackupLease.ts"
+
+/**
+ * @category services
  * @since 0.1.0
  * @slop
  */

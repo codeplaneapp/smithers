@@ -3,10 +3,15 @@ import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as ArtifactBackupLease from "../../src/ArtifactBackupLease.ts"
 import * as ArtifactStore from "../../src/ArtifactStore.ts"
 
 const [mode, directory, digest] = process.argv.slice(2)
-if ((mode !== "freshen-hold" && mode !== "lock-hold") || directory === undefined || digest === undefined) {
+if (
+  (mode !== "backup-hold" && mode !== "freshen-hold" && mode !== "lock-hold") ||
+  directory === undefined ||
+  digest === undefined
+) {
   process.stderr.write("invalid fixture arguments\n")
   process.exitCode = 2
 } else {
@@ -24,6 +29,17 @@ if ((mode !== "freshen-hold" && mode !== "lock-hold") || directory === undefined
 
   const program = Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
+    if (mode === "backup-hold") {
+      yield* ArtifactBackupLease.withLease(
+        fs,
+        directory,
+        Effect.sync(() => process.stdout.write("leased\n")).pipe(Effect.andThen(awaitRelease)),
+        (cause) => cause instanceof Error ? cause : new Error(String(cause))
+      )
+      process.stdout.write("done:backup\n")
+      process.stdin.destroy()
+      return
+    }
     let announced = false
     const gated: FileSystem.FileSystem = {
       ...fs,

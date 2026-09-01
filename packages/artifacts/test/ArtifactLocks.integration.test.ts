@@ -6,6 +6,7 @@ import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process"
+import * as ArtifactBackupLease from "../src/ArtifactBackupLease.ts"
 import * as ArtifactStore from "../src/ArtifactStore.ts"
 import * as ArtifactSweep from "../src/ArtifactSweep.ts"
 
@@ -15,7 +16,10 @@ const fixture = new URL("./fixtures/artifact-lock-child.ts", import.meta.url)
 
 const runLayer = Layer.merge(NodeFileSystem.layer, NodeCrypto.layer)
 
-const launch = (mode: "freshen-hold" | "lock-hold", directory: string): ChildProcessWithoutNullStreams =>
+const launch = (
+  mode: "backup-hold" | "freshen-hold" | "lock-hold",
+  directory: string
+): ChildProcessWithoutNullStreams =>
   spawn(process.execPath, ["--experimental-strip-types", fixture.pathname, mode, directory, digest], {
     stdio: ["pipe", "pipe", "pipe"]
   })
@@ -60,6 +64,32 @@ const waitForExit = (child: ChildProcessWithoutNullStreams): Promise<void> =>
   })
 
 describe("cross-process artifact locking", () => {
+  it.live("fences sweep deletion while another process holds a backup lease", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "smithers-artifact-backup-lease-" })
+        const store = ArtifactStore.makeFileSystem(fs, { directory, durability: "best-effort" })
+        expect(yield* store.put(payload)).toBe(digest)
+
+        const child = launch("backup-hold", directory)
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            if (child.exitCode === null) child.kill("SIGKILL")
+          })
+        )
+        yield* Effect.promise(() => waitFor(child, "leased"))
+
+        const sweep = ArtifactSweep.makeFileSystem(fs, { directory })
+        expect(yield* sweep.remove(digest)).toBe(false)
+        expect(Array.from(yield* store.get(digest))).toEqual(Array.from(payload))
+
+        child.stdin.write("release\n")
+        yield* Effect.promise(() => waitForExit(child))
+        expect(yield* sweep.remove(digest)).toBe(true)
+      }).pipe(Effect.provide(runLayer))
+    ))
+
   it.live("keeps a child-process freshen ahead of a fenced sweep deletion", () =>
     Effect.scoped(
       Effect.gen(function*() {

@@ -24,6 +24,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as PlatformError from "effect/PlatformError"
+import * as ArtifactBackupLease from "./ArtifactBackupLease.ts"
 import * as ArtifactStore from "./ArtifactStore.ts"
 import * as ArtifactLocks from "./internal/ArtifactLocks.ts"
 
@@ -182,7 +183,17 @@ export const makeFileSystem = (
         fs,
         directory,
         validated,
-        Effect.gen(function*() {
+        coordination === "process"
+          ? removeBlob()
+          : ArtifactBackupLease.unlessActive(fs, directory, removeBlob(), hostFailure).pipe(
+            Effect.map(Option.getOrElse(() => false))
+          ),
+        hostFailure,
+        coordination
+      )
+
+      function removeBlob(): Effect.Effect<boolean, ArtifactStore.ArtifactStoreError> {
+        return Effect.gen(function*() {
           const path = blobPath(validated)
           const bound = removeOptions?.ifUnmodifiedSinceMs
           if (bound !== undefined) {
@@ -204,10 +215,8 @@ export const makeFileSystem = (
               )
             )
           )
-        }),
-        hostFailure,
-        coordination
-      )
+        })
+      }
     })
   )
 
