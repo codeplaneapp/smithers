@@ -89,6 +89,62 @@ describe("run catalog catch-up", () => {
       expect(listed.whole).toEqual(["run-0", "run-1", "run-2", "run-3"])
     }))
 
+  it.effect("defines zero as empty and rejects every other invalid bound before SQL", () =>
+    Effect.gen(function*() {
+      const filename = yield* temporaryFile
+      const observed = yield* onFile(filename)(Effect.gen(function*() {
+        const catalog = yield* RunCatalogOps.make()
+        yield* create("run-present")
+        const invalid = []
+        for (
+          const limit of [
+            -1,
+            1.5,
+            Number.NaN,
+            Number.POSITIVE_INFINITY,
+            Number.MAX_SAFE_INTEGER + 1
+          ]
+        ) {
+          invalid.push(yield* catalog.listRunIds({ limit }).pipe(Effect.exit))
+        }
+        return { zero: yield* catalog.listRunIds({ limit: 0 }), invalid }
+      }))
+
+      expect(observed.zero).toEqual([])
+      for (const exit of observed.invalid) {
+        expect(exit).toMatchObject({
+          _tag: "Failure",
+          cause: { reasons: [{ error: { code: "invalid_options" } }] }
+        })
+      }
+    }))
+
+  it.effect("bounds the default read to its newest ten thousand rows", () =>
+    Effect.gen(function*() {
+      const filename = yield* temporaryFile
+      const listed = yield* onFile(filename)(Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        const catalog = yield* RunCatalogOps.make()
+        for (let offset = 0; offset < RunCatalogOps.defaultLimit + 1; offset += 250) {
+          const rows = Array.from(
+            { length: Math.min(250, RunCatalogOps.defaultLimit + 1 - offset) },
+            (_, index) => ({
+              run_id: `run-${String(offset + index).padStart(5, "0")}`,
+              status: "pending",
+              created_at_ms: offset + index,
+              state_json: runState
+            })
+          )
+          yield* sql`INSERT INTO flows_runs ${sql.insert(rows)}`
+        }
+        return yield* catalog.listRunIds()
+      }))
+
+      expect(listed).toHaveLength(RunCatalogOps.defaultLimit)
+      expect(listed[0]).toBe("run-00001")
+      expect(listed.at(-1)).toBe("run-10000")
+    }))
+
   it.effect("keeps the newest runs across the hot-backup restore path", () =>
     Effect.gen(function*() {
       const source = yield* temporaryFile

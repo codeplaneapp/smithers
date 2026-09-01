@@ -92,6 +92,8 @@ export interface Options {
   readonly dryRun?: boolean | undefined
   /** A label for the report; the host's database path. */
   readonly database?: string | undefined
+  /** Largest number of runs considered by this pass. Defaults to 1,000. */
+  readonly limit?: number | undefined
 }
 
 /** Whether a table exists in the connected database. */
@@ -116,7 +118,8 @@ const hasTable = (table: string): Effect.Effect<boolean, SqlError, SqlClient.Sql
  * be parked for longer than the threshold before it ever asks.
  */
 const eligibleCandidates = (
-  olderThanMs: number
+  olderThanMs: number,
+  limit: number
 ): Effect.Effect<ReadonlyArray<RetentionOps.Candidate>, SqlError, SqlClient.SqlClient> =>
   Effect.gen(function*() {
     const sql = yield* SqlClient.SqlClient
@@ -134,6 +137,7 @@ const eligibleCandidates = (
         AND run_id NOT IN (SELECT run_id FROM under_live)
         AND run_id NOT IN (SELECT run_id FROM over_live)
       ORDER BY COALESCE(finished_at_ms, created_at_ms) ASC
+      LIMIT ${limit}
     `
     return rows.map((row) => ({ runId: row.run_id, parentRunId: row.parent_run_id }))
   })
@@ -145,9 +149,16 @@ const eligibleCandidates = (
  * @since 1.0.0
  */
 export const eligible = (
-  olderThanMs: number
+  olderThanMs: number,
+  limit = RetentionOps.defaultLimit
 ): Effect.Effect<ReadonlyArray<string>, SqlError, SqlClient.SqlClient> =>
-  Effect.map(eligibleCandidates(olderThanMs), (candidates) => candidates.map((candidate) => candidate.runId))
+  Effect.map(
+    eligibleCandidates(
+      olderThanMs,
+      Number.isSafeInteger(limit) && limit >= 0 ? limit : 0
+    ),
+    (candidates) => candidates.map((candidate) => candidate.runId)
+  )
 
 /**
  * Runs one retention pass.
@@ -178,7 +189,11 @@ export const collect = (
 ): Effect.Effect<Report, SqlError | RetentionOps.RetentionError, SqlClient.SqlClient> =>
   Effect.gen(function*() {
     const sql = yield* SqlClient.SqlClient
-    const candidates = yield* eligibleCandidates(options.olderThanMs)
+    const limit = options.limit ?? RetentionOps.defaultLimit
+    const candidates = yield* eligibleCandidates(
+      options.olderThanMs,
+      Number.isSafeInteger(limit) && limit >= 0 ? limit : 0
+    )
     const dryRun = options.dryRun === true
     const removed = yield* sql.withTransaction(
       RetentionOps.deleteRuns(sql, candidates, { dryRun, assumeLadder: false })

@@ -118,6 +118,28 @@ describe("Retention.collect", () => {
       expect(yield* count("flows_journal_events")).toBe(0)
     })))
 
+  it.effect("bounds the host-facing default pass to one thousand runs", () =>
+    migrated(Effect.gen(function*() {
+      const sql = yield* SqlClient.SqlClient
+      for (let offset = 0; offset < 1_001; offset += 200) {
+        const rows = Array.from({ length: Math.min(200, 1_001 - offset) }, (_, index) => ({
+          run_id: `aged-${String(offset + index).padStart(4, "0")}`,
+          status: "completed",
+          created_at_ms: 1,
+          started_at_ms: 1,
+          finished_at_ms: offset + index + 1,
+          state_json: "{}"
+        }))
+        yield* sql`INSERT INTO flows_runs ${sql.insert(rows)}`
+      }
+
+      const first = yield* Retention.collect({ olderThanMs: 2_000 })
+      expect(first.runs).toHaveLength(1_000)
+      expect(yield* count("flows_runs")).toBe(1)
+      expect((yield* Retention.collect({ olderThanMs: 2_000 })).runs).toEqual(["aged-1000"])
+      expect(yield* count("flows_runs")).toBe(0)
+    })))
+
   it.effect("keeps a run that has not finished, whatever its age", () =>
     migrated(Effect.gen(function*() {
       yield* insertRun("live", "running", null)
@@ -326,6 +348,17 @@ describe("Retention.collect", () => {
       expect(report.runs).toEqual([])
       expect(report.deleted).toEqual({})
     }))
+
+  it.effect("turns invalid host-facing limits into empty, non-mutating passes", () =>
+    migrated(Effect.gen(function*() {
+      yield* insertRun("old", "completed", 100)
+
+      expect(yield* Retention.eligible(500, -1)).toEqual([])
+      const report = yield* Retention.collect({ olderThanMs: 500, limit: Number.NaN })
+      expect(report.runs).toEqual([])
+      expect(report.deleted).toEqual({})
+      expect(yield* count("flows_runs")).toBe(1)
+    })))
 
   it("names the terminal statuses the contract lists", () => {
     expect(Retention.terminalStatuses).toEqual(["completed", "failed", "cancelled"])
