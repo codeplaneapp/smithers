@@ -516,13 +516,13 @@ describe("AttemptStore", () => {
         ]
         const putFailures = yield* Effect.forEach(
           invalidPuts,
-          (attempt) => Effect.flip(store.put(attempt, owner))
+          (attempt) => Effect.flip(store.put(attempt as never, owner))
         )
         const heartbeatFailures = yield* Effect.forEach(
           [
             store.heartbeat("run-1", "digest", 0, owner, Number.NaN),
             store.heartbeat("run-1", "digest", 0, owner, -1),
-            store.heartbeat("run-1", "digest", 0, owner, 1, BigInt(1)),
+            store.heartbeat("run-1", "digest", 0, owner, 1, BigInt(1) as never),
             store.heartbeat("run-1", "digest", 0, owner, 1, "x".repeat(1024 * 1024))
           ],
           Effect.flip
@@ -538,14 +538,13 @@ describe("AttemptStore", () => {
         ]
         const finishFailures = yield* Effect.forEach(
           invalidFinishes,
-          (attempt) => Effect.flip(store.finish(attempt, owner))
+          (attempt) => Effect.flip(store.finish(attempt as never, owner))
         )
         return [...putFailures, ...heartbeatFailures, ...finishFailures]
       }))
 
       expect(failures.every((failure) => failure.code === "invalid_attempt")).toBe(true)
-      expect(failures.every((failure) => failure.cause !== undefined)).toBe(false)
-      expect(failures.some((failure) => failure.cause !== undefined)).toBe(true)
+      expect(failures.every((failure) => failure.cause === undefined)).toBe(true)
     }))
 
   it.effect("reports decode_failed for corrupt durable attempt JSON", () =>

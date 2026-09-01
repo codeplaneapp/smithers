@@ -24,7 +24,7 @@ const own = (runs: RunStore.Service, runId: string) =>
   )
 
 describe("run-store payload and timeline limits", () => {
-  it.effect("pins acceptance of reversed attempt finish and heartbeat timelines", () =>
+  it.effect("rejects reversed attempt timelines and keeps heartbeats monotonic", () =>
     Effect.gen(function*() {
       const result = yield* migrated(
         Effect.gen(function*() {
@@ -49,30 +49,57 @@ describe("run-store payload and timeline limits", () => {
             startedAtMs: 10,
             meta: {}
           }
-          const reversedPut = yield* attempts.put(reversed, owner)
+          const reversedPut = yield* Effect.flip(attempts.put(reversed, owner))
+          const reversedHeartbeatPut = yield* Effect.flip(attempts.put({
+            ...running,
+            stepKeyDigest: "already-heartbeaten",
+            heartbeatAtMs: 9
+          }, owner))
           yield* attempts.put(running, owner)
-          const earlyHeartbeat = yield* attempts.heartbeat(
+          const earlyHeartbeat = yield* Effect.flip(attempts.heartbeat(
             running.runId,
             running.stepKeyDigest,
             running.attempt,
             owner,
             9
+          ))
+          const atStart = yield* attempts.heartbeat(
+            running.runId,
+            running.stepKeyDigest,
+            running.attempt,
+            owner,
+            10
           )
+          yield* attempts.heartbeat(running.runId, running.stepKeyDigest, running.attempt, owner, 20)
+          yield* attempts.heartbeat(running.runId, running.stepKeyDigest, running.attempt, owner, 15)
+          const earlyFinish = yield* Effect.flip(attempts.finish({
+            runId: running.runId,
+            stepKeyDigest: running.stepKeyDigest,
+            attempt: running.attempt,
+            state: "completed",
+            finishedAtMs: 9
+          }, owner))
           return {
+            atStart,
+            earlyFinish,
             earlyHeartbeat,
-            heartbeatRow: Option.getOrThrow(yield* attempts.get(running)),
-            reversedPut,
-            reversedRow: Option.getOrThrow(yield* attempts.get(reversed))
+            heartbeatRow: Option.getOrThrow(yield* attempts.get({
+              runId: running.runId,
+              stepKeyDigest: running.stepKeyDigest,
+              attempt: running.attempt
+            })),
+            reversedHeartbeatPut,
+            reversedPut
           }
         })
       )
 
-      // CONTRACT: timestamps are range-checked independently; no relational
-      // finished >= started or heartbeat >= started constraint exists.
-      expect(result.reversedPut).toEqual({ _tag: "Inserted" })
-      expect(result.reversedRow).toMatchObject({ startedAtMs: 10, finishedAtMs: 9 })
-      expect(result.earlyHeartbeat).toEqual({ _tag: "Updated" })
-      expect(result.heartbeatRow).toMatchObject({ startedAtMs: 10, heartbeatAtMs: 9 })
+      expect(result.reversedPut.code).toBe("invalid_attempt")
+      expect(result.reversedHeartbeatPut.code).toBe("invalid_attempt")
+      expect(result.earlyHeartbeat.code).toBe("invalid_attempt")
+      expect(result.earlyFinish.code).toBe("invalid_attempt")
+      expect(result.atStart).toEqual({ _tag: "Updated" })
+      expect(result.heartbeatRow).toMatchObject({ startedAtMs: 10, heartbeatAtMs: 20 })
     }))
 
   it.effect("round-trips multi-megabyte run state, meta, error, and outcome without caps", () =>

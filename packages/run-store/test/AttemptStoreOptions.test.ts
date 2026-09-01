@@ -120,6 +120,55 @@ describe("AttemptStore options", () => {
         })
     ))
 
+  it.effect("never reopens a terminal attempt in upsert mode", () =>
+    withStore(
+      { inProgressStates: ["in-progress"], putMode: "upsert" },
+      (store) =>
+        Effect.gen(function*() {
+          yield* store.put(attempt(), owner)
+          yield* store.finish({
+            runId: "run",
+            stepKeyDigest: "digest",
+            attempt: 0,
+            state: "succeeded",
+            finishedAtMs: 3
+          }, owner)
+          const terminal = attempt({ state: "succeeded", finishedAtMs: 3 })
+          expect(yield* store.put(terminal, owner)).toEqual({ _tag: "ExistingSame" })
+          expect(yield* store.put({ ...terminal, meta: { a: 2 } }, owner)).toEqual({ _tag: "Conflict" })
+          expect(Option.getOrThrow(yield* store.get({
+            runId: terminal.runId,
+            stepKeyDigest: terminal.stepKeyDigest,
+            attempt: terminal.attempt
+          }))).toMatchObject({
+            state: "succeeded",
+            finishedAtMs: 3,
+            meta: { a: 1 }
+          })
+        })
+    ))
+
+  it.effect("snapshots the in-progress vocabulary when the store is built", () => {
+    const states = ["in-progress"]
+    return withStore(
+      { inProgressStates: states, putMode: "upsert" },
+      (store) =>
+        Effect.gen(function*() {
+          states[0] = "replaced"
+          states.push("succeeded")
+          yield* store.put(attempt(), owner)
+          expect(yield* store.heartbeat("run", "digest", 0, owner, 2)).toEqual({ _tag: "Updated" })
+          expect(yield* store.finish({
+            runId: "run",
+            stepKeyDigest: "digest",
+            attempt: 0,
+            state: "succeeded",
+            finishedAtMs: 3
+          }, owner)).toEqual({ _tag: "Finished" })
+        })
+    )
+  })
+
   it.effect("keeps first-writer-wins by default", () =>
     withStore(
       { inProgressStates: ["in-progress"] },
@@ -145,7 +194,13 @@ describe("AttemptStore options", () => {
       { inProgressStates: ["in-progress"], maxCheckpointBytes: 32 },
       (store) =>
         Effect.gen(function*() {
-          const failure = yield* Effect.flip(store.put(attempt({ checkpoint: "x".repeat(64) }), owner))
+          expect(yield* store.put(attempt({ checkpoint: "x".repeat(30) }), owner)).toEqual({ _tag: "Inserted" })
+          expect(yield* store.put(attempt({ attempt: 1, checkpoint: "é".repeat(15) }), owner)).toEqual({
+            _tag: "Inserted"
+          })
+          const failure = yield* Effect.flip(
+            store.put(attempt({ attempt: 2, checkpoint: "x".repeat(31) }), owner)
+          )
           expect(failure.code).toBe("invalid_attempt")
         })
     ))
@@ -230,10 +285,20 @@ describe("AttemptStore options", () => {
 
   it.effect("rejects an invalid options vocabulary", () =>
     Effect.gen(function*() {
-      const failure = yield* Effect.flip(AttemptStore.makeWith({ inProgressStates: [] }))
-      expect(failure.code).toBe("invalid_attempt")
-      const cap = yield* Effect.flip(AttemptStore.makeWith({ maxCheckpointBytes: 0 }))
-      expect(cap.code).toBe("invalid_attempt")
+      const hostile = Object.defineProperty({}, "inProgressStates", {
+        enumerable: true,
+        get: () => ["running"]
+      })
+      const failures = yield* Effect.forEach([
+        { inProgressStates: [] },
+        { inProgressStates: ["running", "running"] },
+        { inProgressStates: [""] },
+        { maxCheckpointBytes: 0 },
+        { maxCheckpointBytes: AttemptStore.maximumCheckpointBytes + 1 },
+        { putMode: "replace" },
+        hostile
+      ], (options) => Effect.flip(AttemptStore.makeWith(options as never)))
+      expect(failures.every((failure) => failure.code === "invalid_attempt")).toBe(true)
     }).pipe(Effect.provide(base), Effect.scoped))
 
   it.effect("the noop store reports patch as unavailable", () =>

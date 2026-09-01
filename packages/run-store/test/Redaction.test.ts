@@ -7,7 +7,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { DurableWriter } from "@smthrs/database/DurableWriter"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Effect, Layer, Option } from "effect"
+import { Cause, Effect, Exit, Layer, Option } from "effect"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as AttemptStore from "../src/AttemptStore.ts"
@@ -138,4 +138,99 @@ describe("durable run state redaction", () => {
 
       expect(Option.getOrThrow(attempt)).toMatchObject({ checkpoint: executable })
     }))
+
+  describe("RunStore error-cause hygiene", () => {
+    const secret = "sk-live-DO-NOT-LOG"
+    const invalidStateJson = `{"apiKey":"${secret}","padding":"${"x".repeat(200_000)}"`
+
+    const errorOf = <A>(exit: Exit.Exit<A, RunStore.RunStoreError>): RunStore.RunStoreError => {
+      if (Exit.isSuccess(exit)) throw new Error("expected RunStore failure")
+      const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail")
+      if (failure === undefined) throw new Error("expected typed RunStore failure")
+      return failure.error
+    }
+
+    const expectHygienic = <A>(
+      exit: Exit.Exit<A, RunStore.RunStoreError>,
+      runId: string
+    ): RunStore.RunStoreError => {
+      const error = errorOf(exit)
+      const serialized = JSON.stringify(error)
+      const pretty = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : ""
+      for (const rendered of [serialized, pretty]) {
+        expect(rendered).not.toContain(secret)
+        expect(rendered).not.toContain("xxxxxxxxxx")
+        expect(rendered).toContain(runId)
+      }
+      expect(serialized.length).toBeLessThan(2_000)
+      return error
+    }
+
+    it.effect("keeps create's published error cause free of executable state", () =>
+      Effect.gen(function*() {
+        const exit = yield* withStores(Effect.gen(function*() {
+          const store = yield* RunStore.RunStore
+          return yield* Effect.exit(store.create("run-cause-hygiene", invalidStateJson))
+        }))
+
+        const error = expectHygienic(exit, "run-cause-hygiene")
+        expect(error.cause).toMatchObject({
+          runId: "run-cause-hygiene",
+          stateJsonLength: invalidStateJson.length,
+          stateJsonValid: false
+        })
+      }))
+
+    it.effect("keeps transitionOwned's published error cause free of executable state", () =>
+      Effect.gen(function*() {
+        const exit = yield* withStores(Effect.gen(function*() {
+          const store = yield* RunStore.RunStore
+          const owner = { hostId: "host-a", pid: 42, nonce: "nonce-a" }
+          yield* store.create("run-transition-cause-hygiene", "{}")
+          yield* store.claimAndOwn(
+            "run-transition-cause-hygiene",
+            { status: "pending", owner: null, heartbeatAtMs: null },
+            owner,
+            1
+          )
+          return yield* Effect.exit(
+            store.transitionOwned("run-transition-cause-hygiene", owner, "completed", invalidStateJson)
+          )
+        }))
+
+        const error = expectHygienic(exit, "run-transition-cause-hygiene")
+        expect(error.cause).toMatchObject({
+          runId: "run-transition-cause-hygiene",
+          stateJsonLength: invalidStateJson.length,
+          stateJsonValid: false
+        })
+      }))
+
+    it.effect("keeps decodeRunRow's published error cause free of executable state", () =>
+      Effect.gen(function*() {
+        const stateJson = JSON.stringify({ apiKey: secret, padding: "x".repeat(200_000) })
+        const exit = yield* withStores(Effect.gen(function*() {
+          const sql = yield* Effect.service(SqlClient.SqlClient)
+          yield* sql`PRAGMA ignore_check_constraints = ON`
+          yield* sql`
+            INSERT INTO flows_runs (
+              run_id, status, created_at_ms, owner_host_id, owner_pid, owner_nonce, heartbeat_at_ms, state_json
+            ) VALUES (
+              'run-decode-cause-hygiene', 'suspended', 1, 'host-a', 42, 'nonce-a', 1, ${stateJson}
+            )
+          `
+          yield* sql`PRAGMA ignore_check_constraints = OFF`
+          const store = yield* RunStore.RunStore
+          return yield* Effect.exit(store.get("run-decode-cause-hygiene"))
+        }))
+
+        const error = expectHygienic(exit, "run-decode-cause-hygiene")
+        expect(error).toMatchObject({ code: "decode_failed", method: "get" })
+        expect(error.cause).toMatchObject({
+          hasClaimColumns: false,
+          hasOwnerColumns: true,
+          stateJsonValid: true
+        })
+      }))
+  })
 })
