@@ -17,6 +17,13 @@ import type { Commands } from "../ProviderConformance/Commands.ts"
  * that cannot match its own command line. A guest without `pgrep` answers 127
  * and the survivor question goes unanswered rather than wrongly answered.
  *
+ * `check` does not use this value verbatim: several providers' machines are
+ * the test host itself, and vitest runs suites in parallel workers, so two
+ * checks sharing one duration would each find the other's fixture alive and
+ * report a survivor that is not theirs. The default each check actually runs
+ * is {@link uniquePosixCommands}, which keeps this shape and makes the
+ * duration this process's own.
+ *
  * @category models
  * @since 0.1.0
  */
@@ -28,4 +35,26 @@ export const posixCommands: Commands = {
   runs: "sleep 3607",
   survivor: "pgrep -f 'sleep 360[7]'",
   shell: true
+}
+
+let uniqueRun = 0
+
+/**
+ * The default fixture with a per-call sleep duration, derived from the
+ * process id and a counter, so concurrent conformance runs on one host can
+ * never mistake each other's fixture for a survivor. The survivor pattern
+ * brackets the final digit so it cannot match its own command line.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const uniquePosixCommands = (): Commands => {
+  // Six digits give the collision space of concurrent workers room that a
+  // four-digit one did not; the fixture is signalled long before it wakes.
+  const duration = String(100000 + ((process.pid * 7919 + uniqueRun++ * 104729) % 900000))
+  return {
+    ...posixCommands,
+    runs: `sleep ${duration}`,
+    survivor: `pgrep -f 'sleep ${duration.slice(0, -1)}[${duration.slice(-1)}]'`
+  }
 }

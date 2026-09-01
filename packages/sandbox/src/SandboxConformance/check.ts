@@ -3,6 +3,7 @@
  *
  * @since 0.1.0
  */
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Stream from "effect/Stream"
@@ -14,21 +15,52 @@ import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
 import { commandProvider } from "../Sandbox/commandProvider.ts"
 import type { Provider } from "../Sandbox/Provider.ts"
 import type { Session } from "../Sandbox/Session.ts"
-import { posixCommands } from "./posixCommands.ts"
+import { posixCommands, uniquePosixCommands } from "./posixCommands.ts"
 
 /** Describes an unexpected outcome without leaking a stack into the report. */
 const shown = (exit: Exit.Exit<unknown, unknown>): string =>
   Exit.isSuccess(exit) ? JSON.stringify(exit.value) : `a failure: ${String(exit.cause)}`
 
 /**
+ * A deadline on the wall clock, not the ambient `Clock`.
+ *
+ * Provider test suites commonly run under a frozen test clock (`it.effect`
+ * provides one), where a clock-based timeout never fires; a conformance suite
+ * whose hang protection depends on the very layer a host may freeze would
+ * hang exactly when it is needed. The timer here is the platform's own, so a
+ * stuck check is convicted under any clock, and losing the race interrupts
+ * the check, which closes its scope and ends whatever it spawned.
+ */
+const expired = (deadline: Duration.Input): Effect.Effect<never, ProviderError> =>
+  Effect.flatMap(
+    Effect.callback<void>((resume) => {
+      const timer = setTimeout(() => resume(Effect.void), Duration.toMillis(deadline))
+      return Effect.sync(() => clearTimeout(timer))
+    }),
+    () =>
+      Effect.fail(
+        new ProviderError({
+          code: "timeout",
+          message: `the check did not finish within ${Duration.toMillis(deadline)} milliseconds`
+        })
+      )
+  )
+
+/**
  * Runs one check against a fresh session, so a check that leaves a session
- * unusable cannot decide the next one.
+ * unusable cannot decide the next one, and under a deadline, so a provider
+ * that hangs (a dropped stdin leaves `cat` waiting forever) is convicted
+ * rather than hanging the suite with it.
  */
 const inSession = <A>(
   provider: Provider,
   session: string,
+  deadline: Duration.Input,
   body: (session: Session) => Effect.Effect<A, unknown, never>
-): Effect.Effect<Exit.Exit<A, unknown>> => Effect.exit(Effect.scoped(Effect.flatMap(provider.acquire(session), body)))
+): Effect.Effect<Exit.Exit<A, unknown>> =>
+  Effect.exit(
+    Effect.raceFirst(Effect.scoped(Effect.flatMap(provider.acquire(session), body)), expired(deadline))
+  )
 
 /** Standard output as text plus the exit status, the shape most checks compare. */
 const output = (process: RemoteProcess): Effect.Effect<string, ProviderError> =>
@@ -87,8 +119,14 @@ const sameBytes = (left: Uint8Array, right: Uint8Array): boolean =>
 export interface CheckOptions {
   /** The session key every check acquires. Default `sandbox-conformance`. */
   readonly session?: string | undefined
-  /** The command fixture for the delegated spawn checks. Default {@link posixCommands}. */
+  /** The command fixture for the delegated spawn checks. Default {@link uniquePosixCommands}. */
   readonly commands?: Commands | undefined
+  /**
+   * How long any single check may take, machine acquisition included, before
+   * it is convicted as hung. Default 240 seconds, sized for a backend that
+   * provisions a real machine per check.
+   */
+  readonly checkTimeout?: Duration.Input | undefined
   /** Capabilities the provider's sessions are declared to have. */
   readonly provides?: {
     readonly kill?: boolean | undefined
@@ -125,43 +163,44 @@ export const check = (
 ): Effect.Effect<ReadonlyArray<Violation>> =>
   Effect.gen(function*() {
     const session = options.session ?? "sandbox-conformance"
-    const roundTrips = yield* inSession(provider, session, (live) =>
+    const deadline = options.checkTimeout ?? Duration.seconds(240)
+    const roundTrips = yield* inSession(provider, session, deadline, (live) =>
       Effect.gen(function*() {
         const path = `${live.workdir}/conformance-bytes.bin`
         yield* live.writeFile(path, conformanceBytes)
         return yield* live.readFile(path)
       }))
-    const empty = yield* inSession(provider, session, (live) =>
+    const empty = yield* inSession(provider, session, deadline, (live) =>
       Effect.gen(function*() {
         const path = `${live.workdir}/conformance-empty.bin`
         yield* live.writeFile(path, new Uint8Array())
         return yield* live.readFile(path)
       }))
-    const large = yield* inSession(provider, session, (live) =>
+    const large = yield* inSession(provider, session, deadline, (live) =>
       Effect.gen(function*() {
         const path = `${live.workdir}/conformance-large.bin`
         yield* live.writeFile(path, largeBytes)
         return yield* live.readFile(path)
       }))
-    const absent = yield* inSession(provider, session, (live) =>
+    const absent = yield* inSession(provider, session, deadline, (live) =>
       Effect.flip(live.readFile(`${live.workdir}/conformance-absent`)))
-    const parents = yield* inSession(provider, session, (live) =>
+    const parents = yield* inSession(provider, session, deadline, (live) =>
       Effect.gen(function*() {
         const path = `${live.workdir}/conformance/deep/tree/leaf.txt`
         yield* live.writeFile(path, conformanceBytes)
         return yield* live.readFile(path)
       }))
-    const workdir = yield* inSession(provider, session, (live) =>
+    const workdir = yield* inSession(provider, session, deadline, (live) =>
       Effect.map(run(live, "pwd"), (answer) => ({ answer, expected: `${live.workdir}\n#0` })))
-    const relativeCwd = yield* inSession(provider, session, (live) =>
+    const relativeCwd = yield* inSession(provider, session, deadline, (live) =>
       Effect.gen(function*() {
         yield* run(live, "mkdir -p conformance-sub")
         const answer = yield* run(live, "pwd", { cwd: "conformance-sub" })
         return { answer, expected: `${live.workdir}/conformance-sub\n#0` }
       }))
-    const environment = yield* inSession(provider, session, (live) =>
+    const environment = yield* inSession(provider, session, deadline, (live) =>
       run(live, `printf '%s' "$SANDBOX_CONFORMANCE"`, { env: { SANDBOX_CONFORMANCE: "delivered" } }))
-    const stdin = yield* inSession(provider, session, (live) =>
+    const stdin = yield* inSession(provider, session, deadline, (live) =>
       Effect.gen(function*() {
         // Compared through a file, not through stdout: a transport whose
         // process output is a pseudo-terminal cannot carry these bytes back
@@ -171,22 +210,26 @@ export const check = (
         const copied = yield* live.readFile(`${live.workdir}/conformance-stdin.bin`)
         return { status, copied }
       }))
-    const stderr = yield* inSession(provider, session, (live) =>
+    const stderr = yield* inSession(provider, session, deadline, (live) =>
       Effect.scoped(Effect.flatMap(live.spawn(`printf 'to-stderr' >&2`, {}), everything)))
-    const fileToProcess = yield* inSession(provider, session, (live) =>
+    const fileToProcess = yield* inSession(provider, session, deadline, (live) =>
       Effect.gen(function*() {
         yield* live.writeFile(`${live.workdir}/conformance-cross.bin`, conformanceBytes)
-        return yield* run(live, "wc -c < conformance-cross.bin")
+        // BSD `wc` pads its count, so whitespace is not part of the answer.
+        return (yield* run(live, "wc -c < conformance-cross.bin")).replaceAll(/\s+/g, "")
       }))
-    const processToFile = yield* inSession(provider, session, (live) =>
+    const processToFile = yield* inSession(provider, session, deadline, (live) =>
       Effect.gen(function*() {
         yield* run(live, "printf 'from-process' > conformance-produced.txt")
         return new TextDecoder().decode(yield* live.readFile(`${live.workdir}/conformance-produced.txt`))
       }))
     const reacquired = yield* Effect.exit(
-      Effect.andThen(
-        Effect.scoped(Effect.asVoid(provider.acquire(session))),
-        Effect.scoped(Effect.flatMap(provider.acquire(session), (live) => run(live, "printf 'again'")))
+      Effect.raceFirst(
+        Effect.andThen(
+          Effect.scoped(Effect.asVoid(provider.acquire(session))),
+          Effect.scoped(Effect.flatMap(provider.acquire(session), (live) => run(live, "printf 'again'")))
+        ),
+        expired(deadline)
       )
     )
     const spawnChecks = yield* check_.check(
@@ -194,7 +237,7 @@ export const check = (
         session,
         ...options.provides === undefined ? {} : { provides: options.provides }
       }),
-      options.commands ?? posixCommands
+      options.commands ?? uniquePosixCommands()
     )
     const found: Array<Violation | undefined> = [
       Exit.isSuccess(roundTrips) && sameBytes(roundTrips.value, conformanceBytes) ? undefined : {
@@ -251,7 +294,7 @@ export const check = (
         expected: "text a command writes to stderr to arrive on one of its output streams",
         actual: shown(stderr)
       },
-      Exit.isSuccess(fileToProcess) && fileToProcess.value.trim() === `${conformanceBytes.length}#0` ? undefined : {
+      Exit.isSuccess(fileToProcess) && fileToProcess.value === `${conformanceBytes.length}#0` ? undefined : {
         check: "files-reach-processes",
         expected: `a process to measure ${conformanceBytes.length} bytes in a file writeFile put there`,
         actual: shown(fileToProcess)
