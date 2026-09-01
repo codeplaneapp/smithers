@@ -29,14 +29,12 @@ pull request (or dispatch the workflow) rather than trusting a bare branch
 push to run it. Steps 3 and 5 gate the tag and the publish on
 `gh run watch --exit-status`.
 
-One further item is a maintainer decision rather than a lane.
-`e2e/faults/case22-secret-never-in-journal.test.ts` keeps one red half: rc.0
-ships no redacting logger, so a credential an action passes to `Effect.logInfo`
-reaches the operator's terminal in full. The journal half passes, reading the
-SQLite file directly. Ruling R-12 makes case 22 a required parity test, and
-root `BUILD.ts` keeps the `e2e-faults` CI job advisory until the section 5.2
-redaction deliverable lands. The limitation ships documented in the release
-notes and on the known-limitations page. Decide whether it publishes that way.
+The redaction decision this step used to carry is closed, not pending. The
+section 5.2 deliverable landed `@smthrs/journal` `RedactedLogger`, both halves
+of `e2e/faults/case22-secret-never-in-journal.test.ts` are green on the real
+binary with no edit to the test, and root `BUILD.ts` drops `continueOnError`
+and lists `e2e-faults` in `requiredJobs`. Contract section 5 records it as
+shipped on both paths. Nothing about it needs deciding before publishing.
 
 Plue is the other half of the cutover. PLAN completion criterion 9 is met on
 the branch `smithers-rc0-cutover` (tip `976a170a6`) for everything that runs
