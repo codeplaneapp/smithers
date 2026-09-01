@@ -358,6 +358,7 @@ const spawnText = (
     const stdout: Array<Buffer> = []
     let stdoutLength = 0
     let stderrTail = ""
+    let stdinFailure: Error | undefined
     let settled = false
     const settle = (outcome: Effect.Effect<Spawned, Error>): void => {
       if (settled) return
@@ -395,6 +396,10 @@ const spawnText = (
     child.on("error", (error: NodeJS.ErrnoException) => settle(Effect.fail(error)))
     child.on("close", (exitCode: number | null, signal: NodeJS.Signals | null) => {
       if (settled) return
+      if (stdinFailure !== undefined && stdoutLength === 0 && stderrTail === "") {
+        settle(Effect.fail(stdinFailure))
+        return
+      }
       settle(Effect.succeed({
         exitCode: exitCode ?? -1,
         stdout: Buffer.concat(stdout).toString("utf8"),
@@ -406,12 +411,12 @@ const spawnText = (
         failPipe("the agent subprocess was created without a stdin pipe")
       } else {
         child.stdin.on("error", (error: Error) => {
-          if (!settled) failPipe(`stdin could not be written: ${error.message}`)
+          if (!settled) stdinFailure = new Error(`stdin could not be written: ${error.message}`)
         })
         try {
           child.stdin.end(options.stdin, "utf8")
         } catch (cause) {
-          failPipe(`stdin could not be written: ${messageOf(cause)}`)
+          stdinFailure = new Error(`stdin could not be written: ${messageOf(cause)}`)
         }
       }
     }
