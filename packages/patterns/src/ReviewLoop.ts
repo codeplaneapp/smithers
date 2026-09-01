@@ -140,18 +140,15 @@ export const run = <I, A, Review, E, R, E2, R2, E3, R3>(
   }
   return Effect.gen(function*() {
     let output = yield* options.produce(input)
-    for (let round = 1; round <= options.maxRounds; round++) {
+    let round = 1
+    while (true) {
       const review = yield* options.review(output, round)
       if (accepted(review)) return output
       if (round === options.maxRounds) {
         return { output, review, approved: false, exhausted: true }
       }
       output = yield* options.revise({ output, review, round })
+      round += 1
     }
-    /* v8 ignore start -- unreachable: `maxRounds` is a validated positive safe integer, so the loop always reaches `round === options.maxRounds` and returns the exhausted value. The failure exists so the generator's return type stays honest if that bound ever becomes dynamic. */
-    return yield* Effect.fail(
-      new PatternError({ code: "exhausted", message: "ReviewLoop exhausted without a terminal result" })
-    )
-    /* v8 ignore stop */
   })
 }
