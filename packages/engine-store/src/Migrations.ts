@@ -29,7 +29,6 @@ import selectionStore from "./migrations/0002_selection_store.ts"
  *
  * @category migrations
  * @since 0.1.0
- * @slop
  */
 export const set: DatabaseMigrations.MigrationSet = {
   namespace: "engine-store",
@@ -52,7 +51,6 @@ export const set: DatabaseMigrations.MigrationSet = {
  *
  * @category migrations
  * @since 0.1.0
- * @slop
  */
 export const sets: ReadonlyArray<DatabaseMigrations.MigrationSet> = [
   JournalMigrations.set,
@@ -67,7 +65,6 @@ export const sets: ReadonlyArray<DatabaseMigrations.MigrationSet> = [
  *
  * @category migrations
  * @since 0.1.0
- * @slop
  */
 export const run = DatabaseMigrations.run(sets)
 
@@ -77,6 +74,5 @@ export const run = DatabaseMigrations.run(sets)
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer = Layer.effectDiscard(run)

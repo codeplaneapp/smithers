@@ -30,7 +30,6 @@ import * as Metric from "effect/Metric"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type ExitTag = "Success" | "Failure" | "Interrupt"
 
@@ -52,7 +51,6 @@ const byOutcome = <const Tags extends ReadonlyArray<string>>(
  *
  * @category accessors
  * @since 0.1.0
- * @slop
  */
 export const exitTag = <A, E>(exit: Exit.Exit<A, E>): ExitTag =>
   exit._tag === "Success" ? "Success" : Cause.hasInterruptsOnly(exit.cause) ? "Interrupt" : "Failure"
@@ -69,7 +67,6 @@ export const exitTag = <A, E>(exit: Exit.Exit<A, E>): ExitTag =>
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const observe = (instruments: {
   readonly timer: Metric.Histogram<Duration.Duration>
@@ -96,7 +93,6 @@ const exitTags = ["Success", "Failure", "Interrupt"] as const
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const dispatches = Metric.counter("flows_engine_dispatches", {
   description: "Durable action dispatches by exit outcome"
@@ -109,7 +105,6 @@ export const dispatches = Metric.counter("flows_engine_dispatches", {
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const dispatchDuration = Metric.timer("flows_engine_dispatch_duration", {
   description: "Durable action dispatch duration"
@@ -120,7 +115,6 @@ export const dispatchDuration = Metric.timer("flows_engine_dispatch_duration", {
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const dispatch = byOutcome(dispatches, {}, exitTags)
 
@@ -133,7 +127,6 @@ export const dispatch = byOutcome(dispatches, {}, exitTags)
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const schedulerAdmissions = Metric.counter("flows_engine_scheduler_admissions", {
   description: "Plan scheduler admission passes that launched at least one dispatch"
@@ -146,7 +139,6 @@ export const schedulerAdmissions = Metric.counter("flows_engine_scheduler_admiss
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const schedulerDispatchDuration = Metric.timer("flows_engine_scheduler_dispatch_duration", {
   description: "Duration of one scheduler dispatch, admission through terminal event"
@@ -159,7 +151,6 @@ export const schedulerDispatchDuration = Metric.timer("flows_engine_scheduler_di
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const schedulerNodes = Metric.counter("flows_engine_scheduler_nodes", {
   description: "Plan node settlements by evaluation outcome"
@@ -170,7 +161,6 @@ export const schedulerNodes = Metric.counter("flows_engine_scheduler_nodes", {
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const node = byOutcome(
   schedulerNodes,
@@ -185,7 +175,6 @@ export const node = byOutcome(
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const sandboxExecutions = Metric.counter("flows_engine_sandbox_executions", {
   description: "Isolated workspace executions by exit outcome"
@@ -196,7 +185,6 @@ export const sandboxExecutions = Metric.counter("flows_engine_sandbox_executions
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const sandboxExecution = byOutcome(sandboxExecutions, {}, exitTags)
 
@@ -205,7 +193,6 @@ export const sandboxExecution = byOutcome(sandboxExecutions, {}, exitTags)
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const sandboxExecutionDuration = Metric.timer("flows_engine_sandbox_execution_duration", {
   description: "Isolated workspace execution duration"
@@ -217,7 +204,6 @@ export const sandboxExecutionDuration = Metric.timer("flows_engine_sandbox_execu
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const sandboxMaterializations = Metric.counter("flows_engine_sandbox_materializations", {
   description: "Sandbox copy-back materializations by exit outcome"
@@ -228,7 +214,6 @@ export const sandboxMaterializations = Metric.counter("flows_engine_sandbox_mate
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const materialization = byOutcome(sandboxMaterializations, {}, exitTags)
 
@@ -237,7 +222,6 @@ export const materialization = byOutcome(sandboxMaterializations, {}, exitTags)
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const materializationDuration = Metric.timer("flows_engine_sandbox_materialization_duration", {
   description: "Sandbox copy-back materialization duration"
@@ -251,7 +235,6 @@ export const materializationDuration = Metric.timer("flows_engine_sandbox_materi
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const materializationConflicts = Metric.counter("flows_engine_sandbox_conflicts", {
   description: "Sandbox copy-back compare-and-set refusals"
@@ -265,7 +248,6 @@ export const materializationConflicts = Metric.counter("flows_engine_sandbox_con
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const boundarySettlements = Metric.counter("flows_engine_boundary_settlements", {
   description: "Step boundary settlements by outcome"
@@ -276,7 +258,6 @@ export const boundarySettlements = Metric.counter("flows_engine_boundary_settlem
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const boundarySettlement = byOutcome(
   boundarySettlements,
@@ -304,7 +285,6 @@ export const boundarySettlement = byOutcome(
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const stepCacheDecisions = Metric.counter("flows_engine_step_cache_decisions", {
   description: "Effective step-boundary cache decisions at the dispatch seam"
@@ -315,7 +295,6 @@ export const stepCacheDecisions = Metric.counter("flows_engine_step_cache_decisi
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const stepCacheDecision = byOutcome(
   stepCacheDecisions,
@@ -333,7 +312,6 @@ export const stepCacheDecision = byOutcome(
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const claims = Metric.counter("flows_engine_claims", {
   description: "Run driver claim-and-activate decisions by outcome"
@@ -344,7 +322,6 @@ export const claims = Metric.counter("flows_engine_claims", {
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const claim = byOutcome(
   claims,

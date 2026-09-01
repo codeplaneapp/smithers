@@ -23,7 +23,6 @@ import * as JournalRecords from "./JournalRecords.ts"
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type ResumeReason = "deferred" | "clock"
 
@@ -35,7 +34,6 @@ export type ResumeReason = "deferred" | "clock"
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Dependencies {
   readonly owner: Ownership.OwnerId
@@ -60,7 +58,6 @@ export interface Dependencies {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface DeferredDoneOptions {
   readonly flowName: string
@@ -75,7 +72,6 @@ export interface DeferredDoneOptions {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Service {
   readonly deferredResult: (
@@ -111,7 +107,6 @@ const clockKey = (row: DurableEngineState.ClockAddress): string =>
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type FireRetryPolicy = Schedule.Schedule<unknown, unknown>
 
@@ -128,7 +123,6 @@ export type FireRetryPolicy = Schedule.Schedule<unknown, unknown>
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const defaultFireRetryPolicy: FireRetryPolicy = Schedule.min([
   Schedule.exponential("100 millis"),
@@ -143,7 +137,6 @@ export const defaultFireRetryPolicy: FireRetryPolicy = Schedule.min([
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const make = (
   dependencies: Dependencies

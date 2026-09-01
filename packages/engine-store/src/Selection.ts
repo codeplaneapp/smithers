@@ -86,7 +86,6 @@ export const NonNegativeSafeInt = Schema.Int.check(
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const SuspectedEdge = Schema.Struct({
   /** The path glob changed files are matched against. */
@@ -106,7 +105,6 @@ export const SuspectedEdge = Schema.Struct({
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type SuspectedEdge = typeof SuspectedEdge.Type
 
@@ -117,7 +115,6 @@ export type SuspectedEdge = typeof SuspectedEdge.Type
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const BeliefSnapshot = Schema.Struct({
   pinnedAtMs: NonNegativeSafeInt,
@@ -129,7 +126,6 @@ export const BeliefSnapshot = Schema.Struct({
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type BeliefSnapshot = typeof BeliefSnapshot.Type
 
@@ -143,7 +139,6 @@ export type BeliefSnapshot = typeof BeliefSnapshot.Type
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const Verdict = Schema.Union([
   Schema.TaggedStruct("Admit", {}),
@@ -156,7 +151,6 @@ export const Verdict = Schema.Union([
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type Verdict = typeof Verdict.Type
 
@@ -165,7 +159,6 @@ export type Verdict = typeof Verdict.Type
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Policy {
   /**
@@ -182,7 +175,6 @@ export interface Policy {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Candidate {
   readonly nodeId: string
@@ -202,7 +194,6 @@ export interface Candidate {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Input {
   /** Paths this change touched, matched against edge scopes. */
@@ -227,7 +218,6 @@ export interface Input {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Selected {
   readonly nodeId: string
@@ -239,7 +229,6 @@ export interface Selected {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Service {
   readonly select: (input: Input) => Effect.Effect<ReadonlyArray<Selected>>
@@ -250,7 +239,6 @@ export interface Service {
  *
  * @since 0.1.0
  * @category services
- * @slop
  */
 export class Selection extends Context.Service<Selection, Service>()("@smthrs/engine-store/Selection") {}
 
@@ -263,7 +251,6 @@ export class Selection extends Context.Service<Selection, Service>()("@smthrs/en
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const make = (service: Service): Service => service
 
@@ -272,7 +259,6 @@ export const make = (service: Service): Service => service
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layer = (service: Service): Layer.Layer<Selection> => Layer.succeed(Selection, service)
 
@@ -284,7 +270,6 @@ export const layer = (service: Service): Layer.Layer<Selection> => Layer.succeed
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const makeNoop = (): Service => ({
   select: Effect.fn("Selection.select")((input) =>
@@ -299,7 +284,6 @@ export const makeNoop = (): Service => ({
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layerNoop: Layer.Layer<Selection> = Layer.sync(Selection, makeNoop)
 
@@ -345,7 +329,6 @@ const liveEdges = (beliefs: BeliefSnapshot, paths: ReadonlyArray<string>): Reado
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const makeHeuristic = (): Service => ({
   select: Effect.fn("Selection.select")((input) =>
@@ -388,7 +371,6 @@ export const makeHeuristic = (): Service => ({
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layerHeuristic: Layer.Layer<Selection> = Layer.sync(Selection, makeHeuristic)
 
@@ -400,7 +382,6 @@ export const layerHeuristic: Layer.Layer<Selection> = Layer.sync(Selection, make
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const DebtEntry = Schema.Struct({
   planId: Schema.NonEmptyString,
@@ -418,7 +399,6 @@ export const DebtEntry = Schema.Struct({
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type DebtEntry = typeof DebtEntry.Type
 
@@ -453,7 +433,6 @@ const decodeSettled = Schema.decodeUnknownOption(SettledPayload)
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface DebtOptions {
   readonly repaidBy?: ReadonlyArray<string> | undefined
@@ -480,7 +459,6 @@ export interface DebtOptions {
  *
  * @since 0.1.0
  * @category queries
- * @slop
  */
 export const debt = Effect.fn("Selection.debt")((runId: string, options?: DebtOptions) =>
   Effect.gen(function*() {
@@ -536,7 +514,6 @@ export const debt = Effect.fn("Selection.debt")((runId: string, options?: DebtOp
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Risk {
   readonly level: "low" | "medium" | "high"
@@ -549,7 +526,6 @@ export interface Risk {
  *
  * @since 0.1.0
  * @category combinators
- * @slop
  */
 export const risk = (input: {
   readonly changed: ReadonlyArray<string>
@@ -574,7 +550,6 @@ export const risk = (input: {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface CardInput {
   readonly settlements: ReadonlyArray<{ readonly nodeId: string; readonly outcome: string }>
@@ -593,7 +568,6 @@ export interface CardInput {
  *
  * @since 0.1.0
  * @category combinators
- * @slop
  */
 export const card = (input: CardInput): ReadonlyArray<string> => {
   const likelihoods = new Map(input.deferrals.map((deferral) => [deferral.nodeId, deferral.likelihood]))
@@ -626,7 +600,6 @@ export const card = (input: CardInput): ReadonlyArray<string> => {
  *
  * @since 0.1.0
  * @category combinators
- * @slop
  */
 export const proposeReadSet = (input: {
   readonly beliefs: BeliefSnapshot

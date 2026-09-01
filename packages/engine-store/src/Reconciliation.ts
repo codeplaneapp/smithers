@@ -36,7 +36,6 @@ import * as Schema from "effect/Schema"
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const Deviation = Schema.Struct({
   nodeId: Schema.NonEmptyString,
@@ -60,7 +59,6 @@ export const Deviation = Schema.Struct({
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type Deviation = typeof Deviation.Type
 
@@ -70,7 +68,6 @@ export type Deviation = typeof Deviation.Type
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const Conflict = Schema.Struct({
   nodeId: Schema.NonEmptyString,
@@ -88,7 +85,6 @@ export const Conflict = Schema.Struct({
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type Conflict = typeof Conflict.Type
 
@@ -97,7 +93,6 @@ export type Conflict = typeof Conflict.Type
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const Verdict = Schema.Union([
   Schema.TaggedStruct("Fail", { reason: Schema.String }),
@@ -110,7 +105,6 @@ export const Verdict = Schema.Union([
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type Verdict = typeof Verdict.Type
 
@@ -119,7 +113,6 @@ export type Verdict = typeof Verdict.Type
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Service {
   readonly onDeviation: (deviation: Deviation) => Effect.Effect<Verdict>
@@ -131,7 +124,6 @@ export interface Service {
  *
  * @since 0.1.0
  * @category services
- * @slop
  */
 export class Reconciliation extends Context.Service<Reconciliation, Service>()("@smthrs/engine-store/Reconciliation") {}
 
@@ -144,7 +136,6 @@ export class Reconciliation extends Context.Service<Reconciliation, Service>()("
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const make = (service: Service): Service => service
 
@@ -154,7 +145,6 @@ export const make = (service: Service): Service => service
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layer = (service: Service): Layer.Layer<Reconciliation> => Layer.succeed(Reconciliation, service)
 
@@ -178,7 +168,6 @@ export const layer = (service: Service): Layer.Layer<Reconciliation> => Layer.su
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const makeDefault = (): Service => ({
   onDeviation: Effect.fn("Reconciliation.onDeviation")((deviation) => {
@@ -228,6 +217,5 @@ export const makeDefault = (): Service => ({
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layerDefault: Layer.Layer<Reconciliation> = Layer.sync(Reconciliation, makeDefault)

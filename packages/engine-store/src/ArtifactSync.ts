@@ -47,7 +47,6 @@ import * as Schema from "effect/Schema"
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class ArtifactPublicationFailed extends Schema.TaggedError<ArtifactPublicationFailed>()(
   "@smthrs/engine-store/ArtifactPublicationFailed",
@@ -96,7 +95,6 @@ export type DownloadPolicy = RemoteArtifacts.DownloadPolicy
  *
  * @since 0.1.0
  * @category services
- * @slop
  */
 export interface Service {
   /**
@@ -126,7 +124,6 @@ export interface Service {
  *
  * @since 0.1.0
  * @category services
- * @slop
  */
 export class ArtifactSync extends Context.Service<ArtifactSync, Service>()("@smthrs/engine-store/ArtifactSync") {}
 
@@ -140,7 +137,6 @@ export class ArtifactSync extends Context.Service<ArtifactSync, Service>()("@smt
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const makeLocal = (): Service => ({
   publish: Effect.fn("ArtifactSync.publish")(() => Effect.void),
@@ -152,7 +148,6 @@ export const makeLocal = (): Service => ({
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layerLocal: Layer.Layer<ArtifactSync> = Layer.succeed(ArtifactSync)(makeLocal())
 
@@ -161,7 +156,6 @@ export const layerLocal: Layer.Layer<ArtifactSync> = Layer.succeed(ArtifactSync)
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const make = (options: {
   readonly local: ArtifactStore.Service
@@ -253,7 +247,6 @@ export const make = (options: {
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layer = <E, R>(
   remote: Effect.Effect<ArtifactStore.Service, E, R>,

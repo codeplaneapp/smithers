@@ -52,7 +52,6 @@ import * as ArtifactRoots from "./internal/ArtifactRoots.ts"
  *
  * @since 0.1.0
  * @category constants
- * @slop
  */
 export const databaseFileName = "store.sqlite3"
 
@@ -62,7 +61,6 @@ export const databaseFileName = "store.sqlite3"
  *
  * @since 0.1.0
  * @category constants
- * @slop
  */
 export const manifestFileName = "manifest.json"
 
@@ -72,7 +70,6 @@ export const manifestFileName = "manifest.json"
  *
  * @since 0.1.0
  * @category constants
- * @slop
  */
 export const objectsDirectoryName = "objects"
 
@@ -82,7 +79,6 @@ export const objectsDirectoryName = "objects"
  *
  * @since 0.1.0
  * @category constants
- * @slop
  */
 export const restoredMarkerFileName = "restored.json"
 
@@ -100,7 +96,6 @@ export const defaultMaxFileSizeBytes = 512 * 1024 * 1024
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const AppliedMigration = Schema.Struct({
   migrationId: Schema.Number,
@@ -112,7 +107,6 @@ export const AppliedMigration = Schema.Struct({
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type AppliedMigration = typeof AppliedMigration.Type
 
@@ -122,7 +116,6 @@ export type AppliedMigration = typeof AppliedMigration.Type
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const ArtifactEntry = Schema.Struct({
   digest: Sha256.Digest,
@@ -134,7 +127,6 @@ export const ArtifactEntry = Schema.Struct({
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type ArtifactEntry = typeof ArtifactEntry.Type
 
@@ -144,7 +136,6 @@ export type ArtifactEntry = typeof ArtifactEntry.Type
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const BackupManifest = Schema.Struct({
   formatVersion: Schema.Literal(1),
@@ -163,7 +154,6 @@ export const BackupManifest = Schema.Struct({
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type BackupManifest = typeof BackupManifest.Type
 
@@ -175,7 +165,6 @@ const ManifestFromJsonString = Schema.fromJsonString(BackupManifest)
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export const DisasterRecoveryErrorCode = Schema.Literals([
   "not_empty",
@@ -194,7 +183,6 @@ export const DisasterRecoveryErrorCode = Schema.Literals([
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export type DisasterRecoveryErrorCode = typeof DisasterRecoveryErrorCode.Type
 
@@ -205,7 +193,6 @@ export type DisasterRecoveryErrorCode = typeof DisasterRecoveryErrorCode.Type
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class DisasterRecoveryError extends Schema.TaggedError<DisasterRecoveryError>()(
   "@smthrs/engine-store/DisasterRecoveryError",
@@ -222,7 +209,6 @@ export class DisasterRecoveryError extends Schema.TaggedError<DisasterRecoveryEr
  *
  * @since 1.0.0
  * @category models
- * @slop
  */
 export interface FileSizeOptions {
   /**
@@ -237,7 +223,6 @@ export interface FileSizeOptions {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface BackupOptions<R = never, E = never> extends FileSizeOptions {
   /** The directory the backup is written into. Created when absent; must be empty when present. */
@@ -261,7 +246,6 @@ export interface BackupOptions<R = never, E = never> extends FileSizeOptions {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface RestoreOptions extends FileSizeOptions {
   /** The directory a previous {@link backup} wrote. */
@@ -276,7 +260,6 @@ export interface RestoreOptions extends FileSizeOptions {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface RestoreAndFenceOptions<R = never, E = never> extends RestoreOptions {
   /**
@@ -293,7 +276,6 @@ export interface RestoreAndFenceOptions<R = never, E = never> extends RestoreOpt
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface RestoredStore {
   readonly databaseFile: string
@@ -307,7 +289,6 @@ export interface RestoredStore {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface FencedRestoredStore extends RestoredStore {
   readonly fence: FenceSummary
@@ -318,7 +299,6 @@ export interface FencedRestoredStore extends RestoredStore {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface FenceSummary {
   /** Runs whose pending claim columns were cleared. */
@@ -533,7 +513,6 @@ const checkedFile = (
  *
  * @since 0.1.0
  * @category operations
- * @slop
  */
 export const backup = <R = never, E = never>(
   options: BackupOptions<R, E>
@@ -649,7 +628,6 @@ export const backup = <R = never, E = never>(
  *
  * @since 0.1.0
  * @category operations
- * @slop
  */
 export const verify = Effect.fn("DisasterRecovery.verify")(function*(
   backupDirectory: string,
@@ -690,7 +668,6 @@ export const verify = Effect.fn("DisasterRecovery.verify")(function*(
  *
  * @since 0.1.0
  * @category operations
- * @slop
  */
 export const restore = Effect.fn("DisasterRecovery.restore")(function*(options: RestoreOptions) {
   const fs = yield* FileSystem.FileSystem
@@ -767,7 +744,6 @@ export const restore = Effect.fn("DisasterRecovery.restore")(function*(options: 
  *
  * @since 0.1.0
  * @category operations
- * @slop
  */
 export const fence = Effect.fn("DisasterRecovery.fence")(function*(manifest: BackupManifest) {
   const sql = yield* Effect.service(SqlClient.SqlClient)
@@ -831,7 +807,6 @@ export const fence = Effect.fn("DisasterRecovery.fence")(function*(manifest: Bac
  *
  * @since 0.1.0
  * @category operations
- * @slop
  */
 export const restoreAndFence = <R = never, E = never>(
   options: RestoreAndFenceOptions<R, E>

@@ -20,7 +20,6 @@ import { Cause, Deferred, Effect, Exit, Fiber, FiberSet, type Scope } from "effe
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface RunCoordinator<Key, E> {
   /**
@@ -65,7 +64,6 @@ type Entry<E> = {
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const make = <Key, E, R>(options: {
   readonly drain: (key: Key) => Effect.Effect<void, E, R>

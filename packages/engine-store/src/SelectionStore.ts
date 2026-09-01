@@ -34,7 +34,6 @@ import * as Selection from "./Selection.ts"
  *
  * @category schemas
  * @since 0.1.0
- * @slop
  */
 export const TrainingOutcome = Schema.Literals(["hit", "miss"])
 
@@ -43,7 +42,6 @@ export const TrainingOutcome = Schema.Literals(["hit", "miss"])
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type TrainingOutcome = typeof TrainingOutcome.Type
 
@@ -52,7 +50,6 @@ export type TrainingOutcome = typeof TrainingOutcome.Type
  *
  * @category schemas
  * @since 0.1.0
- * @slop
  */
 export const TrainingObservation = Schema.Struct({
   scope: Schema.NonEmptyString,
@@ -65,7 +62,6 @@ export const TrainingObservation = Schema.Struct({
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type TrainingObservation = typeof TrainingObservation.Type
 
@@ -116,7 +112,6 @@ export class SelectionStoreError extends Schema.TaggedError<SelectionStoreError>
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Service {
   readonly upsert: (
@@ -134,7 +129,6 @@ export interface Service {
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export class SelectionStore extends Context.Service<SelectionStore, Service>()(
   "@smthrs/engine-store/SelectionStore"
@@ -244,7 +238,6 @@ export const maxEvidenceEntries = 128
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
@@ -353,7 +346,6 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer: Layer.Layer<SelectionStore, never, DurableWriter | SqlClient.SqlClient> = Layer.effect(
   SelectionStore

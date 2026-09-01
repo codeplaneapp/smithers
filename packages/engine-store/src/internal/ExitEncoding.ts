@@ -59,7 +59,6 @@ const { isNativeError, isProxy } = HostReflection.host
  *
  * @since 0.1.0
  * @category constants
- * @slop
  */
 export const projectionTag = "flows/engine-store/UnencodableResult"
 
@@ -72,7 +71,6 @@ export const projectionTag = "flows/engine-store/UnencodableResult"
  *
  * @since 0.1.0
  * @category constants
- * @slop
  */
 export const maxCauseDepth = 4
 
@@ -81,7 +79,6 @@ export const maxCauseDepth = 4
  *
  * @since 0.1.0
  * @category constants
- * @slop
  */
 export const maxStackLines = 4
 
@@ -90,7 +87,6 @@ export const maxStackLines = 4
  *
  * @since 0.1.0
  * @category constants
- * @slop
  */
 export const maxTextLength = 1024
 
@@ -118,7 +114,6 @@ export const maxProjectionBytes = 64 * 1024
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface ValueProjection {
   readonly type: string
@@ -134,7 +129,6 @@ export interface ValueProjection {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface ReasonProjection {
   readonly _tag: "Fail" | "Die" | "Interrupt"
@@ -147,7 +141,6 @@ export interface ReasonProjection {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface ResultProjection {
   readonly _tag: typeof projectionTag
@@ -167,7 +160,6 @@ export interface ResultProjection {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface EncodedResult {
   readonly encoded: unknown
@@ -224,7 +216,6 @@ const exitArguments = "~effect/Effect/args"
  *
  * @since 0.1.0
  * @category conversions
- * @slop
  */
 export const projectValue = (value: unknown, depth = 0, seen = new WeakSet<object>()): ValueProjection => {
   if (value === null || typeof value !== "object") {
@@ -295,7 +286,6 @@ const projectReason = (reason: Cause.Reason<unknown>): ReasonProjection => {
  *
  * @since 0.1.0
  * @category conversions
- * @slop
  */
 export const projectCause = (
   cause: Cause.Cause<unknown> | undefined
@@ -343,7 +333,6 @@ const withinBudget = (projection: ResultProjection): ResultProjection => {
  *
  * @since 0.1.0
  * @category conversions
- * @slop
  */
 export const projectResult = (
   result: Flow.Result<unknown, unknown>,
@@ -428,7 +417,6 @@ const degrade = (result: Flow.Result<unknown, unknown>, projection: ResultProjec
  *
  * @since 0.1.0
  * @category conversions
- * @slop
  */
 export const encode = (
   flow: Flow.Any,

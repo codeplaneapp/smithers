@@ -34,7 +34,6 @@ import * as JournalRecords from "./internal/JournalRecords.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type InconsistencyVerdict = "fail" | "tolerate"
 
@@ -44,7 +43,6 @@ export type InconsistencyVerdict = "fail" | "tolerate"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface CacheConflict {
   readonly key: string
@@ -61,7 +59,6 @@ export interface CacheConflict {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface BlobCorruption {
   /** The run that observed the corruption; the journaling target. */
@@ -83,7 +80,6 @@ export interface BlobCorruption {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Service {
   readonly note: (event: CacheConflict) => Effect.Effect<InconsistencyVerdict, Journal.JournalError>
@@ -100,7 +96,6 @@ export interface Service {
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export class Inconsistency extends Context.Service<Inconsistency, Service>()("@smthrs/engine-store/Inconsistency") {}
 
@@ -109,7 +104,6 @@ export class Inconsistency extends Context.Service<Inconsistency, Service>()("@s
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly journal: Journal.Service
@@ -132,7 +126,6 @@ export interface MakeOptions {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: MakeOptions): Service => ({
   note: Effect.fn("Inconsistency.note")((event) =>
@@ -211,7 +204,6 @@ export const make = (options: MakeOptions): Service => ({
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const makeNoop = (overrides: Partial<Service> = {}): Service => ({
   note: Effect.fn("Inconsistency.note")(() => Effect.succeed("tolerate" as const)),
@@ -224,7 +216,6 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service => ({
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerNoop = (overrides: Partial<Service> = {}): Layer.Layer<Inconsistency> =>
   Layer.succeed(Inconsistency)(makeNoop(overrides))
@@ -236,7 +227,6 @@ export const layerNoop = (overrides: Partial<Service> = {}): Layer.Layer<Inconsi
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerStrict = (owner: Ownership.OwnerId): Layer.Layer<Inconsistency, never, Journal.Journal> =>
   Layer.effect(Inconsistency)(
@@ -252,7 +242,6 @@ export const layerStrict = (owner: Ownership.OwnerId): Layer.Layer<Inconsistency
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerTolerant = (owner: Ownership.OwnerId): Layer.Layer<Inconsistency, never, Journal.Journal> =>
   Layer.effect(Inconsistency)(

@@ -50,7 +50,6 @@ import * as ArtifactRoots from "./internal/ArtifactRoots.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const ArtifactGcErrorCode = Schema.Literals(["invalid_options", "mark_failed", "sweep_failed"])
 
@@ -59,7 +58,6 @@ export const ArtifactGcErrorCode = Schema.Literals(["invalid_options", "mark_fai
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type ArtifactGcErrorCode = typeof ArtifactGcErrorCode.Type
 
@@ -71,7 +69,6 @@ export type ArtifactGcErrorCode = typeof ArtifactGcErrorCode.Type
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class ArtifactGcError extends Schema.TaggedError<ArtifactGcError>()(
   "@smthrs/engine-store/ArtifactGcError",
@@ -88,7 +85,6 @@ export class ArtifactGcError extends Schema.TaggedError<ArtifactGcError>()(
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Policy {
   /** Grace bound applied when a `gc()` call does not name one. */
@@ -106,7 +102,6 @@ export interface Policy {
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export class ArtifactGcPolicy extends Context.Service<ArtifactGcPolicy, Policy>()(
   "@smthrs/engine-store/ArtifactGcPolicy"
@@ -117,7 +112,6 @@ export class ArtifactGcPolicy extends Context.Service<ArtifactGcPolicy, Policy>(
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerPolicy = (policy: Policy): Layer.Layer<ArtifactGcPolicy> => Layer.succeed(ArtifactGcPolicy)(policy)
 
@@ -126,7 +120,6 @@ export const layerPolicy = (policy: Policy): Layer.Layer<ArtifactGcPolicy> => La
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface GcOptions {
   /**
@@ -146,7 +139,6 @@ export interface GcOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface GcReport {
   /** Blobs the inventory enumerated. */
@@ -167,7 +159,6 @@ export interface GcReport {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Service {
   /**
@@ -183,7 +174,6 @@ export interface Service {
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export class ArtifactGc extends Context.Service<ArtifactGc, Service>()("@smthrs/engine-store/ArtifactGc") {}
 
@@ -195,7 +185,6 @@ export class ArtifactGc extends Context.Service<ArtifactGc, Service>()("@smthrs/
  *
  * @category constants
  * @since 0.1.0
- * @slop
  */
 export const defaultGraceMs = 14 * 24 * 60 * 60 * 1000
 
@@ -204,7 +193,6 @@ export const defaultGraceMs = 14 * 24 * 60 * 60 * 1000
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   /** Rows per mark-phase page. Defaults to 500. */
@@ -260,7 +248,6 @@ const checkpointDigests = (checkpointJson: string | null): Effect.Effect<Readonl
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (
   options: MakeOptions = {}
@@ -392,7 +379,6 @@ export const make = (
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer = (
   options: MakeOptions = {}

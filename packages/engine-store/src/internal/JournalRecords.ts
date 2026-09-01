@@ -16,7 +16,6 @@ import * as Effect from "effect/Effect"
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface EventOptions {
   readonly runId: string
@@ -70,7 +69,6 @@ const event = (options: EventOptions, eventType: string, payload: unknown): Jour
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const runDecision = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.run-decision", payload)
@@ -80,7 +78,6 @@ export const runDecision = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const attemptStarted = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.attempt-started", payload)
@@ -90,7 +87,6 @@ export const attemptStarted = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const attemptFinished = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.attempt-finished", payload)
@@ -101,7 +97,6 @@ export const attemptFinished = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const deferredCompleted = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.deferred-completed", payload)
@@ -112,7 +107,6 @@ export const deferredCompleted = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const clockScheduled = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.clock-scheduled", payload)
@@ -123,7 +117,6 @@ export const clockScheduled = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const interrupted = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.interrupted", payload)
@@ -134,7 +127,6 @@ export const interrupted = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const snapshotIdentified = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.snapshot-identified", payload)
@@ -145,7 +137,6 @@ export const snapshotIdentified = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const hardViolation = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.hard-violation", payload)
@@ -156,7 +147,6 @@ export const hardViolation = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const expectedSetDeviation = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.expected-set-deviation", payload)
@@ -174,7 +164,6 @@ export const expectedSetDeviation = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const diffBundleCaptured = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.diff-bundle-captured", payload)
@@ -186,7 +175,6 @@ export const diffBundleCaptured = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const copyBackSettled = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.copy-back-settled", payload)
@@ -198,7 +186,6 @@ export const copyBackSettled = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const planRecorded = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.plan-recorded", payload)
@@ -209,7 +196,6 @@ export const planRecorded = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const subgraphAppended = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.subgraph-appended", payload)
@@ -221,7 +207,6 @@ export const subgraphAppended = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const nodeScheduled = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.node-scheduled", payload)
@@ -238,7 +223,6 @@ export const nodeScheduled = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const nodeSettled = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.node-settled", payload)
@@ -250,7 +234,6 @@ export const nodeSettled = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const nodeInvalidated = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.node-invalidated", payload)
@@ -260,7 +243,6 @@ export const nodeInvalidated = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const nodeReconciled = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.node-reconciled", payload)
@@ -272,7 +254,6 @@ export const nodeReconciled = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const selectionDeferred = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.selection-deferred", payload)
@@ -283,7 +264,6 @@ export const selectionDeferred = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const selectionProposed = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.selection-proposed", payload)
@@ -294,7 +274,6 @@ export const selectionProposed = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const selectionOverridden = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.selection-overridden", payload)
@@ -307,7 +286,6 @@ export const selectionOverridden = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const selectionInconsistent = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.selection-inconsistent", payload)
@@ -318,7 +296,6 @@ export const selectionInconsistent = (options: EventOptions, payload: unknown) =
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const cacheProvenance = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.cache-provenance", payload)
@@ -328,7 +305,6 @@ export const cacheProvenance = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const cacheConflict = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.cache-conflict", payload)
@@ -338,7 +314,6 @@ export const cacheConflict = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category events
- * @slop
  */
 export const cacheCorruption = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.cache-corruption", payload)
@@ -348,7 +323,6 @@ export const cacheCorruption = (options: EventOptions, payload: unknown) =>
  *
  * @since 0.1.0
  * @category queries
- * @slop
  */
 export const entries = (runId: string, after: number | undefined, limit: number) =>
   Effect.flatMap(

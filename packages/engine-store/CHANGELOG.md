@@ -6,6 +6,11 @@
 
 ### Release notes
 
+> **Issue links.** This package was imported from the `smithersai/flows`
+> repository, so the issue numbers cited below resolve there. Issues opened
+> since the import resolve in `smithersai/smithers`, which `package.json`
+> names as this package's repository.
+
 > **Databases.** Smithers 1.0.0-rc.0 stores run state in local SQLite only (`@effect/sql-sqlite-node` over Node.js `node:sqlite`). PostgreSQL and PGlite are not supported: no client layer or migration ladder ships, `SMITHERS_BACKEND=pglite|postgres` and `--backend pglite|postgres` exit with `unsupported_database`, and the 0.x `smithers migrate --to` database move is removed. Projects that ran 0.x on PGlite or PostgreSQL must finish or discard their runs on 0.x; there is no import path.
 
 ### Added
@@ -29,6 +34,12 @@
   bind checkpoint operations to the configured repository workspace.
 - Derived workspace-revision and bundle-identity strings from domain-tagged
   canonical JSON. Their persisted values now change.
+- Removed the internal `@slop` review markers from every published JSDoc block.
+  They shipped in `src/**/*.ts` and the generated declarations, so a consumer's
+  editor hover showed a repository to-do instead of the contract.
+- Repointed every JSDoc design reference at its published `docs/pages`
+  successor. The imported `docs/specs` tree does not exist in this repository,
+  so each pointer named a file no reader could open.
 
 ### Fixed
 

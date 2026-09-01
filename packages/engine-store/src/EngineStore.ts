@@ -42,7 +42,6 @@ import * as WorkspaceSandbox from "./WorkspaceSandbox.ts"
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Options {
   readonly owner: {
@@ -108,7 +107,6 @@ const isBoundaryMetadata = Schema.is(FileBoundary)
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 const makeWithEngineJj = (
   options: Options
@@ -338,7 +336,6 @@ const makeWithEngineJj = (
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const make = (
   options: Options
@@ -355,7 +352,6 @@ export const make = (
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 const layerBase = (
   options: Options
@@ -403,7 +399,6 @@ const layerBase = (
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layer = (
   options: Options

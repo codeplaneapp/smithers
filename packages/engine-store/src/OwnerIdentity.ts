@@ -24,7 +24,6 @@ import * as Random from "effect/Random"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Service {
   /**
@@ -40,7 +39,6 @@ export interface Service {
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export class OwnerIdentity extends Context.Service<OwnerIdentity, Service>()("@smthrs/engine-store/OwnerIdentity") {}
 
@@ -49,7 +47,6 @@ export class OwnerIdentity extends Context.Service<OwnerIdentity, Service>()("@s
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (service: Service): Service => OwnerIdentity.of(service)
 
@@ -85,7 +82,6 @@ const hostProcessId = (): number | undefined =>
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const makeIncarnation = (pid: number | undefined, crypto: Crypto.Crypto): Service => {
   const incarnationId: Effect.Effect<number> = pid === undefined
@@ -110,7 +106,6 @@ export const makeIncarnation = (pid: number | undefined, crypto: Crypto.Crypto):
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer: Layer.Layer<OwnerIdentity, never, Crypto.Crypto> = Layer.effect(
   OwnerIdentity,
@@ -124,7 +119,6 @@ export const layer: Layer.Layer<OwnerIdentity, never, Crypto.Crypto> = Layer.eff
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerConstant = (owner: OwnerId): Layer.Layer<OwnerIdentity> =>
   Layer.succeed(OwnerIdentity)(make({ ownerId: () => Effect.succeed(owner) }))

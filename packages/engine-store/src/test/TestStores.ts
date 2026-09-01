@@ -85,7 +85,6 @@ export const layer = (options?: TestStoresOptions) =>
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const databaseAt = (filename: string) =>
   Layer.provideMerge(
@@ -108,7 +107,6 @@ export const databaseAt = (filename: string) =>
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerAt = (filename: string, options?: TestStoresOptions) =>
   Layer.mergeAll(

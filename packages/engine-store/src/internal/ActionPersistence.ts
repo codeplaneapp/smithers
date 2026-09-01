@@ -46,7 +46,6 @@ import * as SandboxedExecution from "./SandboxedExecution.ts"
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type BoundaryMetadata = FileBoundary
 
@@ -61,7 +60,6 @@ export type BoundaryMetadata = FileBoundary
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface ActionInput {
   readonly action: unknown
@@ -86,7 +84,6 @@ export interface ActionInput {
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class AttemptSuspended extends Schema.TaggedError<AttemptSuspended>()(
   "@smthrs/engine-store/AttemptSuspended",
@@ -107,7 +104,6 @@ export class AttemptSuspended extends Schema.TaggedError<AttemptSuspended>()(
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class AttemptAdmissionRejected extends Schema.TaggedError<AttemptAdmissionRejected>()(
   "@smthrs/engine-store/AttemptAdmissionRejected",
@@ -128,7 +124,6 @@ export class AttemptAdmissionRejected extends Schema.TaggedError<AttemptAdmissio
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class CacheConflictDetected extends Schema.TaggedError<CacheConflictDetected>()(
   "@smthrs/engine-store/CacheConflictDetected",
@@ -148,7 +143,6 @@ export class CacheConflictDetected extends Schema.TaggedError<CacheConflictDetec
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class CacheCorruptionDetected extends Schema.TaggedError<CacheCorruptionDetected>()(
   "@smthrs/engine-store/CacheCorruptionDetected",
@@ -177,7 +171,6 @@ export class CacheCorruptionDetected extends Schema.TaggedError<CacheCorruptionD
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class AttemptEvidenceQuarantined extends Schema.TaggedError<AttemptEvidenceQuarantined>()(
   "@smthrs/engine-store/AttemptEvidenceQuarantined",
@@ -198,7 +191,6 @@ export class AttemptEvidenceQuarantined extends Schema.TaggedError<AttemptEviden
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export const evidenceQuarantined = (
   cause: Cause.Cause<unknown>
@@ -290,7 +282,6 @@ const settlementViolated = (cause: Cause.Cause<unknown>): boolean =>
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Dependencies {
   readonly runId: string
@@ -469,7 +460,6 @@ const declaredCachePolicy = (action: unknown): CacheEnvironment.CachePolicy | un
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const make = (deps: Dependencies) => {
   const admission = deps.admission ?? AttemptAdmission.makeUnsafe()

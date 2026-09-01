@@ -47,7 +47,6 @@ import * as Option from "effect/Option"
  *
  * @since 0.1.0
  * @category services
- * @slop
  */
 export interface Service {
   /**
@@ -69,7 +68,6 @@ export interface Service {
  *
  * @since 0.1.0
  * @category services
- * @slop
  */
 export class CacheSync extends Context.Service<CacheSync, Service>()("@smthrs/engine-store/CacheSync") {}
 
@@ -83,7 +81,6 @@ export class CacheSync extends Context.Service<CacheSync, Service>()("@smthrs/en
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const makeLocal = (): Service => ({
   publishEntry: Effect.fn("CacheSync.publishEntry")(() => Effect.succeed(Option.none()))
@@ -94,7 +91,6 @@ export const makeLocal = (): Service => ({
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layerLocal: Layer.Layer<CacheSync> = Layer.succeed(CacheSync)(makeLocal())
 
@@ -104,7 +100,6 @@ export const layerLocal: Layer.Layer<CacheSync> = Layer.succeed(CacheSync)(makeL
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const make = (options: { readonly remote: CacheStore.Service }): Service => ({
   publishEntry: Effect.fn("CacheSync.publishEntry")((entry: CacheStore.CacheEntry) =>
@@ -129,7 +124,6 @@ export const make = (options: { readonly remote: CacheStore.Service }): Service 
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layer = <E, R>(
   remote: Effect.Effect<CacheStore.Service, E, R>

@@ -65,7 +65,6 @@ export class FileEnumerationError extends Schema.TaggedError<FileEnumerationErro
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface EnumerationOptions {
   /**
@@ -170,7 +169,6 @@ const enumerateUnder = (
  *
  * @since 0.1.0
  * @category accessors
- * @slop
  */
 export const filesUnder = (
   fs: FileSystem.FileSystem,
@@ -191,7 +189,6 @@ export const filesUnder = (
  *
  * @since 0.1.0
  * @category accessors
- * @slop
  */
 export const entriesUnder = (
   fs: FileSystem.FileSystem,
@@ -212,7 +209,6 @@ export const entriesUnder = (
  *
  * @since 0.1.0
  * @category accessors
- * @slop
  */
 export const staticPrefix = (pattern: string): string => {
   const segments = pattern.replaceAll("\\", "/").split("/")
@@ -231,7 +227,6 @@ export const staticPrefix = (pattern: string): string => {
  *
  * @since 0.1.0
  * @category accessors
- * @slop
  */
 export const expandGlob = (
   fs: FileSystem.FileSystem,

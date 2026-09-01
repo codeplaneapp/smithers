@@ -32,7 +32,6 @@ const PositiveSafeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const OnParentExit = Schema.Literals(["cancel", "detach"])
 
@@ -41,7 +40,6 @@ export const OnParentExit = Schema.Literals(["cancel", "detach"])
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type OnParentExit = typeof OnParentExit.Type
 
@@ -57,7 +55,6 @@ export type OnParentExit = typeof OnParentExit.Type
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const RunState = Schema.Struct({
   version: Schema.Literal(1),
@@ -77,6 +74,5 @@ export const RunState = Schema.Struct({
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type RunState = typeof RunState.Type

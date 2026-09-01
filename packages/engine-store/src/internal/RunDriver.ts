@@ -48,7 +48,6 @@ const RunStateJson = Schema.fromJsonString(RunState)
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export const FlowCycleDetected = FlowRuntime.FlowCycleDetected
 
@@ -57,7 +56,6 @@ export const FlowCycleDetected = FlowRuntime.FlowCycleDetected
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export type FlowCycleDetected = FlowRuntime.FlowCycleDetected
 
@@ -66,7 +64,6 @@ export type FlowCycleDetected = FlowRuntime.FlowCycleDetected
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Dependencies {
   readonly owner: Ownership.OwnerId
@@ -109,7 +106,6 @@ export interface Dependencies {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Service {
   readonly register: FlowEngine.Encoded["register"]
@@ -147,7 +143,6 @@ interface Registration {
  *
  * @since 0.1.0
  * @category constants
- * @slop
  */
 export const spawnEffectKind = "flows/engine-store/child-spawn"
 
@@ -260,7 +255,6 @@ const withoutResult = (state: RunState): RunState => {
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const make = (
   dependencies: Dependencies

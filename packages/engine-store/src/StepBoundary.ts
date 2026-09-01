@@ -32,7 +32,6 @@ import { compareText } from "./internal/Ordering.ts"
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const PreparedBoundary = Schema.Struct({
   descriptor: FileBoundary,
@@ -50,7 +49,6 @@ export const PreparedBoundary = Schema.Struct({
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type PreparedBoundary = typeof PreparedBoundary.Type
 
@@ -59,7 +57,6 @@ export type PreparedBoundary = typeof PreparedBoundary.Type
  *
  * @category accessors
  * @since 0.1.0
- * @slop
  */
 export const exactReads = (descriptor: FileBoundary): ReadonlyArray<FileInput> =>
   descriptor.readSet.filter((entry): entry is FileInput => !FileSet.isGlob(entry))
@@ -74,7 +71,6 @@ export const exactReads = (descriptor: FileBoundary): ReadonlyArray<FileInput> =
  *
  * @since 0.1.0
  * @category predicates
- * @slop
  */
 export const readSetMatches = (prepared: PreparedBoundary): boolean =>
   prepared.descriptor.readSet.every((entry) =>
@@ -93,7 +89,6 @@ export const readSetMatches = (prepared: PreparedBoundary): boolean =>
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const ExpectedSetDeviation = Schema.TaggedStruct("ExpectedSetDeviation", {
   paths: Schema.Array(Schema.String),
@@ -117,7 +112,6 @@ export const ExpectedSetDeviation = Schema.TaggedStruct("ExpectedSetDeviation", 
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const MissingOutputDeviation = Schema.TaggedStruct("MissingDeclaredOutput", {
   paths: Schema.Array(Schema.String),
@@ -136,7 +130,6 @@ export const MissingOutputDeviation = Schema.TaggedStruct("MissingDeclaredOutput
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const SurvivingRemovalDeviation = Schema.TaggedStruct("SurvivingDeclaredRemoval", {
   paths: Schema.Array(Schema.String),
@@ -148,7 +141,6 @@ export const SurvivingRemovalDeviation = Schema.TaggedStruct("SurvivingDeclaredR
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const BoundaryDeviation = Schema.Union([ExpectedSetDeviation, MissingOutputDeviation, SurvivingRemovalDeviation])
 
@@ -157,7 +149,6 @@ export const BoundaryDeviation = Schema.Union([ExpectedSetDeviation, MissingOutp
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type BoundaryDeviation = typeof BoundaryDeviation.Type
 
@@ -174,7 +165,6 @@ export type BoundaryDeviation = typeof BoundaryDeviation.Type
  *
  * @since 0.1.0
  * @category schemas
- * @slop
  */
 export const BoundaryEvidence = Schema.Struct({
   declaredOutputs: Schema.Unknown,
@@ -196,7 +186,6 @@ export const BoundaryEvidence = Schema.Struct({
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type BoundaryEvidence = typeof BoundaryEvidence.Type
 
@@ -210,7 +199,6 @@ export type BoundaryEvidence = typeof BoundaryEvidence.Type
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class UndeclaredWrite extends Schema.TaggedError<UndeclaredWrite>()(
   "@smthrs/engine-store/UndeclaredWrite",
@@ -237,7 +225,6 @@ export class UndeclaredWrite extends Schema.TaggedError<UndeclaredWrite>()(
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class MissingDeclaredOutput extends Schema.TaggedError<MissingDeclaredOutput>()(
   "@smthrs/engine-store/MissingDeclaredOutput",
@@ -258,7 +245,6 @@ export class MissingDeclaredOutput extends Schema.TaggedError<MissingDeclaredOut
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class SurvivingDeclaredRemoval extends Schema.TaggedError<SurvivingDeclaredRemoval>()(
   "@smthrs/engine-store/SurvivingDeclaredRemoval",
@@ -280,7 +266,6 @@ export class SurvivingDeclaredRemoval extends Schema.TaggedError<SurvivingDeclar
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class UnsupportedBoundary extends Schema.TaggedError<UnsupportedBoundary>()(
   "@smthrs/engine-store/UnsupportedBoundary",
@@ -305,7 +290,6 @@ export class UnsupportedBoundary extends Schema.TaggedError<UnsupportedBoundary>
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class BoundaryCorruption extends Schema.TaggedError<BoundaryCorruption>()(
   "@smthrs/engine-store/BoundaryCorruption",
@@ -327,7 +311,6 @@ export class BoundaryCorruption extends Schema.TaggedError<BoundaryCorruption>()
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class MissingArtifact extends Schema.TaggedError<MissingArtifact>()(
   "@smthrs/engine-store/MissingArtifact",
@@ -349,7 +332,6 @@ export class MissingArtifact extends Schema.TaggedError<MissingArtifact>()(
  *
  * @since 0.1.0
  * @category services
- * @slop
  */
 export interface Service {
   readonly prepare: (
@@ -373,7 +355,6 @@ export interface Service {
  *
  * @since 0.1.0
  * @category services
- * @slop
  */
 export const StepBoundary: Context.Service<Service, Service> = Context.Service<Service>(
   "@smthrs/engine-store/StepBoundary"
@@ -386,7 +367,6 @@ export const StepBoundary: Context.Service<Service, Service> = Context.Service<S
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const make = (service: Service): Service => StepBoundary.of(service)
 
@@ -520,7 +500,6 @@ const inlineCorruption = (path: string, recordedDigest: string): BoundaryCorrupt
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface FileSystemOptions {
   /**
@@ -567,7 +546,6 @@ type MaterializedOutput = typeof DigestReferencedOutput.Type
  *
  * @since 0.1.0
  * @category accessors
- * @slop
  */
 export const referencedDigests = (evidence: BoundaryEvidence): ReadonlyArray<string> => {
   const decoded = Schema.decodeUnknownResult(MaterializedOutputs)(evidence.declaredOutputs)
@@ -595,7 +573,6 @@ export const referencedDigests = (evidence: BoundaryEvidence): ReadonlyArray<str
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const makeFileSystem = (
   fs: FileSystem.FileSystem,
@@ -966,7 +943,6 @@ export const makeFileSystem = (
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layer: Layer.Layer<Service, never, FileSystem.FileSystem | ArtifactStore.ArtifactStore> = Layer.effect(
   StepBoundary,
@@ -987,7 +963,6 @@ export const layer: Layer.Layer<Service, never, FileSystem.FileSystem | Artifact
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface TestOptions {
   /** The paths `settle` reports as written. Defaults to none. */
@@ -1045,7 +1020,6 @@ const unsupported = (): UnsupportedBoundary =>
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layerTest = (options: TestOptions = {}): Layer.Layer<Service> => {
   const changedPaths = options.changedPaths ?? []

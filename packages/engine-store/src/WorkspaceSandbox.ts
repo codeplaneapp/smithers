@@ -69,7 +69,6 @@ import { compareText } from "./internal/Ordering.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Resource {
   readonly kind: string
@@ -81,7 +80,6 @@ export interface Resource {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface InputObservation {
   readonly resource: Resource
@@ -93,7 +91,6 @@ export interface InputObservation {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface OutputObservation {
   readonly resource: Resource
@@ -106,7 +103,6 @@ export interface OutputObservation {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Provenance {
   readonly baseRevision: string
@@ -125,7 +121,6 @@ export interface Provenance {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface FileChange {
   readonly path: string
@@ -145,7 +140,6 @@ export interface FileChange {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface QueuedEffect {
   readonly protocol: string
@@ -164,7 +158,6 @@ export interface QueuedEffect {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface WorkflowResult<out Output = unknown> {
   readonly output: Output
@@ -184,7 +177,6 @@ export interface WorkflowResult<out Output = unknown> {
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export interface Workspace {
   readonly readFile: (path: string) => Effect.Effect<Uint8Array, WorkspaceError>
@@ -198,7 +190,6 @@ export interface Workspace {
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export const Workspace: Context.Service<Workspace, Workspace> = Context.Service<Workspace>(
   "@smthrs/engine-store/WorkspaceSandbox/Workspace"
@@ -216,7 +207,6 @@ export const Workspace: Context.Service<Workspace, Workspace> = Context.Service<
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Execution<out Output, out Error> {
   readonly descriptor: FileBoundary
@@ -229,7 +219,6 @@ export interface Execution<out Output, out Error> {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface DeclarationViolation {
   readonly kind: "undeclared-read" | "undeclared-write"
@@ -252,7 +241,6 @@ export interface DeclarationViolation {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type CacheDisposition =
   | { readonly status: "disabled" }
@@ -267,7 +255,6 @@ export type CacheDisposition =
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Accepted<out Output = unknown> {
   readonly _tag: "Accepted"
@@ -297,7 +284,6 @@ export interface Accepted<out Output = unknown> {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Invalidated {
   readonly _tag: "Invalidated"
@@ -310,7 +296,6 @@ export interface Invalidated {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type ExecutionResult<Output = unknown> = Accepted<Output> | Invalidated
 
@@ -319,7 +304,6 @@ export type ExecutionResult<Output = unknown> = Accepted<Output> | Invalidated
  *
  * @category schemas
  * @since 0.1.0
- * @slop
  */
 export const WorkspaceErrorCode = Schema.Literals([
   "invalid_path",
@@ -333,7 +317,6 @@ export const WorkspaceErrorCode = Schema.Literals([
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type WorkspaceErrorCode = typeof WorkspaceErrorCode.Type
 
@@ -347,7 +330,6 @@ export type WorkspaceErrorCode = typeof WorkspaceErrorCode.Type
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class WorkspaceError extends Schema.TaggedError<WorkspaceError>()(
   "@smthrs/engine-store/WorkspaceError",
@@ -369,7 +351,6 @@ export class WorkspaceError extends Schema.TaggedError<WorkspaceError>()(
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class MaterializationConflict extends Schema.TaggedError<MaterializationConflict>()(
   "@smthrs/engine-store/MaterializationConflict",
@@ -388,7 +369,6 @@ export class MaterializationConflict extends Schema.TaggedError<MaterializationC
  *
  * @category guards
  * @since 0.1.0
- * @slop
  */
 export const isMaterializationConflict = (error: unknown): boolean => {
   if (typeof error !== "object" || error === null) return false
@@ -442,7 +422,6 @@ export const isMaterializationConflict = (error: unknown): boolean => {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Service {
   readonly execute: <Output, Error>(
@@ -458,7 +437,6 @@ export interface Service {
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export const WorkspaceSandbox: Context.Service<Service, Service> = Context.Service<Service>(
   "@smthrs/engine-store/WorkspaceSandbox"
@@ -469,7 +447,6 @@ export const WorkspaceSandbox: Context.Service<Service, Service> = Context.Servi
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (service: Service): Service => WorkspaceSandbox.of(service)
 
@@ -478,7 +455,6 @@ export const make = (service: Service): Service => WorkspaceSandbox.of(service)
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer = (service: Service): Layer.Layer<Service> => Layer.succeed(WorkspaceSandbox, make(service))
 
@@ -495,7 +471,6 @@ export const layer = (service: Service): Layer.Layer<Service> => Layer.succeed(W
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export interface Dispatcher {
   readonly dispatch: (effect: QueuedEffect) => Effect.Effect<void>
@@ -508,7 +483,6 @@ export interface Dispatcher {
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export const EffectDispatcher: Context.Service<Dispatcher, Dispatcher> = Context.Service<Dispatcher>(
   "@smthrs/engine-store/WorkspaceSandbox/EffectDispatcher"
@@ -519,7 +493,6 @@ export const EffectDispatcher: Context.Service<Dispatcher, Dispatcher> = Context
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerDispatcher = (dispatcher: Dispatcher): Layer.Layer<Dispatcher> =>
   Layer.succeed(EffectDispatcher, EffectDispatcher.of(dispatcher))
@@ -657,7 +630,6 @@ const collapseDots = (path: string): string | undefined => {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Host {
   /**
@@ -903,7 +875,6 @@ const revisionOf = Effect.fn("WorkspaceSandbox.revision")(function*(base: Readon
  *
  * @category accessors
  * @since 0.1.0
- * @slop
  */
 export const violations = (
   descriptor: FileBoundary,
@@ -936,7 +907,6 @@ export const violations = (
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const makeHosted = (host: Host): Service => {
   const memo = new Map<
@@ -1085,7 +1055,6 @@ export const makeHosted = (host: Host): Service => {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type InitialFiles = Readonly<Record<string, string | Uint8Array>>
 
@@ -1094,7 +1063,6 @@ export type InitialFiles = Readonly<Record<string, string | Uint8Array>>
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface HostFile {
   readonly path: string
@@ -1106,7 +1074,6 @@ export interface HostFile {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MemorySandbox {
   readonly service: Service
@@ -1124,7 +1091,6 @@ export interface MemorySandbox {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const makeMemory = (
   initialFiles: InitialFiles = {}
@@ -1184,7 +1150,6 @@ export const makeMemory = (
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface FileSystemOptions {
   /**
@@ -1245,7 +1210,6 @@ const escapesWorkspace = (path: string, resolved: string): WorkspaceError =>
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const makeFileSystem = (
   fs: FileSystem.FileSystem,
@@ -1517,7 +1481,6 @@ export const makeFileSystem = (
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerFileSystem = (
   options: FileSystemOptions = {}

@@ -113,7 +113,6 @@ import * as WorkspaceSandbox from "./WorkspaceSandbox.ts"
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type Outcome = "built" | "clean" | "failed" | "skipped" | "deferred"
 
@@ -123,7 +122,6 @@ export type Outcome = "built" | "clean" | "failed" | "skipped" | "deferred"
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface ResolvedInput {
   readonly from: string
@@ -136,7 +134,6 @@ export interface ResolvedInput {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface NodeInput {
   readonly node: Plan.PlanNode
@@ -162,7 +159,6 @@ export interface NodeInput {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Executor {
   readonly execute: (input: NodeInput) => Effect.Effect<unknown, unknown>
@@ -173,7 +169,6 @@ export interface Executor {
  *
  * @since 0.1.0
  * @category services
- * @slop
  */
 export class NodeExecutor extends Context.Service<NodeExecutor, Executor>()("@smthrs/engine-store/NodeExecutor") {}
 
@@ -186,7 +181,6 @@ export class NodeExecutor extends Context.Service<NodeExecutor, Executor>()("@sm
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layerExecutor = (executor: Executor): Layer.Layer<NodeExecutor> => Layer.succeed(NodeExecutor, executor)
 
@@ -195,7 +189,6 @@ export const layerExecutor = (executor: Executor): Layer.Layer<NodeExecutor> => 
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Settlement {
   readonly nodeId: string
@@ -213,7 +206,6 @@ export interface Settlement {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Report {
   readonly planId: string
@@ -230,7 +222,6 @@ export interface Report {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Options {
   readonly runId: string
@@ -282,7 +273,6 @@ export interface Options {
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export type Requirements =
   | AttemptStore.AttemptStore
@@ -301,7 +291,6 @@ export type Requirements =
  *
  * @since 0.1.0
  * @category errors
- * @slop
  */
 export class SchedulerError extends Schema.TaggedError<SchedulerError>()("@smthrs/engine-store/SchedulerError", {
   code: Schema.Literals(["boundary_unavailable", "key_uncomputable", "elaboration_failed", "store_failed"]),
@@ -314,7 +303,6 @@ export class SchedulerError extends Schema.TaggedError<SchedulerError>()("@smthr
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Service {
   /** Persists generation 0 and journals `plan-recorded`. */
@@ -332,7 +320,6 @@ export interface Service {
  *
  * @since 0.1.0
  * @category services
- * @slop
  */
 export class PlanScheduler extends Context.Service<PlanScheduler, Service>()("@smthrs/engine-store/PlanScheduler") {}
 
@@ -450,7 +437,6 @@ const nonNegativeSafeInteger = (name: string, value: number): number => {
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const make = (options: Options): Service => {
   const rebaseLimit = nonNegativeSafeInteger("rebaseLimit", options.rebaseLimit ?? 3)
@@ -1518,7 +1504,6 @@ export const make = (options: Options): Service => {
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layer = (options: Options): Layer.Layer<PlanScheduler> => Layer.succeed(PlanScheduler, make(options))
 
@@ -1528,7 +1513,6 @@ export const layer = (options: Options): Layer.Layer<PlanScheduler> => Layer.suc
  *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface RecertifyResult {
   readonly runId: string
@@ -1551,7 +1535,6 @@ export interface RecertifyResult {
  *
  * @since 0.1.0
  * @category combinators
- * @slop
  */
 export const recertify = Effect.fn("PlanScheduler.recertify")(
   (input: {
