@@ -93,7 +93,7 @@ export type WorkspaceCursor = typeof WorkspaceCursor.Type
  * later revision can add the checkpoint STATE here (or as its own RPC) without
  * moving what already exists. What it does not carry today is that state, so a
  * projection rebuilt from the sync stream alone is missing the prefix the
- * checkpoint stands for; see `@smthrs/journal`'s `checkpointAt`.
+ * checkpoint stands for; see `@smthrs/journal`'s `latestCheckpoint`.
  *
  * @category models
  * @since 0.1.0

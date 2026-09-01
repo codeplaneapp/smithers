@@ -442,7 +442,7 @@ export const make = ({ client, maxFrameBytes = defaultMaxFrameBytes }: {
          * in what the consumer sees, so it is logged rather than absorbed: the
          * checkpoint state that stands for those entries is not carried on
          * this wire, and a consumer rebuilding a projection has to read it
-         * from the journal's own `checkpointAt`.
+         * from the journal's own `latestCheckpoint`.
          */
         const resynced = (): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
           Stream.catch(bootstrap(), (failure) => {
