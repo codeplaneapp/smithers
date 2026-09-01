@@ -38,7 +38,15 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
-import { Agent, AgentAction, type FlowEngineLike, Seat, SeatResolver } from "../../packages/agent/src/index.ts"
+import {
+  Agent,
+  AgentAction,
+  Budget,
+  type FlowEngineLike,
+  QuotaPolicy,
+  Seat,
+  SeatResolver
+} from "../../packages/agent/src/index.ts"
 import { Flow as CoreFlow } from "../../packages/core/src/index.ts"
 import { FlowEngine } from "../../packages/engine/src/index.ts"
 import { Action, Flow, FlowRuntime, Interpreter } from "../../packages/flow/src/index.ts"
@@ -58,6 +66,10 @@ const hostCrypto = Layer.succeed(
       )
   })
 )
+
+// Every eval seat is scripted, so there is no provider quota to park on. The
+// suite also has no approved plan envelope from which to derive a spend cap.
+const offlinePolicy = Layer.mergeAll(QuotaPolicy.layerUnclassified(), Budget.layerUnbounded())
 
 /**
  * What one scenario run reports, and the only thing the scorers read.
@@ -399,6 +411,7 @@ export const runAction = (options: ActionOptions): Effect.Effect<Observation> =>
             : scriptedSeats(options.recorder, options.respond)
         ),
         Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+        Layer.provideMerge(offlinePolicy),
         Layer.provideMerge(Action.layerImplementations),
         Layer.provideMerge(FlowEngine.layerMemory),
         Layer.provideMerge(hostCrypto)
@@ -474,14 +487,14 @@ export const runAgent = (options: AgentOptions): Effect.Effect<Observation> =>
         capabilityEnvelope: [],
         maxFrames: options.maxFrames,
         ...(options.flows === undefined ? {} : { flows: options.flows }),
-        ...(options.readOnlyCap === undefined ? {} : { readOnlyCap: options.readOnlyCap }),
+        ...(options.readOnlyCap === undefined ? {} : { readOnlyCap: options.readOnlyCap })
       }).pipe(
         Stream.runForEach((event) => Effect.sync(() => collected.push(event))),
         Effect.provide(Agent.layerDefaults)
       )
       const answer = resolvedText(collected)
       return answer === undefined ? yield* Effect.fail(new Error("the run resolved with no answer")) : answer
-    }).pipe(Effect.provide(Agent.layer))
+    }).pipe(Effect.provide(Agent.layer), Effect.provide(offlinePolicy))
 
     yield* engine.register(
       DriveFlow,
