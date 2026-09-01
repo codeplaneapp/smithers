@@ -827,6 +827,51 @@ describe("Graph.build into a plan", () => {
     ])
   })
 
+  it("refuses hostile payload containers and inert accessor-backed members", () => {
+    const hostilePrototype = new Proxy({}, {
+      getPrototypeOf() {
+        throw new Error("prototype trap")
+      }
+    })
+    const hostileDescriptors = new Proxy({}, {
+      getPrototypeOf: () => Object.prototype,
+      ownKeys() {
+        throw new Error("descriptor trap")
+      }
+    })
+    const arrayAccessor: Array<unknown> = []
+    Object.defineProperty(arrayAccessor, "0", { get: () => 1, enumerable: true })
+    const objectAccessor = Object.defineProperty({}, "value", { get: () => 1, enumerable: true })
+    const nodeWith = (payload: unknown) => {
+      const node = Node.succeed<unknown>(null)
+      ;(node.ast as { value: unknown }).value = payload
+      return node
+    }
+
+    for (const payload of [hostilePrototype, hostileDescriptors, arrayAccessor, objectAccessor]) {
+      expect(() => Graph.build(nodeWith(payload))).toThrowError(expect.objectContaining({
+        code: "invalid_payload"
+      }))
+    }
+    expect(Graph.nodes(Graph.build(nodeWith(new Array(1))))[0]?.payload).toEqual([undefined])
+  })
+
+  it("fails closed when an authored outcome loses its branded payload", () => {
+    const done = Flow.done(1)
+    ;(done.ast as { value: unknown }).value = 1
+    expect(() => Graph.build(done)).toThrowError(expect.objectContaining({
+      code: "invalid_payload",
+      message: expect.stringContaining("lost its Done payload")
+    }))
+
+    const unrecognized = Flow.done(1)
+    const marker = Reflect.ownKeys(unrecognized.ast).find((key) => typeof key === "symbol")!
+    const cloned = { ...unrecognized.ast }
+    Object.defineProperty(cloned, marker, { value: "Other" })
+    ;(unrecognized as { ast: Node.Ast }).ast = cloned as Node.Ast
+    expect(Graph.build(unrecognized).diagnostics).toEqual([])
+  })
+
   it("rejects a very deep unknown payload with a typed error instead of overflowing the stack", () => {
     let payload: Record<string, unknown> = { value: "leaf" }
     for (let index = 0; index < 20_000; index++) payload = { next: payload }
