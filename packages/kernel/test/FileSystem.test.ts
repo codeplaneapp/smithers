@@ -57,6 +57,39 @@ const provide = (
   )
 
 describe("FileSystem", () => {
+  it("attaches one descriptor-relative executor in place", () => {
+    const fileSystem = EffectFileSystem.makeNoop({})
+    const executor: FileSystem.AtomicFileSystem = { execute: () => Effect.die("not executed") }
+
+    const decorated = FileSystem.withAtomicFileSystem(fileSystem, executor)
+
+    expect(decorated).toBe(fileSystem)
+    expect(decorated[FileSystem.AtomicFileSystemTypeId]).toBe(executor)
+  })
+
+  it("refuses to replace a descriptor-relative executor", () => {
+    const fileSystem = EffectFileSystem.makeNoop({})
+    const original: FileSystem.AtomicFileSystem = { execute: () => Effect.die("not executed") }
+    const replacement: FileSystem.AtomicFileSystem = { execute: () => Effect.die("not executed") }
+    const decorated = FileSystem.withAtomicFileSystem(fileSystem, original)
+
+    expect(() => FileSystem.withAtomicFileSystem(decorated, replacement)).toThrowError(
+      "filesystem already carries a descriptor-relative executor; a second attachment would silently replace it"
+    )
+    expect(decorated[FileSystem.AtomicFileSystemTypeId]).toBe(original)
+  })
+
+  it("refuses to replace a descriptor-relative executor with an isolation delegate", () => {
+    const fileSystem = EffectFileSystem.makeNoop({})
+    const original: FileSystem.AtomicFileSystem = { execute: () => Effect.die("not executed") }
+    const decorated = FileSystem.withAtomicFileSystem(fileSystem, original)
+
+    expect(() => FileSystem.withIsolatedFileSystem(decorated)).toThrowError(
+      "filesystem already carries a descriptor-relative executor; a second attachment would silently replace it"
+    )
+    expect(decorated[FileSystem.AtomicFileSystemTypeId]).toBe(original)
+  })
+
   itEffect("classifies reads and mutations and normalizes workspace-relative paths", () => {
     const checks: Array<Capability.Capability> = []
     const paths: Array<string> = []

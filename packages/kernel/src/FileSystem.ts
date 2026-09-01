@@ -100,7 +100,14 @@ export type AtomicHostFileSystem = EffectFileSystem.FileSystem & {
 export const withAtomicFileSystem = (
   fileSystem: EffectFileSystem.FileSystem,
   atomic: AtomicFileSystem
-): AtomicHostFileSystem => Object.assign(fileSystem, { [AtomicFileSystemTypeId]: atomic })
+): AtomicHostFileSystem => {
+  if (AtomicFileSystemTypeId in fileSystem) {
+    throw new Error(
+      "filesystem already carries a descriptor-relative executor; a second attachment would silently replace it"
+    )
+  }
+  return Object.assign(fileSystem, { [AtomicFileSystemTypeId]: atomic })
+}
 
 /**
  * Attests that a host filesystem is already isolated as a whole. Intended for
