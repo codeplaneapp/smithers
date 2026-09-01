@@ -6,11 +6,13 @@
  * carries no execution authority: the target flow's envelope and permission
  * checks apply unchanged.
  *
- * @see docs/specs/Concepts/Channels.md
+ * @see packages/triggers/docs/api.md
  * @since 0.1.0
  */
 import type { IdempotencyKey } from "@smthrs/control/ControlSchema"
+import type { CredentialRef } from "@smthrs/control/Credential"
 import type * as Effect from "effect/Effect"
+import type * as Redacted from "effect/Redacted"
 import type * as Schema from "effect/Schema"
 import type { TriggerError } from "./TriggerError.ts"
 

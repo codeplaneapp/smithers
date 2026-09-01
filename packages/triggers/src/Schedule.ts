@@ -1,14 +1,14 @@
 /**
  * Reusable schedule declarations shared by triggers.
  *
- * @see docs/specs/Concepts/Flow Triggers.md
+ * @see packages/triggers/docs/api.md
  *
  * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Cron from "./Cron.ts"
-import { TriggerError } from "./TriggerError.ts"
+import { fromSchemaError, TriggerError } from "./TriggerError.ts"
 
 /**
  * Schedule overlap policies.
@@ -43,7 +43,22 @@ export const CatchUp = Schema.Literals(["none", "one", "all"])
 export type CatchUp = typeof CatchUp.Type
 
 /**
+ * The greatest catch-up bound a schedule may declare.
+ *
+ * A schedule may not owe more occurrences than one occurrence search returns,
+ * so the ceiling is the search's own cap.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maxCatchUpLimit = Cron.maxOccurrences
+
+/**
  * A reusable cron schedule and its overlap and catch-up policies.
+ *
+ * All three policy fields are optional. `maxCatchUp` defaults to `0`, which
+ * pairs with the `catchUp` default of `none`: a schedule that states no
+ * catch-up intent owes nothing after downtime.
  *
  * @category schemas
  * @since 0.1.0
@@ -53,7 +68,10 @@ export const Schedule = Schema.Struct({
   timezone: Schema.optional(Schema.NonEmptyString),
   overlap: Overlap.pipe(Schema.withDecodingDefault(Effect.succeed("skip" as const))),
   catchUp: CatchUp.pipe(Schema.withDecodingDefault(Effect.succeed("none" as const))),
-  maxCatchUp: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+  maxCatchUp: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(maxCatchUpLimit)
+  ).pipe(Schema.withDecodingDefault(Effect.succeed(0)))
 })
 
 /**
@@ -88,12 +106,6 @@ export const validate = <A extends { readonly cron: string; readonly timezone?: 
  */
 export const make = (input: unknown): Effect.Effect<Schedule, TriggerError> =>
   Schema.decodeUnknownEffect(Schedule)(input).pipe(
-    Effect.mapError((cause) =>
-      new TriggerError({
-        code: "invalid_schedule",
-        message: "Schedule declaration is invalid",
-        cause
-      })
-    ),
+    Effect.mapError((cause) => fromSchemaError("invalid_schedule", "Schedule declaration is invalid", cause)),
     Effect.flatMap(validate)
   )

@@ -1,7 +1,7 @@
 /**
  * Verified webhook ingestion through the authoritative Control boundary.
  *
- * @see docs/specs/Concepts/Channels.md
+ * @see packages/triggers/docs/api.md
  * @since 0.1.0
  */
 import * as ControlChannels from "@smthrs/control/Channels"

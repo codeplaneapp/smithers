@@ -10,6 +10,11 @@
  * one occurrence so an unsatisfiable expression is refused where it is
  * declared rather than at the tick that would have fired it.
  *
+ * A satisfiable expression carries the opposite hazard: `* * * * *` across a
+ * year is 525,600 occurrences, and materializing them costs seconds and
+ * hundreds of megabytes. {@link occurrencesBetween} therefore always searches
+ * under a finite cap, {@link maxOccurrences} when the caller states none.
+ *
  * @since 0.1.0
  */
 import * as Clock from "effect/Clock"
@@ -66,7 +71,22 @@ export const previousAtOrBefore = (cron: Cron, at: Date): Effect.Effect<Date, Tr
 }
 
 /**
- * The occurrences in `(from, to]`, in order, capped at `limit`.
+ * The greatest number of occurrences one search returns when its caller states
+ * no limit of its own.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maxOccurrences = 1000
+
+/**
+ * The occurrences in `(from, to]`, in order, at most `limit` of them.
+ *
+ * `limit` must be a non-negative safe integer; anything else is
+ * `invalid_options` rather than a silently disabled cap, which is what
+ * `NaN` used to be. A caller that needs to know the interval held more than it
+ * asked for passes one more than its own bound and compares the length, the
+ * way `CatchUp.occurrences` does.
  *
  * @category sequencing
  * @since 0.1.0
@@ -75,17 +95,28 @@ export const occurrencesBetween = (
   cron: Cron,
   from: Date,
   to: Date,
-  limit = Number.POSITIVE_INFINITY
-): Effect.Effect<ReadonlyArray<Date>, TriggerError> =>
-  attempt(cron, "interval", () => {
+  limit: number = maxOccurrences
+): Effect.Effect<ReadonlyArray<Date>, TriggerError> => {
+  if (!Number.isSafeInteger(limit) || limit < 0) {
+    return Effect.fail(
+      new TriggerError({
+        code: "invalid_options",
+        message: `occurrence limit must be a non-negative safe integer, received ${limit}`,
+        path: "limit"
+      })
+    )
+  }
+  if (limit === 0) return Effect.succeed([])
+  return attempt(cron, "interval", () => {
     const occurrences: Array<Date> = []
     for (const occurrence of EffectCron.sequence(cron.value, from)) {
       if (occurrence.getTime() > to.getTime()) break
-      occurrences.push(occurrence)
       if (occurrences.length >= limit) break
+      occurrences.push(occurrence)
     }
     return occurrences
   })
+}
 
 /**
  * Parses a cron expression in an optional timezone, reporting a malformed one
