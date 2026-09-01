@@ -1,6 +1,8 @@
-# Changelog
+# @smthrs/patterns
 
 ## [Unreleased]
+
+## [1.0.0-rc.0] - 2026-08-31
 
 ### Added
 
@@ -10,22 +12,85 @@
 - Added `Quarantine`, a join that isolates a failing member from its siblings.
 - Added `TryCatchFinally`, an error boundary whose finalizer runs on every
   path.
-- Added `Saga`, forward steps whose compensations unwind in reverse on a
-  failure or an interruption. `onFailure` defaults to `compensate`, `make`
-  refuses a step whose action or compensation is not a flow, and a
-  compensation that dies is reported as `compensation_failed`.
+- Added `Saga`, forward steps whose compensations unwind in reverse on
+  failure or interruption.
+- Added `Trellis`, which validates, declares, and executes bounded plans
+  authored at runtime.
+- Added `DelegationChain`, the fixed refine, plan, derisk, execute, review,
+  and settle chain.
+- Added `Loop`, bounded do-then-check iteration with declaration and runtime
+  forms.
+- Added `Optimizer`, iterative candidate generation with scoring and a
+  best-so-far result.
+- Added `ScanFixVerify`, bounded scan, parallel fix, verification, and rescan
+  rounds.
+- Added `DriftDetector`, one capture-and-compare pass with an optional alert.
+- Added `Sidecar`, concurrent primary and quarantined shadow execution with
+  score comparison.
+- Added `Kanban`, ordered columns that move items with bounded concurrency.
+- Added `CheckSuite`, bounded checks reduced under configurable verdict
+  strategies.
+- Added `MergeQueue`, deterministic priority ordering with halt or quarantine
+  failure policy.
+- Added `Supervisor`, task planning, bounded worker rounds, review, retry, and
+  finalization.
+- Added `Runbook`, ordered risk-aware steps with approval gates.
+- Added `Intervene`, read, propose, optionally approve and apply, then report.
 
 ### Changed
 
 - `WithRetry` accepts a `backoff` ladder and `nonRetryable` error tags, both
   folded into declaration identity.
-- `Panel` gained a runtime form with per-panelist roles and a concurrency
-  bound.
-- `Escalation` accepts a per-rung `escalateIf`, a `fallback` rung, and returns
-  the rung that settled as `{ level, result }`.
-- **Breaking:** `Escalation.run` no longer fails with
-  `PatternError { code: "exhausted" }` when every rung escalates and no
-  `fallback` is declared. It returns the last result as
-  `Exhausted<A> { level, result, accepted: false, exhausted: true }`. A caller
-  that matched on the `exhausted` code checks `exhausted: true` on the value
-  instead.
+- `WithApproval` declares the exact approval request schema with `input`,
+  `reason`, and `scope`, and reports precise schema incompatibilities.
+- `Panel` has a runtime form with per-panelist roles and a concurrency bound;
+  role validation uses own properties and supports prototype-shaped names.
+- `Escalation`, `ReviewLoop`, and `DelegationChain` share the acceptance
+  vocabulary `true`, `"approved"`, `{ approved: true }`, and
+  `{ accepted: true }`, using own properties only.
+- Empty `Escalation` ladders report `invalid_decorator`; declarations reserve
+  every rung when no acceptance flow is available, and runtime snapshots its
+  rungs before work starts.
+- `Escalation` accepts per-rung `escalateIf` flows and a `fallback` rung,
+  and reports the rung that settled as `{ level, result }`.
+- `Escalation.run` returns `Exhausted<A>` when every rung escalates and no
+  fallback is declared.
+- `Bounded.run` refuses priorities for unknown members and non-finite
+  per-member priorities before work starts, while safely supporting
+  prototype-shaped member names.
+- `Debate.run` gives each callback a frozen transcript snapshot.
+- `CheckSuite` treats inherited rows as missing and safely materializes
+  declaration records with prototype-shaped check ids.
+- `Kanban` rejects empty runtime item lists and duplicate column names,
+  snapshots columns, supports prototype-shaped names, evaluates `until` on
+  the final allowed pass, and runs `onComplete` exactly once after settlement.
+- `MergeQueue` uses `id` in declaration call payloads to match runtime and
+  safely handles prototype-shaped member ids.
+- `Optimizer.run` refuses non-finite evaluator scores before continuing.
+- Pattern composition reports the input or output side and schema AST tags for
+  compatibility failures, distinct from JSON Schema conversion failures.
+- `PatternError` carries an optional `cause` for the error or errors it
+  reports.
+- `Quarantine` validates the complete structural marker, treats near-miss
+  values as successes, supports prototype-shaped names, and preserves member
+  errors in the `settle` failure cause.
+- `Runbook.run` snapshots steps and safely records outputs for
+  prototype-shaped step ids.
+- `Saga.run` snapshots steps, safely records prototype-shaped ids, and reports
+  the original failure plus sorted compensation residue in
+  `compensation_failed` causes, including compensation defects.
+- `Trellis.Plan` is an exact closed grammar; validation stops descending after
+  a fanout breach, and runtime forms validate envelopes and concurrency before
+  callbacks, honor the shared concurrency bound, and stop on empty
+  continuations.
+- `TryCatchFinally` refuses `catchErrors` without a catch arm before the body
+  runs and preserves the finalizer failure in `PatternError.cause`.
+- `DelegationChain.run` validates optional concurrency before invoking any
+  callback.
+- A decorator wrapping an unnamed flow now reads `anonymous` rather than an
+  empty slot, so `WithRetry`, `WithCache`, `WithApproval`, and
+  `Pattern.decorate` no longer produce names such as `withRetry(, attempts=2)`
+  or the empty string.
+
+[Unreleased]: https://github.com/smithersai/smithers/compare/v1.0.0-rc.0...HEAD
+[1.0.0-rc.0]: https://github.com/smithersai/smithers/releases/tag/v1.0.0-rc.0
