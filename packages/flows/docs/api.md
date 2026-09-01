@@ -30,6 +30,9 @@ The `Capability` namespace re-exports `@smthrs/capability`; its exact-resource
 bounds, pattern grammar, and permission failures are documented in the
 [capability API](/api/capability).
 
+The `Plan` namespace re-exports [`@smthrs/plan`](/api/plan), which owns step
+identity, graph compilation, static effect declarations, and plan storage.
+
 ## NodeRuntime
 
 `@smthrs/flows/NodeRuntime` is the only supported durable-runtime subpath in
