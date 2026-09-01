@@ -6,7 +6,7 @@
   "smthrs": {
     "group": "agent"
   },
-  "description": "The Smithers built-in agent harness — pure translation of dynamic nodes into sealed model steps and child plans",
+  "description": "The Smithers built-in agent loop: a cell-first controller whose model turns produce JavaScript cells that run in a persistent realm and reach the world only through durable flow calls",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
