@@ -157,7 +157,44 @@ const snapshot = (row: RunStore.RunRow): RunStore.RunSnapshot => ({
   heartbeatAtMs: row.heartbeatAtMs
 })
 
-const samePayload = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right)
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (value === null || typeof value !== "object") return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+/**
+ * Compares encoded JSON payloads structurally. Object key order is not part
+ * of JSON identity, while array order and array length are.
+ *
+ * Values outside JSON compare unequal unless both arguments are the same
+ * reference.
+ *
+ * @since 1.0.0
+ * @category guards
+ * @private
+ */
+export const samePayload = (left: unknown, right: unknown): boolean => {
+  if (Object.is(left, right)) return true
+  if (typeof left === "number" && typeof right === "number") {
+    return left === 0 && right === 0
+  }
+  if (Array.isArray(left)) {
+    if (!Array.isArray(right) || left.length !== right.length) return false
+    for (let index = 0; index < left.length; index++) {
+      if (!samePayload(left[index], right[index])) return false
+    }
+    return true
+  }
+  if (Array.isArray(right) || !isPlainObject(left) || !isPlainObject(right)) return false
+  const leftKeys = Object.keys(left)
+  const rightKeys = Object.keys(right)
+  if (leftKeys.length !== rightKeys.length) return false
+  for (const key of leftKeys) {
+    if (!Object.hasOwn(right, key) || !samePayload(left[key], right[key])) return false
+  }
+  return true
+}
 
 /**
  * Sentinel produced when the cancel-request poll observes a durable
@@ -1363,11 +1400,12 @@ export const make = (
     ): Effect.Effect<void> =>
       Effect.gen(function*() {
         // The handoff payload travels encoded, and the next round's row has to
-        // hold the same bytes `ensureRun` would write for it: the root caller
+        // hold the same value `ensureRun` would write for it: the root caller
         // re-enters `execute` for this round, and its identical-create check
-        // compares the ENCODED payload. Round-tripping through the target's own
-        // codec is what makes the two agree regardless of the key order the
-        // body's object literal happened to have.
+        // compares encoded payloads structurally, so object key order cannot
+        // separate two encodings of the same value. The execution id itself
+        // uses canonical RFC 8785 JSON, so the identity and payload checks
+        // agree by construction.
         //
         // A target this process does not run has no codec to normalize
         // through, and the round is still created with the payload verbatim —

@@ -31,6 +31,12 @@ const OtherFlow = Flow.make("RunDriverEdges/Other", {
   body: opaqueHandlerBody
 })
 
+const ObjectPayloadFlow = Flow.make("RunDriverEdges/ObjectPayload", {
+  payload: { data: Schema.Unknown },
+  success: Schema.String,
+  body: opaqueHandlerBody
+})
+
 const UnregisteredFlow = Flow.make("RunDriverEdges/Unregistered", {
   payload: {},
   success: Schema.String,
@@ -78,6 +84,29 @@ const decisionsFor = (runId: string) =>
       .filter((entry) => entry.eventType === "flows.engine.run-decision")
       .map((entry) => (entry.payload as { decision: string }).decision)
   })
+
+describe("samePayload", () => {
+  it("compares encoded JSON structurally without admitting different payloads", () => {
+    const reference = new Date(0)
+    const nullPrototypeLeft = Object.assign(Object.create(null) as Record<string, unknown>, { value: 1 })
+    const nullPrototypeRight = Object.assign(Object.create(null) as Record<string, unknown>, { value: 1 })
+    expect(RunDriver.samePayload({ data: { a: 1, b: [2, 3] } }, { data: { b: [2, 3], a: 1 } })).toBe(true)
+    expect(RunDriver.samePayload(-0, 0)).toBe(true)
+    expect(RunDriver.samePayload(reference, reference)).toBe(true)
+    expect(RunDriver.samePayload(nullPrototypeLeft, nullPrototypeRight)).toBe(true)
+    expect(RunDriver.samePayload({ value: 1 }, { value: 2 })).toBe(false)
+    expect(RunDriver.samePayload({ value: 1 }, { other: 1 })).toBe(false)
+    expect(RunDriver.samePayload({ value: 1 }, { value: 1, other: 2 })).toBe(false)
+    expect(RunDriver.samePayload([1, 2], [2, 1])).toBe(false)
+    expect(RunDriver.samePayload([1, 2], [1, 2, 3])).toBe(false)
+    expect(RunDriver.samePayload([1], { 0: 1 })).toBe(false)
+    expect(RunDriver.samePayload({ 0: 1 }, [1])).toBe(false)
+    expect(RunDriver.samePayload(null, {})).toBe(false)
+    expect(RunDriver.samePayload("left", "right")).toBe(false)
+    expect(RunDriver.samePayload({}, new Date(0))).toBe(false)
+    expect(RunDriver.samePayload(new Date(0), new Date(0))).toBe(false)
+  })
+})
 
 describe("RunDriver missing and foreign rows", () => {
   it.effect("drives nothing for an execution whose row does not exist", () =>
@@ -306,6 +335,36 @@ describe("RunDriver poll", () => {
 })
 
 describe("RunDriver execute preconditions", () => {
+  it.effect("joins an existing execution when encoded object keys arrive in a different order", () =>
+    Effect.gen(function*() {
+      let executions = 0
+      const result = yield* withCrypto(provideJournal(Effect.gen(function*() {
+        const driver = yield* makeDriver()
+        yield* driver.register(
+          ObjectPayloadFlow,
+          () =>
+            Effect.sync(() => {
+              executions++
+              return "joined"
+            })
+        )
+        const first = yield* driver.execute(ObjectPayloadFlow, {
+          executionId: "object-payload",
+          payload: { data: { a: 1, b: 2 } },
+          discard: false
+        })
+        const second = yield* driver.execute(ObjectPayloadFlow, {
+          executionId: "object-payload",
+          payload: { data: { b: 2, a: 1 } },
+          discard: false
+        })
+        return { first, second }
+      })))
+
+      expect(result.first).toEqual(result.second)
+      expect(executions).toBe(1)
+    }))
+
   it.effect("dies when asked to execute an unregistered flow", () =>
     Effect.gen(function*() {
       const exit = yield* withCrypto(provideJournal(Effect.gen(function*() {
