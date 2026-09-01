@@ -481,11 +481,21 @@ describe("vitest coverage isolation conformance", () => {
     // The fault matrix. Until Phase 7 blocker B6 it ran under no gate at all:
     // `//packages/...` does not reach `e2e/`, `e2e` was not a workspace member,
     // and `//e2e:faults` failed in 262 ms with `Command "vitest" not found`.
-    // The typecheck is a required step and the matrix itself is the advisory
-    // `e2e-faults` job, because two gates in it are red by design and owned
-    // elsewhere (case 22's redaction requirement, and the durable park).
+    // The typecheck is a required step and the matrix itself is the `e2e-faults`
+    // job, which is required now that the section 5.2 redaction deliverable
+    // landed: case 22's terminal-log half was the one gate red by design, the
+    // redacting logger closed it, and the matrix is 67 of 67.
     expect(ci).toMatch(/^\s*run: pnpm exec smithers-build build '\/\/e2e:check'$/m)
     expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/e2e:faults'$/m)
+    // And it gates. `continue-on-error: true` is the single line that makes a
+    // lane advisory, so a matrix that runs but cannot fail the pipeline is
+    // exactly the state this deliverable left behind, and it would read as
+    // green from every other pin in this file. Slice the job out by its own
+    // key rather than searching the whole document, because three other lanes
+    // legitimately carry the line.
+    const faultsJob = ci.slice(ci.indexOf("\n  e2e-faults:") + 1).split(/\n {2}(?=\S)/)[0]!
+    expect(faultsJob).toContain("//e2e:faults")
+    expect(faultsJob).not.toContain("continue-on-error")
     expect(ci).toMatch(/tool: jj-cli@\d+\.\d+\.\d+/)
     expect(ci).toMatch(/^\s*run: jj git init --colocate$/m)
   })

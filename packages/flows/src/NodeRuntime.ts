@@ -23,6 +23,7 @@ import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import { DurableEngineState, EngineStore, OwnerIdentity, StepBoundary, WorkspaceSandbox } from "@smthrs/engine-store"
 import * as Migrations from "@smthrs/engine-store/Migrations"
 import { SqlJournal } from "@smthrs/journal"
+import * as RedactedLogger from "@smthrs/journal/RedactedLogger"
 import type * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
 import * as GrantStore from "@smthrs/kernel/GrantStore"
 import * as HostServices from "@smthrs/kernel/HostServices"
@@ -151,7 +152,13 @@ const composition = <
 ) => {
   const validated = validate(options)
   const execution = Layer.merge(stepBoundary, workspaceSandbox).pipe(
-    Layer.provideMerge(storage(validated.filename))
+    Layer.provideMerge(storage(validated.filename)),
+    // Credential redaction covers the operator's terminal as well as the
+    // journal (rc-contract section 5.2). It sits UNDER the engine so the
+    // context the engine captures for an action body carries it: a line an
+    // action, the harness, or an agent session writes leaves through the same
+    // rules `@smthrs/journal` applies on the write path.
+    Layer.provideMerge(RedactedLogger.layer())
   )
   const engine = EngineStore.layer({
     owner: validated.owner,
@@ -482,7 +489,9 @@ export const layerHost = <
   // guarded surface, because a body is exactly what the capability check
   // exists for. That is why the engine is built over the kernel here and not
   // beside it: an action resolves its host services from the engine's context.
-  const raw = Layer.mergeAll(NodeHost.layer, NodeHost.NodeCrypto.layer)
+  const raw = Layer.mergeAll(NodeHost.layer, NodeHost.NodeCrypto.layer).pipe(
+    Layer.provideMerge(RedactedLogger.layer())
+  )
   const store = storage(validated.filename).pipe(Layer.provideMerge(raw))
   const execution = Layer.merge(StepBoundary.layer, WorkspaceSandbox.layerFileSystem()).pipe(
     Layer.provideMerge(store)

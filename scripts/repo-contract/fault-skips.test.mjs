@@ -47,33 +47,45 @@ const faults = join(root, "e2e", "faults")
 const harness = join(root, "e2e", "harness")
 
 /**
- * The tests that are required to exist and are expected to be red at rc.0.
+ * The tests that are required to exist, whatever colour they are.
  *
- * A requirement the product does not meet yet is enforced by a plain failing
- * test, not by prose. This map is what stops the next person from making the
- * matrix green by deleting one.
+ * A required parity test is a promise the repository made in the release
+ * contract, and the cheapest way to break one is to delete the test rather than
+ * the promise. This map is what stops that: a gate listed here has to be in the
+ * matrix, under its own title, or this suite fails and names it.
  */
-const requiredRedGates = new Map([
+const requiredGates = new Map([
   [
     "faults/case22-secret-never-in-journal.test.ts",
     {
       title: "redacts the credential out of the operator's terminal",
-      why: "rc-contract R-12 requires case 22 to cover the logs as well as the journal. rc.0 ships no "
-        + "redacting logger, so this gate is red until the Phase 5 redaction deliverable (rc-contract "
-        + "§5.2) lands. Deleting it, or marking it `.fails`, makes the matrix green over a live "
-        + "credential leak.",
-      // The release-facing record of the same limitation. `heading` is the
-      // section on the known-limitations page, generated from rc-contract §7;
-      // `anchor` is what e2e/fault-gaps.md has to link to so a reader of the
-      // row can reach it.
-      limitation: {
-        heading: "Credential redaction in logs",
-        anchor: "docs/pages/release/known-limitations.md#credential-redaction-in-logs",
-        row: "| 22 |"
-      }
+      why: "rc-contract R-12 requires case 22 to cover the logs as well as the journal. It was red at rc.0 "
+        + "and went green when the section 5.2 redaction deliverable landed `@smthrs/journal` "
+        + "`RedactedLogger`. It runs the real binary and reads its real stderr, so it is the only thing "
+        + "that proves the redacting logger is installed under the durable engine rather than merely "
+        + "exported. Deleting it retires the proof, not the requirement."
     }
   ]
 ])
+
+/**
+ * The subset of {@link requiredGates} that are expected to be RED right now.
+ *
+ * A requirement the product does not meet yet is enforced by a plain failing
+ * test, not by prose, and a shipped limitation that is written down only in
+ * `e2e/fault-gaps.md` is written down where no reader of the release looks. An
+ * entry here therefore also has to name its section of the known-limitations
+ * page, and the fault-gaps row has to link to it.
+ *
+ * Empty. Case 22's terminal-log half was the last entry: rc.0 shipped no
+ * redacting logger, so the gate was red by design and `e2e-faults` carried
+ * `continueOnError` for it. The section 5.2 redaction deliverable landed the
+ * logger, the gate went green with no edit to the case, and `e2e-faults` became
+ * a required CI job. While this map is empty the matrix is expected to be green
+ * end to end; adding an entry back means putting `continueOnError` back on that
+ * job in the root `BUILD.ts` in the same commit.
+ */
+const requiredRedGates = new Map([])
 
 const knownLimitations = join(root, "docs", "pages", "release", "known-limitations.md")
 const faultGaps = join(root, "e2e", "fault-gaps.md")
@@ -152,12 +164,22 @@ describe("the fault-suite skip audit", () => {
 
   it("keeps every required gate in the matrix, including the ones that are red", () => {
     const byRelative = new Map(sources.map((source) => [source.relative, source.text]))
-    for (const [relative, gate] of requiredRedGates) {
+    for (const [relative, gate] of requiredGates) {
       const text = byRelative.get(relative)
       assert.ok(text !== undefined, `${relative} is a required gate and is not in the matrix any more. ${gate.why}`)
       assert.ok(
         text.includes(gate.title),
         `${relative} no longer contains the required test "${gate.title}". ${gate.why}`
+      )
+    }
+  })
+
+  it("keeps every red gate in the required set, so its existence is checked too", () => {
+    for (const relative of requiredRedGates.keys()) {
+      assert.ok(
+        requiredGates.has(relative),
+        `${relative} is listed as red by design and is not in requiredGates, so nothing checks that the test `
+          + "still exists. Add it there as well."
       )
     }
   })
