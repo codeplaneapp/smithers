@@ -69,8 +69,41 @@ describe("JjError durability", () => {
   it("bounds the cause message so a host failure cannot drag a payload into the journal", () => {
     const long = Jj.jjErrorCause(new Error("x".repeat(Jj.causeMessageLimit + 500)))
 
-    expect(long.message).toHaveLength(Jj.causeMessageLimit + 1)
+    expect(long.message).toHaveLength(Jj.causeMessageLimit)
     expect(long.message.endsWith("…")).toBe(true)
+  })
+
+  it("bounds every string projected from an arbitrary host failure", () => {
+    const cause = Jj.jjErrorCause({
+      name: "n".repeat(Jj.causeMessageLimit + 1),
+      code: "c".repeat(Jj.causeMessageLimit + 1),
+      message: "short"
+    })
+
+    expect(cause.name).toHaveLength(Jj.causeMessageLimit)
+    expect(cause.name?.endsWith("…")).toBe(true)
+    expect(cause.code).toHaveLength(Jj.causeMessageLimit)
+    expect(cause.code?.endsWith("…")).toBe(true)
+  })
+
+  it("refuses an over-length cause at construction and journal decode", () => {
+    const base = {
+      _tag: "@smthrs/jj/JjError",
+      code: "unknown",
+      message: "bounded failure"
+    } as const
+
+    expect(() =>
+      new Jj.JjError({
+        code: "unknown",
+        message: "bounded failure",
+        cause: { message: "x".repeat(Jj.causeMessageLimit + 1) }
+      })
+    ).toThrow()
+    for (const field of ["name", "code", "message"] as const) {
+      const cause = { message: "bounded", [field]: "x".repeat(Jj.causeMessageLimit + 1) }
+      expect(() => Schema.decodeUnknownSync(Jj.JjError)({ ...base, cause }), field).toThrow()
+    }
   })
 })
 

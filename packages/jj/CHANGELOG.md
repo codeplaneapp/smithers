@@ -6,6 +6,28 @@
 
 ### Changed
 
+- Browser WASI append opens preserve `O_CREAT|O_EXCL` through the backend's
+  atomic `ax` or `ax+` flag, so a file created after the existence probe answers
+  `EEXIST` instead of being opened.
+- `BrowserJj` copies raw `ArrayBuffer` bytes even when they came from another
+  JavaScript realm, so a caller cannot mutate the bytes between failed
+  instantiation attempts. A view backed by `SharedArrayBuffer` is copied into
+  unshared bytes; a direct `SharedArrayBuffer` remains outside the option type.
+- **CONTRACT:** Every `JjErrorCause` string is schema-bounded by
+  `causeMessageLimit`, including the ellipsis. `jjErrorCause` truncates `name`,
+  `code`, and `message` to fit. The `JjError` constructor and journal decoder
+  reject an over-length cause built without that supported projection.
+- Browser WASI timestamp setters reinterpret imported `i64` nanosecond stamps as
+  WASI `u64` values before converting them to seconds, so a timestamp with bit 63
+  set is no longer a date before the epoch.
+- `BrowserJj` excerpts a guest-reported error `command` before putting it on the
+  journaled `JjError`, matching the bound already applied to guest messages. The
+  excerpt and the recorded `jj` command each count their ellipsis against the
+  ceiling they name, so neither exceeds it by a character.
+- `resolveJjBinary` records the environment variable that supplied an override,
+  so `describe()` reports `FLOWS_JJ_PATH` when the rc.0 alias won instead of
+  always naming `SMITHERS_JJ_PATH`.
+
 - `Jj`'s error channel is now honest about the capability kernel: every method
   fails with `JjFailure` (`JjError | Permission.PermissionError`), and
   `workspaceAdd` additionally with `PlatformError` because the guarded
@@ -50,10 +72,13 @@
   not a directory is now reported as such instead of as `not_installed`, which
   is what `spawn` reports it as.
 - Both Node layers bound how much of a child's output they buffer, at 64 MiB
-  per stream. The engine outlives any one invocation, so a jj that never stops
-  printing was an unbounded buffer in a long-lived process; it is now killed and
-  the operation fails with `unknown`. The direct runner and the spawner-routed
-  runner apply the same ceiling and report it identically.
+  per stream, counted in bytes as they arrive. The engine outlives any one
+  invocation, so a jj that never stops printing was an unbounded buffer in a
+  long-lived process; it is now killed and the operation fails with `unknown`.
+  The direct runner and the spawner-routed runner apply the same ceiling and
+  report it identically.
+- Every `JjError` the Node adapter produces now carries a `command`, including
+  the empty-revision refusals that happen before anything is spawned.
 - The direct Node runner decodes child output with a streaming decoder, so a
   multibyte code point split across two chunks is no longer two replacement
   characters. `layerSpawner` already behaved this way, and the two layers are
@@ -78,11 +103,10 @@
 - Every WASI `u64` offset, size, and directory cookie is range-checked before it
   narrows to a JavaScript number, so a value above `Number.MAX_SAFE_INTEGER` is
   refused instead of silently addressing a different byte.
-- `BrowserJj.workspaceAdd` with a revision rolls the lane back when the pin
-  fails, and reports the failure against `workspaceAdd`, so the lane name is
-  free again and no workspace stays registered at a tree that was never pinned.
-  `BrowserJj.root(from)` fails for a path outside its slice instead of answering
-  for an unrelated tree.
+- `BrowserJj.workspaceAdd` with a revision attempts to roll the lane back when
+  the pin fails, and reports the failure against `workspaceAdd`. A rollback that
+  also fails can leave the lane registered. `BrowserJj.root(from)` fails for a
+  path outside its slice instead of answering for an unrelated tree.
 - `BrowserJj.layerUnsupported` names the commands `NodeJj` would have run
   (`jj describe`, `jj restore`) rather than `jj commit` and `jj edit`, which this
   package never invokes.

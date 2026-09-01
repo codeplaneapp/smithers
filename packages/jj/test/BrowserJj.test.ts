@@ -13,6 +13,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import type { PlatformError } from "effect/PlatformError"
 import * as fs from "node:fs"
+import { runInNewContext } from "node:vm"
 import * as BrowserJj from "../src/browser/BrowserJj.ts"
 import { isJjError, Jj, type JjError, type JjFailure } from "../src/Jj.ts"
 import { emptyWasmModule, fakeFlowsJjWasm } from "./FakeFlowsJjWasm.ts"
@@ -140,6 +141,40 @@ describe("BrowserJj over the fake ABI module", () => {
       expect(yield* run({ wasm: module, fs: slice }, (jj) => jj.status())).toBe("ok")
     }))
 
+  it.effect("retries with the bytes it copied, not with the caller's mutated buffer", () =>
+    Effect.gen(function*() {
+      // Reading `options.wasm` once is not enough on its own: a `BufferSource`
+      // is a live view on memory the page still owns, so the SAME object can
+      // carry different bytes by the time a retry compiles it. The bytes are
+      // copied at the read, which is what makes the capture final.
+      const working = fakeFlowsJjWasm({ response: "{\"ok\":{\"status\":\"ok\"}}" })
+      const bytes = new Uint8Array(working.length) // all zeros: not a module
+      const jj = yield* (Effect.provide(Jj, BrowserJj.layer({ wasm: bytes, fs: slice })))
+
+      expect((yield* (Effect.flip(jj.status()))).message).toContain("failed to instantiate flows_jj.wasm")
+      bytes.set(working) // the caller's buffer is now a perfectly good module
+      expect((yield* (Effect.flip(jj.status()))).message).toContain("failed to instantiate flows_jj.wasm")
+    }))
+
+  it.effect("accepts raw ArrayBuffer bytes as well as a view", () =>
+    Effect.gen(function*() {
+      const buffer = fakeFlowsJjWasm({ response: "{\"ok\":{\"status\":\"from a buffer\"}}" }).buffer
+      expect(yield* run({ wasm: buffer, fs: slice }, (jj) => jj.status())).toBe("from a buffer")
+    }))
+
+  it.effect("copies an ArrayBuffer from another realm before the caller can mutate it", () =>
+    Effect.gen(function*() {
+      const working = fakeFlowsJjWasm({ response: "{\"ok\":{\"status\":\"ok\"}}" })
+      const buffer = runInNewContext("new ArrayBuffer(byteLength)", { byteLength: working.byteLength }) as ArrayBuffer
+      expect(buffer instanceof ArrayBuffer).toBe(false)
+      const bytes = new Uint8Array(buffer)
+      const jj = yield* (Effect.provide(Jj, BrowserJj.layer({ wasm: buffer, fs: slice })))
+
+      expect((yield* (Effect.flip(jj.status()))).message).toContain("failed to instantiate flows_jj.wasm")
+      bytes.set(working)
+      expect((yield* (Effect.flip(jj.status()))).message).toContain("failed to instantiate flows_jj.wasm")
+    }))
+
   it.effect("decodes err responses onto the frozen JjError codes", () =>
     Effect.gen(function*() {
       const conflicted = fakeFlowsJjWasm({
@@ -164,6 +199,22 @@ describe("BrowserJj over the fake ABI module", () => {
 
       const absent = fakeFlowsJjWasm({ response: "{\"err\":{\"code\":\"not_installed\",\"message\":\"n\"}}" })
       expect((yield* flip({ wasm: absent, fs: slice }, (jj) => jj.status())).code).toBe("not_installed")
+    }))
+
+  it.effect("bounds a guest-reported command before putting it on JjError", () =>
+    Effect.gen(function*() {
+      const reported = `jj ${"x".repeat(700)}`
+      const wasm = fakeFlowsJjWasm({
+        response: JSON.stringify({ err: { code: "unknown", message: "failed", command: reported } })
+      })
+
+      const error = yield* flip({ wasm, fs: slice }, (jj) => jj.status())
+
+      // 256 is the excerpt ceiling, ellipsis included: a bound that quoted 256
+      // characters AND an ellipsis would be one past the limit it names.
+      expect(error.command).toHaveLength(256)
+      expect(error.command).not.toBe(reported)
+      expect(error.command?.endsWith("…")).toBe(true)
     }))
 
   it.effect("degrades err responses outside the frozen vocabulary to unknown", () =>
@@ -435,6 +486,11 @@ describe("BrowserJj over the fake ABI module", () => {
       }
       const jj = yield* (Effect.provide(Jj, BrowserJj.layer(options)))
       const swapped: Array<string> = []
+      Object.defineProperty(options, "fs", {
+        get: () => {
+          throw new Error("the filesystem option was read again")
+        }
+      })
       options.onStderr = (text: string) => swapped.push(text)
 
       expect(yield* (jj.status())).toBe("clean")

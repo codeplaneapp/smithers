@@ -93,11 +93,12 @@ authoritative even when it cannot be executed, so a broken explicit path is
 reported rather than a different binary being quietly substituted. An override
 that names nothing falls through to `PATH`, and `smithers doctor` says so.
 
-One invocation buffers at most **64 MiB of each output stream**. jj is not an
-attacker, but the engine outlives any one command, so a child that never stops
-printing is killed and the operation fails with `unknown` rather than filling a
-buffer nobody will read. Both Node layers apply the same ceiling, since routing
-jj through the host's spawner must not change what a caller observes.
+One invocation buffers at most **64 MiB of each output stream**, counted in
+bytes as they arrive rather than in decoded characters. jj is not an attacker,
+but the engine outlives any one command, so a child that never stops printing is
+killed and the operation fails with `unknown` rather than filling a buffer
+nobody will read. Both Node layers apply the same ceiling, since routing jj
+through the host's spawner must not change what a caller observes.
 
 The tag key and the error `_tag` are durable identity: step keys digest the
 resolved service set and `JjError` round-trips through the journal, so
@@ -172,10 +173,13 @@ does not own the mount and never syncs for you.
   exists. `NodeJj` fails in a directory that is not a workspace.
 - **A pinned `workspaceAdd` is two calls.** The frozen ABI has no revision
   field, so a revisioned add is the add followed by a restore rooted at the new
-  lane. If the restore fails, the add is rolled back with a `workspaceForget`
-  and the failure is reported against `workspaceAdd`, so the lane name is free
-  again and no workspace stays registered at a tree that was never pinned. As
-  with any forget, the lane directory itself is left on disk.
+  lane. The whole sequence runs uninterruptibly. If the restore fails, the add
+  is rolled back with a `workspaceForget` and the failure is reported against
+  `workspaceAdd`, so the lane name is free again and no workspace stays
+  registered at a tree that was never pinned. As with any forget, the lane
+  directory itself is left on disk. If the rollback ITSELF fails, the lane does
+  stay registered: the caller is told about the pin failure, which is the one it
+  can act on, and only a single ABI operation can make the pair atomic.
 - **`root(from)` answers for its own slice.** The layer owns one workspace, so
   it answers the configured root for any path inside it and fails for a path
   that is not, rather than answering for an unrelated tree.

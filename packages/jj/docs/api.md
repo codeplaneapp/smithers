@@ -90,8 +90,10 @@ drives one table of inputs through both and asserts they agree.
 `cause` is a projection, not the host failure itself. `JjError` round-trips
 through the journal, and an `Error` serializes to `{}` because its `message` and
 `stack` are not enumerable, so the underlying failure is copied onto the three
-fields of `JjErrorCause` (`name`, `code`, `message`) at construction, with the
-message bounded by `causeMessageLimit`.
+fields of `JjErrorCause` (`name`, `code`, `message`) at construction. The schema
+bounds every field by `causeMessageLimit`. The `JjError` constructor and journal
+decoder reject an over-length field; `jjErrorCause` is the supported projection
+and truncates each field to fit.
 
 ## Implementations
 
@@ -157,12 +159,14 @@ Two places where the browser backend answers differently from the CLI, both
 because the frozen wasm ABI has no field for them:
 
 - `workspaceAdd` with a revision is two calls, an add followed by a restore
-  rooted at the new lane. If the pin fails, the add is rolled back with a
-  `workspaceForget` and the failure is reported against `workspaceAdd`, so the
-  lane name is free again and no workspace stays registered at a tree that was
-  never pinned. The lane DIRECTORY is left on disk, which is what
-  `workspaceForget` does everywhere; the CLI adapter's single command needs no
-  rollback at all.
+  rooted at the new lane. The whole sequence runs uninterruptibly. If the pin
+  fails, the adapter attempts a `workspaceForget` and reports the pin failure
+  against `workspaceAdd`. A successful rollback frees the lane name but leaves
+  the lane directory on disk, which is what `workspaceForget` does everywhere.
+  If the rollback itself fails, the lane can stay registered. The caller still
+  receives the pin failure, which is the one it can act on. Only a single ABI
+  operation can make the pair atomic; the CLI adapter's single command needs no
+  rollback.
 - `root(from)` answers the configured slice root, and fails when `from` is not
   inside it rather than answering for an unrelated tree.
 

@@ -52,7 +52,9 @@ const commandLimit = 512
 
 const commandOf = (args: ReadonlyArray<string>): string => {
   const command = `jj ${args.join(" ")}`
-  return command.length > commandLimit ? `${command.slice(0, commandLimit)}…` : command
+  // The ellipsis is part of the budget, so a recorded command never exceeds the
+  // limit this module names.
+  return command.length > commandLimit ? `${command.slice(0, commandLimit - 1)}…` : command
 }
 
 /**
@@ -114,13 +116,17 @@ const classify = (method: string, args: ReadonlyArray<string>, output: Output): 
  * `jj`'s own answer would be a clap usage error that classifies `unknown`,
  * and the two layers must agree on durable error identity.
  */
-const requireRevision = (method: string, revision: string): Effect.Effect<string, JjError> =>
+const requireRevision = (method: string, command: string, revision: string): Effect.Effect<string, JjError> =>
   revision.length === 0
     ? Effect.fail(
       new JjError({
         code: "invalid_ref",
         module: MODULE,
         method,
+        // The refusal lands before any argv exists, so the command is the one
+        // the operation WOULD have run. A failure without it would be the only
+        // one this adapter produces that a caller cannot attribute.
+        command,
         message: `jj ${method}: empty revision string`
       })
     )
@@ -200,8 +206,7 @@ const spawnFailure = (
 }
 
 /**
- * How much of one stream a single `jj` invocation may buffer, in decoded
- * characters.
+ * How many BYTES of one stream a single `jj` invocation may buffer.
  *
  * The engine is a long-lived process and a child's output is unbounded, so a
  * command that never stops printing would otherwise be a memory leak no caller
@@ -209,6 +214,10 @@ const spawnFailure = (
  * step snapshots — a `jj diff --git` of a very large change is single-digit
  * megabytes — so reaching it means the output is not one a run can journal
  * anyway, and a named failure is a better answer than an exhausted host.
+ *
+ * It is counted in bytes, before decoding, so the bound is the same for a diff
+ * of Japanese source as for one of ASCII: counting decoded characters would let
+ * three-byte code points through at three times the promised size.
  */
 const outputLimit = 64 * 1024 * 1024
 
@@ -219,7 +228,7 @@ const outputTooLarge = (method: string, args: ReadonlyArray<string>): JjError =>
     module: MODULE,
     method,
     command: commandOf(args),
-    message: `jj ${method}: output exceeded the ${outputLimit}-character ceiling`
+    message: `jj ${method}: output exceeded the ${outputLimit}-byte ceiling`
   })
 
 /** How one `jj` invocation reaches the operating system. */
@@ -262,19 +271,25 @@ const jj: Run = (method, args, cwd) =>
     child.stdout?.setEncoding("utf8")
     child.stderr?.setEncoding("utf8")
     // Past the ceiling the child is stopped rather than read further: leaving
-    // it running would keep filling a buffer nobody will ever look at.
-    const bound = (length: number): void => {
-      if (length <= outputLimit) return
+    // it running would keep filling a buffer nobody will ever look at. The
+    // count is of BYTES received, not of decoded characters, so it matches the
+    // spawner runner, which counts before it decodes.
+    let stdoutBytes = 0
+    let stderrBytes = 0
+    const bound = (bytes: number): void => {
+      if (bytes <= outputLimit) return
       child.kill("SIGKILL")
       finish(Effect.fail(outputTooLarge(method, args)))
     }
     child.stdout?.on("data", (chunk: string) => {
       stdout += chunk
-      bound(stdout.length)
+      stdoutBytes += Buffer.byteLength(chunk, "utf8")
+      bound(stdoutBytes)
     })
     child.stderr?.on("data", (chunk: string) => {
       stderr += chunk
-      bound(stderr.length)
+      stderrBytes += Buffer.byteLength(chunk, "utf8")
+      bound(stderrBytes)
     })
     child.on("error", (error: NodeJS.ErrnoException) =>
       finish(Effect.fail(spawnFailure(method, args, cwd, hint, error, error.code === "ENOENT"))))
@@ -303,16 +318,21 @@ const viaSpawner = (spawner: ChildProcessSpawner["Service"]): Run => (method, ar
      * One stream as text, refused rather than buffered past
      * {@link outputLimit}. `Stream.mkString` is as unbounded as string
      * concatenation is, and the two layers owe callers the same answer.
+     *
+     * The bytes are counted BEFORE `decodeText`, which is both the honest
+     * measure of what arrived and the same thing the direct runner counts.
      */
     const boundedText = (
       stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>
     ): Effect.Effect<string, PlatformError.PlatformError | JjError> => {
-      let length = 0
+      let bytes = 0
       return Stream.mkString(
-        Stream.mapEffect(Stream.decodeText(stream), (chunk) => {
-          length += chunk.length
-          return length > outputLimit ? Effect.fail(outputTooLarge(method, args)) : Effect.succeed(chunk)
-        })
+        Stream.decodeText(
+          Stream.mapEffect(stream, (chunk) => {
+            bytes += chunk.length
+            return bytes > outputLimit ? Effect.fail(outputTooLarge(method, args)) : Effect.succeed(chunk)
+          })
+        )
       )
     }
     return Effect.scoped(
@@ -377,14 +397,14 @@ const operations = (run: Run, repositoryRoot?: string) => {
   const restore = (changeId: string) =>
     Effect.asVoid(
       Effect.flatMap(
-        requireRevision("restore", changeId),
+        requireRevision("restore", "jj restore", changeId),
         (revision) => inRepository("restore", ["restore", "--from", revision])
       )
     )
 
   const diff = (from: string, to: string) =>
     Effect.flatMap(
-      Effect.all([requireRevision("diff", from), requireRevision("diff", to)]),
+      Effect.all([requireRevision("diff", "jj diff", from), requireRevision("diff", "jj diff", to)]),
       ([fromRevision, toRevision]) =>
         inRepository("diff", ["diff", "--from", fromRevision, "--to", toRevision, "--git"])
     )
@@ -400,7 +420,7 @@ const operations = (run: Run, repositoryRoot?: string) => {
     Effect.asVoid(
       revision === undefined
         ? inRepository("workspaceAdd", ["workspace", "add", `--name=${name}`, "--", path])
-        : Effect.flatMap(requireRevision("workspaceAdd", revision), (pinned) =>
+        : Effect.flatMap(requireRevision("workspaceAdd", "jj workspace add", revision), (pinned) =>
           inRepository("workspaceAdd", ["workspace", "add", `--name=${name}`, `--revision=${pinned}`, "--", path]))
     )
 
@@ -442,7 +462,7 @@ const operations = (run: Run, repositoryRoot?: string) => {
    */
   const revert = (changeId: string) =>
     Effect.flatMap(
-      requireRevision("revert", changeId),
+      requireRevision("revert", "jj revert", changeId),
       (revision) =>
         inRepository("revert", ["diff", "-r", revision, "--name-only"]).pipe(
           Effect.flatMap((names) =>

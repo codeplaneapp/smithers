@@ -350,15 +350,16 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
       // "a workspace name is opaque argv" was only true for names that do not
       // look like options.
       const name = "-dash-lane"
-      const lane = join(repository, "..", `-dash-${process.pid}`)
+      const lane = "-dash-lane-dir"
+      const laneAt = join(repository, lane)
 
       yield* run(Effect.flatMap(Jj, (jj) => jj.workspaceAdd(name, lane)))
-      expect(existsSync(lane)).toBe(true)
+      expect(existsSync(laneAt)).toBe(true)
       expect(execFileSync("jj", ["workspace", "list"], { cwd: repository, encoding: "utf8" })).toContain(name)
 
       yield* run(Effect.flatMap(Jj, (jj) => jj.workspaceForget(name)))
       expect(execFileSync("jj", ["workspace", "list"], { cwd: repository, encoding: "utf8" })).not.toContain(name)
-      yield* Effect.promise(() => rm(lane, { recursive: true, force: true }))
+      yield* Effect.promise(() => rm(laneAt, { recursive: true, force: true }))
     }))
 
   it.effect("reports reverted paths byte for byte, including leading and trailing spaces", () =>

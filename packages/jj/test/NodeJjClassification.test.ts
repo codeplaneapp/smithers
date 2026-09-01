@@ -169,9 +169,20 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
       const restoreError = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.restore(""))))
       expect(restoreError.code).toBe("invalid_ref")
       expect(restoreError.message).toBe("jj restore: empty revision string")
+      // Refusing before the spawn is not a reason to drop the metadata: the
+      // command is the one the operation would have run, so every failure this
+      // adapter produces can be attributed the same way.
+      expect(restoreError).toMatchObject({ module: "NodeJj", method: "restore", command: "jj restore" })
       const diffError = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.diff("@", ""))))
       expect(diffError.code).toBe("invalid_ref")
       expect(diffError.message).toBe("jj diff: empty revision string")
+      expect(asJjError(diffError).command).toBe("jj diff")
+      const addError = yield* run(
+        Effect.flip(Effect.flatMap(Jj, (jj) => jj.workspaceAdd("lane", "/tmp/lane", "")))
+      )
+      expect(addError).toMatchObject({ method: "workspaceAdd", command: "jj workspace add" })
+      const revertError = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.revert!(""))))
+      expect(revertError).toMatchObject({ method: "revert", command: "jj revert" })
     }))
 
   it.live("falls back to stdout for the message when stderr is empty", () =>
@@ -294,7 +305,7 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
       const error = yield* status("flood")
 
       expect(error.code).toBe("unknown")
-      expect(error.message).toBe("jj status: output exceeded the 67108864-character ceiling")
+      expect(error.message).toBe("jj status: output exceeded the 67108864-byte ceiling")
       expect(error).toMatchObject({ module: "NodeJj", method: "status", command: "jj status" })
       // Refusing the output is only half the answer: the child has to be gone,
       // not left filling a pipe nobody reads.

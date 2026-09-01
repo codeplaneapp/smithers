@@ -26,8 +26,8 @@ import { delimiter, join } from "node:path"
 /**
  * Where a resolved `jj` command came from.
  *
- * `env` is the `SMITHERS_JJ_PATH` override, `path` is the bare command name
- * left for the operating system to search.
+ * `env` is an override named by {@link overrideVariables}, `path` is the bare
+ * command name left for the operating system to search.
  *
  * @category models
  * @since 1.0.0
@@ -53,6 +53,8 @@ export interface Resolved {
   readonly source: Source
   readonly executable: boolean
   readonly hint?: string | undefined
+  /** The override variable that supplied `path` when `source` is `env`. */
+  readonly variable?: string | undefined
   /**
    * An override variable that was set to a path nothing exists at, and was
    * therefore skipped. The resolution is unaffected, but an operator whose
@@ -199,6 +201,7 @@ export const resolveJjBinary = (options: Options = {}): Resolved => {
       path: override,
       source: "env",
       executable: usable,
+      variable,
       ...(usable ? {} : { hint: permissionHint(override, platform) }),
       ...(ignored === undefined ? {} : { ignored })
     }
@@ -218,7 +221,7 @@ export const resolveJjBinary = (options: Options = {}): Resolved => {
  */
 export const describe = (resolved: Resolved): string => {
   const where = resolved.source === "env"
-    ? `${resolved.path} (SMITHERS_JJ_PATH)`
+    ? `${resolved.path} (${resolved.variable ?? "SMITHERS_JJ_PATH"})`
     : resolved.executable
     ? resolved.path
     : "not found"

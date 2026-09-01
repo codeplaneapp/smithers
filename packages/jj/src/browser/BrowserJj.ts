@@ -43,7 +43,8 @@ const MODULE = "BrowserJj"
  */
 const excerptLimit = 256
 
-const excerpt = (text: string): string => text.length > excerptLimit ? `${text.slice(0, excerptLimit)}…` : text
+/** The ellipsis is part of the budget, so an excerpt never exceeds the limit it names. */
+const excerpt = (text: string): string => text.length > excerptLimit ? `${text.slice(0, excerptLimit - 1)}…` : text
 
 /**
  * The exports the frozen `flows_jj.wasm` ABI guarantees: a reactor
@@ -109,6 +110,10 @@ const isJjErrorCode = Schema.is(JjErrorCode)
 const messageOf = (cause: unknown): string => cause instanceof Error ? cause.message : String(cause)
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
+
+/** A realm-independent test for raw, non-shared wasm bytes. */
+const isArrayBuffer = (value: unknown): value is ArrayBuffer =>
+  Object.prototype.toString.call(value) === "[object ArrayBuffer]"
 
 type OkPayload = Record<string, unknown>
 
@@ -182,7 +187,13 @@ const decodeResponse = (method: string, command: string, text: string): Effect.E
     // own command stands, so no failure reaches a caller without it.
     const reported = isRecord(err) && typeof err.command === "string" ? err.command : command
     return Effect.fail(
-      new JjError({ code, module: MODULE, method, command: reported, message: `jj ${method}: ${excerpt(message)}` })
+      new JjError({
+        code,
+        module: MODULE,
+        method,
+        command: excerpt(reported),
+        message: `jj ${method}: ${excerpt(message)}`
+      })
     )
   }
   if (isRecord(parsed) && isRecord(parsed.ok)) {
@@ -288,7 +299,22 @@ export const make = (options: BrowserJjOptions): Jj => {
    * retry would let a caller swap the module between a failed operation and the
    * next one. The read's outcome is memoized, throw included, so a getter is
    * called once whatever it does.
+   *
+   * Bytes are COPIED at the read. A `BufferSource` is a live view on memory the
+   * page still owns, so holding the caller's view would leave the executable
+   * authority mutable after the one-time capture: the same object could carry
+   * an unusable module on the first operation and a different, working one on
+   * the retry. A `WebAssembly.Module` is already immutable and is kept as is.
+   * A direct `SharedArrayBuffer` is outside the declared `BufferSource` option
+   * and is not treated as raw module bytes. A view backed by shared memory still
+   * takes the view branch and is copied into ordinary, unshared bytes.
    */
+  const capture = (wasm: WebAssembly.Module | BufferSource): WebAssembly.Module | BufferSource =>
+    ArrayBuffer.isView(wasm)
+      ? new Uint8Array(new Uint8Array(wasm.buffer, wasm.byteOffset, wasm.byteLength))
+      : isArrayBuffer(wasm)
+      ? wasm.slice(0)
+      : wasm
   let taken: { readonly ok: true; readonly wasm: WebAssembly.Module | BufferSource } | {
     readonly ok: false
     readonly cause: unknown
@@ -296,7 +322,7 @@ export const make = (options: BrowserJjOptions): Jj => {
   const wasmOnce = (): WebAssembly.Module | BufferSource => {
     if (taken === undefined) {
       try {
-        taken = { ok: true, wasm: options.wasm }
+        taken = { ok: true, wasm: capture(options.wasm) }
       } catch (cause) {
         taken = { ok: false, cause }
       }
@@ -401,9 +427,14 @@ export const make = (options: BrowserJjOptions): Jj => {
                 ).pipe(
                   // The two calls are not one transaction, so a failed pin has
                   // to undo the add: the lane is already registered. The
-                  // directory stays, as it does after any forget. A rollback
-                  // that ITSELF fails is ignored: the pin failure is the
-                  // actionable one, and forgetting an absent lane is a no-op.
+                  // directory stays, as it does after any forget.
+                  //
+                  // A rollback that ITSELF fails is ignored, and that is a
+                  // deliberate limit rather than an oversight: the pin failure
+                  // is the one a caller can act on, and turning one error into
+                  // two hides it. The README records what it costs, which is
+                  // that a lane can stay registered when both calls fail. Only
+                  // a single ABI operation can close that gap for good.
                   Effect.catch((failure) =>
                     Effect.andThen(
                       Effect.ignore(

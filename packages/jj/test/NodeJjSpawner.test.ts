@@ -218,7 +218,7 @@ describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
       const error = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.status())), flood)
 
       expect(error.code).toBe("unknown")
-      expect(error.message).toBe("jj status: output exceeded the 67108864-character ceiling")
+      expect(error.message).toBe("jj status: output exceeded the 67108864-byte ceiling")
       expect(error).toMatchObject({ module: "NodeJj", method: "status", command: "jj status" })
     }))
 

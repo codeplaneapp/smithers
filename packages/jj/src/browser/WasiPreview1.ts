@@ -18,6 +18,14 @@
  * exactly what wasi-libc's preopen scan expects, so every absolute path the
  * module opens resolves inside the slice.
  *
+ * The namespace is POSIX: `/` is the only separator, in guest paths and in
+ * symlink targets alike, and `root` is expected to be a path the slice joins
+ * the same way. A backend that also treats `\` as a separator would read a
+ * segment this shim considers an ordinary filename as a traversal, so the
+ * confinement below assumes it does not. rc.0 supports no such host: Windows is
+ * not a supported runtime, and the slices this ships against are ZenFS and
+ * `node:fs` under a POSIX root.
+ *
  * **Honest divergences** from a kernel WASI host, in the `BrowserFileSystem`
  * tradition of documenting rather than hiding them:
  *
@@ -35,6 +43,13 @@
  *   iteration can skip or repeat a name — unobservable from the
  *   single-threaded module this shim hosts, which finishes each iteration
  *   before it mutates.
+ * - A directory fd names a PATH, not an inode. The slice has no `openat` and no
+ *   directory handle to hold, so every use of an open directory fd re-resolves
+ *   its namespace path. Rename the directory an fd was opened on and the fd
+ *   follows the name, where POSIX would keep naming the moved directory. The
+ *   alternative — remembering the host path at open time — is worse than a
+ *   divergence: it is an escape, because a symlink left at the old name is then
+ *   followed by the backend out of the preopen.
  * - `sock_*` and `proc_raise` are `notsup`; there are no sockets or signals in
  *   a tab.
  *
@@ -165,6 +180,19 @@ const checked = (value: bigint, errno: number): number => {
   const unsigned = BigInt.asUintN(64, value)
   if (unsigned > BigInt(Number.MAX_SAFE_INTEGER)) return fail(errno)
   return Number(unsigned)
+}
+
+/**
+ * A WASI `u64` nanosecond stamp converted to the seconds `utimesSync` accepts.
+ *
+ * Timestamps cannot use {@link checked}: an ordinary wall-clock stamp already
+ * exceeds `Number.MAX_SAFE_INTEGER`. Reinterpret the imported `i64` as unsigned,
+ * then narrow only the seconds and subsecond remainder, which both fit safely in
+ * a JavaScript number.
+ */
+const secondsOfNanoseconds = (value: bigint): number => {
+  const unsigned = BigInt.asUintN(64, value)
+  return Number(unsigned / 1_000_000_000n) + Number(unsigned % 1_000_000_000n) / 1e9
 }
 
 /** The Node-style string `code` of a thrown backend error, if it has one. */
@@ -487,12 +515,12 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     // from a swapped test clock would be lied to about the world it runs in.
     const nowSec = Date.now() / 1e3
     const atimeSec = (flags & FSTFLAGS.atim) !== 0
-      ? Number(atim) / 1e9
+      ? secondsOfNanoseconds(atim)
       : (flags & FSTFLAGS.atimNow) !== 0
       ? nowSec
       : stats.atimeMs / 1e3
     const mtimeSec = (flags & FSTFLAGS.mtim) !== 0
-      ? Number(mtim) / 1e9
+      ? secondsOfNanoseconds(mtim)
       : (flags & FSTFLAGS.mtimNow) !== 0
       ? nowSec
       : stats.mtimeMs / 1e3
@@ -870,7 +898,12 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
       if (o.creat && !o.existing) fs.closeSync(fs.openSync(path, "wx"))
       return fs.openSync(path, "r")
     }
-    if (o.append) return fs.openSync(path, o.read ? "a+" : "a")
+    if (o.append) {
+      // The earlier existence probe cannot make O_EXCL atomic. Keeping the
+      // exclusive append flag here makes the backend reject a file created in
+      // that gap instead of opening the concurrent writer's file.
+      return fs.openSync(path, o.creat && o.excl ? (o.read ? "ax+" : "ax") : o.read ? "a+" : "a")
+    }
     if (o.creat) {
       // `O_CREAT|O_EXCL` keeps an exclusive flag even with `O_TRUNC`. The
       // caller's existence check happened one syscall ago, and O_EXCL exists
@@ -929,6 +962,7 @@ export const make = (options: WasiPreview1Options): WasiPreview1 => {
     const osFd = openFile(target.hostPath, {
       existing: existing !== undefined,
       creat,
+      excl,
       trunc,
       read,
       write,

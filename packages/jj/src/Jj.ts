@@ -47,6 +47,20 @@ export const JjErrorCode = Schema.Literals(["not_installed", "conflict", "invali
 export type JjErrorCode = typeof JjErrorCode.Type
 
 /**
+ * How many characters each string in a {@link JjErrorCause} keeps.
+ *
+ * A cause is a diagnostic, not a payload: the bound stops a host failure that
+ * embeds a whole command line, or a whole file, from being journaled with the
+ * error.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const causeMessageLimit = 1024
+
+const JjErrorCauseField = Schema.String.check(Schema.isMaxLength(causeMessageLimit))
+
+/**
  * The plain-data projection of an underlying host failure.
  *
  * `JjError` is journaled, and a journal round-trip is `JSON.stringify` at some
@@ -54,19 +68,24 @@ export type JjErrorCode = typeof JjErrorCode.Type
  * are non-enumerable, so a `cause` that held the live object would arrive at
  * the other side of a replay with its message gone. The three fields that
  * survive are named here and copied out at construction instead, which also
- * bounds what a failure can drag into the journal — a live `PlatformError`
+ * bounds what a failure can drag into the journal. A live `PlatformError`
  * carries argv, and an arbitrary object can be cyclic or mutable.
+ *
+ * `Schema.TaggedError` validates this contract at construction. `new JjError`
+ * throws when a cause field exceeds {@link causeMessageLimit}, and a decoder
+ * rejects an over-length journal record. Use {@link jjErrorCause} to project an
+ * arbitrary host failure without overflowing the schema.
  *
  * @category models
  * @since 1.0.0
  */
 export const JjErrorCause = Schema.Struct({
-  /** The failure's constructor or tag name, when it had one. */
-  name: Schema.optional(Schema.String),
-  /** The errno-style code, such as `ENOENT`. */
-  code: Schema.optional(Schema.String),
+  /** The failure's constructor or tag name, truncated to {@link causeMessageLimit}. */
+  name: Schema.optional(JjErrorCauseField),
+  /** The errno-style code, such as `ENOENT`, truncated to {@link causeMessageLimit}. */
+  code: Schema.optional(JjErrorCauseField),
   /** The failure's own message, truncated to {@link causeMessageLimit}. */
-  message: Schema.String
+  message: JjErrorCauseField
 })
 
 /**
@@ -77,17 +96,8 @@ export const JjErrorCause = Schema.Struct({
  */
 export type JjErrorCause = typeof JjErrorCause.Type
 
-/**
- * How much of an underlying failure's message a {@link JjErrorCause} keeps.
- *
- * A cause is a diagnostic, not a payload: the bound stops a host failure that
- * embeds a whole command line, or a whole file, from being journaled with the
- * error.
- *
- * @category constants
- * @since 1.0.0
- */
-export const causeMessageLimit = 1024
+const truncateCauseField = (value: string): string =>
+  value.length > causeMessageLimit ? `${value.slice(0, causeMessageLimit - 1)}…` : value
 
 /**
  * Projects an arbitrary host failure onto the plain data {@link JjErrorCause}
@@ -111,9 +121,9 @@ export const jjErrorCause = (cause: unknown): JjErrorCause => {
     ? record["message"]
     : String(cause)
   return {
-    ...(name === undefined ? {} : { name }),
-    ...(code === undefined ? {} : { code }),
-    message: message.length > causeMessageLimit ? `${message.slice(0, causeMessageLimit)}…` : message
+    ...(name === undefined ? {} : { name: truncateCauseField(name) }),
+    ...(code === undefined ? {} : { code: truncateCauseField(code) }),
+    message: truncateCauseField(message)
   }
 }
 

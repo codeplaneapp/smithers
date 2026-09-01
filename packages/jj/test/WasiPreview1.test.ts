@@ -508,6 +508,74 @@ describe("WasiPreview1 path_open", () => {
     expect(fsModule.readFileSync(join(root, "fresh3.txt"), "utf8")).toBe("wo")
   })
 
+  it("keeps O_CREAT|O_EXCL exclusive when the file appears after the existence probe", () => {
+    // O_EXCL is what makes create-if-absent atomic, and the shim decides
+    // "absent" one syscall before it opens. A file that appears in that gap
+    // must still answer EEXIST: opening it `w` because the probe said missing
+    // would truncate a file the guest never asked to touch.
+    const root = freshDir()
+    const raced = join(root, "raced.txt")
+    fsModule.writeFileSync(raced, "not mine to truncate")
+    const absent = (): never => {
+      const error: NodeJS.ErrnoException = new Error("ENOENT: no such file or directory")
+      error.code = "ENOENT"
+      throw error
+    }
+    const h = host({
+      root,
+      fs: {
+        ...nodeFs,
+        statSync: (path: string) => path === raced ? absent() : fsModule.statSync(path),
+        lstatSync: (path: string) => path === raced ? absent() : fsModule.lstatSync(path)
+      }
+    })
+
+    expect(openErrno(h, "/raced.txt", { oflags: OFLAG.creat | OFLAG.excl | OFLAG.trunc, rights: RW })).toBe(E.exist)
+    expect(openErrno(h, "/raced.txt", { oflags: OFLAG.creat | OFLAG.excl | OFLAG.trunc, rights: W })).toBe(E.exist)
+    expect(fsModule.readFileSync(raced, "utf8")).toBe("not mine to truncate")
+  })
+
+  it("keeps O_CREAT|O_EXCL exclusive for append opens across the existence race", () => {
+    const root = freshDir()
+    const racedWrite = join(root, "raced-write.txt")
+    const racedReadWrite = join(root, "raced-read-write.txt")
+    fsModule.writeFileSync(racedWrite, "writer won")
+    fsModule.writeFileSync(racedReadWrite, "writer won")
+    const hidden = new Set([racedWrite, racedReadWrite])
+    const h = host({
+      root,
+      fs: stubFs({
+        ...nodeFs,
+        statSync: (path: string) => {
+          if (hidden.delete(path)) throw codeError("ENOENT")
+          return fsModule.statSync(path)
+        }
+      })
+    })
+
+    const options = { oflags: OFLAG.creat | OFLAG.excl, fdflags: 1 }
+    expect(openErrno(h, "/raced-write.txt", { ...options, rights: W })).toBe(E.exist)
+    expect(openErrno(h, "/raced-read-write.txt", { ...options, rights: RW })).toBe(E.exist)
+    expect(fsModule.readFileSync(racedWrite, "utf8")).toBe("writer won")
+    expect(fsModule.readFileSync(racedReadWrite, "utf8")).toBe("writer won")
+  })
+
+  it("creates and appends with O_CREAT|O_EXCL|O_APPEND when the path is absent", () => {
+    const root = freshDir()
+    const h = host({ root })
+    const flags = { oflags: OFLAG.creat | OFLAG.excl, fdflags: 1 }
+    const writeOnly = open(h, "/append-write.txt", { ...flags, rights: W })
+    expect(writeAll(h, writeOnly, "one")).toBe(E.success)
+    expect(writeAll(h, writeOnly, "-two")).toBe(E.success)
+    h.sys.fd_close!(writeOnly)
+    expect(fsModule.readFileSync(join(root, "append-write.txt"), "utf8")).toBe("one-two")
+
+    const readWrite = open(h, "/append-read-write.txt", { ...flags, rights: RW })
+    expect(writeAll(h, readWrite, "readable")).toBe(E.success)
+    h.sys.fd_close!(readWrite)
+    expect(fsModule.readFileSync(join(root, "append-read-write.txt"), "utf8")).toBe("readable")
+  })
+
   it("opens O_CREAT without O_TRUNC preserving existing bytes", () => {
     const root = freshDir()
     fsModule.writeFileSync(join(root, "keep.txt"), "keepers")
@@ -759,6 +827,12 @@ describe("WasiPreview1 path_open", () => {
 
       // `/held` now resolves to the re-rooted target inside the slice, which
       // does not exist, so nothing outside is reachable through the held fd.
+      //
+      // ENOENT is the DIVERGENCE the module header records, not the POSIX
+      // answer: a kernel fd would still name the moved directory and read
+      // `own.txt` from it. Naming the inode needs an `openat` the slice does
+      // not have, and the only other option — remembering the host path — is
+      // the escape this case exists to close.
       const own = h.str(PATH_A, "own.txt")
       expect(h.sys.path_open!(dirFd, 1, own.ptr, own.len, 0, R, 0n, 0, RET)).toBe(E.noent)
       const secret = h.str(PATH_B, "secret.txt")
@@ -1297,6 +1371,33 @@ describe("WasiPreview1 stat & times", () => {
     const p = h.str(PATH_A, "/peek")
     expect(h.sys.path_filestat_get!(3, 1, p.ptr, p.len, STAT)).toBe(E.noent)
     expect(fsModule.statSync(outsideFile).size).toBe(13)
+  })
+
+  it("interprets explicit nanosecond timestamps as unsigned WASI values", () => {
+    const root = freshDir()
+    const pathFile = join(root, "path-time.txt")
+    const fdFile = join(root, "fd-time.txt")
+    fsModule.writeFileSync(pathFile, "path")
+    fsModule.writeFileSync(fdFile, "fd")
+    const h = host({ root })
+    const p = h.str(PATH_A, "/path-time.txt")
+    const presentDay = 1_750_000_000_125_000_000n
+
+    expect(h.sys.path_filestat_set_times!(3, 1, p.ptr, p.len, 0n, presentDay, 4)).toBe(E.success)
+    expectNsClose(nsOfMs(fsModule.statSync(pathFile).mtimeMs), presentDay)
+
+    const highBit = 1n << 63n
+    const signedImport = BigInt.asIntN(64, highBit)
+    expect(signedImport).toBeLessThan(0n)
+    expect(h.sys.path_filestat_set_times!(3, 1, p.ptr, p.len, 0n, signedImport, 4)).toBe(E.success)
+    expect(fsModule.statSync(pathFile).mtimeMs).toBeGreaterThan(Date.now())
+    expectNsClose(nsOfMs(fsModule.statSync(pathFile).mtimeMs), highBit)
+
+    const fd = open(h, "/fd-time.txt", { rights: RW })
+    expect(h.sys.fd_filestat_set_times!(fd, 0n, signedImport, 4)).toBe(E.success)
+    expect(fsModule.statSync(fdFile).mtimeMs).toBeGreaterThan(Date.now())
+    expectNsClose(nsOfMs(fsModule.statSync(fdFile).mtimeMs), highBit)
+    h.sys.fd_close!(fd)
   })
 
   it("sets explicit nanosecond times and 'now', keeping unset sides", () => {

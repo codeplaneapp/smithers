@@ -34,8 +34,11 @@ describe("resolveJjBinary", () => {
       const binary = write(join(directory, "jj"), 0o755)
       const resolved = Resolve.resolveJjBinary({ environment: { SMITHERS_JJ_PATH: binary }, platform: "linux" })
 
-      expect(resolved).toEqual({ path: binary, source: "env", executable: true })
+      expect(resolved).toEqual({ path: binary, source: "env", executable: true, variable: "SMITHERS_JJ_PATH" })
       expect(Resolve.describe(resolved)).toBe(`jj: ${binary} (SMITHERS_JJ_PATH)`)
+      expect(Resolve.describe({ path: binary, source: "env", executable: true })).toBe(
+        `jj: ${binary} (SMITHERS_JJ_PATH)`
+      )
     }))
 
   it("keeps a non-executable override authoritative and explains why it fails", () =>
@@ -60,13 +63,15 @@ describe("resolveJjBinary", () => {
       const preferred = write(join(directory, "preferred"), 0o755)
       const alias = write(join(directory, "alias"), 0o755)
 
-      expect(Resolve.resolveJjBinary({ environment: { FLOWS_JJ_PATH: alias }, platform: "linux" }).path).toBe(alias)
+      const aliased = Resolve.resolveJjBinary({ environment: { FLOWS_JJ_PATH: alias }, platform: "linux" })
+      expect(aliased).toMatchObject({ path: alias, variable: "FLOWS_JJ_PATH" })
+      expect(Resolve.describe(aliased)).toBe(`jj: ${alias} (FLOWS_JJ_PATH)`)
       expect(
         Resolve.resolveJjBinary({
           environment: { SMITHERS_JJ_PATH: preferred, FLOWS_JJ_PATH: alias },
           platform: "linux"
-        }).path
-      ).toBe(preferred)
+        })
+      ).toMatchObject({ path: preferred, variable: "SMITHERS_JJ_PATH" })
       expect(Resolve.overrideVariables).toEqual(["SMITHERS_JJ_PATH", "FLOWS_JJ_PATH"])
     }))
 
@@ -105,6 +110,7 @@ describe("resolveJjBinary", () => {
 
       expect(resolved.path).toBe(alias)
       expect(resolved.source).toBe("env")
+      expect(resolved.variable).toBe("FLOWS_JJ_PATH")
       expect(resolved.ignored).toEqual({ variable: "SMITHERS_JJ_PATH", path: join(directory, "absent") })
       expect(Resolve.describe(resolved)).toContain("was ignored")
     }))
