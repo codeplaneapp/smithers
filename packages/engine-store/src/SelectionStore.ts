@@ -69,6 +69,43 @@ export const TrainingObservation = Schema.Struct({
 export type TrainingObservation = typeof TrainingObservation.Type
 
 /**
+ * Stable selection-store failure codes.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const SelectionStoreErrorCode = Schema.Literals([
+  "invalid_input",
+  "decode_failed",
+  "persistence_failed"
+])
+
+/**
+ * Stable selection-store failure codes.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type SelectionStoreErrorCode = typeof SelectionStoreErrorCode.Type
+
+/**
+ * A rejected public value, corrupt stored row, or unavailable database.
+ *
+ * @category errors
+ * @since 1.0.0
+ */
+export class SelectionStoreError extends Schema.TaggedError<SelectionStoreError>()(
+  "@smthrs/engine-store/SelectionStoreError",
+  {
+    code: SelectionStoreErrorCode,
+    message: Schema.String,
+    scope: Schema.optional(Schema.String),
+    affects: Schema.optional(Schema.String),
+    cause: Schema.optional(Schema.Unknown)
+  }
+) {}
+
+/**
  * Durable suspected-edge persistence operations. `snapshot` pins the injected
  * clock's now, never `Date.now()`; `train` applies the asymmetric rule — a
  * hit gains five percent of the remaining headroom, a miss halves — to
@@ -80,10 +117,14 @@ export type TrainingObservation = typeof TrainingObservation.Type
  * @slop
  */
 export interface Service {
-  readonly upsert: (edges: ReadonlyArray<Selection.SuspectedEdge>) => Effect.Effect<void>
-  readonly list: () => Effect.Effect<ReadonlyArray<Selection.SuspectedEdge>>
-  readonly snapshot: () => Effect.Effect<Selection.BeliefSnapshot>
-  readonly train: (observations: ReadonlyArray<TrainingObservation>) => Effect.Effect<void>
+  readonly upsert: (
+    edges: ReadonlyArray<Selection.SuspectedEdge>
+  ) => Effect.Effect<void, SelectionStoreError>
+  readonly list: () => Effect.Effect<ReadonlyArray<Selection.SuspectedEdge>, SelectionStoreError>
+  readonly snapshot: () => Effect.Effect<Selection.BeliefSnapshot, SelectionStoreError>
+  readonly train: (
+    observations: ReadonlyArray<TrainingObservation>
+  ) => Effect.Effect<void, SelectionStoreError>
 }
 
 /**
@@ -103,37 +144,79 @@ const EdgeRow = Schema.Struct({
   scope: Schema.NonEmptyString,
   affects: Schema.NonEmptyString,
   confidence: Schema.Number,
-  validFromMs: Schema.Number,
+  validFromMs: Selection.NonNegativeSafeInt,
   evidenceJson: Schema.String
 })
 
 type EdgeRow = typeof EdgeRow.Type
 
-const decodeObservation = (input: unknown): Effect.Effect<TrainingObservation> =>
-  Schema.decodeUnknownEffect(TrainingObservation)(input).pipe(Effect.orDie)
+const invalidInput = (message: string, cause: unknown): SelectionStoreError =>
+  new SelectionStoreError({ code: "invalid_input", message, cause })
 
-const decodeEdge = (input: unknown): Effect.Effect<Selection.SuspectedEdge> =>
-  Schema.decodeUnknownEffect(Selection.SuspectedEdge)(input).pipe(Effect.orDie)
+const persistenceFailed = (message: string, cause: unknown): SelectionStoreError =>
+  cause instanceof SelectionStoreError
+    ? cause
+    : new SelectionStoreError({ code: "persistence_failed", message, cause })
 
+const decodeObservation = (input: unknown): Effect.Effect<TrainingObservation, SelectionStoreError> =>
+  Schema.decodeUnknownEffect(TrainingObservation)(input).pipe(
+    Effect.mapError((cause) => invalidInput("a training observation is invalid", cause))
+  )
+
+const decodeEdge = (input: unknown): Effect.Effect<Selection.SuspectedEdge, SelectionStoreError> =>
+  Schema.decodeUnknownEffect(Selection.SuspectedEdge)(input).pipe(
+    Effect.mapError((cause) => invalidInput("a suspected edge is invalid", cause))
+  )
+
+// `decodeEdge` has already copied and validated this as an array of strings.
+// JSON encoding that closed value cannot fail, so retaining a fictitious
+// schema-error branch here only obscures the actual persistence failures.
 const encodeEvidence = (evidence: ReadonlyArray<string>): Effect.Effect<string> =>
-  Schema.encodeEffect(EvidenceListFromJsonString)(evidence).pipe(Effect.orDie)
+  Effect.succeed(JSON.stringify(evidence))
 
-const decodeEvidence = (evidenceJson: string): Effect.Effect<ReadonlyArray<string>> =>
-  Schema.decodeUnknownEffect(EvidenceListFromJsonString)(evidenceJson).pipe(Effect.orDie)
+const decodeEvidence = (
+  evidenceJson: string,
+  row: Pick<EdgeRow, "scope" | "affects">
+): Effect.Effect<ReadonlyArray<string>, SelectionStoreError> =>
+  Schema.decodeUnknownEffect(EvidenceListFromJsonString)(evidenceJson).pipe(
+    Effect.mapError((cause) =>
+      new SelectionStoreError({
+        code: "decode_failed",
+        message: `stored edge ${row.scope} -> ${row.affects} has invalid evidence`,
+        scope: row.scope,
+        affects: row.affects,
+        cause
+      })
+    )
+  )
 
-const decodeRow = (input: unknown): Effect.Effect<Selection.SuspectedEdge> =>
+const decodeRow = (input: unknown): Effect.Effect<Selection.SuspectedEdge, SelectionStoreError> =>
   Schema.decodeUnknownEffect(EdgeRow)(input).pipe(
-    Effect.orDie,
+    Effect.mapError((cause) =>
+      new SelectionStoreError({
+        code: "decode_failed",
+        message: "a stored selection edge row is invalid",
+        cause
+      })
+    ),
     Effect.flatMap((row) =>
-      decodeEvidence(row.evidenceJson).pipe(
+      decodeEvidence(row.evidenceJson, row).pipe(
         Effect.flatMap((evidence) =>
-          decodeEdge({
+          Schema.decodeUnknownEffect(Selection.SuspectedEdge)({
             scope: row.scope,
             affects: row.affects,
             confidence: row.confidence,
             validFromMs: row.validFromMs,
             evidence
-          })
+          }).pipe(Effect.mapError((cause) =>
+            new SelectionStoreError({
+              code: "decode_failed",
+              message: `stored edge ${row.scope} -> ${row.affects} is invalid`,
+              scope: row.scope,
+              affects: row.affects,
+              cause
+            })
+          ))
         )
       )
     )
@@ -168,7 +251,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         AND affects = ${observation.affects}
     `
 
-  const writeEdge = (edge: Selection.SuspectedEdge): Effect.Effect<void, unknown> =>
+  const writeEdge = (edge: Selection.SuspectedEdge): Effect.Effect<void, SelectionStoreError> =>
     Effect.gen(function*() {
       const evidenceJson = yield* encodeEvidence(edge.evidence)
       yield* sql`
@@ -180,13 +263,20 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
           confidence = excluded.confidence,
           valid_from_ms = excluded.valid_from_ms,
           evidence_json = excluded.evidence_json
-      `
+      `.pipe(Effect.mapError((cause) =>
+        persistenceFailed(
+          `could not persist edge ${edge.scope} -> ${edge.affects}`,
+          cause
+        )
+      ))
     })
 
   const upsert: Service["upsert"] = Effect.fn("SelectionStore.upsert")((edges) =>
     Effect.gen(function*() {
       const decoded = yield* Effect.forEach(edges, decodeEdge)
-      yield* writer.write(Effect.forEach(decoded, writeEdge, { discard: true })).pipe(Effect.orDie)
+      yield* writer.write(Effect.forEach(decoded, writeEdge, { discard: true })).pipe(
+        Effect.mapError((cause) => persistenceFailed("could not persist suspected edges", cause))
+      )
     })
   )
 
@@ -201,7 +291,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
           evidence_json AS "evidenceJson"
         FROM flows_selection_suspected_edges
         ORDER BY scope, affects
-      `.pipe(Effect.orDie)
+      `.pipe(Effect.mapError((cause) => persistenceFailed("could not list suspected edges", cause)))
       return yield* Effect.forEach(rows, decodeRow)
     })
   )
@@ -221,7 +311,14 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         decoded,
         (observation) =>
           Effect.gen(function*() {
-            const rows = yield* selectEdge(observation)
+            const rows = yield* selectEdge(observation).pipe(
+              Effect.mapError((cause) =>
+                persistenceFailed(
+                  `could not read edge ${observation.scope} -> ${observation.affects}`,
+                  cause
+                )
+              )
+            )
             const row = rows[0]
             if (row === undefined) return
             const edge = yield* decodeRow(row)
@@ -232,7 +329,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             })
           }),
         { discard: true }
-      )).pipe(Effect.orDie)
+      )).pipe(Effect.mapError((cause) => persistenceFailed("could not train suspected edges", cause)))
     })
   )
 
