@@ -127,10 +127,16 @@ const toArray = (message: unknown): ReadonlyArray<unknown> => Array.isArray(mess
  * `stack` ACCESSOR whose getter would read the unredacted text straight back
  * out of the original.
  */
-const redactError = (error: Error, redactor: Redaction.Redactor, seen: WeakSet<object>): Error => {
-  if (seen.has(error)) return error
-  seen.add(error)
+const redactError = (error: Error, redactor: Redaction.Redactor, seen: WeakMap<Error, Error>): Error => {
+  // The memo holds the CLONE, not a visited mark: returning the original on a
+  // repeat reference put the unredacted error back into the output, so a
+  // diamond (two fields naming one error) leaked on its second field. The
+  // clone is registered before its own keys are walked, so a cycle terminates
+  // on the clone and every reference to one error is the same redacted object.
+  const memoized = seen.get(error)
+  if (memoized !== undefined) return memoized
   const clone = Object.create(Object.getPrototypeOf(error)) as Error
+  seen.set(error, clone)
   for (const key of Reflect.ownKeys(error)) {
     if (key === "message" || key === "stack") continue
     const descriptor = Object.getOwnPropertyDescriptor(error, key)!
@@ -171,7 +177,94 @@ const redactError = (error: Error, redactor: Redaction.Redactor, seen: WeakSet<o
  * @slop
  */
 export const redactArgument = (value: unknown, redactor: Redaction.Redactor): unknown =>
-  value instanceof Error ? redactError(value, redactor, new WeakSet()) : redactor(value)
+  redactRendered(value, redactor, new WeakMap())
+
+/**
+ * Redacts a value for a log line, keeping the type the operator was given.
+ *
+ * `Redaction.redact` rebuilds an object from its own enumerable entries, which
+ * is right for the journal, whose rows are JSON, and wrong here: a `Date`, a
+ * `Map`, a `Set`, a `URL`, a `RegExp`, or a class instance would reach the
+ * operator as `{}` and `layer()` promises they keep the format they had. So a
+ * value that is not a plain object or an array is rebuilt on its own
+ * prototype, with its contents redacted by the same rules.
+ *
+ * A binary view (`ArrayBuffer` and the typed arrays) passes through unchanged:
+ * the rules read text, and copying a buffer per log line is a cost with no
+ * redaction to show for it.
+ *
+ * @private
+ */
+const redactRendered = (value: unknown, redactor: Redaction.Redactor, seen: WeakMap<object, unknown>): unknown => {
+  if (value === null || typeof value !== "object") return redactor(value)
+  if (value instanceof Error) return redactError(value, redactor, seen as WeakMap<Error, Error>)
+  const memoized = seen.get(value)
+  if (memoized !== undefined) return memoized
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return value
+  if (value instanceof Date || value instanceof RegExp) return value
+  if (value instanceof URL) return new URL(String(redactor(value.href)))
+  if (value instanceof Map) {
+    const clone = new Map<unknown, unknown>()
+    seen.set(value, clone)
+    for (const [key, member] of value) {
+      clone.set(
+        key,
+        typeof key === "string" && Redaction.isSensitiveKey(key)
+          ? Redaction.placeholder
+          : redactRendered(member, redactor, seen)
+      )
+    }
+    return clone
+  }
+  if (value instanceof Set) {
+    const clone = new Set<unknown>()
+    seen.set(value, clone)
+    for (const member of value) clone.add(redactRendered(member, redactor, seen))
+    return clone
+  }
+  const prototype = Object.getPrototypeOf(value) as object | null
+  if (Array.isArray(value)) {
+    const clone: Array<unknown> = []
+    seen.set(value, clone)
+    for (const member of value) clone.push(redactRendered(member, redactor, seen))
+    return clone
+  }
+  if (prototype === Object.prototype || prototype === null) {
+    // Walked here rather than handed to `Redaction.redact`, because that
+    // rebuild would collapse an exotic member one level down, which is the
+    // whole point of this function. `Object.fromEntries` keeps the
+    // `__proto__` safety the journal's walker documents: assigning that key
+    // would make the field a prototype instead of a member.
+    const entries: Array<[string, unknown]> = []
+    const clone: Record<string, unknown> = {}
+    seen.set(value, clone)
+    for (const [key, member] of Object.entries(value as Record<string, unknown>)) {
+      entries.push([
+        key,
+        Redaction.isSensitiveKey(key) ? Redaction.placeholder : redactRendered(member, redactor, seen)
+      ])
+    }
+    Object.assign(clone, Object.fromEntries(entries))
+    return clone
+  }
+  const clone = Object.create(prototype) as Record<PropertyKey, unknown>
+  seen.set(value, clone)
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!
+    // Read once and stored as data, for the reason `redactError` gives: a
+    // getter carried across would hand the unredacted value to its reader.
+    const member = "value" in descriptor ? descriptor.value : (value as Record<PropertyKey, unknown>)[key]
+    Object.defineProperty(clone, key, {
+      value: typeof key === "string" && Redaction.isSensitiveKey(key)
+        ? Redaction.placeholder
+        : redactRendered(member, redactor, seen),
+      writable: true,
+      enumerable: descriptor.enumerable === true,
+      configurable: true
+    })
+  }
+  return clone
+}
 
 /**
  * A console that runs every value it is handed through `redactor` and then

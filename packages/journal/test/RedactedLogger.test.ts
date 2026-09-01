@@ -253,7 +253,13 @@ describe("RedactedLogger", () => {
     expect(redacted.message).toBe("outer Bearer [REDACTED_TOKEN]")
     expect(redacted.cause).toBeInstanceOf(Error)
     expect((redacted.cause as Error).message).toBe(`inner token=${Redaction.placeholder}`)
-    expect(redacted.self).toBe(outer)
+    // Restated 2026-08-31: this asserted `toBe(outer)`, which made the repeat
+    // reference the UNREDACTED original. A diamond (two fields naming one
+    // error) then carried the credential in clear on the second field, and a
+    // logger that reads the event rather than rendering it through the console
+    // printed it. The memo returns the clone, so every reference is redacted
+    // and the shape a reader sees is still a self-reference.
+    expect(redacted.self).toBe(redacted)
     // A getter is read once and stored, so what it returned is redacted too.
     expect(redacted.detail).toBe("sent Bearer [REDACTED_TOKEN]")
   })
@@ -272,6 +278,100 @@ describe("RedactedLogger", () => {
       expect(rendered).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
       expect(rendered).toContain("Bearer [REDACTED_API_KEY]")
     }))
+
+  it("keeps the type a logger was given, and still redacts what it holds", () => {
+    // The redactor rebuilds an object from its own enumerable entries, which
+    // turns a Date, Map, Set, URL, RegExp or class instance into `{}`. That is
+    // right for the journal, whose rows are JSON, and wrong for a log line,
+    // where the operator keeps the format they had.
+    const redactor = Redaction.make()
+    const at = new Date(0)
+    expect(RedactedLogger.redactArgument(at, redactor)).toBeInstanceOf(Date)
+    expect((RedactedLogger.redactArgument(at, redactor) as Date).toISOString()).toBe(at.toISOString())
+    expect(RedactedLogger.redactArgument(/x/g, redactor)).toBeInstanceOf(RegExp)
+
+    const map = RedactedLogger.redactArgument(new Map([["apiKey", "sk-live-abcdefgh"]]), redactor) as Map<
+      string,
+      unknown
+    >
+    expect(map).toBeInstanceOf(Map)
+    expect(map.get("apiKey")).toBe(Redaction.placeholder)
+
+    const set = RedactedLogger.redactArgument(new Set(["token=sk-live-abcdefgh"]), redactor) as Set<string>
+    expect(set).toBeInstanceOf(Set)
+    expect([...set].join()).not.toContain("sk-live-abcdefgh")
+
+    class Detail {
+      readonly apiKey: string
+      readonly endpoint: string
+      constructor(apiKey: string, endpoint: string) {
+        this.apiKey = apiKey
+        this.endpoint = endpoint
+      }
+    }
+    const detail = RedactedLogger.redactArgument(new Detail("sk-live-abcdefgh", "https://example.test"), redactor)
+    expect(detail).toBeInstanceOf(Detail)
+    expect((detail as Detail).apiKey).toBe(Redaction.placeholder)
+    expect((detail as Detail).endpoint).toBe("https://example.test")
+
+    // A repeat reference is the same clone, a binary view passes through, a
+    // URL keeps its type with its query redacted, and a symbol-keyed member
+    // of a class instance survives with its own value.
+    const shared = new Map([["endpoint", "https://example.test"]])
+    const twice = RedactedLogger.redactArgument({ a: shared, b: shared }, redactor) as {
+      a: Map<string, unknown>
+      b: Map<string, unknown>
+    }
+    expect(twice.b).toBe(twice.a)
+    const bytes = new Uint8Array([1, 2, 3])
+    expect(RedactedLogger.redactArgument(bytes, redactor)).toBe(bytes)
+    const url = RedactedLogger.redactArgument(new URL("https://example.test/?token=sk-live-abcdefgh"), redactor)
+    expect(url).toBeInstanceOf(URL)
+    expect(String(url)).not.toContain("sk-live-abcdefgh")
+    const tag = Symbol("tag")
+    class Tagged {
+      readonly apiKey = "sk-live-abcdefgh"
+      readonly [tag] = "kept"
+    }
+    const tagged = RedactedLogger.redactArgument(new Tagged(), redactor) as Tagged
+    expect(tagged[tag]).toBe("kept")
+    expect(tagged.apiKey).toBe(Redaction.placeholder)
+
+    // A getter on a class instance is read once and stored as data, so the
+    // reader cannot pull the unredacted value back out of the original.
+    class Lazy {}
+    const lazy = new Lazy()
+    Object.defineProperty(lazy, "detail", {
+      get: () => "sent Bearer abcdefghijkl",
+      enumerable: true,
+      configurable: true
+    })
+    const rendered = RedactedLogger.redactArgument(lazy, redactor) as { detail: string }
+    expect(rendered).toBeInstanceOf(Lazy)
+    expect(rendered.detail).toBe("sent Bearer [REDACTED_TOKEN]")
+
+    // A plain object and an array still walk exactly as before.
+    expect(RedactedLogger.redactArgument({ a: ["token=sk-live-abcdefgh"] }, redactor)).toEqual({
+      a: [`token=${Redaction.placeholder}`]
+    })
+  })
+
+  it("redacts every reference to one error, not only the first", () => {
+    // A diamond: two fields of one error naming the same child. The cycle
+    // guard used to hand back the original on the second visit, so the
+    // credential survived on `second` while `first` was clean.
+    const base = new Error("upstream token=sk-live-abcdefgh")
+    const top = new Error("deploy failed") as Error & { first?: unknown; second?: unknown }
+    top.first = base
+    top.second = base
+    const redacted = RedactedLogger.redactArgument(top, Redaction.make()) as Error & {
+      first: Error
+      second: Error
+    }
+    expect(redacted.first.message).not.toContain("sk-live-abcdefgh")
+    expect(redacted.second.message).not.toContain("sk-live-abcdefgh")
+    expect(redacted.second).toBe(redacted.first)
+  })
 
   it.effect("redacts a credential-named log annotation wholesale", () =>
     Effect.gen(function*() {
