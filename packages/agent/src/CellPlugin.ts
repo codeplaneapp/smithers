@@ -20,7 +20,7 @@ import * as Kernel from "@smthrs/plugin/Kernel"
 import { PluginError } from "@smthrs/plugin/PluginError"
 import type * as Plugins from "@smthrs/plugin/Plugins"
 import type * as Registry from "@smthrs/registry/Registry"
-import { Effect } from "effect"
+import * as Effect from "effect/Effect"
 
 declare module "@smthrs/plugin" {
   interface FlowsHooks {

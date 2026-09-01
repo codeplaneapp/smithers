@@ -9,7 +9,9 @@
  */
 import * as EngineLike from "@smthrs/harness/EngineLike"
 import * as SnapshotRecorder from "@smthrs/memory/SnapshotRecorder"
-import { Effect, Layer, Schema } from "effect"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 
 const record = <R>(
   engine: EngineLike.EngineLike,

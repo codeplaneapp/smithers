@@ -74,8 +74,11 @@
 import * as Digest from "@smthrs/core/Digest"
 import * as EngineLike from "@smthrs/harness/EngineLike"
 import { HarnessError } from "@smthrs/harness/HarnessError"
-import { Context, Effect, Layer, Option } from "effect"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 
 /**
  * Directory names never descended into.

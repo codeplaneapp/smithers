@@ -22,10 +22,10 @@
  * turn into a route is a typed {@link SeatUnresolved} rather than a run that
  * fails halfway through.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import type * as Model from "@smthrs/model/Model"
-import { Schema } from "effect"
+import * as Schema from "effect/Schema"
 import type * as FlowEngineLike from "./FlowEngineLike.ts"
 
 /**
@@ -34,7 +34,7 @@ import type * as FlowEngineLike from "./FlowEngineLike.ts"
  * has a real budget.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Seat {
   /** The declared seat string this record was resolved from. */
@@ -49,7 +49,7 @@ export interface Seat {
  * Constructs a resolved seat.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const make = (seat: Seat): Seat => seat
 
@@ -58,7 +58,7 @@ export const make = (seat: Seat): Seat => seat
  * missing API key, an invalid endpoint.
  *
  * @category errors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export class SeatUnresolved extends Schema.TaggedError<SeatUnresolved>()(
   "@smthrs/agent/Seat/SeatUnresolved",
@@ -77,7 +77,7 @@ export class SeatUnresolved extends Schema.TaggedError<SeatUnresolved>()(
  * called nothing.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const modelIdOf = (id: string): string => {
   const separator = id.indexOf(":")

@@ -16,8 +16,12 @@
  *
  * @since 0.1.0
  */
-import { Context, Effect, Layer, Path, Schema } from "effect"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
+import * as Schema from "effect/Schema"
 
 /**
  * Stable error codes returned by saved-flow storage.

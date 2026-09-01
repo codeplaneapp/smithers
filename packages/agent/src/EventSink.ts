@@ -25,7 +25,9 @@
  * @since 0.1.0
  */
 import type * as AgentEvent from "@smthrs/harness/AgentEvent"
-import { Context, Effect, Layer } from "effect"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 
 /**
  * The sink: one event in, nothing out.

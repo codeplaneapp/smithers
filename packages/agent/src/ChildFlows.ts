@@ -30,7 +30,9 @@
 import * as Flow from "@smthrs/core/Flow"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import type { HarnessError } from "@smthrs/harness/HarnessError"
-import { Context, Effect, Schema } from "effect"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 
 /**
  * Input for `agent/spawn`.

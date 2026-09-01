@@ -14,16 +14,18 @@
  * not a rule the agent enforces — a resolver that maps `reviewer` onto a
  * particular model is an ordinary implementation of this one method.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-import { Context, Effect, Layer } from "effect"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Seat from "./Seat.ts"
 
 /**
  * The resolver: one seat string in, one resolved seat out.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Service {
   readonly resolve: (id: string) => Effect.Effect<Seat.Seat, Seat.SeatUnresolved>
@@ -33,7 +35,7 @@ export interface Service {
  * The {@link Service} tag.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export class SeatResolver extends Context.Service<SeatResolver, Service>()(
   "@smthrs/agent/SeatResolver"
@@ -43,7 +45,7 @@ export class SeatResolver extends Context.Service<SeatResolver, Service>()(
  * Builds a {@link Service} from an implementation of its one method.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const make = (implementation: Service): Service => SeatResolver.of(implementation)
 
@@ -55,7 +57,7 @@ export const make = (implementation: Service): Service => SeatResolver.of(implem
  * failed provider call halfway through a run. Overrides replace the method.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const makeNoop = (overrides: Partial<Service> = {}): Service =>
   make({
@@ -67,7 +69,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service =>
  * Provides {@link SeatResolver} from an implementation.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layer = (implementation: Service): Layer.Layer<SeatResolver> =>
   Layer.succeed(SeatResolver)(make(implementation))
@@ -76,7 +78,7 @@ export const layer = (implementation: Service): Layer.Layer<SeatResolver> =>
  * Provides {@link makeNoop}.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layerNoop = (overrides: Partial<Service> = {}): Layer.Layer<SeatResolver> =>
   Layer.succeed(SeatResolver)(makeNoop(overrides))
@@ -96,7 +98,7 @@ const contextWindows: ReadonlyArray<readonly [RegExp, number]> = [
  * silently disable it.
  *
  * @category resolvers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const contextWindowTokensFor = (modelId: string): number => {
   for (const [pattern, tokens] of contextWindows) {

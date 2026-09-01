@@ -29,8 +29,10 @@ import * as Flow from "@smthrs/core/Flow"
 import * as CellHistory from "@smthrs/harness/CellHistory"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import * as Registry from "@smthrs/registry/Registry"
-import { Effect, Option, Schema } from "effect"
 import type * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import * as FlowStore from "./FlowStore.ts"
 
 /**
@@ -59,7 +61,7 @@ export const bestPractices = [
 export const flowTemplate = `"use server"
 
 import { Flow } from "@smthrs/core"
-import { Schema } from "effect"
+import * as Schema from "effect/Schema"
 
 export default Flow.make({
   description: "<one line naming what this flow produces>",
