@@ -38,8 +38,9 @@ export const authorDigest: string = Digest.digest(
 )
 
 /**
- * The capability the author seat claims — the envelope seam evaluates the
- * model call like any other effect.
+ * The capability the author seat claims — the authorization seam evaluates
+ * the model call against this claim like any other effect, so an operator's
+ * policy must cover it before a chain can author at all.
  *
  * @category constants
  * @since 0.1.0

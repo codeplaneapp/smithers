@@ -6,7 +6,7 @@
  * in as the production binding when the engine mounts; the in-memory
  * layer is the stand-in. Chains that provide no steering service run
  * unchanged and journal identically — the chain looks the service up
- * optionally (`docs/specs/Concepts/Chain Harness Build.md`, PR 5).
+ * optionally (`packages/chain/docs/contract.md`).
  *
  * @since 0.1.0
  */

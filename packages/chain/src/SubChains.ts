@@ -10,7 +10,7 @@
  * waiting on approval bubbles as an in-place park so a later grant
  * resumes the child through the same slot. Children run unattended —
  * the chain core never drains steering under a child scope
- * (`docs/specs/Concepts/Chain Harness Build.md`, PR 7).
+ * (`packages/chain/docs/contract.md`).
  *
  * Composition invariants: the catalog layer must be built over the SAME
  * journal/author/runner layers the chain runs on (the services are

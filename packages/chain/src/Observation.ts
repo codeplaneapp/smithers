@@ -3,8 +3,7 @@
  *
  * A failed gate is never a harness crash: it is recorded in the journal and
  * projected into the next authored link's context so the model corrects it
- * (`docs/specs/Concepts/Chain Slice.md`, `docs/specs/Concepts/Agent
- * Chain.md`).
+ * (`packages/chain/docs/contract.md`).
  *
  * @since 0.1.0
  */

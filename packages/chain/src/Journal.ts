@@ -3,7 +3,7 @@
  *
  * The in-memory layer is a deletable stand-in for the Smithers engine journal:
  * the e2e suite asserts journal contents, not this API, so the suite
- * survives the engine swap (`docs/specs/Concepts/Chain Slice.md`).
+ * survives the engine swap (`packages/chain/docs/contract.md`).
  *
  * @since 0.1.0
  */

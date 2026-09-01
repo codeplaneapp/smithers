@@ -5,10 +5,9 @@
  * tests supply a replay model — and maps an author input onto the sealed
  * request shape the cell loop proved out: prefix as the stable system
  * part, context lines as one user message, no tools, `toolChoice: "none"`
- * (`docs/specs/Concepts/Chain Harness Build.md`, PR 2). Reference prior
- * art: the cell loop's sealed author step
- * (`packages/harness/src/CellTurn.ts`, mined not imported) and effect's
- * `unstable/ai` LanguageModel fold (`reference/effect`).
+ * (`packages/chain/docs/contract.md`). Reference prior art: the cell
+ * loop's sealed author step (`packages/harness/src/CellTurn.ts`, mined
+ * not imported).
  *
  * @since 0.1.0
  */

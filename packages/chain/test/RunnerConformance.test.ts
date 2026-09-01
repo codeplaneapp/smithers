@@ -1,4 +1,4 @@
-import { Cause, Deferred, Effect, Fiber, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Author from "../src/Author.ts"
 import * as Catalog from "../src/Catalog.ts"
@@ -444,6 +444,62 @@ describe("QuickJs sealed realm", () => {
   it("keeps the outcome encoder off the global object", async () => {
     const outcome = await runWith(layer, `return done(typeof globalThis.__encodeOutcome)`, echo)
     expect(outcome).toEqual({ _tag: "Done", value: "undefined" })
+  })
+
+  // Opting out of the stack limit is what production must never do, and the
+  // reason is here: the realm exhausts the HOST WebAssembly stack, is left
+  // holding live GC objects, and aborts the module natively on dispose. That
+  // abort is a defect, and a defect escapes `Chain.run` entirely — nothing is
+  // journaled, so the resumed link replays the same script and dies the same
+  // way forever. The runner degrades it to a journaled `runtime` observation.
+  it("degrades a native abort from an unlimited stack to a typed failure", async () => {
+    const error = await failWith(
+      QuickJsRunner.layer({ stackBytes: undefined }),
+      `function f(n) { return n === 0 ? 0 : f(n - 1) + 1 }\nreturn done(f(100000))`,
+      echo
+    ) as ScriptRunner.ScriptFailure
+    expect(error._tag).toBe("/chain/ScriptFailure")
+    expect(error.code).toBe("runtime")
+  })
+
+  // The realm's defect boundary must not reach the caller's handler. A
+  // sub-chain deliberately turns a failing child RUN into a defect so the
+  // parent dies un-settled and resumes at the child's settled prefix
+  // (SubChains.ts); absorbing that into a journaled script failure would
+  // break the contract and make the two bindings disagree about what kills
+  // a run.
+  it("re-raises a defect the caller's handler raised instead of absorbing it", async () => {
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        Effect.flatMap(
+          ScriptRunner.ScriptRunner,
+          (runner) =>
+            runner.run(
+              Script.make(`await ctx.call("boom", {})\nreturn done(null)`),
+              () => Effect.die(new Error("the host handler is broken"))
+            )
+        ).pipe(Effect.provide(QuickJsRunner.layer()))
+      ) as Effect.Effect<Exit.Exit<unknown, unknown>, never, never>
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+    const cause = (exit as Exit.Failure<unknown, unknown>).cause
+    // A DEFECT, not a typed ScriptFailure: converting it would let the run
+    // continue by re-authoring around a broken host.
+    expect(Cause.hasFails(cause)).toBe(false)
+    expect(Cause.hasDies(cause)).toBe(true)
+    expect(Cause.prettyErrors(cause)[0]?.message).toBe("the host handler is broken")
+  })
+
+  // The bridge settles inside a synchronous QuickJS callback, where a throw
+  // becomes an untyped defect rather than a script-visible failure.
+  // `jsonBoundary` bounds what reaches it, so this is the belt to that
+  // braces: encoding is total, whatever it is handed.
+  it("settles a refusal rather than throwing when a result cannot be encoded", () => {
+    expect(JSON.parse(QuickJsRunner.encodeSettlement("x", { ok: true }))).toEqual({ ok: true })
+    expect(JSON.parse(QuickJsRunner.encodeSettlement("weird", 1n))).toEqual({
+      message: `the "weird" call result cannot be encoded`,
+      ok: false
+    })
   })
 
   it("journals time and randomness through the one door, replaying identically", async () => {

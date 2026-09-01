@@ -6,7 +6,7 @@
  * declared names. Payloads and results are held to those schemas, with
  * the actual parse failure quoted in every refusal; store failures carry
  * the memory package's stable error code as the call's `cause`
- * (`docs/specs/Concepts/Chain Harness Build.md`, PR 6).
+ * (`packages/chain/docs/contract.md`).
  *
  * Composition note: hosts that also mount the memory flows through the
  * registry must bind them there OR here, not both — a catalog holding two

@@ -4,8 +4,7 @@
  * `done` completes the chain, `to` hands off to a successor script, and
  * `park` suspends the lineage with a typed waiting reason. There is no
  * agent-loop object: continuation is whatever the script returns
- * (`docs/specs/Concepts/Trampoline Loops.md`,
- * `docs/specs/Concepts/Chain Slice.md`).
+ * (`packages/chain/docs/contract.md`).
  *
  * @since 0.1.0
  */

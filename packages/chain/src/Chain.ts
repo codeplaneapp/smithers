@@ -5,8 +5,7 @@
  * an outcome, or — when it has no script (bootstrap) or its script was
  * rejected by a gate — the harness authors a successor from the goal plus
  * the journaled observations. Continuation is whatever the link returns
- * (`docs/specs/Concepts/Chain Slice.md`,
- * `docs/specs/Concepts/Trampoline Loops.md`).
+ * (`packages/chain/docs/contract.md`).
  *
  * @since 0.1.0
  */
@@ -61,6 +60,14 @@ class ApprovalPark extends Schema.TaggedError<ApprovalPark>()("/chain/Chain/Appr
  */
 export interface Options {
   readonly goal: string
+  /**
+   * Opaque run identity pinned into `ChainStarted` and compared on resume:
+   * a resumed run whose envelope differs from the journaled one fails with
+   * `replay_divergence`. It is NOT a policy input — the {@link Authorize}
+   * seam receives only the call's name, the capabilities its catalog entry
+   * declares, and the call slot. It is journaled verbatim and never
+   * redacted, so keep secrets out of it.
+   */
   readonly envelope?: typeof Schema.Json.Type | undefined
   readonly prefix?: string | undefined
   readonly maxLinks?: number | undefined
@@ -99,6 +106,17 @@ export const authorDescription = AuthorDeclaration.authorDescription
  * @slop
  */
 export const authorDigest: string = AuthorDeclaration.authorDigest
+
+/**
+ * The capability claim the chain sends to the {@link Authorize} seam for the
+ * model seat — the string an operator's policy rule must cover to let a
+ * chain author at all.
+ *
+ * @category constants
+ * @since 0.1.0
+ * @slop
+ */
+export const authorCapability: string = AuthorDeclaration.authorCapability
 
 const decodeScript = Schema.decodeUnknownOption(Script.Script)
 
@@ -149,13 +167,36 @@ export const run = (options: Options): Effect.Effect<Outcome.Terminal, RunError,
 
     const existing = Event.terminal(events, chainId)
 
+    // The count of in-scope events this run believes it owns. A run cannot
+    // simply track the journal's LENGTH: a sub-chain legitimately appends to
+    // the same journal under its own id while this frame is suspended inside
+    // the spawning handler, so the position has to be re-derived from a fresh
+    // read — and that fresh read is exactly what neuters `append`'s
+    // compare-and-swap. Counting our own scope restores the guarantee the
+    // `expectedPosition` argument exists for: a second writer on THIS chain
+    // is a conflict, a child writing its own scope is not.
+    let owned = events.filter((event) => Event.inChain(event, chainId)).length
+
     const append = (event: Event.Event): Effect.Effect<void, Journal.JournalError> =>
       Effect.gen(function*() {
         const scoped = chainId === "" ? event : { ...event, chain: chainId }
         const latest = yield* journal.read
+        const seen = latest.filter((candidate) => Event.inChain(candidate, chainId)).length
+        if (seen !== owned) {
+          // Never absorb the other writer's events mid-link: their call
+          // ordinals are keyed to a state this run does not hold, and
+          // continuing would settle one slot twice.
+          return yield* new Journal.JournalError({
+            code: "journal_conflict",
+            message: `chain ${
+              JSON.stringify(chainId)
+            } holds ${owned} events but the journal carries ${seen}: another writer advanced it`
+          })
+        }
         events.splice(0, events.length, ...latest)
         yield* journal.append(scoped, events.length)
         events.push(scoped)
+        owned = owned + 1
       })
 
     const hasRejection = (link: number, ordinal: number): boolean =>
@@ -470,10 +511,16 @@ export const run = (options: Options): Effect.Effect<Outcome.Terminal, RunError,
         return Outcome.park("approval", outcome.message)
       }
       if (outcome._tag === "To") {
+        // The successor's digest is re-derived here, whatever the runner
+        // handed back: `script.digest` becomes the replay key of every call
+        // the next link makes, and the script that chose the text must not
+        // also choose that key. `Outcome.to` normalizes the same way, so a
+        // runner double that bypasses `decodeOutcome` cannot forge it either.
+        const successor = Outcome.to(outcome.script)
         if (Event.authored(events, link + 1, chainId) === undefined) {
-          yield* append({ _tag: "LinkAuthored", link: link + 1, script: outcome.script })
+          yield* append({ _tag: "LinkAuthored", link: link + 1, script: successor.script })
         }
-        yield* append({ _tag: "LinkEnded", link, outcome })
+        yield* append({ _tag: "LinkEnded", link, outcome: successor })
         link = link + 1
         continue
       }

@@ -559,7 +559,7 @@ describe("Chain journal ownership", () => {
     const error = await Effect.runPromise(
       Effect.flip(Chain.run({ goal: "race" })).pipe(
         Effect.provide(sharedLayers([intruder], journal))
-      ) as Effect.Effect<{ _tag: string; code: string }, never, never>
+      ) as unknown as Effect.Effect<{ _tag: string; code: string }, never, never>
     )
     expect(error._tag).toBe("/chain/JournalError")
     expect(error.code).toBe("journal_conflict")

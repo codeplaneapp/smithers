@@ -3,8 +3,7 @@
  *
  * Every effect goes through this one door: a call names a visible entry,
  * pinned by its declaration digest, and settles as a journaled event
- * (`docs/specs/Concepts/Chain Slice.md`, `docs/specs/Concepts/Flow
- * Registry.md`).
+ * (`packages/chain/docs/contract.md`).
  *
  * @since 0.1.0
  */
@@ -64,8 +63,9 @@ export interface Entry {
   readonly digest?: string | undefined
   /**
    * The capabilities this entry claims, as `action:resource` strings the
-   * envelope seam evaluates per call. Undeclared is conservatively the
-   * broadest claim — it asks under rules, never silently passes.
+   * `Authorize` seam evaluates per call — the only policy input the seam
+   * receives. Undeclared is conservatively the broadest claim — it
+   * asks under rules, never silently passes.
    */
   readonly capabilities?: ReadonlyArray<string> | undefined
 }
@@ -120,9 +120,15 @@ export const entryDigest = (entry: Entry): string =>
  * @slop
  */
 export const make = (entries: ReadonlyArray<Entry>): Service => {
-  const byName = new Map(entries.map((entry) => [entry.name, entry]))
+  // One frozen snapshot backs BOTH the advertised list and the dispatch
+  // index. Retaining the caller's array would let a later push or pop move
+  // `Prompt.catalogBlock` (which reads `entries`) away from `lookup` (which
+  // gate 3 decides membership with), so the model would be shown a call the
+  // chain refuses, or refused a call the model was never shown.
+  const snapshot: ReadonlyArray<Entry> = Object.freeze([...entries])
+  const byName = new Map(snapshot.map((entry) => [entry.name, entry]))
   return Catalog.of({
-    entries,
+    entries: snapshot,
     lookup: (name) => byName.get(name)
   })
 }
@@ -130,7 +136,7 @@ export const make = (entries: ReadonlyArray<Entry>): Service => {
 /**
  * The system entries every sealed realm relies on: time and randomness as
  * ordinary journaled calls, so replay is deterministic with no special
- * identity (`docs/specs/Concepts/Chain Harness Build.md`, PR 3).
+ * identity (`packages/chain/docs/contract.md`).
  *
  * @category constructors
  * @since 0.1.0
@@ -155,15 +161,20 @@ export const system: ReadonlyArray<Entry> = [
 ]
 
 /**
- * Prepends the system entries to a host's own — the composition every
+ * Appends the system entries to a host's own — the composition every
  * sealed-realm host wants, since the QuickJS prelude deletes `Date` and
  * `Math.random` on the promise that `sys/now` and `sys/random` exist.
+ *
+ * The system entries come LAST because {@link make} indexes last-wins:
+ * nothing a host passes can shadow `sys/now` or `sys/random` with an
+ * unjournaled clock or RNG, which is what replay determinism rests on.
+ * `RegistryCatalog.make` and `SubChains.make` order them the same way.
  *
  * @category constructors
  * @since 0.1.0
  * @slop
  */
-export const withSystem = (entries: ReadonlyArray<Entry>): ReadonlyArray<Entry> => [...system, ...entries]
+export const withSystem = (entries: ReadonlyArray<Entry>): ReadonlyArray<Entry> => [...entries, ...system]
 
 /**
  * The empty catalog: every call misses gate 3.

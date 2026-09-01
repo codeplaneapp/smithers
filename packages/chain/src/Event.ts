@@ -4,7 +4,7 @@
  * The journal is the only state. The call cache used for replay, the
  * observation context handed to recovery author calls, and the terminal
  * verdict are all pure folds over the event array — nothing else is stored
- * anywhere (`docs/specs/Concepts/Chain Slice.md`).
+ * anywhere (`packages/chain/docs/contract.md`).
  *
  * @since 0.1.0
  */

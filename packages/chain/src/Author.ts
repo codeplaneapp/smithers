@@ -3,9 +3,8 @@
  *
  * The seat is mocked at this boundary, not at the provider wire: the model
  * layer sits beneath a production implementation and no chain code changes
- * when it arrives (`docs/specs/Concepts/Chain Slice.md`). The author call
- * carries no tools; the root stays clean (`docs/specs/Concepts/Agent
- * Chain.md`).
+ * when it arrives. The author call carries no tools; the root stays
+ * clean (`packages/chain/docs/contract.md`).
  *
  * @since 0.1.0
  */

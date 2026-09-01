@@ -4,7 +4,7 @@
  * Re-running a link with the same script digest prefix-matches its settled
  * calls by ordinal; editing one character of a script re-keys exactly the
  * calls inside it and nothing else. Governing contract:
- * `docs/specs/Concepts/Chain Slice.md`.
+ * `packages/chain/docs/contract.md`.
  *
  * @since 0.1.0
  */

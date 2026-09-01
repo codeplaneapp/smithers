@@ -7,7 +7,7 @@
  * refusal forever. A policy denial becomes a journaled observation the
  * model routes around; a required approval parks the run without ending
  * the link, so resuming re-executes the call under the new grant
- * (`docs/specs/Concepts/Chain Harness Build.md`, PR 8).
+ * (`packages/chain/docs/contract.md`).
  *
  * @since 0.1.0
  */

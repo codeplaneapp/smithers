@@ -8,7 +8,7 @@
  * markdown-bodied flow needs a prompt runner — so the model's catalog
  * never discloses a call that is guaranteed to refuse. The system entries
  * (`sys/now`, `sys/random`) are always composed in, keeping the sealed
- * realm's promise (`docs/specs/Concepts/Chain Harness Build.md`, PR 4).
+ * realm's promise (`packages/chain/docs/contract.md`).
  *
  * @since 0.1.0
  */

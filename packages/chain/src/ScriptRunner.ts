@@ -1,10 +1,12 @@
 /**
  * The script interpreter port, and its in-process implementation.
  *
- * A script's only exits are `ctx.call` and the outcome it returns. Calls are
- * settled one at a time by an Effect handler (the same pump shape the
- * QuickJS sandbox uses), so a hardened interpreter is a later layer swap
- * with no chain change (`docs/specs/Concepts/Chain Slice.md`).
+ * A script's only INTENDED exits are `ctx.call` and the outcome it returns.
+ * Calls are settled one at a time by an Effect handler (the same pump shape
+ * the QuickJS sandbox uses), so a hardened interpreter is a layer swap with
+ * no chain change (`packages/chain/docs/contract.md`). Enforcing that the
+ * intended exits are the ONLY exits is the sandbox's job, not this port's:
+ * {@link layerInProcess} runs the script in the host realm.
  *
  * @since 0.1.0
  */
@@ -174,7 +176,8 @@ const refused = { _tag: "Refused" } as const
  * `undefined` is refused everywhere except as the whole value, where it
  * becomes `null`. Array holes read as `undefined` and are refused too:
  * `JSON.stringify` would silently rewrite them to `null`, and this
- * boundary never changes a value it accepts.
+ * boundary never changes a value it accepts. The one exception is `-0`,
+ * which JSON cannot represent at all and which crosses as `0`.
  *
  * @category gates
  * @since 0.1.0
@@ -199,7 +202,13 @@ export const jsonBoundary = (
     }
     if (typeof candidate === "number") {
       if (!Number.isFinite(candidate)) throw refused
-      return candidate
+      // `-0` is the one value normalized rather than refused. JSON has no
+      // negative zero, so it would survive here and become `0` the moment
+      // the event was serialized — and the QuickJS binding, which encodes
+      // in-realm, already hands `0` to the host. Normalizing keeps the two
+      // bindings byte-identical and keeps a replayed payload comparable to
+      // the journaled one.
+      return candidate === 0 ? 0 : candidate
     }
     if (typeof candidate !== "object") throw refused
     if (seen.has(candidate)) throw refused
@@ -394,8 +403,15 @@ const runInProcess = <E>(
   })
 
 /**
- * The in-process runner: the script body runs as a sealed async `Function`
- * with `ctx`, `done`, `to`, and `park` in scope.
+ * The in-process runner: the script body runs as an async `Function` with
+ * `ctx`, `done`, `to`, and `park` in scope.
+ *
+ * It provides NO isolation. The `Function` constructor builds its body in
+ * GLOBAL scope, so the script reaches `globalThis`, `process`, and dynamic
+ * `import()` — a fact `RunnerConformance.test.ts` pins deliberately, so
+ * this sentence and the code cannot drift apart. Use it for trusted
+ * fixtures. `QuickJsRunner.layer()` is the only sandbox for model-authored
+ * scripts.
  *
  * @category layers
  * @since 0.1.0

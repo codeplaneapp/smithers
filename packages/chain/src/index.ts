@@ -6,7 +6,7 @@
  * An append-only journal of typed events, keyed replayable calls, and the
  * trampoline that runs model-authored flow scripts. The journal is the only
  * state; everything else is a pure fold. Governing design:
- * `docs/specs/Concepts/Chain Slice.md`.
+ * `packages/chain/docs/contract.md`.
  */
 
 /**
