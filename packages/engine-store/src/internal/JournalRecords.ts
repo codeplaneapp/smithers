@@ -179,9 +179,10 @@ export const expectedSetDeviation = (options: EventOptions, payload: unknown) =>
 export const diffBundleCaptured = (options: EventOptions, payload: unknown) =>
   event(options, "flows.engine.diff-bundle-captured", payload)
 /**
- * A diff bundle reached the host. Carries the rebase count and the queued
- * effects the dispatch stage then delivered, so a copy-back that raced, or one
- * whose effects fired, is never inferred from an absence.
+ * A diff bundle reached the host. Carries the rebase count, the deduplicated
+ * `queued` effect keys, and the `dispatched` keys the delivery stage sent.
+ * `dispatched` is present and empty when no `EffectDispatcher` is composed, so
+ * the absence of delivery is a journal fact rather than an inference.
  *
  * @since 0.1.0
  * @category events

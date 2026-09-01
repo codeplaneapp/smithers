@@ -9,8 +9,7 @@
  */
 import { Sha256 } from "@smthrs/crypto"
 import { FlowEngine } from "@smthrs/engine"
-import type { Action } from "@smthrs/flow"
-import { FlowRuntime } from "@smthrs/flow"
+import { Action, FlowRuntime } from "@smthrs/flow"
 import * as CacheEnvironment from "@smthrs/flow/CacheEnvironment"
 import type { FileBoundary } from "@smthrs/flow/FileBoundary"
 import { Journal, type JournalEvent } from "@smthrs/journal"
@@ -98,29 +97,6 @@ export class AttemptSuspended extends Schema.TaggedError<AttemptSuspended>()(
     attempt: Schema.Int
   }
 ) {}
-
-/**
- * A retry of an irreversible action was refused because the caller supplied
- * no idempotency key.
- *
- * Retrying an irreversible body is only safe if the downstream effect can
- * recognize the repeat, and the idempotency key is how it does. Without one
- * the engine refuses rather than risking a second charge, a second send, or a
- * second irreversible write.
- *
- * @since 0.1.0
- * @category errors
- * @slop
- */
-export class IrreversibleRetryRequiresIdempotencyKey
-  extends Schema.TaggedError<IrreversibleRetryRequiresIdempotencyKey>()(
-    "@smthrs/engine-store/IrreversibleRetryRequiresIdempotencyKey",
-    {
-      code: Schema.Literal("irreversible_retry_requires_idempotency_key"),
-      key: Schema.String
-    }
-  )
-{}
 
 /**
  * The attempt was not admitted, so its body never ran.
@@ -260,15 +236,6 @@ const replayCorruption = (
 }
 
 /**
- * Whether a failing execution failed because it broke its declared boundary.
- *
- * The isolated execution path raises the boundary's own `UndeclaredWrite`, so
- * a violation detected while the body ran classifies exactly like one detected
- * at settle time: the row records `hardViolation` and the journal gets the
- * violation record, rather than the failure passing as an ordinary action
- * error the retry policy might happily retry.
- */
-/**
  * The stable effect kind a compensation handler is registered under.
  *
  * The action name is the adapter's own identity and is what an engine
@@ -282,6 +249,15 @@ const actionKind = (action: unknown): string =>
     ? (action as { readonly name: string }).name
     : "flows/engine-store/action"
 
+/**
+ * Whether a failing execution failed because it broke its declared boundary.
+ *
+ * The isolated execution path raises the boundary's own `UndeclaredWrite`, so
+ * a violation detected while the body ran classifies exactly like one detected
+ * at settle time: the row records `hardViolation` and the journal gets the
+ * violation record, rather than the failure passing as an ordinary action
+ * error the retry policy might happily retry.
+ */
 const declarationViolated = (cause: Cause.Cause<unknown>): boolean =>
   cause.reasons.some((reason) =>
     Cause.isFailReason(reason) &&
@@ -330,7 +306,8 @@ export interface Dependencies {
   readonly engineJj?: Jj.Jj | undefined
   /**
    * Makes a retry of an irreversible action recognizable downstream. Its
-   * absence is what {@link IrreversibleRetryRequiresIdempotencyKey} reports.
+   * absence is what
+   * {@link Action.IrreversibleRetryRequiresIdempotencyKey} reports.
    */
   readonly idempotencyKey?: string | undefined
   /**
@@ -612,9 +589,9 @@ export const make = (deps: Dependencies) => {
 
       if (input.tier === "irreversible" && input.attempt > 1 && deps.idempotencyKey === undefined) {
         return yield* Effect.fail(
-          new IrreversibleRetryRequiresIdempotencyKey({
-            code: "irreversible_retry_requires_idempotency_key",
-            key: input.key
+          new Action.IrreversibleRetryRequiresIdempotencyKey({
+            actionName: actionKind(input.action),
+            attempt: input.attempt
           })
         )
       }
@@ -1486,9 +1463,9 @@ export const make = (deps: Dependencies) => {
             deps.idempotencyKey === undefined
           ) {
             return yield* Effect.fail(
-              new IrreversibleRetryRequiresIdempotencyKey({
-                code: "irreversible_retry_requires_idempotency_key",
-                key: input.key
+              new Action.IrreversibleRetryRequiresIdempotencyKey({
+                actionName: actionKind(input.action),
+                attempt: input.attempt
               })
             )
           }
@@ -1895,10 +1872,10 @@ export const make = (deps: Dependencies) => {
             const dispatcher = Option.getOrUndefined(
               yield* Effect.serviceOption(WorkspaceSandbox.EffectDispatcher)
             )
-            const dispatched = new Set<string>()
+            const deduped = new Set<string>()
             for (const queued of settlement.effects) {
-              if (dispatched.has(queued.idempotencyKey)) continue
-              dispatched.add(queued.idempotencyKey)
+              if (deduped.has(queued.idempotencyKey)) continue
+              deduped.add(queued.idempotencyKey)
               if (dispatcher !== undefined) yield* dispatcher.dispatch(queued)
             }
             yield* emitConverging(
@@ -1906,7 +1883,8 @@ export const make = (deps: Dependencies) => {
                 ...attemptId,
                 bundleIdentity: settlement.bundleIdentity,
                 rebases: settlement.rebases,
-                dispatched: [...dispatched]
+                queued: [...deduped],
+                dispatched: dispatcher === undefined ? [] : [...deduped]
               })
             )
           }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { Action } from "@smthrs/flow"
 import { Journal } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
 import { AttemptStore, type Ownership, RunStore } from "@smthrs/run-store"
@@ -9,6 +10,7 @@ import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import * as Errors from "../src/Errors.ts"
 import * as Inconsistency from "../src/Inconsistency.ts"
 import * as ActionPersistence from "../src/internal/ActionPersistence.ts"
 import * as StepBoundary from "../src/StepBoundary.ts"
@@ -354,5 +356,21 @@ describe("ActionPersistence", () => {
       expect(decoded.success.wholeTreeWritesVerified).toBe(true)
       expect(decoded.success.hermeticReadsVerified).toBeUndefined()
     }
+  })
+})
+
+describe("engine-store error barrel", () => {
+  it("exports every tagged-error class exposed by ActionPersistence", () => {
+    let checked = 0
+    for (const [name, value] of Object.entries(ActionPersistence)) {
+      if (typeof value !== "function") continue
+      const identifier = (value as { readonly identifier?: unknown }).identifier
+      if (typeof identifier !== "string" || !identifier.startsWith("@smthrs/")) continue
+      checked++
+      expect(Reflect.get(Errors, name)).toBe(value)
+    }
+    expect(checked).toBeGreaterThan(0)
+    expect(Errors.IrreversibleRetryRequiresIdempotencyKey)
+      .toBe(Action.IrreversibleRetryRequiresIdempotencyKey)
   })
 })

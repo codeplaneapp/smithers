@@ -310,7 +310,14 @@ describe("sealed actions under the production composition", () => {
       const captured = records.find((record) => record.eventType === "flows.engine.diff-bundle-captured")
       const settled = records.find((record) => record.eventType === "flows.engine.copy-back-settled")
       expect(captured?.payload).toMatchObject({ changedPaths: ["out/result.txt"], deviations: [] })
-      expect(settled?.payload).toMatchObject({ rebases: 0, dispatched: ["reply-1", "reply-2"] })
+      expect(settled).toBeDefined()
+      const payload = settled!.payload as { readonly queued: unknown; readonly dispatched: unknown }
+      expect(payload).toMatchObject({
+        rebases: 0,
+        queued: ["reply-1", "reply-2"],
+        dispatched: ["reply-1", "reply-2"]
+      })
+      expect(payload.dispatched).toEqual(payload.queued)
       expect(dispatched.map((effect) => effect.idempotencyKey)).toEqual(["reply-1", "reply-2"])
       expect(dispatched[0]?.payload).toEqual({ n: 1 })
       expect(yield* withCrypto(hostText(root, "out/result.txt"))).toBe("done")
@@ -333,6 +340,7 @@ describe("sealed actions under the production composition", () => {
               const inner = yield* WorkspaceSandbox.Workspace
               yield* inner.writeFile("out/result.txt", encoder.encode("done"))
               yield* inner.queueEffect({ protocol: "chat/v1", idempotencyKey: "reply-1", payload: {} })
+              yield* inner.queueEffect({ protocol: "chat/v1", idempotencyKey: "reply-2", payload: {} })
               return null
             }).pipe(Effect.orDie)
           )).pipe(Effect.provide(production(root, true)))
@@ -343,7 +351,7 @@ describe("sealed actions under the production composition", () => {
       // Visible, not silent: the outbox is journalled even with no delivery
       // stage composed, so an undelivered effect is a recorded fact.
       expect(records.find((record) => record.eventType === "flows.engine.copy-back-settled")?.payload)
-        .toMatchObject({ dispatched: ["reply-1"] })
+        .toMatchObject({ queued: ["reply-1", "reply-2"], dispatched: [] })
       expect(yield* withCrypto(hostText(root, "out/result.txt"))).toBe("done")
     }))
 
@@ -566,6 +574,37 @@ describe("copy-back conflict retry", () => {
       })
 
       expect(yield* withCrypto(program)).toEqual({ _tag: "BusinessError" })
+    }))
+
+  it.effect("derives bundle identities canonically across object insertion order", () =>
+    Effect.gen(function*() {
+      const identity = (initialFiles: Readonly<Record<string, string>>, nextB: string) =>
+        Effect.gen(function*() {
+          const memory = yield* WorkspaceSandbox.makeMemory(initialFiles)
+          const settlement = yield* SandboxedExecution.execute({
+            sandbox: memory.service,
+            descriptor: { readSet: [], writeSet: ["a.txt", "b.txt"], boundaryMode: "hard" },
+            workflow: Effect.gen(function*() {
+              const inner = yield* WorkspaceSandbox.Workspace
+              yield* inner.writeFile("a.txt", encoder.encode("new-a"))
+              yield* inner.writeFile("b.txt", encoder.encode(nextB))
+              return null
+            })
+          })
+          return settlement.bundleIdentity
+        })
+      const forward = { "a.txt": "old-a", "b.txt": "old-b" }
+      const reverse: Record<string, string> = {}
+      reverse["b.txt"] = "old-b"
+      reverse["a.txt"] = "old-a"
+
+      const first = yield* withCrypto(identity(forward, "new-b"))
+      const reordered = yield* withCrypto(identity(reverse, "new-b"))
+      const changed = yield* withCrypto(identity(forward, "different-b"))
+
+      expect(first).toMatch(/^key1_[0-9a-f]{64}$/)
+      expect(reordered).toBe(first)
+      expect(changed).not.toBe(first)
     }))
 })
 

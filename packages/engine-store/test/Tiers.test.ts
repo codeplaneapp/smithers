@@ -192,7 +192,11 @@ describe("engine-store action tiers", () => {
       const result = yield* withCrypto(program)
       expect(result.withoutKey).toMatchObject({
         _tag: "Failure",
-        failure: { _tag: "@smthrs/engine-store/IrreversibleRetryRequiresIdempotencyKey" }
+        failure: {
+          _tag: "@smthrs/flow/IrreversibleRetryRequiresIdempotencyKey",
+          actionName: "flows/engine-store/action",
+          attempt: 2
+        }
       })
       expect(result.withKey).toBe("once")
     }))

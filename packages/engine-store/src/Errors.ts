@@ -5,8 +5,9 @@
  * consumers may switch on `code` (or `_tag`) and the strings will not change
  * without a major version. The classes themselves are declared next to the
  * logic that raises them (`internal/ActionPersistence.ts`,
- * `@smthrs/flow`'s `FlowRuntime/`); this module is the barrel-exported
- * surface so that `internal/` never has to be imported by consumers.
+ * `@smthrs/flow/Action`, and `@smthrs/flow/FlowRuntime`); this module is the
+ * barrel-exported surface so that `internal/` never has to be imported by
+ * consumers.
  *
  * Design notes: [[Events And Errors]]
  * (`docs/specs/Concepts/Events And Errors.md`), [[Engine Hardening Round 1]]
@@ -16,10 +17,12 @@
  *
  * @since 0.1.0
  */
+export { IrreversibleRetryRequiresIdempotencyKey } from "@smthrs/flow/Action"
 export { FlowCycleDetected } from "@smthrs/flow/FlowRuntime"
 export {
   AttemptAdmissionRejected,
   AttemptEvidenceQuarantined,
+  AttemptSuspended,
   CacheConflictDetected,
   CacheCorruptionDetected
 } from "./internal/ActionPersistence.ts"

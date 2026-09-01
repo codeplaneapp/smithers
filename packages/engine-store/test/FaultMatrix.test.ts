@@ -477,7 +477,11 @@ describe("FaultMatrix", () => {
         expect(result.dispatches).toBe(1)
         expect(result.refused).toMatchObject({
           _tag: "Failure",
-          failure: { _tag: "@smthrs/engine-store/IrreversibleRetryRequiresIdempotencyKey" }
+          failure: {
+            _tag: "@smthrs/flow/IrreversibleRetryRequiresIdempotencyKey",
+            actionName: "flows/engine-store/action",
+            attempt: 1
+          }
         })
         const row = Option.getOrThrow(result.row)
         expect(row.state).toBe("running")
