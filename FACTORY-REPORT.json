@@ -6,7 +6,7 @@
   "language": "typescript",
   "branch": "smthrs-dogfood",
   "base": "84ac43ad1e",
-  "labels": 600,
+  "labels": 606,
   "kinds": {
     "Shell.Test": 318,
     "Filegroup": 123,
@@ -203,6 +203,11 @@
       "area": "Shell targets",
       "summary": "no working directory, so a package's own lint or format gate could not be expressed",
       "test": "packages/build-cli/test/ShellCwd.test.ts"
+    },
+    {
+      "area": "GithubRender",
+      "summary": "the root package's empty directory rendered the setup action as .//actions/setup, which GitHub rejects",
+      "test": "packages/build-cli/test/GithubRender.test.ts"
     }
   ],
   "proposals": [
@@ -225,6 +230,14 @@
     {
       "name": "ci/docs/install verbs",
       "oneLine": "refuse in package mode, so generated workflows call targets directly"
+    },
+    {
+      "name": "CiGen self-drift",
+      "oneLine": "a generated workflow cannot check its own generator for drift; naming it is a cycle"
+    },
+    {
+      "name": "Github.Workflow continueOnError",
+      "oneLine": "no attr for an advisory lane, so ci-faults and the host lanes are advisory by convention only"
     }
   ],
   "hostDrift": [

@@ -139,6 +139,16 @@ Every one refused a real target, and each carries a red-then-green test.
    out by hand, once per package.
 5. The `ci`, `docs`, and `install` verbs refuse in package mode
    (`refusePackageMode`), so the generated workflows call targets directly.
+6. A generated workflow cannot check its own generator for drift. Naming
+   `//:githubCi` in a workflow's `run` list makes that workflow a member of
+   the `CiGen` that lists it, which is a cycle the loader refuses. The
+   BUILD-mode pipeline could, because its steps were verb-and-pattern strings
+   rather than target references, so `lint '//:ci'` was just another step. A
+   workflow step that names a plain verb and label would close this.
+7. `S.Github.Workflow` has no `continueOnError`, so an advisory lane cannot
+   say so. `ci-faults`, `ci-node-macos`, and `ci-node-windows` are advisory by
+   convention here and would be enforcing if the repository's branch
+   protection required them.
 
 ## Failure modes and host drift
 
