@@ -222,11 +222,16 @@ function MonthView({
     if (!DAY_KEYS.has(event.key)) return;
     event.preventDefault();
     const delta = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : event.key === "ArrowUp" ? -7 : 7;
+    // Home and End move within the VISIBLE row, and the grid is laid out with
+    // `monthGridDays(anchorMs, weekStartsOn)`. Computing the row bounds from
+    // the raw weekday always targeted Sunday and Saturday, so in a Monday-first
+    // grid Home jumped to the previous visual row.
+    const column = (new Date(focusedMs).getDay() - weekStartsOn + 7) % 7;
     const next =
       event.key === "Home"
-        ? addDays(focusedMs, -new Date(focusedMs).getDay())
+        ? addDays(focusedMs, -column)
         : event.key === "End"
-          ? addDays(focusedMs, 6 - new Date(focusedMs).getDay())
+          ? addDays(focusedMs, 6 - column)
           : addDays(focusedMs, delta);
     focusDay(dayKey(next), next, days);
   }
