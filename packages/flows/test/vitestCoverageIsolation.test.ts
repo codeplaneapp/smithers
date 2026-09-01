@@ -674,7 +674,6 @@ describe("vitest coverage isolation conformance", () => {
       // One `else` arm in recursive enumeration: special entries (symlinks,
       // sockets) are neither materializable leaves nor prunable scaffolding
       // and are intentionally discarded.
-      "engine-store/src/internal/FileEnumeration.ts": 1,
       // FileBoundary rejects upward and absolute removal declarations before
       // they reach the sandbox.
       "engine-store/src/WorkspaceSandbox.ts": 1,
@@ -755,7 +754,8 @@ describe("vitest coverage isolation conformance", () => {
       // construction because every application enters the trap.
       "plan/src/Planned.ts": 1,
       "run-store/src/AttemptStore.ts": 1,
-      "run-store/src/RunStore.ts": 1,
+      "run-store/src/RunStore.ts": 3,
+      "run-store/src/internal/Boundary.ts": 1,
       // Provider processes can only originate from each provider's `spawn`,
       // which records the opaque handle before returning it. These guards
       // turn a future provenance violation into a typed unknown-process error.

@@ -160,7 +160,12 @@ describe("child-process containment conformance", () => {
     expect(importers.filter((id) => !allowed.has(id))).toEqual([])
   })
 
-  it("never reads a secret declaration directly from an environment", () => {
+  // Parses every workspace source into a TypeScript AST, so the cost is
+  // allocation bound and scales with the machine. Measured at 995 ms on an idle
+  // developer machine and 38.3 s on a two-core hosted runner sharing itself
+  // with eleven other test files, which overran the 30 s package default. The
+  // budget clears the observed cost three times over and still bounds a hang.
+  it("never reads a secret declaration directly from an environment", { timeout: 120_000 }, () => {
     const reads: Array<string> = []
     for (const source of sources) {
       const file = ts.createSourceFile(
