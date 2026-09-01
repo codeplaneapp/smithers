@@ -24,6 +24,15 @@ describe("Vitest", () => {
     expect(it).not.toBe(EffectVitest.it)
   })
 
+  // The proxy must forward every member vitest defines as an accessor, which
+  // `Object.assign` silently dropped.
+  it.each([["effect"], ["live"], ["skip"], ["only"], ["each"], ["skipIf"], ["runIf"], ["concurrent"]])(
+    "forwards it.%s",
+    (member) => {
+      expect((it as unknown as Record<string, unknown>)[member]).toBeDefined()
+    }
+  )
+
   it.effect("runs Effect test bodies", () => Effect.sync(() => expect(true).toBe(true)))
 
   it.effect("surfaces failed Effects as test failures", () =>

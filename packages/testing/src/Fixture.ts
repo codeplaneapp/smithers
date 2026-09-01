@@ -257,6 +257,11 @@ export const canonicalRequestDigest = (request: ModelRequestLike): string =>
  * compare. The index is memoized on the fixture object, so a hundred-turn
  * agent fixture encodes its calls once.
  *
+ * The memo is keyed by object identity. `FixtureStore` replaces the whole
+ * fixture on every append rather than mutating it, so a recorded call is
+ * visible to the next lookup; a caller that instead mutates a fixture's `calls`
+ * in place would read a stale index.
+ *
  * @category encoding
  * @since 0.0.0
  */
