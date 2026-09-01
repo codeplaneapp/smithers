@@ -49,6 +49,12 @@ export * as JournalMetrics from "./JournalMetrics.ts"
 export * as Redaction from "./Redaction.ts"
 
 /**
+ * @category redaction
+ * @since 0.1.0
+ */
+export * as RedactedLogger from "./RedactedLogger.ts"
+
+/**
  * @category projections
  * @since 0.1.0
  */

@@ -35,8 +35,33 @@ const registration = Interpreter.layer(Deploy).pipe(
   Layer.provideMerge(
     Use.toLayer(({ apiKey, endpoint }) =>
       // The action logs the way a careless integration would, and returns a
-      // string with the credential inside it.
+      // string with the credential inside it. The second line logs a real
+      // `Headers`: a brand-checked host object keeps its state in internal
+      // slots, and a redacting logger that rebuilt it on its prototype
+      // produced an impostor whose rendering threw from inside the logger and
+      // killed the run, so this line proves the log survives as well as hides.
       Effect.logInfo(`calling ${endpoint} with Bearer ${apiKey}`).pipe(
+        Effect.andThen(Effect.logInfo("request headers", new Headers({ authorization: `Bearer ${apiKey}` }))),
+        // The third line carries the credential in a log span rather than in
+        // the message. Effect sanitizes a span label before it is rendered,
+        // folding `token=` into `token_`, so a rule anchored on a word
+        // boundary never fired and the label printed the key in full.
+        Effect.andThen(
+          Effect.logInfo("deploy finished").pipe(Effect.withLogSpan(`fetch token=${apiKey}`))
+        ),
+        // The fourth line logs a cause carrying a host error. An aborted fetch
+        // fails with a `DOMException`, whose `name` lives in an internal slot,
+        // so a redacted copy built on its prototype is an impostor that throws
+        // from inside `Cause.pretty` and kills the run the line describes.
+        Effect.andThen(
+          Effect.suspend(() => {
+            const controller = new AbortController()
+            controller.abort()
+            return Effect.fail(controller.signal.reason).pipe(
+              Effect.catchCause((cause) => Effect.logError(`cleanup after Bearer ${apiKey}`, cause))
+            )
+          })
+        ),
         Effect.as(`deployed ${endpoint} token=${apiKey}`)
       )
     )

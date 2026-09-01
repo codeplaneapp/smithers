@@ -7,6 +7,8 @@
  */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
+import * as RedactedLogger from "@smthrs/journal/RedactedLogger"
+import * as Redaction from "@smthrs/journal/Redaction"
 import { Cause, Effect, Exit, Logger, Runtime } from "effect"
 import { CliError as EffectCliError, Command } from "effect/unstable/cli"
 import * as CliError from "./CliError.ts"
@@ -67,7 +69,10 @@ const report = (error: unknown): void => {
     : error instanceof Error
     ? `${errorName(error)}: ${error.message}`
     : String(error)
-  process.stderr.write(`${message}\n`)
+  // A failure sentence is written here rather than logged, so it misses the
+  // redacting logger below. It is still a line an operator reads and a
+  // collector keeps, so it takes the same rules (rc-contract section 5.2).
+  process.stderr.write(`${String(Redaction.redact(message))}\n`)
 }
 
 const teardown: Runtime.Teardown = (exit, onExit) => {
@@ -184,8 +189,19 @@ const main = Effect.gen(function*() {
  * receipt it was promised (rc-contract section 4, the `up` row). `LogToStderr`
  * is the reference Effect provides for exactly this: keep stdout for protocol
  * output and send every built-in logger to `console.error`.
+ *
+ * `RedactedLogger.layer` then puts every one of those lines through the rules
+ * `@smthrs/journal` applies on the write path, so a credential an action hands
+ * to `Effect.logInfo` no longer reaches the operator's terminal, the
+ * `--json` stderr stream, or `.flows/logs/<runId>.log` under a detached
+ * launch (rc-contract section 5.2). The durable engine installs the same layer
+ * beneath itself, and wrapping is idempotent, so a detached `smithers run`
+ * pays the rules once.
  */
-NodeRuntime.runMain(Effect.provideService(main, Logger.LogToStderr, true), {
-  teardown,
-  disableErrorReporting: true
-})
+NodeRuntime.runMain(
+  Effect.provideService(main, Logger.LogToStderr, true).pipe(Effect.provide(RedactedLogger.layer())),
+  {
+    teardown,
+    disableErrorReporting: true
+  }
+)

@@ -121,47 +121,56 @@ Two steps in `.github/workflows/ci.yml`, generated from the root `BUILD.ts`:
   `fixtures/claimChild.ts` called `Control.pause`, which rc.0 removed, and died
   at runtime in every case that spawned it. The typecheck catches that in
   seconds.
-- `smithers-build test '//e2e:faults'`, in the advisory `e2e-faults` job. It is
-  advisory because case 22 below is required to be red at rc.0 and the graceful
-  park it cannot reach is broken in the product (`fault-gaps.md`, row
-  `03, 05, 31`). A required job would be red on every commit for defects no
-  commit introduced. Drop `continueOnError` in the root `BUILD.ts` and add
-  `e2e-faults` to `requiredJobs` when the redacting logger lands and the park
-  defect closes.
+- `smithers-build test '//e2e:faults'`, in the required `e2e-faults` job. It
+  was advisory while case 22 below was required to be red at rc.0: a required
+  job would have been red on every commit for a defect no commit introduced.
+  The section 5.2 redaction deliverable landed the redacting logger, case 22
+  went green with no edit to the test, and the matrix is 67 of 67, so the root
+  `BUILD.ts` drops `continueOnError` and lists `e2e-faults` in `requiredJobs`.
+  The graceful park this directory cannot reach is still broken in the product
+  (`fault-gaps.md`, row `03, 05, 31`), but that is a coverage gap: no case here
+  fails for it, so it cannot make this job red.
 
 Membership has a second edge. Root `pnpm test` is
 `pnpm --recursive --if-present run test`, the pre-PR gate `CONTRIBUTING.md`
 names, so it runs this directory's `scripts.test` on every commit. That script
 is `vitest run ci/ harness/`: the eight deterministic suites, 40 tests in about
 6 s. The cases themselves stay behind `//e2e:faults` and the `test:faults` script,
-because they kill process groups and bind ports for about 95 s and because case
-22 is required to be red. Putting them in the recursive fan-out would make the
-documented pre-PR gate red on every commit for the same defects that keep the
-CI job advisory. `ci/matrixIsWired.test.ts` pins both halves: it asks vitest
-which files each argv selects, and fails if a case reaches `scripts.test` or if
-a case leaves `//e2e:faults`. Root `pnpm run check` runs this directory's
+because they kill process groups and bind ports for about 95 s. Putting them in
+the recursive fan-out would spend that on every commit, on a pre-PR gate whose
+whole value is that it answers in seconds. `ci/matrixIsWired.test.ts` pins both
+halves: it asks vitest which files each argv selects, and fails if a case
+reaches `scripts.test` or if a case leaves `//e2e:faults`. Root `pnpm run check` runs this directory's
 `tsc -p tsconfig.json --noEmit` in about 4 s, and that one is green.
 
 ## Required gates that are red
 
-One test in this matrix is expected to fail, and the suite is expected to be red
-because of it: `case22 ... redacts the credential out of the operator's terminal`.
+None. Every case in this matrix is expected to pass, which is what lets
+`e2e-faults` gate.
 
+One was red by design until recently, and the shape is worth keeping because the
+next requirement the product does not meet yet is enforced the same way.
 rc-contract R-12 makes case 22 a required parity test over the journal *and* the
-logs. rc.0 ships no redacting logger, so an action that logs a credential puts it
-on the operator's terminal. The requirement is enforced by keeping the test in
-the matrix as a plain failure, with the Phase 5 redaction deliverable
-(`docs/migration/rc-contract.md` §5.2) named as its owner in the case file and in
-`fault-gaps.md`. Marking it `.fails`, skipping it, or deleting it would report a
-green matrix over a live credential leak, so
-`scripts/repo-contract/fault-skips.test.mjs` refuses all three.
+logs. rc.0 shipped no redacting logger, so an action that logged a credential
+put it on the operator's terminal, and the requirement was enforced by keeping
+`case22 ... redacts the credential out of the operator's terminal` in the matrix
+as a plain failure with its owner named in the case file and in `fault-gaps.md`.
+Marking it `.fails`, skipping it, or deleting it would have reported a green
+matrix over a live credential leak, so `scripts/repo-contract/fault-skips.test.mjs`
+refused all three. The section 5.2 redaction deliverable landed
+`@smthrs/journal` `RedactedLogger` and the test went green with no edit to this
+suite, which is exactly what a plain failing test is for.
 
-A redacting logger turns it green with no edit to this suite.
+State the next one the same way: a plain test that fails, its owner in the case
+file, a row in `fault-gaps.md`, the shipped limitation on
+`docs/pages/release/known-limitations.md`, and an entry in that contract suite's
+`requiredRedGates` so nobody can quietly delete it. `e2e-faults` goes back to
+`continueOnError` for as long as one exists.
 
 ## Flakes
 
 There is no automated promotion history and no rolling flake cache. A case is
-either in `fault-matrix.json` and expected to pass — or, for the one required
-gate above, expected to fail for a stated reason with a named owner — or it is
-not in the suite. Record a flake by hand in `flake-log.md` with enough detail to
+either in `fault-matrix.json` and expected to pass — or, while a required gate
+is red, expected to fail for a stated reason with a named owner — or it is not
+in the suite. Record a flake by hand in `flake-log.md` with enough detail to
 reproduce it.

@@ -47,33 +47,45 @@ const faults = join(root, "e2e", "faults")
 const harness = join(root, "e2e", "harness")
 
 /**
- * The tests that are required to exist and are expected to be red at rc.0.
+ * The tests that are required to exist, whatever colour they are.
  *
- * A requirement the product does not meet yet is enforced by a plain failing
- * test, not by prose. This map is what stops the next person from making the
- * matrix green by deleting one.
+ * A required parity test is a promise the repository made in the release
+ * contract, and the cheapest way to break one is to delete the test rather than
+ * the promise. This map is what stops that: a gate listed here has to be in the
+ * matrix, under its own title, or this suite fails and names it.
  */
-const requiredRedGates = new Map([
+const requiredGates = new Map([
   [
     "faults/case22-secret-never-in-journal.test.ts",
     {
       title: "redacts the credential out of the operator's terminal",
-      why: "rc-contract R-12 requires case 22 to cover the logs as well as the journal. rc.0 ships no "
-        + "redacting logger, so this gate is red until the Phase 5 redaction deliverable (rc-contract "
-        + "§5.2) lands. Deleting it, or marking it `.fails`, makes the matrix green over a live "
-        + "credential leak.",
-      // The release-facing record of the same limitation. `heading` is the
-      // section on the known-limitations page, generated from rc-contract §7;
-      // `anchor` is what e2e/fault-gaps.md has to link to so a reader of the
-      // row can reach it.
-      limitation: {
-        heading: "Credential redaction in logs",
-        anchor: "docs/pages/release/known-limitations.md#credential-redaction-in-logs",
-        row: "| 22 |"
-      }
+      why: "rc-contract R-12 requires case 22 to cover the logs as well as the journal. It was red at rc.0 "
+        + "and went green when the section 5.2 redaction deliverable landed `@smthrs/journal` "
+        + "`RedactedLogger`. It runs the real binary and reads its real stderr, so it is the only thing "
+        + "that proves the redacting logger is installed under the durable engine rather than merely "
+        + "exported. Deleting it retires the proof, not the requirement."
     }
   ]
 ])
+
+/**
+ * The subset of {@link requiredGates} that are expected to be RED right now.
+ *
+ * A requirement the product does not meet yet is enforced by a plain failing
+ * test, not by prose, and a shipped limitation that is written down only in
+ * `e2e/fault-gaps.md` is written down where no reader of the release looks. An
+ * entry here therefore also has to name its section of the known-limitations
+ * page, and the fault-gaps row has to link to it.
+ *
+ * Empty. Case 22's terminal-log half was the last entry: rc.0 shipped no
+ * redacting logger, so the gate was red by design and `e2e-faults` carried
+ * `continueOnError` for it. The section 5.2 redaction deliverable landed the
+ * logger, the gate went green with no edit to the case, and `e2e-faults` became
+ * a required CI job. While this map is empty the matrix is expected to be green
+ * end to end; adding an entry back means putting `continueOnError` back on that
+ * job in the root `BUILD.ts` in the same commit.
+ */
+const requiredRedGates = new Map([])
 
 const knownLimitations = join(root, "docs", "pages", "release", "known-limitations.md")
 const faultGaps = join(root, "e2e", "fault-gaps.md")
@@ -158,13 +170,42 @@ describe("the fault-suite skip audit", () => {
 
   it("keeps every required gate in the matrix, including the ones that are red", () => {
     const byRelative = new Map(sources.map((source) => [source.relative, source.text]))
-    for (const [relative, gate] of requiredRedGates) {
+    for (const [relative, gate] of requiredGates) {
       const text = byRelative.get(relative)
       assert.ok(text !== undefined, `${relative} is a required gate and is not in the matrix any more. ${gate.why}`)
       assert.ok(
         text.includes(gate.title),
         `${relative} no longer contains the required test "${gate.title}". ${gate.why}`
       )
+    }
+  })
+
+  it("keeps every red gate in the required set, so its existence is checked too", () => {
+    for (const relative of requiredRedGates.keys()) {
+      assert.ok(
+        requiredGates.has(relative),
+        `${relative} is listed as red by design and is not in requiredGates, so nothing checks that the test `
+          + "still exists. Add it there as well."
+      )
+    }
+  })
+
+  it("keeps the fault job's CI status in step with the required-red set", () => {
+    // The comment over `requiredRedGates` states this rule; without a case it
+    // is enforced by nothing, and the two limitation cases below pass over an
+    // empty collection. A red gate the matrix is required to carry means
+    // `e2e-faults` cannot fail the pipeline, and an empty map means it must.
+    const build = readFileSync(join(root, "BUILD.ts"), "utf8")
+    const faultsJob = build.slice(build.indexOf("id: \"e2e-faults\""))
+    const jobBody = faultsJob.slice(0, faultsJob.indexOf("\n    }"))
+    const advisory = /continueOnError:\s*true/.test(jobBody)
+    const required = /requiredJobs:[^\]]*"e2e-faults"/.test(build)
+    if (requiredRedGates.size === 0) {
+      assert.ok(!advisory, "requiredRedGates is empty, so e2e-faults must not carry continueOnError")
+      assert.ok(required, "requiredRedGates is empty, so e2e-faults belongs in requiredJobs")
+    } else {
+      assert.ok(advisory, "a required red gate is listed, so e2e-faults must carry continueOnError")
+      assert.ok(!required, "a required red gate is listed, so e2e-faults must not be in requiredJobs")
     }
   })
 
@@ -192,6 +233,43 @@ describe("the fault-suite skip audit", () => {
           + `not link to it. Link ${gate.limitation.anchor}.`
       )
     }
+  })
+
+  it("counts the limits the release page says remain", () => {
+    // The paragraph states a number and then lists the limits. Nothing checked
+    // the number against the list: `check-docs` and `check-llms` prove the
+    // generated page matches rc-contract §7, not that §7 can count. It said
+    // "Two limits remain" over three sentences, and the miscount shipped to
+    // the release page verbatim.
+    const page = readFileSync(knownLimitations, "utf8")
+    const paragraph = page.split("\n").find((line) => line.includes("**Credential redaction in logs.**"))
+    assert.ok(paragraph !== undefined, "known-limitations.md has no credential-redaction paragraph")
+    const counted = /\b(One|Two|Three|Four|Five) limits? remain\./.exec(paragraph)
+    assert.ok(counted !== null, "the credential-redaction paragraph no longer states how many limits remain")
+    const spelled = new Map([["One", 1], ["Two", 2], ["Three", 3], ["Four", 4], ["Five", 5]])
+    const claimed = spelled.get(counted[1])
+    // A sentence ends at a period followed by whitespace and a capital, which
+    // leaves `flows_runs.state_json` and the other dotted identifiers alone.
+    const listed = paragraph.slice(counted.index + counted[0].length).trim()
+      .split(/(?<=\.)\s+(?=[A-Z])/)
+      .filter((sentence) => sentence.length > 0)
+    assert.equal(
+      listed.length,
+      claimed,
+      `the paragraph says "${counted[0]}" and then lists ${listed.length}: ${
+        listed.map((sentence) => sentence.slice(0, 60)).join(" | ")
+      }. Fix the count in rc-contract §7 and regenerate the page, or move a sentence that is standing policy `
+        + "rather than a limit ahead of the count."
+    )
+    // And the count is not free to drift from the matrix: fault-gaps row 22
+    // says "Both limits", so the page has to name exactly those two.
+    const row = readFileSync(faultGaps, "utf8").split("\n").find((line) => line.startsWith("| 22 |"))
+    assert.ok(row !== undefined, "e2e/fault-gaps.md has no row 22")
+    assert.ok(
+      row.includes("Both limits are stated in"),
+      "row 22 no longer claims two limits, so this check and the release page have to move together"
+    )
+    assert.equal(claimed, 2, "fault-gaps row 22 names two limits, so the release page must state two")
   })
 
   it("keeps the skip allow-list pointed at files that exist", () => {

@@ -226,7 +226,7 @@ describe("Redaction", () => {
     })
   })
 
-  it("mirrors JSON.stringify for Date and callable toJSON values", () => {
+  it("mirrors JSON.stringify for Date and toJSON values, and names a callable", () => {
     const instant = "2020-01-01T00:00:00.000Z"
     const date = new Date(instant)
     expect(Redaction.redact(date)).toBe(instant)
@@ -246,10 +246,18 @@ describe("Redaction", () => {
     selfReturning.toJSON = () => selfReturning
     expect(Redaction.redact(selfReturning)).toBe("[Circular]")
 
+    // Re-pinned 2026-09-01: these expected `{ safe: 1 }` and the function
+    // itself, which was the mirror of `JSON.stringify` for a callable. A
+    // function is now NAMED instead, ahead of the `toJSON` branch, because
+    // neither its body nor its own properties are text the walk can rewrite in
+    // place and a renderer prints all of it: `[Function: deploy] { token:
+    // "sk-..." }` reached the operator's terminal that way. Naming costs the
+    // `toJSON` parity for a callable, which no journal payload has, and buys a
+    // shape carrying no caller text at all.
     const callable = Object.assign(() => "ignored", { toJSON: () => ({ safe: 1 }) })
-    expect(Redaction.redact(callable)).toEqual({ safe: 1 })
+    expect(Redaction.redact(callable)).toBe(Redaction.functionMarker)
     const plainCallable = () => "kept"
-    expect(Redaction.redact(plainCallable)).toBe(plainCallable)
+    expect(Redaction.redact(plainCallable)).toBe(Redaction.functionMarker)
   })
 
   it("accepts a value at the depth bound and rejects one beyond it", () => {
@@ -444,6 +452,41 @@ describe("Redaction", () => {
     // fail this, and still finite, which is the whole claim.
     expect(Date.now() - started).toBeLessThan(2_000)
     expect(redacted).toContain(`api_key=${Redaction.placeholder}`)
+  })
+
+  it("names a binary view that refuses to describe itself", () => {
+    // The description reads two properties off the view, and either can be an
+    // own accessor that throws or a prototype the caller removed. Neither is a
+    // reason to lose the line, so both fall back to the bare marker.
+    const redact = Redaction.make()
+    const throwing = new Uint8Array([1, 2])
+    Object.defineProperty(throwing, "constructor", {
+      get: () => {
+        throw new TypeError("no constructor for you")
+      },
+      configurable: true
+    })
+    expect(redact(throwing)).toEqual({ [Redaction.binaryMarker]: Redaction.binaryMarker })
+    const bare = Object.setPrototypeOf(new Uint8Array([3]), null) as Uint8Array
+    expect(redact(bare)).toEqual({ [Redaction.binaryMarker]: Redaction.binaryMarker })
+    // Restated 2026-09-01: a caller's own `byteLength` decided the walk here, so
+    // this asserted the members were skipped when it threw. That property is
+    // not a bound: a getter that merely LIES walked one property per byte and
+    // nothing failed. The size is read from the value's internal slot now, and
+    // no property a caller writes answers for it, so a throwing own
+    // `byteLength` costs nothing, the true size is named, and the member is
+    // kept and redacted.
+    const sizeless = Object.assign(new Uint8Array([4]), { seat: "token=sk-live-abcdefgh" })
+    Object.defineProperty(sizeless, "byteLength", {
+      get: () => {
+        throw new TypeError("no byteLength for you")
+      },
+      configurable: true
+    })
+    expect(redact(sizeless)).toEqual({
+      [Redaction.binaryMarker]: "Uint8Array 1 bytes",
+      seat: `token=${Redaction.placeholder}`
+    })
   })
 
   effect("keeps payloads verbatim when redaction is disabled", () =>
