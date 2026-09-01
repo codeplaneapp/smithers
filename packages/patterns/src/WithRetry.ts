@@ -29,7 +29,6 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Backoff {
   readonly initialMs: number
@@ -45,7 +44,6 @@ export interface Backoff {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Options<Attempts extends number = number> {
   readonly attempts: Attempts
@@ -82,7 +80,10 @@ const validate = (options: Options): void => {
   }
 }
 
-const tags = (options: Options): ReadonlyArray<string> => [...new Set(options.nonRetryable ?? [])].sort()
+// Both call sites read `nonRetryable` only after proving it is present, so the
+// parameter is the array rather than the options: a `?? []` fallback here would
+// be code no caller can reach.
+const tags = (nonRetryable: ReadonlyArray<string>): ReadonlyArray<string> => [...new Set(nonRetryable)].sort()
 
 const captures = (options: Options): Readonly<Record<string, unknown>> => ({
   attempts: options.attempts,
@@ -93,7 +94,7 @@ const captures = (options: Options): Readonly<Record<string, unknown>> => ({
       maxMs: options.backoff.maxMs
     }
   }),
-  ...(options.nonRetryable === undefined ? {} : { nonRetryable: tags(options) })
+  ...(options.nonRetryable === undefined ? {} : { nonRetryable: tags(options.nonRetryable) })
 })
 
 const label = (options: Options): string => {
@@ -101,7 +102,7 @@ const label = (options: Options): string => {
   if (options.backoff !== undefined) {
     parts.push(`backoff=${options.backoff.initialMs}x${options.backoff.factor}<=${options.backoff.maxMs}`)
   }
-  if (options.nonRetryable !== undefined) parts.push(`nonRetryable=${tags(options).join("|")}`)
+  if (options.nonRetryable !== undefined) parts.push(`nonRetryable=${tags(options.nonRetryable).join("|")}`)
   return parts.join(", ")
 }
 
@@ -132,7 +133,6 @@ const declaration = <const Attempts extends number>(
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = <const Attempts extends number>(options: Options<Attempts>): Pattern.Decorator => (inner) =>
   declaration(inner, options)
@@ -142,7 +142,6 @@ export const make = <const Attempts extends number>(options: Options<Attempts>):
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const withRetry = <const Attempts extends number>(
   inner: Flow.Any,
@@ -170,7 +169,6 @@ const tagOf = (error: unknown): string | undefined =>
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const retryEffect = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -179,7 +177,7 @@ export const retryEffect = <A, E, R>(
   validate(options)
   const retryable = options.nonRetryable === undefined
     ? undefined
-    : new Set(tags(options))
+    : new Set(tags(options.nonRetryable))
   if (options.attempts === 1) return effect
   return Effect.retry(effect, {
     times: options.attempts - 1,

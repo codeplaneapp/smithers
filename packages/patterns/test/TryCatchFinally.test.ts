@@ -54,7 +54,7 @@ describe("TryCatchFinally", () => {
   // The outer boundary exists to catch what the BODY raised. The success-arm
   // finalizer must sit outside it: inside, a finalizer that fails on the
   // success path would be caught by the boundary that then calls the finalizer
-  // a second time and re-raises — a topology `run` does not implement, which
+  // a second time and re-raises: a topology `run` does not implement, which
   // calls the finalizer exactly once and maps that case to `finalizer_failed`.
   it("keeps the success-arm finalizer outside the unhandled-failure boundary", () => {
     const graph = Graph.build(
@@ -98,6 +98,26 @@ describe("TryCatchFinally", () => {
 
     expect(calledFlows(graph)).toEqual(["try"])
     expect(Graph.nodes(graph).filter((node) => node.kind === "Catch")).toHaveLength(0)
+  })
+
+  it("declares an unfiltered catch when no error schema is supplied", () => {
+    const graph = Graph.build(TryCatchFinally.make({ try: named("try"), catch: named("catch") }), "request")
+
+    expect(calledFlows(graph)).toEqual(["try", "catch"])
+    expect(Graph.nodes(graph).filter((node) => node.kind === "Catch")).toHaveLength(1)
+  })
+
+  it("refuses a declaration that filters errors without a catch", () => {
+    let refusal: unknown
+    try {
+      TryCatchFinally.make({ try: named("try"), catchErrors: Timeout })
+    } catch (error) {
+      refusal = error
+    }
+
+    expect(refusal).toBeInstanceOf(PatternError)
+    expect((refusal as PatternError).code).toBe("invalid_decorator")
+    expect((refusal as PatternError).message).toBe("TryCatchFinally catchErrors requires catch")
   })
 
   // Content-addressed step identity requires that the same declaration key the
@@ -180,15 +200,45 @@ describe("TryCatchFinally", () => {
 
   it.effect("fails finalizer_failed when the finalizer fails after a successful body", () =>
     Effect.gen(function*() {
+      const finalizerError = new Denied({ who: "cleanup" })
       const error = yield* Effect.flip(
         TryCatchFinally.run("request", {
           try: () => Effect.succeed("ok"),
-          finally: () => Effect.fail(new Denied({ who: "cleanup" }))
+          finally: () => Effect.fail(finalizerError)
         })
       )
 
       expect(error).toBeInstanceOf(PatternError)
       expect((error as PatternError).code).toBe("finalizer_failed")
+      expect((error as PatternError).message).toBe(
+        "The TryCatchFinally finalizer failed after the protected body succeeded"
+      )
+      expect((error as PatternError).cause).toEqual(finalizerError)
+    }))
+
+  it.effect("returns the protected body directly when no finalizer is configured", () =>
+    Effect.gen(function*() {
+      const value = yield* TryCatchFinally.run("request", {
+        try: (input) => Effect.succeed(`${input}-ok`)
+      })
+
+      expect(value).toBe("request-ok")
+    }))
+
+  it.effect("refuses a runtime filter without a catch before the body runs", () =>
+    Effect.gen(function*() {
+      let ran = 0
+      const error = yield* Effect.flip(
+        TryCatchFinally.run("request", {
+          try: (): Effect.Effect<string, Timeout> => Effect.sync(() => (ran += 1, "ok")),
+          catchErrors: () => true
+        })
+      )
+
+      expect(error).toBeInstanceOf(PatternError)
+      expect((error as PatternError).code).toBe("invalid_decorator")
+      expect((error as PatternError).message).toBe("TryCatchFinally catchErrors requires catch")
+      expect(ran).toBe(0)
     }))
 
   it.effect("keeps the body failure when the finalizer fails too", () =>

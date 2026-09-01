@@ -7,9 +7,8 @@
  *
  * The pattern detects once. Polling belongs to the caller, because how often
  * to look is a deployment decision rather than a property of the check: wrap
- * {@link run} in `Loop.run` for rounds inside one execution, or hand it to a
- * `@smthrs/triggers` schedule for rounds the control plane owns. The recipe is
- * in `docs/pages/api/patterns-loops.md`.
+ * {@link run} in `Loop.run` for bounded rounds inside one execution. The recipe
+ * is in `docs/pages/api/patterns-loops.md`.
  *
  * @see docs/pages/api/patterns-loops.md
  *
@@ -32,7 +31,6 @@ import * as Schema from "effect/Schema"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly capture: Flow.Any
@@ -50,9 +48,12 @@ export interface MakeOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions<I, Baseline, Snapshot, Comparison, Alert, E, R, E2, R2, E3 = never, R3 = never> {
+  /**
+   * The same reference is handed to every callback; a callback that mutates it
+   * changes what later callbacks see.
+   */
   readonly baseline: Baseline
   readonly capture: (input: {
     readonly input: I
@@ -80,7 +81,6 @@ export interface RuntimeOptions<I, Baseline, Snapshot, Comparison, Alert, E, R, 
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Result<Snapshot, Comparison, Alert> {
   readonly snapshot: Snapshot
@@ -101,7 +101,6 @@ const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
  *
  * @category predicates
  * @since 0.1.0
- * @slop
  */
 export const drifted = (value: unknown): boolean =>
   value === true ||
@@ -118,7 +117,6 @@ export const drifted = (value: unknown): boolean =>
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   const alert = options.alert
@@ -152,7 +150,6 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <I, Baseline, Snapshot, Comparison, Alert, E, R, E2, R2, E3 = never, R3 = never>(
   input: I,

@@ -49,7 +49,18 @@ describe("Sidecar", () => {
       _tag: "Succeed",
       value: { error: { _tag: "PlannedInput", path: [] }, quarantined: true }
     })
-    expect(Graph.diagnostics(graph)).toEqual([])
+    expect(Graph.diagnostics(graph)).toEqual([
+      expect.objectContaining({
+        code: "capability_outside_grant",
+        nodeId: "root.andThen.all.primary",
+        paths: ["sidecar/primary"]
+      }),
+      expect.objectContaining({
+        code: "capability_outside_grant",
+        nodeId: "root.andThen.all.shadow.catch.map",
+        paths: ["sidecar/shadow"]
+      })
+    ])
   })
 
   it("hands the scorer the pair run hands it", () => {
@@ -99,6 +110,19 @@ describe("Sidecar", () => {
       if (result.shadow.quarantined) {
         expect(Cause.hasDies(result.shadow.cause)).toBe(true)
       }
+    }))
+
+  it.effect("propagates a shadow interruption instead of quarantining it", () =>
+    Effect.gen(function*() {
+      const exit = yield* Effect.exit(
+        Sidecar.run("prompt", {
+          primary: () => Effect.succeed("answer"),
+          shadow: () => Effect.interrupt
+        })
+      )
+
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") expect(Cause.hasInterrupts(exit.cause)).toBe(true)
     }))
 
   it.effect("fails when the primary fails, because the shadow is not a fallback", () =>

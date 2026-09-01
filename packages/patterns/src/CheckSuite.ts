@@ -98,6 +98,9 @@ const merge = (left: unknown, right: unknown): Record<string, unknown> => ({
  * failed and the join isolated it, so the suite has no row to read. An object
  * row fails when it carries `passed: false`, `ok: false`, `failed: true`, or an
  * `error` other than `undefined`, `null`, or `false`. Anything else passes.
+ * The quarantine marker is a structural tag on the wire. A successful value
+ * with that full shape is indistinguishable, so callers whose values can carry
+ * a `_tag` should wrap them before returning them as check rows.
  *
  * @category introspection
  * @since 0.1.0
@@ -122,7 +125,7 @@ export const passed = (row: unknown): boolean => {
  */
 export const rows = (values: unknown, ids: ReadonlyArray<string>): ReadonlyArray<CheckResult> => {
   const record = (typeof values === "object" && values !== null ? values : {}) as Record<string, unknown>
-  return ids.map((id) => ({ id, passed: passed(record[id]) }))
+  return ids.map((id) => ({ id, passed: Object.hasOwn(record, id) ? passed(record[id]) : false }))
 }
 
 /**
@@ -195,10 +198,12 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
     flows: declared.map(([, flow]) => flow),
     body: Node.capture(captures, (input) => {
       const batchAt = (offset: number): Node.Node<unknown, unknown> => {
-        const members: Record<string, Node.Any> = {}
-        for (const [id, flow] of declared.slice(offset, offset + options.concurrency)) {
-          members[id] = call(flow, { check: id, input })
-        }
+        const members = Object.fromEntries(
+          declared.slice(offset, offset + options.concurrency).map(([id, flow]) => [
+            id,
+            call(flow, { check: id, input })
+          ])
+        ) as Record<string, Node.Any>
         return Quarantine.all(members, {
           policy: options.continueOnFail ? "quarantine" : "halt"
         })

@@ -33,7 +33,6 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly scan: Flow.Any
@@ -52,7 +51,6 @@ export interface MakeOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions<I, Issue, Fix, Verification, E, R, E2, R2, E3, R3> {
   readonly scan: (input: {
@@ -83,7 +81,6 @@ export interface RuntimeOptions<I, Issue, Fix, Verification, E, R, E2, R2, E3, R
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Report<Issue, Verification> {
   readonly iterations: number
@@ -116,7 +113,6 @@ const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
  *
  * @category predicates
  * @since 0.1.0
- * @slop
  */
 export const resolved = (value: unknown): boolean =>
   value === true ||
@@ -144,10 +140,10 @@ const validate = (options: {
  * `concurrency`-sized batches, so the declaration already shows the confirming
  * rescan that follows a verified round. Which issues exist, and therefore which
  * fixes run, is a runtime fact that {@link run} settles.
+ * Very large retry and issue bounds build a very large graph before anything runs.
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   const invalid = validate(options)
@@ -225,7 +221,6 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <I, Issue, Fix, Verification, E, R, E2, R2, E3, R3>(
   input: I,

@@ -28,7 +28,12 @@ describe("Recursion", () => {
   })
 
   it("rejects exhausted and widened bounds", () => {
-    expect(() => Recursion.recurse({ child, fuel: 0, depth: 1, fanout: 1 })).toThrow(PatternError)
+    expect(() => Recursion.recurse({ child, fuel: 0, depth: 1, fanout: 1 })).toThrow(
+      expect.objectContaining({
+        code: "recursion_bound",
+        message: "Recursion bounds must be positive safe integers"
+      })
+    )
     expect(() =>
       Recursion.recurse({
         child,
@@ -37,13 +42,51 @@ describe("Recursion", () => {
         fanout: 2,
         parent: { fuel: 2, depth: 2, fanout: 2 }
       })
-    ).toThrow(PatternError)
+    ).toThrow(
+      expect.objectContaining({
+        code: "recursion_bound",
+        message: "Nested recursion may attenuate but cannot widen its parent envelope"
+      })
+    )
+    expect(() =>
+      Recursion.recurse({
+        child,
+        fuel: 2,
+        depth: 3,
+        fanout: 2,
+        parent: { fuel: 2, depth: 2, fanout: 2 }
+      })
+    ).toThrow(
+      expect.objectContaining({
+        code: "recursion_bound",
+        message: "Nested recursion may attenuate but cannot widen its parent envelope"
+      })
+    )
+    expect(() =>
+      Recursion.recurse({
+        child,
+        fuel: 2,
+        depth: 2,
+        fanout: 3,
+        parent: { fuel: 2, depth: 2, fanout: 2 }
+      })
+    ).toThrow(
+      expect.objectContaining({
+        code: "recursion_bound",
+        message: "Nested recursion may attenuate but cannot widen its parent envelope"
+      })
+    )
     expect(() =>
       Graph.build(
         Recursion.recurse({ child, fuel: 3, depth: 3, fanout: 1 }),
         { input: "root", children: [{ input: "a" }, { input: "b" }] }
       )
-    ).toThrow(PatternError)
+    ).toThrow(
+      expect.objectContaining({
+        code: "recursion_bound",
+        message: "Recursive child fan-out exceeds the envelope"
+      })
+    )
     expect(() =>
       Graph.build(
         Recursion.recurse({ child, fuel: 2, depth: 3, fanout: 2 }),
@@ -52,7 +95,29 @@ describe("Recursion", () => {
           children: [{ input: "a", children: [{ input: "b" }] }]
         }
       )
-    ).toThrow(PatternError)
+    ).toThrow(
+      expect.objectContaining({ code: "recursion_bound", message: "Recursion fuel is exhausted" })
+    )
+  })
+
+  it("admits the declared depth and refuses one level past it", () => {
+    const recursive = Recursion.recurse({ child, fuel: 4, depth: 3, fanout: 1 })
+    const atBound = {
+      input: "root",
+      children: [{ input: "middle", children: [{ input: "leaf" }] }]
+    }
+    const pastBound = {
+      input: "root",
+      children: [{ input: "middle", children: [{ input: "leaf", children: [{ input: "past" }] }] }]
+    }
+
+    expect(Graph.nodes(Graph.build(recursive, atBound)).filter((node) => node.kind === "FlowCall")).toHaveLength(3)
+    expect(() => Graph.build(recursive, pastBound)).toThrow(
+      expect.objectContaining({
+        code: "recursion_bound",
+        message: "Recursive child depth exceeds the envelope"
+      })
+    )
   })
 
   it("refuses a symbolic tree instead of silently planning one leaf", () => {
@@ -64,7 +129,10 @@ describe("Recursion", () => {
     })
 
     expect(() => Graph.build(composed, { input: "root" })).toThrow(
-      "Recursion input must be a literal tree available while planning"
+      expect.objectContaining({
+        code: "recursion_bound",
+        message: "Recursion input must be a literal tree available while planning"
+      })
     )
   })
 })

@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { expect } from "vitest"
 import * as Intervene from "../src/Intervene.ts"
+import { PatternError } from "../src/PatternError.ts"
 import * as WithApproval from "../src/WithApproval.ts"
 
 const step = Flow.make({
@@ -94,7 +95,20 @@ describe("Intervene", () => {
         dryRun: false,
         approval: permissive
       })
-    ).toThrow("The bound flow does not satisfy the slot input and output schemas")
+    ).toThrow(expect.objectContaining({
+      code: "invalid_decorator",
+      message: "The bound flow has an incompatible output schema: expected Literal, received String"
+    }))
+    expect(() =>
+      Intervene.make({
+        read: step,
+        propose: step,
+        apply: step,
+        report: step,
+        dryRun: false,
+        approval: permissive
+      })
+    ).toThrow(PatternError)
   })
 
   it.effect("never applies on a dry run and reports the proposal", () =>
@@ -136,6 +150,21 @@ describe("Intervene", () => {
       })
 
       expect(trace).toEqual(["read", "propose", "approve", "apply", "report"])
+      expect(report).toMatchObject({ applied: "written", dryRun: false })
+    }))
+
+  it.effect("applies directly when no approval callback is configured", () =>
+    Effect.gen(function*() {
+      const trace: Array<string> = []
+      const report = yield* Intervene.run("refactor", {
+        dryRun: false,
+        read: () => Effect.sync(() => (trace.push("read"), ["a.ts"])),
+        propose: () => Effect.sync(() => (trace.push("propose"), { edits: 1 })),
+        apply: () => Effect.sync(() => (trace.push("apply"), "written")),
+        report: (args) => Effect.sync(() => (trace.push("report"), args))
+      })
+
+      expect(trace).toEqual(["read", "propose", "apply", "report"])
       expect(report).toMatchObject({ applied: "written", dryRun: false })
     }))
 

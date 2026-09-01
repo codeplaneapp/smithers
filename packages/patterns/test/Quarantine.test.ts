@@ -36,7 +36,9 @@ describe("Quarantine", () => {
   })
 
   it("rejects an empty member record", () => {
-    expect(() => Quarantine.all({}, { policy: "quarantine" })).toThrow(PatternError)
+    expect(() => Quarantine.all({}, { policy: "quarantine" })).toThrow(
+      expect.objectContaining({ code: "invalid_decorator", message: "Quarantine requires at least one member" })
+    )
   })
 
   it.effect("isolates a failing member and lets its siblings finish", () =>
@@ -65,6 +67,21 @@ describe("Quarantine", () => {
       expect([...finished].sort()).toEqual(["alpha", "gamma"])
     }))
 
+  it.effect("returns own data properties for prototype-shaped member names", () =>
+    Effect.gen(function*() {
+      const names = ["__proto__", "constructor", "toString", "normal"]
+      const result = yield* Quarantine.run(
+        Object.fromEntries(names.map((name) => [name, Effect.succeed(`${name}-value`)])),
+        { policy: "quarantine" }
+      )
+
+      expect(Object.getPrototypeOf(result)).toBe(Object.prototype)
+      for (const name of names) {
+        expect(Object.hasOwn(result, name)).toBe(true)
+        expect(result[name]).toBe(`${name}-value`)
+      }
+    }))
+
   it.effect("interrupts siblings on the first failure under the halt policy", () =>
     Effect.gen(function*() {
       const finished: Array<string> = []
@@ -80,6 +97,17 @@ describe("Quarantine", () => {
 
       expect(exit._tag).toBe("Failure")
       expect(finished).toEqual([])
+    }))
+
+  it.effect("returns every member's value under the halt policy when none fails", () =>
+    Effect.gen(function*() {
+      const result = yield* Quarantine.run(
+        { alpha: Effect.succeed("alpha-value"), beta: Effect.succeed("beta-value") },
+        { policy: "halt" }
+      )
+
+      expect(result).toEqual({ alpha: "alpha-value", beta: "beta-value" })
+      expect(Object.keys(result).sort()).toEqual(["alpha", "beta"])
     }))
 
   it.effect("bounds how many members run at once", () =>
@@ -134,7 +162,11 @@ describe("Quarantine", () => {
 
       expect(error).toBeInstanceOf(PatternError)
       expect(error.code).toBe("quarantined")
-      expect(error.message).toContain("b, c")
+      expect(error.message).toBe("Quarantined members: b, c")
+      expect(error.cause).toEqual([
+        { member: "b", error: new Boom({ member: "b" }) },
+        { member: "c", error: new Boom({ member: "c" }) }
+      ])
     }))
 
   // `run` refuses with a TYPED failure, not a defect, for the same reason
@@ -149,13 +181,27 @@ describe("Quarantine", () => {
 
       expect(empty).toBeInstanceOf(PatternError)
       expect(empty.code).toBe("invalid_decorator")
+      expect(empty.message).toBe("Quarantine requires at least one member")
       expect(width).toBeInstanceOf(PatternError)
       expect(width.code).toBe("invalid_decorator")
+      expect(width.message).toBe("Quarantine concurrency must be a positive safe integer, received 0")
     }))
 
-  it("recognises a quarantined member", () => {
+  it("recognises only the full structural quarantined marker", () => {
     expect(Quarantine.isQuarantined({ _tag: "Quarantined", member: "a", error: 1 })).toBe(true)
+    expect(Quarantine.isQuarantined({ _tag: "Quarantined" })).toBe(false)
+    expect(Quarantine.isQuarantined({ _tag: "Quarantined", member: 1, error: "e" })).toBe(false)
+    expect(Quarantine.isQuarantined({ _tag: "Quarantined", error: "e" })).toBe(false)
+    expect(Quarantine.isQuarantined({ _tag: "quarantined", member: "a", error: "e" })).toBe(false)
     expect(Quarantine.isQuarantined({ _tag: "Settled" })).toBe(false)
     expect(Quarantine.isQuarantined(undefined)).toBe(false)
   })
+
+  it.effect("settles a near-miss structural tag as a successful value", () =>
+    Effect.gen(function*() {
+      const value = { _tag: "Quarantined" } as const
+      const settled = yield* Quarantine.settle({ a: value })
+
+      expect(settled).toEqual({ a: value })
+    }))
 })

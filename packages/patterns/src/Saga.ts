@@ -10,6 +10,7 @@
  * @since 0.1.0
  */
 import { Flow, Node } from "@smthrs/core"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
@@ -28,7 +29,6 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type OnFailure = "compensate" | "compensate-and-fail" | "fail"
 
@@ -42,7 +42,6 @@ export type OnFailure = "compensate" | "compensate-and-fail" | "fail"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Step {
   readonly id: string
@@ -55,7 +54,6 @@ export interface Step {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly steps: ReadonlyArray<Step>
@@ -67,7 +65,6 @@ export interface MakeOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeStep<I, A, E, R, E2, R2> {
   readonly id: string
@@ -82,9 +79,11 @@ export interface RuntimeStep<I, A, E, R, E2, R2> {
 /**
  * Configuration for {@link run}.
  *
+ * `run` snapshots `steps` at entry; later array mutations do not alter that
+ * run.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions<I, A, E, R, E2, R2> {
   readonly steps: ReadonlyArray<RuntimeStep<I, A, E, R, E2, R2>>
@@ -96,7 +95,6 @@ export interface RuntimeOptions<I, A, E, R, E2, R2> {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Compensated<E> {
   readonly compensated: true
@@ -158,7 +156,6 @@ const declarationRefusal = (steps: ReadonlyArray<Step>): PatternError | undefine
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   const refusal = stepsRefusal(options.steps) ?? declarationRefusal(options.steps)
@@ -224,49 +221,57 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <I, A, E, R, E2, R2>(
   input: I,
   options: RuntimeOptions<I, A, E, R, E2, R2>
 ): Effect.Effect<Readonly<Record<string, A>> | Compensated<E>, E | PatternError, R | R2> =>
   Effect.suspend(() => {
-    const refusal = stepsRefusal(options.steps)
+    const steps = [...options.steps]
+    const refusal = stepsRefusal(steps)
     if (refusal !== undefined) return Effect.fail(refusal)
     const policy = options.onFailure ?? "compensate"
-    const residue: Array<string> = []
+    const residue: Array<{ readonly id: string; readonly error: unknown }> = []
     const forward = Effect.gen(function*() {
-      const completed: Record<string, A> = {}
-      for (const step of options.steps) {
-        const value = yield* step.action({ input, completed: { ...completed } })
-        completed[step.id] = value
+      const completed = new Map<string, A>()
+      for (const step of steps) {
+        const value = yield* step.action({
+          input,
+          completed: Object.fromEntries(completed)
+        })
+        completed.set(step.id, value)
         if (policy === "fail") continue
         yield* Effect.addFinalizer((exit) =>
           Exit.isSuccess(exit)
             ? Effect.void
             : Effect.matchCause(step.compensation({ id: step.id, input, value }), {
-              onFailure: () => {
-                residue.push(step.id)
+              onFailure: (cause) => {
+                residue.push({ id: step.id, error: Cause.squash(cause) })
               },
               onSuccess: () => {}
             })
         )
       }
-      return completed
+      return Object.fromEntries(completed)
     })
     const settle = (
       exit: Exit.Exit<Readonly<Record<string, A>>, E>
     ): Effect.Effect<Readonly<Record<string, A>> | Compensated<E>, E | PatternError> => {
+      const failure = Exit.findErrorOption(exit)
       if (residue.length > 0) {
+        const sorted = [...residue].sort((left, right) => left.id.localeCompare(right.id))
         return Effect.fail(
           new PatternError({
             code: "compensation_failed",
-            message: `Saga compensation failed for: ${[...residue].sort().join(", ")}`
+            message: `Saga compensation failed for: ${sorted.map((entry) => entry.id).join(", ")}`,
+            cause: {
+              ...(Option.isSome(failure) ? { failure: failure.value } : {}),
+              residue: sorted
+            }
           })
         )
       }
       if (Exit.isSuccess(exit) || policy !== "compensate") return exit
-      const failure = Exit.findErrorOption(exit)
       return Option.isSome(failure)
         ? Effect.succeed<Compensated<E>>({ compensated: true, failure: failure.value })
         : exit

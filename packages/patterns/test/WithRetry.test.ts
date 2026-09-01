@@ -58,8 +58,24 @@ describe("WithRetry", () => {
       body: () => Node.succeed(undefined)
     })
 
-    expect(() => WithRetry.withRetry(inner, { attempts: 0 })).toThrow(PatternError)
-    expect(() => WithRetry.withRetry(inner, { attempts: Number.POSITIVE_INFINITY })).toThrow(PatternError)
+    expect(() => WithRetry.withRetry(inner, { attempts: 0 })).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Retry attempts must be a positive safe integer, received 0"
+      })
+    )
+    expect(() => WithRetry.withRetry(inner, { attempts: Number.POSITIVE_INFINITY })).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Retry attempts must be a positive safe integer, received Infinity"
+      })
+    )
+    expect(() => WithRetry.retryEffect(Effect.succeed("unused"), { attempts: 0 })).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Retry attempts must be a positive safe integer, received 0"
+      })
+    )
   })
 
   it.effect("retries typed failures and propagates fiber interruption", () =>
@@ -108,6 +124,18 @@ describe("WithRetry", () => {
     expect(guarded.implementation).not.toEqual(plain.implementation)
   })
 
+  it("names an unnamed inner flow anonymous", () => {
+    const inner = Flow.make({
+      input: Schema.String,
+      output: Schema.String,
+      body: () => Node.dynamic({ output: Schema.String })
+    })
+
+    const retried = WithRetry.withRetry(inner, { attempts: 2 }) as typeof inner
+
+    expect(retried.name).toBe("withRetry(anonymous, attempts=2)")
+  })
+
   it("rejects an invalid backoff", () => {
     const inner = Flow.make({
       input: Schema.Void,
@@ -117,14 +145,41 @@ describe("WithRetry", () => {
     })
 
     expect(() => WithRetry.withRetry(inner, { attempts: 2, backoff: { initialMs: 0, factor: 2, maxMs: 10 } }))
-      .toThrow(PatternError)
+      .toThrow(expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Retry backoff initialMs must be a positive finite number, received 0"
+      }))
     expect(() => WithRetry.withRetry(inner, { attempts: 2, backoff: { initialMs: 10, factor: 0.5, maxMs: 10 } }))
-      .toThrow(PatternError)
+      .toThrow(expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Retry backoff factor must be at least 1, received 0.5"
+      }))
     expect(() => WithRetry.withRetry(inner, { attempts: 2, backoff: { initialMs: 10, factor: 2, maxMs: 5 } }))
-      .toThrow(PatternError)
+      .toThrow(expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Retry backoff maxMs must be at least initialMs, received 5"
+      }))
     expect(() => WithRetry.withRetry(inner, { attempts: 2, backoff: { initialMs: Number.NaN, factor: 2, maxMs: 10 } }))
-      .toThrow(PatternError)
+      .toThrow(expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Retry backoff initialMs must be a positive finite number, received NaN"
+      }))
   })
+
+  it.effect("returns a single-attempt effect without retrying it", () =>
+    Effect.gen(function*() {
+      let attempts = 0
+      const value = yield* WithRetry.retryEffect(
+        Effect.sync(() => {
+          attempts += 1
+          return "once"
+        }),
+        { attempts: 1 }
+      )
+
+      expect(value).toBe("once")
+      expect(attempts).toBe(1)
+    }))
 
   // The bound on `initialMs` is "positive and finite", not "at least one
   // millisecond": the ladder is a `Duration`, which carries sub-millisecond
@@ -205,5 +260,20 @@ describe("WithRetry", () => {
 
       expect(value).toBe("ok")
       expect(attempts).toBe(3)
+    }))
+
+  it.effect("still retries an untagged failure when non-retryable tags are configured", () =>
+    Effect.gen(function*() {
+      let attempts = 0
+      const value = yield* WithRetry.retryEffect(
+        Effect.suspend(() => {
+          attempts += 1
+          return attempts === 1 ? Effect.fail("transient") : Effect.succeed("ok")
+        }),
+        { attempts: 2, nonRetryable: ["patterns/Fatal"] }
+      )
+
+      expect(value).toBe("ok")
+      expect(attempts).toBe(2)
     }))
 })

@@ -20,13 +20,20 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Slot<I extends Schema.Top, O extends Schema.Top> {
   readonly input: I
   readonly output: O
   readonly default?: Flow.Any | undefined
 }
+
+type SchemaCompatibilityIssue = Exclude<ReturnType<typeof Compose.schemasCompatible>, undefined>
+
+const schemaRefusalMessage = (subject: string, issue: SchemaCompatibilityIssue): string =>
+  issue._tag === "IncompatibleSchemas"
+    ? `${subject} has an incompatible ${issue.side} schema: expected ${issue.expectedTag}, received ${issue.actualTag}`
+    : `${subject} ${issue.side} schemas cannot be compared because the ${issue.schema} ${issue.side} schema ` +
+      `(${issue.tag}) has no JSON Schema form`
 
 /**
  * Declares a flow-valued slot.
@@ -36,15 +43,17 @@ export interface Slot<I extends Schema.Top, O extends Schema.Top> {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const slot = <I extends Schema.Top, O extends Schema.Top>(
   options: Slot<I, O>
 ): Slot<I, O> => {
-  if (options.default !== undefined && !Compose.schemasCompatible(options.input, options.output, options.default)) {
+  const issue = options.default === undefined
+    ? undefined
+    : Compose.schemasCompatible(options.input, options.output, options.default)
+  if (issue !== undefined) {
     throw new PatternError({
       code: "invalid_decorator",
-      message: "The slot default does not satisfy its input and output schemas"
+      message: schemaRefusalMessage("The slot default", issue)
     })
   }
   return options
@@ -59,7 +68,6 @@ export const slot = <I extends Schema.Top, O extends Schema.Top>(
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const bind = <I extends Schema.Top, O extends Schema.Top>(
   declaration: Slot<I, O>,
@@ -72,10 +80,11 @@ export const bind = <I extends Schema.Top, O extends Schema.Top>(
       message: "A required flow slot was not bound and has no default"
     })
   }
-  if (!Compose.schemasCompatible(declaration.input, declaration.output, flow)) {
+  const issue = Compose.schemasCompatible(declaration.input, declaration.output, flow)
+  if (issue !== undefined) {
     throw new PatternError({
       code: "invalid_decorator",
-      message: "The bound flow does not satisfy the slot input and output schemas"
+      message: schemaRefusalMessage("The bound flow", issue)
     })
   }
   return flow
@@ -86,7 +95,6 @@ export const bind = <I extends Schema.Top, O extends Schema.Top>(
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Decorator = (inner: Flow.Any) => Flow.Any
 
@@ -96,7 +104,6 @@ export type Decorator = (inner: Flow.Any) => Flow.Any
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Clipped {
   readonly capabilities: ReadonlyArray<string>
@@ -111,7 +118,6 @@ export interface Clipped {
  *
  * @category introspection
  * @since 0.1.0
- * @slop
  */
 export const clipped = (template: Flow.Any, supplied: Flow.Any): Clipped => {
   const expected = Compose.details(template)
@@ -140,7 +146,6 @@ export const clipped = (template: Flow.Any, supplied: Flow.Any): Clipped => {
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const decorate: {
   (decorator: Decorator): (self: Flow.Any) => Flow.Any
@@ -153,16 +158,20 @@ export const decorate: {
       message: "A flow decorator must return a Flow"
     })
   }
-  if (!Compose.schemasCompatible(self.input, self.output, supplied)) {
+  const issue = Compose.schemasCompatible(self.input, self.output, supplied)
+  if (issue !== undefined) {
     throw new PatternError({
       code: "invalid_decorator",
-      message: "A flow decorator must preserve compatible input and output schemas"
+      message: schemaRefusalMessage("The flow decorator result", issue)
     })
   }
   const innerName = Compose.displayName(self)
   const suppliedName = Compose.details(supplied).name
   const decoratorName = decorator.name.length === 0 ? "decorate" : decorator.name
-  const name = suppliedName !== undefined && suppliedName !== innerName
+  // An unnamed decorator result carries the empty string, not `undefined`, so
+  // it must not be adopted as the composed name: a flow called "" is worse than
+  // the derived `decorate(anonymous)`.
+  const name = suppliedName !== undefined && suppliedName.length > 0 && suppliedName !== innerName
     ? suppliedName
     : `${decoratorName}(${innerName})`
   return Compose.redeclare(self, supplied, name)
@@ -173,7 +182,6 @@ export const decorate: {
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const decorateAll = (
   flow: Flow.Any,

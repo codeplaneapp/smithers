@@ -204,8 +204,8 @@ const validate = (
  *
  * At the default concurrency of 1 the queue is a plain `Node.andThen` chain,
  * with no `Node.all` at all, so the declared plan admits exactly one landing at
- * a time. Each call carries `{ member, position, input }`, so a built graph
- * names each member's place in the queue.
+ * a time. Each call carries `{ id, position, input }`, so a built graph names
+ * each member's place in the queue.
  *
  * A member's effective priority reaches the plan as a `Node.priority`
  * annotation rather than as call input, which is what lets the scheduler start
@@ -219,6 +219,10 @@ const validate = (
  * batch beside it: the queue {@link run} lands. Under `halt` the chain has no
  * continuation past a failed member, and a batch join fails on the first
  * failing member and interrupts the rest.
+ *
+ * That wire marker deliberately remains
+ * `{ _tag: "Quarantined", member, error }`: it is the structural marker
+ * `Quarantine.all` produces, so its `member` key is not a landing-call payload.
  *
  * `make` throws a `PatternError` when there are no members, when two members
  * share an id, when `concurrency` is not a positive safe integer, or when
@@ -237,8 +241,8 @@ export const make = (
   if (invalid !== undefined) throw invalid
   const queue = ordered(members, priority)
   // Priority is deliberately absent: it reaches the plan as an annotation, and
-  // an annotation never enters key material. What it changes — the order, and
-  // therefore each member's position — is captured through `members`.
+  // an annotation never enters key material. What it changes, the order and
+  // therefore each member's position, is captured through `members`.
   const captures = {
     members: queue.map((entry) => entry.id),
     concurrency,
@@ -252,7 +256,7 @@ export const make = (
       const landing = (entry: Position<Member>): Node.Node<unknown, unknown> => {
         const declared = Node.priority(
           call(entry.member.flow, {
-            member: entry.id,
+            id: entry.id,
             position: entry.position,
             input
           }),
@@ -282,8 +286,9 @@ export const make = (
         return walk(0)
       }
       const batchAt = (offset: number): Node.Node<unknown, unknown> => {
-        const group: Record<string, Node.Any> = {}
-        for (const entry of queue.slice(offset, offset + concurrency)) group[entry.id] = landing(entry)
+        const group = Object.fromEntries(
+          queue.slice(offset, offset + concurrency).map((entry) => [entry.id, landing(entry)])
+        ) as Record<string, Node.Any>
         // A plain join: under quarantine every member already carries its own
         // recovery arm, so no member can fail this join on the batch's behalf.
         return Node.all(group)

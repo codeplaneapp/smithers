@@ -22,11 +22,10 @@ import { PatternError } from "./PatternError.ts"
  *
  * `catch` receives `{ error, input }`; `finally` receives `{ input }`.
  * `catchErrors` selects which typed failures reach `catch`; without it the
- * whole error channel does.
+ * whole error channel does. Supplying `catchErrors` requires `catch`.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly try: Flow.Any
@@ -39,11 +38,10 @@ export interface MakeOptions {
  * Operational callbacks for {@link run}.
  *
  * `catchErrors` is a predicate rather than a schema, because the runtime form
- * already holds the decoded typed error.
+ * already holds the decoded typed error. Supplying it requires `catch`.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions<I, A, E, R, B = A, E2 = never, R2 = never, E3 = never, R3 = never> {
   readonly try: (input: I) => Effect.Effect<A, E, R>
@@ -72,10 +70,15 @@ const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
-export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> =>
-  Flow.make({
+export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
+  if (options.catchErrors !== undefined && options.catch === undefined) {
+    throw new PatternError({
+      code: "invalid_decorator",
+      message: "TryCatchFinally catchErrors requires catch"
+    })
+  }
+  return Flow.make({
     input: Schema.Unknown,
     output: Schema.Unknown,
     flows: [
@@ -122,6 +125,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
       }
     )
   })
+}
 
 /**
  * Runs the boundary.
@@ -133,12 +137,19 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <I, A, E, R, B = A, E2 = never, R2 = never, E3 = never, R3 = never>(
   input: I,
   options: RuntimeOptions<I, A, E, R, B, E2, R2, E3, R3>
 ): Effect.Effect<A | B, E | E2 | PatternError, R | R2 | R3> => {
+  if (options.catchErrors !== undefined && options.catch === undefined) {
+    return Effect.fail(
+      new PatternError({
+        code: "invalid_decorator",
+        message: "TryCatchFinally catchErrors requires catch"
+      })
+    )
+  }
   const handler = options.catch
   const guarded: Effect.Effect<A | B, E | E2, R | R2> = handler === undefined
     ? options.try(input)
@@ -151,12 +162,13 @@ export const run = <I, A, E, R, B = A, E2 = never, R2 = never, E3 = never, R3 = 
   if (finalize === undefined) return guarded
   return Effect.onExit(guarded, (exit) =>
     Effect.matchEffect(finalize(input), {
-      onFailure: () =>
+      onFailure: (error) =>
         Exit.isSuccess(exit)
           ? Effect.fail(
             new PatternError({
               code: "finalizer_failed",
-              message: "The TryCatchFinally finalizer failed after the protected body succeeded"
+              message: "The TryCatchFinally finalizer failed after the protected body succeeded",
+              cause: error
             })
           )
           : Effect.void,

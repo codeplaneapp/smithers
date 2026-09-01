@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { expect } from "vitest"
 import * as DelegationChain from "../src/DelegationChain.ts"
+import { PatternError } from "../src/PatternError.ts"
 import type * as Trellis from "../src/Trellis.ts"
 
 const stub = (name: string): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, never> =>
@@ -163,6 +164,9 @@ describe("DelegationChain", () => {
       expect(failure).toBeInstanceOf(DelegationChain.DelegationError)
       expect((failure as DelegationChain.DelegationError).code).toBe("leaf_failed")
       expect((failure as DelegationChain.DelegationError).path).toBe("root.sequence[0]")
+      expect((failure as DelegationChain.DelegationError).message).toBe(
+        "No tier settled the leaf at root.sequence[0] within 2 attempts each"
+      )
       expect(attempts).toBe(bounds.tierOrder.length * bounds.maxAttempts)
     }))
 
@@ -201,6 +205,9 @@ describe("DelegationChain", () => {
       expect(failure).toBeInstanceOf(DelegationChain.DelegationError)
       expect((failure as DelegationChain.DelegationError).code).toBe("leaf_failed")
       expect((failure as DelegationChain.DelegationError).path).toBe("root.sequence[0]")
+      expect((failure as DelegationChain.DelegationError).message).toBe(
+        "No tier settled the leaf at root.sequence[0] within 2 attempts each"
+      )
       expect(attempts).toEqual(new Map([["weak", bounds.maxAttempts], ["strong", bounds.maxAttempts]]))
       expect(reviewed).toEqual(["weak", "strong"])
       expect(settled).toBe(false)
@@ -241,7 +248,80 @@ describe("DelegationChain", () => {
         settle: ({ leaves }) => Effect.succeed(leaves)
       }).pipe(Effect.flip)
 
-      expect(failure).toMatchObject({ code: "depth_exceeded", path: "root.sequence[0]" })
+      expect(failure).toMatchObject({
+        code: "depth_exceeded",
+        path: "root.sequence[0]",
+        message: "Plan depth 2 exceeds the envelope depth 1"
+      })
+    }))
+
+  it.effect("refuses invalid concurrency before any callback runs", () =>
+    Effect.gen(function*() {
+      for (const concurrency of [0, -5, 1.5, Number.NaN]) {
+        let callbacks = 0
+        const called = <A>(value: A) => Effect.sync(() => (callbacks += 1, value))
+        const failure = yield* Effect.flip(
+          DelegationChain.run("ship it", {
+            ...bounds,
+            concurrency,
+            refine: () => called("goal"),
+            plan: () => called({ agent: { goal: "a" } }),
+            derisk: () => called({ approved: true }),
+            execute: { weak: () => called("ok"), strong: () => called("ok") },
+            review: () => called({ approved: true }),
+            settle: ({ leaves }) => called(leaves)
+          })
+        )
+
+        expect(failure).toBeInstanceOf(DelegationChain.DelegationError)
+        expect((failure as DelegationChain.DelegationError).code).toBe("invalid_bounds")
+        expect((failure as DelegationChain.DelegationError).path).toBe("root")
+        expect((failure as DelegationChain.DelegationError).message).toBe(
+          `Delegation concurrency must be a positive safe integer, received ${concurrency}`
+        )
+        expect(callbacks).toBe(0)
+      }
+    }))
+
+  it.effect("wraps a derisk PatternError with the exact delegation refusal", () =>
+    Effect.gen(function*() {
+      const failure = yield* DelegationChain.run("ship it", {
+        ...bounds,
+        refine: () => Effect.succeed("goal"),
+        plan: () => Effect.fail(new PatternError({ code: "invalid_decorator", message: "planner refused input" })),
+        derisk: () => Effect.succeed({ approved: true }),
+        execute: { weak: () => Effect.succeed("ok"), strong: () => Effect.succeed("ok") },
+        review: () => Effect.succeed({ approved: true }),
+        settle: ({ leaves }) => Effect.succeed(leaves)
+      }).pipe(Effect.flip)
+
+      expect(failure).toBeInstanceOf(DelegationChain.DelegationError)
+      expect((failure as DelegationChain.DelegationError).code).toBe("derisk_failed")
+      expect((failure as DelegationChain.DelegationError).path).toBe("root")
+      expect((failure as DelegationChain.DelegationError).message).toBe("planner refused input")
+    }))
+
+  it.effect("wraps a leaf-review PatternError with the exact leaf refusal", () =>
+    Effect.gen(function*() {
+      const failure = yield* DelegationChain.run("ship it", {
+        ...bounds,
+        refine: () => Effect.succeed("goal"),
+        plan: () => Effect.succeed({ agent: { goal: "a" } }),
+        derisk: () => Effect.succeed({ approved: true }),
+        execute: { weak: () => Effect.succeed("candidate"), strong: () => Effect.succeed("unused") },
+        review: (request) =>
+          request.stage === "leaf"
+            ? Effect.fail(new PatternError({ code: "invalid_decorator", message: "review unavailable" }))
+            : Effect.succeed({ approved: true }),
+        settle: ({ leaves }) => Effect.succeed(leaves)
+      }).pipe(Effect.flip)
+
+      expect(failure).toBeInstanceOf(DelegationChain.DelegationError)
+      expect((failure as DelegationChain.DelegationError).code).toBe("leaf_failed")
+      expect((failure as DelegationChain.DelegationError).path).toBe("root")
+      expect((failure as DelegationChain.DelegationError).message).toBe(
+        "No tier settled the leaf at root within 2 attempts each"
+      )
     }))
 
   it("declares the documented number of flow calls", () => {
@@ -326,10 +406,26 @@ describe("DelegationChain", () => {
     }))
 
   it("refuses bounds and tiers it cannot honour", () => {
-    expect(() => DelegationChain.make({ ...makeOptions, maxDepth: 0 })).toThrow(DelegationChain.DelegationError)
-    expect(() => DelegationChain.make({ ...makeOptions, tierOrder: [] })).toThrow(DelegationChain.DelegationError)
+    expect(() => DelegationChain.make({ ...makeOptions, maxDepth: 0 })).toThrow(
+      expect.objectContaining({
+        code: "invalid_bounds",
+        path: "root",
+        message: "maxDepth, maxDeriskRounds, and maxAttempts must be positive safe integers"
+      })
+    )
+    expect(() => DelegationChain.make({ ...makeOptions, tierOrder: [] })).toThrow(
+      expect.objectContaining({
+        code: "invalid_bounds",
+        path: "root",
+        message: "tierOrder must name at least one tier, weakest first"
+      })
+    )
     expect(() => DelegationChain.make({ ...makeOptions, tierOrder: ["absent"] })).toThrow(
-      DelegationChain.DelegationError
+      expect.objectContaining({
+        code: "missing_tier",
+        path: "root",
+        message: "execute has no flow for tier absent"
+      })
     )
   })
 })

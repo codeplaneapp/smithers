@@ -21,7 +21,10 @@ describe("WithCache", () => {
       throw new Error("expected withCache to fail")
     } catch (error) {
       expect(error).toBeInstanceOf(PatternError)
-      expect(error).toMatchObject({ code: "invalid_decorator" })
+      expect(error).toMatchObject({
+        code: "invalid_decorator",
+        message: "withCache requires an explicitly hermetic, sealed flow"
+      })
     }
   })
 
@@ -101,13 +104,42 @@ describe("WithCache policy", () => {
   })
 
   it("refuses a time to live no clock reading satisfies", () => {
-    expect(() => WithCache.withCache(sealedRead(), { ttlMs: 0 })).toThrow(PatternError)
-    expect(() => WithCache.withCache(sealedRead(), { ttlMs: -1 })).toThrow(PatternError)
-    expect(() => WithCache.withCache(sealedRead(), { ttlMs: 1.5 })).toThrow(PatternError)
+    for (const ttlMs of [0, -1, 1.5]) {
+      expect(() => WithCache.withCache(sealedRead(), { ttlMs })).toThrow(
+        expect.objectContaining({
+          code: "invalid_decorator",
+          message: `withCache ttlMs must be a positive safe integer, received ${ttlMs}`
+        })
+      )
+    }
   })
 
   it("refuses a blank version", () => {
-    expect(() => WithCache.withCache(sealedRead(), { version: " " })).toThrow(PatternError)
+    expect(() => WithCache.withCache(sealedRead(), { version: " " })).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "withCache version must name a revision, not blank text"
+      })
+    )
+  })
+
+  it("refuses every non-cacheable effect envelope with its exact code", () => {
+    const inner = (mode: "expected" | "hermetic", tier: "sealed" | "compensable") =>
+      Flow.make({
+        input: Schema.String,
+        output: Schema.String,
+        effects: Effects.make({ reads: [], writes: [], mode, onConflict: "serialize", tier }),
+        body: (input) => Node.succeed(input)
+      })
+
+    for (const flow of [inner("expected", "sealed"), inner("hermetic", "compensable")]) {
+      expect(() => WithCache.withCache(flow)).toThrow(
+        expect.objectContaining({
+          code: "invalid_decorator",
+          message: "withCache requires an explicitly hermetic, sealed flow"
+        })
+      )
+    }
   })
 })
 

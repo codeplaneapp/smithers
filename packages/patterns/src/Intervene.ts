@@ -30,6 +30,10 @@ export interface MakeOptions {
   readonly apply: Flow.Any
   readonly report: Flow.Any
   readonly dryRun: boolean
+  /**
+   * Called with `{ input, reason, scope }`; its declared input must be that
+   * struct or `Schema.Unknown`; `scope` is currently the string `"run"`.
+   */
   readonly approval?: Flow.Any | undefined
   readonly reason?: string | undefined
 }

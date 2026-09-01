@@ -47,7 +47,7 @@ describe("MergeQueue", () => {
 
     expect(Graph.diagnostics(graph)).toEqual([])
     expect(Graph.nodes(graph).filter((node) => node.kind === "All")).toHaveLength(0)
-    expect(literals(graph).map((value) => value.member)).toEqual(["hotfix", "docs", "feature"])
+    expect(literals(graph).map((value) => value.id)).toEqual(["hotfix", "docs", "feature"])
   })
 
   it("gives every member the default priority unless it sets its own, as an annotation", () => {
@@ -100,10 +100,21 @@ describe("MergeQueue", () => {
   })
 
   it("rejects an empty queue, a duplicate id, and an invalid bound", () => {
-    expect(() => MergeQueue.make([], { failurePolicy: "halt" })).toThrow(PatternError)
-    expect(() => MergeQueue.make([members[0]!, members[0]!], { failurePolicy: "halt" })).toThrow(PatternError)
-    expect(() => MergeQueue.make(members, { concurrency: 0, failurePolicy: "halt" })).toThrow(PatternError)
-    expect(() => MergeQueue.make(members, { priority: 1.5, failurePolicy: "halt" })).toThrow(PatternError)
+    expect(() => MergeQueue.make([], { failurePolicy: "halt" })).toThrow(
+      expect.objectContaining({ code: "invalid_decorator", message: "MergeQueue requires at least one member" })
+    )
+    expect(() => MergeQueue.make([members[0]!, members[0]!], { failurePolicy: "halt" })).toThrow(
+      expect.objectContaining({ code: "invalid_decorator", message: "MergeQueue member ids must be unique" })
+    )
+    expect(() => MergeQueue.make(members, { concurrency: 0, failurePolicy: "halt" })).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "MergeQueue concurrency must be a positive safe integer"
+      })
+    )
+    expect(() => MergeQueue.make(members, { priority: 1.5, failurePolicy: "halt" })).toThrow(
+      expect.objectContaining({ code: "invalid_decorator", message: "MergeQueue priority must be a safe integer" })
+    )
   })
 
   it.effect("lands members one at a time in priority then declaration order", () =>
@@ -134,6 +145,21 @@ describe("MergeQueue", () => {
       expect(result.order).toEqual(["hotfix", "docs", "feature"])
       expect(result.landed.map((entry) => entry.id)).toEqual(["hotfix", "docs", "feature"])
       expect(result.quarantined).toEqual([])
+    }))
+
+  it.effect("preserves prototype-shaped member ids in declaration and runtime order", () =>
+    Effect.gen(function*() {
+      const ids = ["__proto__", "constructor", "toString", "normal"]
+      const declared = ids.map((id) => ({ id, flow: land }))
+      const graph = Graph.build(MergeQueue.make(declared, { failurePolicy: "halt" }), "land")
+      expect(literals(graph).map((value) => value.id)).toEqual(ids)
+
+      const result = yield* MergeQueue.run("main", {
+        failurePolicy: "halt",
+        members: ids.map((id) => ({ id, run: ({ id }) => Effect.succeed(`${id}-value`) }))
+      })
+      expect(result.order).toEqual(ids)
+      expect(result.landed).toEqual(ids.map((id) => ({ id, output: `${id}-value` })))
     }))
 
   it.effect("stops later members when one fails under halt", () =>
@@ -218,6 +244,8 @@ describe("MergeQueue", () => {
     Effect.gen(function*() {
       const empty = yield* MergeQueue.run("main", { members: [], failurePolicy: "halt" }).pipe(Effect.flip)
       expect(empty).toBeInstanceOf(PatternError)
+      expect(empty.code).toBe("invalid_decorator")
+      expect(empty.message).toBe("MergeQueue requires at least one member")
 
       const bound = yield* MergeQueue.run("main", {
         members: [{ id: "a", run: () => Effect.succeed("a") }],
@@ -225,12 +253,16 @@ describe("MergeQueue", () => {
         failurePolicy: "halt"
       }).pipe(Effect.flip)
       expect(bound).toBeInstanceOf(PatternError)
+      expect(bound.code).toBe("invalid_decorator")
+      expect(bound.message).toBe("MergeQueue concurrency must be a positive safe integer")
 
       const duplicate = yield* MergeQueue.run("main", {
         members: [{ id: "a", run: () => Effect.succeed("a") }, { id: "a", run: () => Effect.succeed("b") }],
         failurePolicy: "halt"
       }).pipe(Effect.flip)
       expect(duplicate).toBeInstanceOf(PatternError)
+      expect(duplicate.code).toBe("invalid_decorator")
+      expect(duplicate.message).toBe("MergeQueue member ids must be unique")
     }))
 
   it("gives a halting queue and a quarantining queue different topology and identity", () => {

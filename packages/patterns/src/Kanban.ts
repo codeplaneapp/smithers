@@ -104,13 +104,25 @@ export interface Board<Out, E> {
  * `until` stops it early, after the pass whose result satisfies the predicate,
  * and requires `maxIterations`, because a predicate that never holds would
  * otherwise run forever.
+ * `run` snapshots `columns` at entry; later array mutations do not alter that
+ * run.
  *
  * @category models
  * @since 0.1.0
  */
-export interface RuntimeOptions<It extends Item, Out, E, R> {
+export interface RuntimeOptions<It extends Item, Out, E, R, E2 = never, R2 = never> {
   readonly columns: ReadonlyArray<RuntimeColumn<It, Out, E, R>>
   readonly concurrency: number
+  /**
+   * Runs once after the final pass with the original items and final board.
+   * A failure from this callback is the run's failure.
+   */
+  readonly onComplete?:
+    | ((args: {
+      readonly items: ReadonlyArray<It>
+      readonly board: Board<Out, E>
+    }) => Effect.Effect<unknown, E2, R2>)
+    | undefined
   readonly until?: ((board: Board<Out, E>) => boolean) | undefined
   readonly maxIterations?: number | undefined
 }
@@ -137,11 +149,12 @@ const bound = (value: number): boolean => Number.isSafeInteger(value) && value >
  * whole preceding column.
  *
  * `make` throws a `PatternError` when there are no columns, no items, a
- * duplicate item id, or a concurrency that is not a positive safe integer.
+ * duplicate item id, duplicate column name, or a concurrency that is not a
+ * positive safe integer.
  *
  * A column joins its batch with {@link Quarantine.all} under the `quarantine`
  * policy, because one rejected card is not a reason to interrupt the cards
- * beside it — which is the same call {@link run} makes. A rejected card
+ * beside it, which is the same call {@link run} makes. A rejected card
  * settles as a {@link Quarantine.Quarantined} marker naming the item.
  *
  * The declaration does not drop a quarantined card from the later columns: a
@@ -175,18 +188,23 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
     throw new PatternError({ code: "invalid_decorator", message: "Kanban item ids must be unique" })
   }
   const names = options.columns.map((column) => column.name)
+  if (new Set(names).size !== names.length) {
+    throw new PatternError({ code: "invalid_decorator", message: "Kanban column names must be unique" })
+  }
   const captures = { columns: names, items: ids, concurrency: options.concurrency }
   const column = (index: number, previous: unknown): Node.Node<unknown, unknown> => {
     const declared = options.columns[index]!
     const batchAt = (offset: number): Node.Node<unknown, unknown> => {
-      const members: Record<string, Node.Any> = {}
-      for (const item of options.items.slice(offset, offset + options.concurrency)) {
-        members[item.id] = call(declared.flow, {
-          column: declared.name,
-          item,
-          previous: previous === undefined ? undefined : (previous as Record<string, unknown>)[item.id]
-        })
-      }
+      const members = Object.fromEntries(
+        options.items.slice(offset, offset + options.concurrency).map((item) => [
+          item.id,
+          call(declared.flow, {
+            column: declared.name,
+            item,
+            previous: previous === undefined ? undefined : (previous as Record<string, unknown>)[item.id]
+          })
+        ])
+      ) as Record<string, Node.Any>
       return Quarantine.all(members, { policy: "quarantine" })
     }
     let batches = batchAt(0)
@@ -230,12 +248,12 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
   })
 }
 
-const pass = <It extends Item, Out, E, R>(
+const pass = <It extends Item, Out, E, R, E2, R2>(
   items: ReadonlyArray<It>,
-  options: RuntimeOptions<It, Out, E, R>
+  options: RuntimeOptions<It, Out, E, R, E2, R2>
 ): Effect.Effect<Omit<Board<Out, E>, "iterations">, never, R> =>
   Effect.gen(function*() {
-    const board: Record<string, Record<string, Out>> = {}
+    const board = new Map<string, Map<string, Out>>()
     const failed: Array<Failure<E>> = []
     const latest = new Map<string, Out>()
     let active: ReadonlyArray<It> = items
@@ -252,7 +270,9 @@ const pass = <It extends Item, Out, E, R>(
       const next: Array<It> = []
       for (const outcome of outcomes) {
         if (outcome.ok) {
-          board[outcome.item.id] = { ...board[outcome.item.id], [column.name]: outcome.output }
+          const row = board.get(outcome.item.id) ?? new Map<string, Out>()
+          row.set(column.name, outcome.output)
+          board.set(outcome.item.id, row)
           latest.set(outcome.item.id, outcome.output)
           next.push(outcome.item)
         } else {
@@ -261,7 +281,13 @@ const pass = <It extends Item, Out, E, R>(
       }
       active = next
     }
-    return { board, completed: active.map((item) => item.id), failed }
+    return {
+      board: Object.fromEntries(
+        Array.from(board, ([id, columns]) => [id, Object.fromEntries(columns)])
+      ),
+      completed: active.map((item) => item.id),
+      failed
+    }
   })
 
 /**
@@ -286,12 +312,16 @@ const pass = <It extends Item, Out, E, R>(
  * @category combinators
  * @since 0.1.0
  */
-export const run = <It extends Item, Out, E = never, R = never>(
+export const run = <It extends Item, Out, E = never, R = never, E2 = never, R2 = never>(
   items: ReadonlyArray<It>,
-  options: RuntimeOptions<It, Out, E, R>
-): Effect.Effect<Board<Out, E>, PatternError, R> => {
-  if (options.columns.length === 0) {
+  options: RuntimeOptions<It, Out, E, R, E2, R2>
+): Effect.Effect<Board<Out, E>, PatternError | E2, R | R2> => {
+  const columns = [...options.columns]
+  if (columns.length === 0) {
     return Effect.fail(new PatternError({ code: "invalid_decorator", message: "Kanban requires at least one column" }))
+  }
+  if (items.length === 0) {
+    return Effect.fail(new PatternError({ code: "invalid_decorator", message: "Kanban requires at least one item" }))
   }
   if (!bound(options.concurrency)) {
     return Effect.fail(
@@ -304,6 +334,10 @@ export const run = <It extends Item, Out, E = never, R = never>(
   const ids = items.map((item) => item.id)
   if (new Set(ids).size !== ids.length) {
     return Effect.fail(new PatternError({ code: "invalid_decorator", message: "Kanban item ids must be unique" }))
+  }
+  const names = columns.map((column) => column.name)
+  if (new Set(names).size !== names.length) {
+    return Effect.fail(new PatternError({ code: "invalid_decorator", message: "Kanban column names must be unique" }))
   }
   const maxIterations = options.maxIterations
   if (options.until !== undefined && maxIterations === undefined) {
@@ -323,14 +357,18 @@ export const run = <It extends Item, Out, E = never, R = never>(
     )
   }
   const limit = maxIterations ?? 1
+  const runtimeOptions = { ...options, columns }
   return Effect.gen(function*() {
     let iterations = 0
     for (;;) {
-      const settled = yield* pass(items, options)
+      const settled = yield* pass(items, runtimeOptions)
       iterations += 1
       const result: Board<Out, E> = { ...settled, iterations }
-      if (iterations >= limit) return result
-      if (options.until !== undefined && options.until(result)) return result
+      const done = options.until !== undefined && options.until(result)
+      if (done || iterations >= limit) {
+        if (options.onComplete !== undefined) yield* options.onComplete({ items, board: result })
+        return result
+      }
     }
   })
 }

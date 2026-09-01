@@ -46,8 +46,14 @@ describe("Loop", () => {
   })
 
   it("rejects a loop bound below one iteration", () => {
-    expect(() => Loop.make({ body, until, maxIterations: 0, onMaxReached: "fail" })).toThrow(PatternError)
-    expect(() => Loop.make({ body, until, maxIterations: 1.5, onMaxReached: "fail" })).toThrow(PatternError)
+    for (const maxIterations of [0, 1.5]) {
+      expect(() => Loop.make({ body, until, maxIterations, onMaxReached: "fail" })).toThrow(
+        expect.objectContaining({
+          code: "invalid_decorator",
+          message: "Loop maxIterations must be a positive safe integer"
+        })
+      )
+    }
   })
 
   it.effect("stops at the first satisfied predicate", () =>
@@ -108,6 +114,7 @@ describe("Loop", () => {
 
       expect(failure).toBeInstanceOf(PatternError)
       expect(failure.code).toBe("exhausted")
+      expect(failure.message).toBe("Loop reached its bound of 2 iterations unsatisfied")
     }))
 
   it.effect("validates the bound before running any body", () =>
@@ -121,6 +128,7 @@ describe("Loop", () => {
       }).pipe(Effect.flip)
 
       expect(failure.code).toBe("invalid_decorator")
+      expect(failure.message).toBe("Loop maxIterations must be a positive safe integer")
       expect(ran).toBe(0)
     }))
 

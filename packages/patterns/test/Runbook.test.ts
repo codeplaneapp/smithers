@@ -65,14 +65,23 @@ describe("Runbook", () => {
   })
 
   it("rejects an empty runbook, a duplicate step id, and an approval that permits denial", () => {
-    expect(() => Runbook.make({ steps: [], approval, onDeny: "fail" })).toThrow(PatternError)
-    expect(() => Runbook.make({ steps: [steps[0]!, steps[0]!], approval, onDeny: "fail" })).toThrow(PatternError)
+    expect(() => Runbook.make({ steps: [], approval, onDeny: "fail" })).toThrow(
+      expect.objectContaining({ code: "invalid_decorator", message: "Runbook requires at least one step" })
+    )
+    expect(() => Runbook.make({ steps: [steps[0]!, steps[0]!], approval, onDeny: "fail" })).toThrow(
+      expect.objectContaining({ code: "invalid_decorator", message: "Runbook step ids must be unique" })
+    )
     const permissive = Flow.make({
       input: Schema.Unknown,
       output: Schema.String,
       body: () => Node.succeed("approved")
     })
-    expect(() => Runbook.make({ steps, approval: permissive, onDeny: "fail" })).toThrow(PatternError)
+    expect(() => Runbook.make({ steps, approval: permissive, onDeny: "fail" })).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "The bound flow has an incompatible output schema: expected Literal, received String"
+      })
+    )
   })
 
   it.effect("never asks for approval of a safe step", () =>
@@ -96,6 +105,22 @@ describe("Runbook", () => {
       expect(result.ran).toEqual(["backup", "deploy"])
       expect(result.skipped).toEqual([])
       expect(result.outputs).toEqual({ backup: "backed up", deploy: "deployed" })
+    }))
+
+  it.effect("returns own outputs for prototype-shaped step ids", () =>
+    Effect.gen(function*() {
+      const ids = ["__proto__", "constructor", "toString", "normal"]
+      const result = yield* Runbook.run("release-1", {
+        onDeny: "fail",
+        approve: () => Effect.succeed("approved"),
+        steps: ids.map((id) => ({ id, risk: "safe" as const, run: () => Effect.succeed(`${id}-value`) }))
+      })
+
+      expect(Object.getPrototypeOf(result.outputs)).toBe(Object.prototype)
+      for (const id of ids) {
+        expect(Object.hasOwn(result.outputs, id)).toBe(true)
+        expect(result.outputs[id]).toBe(`${id}-value`)
+      }
     }))
 
   it.effect("passes elevated true for a critical step and the previous step's output", () =>
@@ -222,6 +247,11 @@ describe("Runbook", () => {
         steps: []
       }).pipe(Effect.flip)
       expect(empty).toBeInstanceOf(PatternError)
+      // `run` declares `SchemaError | PatternError`, so the assertion above is
+      // what proves the arm; the guard is only how TypeScript reads the code.
+      if (!(empty instanceof PatternError)) throw new Error("expected a PatternError")
+      expect(empty.code).toBe("invalid_decorator")
+      expect(empty.message).toBe("Runbook requires at least one step")
 
       const duplicate = yield* Runbook.run("release-1", {
         onDeny: "fail",
@@ -232,6 +262,34 @@ describe("Runbook", () => {
         ]
       }).pipe(Effect.flip)
       expect(duplicate).toBeInstanceOf(PatternError)
+      if (!(duplicate instanceof PatternError)) throw new Error("expected a PatternError")
+      expect(duplicate.code).toBe("invalid_decorator")
+      expect(duplicate.message).toBe("Runbook step ids must be unique")
+    }))
+
+  it.effect("does not admit a step appended while the run is in flight", () =>
+    Effect.gen(function*() {
+      const trace: Array<string> = []
+      const runtimeSteps: Array<Runbook.RuntimeStep<string, string, never, never>> = []
+      const late: Runbook.RuntimeStep<string, string, never, never> = {
+        id: "late",
+        risk: "safe",
+        run: () => Effect.sync(() => (trace.push("late"), "late-done"))
+      }
+      runtimeSteps.push({
+        id: "first",
+        risk: "safe",
+        run: () => Effect.sync(() => (trace.push("first"), runtimeSteps.push(late), "first-done"))
+      })
+
+      const result = yield* Runbook.run("release-1", {
+        steps: runtimeSteps,
+        approve: () => Effect.succeed("approved"),
+        onDeny: "fail"
+      })
+
+      expect(trace).toEqual(["first"])
+      expect(result).toEqual({ outputs: { first: "first-done" }, ran: ["first"], skipped: [] })
     }))
 
   // A declared plan has no branch to drop a denied step from, and the gated
@@ -241,7 +299,9 @@ describe("Runbook", () => {
   // that halts, which is the shape an operator reading the plan would
   // misread as a skip.
   it("refuses onDeny skip at declaration, naming run as the way to skip", () => {
-    expect(() => Runbook.make({ steps, approval, onDeny: "skip" })).toThrow(PatternError)
+    expect(() => Runbook.make({ steps, approval, onDeny: "skip" })).toThrow(
+      expect.objectContaining({ code: "invalid_decorator" })
+    )
     const refusal = (() => {
       try {
         Runbook.make({ steps, approval, onDeny: "skip" })
@@ -252,8 +312,12 @@ describe("Runbook", () => {
     })()
 
     expect(refusal?.code).toBe("invalid_decorator")
-    expect(refusal?.message).toContain("Runbook.make does not support onDeny: \"skip\"")
-    expect(refusal?.message).toContain("Runbook.run")
+    expect(refusal?.message).toBe(
+      "Runbook.make does not support onDeny: \"skip\". A declared plan has no branch that drops a denied step, " +
+        "and the gated node carries the step's own failures beside the denial, so the arm that would skip also " +
+        "declares that the runbook continues past a failed step. Declare the runbook with onDeny: \"fail\", and " +
+        "call Runbook.run with onDeny: \"skip\" to skip a denied step at run time."
+    )
     // The supported declaration is unaffected.
     expect(Graph.diagnostics(Graph.build(Runbook.make({ steps, approval, onDeny: "fail" }), "release")))
       .toEqual([])

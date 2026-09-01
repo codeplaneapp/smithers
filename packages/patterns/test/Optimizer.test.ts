@@ -84,7 +84,10 @@ describe("Optimizer", () => {
     expect(() =>
       Optimizer.make({ generate, evaluate, targetScore: 0.8, maxIterations: 0, onMaxReached: "return-last" })
     )
-      .toThrow(PatternError)
+      .toThrow(expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Optimizer maxIterations must be a positive safe integer"
+      }))
   })
 
   it("makes the target score part of declaration identity", () => {
@@ -100,7 +103,32 @@ describe("Optimizer", () => {
   })
 
   it("rejects a fail policy with no target score", () => {
-    expect(() => Optimizer.make({ generate, evaluate, maxIterations: 2, onMaxReached: "fail" })).toThrow(PatternError)
+    expect(() => Optimizer.make({ generate, evaluate, maxIterations: 2, onMaxReached: "fail" })).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Optimizer onMaxReached 'fail' requires a targetScore to fall short of"
+      })
+    )
+  })
+
+  it("refuses a non-finite target and declares a target-free return-last search", () => {
+    expect(() =>
+      Optimizer.make({
+        generate,
+        evaluate,
+        targetScore: Number.NaN,
+        maxIterations: 2,
+        onMaxReached: "return-last"
+      })
+    ).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Optimizer targetScore must be a finite number"
+      })
+    )
+
+    const targetFree = Optimizer.make({ generate, evaluate, maxIterations: 2, onMaxReached: "return-last" })
+    expect(callsTo(Graph.build(targetFree, "prompt"), "optimizer/generate")).toHaveLength(2)
   })
 
   it.effect("stops at the first candidate that reaches the target", () =>
@@ -181,6 +209,7 @@ describe("Optimizer", () => {
 
       expect(failure).toBeInstanceOf(PatternError)
       expect(failure.code).toBe("exhausted")
+      expect(failure.message).toBe("Optimizer reached its bound of 3 iterations below 0.95")
     }))
 
   it.effect("feeds the previous score and feedback into the next generate call", () =>
@@ -205,6 +234,26 @@ describe("Optimizer", () => {
       ])
     }))
 
+  it.effect("refuses non-finite evaluator scores with the iteration and value", () =>
+    Effect.gen(function*() {
+      for (const score of [Number.NaN, Number.POSITIVE_INFINITY]) {
+        const failure = yield* Effect.flip(
+          Optimizer.run("prompt", {
+            maxIterations: 3,
+            onMaxReached: "return-last",
+            generate: ({ iteration }) => Effect.succeed(`candidate-${iteration}`),
+            evaluate: ({ iteration }) => Effect.succeed({ score, feedback: iteration })
+          })
+        )
+
+        expect(failure).toBeInstanceOf(PatternError)
+        expect(failure.code).toBe("invalid_decorator")
+        expect(failure.message).toBe(
+          `Optimizer evaluation score at iteration 1 must be a finite number, received ${score}`
+        )
+      }
+    }))
+
   it.effect("validates the target score and the bound before generating", () =>
     Effect.gen(function*() {
       let generated = 0
@@ -224,9 +273,19 @@ describe("Optimizer", () => {
         maxIterations: 0,
         onMaxReached: "return-last"
       }).pipe(Effect.flip)
+      const nonFinite = yield* Optimizer.run("prompt", {
+        ...options,
+        targetScore: Number.POSITIVE_INFINITY,
+        maxIterations: 1,
+        onMaxReached: "return-last"
+      }).pipe(Effect.flip)
 
       expect(noTarget.code).toBe("invalid_decorator")
+      expect(noTarget.message).toBe("Optimizer onMaxReached 'fail' requires a targetScore to fall short of")
       expect(badBound.code).toBe("invalid_decorator")
+      expect(badBound.message).toBe("Optimizer maxIterations must be a positive safe integer")
+      expect(nonFinite.code).toBe("invalid_decorator")
+      expect(nonFinite.message).toBe("Optimizer targetScore must be a finite number")
       expect(generated).toBe(0)
     }))
 })

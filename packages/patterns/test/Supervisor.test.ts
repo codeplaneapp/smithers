@@ -131,14 +131,37 @@ describe("Supervisor", () => {
       concurrency: 1
     })
 
-    expect(() => Graph.build(supervisor, "ship the feature")).toThrow(PatternError)
-    expect(() => Graph.build(supervisor, { tasks: [] })).toThrow(PatternError)
-    expect(() => Graph.build(supervisor, { tasks: [{ id: "a" }] })).toThrow(PatternError)
+    expect(() => Graph.build(supervisor, "ship the feature")).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Supervisor input must contain a tasks array"
+      })
+    )
+    expect(() => Graph.build(supervisor, { tasks: [] })).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Supervisor input must contain at least one task"
+      })
+    )
+    expect(() => Graph.build(supervisor, { tasks: [{ id: "a" }] })).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Supervisor tasks must each carry a string id and a string workerType"
+      })
+    )
     expect(() =>
       Graph.build(supervisor, { tasks: [{ id: "a", workerType: "coder" }, { id: "a", workerType: "coder" }] })
     )
-      .toThrow(PatternError)
-    expect(() => Graph.build(supervisor, { tasks: [{ id: "a", workerType: "painter" }] })).toThrow(PatternError)
+      .toThrow(expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Supervisor task ids must be unique"
+      }))
+    expect(() => Graph.build(supervisor, { tasks: [{ id: "a", workerType: "painter" }] })).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Supervisor has no worker named \"painter\""
+      })
+    )
   })
 
   it("rejects invalid bounds", () => {
@@ -151,7 +174,10 @@ describe("Supervisor", () => {
         maxRounds: 0,
         concurrency: 1
       })
-    ).toThrow(PatternError)
+    ).toThrow(expect.objectContaining({
+      code: "invalid_decorator",
+      message: "Supervisor maxRounds must be a positive safe integer"
+    }))
     expect(() =>
       Supervisor.make({
         plan: step,
@@ -161,7 +187,10 @@ describe("Supervisor", () => {
         maxRounds: 1,
         concurrency: 0
       })
-    ).toThrow(PatternError)
+    ).toThrow(expect.objectContaining({
+      code: "invalid_decorator",
+      message: "Supervisor concurrency must be a positive safe integer"
+    }))
     expect(() =>
       Supervisor.make({
         plan: step,
@@ -171,7 +200,10 @@ describe("Supervisor", () => {
         maxRounds: 1,
         concurrency: 1
       })
-    ).toThrow(PatternError)
+    ).toThrow(expect.objectContaining({
+      code: "invalid_decorator",
+      message: "Supervisor requires at least one worker"
+    }))
   })
 
   it.effect("re-delegates only the retriable tasks and finalizes every output", () =>
@@ -311,6 +343,7 @@ describe("Supervisor", () => {
       }).pipe(Effect.flip)
 
       expect(failure).toBeInstanceOf(PatternError)
+      expect((failure as PatternError).code).toBe("invalid_decorator")
       expect((failure as PatternError).message).toBe("Supervisor task ids must be unique")
       expect(ran).toBe(0)
     }))
@@ -327,6 +360,32 @@ describe("Supervisor", () => {
       }).pipe(Effect.flip)
 
       expect(failure).toBeInstanceOf(PatternError)
+      expect(failure.code).toBe("invalid_decorator")
+      expect(failure.message).toBe("Supervisor maxRounds and concurrency must be positive safe integers")
+    }))
+
+  it.effect("ignores malformed retriable values without re-delegating", () =>
+    Effect.gen(function*() {
+      const reviews: ReadonlyArray<unknown> = [null, { retriable: "a" }, { retriable: [1, false] }]
+
+      for (const review of reviews) {
+        let workers = 0
+        const result = yield* Supervisor.run("goal", {
+          maxRounds: 2,
+          concurrency: 1,
+          plan: () => Effect.succeed({ tasks: [{ id: "a", workerType: "coder" }] }),
+          worker: () =>
+            Effect.sync(() => {
+              workers += 1
+              return "done"
+            }),
+          review: () => Effect.succeed(review),
+          finalize: () => Effect.succeed("unused")
+        })
+
+        expect(result).toEqual({ exhausted: true, rounds: 1, review })
+        expect(workers).toBe(1)
+      }
     }))
 
   it("gives two concurrency bounds different step identity at the same topology", () => {

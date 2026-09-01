@@ -15,7 +15,6 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Envelope {
   readonly fuel: number
@@ -31,7 +30,6 @@ export interface Envelope {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RecurseOptions extends Envelope {
   readonly child: Flow.Any
@@ -43,7 +41,6 @@ export interface RecurseOptions extends Envelope {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Branch {
   readonly input: unknown
@@ -62,10 +59,10 @@ const boundError = (message: string): never => {
  * A plain input is a leaf. A `{ input, children }` branch expands recursively:
  * fuel is shared by the whole tree, depth is decremented per level, and every
  * child list is checked against fan-out before any child is admitted.
+ * Very large depth and fan-out bounds build a very large graph before anything runs.
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const recurse = (options: RecurseOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   if (!valid(options.fuel) || !valid(options.depth) || !valid(options.fanout)) {

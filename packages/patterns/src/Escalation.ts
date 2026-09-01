@@ -14,6 +14,7 @@
 import { Flow, Node } from "@smthrs/core"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as Compose from "./internal/Compose.ts"
 import { PatternError } from "./PatternError.ts"
 
 /**
@@ -24,7 +25,6 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Rung {
   readonly flow: Flow.Any
@@ -39,10 +39,12 @@ export interface Rung {
  *
  * `accept` decides every rung that declares no `escalateIf`. `fallback` is the
  * last rung: it runs only after every declared rung escalated.
+ * With no `accept` and no `escalateIf`, `make` reserves every rung because a
+ * declaration cannot branch on a value it does not have; {@link defaultEscalate}
+ * applies to {@link run} alone.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly rungs: ReadonlyArray<Flow.Any | Rung>
@@ -55,7 +57,6 @@ export interface MakeOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeRung<I, A, E, R, E2, R2> {
   readonly run: (input: I) => Effect.Effect<A, E, R>
@@ -68,10 +69,11 @@ export interface RuntimeRung<I, A, E, R, E2, R2> {
  * A rung is either a plain effectful function or a {@link RuntimeRung} that
  * carries its own `escalateIf`. With no `accept` and no `escalateIf`,
  * {@link defaultEscalate} decides.
+ * `run` snapshots `rungs` at entry; later array mutations do not alter that
+ * run.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions<I, A, E, R, E2, R2, F = A, E3 = never, R3 = never> {
   readonly rungs: ReadonlyArray<((input: I) => Effect.Effect<A, E, R>) | RuntimeRung<I, A, E, R, E2, R2>>
@@ -87,7 +89,6 @@ export interface RuntimeOptions<I, A, E, R, E2, R2, F = A, E3 = never, R3 = neve
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Reached<A> {
   readonly level: number
@@ -100,7 +101,6 @@ export interface Reached<A> {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Exhausted<A> extends Reached<A> {
   readonly accepted: false
@@ -110,18 +110,19 @@ export interface Exhausted<A> extends Reached<A> {
 const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
   (flow as unknown as (input: unknown) => Node.Node<unknown, unknown>)(input)
 
-const accepted = (value: unknown): boolean =>
-  value === true ||
-  value === "approved" ||
-  (
-    typeof value === "object" &&
-    value !== null &&
-    "accepted" in value &&
-    value.accepted === true
-  )
+/**
+ * Reads an accepted decision: `true`, `"approved"`, `{ approved: true }`, or
+ * `{ accepted: true }`.
+ *
+ * @category predicates
+ * @since 0.1.0
+ */
+export const accepted = Compose.accepted
 
 /**
- * Decides escalation for a rung that names no predicate and no `accept` flow.
+ * Decides escalation in {@link run} for a rung that names no predicate and no
+ * `accept` flow. Declarations reserve every such rung because they do not have
+ * a result to inspect.
  *
  * A missing result escalates. So does a result that reports a failure the way
  * flows conventionally do: a set `error`, `failed: true`, or `ok: false`.
@@ -129,7 +130,6 @@ const accepted = (value: unknown): boolean =>
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const defaultEscalate = (result: unknown): boolean => {
   if (result === undefined || result === null) return true
@@ -153,11 +153,10 @@ const operational = <I, A, E, R, E2, R2>(
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   if (options.rungs.length === 0) {
-    throw new PatternError({ code: "exhausted", message: "Escalation requires at least one rung" })
+    throw new PatternError({ code: "invalid_decorator", message: "Escalation requires at least one rung" })
   }
   const rungs = options.rungs.map(declared)
   const flows = [
@@ -228,19 +227,21 @@ const escalates = <I, A, E, R, E2, R2, F, E3, R3>(
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <I, A, E, R, E2 = never, R2 = never, F = A, E3 = never, R3 = never>(
   input: I,
   options: RuntimeOptions<I, A, E, R, E2, R2, F, E3, R3>
 ): Effect.Effect<Reached<A> | Reached<F> | Exhausted<A>, E | E2 | E3 | PatternError, R | R2 | R3> => {
-  if (options.rungs.length === 0) {
-    return Effect.fail(new PatternError({ code: "exhausted", message: "Escalation requires at least one rung" }))
+  const rungs = [...options.rungs]
+  if (rungs.length === 0) {
+    return Effect.fail(
+      new PatternError({ code: "invalid_decorator", message: "Escalation requires at least one rung" })
+    )
   }
   return Effect.gen(function*() {
     let last: A | undefined
     let level = 0
-    for (const declaration of options.rungs) {
+    for (const declaration of rungs) {
       const rung = operational(declaration)
       const result = yield* rung.run(input)
       last = result
@@ -248,8 +249,8 @@ export const run = <I, A, E, R, E2 = never, R2 = never, F = A, E3 = never, R3 = 
       level = level + 1
     }
     if (options.fallback !== undefined) {
-      return { level: options.rungs.length, result: yield* options.fallback(input) }
+      return { level: rungs.length, result: yield* options.fallback(input) }
     }
-    return { level: options.rungs.length - 1, result: last as A, accepted: false, exhausted: true }
+    return { level: rungs.length - 1, result: last as A, accepted: false, exhausted: true }
   })
 }

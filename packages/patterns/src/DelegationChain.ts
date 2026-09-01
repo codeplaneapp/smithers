@@ -219,9 +219,18 @@ const exhaustedRound = (value: unknown): { readonly output: unknown } | undefine
     ? { output: value.output }
     : undefined
 
-const checkBounds = (bounds: Bounds, tiers: ReadonlyArray<string>): DelegationError | undefined => {
+const checkBounds = (
+  bounds: Bounds & { readonly concurrency?: number | undefined },
+  tiers: ReadonlyArray<string>
+): DelegationError | undefined => {
   if (!positive(bounds.maxDepth) || !positive(bounds.maxDeriskRounds) || !positive(bounds.maxAttempts)) {
     return refuse("invalid_bounds", "maxDepth, maxDeriskRounds, and maxAttempts must be positive safe integers")
+  }
+  if (bounds.concurrency !== undefined && !positive(bounds.concurrency)) {
+    return refuse(
+      "invalid_bounds",
+      `Delegation concurrency must be a positive safe integer, received ${bounds.concurrency}`
+    )
   }
   if (bounds.tierOrder.length === 0) {
     return refuse("invalid_bounds", "tierOrder must name at least one tier, weakest first")
@@ -240,17 +249,7 @@ const checkBounds = (bounds: Bounds, tiers: ReadonlyArray<string>): DelegationEr
  * @category predicates
  * @since 0.1.0
  */
-export const accepted = (value: unknown): boolean =>
-  value === true ||
-  value === "approved" ||
-  (
-    typeof value === "object" &&
-    value !== null &&
-    (
-      ("approved" in value && value.approved === true) ||
-      ("accepted" in value && value.accepted === true)
-    )
-  )
+export const accepted = Compose.accepted
 
 /**
  * The number of flow calls {@link make} declares, counting only the calls the
@@ -348,7 +347,8 @@ const ladder = (
  * yet will be. Each declared call carries the payload {@link run} sends, with
  * the authored plan standing in for the leaf goals nothing knows yet.
  *
- * Use {@link run} to execute the real chain.
+ * Use {@link run} to execute the real chain. Very large depth and derisk-round
+ * bounds build a very large graph before anything runs.
  *
  * @category constructors
  * @since 0.1.0

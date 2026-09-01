@@ -23,16 +23,18 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Policy = "quarantine" | "halt"
 
 /**
  * A member that failed and was isolated from its siblings.
  *
+ * This is a structural tag on the wire so it survives durable JSON replay. A
+ * successful member value with exactly this shape is indistinguishable from a
+ * quarantined member; callers whose values can carry a `_tag` should wrap them.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Quarantined<E> {
   readonly _tag: "Quarantined"
@@ -45,7 +47,6 @@ export interface Quarantined<E> {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface AllOptions {
   readonly policy: Policy
@@ -59,7 +60,6 @@ export interface AllOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions {
   readonly policy: Policy
@@ -69,15 +69,20 @@ export interface RuntimeOptions {
 /**
  * Tests whether a joined member was quarantined.
  *
+ * The check reads the full structural wire shape. A successful member value
+ * with exactly that shape is indistinguishable, so callers whose values can
+ * carry a `_tag` should wrap them.
+ *
  * @category refinements
  * @since 0.1.0
- * @slop
  */
 export const isQuarantined = (value: unknown): value is Quarantined<unknown> =>
   typeof value === "object" &&
   value !== null &&
-  "_tag" in value &&
-  (value as { readonly _tag: unknown })._tag === "Quarantined"
+  (value as { readonly _tag?: unknown })._tag === "Quarantined" &&
+  Object.hasOwn(value, "member") &&
+  typeof (value as { readonly member: unknown }).member === "string" &&
+  Object.hasOwn(value, "error")
 
 // Every refusal is minted once, as a value. `all` throws it, because a
 // declaration is built eagerly and a broken one is a programming error. `run`
@@ -112,7 +117,6 @@ const nonEmpty = (names: ReadonlyArray<string>): void => {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const all = (
   members: Readonly<Record<string, Node.Any>>,
@@ -121,15 +125,17 @@ export const all = (
   const names = Object.keys(members)
   nonEmpty(names)
   if (options.policy === "halt") return Node.all(members)
-  const isolated: Record<string, Node.Any> = {}
-  for (const member of names) {
-    isolated[member] = Node.catch(members[member]!, {
-      onFailure: Node.capture(
-        { member },
-        (error: unknown) => Node.succeed({ _tag: "Quarantined", member, error })
-      )
-    })
-  }
+  const isolated = Object.fromEntries(
+    names.map((member) => [
+      member,
+      Node.catch(members[member]!, {
+        onFailure: Node.capture(
+          { member },
+          (error: unknown) => Node.succeed({ _tag: "Quarantined", member, error })
+        )
+      })
+    ])
+  ) as Record<string, Node.Any>
   return Node.all(isolated)
 }
 
@@ -144,7 +150,6 @@ export const all = (
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <A, E, R>(
   members: Readonly<Record<string, Effect.Effect<A, E, R>>>,
@@ -180,9 +185,12 @@ export const run = <A, E, R>(
  * Use it when the caller wants halt-after-join: every member got its chance to
  * run, and one failure still fails the step.
  *
+ * The marker is a structural tag on the wire. A successful member value with
+ * exactly that shape is indistinguishable, so callers whose values can carry a
+ * `_tag` should wrap them before settling the record.
+ *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const settle = <A, E>(
   result: Readonly<Record<string, A | Quarantined<E>>>
@@ -192,7 +200,11 @@ export const settle = <A, E>(
     return Effect.fail(
       new PatternError({
         code: "quarantined",
-        message: `Quarantined members: ${quarantined.join(", ")}`
+        message: `Quarantined members: ${quarantined.join(", ")}`,
+        cause: quarantined.map((member) => {
+          const entry = result[member] as Quarantined<E>
+          return { member, error: entry.error }
+        })
       })
     )
   }

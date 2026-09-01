@@ -104,9 +104,21 @@ export type Plan =
 const PlanSchema: Schema.Codec<Plan> = Schema.suspend(
   (): Schema.Codec<Plan> =>
     Schema.Union([
-      Schema.Struct({ agent: Agent }),
-      Schema.Struct({ sequence: Schema.NonEmptyArray(PlanSchema) }),
-      Schema.Struct({ parallel: Schema.NonEmptyArray(PlanSchema) })
+      Schema.Struct({
+        agent: Agent,
+        sequence: Schema.optionalKey(Schema.Never),
+        parallel: Schema.optionalKey(Schema.Never)
+      }),
+      Schema.Struct({
+        sequence: Schema.NonEmptyArray(PlanSchema),
+        agent: Schema.optionalKey(Schema.Never),
+        parallel: Schema.optionalKey(Schema.Never)
+      }),
+      Schema.Struct({
+        parallel: Schema.NonEmptyArray(PlanSchema),
+        agent: Schema.optionalKey(Schema.Never),
+        sequence: Schema.optionalKey(Schema.Never)
+      })
     ])
 )
 
@@ -164,6 +176,32 @@ export const leaves = (plan: Plan): ReadonlyArray<Leaf> => {
 
 const bounded = (value: number): boolean => Number.isSafeInteger(value) && value >= 1
 
+const admissionRefusal = (options: {
+  readonly envelope?: Envelope | undefined
+  readonly concurrency?: number | undefined
+}): TrellisError | undefined => {
+  const envelope = options.envelope
+  if (
+    envelope !== undefined &&
+    (!bounded(envelope.fuel) || !bounded(envelope.depth) || !bounded(envelope.fanout))
+  ) {
+    return new TrellisError({
+      code: "invalid_envelope",
+      path: "root",
+      message: "Trellis envelope fuel, depth, and fanout must be positive safe integers"
+    })
+  }
+  const concurrency = options.concurrency
+  if (concurrency !== undefined && !bounded(concurrency)) {
+    return new TrellisError({
+      code: "invalid_envelope",
+      path: "root",
+      message: `Trellis concurrency must be a positive safe integer, received ${concurrency}`
+    })
+  }
+  return undefined
+}
+
 const shape = (value: unknown): "agent" | "sequence" | "parallel" | undefined => {
   if (typeof value !== "object" || value === null) return undefined
   const keys = Object.keys(value)
@@ -192,15 +230,8 @@ const namesNoWork = (value: unknown): boolean => {
  * @since 0.1.0
  */
 export const validate = (plan: unknown, envelope: Envelope): ReadonlyArray<TrellisError> => {
-  if (!bounded(envelope.fuel) || !bounded(envelope.depth) || !bounded(envelope.fanout)) {
-    return [
-      new TrellisError({
-        code: "invalid_envelope",
-        path: "root",
-        message: "Trellis envelope fuel, depth, and fanout must be positive safe integers"
-      })
-    ]
-  }
+  const invalid = admissionRefusal({ envelope })
+  if (invalid !== undefined) return [invalid]
   const found: Array<TrellisError> = []
   let leafCount = 0
   const visit = (value: unknown, path: string, depth: number): void => {
@@ -277,6 +308,7 @@ export const validate = (plan: unknown, envelope: Envelope): ReadonlyArray<Trell
           message: `${kind} declares ${members.length} members, above the envelope fan-out ${envelope.fanout}`
         })
       )
+      return
     }
     members.forEach((member, index) => visit(member, `${path}.${kind}[${index}]`, depth + 1))
   }
@@ -371,19 +403,15 @@ export interface MakeOptions {
  * The leaf slots are sequenced because a plan-time declaration cannot know
  * which of them a plan will fan out. Use {@link run} to execute the plan a
  * model actually authored.
+ * A very large envelope fuel bound builds a very large graph before anything runs.
  *
  * @category constructors
  * @since 0.1.0
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   const { envelope } = options
-  if (!bounded(envelope.fuel) || !bounded(envelope.depth) || !bounded(envelope.fanout)) {
-    throw new TrellisError({
-      code: "invalid_envelope",
-      path: "root",
-      message: "Trellis envelope fuel, depth, and fanout must be positive safe integers"
-    })
-  }
+  const invalid = admissionRefusal({ envelope })
+  if (invalid !== undefined) throw invalid
   const captured = { fuel: envelope.fuel, depth: envelope.depth, fanout: envelope.fanout }
   return Flow.make({
     input: Schema.Unknown,
@@ -470,6 +498,13 @@ export interface RuntimeOptions<E, R, E2, R2, E3, R3> {
   readonly author: (input: Authoring) => Effect.Effect<unknown, E, R>
   readonly leaf: (input: Leaf) => Effect.Effect<unknown, E2, R2>
   readonly envelope: Envelope
+  /**
+   * Requests another round. `undefined`, and any value whose only content is
+   * empty `sequence` or `parallel` containers, terminates the trampoline even
+   * though the {@link Plan} codec and {@link validate} refuse such a value as a
+   * plan. A continuation names work for another round, so one that names no
+   * work is the same answer as no request.
+   */
   readonly continue?: ((input: Continuation) => Effect.Effect<unknown, E3, R3>) | undefined
   readonly concurrency?: number | undefined
 }
@@ -490,8 +525,10 @@ export const execute = <E, R>(
     readonly leaf: (input: Leaf) => Effect.Effect<unknown, E, R>
     readonly concurrency: number
   }
-): Effect.Effect<unknown, E, R> =>
-  Effect.flatMap(Semaphore.make(Math.max(1, options.concurrency)), (semaphore) => {
+): Effect.Effect<unknown, E | TrellisError, R> => {
+  const invalid = admissionRefusal({ concurrency: options.concurrency })
+  if (invalid !== undefined) return Effect.fail(invalid)
+  return Effect.flatMap(Semaphore.make(options.concurrency), (semaphore) => {
     const visit = (node: Plan, path: string): Effect.Effect<unknown, E, R> => {
       const members = container(node)
       if (members === undefined) {
@@ -509,6 +546,7 @@ export const execute = <E, R>(
     }
     return visit(plan, "root")
   })
+}
 
 /**
  * Authors a plan, admits it, executes it, and re-authors while `continue`
@@ -525,35 +563,39 @@ export const run = <E, R, E2, R2, E3 = never, R3 = never>(
   prompt: string,
   options: RuntimeOptions<E, R, E2, R2, E3, R3>
 ): Effect.Effect<RunResult, E | E2 | E3 | TrellisError, R | R2 | R3> =>
-  Effect.gen(function*() {
+  Effect.suspend(() => {
     const envelope = options.envelope
     const concurrency = options.concurrency ?? envelope.fanout
-    const rounds: Array<Round> = []
-    let remaining = envelope.fuel
-    let authored: unknown = yield* options.author({ prompt, round: 1, previous: undefined, remaining })
-    for (let round = 1;; round++) {
-      const refusals = validate(authored, envelope)
-      if (refusals.length > 0) return yield* Effect.fail(refusals[0] as TrellisError)
-      const plan = authored as Plan
-      const cost = leaves(plan).length
-      if (cost > remaining) {
-        return yield* Effect.fail(
-          new TrellisError({
-            code: "fuel_exhausted",
-            path: "root",
-            message: `Round ${round} needs ${cost} leaf calls but only ${remaining} fuel remains`
-          })
-        )
+    const invalid = admissionRefusal({ envelope, concurrency })
+    if (invalid !== undefined) return Effect.fail(invalid)
+    return Effect.gen(function*() {
+      const rounds: Array<Round> = []
+      let remaining = envelope.fuel
+      let authored: unknown = yield* options.author({ prompt, round: 1, previous: undefined, remaining })
+      for (let round = 1;; round++) {
+        const refusals = validate(authored, envelope)
+        if (refusals.length > 0) return yield* Effect.fail(refusals[0] as TrellisError)
+        const plan = authored as Plan
+        const cost = leaves(plan).length
+        if (cost > remaining) {
+          return yield* Effect.fail(
+            new TrellisError({
+              code: "fuel_exhausted",
+              path: "root",
+              message: `Round ${round} needs ${cost} leaf calls but only ${remaining} fuel remains`
+            })
+          )
+        }
+        const result = yield* execute(plan, { leaf: options.leaf, concurrency })
+        remaining -= cost
+        rounds.push({ plan, result })
+        if (options.continue === undefined) return { rounds, remaining }
+        const next = yield* options.continue({ plan, result, round, remaining })
+        // A continuation is a request for another round. Nothing, or a plan
+        // that names no work, is the same answer: the trampoline is done. Every
+        // other round costs at least one leaf, so `run` always terminates.
+        if (next === undefined || namesNoWork(next)) return { rounds, remaining }
+        authored = next
       }
-      const result = yield* execute(plan, { leaf: options.leaf, concurrency })
-      remaining -= cost
-      rounds.push({ plan, result })
-      if (options.continue === undefined) return { rounds, remaining }
-      const next = yield* options.continue({ plan, result, round, remaining })
-      // A continuation is a request for another round. Nothing, or a plan that
-      // names no work, is the same answer: the trampoline is done. Every other
-      // round costs at least one leaf, so `run` always terminates.
-      if (next === undefined || namesNoWork(next)) return { rounds, remaining }
-      authored = next
-    }
+    })
   })

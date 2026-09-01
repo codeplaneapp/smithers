@@ -60,6 +60,16 @@ describe("CheckSuite", () => {
     expect(CheckSuite.rows("not a record", ["lint"])).toEqual([{ id: "lint", passed: false }])
   })
 
+  it("treats inherited prototype-shaped rows as missing", () => {
+    const ids = ["__proto__", "constructor", "toString", "normal"]
+
+    expect(CheckSuite.rows({}, ids)).toEqual(ids.map((id) => ({ id, passed: false })))
+
+    const values = Object.fromEntries(ids.map((id) => [id, { ok: true }]))
+    expect(Object.getPrototypeOf(values)).toBe(Object.prototype)
+    expect(CheckSuite.rows(values, ids)).toEqual(ids.map((id) => ({ id, passed: true })))
+  })
+
   it("declares one call per check plus the verdict map", () => {
     const suite = CheckSuite.make({ checks, strategy: "all-pass", concurrency: 3, continueOnFail: false })
 
@@ -114,11 +124,20 @@ describe("CheckSuite", () => {
 
   it("rejects an empty suite, an empty id, and an invalid concurrency", () => {
     expect(() => CheckSuite.make({ checks: {}, strategy: "all-pass", concurrency: 1, continueOnFail: false }))
-      .toThrow(PatternError)
+      .toThrow(expect.objectContaining({
+        code: "invalid_decorator",
+        message: "CheckSuite requires at least one check"
+      }))
     expect(() => CheckSuite.make({ checks, strategy: "all-pass", concurrency: 0, continueOnFail: false }))
-      .toThrow(PatternError)
+      .toThrow(expect.objectContaining({
+        code: "invalid_decorator",
+        message: "CheckSuite concurrency must be a positive safe integer"
+      }))
     expect(() => CheckSuite.make({ checks: { "": step }, strategy: "all-pass", concurrency: 1, continueOnFail: false }))
-      .toThrow(PatternError)
+      .toThrow(expect.objectContaining({
+        code: "invalid_decorator",
+        message: "CheckSuite check ids must not be empty"
+      }))
   })
 
   it("names one graph member per check id", () => {
@@ -215,6 +234,8 @@ describe("CheckSuite", () => {
       }).pipe(Effect.flip)
 
       expect(failure).toBeInstanceOf(PatternError)
+      expect(failure.code).toBe("invalid_decorator")
+      expect(failure.message).toBe("CheckSuite concurrency must be a positive safe integer")
     }))
 
   it.effect("rejects an empty runtime suite and an empty runtime id before a check runs", () =>
@@ -234,6 +255,8 @@ describe("CheckSuite", () => {
       }).pipe(Effect.flip)
 
       expect(empty).toBeInstanceOf(PatternError)
+      expect(empty.code).toBe("invalid_decorator")
+      expect(empty.message).toBe("CheckSuite requires at least one check")
 
       const unnamed = yield* CheckSuite.run<string, { readonly ok: boolean }, never, never>("head", {
         strategy: "all-pass",
@@ -243,6 +266,8 @@ describe("CheckSuite", () => {
       }).pipe(Effect.flip)
 
       expect(unnamed).toBeInstanceOf(PatternError)
+      expect(unnamed.code).toBe("invalid_decorator")
+      expect(unnamed.message).toBe("CheckSuite check ids must not be empty")
       expect(ran).toBe(0)
     }))
 

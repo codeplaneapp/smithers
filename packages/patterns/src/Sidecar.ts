@@ -26,7 +26,6 @@ import * as Schema from "effect/Schema"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly primary: Flow.Any
@@ -39,7 +38,6 @@ export interface MakeOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Scores {
   readonly primary: number
@@ -56,7 +54,6 @@ export interface Scores {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Delta extends Scores {
   readonly difference: number
@@ -74,7 +71,6 @@ export interface Delta extends Scores {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Shadow<S> =
   | { readonly quarantined: false; readonly value: S }
@@ -88,7 +84,6 @@ export type Shadow<S> =
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Result<P, S> {
   readonly primary: P
@@ -105,7 +100,6 @@ export interface Result<P, S> {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions<I, P, S, E, R, E2, R2, E3 = never, R3 = never> {
   readonly primary: (input: I) => Effect.Effect<P, E, R>
@@ -134,7 +128,6 @@ const field = (value: unknown, key: string): unknown => (value as Record<string,
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const delta = (primary: number, shadow: number): Delta => ({
   primary,
@@ -161,7 +154,6 @@ export const delta = (primary: number, shadow: number): Delta => ({
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   const score = options.score
@@ -212,7 +204,6 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <I, P, S, E, R, E2, R2, E3 = never, R3 = never>(
   input: I,

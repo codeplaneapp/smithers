@@ -37,7 +37,7 @@ export type Scope = "run" | "flow" | "shared"
  *
  * Every field is optional and every default is the pre-policy behavior: no age
  * bound, the reach the composition already granted, and no extra revision in
- * the key. All three are declaration identity — a wrapper that declares a
+ * the key. All three are declaration identity: a wrapper that declares a
  * different policy is a different declaration, so a plan cannot silently reuse
  * a row recorded under another one.
  *
@@ -62,7 +62,7 @@ export interface Options {
 /**
  * The durable half of {@link Options}: the two fields the engine acts on at
  * dispatch. `version` is absent because it is declaration identity, not a
- * dispatch instruction — it changes the key the step is addressed by and
+ * dispatch instruction: it changes the key the step is addressed by and
  * nothing else.
  *
  * @category models
@@ -219,7 +219,6 @@ const declaration = (inner: Flow.Any, options: Options): Flow.Any => {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: Options = {}): Pattern.Decorator => (inner) => declaration(inner, options)
 
@@ -239,7 +238,6 @@ export const make = (options: Options = {}): Pattern.Decorator => (inner) => dec
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const withCache = (inner: Flow.Any, options?: Options | undefined): Flow.Any => {
   const declared = options ?? {}
