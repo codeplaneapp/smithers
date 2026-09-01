@@ -171,6 +171,7 @@ export const layerFor = (options: LayerOptions) => {
   // Routed apps spend real model calls, so a reset-bearing refusal should
   // park. This boundary has no approved plan envelope, so an invented ceiling
   // would be policy the app author never chose.
+  // eslint-disable-next-line no-restricted-syntax -- no approved envelope exists, see above
   const agentPolicy = Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())
   return Layer.mergeAll(host, seats, Agent.layer).pipe(
     Layer.provideMerge(agentPolicy),
