@@ -1,6 +1,8 @@
-import { readdirSync, readFileSync, statSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join, relative, resolve } from "node:path"
-import { describe, expect, it } from "vitest"
+import { afterAll, describe, expect, it } from "vitest"
 
 /**
  * Every package's coverage thresholds are its primary regression gate, so the
@@ -756,5 +758,126 @@ describe("vitest coverage isolation conformance", () => {
       }
     }
     expect(found).toEqual(allowlist)
+  })
+})
+
+/**
+ * `known-files.d.ts` is generated, and it is one TypeScript union with 4,681
+ * members across 11,458 lines. A syntax-aware merge driver walks that file's
+ * whole AST recursively, and mergiraf 0.16.1 overflows its stack on it:
+ *
+ * ```
+ * thread 'main' has overflowed its stack
+ * fatal runtime error: stack overflow, aborting
+ * error: mergiraf merge --git ... died of signal 6
+ * error: failed to execute internal merge for known-files.d.ts
+ * Merge with strategy ort failed.
+ * ```
+ *
+ * The driver aborts instead of falling back to a line merge, so the whole
+ * `git merge` fails (upstream: https://codeberg.org/mergiraf/mergiraf).
+ * Developers enable it globally with `* merge=mergiraf` in git's global
+ * attributes file (`core.attributesFile`, `~/.config/git/attributes` by
+ * default), so every lander who has it configured hits the crash and
+ * substitutes `git merge-file` by hand on this one path.
+ *
+ * `.gitattributes` in the working tree outranks that global file, so one
+ * line there routes exactly this file to git's built-in text driver and leaves
+ * every other path on whatever driver the developer configured. This pins that
+ * line and proves it with a real three-way merge whose configured driver
+ * always fails, standing in for the crash.
+ */
+describe("known-files.d.ts merge-driver exclusion", () => {
+  const repoRoot = resolve(import.meta.dirname, "..", "..", "..")
+  const scratchDirectories: Array<string> = []
+
+  afterAll(() => {
+    for (const directory of scratchDirectories) {
+      rmSync(directory, { force: true, recursive: true })
+    }
+  })
+
+  it("routes the generated union to the text driver in .gitattributes", () => {
+    const attributes = readFileSync(join(repoRoot, ".gitattributes"), "utf8")
+    expect(
+      attributes,
+      ".gitattributes must exclude known-files.d.ts from a syntax-aware merge driver"
+    ).toMatch(/^\/known-files\.d\.ts merge=text$/m)
+  })
+
+  it("text-merges known-files.d.ts and leaves every other path on the configured driver", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "known-files-merge-"))
+    scratchDirectories.push(scratch)
+    const repository = join(scratch, "repository")
+    mkdirSync(repository)
+
+    // A driver that always fails stands in for the crashing one: the contract
+    // under test is which paths git hands to the configured driver at all.
+    const attributesFile = join(scratch, "global-attributes")
+    writeFileSync(attributesFile, "* merge=always-fails\n")
+
+    const git = (...args: Array<string>) =>
+      execFileSync("git", args, {
+        cwd: repository,
+        encoding: "utf8",
+        // The developer's real global and system configuration would decide
+        // the driver and the attributes file, which is the thing being pinned.
+        env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+        stdio: ["ignore", "pipe", "pipe"]
+      })
+
+    git("init", "--quiet", "--initial-branch=main", ".")
+    git("config", "user.name", "lane")
+    git("config", "user.email", "lane@local")
+    git("config", "core.attributesFile", attributesFile)
+    git("config", "merge.always-fails.name", "always fails")
+    git("config", "merge.always-fails.driver", "false")
+
+    // The two sides add their member at different positions, twenty filler
+    // members apart, so a text merge takes both and the merge exercises the
+    // driver rather than a textual conflict.
+    const filler = Array.from({ length: 20 }, (_, index) => `      | "filler-${index}.ts"`)
+    const union = (ours: string, theirs: string) =>
+      [
+        "declare module \"known\" {",
+        "  export type KnownFile =",
+        ...(ours === "" ? [] : [ours]),
+        ...filler,
+        ...(theirs === "" ? [] : [theirs]),
+        "      | \"z.ts\"",
+        "}",
+        ""
+      ].join("\n")
+
+    writeFileSync(join(repository, ".gitattributes"), readFileSync(join(repoRoot, ".gitattributes")))
+    writeFileSync(join(repository, "known-files.d.ts"), union("", ""))
+    writeFileSync(join(repository, "sibling.ts"), union("", ""))
+    git("add", "--all")
+    git("commit", "--quiet", "--message", "base")
+
+    git("checkout", "--quiet", "-b", "theirs")
+    writeFileSync(join(repository, "known-files.d.ts"), union("", "      | \"theirs.ts\""))
+    writeFileSync(join(repository, "sibling.ts"), union("", "      | \"theirs.ts\""))
+    git("commit", "--quiet", "--all", "--message", "theirs")
+
+    git("checkout", "--quiet", "main")
+    writeFileSync(join(repository, "known-files.d.ts"), union("      | \"ours.ts\"", ""))
+    git("commit", "--quiet", "--all", "--message", "ours")
+
+    // The excluded path merges: git used its built-in text driver, and both
+    // sides survive.
+    git("merge", "--no-edit", "theirs")
+    const merged = readFileSync(join(repository, "known-files.d.ts"), "utf8")
+    expect(merged).toContain("| \"ours.ts\"")
+    expect(merged).toContain("| \"theirs.ts\"")
+    expect(merged).not.toContain("<<<<<<<")
+
+    // Every other path still goes to the configured driver, so the exclusion
+    // is one file wide and not a repository-wide opt-out.
+    git("checkout", "--quiet", "-b", "sibling-ours", "main~1")
+    writeFileSync(join(repository, "sibling.ts"), union("      | \"ours.ts\"", ""))
+    git("commit", "--quiet", "--all", "--message", "sibling ours")
+    expect(() => git("merge", "--no-edit", "theirs")).toThrow()
+    expect(git("status", "--porcelain", "sibling.ts")).toMatch(/^(?:UU|AA) /)
   })
 })

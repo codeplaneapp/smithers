@@ -27,3 +27,29 @@
 *.zip binary
 *.exe binary
 *.node binary
+
+# `known-files.d.ts` is generated: one union with 4,681 members across 11,458
+# lines, plus the `@smthrs/targets` augmentation that reads it. A syntax-aware
+# merge driver parses that whole file and walks the tree recursively, and
+# mergiraf 0.16.1 overflows its stack doing it. Measured on this file with one
+# added union member on each side:
+#
+#     thread 'main' has overflowed its stack
+#     fatal runtime error: stack overflow, aborting
+#     error: mergiraf merge --git ... died of signal 6
+#     error: failed to execute internal merge for known-files.d.ts
+#     Merge with strategy ort failed.
+#
+# Upstream defect: mergiraf 0.16.1 (https://codeberg.org/mergiraf/mergiraf)
+# aborts rather than falling back to a line merge, so the whole `git merge`
+# fails and every lander has to run `git merge-file` on this path by hand.
+#
+# Developers enable the driver globally with `* merge=mergiraf` in git's
+# global attributes file (`core.attributesFile`, `~/.config/git/attributes` by
+# default), and a working-tree `.gitattributes` outranks that file, so this one
+# line routes this one generated path to git's built-in text driver and leaves
+# every other path on whatever driver the developer configured. The file is a
+# sorted list of one-line union members, which text merges cleanly: two sides
+# adding different members merge with no conflict.
+# Remove this line when a mergiraf release merges the file without aborting.
+/known-files.d.ts merge=text
