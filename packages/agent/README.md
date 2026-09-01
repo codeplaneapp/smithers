@@ -20,16 +20,17 @@ is another implementation of `Agent.Service`, not a second loop beside this one.
 
 ## `Agent`
 
-`Agent.layer` provides the production implementation. It composes the whole cell
-path — the controller in `@smthrs/harness/CellTurn`, registry-backed call
+`Agent.layer` provides the production implementation and requires both a quota
+classifier and a budget. It composes the whole cell path, the controller in
+`@smthrs/harness/CellTurn`, registry-backed call
 resolution in `@smthrs/harness/CellCalls`, the QuickJS sandbox, the durable
-engine port in `./FlowEngineLike.ts`, the plugin kernel — and returns the
+engine port in `./FlowEngineLike.ts`, and the plugin kernel, then returns the
 framework-neutral `Stream<AgentEvent>` the controller emits. There is no
 callback, no event emitter, and no host-shaped result type; a caller renders the
 stream, journals it, or ignores it.
 
 ```ts
-import { Agent, ChildFlows, SeatResolver, StandardFlows } from "@smthrs/agent"
+import { Agent, Budget, ChildFlows, QuotaPolicy, SeatResolver, StandardFlows } from "@smthrs/agent"
 import type * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
 import type * as Path from "@smthrs/kernel/Path"
 import { Effect, Stream } from "effect"
@@ -61,7 +62,13 @@ const run = Effect.gen(function*() {
     ],
     plugins
   }).pipe(Stream.provide(Agent.layerDefaults))
-}).pipe(Effect.provide(Agent.layer))
+}).pipe(
+  Effect.provide(Agent.layer),
+  // This direct host should park reset-bearing refusals. It has no approved
+  // plan envelope from which to derive a spend ceiling.
+  Effect.provide(QuotaPolicy.layerDefault()),
+  Effect.provide(Budget.layerUnbounded())
+)
 ```
 
 `Seat.make` is documented as the resolved-seat constructor, and a `SeatResolver`
@@ -273,7 +280,7 @@ its `.layer` together, so the composition names the action once.
 
 ```ts
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
-import { Agent, AgentAction, Seat, SeatResolver } from "@smthrs/agent"
+import { Agent, AgentAction, Budget, QuotaPolicy, Seat, SeatResolver } from "@smthrs/agent"
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Interpreter } from "@smthrs/flow"
 import * as Effect from "effect/Effect"
@@ -292,6 +299,9 @@ const layer = Layer.mergeAll(
     }),
     Agent.layer
   )),
+  // A provider refusal with a reset should park. This standalone composition
+  // has no approved plan envelope from which to derive a spend ceiling.
+  Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())),
   // The QuickJS sandbox a cell runs in and the steering source it drains.
   Layer.provideMerge(Agent.layerDefaults),
   // Ordinary flow composition: action implementations, a durable engine, crypto.
@@ -425,8 +435,9 @@ declared for the run. Three rules make it usable:
 `BudgetExceeded { scope, used, max, next }` at the step, `warn` writes a
 `flows.agent.budget-warning.v1` journal record and proceeds, and
 `skip-remaining` latches, so every later model call in the run fails typed
-`skipped` without asking a provider anything. Providing no `Budget` layer
-accounts nothing and refuses nothing.
+`skipped` without asking a provider anything. `Budget.layerUnbounded()`
+explicitly accounts nothing and refuses nothing; omitting a budget is a type
+error.
 
 A latched refusal is its own failure, `Budget.Skipped`, carrying the
 `BudgetExceeded` it latched on. The distinction is what an operator needs: one
