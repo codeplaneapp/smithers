@@ -460,8 +460,22 @@ export type RunSummary = typeof RunSummary.Type
  */
 const steerEnvelope = {
   messageId: Schema.String,
+  /**
+   * The run this message is for. `Control.steer` refuses a message whose
+   * `runId` disagrees with the one the call names: the notification would be
+   * admitted to the call's run while the stored message claimed another, and an
+   * operator reading it later would be told it belongs somewhere it was never
+   * delivered.
+   */
   runId: RunId,
   principal: Principal,
+  /**
+   * When the caller says it wrote the message. It is the caller's own
+   * statement, recorded on `control.steer.enqueued` and never used to decide
+   * anything. Over RPC the server's own clock is already on
+   * `principal.stampedAt`, which is the time a decision may be replayed
+   * against.
+   */
   createdAt: Schema.Number
 }
 
@@ -584,6 +598,16 @@ export type SignalPayload = typeof SignalPayload.Type
  */
 export const WatchFilter = Schema.Struct({
   runId: Schema.optional(RunId),
+  /**
+   * A resumable cursor into ONE run's journal partition.
+   *
+   * Journal sequences are partition-local: the plan partition and every run
+   * partition each start at 0, so one scalar cursor means different positions
+   * in different partitions. An unscoped watch that applied it to all of them
+   * skipped every lower unseen sequence in every other partition, which is why
+   * `Control.watch` refuses `afterSequence` without `runId`. Exactly-once
+   * resumption is a promise about a scoped watch, and only about a scoped one.
+   */
   afterSequence: Schema.optional(Schema.Number),
   follow: Schema.optional(Schema.Boolean)
 })

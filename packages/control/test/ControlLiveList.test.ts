@@ -435,25 +435,26 @@ describe("ControlLive mutations", () => {
     expect(observed.pending).toEqual([])
   })
 
-  it("records a steer with a server-side creation time", async () => {
-    const observed = await run(
-      Effect.gen(function*() {
-        const control = yield* Control
-        const journal = yield* Journal.Journal
-        const { runId } = yield* start("system/test", "steer-created-at")
-        yield* control.steer({
-          runId,
-          message: { messageId: "steer-time", runId, body: "continue", principal, createdAt: 1 },
-          idempotencyKey: "steer:time"
-        })
-        yield* journal.flush
-        const events = yield* control.watch({ runId, follow: false }).pipe(Stream.runCollect)
-        return events.find((event) => event.kind === "control.steer.enqueued")
-      }),
-      live({ runtime: memoryRuntime({ flows, now: () => 99 }) })
-    )
+  it("keeps the message's stated creation time on the enqueue record", async () => {
+    // `steerItem` strips the control envelope before the message reaches the
+    // queue, so the journal entry is the only place `createdAt` survives. It
+    // is the caller's own statement, not a server stamp: over RPC the server's
+    // clock is already on `message.principal.stampedAt`.
+    const observed = await run(Effect.gen(function*() {
+      const control = yield* Control
+      const journal = yield* Journal.Journal
+      const { runId } = yield* start("system/test", "steer-created-at")
+      yield* control.steer({
+        runId,
+        message: { messageId: "steer-time", runId, body: "continue", principal, createdAt: 1712 },
+        idempotencyKey: "steer:time"
+      })
+      yield* journal.flush
+      const events = yield* control.watch({ runId, follow: false }).pipe(Stream.runCollect)
+      return events.find((event) => event.kind === "control.steer.enqueued")
+    }))
 
-    expect(observed?.payload).toMatchObject({ messageId: "steer-time", createdAt: 99 })
+    expect(observed?.payload).toMatchObject({ messageId: "steer-time", createdAt: 1712 })
   })
 
   it("admits an empty steering body and keeps a second steer of the same run queued behind it", async () => {

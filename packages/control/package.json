@@ -6,7 +6,7 @@
   "smthrs": {
     "group": "agent"
   },
-  "description": "Browser-safe control services and RPC projections for flows",
+  "description": "Control services and RPC projections for flows",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",

@@ -821,19 +821,30 @@ export const layer: Layer.Layer<
      * The expansion runs after the follow branch's deduplication, so a derived
      * event never competes for the `(runId, sequence)` key its own entry was
      * deduplicated on.
+     *
+     * An `afterSequence` without a `runId` is refused. Journal sequences are
+     * partition-local, so one scalar cursor applied to every partition skipped
+     * every lower unseen sequence in every partition but the one the cursor
+     * came from, while the api page promised a consumer resuming at a cursor
+     * sees each event exactly once. Refusing the unscoped cursor keeps that
+     * promise true for the scoped watch that can actually hold it.
      */
     const watch = (filter: WatchFilter): Stream.Stream<ControlEvent, ControlError> =>
-      entries(filter).pipe(
-        Stream.map((event): ReadonlyArray<ControlEvent> => {
-          const lineage = Lineage.derive(event)
-          return [
-            event,
-            ...(lineage === undefined ? [] : [lineage]),
-            ...Steering.derive(event)
-          ]
-        }),
-        Stream.flattenIterable
-      )
+      filter.afterSequence !== undefined && filter.runId === undefined
+        ? Stream.fail(
+          invalid("afterSequence: a watch cursor resumes one run, so it requires runId")
+        )
+        : entries(filter).pipe(
+          Stream.map((event): ReadonlyArray<ControlEvent> => {
+            const lineage = Lineage.derive(event)
+            return [
+              event,
+              ...(lineage === undefined ? [] : [lineage]),
+              ...Steering.derive(event)
+            ]
+          }),
+          Stream.flattenIterable
+        )
 
     const service: Service = {
       plan: Effect.fn("Control.plan")((input) =>

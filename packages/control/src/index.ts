@@ -1,6 +1,16 @@
 /**
  * Control-plane contracts and projections for the Smithers harness.
  *
+ * This is the public surface of the control plane: the transport-independent
+ * `Control` service, the `ControlRuntime` port it writes through, the
+ * projections it reads back, and the durable adapter that binds both to a real
+ * database.
+ *
+ * `Control` is authority, not execution. Every mutation it accepts is
+ * idempotent, principal-stamped, and recorded in the journal beside the state
+ * change it caused, so "who asked for this, and when did it take effect?" is
+ * answered from persisted evidence rather than from a log line.
+ *
  * @since 0.1.0
  */
 

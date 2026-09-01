@@ -347,41 +347,61 @@ describe("Monitor.run over the durable control plane", () => {
     }
   })
 
+  /**
+   * What each receipt a remedy can answer with means to the loop.
+   *
+   * Only `Accepted` and `AlreadyApplied` say the remedy was applied. `Parked`
+   * and `Conflict` say it was not, so the stall evidence stands and the next
+   * beat tries again; `Terminal` says the run settled under the monitor, so
+   * there is nothing left to remedy and the loop ends. `beats` is what tells
+   * the ended loop apart from the one that kept beating: the monitor is
+   * allowed four checks and takes fewer when it stops early.
+   */
   const receiptCases: ReadonlyArray<{
     readonly receipt: Receipt
     readonly healed: boolean
     readonly calls: number
+    readonly beats: number
     readonly finalHealth: Monitor.Health
   }> = [
     {
       receipt: { _tag: "Accepted", receiptId: "receipt:accepted", runId: "run-replaced" },
       healed: true,
       calls: 1,
+      beats: 4,
       finalHealth: "healthy"
     },
     {
       receipt: { _tag: "AlreadyApplied", receiptId: "receipt:replayed", runId: "run-replaced" },
       healed: true,
       calls: 1,
+      beats: 4,
       finalHealth: "healthy"
     },
     {
       receipt: { _tag: "Parked", receiptId: "receipt:parked", planId: "plan-parked", status: "waiting-approval" },
       healed: false,
       calls: 2,
+      beats: 4,
       finalHealth: "stalled"
     },
     {
       receipt: { _tag: "Conflict", message: "the key names another mutation" },
       healed: false,
       calls: 2,
+      beats: 4,
       finalHealth: "stalled"
     },
     {
+      // The beat that asked still classified a stalled run, because it did:
+      // the run settled while the remedy was in flight, and rewriting the
+      // beat's own classification afterwards would be a record of something
+      // the monitor never observed. What changes is that the loop stops.
       receipt: { _tag: "Terminal", runId: "run-replaced", status: "completed" },
       healed: false,
       calls: 1,
-      finalHealth: "healthy"
+      beats: 3,
+      finalHealth: "stalled"
     }
   ]
 
@@ -415,6 +435,7 @@ describe("Monitor.run over the durable control plane", () => {
       }))
 
       expect(calls).toBe(testCase.calls)
+      expect(observed.report.beats).toHaveLength(testCase.beats)
       expect(observed.report.beats.at(-1)?.health).toBe(testCase.finalHealth)
       expect(observed.report.beats.some((beat) => beat.healed === "resume")).toBe(testCase.healed)
       expect(observed.healed).toHaveLength(testCase.healed ? 1 : 0)

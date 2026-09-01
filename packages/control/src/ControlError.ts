@@ -150,7 +150,7 @@ export class PersistenceError extends Schema.TaggedError<PersistenceError>()("/c
   code: constantCode("persistence_failed"),
   operation: Schema.String,
   message: Schema.String,
-  cause: Schema.optional(Schema.Unknown)
+  cause: Schema.optional(Schema.Defect())
 }) {}
 
 /**
@@ -164,7 +164,7 @@ export class LaunchFailed extends Schema.TaggedError<LaunchFailed>()("/control/L
   code: constantCode("launch_failed"),
   runId: RunId,
   message: Schema.String,
-  cause: Schema.optional(Schema.Unknown)
+  cause: Schema.optional(Schema.Defect())
 }) {}
 
 /**

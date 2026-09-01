@@ -13,7 +13,7 @@ import { NotificationQueue } from "@smthrs/notifications"
 import { Deferred, Effect, Fiber, Layer, PubSub, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import { Control } from "../src/Control.ts"
-import { Unavailable } from "../src/ControlError.ts"
+import { InvalidInput, Unavailable } from "../src/ControlError.ts"
 import { ControlRuntime, type MemoryFlow } from "../src/ControlRuntime.ts"
 import type { ControlEvent, Envelope } from "../src/ControlSchema.ts"
 import { live, memoryRuntime, type Stack } from "./TestStack.ts"
@@ -312,7 +312,7 @@ describe("ControlLive.watch following", () => {
 
         return yield* Effect.gen(function*() {
           const control = yield* Control
-          const collected = yield* control.watch({ afterSequence: 10 }).pipe(
+          const collected = yield* control.watch({ runId: "run-1", afterSequence: 10 }).pipe(
             Stream.take(1),
             Stream.runCollect,
             Effect.forkChild({ startImmediately: true })
@@ -334,5 +334,26 @@ describe("ControlLive.watch following", () => {
 
     // The cursor is exclusive: 10 is already seen, 11 is the first new one.
     expect(sequences(observed)).toEqual([11])
+  })
+
+  it("refuses a cursor that names no run, because one scalar cannot address every partition", async () => {
+    // Journal sequences are partition-local: `plan:` entries and every run
+    // start at 0. One scalar applied to all of them skipped every lower unseen
+    // sequence in every partition but the cursor's own, while the api page
+    // promised exactly-once resumption. The refusal is what makes the promise
+    // true for the scoped watch that can hold it.
+    const error = await Effect.runPromise(
+      Effect.gen(function*() {
+        const control = yield* Control
+        return yield* Effect.flip(Stream.runCollect(control.watch({ afterSequence: 10, follow: false })))
+      }).pipe(
+        Effect.provide(live({ runtime: memoryRuntime({ flows }), notifications: NotificationQueue.layerNoop() })),
+        Effect.scoped,
+        Effect.orDie
+      )
+    )
+
+    expect(error).toBeInstanceOf(InvalidInput)
+    expect((error as InvalidInput).issue).toContain("afterSequence")
   })
 })

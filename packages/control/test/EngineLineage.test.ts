@@ -197,11 +197,19 @@ const observeFork = <A>(
       yield* journal.flush
       const page = yield* journal.entries({ runId: JournalEvent.RunId.make(forkOriginId), limit: 200 })
       const service = yield* TimeTravel.TimeTravel
+      // The frame is read off the run's own last committed record rather than
+      // spelled. A journal lineage id is a versioned encoded tuple the ENGINE
+      // mints (`FlowEngine.Lineage`), not `<runId>/root`, and this suite spelled
+      // the second: time travel now refuses a frame that addresses no record, so
+      // the invented coordinate failed `not_found` where it used to copy
+      // whatever `seq <= frame.seq` matched and fork from the parent's state NOW.
+      const last = page.entries.at(-1)
       const fork = yield* service.fork({
         runId: forkOriginId,
-        // The engine's root lineage for a run is `<runId>/root`, and the frame
-        // is the run's last committed sequence, so the fork inherits it all.
-        frame: { lineageId: `${forkOriginId}/root`, seq: page.entries.at(-1)?.seq ?? 0 }
+        frame: {
+          lineageId: (last?.meta as { readonly lineageId?: string } | undefined)?.lineageId ?? "",
+          seq: last?.seq ?? 0
+        }
       })
       return yield* body(yield* Control, fork.runId)
     }).pipe(Effect.provide(stack), Effect.scoped, Effect.orDie) as Effect.Effect<A>
