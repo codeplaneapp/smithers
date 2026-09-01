@@ -8,16 +8,16 @@
  * without the other would make those two answers disagree forever, so the
  * transaction is the contract and a killed process is how it is checked.
  */
+import { describe, expect, it } from "@effect/vitest"
+import * as DurableWriter from "@smthrs/database/DurableWriter"
+import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { spawnSync } from "node:child_process"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, it } from "@effect/vitest"
-import * as DurableWriter from "@smthrs/database/DurableWriter"
-import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
-import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { fileURLToPath } from "node:url"
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url))
