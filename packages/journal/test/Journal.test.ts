@@ -355,6 +355,31 @@ const readGatedDatabase = (gate: ReadGate): Layer.Layer<SqlClient.SqlClient, nev
     })
   )
 
+/** Parks the first canonical floor read after explicit-id preflight. */
+const allocationReadGatedDatabase = (
+  gate: ReadGate
+): Layer.Layer<SqlClient.SqlClient, never, SqlClient.SqlClient> =>
+  Layer.effect(
+    SqlClient.SqlClient,
+    Effect.gen(function*() {
+      const base = yield* Effect.service(SqlClient.SqlClient)
+      return new Proxy(base, {
+        apply(target, thisArgument, argumentsList) {
+          const statement = Reflect.apply(target, thisArgument, argumentsList) as Statement.Statement<unknown>
+          const [query] = statement.compile()
+          if (!gate.armed || !query.includes("MAX(seq) + 1")) {
+            return statement
+          }
+          gate.armed = false
+          return Deferred.succeed(gate.started, undefined).pipe(
+            Effect.andThen(Deferred.await(gate.release)),
+            Effect.andThen(statement)
+          )
+        }
+      }) as SqlClient.SqlClient
+    })
+  )
+
 describe("Journal", () => {
   effect("validates queue and batch options when constructing the layer", () =>
     Effect.gen(function*() {
@@ -803,6 +828,38 @@ describe("Journal", () => {
         expect(new Set(sequences).size).toBe(work.length)
       }),
       { capacity: 128, overflow: "reject", batchSize: 8 }
+    )
+  })
+
+  effect("rechecks an explicit identity after preflight races a durable commit", () => {
+    const run = runId("concurrent-retry")
+    const source = sourceId("producer")
+    const candidate = input(run, source, "concurrent.event", { value: 1 }, sourceSeq(0))
+    const gate: ReadGate = {
+      armed: true,
+      release: Deferred.makeUnsafe<void>(),
+      started: Deferred.makeUnsafe<void>()
+    }
+
+    return Effect.scoped(
+      Effect.gen(function*() {
+        const journal = yield* Journal
+        const lossy = yield* journal.emitLossy(candidate).pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.await(gate.started)
+
+        const durable = yield* journal.emitDurableUnfenced(candidate)
+        yield* Deferred.succeed(gate.release, undefined)
+        const retried = yield* Fiber.join(lossy)
+        expect(durable).toMatchObject({ _tag: "Accepted", seq: 0, sourceSeq: 0 })
+        expect(retried).toEqual({ _tag: "Duplicate", seq: 0, sourceSeq: 0, status: "committed" })
+
+        yield* journal.flush
+        const page = yield* journal.entries({ runId: run, limit: 10 })
+        expect(page.entries).toHaveLength(1)
+      }).pipe(
+        Effect.provide(SqlJournal.layer({ capacity: 8, overflow: "reject" })),
+        Effect.provide(Layer.provideMerge(allocationReadGatedDatabase(gate), migratedDatabase()))
+      )
     )
   })
 

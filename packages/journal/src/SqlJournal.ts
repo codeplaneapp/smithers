@@ -533,9 +533,10 @@ export const layer = (
         sourceEvents: initialized.sourceEvents,
         flushWaiters: new Set()
       }
-      // A lazy floor read yields to the SQL driver. Keep that read and the
-      // following in-memory allocation in one critical section, or two first
-      // emits can both observe the same durable floor before either raises it.
+      // The permit protects only synchronous in-memory reservation. It must
+      // never be held while waiting on SQLite: an enclosing `transact` owns a
+      // database transaction, so DB -> allocator and allocator -> DB ordering
+      // would otherwise deadlock concurrent lifecycle writers.
       const allocation = yield* Semaphore.make(1)
       const runBarriers = new Map<RunId, RunBarrier>()
       const runDrainWaiters = new Map<RunId, Set<Deferred.Deferred<void>>>()
@@ -896,7 +897,7 @@ export const layer = (
           sourceId: input.sourceId,
           eventType: input.eventType
         }).pipe(Effect.andThen(
-          allocation.withPermit(withRunAdmission(
+          withRunAdmission(
             input.runId,
             Effect.flatMap(Clock.currentTimeMillis, (emittedAtMs) =>
               Effect.flatMap(
@@ -910,11 +911,25 @@ export const layer = (
                         : Effect.flatMap(
                           ensureFloors(prepared.validated.runId, prepared.validated.sourceId),
                           (floors) =>
-                            Effect.fromResult(
+                            allocation.withPermit(Effect.fromResult(
                               Result.gen(function*() {
                                 const { metaJson, payloadJson, validated } = prepared
                                 const key = sourceKey(validated.runId, validated.sourceId)
-                                const nextSourceSeq = floors.sourceSeq
+                                const nextSourceSeq = Math.max(
+                                  floors.sourceSeq,
+                                  state.sourceSequences.get(key) ?? 0
+                                )
+                                if (validated.sourceSeq !== undefined) {
+                                  const identity = sourceEventKey(
+                                    validated.runId,
+                                    validated.sourceId,
+                                    validated.sourceSeq
+                                  )
+                                  const cached = state.sourceEvents.get(identity)
+                                  if (cached !== undefined) {
+                                    return yield* compareSourceEvent(prepared, validated.sourceSeq, cached)
+                                  }
+                                }
                                 // An explicit producer sequence was validated and
                                 // answered by `preflightExplicit`, and an implicit one
                                 // is the floor `ensureFloors` already proved to be a
@@ -930,7 +945,10 @@ export const layer = (
                                     )
                                   )
                                 }
-                                const nextSeq = floors.seq
+                                const nextSeq = Math.max(
+                                  floors.seq,
+                                  state.sequences.get(validated.runId) ?? 0
+                                )
                                 if (nextSeq === Number.MAX_SAFE_INTEGER) {
                                   return yield* Result.fail(
                                     error(
@@ -1014,11 +1032,11 @@ export const layer = (
                                   sourceSeq
                                 } satisfies EmitReceipt
                               })
-                            )
+                            ))
                         )
                   )
               )).pipe(Effect.tap((receipt) => Metric.update(JournalMetrics.lossy[receipt._tag], 1)))
-          ))
+          )
         ))
       )
 
@@ -1516,8 +1534,8 @@ export const layer = (
         )
 
       /**
-       * Loads a run's allocation floors into the in-process index if they are
-       * not there yet.
+       * Reads a run's durable allocation floors when the in-process cache has
+       * not observed them yet.
        *
        * `emitLossy` allocates from the index alone, it queues rather than
        * writing, so it cannot read the database mid-allocation, which is why
@@ -1526,8 +1544,10 @@ export const layer = (
        * process touches rather than to total history, and the durable read is
        * the same `MAX(...) + 1` the seed computed.
        *
-       * `emitDurable` needs nothing from this: it already takes the max of the
-       * durable floor and the index on every emit.
+       * This function never mutates the cache. Its SQL reads deliberately run
+       * without the allocator; the caller later takes the short allocator
+       * permit, re-checks the monotonic cache, and reserves both sequences in
+       * one synchronous step.
        */
       const ensureFloors = (
         runId: RunId,
@@ -1556,11 +1576,7 @@ export const layer = (
                   error("invalid_event", "journal sequence is outside the allocatable safe integer range")
                 )
               }
-              const currentSeq = Math.max(floors.seq, state.sequences.get(runId) ?? 0)
-              const currentSourceSeq = Math.max(floors.sourceSeq, state.sourceSequences.get(key) ?? 0)
-              state.sequences.set(runId, currentSeq)
-              state.sourceSequences.set(key, currentSourceSeq)
-              return Effect.succeed({ seq: currentSeq, sourceSeq: currentSourceSeq })
+              return Effect.succeed(floors)
             })
           )
         })
@@ -1638,15 +1654,21 @@ export const layer = (
           const prepared = yield* Effect.fromResult(prepare(input, emittedAtMs))
           const committed = yield* withActiveRunWrite(
             prepared.validated.runId,
-            allocation.withPermit(
-              Effect.gen(function*() {
-                const { metaJson, payloadJson, validated } = prepared
-                const written = yield* Effect.uninterruptibleMask((restore) =>
-                  restore(writer.write(Effect.gen(function*() {
+            Effect.gen(function*() {
+              const { metaJson, payloadJson, validated } = prepared
+              const written = yield* Effect.uninterruptibleMask((restore) =>
+                restore(writer.write(Effect.gen(function*() {
+                  const durableSourceSeq = yield* nextDurable(
+                    "source_seq",
+                    validated.runId,
+                    validated.sourceId
+                  )
+                  const durableSeq = yield* nextDurable("seq", validated.runId, undefined)
+                  const reserved = yield* allocation.withPermit(Effect.fromResult(Result.gen(function*() {
                     const key = sourceKey(validated.runId, validated.sourceId)
                     const sourceSeq: SourceSeq = validated.sourceSeq ??
                       (Math.max(
-                        yield* nextDurable("source_seq", validated.runId, validated.sourceId),
+                        durableSourceSeq,
                         state.sourceSequences.get(key) ?? 0
                       ) as SourceSeq)
                     if (
@@ -1654,16 +1676,16 @@ export const layer = (
                       sourceSeq < 0 ||
                       sourceSeq === Number.MAX_SAFE_INTEGER
                     ) {
-                      return yield* Effect.fail(
+                      return yield* Result.fail(
                         error("invalid_event", "journal sequence is outside the allocatable safe integer range")
                       )
                     }
                     const seq = Math.max(
-                      yield* nextDurable("seq", validated.runId, undefined),
+                      durableSeq,
                       state.sequences.get(validated.runId) ?? 0
                     ) as Seq
                     if (!Number.isSafeInteger(seq) || seq === Number.MAX_SAFE_INTEGER) {
-                      return yield* Effect.fail(
+                      return yield* Result.fail(
                         error("invalid_event", "journal sequence is outside the allocatable safe integer range")
                       )
                     }
@@ -1680,51 +1702,53 @@ export const layer = (
                     // the pre-transaction source floor and reuse this identity
                     // while an enclosing `transact` is still open.
                     raiseSourceSequenceFloor(validated.runId, validated.sourceId, sourceSeq)
-                    const queued: QueuedEntry = {
-                      runId: validated.runId,
-                      seq,
-                      eventId: makeEventId(validated.runId, validated.sourceId, sourceSeq),
-                      sourceId: validated.sourceId,
-                      sourceSeq,
-                      emittedAtMs,
-                      eventType: validated.eventType,
-                      payloadJson,
-                      metaJson
-                    }
-                    const commit = yield* insertOne(queued, fence)
-                    return { commit, queued, sourceSeq }
+                    return { seq, sourceSeq }
                   })))
-                )
-                /**
-                 * `writer.write` is a retrying transaction: its body replays on
-                 * `SQLITE_BUSY(_SNAPSHOT)` and can still abort at COMMIT after the
-                 * body succeeded. Cache mutation and publication therefore happen
-                 * strictly after the transaction returns, so subscribers never
-                 * observe a rolled-back entry and a replayed body never publishes
-                 * twice. Mirrors the queued path, which publishes in a `.tap`
-                 * outside `persistBatch`.
-                 *
-                 * Under `transact` "after the transaction returns" is not yet
-                 * "after COMMIT": this write is a savepoint of the caller's
-                 * transaction, so `settleCommit` parks both effects until the
-                 * outermost transaction commits. The run permit is already free,
-                 * which lets automatic compaction take the same run barrier.
-                 */
-                const maintenance = yield* settleCommit(written.queued, written.commit)
-                const receipt: DurableReceipt = written.commit.inserted
-                  ? { _tag: "Accepted", seq: written.commit.entry.seq, sourceSeq: written.sourceSeq }
-                  : {
-                    _tag: "Duplicate",
-                    seq: written.commit.entry.seq,
-                    sourceSeq: written.sourceSeq,
-                    status: "committed"
+                  const { seq, sourceSeq } = reserved
+                  const queued: QueuedEntry = {
+                    runId: validated.runId,
+                    seq,
+                    eventId: makeEventId(validated.runId, validated.sourceId, sourceSeq),
+                    sourceId: validated.sourceId,
+                    sourceSeq,
+                    emittedAtMs,
+                    eventType: validated.eventType,
+                    payloadJson,
+                    metaJson
                   }
-                yield* Metric.update(JournalMetrics.durable[receipt._tag], 1)
-                return { maintenance, receipt }
-              }).pipe(
-                Effect.mapError((cause) =>
-                  isJournalError(cause) ? cause : error("sink_failed", "durable journal write failed", cause)
-                )
+                  const commit = yield* insertOne(queued, fence)
+                  return { commit, queued, sourceSeq }
+                })))
+              )
+              /**
+               * `writer.write` is a retrying transaction: its body replays on
+               * `SQLITE_BUSY(_SNAPSHOT)` and can still abort at COMMIT after the
+               * body succeeded. Cache mutation and publication therefore happen
+               * strictly after the transaction returns, so subscribers never
+               * observe a rolled-back entry and a replayed body never publishes
+               * twice. Mirrors the queued path, which publishes in a `.tap`
+               * outside `persistBatch`.
+               *
+               * Under `transact` "after the transaction returns" is not yet
+               * "after COMMIT": this write is a savepoint of the caller's
+               * transaction, so `settleCommit` parks both effects until the
+               * outermost transaction commits. The run permit is already free,
+               * which lets automatic compaction take the same run barrier.
+               */
+              const maintenance = yield* settleCommit(written.queued, written.commit)
+              const receipt: DurableReceipt = written.commit.inserted
+                ? { _tag: "Accepted", seq: written.commit.entry.seq, sourceSeq: written.sourceSeq }
+                : {
+                  _tag: "Duplicate",
+                  seq: written.commit.entry.seq,
+                  sourceSeq: written.sourceSeq,
+                  status: "committed"
+                }
+              yield* Metric.update(JournalMetrics.durable[receipt._tag], 1)
+              return { maintenance, receipt }
+            }).pipe(
+              Effect.mapError((cause) =>
+                isJournalError(cause) ? cause : error("sink_failed", "durable journal write failed", cause)
               )
             )
           )
