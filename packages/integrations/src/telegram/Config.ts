@@ -4,6 +4,7 @@
  * @since 1.0.0
  */
 import { SmithersError } from "@smthrs/errors/SmithersError"
+import * as Environment from "../Environment.ts"
 
 /**
  * The public Bot API host.
@@ -42,7 +43,7 @@ export interface TelegramConfig {
  */
 export const resolve = (
   config: Partial<TelegramConfig> = {},
-  env: Readonly<Record<string, string | undefined>> = process.env
+  env: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
 ): TelegramConfig => {
   const botToken = config.botToken ?? env["SMITHERS_TELEGRAM_BOT_TOKEN"]
   if (botToken === undefined || botToken.length === 0) {
