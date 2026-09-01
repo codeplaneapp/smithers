@@ -7,7 +7,7 @@
  * the same rules on the real binary.
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Console, Effect, Logger } from "effect"
+import { Cause, Console, Effect, Logger, Tracer } from "effect"
 import * as RedactedLogger from "../src/RedactedLogger.ts"
 import * as Redaction from "../src/Redaction.ts"
 
@@ -71,6 +71,41 @@ const loggedWith = <E>(
 /** Runs `body` under the pretty logger, which is what an operator's terminal gets. */
 const logged = <E>(body: Effect.Effect<void, E>): Effect.Effect<Capture, E> =>
   loggedWith(Logger.consolePretty({ colors: false, mode: "tty" }), body)
+
+/**
+ * Runs `body` under the real `Logger.tracerLogger` inside a recorded span.
+ *
+ * That logger is the non-console logger that actually ships: Effect installs
+ * it by default alongside the console one, it never reads the fiber's
+ * `Console`, and what it writes leaves the process for an OTLP collector.
+ */
+const traced = <E>(body: Effect.Effect<void, E>): Effect.Effect<Array<Tracer.NativeSpan>, E> =>
+  Effect.suspend(() => {
+    const spans: Array<Tracer.NativeSpan> = []
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      }
+    })
+    return body.pipe(
+      Effect.withSpan("probe"),
+      Effect.provide(RedactedLogger.layer()),
+      Effect.provide(Logger.layer([Logger.tracerLogger])),
+      Effect.provideService(Tracer.Tracer, tracer),
+      Effect.as(spans)
+    )
+  })
+
+/** The one log event the tracer logger recorded on the probe span. */
+const onlyEvent = (
+  spans: ReadonlyArray<Tracer.NativeSpan>
+): [name: string, startTime: bigint, attributes: Record<string, unknown>] => {
+  const events = spans.flatMap((span) => span.events)
+  expect(events.length).toBe(1)
+  return events[0]!
+}
 
 describe("RedactedLogger", () => {
   it.effect("keeps a credential-shaped token out of the line the console prints", () =>
@@ -146,6 +181,96 @@ describe("RedactedLogger", () => {
       const text = JSON.stringify(seen)
       expect(text).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
       expect(text).toContain("[REDACTED_API_KEY]")
+    }))
+
+  it.effect("redacts the span event the tracer logger exports", () =>
+    Effect.gen(function*() {
+      const spans = yield* traced(
+        Effect.logInfo("calling https://example.test/deploy with Bearer sk-live-e2ecase22NEVERLOGTHIS").pipe(
+          Effect.annotateLogs({ apiKey: "sk-ant-api03-abcdefgh" })
+        )
+      )
+      const [name, , attributes] = onlyEvent(spans)
+      expect(name).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+      expect(name).toBe("calling https://example.test/deploy with Bearer [REDACTED_API_KEY]")
+      expect(attributes.apiKey).toBe(Redaction.placeholder)
+    }))
+
+  it.effect("redacts the cause that logger renders into the span itself", () =>
+    Effect.gen(function*() {
+      // A failure is logged as a `Cause`, not as message parts, and the tracer
+      // logger renders it with `Cause.pretty` into `effect.cause`. Nothing on
+      // that path touches the console.
+      const spans = yield* traced(
+        Effect.logError(
+          Cause.fail(new Error("POST https://example.test failed: token=sk-live-e2ecase22NEVERLOGTHIS"))
+        )
+      )
+      const rendered = String(onlyEvent(spans)[2]["effect.cause"])
+      expect(rendered).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+      expect(rendered).toContain(`token=${Redaction.placeholder}`)
+      expect(rendered).toContain("POST https://example.test failed")
+    }))
+
+  it("keeps a redacted error's class and own fields, which a rendered cause reads", () => {
+    class DeployError extends Error {
+      readonly _tag = "DeployError"
+      readonly status: number
+      constructor(message: string, status: number) {
+        super(message)
+        this.name = "DeployError"
+        this.status = status
+      }
+    }
+    const redacted = RedactedLogger.redactArgument(
+      new DeployError("POST failed: token=sk-live-abcdefgh", 502),
+      Redaction.make()
+    ) as DeployError
+    expect(redacted).toBeInstanceOf(DeployError)
+    expect(redacted._tag).toBe("DeployError")
+    expect(redacted.status).toBe(502)
+    expect(redacted.name).toBe("DeployError")
+    expect(redacted.message).toBe(`POST failed: token=${Redaction.placeholder}`)
+    expect(redacted.stack).not.toContain("sk-live-abcdefgh")
+  })
+
+  it("redacts an error's own fields, reads its getters, and stops at a cycle", () => {
+    // `Cause.pretty` walks `error.cause`, so a nested error is rendered too.
+    // A cycle is not exotic once errors carry each other: the walk records
+    // what it has seen and hands the original back rather than recurring.
+    const inner = new Error("inner token=sk-live-abcdefgh")
+    const outer = new Error("outer Bearer abcdefghijkl", { cause: inner }) as Error & { self?: unknown }
+    outer.self = outer
+    Object.defineProperty(outer, "detail", {
+      get: () => "sent Bearer abcdefghijkl",
+      enumerable: true,
+      configurable: true
+    })
+    const redacted = RedactedLogger.redactArgument(outer, Redaction.make()) as Error & {
+      self: unknown
+      detail: string
+    }
+    expect(redacted.message).toBe("outer Bearer [REDACTED_TOKEN]")
+    expect(redacted.cause).toBeInstanceOf(Error)
+    expect((redacted.cause as Error).message).toBe(`inner token=${Redaction.placeholder}`)
+    expect(redacted.self).toBe(outer)
+    // A getter is read once and stored, so what it returned is redacted too.
+    expect(redacted.detail).toBe("sent Bearer [REDACTED_TOKEN]")
+  })
+
+  it.effect("redacts a defect and passes an interrupt through", () =>
+    Effect.gen(function*() {
+      const spans = yield* traced(
+        Effect.logError(
+          Cause.combine(
+            Cause.die(new Error("crashed calling with Bearer sk-live-e2ecase22NEVERLOGTHIS")),
+            Cause.interrupt(1)
+          )
+        )
+      )
+      const rendered = String(onlyEvent(spans)[2]["effect.cause"])
+      expect(rendered).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+      expect(rendered).toContain("Bearer [REDACTED_API_KEY]")
     }))
 
   it.effect("redacts a credential-named log annotation wholesale", () =>
