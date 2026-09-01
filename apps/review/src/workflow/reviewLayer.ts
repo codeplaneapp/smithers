@@ -155,3 +155,21 @@ export const layerNode = (options: {
     )
   )
 }
+
+/** Refuses a composition root that still owes a service. */
+type Complete<L> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>] ? [R] extends [never] ? true : false
+  : false
+
+/** Fails to compile unless its argument is `true`. */
+type Expect<T extends true> = T
+
+/**
+ * Both review runtimes supply every service the workflow can require.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type CompositionRootsAreComplete = [
+  Expect<Complete<ReturnType<typeof layerMemory>>>,
+  Expect<Complete<ReturnType<typeof layerNode>>>
+]
