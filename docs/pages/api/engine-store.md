@@ -353,7 +353,7 @@ shapes need:
 | `DisasterRecovery.BackupManifest` | const + type | schemas | The verification contract of a backup: the database snapshot's digest and schema version, and the digest of every captured artifact blob. |
 | `DisasterRecovery.DisasterRecoveryErrorCode` | const + type | errors | Stable failure codes surfaced by backup, verify, restore, and fence. |
 | `DisasterRecovery.DisasterRecoveryError` | class | errors | A normalized backup or restore failure. |
-| `DisasterRecovery.FileSizeOptions` | interface | models | Where a backup is written and which artifact store it captures. |
+| `DisasterRecovery.FileSizeOptions` | interface | models | Shared buffering limit for backup, verification, and restore operations. |
 | `DisasterRecovery.BackupOptions` | interface | models | Where a backup is written and which artifact store it captures. |
 | `DisasterRecovery.RestoreOptions` | interface | models | Which backup to restore and where the restored store lands. |
 | `DisasterRecovery.RestoreAndFenceOptions` | interface | models | Which backup to restore and how to open the freshly restored SQLite file for restore-time fencing. |

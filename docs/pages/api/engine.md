@@ -159,6 +159,10 @@ See [Getting started](/guides/getting-started), [Writing a flow](/guides/writing
 | --- | --- | --- |
 | `FlowEngine.ActionExecuteOptions` (interface) | models | The identity and boundary information supplied to an encoded action executor. |
 | `FlowEngine.Encoded` (interface) | models | The low-level flow engine contract a durable store implements, over which `makeUnsafe` builds the typed `FlowRuntime` port. |
+| `FlowEngine.SuspendedResumeGaveUp` (class) | errors | A suspended execution spent the caller's resume retry policy. |
+| `FlowEngine.SnapshotBoundaryRequired` (class) | errors | A compensable action was admitted without a snapshot boundary. |
+| `FlowEngine.FlowNotRegistered` (class) | errors | A flow operation named a declaration this engine has not registered. |
+| `FlowEngine.ExecutionIdentityConflict` (class) | errors | A caller reused an execution id for a different flow or payload identity. |
 | `FlowEngine.makeInstance` (const) | constructors | Creates the initial `FlowInstance` state for one flow execution. |
 | `FlowEngine.layerMemory` (const) | layers | Layer that provides an in-memory `FlowRuntime`. |
 | `FlowEngine.Lineage.JournalLineageId` (type) | models | An injective journal address minted from one run and node path. |
@@ -173,6 +177,7 @@ See [Getting started](/guides/getting-started), [Writing a flow](/guides/writing
 | `FlowEngine.SnapshotBoundaryOptions` (interface) | models | Context passed to a compensable action snapshot boundary. |
 | `FlowEngine.SnapshotBoundary` (class) | services | Minimal host snapshot boundary required by compensable actions. |
 | `FlowProxy.FlowProxyCollision` (class) | errors | Raised before proxy construction when two flow operations share one wire identity. |
+| `FlowProxy.InvalidFlowTag` (class) | errors | Raised before HTTP proxy construction when a flow tag is ill-formed UTF-16. |
 | `FlowProxy.OperationAddresses` (interface) | models | The three wire operation names one flow owns. |
 | `FlowProxy.operationAddresses` (const) | constructors | Derives operation names shared by proxy definitions and server handlers. |
 | `FlowProxy.assertNoCollisions` (const) | validation | Refuses a flow set whose generated operation names are ambiguous. |
