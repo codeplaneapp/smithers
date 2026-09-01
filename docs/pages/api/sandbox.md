@@ -209,11 +209,24 @@ The checks run through `RemoteChildProcessSpawner.layer`, because a provider tha
 | --- | --- |
 | default directory | `spawn(command, {})` runs in `Session.workdir` |
 | relative cwd | a relative `cwd` is taken under `workdir`, never under the transport's own directory |
+| environment names | `spawn` fails with `spawn_error` when an `options.env` entry with a value is named anything but `[A-Za-z_][A-Za-z0-9_]*`, rather than delivering a variable the command cannot see |
 | standard input | `spawn` delivers `options.stdin` bytes as the command's complete input; a transport with no input channel stages a workspace file and redirects |
 | parent creation | `writeFile` creates missing parent directories |
 | absence | `readFile` fails with `ProviderError.code === "not_found"` when the path is absent |
 | contents | file contents cross as bytes and round-trip unchanged |
 | optional control | `ping` keeps the spawner-level meaning; a declared `kill` ends the command and everything it started, not only the shell that wrapped it |
+
+:::warning[Environment names must be shell identifiers]
+A command given to `spawn` is arbitrary shell text, so every provider runs it
+through a shell, and a shell rebuilds its environment from the entries whose
+names are shell identifiers when it starts. Dash, which is `/bin/sh` on Debian
+and Ubuntu, drops `a-b`; bash, which is `/bin/sh` on macOS, keeps it. Delivery
+is therefore not portable, and no arrangement of the delivery fixes it because
+the shell that drops the name is the one that has to interpret the command.
+The loss is also invisible to the host, so nothing downstream could report it.
+`spawn` refuses such a name instead, on every provider and every platform, and
+names the variable in the error.
+:::
 
 ```ts
 import { Sandbox } from "@smthrs/sandbox"
@@ -267,7 +280,7 @@ const violations = yield* SandboxConformance.check(provider, {
 })
 ```
 
-Each check acquires a fresh session. The file checks verify binary, empty, and 64 KiB byte round-trips, `not_found`, parent creation, the default workdir and a relative `cwd`, environment delivery, standard input delivery (verified through `readFile`, so a pseudo-terminal transport is not penalized for its output), standard error arriving on one of the two streams, and a working release-then-reacquire cycle. Two checks deliberately cross surfaces: `files-reach-processes` writes through `writeFile` and measures the file with `wc -c` in a process, and `processes-reach-files` has a process produce a file that `readFile` must return, so a session serving files from anywhere but the machine its processes run on cannot pass. The suite then projects the provider through `Sandbox.commandProvider` and delegates spawn, exit, ping, and process-stop checks to `ProviderConformance`, whose kill check now also runs the fixture's `survivor` probe: after a kill, a command that can still be found running on the machine is a violation even though its wrapper exited. A provider package asserts that the returned array is empty.
+Each check acquires a fresh session. The file checks verify binary, empty, and 64 KiB byte round-trips, `not_found`, parent creation, the default workdir and a relative `cwd`, environment delivery, refusal of an environment name a guest shell would drop (`refuses-an-unusable-environment-name`), standard input delivery (verified through `readFile`, so a pseudo-terminal transport is not penalized for its output), standard error arriving on one of the two streams, and a working release-then-reacquire cycle. Two checks deliberately cross surfaces: `files-reach-processes` writes through `writeFile` and measures the file with `wc -c` in a process, and `processes-reach-files` has a process produce a file that `readFile` must return, so a session serving files from anywhere but the machine its processes run on cannot pass. The suite then projects the provider through `Sandbox.commandProvider` and delegates spawn, exit, ping, and process-stop checks to `ProviderConformance`, whose kill check now also runs the fixture's `survivor` probe: after a kill, a command that can still be found running on the machine is a violation even though its wrapper exited. A provider package asserts that the returned array is empty.
 
 ### Providers
 
@@ -351,7 +364,7 @@ const provider = KubernetesSandbox.make({
 
 `acquire` derives the Pod name from the session key (prefix `smthrs-sbx-`, lowercased, bounded to 63 characters with the key's digest kept), runs `kubectl run` with `--restart Never` and `sleep infinity`, treats an `AlreadyExists` answer as a reattach, waits for the `Ready` condition with a 300 second timeout, and prepares the workdir and a session-private pidfile directory. Options `kubectl run` has no flag for (`serviceAccount`, `nodeSelector`, `resources`) travel as a strategic-merge `--overrides` document; `context`, `namespace`, and `kubeconfig` prefix every invocation. The scope finalizer runs `kubectl delete pod --force --grace-period=0`, and a Pod that was created but never became Ready or could not prepare its workspace is deleted the same way.
 
-Commands run through `kubectl exec` under the guest `sh`, in the requested `cwd` with the requested environment exported. Files travel through the same channel as base64: a read runs guest `base64`, a write pipes base64 into `base64 -d` on the exec's stdin after `mkdir -p` of the parent, and "file contents cross the text boundary as base64 and remain byte exact". `kill` is the `ContainerSandbox` design, a pidfile per command and a second exec that signals descendants before the recorded pid. `ping` is `kubectl exec <pod> -- true`.
+Commands run through `kubectl exec` under the guest `sh`, in the requested `cwd` with the requested environment applied by `env(1)` rather than `export`, because `export` is a special builtin whose refusal of a name would end the whole script. Files travel through the same channel as base64: a read runs guest `base64`, a write pipes base64 into `base64 -d` on the exec's stdin after `mkdir -p` of the parent, and "file contents cross the text boundary as base64 and remain byte exact". `kill` is the `ContainerSandbox` design, a pidfile per command and a second exec that signals descendants before the recorded pid. `ping` is `kubectl exec <pod> -- true`.
 
 Isolation is the cluster's, not the provider's: the image, the service account, and the namespace's policies decide what a Pod can reach, and the provider only forwards the shaping options above. The image must carry `sh`, `env`, and `base64`. The Ready timeout is fixed. The real-backend suite runs against the `orbstack` context and skips wherever `kubectl cluster-info` does not answer there.
 

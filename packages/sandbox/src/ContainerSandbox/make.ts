@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { cancelGuard, killScript } from "../internal/killScript.ts"
 import { gather, type GatheredRun, providerFailure, remoteProcessOf } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
@@ -188,14 +189,17 @@ export const make = (options: ContainerSandboxOptions): Provider => {
           remoteId: name,
           workdir,
           spawn: Effect.fnUntraced(function*(command, spawnOptions) {
+            yield* checkEnvironmentNames(spawnOptions.env)
             const pidfile = `${pidDirectory}/${nextPidfile++}.pid`
             const stdin = spawnOptions.stdin
             // The caller's variables reach the COMMAND, never the wrapper. As
             // `--env` they were part of the exec environment, so a `PATH`
-            // override broke the wrapper's own `sh` one layer in — the same
+            // override broke the wrapper's own `sh` one layer in, the same
             // failure the absolute `/bin/sh` below exists to prevent, moved
-            // rather than fixed. `env(1)` also passes a name `export` would
-            // refuse (`a-b=1`), which is what the session contract accepts.
+            // rather than fixed. `env(1)` does not widen which names survive:
+            // the inner shell rebuilds its environment when it starts, so
+            // `checkEnvironmentNames` above refuses a non-identifier name
+            // whatever the delivery.
             const environment = Object.entries(spawnOptions.env ?? {}).flatMap(([key, value]) =>
               value === undefined ? [] : [CommandLine.quote(`${key}=${value}`)]
             )

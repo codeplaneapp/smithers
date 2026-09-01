@@ -391,14 +391,24 @@ describe("ContainerSandbox", () => {
             // if the caller's PATH reaches the command and neither shell.
             const overridden = yield* output(session, "true", { env: { PATH: "/nowhere" } })
             expect(overridden.code).toBe(0)
-            // A non-identifier name `export` would refuse, an empty value, and
-            // a Unicode value all survive; an undefined value is a deletion.
+            // An empty value and a Unicode value survive; an undefined value
+            // is a deletion.
             const delivered = yield* output(
               session,
-              `printf '%s:%s:[%s]' "$(printenv WITH-DASH)" "$KEPT" "$EMPTY"`,
-              { env: { "WITH-DASH": "delivered", "KEPT": "\u00e9\u00e0 two words", "EMPTY": "", "DROPPED": undefined } }
+              `printf '%s:[%s]' "$KEPT" "$EMPTY"`,
+              { env: { "KEPT": "\u00e9\u00e0 two words", "EMPTY": "", "DROPPED": undefined } }
             )
-            expect(delivered).toEqual({ stdout: "delivered:\u00e9\u00e0 two words:[]", code: 0 })
+            expect(delivered).toEqual({ stdout: "\u00e9\u00e0 two words:[]", code: 0 })
+            // A name the guest shell would drop is refused before anything is
+            // sent. The `env(1)` prefix does not save it: the inner `/bin/sh`
+            // rebuilds its environment as it starts, and dash, `/bin/sh` on
+            // Debian and Ubuntu, discards `WITH-DASH` there. Delivering it
+            // would pass on macOS and lose the variable in production.
+            const refused = yield* Effect.flip(
+              Effect.scoped(session.spawn(`printenv WITH-DASH`, { env: { "WITH-DASH": "delivered" } }))
+            )
+            expect((refused as ProviderError).code).toBe("spawn_error")
+            expect((refused as ProviderError).message).toContain("WITH-DASH")
             expect((yield* output(session, `printf '%s' "\${DROPPED-unset}"`, { env: { DROPPED: undefined } })).stdout)
               .toBe("unset")
           }))
