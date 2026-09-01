@@ -347,7 +347,15 @@ const snapshotSpec = (spec: ServiceSpec): ServiceSpec => {
     ...(spec.secretUrls === undefined
       ? {}
       : { secretUrls: Object.freeze(spec.secretUrls.map((entry) => Object.freeze({ ...entry }))) }),
-    ...(spec.readiness === undefined ? {} : { readiness: Object.freeze({ ...spec.readiness }) as Readiness }),
+    ...(spec.readiness === undefined
+      ? {}
+      : {
+        readiness: Object.freeze(
+          "exec" in spec.readiness
+            ? { ...spec.readiness, exec: Object.freeze([...spec.readiness.exec]) }
+            : { ...spec.readiness }
+        ) as Readiness
+      }),
     ...(spec.health === undefined ? {} : { health: Object.freeze({ ...spec.health }) }),
     ...(spec.stop === undefined ? {} : { stop: Object.freeze({ ...spec.stop }) }),
     ...(spec.prepare === undefined ? {} : { prepare: commands(spec.prepare)! }),

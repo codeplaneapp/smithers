@@ -1301,10 +1301,14 @@ export const materializeManifest = async (
  * "Exactly" is what the caller acts on: `PackageExec` skips materialization
  * entirely when this answers undefined. Iterating only the manifest's own
  * entries and comparing only kind and digest therefore let a stale extra file
- * from a previous build, an extra empty directory, and a lost or gained
- * executable bit all survive a cache hit into the declared output tree. The
- * tree is enumerated with the same no-follow policy the capture uses, and the
- * two are compared as sets.
+ * from a previous build and a lost or gained executable bit survive a cache hit
+ * into the declared output tree. The tree is enumerated with the same no-follow
+ * policy the capture uses, and the file and symlink sets are compared both
+ * ways.
+ *
+ * Directories are walked, never compared: a capture records files and symlinks
+ * only, so an empty directory is absent from every manifest and reporting one
+ * as a difference would re-materialize the tree on every hit.
  *
  * @category artifacts
  * @since 0.1.0
