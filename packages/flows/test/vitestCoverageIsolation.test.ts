@@ -155,7 +155,6 @@ describe("vitest coverage isolation conformance", () => {
   const coverageFloorDeferred = new Set([
     "cli",
     "control",
-    "core",
     "evals",
     "fs",
     "memory",
