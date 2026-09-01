@@ -581,6 +581,13 @@ const literal = (value: unknown, at: string): unknown =>
  * still observes the key and descriptor reads; making the directive inert
  * before it is compared is the remaining half of that hardening.
  *
+ * Identity over a CYCLIC directive is bisimulation: the visited-pair map makes
+ * two directives identical when they unfold to the same infinite tree, so a
+ * self-cycle and a two-node cycle of the same shape are the same directive.
+ * Cycle lengths that share no factor pair off against each other for their
+ * least common multiple of comparisons, which is what
+ * {@link maxComparisonPairs} bounds.
+ *
  * DECIDED: an enclosing flow that declares NO
  * placement is unconstrained and satisfies any callee, rather than satisfying
  * only a callee that declares none. Inline expansion runs the callee's steps in
@@ -593,44 +600,66 @@ const literal = (value: unknown, at: string): unknown =>
 const structuralIdentity = (left: unknown, right: unknown): boolean => {
   const pending: Array<readonly [unknown, unknown]> = [[left, right]]
   const visited = new WeakMap<object, WeakSet<object>>()
-  while (pending.length > 0) {
-    const [left, right] = pending.pop()!
-    if (Object.is(left, right)) continue
-    if (left !== Object(left)) return false
-    if (right !== Object(right)) return false
-    const leftObject = left as object
-    const rightObject = right as object
-    const leftIsArray = Array.isArray(leftObject)
-    if (leftIsArray !== Array.isArray(rightObject)) return false
-    if (
-      leftIsArray && (leftObject as ReadonlyArray<unknown>).length !== (rightObject as ReadonlyArray<unknown>).length
-    ) {
-      return false
+  let examined = 0
+  try {
+    while (pending.length > 0) {
+      const [left, right] = pending.pop()!
+      if (++examined > maxComparisonPairs) return false
+      if (Object.is(left, right)) continue
+      if (left !== Object(left)) return false
+      if (right !== Object(right)) return false
+      const leftObject = left as object
+      const rightObject = right as object
+      const leftIsArray = Array.isArray(leftObject)
+      if (leftIsArray !== Array.isArray(rightObject)) return false
+      if (
+        leftIsArray && (leftObject as ReadonlyArray<unknown>).length !== (rightObject as ReadonlyArray<unknown>).length
+      ) {
+        return false
+      }
+      const seen = visited.get(leftObject) ?? new WeakSet<object>()
+      if (seen.has(rightObject)) continue
+      seen.add(rightObject)
+      visited.set(leftObject, seen)
+      if (!leftIsArray && !(isPlainObject(leftObject) && isPlainObject(rightObject))) return false
+      const leftKeys = Reflect.ownKeys(leftObject).filter((key) =>
+        Object.prototype.propertyIsEnumerable.call(leftObject, key)
+      )
+      const rightKeys = Reflect.ownKeys(rightObject).filter((key) =>
+        Object.prototype.propertyIsEnumerable.call(rightObject, key)
+      )
+      if (leftKeys.length !== rightKeys.length) return false
+      for (const key of leftKeys) {
+        if (!Object.prototype.propertyIsEnumerable.call(rightObject, key)) return false
+        // Descriptors rather than `Reflect.get`: a getter is author code, and
+        // graph building must not run it.
+        const leftMember = Object.getOwnPropertyDescriptor(leftObject, key)!
+        const rightMember = Object.getOwnPropertyDescriptor(rightObject, key)!
+        if (!("value" in leftMember) || !("value" in rightMember)) return false
+        pending.push([leftMember.value, rightMember.value])
+      }
     }
-    const seen = visited.get(leftObject) ?? new WeakSet<object>()
-    if (seen.has(rightObject)) continue
-    seen.add(rightObject)
-    visited.set(leftObject, seen)
-    if (!leftIsArray && !(isPlainObject(leftObject) && isPlainObject(rightObject))) return false
-    const leftKeys = Reflect.ownKeys(leftObject).filter((key) =>
-      Object.prototype.propertyIsEnumerable.call(leftObject, key)
-    )
-    const rightKeys = Reflect.ownKeys(rightObject).filter((key) =>
-      Object.prototype.propertyIsEnumerable.call(rightObject, key)
-    )
-    if (leftKeys.length !== rightKeys.length) return false
-    for (const key of leftKeys) {
-      if (!Object.prototype.propertyIsEnumerable.call(rightObject, key)) return false
-      // Descriptors rather than `Reflect.get`: a getter is author code, and
-      // graph building must not run it.
-      const leftMember = Object.getOwnPropertyDescriptor(leftObject, key)!
-      const rightMember = Object.getOwnPropertyDescriptor(rightObject, key)!
-      if (!("value" in leftMember) || !("value" in rightMember)) return false
-      pending.push([leftMember.value, rightMember.value])
-    }
+  } catch {
+    // Every reflection above is a Proxy trap, and a trap is author code that
+    // may throw. Graph building must not fail with whatever it threw, so an
+    // unreadable directive gets the verdict every other one gets: identity is
+    // not proved, and the call goes to an explicit `.child()` boundary.
+    return false
   }
   return true
 }
+
+/**
+ * The most value pairs one placement comparison examines before giving up.
+ *
+ * A directive is author data walked at planning time, so the comparison needs a
+ * ceiling that does not depend on how large or how cyclic that data is.
+ * Exhausting the ceiling is a refusal to prove identity, not a claim that the
+ * two directives differ.
+ *
+ * @private
+ */
+const maxComparisonPairs = 100_000
 
 /** @private */
 const placementConflicts = (enclosing: unknown, callee: unknown): boolean =>
@@ -643,6 +672,15 @@ const maxPlacementChars = 240
 const maxPlacementDepth = 4
 
 /**
+ * How many members of one array or object a diagnostic renders.
+ *
+ * An array's cost is its LENGTH, not its member count: `new Array(100_000)` owns
+ * no properties and still renders a hundred thousand separators without this
+ * bound, so a directive a byte long becomes a diagnostic megabytes long.
+ */
+const maxPlacementMembers = 32
+
+/**
  * A bounded, inert rendering of a placement directive, for the refusal that
  * names it.
  *
@@ -652,9 +690,13 @@ const maxPlacementDepth = 4
  * {@link structuralIdentity} holds to: own enumerable data properties only,
  * never an accessor, plain objects and arrays walked and everything else named
  * by kind, under a depth bound, a cycle guard, and a length bound so a large
- * directive cannot become the whole message. Members are sorted, so two
- * directives that differ only in key order render identically, matching the
- * comparison that admitted them. It never throws.
+ * directive cannot become the whole message. Array indices are read as
+ * descriptors rather than iterated, because iteration invokes an index getter;
+ * a hole renders as `<hole>`. Both arrays and objects render at most
+ * {@link maxPlacementMembers} members and mark the rest `<more>`, so the work
+ * is bounded before the string is truncated rather than after. Object members
+ * are sorted, so two directives that differ only in key order render
+ * identically, matching the comparison that admitted them. It never throws.
  *
  * @private
  */
@@ -668,7 +710,23 @@ const renderPlacement = (value: unknown): string => {
     if (depth === maxPlacementDepth) return "<elided>"
     const nested = [...seen, object]
     if (Array.isArray(object)) {
-      return `[${(object as ReadonlyArray<unknown>).map((member) => render(member, depth + 1, nested)).join(",")}]`
+      const length = (object as ReadonlyArray<unknown>).length
+      const shown = Math.min(length, maxPlacementMembers)
+      const members: Array<string> = []
+      for (let index = 0; index < shown; index++) {
+        // `Array.prototype.map` invokes an index getter, so indices are read as
+        // descriptors here for the same reason keys are below.
+        const member = Object.getOwnPropertyDescriptor(object, String(index))
+        members.push(
+          member === undefined
+            ? "<hole>"
+            : "value" in member
+            ? render(member.value, depth + 1, nested)
+            : "<accessor>"
+        )
+      }
+      if (length > shown) members.push("<more>")
+      return `[${members.join(",")}]`
     }
     if (!isPlainObject(object)) return Object.prototype.toString.call(object)
     const members = Reflect.ownKeys(object)
@@ -679,7 +737,10 @@ const renderPlacement = (value: unknown): string => {
         return `${String(key)}:${rendered}`
       })
       .sort()
-    return `{${members.join(",")}}`
+    const shown = members.length > maxPlacementMembers
+      ? [...members.slice(0, maxPlacementMembers), "<more>"]
+      : members
+    return `{${shown.join(",")}}`
   }
 
   try {

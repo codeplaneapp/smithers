@@ -711,6 +711,47 @@ describe("Graph.build placement identity", () => {
     expect(reads).toBe(0)
   })
 
+  it("refuses a placement whose own reflection throws, instead of letting it escape", () => {
+    // `isPlainObject` calls `Object.getPrototypeOf`, which on a Proxy runs the
+    // author's trap. A trap that throws used to leave graph building as a raw
+    // Error, past the typed refusal every other unreadable placement gets.
+    const hostile = new Proxy({}, {
+      getPrototypeOf: () => {
+        throw new Error("boom")
+      }
+    })
+
+    conflict(hostile, { host: "sandbox" })
+    conflict({ host: "sandbox" }, hostile)
+  })
+
+  it("refuses to prove identity past its comparison budget", () => {
+    // Two directives large enough to exhaust the budget are refused rather than
+    // compared to the end, so a placement cannot make planning unbounded. The
+    // verdict is the same fail-closed one every unreadable value gets.
+    const wide = () => Array.from({ length: 100_001 }, () => 0)
+    conflict(wide(), wide())
+
+    // A directive that fits the budget is still proved identical.
+    const narrow = () => Array.from({ length: 1_000 }, () => 0)
+    expect(() => buildWithPlacements(narrow(), narrow())).not.toThrow()
+  })
+
+  it("judges two cycles that unfold alike identical", () => {
+    // Identity over a cyclic directive is bisimulation: a self-cycle and a
+    // two-node cycle unfold to the same infinite tree, so they are the same
+    // directive. This is deliberate, and the comparison budget is what keeps it
+    // decidable in bounded time.
+    const enclosing: { next?: unknown } = {}
+    enclosing.next = enclosing
+    const first: { next?: unknown } = {}
+    const second: { next?: unknown } = {}
+    first.next = second
+    second.next = first
+
+    expect(() => buildWithPlacements(enclosing, first)).not.toThrow()
+  })
+
   it("names both placements in the refusal, bounded and inert", () => {
     const message = (enclosing: unknown, callee: unknown): string => {
       try {
@@ -762,6 +803,45 @@ describe("Graph.build placement identity", () => {
     const large = message({ host: "x".repeat(400) }, { host: "vm" })
     expect(large).toContain("characters dropped]")
     expect(large).not.toContain("x".repeat(400))
+  })
+
+  it("renders array members inertly and under a member bound", () => {
+    const message = (enclosing: unknown, callee: unknown): string => {
+      try {
+        buildWithPlacements(enclosing, callee)
+      } catch (thrown) {
+        return (thrown as { message: string }).message
+      }
+      throw new Error("the build did not refuse")
+    }
+
+    // `Array.prototype.map` invokes an index getter. Reading own descriptors
+    // instead keeps the rendering as inert as the comparison that preceded it.
+    let reads = 0
+    const withGetter: Array<unknown> = []
+    Object.defineProperty(withGetter, "0", {
+      get: () => {
+        reads++
+        return "sandbox"
+      },
+      enumerable: true,
+      configurable: true
+    })
+    expect(message({ list: withGetter }, { host: "vm" })).toContain("<accessor>")
+    expect(reads).toBe(0)
+
+    // A sparse array costs its member bound, not its length. Rendering through
+    // `map` and `join` built one separator per element -- a hundred thousand
+    // commas for a directive that owns no properties at all.
+    const sparse = message({ list: new Array(100_000) }, { host: "vm" })
+    expect(sparse).toContain("<hole>")
+    expect(sparse).not.toContain(",,,,,")
+
+    // Past the bound, both kinds mark the tail they dropped.
+    expect(message({ list: Array.from({ length: 40 }, () => 1) }, { host: "vm" })).toContain("<more>")
+    const wide: Record<string, number> = {}
+    for (let index = 0; index < 40; index++) wide[`k${index}`] = 1
+    expect(message(wide, { host: "vm" })).toContain("<more>")
   })
 })
 

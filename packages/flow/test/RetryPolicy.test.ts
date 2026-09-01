@@ -187,6 +187,31 @@ describe("nextDelay", () => {
     expect(RetryPolicy.nextDelay(full, 1, { random: 1 })).toEqual(some(1_000))
   })
 
+  it("never jitters a delay above the declared cap", () => {
+    // Regression: `delay * (1 - ratio) + random * delay * ratio` is not exactly
+    // `delay` when `random` is 1. At ratio 0.000002 the two terms round to
+    // 100.00000000000001, which is above the policy's own `maxMs` and above the
+    // remaining expiration window when one applies, and `@smthrs/engine` sleeps
+    // on whatever this returns.
+    const rounding = RetryPolicy.make({ initialMs: 100, factor: 1, maxMs: 100, jitterRatio: 0.000002 })
+    expect(RetryPolicy.nextDelay(rounding, 1, { random: 1 })).toEqual(some(100))
+
+    // The stated postcondition, over the shapes that reach the rounding: the
+    // delay a policy hands the engine is never negative and never above the cap.
+    for (const jitterRatio of [0.000002, 1e-7, 0.1, 1 / 3, 0.9999999, 1]) {
+      for (const random of [0, 0.5, 1 - Number.EPSILON, 1]) {
+        for (const [initialMs, maxMs] of [[100, 100], [1_000, 30_000], [7, 7]] as const) {
+          const policy = RetryPolicy.make({ initialMs, factor: 1.5, maxMs, jitterRatio })
+          const delay = RetryPolicy.nextDelay(policy, 3, { random })
+          expect(Option.isSome(delay)).toBe(true)
+          const value = (delay as Option.Some<number>).value
+          expect(value).toBeGreaterThanOrEqual(0)
+          expect(value).toBeLessThanOrEqual(maxMs)
+        }
+      }
+    }
+  })
+
   it("applies jitter from the supplied random sample", () => {
     const jittered = RetryPolicy.make({
       initialMs: 100,

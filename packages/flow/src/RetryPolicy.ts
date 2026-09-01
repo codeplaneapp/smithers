@@ -337,7 +337,14 @@ export const nextDelay = (
     // In range, the result is between `delay * (1 - jitterRatio)` and `delay`,
     // so it is finite and never negative. A jittered value of zero retries
     // immediately; it does not exhaust the sequence.
-    delay = delay * (1 - policy.jitterRatio) + random * delay * policy.jitterRatio
+    //
+    // The two terms do not sum to exactly `delay` at `random: 1`: at
+    // `jitterRatio: 0.000002` a delay of 100 rounds up to 100.00000000000001,
+    // above the policy's own cap and above the remaining expiration window.
+    // Clamping down to the un-jittered delay is what makes the upper bound
+    // stated above exact rather than approximate.
+    const jittered = delay * (1 - policy.jitterRatio) + random * delay * policy.jitterRatio
+    delay = Math.min(delay, jittered)
   }
   return Option.some(delay)
 }
