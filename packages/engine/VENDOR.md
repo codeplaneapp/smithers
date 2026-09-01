@@ -6,9 +6,15 @@
 - Upstream commit: `23e176a4f05ed3e81cc13a5d70111099692ea9a5`
 - Upstream package: `effect@4.0.0-beta.102`
 - Upstream source: `packages/effect/src/unstable/workflow`
-- Vendored modules: `Flow.ts`, `Activity.ts`, `FlowEngine.ts`,
-  `DurableClock.ts`, `DurableDeferred.ts`, `DurableQueue.ts`,
-  `FlowProxy.ts`, `FlowProxyServer.ts`, and `index.ts`
+- Vendored modules, upstream name in parentheses where it changed:
+  - in `@smthrs/flow`: `Flow/` (`Flow.ts`), `Action/` (`Activity.ts`),
+    `FlowRuntime/` (the service half of `FlowEngine.ts`), `DurableClock.ts`,
+    `DurableDeferred.ts`, `DurableQueue.ts`, and `index.ts`
+  - in `@smthrs/engine`: `FlowEngine/` (`FlowEngine.ts`, split into
+    `Encoded.ts`, `make.ts`, `layerMemory.ts`, `ActionKey.ts`,
+    `FlowInstance.ts`, `SnapshotBoundary.ts`, `Errors.ts`, `Lineage.ts`,
+    `Round.ts`, and the barrel), `FlowProxy.ts`, `FlowProxyServer.ts`, and
+    `index.ts`
 
 The vendored source now spans two packages. `@smthrs/flow` carries the
 authoring half (`Flow`, `Action`, `DurableClock`, `DurableDeferred`,

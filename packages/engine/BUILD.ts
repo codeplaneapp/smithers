@@ -19,6 +19,17 @@ export const fmt = standard.fmt
 export const docs = standard.docs
 export const circular = standard.circular
 
+export const docsPages = Smithers.Generate({
+  script: Smithers.file("//packages/engine/scripts/docs.mjs"),
+  data: [
+    Smithers.file("//packages/engine/Package.ts"),
+    Smithers.glob("//packages/engine/src/**/*.ts"),
+    Smithers.glob("//packages/engine/docs/*.md"),
+    Smithers.file("//packages/engine/package.json")
+  ],
+  changes: ["docs/pages/api/engine.md"]
+})
+
 export const dependencyPolicy = Smithers.DepsLint({
   packageManager,
   runtime: packageManager.runtime,

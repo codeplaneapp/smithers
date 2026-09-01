@@ -28,7 +28,7 @@ operations — both defined in `@smthrs/flow`. This package is what runs them.
 
 | Source               | Role                                                                                                                                                                                                                                                                                                                      |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FlowEngine/`        | Interprets flows, executes actions, stores outcomes, and resumes suspended executions. `Encoded.ts` is the low-level seam, `make.ts` adapts it to the typed port, `layerMemory.ts` is the in-memory implementation, `FlowInstance.ts` builds per-execution state, and `SnapshotBoundary.ts` is the compensable host hook. |
+| `FlowEngine/`        | Interprets flows, executes actions, stores outcomes, and resumes suspended executions. `Encoded.ts` is the low-level seam, `make.ts` adapts it to the typed port, `layerMemory.ts` is the in-memory implementation, `ActionKey.ts` derives step identity, `FlowInstance.ts` builds per-execution state, `Lineage.ts` and `Round.ts` mint journal and trampoline identity, `Errors.ts` holds the coded refusals, and `SnapshotBoundary.ts` is the compensable host hook. |
 | `FlowProxy.ts`       | Derives HTTP and RPC definitions for remotely invoking flows.                                                                                                                                                                                                                                                             |
 | `FlowProxyServer.ts` | Connects those definitions to the actual flows and engine.                                                                                                                                                                                                                                                                |
 | `index.ts`           | Exposes the public namespaces.                                                                                                                                                                                                                                                                                            |
@@ -41,8 +41,8 @@ The root exports these namespaces, also available from matching
 
 | Namespace         | Public exports                                                                                                                                                                                                                                                                                                                         |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FlowEngine`      | Implementation boundary `Encoded` and `ActionExecuteOptions`; `makeUnsafe`, which adapts an `Encoded` implementation into `@smthrs/flow`'s `FlowRuntime`; in-memory `layerMemory`; per-run state constructor `makeInstance`; journal `Lineage`; trampoline `Round`; compensable-step `SnapshotBoundaryOptions` and `SnapshotBoundary`. |
-| `FlowProxy`       | `toRpcGroup` / `ConvertRpcs` and `toHttpApiGroup` / `ConvertHttpApi` derive execute, discard, and resume transports from flows.                                                                                                                                                                                                        |
+| `FlowEngine`      | Implementation boundary `Encoded` and `ActionExecuteOptions`; `makeUnsafe`, which adapts an `Encoded` implementation into `@smthrs/flow`'s `FlowRuntime`; in-memory `layerMemory`; per-run state constructor `makeInstance`; journal `Lineage` (`root`, `make`, `JournalLineageId`); trampoline `Round` (`initial`, `next`, `executionId`, `Round`, `InvalidRound`); the coded refusals `FlowNotRegistered`, `ExecutionIdentityConflict`, `SuspendedResumeGaveUp`, and `SnapshotBoundaryRequired`; compensable-step `SnapshotBoundaryOptions` and `SnapshotBoundary`. |
+| `FlowProxy`       | `toRpcGroup` / `ConvertRpcs` and `toHttpApiGroup` / `ConvertHttpApi` derive execute, discard, and resume transports from flows. `operationAddresses` / `OperationAddresses` name the three wire operations one flow owns, `assertNoCollisions` refuses an ambiguous flow set with `FlowProxyCollision`, and `InvalidFlowTag` refuses a tag with no route encoding.                                                                                                                                                                                                        |
 | `FlowProxyServer` | `layerRpcHandlers`, `layerHttpApi`, and `RpcHandlers` implement the derived transports.                                                                                                                                                                                                                                                |
 
 ## Reference implementation
@@ -57,15 +57,15 @@ import { FlowEngine } from "@smthrs/engine"
 import { FlowRuntime } from "@smthrs/flow"
 import { Effect } from "effect"
 
-// FlowEngine is the service the flow/action/deferred/clock/queue APIs
-// talk to. layerMemory is the in-memory implementation;
-// @smthrs/engine-store provides the durable one. makeUnsafe builds a
-// FlowEngine from an Encoded implementation (the persistence boundary).
+// FlowRuntime.FlowRuntime is the service the flow/action/deferred/clock/queue
+// APIs talk to, and this package implements it. layerMemory is the in-memory
+// implementation; @smthrs/engine-store provides the durable one. makeUnsafe
+// builds one from an Encoded implementation (the persistence boundary).
 const program = Effect.gen(function*() {
   const engine = yield* FlowRuntime.FlowRuntime
   // register, execute, poll, interrupt, interruptUnsafe, resume,
   // actionExecute (ActionExecuteOptions), deferredResult,
-  // deferredDone, scheduleClock
+  // deferredDone, deferredDoneIfWaiting, scheduleClock
 }).pipe(Effect.provide(FlowEngine.layerMemory))
 
 // Per-execution state is created with FlowEngine.makeInstance. Compensable actions need a SnapshotBoundary
@@ -99,10 +99,14 @@ const RpcLayer = RpcServer.layer(ReviewRpcs).pipe(
 const HttpLayer = FlowProxyServer.layerHttpApi(ReviewApi, "flows", [Review])
 ```
 
-Proxy construction refuses duplicate generated operation names before a group
-or handler map exists. HTTP routes encode a flow tag as one opaque URL-safe
-segment, preserving case, reserved characters, Unicode normalization, and
-operation identity.
+`FlowProxy.operationAddresses` is the single source of the three wire names one
+flow owns, and every group builder and server layer derives from it.
+`assertNoCollisions` runs first, so proxy construction refuses duplicate or
+suffix-ambiguous operation names before a group or handler map exists. HTTP
+routes encode a flow tag as one opaque URL-safe segment, preserving case,
+reserved characters, Unicode normalization, and operation identity. Both server
+layers log a defect from a served body through `Effect.logError`, annotated with
+the module and the wire operation name.
 
 Both server layers drive the served bodies, so both require what those bodies
 require: `Flow.Requirements` of every flow, on top of the schema services
@@ -116,7 +120,16 @@ and requires no implementation at all.
 `FlowEngine.layerMemory` is a deterministic test and local-development
 runtime, not a bounded store. It retains completed executions, action
 settlements, deferred results, and clocks until the layer scope closes; there
-is no eviction option. It snapshots a flow payload through that flow's JSON
-codec at admission and decodes a fresh value on every re-drive, so caller or
-handler mutation cannot rewrite replay state. Same-key in-flight actions share
-one settlement.
+is no eviction option. It rebuilds a submitted payload through the flow's own
+payload schema constructor at admission and again on every re-drive, so caller
+or handler mutation cannot rewrite replay state: structs, arrays, and records
+the schema declares are copied, and values it declares opaque are shared by
+reference. Same-key in-flight actions share one settlement.
+
+`executionId` is caller-supplied identity. A repeated id joins the run that
+already owns it and answers with that run's recorded result, so a retried
+submission is idempotent; a reuse that names a different flow declaration, or
+that arrives with a different payload, is refused with
+`ExecutionIdentityConflict`. The derived transports pass the field through from
+the request body, so a multi-tenant server namespaces or rejects the client
+value before it reaches `Flow.execute`.
