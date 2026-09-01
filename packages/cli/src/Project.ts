@@ -20,6 +20,7 @@
 import { Context, Layer } from "effect"
 import { existsSync } from "node:fs"
 import { dirname, isAbsolute, join, resolve } from "node:path"
+import * as Environment from "./Environment.ts"
 
 /**
  * Directory and file names that mark a Smithers 0.x project.
@@ -77,7 +78,7 @@ const anchors = (directory: string, exists: (path: string) => boolean): boolean 
  */
 export const root = (
   explicit: string | undefined,
-  cwd: string = process.cwd(),
+  cwd: string,
   exists: (path: string) => boolean = existsSync
 ): string => {
   if (explicit !== undefined && explicit !== "") {
@@ -110,7 +111,7 @@ export const root = (
  */
 export const legacyRoot = (
   explicit: string | undefined,
-  cwd: string = process.cwd(),
+  cwd: string,
   exists: (path: string) => boolean = existsSync
 ): string => {
   if (explicit !== undefined && explicit !== "") {
@@ -174,7 +175,7 @@ export const flowsDirectory = (projectRoot: string): string => join(projectRoot,
  * @since 1.0.0
  */
 export const legacyDatabases = (
-  cwd: string = process.cwd(),
+  cwd: string,
   exists: (path: string) => boolean = existsSync
 ): ReadonlyArray<string> => {
   const found: Array<string> = []
@@ -199,7 +200,7 @@ export const legacyDatabases = (
  * @since 1.0.0
  */
 export const legacyState = (
-  cwd: string = process.cwd(),
+  cwd: string,
   exists: (path: string) => boolean = existsSync
 ): ReadonlyArray<string> => {
   const found: Array<string> = []
@@ -255,7 +256,7 @@ export const ProjectRoot: Context.Reference<string> = Context.Reference<string>(
  */
 export const LegacyState: Context.Reference<ReadonlyArray<string>> = Context.Reference<ReadonlyArray<string>>(
   "/cli/LegacyState",
-  { defaultValue: () => legacyState() }
+  { defaultValue: () => legacyState(Environment.ambientWorkingDirectory()) }
 )
 
 /**
@@ -271,7 +272,7 @@ export const LegacyState: Context.Reference<ReadonlyArray<string>> = Context.Ref
  */
 export const MigrationRoot: Context.Reference<string> = Context.Reference<string>(
   "/cli/MigrationRoot",
-  { defaultValue: () => legacyRoot(undefined) }
+  { defaultValue: () => legacyRoot(undefined, Environment.ambientWorkingDirectory()) }
 )
 
 /**
@@ -291,7 +292,7 @@ export const MigrationRoot: Context.Reference<string> = Context.Reference<string
  */
 export const layer = (
   projectRoot: string,
-  migrationRoot: string = legacyRoot(undefined)
+  migrationRoot: string
 ): Layer.Layer<never> =>
   Layer.mergeAll(
     Layer.succeed(ProjectRoot, projectRoot),

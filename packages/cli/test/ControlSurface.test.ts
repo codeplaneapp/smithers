@@ -217,11 +217,15 @@ const nonTerminalControl = Layer.effect(
 
 describe("Control surface", () => {
   it("parses the remote bearer credential from either CLI spelling", () => {
-    const resolved = NodeControl.makeConfig([
-      "--remote",
-      "https://control.example.test",
-      "--credential=alpha-secret"
-    ], {})
+    const resolved = NodeControl.makeConfig(
+      [
+        "--remote",
+        "https://control.example.test",
+        "--credential=alpha-secret"
+      ],
+      {},
+      "/work"
+    )
 
     expect(resolved.remote).toBe("https://control.example.test")
     expect(resolved.credential).toBe("alpha-secret")
@@ -616,7 +620,7 @@ describe("Control surface", () => {
         const server = yield* HttpServer.HttpServer
         const shared = ["--remote", addressUrl(server), "--credential", "alpha-secret"]
         const result = yield* scenario(shared).pipe(
-          Effect.provide(NodeControl.layerControl(NodeControl.makeConfig(shared, {}))),
+          Effect.provide(NodeControl.layerControl(NodeControl.makeConfig(shared, {}, "/work"))),
           Effect.provide(scenarioServices)
         )
         return { hostname: server.address._tag === "TcpAddress" ? server.address.hostname : "", result }

@@ -2,7 +2,7 @@ import js from "@eslint/js"
 import importPlugin from "eslint-plugin-import"
 import unicorn from "eslint-plugin-unicorn"
 import tseslint from "typescript-eslint"
-import { invariants, swallowedCause, uninstalledSafety } from "../../eslint.invariants.js"
+import { ambientAuthority, invariants, swallowedCause, uninstalledSafety } from "../../eslint.invariants.js"
 import { jsdocConvention } from "../../eslint.jsdoc.js"
 
 export default tseslint.config(
@@ -60,8 +60,5 @@ export default tseslint.config(
     }
   },
   ...jsdocConvention,
-  // `ambientAuthority` (30 sites across Command, Detached, Doctor, Init,
-  // NodeControl, Project, Serve) is not wired yet. The CLI resolves its project
-  // root and environment inline rather than taking them as parameters.
-  ...invariants(uninstalledSafety, swallowedCause)
+  ...invariants(uninstalledSafety, swallowedCause, ambientAuthority)
 )

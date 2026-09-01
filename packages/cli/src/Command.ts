@@ -829,7 +829,7 @@ const init = Command.make("init", {
     yield* refuseRemoved("init", { global: config.global })
     const projectRoot = yield* Project.ProjectRoot
     const name = Option.getOrElse(config.name, () => Init.defaultName(projectRoot))
-    yield* render(yield* Effect.sync(() => Init.scaffold(projectRoot, name)))
+    yield* render(yield* Effect.sync(() => Init.scaffold(projectRoot, name, process.env)))
   })).pipe(Command.withDescription(Verb.find("init")!.help))
 
 const docs = Command.make("docs", { full: Flag.boolean("full") }, (config) =>

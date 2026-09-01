@@ -151,16 +151,16 @@ describe("NodeControl.makeConfig", () => {
       const entry = { server: "docs", command: "docs-mcp", args: ["--stdio"], cwd: directory }
       await writeFile(file, JSON.stringify([entry]))
 
-      expect(NodeControl.makeConfig(["--mcp-config", file], {}).mcpServers).toEqual([entry])
-      expect(NodeControl.makeConfig([], { SMITHERS_MCP_CONFIG: file }).mcpServers).toEqual([entry])
+      expect(NodeControl.makeConfig(["--mcp-config", file], {}, "/work").mcpServers).toEqual([entry])
+      expect(NodeControl.makeConfig([], { SMITHERS_MCP_CONFIG: file }, "/work").mcpServers).toEqual([entry])
       // The rc.0 alias, removed at 1.0.0.
-      expect(NodeControl.makeConfig([], { FLOWS_MCP_CONFIG: file }).mcpServers).toEqual([entry])
+      expect(NodeControl.makeConfig([], { FLOWS_MCP_CONFIG: file }, "/work").mcpServers).toEqual([entry])
 
       // A typo'd config must not look like "no MCP servers configured".
       const malformed = join(directory, "malformed.json")
       await writeFile(malformed, JSON.stringify([{ server: "docs" }]))
-      expect(() => NodeControl.makeConfig(["--mcp-config", malformed], {})).toThrow(malformed)
-      expect(() => NodeControl.makeConfig(["--mcp-config", join(directory, "absent.json")], {})).toThrow()
+      expect(() => NodeControl.makeConfig(["--mcp-config", malformed], {}, "/work")).toThrow(malformed)
+      expect(() => NodeControl.makeConfig(["--mcp-config", join(directory, "absent.json")], {}, "/work")).toThrow()
     } finally {
       await rm(directory, { recursive: true, force: true })
     }

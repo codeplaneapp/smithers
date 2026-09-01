@@ -175,8 +175,8 @@ const mcpServersFromArguments = (
  */
 export const makeConfig = (
   args: ReadonlyArray<string>,
-  environment: Environment = process.env,
-  cwd: string = process.cwd()
+  environment: Environment,
+  cwd: string
 ): Application.Config => ({
   remote: valueFromArguments(args, "remote") ?? Environment_.read(environment, "SMITHERS_REMOTE"),
   // New in Phase 4: at the import reference `--credential` had no environment
@@ -200,7 +200,9 @@ export const makeConfig = (
  * @since 0.1.0
  * @slop
  */
-export const config: Effect.Effect<Application.Config> = Effect.sync(() => makeConfig(process.argv.slice(2)))
+export const config: Effect.Effect<Application.Config> = Effect.sync(() =>
+  makeConfig(process.argv.slice(2), process.env, process.cwd())
+)
 
 const websocketUrl = (remote: string): string => {
   const url = new URL(remote)
@@ -358,7 +360,7 @@ export const layerObserver = (root: string): Layer.Layer<WorkspaceObservation.Ob
  * @since 0.1.0
  * @slop
  */
-export const layerRegistry = (root: string = process.cwd()): Layer.Layer<Registry.Registry> => {
+export const layerRegistry = (root: string): Layer.Layer<Registry.Registry> => {
   const platform = layerGuardedPlatform(root)
   const discovery = Discovery.layer.pipe(Layer.provide(platform))
   return Registry.layer({ sources: projectSources(root) }).pipe(
@@ -463,7 +465,7 @@ const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.Memo
  * @slop
  */
 export const engineDurable = (
-  root: string = process.cwd(),
+  root: string,
   registry?: Layer.Layer<Registry.Registry> | undefined
 ): EngineDurable => {
   const file = databasePath(root)
@@ -649,7 +651,7 @@ const seatOf = <Body, Frame, Event, State>(
  * @since 0.1.0
  */
 export const layerSeatResolver = (
-  environment: Readonly<Record<string, string | undefined>> = process.env
+  environment: Readonly<Record<string, string | undefined>>
 ): Layer.Layer<SeatResolver.SeatResolver, never, RequestExecutor.RequestExecutor> =>
   Layer.effect(SeatResolver.SeatResolver)(
     Effect.gen(function*() {
@@ -838,8 +840,8 @@ const layerRequestExecutor: Layer.Layer<RequestExecutor.RequestExecutor> = Layer
 export const layerExecutor = (
   registry: Layer.Layer<Registry.Registry>,
   engine: EngineDurable,
-  root: string = process.cwd(),
-  environment: Readonly<Record<string, string | undefined>> = process.env,
+  root: string,
+  environment: Readonly<Record<string, string | undefined>>,
   /**
    * MCP servers to connect at startup, each projected into the run's flow
    * catalog by `@smthrs/mcp/McpFlows` — one more source alongside filesystem,
@@ -1030,7 +1032,7 @@ export const layer = (applicationConfig: Application.Config) => {
     layerControl(applicationConfig),
     layerOutput,
     NodeServices.layer,
-    Project.layer(root, applicationConfig.migrationRoot),
+    Project.layer(root, applicationConfig.migrationRoot ?? Project.legacyRoot(undefined, root)),
     // `smithers memory` reads and writes the same durable store a run's
     // `memory` flow does, over the same control database. A separate
     // connection would be a second writer to one SQLite file. A remote
@@ -1113,7 +1115,7 @@ const remoteMemory = (verb: string): Effect.Effect<never, MemoryError.MemoryErro
  * @since 1.0.0
  * @slop
  */
-export const layerMemory = (root: string = process.cwd()): Layer.Layer<MemoryStore.MemoryStore> =>
+export const layerMemory = (root: string): Layer.Layer<MemoryStore.MemoryStore> =>
   MemoryStore.layer.pipe(
     Layer.provide([engineDurable(root).stores, NodeCrypto.layer]),
     Layer.orDie
@@ -1182,7 +1184,7 @@ export const layerServer = (
 export const layerGateway = (
   health: GatewayServer.Health,
   options: NodeGateway.ServerOptions = { host: "127.0.0.1", port: defaultServerOptions.port },
-  root: string = process.cwd()
+  root: string
 ) => {
   const journal = engineDurable(root).journal
   return NodeGateway.layer(health, options).pipe(
