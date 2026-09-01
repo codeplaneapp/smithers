@@ -1160,6 +1160,7 @@
         "vitest": "4.1.9",
       },
       "optionalPeers": [
+        "@effect/vitest",
         "vitest",
       ],
     },

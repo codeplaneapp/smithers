@@ -51,33 +51,77 @@ test("an environment-variable gate is a pin, inline or through a const", () => {
   assert.deepEqual(findPins(aliased).map((pin) => pin.title), ["slow two", "slow three"])
 })
 
+/**
+ * Builds a throwaway package holding one pinned test, and names it the way the
+ * register does.
+ *
+ * Re-pinned 2026-09-01: the two cases below used to read the live register and
+ * the live `packages/database` pin. `ef7ee4d0c0` unpinned that test once the
+ * open path's read-only probe brought it inside the package's per-test budget,
+ * so the register row they quoted stopped naming a pin and both cases went
+ * vacuous: the wrong-package variant found nothing to report and asserted
+ * nothing. The rule under test is unchanged. Only the pin it reads moved, from
+ * whatever the tree happens to pin today to a fixture this file owns, which is
+ * why `findPins` and `undocumentedPins` are exported at all.
+ */
+const withPinnedPackage = (title, run) => {
+  const fixtureRoot = mkdtempSync(join(repoRoot, "scripts", ".check-test-pins-"))
+  const packageDirectory = join(fixtureRoot, "ledger")
+  const testFile = join(packageDirectory, "test", "Ledger.test.mjs")
+  try {
+    mkdirSync(dirname(testFile), { recursive: true })
+    writeFileSync(testFile, `it.skip(${JSON.stringify(title)}, () => {})\n`)
+    // The register names a package by its path under `packages/`, which is the
+    // half of the pair `undocumentedPins` builds from the directory it walks.
+    run({ packageDirectory, packageName: relative(join(repoRoot, "packages"), packageDirectory), testFile })
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true })
+  }
+}
+
 test("a pin counts as documented only when Surviving pins pairs its package and title", () => {
-  const packages = [resolve(repoRoot, "packages", "database")]
-  const notes = readFileSync(notesPath, "utf8")
-  assert.deepEqual(undocumentedPins(notes, packages), [])
+  const title = "refuses a ledger row the journal never wrote"
+  withPinnedPackage(title, ({ packageDirectory, packageName, testFile }) => {
+    const packages = [packageDirectory]
+    const row = (name, pinned) => `| \`${name}\` | \`${pinned}\` | \`it.skip\` |`
+    const notes = [
+      "# Alpha notes",
+      "",
+      "### Surviving pins",
+      "",
+      "| Package | Test | Form |",
+      "| --- | --- | --- |",
+      row(packageName, title)
+    ].join("\n")
+    assert.deepEqual(undocumentedPins(notes, packages), [])
 
-  const wrongPackage = notes.replace("| `database` | `dies with the original lock defect", "| `other` | `dies with the original lock defect")
-  assert.equal(undocumentedPins(wrongPackage, packages).length, 1)
+    const wrongPackage = notes.replace(row(packageName, title), row("other", title))
+    assert.equal(undocumentedPins(wrongPackage, packages).length, 1)
 
-  const unexplained = undocumentedPins("# Alpha notes\n\nNothing here.\n", packages)
-  assert.equal(unexplained.length, 1)
-  assert.match(unexplained[0].title, /open-retry budget is exhausted/)
-  assert.equal(unexplained[0].file, "packages/database/test/NodeDatabaseConcurrentOpen.test.ts")
+    const wrongTitle = notes.replace(row(packageName, title), row(packageName, `${title} once`))
+    assert.equal(undocumentedPins(wrongTitle, packages).length, 1)
+
+    const unexplained = undocumentedPins("# Alpha notes\n\nNothing here.\n", packages)
+    assert.equal(unexplained.length, 1)
+    assert.equal(unexplained[0].title, title)
+    assert.equal(unexplained[0].file, relative(repoRoot, testFile))
+  })
 })
 
 test("reads Surviving pins through ordinary z text and through end of input", () => {
-  const packages = [resolve(repoRoot, "packages", "database")]
-  const title = "dies with the original lock defect after the fixed open-retry budget is exhausted"
-  const notes = [
-    "# Alpha notes",
-    "",
-    "### Surviving pins",
-    "",
-    "A z before this row must not end the section.",
-    `| \`database\` | \`${title}\` | rationale |`
-  ].join("\n")
+  const title = "waits for a lock the peer never releases"
+  withPinnedPackage(title, ({ packageDirectory, packageName }) => {
+    const notes = [
+      "# Alpha notes",
+      "",
+      "### Surviving pins",
+      "",
+      "A z before this row must not end the section.",
+      `| \`${packageName}\` | \`${title}\` | rationale |`
+    ].join("\n")
 
-  assert.deepEqual(undocumentedPins(notes, packages), [])
+    assert.deepEqual(undocumentedPins(notes, [packageDirectory]), [])
+  })
 })
 
 test("a resolved title does not authorize re-pinning a test", () => {
