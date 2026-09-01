@@ -27,6 +27,8 @@
   UTF-16 ordering.
 - Snapshot caller-owned descriptors and bytes before asynchronous work, and
   bind checkpoint operations to the configured repository workspace.
+- Derived workspace-revision and bundle-identity strings from domain-tagged
+  canonical JSON. Their persisted values now change.
 
 ### Fixed
 

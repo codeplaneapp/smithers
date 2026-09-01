@@ -10,8 +10,8 @@
  *
  * @since 0.1.0
  */
-import { Sha256 } from "@smthrs/crypto"
 import type { FileBoundary } from "@smthrs/flow/FileBoundary"
+import { Key } from "@smthrs/keys"
 import * as Cause from "effect/Cause"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
@@ -67,7 +67,16 @@ export const defaultMaxRebases = 3
 const bundleIdentity = (
   entries: ReadonlyArray<readonly [string, string | undefined, string | undefined]>
 ): Effect.Effect<string, never, Crypto.Crypto> =>
-  Schema.decodeUnknownEffect(Sha256)(JSON.stringify(entries)).pipe(Effect.orDie)
+  Schema.decodeUnknownEffect(Key)({
+    kind: "bundle-identity",
+    // Canonicalization substitutes undefined array slots with null. Name and
+    // normalize each member first so absence is explicit in this durable key.
+    entries: entries.map(([path, before, after]) => ({
+      path,
+      before: before ?? null,
+      after: after ?? null
+    }))
+  }).pipe(Effect.orDie)
 
 const conflicted = (cause: Cause.Cause<unknown>): boolean =>
   cause.reasons.some((reason) =>

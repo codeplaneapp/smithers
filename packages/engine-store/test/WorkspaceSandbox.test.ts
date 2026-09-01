@@ -398,6 +398,32 @@ describe("WorkspaceSandbox conformance", () => {
       expect(accepted.result.provenance.outputs).toEqual([])
     }))
 
+  it.effect("derives workspace revisions canonically across object insertion order", () =>
+    Effect.gen(function*() {
+      const revision = (initialFiles: Readonly<Record<string, string>>) =>
+        Effect.gen(function*() {
+          const test = yield* WorkspaceSandbox.makeMemory(initialFiles)
+          const accepted = yield* test.service.execute({
+            descriptor: descriptor(),
+            workflow: Effect.succeed(null)
+          })
+          if (accepted._tag !== "Accepted") throw new Error("expected accepted execution")
+          return accepted.result.provenance.baseRevision
+        })
+      const forward = { "a.txt": "a", "b.txt": "b" }
+      const reverse: Record<string, string> = {}
+      reverse["b.txt"] = "b"
+      reverse["a.txt"] = "a"
+
+      const first = yield* withCrypto(revision(forward))
+      const reordered = yield* withCrypto(revision(reverse))
+      const changed = yield* withCrypto(revision({ "a.txt": "a", "b.txt": "changed" }))
+
+      expect(first).toMatch(/^key1_[0-9a-f]{64}$/)
+      expect(reordered).toBe(first)
+      expect(changed).not.toBe(first)
+    }))
+
   it.effect("honors glob declarations without rewriting the characters inside them", () =>
     Effect.gen(function*() {
       const program = Effect.gen(function*() {
