@@ -90,6 +90,20 @@ describe("RunStore", () => {
       })
     }))
 
+  it.effect("reproduces SQLite aliasing of a lone UTF-16 surrogate", () =>
+    Effect.gen(function*() {
+      const result = yield* migrated(Effect.gen(function*() {
+        const store = yield* RunStore
+        yield* store.create("\uD800", "{}")
+        const row = yield* store.get("\uD800")
+        const duplicate = yield* Effect.flip(store.create("�", "{}"))
+        return { duplicate, row }
+      }))
+
+      expect(result.row.runId).toBe("�")
+      expect(result.duplicate.code).toBe("constraint")
+    }))
+
   it.effect("returns typed errors for invalid, duplicate, missing, and corrupt runs", () =>
     Effect.gen(function*() {
       const codes = yield* migrated(Effect.gen(function*() {
