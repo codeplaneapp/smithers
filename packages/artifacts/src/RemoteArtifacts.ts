@@ -1,9 +1,9 @@
 /**
  * The shared artifact tier: an {@link ArtifactStore.Service} spoken over HTTP.
  *
- * The wire protocol mirrors Bazel's dumb-HTTP remote cache
- * (`reference/bazel/.../remote/http/HttpCacheClient.java`), which documents it
- * as: "CAS (Content Addressable Storage) blobs are stored under the path
+ * The wire protocol mirrors Bazel's dumb-HTTP remote cache, class
+ * `HttpCacheClient` in `com.google.devtools.build.lib.remote.http`, which
+ * documents it as: "CAS (Content Addressable Storage) blobs are stored under the path
  * `/cas/base16-key`", uploaded with `PUT`, downloaded with `GET`. We add
  * `HEAD /cas/{digest}` for a single existence probe and
  * `POST /cas/findMissing` for the batched one, because Bazel's HTTP client has
@@ -122,6 +122,12 @@ export interface Options {
    * credential seam, and it is deliberately construction-time: a credential
    * that arrived as a step input would be hashed into a step key and persisted
    * everywhere the journal goes.
+   *
+   * The protocol wins every collision. These headers are applied to a request
+   * first, and the ones the protocol computes for it — `content-type`,
+   * `content-length`, and the `content-range` of a chunked upload — are applied
+   * after, so no configuration can silently strip the header that tells the
+   * tier which slice of the blob it is being handed.
    */
   readonly headers?: Record<string, string> | undefined
   /**
@@ -131,7 +137,7 @@ export interface Options {
    * failure as a miss it can live with, but it can do nothing with a read
    * that never returns. Defaults to 60 seconds, Bazel's `--remote_timeout`
    * default for the same REST protocol
-   * (`reference/bazel/.../remote/options/RemoteOptions.java`: "For the REST
+   * (its `RemoteOptions`: "For the REST
    * cache, this is both the connect and the read timeout").
    */
   readonly downloadTimeout?: Duration.Input | undefined
@@ -295,7 +301,19 @@ export const make = (
     const base = endpoint.toString().replace(/\/+$/, "")
     const headers = configured.headers
     const client = yield* HttpClient.HttpClient
-    const authorize = (request: HttpClientRequest.HttpClientRequest): HttpClientRequest.HttpClientRequest =>
+    /**
+     * Starts a request from the configured credentials.
+     *
+     * `HttpClientRequest.setHeaders` is `Headers.setAll`, so whatever is applied
+     * LAST wins. Every request therefore begins here and takes its body and its
+     * `content-range` afterwards: applying the caller's record over a finished
+     * request would let a configured `content-range`, `content-type`, or
+     * `content-length` overwrite the protocol's own, and the failure would be
+     * silent — a tier that stops seeing per-chunk ranges answers `2xx`, the
+     * client reads that as a tier ignoring `Content-Range`, and every upload
+     * degrades to a whole-blob `PUT` with no diagnostic anywhere.
+     */
+    const authorized = (request: HttpClientRequest.HttpClientRequest): HttpClientRequest.HttpClientRequest =>
       headers === undefined ? request : HttpClientRequest.setHeaders(request, headers)
     // The address is a URL path segment, so it is refused before it is
     // interpolated and percent-encoded when it is: an address carrying a
@@ -305,7 +323,7 @@ export const make = (
     // a digest read back out of a durable row.
     const casUrl = (digest: ArtifactStore.Digest) => `${base}/cas/${digest}`
     const send = (operation: string, request: HttpClientRequest.HttpClientRequest) =>
-      client.execute(authorize(request)).pipe(Effect.mapError(() => transportFailure(operation)))
+      client.execute(request).pipe(Effect.mapError(() => transportFailure(operation)))
     const parseDeadline = (name: string, input: Duration.Input | undefined, fallback: Duration.Duration) =>
       Effect.gen(function*() {
         const parsed = Duration.fromInput(input ?? fallback)
@@ -413,7 +431,7 @@ export const make = (
     /** The network half of `get`: request, status split, bounded body read. */
     const download = (digest: ArtifactStore.Digest) =>
       Effect.gen(function*() {
-        const response = yield* send("a download", HttpClientRequest.get(casUrl(digest)))
+        const response = yield* send("a download", authorized(HttpClientRequest.get(casUrl(digest))))
         if (response.status === 404) {
           return yield* Effect.fail(new ArtifactStore.ArtifactMissing({ code: "artifact_missing", digest }))
         }
@@ -426,7 +444,7 @@ export const make = (
       Effect.gen(function*() {
         const response = yield* send(
           "an upload",
-          HttpClientRequest.put(casUrl(digest)).pipe(
+          authorized(HttpClientRequest.put(casUrl(digest))).pipe(
             HttpClientRequest.bodyUint8Array(bytes, "application/octet-stream")
           )
         )
@@ -444,7 +462,13 @@ export const make = (
       if (header === undefined) return undefined
       const match = /^bytes=0-(\d+)$/.exec(header.trim())
       if (match === null) return undefined
-      return Number(match[1]) + 1
+      const last = Number(match[1])
+      // A prefix past the safe integer range does not survive `Number`: the
+      // decimal digits are rounded, so the offset it names is a number this
+      // client made up. It proves nothing about what the tier holds, which is
+      // the same as naming no prefix at all.
+      if (!Number.isSafeInteger(last)) return undefined
+      return last + 1
     }
 
     /** A tier that refuses ranged bodies, in the two ways HTTP has to say so. */
@@ -459,7 +483,7 @@ export const make = (
      * refused — it simply proves nothing, so the caller sends the blob whole.
      */
     const holdsWhole = (digest: ArtifactStore.Digest, total: number) =>
-      Effect.map(send("an existence probe", HttpClientRequest.head(casUrl(digest))), (response) => {
+      Effect.map(send("an existence probe", authorized(HttpClientRequest.head(casUrl(digest)))), (response) => {
         if (!isOk(response)) return false
         const declared = response.headers["content-length"]
         return declared !== undefined && Number(declared) === total
@@ -485,7 +509,7 @@ export const make = (
         const ranged = (range: string, body: Uint8Array) =>
           send(
             "an upload",
-            HttpClientRequest.put(casUrl(digest)).pipe(
+            authorized(HttpClientRequest.put(casUrl(digest))).pipe(
               HttpClientRequest.bodyUint8Array(body, "application/octet-stream"),
               HttpClientRequest.setHeader("content-range", range)
             )
@@ -578,7 +602,7 @@ export const make = (
         const response = yield* within(
           "an existence probe",
           requestDeadline,
-          send("an existence probe", HttpClientRequest.head(casUrl(validated)))
+          send("an existence probe", authorized(HttpClientRequest.head(casUrl(validated))))
         )
         if (response.status === 404) return false
         if (!isOk(response)) return yield* Effect.fail(unexpectedStatus("an existence probe", response.status))
@@ -612,7 +636,7 @@ export const make = (
               Effect.gen(function*() {
                 const response = yield* send(
                   "a batched existence probe",
-                  HttpClientRequest.post(`${base}/cas/findMissing`).pipe(
+                  authorized(HttpClientRequest.post(`${base}/cas/findMissing`)).pipe(
                     HttpClientRequest.bodyUint8Array(requestBody, "application/json")
                   )
                 )

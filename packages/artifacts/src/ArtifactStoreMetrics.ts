@@ -2,10 +2,22 @@
  * Standard metric definitions for content-addressed artifact storage.
  *
  * This module only defines the metric handles, following the shape of Effect's
- * `ClusterMetrics`. The local `ArtifactStore` implementations update them per
- * successful operation, so a `CombinedArtifacts` stack counts once per tier it
- * actually touched. No exporter ships in this package; provide one — for
+ * `ClusterMetrics`. No exporter ships in this package; provide one — for
  * example `@smthrs/observability` — and these counters appear in it.
+ *
+ * Only the local `ArtifactStore` implementations, filesystem and memory, update
+ * them. `RemoteArtifacts` is deliberately uninstrumented, and the counters carry
+ * no tier attribute, so read them as *local artifact store traffic* rather than
+ * as artifact operations:
+ *
+ * - a `CombinedArtifacts` read the local tier serves counts one get;
+ * - a read the shared tier serves counts NO get, because no local store
+ *   answered it;
+ * - the write-back that materializes such a read counts a put, indistinguishable
+ *   from a producer publishing new bytes.
+ *
+ * Attributing operations per tier needs the tier in the metric, which would
+ * change the published counter shape; until then this is what the numbers mean.
  *
  * @since 1.0.0-rc.0
  */

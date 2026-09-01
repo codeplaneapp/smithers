@@ -1,7 +1,7 @@
 /**
  * The dumb-HTTP CAS protocol: `GET`/`PUT`/`HEAD /cas/{digest}` and
  * `POST /cas/findMissing`, mirroring
- * `reference/bazel/.../remote/http/HttpCacheClient.java`.
+ * `com.google.devtools.build.lib.remote.http.HttpCacheClient`.
  */
 import { describe, expect, it } from "@effect/vitest"
 import { syncCrypto } from "@smthrs/crypto"
@@ -228,6 +228,26 @@ describe("uploads", () => {
       const tier = remote(() => new Response(null, { status: 200 }), { headers: { authorization: "Bearer secret" } })
       yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(artifact))))
       expect(tier.calls[0]!.headers["authorization"]).toBe("Bearer secret")
+    }))
+
+  it.effect("keeps its own content headers when a deployment configures the same names", () =>
+    Effect.gen(function*() {
+      // Caller headers are applied first and the protocol's own last. The other
+      // order is silently destructive: a configured `content-range` would ride
+      // on every chunk, the tier would stop seeing per-chunk ranges, answer
+      // 2xx, and the client would read that as a tier ignoring `Content-Range`
+      // and re-send the whole blob forever, with no diagnostic anywhere.
+      const tier = remote(() => new Response(null, { status: 200 }), {
+        headers: {
+          authorization: "Bearer secret",
+          "content-range": "bytes 0-0/1",
+          "content-type": "text/plain"
+        }
+      })
+      yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(artifact))))
+      const upload = tier.calls[0]!
+      expect(upload.headers["authorization"]).toBe("Bearer secret")
+      expect(upload.headers["content-type"]).toBe("application/octet-stream")
     }))
 
   it.effect("fails on a non-2xx answer", () =>
@@ -492,6 +512,35 @@ describe("chunked uploads", () => {
       expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 0-3/10", undefined])
     }))
 
+  it.effect("computes each chunk's range even when one is configured for every request", () =>
+    Effect.gen(function*() {
+      // The protocol's `content-range` is applied after the caller's headers,
+      // so a deployment that configures the same name cannot silently turn the
+      // resumable path into a permanent whole-blob path.
+      const tier = remote(withHeads(() => new Response(null, { status: 308 })), {
+        chunkBytes: 4,
+        headers: { "content-range": "bytes 0-0/1" }
+      })
+      const published = yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(published).toBe(largeDigest)
+      expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 0-3/10", "bytes 4-7/10", "bytes 8-9/10"])
+    }))
+
+  it.effect("does not resume from a prefix past the safe integer range", () =>
+    Effect.gen(function*() {
+      // `Number("9".repeat(19)) + 1` silently loses precision, so a hostile or
+      // broken tier must not be able to move the offset with it. An unusable
+      // prefix leaves the offset where the chunk put it, and the transfer still
+      // terminates.
+      const tier = remote(
+        withHeads(() => new Response(null, { status: 308, headers: { range: `bytes=0-${"9".repeat(19)}` } })),
+        { chunkBytes: 4 }
+      )
+      const published = yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+      expect(published).toBe(largeDigest)
+      expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 0-3/10", "bytes 4-7/10", "bytes 8-9/10"])
+    }))
+
   it.effect("completes when the last chunk is acknowledged with 308", () =>
     Effect.gen(function*() {
       // A tier that answers every chunk "keep going" has still taken every
@@ -553,6 +602,19 @@ describe("downloads", () => {
       const tier = remote(() => new Response(artifact))
       expect(text(yield* withCrypto(Effect.flatMap(tier.store, (store) => store.get(digest))))).toBe(artifact)
       expect(tier.calls[0]!.method).toBe("GET")
+    }))
+
+  it.effect("round-trips a zero-byte artifact", () =>
+    Effect.gen(function*() {
+      // An empty body is zero bytes, not an absent answer: the digest check is
+      // the only arbiter of whether empty content is the requested artifact.
+      const empty = sha256(new Uint8Array(0))
+      const tier = remote((call) =>
+        call.method === "GET" ? new Response(null, { status: 200 }) : new Response(null, { status: 200 })
+      )
+      const store = yield* tier.store
+      expect(yield* withCrypto(store.put(new Uint8Array(0)))).toBe(empty)
+      expect((yield* withCrypto(store.get(empty))).byteLength).toBe(0)
     }))
 
   it.effect("reports a typed miss on 404", () =>

@@ -1,6 +1,6 @@
 /**
  * Local-first, remote-second, with write-back — the shape of Bazel's
- * `CombinedCache` (`reference/bazel/.../remote/CombinedCache.java`).
+ * `CombinedCache` (`com.google.devtools.build.lib.remote.CombinedCache`).
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"

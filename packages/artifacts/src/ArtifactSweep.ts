@@ -6,7 +6,8 @@
  * contract is shared by memory, filesystem, and network tiers, and a remote
  * tier can neither enumerate its address space nor accept a delete — Bazel
  * draws the same line: its disk-cache collector
- * (`reference/bazel/.../remote/disk/DiskCacheGarbageCollector.java`) walks the
+ * (class `DiskCacheGarbageCollector` in
+ * `com.google.devtools.build.lib.remote.disk`) walks the
  * local directory, while the remote tier owns its own retention. Only the
  * host-local filesystem store implements this.
  *

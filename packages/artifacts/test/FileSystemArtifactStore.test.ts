@@ -398,6 +398,28 @@ describe("verification and healing (issues #132, #144, #145)", () => {
 describe("the orphan sweep (issue #138)", () => {
   const stale = `.flows/objects/aa/old.tmp-dead-0`
   const fresh = `.flows/objects/aa/live.tmp-live-0`
+  const staleLock = `.flows/objects/.locks/${"a".repeat(64)}.lock`
+  const staleTombstone = `.flows/objects/.locks/${"b".repeat(64)}.lock.stale-dead-owner`
+  const freshLock = `.flows/objects/.locks/${"c".repeat(64)}.lock`
+
+  it.effect("reclaims lock files a hard-killed holder left behind, and keeps live ones", () =>
+    Effect.gen(function*() {
+      // A lock file is otherwise reclaimed only when another acquirer contends
+      // for the same digest, and a digest nobody publishes again never gets
+      // one. Without this the `.locks` directory grows without bound, which is
+      // the exact failure the temp sweep exists to prevent.
+      yield* TestClock.adjust("2 hours")
+      const now = yield* Clock.currentTimeMillis
+      const dead = now - 2 * 60 * 60 * 1000
+      const host = memoryFs({
+        seed: { [staleLock]: "dead-owner", [staleTombstone]: "dead-owner", [freshLock]: "live-owner" },
+        mtimes: { [staleLock]: dead, [staleTombstone]: dead, [freshLock]: now }
+      })
+      yield* withCrypto(store(host).put(bytes(artifact)))
+      expect(host.files.has(staleLock)).toBe(false)
+      expect(host.files.has(staleTombstone)).toBe(false)
+      expect(host.files.has(freshLock)).toBe(true)
+    }))
 
   it.effect("sweeps stale orphans on first put, keeps fresh temps, and sweeps once", () =>
     Effect.gen(function*() {
@@ -438,6 +460,19 @@ const errorOf = (exit: Exit.Exit<unknown, unknown>): unknown => {
 }
 
 describe("reads, probes, and refusals", () => {
+  it.effect("round-trips a zero-byte artifact", () =>
+    Effect.gen(function*() {
+      // A step that spills an empty output is an ordinary publication: the
+      // empty digest is a real address, and nothing along the write, read, or
+      // verify path may treat "no bytes" as "no artifact".
+      const host = memoryFs()
+      const artifacts = store(host)
+      const empty = yield* withCrypto(artifacts.put(new Uint8Array(0)))
+      expect(empty).toBe(sha256(new Uint8Array(0)))
+      expect(yield* withCrypto(artifacts.has(empty))).toBe(true)
+      expect((yield* withCrypto(artifacts.get(empty))).byteLength).toBe(0)
+    }))
+
   it.effect("reports a typed miss for an address it does not hold", () =>
     Effect.gen(function*() {
       const host = memoryFs()

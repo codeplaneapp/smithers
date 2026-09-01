@@ -3,7 +3,7 @@
  * write-back into the local tier.
  *
  * This is the shape of Bazel's `CombinedCache`
- * (`reference/bazel/.../remote/CombinedCache.java`): a read consults the disk
+ * (`com.google.devtools.build.lib.remote.CombinedCache`): a read consults the disk
  * cache, falls back to the remote cache only on a miss, and *uploads what it
  * found back into the disk cache* so the next read is local
  * (`downloadActionResultFromRemote`, lines 230-303). A write goes to both.
@@ -42,7 +42,7 @@ export interface Options {
    * starts, so the deadline bounds only how long a stalled remote can delay
    * the answer — an abandoned upload is dropped exactly like a refused one.
    * Defaults to 60 seconds, Bazel's `--remote_timeout` default
-   * (`reference/bazel/.../remote/options/RemoteOptions.java`).
+   * (its `RemoteOptions`).
    */
   readonly uploadTimeout?: Duration.Input | undefined
   /**

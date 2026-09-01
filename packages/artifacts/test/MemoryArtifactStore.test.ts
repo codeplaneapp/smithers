@@ -103,12 +103,27 @@ describe("makeMemory", () => {
       }
     }))
 
-  it.effect("reports an input buffer detached before execution as digest_failed", () =>
+  it.effect("reports an input buffer detached before execution as a host refusal", () =>
     Effect.gen(function*() {
+      // The snapshot is the first statement of every `put`, before the Crypto
+      // service is consulted at all, so a refused copy is a host allocation
+      // failure and must not be reported as a crypto one.
       const input = bytes(artifact)
       structuredClone(input.buffer, { transfer: [input.buffer as ArrayBuffer] })
       const exit = yield* withCrypto(ArtifactStore.makeMemory().put(input).pipe(Effect.exit))
-      expect(errorOf(exit)).toMatchObject({ code: "digest_failed" })
+      expect(errorOf(exit)).toMatchObject({
+        code: "unavailable",
+        message: "the host could not copy the artifact bytes"
+      })
+    }))
+
+  it.effect("round-trips a zero-byte artifact", () =>
+    Effect.gen(function*() {
+      const artifacts = ArtifactStore.makeMemory()
+      const empty = yield* withCrypto(artifacts.put(new Uint8Array(0)))
+      expect(empty).toBe(sha256(new Uint8Array(0)))
+      expect(yield* withCrypto(artifacts.has(empty))).toBe(true)
+      expect((yield* withCrypto(artifacts.get(empty))).byteLength).toBe(0)
     }))
 
   it.effect("is immune to a caller mutating the array it got", () =>
