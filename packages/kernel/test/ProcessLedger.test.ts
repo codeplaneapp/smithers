@@ -192,9 +192,9 @@ describe("ProcessLedger", () => {
         startedAtMs: 0,
         commandDigest: "sleep 60"
       } as const
-      // The in-memory half still tracked it, so the caller can still release
-      // what it started.
-      expect((yield* ledger.live).map((row) => row.pid)).toEqual([5])
+      // The caller is told the spawn was not recorded and kills the child, so
+      // the ledger must not retain a process this incarnation does not hold.
+      expect(yield* ledger.live).toEqual([])
       expect((yield* Effect.flip(ledger.reaped(held)))._tag).toBe("@smthrs/journal/JournalError")
       expect((yield* Effect.flip(ledger.skipped(held, "pre-boot")))._tag).toBe("@smthrs/journal/JournalError")
       expect((yield* Effect.flip(ledger.release(held)))._tag).toBe("@smthrs/journal/JournalError")

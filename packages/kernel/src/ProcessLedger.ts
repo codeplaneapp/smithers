@@ -290,10 +290,12 @@ const makeWith = (options: Options, sink: Sink): Service => {
           commandDigest: spawned.commandDigest
         }
         live.set(record.pid, record)
-        // The in-memory entry goes in first and stays even when the durable
-        // half fails, so a caller that kills the process it just started still
-        // finds the record to release.
-        yield* sink.append(SpawnedEventType, record)
+        // A failed append tells the caller the spawn was not recorded, and the
+        // caller kills the child. Keeping it live would lie to every later
+        // reader about a process this incarnation still holds.
+        yield* sink.append(SpawnedEventType, record).pipe(
+          Effect.tapCause(() => Effect.sync(() => live.delete(record.pid)))
+        )
         return record
       }),
     release: (record) =>

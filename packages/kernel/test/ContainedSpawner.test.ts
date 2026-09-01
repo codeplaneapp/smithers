@@ -9,6 +9,7 @@
  * the spawn scope closes.
  */
 import { describe, expect, it } from "@effect/vitest"
+import * as JournalModule from "@smthrs/journal/Journal"
 import { JournalError } from "@smthrs/journal/Journal"
 import { Effect, Layer, Sink, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -190,6 +191,11 @@ describe("ContainedSpawner", () => {
     Effect.gen(function*() {
       const spawned: Array<ChildProcess.Command> = []
       const events: Array<string> = []
+      // The public constructor keeps this test on the same in-memory and
+      // durable path as production while the journal refuses every append.
+      const ledger = yield* ProcessLedger.make({ hostId: "broken", ownerPid: 1 }).pipe(
+        Effect.provide(JournalModule.layerNoop())
+      )
 
       const failure = yield* Effect.gen(function*() {
         const spawner = yield* ChildProcessSpawner
@@ -198,7 +204,7 @@ describe("ContainedSpawner", () => {
         Effect.provide(
           ContainedSpawner.layer().pipe(
             Layer.provide(hostSpawner(spawned, 4321, events)),
-            Layer.provide(Layer.succeed(ProcessLedger.ProcessLedger)(brokenLedger(["record"], events)))
+            Layer.provide(Layer.succeed(ProcessLedger.ProcessLedger)(ledger))
           )
         ),
         Effect.scoped
@@ -211,6 +217,7 @@ describe("ContainedSpawner", () => {
       expect(failure.reason.method).toBe("spawn")
       expect(String(failure)).toContain("could not record this spawn durably")
       expect(events).toEqual(["killed", "signalled"])
+      expect(yield* ledger.live).toEqual([])
     }))
 
   it.effect("closes the scope when the exit itself cannot be journaled", () =>
