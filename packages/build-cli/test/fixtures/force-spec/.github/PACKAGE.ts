@@ -38,13 +38,13 @@ const review = S.Github.Workflow({
 const danger = S.Shell.Run({
   bin: S.NodeModule.Bin("danger"),
   args: ["ci", "--verbose"],
-  secrets: [S.Secret("DANGER_GITHUB_API_TOKEN")],
+  secrets: [S.HttpSecret(S.Secret("DANGER_GITHUB_API_TOKEN"), ["https://api.github.com"])],
   sandbox: { network: true },
 })
 
 const pr = S.Github.Pr({
   gates: [root.prePush],
-  secrets: [S.Secret("GITHUB_TOKEN")],
+  secrets: [S.HttpSecret(S.Secret("GITHUB_TOKEN"), ["https://api.github.com"])],
   sandbox: { network: true },
 })
 
