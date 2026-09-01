@@ -52,7 +52,7 @@ import { annotateWaiting } from "./FlowRuntime/WaitingAnnotation.ts"
 export class SleepRequestInvalid extends Schema.TaggedError<SleepRequestInvalid>()(
   "@smthrs/flow/SleepRequestInvalid",
   {
-    code: Schema.Literals(["missing_deadline", "ambiguous_deadline"]),
+    code: Schema.Literals(["missing_deadline", "ambiguous_deadline", "invalid_deadline"]),
     message: Schema.String
   }
 ) {}
@@ -107,11 +107,18 @@ export const action: Action.Declared<
 /**
  * The absolute deadline a payload names, in epoch milliseconds.
  *
- * DECIDED (2026-08-11, pending review): a payload names EXACTLY one of `millis`
+ * DECIDED: a payload names EXACTLY one of `millis`
  * and `until`, and both other shapes are refused rather than resolved by
  * precedence. A precedence rule would silently ignore half of a payload an
  * author believed in, and the two fields are the same fact stated two ways, so
  * there is no shape where carrying both is meaningful.
+ *
+ * `Duration.millis` accepts every number, so an unchecked deadline changes the
+ * sleep instead of refusing it. `NaN` becomes zero, a negative relative delay
+ * has already passed, and `Infinity` never ends. The implementation rejects
+ * those values before it annotates the instance or arms a clock. A finite
+ * absolute `until` remains legal when it is in the past because that sleep can
+ * settle immediately.
  *
  * @private
  */
@@ -128,8 +135,40 @@ const deadlineOf = (
       })
     )
   }
-  if (payload.millis !== undefined) return Effect.succeed(now + payload.millis)
-  if (payload.until !== undefined) return Effect.succeed(payload.until)
+  if (payload.millis !== undefined) {
+    if (!Number.isFinite(payload.millis) || payload.millis < 0) {
+      return Effect.fail(
+        new SleepRequestInvalid({
+          code: "invalid_deadline",
+          message: `${tag} was called with millis ${payload.millis}. A deadline is a finite number of ` +
+            "milliseconds that is not negative; the sleep would be over before it started, or never over at all."
+        })
+      )
+    }
+    const deadline = now + payload.millis
+    if (!Number.isFinite(deadline)) {
+      return Effect.fail(
+        new SleepRequestInvalid({
+          code: "invalid_deadline",
+          message: `${tag} was called with millis ${payload.millis} at current time ${now}, which produces ` +
+            `${deadline}. A deadline is a finite epoch time in milliseconds.`
+        })
+      )
+    }
+    return Effect.succeed(deadline)
+  }
+  if (payload.until !== undefined) {
+    return Number.isFinite(payload.until)
+      ? Effect.succeed(payload.until)
+      : Effect.fail(
+        new SleepRequestInvalid({
+          code: "invalid_deadline",
+          message:
+            `${tag} was called with until ${payload.until}. A deadline is a finite epoch time in milliseconds; ` +
+            "the sleep must end at a real point in time."
+        })
+      )
+  }
   return Effect.fail(
     new SleepRequestInvalid({
       code: "missing_deadline",
@@ -141,7 +180,7 @@ const deadlineOf = (
 /**
  * The durable clock the dispatch currently executing arms.
  *
- * DECIDED (2026-08-11, pending review): the name is derived from the ENGINE's
+ * DECIDED: the name is derived from the ENGINE's
  * per-dispatch identity — the invocation key it already allocated — rather than
  * from the payload. A durable clock's deferred is addressed by (execution,
  * name), so the name has to be stable across replays of one node and distinct
@@ -152,7 +191,7 @@ const deadlineOf = (
  * sleep once — and closing that with a discriminator in the payload would make
  * an author carry identity that a keyed plan node already has.
  *
- * DECIDED (2026-08-11, pending review): a runtime that supplies no dispatch
+ * DECIDED: a runtime that supplies no dispatch
  * identity is refused as a defect rather than falling back to the payload. The
  * fallback is unobservable in the one-wait case and silently collapses two
  * waits in every other, so it would trade a wiring error a host fixes once for
@@ -194,14 +233,14 @@ export const layer: Layer.Layer<never, never, Crypto.Crypto | FlowRuntime> = act
     const now = yield* Clock.currentTimeMillis
     const wakeAt = yield* deadlineOf(payload, now)
     const remaining = wakeAt - now
-    // DECIDED (2026-08-11, pending review): a deadline that has already passed
+    // DECIDED: a deadline that has already passed
     // settles the node instead of parking it. A durable wait exists to survive
     // the gap until a deadline, and a run that resumes after its own deadline
     // has to make progress rather than park again on a timer that can only fire
     // in the past.
     if (remaining <= 0) return
     const name = yield* clockName
-    // DECIDED (2026-08-11, pending review): the park is declared rather than
+    // DECIDED: the park is declared rather than
     // left to a driver's derivation, so a host with no clock table still parks
     // under `timer`. A `millis` deadline is recomputed from the current clock,
     // so a round re-driven before its timer fires re-declares a `wakeAt` later

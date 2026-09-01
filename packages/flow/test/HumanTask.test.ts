@@ -15,7 +15,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Action, DurableDeferred, Flow, FlowRuntime, Graph, HumanTask, Interpreter } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
-import { Effect, Exit, Layer, Option, Schema } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 import { TestClock } from "effect/testing"
 import { withCrypto } from "./Crypto.ts"
@@ -204,6 +204,37 @@ describe("HumanTask.validate", () => {
     expect(HumanTask.validate("a string", { kind: "json", schema })).toContain("object")
   })
 
+  it("matches object-valued enum members structurally", () => {
+    const schema = { enum: [{ id: 1, details: { ready: false } }, "other"] }
+    expect(
+      HumanTask.validate({ details: { ready: false }, id: 1 }, { kind: "json", schema })
+    ).toBeUndefined()
+    expect(HumanTask.validate({ id: 2, details: { ready: false } }, { kind: "json", schema }))
+      .toContain("must be one of")
+    expect(HumanTask.validate({ id: 1 }, { kind: "json", schema })).toContain("must be one of")
+    expect(HumanTask.validate({ ix: 1, details: { ready: false } }, { kind: "json", schema }))
+      .toContain("must be one of")
+  })
+
+  it("matches array-valued enum members structurally", () => {
+    const schema = { enum: [[1, { id: 2 }]] }
+    expect(HumanTask.validate([1, { id: 2 }], { kind: "json", schema })).toBeUndefined()
+    expect(HumanTask.validate([1, { id: 3 }], { kind: "json", schema })).toContain("must be one of")
+    expect(HumanTask.validate([1], { kind: "json", schema })).toContain("must be one of")
+    expect(HumanTask.validate({ 0: 1 }, { kind: "json", schema })).toContain("must be one of")
+  })
+
+  it("matches nested, null-valued, and false-valued enum members", () => {
+    const nested = {
+      type: "object",
+      properties: { choice: { enum: [{ id: 1 }, "b"] } }
+    }
+    expect(HumanTask.validate({ choice: { id: 1 } }, { kind: "json", schema: nested })).toBeUndefined()
+    expect(HumanTask.validate({ choice: { id: 2 } }, { kind: "json", schema: nested })).toContain("choice")
+    expect(HumanTask.validate(null, { kind: "json", schema: { enum: [null, "none"] } })).toBeUndefined()
+    expect(HumanTask.validate(false, { kind: "json", schema: { enum: [false, true] } })).toBeUndefined()
+  })
+
   it("checks every scalar type the subset covers, both ways", () => {
     const cases: ReadonlyArray<readonly [unknown, unknown, boolean]> = [
       [1.5, { type: "number" }, true],
@@ -262,6 +293,37 @@ describe("HumanTask.validate", () => {
     expect(HumanTask.validate({}, { kind: "json", schema: inherited })).toBeUndefined()
     expect(HumanTask.validate({ toString: 1 }, { kind: "json", schema: inherited })).toContain("string")
   })
+
+  it("bounds answer nodes at the exported limit", () => {
+    const exact = Array.from({ length: HumanTask.maxAnswerNodes - 1 }, () => null)
+    const over = [...exact, null]
+    expect(HumanTask.validate(exact, { kind: "json", schema: { type: "array" } })).toBeUndefined()
+    const rejection = HumanTask.validate(over, { kind: "json", schema: { type: "array" } })
+    expect(rejection).toContain("too large to check")
+    expect(rejection).toContain(String(over.length - 1))
+  })
+
+  it("truncates rendered diagnostics only after the exported limit", () => {
+    const exact = HumanTask.validate("x".repeat(HumanTask.maxDiagnosticChars - 2), {
+      kind: "select",
+      options: ["ok"]
+    })
+    const over = HumanTask.validate("x".repeat(HumanTask.maxDiagnosticChars - 1), {
+      kind: "select",
+      options: ["ok"]
+    })
+    expect(exact).not.toContain("characters dropped")
+    expect(over).toContain("1 characters dropped")
+    expect(
+      HumanTask.validate("no", { kind: "select", options: ["x".repeat(HumanTask.maxDiagnosticChars + 1)] })
+    ).toContain("characters dropped")
+    expect(
+      HumanTask.validate("no", {
+        kind: "json",
+        schema: { enum: ["x".repeat(HumanTask.maxDiagnosticChars + 1)] }
+      })
+    ).toContain("characters dropped")
+  })
 })
 
 describe("HumanTask.validateSchema", () => {
@@ -293,6 +355,39 @@ describe("HumanTask.validateSchema", () => {
     expect(HumanTask.validateSchema({ type: "tuple" })).toContain("tuple")
     expect(HumanTask.validateSchema({ enum: "ship" })).toContain("enum")
     expect(HumanTask.validateSchema(null)).toContain("JSON Schema object")
+  })
+
+  it("refuses malformed required and nullable declarations at their paths", () => {
+    expect(HumanTask.validateSchema({ type: "object", required: "name" })).toContain("required")
+    expect(HumanTask.validateSchema({ type: "object", required: [1] })).toContain("required.0")
+    expect(HumanTask.validateSchema({ type: "object", nullable: "yes" })).toContain("nullable")
+  })
+
+  it("bounds schema depth at the exported limit", () => {
+    const nested = (depth: number): unknown => {
+      let schema: unknown = { type: "string" }
+      for (let index = 0; index < depth; index++) schema = { type: "array", items: schema }
+      return schema
+    }
+
+    expect(HumanTask.validateSchema(nested(HumanTask.maxSchemaDepth))).toBeUndefined()
+    const complaint = HumanTask.validateSchema(nested(HumanTask.maxSchemaDepth + 1))
+    expect(complaint).toContain(`depth of ${HumanTask.maxSchemaDepth}`)
+    expect(complaint).toContain("items")
+  })
+
+  it("bounds schema nodes at the exported limit", () => {
+    const schemaWithNodes = (nodes: number) => ({
+      type: "object",
+      properties: Object.fromEntries(
+        Array.from({ length: nodes - 1 }, (_, index) => [`field${index}`, { type: "string" }])
+      )
+    })
+
+    expect(HumanTask.validateSchema(schemaWithNodes(HumanTask.maxSchemaNodes))).toBeUndefined()
+    const complaint = HumanTask.validateSchema(schemaWithNodes(HumanTask.maxSchemaNodes + 1))
+    expect(complaint).toContain(`node count of ${HumanTask.maxSchemaNodes}`)
+    expect(complaint).toContain(`field${HumanTask.maxSchemaNodes - 1}`)
   })
 })
 
@@ -413,6 +508,69 @@ describe("HumanTask gives up", () => {
     )
   })
 
+  effect("retains rejection diagnostics exactly to the cap and omits the tail", () => {
+    const request = { kind: "select", options: ["ok"] } as const
+    const maxValueChars = HumanTask.maxDiagnosticChars - 2
+    const valuesAtLimit = (): Array<string> => {
+      for (let count = 1; count <= 100; count++) {
+        const base = Array.from({ length: count }, (_, index) => {
+          const reason = HumanTask.validate("", request)!
+          return `attempt ${index + 1}: ${reason}`.length
+        }).reduce((sum, length) => sum + length, 0)
+        if (base > HumanTask.maxRetainedRejectionChars) break
+        if (base + count * maxValueChars < HumanTask.maxRetainedRejectionChars) continue
+        let remaining = HumanTask.maxRetainedRejectionChars - base
+        return Array.from({ length: count }, () => {
+          const length = Math.min(maxValueChars, remaining)
+          remaining -= length
+          return "x".repeat(length)
+        })
+      }
+      throw new Error("could not construct an exact retained-rejection boundary")
+    }
+    const values = valuesAtLimit()
+    const run = (executionId: string, extra: ReadonlyArray<string>) => {
+      const instance = makeInstance(Host, executionId)
+      return drive(
+        Effect.gen(function*() {
+          const answers = [...values, ...extra]
+          for (const [index, value] of answers.entries()) {
+            yield* record(executionId, "bounded", index + 1, value)
+          }
+          const exit = yield* Effect.exit(
+            Interpreter.interpret(
+              HumanTask.action.call({
+                name: "bounded",
+                kind: "select",
+                prompt: "Choose.",
+                options: ["ok"],
+                maxAttempts: answers.length
+              })
+            )
+          )
+          expect(Exit.isFailure(exit)).toBe(true)
+          if (!Exit.isFailure(exit)) return []
+          const failure = exit.cause.reasons.find(Cause.isFailReason)?.error
+          expect(failure).toBeInstanceOf(HumanTask.HumanTaskFailed)
+          return failure instanceof HumanTask.HumanTaskFailed ? failure.rejections : []
+        }),
+        instance
+      )
+    }
+
+    return Effect.gen(function*() {
+      const exact = yield* run("human-retained-exact", [])
+      expect(exact.reduce((sum, entry) => sum + entry.length, 0)).toBe(HumanTask.maxRetainedRejectionChars)
+      expect(exact.some((entry) => entry.includes("were omitted"))).toBe(false)
+
+      const over = yield* run("human-retained-over", ["one more", "and another"])
+      expect(over.reduce((sum, entry) => sum + entry.length, 0)).toBeLessThanOrEqual(
+        HumanTask.maxRetainedRejectionChars
+      )
+      expect(over.at(-1)).toMatch(/\d+ further rejections were omitted\./)
+    })
+  })
+
   effect("refuses an attempt budget below one attempt before it parks", () => {
     const instance = makeInstance(Host, "human-no-budget")
     return drive(
@@ -433,6 +591,54 @@ describe("HumanTask gives up", () => {
       }),
       instance
     )
+  })
+
+  effect("accepts the maximum attempt budget and refuses one more", () => {
+    const acceptedInstance = makeInstance(Host, "human-max-budget")
+    const refusedInstance = makeInstance(Host, "human-over-budget")
+    return Effect.all([
+      drive(
+        Effect.gen(function*() {
+          const result = yield* Flow.intoResult(
+            Interpreter.interpret(
+              HumanTask.action.call({
+                name: "accepted",
+                kind: "ask",
+                prompt: "Answer.",
+                maxAttempts: HumanTask.maxAttemptBudget
+              })
+            )
+          )
+          expect(result._tag).toBe("Suspended")
+        }),
+        acceptedInstance
+      ),
+      drive(
+        Effect.gen(function*() {
+          const result = yield* Flow.intoResult(
+            Interpreter.interpret(
+              HumanTask.action.call({
+                name: "refused",
+                kind: "ask",
+                prompt: "Answer.",
+                maxAttempts: HumanTask.maxAttemptBudget + 1
+              })
+            )
+          )
+          expect(result._tag).toBe("Complete")
+          if (result._tag === "Complete" && Exit.isFailure(result.exit)) {
+            expect(result.exit.cause.reasons[0]).toMatchObject({
+              error: {
+                _tag: "@smthrs/flow/HumanTaskFailed",
+                code: "request_invalid",
+                message: expect.stringContaining("stuck question")
+              }
+            })
+          }
+        }),
+        refusedInstance
+      )
+    ], { discard: true })
   })
 
   effect("refuses a deadline no clock can keep before it parks", () => {
@@ -528,6 +734,107 @@ describe("HumanTask gives up", () => {
       instance
     )
   })
+
+  effect("refuses malformed required and nullable schemas before it parks", () => {
+    const refused = (schema: typeof Schema.Json.Type, executionId: string, path: string) => {
+      const instance = makeInstance(Host, executionId)
+      return drive(
+        Effect.gen(function*() {
+          const result = yield* Flow.intoResult(
+            Interpreter.interpret(
+              HumanTask.action.call({ name: executionId, kind: "json", prompt: "Answer.", schema })
+            )
+          )
+          expect(result._tag).toBe("Complete")
+          if (result._tag === "Complete" && Exit.isFailure(result.exit)) {
+            expect(result.exit.cause.reasons[0]).toMatchObject({
+              error: {
+                _tag: "@smthrs/flow/HumanTaskFailed",
+                code: "request_invalid",
+                message: expect.stringContaining(path)
+              }
+            })
+          }
+          expect(instance.suspended).toBe(false)
+        }),
+        instance
+      )
+    }
+
+    return Effect.all([
+      refused({ type: "object", required: "name" }, "human-required-string", "required"),
+      refused({ type: "object", required: [1] }, "human-required-number", "required.0"),
+      refused({ type: "object", nullable: "yes" }, "human-nullable-string", "nullable")
+    ], { discard: true })
+  })
+
+  effect("refuses a schema on ask, confirm, and select questions", () => {
+    const refused = (
+      payload: typeof HumanTask.action.payloadSchema.Type,
+      executionId: string
+    ) => {
+      const instance = makeInstance(Host, executionId)
+      return drive(
+        Effect.gen(function*() {
+          const result = yield* Flow.intoResult(Interpreter.interpret(HumanTask.action.call(payload)))
+          expect(result._tag).toBe("Complete")
+          if (result._tag === "Complete" && Exit.isFailure(result.exit)) {
+            expect(result.exit.cause.reasons[0]).toMatchObject({
+              error: {
+                _tag: "@smthrs/flow/HumanTaskFailed",
+                code: "request_invalid",
+                message: expect.stringContaining(`"${payload.kind}"`)
+              }
+            })
+          }
+        }),
+        instance
+      )
+    }
+
+    return Effect.all([
+      refused(
+        { name: "ask-schema", kind: "ask", prompt: "Ask.", schema: { type: "string" } },
+        "human-ask-schema"
+      ),
+      refused(
+        { name: "confirm-schema", kind: "confirm", prompt: "Confirm.", schema: { type: "boolean" } },
+        "human-confirm-schema"
+      ),
+      refused(
+        {
+          name: "select-schema",
+          kind: "select",
+          prompt: "Select.",
+          options: ["one"],
+          schema: { type: "string" }
+        },
+        "human-select-schema"
+      )
+    ], { discard: true })
+  })
+
+  effect("keeps json schema validation and ignores a json option list", () =>
+    drive(
+      Effect.gen(function*() {
+        yield* record("human-json-schema", "json-schema", 1, { choice: { id: 1 } })
+        const checked = yield* Interpreter.interpret(
+          HumanTask.action.call({
+            name: "json-schema",
+            kind: "json",
+            prompt: "Choose.",
+            options: ["not-a-json-constraint"],
+            schema: {
+              type: "object",
+              required: ["choice"],
+              properties: { choice: { enum: [{ id: 1 }] } }
+            }
+          })
+        )
+        expect(checked.value).toEqual({ choice: { id: 1 } })
+      }),
+      makeInstance(Host, "human-json-schema")
+    ))
 
   effect("refuses a select task whose option list is empty", () => {
     const instance = makeInstance(Host, "human-empty-options")
@@ -808,22 +1115,83 @@ describe("HumanTask across a restart", () => {
 })
 
 describe("HumanTask.answer", () => {
-  effect("refuses a token that is not a durable deferred token", () =>
+  effect("refuses a bad token with its parse issue and a bounded excerpt", () =>
     drive(
       Effect.gen(function*() {
+        const token = "*".repeat(100) as DurableDeferred.Token
         const exit = yield* Effect.exit(
-          HumanTask.answer({ token: "not a token" as DurableDeferred.Token, value: true })
+          HumanTask.answer({ token, value: true })
         )
 
         expect(Exit.isFailure(exit)).toBe(true)
         if (Exit.isFailure(exit)) {
           expect(exit.cause.reasons[0]).toMatchObject({
-            error: { _tag: "@smthrs/flow/DurableDeferred/TokenInvalid" }
+            error: {
+              _tag: "@smthrs/flow/DurableDeferred/TokenInvalid",
+              code: "malformed_token",
+              message: expect.stringContaining("Base64Url")
+            }
           })
+          const failure = exit.cause.reasons.find(Cause.isFailReason)?.error
+          if (failure instanceof DurableDeferred.TokenInvalid) {
+            expect(failure.message).toContain("*".repeat(64))
+            expect(failure.message).toContain("36 characters dropped")
+            expect(failure.message).not.toContain(token)
+          }
         }
       }),
       makeInstance(Host, "human-bad-token")
     ))
+
+  effect("refuses a token naming a deferred no human task ever opened", () => {
+    // `answer` completes a caller-supplied address under `Schema.Json`, so
+    // without this check it is an oracle over every durable deferred in the
+    // run: a queue item's token or a bare wait point's token, submitted to a
+    // human-approval surface, would write a JSON exit into a row the awaiting
+    // flow decodes under its own schemas. First-writer-wins makes that
+    // permanent, so the refusal has to also leave the row untouched.
+    const state = makeMemoryState()
+    const executionId = "human-foreign-token"
+    const foreign = [
+      // A `DurableQueue` per-item address.
+      "DurableQueue/releases/item-1",
+      // A bare wait point: HumanTask's namespace, but not its attempt suffix.
+      "WaitFor/approval",
+      // Attempt suffixes `HumanTask.deferred` would never have written.
+      "WaitFor/release#01",
+      "WaitFor/release#1e0",
+      "WaitFor/release#",
+      // An unrelated flow's deferred.
+      "Some/Other/Deferred"
+    ]
+
+    return Effect.gen(function*() {
+      for (const deferredName of foreign) {
+        const token = new DurableDeferred.TokenParsed({
+          flowName: Host._tag,
+          executionId,
+          deferredName
+        }).asToken
+        const failure = yield* Effect.flip(HumanTask.answer({ token, value: true }))
+
+        expect(failure).toBeInstanceOf(DurableDeferred.TokenInvalid)
+        expect(failure.code).toBe("deferred_mismatch")
+        expect(failure.message).toContain(deferredName)
+        expect(state.deferredResults.has(`${executionId}/${deferredName}`)).toBe(false)
+      }
+
+      // The addresses the surface IS for still complete through it.
+      const point = HumanTask.deferred("release", 1)
+      yield* HumanTask.answer({
+        token: DurableDeferred.tokenFromExecutionId(point, { flow: Host, executionId }),
+        value: "ship it"
+      })
+      expect(state.deferredResults.has(`${executionId}/${point.name}`)).toBe(true)
+    }).pipe(
+      Effect.provideService(FlowRuntime.FlowInstance, makeInstance(Host, executionId)),
+      Effect.provide(wiredOver(state))
+    )
+  })
 })
 
 describe("HumanTask.decode", () => {

@@ -3,7 +3,7 @@
 /**
  * Execution policies attached to flow definitions through Effect context.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import * as FileSet from "@smthrs/plan/FileSet"
 import * as Context from "effect/Context"
@@ -94,7 +94,7 @@ export const Placement = Context.Service<PlacementDirective>("@smthrs/flow/Flow/
  * By default, this annotation is set to `true`, meaning defects are captured.
  *
  * @category annotations
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const CaptureDefects = Context.Reference<boolean>(
@@ -112,7 +112,7 @@ export const CaptureDefects = Context.Reference<boolean>(
  * The suspended execution can later be resumed with the flow's `resume` method, for example `MyFlow.resume(executionId)`.
  *
  * @category annotations
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const SuspendOnFailure = Context.Reference<boolean>(

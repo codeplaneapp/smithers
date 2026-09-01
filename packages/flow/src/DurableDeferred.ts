@@ -9,7 +9,7 @@
  * execution id, and deferred name so external code can complete the correct
  * wait point later.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import * as Arr from "effect/Array"
 import type { NonEmptyReadonlyArray } from "effect/Array"
@@ -30,14 +30,14 @@ import * as Flow from "./Flow/index.ts"
 import { FlowInstance } from "./FlowRuntime/FlowInstance.ts"
 import { FlowRuntime } from "./FlowRuntime/FlowRuntime.ts"
 
-const TypeId = "~effect/flow/DurableDeferred"
+const TypeId = "@smthrs/flow/DurableDeferred"
 
 /**
  * Named durable deferred value whose completion is persisted by the flow
  * engine and encoded with success and error schemas.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface DurableDeferred<
@@ -57,7 +57,7 @@ export interface DurableDeferred<
  * identity and name.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface Any {
@@ -70,7 +70,7 @@ export interface Any {
  * exit schemas.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface AnyWithProps {
@@ -86,7 +86,7 @@ export interface AnyWithProps {
  * persisted completion.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const make = <
@@ -170,7 +170,7 @@ export {
    * persisted completion is available.
    *
    * @category combinators
-   * @since 4.0.0
+   * @since 0.1.0
    */
   await_ as await
 }
@@ -180,7 +180,7 @@ export {
  * flows that are waiting on that deferred.
  *
  * @category combinators
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const into: {
@@ -247,6 +247,12 @@ export const into: {
                 if (instance.suspended) {
                   parentInstance.suspended = true
                 }
+                // A recorded interrupt is a durable outcome, so the parent
+                // instance must classify it as completion instead of an
+                // external suspension interrupt.
+                if (instance.interrupted) {
+                  parentInstance.interrupted = true
+                }
                 return
               } else if (interrupts.length > 0) {
                 exit = Exit.failCause(Cause.fromReasons(reasons))
@@ -269,7 +275,7 @@ export const into: {
  * present or completing a named deferred with the first result.
  *
  * @category racing
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const raceAll = <
@@ -313,16 +319,16 @@ export const raceAll = <
  * Runtime brand identifier for durable deferred tokens.
  *
  * @category type IDs
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
-export const TokenTypeId = "~effect/flow/DurableDeferred/Token"
+export const TokenTypeId = "@smthrs/flow/DurableDeferred/Token"
 
 /**
  * Type-level brand identifier for `Token` values.
  *
  * @category type IDs
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export type TokenTypeId = typeof TokenTypeId
@@ -332,7 +338,7 @@ export type TokenTypeId = typeof TokenTypeId
  * execution.
  *
  * @category token
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export type Token = Brand.Branded<string, TokenTypeId>
@@ -341,7 +347,7 @@ export type Token = Brand.Branded<string, TokenTypeId>
  * Schema for branded durable deferred tokens.
  *
  * @category token
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const Token: Schema.brand<Schema.String, TokenTypeId> = Schema.String.pipe(Schema.brand(TokenTypeId))
@@ -354,7 +360,7 @@ export const Token: Schema.brand<Schema.String, TokenTypeId> = Schema.String.pip
  * @slop
  */
 export class TokenInvalid extends Schema.TaggedError<TokenInvalid>()("@smthrs/flow/DurableDeferred/TokenInvalid", {
-  code: Schema.Literal("malformed_token").pipe(
+  code: Schema.Literals(["malformed_token", "deferred_mismatch"]).pipe(
     Schema.withConstructorDefault(Effect.succeed("malformed_token"))
   ),
   message: Schema.String
@@ -365,7 +371,7 @@ export class TokenInvalid extends Schema.TaggedError<TokenInvalid>()("@smthrs/fl
  * name, execution ID, and deferred name.
  *
  * @category token
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export class TokenParsed extends Schema.Class<TokenParsed>(
@@ -378,7 +384,7 @@ export class TokenParsed extends Schema.Class<TokenParsed>(
   /**
    * Encodes the parsed flow, execution, and deferred names back into a token.
    *
-   * @since 4.0.0
+   * @since 0.1.0
    */
   get asToken(): Token {
     return Encoding.encodeBase64Url(
@@ -389,7 +395,7 @@ export class TokenParsed extends Schema.Class<TokenParsed>(
   /**
    * Schema for decoding and encoding durable deferred tokens as strings.
    *
-   * @since 4.0.0
+   * @since 0.1.0
    */
   static readonly FromString = Schema.String.pipe(
     Schema.decodeTo(
@@ -424,24 +430,52 @@ export class TokenParsed extends Schema.Class<TokenParsed>(
   /**
    * Decodes a durable deferred token string into its parsed components.
    *
-   * @since 4.0.0
+   * @since 0.1.0
    */
   static readonly fromString = Schema.decodeSync(TokenParsed.FromString)
 
   /**
    * Encodes parsed durable deferred token components into a token string.
    *
-   * @since 4.0.0
+   * @since 0.1.0
    */
   static readonly encode = Schema.encodeSync(TokenParsed.FromString)
 }
+
+const maxTokenExcerptChars = 64
+
+/** Renders a bounded, non-secret token excerpt for a parse failure. */
+const tokenExcerpt = (token: string): string =>
+  token.length <= maxTokenExcerptChars
+    ? token
+    : `${token.slice(0, maxTokenExcerptChars)} [${token.length - maxTokenExcerptChars} characters dropped]`
+
+/**
+ * Decodes a durable deferred token while preserving its schema failure.
+ *
+ * Exported so `HumanTask.answer` completes through the same decode rather than
+ * a second copy of it. It carries no `@category`, so it stays out of the
+ * published API tables: the supported way to parse a token is
+ * `TokenParsed.FromString`.
+ *
+ * @since 0.1.0
+ * @private
+ */
+export const parseToken = (token: string): Effect.Effect<TokenParsed, TokenInvalid> =>
+  Effect.mapError(
+    Schema.decodeEffect(TokenParsed.FromString)(token),
+    (issue) =>
+      new TokenInvalid({
+        message: `The supplied token "${tokenExcerpt(token)}" is not a durable deferred token: ${issue.message}`
+      })
+  )
 
 /**
  * Creates a token for a durable deferred using the current flow instance's
  * flow name and execution ID.
  *
  * @category token
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const token: <Success extends Schema.Constraint, Error extends Schema.Constraint>(
@@ -462,7 +496,7 @@ export const token: <Success extends Schema.Constraint, Error extends Schema.Con
  * and deferred name.
  *
  * @category token
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const tokenFromExecutionId: {
@@ -497,7 +531,7 @@ export const tokenFromExecutionId: {
  * the supplied flow payload.
  *
  * @category token
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const tokenFromPayload: {
@@ -543,7 +577,7 @@ export const tokenFromPayload: {
  * encoding the result through the deferred schemas.
  *
  * @category combinators
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const done: {
@@ -581,10 +615,17 @@ export const done: {
       readonly exit: Exit.Exit<Success["Type"], Error["Type"]>
     }
   ) {
+    const token = yield* parseToken(options.token)
+    if (token.deferredName !== self.name) {
+      return yield* Effect.fail(
+        new TokenInvalid({
+          code: "deferred_mismatch",
+          message: `The token addresses deferred "${token.deferredName}", but it was submitted through ` +
+            `deferred "${self.name}".`
+        })
+      )
+    }
     const engine = yield* FlowRuntime
-    const token = yield* Schema.decodeEffect(TokenParsed.FromString)(options.token).pipe(
-      Effect.mapError(() => new TokenInvalid({ message: "The supplied token is not a durable deferred token" }))
-    )
     yield* engine.deferredDone(self, {
       flowName: token.flowName,
       executionId: token.executionId,
@@ -599,7 +640,7 @@ export const done: {
  * value.
  *
  * @category combinators
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const succeed: {
@@ -635,7 +676,7 @@ export const succeed: {
  * Completes the durable deferred identified by a token with a typed failure.
  *
  * @category combinators
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const fail: {
@@ -671,7 +712,7 @@ export const fail: {
  * Completes the durable deferred identified by a token with a failure cause.
  *
  * @category combinators
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const failCause: {

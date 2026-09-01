@@ -8,7 +8,7 @@
  * in-memory action, and schedules longer sleeps through the `FlowRuntime`
  * before awaiting the durable deferred tied to the clock.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import type * as Crypto from "effect/Crypto"
 import * as Duration from "effect/Duration"
@@ -19,14 +19,14 @@ import * as DurableDeferred from "./DurableDeferred.ts"
 import { FlowInstance } from "./FlowRuntime/FlowInstance.ts"
 import { FlowRuntime } from "./FlowRuntime/FlowRuntime.ts"
 
-const TypeId = "~effect/flow/DurableClock"
+const TypeId = "@smthrs/flow/DurableClock"
 
 /**
  * Represents a durable flow timer with a name, duration, and deferred
  * completed when the timer wakes.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface DurableClock {
@@ -41,7 +41,7 @@ export interface DurableClock {
  * signal.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const make = (options: {
@@ -59,7 +59,7 @@ export const make = (options: {
  * below the threshold and scheduling a durable clock for longer durations.
  *
  * @category sleeping
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const sleep: (

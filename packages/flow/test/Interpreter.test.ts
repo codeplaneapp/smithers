@@ -359,6 +359,19 @@ describe("Interpreter node variants", () => {
       expect(calls).toEqual(["read:counter.txt", "sum:counter.txt"])
     }))
 
+  it.effect("interprets dotted All member names whose addresses do not collide", () =>
+    Effect.gen(function*() {
+      const interpretation = yield* drive(Interpreter.interpret(Node.all({
+        "x.all.z": Node.succeed("outer"),
+        x: Node.all({ y: Node.succeed("nested") })
+      })))
+
+      expect(interpretation.value).toEqual({
+        "x.all.z": "outer",
+        x: { y: "nested" }
+      })
+    }))
+
   it.effect("preserves an own __proto__ member when joining a combination", () =>
     Effect.gen(function*() {
       const members = Object.create(null) as Record<string, Node.Any>
@@ -444,6 +457,24 @@ describe("Interpreter refusals", () => {
           flow: "interpreter/orphan",
           node: "root.flow",
           message: expect.stringContaining("interpreter/missing.toLayer(execute)")
+        }
+      })
+    }))
+
+  it.effect("refuses duplicate node ids before constructing a last-write-wins lookup", () =>
+    Effect.gen(function*() {
+      const collided = Node.all({
+        "x.all.y": Node.succeed("outer"),
+        x: Node.all({ y: Node.succeed("nested") })
+      })
+
+      expect(yield* refusal(Interpreter.interpret(collided))).toMatchObject({
+        error: {
+          _tag: "@smthrs/flow/InterpreterError",
+          code: "duplicate_node_id",
+          flow: "node",
+          node: "root.all.x.all.y",
+          message: expect.stringContaining("durable dispatch identity")
         }
       })
     }))
@@ -556,6 +587,7 @@ describe("a flow's behavior is its body", () => {
     expect("BodyDefinesBehavior" in Flow).toBe(false)
     expectTypeOf<Interpreter.InterpreterError["code"]>().toEqualTypeOf<
       | "incomplete_graph"
+      | "duplicate_node_id"
       | "unresolved_action"
       | "unresolved_reference"
       | "unsupported_call"

@@ -19,7 +19,7 @@
  * a caller reaching the port directly has already been asked, or is replaying a
  * persisted plan and has nothing to be asked about.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import * as Context from "effect/Context"
 import type * as Crypto from "effect/Crypto"
@@ -44,7 +44,7 @@ import type { FlowInstance } from "./FlowInstance.ts"
  * interrupts, resumes, and clocks.
  *
  * @category services
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export class FlowRuntime extends Context.Service<

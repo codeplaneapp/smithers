@@ -3,37 +3,43 @@
 /**
  * Serializable completion and suspension states returned by flow executions.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import type * as Exit from "effect/Exit"
-import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as SchemaIssue from "effect/SchemaIssue"
 import * as SchemaParser from "effect/SchemaParser"
-import * as Tranformation from "effect/SchemaTransformation"
+import * as Transformation from "effect/SchemaTransformation"
 import type { ExitEncoded } from "effect/unstable/rpc/RpcMessage"
 
-const ResultTypeId = "~effect/flow/Flow/Result"
+const ResultTypeId = "@smthrs/flow/Flow/Result"
 
 /**
  * Returns `true` when a value is a flow `Result`.
  *
  * @category results
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const isResult = <A = unknown, E = unknown>(
   u: unknown
-): u is Result<A, E> => Predicate.hasProperty(u, ResultTypeId)
+): u is Result<A, E> => {
+  if (u !== Object(u)) return false
+  const marker = Object.getOwnPropertyDescriptor(u, ResultTypeId)
+  if (marker === undefined || !("value" in marker) || marker.value !== ResultTypeId) return false
+  const tag = Object.getOwnPropertyDescriptor(u, "_tag")
+  return tag !== undefined && "value" in tag &&
+    (tag.value === "Complete" || tag.value === "Suspended" || tag.value === "Handoff")
+}
 
 /**
  * Result of a flow execution: a completed exit, a suspended flow state, or a
  * handoff to the next round of a trampoline lineage.
  *
  * @category results
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export type Result<A, E> = Complete<A, E> | Suspended | Handoff
@@ -42,7 +48,7 @@ export type Result<A, E> = Complete<A, E> | Suspended | Handoff
  * Encoded representation of a flow `Result`.
  *
  * @category results
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export type ResultEncoded<A, E> =
@@ -55,7 +61,7 @@ export type ResultEncoded<A, E> =
  * `Exit`.
  *
  * @category results
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface CompleteEncoded<A, E> {
@@ -68,7 +74,7 @@ export interface CompleteEncoded<A, E> {
  * success and error schemas.
  *
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface CompleteSchema<
@@ -89,7 +95,7 @@ export interface CompleteSchema<
  * Represents a completed flow execution with its success or failure `Exit`.
  *
  * @category results
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export class Complete<A, E> extends Data.TaggedClass("Complete")<{
@@ -98,20 +104,20 @@ export class Complete<A, E> extends Data.TaggedClass("Complete")<{
   /**
    * Marks this value as a flow result for runtime guards.
    *
-   * @since 4.0.0
+   * @since 0.1.0
    */
   readonly [ResultTypeId] = ResultTypeId
 
   /**
    * Builds the schema for completed flow results from success and error schemas.
    *
-   * @since 4.0.0
+   * @since 0.1.0
    */
   static Schema<Success extends Schema.Constraint, Error extends Schema.Constraint>(options: {
     readonly success: Success
     readonly error: Error
   }): CompleteSchema<Success, Error> {
-    // TODO: extract to a helper function
+    // The declaration stays inline because it closes over this constructor's schemas.
     const schema = Schema.declareConstructor<
       Complete<Success["Type"], Error["Type"]>,
       Complete<Success["Encoded"], Error["Encoded"]>
@@ -145,7 +151,7 @@ export class Complete<A, E> extends Data.TaggedClass("Complete")<{
               _tag: Schema.tag("Complete"),
               exit
             }),
-            Tranformation.transform({
+            Transformation.transform({
               decode: (encoded) => new Complete({ exit: encoded.exit }),
               encode: (result) => (({
                 _tag: "Complete",
@@ -167,7 +173,7 @@ export class Complete<A, E> extends Data.TaggedClass("Complete")<{
  * triggered suspension.
  *
  * @category results
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export class Suspended extends Schema.Class<Suspended>(
@@ -179,7 +185,7 @@ export class Suspended extends Schema.Class<Suspended>(
   /**
    * Marks this value as a flow result for runtime guards.
    *
-   * @since 4.0.0
+   * @since 0.1.0
    */
   readonly [ResultTypeId] = ResultTypeId
 }
@@ -193,7 +199,7 @@ export class Suspended extends Schema.Class<Suspended>(
  * its own, it produced the NEXT flow to run. `flow` is the target's tag, so the
  * value survives the journal and the run row unchanged.
  *
- * DECIDED (2026-08-11, pending review): `payload` is the target's payload in
+ * DECIDED: `payload` is the target's payload in
  * ENCODED form. The target's `to` method accepts its ordinary constructor
  * shape so authoring stays aligned with `call` and `execute`; the body
  * interpreter resolves planned references and encodes the invocation through
@@ -229,7 +235,7 @@ export class Handoff extends Schema.Class<Handoff>(
  * schemas.
  *
  * @category results
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const Result = <
@@ -246,7 +252,7 @@ const AnyOrVoid = Schema.Union([Schema.Any, Schema.Void])
  * Schema for encoded flow results with generic success and error payloads.
  *
  * @category results
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const ResultEncoded: Schema.Codec<ResultEncoded<any, any>> = Schema.toEncoded(

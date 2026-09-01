@@ -85,6 +85,7 @@ export class InterpreterError extends Schema.TaggedError<InterpreterError>()(
   {
     code: Schema.Literals([
       "incomplete_graph",
+      "duplicate_node_id",
       "unresolved_action",
       "unresolved_reference",
       "unsupported_call",
@@ -133,7 +134,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 /**
  * The execution id a `.child()` boundary runs its child under.
  *
- * DECIDED (2026-08-11, pending review): the id is DERIVED from the parent
+ * DECIDED: the id is DERIVED from the parent
  * execution and the child node's structural address, not minted. That is what
  * makes a boundary at-most-once under replay, exactly as
  * `docs/specs/Concepts/Trampoline Loops.md` requires of a round handoff: a
@@ -142,7 +143,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
  * The canonical tuple includes the callee and a canonical payload digest, so
  * delimiter splicing and a changed invocation cannot alias an earlier child.
  * SHA-256 uses the same injected derivation services as the repository's
- * other durable identities.
+ * other durable identities. The versioned `Key` prefix is dropped because the
+ * existing child-id wire format is the bare digest; finding the first `_`
+ * preserves that format without hardcoding a particular prefix length.
  *
  * @since 0.1.0
  * @category constructors
@@ -162,7 +165,7 @@ export const childExecutionId = (
       calleeTag,
       payloadDigest
     ]).pipe(Effect.orDie)
-    return tupleDigest.slice("key1_".length)
+    return tupleDigest.slice(tupleDigest.indexOf("_") + 1)
   })
 
 /**
@@ -191,6 +194,20 @@ export const interpret = (
       message: string
     ): Effect.Effect<never, InterpreterError> => Effect.fail(new InterpreterError({ code, flow: name, node, message }))
 
+    const graphNodes = Graph.nodes(graph)
+    const byId = new Map<string, Graph.GraphNode>()
+    for (const node of graphNodes) {
+      if (byId.has(node.id)) {
+        return yield* refuse(
+          "duplicate_node_id",
+          node.id,
+          `Graph of "${name}" contains duplicate node id "${node.id}". ` +
+            "A node id is durable dispatch identity, so two nodes may not share one."
+        )
+      }
+      byId.set(node.id, node)
+    }
+
     if (graph.diagnostics.length > 0) {
       const first = graph.diagnostics[0]!
       return yield* refuse(
@@ -200,7 +217,6 @@ export const interpret = (
       )
     }
 
-    const byId = new Map(Graph.nodes(graph).map((node) => [node.id, node] as const))
     // Everything the walk needs that the built graph can be asked for before it
     // runs, is asked for here — so neither refusal can surface halfway through a
     // body with the actions ahead of it already committed.
@@ -215,7 +231,7 @@ export const interpret = (
     const implementations = new Map<string, Implementation>()
     const handoffDeclarations = new Map<string, AnyFlow>()
     const childDeclarations = new Map<string, AnyWithProps>()
-    for (const node of Graph.nodes(graph)) {
+    for (const node of graphNodes) {
       for (const dependency of KeyMaterial.dependencies(node.draft.material)) {
         if (byId.has(dependency)) continue
         return yield* refuse(
@@ -404,7 +420,7 @@ export const interpret = (
           return yield* settle(decide(subject) ? children[1]! : children[2]!)
         }
         if (ast._tag === "Catch") {
-          // DECIDED (2026-08-11, pending review): catch observes only typed
+          // DECIDED: catch observes only typed
           // failures from ordinary protected execution. Effect defects and
           // compensation failures remain outside this interpreter's error
           // channel, so recovery cannot conceal a broken invariant or weaken
@@ -488,7 +504,7 @@ export const interpret = (
           case "FlowCall": {
             if (ast.mode === "handoff") {
               const declaration = handoffDeclarations.get(node.id)!
-              // DECIDED (2026-08-11, pending review): a handoff target's schema
+              // DECIDED: a handoff target's schema
               // services come from the context registration captured. A
               // body's type cannot enumerate declarations hidden in its
               // topology, so erase only that dynamic service parameter after

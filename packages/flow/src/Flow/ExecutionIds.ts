@@ -76,6 +76,10 @@ const canonicalKey = (
  * crashed program re-attaches to the run it left behind instead of opening a
  * second one.
  *
+ * The tag and canonical payload key are JSON-tuple framed before hashing.
+ * Their strings are used exactly as given and encoded as UTF-8, with no Unicode
+ * normalization. This preimage encoding freezes at rc.0.
+ *
  * @category constructors
  * @since 0.1.0
  * @slop
@@ -83,7 +87,8 @@ const canonicalKey = (
 export const derived: ExecutionIdSource = {
   mint: (flow, payload) =>
     canonicalKey(flow, payload).pipe(
-      Effect.flatMap((key) => Effect.orDie(Schema.decodeUnknownEffect(Sha256)(`${flow._tag}-${key}`))),
+      // The JSON tuple prevents delimiter splicing. This exact framing freezes at rc.0.
+      Effect.flatMap((key) => Effect.orDie(Schema.decodeUnknownEffect(Sha256)(JSON.stringify([flow._tag, key])))),
       Effect.orDie
     )
 }

@@ -3,7 +3,7 @@
 /**
  * Runtime helpers for flow completion, suspension, scopes, and rollback.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import * as Arr from "effect/Array"
 import * as Cause from "effect/Cause"
@@ -24,7 +24,7 @@ import { Complete, isResult, type Result, Suspended } from "./Result.ts"
  * scope finalization.
  *
  * @category results
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const intoResult = <A, E, R>(
@@ -132,7 +132,7 @@ const EnclosingActions = Context.Reference<ReadonlyArray<FlowInstance["Service"]
  * resumable, and invisible in the journal past the `clock-scheduled` record.
  *
  * @category results
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const wrapActionResult = <A, E, R>(
@@ -198,7 +198,7 @@ const waitForSiblings = Effect.fnUntraced(function*(
  * Accesses the flow scope, which is only closed when the flow execution fully completes.
  *
  * @category resource management
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const scope: Effect.Effect<
@@ -214,7 +214,7 @@ export const scope: Effect.Effect<
  * Provides the flow scope to the given effect, and closes the scope only when the flow execution fully completes.
  *
  * @category resource management
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const provideScope = <A, E, R>(
@@ -227,7 +227,7 @@ export const provideScope = <A, E, R>(
  * services available when the finalizer is registered.
  *
  * @category resource management
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const addFinalizer: <R>(
@@ -269,7 +269,7 @@ export const addFinalizer: <R>(
  * channel is `never`; handle expected rollback failures inside the callback.
  *
  * @category resource management
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const withRollback: {
@@ -298,7 +298,7 @@ export const withRollback: {
  * stop execution until it is resumed.
  *
  * @category results
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const suspend = (instance: FlowInstance["Service"]): Effect.Effect<never> =>

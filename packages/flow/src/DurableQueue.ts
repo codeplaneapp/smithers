@@ -10,7 +10,7 @@
  * records the handler's `Exit` through that token so the original flow can
  * continue with the typed success or error.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -26,26 +26,26 @@ import type { FlowInstance, FlowRuntime } from "./FlowRuntime/index.ts"
  * Type-level identifier used to recognize `DurableQueue` values.
  *
  * @category type IDs
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
-export type TypeId = "~effect/flow/DurableQueue"
+export type TypeId = "@smthrs/flow/DurableQueue"
 
 /**
  * Runtime identifier attached to `DurableQueue` values.
  *
  * @category type IDs
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
-export const TypeId: TypeId = "~effect/flow/DurableQueue"
+export const TypeId: TypeId = "@smthrs/flow/DurableQueue"
 
 /**
  * Durable flow queue definition containing a payload schema, idempotency
  * key, and deferred used to await worker results.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface DurableQueue<
@@ -129,7 +129,7 @@ export interface DurableQueue<
  * ```
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const make = <
@@ -188,10 +188,20 @@ const getQueueSchema = <Payload extends Schema.Top>(
 }
 
 /**
- * Adds an item to the queue and wait for a worker to process it.
+ * Adds an item to the queue and waits for a worker to process it.
+ *
+ * `retrySchedule` controls retries when the persisted offer fails. The default
+ * is unbounded, with exponential delays capped at one minute, so a transient
+ * store outage does not lose the item. A caller-supplied schedule may exhaust;
+ * its final offer failure becomes a defect to keep the public error channel
+ * reserved for the worker's declared error.
+ *
+ * Payload construction also becomes a defect when `fields` does not satisfy
+ * the queue's payload schema. The public error channel is the worker result,
+ * not malformed caller input.
  *
  * @category processing
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const process: <
@@ -223,7 +233,7 @@ export const process: <
   >(self: DurableQueue<Payload, Success, Error>, fields: Payload["~type.make.in"], options?: {
     readonly retrySchedule?: Schedule.Schedule<any, PersistedQueue.PersistedQueueError> | undefined
   }) {
-    const payload = self.payloadSchema.make(fields)
+    const payload = yield* Effect.orDie(self.payloadSchema.makeEffect(fields))
     const queueName = `DurableQueue/${self.name}`
     const queue = yield* PersistedQueue.make({
       name: queueName,
@@ -254,7 +264,7 @@ export const process: <
         Effect.retry(options?.retrySchedule ?? defaultRetrySchedule),
         Effect.orDie,
         Effect.annotateLogs({
-          package: "effect",
+          package: "@smthrs/flow",
           module: "DurableQueue",
           fiber: "process",
           queueName: self.name
@@ -269,11 +279,90 @@ const defaultRetrySchedule = Schedule.min([
   Schedule.spaced("1 minute")
 ])
 
+const makeWorkerEffect = Effect.fnUntraced(function*<
+  Payload extends Schema.Top,
+  Success extends Schema.Top,
+  Error extends Schema.Top,
+  R
+>(
+  self: DurableQueue<Payload, Success, Error>,
+  f: (payload: Payload["Type"]) => Effect.Effect<Success["Type"], Error["Type"], R>,
+  concurrency: number
+) {
+  const queue = yield* PersistedQueue.make({
+    name: `DurableQueue/${self.name}`,
+    schema: getQueueSchema(self.payloadSchema)
+  })
+
+  const worker = queue.take((item_) => {
+    const item = item_ as {
+      readonly token: DurableDeferred.Token
+      readonly payload: Payload["Type"]
+      readonly traceId: string
+      readonly spanId: string
+      readonly sampled: boolean
+    }
+    return Effect.withSpan(
+      Effect.gen(function*() {
+        // Parse before running the handler. A malformed completion address
+        // cannot strand a handler result that was already produced.
+        const parsed = yield* DurableDeferred.parseToken(item.token)
+        const deferred = DurableDeferred.make(parsed.deferredName, {
+          success: self.deferred.successSchema,
+          error: self.deferred.errorSchema
+        })
+        const exit = yield* Effect.exit(f(item.payload))
+        yield* DurableDeferred.done(deferred, {
+          token: item.token,
+          exit
+        })
+      }).pipe(
+        Effect.catchTag("@smthrs/flow/DurableDeferred/TokenInvalid", (error) =>
+          Effect.logError(
+            `DurableQueue "${self.name}" could not complete an item because its token was invalid. ${error.message}`
+          ))
+      ),
+      `DurableQueue/${self.name}/worker`,
+      {
+        captureStackTrace: false,
+        parent: Tracer.externalSpan({
+          traceId: item.traceId,
+          spanId: item.spanId,
+          sampled: item.sampled
+        })
+      }
+    )
+  }).pipe(
+    // A persistently failing take would otherwise consume a core in a tight
+    // loop while the queue store is unavailable.
+    Effect.catchCause((cause) =>
+      Effect.logWarning(cause).pipe(
+        Effect.andThen(Effect.sleep(500))
+      )
+    ),
+    Effect.forever,
+    Effect.annotateLogs({
+      package: "@smthrs/flow",
+      module: "DurableQueue",
+      fiber: "worker",
+      queueName: self.name
+    })
+  )
+
+  return yield* Effect.replicateEffect(worker, concurrency, { concurrency, discard: true }).pipe(
+    Effect.andThen(Effect.never)
+  )
+})
+
 /**
  * Create a worker effect that processes items from the durable queue.
  *
+ * `concurrency` defaults to one and must be a positive safe integer. It is
+ * checked before the persisted queue is opened.
+ *
+ * @throws A `RangeError` when `concurrency` is not a positive safe integer.
  * @category worker
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const makeWorker: <
@@ -295,75 +384,32 @@ export const makeWorker: <
   | Payload["DecodingServices"]
   | Success["EncodingServices"]
   | Error["EncodingServices"]
-> =
-  // Untraced because queue worker polling is a scheduler hot path.
-  Effect.fnUntraced(function*<
-    Payload extends Schema.Top,
-    Success extends Schema.Top,
-    Error extends Schema.Top,
-    R
-  >(
-    self: DurableQueue<Payload, Success, Error>,
-    f: (payload: Payload["Type"]) => Effect.Effect<Success["Type"], Error["Type"], R>,
-    options?: {
-      readonly concurrency?: number | undefined
-    }
-  ) {
-    const queue = yield* PersistedQueue.make({
-      name: `DurableQueue/${self.name}`,
-      schema: getQueueSchema(self.payloadSchema)
-    })
-    const concurrency = options?.concurrency ?? 1
-
-    const worker = queue.take((item_) => {
-      const item = item_ as {
-        readonly token: DurableDeferred.Token
-        readonly payload: Payload["Type"]
-        readonly traceId: string
-        readonly spanId: string
-        readonly sampled: boolean
-      }
-      return Effect.withSpan(
-        f(item.payload).pipe(
-          Effect.exit,
-          Effect.flatMap((exit) =>
-            DurableDeferred.done(self.deferred, {
-              token: item.token,
-              exit
-            })
-          ),
-          Effect.asVoid
-        ),
-        `DurableQueue/${self.name}/worker`,
-        {
-          captureStackTrace: false,
-          parent: Tracer.externalSpan({
-            traceId: item.traceId,
-            spanId: item.spanId,
-            sampled: item.sampled
-          })
-        }
-      )
-    }).pipe(
-      Effect.catchCause(Effect.logWarning),
-      Effect.forever,
-      Effect.annotateLogs({
-        package: "effect",
-        module: "DurableQueue",
-        fiber: "worker",
-        queueName: self.name
-      })
+> = <
+  Payload extends Schema.Top,
+  Success extends Schema.Top,
+  Error extends Schema.Top,
+  R
+>(
+  self: DurableQueue<Payload, Success, Error>,
+  f: (payload: Payload["Type"]) => Effect.Effect<Success["Type"], Error["Type"], R>,
+  options?: {
+    readonly concurrency?: number | undefined
+  }
+) => {
+  const concurrency = options?.concurrency ?? 1
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+    throw new RangeError(
+      `DurableQueue.makeWorker: concurrency must be a positive safe integer, and was ${concurrency}.`
     )
-
-    yield* Effect.replicateEffect(worker, concurrency, { concurrency, discard: true })
-    return yield* Effect.never
-  })
+  }
+  return makeWorkerEffect(self, f, concurrency)
+}
 
 /**
  * Create a layer that runs workers for the durable queue.
  *
  * @category worker
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const worker: <

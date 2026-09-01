@@ -92,7 +92,7 @@ export const CurrentOrdinal = Context.Reference<OrdinalSlot | undefined>(
  * to `1`.
  *
  * @category attempts
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const CurrentAttempt = Context.Reference<number>(

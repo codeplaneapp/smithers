@@ -35,7 +35,7 @@ describe("Flow cancellation failures", () => {
 
       expect(observed).toBe(failure)
       expect(observed).toMatchObject({
-        _tag: "flows/engine/CancelRequestFailed",
+        _tag: "@smthrs/flow/CancelRequestFailed",
         code: "cancel_request_failed",
         executionId: "cancellation-1",
         reason: "journal unavailable"
@@ -53,7 +53,7 @@ describe("Flow cancellation failures", () => {
 
       expect(observed).toBe(failure)
       expect(observed).toMatchObject({
-        _tag: "flows/engine/CancelRequestFailed",
+        _tag: "@smthrs/flow/CancelRequestFailed",
         code: "cancel_request_failed",
         executionId: "cancellation-1",
         reason: "journal unavailable"

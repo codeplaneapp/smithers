@@ -4,7 +4,7 @@
  * Runtime identity shared by flow interfaces and constructors.
  *
  * @private
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
-export const TypeId = "~effect/flow/Flow"
+export const TypeId = "@smthrs/flow/Flow"

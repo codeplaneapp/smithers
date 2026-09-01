@@ -9,12 +9,19 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 /**
- * A flow execution was requested without either a caller-selected
- * execution ID or an opt-in flow idempotency key.
+ * A flow execution has no derivable identity, because its payload has no
+ * canonical form.
+ *
+ * Executing without a caller-selected execution ID is ordinary: the ambient
+ * `CurrentExecutionIds.derived` source mints one by hashing the flow tag and
+ * the payload's canonical form. This is what that source raises when the
+ * payload cannot BE canonicalized, for example a non-finite number, a lone
+ * surrogate, or a cycle. `derived.mint` dies with it rather than starting a run
+ * under a guessed identity, so it is a defect and not a typed failure a body
+ * catches.
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class ExecutionIdRequired extends Schema.TaggedError<ExecutionIdRequired>()(
   "@smthrs/flow/ExecutionIdRequired",

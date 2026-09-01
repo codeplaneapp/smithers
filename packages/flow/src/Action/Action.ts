@@ -3,7 +3,7 @@
 /**
  * Defines the schemas and interfaces of a durable action.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import type * as Node from "@smthrs/plan/Node"
 import type * as Planned from "@smthrs/plan/Planned"
@@ -164,7 +164,7 @@ export interface Declared<
  * engine.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface Action<
@@ -236,7 +236,7 @@ export interface Action<
  * name, annotations, and encoded execution.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface Any {
@@ -256,7 +256,7 @@ export interface Any {
  * derived flow APIs.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface AnyWithProps {

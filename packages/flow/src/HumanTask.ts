@@ -123,6 +123,54 @@ export const tag = "system/human-task"
 export const defaultMaxAttempts = 10
 
 /**
+ * The deepest supported JSON Schema path, counting the root as depth zero.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const maxSchemaDepth = 32
+
+/**
+ * The most schema objects one human-task request may contain.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const maxSchemaNodes = 512
+
+/**
+ * The most JSON values one answer validation may visit.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const maxAnswerNodes = 10_000
+
+/**
+ * The largest attempt budget one human task may declare.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const maxAttemptBudget = 1_000
+
+/**
+ * The most caller-supplied characters retained in one rendered diagnostic.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const maxDiagnosticChars = 512
+
+/**
+ * The most characters retained across a terminal failure's rejection list.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const maxRetainedRejectionChars = 8_192
+
+/**
  * The durable deferred one attempt at answering resolves through.
  *
  * Attempts are separate wait points on purpose. A durable deferred records the
@@ -144,6 +192,44 @@ export const deferred = (
   name: string,
   attempt: number
 ): DurableDeferred.DurableDeferred<typeof Schema.Json> => WaitFor.deferred(`${name}#${attempt}`)
+
+/** The namespace {@link module:WaitFor.deferred} prepends to every wait point. */
+const waitForNamespace = /^WaitFor\//
+
+/**
+ * The deferred a token addresses, when {@link deferred} could have named it.
+ *
+ * {@link answer} builds its deferred FROM the caller's token, so
+ * `DurableDeferred.done`'s own name check compares a name against itself and
+ * can never refuse. This is the check that is not vacuous: the name is taken
+ * apart at its attempt separator, rebuilt through {@link deferred}, and
+ * accepted only when the rebuilt name is character-for-character the one the
+ * token carried. A name {@link deferred} cannot produce -- a `DurableQueue`
+ * item address, a plain {@link module:WaitFor} gate, another flow's deferred --
+ * fails that comparison, so a foreign token cannot be completed under
+ * `Schema.Json` through the human-answer path.
+ *
+ * The comparison is the whole check, which is why nothing here validates the
+ * attempt: a suffix that is not the exact decimal {@link deferred} would have
+ * written rebuilds into a different name and is refused by the same equality.
+ *
+ * This bounds the confusion to human-task wait points. It does NOT distinguish
+ * two human tasks from each other, nor a wait point an author deliberately
+ * named to collide with one; separating those needs the deferred's schema and
+ * purpose carried in the address itself, which is a wire-format change.
+ *
+ * @private
+ */
+const answerableDeferred = (
+  deferredName: string
+): DurableDeferred.DurableDeferred<typeof Schema.Json> | undefined => {
+  const separator = deferredName.lastIndexOf("#")
+  const rebuilt = deferred(
+    deferredName.slice(0, separator).replace(waitForNamespace, ""),
+    Number(deferredName.slice(separator + 1))
+  )
+  return rebuilt.name === deferredName ? rebuilt : undefined
+}
 
 /**
  * The clock a task's deadline is armed on.
@@ -184,6 +270,7 @@ type Settled = typeof Settled.Type
  */
 export interface Request {
   readonly kind: Kind
+  /** Ignored for `json`: an option list alone constrains no JSON value. */
   readonly options?: ReadonlyArray<string> | undefined
   readonly schema?: unknown
 }
@@ -203,12 +290,80 @@ const supportedKeywords = [
   "title"
 ]
 
+/** Truncates a caller-supplied diagnostic while stating exactly what was dropped. */
+const truncateDiagnostic = (rendered: string): string =>
+  rendered.length <= maxDiagnosticChars
+    ? rendered
+    : `${rendered.slice(0, maxDiagnosticChars)} [${rendered.length - maxDiagnosticChars} characters dropped]`
+
+/** Renders one JSON value for a bounded rejection message. */
+const renderDiagnostic = (value: unknown): string => truncateDiagnostic(String(JSON.stringify(value)))
+
+/** Renders an option list in its existing comma-separated diagnostic shape. */
+const renderDiagnosticList = (values: ReadonlyArray<unknown>): string =>
+  truncateDiagnostic(values.map((value) => String(JSON.stringify(value))).join(", "))
+
 /** Renders a JSON pointer-ish path for a rejection message. */
-const at = (path: ReadonlyArray<string>): string => path.length === 0 ? "the answer" : `"${path.join(".")}"`
+const at = (path: ReadonlyArray<string>): string =>
+  path.length === 0 ? "the answer" : `"${truncateDiagnostic(path.join("."))}"`
 
 /** Whether a value is a plain JSON object rather than an array or a null. */
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
+
+/** Compares two JSON values structurally without depending on object key order. */
+const jsonEquals = (left: unknown, right: unknown): boolean => {
+  const pending: Array<readonly [unknown, unknown]> = [[left, right]]
+  while (pending.length > 0) {
+    const [a, b] = pending.pop()!
+    if (a === b) continue
+    if (Array.isArray(a)) {
+      if (!Array.isArray(b) || a.length !== b.length) return false
+      for (let index = a.length - 1; index >= 0; index--) pending.push([a[index], b[index]])
+      continue
+    }
+    if (!isObject(a) || !isObject(b)) return false
+    const aKeys = Object.keys(a).sort()
+    const bKeys = Object.keys(b).sort()
+    if (aKeys.length !== bKeys.length) return false
+    for (let index = aKeys.length - 1; index >= 0; index--) {
+      const aKey = aKeys[index]!
+      const bKey = bKeys[index]!
+      if (aKey !== bKey) return false
+      pending.push([a[aKey], b[bKey]])
+    }
+  }
+  return true
+}
+
+/** Refuses an answer whose JSON tree exceeds the validation node budget. */
+const answerSizeComplaint = (answer: unknown): string | undefined => {
+  const pending: Array<{ readonly value: unknown; readonly path: ReadonlyArray<string> }> = [{
+    value: answer,
+    path: []
+  }]
+  let visited = 0
+  while (pending.length > 0) {
+    const current = pending.pop()!
+    visited++
+    if (visited > maxAnswerNodes) {
+      return `${at(current.path)} makes the answer too large to check: it contains more than ` +
+        `${maxAnswerNodes} JSON values.`
+    }
+    if (Array.isArray(current.value)) {
+      for (let index = current.value.length - 1; index >= 0; index--) {
+        pending.push({ value: current.value[index], path: [...current.path, String(index)] })
+      }
+    } else if (isObject(current.value)) {
+      const keys = Object.keys(current.value).sort()
+      for (let index = keys.length - 1; index >= 0; index--) {
+        const key = keys[index]!
+        pending.push({ value: current.value[key], path: [...current.path, key] })
+      }
+    }
+  }
+  return undefined
+}
 
 /**
  * Checks a value against the bounded JSON Schema subset, returning the first
@@ -230,43 +385,37 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
  *
  * @private
  */
-const check = (
+const checkAt = (
   value: unknown,
-  schema: unknown,
+  schema: Record<string, unknown>,
   path: ReadonlyArray<string>
 ): string | undefined => {
-  if (!isObject(schema)) return `${at(path)} is described by something that is not a JSON Schema object.`
   const nullable = schema["nullable"] === true
   if (nullable && value === null) return undefined
-  const unsupported = Object.keys(schema).find((keyword) => !supportedKeywords.includes(keyword))
-  if (unsupported !== undefined) {
-    return `${at(path)} uses the unsupported JSON Schema keyword "${unsupported}".`
-  }
   const enumeration = schema["enum"]
+  // Enum membership is exhaustive, so sibling shape constraints cannot admit an answer outside the listed members.
   if (enumeration !== undefined) {
-    if (!Array.isArray(enumeration)) return `${at(path)} declares an "enum" that is not an array.`
-    return enumeration.some((allowed) => allowed === value)
+    return (enumeration as ReadonlyArray<unknown>).some((allowed) => jsonEquals(allowed, value))
       ? undefined
-      : `${at(path)} must be one of ${enumeration.map((allowed) => JSON.stringify(allowed)).join(", ")}.`
+      : `${at(path)} must be one of ${renderDiagnosticList(enumeration as ReadonlyArray<unknown>)}.`
   }
   const type = schema["type"]
   if (type === undefined) return undefined
-  if (typeof type !== "string" || !supportedTypes.has(type)) {
-    return `${at(path)} declares the unsupported JSON Schema type ${JSON.stringify(type)}.`
-  }
   switch (type) {
     case "object": {
       if (!isObject(value)) return `${at(path)} must be an object.`
       const required = schema["required"]
       if (Array.isArray(required)) {
-        const missing = required.find((key) => typeof key === "string" && !Object.hasOwn(value, key))
-        if (missing !== undefined) return `${at(path)} is missing the required property "${String(missing)}".`
+        const missing = required.find((key) => !Object.hasOwn(value, key as string))
+        if (missing !== undefined) {
+          return `${at(path)} is missing the required property "${truncateDiagnostic(String(missing))}".`
+        }
       }
       const properties = schema["properties"]
       if (isObject(properties)) {
         for (const [key, property] of Object.entries(properties)) {
           if (!Object.hasOwn(value, key)) continue
-          const rejection = check(value[key], property, [...path, key])
+          const rejection = checkAt(value[key], property as Record<string, unknown>, [...path, key])
           if (rejection !== undefined) return rejection
         }
       }
@@ -277,7 +426,7 @@ const check = (
       const items = schema["items"]
       if (items === undefined) return undefined
       for (const [index, element] of value.entries()) {
-        const rejection = check(element, items, [...path, String(index)])
+        const rejection = checkAt(element, items as Record<string, unknown>, [...path, String(index)])
         if (rejection !== undefined) return rejection
       }
       return undefined
@@ -293,6 +442,66 @@ const check = (
     default:
       return value === null ? undefined : `${at(path)} must be null.`
   }
+}
+
+/** Checks schema validity and answer size before walking their shapes together. */
+const check = (value: unknown, schema: unknown): string | undefined => {
+  const schemaComplaint = validateSchema(schema)
+  if (schemaComplaint !== undefined) return schemaComplaint
+  const sizeComplaint = answerSizeComplaint(value)
+  return sizeComplaint ?? checkAt(value, schema as Record<string, unknown>, [])
+}
+
+interface SchemaBudget {
+  visited: number
+}
+
+/** Walks one schema node under a shared depth and node budget. */
+const validateSchemaAt = (
+  schema: unknown,
+  path: ReadonlyArray<string>,
+  depth: number,
+  budget: SchemaBudget
+): string | undefined => {
+  if (depth > maxSchemaDepth) {
+    return `${at(path)} exceeds the maximum JSON Schema depth of ${maxSchemaDepth}.`
+  }
+  budget.visited++
+  if (budget.visited > maxSchemaNodes) {
+    return `${at(path)} exceeds the maximum JSON Schema node count of ${maxSchemaNodes}.`
+  }
+  if (!isObject(schema)) return `${at(path)} is described by something that is not a JSON Schema object.`
+  const unsupported = Object.keys(schema).find((keyword) => !supportedKeywords.includes(keyword))
+  if (unsupported !== undefined) {
+    return `${at(path)} uses the unsupported JSON Schema keyword "${truncateDiagnostic(unsupported)}".`
+  }
+  const enumeration = schema["enum"]
+  if (enumeration !== undefined && !Array.isArray(enumeration)) {
+    return `${at(path)} declares an "enum" that is not an array.`
+  }
+  if (Object.hasOwn(schema, "required")) {
+    const required = schema["required"]
+    if (!Array.isArray(required)) return `${at([...path, "required"])} is not an array.`
+    const invalid = required.findIndex((key) => typeof key !== "string")
+    if (invalid !== -1) return `${at([...path, "required", String(invalid)])} is not a string.`
+  }
+  if (Object.hasOwn(schema, "nullable") && typeof schema["nullable"] !== "boolean") {
+    return `${at([...path, "nullable"])} is not a boolean.`
+  }
+  const type = schema["type"]
+  if (type !== undefined && (typeof type !== "string" || !supportedTypes.has(type))) {
+    return `${at(path)} declares the unsupported JSON Schema type ${renderDiagnostic(type)}.`
+  }
+  const properties = schema["properties"]
+  if (properties !== undefined) {
+    if (!isObject(properties)) return `${at(path)} declares "properties" that is not an object.`
+    for (const [key, property] of Object.entries(properties)) {
+      const complaint = validateSchemaAt(property, [...path, key], depth + 1, budget)
+      if (complaint !== undefined) return complaint
+    }
+  }
+  const items = schema["items"]
+  return items === undefined ? undefined : validateSchemaAt(items, [...path, "items"], depth + 1, budget)
 }
 
 /**
@@ -313,31 +522,7 @@ const check = (
 export const validateSchema = (
   schema: unknown,
   path: ReadonlyArray<string> = []
-): string | undefined => {
-  if (!isObject(schema)) return `${at(path)} is described by something that is not a JSON Schema object.`
-  const unsupported = Object.keys(schema).find((keyword) => !supportedKeywords.includes(keyword))
-  if (unsupported !== undefined) {
-    return `${at(path)} uses the unsupported JSON Schema keyword "${unsupported}".`
-  }
-  const enumeration = schema["enum"]
-  if (enumeration !== undefined && !Array.isArray(enumeration)) {
-    return `${at(path)} declares an "enum" that is not an array.`
-  }
-  const type = schema["type"]
-  if (type !== undefined && (typeof type !== "string" || !supportedTypes.has(type))) {
-    return `${at(path)} declares the unsupported JSON Schema type ${JSON.stringify(type)}.`
-  }
-  const properties = schema["properties"]
-  if (properties !== undefined) {
-    if (!isObject(properties)) return `${at(path)} declares "properties" that is not an object.`
-    for (const [key, property] of Object.entries(properties)) {
-      const complaint = validateSchema(property, [...path, key])
-      if (complaint !== undefined) return complaint
-    }
-  }
-  const items = schema["items"]
-  return items === undefined ? undefined : validateSchema(items, [...path, "items"])
-}
+): string | undefined => validateSchemaAt(schema, path, 0, { visited: 0 })
 
 /**
  * Checks one answer against the question that was asked.
@@ -367,10 +552,10 @@ export const validate = (value: unknown, request: Request): string | undefined =
       }
       return request.options.some((option) => option === value)
         ? undefined
-        : `The answer ${JSON.stringify(value)} is not one of ${request.options.join(", ")}.`
+        : `The answer ${renderDiagnostic(value)} is not one of ${truncateDiagnostic(request.options.join(", "))}.`
     }
     default:
-      return request.schema === undefined ? undefined : check(value, request.schema, [])
+      return request.schema === undefined ? undefined : check(value, request.schema)
   }
 }
 
@@ -442,6 +627,39 @@ const failed = (
   message: string
 ): HumanTaskFailed => new HumanTaskFailed({ code, task: payload.name, attempts, rejections, message })
 
+interface RetainedRejections {
+  readonly entries: Array<string>
+  chars: number
+  omitted: number
+}
+
+/** Describes the tail of a rejection history that could not be retained. */
+const omissionMarker = (count: number): string => `${count} further rejections were omitted.`
+
+/** Adds one rejection while keeping the terminal rejection history bounded. */
+const retainRejection = (state: RetainedRejections, rejection: string): void => {
+  const alreadyOmitting = state.omitted > 0
+  if (alreadyOmitting) {
+    const previousMarker = state.entries.pop()!
+    state.chars -= previousMarker.length
+  }
+  if (!alreadyOmitting && state.chars + rejection.length <= maxRetainedRejectionChars) {
+    state.entries.push(rejection)
+    state.chars += rejection.length
+    return
+  }
+  state.omitted++
+  let marker = omissionMarker(state.omitted)
+  while (state.chars + marker.length > maxRetainedRejectionChars) {
+    const removed = state.entries.pop()!
+    state.chars -= removed.length
+    state.omitted++
+    marker = omissionMarker(state.omitted)
+  }
+  state.entries.push(marker)
+  state.chars += marker.length
+}
+
 /**
  * The attempt budget a payload asks for, refused when it is not a whole number
  * of attempts.
@@ -450,7 +668,18 @@ const failed = (
  */
 const budgetOf = (payload: Payload): Effect.Effect<number, HumanTaskFailed> => {
   const maxAttempts = payload.maxAttempts ?? defaultMaxAttempts
-  return Number.isInteger(maxAttempts) && maxAttempts >= 1
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+    return Effect.fail(
+      failed(
+        payload,
+        "request_invalid",
+        0,
+        [],
+        `${tag} was called with maxAttempts ${maxAttempts}. A question is asked at least once.`
+      )
+    )
+  }
+  return maxAttempts <= maxAttemptBudget
     ? Effect.succeed(maxAttempts)
     : Effect.fail(
       failed(
@@ -458,7 +687,8 @@ const budgetOf = (payload: Payload): Effect.Effect<number, HumanTaskFailed> => {
         "request_invalid",
         0,
         [],
-        `${tag} was called with maxAttempts ${maxAttempts}. A question is asked at least once.`
+        `${tag} was called with maxAttempts ${maxAttempts}. A question asked more than ` +
+          `${maxAttemptBudget} times is a stuck question.`
       )
     )
 }
@@ -504,6 +734,9 @@ const deadlineOf = (payload: Payload): Effect.Effect<Duration.Duration | undefin
  * whole schema tree before the first park rather than waiting for an answer to
  * reach the keyword nobody can enforce.
  *
+ * An `options` list on a `json` question is ignored because it constrains
+ * nothing; JSON constraints come only from `schema`.
+ *
  * @private
  */
 const requestOf = (payload: Payload): Effect.Effect<Request, HumanTaskFailed> => {
@@ -511,6 +744,17 @@ const requestOf = (payload: Payload): Effect.Effect<Request, HumanTaskFailed> =>
     kind: payload.kind,
     options: payload.options,
     ...(payload.schema === undefined ? {} : { schema: payload.schema })
+  }
+  if (payload.schema !== undefined && payload.kind !== "json") {
+    return Effect.fail(
+      failed(
+        payload,
+        "request_invalid",
+        0,
+        [],
+        `A schema describes a "json" answer, and this question is an "${payload.kind}".`
+      )
+    )
   }
   if (payload.kind === "select" && (payload.options === undefined || payload.options.length === 0)) {
     return Effect.fail(
@@ -625,7 +869,7 @@ export const layer: Layer.Layer<never, never, Crypto.Crypto | FlowRuntime> = act
     const maxAttempts = yield* budgetOf(payload)
     const deadline = yield* deadlineOf(payload)
     const request = yield* requestOf(payload)
-    const rejections: Array<string> = []
+    const retained: RetainedRejections = { entries: [], chars: 0, omitted: 0 }
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const token = DurableDeferred.tokenFromExecutionId(deferred(payload.name, attempt), {
         flow: instance.flow,
@@ -645,14 +889,14 @@ export const layer: Layer.Layer<never, never, Crypto.Crypto | FlowRuntime> = act
             payload,
             "timeout",
             attempt,
-            rejections,
+            retained.entries,
             `Nobody answered "${payload.name}" within ${payload.timeoutMs} ms.`
           )
         )
       }
       const rejection = validate(settled.value, request)
       if (rejection === undefined) return settled.value
-      rejections.push(`attempt ${attempt}: ${rejection}`)
+      retainRejection(retained, `attempt ${attempt}: ${rejection}`)
       yield* recordRejection(payload.name, attempt, rejection)
     }
     return yield* Effect.fail(
@@ -660,7 +904,7 @@ export const layer: Layer.Layer<never, never, Crypto.Crypto | FlowRuntime> = act
         payload,
         "rejected",
         maxAttempts,
-        rejections,
+        retained.entries,
         `"${payload.name}" was asked ${maxAttempts} times without an answer it could accept.`
       )
     )
@@ -686,6 +930,13 @@ export const layer: Layer.Layer<never, never, Crypto.Crypto | FlowRuntime> = act
  * {@link validate} first when the interface can refuse it while the person is
  * still looking at it.
  *
+ * The TOKEN is checked. This entry point completes an arbitrary caller-supplied
+ * address under `Schema.Json`, so it accepts only a token whose deferred name
+ * {@link deferred} could have written. A token for a `DurableQueue` item, a
+ * plain {@link module:WaitFor} gate, or an unrelated flow's deferred fails with
+ * `TokenInvalid` carrying `deferred_mismatch` rather than writing a JSON exit
+ * into a row another schema will decode.
+ *
  * @category combinators
  * @since 0.1.0
  */
@@ -694,15 +945,18 @@ export const answer = (options: {
   readonly value: typeof Schema.Json.Type
 }): Effect.Effect<void, DurableDeferred.TokenInvalid, FlowRuntime> =>
   Effect.gen(function*() {
-    const parsed = yield* Schema.decodeEffect(DurableDeferred.TokenParsed.FromString)(options.token).pipe(
-      Effect.mapError(() =>
-        new DurableDeferred.TokenInvalid({ message: "The supplied token is not a durable deferred token" })
+    const parsed = yield* DurableDeferred.parseToken(options.token)
+    const target = answerableDeferred(parsed.deferredName)
+    if (target === undefined) {
+      return yield* Effect.fail(
+        new DurableDeferred.TokenInvalid({
+          code: "deferred_mismatch",
+          message: `The token addresses deferred "${truncateDiagnostic(parsed.deferredName)}", which is not a ` +
+            "human task wait point. Answer it through the surface that owns it."
+        })
       )
-    )
-    yield* DurableDeferred.succeed(
-      DurableDeferred.make(parsed.deferredName, { success: Schema.Json }),
-      { token: options.token, value: options.value }
-    )
+    }
+    yield* DurableDeferred.succeed(target, { token: options.token, value: options.value })
   })
 
 /**

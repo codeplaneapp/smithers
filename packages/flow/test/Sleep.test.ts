@@ -5,7 +5,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Action, DurableClock, DurableDeferred, Flow, FlowRuntime, Graph, Interpreter, Sleep } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
-import { Effect, Exit, Layer, Option, Schema } from "effect"
+import { Clock, Effect, Exit, Layer, Option, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 import { TestClock } from "effect/testing"
 import { withCrypto } from "./Crypto.ts"
@@ -76,6 +76,7 @@ const refusal = (node: Node.Node<unknown, unknown>) =>
       )
     )
     expect(Exit.isFailure(exit)).toBe(true)
+    expect(instance.waiting).toBeUndefined()
     return Exit.isFailure(exit) ? exit.cause.reasons[0] : undefined
   })
 
@@ -293,9 +294,26 @@ describe("Sleep replays", () => {
       expect(instance.waiting).toBeUndefined()
     }))
 
+  it.effect("settles a zero duration without parking", () =>
+    Effect.gen(function*() {
+      const instance = makeInstance(Host, "sleep-zero")
+      yield* withCrypto(
+        Effect.gen(function*() {
+          const interpretation = yield* Interpreter.interpret(Sleep.action.call({ millis: 0 }))
+          expect(interpretation.value).toBeUndefined()
+        }).pipe(
+          Effect.provideService(FlowRuntime.FlowInstance, instance),
+          Effect.provide(wired())
+        )
+      )
+      expect(instance.suspended).toBe(false)
+      expect(instance.waiting).toBeUndefined()
+    }))
+
   it.effect("settles a deadline that has already passed instead of parking", () =>
     Effect.gen(function*() {
       const instance = makeInstance(Host, "sleep-past")
+      yield* TestClock.setTime(1)
       yield* withCrypto(
         Effect.gen(function*() {
           const interpretation = yield* Interpreter.interpret(Sleep.action.call({ until: 0 }))
@@ -342,6 +360,52 @@ describe("Sleep refusals", () => {
         defect: expect.stringContaining("CurrentInvocationKey")
       })
       expect(instance.suspended).toBe(false)
+    }))
+
+  effect("refuses relative values that are not lengths of time", () =>
+    Effect.gen(function*() {
+      for (const millis of [Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NaN, -1]) {
+        expect(yield* refusal(Sleep.action.call({ millis }))).toMatchObject({
+          error: {
+            _tag: "@smthrs/flow/SleepRequestInvalid",
+            code: "invalid_deadline",
+            message: expect.stringContaining(`millis ${millis}`)
+          }
+        })
+      }
+    }))
+
+  effect("refuses absolute values that are not epoch times", () =>
+    Effect.gen(function*() {
+      for (const until of [Number.NaN, Number.POSITIVE_INFINITY]) {
+        expect(yield* refusal(Sleep.action.call({ until }))).toMatchObject({
+          error: {
+            _tag: "@smthrs/flow/SleepRequestInvalid",
+            code: "invalid_deadline",
+            message: expect.stringContaining(`until ${until}`)
+          }
+        })
+      }
+    }))
+
+  effect("refuses a relative deadline whose addition overflows", () =>
+    Effect.gen(function*() {
+      const clock = yield* Clock.Clock
+      const overflowClock: Clock.Clock = {
+        ...clock,
+        currentTimeMillisUnsafe: () => Number.MAX_VALUE,
+        currentTimeMillis: Effect.succeed(Number.MAX_VALUE)
+      }
+      const reason = yield* refusal(Sleep.action.call({ millis: Number.MAX_VALUE })).pipe(
+        Effect.provideService(Clock.Clock, overflowClock)
+      )
+      expect(reason).toMatchObject({
+        error: {
+          _tag: "@smthrs/flow/SleepRequestInvalid",
+          code: "invalid_deadline",
+          message: expect.stringContaining(`millis ${Number.MAX_VALUE}`)
+        }
+      })
     }))
 
   it.effect("refuses a payload that names no deadline", () =>

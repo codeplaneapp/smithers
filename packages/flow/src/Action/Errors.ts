@@ -3,11 +3,9 @@
 /**
  * Defines typed action execution and identity failures.
  *
- * The `_tag` strings below keep the `@smthrs/engine/` prefix they were minted
- * with. A tag is wire format: durable stores persist encoded exits carrying
- * it, so renaming one to match this package would make every stored row
- * decode as an unknown error on replay. The owning package moved; the tag did
- * not.
+ * The `_tag` strings below were settled under `@smthrs/flow/` for
+ * 1.0.0-rc.0. The RC makes no compatibility promise to 0.x journals, and
+ * these tags freeze when the RC ships.
  *
  * @since 0.1.0
  */
@@ -29,6 +27,31 @@ export class InfraInterrupt extends Schema.TaggedError<InfraInterrupt>()(
       Schema.withConstructorDefault(Effect.succeed("infra_interrupt"))
     ),
     reason: Schema.optional(Schema.Unknown)
+  }
+) {}
+
+/**
+ * An action spent its infrastructure-interrupt retry policy without reaching
+ * an ordinary success or failure.
+ *
+ * @category errors
+ * @since 0.1.0
+ * @slop
+ */
+export class InfraInterruptRetriesExhausted extends Schema.TaggedError<InfraInterruptRetriesExhausted>()(
+  "@smthrs/flow/InfraInterruptRetriesExhausted",
+  {
+    code: Schema.Literal("infra_interrupt_retries_exhausted").pipe(
+      Schema.withConstructorDefault(Effect.succeed("infra_interrupt_retries_exhausted"))
+    ),
+    actionName: Schema.String,
+    attempts: Schema.Number,
+    interrupt: InfraInterrupt,
+    /**
+     * The sentence an operator reads out of a rendered cause. The typed fields
+     * beside it are what a log pipeline keys on.
+     */
+    message: Schema.String
   }
 ) {}
 
@@ -55,9 +78,9 @@ export class IrreversibleRetryRequiresIdempotencyKey
 
 /**
  * Two ordinal-keyed invocations of one allocation scope were in flight
- * concurrently — keyless invocations of one declaration, or same-key
- * invocations at a non-sealed tier (issue #130) — so their ordinals, and
- * with them their step keys, attempt rows, and recorded outcomes, would be
+ * concurrently, either keyless invocations of one declaration or same-key
+ * invocations at a non-sealed tier (issue #130), so their ordinals, and with
+ * them their step keys, attempt rows, and recorded outcomes, would be
  * assigned by fiber arrival order. A crash-resume that replays the fibers in
  * the opposite order would silently hand one invocation the other's recorded
  * outcome (issue #111); Temporal fails such replays with a nondeterminism

@@ -1,8 +1,8 @@
 // Deep reviewed and polished by a human on 2026-08-10.
 
 import { describe, expect, it } from "@effect/vitest"
-import { Action, DurableQueue, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
-import { Cause, Effect, Exit, Layer, Option, Schema } from "effect"
+import { Action, DurableDeferred, DurableQueue, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
+import { Cause, Effect, Exit, Layer, Logger, Option, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 import { TestClock } from "effect/testing"
 import { PersistedQueue } from "effect/unstable/persistence"
@@ -147,46 +147,122 @@ describe("DurableQueue", () => {
     }).pipe(Effect.provide(layer))
   })
 
-  effect("a worker with concurrency 0 starts no workers, so queued items are never consumed", () => {
-    const IdleQueue = DurableQueue.make({
-      name: "DurableQueue/Idle",
-      payload: { id: Schema.String },
-      success: Schema.Void,
+  it("refuses invalid concurrency before opening the persisted queue", () => {
+    const declare = (concurrency: number) => () =>
+      DurableQueue.makeWorker(Queue, () => Effect.succeed(0), { concurrency })
+
+    for (const invalid of [-1, 0, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(declare(invalid)).toThrow(RangeError)
+      expect(declare(invalid)).toThrow(/concurrency/)
+      expect(declare(invalid)).toThrow(String(invalid))
+    }
+    expect(declare(Number.MAX_SAFE_INTEGER)).not.toThrow()
+  })
+
+  effect("logs a malformed item token at error and continues the worker loop", () => {
+    const WorkerQueue = DurableQueue.make({
+      name: "DurableQueue/MalformedWorker",
+      payload: { id: Schema.String, value: Schema.Number },
+      success: Schema.Number,
       error: Schema.String,
       idempotencyKey: ({ id }) => id
     })
-    const Offer = Action.make("DurableQueue/Idle/offer", {
-      payload: { id: Schema.String },
-      success: Schema.Void,
-      error: Schema.String
+    const itemSchema = Schema.Struct({
+      token: DurableDeferred.Token,
+      payload: WorkerQueue.payloadSchema,
+      traceId: Schema.String,
+      spanId: Schema.String,
+      sampled: Schema.Boolean
     })
-    const IdleFlow = Flow.make("DurableQueue/Idle", {
-      payload: { id: Schema.String },
-      success: Schema.Void,
-      error: Schema.String,
-      idempotencyKey: ({ id }) => id,
-      body: (payload) => Offer.call(payload)
+    const logs: Array<{ readonly level: string; readonly message: string }> = []
+    const capture = Logger.make((entry) => {
+      logs.push({ level: entry.logLevel, message: String(entry.message) })
     })
     let handled = 0
-    const layer = Layer.mergeAll(
-      Offer.toLayer(({ id }) => DurableQueue.process(IdleQueue, { id }).pipe(Effect.asVoid)),
-      Interpreter.layer(IdleFlow),
-      DurableQueue.worker(
-        IdleQueue,
-        () => Effect.sync(() => void handled++),
-        { concurrency: 0 }
+
+    return Effect.gen(function*() {
+      const queue = yield* PersistedQueue.make({
+        name: `DurableQueue/${WorkerQueue.name}`,
+        schema: itemSchema
+      })
+      yield* Effect.forkChild(
+        DurableQueue.makeWorker(
+          WorkerQueue,
+          ({ value }) => Effect.sync(() => (handled++, value + 1))
+        ),
+        { startImmediately: true }
       )
-    ).pipe(
-      Layer.provideMerge(Action.layerImplementations),
-      Layer.provideMerge(layerMemory),
-      Layer.provideMerge(PersistedQueueLayer)
+      yield* queue.offer({
+        token: "*".repeat(100) as DurableDeferred.Token,
+        payload: { id: "bad", value: 1 },
+        traceId: "0".repeat(32),
+        spanId: "0".repeat(16),
+        sampled: false
+      }, { id: "bad" })
+      for (let turn = 0; turn < 50 && !logs.some((entry) => entry.level === "Error"); turn++) {
+        yield* Effect.yieldNow
+      }
+
+      const completion = DurableDeferred.make(`${WorkerQueue.deferred.name}/valid`, {
+        success: WorkerQueue.deferred.successSchema,
+        error: WorkerQueue.deferred.errorSchema
+      })
+      const token = new DurableDeferred.TokenParsed({
+        flowName: "DurableQueue/MalformedWorker/Host",
+        executionId: "worker",
+        deferredName: completion.name
+      }).asToken
+      yield* queue.offer({
+        token,
+        payload: { id: "valid", value: 41 },
+        traceId: "1".repeat(32),
+        spanId: "1".repeat(16),
+        sampled: false
+      }, { id: "valid" })
+      for (let turn = 0; turn < 50 && handled === 0; turn++) yield* Effect.yieldNow
+
+      expect(handled).toBe(1)
+      const reported = logs.find((entry) => entry.level === "Error")
+      expect(reported?.message).toContain(WorkerQueue.name)
+      expect(reported?.message).toContain("64")
+      expect(reported?.message).toContain("characters dropped")
+    }).pipe(
+      Effect.provide(Logger.layer([capture])),
+      Effect.provide(layerMemory),
+      Effect.provide(PersistedQueueLayer)
+    )
+  })
+
+  effect("backs off before retrying a persistently failing take", () => {
+    const logs: Array<{ readonly level: string; readonly message: string }> = []
+    const capture = Logger.make((entry) => {
+      logs.push({ level: entry.logLevel, message: String(entry.message) })
+    })
+    const store = PersistedQueue.PersistedQueueStore.of({
+      offer: () => Effect.void,
+      take: () => Effect.fail(new PersistedQueue.PersistedQueueError({ message: "take unavailable" }))
+    })
+    const failingQueueLayer = PersistedQueue.layer.pipe(
+      Layer.provide(Layer.succeed(PersistedQueue.PersistedQueueStore)(store))
     )
 
     return Effect.gen(function*() {
-      const executionId = yield* IdleFlow.execute({ id: "idle" }, { discard: true })
-      const result = yield* pollUntilComplete(IdleFlow.poll(executionId))
-      expect(handled).toBe(0)
-      expect(Option.isSome(result) && result.value._tag === "Complete").toBe(false)
-    }).pipe(Effect.provide(layer))
+      yield* Effect.forkChild(
+        DurableQueue.makeWorker(Queue, () => Effect.succeed(0)),
+        { startImmediately: true }
+      )
+      for (let turn = 0; turn < 50 && logs.length === 0; turn++) yield* Effect.yieldNow
+      expect(logs.filter((entry) => entry.level === "Warn")).toHaveLength(1)
+
+      yield* TestClock.adjust("499 millis")
+      expect(logs.filter((entry) => entry.level === "Warn")).toHaveLength(1)
+      yield* TestClock.adjust("1 milli")
+      for (let turn = 0; turn < 50 && logs.length === 1; turn++) yield* Effect.yieldNow
+      expect(logs.filter((entry) => entry.level === "Warn")).toHaveLength(2)
+    }).pipe(
+      Effect.provide(Logger.layer([capture])),
+      Effect.provide(layerMemory),
+      Effect.provide(failingQueueLayer)
+    )
   })
 })

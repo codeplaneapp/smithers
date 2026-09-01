@@ -14,7 +14,7 @@
  * therefore no handler to attach to a flow, and no `toLayer` on one to attach
  * it with.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import type * as Node from "@smthrs/plan/Node"
 import type * as Planned from "@smthrs/plan/Planned"
@@ -43,7 +43,7 @@ import type { TypeId } from "./TypeId.ts"
  * explicitly, hands off to another round, or parks durably.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export type BodySuccess<A> = A | Planned.Planned<A> | Outcome<A | Planned.Planned<A>, unknown>
@@ -54,7 +54,7 @@ export type BodySuccess<A> = A | Planned.Planned<A> | Outcome<A | Planned.Planne
  * registration.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface Flow<
@@ -90,6 +90,13 @@ export interface Flow<
    * until something executes it.
    */
   readonly body: (payload: Payload["Type"]) => Node.Node<BodySuccess<Success["Type"]>, Error["Type"], Requires>
+  /**
+   * Declares the stable key used when a caller supplies no execution id.
+   *
+   * The flow tag and returned key are JSON-tuple framed, then hashed as their
+   * exact UTF-8 strings. No Unicode normalization is applied, and this preimage
+   * encoding freezes at rc.0.
+   */
   readonly idempotencyKey?: ((payload: Payload["Type"]) => string) | undefined
   /**
    * How long ONE CALLER keeps polling a suspended execution of this flow.
@@ -268,6 +275,11 @@ export interface Flow<
    * `CurrentExecutionIds` source otherwise. It dies with `ExecutionIdRequired`
    * when the source cannot name the invocation — the default source cannot
    * when the payload has no canonical form.
+   *
+   * A payload this flow's own schema refuses also dies as a defect here. This
+   * differs from `execute`, which fails with a typed `Schema.SchemaError` for
+   * the same caller input. A caller precomputing an id should validate the
+   * payload first.
    */
   readonly executionId: (
     payload: Payload["~type.make.in"]
@@ -316,7 +328,7 @@ export interface Flow<
  * Schema constraint for flow payload schemas that expose struct fields.
  *
  * @category schemas
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface AnyStructSchema extends Schema.Top {
@@ -328,7 +340,7 @@ export interface AnyStructSchema extends Schema.Top {
  * execution tag.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface Execution<Tag extends string> {
@@ -341,7 +353,7 @@ export interface Execution<Tag extends string> {
  * preserving their specific payload, success, or error types.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface Any {
@@ -365,7 +377,7 @@ export interface Any {
  * flow proxy and engine helpers.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export interface AnyWithProps extends Any {
@@ -391,7 +403,7 @@ export interface AnyWithProps extends Any {
  * Extracts the payload schema from a `Flow`.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export type PayloadSchema<W> = W extends Flow<
@@ -425,7 +437,7 @@ export type Requirements<W> = W extends Flow<
  * flows.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export type RequirementsClient<Flows extends Any> = Flows extends Flow<
@@ -445,7 +457,7 @@ export type RequirementsClient<Flows extends Any> = Flows extends Flow<
  * payloads and encode flow results.
  *
  * @category models
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export type RequirementsHandler<Flows extends Any> = Flows extends Flow<

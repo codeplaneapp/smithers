@@ -202,6 +202,23 @@ describe("Poll.delayMillis", () => {
   })
 })
 
+describe("stable error codes", () => {
+  it("defaults every newly frozen code", () => {
+    expect(new Poll.PollExhausted({ poll: "poll/code", attempts: 1, message: "done" })).toMatchObject({
+      _tag: "@smthrs/flow/PollExhausted",
+      code: "poll_exhausted"
+    })
+    expect(new FlowRuntime.FlowCycleDetected({ path: ["parent", "child"] })).toMatchObject({
+      _tag: "@smthrs/flow/FlowCycleDetected",
+      code: "flow_cycle_detected"
+    })
+    expect(new FlowRuntime.FlowExecutionNotFound({ executionId: "missing" })).toMatchObject({
+      _tag: "@smthrs/flow/FlowExecutionNotFound",
+      code: "execution_not_found"
+    })
+  })
+})
+
 describe("Poll as a plan", () => {
   it("shows the attempt's check, its sleep, and the handoff that opens the next round", () => {
     const graph = Graph.build(Rising, { until: 3, attempt: 1 })
@@ -322,6 +339,28 @@ describe("Poll as a plan", () => {
 })
 
 describe("Poll rounds", () => {
+  effect("fails when a caller-visible attempt produces a non-finite wait", () => {
+    probes.length = 0
+    return Effect.gen(function*() {
+      const round = yield* openRound(Rising, { until: 3, attempt: Number.NaN }, "poll-invalid-attempt/1")
+
+      expect(round._tag).toBe("Complete")
+      if (round._tag === "Complete") {
+        expect(Exit.isFailure(round.exit)).toBe(true)
+        if (Exit.isFailure(round.exit)) {
+          expect(round.exit.cause.reasons[0]).toMatchObject({
+            error: {
+              _tag: "@smthrs/flow/SleepRequestInvalid",
+              code: "invalid_deadline"
+            }
+          })
+        }
+      }
+    }).pipe(
+      Effect.provide(wired(Layer.mergeAll(probeLayer, Sleep.layer, Poll.layer, Interpreter.layer(Rising))))
+    )
+  })
+
   effect("waits the declared schedule between attempts, then answers with what satisfied the check", () => {
     probes.length = 0
     return Effect.gen(function*() {
@@ -395,7 +434,12 @@ describe("Poll rounds", () => {
         expect(Exit.isFailure(second.exit)).toBe(true)
         if (Exit.isFailure(second.exit)) {
           expect(second.exit.cause.reasons[0]).toMatchObject({
-            error: { _tag: "@smthrs/flow/PollExhausted", poll: "poll/failing", attempts: 2 }
+            error: {
+              _tag: "@smthrs/flow/PollExhausted",
+              code: "poll_exhausted",
+              poll: "poll/failing",
+              attempts: 2
+            }
           })
         }
       }

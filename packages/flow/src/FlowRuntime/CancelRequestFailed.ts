@@ -40,7 +40,7 @@ import * as Schema from "effect/Schema"
  * @slop
  */
 export class CancelRequestFailed extends Schema.TaggedError<CancelRequestFailed>()(
-  "flows/engine/CancelRequestFailed",
+  "@smthrs/flow/CancelRequestFailed",
   {
     /**
      * Stable public error code. `cancel_request_failed` is a storage failure

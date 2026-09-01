@@ -91,6 +91,10 @@ export const CheckResult = <Result extends Schema.Top>(
 export class PollExhausted extends Schema.TaggedError<PollExhausted>()(
   "@smthrs/flow/PollExhausted",
   {
+    // This wire shape freezes at 1.0.0-rc.0.
+    code: Schema.Literal("poll_exhausted").pipe(
+      Schema.withConstructorDefault(Effect.succeed("poll_exhausted"))
+    ),
     poll: Schema.String,
     attempts: Schema.Number,
     message: Schema.String
@@ -152,14 +156,11 @@ export const delayMillis = (options: {
  * {@link PollExhausted} is the poll's own failure. `SleepRequestInvalid` is the
  * wait node's, declared because the wait between attempts is an ordinary
  * {@link module:Sleep.action} node and its typed refusal is part of the
- * topology a poll carries. Its two codes are the shapes of a payload that names
- * no deadline or names two, and {@link make} builds every wait payload itself
- * with exactly one `millis`, so a poll built through {@link make} does not
- * reach it; it stays in the union because the declaration a caller catches on
- * has to describe the node the plan holds. A wait whose length is not a length
- * is a different fault, which is why {@link make} refuses the schedule rather
- * than leaving it to this union: `Sleep` accepts `Infinity` as a `millis` and
- * arms a timer nobody wakes.
+ * topology a poll carries. Its codes cover a payload that names no deadline,
+ * names two deadlines, or names a value that is not a deadline. {@link make}
+ * refuses invalid author schedules at construction. A caller-visible round
+ * payload can still carry an invalid attempt that produces an invalid derived
+ * wait, so `Sleep` refuses that wait before the round parks.
  *
  * @category schemas
  * @since 0.1.0

@@ -241,12 +241,14 @@ describe("the interpreter drives a child boundary as a real execution", () => {
           const value = yield* Parent.execute({ value: 4 }, { executionId: "child-parent-1" })
           const childId = yield* Interpreter.childExecutionId("child-parent-1", boundaryNode, Child._tag, { value: 4 })
           const childResult = yield* Child.poll(childId)
-          return { childResult, value }
+          return { childId, childResult, value }
         }).pipe(Effect.provide(layer))
       )
 
       expect(settled.value).toBe(50)
       expect(calls).toEqual(["bump:4"])
+      expect(settled.childId).toMatch(/^[0-9a-f]{64}$/)
+      expect(settled.childId).toBe("de42e9de2118e15f0849d62ff3dd52fdb48ceec24692f9caef86b023d35af875")
       // The child is its own execution with its own result, not a step of the
       // parent's: polling the derived id answers with the child's own settlement.
       expect(Option.isSome(settled.childResult)).toBe(true)
