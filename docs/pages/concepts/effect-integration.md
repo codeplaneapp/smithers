@@ -46,7 +46,7 @@ The runtime distinguishes these cases:
 | Defect | Effect cause outside the error channel | Captured or allowed to die according to `Flow.CaptureDefects` |
 | Infrastructure interruption | `Action.InfraInterrupt` | Retried only when the action declares `interruptRetryPolicy` |
 | Suspension | `Flow.Suspended` result | Releases ownership and leaves the run resumable |
-| Composition failure | `EngineStore.EngineCompositionError` | Indicates missing or incompatible engine services |
+| Composition failure | An unmet `Requirements` type | Rejected by the compiler; the engine raises no runtime composition error |
 | Permission denial | `Permission.PermissionError`, or `PlatformError` carrying it | `Jj` and `HttpClient` fail with the typed kernel failure directly; Effect-owned tags (`FileSystem`, `ChildProcessSpawner`) surface a `PlatformError` with reason `PermissionDenied` whose `cause` is recovered via `Permission.fromPlatformError` |
 
 `Action.InfraInterrupt` is deliberately narrower than cancellation. An exhausted infrastructure retry schedule becomes a defect:

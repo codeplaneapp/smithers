@@ -104,7 +104,11 @@ in `flows_step_cache` and an immutable record in the append-only
 `(keyDigest, recordedRunId, recordedEventSeq)`. A second `put` under a
 provenance the ledger already holds is `Conflict` unless its `result`, `meta`,
 and `createdAtMs` are identical, so an evicted head can be restored from the
-same bytes but never rewritten with different ones. Whether the insert
+same bytes but never rewritten with different ones. Under a provenance the
+ledger has never seen, the head is arbitrated on the canonical `result` alone:
+a second run recording the same result is `ExistingSame` though its `meta`,
+`createdAtMs`, and run identity all differ, because `Conflict` is reserved for
+two runs disagreeing about what a step produced. Whether the insert
 conflicted and whether a fenced delete hit are read through
 [`DurableWriter.affectedRows`](/api/database#durablewriter) rather than a
 driver-specific `changes` cast, so the outcomes hold on every backend (issue
@@ -204,7 +208,7 @@ HTTP does not define:
 | ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | `GET /ac/{keyDigest}`                                | `200` with the entry JSON, or `404` for a miss                                         |
 | `GET` with `recordedRunId` and `recordedEventSeq`    | the entry that provenance recorded if still held, otherwise the head                   |
-| `PUT /ac/{keyDigest}`                                | `201` for a first write, another 2xx for an identical entry, `409` for a different one |
+| `PUT /ac/{keyDigest}`                                | `201` for a first write, another 2xx when nothing disagrees, `409` when something does |
 | `DELETE /ac/{keyDigest}`                             | 2xx when it removed the entry, `404` when it did not                                   |
 | `DELETE` with `recordedRunId` and `recordedEventSeq` | remove only while the entry still carries that provenance, `404` on a mismatch         |
 
@@ -217,6 +221,15 @@ lookup with its head whenever it holds no row for that provenance, so an entry
 carrying different provenance is accepted as that documented fallback.
 Provenance-fenced reads and evictions require a conforming server.
 :::
+
+Arbitrate `PUT` in the two stages the SQL tier arbitrates it in. A publication
+reusing a `(keyDigest, recordedRunId, recordedEventSeq)` the tier already
+recorded is `409` unless its `result`, `meta`, and `createdAtMs` all match,
+because that provenance record is immutable. Every other publication is
+arbitrated on the canonical `result` alone, as the head is: a second run
+recording the same result under its own provenance is not a conflict, and
+answering `409` there makes `CombinedCacheStore` count cross-host divergence
+that has not happened.
 
 ### Combining tiers
 
@@ -303,7 +316,7 @@ subpath, except the Node-only test layer, which has only its subpath.
 | `CacheStore` (class) | services | Service tag for content-addressed recorded step results. |
 | `encodeCanonical` (const) | serialization | Encodes a stored value as RFC 8785 canonical JSON. |
 | `validateKey` (const) | validation | Validates a cache-key digest before any statement or request is issued. |
-| `validateRecordedBy` (const) | validation | Validates a provenance selector before a store performs I/O. |
+| `validateRecordedBy` (const) | validation | Validates a provenance selector before a store performs I/O and returns the schema-decoded copy (or `undefined`). |
 | `validateFence` (const) | validation | Refuses a malformed eviction fence before any statement or request is issued. |
 | `validateAge` (const) | validation | Refuses an age bound no row could satisfy before any statement is issued. |
 | `snapshotEntry` (const) | validation | Takes an inert, detached snapshot of a cache entry at effect start. |
@@ -320,7 +333,7 @@ subpath, except the Node-only test layer, which has only its subpath.
 | --- | --- | --- |
 | `lookups` (const) | metrics | Counter over cache lookups, dimensioned by `outcome` (`hit` or `miss`). |
 | `hit` (const) | metrics | `lookups` view counting hits: a row existed for the key digest. |
-| `miss` (const) | metrics | `lookups` view counting misses: no row existed for the key digest. |
+| `miss` (const) | metrics | `lookups` view counting misses: the lookup had no entry it could serve. |
 | `puts` (const) | metrics | Counter over cache recordings, dimensioned by `outcome` (`inserted`, `existing_same`, or `conflict`). |
 | `put` (const) | metrics | `puts` views keyed by the `PutResult` tag `CacheStore.put` resolves to. |
 

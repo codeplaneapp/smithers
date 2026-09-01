@@ -30,7 +30,7 @@ message.
 | `invalid_cron`            | The Effect cron parser rejects an expression or timezone.                                               |
 | `unsatisfiable_cron`      | A next, previous, or interval occurrence search exhausts its search bound.                              |
 | `verification_failed`     | Webhook verification fails, including a signature mismatch or typed credential-resolution failure.      |
-| `catch_up_bound_exceeded` | `maxCatchUp` is invalid or the selected policy owes more occurrences than the bound permits.            |
+| `catch_up_bound_exceeded` | `maxCatchUp` is invalid, catch-up exceeds its bound, or an unbounded interval exceeds the package cap.  |
 | `runner`                  | The scheduler cannot plan, launch, inspect, cancel, or finish approval retries for a run.               |
 | `store`                   | A migration, persistence, or row-decoding operation fails, or a no-op store method is unavailable.      |
 
@@ -48,9 +48,22 @@ fails with `trigger_disabled`.
 
 A launch-capable claim writes a reservation before it starts a run.
 `TriggerStore.reservationPrefix` is `trigger-reservation:`, and
-`TriggerStore.reservationId` appends the trigger ID and occurrence. The
+`TriggerStore.reservationId` appends the trigger ID and occurrence;
+`TriggerStore.reservationOccurrence` reads that occurrence back. The
 `SqlTriggerStore.reservationLeaseMs` lease is 300,000 milliseconds, or 5
-minutes. The store may reclaim an expired reservation.
+minutes. `TriggerStore.reservationLeaseMs` owns the shared value and
+`SqlTriggerStore` re-exports it. Both store implementations reclaim an expired
+reservation and restore its unfinished occurrence to pending work, whether the
+lease expires during an active-run read or a later claim. A supersede
+reservation also retains the predecessor run ID: recovery re-attaches to that
+run and cancels it before launching the pending replacement.
+
+`TriggerStore.claimPending` reads the buffered occurrence, applies the same
+claim rules as `claimFire`, and clears the buffer only when the decision
+consumes it, inside one transaction. A refused claim leaves the buffer intact,
+and a concurrent active run that buffers it again keeps it pending. If a
+process dies after claiming ordinary or buffered work but before launching it,
+expiration of that launch reservation restores the occurrence.
 
 The persisted `last_fired_at_ms` watermark only moves forward. SQL updates use
 the greater of the stored value and the completed occurrence. The scheduler's
@@ -64,10 +77,11 @@ registration.
 
 ## Cron, catch-up, and scheduler limits
 
-`Cron.occurrencesBetween` uses `Cron.maxOccurrences`, currently 1000, when the
-caller omits `limit`. An explicit `limit` must be a non-negative safe integer;
-zero returns no occurrences. `Schedule.maxCatchUpLimit` equals the same cap, so
-a schedule cannot declare a larger catch-up bound.
+`Cron.occurrencesBetween` fails with `catch_up_bound_exceeded` when the caller
+omits `limit` and the interval holds more than `Cron.maxOccurrences`, currently
+1000. An explicit `limit` silently caps the result and must be a non-negative
+safe integer; zero returns no occurrences. `Schedule.maxCatchUpLimit` equals
+the same cap, so a schedule cannot declare a larger catch-up bound.
 
 `maxCatchUp` defaults to 0. `CatchUp.occurrences` validates the bound before it
 selects `none`, `one`, or `all`, and every policy answers to the bound. In
@@ -130,7 +144,7 @@ Migrations are internal. The export map null-maps
 | `Cron.next`                          | const     | getters      | The first occurrence strictly after `from`.                                                                                                                                                                        |
 | `Cron.previousAtOrBefore`            | const     | getters      | Returns the latest occurrence at or before `at`.                                                                                                                                                                   |
 | `Cron.maxOccurrences`                | const     | constants    | The greatest number of occurrences one search returns when its caller states no limit of its own.                                                                                                                  |
-| `Cron.occurrencesBetween`            | const     | sequencing   | The occurrences in `(from, to]`, in order, at most `limit` of them.                                                                                                                                                |
+| `Cron.occurrencesBetween`            | const     | sequencing   | The occurrences in `(from, to]`, in order.                                                                                                                                                                         |
 | `Cron.parse`                         | const     | constructors | Parses a cron expression in an optional timezone, reporting a malformed one as `invalid_cron` and one the calendar never satisfies as `unsatisfiable_cron`.                                                        |
 | `Trigger.Overlap`                    | const     | schemas      | How a trigger behaves when an occurrence arrives while its previous run is still going.                                                                                                                            |
 | `Trigger.Overlap`                    | type      | models       | The decoded form of `Overlap`.                                                                                                                                                                                     |
@@ -157,16 +171,17 @@ Migrations are internal. The export map null-maps
 | `TriggerStore.Fire`                  | interface | models       | One scheduled occurrence of a trigger, addressed by its occurrence number so a retry cannot fire it twice.                                                                                                         |
 | `TriggerStore.ClaimFire`             | interface | models       | A `Fire` together with the revision it was computed from and whether it is resuming a buffered occurrence.                                                                                                         |
 | `TriggerStore.Claim`                 | type      | models       | The outcome of claiming an occurrence: either another worker holds it, or this caller does and must take `action`.                                                                                                 |
+| `TriggerStore.reservationLeaseMs`    | const     | constants    | Time after which an uncommitted launch reservation may be reclaimed.                                                                                                                                               |
 | `TriggerStore.reservationPrefix`     | const     | constants    | The prefix marking an `active_run_id` that is a launch reservation rather than a run the runtime knows about.                                                                                                      |
 | `TriggerStore.reservationId`         | const     | constructors | The reservation id one occurrence of one trigger claims.                                                                                                                                                           |
 | `TriggerStore.isReservation`         | const     | predicates   | Whether a stored `active_run_id` is a launch reservation.                                                                                                                                                          |
+| `TriggerStore.reservationOccurrence` | const     | getters      | Reads the occurrence encoded in a launch reservation.                                                                                                                                                              |
 | `TriggerStore.Outcome`               | type      | models       | How a claimed occurrence ended.                                                                                                                                                                                    |
 | `TriggerStore.Result`                | interface | models       | The reported end of one occurrence, with the run it started when it launched one.                                                                                                                                  |
 | `TriggerStore.Service`               | interface | models       | Durable trigger state: registration, enabled-trigger listing, and the claim protocol that keeps two schedulers from firing the same occurrence.                                                                    |
 | `TriggerStore.TriggerStore`          | class     | services     | The `Service` tag.                                                                                                                                                                                                 |
 | `TriggerStore.makeNoop`              | const     | constructors | A `Service` that fails every method as unavailable, for an environment with no trigger store.                                                                                                                      |
 | `TriggerStore.layerNoop`             | const     | layers       | Provides `makeNoop`.                                                                                                                                                                                               |
-| `SqlTriggerStore.reservationLeaseMs` | const     | constants    | Time after which an uncommitted launch reservation may be reclaimed.                                                                                                                                               |
 | `SqlTriggerStore.make`               | const     | constructors | Builds a `TriggerStore.Service` over the ambient SQL client, with every write going through the durable writer.                                                                                                    |
 | `SqlTriggerStore.layer`              | const     | layers       | Provides `TriggerStore.TriggerStore` backed by SQL.                                                                                                                                                                |
 | `Scheduler.StartInput`               | interface | models       | Arguments used to launch one scheduled flow.                                                                                                                                                                       |

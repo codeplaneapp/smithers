@@ -15,6 +15,8 @@ token can perform every control operation the server exposes.
 `NodeControl.layerServer` and `layerServerBearerAuth` bind to `127.0.0.1` when
 no host is supplied. A non-loopback host is rejected unless the host adapter
 passes the explicit `listen: true` opt-in corresponding to `--listen`:
+the [`@smthrs/cli` API reference](/api/cli) lists the complete composition
+surface.
 
 ```ts
 import { NodeControl } from "@smthrs/cli"

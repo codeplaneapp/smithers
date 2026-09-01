@@ -314,8 +314,10 @@ gap.
 
 ## Errors
 
-Every failure a caller sees is one `Core.IntegrationError` carrying a
-machine-readable `reason`, so a caller maps it without reading message text:
+Every failure that reaches a caller through the Effect channel, from a client,
+a source, a channel, or a durable action, is one `Core.IntegrationError`
+carrying a machine-readable `reason`, so a caller maps it without reading
+message text:
 
 | Reason                | Raised when                                                                                                                                                      |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -328,11 +330,23 @@ machine-readable `reason`, so a caller maps it without reading message text:
 | `permission-denied`   | The credential lacks the scope the operation needs.                                                                                                              |
 | `listener-conflict`   | An unowned hook holds a declared callback URL.                                                                                                                   |
 
+Two kinds of failure sit outside that channel and outside that vocabulary.
+
 The Telegram client raises its own `TelegramApiError`, which carries the Bot
 API's `error_code`. `Telegram.TelegramClient.toIntegrationError` is the mapping
 onto the vocabulary above, and the durable action applies it, so an exhausted
 rate limit journals `retryable: true` and a chat that does not exist journals
 something a caller can tell apart from it.
+
+The plan-time helpers validate their arguments by throwing, the way an ordinary
+constructor does, rather than by returning an Effect: `Telegram.Config.resolve`,
+`Telegram.Chunk.chunk`, `Telegram.Approval.callbackData` and its neighbours,
+`Telegram.InitData.*`, `Core.SignalName.eventName`, `Core.AuthorizationUrl`, and
+`GitHub.Repository.repositoryPath`. Each raises a `SmithersError` with a code
+such as `INVALID_INPUT`, because a caller that passed a bad argument has a bug
+to fix rather than a failure to journal. `GitHub.Repository` also exports
+`requireRepositoryPath`, the same check inside the Effect channel, for the
+paths that build a request from configuration.
 
 `toUnauthorized` and `toInvalidInput` map a failure onto the control plane's
 own errors at the channel boundary. Only the reason crosses: a verifier that
@@ -364,6 +378,8 @@ The service-agnostic pieces every integration in this package builds on.
 | Export | Kind | Summary |
 | --- | --- | --- |
 | `Core.ActionFailure.Reason` (const) | schemas | The classification, as a schema. |
+| `Core.ActionFailure.isMessageId` (const) | refinements | Whether `value` is a provider message id. |
+| `Core.ActionFailure.MessageId` (const) | schemas | A provider message id, as a schema. |
 | `Core.ActionFailure.IntegrationFailure` (class) | errors | A provider failure in the form a durable action encodes. |
 | `Core.ActionFailure.MAX_MESSAGE_LENGTH` (const) | constants | The longest provider text a failure persists. |
 | `Core.ActionFailure.fromIntegrationError` (const) | conversions | Converts a client failure into the schema-backed form. |

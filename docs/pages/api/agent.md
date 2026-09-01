@@ -139,7 +139,7 @@ plane approved, bound nothing until `Budget` existed.
 `Budget.layer(policy)` states one directly.
 
 Enforcement sits at the model boundary, which every model call passes through,
-so a step that assembles its own loop cannot evade a run-wide budget. Three
+so a step that assembles its own loop cannot evade a run-wide budget. Four
 rules make it usable:
 
 - **The accumulator is keyed by the model step's content key, and it is
@@ -222,13 +222,11 @@ correction.
 | --- | --- | --- |
 | `FlowEngineLike.RouteResolver` (interface) | models | Route resolution for one sealed model request. |
 | `FlowEngineLike.routeResolver` (const) | constructors | Adapts one configured model route to `RouteResolver`. |
-| `FlowEngineLike.ChildRunner` (interface) | models | Executes one child call elaborated from a model tool call. |
 | `FlowEngineLike.CallRunner` (interface) | models | Executes one flow call issued from inside a running cell. |
 | `FlowEngineLike.WorkspaceCallRunner` (interface) | models | A cell-call runner that may touch the workspace it runs inside. |
 | `FlowEngineLike.workspaceRelative` (const) | conversions | Rewrites one declared effect path into the workspace-relative form the engine's file boundary speaks. |
 | `FlowEngineLike.callBoundary` (const) | conversions | Converts the agent-side declaration into the file boundary understood by the production engine and its workspace sandbox. |
 | `FlowEngineLike.callMaterial` (const) | constructors | The key material one cell call declares about itself. |
-| `FlowEngineLike.appendBatch` (const) | constructors | Appends one elaborated batch to the persisted plan value. |
 | `FlowEngineLike.sandboxed` (const) | constructors | Runs every cell call inside an outer workspace transaction. |
 | `FlowEngineLike.Options` (interface) | models | The collaborators a durable harness engine needs. |
 | `FlowEngineLike.RecordedModelStep` (const) | schemas | The durable outcome of one sealed model step. |
@@ -238,7 +236,6 @@ correction.
 | `FlowEngineLike.defaultModelRetryTimes` (const) | policies | How many times the production transport policy retries one sealed step. |
 | `FlowEngineLike.defaultModelRetryWindowMillis` (const) | policies | The wall clock the production transport ladder may span, in milliseconds. |
 | `FlowEngineLike.defaultModelRetryPolicy` (const) | policies | The production transport retry budget: five retries over a jittered exponential backoff spanning roughly thirty seconds, inside a 45-second wall-clock window. |
-| `FlowEngineLike.defaultModelOverruns` (const) | policies | How many times one sealed step re-issues a call its budget cut off. |
 | `FlowEngineLike.make` (const) | constructors | Constructs the durable harness engine port. |
 | `FlowEngineLike.layer` (const) | layers | Provides the durable harness engine port. |
 | `MemorySnapshotRecorder.make` (const) | constructors | Builds the memory recorder backed by a harness engine. |
@@ -270,6 +267,7 @@ correction.
 | `CellPlugin.fromBindings` (const) | constructors | Authors a harness plugin that contributes executable flows. |
 | `CellPlugin.modelRequest` (const) | dispatch | Runs the ordered provider-neutral request waterfall. |
 | `CellPlugin.identity` (const) | identity | Computes the order-sensitive identity of a resolved host composition. |
+| `StandardFlows.defaultMaxWaitSeconds` (const) | constants | The default longest wait a cell may request, in seconds. |
 | `StandardFlows.filesystem` (const) | constructors | The standard filesystem capabilities, as ordinary flows. |
 | `StandardFlows.shell` (const) | constructors | Shell execution, as one ordinary flow. |
 | `StandardFlows.tests` (const) | constructors | The repository's own test runner, as one ordinary flow. |
@@ -287,6 +285,7 @@ correction.
 | `StandardFlows.askerNoop` (const) | constructors | An approval port for a host with nobody to ask. |
 | `AgentSession.Options` (interface) | models | Everything the host decides about the composition. |
 | `AgentSession.traceIdentity` (const) | projections | The producer identity of one journaled agent event. |
+| `AgentSession.maxTracedBytes` (const) | projections | The largest free-text or value field one trail record carries. |
 | `AgentSession.trace` (const) | projections | The journal projection of one agent event. |
 | `AgentSession.patterns` (const) | conversions | Parses a run envelope's formatted capabilities, dropping every entry `pattern` cannot name. |
 | `AgentSession.settlementFailure` (const) | conversions | The failure the engine persists as this flow's settlement. |
@@ -418,6 +417,9 @@ correction.
 | `Budget.Budget` (class) | services | The `Service` tag. |
 | `Budget.budgetWarningEvent` (const) | records | The journal event one allowed-over-budget call writes. |
 | `Budget.usageEvent` (const) | records | The journal event one accounted model call writes. |
+| `Budget.UsageRecord` (const) | records | The payload one `usageEvent` record carries. |
+| `Budget.budgetStartedEvent` (const) | records | The journal event one run's latency clock zero is written to. |
+| `Budget.BudgetStartedRecord` (const) | records | The payload one `budgetStartedEvent` record carries. |
 | `Budget.tokensOf` (const) | accounting | The tokens one model call cost. |
 | `Budget.defaultRecoveryEntries` (const) | constructors | How many journal entries one recovery reads before it gives up. |
 | `Budget.looseRunId` (const) | accounting | The run id `Service.usageOf` answers about calls recorded outside any run under. |

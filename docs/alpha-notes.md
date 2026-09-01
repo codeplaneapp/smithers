@@ -254,10 +254,17 @@ lives. The items an alpha operator hits first:
 - **Flow registrations are in-memory.** A restarted process resumes nothing
   until it re-registers the handlers for its stored runs, because registration
   is what re-arms durable clocks and deferred wakes.
-- **The production layer is half-packaged.** `@smthrs/flows/NodeRuntime`
-  composes database, migrations, stores, and the engine; the Host and kernel
-  half is still the caller's, and it installs no process or signal handlers.
-  `examples/src/durable-layer.ts` is the worked composition.
+- **The production layer packages two levels, and only one of them is
+  complete.** `@smthrs/flows/NodeRuntime.layer` composes database, migrations,
+  stores, and the engine, and leaves host services, the step boundary, and the
+  workspace sandbox to the caller. `NodeRuntime.layerHost` adds the rest: the
+  contained Node host, the guarded `HostServices` kernel over an unattended
+  grant store, the default step boundary and filesystem workspace sandbox, the
+  liveness probe, and `SIGINT`/`SIGTERM` shutdown bounded by
+  `shutdownTimeoutMs`. A program that composes `layer` still owes `Crypto`,
+  `FileSystem`, and `Jj`, and installs its own signal handlers.
+  `examples/src/durable-layer.ts` is the worked composition, and
+  [the barrel's API page](../pages/api/flows.md) lists both entry points.
 - **Detached child flows are not exposed.** Subflows are attached
   parent/child only; first-class detached execution, automatic durable
   lineage, and structured parent cancellation policy are planned, not shipped

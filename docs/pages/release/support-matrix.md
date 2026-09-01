@@ -89,7 +89,7 @@ execution claim.
 | [`@smthrs/artifacts`](/api/artifacts) | Content-addressed artifact store (local, remote-over-HTTP, combined). | gated yes |
 | [`@smthrs/canonical`](/api/canonical) | RFC 8785 canonical JSON as Effect Schema. | gated yes |
 | [`@smthrs/capability`](/api/capability) | Capability vocabulary, tiers, typed permission failures. | gated yes |
-| [`@smthrs/cli`](/cli) | The `smithers` executable and `NodeControl` composition. | Node |
+| [`@smthrs/cli`](/api/cli) | The `smithers` executable and `NodeControl` composition. | Node |
 | [`@smthrs/control`](/api/control) | Control services, RPC schema, `ControlServer`/`ControlClient`, `SqlControlRuntime`, credentials. | no claim (no `node:` imports) |
 | [`@smthrs/core`](/api/core) | Plan-time `Flow`/`Node` builders and `Graph`. | no claim |
 | [`@smthrs/crypto`](/api/crypto) | Injected cryptographic schema transformations. | gated yes |

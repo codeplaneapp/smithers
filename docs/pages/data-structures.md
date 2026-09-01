@@ -12,7 +12,7 @@ Everything durable in Smithers is one of a small number of shapes. This page nam
 | -------------------- | ----------------------------- | ------------------------------------ | ---------------------- |
 | Journal entry        | `flows_journal_events`        | `0001_initial`                       | `@smthrs/journal`      |
 | Journal checkpoint   | `flows_journal_checkpoints`   | `0002_checkpoints`                   | `@smthrs/journal`      |
-| Run row              | `flows_runs`                  | `0001_initial`                       | `@smthrs/run-store`    |
+| Run row              | `flows_runs`                  | `0001_initial`, `0002_lineage`       | `@smthrs/run-store`    |
 | Attempt row          | `flows_attempts`              | `0001_initial`                       | `@smthrs/run-store`    |
 | Cache row            | `flows_step_cache`            | `0001_initial`                       | `@smthrs/step-cache`   |
 | Deferred completion  | `flows_deferred_completions`  | `0001_initial`                       | `@smthrs/engine-store` |
@@ -115,14 +115,17 @@ Readers: `Journal.entries` pages history, `Journal.stream` replays then follows,
 | `owner_host_id`, `owner_pid`, `owner_nonce`, `heartbeat_at_ms` | the ownership fence                                                   |
 | `claim_host_id`, `claim_pid`, `claim_nonce`, `claimed_at_ms`   | the claim generation                                                  |
 | `state_json`                                                   | encoded payload and, once terminal, the encoded `Flow.Result`         |
-| `parent_run_id`, `cancel_requested_at_ms`                      | lineage and cancellation guards                                       |
+| `parent_run_id`, `cancel_requested_at_ms`                      | parentage and cancellation guards                                     |
+| `lineage_id`, `round_ordinal`                                  | the trampoline pair added by `0002_lineage`, unique together          |
 | `waiting_reason`, `waiting_wake_at_ms`, `waiting_token`        | parked-run query and wake data                                        |
 
-Invariants, enforced by table `CHECK` constraints rather than by convention:
+`lineage_id` and `round_ordinal` are `NULL` on an ordinary run, which reads as round 0 of a lineage of one. `waiting_*` is created by this migration but read and written only by `@smthrs/engine-store`; `RunStore.RunRow` does not model those three columns.
 
-- A `running` row has all four owner fields set. Any other status has all four `NULL`. Moving to `suspended` or a terminal status therefore clears ownership atomically with the transition.
-- The four claim fields are all set or all `NULL`.
-- The lifecycle is `pending → running → completed | failed | suspended | cancelled`, and `suspended → running` on a wake.
+Table `CHECK` constraints enforce the first two invariants below. The third is a convention `RunStore` upholds, not a constraint:
+
+- Enforced: a `running` row has all four owner fields set. Any other status has all four `NULL`. Moving to `suspended` or a terminal status therefore clears ownership atomically with the transition.
+- Enforced: the four claim fields are all set or all `NULL`, and `status` is one of the six names above.
+- Convention: the lifecycle is `pending → running → completed | failed | suspended | cancelled`, and `suspended → running` on a wake. Nothing in the schema enforces the transition graph. `transitionOwned` writes any `RunStatus` its owner fence admits, so a writer that bypasses `RunStore` can land a shape no reader expects.
 
 Ownership constants live in `Ownership`: a 1 second heartbeat interval, a 19 second write tolerance, and a 30 second stale threshold. The write tolerance is eleven ticks shorter than the steal cutoff, so an owner whose heartbeat writes fail is always interrupted before a peer may take over.
 

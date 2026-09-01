@@ -24,6 +24,7 @@ flowchart TD
   RS["@smthrs/run-store"] --> D
   RS --> J
   SC["@smthrs/step-cache"] --> D
+  SC --> C
   A["@smthrs/artifacts"] --> Crypto
   PB --> JJ
   PB --> K
@@ -78,7 +79,7 @@ flowchart TD
 | [`@smthrs/platform-browser`](/api/platform-browser) | Browser implementations of effect's `FileSystem` and `ChildProcessSpawner`, and the `BrowserHost` bundle, which provides effect's own fetch-backed `HttpClient` | Depends on `effect`, `@smthrs/kernel`, and `@smthrs/jj` for the slots it fills; the ZenFS and just-bash backends are arguments, not dependencies |
 | [`@smthrs/journal`](/api/journal) | The immutable event history: journal rows, projections, redaction, and the `OwnerId` fence its durable channel accepts | Open event envelope; owns `flows_journal_events` only |
 | [`@smthrs/run-store`](/api/run-store) | Executable run state: run rows, attempt rows, and ownership arbitration | Owns `flows_runs` and `flows_attempts`; validates supplied liveness evidence, never probes |
-| [`@smthrs/step-cache`](/api/step-cache) | Sealed step results addressed by step-key digest, plus the HTTP action-cache client and the local-first/remote-second composition | Owns `flows_step_cache`; depends on `database` alone |
+| [`@smthrs/step-cache`](/api/step-cache) | Sealed step results addressed by step-key digest, plus the HTTP action-cache client and the local-first/remote-second composition | Owns the mutable `flows_step_cache` head and the append-only `flows_step_cache_recorded` provenance ledger; depends on `database` and `canonical` |
 | [`@smthrs/plan`](/api/plan) | The persisted plan: the `KeyMaterial`→`StepKey` compiler, `Plan.compile`/`append`, `PlanDiff`, and the append-only `PlanStore` | Owns `flows_plans`, `flows_plan_nodes`, `flows_plan_edges`, and migration block `4000`; performs no I/O beyond the database and executes nothing |
 | [`@smthrs/artifacts`](/api/artifacts) | The content-addressed artifact store the step cache references by digest: local, remote-over-HTTP, and the combination | Owns no tables and no migration; depends on `crypto` alone. Host access is Effect's `FileSystem` and `HttpClient` tags |
 | [`@smthrs/flow`](/api/flow) | The flow authoring model, flows, actions, durable primitives, retry policy, step identity, and the `FlowRuntime` port they execute against | Declares the runtime port; depends on nothing that implements it |
@@ -94,7 +95,8 @@ flowchart TD
 Each storage package owns its own tables and its own migration set:
 `@smthrs/journal` owns `flows_journal_events`, `@smthrs/run-store` owns
 `flows_runs` and `flows_attempts`, `@smthrs/step-cache` owns
-`flows_step_cache`, `@smthrs/plan` owns `flows_plans`, `flows_plan_nodes`, and
+`flows_step_cache` and `flows_step_cache_recorded`, `@smthrs/plan` owns
+`flows_plans`, `flows_plan_nodes`, and
 `flows_plan_edges`, and `@smthrs/engine-store` owns
 `flows_deferred_completions` and `flows_clock_deadlines`. `@smthrs/database`'s `Migrations` composes those
 sets over one `flows_migrations` table, namespacing each package's migration

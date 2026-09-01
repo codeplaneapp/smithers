@@ -47,20 +47,20 @@ These are the behaviors that have to be exercised against real implementations, 
 | Package                         | Suites | Notable coverage                                                                                                                                                                                                                |
 | ------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@smthrs/platform-node`         | 2      | the shared contract suite (`@smthrs/kernel/test/contract`) against the Node bundle, once with explicit expectations and once taking every default                                                                               |
-| `@smthrs/platform-bun`          | 1      | the same suite against the Bun bundle, which runs the Node fallback under vitest                                                                                                                                                |
+| `@smthrs/platform-bun`          | 5      | the shared contract suite against `BunHost.layerAt` with a loopback server behind the HTTP probes, the manual-redirect fail-closed case, the guarded descriptor-relative filesystem, real-process containment and reaping, and the barrel with its browser-free module graph |
 | [`@smthrs/platform-browser`](/api/platform-browser) | 8 | the shared contract suite against `BrowserHost` three ways (the full wasm-backed bundle, manual redirects, one shared mount), the ZenFS filesystem adapter and its bounded streaming against a real directory, the just-bash spawner's rendering, refusals, handle capabilities, and abort boundary, the browser bundle gate, and the barrel with its kernel isolation attestation |
 | `@smthrs/jj`                    | 4      | the contract and its no-op, the jj CLI against a real repository, error classification against a scripted binary, and the Bun and browser layers                                                                                |
 | `@smthrs/sandbox`               | 23     | the barrel, spawner adaptation and kill, the scripted and real-process providers, both conformance suites, the health probe, supervision, the session contract, and nine machine providers, three of them against real backends |
 | `@smthrs/journal`               | 12     | durable and lossy admission, fencing, transactions, retention, redaction, projections, migrations                                                                                                                               |
 | `@smthrs/run-store`             | 9      | run and attempt stores, ownership arbitration, run metadata, migrations                                                                                                                                                         |
-| `@smthrs/step-cache`            | 6      | cache admission, eviction, provenance, migrations                                                                                                                                                                               |
+| `@smthrs/step-cache`            | 13     | bounded-JSON admission, the SQL head and its provenance ledger, durability and crash recovery, expiry and sweeping, fenced eviction, the remote HTTP tier, the combined tiers, metrics, redaction, artifact references, migrations, the barrel contract, and the test double |
 | `@smthrs/database`              | 4      | the write-serialization contract, concurrent open, artifact shape                                                                                                                                                               |
 | `@smthrs/kernel`                | 23     | capability parsing, matching, subsumption, tiers, ambient sets, grants and their journal persistence, every decorated service                                                                                                   |
 | `@smthrs/canonical`             | 1      | RFC 8785 vectors, malformed Unicode, boundary values, and large values                                                                                                                                                          |
 | [`@smthrs/crypto`](/api/crypto) | 3      | package-owned vector, property, host-adversary, error, redaction, and parity coverage                                                                                                                                           |
 | [`@smthrs/keys`](/api/keys)     | 3      | frozen `key1_` vectors, stored-key identity and version rejection, canonical equality properties, typed host failures, diagnostic redaction, irreversibility, and browser-safe source imports                                   |
 | [`@smthrs/plan`](/api/plan)     | 10     | the step-key compiler and its collision cases, plan compilation, conflict annotation and append, the append-only store, the node AST, planned-value refusals, build refusals                                                    |
-| `@smthrs/artifacts`             | 5      | the store contract, the memory and filesystem implementations, the combined tier, and the remote client                                                                                                                         |
+| `@smthrs/artifacts`             | 12     | the store contract, the memory and filesystem implementations, the combined tier, digest validation, the store counters, the remote client against both a stub transport and a real loopback HTTP server that resumes an interrupted chunked upload, the sweep, and the cross-process lock and backup lease that fence publication against deletion, the lock also across real spawned processes |
 | [`@smthrs/flow`](/api/flow)     | 28     | flow definitions and their combinators, execution ids, results, suspension and nested suspension, cancellation, child boundaries and trampoline handoffs, graph building and priority, the interpreter, action declaration, requirements, combinators and retry pinning, deferreds, clocks, queues, wait points, polling, human tasks, sleeps, file boundaries, cache policy, retry policy data, step identity |
 | `@smthrs/engine`                | 18     | action identity and keys, ordinal stability, keyless concurrency, tiers, durable attempt resume, the memory engine, retry decisions, proxies                                                                                    |
 | `@smthrs/engine-store`          | 61     | the durability matrix: ownership, adoption, sweeps, parking, cancellation, cycles, attempt persistence, cache admission, boundaries, WAL atomicity, fault matrix                                                                |
@@ -98,15 +98,16 @@ contract against `BrowserHost` three ways: the full bundle over the committed
 `flows_jj.wasm`, the manual-redirect `HttpClient`, and one real mount shared by
 the filesystem, the interpreter, and jj. Beside it, the filesystem adapter is
 exercised against a real temp directory for recursive listing, permission
-checks, directory modes, symlink and relative canonicalization, and bounded
-streaming with refused bounds, and against stub backends for every error tag,
-a looping directory tree, and a backend that misreports a read length. The
-spawner suite pins the rendered command line against the kernel's own renderer
-with hostile argv tokens, every refused capability, and the abort boundary:
-an interpreter that ignores its `AbortSignal` must not let a second run start,
-and a killed handle must report a `PlatformError` rather than interrupt its
-caller. The barrel suite pins the namespace universe and the kernel isolation
-attestation that `layer` makes and `make` does not.
+checks, directory modes, symlink and relative canonicalization including a `..`
+that follows a link, and bounded streaming with refused bounds, and against stub
+backends for every error tag, a looping directory tree, and a backend that
+misreports a read length. The spawner suite pins the rendered command line
+against the kernel's own renderer with hostile argv tokens, every refused
+capability, and the abort boundary: an interpreter that ignores its
+`AbortSignal` must not let a second run start, and a killed handle must report a
+`PlatformError` rather than interrupt its caller. The barrel suite pins the
+namespace universe and the kernel isolation attestation that `layer` makes and
+`make` does not.
 
 {/* generated:platform-browser-testing end */}
 
