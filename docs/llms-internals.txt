@@ -345,7 +345,7 @@ These are the behaviors that have to be exercised against real implementations, 
 | `@smthrs/engine-store`          | 61     | the durability matrix: ownership, adoption, sweeps, parking, cancellation, cycles, attempt persistence, cache admission, boundaries, WAL atomicity, fault matrix                                                                |
 | `@smthrs/sync`                  | 20     | protocol, server paging and workspace merge, client cursors and gaps, transport faults, branch commands, presence, share, projection, convergence                                                                               |
 | `@smthrs/time-travel`           | 21     | the `TimeTravel` service surface, replay, fork and its lineage, rewind with claims, concurrency and rollback, truncation, compensation, recovery, both stores                                                                   |
-| `@smthrs/flows`                 | 2      | the barrel namespace list against the derived package universe, and the coverage-isolation conformance suite                                                                                                                    |
+| `@smthrs/flows`    | 14     | the barrel namespace universe and the absence of an unsupported Cloudflare runtime subpath, the real-SQLite `NodeRuntime` journey and its guarded host composition, three integration hosts (containment, reaping, signals), the AST spawn-containment gate, sandboxed child execution against both a scripted and a real provider plus its retry policy, the authoring end-to-end program and its error surface, the shipped CLI composition contract, and the repository-wide coverage-isolation conformance suite |
 | `@smthrs/examples`              | 11     | every documentation example, run end to end against the real packages                                                                                                                                                           |
 
 {/* generated:keys-testing start */}
@@ -376,15 +376,20 @@ and its collision cases: prototype-named dependencies, forged digest inputs,
 projected values resolved as own data properties only, adversarial projection
 corpora, and a memo whose leader is interrupted while a waiter is parked on it.
 Payload tests prove the authoring AST is a JSON mirror, so distinct `Date` and
-`URL` payloads never share a key and no function survives into a stored plan.
-Plan tests cover topological order, conflict annotation and the ordering edges
-it infers, reader-after-writer edges, append across generations, diff
-attribution for every hashed field, draft validation, immutability of a
-compiled plan, and bounded-resource compilation of a large chain in both
-declaration orders. The store suite runs real SQLite: append-only triggers,
-compare-and-swap on the plan generation, ordinal uniqueness, and every refusal
-code. Property suites cover file-set globbing, overlap, and Unicode
-normalization.
+`URL` payloads never share a key, no function survives into a stored plan, and
+a `toJSON` returning its own receiver refuses on both the clone and the input
+rather than keying as an empty object. Plan tests cover topological order,
+conflict annotation and the ordering edges it infers, reader-after-writer
+edges, append across generations, diff attribution for every hashed field,
+draft validation, and bounded-resource compilation of a large chain in both
+declaration orders. Immutability is pinned by mutating the caller's `Date`,
+`URL`, and custom-`toJSON` objects after compiling and asserting the stored
+material and the plan digest do not move, and by proving an effect edit re-keys
+its node instead of moving the approval digest silently. The store suite runs
+real SQLite: append-only triggers including the plan-id pin, compare-and-swap
+on the plan generation, the persisted-prefix check that rolls back an append
+grown from a divergent branch, ordinal uniqueness, and every refusal code.
+Property suites cover file-set globbing, overlap, and Unicode normalization.
 
 {/* generated:plan-testing end */}
 
@@ -645,11 +650,11 @@ If your own earlier commit in the current series is wrong, rewrite or squash the
 
 #### Planned
 
-Each of these closes a gap named in External. They are listed in dependency order. None has landed in full; `production-layer` has landed in part, as noted in its row.
+Each of these closes a gap named in External. They are listed in dependency order. Only `production-layer` has landed, as noted in its row; the rest are still open.
 
 | Epic | Intended commits | Depends on |
 | --- | --- | --- |
-| `production-layer` | a `@smthrs/flows` layer composing database, migrations, journal stores, durable deferred and clock state, kernel, a platform bundle, and engine; a durable getting-started example that survives a restart; the manifest and gate updates. Partly landed: the `NodeRuntime` subpath packages the storage and engine composition and the durable example builds on it; the package-level real-SQLite gate is also landed. Still open are the kernel and platform-bundle half: `NodeRuntime` installs neither `NodeHost.layer` nor the guarded `HostServices` kernel | nothing |
+| `production-layer` | a `@smthrs/flows` layer composing database, migrations, journal stores, durable deferred and clock state, kernel, a platform bundle, and engine; a durable getting-started example that survives a restart; the manifest and gate updates. Landed: `NodeRuntime.layer` packages the storage and engine composition and leaves host services, the step boundary, and the workspace sandbox to the caller, and `NodeRuntime.layerHost` supplies the contained Node host, the guarded `HostServices` kernel over an unattended grant store, the liveness probe, and bounded signal shutdown. The durable example builds on it and the package-level real-SQLite gate is landed | nothing |
 | `injectable-seams` | put a service or a defaulted option in front of `resolveRetry`, then `classifyError`, then `resolveShareability`, then `waitStart` and `wake`, one seam per commit with a suite proving a provided `Layer` changes engine behavior | `production-layer` |
 | ~~`supervisor`~~ | Withdrawn. The run driver's heartbeat-cadence sweep handles `released` and cancel-requested parked rows plus stale `running` rows; no separate `Supervisor.layer` is planned; see gap 8. Durable clocks are instead re-armed by `DeferredPersistence.sweepDue` during flow registration and fire through per-clock timer fibers. A gateway supervisor that launches a process for an abandoned run is a distinct, still-unplanned piece of work | nothing |
 | `run-control` | a `RunControl` service journalling attributed pause, cancel, and hijack with actor and reason; the run-row columns; hijack as an alternative `RunControl` implementation | `injectable-seams` |
@@ -835,6 +840,7 @@ The suite is a gate, so a snippet that stops compiling or stops producing the do
 | [`38-monitor-and-alert.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/38-monitor-and-alert.ts) | the control plane's supervision loop over two real durable runs that park on `WaitFor`: one is answered and finishes, the other is not, and `Monitor.run` classifies it from its journal and resumes it before `Alerts` pages about the beat it wrote | the answered run returns `{ approved: true }`, the unanswered one is `parked` on `event`, three quiet beats then `wedged-node`, one `resume`, no page under a production delay, one coalesced page under a zero delay, and no second page |
 | [`39-agent-policies.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/39-agent-policies.ts) | one model-backed step under the three agent-runtime policies: a `QuotaPolicy` park across an engine restart, a structured-output correction, and a `Budget` in `warn` | the provider is called three times in all, one before the restart, and the run records one park, one correction, and its budget warnings |
 | [`40-sandbox-placement.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/40-sandbox-placement.ts) | one durable action placed on a provisioned scratch machine through `Sandbox.layerHost`, while its engine and journal stay on local SQLite | the sandboxed `wc -c` counts the file the body wrote, and closing the execution scope removes the scratch workspace |
+| [`41-sandboxed-flow.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/41-sandboxed-flow.ts) | a child flow's own code run inside a provisioned scratch machine through `@smthrs/flows/SandboxedFlow`, as one durable action of a parent flow on local SQLite | the guest's greeting and the file only it wrote come back as data, a second run over the same journal replays the action without acquiring a machine, and the workspace is gone afterwards |
 
 ### Reading them in order
 

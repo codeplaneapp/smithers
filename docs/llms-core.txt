@@ -898,6 +898,7 @@ These are Node-only, deliberately. The gate asserts each one _still_ fails to bu
 | `@smthrs/kernel/test/TestHost`                   | `effect/testing`'s `TestClock` imports `node:assert`, so the deterministic host is Node-only even though its own adapters are pure |
 | `@smthrs/database/node/NodeDatabase`             | `node:sqlite` through `@effect/sql-sqlite-node`                                                                                    |
 | `@smthrs/flows/NodeRuntime`                      | The supported production composition: it opens a Node SQLite file and closes over a Node scope                                     |
+| `@smthrs/flows/SandboxedFlow`                    | The sandboxed child-flow tier: it bundles a host module with esbuild through `node:url` paths and starts a guest runtime           |
 
 ### The rule this encodes
 
@@ -2083,7 +2084,7 @@ Actions receive ordinals from a counter scoped to the action's **name**, not fro
 
 `Bounded.all(members, { concurrency, priority? })` splits a named record into batches of `concurrency` and sequences the batches, so a plan states how many calls can be in flight. Members are ordered by priority, highest first, with declaration order breaking a tie. A member that carries its own `Node.priority` keeps it; the rest inherit the container's. Priority never enters key material, so raising it does not invalidate a cached step. `Bounded.run` is the Effect form and follows `Effect.forEach`: the first failure interrupts the members still in flight.
 
-`Quarantine.all(members, { policy })` chooses what a failing member does to its siblings. Under `quarantine` each member gains a recovery arm that succeeds with `{ _tag: "Quarantined", member, error }`, so the join returns a record of settled values and markers and no sibling is interrupted on another's behalf. Under `halt` the join is the ordinary one. `Quarantine.run` mirrors both, and `Quarantine.settle(result)` fails `PatternError { code: "quarantined" }` listing the isolated members when the caller wants halt-after-join.
+`Quarantine.all(members, { policy })` chooses what a failing member does to its siblings. Under `quarantine` each member gains a recovery arm and every member settles as an explicit envelope, `{ _tag: "Succeeded", member, value }` or `{ _tag: "Quarantined", member, error }`, so the join returns a record of outcomes and no sibling is interrupted on another's behalf. Nesting the successful value is what keeps a user value of any shape, including the marker's own shape, from being read as protocol metadata. Under `halt` the join is the ordinary one and preserves raw successful values. `Quarantine.run` mirrors both, and `Quarantine.settle(result)` unwraps the successful values and fails `PatternError { code: "quarantined" }` listing the isolated members when the caller wants halt-after-join.
 
 Quarantine isolates typed failures. A defect and an interruption still propagate, because neither is a result the flow declared.
 
@@ -3993,7 +3994,7 @@ A package root exports contracts. A platform implementation lives under a subpat
 | `@smthrs/std/Grep`, `@smthrs/std/Glob` | yes | yes | search and glob contracts over the injected `FileSystem`, with no adapter bound |
 | `@smthrs/std/Search`, `@smthrs/std/PortableSearch` | yes | yes | the search contract and its in-process implementation |
 
-28 entry points bundle for the browser, and 7 are documented Node-only.
+28 entry points bundle for the browser, and 8 are documented Node-only.
 
 :::warning[Bundling is a weaker claim than running]
 `@smthrs/journal`, `@smthrs/run-store`, `@smthrs/step-cache`, and `@smthrs/plan` bundle because they depend on the `DurableWriter` contract. A browser application still has to supply a browser SQL client, such as Effect's sqlite-wasm OPFS worker, to that contract. No such layer ships here.
