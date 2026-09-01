@@ -228,6 +228,12 @@ const verdict = (d: Digest): string => {
       ? "failed — no cause recorded in the journal"
       : `failed — ${clip(firstLine(d.cause), 100)}`
   }
+  // `control.run.pending` is the executor declining the launch. The run row is
+  // durable and stays `accepted` with nothing driving it, which the bare word
+  // `pending` told an operator nothing about.
+  if (status === "pending") {
+    return "pending — accepted, and no executor took the run; nothing is driving it"
+  }
   if (status === "waiting-approval") {
     return d.parkedQuestion === undefined
       ? "waiting-approval — a permission gate is pending"
@@ -284,6 +290,13 @@ export const renderDiagnosis = (
   if (d.parkedApproval !== undefined) {
     lines.push(
       `${label("Unblock")}smithers approve '${d.parkedApproval}' --scope run && smithers run --resume ${runId}`
+    )
+  }
+  if (d.status === "pending") {
+    // The two ways out, in the order an operator reaches for them: the host
+    // that drives the flow takes the run, or the run ends.
+    lines.push(
+      `${label("Unblock")}smithers cancel ${runId}    # or run the flow from the host program that registers it`
     )
   }
   lines.push(`${label("Next")}smithers logs ${runId}    # turn-by-turn transcript`)

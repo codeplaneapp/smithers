@@ -552,6 +552,77 @@ const prompt = (text: string, input: unknown): string => {
 }
 
 /**
+ * Whether a value is a JSON value, the way `Schema.toCodecJson` means it.
+ *
+ * A class instance is not one, however plain its fields look, so this walks
+ * the structure rather than trusting `JSON.stringify`, which turns an `Error`
+ * into `{}` and reports success.
+ */
+const jsonDepthLimit = 200
+
+/**
+ * Whether the codec would take this value as JSON.
+ *
+ * The walk runs inside `Effect.mapError` on the failure channel, so it must
+ * never throw: a self-referencing failure value or one nested past the stack
+ * would turn a clean failure into a defect thrown by the mapper. A cycle and
+ * a depth past {@link jsonDepthLimit} both answer "not JSON", which sends the
+ * value down the rendering path, where `Cause.pretty` prints it safely.
+ */
+const isJsonValue = (value: unknown, ancestors: WeakSet<object> = new WeakSet(), depth = 0): boolean => {
+  if (value === null) return true
+  const kind = typeof value
+  if (kind === "string" || kind === "boolean") return true
+  if (kind === "number") return Number.isFinite(value)
+  if (kind !== "object") return false
+  if (depth >= jsonDepthLimit) return false
+  const object = value as object
+  if (ancestors.has(object)) return false
+  ancestors.add(object)
+  try {
+    if (Array.isArray(value)) return value.every((item) => isJsonValue(item, ancestors, depth + 1))
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) return false
+    return Object.values(value as Record<string, unknown>).every((member) => isJsonValue(member, ancestors, depth + 1))
+  } finally {
+    // A value repeated in sibling positions is not a cycle, so it leaves the
+    // ancestor set with its own subtree.
+    ancestors.delete(object)
+  }
+}
+
+/**
+ * The failure the engine persists as this flow's settlement.
+ *
+ * `agent/run` declares `error: Schema.Unknown`, and `Schema.toCodecJson`
+ * reads that as "any JSON value". Every real agent failure is an `Error`
+ * instance instead — a `HarnessError` wrapping a `ModelError`, a
+ * `SeatUnresolved` — so the codec rejected every one of them, `engine-store`
+ * degraded the settlement into a projection, and it said so in a second WARN
+ * stack beside the run's own `An agent run failed` (Phase 7 smoke observation
+ * N1: two stack traces for one billing refusal). Rendering the error to the
+ * same text `Cause.pretty` gives the operator makes the settlement encodable,
+ * so the durable record carries the real refusal rather than a projection of
+ * it and the duplicate warning has nothing to report. A value that already is
+ * a JSON value is passed through untouched, and a defect stays a defect: this
+ * maps the failure channel only.
+ *
+ * @category conversions
+ * @since 1.0.0
+ */
+export const settlementFailure = (error: unknown): unknown => {
+  if (isJsonValue(error)) return error
+  try {
+    return Cause.pretty(Cause.fail(error))
+  } catch {
+    // The renderer walks the value too, and a value deep enough to overflow it
+    // must still not throw from the mapper: the settlement is the last thing
+    // standing between a failed run and a row that never reaches terminal.
+    return `A failure of type ${typeof error} that could not be rendered.`
+  }
+}
+
+/**
  * The one durable flow every agent run executes. Its plan-time body is inert;
  * the behaviour is the `execute` registered by {@link make}, and the
  * execution id is the control run id.
@@ -1600,7 +1671,11 @@ export const make = (
         )
         activeBodies.set(payload.runId, fiber)
         return yield* Fiber.join(fiber).pipe(
-          Effect.ensuring(Effect.sync(() => activeBodies.delete(payload.runId)))
+          Effect.ensuring(Effect.sync(() => activeBodies.delete(payload.runId))),
+          // `settle` above already read the true exit, so the operator's line
+          // and the control plane's recorded cause are unchanged. This is
+          // only the shape the engine has to persist.
+          Effect.mapError(settlementFailure)
         )
       })).pipe(Scope.provide(scope))
 

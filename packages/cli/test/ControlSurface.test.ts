@@ -359,8 +359,12 @@ describe("Control surface", () => {
     const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
     expect(error).toBeInstanceOf(CliError.UnsupportedError)
     const message = (error as CliError.UnsupportedError).message
-    expect(message).toContain("the executor did not take it")
-    expect(message).toContain("smithers ps")
+    // Restated in the cli-boot-hygiene lane: the sentence used to blame a
+    // missing seat and send the operator to `smithers doctor`, which has
+    // nothing to say about a launch no executor drives.
+    expect(message).toContain("no executor took it")
+    expect(message).toContain("registers its delegates")
+    expect(message).toContain("smithers cancel run-1")
     expect(CliError.exitCode(error as CliError.UnsupportedError)).toBe(1)
   })
 

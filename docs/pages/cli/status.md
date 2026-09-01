@@ -14,7 +14,7 @@ smithers status [flags] [RUN_ID]
 
 ## Behavior
 
-Forensics diagnosis card for one run, or the run listing. `inspect` and `why` are aliases.
+Forensics diagnosis card for one run, or the run listing. `inspect` and `why` are aliases. A run no executor took reads a `pending` verdict saying nothing is driving it, and carries `smithers cancel RUN_ID` as its unblock line.
 
 ## Source
 

@@ -14,7 +14,7 @@ smithers up [flags] <flow>
 
 ## Behavior
 
-One-shot launch: plan, approve with scope `run`, run; prints `{ runId }` under `--json`; exit code follows the terminal status. `-d` spawns `smithers run` detached, logs to `.flows/logs/<runId>.log`, and returns after the admission line (30 s default). Operator-supplied run ids are not supported; callers read `runId` from the receipt.
+One-shot launch: plan, approve with scope `run`, run; prints `{ runId }` under `--json`; exit code follows the terminal status. `-d` spawns `smithers run` detached, logs to `.flows/logs/<runId>.log`, and returns after the admission line (30 s default). Operator-supplied run ids are not supported; callers read `runId` from the receipt. A launch nothing in this host drives, such as a module (`flow.ts`) body whose behavior the host program that registers its delegates supplies, or a flow this registry does not hold, is accepted durably and refused with exit 1: the run stays `accepted`, `ps` labels it `waitingReason: executor`, and `smithers cancel` ends it.
 
 ## Flags
 

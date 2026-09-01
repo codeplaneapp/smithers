@@ -155,9 +155,21 @@ const main = Effect.gen(function*() {
       version: packageVersion
     }).pipe(Effect.provide(NodeControl.layer(applicationConfig)))
   }
-  yield* Command.run(cli, { version: packageVersion }).pipe(
-    Effect.provide(NodeControl.layer(applicationConfig))
-  )
+  // The durable layer belongs to the handler, not to the program.
+  //
+  // `Effect.provide` around `Command.run` builds `NodeControl.layer` before
+  // the parser reads a single token, so an invocation that never runs a
+  // command still created `<cwd>/.flows/` and opened both databases: a typo
+  // (`smithers lss`), a one-token command line (`smithers "gateway status"`),
+  // an unrecognized flag, a missing argument. `Command.provide` moves the
+  // layer inside the handler the parse selects, which makes the command tree
+  // itself the resolver — no second list of verbs to drift — and leaves every
+  // usage error, help document, and refusal file-free. A real command builds
+  // exactly the same layer it always did, one step later.
+  yield* Command.run(
+    Command.provide(cli, () => NodeControl.layer(applicationConfig)),
+    { version: packageVersion }
+  ).pipe(Effect.provide(NodeServices.layer))
 })
 
 /**

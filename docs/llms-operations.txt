@@ -58,15 +58,15 @@ databases for the files, the ladder, and the operating limits.
 | `smithers migrate` | The reserved `system/migrate` flow id is retired so the verb does not collide with the project flow. |
 | `smithers output` | Registered node output from the `node-output` projection. |
 | `smithers plan` | `Control.plan`; prints the `PlanCard` and the approval payload. |
-| `smithers ps` | Run listing; `--status` validated against `accepted\|running\|parked\|waiting-approval\|cancelled\|completed\|failed`. |
+| `smithers ps` | Run listing; `--status` validated against `accepted\|running\|parked\|waiting-approval\|cancelled\|completed\|failed`. A run left `accepted` because no executor took its launch is labelled `waitingReason: executor`. |
 | `smithers resume` | Alias of `run --resume`. |
 | `smithers run` | Launches an approved plan; blocks until settlement when the local process owns the executor. |
 | `smithers serve` | Hosts the control server (section 10): `/rpc`, `/rpc/ws`, `/sync`, `/sync/ws`, `/projections/ws`, `GET /health`. Loopback default; non-loopback requires `--listen` and a bearer token. `gateway` is an alias for rc.0 only. |
 | `smithers signal` | Delivers a named signal to a flow parked on `WaitFor` (section 5). |
 | `smithers skills` | Writes the `smithers` skill into detected agents; no automatic refresh side effect on other commands. |
-| `smithers status` | Forensics diagnosis card for one run, or the run listing. `inspect` and `why` are aliases. |
+| `smithers status` | Forensics diagnosis card for one run, or the run listing. `inspect` and `why` are aliases. A run no executor took reads a `pending` verdict saying nothing is driving it, and carries `smithers cancel RUN_ID` as its unblock line. |
 | `smithers steer` | Durable, attributed steer through the notification queue; drained at the agent's turn close. |
-| `smithers up` | One-shot launch: plan, approve with scope `run`, run; prints `{ runId }` under `--json`; exit code follows the terminal status. `-d` spawns `smithers run` detached, logs to `.flows/logs/<runId>.log`, and returns after the admission line (30 s default). Operator-supplied run ids are not supported; callers read `runId` from the receipt. |
+| `smithers up` | One-shot launch: plan, approve with scope `run`, run; prints `{ runId }` under `--json`; exit code follows the terminal status. `-d` spawns `smithers run` detached, logs to `.flows/logs/<runId>.log`, and returns after the admission line (30 s default). Operator-supplied run ids are not supported; callers read `runId` from the receipt. A launch nothing in this host drives, such as a module (`flow.ts`) body whose behavior the host program that registers its delegates supplies, or a flow this registry does not hold, is accepted durably and refused with exit 1: the run stays `accepted`, `ps` labels it `waitingReason: executor`, and `smithers cancel` ends it. |
 | `smithers update` | npm `latest`/`next` check for `@smthrs/cli`. |
 
 ### Run control
