@@ -7,8 +7,8 @@ export {
   ERROR_REFERENCE_URL,
   getSmithersErrorDefinition,
   isSmithersErrorCode,
-  smithersErrorCodes,
   type SmithersErrorCode,
+  smithersErrorCodes,
   type SmithersErrorDefinition,
   smithersErrorDefinitions
 } from "./ErrorCode.ts"

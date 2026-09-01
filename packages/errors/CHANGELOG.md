@@ -24,4 +24,18 @@
   skip it when the summary is blank.
 - Omit `cause` as an own property when the caller supplies no cause or passes
   `cause: undefined`.
-- Remove the unused parameter from `getSmithersErrorDocsUrl`.
+- Renamed `knownSmithersErrorCodes` to `smithersErrorCodes` and
+  `isKnownSmithersErrorCode` to `isSmithersErrorCode`.
+- `hasSmithersErrorShape` now rejects a `details` value that is not a plain
+  non-null object.
+- Install `name` as a non-enumerable own property and install `details` as an
+  own property only when the caller supplies one, so logs no longer print
+  `details: undefined`.
+
+### Removed
+
+- Removed the `KnownSmithersErrorCode` alias. `SmithersErrorCode` is now the
+  derived type.
+- Removed `getSmithersErrorDocsUrl`; use `ERROR_REFERENCE_URL`.
+- Removed the constant `category` field from `SmithersErrorDefinition`.
+- Removed the unused `effect` and `@effect/vitest` devDependencies.

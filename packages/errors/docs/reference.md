@@ -20,11 +20,11 @@ separated by whitespace, so the suffix is never appended twice.
 
 The table above is generated from `smithersErrorDefinitions` in
 `packages/errors/src/ErrorCode.ts` by
-`packages/errors/scripts/docs.mjs`. `KnownSmithersErrorCode` is derived from
-the keys of `smithersErrorDefinitions`, and `SmithersErrorCode` is an alias of
-it, so the set of codes is closed. Adding a code means adding a row to
-`smithersErrorDefinitions` and regenerating this page in the same change.
-The `//packages/errors:docsPages` target fails on drift.
+`packages/errors/scripts/docs.mjs`. `SmithersErrorCode` is derived from the
+keys of `smithersErrorDefinitions`, so the set of codes is closed. Adding a
+code means adding a row to `smithersErrorDefinitions` and regenerating this
+page in the same change. The `//packages/errors:docsPages` target fails on
+drift.
 
 ## Reading a failure
 
@@ -34,7 +34,8 @@ Classify by `code`, never by matching message text.
 import { isSmithersError } from "@smthrs/errors"
 
 if (isSmithersError(error) && error.code === "TELEGRAM_API_ERROR") {
-  // error.details.errorCode is Telegram's own numeric code
+  // error.details?.["errorCode"] is Telegram's own numeric code.
+  // TelegramApiError exposes it typed as `errorCode: number | null`.
 }
 ```
 

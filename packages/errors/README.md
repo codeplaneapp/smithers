@@ -41,11 +41,10 @@ isSmithersError(error) // true
 ## Codes
 
 `smithersErrorDefinitions` is the runtime source of truth.
-`KnownSmithersErrorCode` is derived from its keys, and `SmithersErrorCode` is
-an alias of it, so the set of codes is closed. Adding a code means adding a row
-to `smithersErrorDefinitions` and regenerating the reference page in the same
-change. Smithers 0.x carried 180 codes for an engine that no longer exists;
-1.0 keeps the five the integration trees raise.
+`SmithersErrorCode` is derived from its keys, so the set of codes is closed.
+Adding a code means adding a row to `smithersErrorDefinitions` and regenerating
+the reference page in the same change. Smithers 0.x carried 180 codes for an
+engine that no longer exists; 1.0 keeps the five the integration trees raise.
 
 <!-- generated:error-codes start -->
 

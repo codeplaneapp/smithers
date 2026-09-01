@@ -127,14 +127,16 @@ export const markdownTable = (
 const usesMdxMarkers = (path: string): boolean => path.startsWith("docs/pages/")
 
 /** Returns the generated-region start marker for a path. */
-export const regionStart = (path: string, name: string): string => usesMdxMarkers(path)
-  ? `{/* generated:${name} start */}`
-  : `<!-- generated:${name} start -->`
+export const regionStart = (path: string, name: string): string =>
+  usesMdxMarkers(path)
+    ? `{/* generated:${name} start */}`
+    : `<!-- generated:${name} start -->`
 
 /** Returns the generated-region end marker for a path. */
-export const regionEnd = (path: string, name: string): string => usesMdxMarkers(path)
-  ? `{/* generated:${name} end */}`
-  : `<!-- generated:${name} end -->`
+export const regionEnd = (path: string, name: string): string =>
+  usesMdxMarkers(path)
+    ? `{/* generated:${name} end */}`
+    : `<!-- generated:${name} end -->`
 
 /** Replaces a named generated region or reports a missing marker. */
 export const replaceRegion = (source: string, name: string, body: string, path: string): string => {

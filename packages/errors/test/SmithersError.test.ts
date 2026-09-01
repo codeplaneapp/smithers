@@ -5,8 +5,8 @@ import {
   getSmithersErrorDefinition,
   isSmithersErrorCode,
   type SmithersErrorCode,
-  type SmithersErrorDefinition,
   smithersErrorCodes,
+  type SmithersErrorDefinition,
   smithersErrorDefinitions
 } from "../src/ErrorCode.ts"
 import { hasSmithersErrorShape, isSmithersError, SmithersError } from "../src/SmithersError.ts"
@@ -296,11 +296,13 @@ describe("error refinements", () => {
       summary: "s",
       docsUrl: "d"
     }
-    for (const error of [
-      Object.assign(new Error("f"), base),
-      Object.assign(new Error("f"), base, { details: {} }),
-      Object.assign(new Error("f"), base, { details: { retryable: true } })
-    ]) {
+    for (
+      const error of [
+        Object.assign(new Error("f"), base),
+        Object.assign(new Error("f"), base, { details: {} }),
+        Object.assign(new Error("f"), base, { details: { retryable: true } })
+      ]
+    ) {
       expect(hasSmithersErrorShape(error)).toBe(true)
     }
   })
@@ -376,5 +378,4 @@ describe("error codes", () => {
     expect(smithersErrorDefinitions.TELEGRAM_INIT_DATA_INVALID.details)
       .toBe("`{ authDate }` on the expiry failures, otherwise none")
   })
-
 })

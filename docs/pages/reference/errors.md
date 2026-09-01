@@ -35,11 +35,11 @@ separated by whitespace, so the suffix is never appended twice.
 
 The table above is generated from `smithersErrorDefinitions` in
 `packages/errors/src/ErrorCode.ts` by
-`packages/errors/scripts/docs.mjs`. `KnownSmithersErrorCode` is derived from
-the keys of `smithersErrorDefinitions`, and `SmithersErrorCode` is an alias of
-it, so the set of codes is closed. Adding a code means adding a row to
-`smithersErrorDefinitions` and regenerating this page in the same change.
-The `//packages/errors:docsPages` target fails on drift.
+`packages/errors/scripts/docs.mjs`. `SmithersErrorCode` is derived from the
+keys of `smithersErrorDefinitions`, so the set of codes is closed. Adding a
+code means adding a row to `smithersErrorDefinitions` and regenerating this
+page in the same change. The `//packages/errors:docsPages` target fails on
+drift.
 
 ## Reading a failure
 
@@ -49,7 +49,8 @@ Classify by `code`, never by matching message text.
 import { isSmithersError } from "@smthrs/errors"
 
 if (isSmithersError(error) && error.code === "TELEGRAM_API_ERROR") {
-  // error.details.errorCode is Telegram's own numeric code
+  // error.details?.["errorCode"] is Telegram's own numeric code.
+  // TelegramApiError exposes it typed as `errorCode: number | null`.
 }
 ```
 
@@ -96,12 +97,10 @@ a message already safe to persist, and `retryable`. `fromIntegrationError` and
 | `ERROR_REFERENCE_URL` (const)         | constants   | The documentation page every code points at.                                |
 | `SmithersErrorDefinition` (interface) | models      | What a code means and when it is raised.                                    |
 | `smithersErrorDefinitions` (const)    | models      | Every known code, with the condition that raises it.                        |
-| `KnownSmithersErrorCode` (type)       | models      | A code this package documents.                                              |
 | `SmithersErrorCode` (type)            | models      | A code carried by a `SmithersError`.                                        |
-| `knownSmithersErrorCodes` (const)     | models      | Every documented code, in declaration order.                                |
-| `isKnownSmithersErrorCode` (const)    | refinements | Whether `code` is one this package documents.                               |
+| `smithersErrorCodes` (const)          | models      | Every documented code, in declaration order.                                |
+| `isSmithersErrorCode` (const)         | refinements | Whether `code` is one this package documents.                               |
 | `getSmithersErrorDefinition` (const)  | getters     | The definition for `code`, or `undefined` when it is not a documented code. |
-| `getSmithersErrorDocsUrl` (const)     | getters     | The documentation URL shared by every code.                                 |
 | `SmithersErrorOptions` (interface)    | models      | Construction options for a `SmithersError`.                                 |
 | `SmithersError` (class)               | errors      | A Smithers integration failure.                                             |
 | `isSmithersError` (const)             | refinements | Whether `value` is a `SmithersError`.                                       |
