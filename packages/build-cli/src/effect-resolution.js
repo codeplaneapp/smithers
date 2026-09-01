@@ -82,12 +82,25 @@ const cliParentUrl = (() => {
   return url.href
 })()
 
-/** The bare specifiers the CLI owns, resolved from this file, not the importer. */
+/**
+ * The bare specifiers the CLI owns, resolved from this file, not the importer.
+ *
+ * A package belongs here when two physical copies of it would disagree, not
+ * merely when it is shared. `effect` holds schema sentinels compared by
+ * identity. `@smthrs/plan` keeps each node's continuation and mapper in a
+ * module-level `WeakMap` keyed by the AST object, so a second copy has a second
+ * table: the node is registered in one and read from the other, and the graph
+ * walk reports the continuation as missing with a message that blames
+ * serialization. `@smthrs/core` and `@smthrs/flow` build and read those same
+ * nodes, so they resolve from here for the same reason.
+ */
 const isCliOwned = (specifier) =>
   specifier === "effect" ||
   specifier.startsWith("effect/") ||
-  specifier === "@smthrs/targets" ||
-  specifier.startsWith("@smthrs/targets/")
+  cliOwnedPackages.some((name) => specifier === name || specifier.startsWith(`${name}/`))
+
+/** Workspace packages whose module-level state is compared by identity. */
+const cliOwnedPackages = ["@smthrs/targets", "@smthrs/plan", "@smthrs/core", "@smthrs/flow"]
 
 /**
  * TypeScript's `./foo.js` -> `foo.ts` mapping, in the compiler's probe order.

@@ -65,21 +65,30 @@ const scaled = Node.capture({ factor: 3 }, (value: number) => value * 3)
 
 Capture data must be finite, inert, plain data. Accessors, cycles, non-finite
 numbers, symbols, functions, and non-plain prototypes are rejected rather than
-hashed incompletely, and accepted capture data is deeply frozen.
+hashed incompletely, and accepted capture data is deeply frozen. Captures are
+compared by structural value: two references to one shared object digest
+identically to two structurally equal copies, so aliasing is not identity.
 
 Plan values follow the same rule from the other direction. `Node.succeed`,
 `Node.fail`, and a flow call retain the caller's value by reference and read it
 when the graph is built, so mutating a value between construction and
 `Graph.build` changes the recorded identity.
 
+The symbolic placeholder handed to a `Node.andThen` or `Node.catch` builder
+reserves the member name `then`: reading it yields `undefined` so the
+placeholder is never mistaken for a thenable. A legitimate `then` field must be
+renamed, or read inside the step that produces it.
+
 ## Failure behavior
 
 Two distinct mechanisms, deliberately:
 
 - Construction failures throw. `Flow.make` and a flow call raise `FlowError`;
-  `Node.all`, `Node.priority`, `Node.capture`, and continuation elaboration
-  raise `NodeBuildError`; the Markdown loaders return a `Result` carrying
-  `MarkdownError` rather than throwing.
+  `Node.all`, `Node.priority`, and continuation elaboration raise
+  `NodeBuildError`; `Node.capture` raises a `TypeError`, and a capture-data
+  failure names the offending path in its `Node.capture:`-prefixed message; the
+  Markdown loaders return a `Result` carrying `MarkdownError` rather than
+  throwing.
 - Declaration failures are recorded. `Graph.build` returns a graph even when a
   declaration is invalid and lists the problems in `Graph.diagnostics`, so an
   invalid plan stays inspectable.
@@ -94,7 +103,9 @@ called invalid can never become a durable step key.
 enforces documented bounds instead of failing with a host stack overflow.
 `Graph.maximumGraphDepth` bounds nested node structure and
 `Graph.maximumPayloadDepth` bounds a reflected plan value. Both refuse with a
-coded `GraphBuildError` naming the offending node.
+coded `GraphBuildError` naming the offending node. Plan width is deliberately
+unbounded: node count and reflected payload size are the caller's resource
+budget.
 
 The write-conflict pass compares every pair of work nodes and tests
 reachability between them, so its cost grows quadratically with the number of

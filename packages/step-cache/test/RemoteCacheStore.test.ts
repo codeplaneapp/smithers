@@ -10,6 +10,7 @@ import * as Option from "effect/Option"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
+import { TestClock } from "effect/testing"
 import * as CacheStore from "../src/CacheStore.ts"
 import * as RemoteCacheStore from "../src/RemoteCacheStore.ts"
 
@@ -82,6 +83,39 @@ describe("lookups", () => {
       expect(tier.calls[0]!.headers["authorization"]).toBe("Bearer secret")
     }))
 
+  it.effect("snapshots credential headers when the store is constructed", () =>
+    Effect.gen(function*() {
+      const headers = { authorization: "Bearer original" }
+      const tier = tierOf(() => new Response(JSON.stringify(entry), { status: 200 }), {
+        endpoint: "https://cache.example.com",
+        headers
+      })
+      const store = yield* tier.store
+      headers.authorization = "Bearer changed"
+      yield* store.get(entry.keyDigest)
+      expect(tier.calls[0]!.headers["authorization"]).toBe("Bearer original")
+    }))
+
+  it.effect("rejects accessor-backed headers without invoking them", () =>
+    Effect.gen(function*() {
+      let reads = 0
+      const headers = Object.defineProperty({}, "authorization", {
+        enumerable: true,
+        get: () => {
+          reads++
+          return "Bearer secret"
+        }
+      }) as Record<string, string>
+      const tier = tierOf(() => new Response(JSON.stringify(entry), { status: 200 }), {
+        endpoint: "https://cache.example.com",
+        headers
+      })
+      const exit = yield* Effect.exit(tier.store)
+      expect(errorOf(exit).code).toBe("invalid_cache")
+      expect(reads).toBe(0)
+      expect(tier.calls).toEqual([])
+    }))
+
   it.effect("carries the recorded provenance fence as query parameters", () =>
     Effect.gen(function*() {
       const tier = tierOf(() => new Response(JSON.stringify(entry), { status: 200 }))
@@ -107,6 +141,46 @@ describe("lookups", () => {
       const tier = tierOf(() => new Response(null, { status: 200 }))
       const exit = yield* (Effect.flatMap(tier.store, (store) => store.get("")).pipe(Effect.exit))
       expect(errorOf(exit).code).toBe("invalid_cache")
+      expect(tier.calls).toEqual([])
+    }))
+
+  it.effect("refuses every path-escaping or ill-formed key before HTTP", () =>
+    Effect.gen(function*() {
+      const tier = tierOf(() => new Response(null, { status: 204 }))
+      const store = yield* tier.store
+      const malformed = [
+        ".",
+        "..",
+        "a/b",
+        "a%2fb",
+        "line\nbreak",
+        "\ud800",
+        "x".repeat(CacheStore.maximumKeyDigestLength + 1)
+      ]
+      const exits = yield* Effect.forEach(malformed, (key) =>
+        Effect.all([store.get(key), store.evict(key)]).pipe(Effect.exit))
+      expect(exits.every(Exit.isFailure)).toBe(true)
+      expect(tier.calls).toEqual([])
+    }))
+
+  it.effect("enforces maxAgeMs at the exact remote boundary", () =>
+    Effect.gen(function*() {
+      const tier = tierOf(() => new Response(JSON.stringify({ ...entry, createdAtMs: 0 }), { status: 200 }))
+      const store = yield* tier.store
+      yield* TestClock.adjust("1 second")
+      expect(Option.isSome(yield* store.get(entry.keyDigest, { maxAgeMs: 1_000 }))).toBe(true)
+      yield* TestClock.adjust("1 millis")
+      expect(Option.isNone(yield* store.get(entry.keyDigest, { maxAgeMs: 1_000 }))).toBe(true)
+    }).pipe(Effect.provide(TestClock.layer())))
+
+  it.effect("rejects every invalid remote age before even a 404 request", () =>
+    Effect.gen(function*() {
+      const tier = tierOf(() => new Response(null, { status: 404 }))
+      const store = yield* tier.store
+      const invalid = [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]
+      const exits = yield* Effect.forEach(invalid, (maxAgeMs) =>
+        store.get(entry.keyDigest, { maxAgeMs }).pipe(Effect.exit))
+      expect(exits.every(Exit.isFailure)).toBe(true)
       expect(tier.calls).toEqual([])
     }))
 

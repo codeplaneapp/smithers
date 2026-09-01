@@ -711,6 +711,13 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
       steps.push({ name: "Initialize colocated jj repository", run: "jj git init --colocate" })
     }
   }
+  if (needs.ripgrep !== undefined) {
+    steps.push({
+      name: "Install ripgrep",
+      uses: actions.installTool,
+      with: { tool: `ripgrep@${needs.ripgrep.release}` }
+    })
+  }
   if (needs.browser !== undefined) {
     const executable = needs.browser.executable
     steps.push({

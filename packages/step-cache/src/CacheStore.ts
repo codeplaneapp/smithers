@@ -21,9 +21,28 @@ import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlError from "effect/unstable/sql/SqlError"
 import * as CacheStoreMetrics from "./CacheStoreMetrics.ts"
+import * as BoundedJson from "./internal/BoundedJson.ts"
 
-/** JSON text carrying an arbitrary decoded value. */
-const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown)
+/** Maximum encoded bytes admitted for one `result` or `meta` JSON tree. */
+export const maximumJsonBytes = 4 * 1024 * 1024
+
+/** Maximum nesting admitted for one cache JSON tree. */
+export const maximumJsonDepth = 128
+
+/** Maximum values admitted for one cache JSON tree. */
+export const maximumJsonNodes = 100_000
+
+/** Maximum members admitted by one cache JSON array or object. */
+export const maximumJsonMembers = 100_000
+
+const jsonLimits: BoundedJson.Limits = {
+  maxBytes: maximumJsonBytes,
+  maxDepth: maximumJsonDepth,
+  maxMembers: maximumJsonMembers,
+  maxNodes: maximumJsonNodes,
+  maxStringBytes: maximumJsonBytes,
+  maxKeyBytes: 16 * 1024
+}
 
 /**
  * Stable error codes returned by cache persistence operations.
@@ -70,6 +89,63 @@ const NonNegativeSafeInt = Schema.Int.check(
   Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)
 )
 
+/** Maximum number of characters accepted in one cache-key digest. */
+export const maximumKeyDigestLength = 256
+
+/**
+ * One URL-segment-safe cache-key digest.
+ *
+ * The cache key is accepted at both SQL and HTTP boundaries. Restricting it
+ * to this grammar makes `.` / `..`, separators, controls, and ill-formed
+ * Unicode unrepresentable before either boundary is touched.
+ *
+ * @category schemas
+ * @since 1.0.0-rc.0
+ */
+export const KeyDigest = Schema.String.check(
+  Schema.isMaxLength(maximumKeyDigestLength),
+  Schema.isPattern(/^[A-Za-z0-9_-]+$/, {
+    expected: "1-256 URL-safe letters, digits, underscores, or hyphens"
+  })
+)
+
+/** A validated cache-key digest. */
+export type KeyDigest = typeof KeyDigest.Type
+
+/** Maximum number of UTF-16 code units accepted in a recording run id. */
+export const maximumRecordedRunIdLength = 1_024
+
+const isWellFormedText = (value: string): boolean => {
+  for (let index = 0; index < value.length; index++) {
+    const unit = value.charCodeAt(index)
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const low = value.charCodeAt(++index)
+      if (!(low >= 0xdc00 && low <= 0xdfff)) return false
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) return false
+  }
+  return !value.includes("\0")
+}
+
+const wellFormedText = Schema.makeFilter(
+  isWellFormedText,
+  { title: "wellFormedText" }
+)
+
+/** Run id carried by an immutable cache provenance record. */
+export const RecordedRunId = Schema.NonEmptyString.check(
+  Schema.isMaxLength(maximumRecordedRunIdLength),
+  wellFormedText
+)
+
+/** Exact journal event that recorded a cache result. */
+export const RecordedBy = Schema.Struct({
+  runId: RecordedRunId,
+  eventSeq: NonNegativeSafeInt
+})
+
+/** Exact journal event that recorded a cache result. */
+export type RecordedBy = typeof RecordedBy.Type
+
 /**
  * The durable data recorded for a cache key.
  *
@@ -77,11 +153,11 @@ const NonNegativeSafeInt = Schema.Int.check(
  * @since 0.1.0
  */
 export const CacheEntry = Schema.Struct({
-  keyDigest: Schema.NonEmptyString,
+  keyDigest: KeyDigest,
   result: Schema.Unknown,
   meta: Schema.Unknown,
   createdAtMs: NonNegativeSafeInt,
-  recordedRunId: Schema.NonEmptyString,
+  recordedRunId: RecordedRunId,
   recordedEventSeq: NonNegativeSafeInt
 })
 
@@ -108,10 +184,7 @@ export type GetOptions = {
    * an old frame's projection stays a function of durable state: evicting or
    * replacing the head never changes what that event recorded.
    */
-  readonly recordedBy?: {
-    readonly runId: string
-    readonly eventSeq: number
-  }
+  readonly recordedBy?: RecordedBy
   /**
    * Refuses an entry recorded more than `maxAgeMs` before the current clock
    * reading, so a caller that declared a time-to-live reads a miss instead of
@@ -136,10 +209,7 @@ export type EvictOptions = {
    * Deletes the row only while it is still the one recorded by this
    * `(runId, eventSeq)` pair. Omitting the predicate deletes unconditionally.
    */
-  readonly ifRecordedBy?: {
-    readonly runId: string
-    readonly eventSeq: number
-  }
+  readonly ifRecordedBy?: RecordedBy
 }
 
 /**
@@ -209,11 +279,11 @@ export interface Service {
 export class CacheStore extends Context.Service<CacheStore, Service>()("@smthrs/step-cache/CacheStore") {}
 
 const CacheRow = Schema.Struct({
-  key_digest: Schema.NonEmptyString,
+  key_digest: KeyDigest,
   result_json: Schema.String,
   meta_json: Schema.String,
   created_at_ms: NonNegativeSafeInt,
-  recorded_run_id: Schema.NonEmptyString,
+  recorded_run_id: RecordedRunId,
   recorded_event_seq: NonNegativeSafeInt
 })
 
@@ -237,35 +307,64 @@ const error = (code: CacheStoreErrorCode, message: string, cause?: unknown): Cac
  * `RemoteCacheStore.put` runs the same check before serializing an entry onto
  * the wire, so a value with no JSON form is refused identically by both tiers.
  *
- * @since 0.1.0
- * @private
+ * @category serialization
+ * @since 1.0.0-rc.0
  */
 export const encodeCanonical = (value: unknown, field: string): Effect.Effect<string, CacheStoreError> =>
-  Schema.decodeUnknownEffect(Canonical)(value).pipe(
-    Effect.mapError((cause) => error("invalid_cache", `${field} must have a canonical JSON form`, cause))
-  )
+  Effect.suspend(() => {
+    const admitted = BoundedJson.admit(value, jsonLimits)
+    return admitted.ok
+      ? Schema.decodeUnknownEffect(Canonical)(admitted.value).pipe(
+        Effect.mapError(() => error("invalid_cache", `${field} must have a bounded canonical JSON form`))
+      )
+      : Effect.fail(error("invalid_cache", `${field} ${admitted.complaint}`))
+  })
 
 const decode = (value: string, field: string): Effect.Effect<unknown, CacheStoreError> =>
-  Schema.decodeUnknownEffect(UnknownFromJsonString)(value).pipe(
-    Effect.mapError((cause) => error("decode_failed", `could not decode ${field}`, cause))
+  Effect.suspend(() => {
+    if (value.length > maximumJsonBytes) {
+      return Effect.fail(error("decode_failed", `${field} exceeds the ${maximumJsonBytes}-byte limit`))
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(value) as unknown
+    } catch {
+      return Effect.fail(error("decode_failed", `could not decode ${field}`))
+    }
+    const admitted = BoundedJson.admit(parsed, jsonLimits)
+    return admitted.ok
+      ? Effect.succeed(admitted.value)
+      : Effect.fail(error("decode_failed", `${field} ${admitted.complaint}`))
+  })
+
+/**
+ * Validates a cache-key digest before any statement or request is issued.
+ *
+ * @category validation
+ * @since 1.0.0-rc.0
+ */
+export const validateKey = (keyDigest: string): Effect.Effect<void, CacheStoreError> =>
+  Schema.decodeUnknownEffect(KeyDigest)(keyDigest).pipe(
+    Effect.asVoid,
+    Effect.mapError((cause) => error("invalid_cache", "keyDigest violates the cache-key contract", cause))
   )
 
 /**
- * Refuses an empty key digest before any statement or request is issued.
+ * Validates a provenance selector before a store performs I/O.
  *
- * @since 0.1.0
- * @private
+ * @category validation
+ * @since 1.0.0-rc.0
  */
-export const validateKey = (keyDigest: string): Effect.Effect<void, CacheStoreError> =>
-  keyDigest.length > 0
+export const validateRecordedBy = (
+  recordedBy: RecordedBy | undefined,
+  field = "recordedBy"
+): Effect.Effect<void, CacheStoreError> =>
+  recordedBy === undefined
     ? Effect.void
-    : Effect.fail(error("invalid_cache", "keyDigest must not be empty"))
-
-/** The shape a caller-supplied eviction fence must decode into. */
-const EvictFence = Schema.Struct({
-  runId: Schema.NonEmptyString,
-  eventSeq: NonNegativeSafeInt
-})
+    : Schema.decodeUnknownEffect(RecordedBy)(recordedBy).pipe(
+      Effect.asVoid,
+      Effect.mapError((cause) => error("invalid_cache", `${field} violates the provenance contract`, cause))
+    )
 
 /**
  * Refuses a malformed eviction fence before any statement or request is
@@ -273,26 +372,21 @@ const EvictFence = Schema.Struct({
  * record is a compare-and-swap no row could ever satisfy; running it anyway
  * would misreport the caller's mistake as an ordinary "nothing matched".
  *
- * @since 0.1.0
- * @private
+ * @category validation
+ * @since 1.0.0-rc.0
  */
 export const validateFence = (
   fence: EvictOptions["ifRecordedBy"]
 ): Effect.Effect<void, CacheStoreError> =>
-  fence === undefined
-    ? Effect.void
-    : Schema.decodeUnknownEffect(EvictFence)(fence).pipe(
-      Effect.asVoid,
-      Effect.mapError((cause) => error("invalid_cache", "eviction fence violates the persistence contract", cause))
-    )
+  validateRecordedBy(fence, "eviction fence")
 
 /**
  * Refuses an age bound no row could satisfy before any statement is issued.
  * A negative or fractional millisecond count is a caller mistake, and running
  * it anyway would report that mistake as an ordinary miss.
  *
- * @since 0.1.0
- * @private
+ * @category validation
+ * @since 1.0.0-rc.0
  */
 export const validateAge = (field: string, value: number | undefined): Effect.Effect<void, CacheStoreError> =>
   value === undefined || (Number.isSafeInteger(value) && value >= 0)
@@ -304,6 +398,54 @@ const validateEntry = (entry: CacheEntry): Effect.Effect<void, CacheStoreError> 
     Effect.asVoid,
     Effect.mapError((cause) => error("invalid_cache", "cache entry violates the persistence contract", cause))
   )
+
+/**
+ * Takes an inert, detached snapshot of a cache entry at effect start.
+ *
+ * @category validation
+ * @since 1.0.0-rc.0
+ */
+export const snapshotEntry = (input: CacheEntry): Effect.Effect<CacheEntry, CacheStoreError> =>
+  Effect.suspend(() => {
+    try {
+      if (typeof input !== "object" || input === null) throw new TypeError("entry")
+      const names = ["keyDigest", "result", "meta", "createdAtMs", "recordedRunId", "recordedEventSeq"] as const
+      const values = Object.create(null) as Record<(typeof names)[number], unknown>
+      for (const name of names) {
+        const descriptor = Object.getOwnPropertyDescriptor(input, name)
+        if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+          throw new TypeError("entry")
+        }
+        values[name] = descriptor.value
+      }
+      for (const key of Reflect.ownKeys(input)) {
+        if (typeof key !== "string" || !(names as ReadonlyArray<string>).includes(key)) {
+          if (Object.getOwnPropertyDescriptor(input, key)?.enumerable) throw new TypeError("entry")
+        }
+      }
+      const result = BoundedJson.admit(values.result, jsonLimits)
+      const meta = BoundedJson.admit(values.meta, jsonLimits)
+      if (!result.ok || !meta.ok) {
+        return Effect.fail(error(
+          "invalid_cache",
+          !result.ok ? `result ${result.complaint}` : `meta ${(meta as { readonly complaint: string }).complaint}`
+        ))
+      }
+      const snapshot = Object.freeze({
+        keyDigest: values.keyDigest,
+        result: result.value,
+        meta: meta.value,
+        createdAtMs: values.createdAtMs,
+        recordedRunId: values.recordedRunId,
+        recordedEventSeq: values.recordedEventSeq
+      })
+      return Schema.decodeUnknownEffect(CacheEntry)(snapshot).pipe(
+        Effect.mapError(() => error("invalid_cache", "cache entry violates the persistence contract"))
+      )
+    } catch {
+      return Effect.fail(error("invalid_cache", "cache entry cannot be inspected as inert data"))
+    }
+  })
 
 const mapPersistenceError = (cause: unknown): CacheStoreError => {
   if (Schema.is(CacheStoreError)(cause)) {
@@ -356,6 +498,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       yield* Effect.annotateCurrentSpan({ keyDigest })
       yield* validateKey(keyDigest)
       yield* validateAge("maxAgeMs", options?.maxAgeMs)
+      yield* validateRecordedBy(options?.recordedBy)
       // The age floor is resolved once, from the injected clock, so both reads
       // below judge the same instant and a row cannot be fresh for the ledger
       // read and stale for the head read of one lookup.
@@ -408,26 +551,47 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     })
   )
 
-  const put: Service["put"] = Effect.fn("CacheStore.put")((entry) =>
+  const put: Service["put"] = Effect.fn("CacheStore.put")((candidate) =>
     Effect.gen(function*() {
+      const entry = yield* snapshotEntry(candidate)
       yield* Effect.annotateCurrentSpan({ keyDigest: entry.keyDigest })
       yield* validateEntry(entry)
       const result = yield* encodeCanonical(entry.result, "result")
       const meta = yield* encodeCanonical(entry.meta, "meta")
       return yield* writer.write(
         Effect.gen(function*() {
-          // The recorded ledger lands first and unconditionally: whatever the
-          // head decides — first write, duplicate, or conflict — this event
-          // durably recorded these bytes, and a later replay naming exactly
-          // this provenance must read them back. First writer wins per
-          // provenance key; nothing ever deletes a ledger row.
-          yield* sql`
+          // The provenance row is immutable. If another write already used
+          // this exact journal identity, its complete bytes decide whether
+          // this attempt is a retry or a conflict before a mutable head can
+          // be created or restored.
+          const recorded = yield* sql`
             INSERT INTO flows_step_cache_recorded (
               key_digest, result_json, meta_json, created_at_ms, recorded_run_id, recorded_event_seq
             ) VALUES (
               ${entry.keyDigest}, ${result}, ${meta}, ${entry.createdAtMs}, ${entry.recordedRunId}, ${entry.recordedEventSeq}
             ) ON CONFLICT (key_digest, recorded_run_id, recorded_event_seq) DO NOTHING
-          `.pipe(Effect.mapError(mapPersistenceError))
+          `.raw.pipe(Effect.mapError(mapPersistenceError))
+          if ((yield* affectedRows(recorded)) === 0) {
+            const ledger = yield* sql<CacheRow>`
+              SELECT key_digest, result_json, meta_json, created_at_ms, recorded_run_id, recorded_event_seq
+              FROM flows_step_cache_recorded
+              WHERE key_digest = ${entry.keyDigest}
+                AND recorded_run_id = ${entry.recordedRunId}
+                AND recorded_event_seq = ${entry.recordedEventSeq}
+            `.pipe(Effect.mapError(mapPersistenceError))
+            /* v8 ignore next -- the row blocked this insert in the same serialized transaction */
+            if (ledger.length === 0) {
+              return yield* Effect.fail(error("unknown", "cache provenance disappeared during put"))
+            }
+            const existing = ledger[0]!
+            if (
+              existing.result_json !== result ||
+              existing.meta_json !== meta ||
+              existing.created_at_ms !== entry.createdAtMs
+            ) {
+              return { _tag: "Conflict" } as const
+            }
+          }
           const inserted = yield* sql`
             INSERT INTO flows_step_cache (
               key_digest, result_json, meta_json, created_at_ms, recorded_run_id, recorded_event_seq

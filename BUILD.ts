@@ -73,6 +73,11 @@ const bareNode = Smithers.CiToolchain.Node({ runtime, release: "22.19.0", cacheP
 const bun = Smithers.CiToolchain.Bun({ runtime: bunRuntime, release: "1.3.14" })
 
 const jj = Smithers.CiToolchain.Jj({ release: "0.39.0" })
+// `@smthrs/std` proves its portable search against a real `rg`: the conformance
+// suite runs both implementations and compares them. Without the binary the
+// native half cannot start and the parity check, which is the point of the
+// suite, is the thing that fails.
+const ripgrep = Smithers.CiToolchain.Ripgrep({ release: "14.1.1" })
 
 export const ci = Smithers.GithubCiGen({
   packageManager,
@@ -93,6 +98,7 @@ export const ci = Smithers.GithubCiGen({
       toolchain: Smithers.CiToolchain.Needs({
         runtimes: [node, bun],
         jj,
+        ripgrep,
         workflowLint: Smithers.CiToolchain.Actionlint({
           release: "1.7.11",
           workflows: [
@@ -288,7 +294,7 @@ export const ci = Smithers.GithubCiGen({
         { os: "windows-latest", advisory: true }
       ],
       timeoutMinutes: 60,
-      toolchain: Smithers.CiToolchain.Needs({ runtimes: [node, bun], jj }),
+      toolchain: Smithers.CiToolchain.Needs({ runtimes: [node, bun], jj, ripgrep }),
       steps: [{ name: "Package test targets", verb: Smithers.Verb.Test, pattern: "//packages/..." }]
     }
   ]

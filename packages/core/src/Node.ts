@@ -299,7 +299,10 @@ export const map: {
  * conditional on it always takes the truthy branch, so only that branch is
  * planned. Either result is baked into the plan's identity with no diagnostic.
  * Decide with real values inside the step that produces them, and use the
- * placeholder only to name what a later step reads.
+ * placeholder only to name what a later step reads. The member name `then` is
+ * reserved by the placeholder: reading it yields `undefined` so the
+ * placeholder is never mistaken for a thenable, so rename a legitimate `then`
+ * field or read it inside the step that produces it.
  *
  * @category sequencing
  * @since 0.0.0
@@ -350,7 +353,8 @@ export interface CatchOptions<E, B, E2, Handled = E> {
  * remainder stays in the error type.
  *
  * The symbolic error carries the same placeholder caveat as {@link andThen}:
- * read members from it, never compute on it or branch on it.
+ * read members from it, never compute on it or branch on it, and its `then`
+ * member is likewise reserved and reads as `undefined`.
  *
  * @category sequencing
  * @since 0.1.0

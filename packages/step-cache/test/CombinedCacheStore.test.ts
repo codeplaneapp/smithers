@@ -24,10 +24,12 @@ const entry: CacheStore.CacheEntry = {
 const tier = (options: { readonly putOutcome?: CacheStore.PutResult } = {}) => {
   const rows = new Map<string, CacheStore.CacheEntry>()
   const calls: Array<string> = []
+  const getOptions: Array<CacheStore.GetOptions | undefined> = []
   const store: CacheStore.Service = {
-    get: (keyDigest) =>
+    get: (keyDigest, lookupOptions) =>
       Effect.sync(() => {
         calls.push("get")
+        getOptions.push(lookupOptions)
         const row = rows.get(keyDigest)
         return row === undefined ? Option.none() : Option.some(row)
       }),
@@ -52,7 +54,7 @@ const tier = (options: { readonly putOutcome?: CacheStore.PutResult } = {}) => {
         return swept
       })
   }
-  return { rows, calls, store }
+  return { rows, calls, getOptions, store }
 }
 
 /**
@@ -69,11 +71,16 @@ const durableTier = (
 ) => {
   const rows = new Map<string, CacheStore.CacheEntry>()
   const calls: Array<string> = []
+  const getOptions: Array<CacheStore.GetOptions | undefined> = []
   const outcomes: Array<CacheStore.PutResult> = []
   const store: CacheStore.Service = {
-    get: (keyDigest: string): Effect.Effect<Option.Option<CacheStore.CacheEntry>, CacheStore.CacheStoreError> =>
+    get: (
+      keyDigest: string,
+      lookupOptions?: CacheStore.GetOptions
+    ): Effect.Effect<Option.Option<CacheStore.CacheEntry>, CacheStore.CacheStoreError> =>
       Effect.suspend(() => {
         calls.push("get")
+        getOptions.push(lookupOptions)
         const announce = options.reachedGet === undefined
           ? Effect.void
           : Deferred.succeed(options.reachedGet, undefined)
@@ -115,7 +122,7 @@ const durableTier = (
         return swept
       })
   }
-  return { rows, calls, outcomes, store }
+  return { rows, calls, getOptions, outcomes, store }
 }
 
 describe("lookups", () => {
@@ -242,6 +249,24 @@ describe("write-back races", () => {
       expect(Option.getOrThrow(observed)).toEqual(remoteEntry)
     }))
 
+  it.effect.each(["Conflict", "ExistingSame"] as const)(
+    "preserves provenance and age options after a %s write-back race",
+    (outcome) =>
+      Effect.gen(function*() {
+        const options: CacheStore.GetOptions = {
+          recordedBy: { runId: remoteEntry.recordedRunId, eventSeq: remoteEntry.recordedEventSeq },
+          maxAgeMs: 1_000
+        }
+        const local = tier({ putOutcome: { _tag: outcome } })
+        const remote = tier()
+        yield* remote.store.put(remoteEntry)
+        const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
+        expect(Option.getOrThrow(yield* combined.get(entry.keyDigest, options))).toEqual(remoteEntry)
+        expect(local.getOptions).toEqual([options, options])
+        expect(remote.getOptions).toEqual([options])
+      })
+  )
+
   it.effect("keeps the local row and fails the caller when the shared publication fails", () =>
     Effect.gen(function*() {
       // Partial success: the local insert committed and the shared write did not.
@@ -327,5 +352,20 @@ describe("layer", () => {
       )
       expect(Option.getOrUndefined(found)).toEqual(entry)
       expect(remote.rows.get(entry.keyDigest)).toEqual(entry)
+    }))
+
+  it.effect("passes deferred publication through the layer constructor", () =>
+    Effect.gen(function*() {
+      const local = tier()
+      const remote = tier()
+      yield* Effect.flatMap(CacheStore.CacheStore, (store) => store.put(entry)).pipe(
+        Effect.provide(CombinedCacheStore.layer({
+          local: Effect.succeed(local.store),
+          remote: Effect.succeed(remote.store),
+          publication: "deferred"
+        }))
+      )
+      expect(local.rows.get(entry.keyDigest)).toEqual(entry)
+      expect(remote.calls).toEqual([])
     }))
 })
