@@ -110,7 +110,8 @@ ${read(join(packageRoot, Package.api.source)).trim()}
 
 ## Exports
 
-Every name below is reachable from the root barrel and from its own subpath.
+Each namespace below is reachable from the root barrel and from its own
+subpath, except the Node-only test layer, which has only its subpath.
 
 ${sections}
 `

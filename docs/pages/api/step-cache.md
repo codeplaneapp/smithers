@@ -25,7 +25,9 @@ import * as TestCacheStore from "@smthrs/step-cache/test/TestCacheStore"
 
 It is deliberately a _cache_. Entries may be evicted, a stale entry is a miss
 rather than a corruption, and the same admission gate serves normal execution,
-replay, and speculation validation alike. It depends on two packages:
+replay, and speculation validation alike. It was split out of
+[`@smthrs/journal`](/api/journal) and shares nothing with it beyond the
+database underneath. It depends on two packages:
 [`@smthrs/database`](/api/database) for the driver-neutral write boundary, and
 [`@smthrs/canonical`](/api/canonical) for RFC 8785 JSON. Canonical form is
 load-bearing rather than cosmetic: `put` decides `ExistingSame` against
@@ -195,8 +197,8 @@ entry would hand the caller a result under the wrong key.
 
 ### Server contract
 
-A conforming tier owes three answers, two of which involve extensions plain
-Bazel HTTP does not define:
+A conforming tier owes three verbs, two of which carry an extension plain Bazel
+HTTP does not define:
 
 | Request                                              | Conforming answer                                                                      |
 | ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
@@ -269,7 +271,8 @@ this store.
 
 ## Exports
 
-Every name below is reachable from the root barrel and from its own subpath.
+Each namespace below is reachable from the root barrel and from its own
+subpath, except the Node-only test layer, which has only its subpath.
 
 ### CacheStore
 

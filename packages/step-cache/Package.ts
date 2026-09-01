@@ -22,11 +22,12 @@ export const Package = {
     }
   ],
   snippets: [],
+  // Only pages no other package's generator writes. A reference on a
+  // generated page would make this gate red whenever that package
+  // regenerated its own page, which is a failure about their file, not
+  // about this contract.
   references: [
-    "docs/pages/api/artifacts.md",
-    "docs/pages/api/database.md",
     "docs/pages/api/engine-store.md",
-    "docs/pages/api/journal.md",
     "docs/pages/architecture/package-map.md",
     "docs/pages/guides/testing.md",
     "docs/pages/release/support-matrix.md"

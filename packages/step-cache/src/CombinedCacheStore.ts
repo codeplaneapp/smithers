@@ -2,18 +2,20 @@
  * Two step-result tiers composed into one: local first, remote second, with
  * write-back into the local SQL store.
  *
- * The shape is Bazel's `CombinedCache.downloadActionResult`
- * (`reference/bazel/.../remote/CombinedCache.java`, lines 230-303): consult the
+ * The shape is Bazel's `CombinedCache.downloadActionResult`, from
+ * `src/main/java/com/google/devtools/build/lib/remote/CombinedCache.java` in
+ * {@link https://github.com/bazelbuild/bazel | bazelbuild/bazel}: consult the
  * disk cache, fall back to the remote cache only on a miss, and write what the
  * remote returned back into the disk cache so the next lookup is local.
  *
  * **Publication order is the caller's job, not this store's.** A cache entry
  * must never be observable in the shared tier while an artifact it references
- * is missing from the shared artifact tier — Bazel's REAPI ordering constraint
- * at `UploadManifest.java:630-633`, stated there as "action results may fail to
- * validate server-side if they are accessed before all blobs they refer to are
- * present". `@smthrs/engine-store`'s `ArtifactSync` enforces it around
- * `put`. This module cannot: it does not know what an entry references.
+ * is missing from the shared artifact tier. That is Bazel's REAPI ordering
+ * constraint, stated in that repository's `remote/UploadManifest.java` as
+ * "action results may fail to validate server-side if they are accessed before
+ * all blobs they refer to are present". `@smthrs/engine-store`'s
+ * `ArtifactSync` enforces it around `put`. This module cannot: it does not
+ * know what an entry references.
  *
  * *When* the shared copy is written is configurable for the same reason — see
  * {@link Options.publication}. A caller holding a write transaction takes

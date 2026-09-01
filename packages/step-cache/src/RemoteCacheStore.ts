@@ -1,20 +1,21 @@
 /**
  * The shared step-result tier: a {@link CacheStore.Service} spoken over HTTP.
  *
- * This is Bazel's *action cache* half of the dumb-HTTP remote cache protocol
- * (`reference/bazel/.../remote/http/HttpCacheClient.java`): "Action cache blobs
- * are stored under the path `/ac/base16-key`", written with `PUT` and read
- * with `GET`. The blob we carry is the JSON encoding of a
+ * This is Bazel's *action cache* half of the dumb-HTTP remote cache protocol,
+ * from `src/main/java/com/google/devtools/build/lib/remote/http/HttpCacheClient.java`
+ * in {@link https://github.com/bazelbuild/bazel | bazelbuild/bazel}: "Action
+ * cache blobs are stored under the path `/ac/base16-key`", written with `PUT`
+ * and read with `GET`. The blob we carry is the JSON encoding of a
  * {@link CacheStore.CacheEntry} rather than a REAPI `ActionResult` proto,
  * because our recorded result and its journal provenance are the thing being
  * shared.
  *
  * The load-bearing protocol constraint lives with the *caller*, not here:
  * every artifact an entry references must be durable in the shared artifact
- * tier before the entry is `put`. Bazel states it at
- * `UploadManifest.java:630-633` — "action results may fail to validate
- * server-side if they are accessed before all blobs they refer to are
- * present". See the
+ * tier before the entry is `put`. Bazel states it in
+ * `src/main/java/com/google/devtools/build/lib/remote/UploadManifest.java`:
+ * "action results may fail to validate server-side if they are accessed before
+ * all blobs they refer to are present". See the
  * {@link https://smithers.sh/api/step-cache | step-cache reference}.
  *
  * The endpoint and its credentials arrive as layer construction options. They

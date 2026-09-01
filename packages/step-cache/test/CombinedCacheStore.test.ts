@@ -1,7 +1,7 @@
 /**
  * Local-first, remote-second, with write-back into the local SQL store — the
  * shape of `CombinedCache.downloadActionResult`
- * (`reference/bazel/.../remote/CombinedCache.java`, lines 230-303).
+ * (`remote/CombinedCache.java` in bazelbuild/bazel).
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"

@@ -1,6 +1,6 @@
 /**
  * The dumb-HTTP action-cache protocol: `GET`/`PUT`/`DELETE /ac/{keyDigest}`,
- * mirroring `reference/bazel/.../remote/http/HttpCacheClient.java`.
+ * mirroring `remote/http/HttpCacheClient.java` in bazelbuild/bazel.
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
