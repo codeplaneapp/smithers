@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
+import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as PlatformError from "effect/PlatformError"
 import { TestClock } from "effect/testing"
@@ -51,6 +52,16 @@ const host = (overrides: Partial<FileSystem.FileSystem> = {}) => {
 
 const run = <A, E, R>(fs: FileSystem.FileSystem, effect: Effect.Effect<A, E, R>) =>
   ArtifactLocks.withDigest(fs, directory, digest, effect, (cause) => cause)
+
+/**
+ * Collects what the heartbeat reports instead of printing it. A lock lost
+ * underneath a live holder is the one condition in this module an operator has
+ * to be able to see, so the tests that drive it assert the record.
+ */
+const capture = () => {
+  const messages: Array<unknown> = []
+  return { messages, logger: Logger.layer([Logger.make<unknown, void>(({ message }) => messages.push(message))]) }
+}
 
 describe("artifact lockfile failure and race handling", () => {
   it.effect("propagates an atomic-create failure other than AlreadyExists", () =>
@@ -176,7 +187,9 @@ describe("artifact lockfile failure and race handling", () => {
         writeFileString: (() => Deferred.succeed(entered, undefined).pipe(Effect.asVoid)) as never,
         readFileString: (() => Effect.succeed("a-replacement-owner")) as never
       })
+      const log = capture()
       const running = yield* run(fixture.fs, Deferred.await(release)).pipe(
+        Effect.provide(log.logger),
         Effect.forkChild({ startImmediately: true })
       )
       yield* Deferred.await(entered)
@@ -186,6 +199,12 @@ describe("artifact lockfile failure and race handling", () => {
       yield* Fiber.join(running)
       // And it must not delete the replacement on the way out either.
       expect(fixture.removes()).toBe(0)
+      // The protected effect is still running unfenced at this point, so the
+      // heartbeat must not retire silently.
+      expect(log.messages).toEqual([[
+        "Artifact lock was reclaimed while its holder was still running",
+        { digest, state: "foreign" }
+      ]])
     }))
 
   it.effect("stops heartbeating once the lock is gone", () =>
@@ -198,7 +217,9 @@ describe("artifact lockfile failure and race handling", () => {
         writeFileString: (() => Deferred.succeed(entered, undefined).pipe(Effect.asVoid)) as never,
         readFileString: (() => Effect.fail(platformError("NotFound", "readFileString"))) as never
       })
+      const log = capture()
       const running = yield* run(fixture.fs, Deferred.await(release)).pipe(
+        Effect.provide(log.logger),
         Effect.forkChild({ startImmediately: true })
       )
       yield* Deferred.await(entered)
@@ -206,6 +227,10 @@ describe("artifact lockfile failure and race handling", () => {
       expect(fixture.heartbeats()).toBe(0)
       yield* Deferred.succeed(release, undefined)
       yield* Fiber.join(running)
+      expect(log.messages).toEqual([[
+        "Artifact lock was reclaimed while its holder was still running",
+        { digest, state: "gone" }
+      ]])
     }))
 
   it.effect("keeps heartbeating across a read the host transiently refused", () =>
@@ -231,7 +256,9 @@ describe("artifact lockfile failure and race handling", () => {
               : Effect.succeed(owner)
           })) as never
       })
+      const log = capture()
       const running = yield* run(fixture.fs, Deferred.await(release)).pipe(
+        Effect.provide(log.logger),
         Effect.forkChild({ startImmediately: true })
       )
       yield* Deferred.await(entered)
@@ -241,6 +268,9 @@ describe("artifact lockfile failure and race handling", () => {
       expect(fixture.heartbeats()).toBeGreaterThan(0)
       yield* Deferred.succeed(release, undefined)
       yield* Fiber.join(running)
+      // A refused read is not evidence the lock was lost, so it must not raise
+      // the warning that means it was.
+      expect(log.messages).toEqual([])
     }))
 
   it.effect("gives a digest one in-process lock even when an effect value is reused", () =>

@@ -124,6 +124,20 @@ export const withDigest = <A, E, R, E2>(
               const modified = Option.getOrUndefined(info.value.mtime)
               const now = yield* Clock.currentTimeMillis
               if (modified !== undefined && now - modified.getTime() > staleAfterMs) {
+                // This measurement and the rename below are two steps, so two
+                // processes that both read the same lock as stale both reclaim
+                // it and the second moves away whatever now sits at the path,
+                // including the first's fresh lock. `FileSystemOptions`'
+                // `coordination` documents the exposure; the heartbeat above is
+                // what makes a holder that loses this way say so.
+                //
+                // Closing it is a protocol change, not a local edit. File
+                // identity is observable — effect's `File.Info` carries `ino` —
+                // but the host offers no remove-if-unchanged and no
+                // rename-if-unchanged, so an identity check can only be made
+                // after the move, which means the repair is another unguarded
+                // rename. A sound version serializes reclamation itself, and
+                // that decision belongs to a review, not to a patch here.
                 const tombstone = `${lockPath}.stale-${owner}`
                 const reaped = yield* fs.rename(lockPath, tombstone).pipe(
                   Effect.as(true),
@@ -185,6 +199,18 @@ export const withDigest = <A, E, R, E2>(
                   // still holds: the file goes stale within the minute, another
                   // process reaps it, and this holder keeps working unfenced.
                   if (beat === "unreadable") continue
+                  // `gone` and `foreign` are the two states worth an operator
+                  // signal: this call's lock was reaped, and possibly already
+                  // replaced, while the effect it fences is still running, so
+                  // the rest of that publication or sweep deletion proceeds
+                  // unfenced against every other process. The heartbeat is the
+                  // only party that ever observes it — the protected effect is
+                  // not interrupted and the caller is not failed — so retiring
+                  // the fiber silently would leave no trace at all.
+                  yield* Effect.logWarning(
+                    "Artifact lock was reclaimed while its holder was still running",
+                    { digest, state: beat }
+                  )
                   return
                 }
               })
