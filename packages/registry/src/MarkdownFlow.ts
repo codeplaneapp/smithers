@@ -16,6 +16,7 @@ import {
   type EffectDeclaration,
   type FlowBody,
   FlowBodyPrompt,
+  type FlowBudget,
   FlowDescriptor,
   type FlowDescriptor as FlowDescriptorType,
   type Provenance,
@@ -122,6 +123,7 @@ export const fromMarkdown = (options: FromMarkdownOptions): FromMarkdownResult =
   const modelInvocable = deriveModelInvocable(fields, options.path, warnings)
   const effects = deriveEffects(fields, capabilities, options.path, warnings)
   const placement = derivePlacement(fields, options.path, warnings)
+  const budget = deriveBudget(fields, options.path, warnings)
   const model = typeof fields.model === "string" && fields.model.trim() !== ""
     ? Option.some(fields.model)
     : Option.none<string>()
@@ -145,6 +147,7 @@ export const fromMarkdown = (options: FromMarkdownOptions): FromMarkdownResult =
         effects,
         placement,
         modelInvocable,
+        ...(budget === undefined ? {} : { budget }),
         path: options.path,
         frontmatter: fields,
         provenance: options.provenance
@@ -421,6 +424,78 @@ const derivePlacement = (
   return Option.none()
 }
 
+/**
+ * Reads the frontmatter budget: the tokens and milliseconds this flow asks a
+ * control plane to approve for one of its runs.
+ *
+ * ```yaml
+ * budget:
+ *   tokens: 120000
+ *   milliseconds: 900000
+ * ```
+ *
+ * A malformed budget is dropped rather than tightened, which is the opposite of
+ * how every other field here reads a malformed value. The other fields have a
+ * conservative reading to fall back on; a budget has none. Its conservative
+ * number is zero, and a zero ceiling refuses the run's first call, so a typo
+ * would be reported as a spending decision. An unreadable declaration therefore
+ * leaves the flow exactly where an undeclared one leaves it, unbounded, and
+ * says so in a warning an operator reads back through `registry.warnings()`.
+ */
+const deriveBudget = (
+  fields: Record<string, unknown>,
+  path: string,
+  warnings: Array<DiscoveryWarning>
+): FlowBudget | undefined => {
+  const value = fields.budget
+  if (value === undefined) return undefined
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    warnings.push({
+      code: "invalid_budget",
+      path,
+      message: "Frontmatter budget must be an object of tokens and milliseconds; ignoring it"
+    })
+    return undefined
+  }
+
+  const declared = value as Record<string, unknown>
+  // Frontmatter is parsed on YAML's failsafe schema, so every scalar arrives as
+  // a string and `Number` is what turns one into a ceiling. A ceiling is a
+  // positive finite number; zero is refused rather than read as "no ceiling",
+  // because a flow that means unbounded declares nothing at all.
+  const ceiling = (key: "tokens" | "milliseconds"): number | undefined => {
+    const candidate = declared[key]
+    if (candidate === undefined) return undefined
+    const parsed = typeof candidate === "string" ? Number(candidate) : Number.NaN
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+    warnings.push({
+      code: "invalid_budget",
+      path,
+      message: `Frontmatter budget.${key} must be a number greater than zero; ignoring it`
+    })
+    return undefined
+  }
+
+  const tokens = ceiling("tokens")
+  const milliseconds = ceiling("milliseconds")
+  // A misspelled ceiling is the failure mode this catches: `budget.token` reads
+  // as no declaration at all, and an unbounded run is the last thing an author
+  // who wrote a budget expects to get back in silence.
+  for (const key of Object.keys(declared)) {
+    if (key === "tokens" || key === "milliseconds") continue
+    warnings.push({
+      code: "invalid_budget",
+      path,
+      message: `Unknown frontmatter budget key: ${key}`
+    })
+  }
+  if (tokens === undefined && milliseconds === undefined) return undefined
+  return {
+    ...(tokens === undefined ? {} : { tokens }),
+    ...(milliseconds === undefined ? {} : { milliseconds })
+  }
+}
+
 const validateStandardFields = (
   fields: Record<string, unknown>,
   path: string,
@@ -490,6 +565,7 @@ const knownFields = new Set([
   "capabilities",
   "effects",
   "placement",
+  "budget",
   "metadata",
   "disable-model-invocation",
   "input",

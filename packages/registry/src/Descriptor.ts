@@ -304,6 +304,7 @@ export const DiscoveryWarningCode = Schema.Literals([
   "unknown_frontmatter_key",
   "invalid_allowed_tools",
   "invalid_capabilities",
+  "invalid_budget",
   "unprojectable_authority",
   "invalid_model_invocation",
   "invalid_compatibility",
@@ -345,7 +346,56 @@ export class DiscoveryWarning extends Schema.Class<DiscoveryWarning>("flows/regi
 }) {}
 
 /**
+ * The tokens and milliseconds a flow declares that a control plane should
+ * approve for one of its runs.
+ *
+ * The two fields are the two fields of a control-plane `Envelope.budget`, so a
+ * host projects a descriptor into an approved envelope without reinterpreting
+ * either number. `@smthrs/agent`'s `Budget.layerFromEnvelope` is what turns
+ * them into enforcement at the model boundary: `tokens` caps what a run may
+ * spend across every model call it makes, and `milliseconds` caps how late in
+ * the run one may start.
+ *
+ * An absent field is not a zero. It is the absence of that ceiling, which is
+ * what {@link budgetUnbounded} spells out for a flow that declares neither.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export const FlowBudget = Schema.Struct({
+  tokens: Schema.optional(Schema.Number),
+  milliseconds: Schema.optional(Schema.Number)
+})
+
+/**
+ * The tokens and milliseconds a flow declares.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type FlowBudget = typeof FlowBudget.Type
+
+/**
+ * The budget of a flow that declares none: no token ceiling and no latency
+ * ceiling.
+ *
+ * It is a named value rather than a `{}` written at each host for the reason
+ * `@smthrs/agent`'s `Budget.layerUnbounded` is a named layer rather than an
+ * omitted service: giving up spending enforcement is a decision, and a reader
+ * has to be able to see that a host made it. A host that projects this into an
+ * envelope has decided the flow may spend what it likes.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const budgetUnbounded: FlowBudget = {}
+
+/**
  * The discovered metadata for one flow, excluding its unloaded body content.
+ *
+ * `budget` is absent for a flow that declares none, and {@link budgetOf} is how
+ * a host reads it, so the absence is answered with {@link budgetUnbounded}
+ * rather than with an empty object nobody named.
  *
  * @category models
  * @since 0.1.0
@@ -362,10 +412,23 @@ export class FlowDescriptor extends Schema.Class<FlowDescriptor>("flows/registry
   effects: EffectDeclaration,
   placement: Schema.Option(Placement),
   modelInvocable: Schema.Boolean,
+  budget: Schema.optional(FlowBudget),
   path: Schema.String,
   frontmatter: Schema.Record(Schema.String, Schema.Json),
   provenance: Provenance
 }) {}
+
+/**
+ * The budget one descriptor declared, or {@link budgetUnbounded}.
+ *
+ * Every host that builds an envelope goes through this rather than reading the
+ * field, so "this flow declared nothing" is stated once and answered the same
+ * way everywhere.
+ *
+ * @category accessors
+ * @since 0.1.0
+ */
+export const budgetOf = (descriptor: FlowDescriptor): FlowBudget => descriptor.budget ?? budgetUnbounded
 
 /**
  * The result of scanning one source.

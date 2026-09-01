@@ -569,6 +569,115 @@ describe("MarkdownFlow", () => {
     expect(() => JSON.stringify(descriptor)).not.toThrow()
   })
 
+  it("reads the tokens and milliseconds a flow declares", () => {
+    const result = fromMarkdown(
+      [
+        "---",
+        "description: Review a pull request",
+        "budget:",
+        "  tokens: 120000",
+        "  milliseconds: 900000",
+        "---",
+        "Review the pull request."
+      ].join("\n")
+    )
+    const descriptor = Option.getOrThrow(result.descriptor)
+
+    // Frontmatter is parsed on YAML's failsafe schema, so both arrive as
+    // strings and reach the descriptor as the numbers an envelope carries.
+    expect(descriptor.budget).toEqual({ tokens: 120000, milliseconds: 900000 })
+    expect(Descriptor.budgetOf(descriptor)).toEqual({ tokens: 120000, milliseconds: 900000 })
+    expect(result.warnings).not.toContainEqual(expect.objectContaining({ code: "invalid_budget" }))
+    expect(result.warnings).not.toContainEqual(expect.objectContaining({ code: "unknown_frontmatter_key" }))
+  })
+
+  it("keeps each ceiling on its own, so declaring one does not imply the other", () => {
+    const tokensOnly = Option.getOrThrow(
+      fromMarkdown(["---", "description: Review", "budget:", "  tokens: 500", "---", "Review."].join("\n")).descriptor
+    )
+    const latencyOnly = Option.getOrThrow(
+      fromMarkdown(
+        ["---", "description: Review", "budget:", "  milliseconds: 500", "---", "Review."].join("\n")
+      ).descriptor
+    )
+
+    expect(tokensOnly.budget).toEqual({ tokens: 500 })
+    expect(latencyOnly.budget).toEqual({ milliseconds: 500 })
+  })
+
+  it("leaves an undeclared budget absent, which reads back as unbounded", () => {
+    const descriptor = Option.getOrThrow(
+      fromMarkdown("---\ndescription: Review a pull request\n---\nReview.").descriptor
+    )
+
+    // Absent rather than an empty object nobody named: `budgetOf` is where the
+    // absence becomes a decision a reader can see.
+    expect(descriptor.budget).toBeUndefined()
+    expect(Descriptor.budgetOf(descriptor)).toBe(Descriptor.budgetUnbounded)
+  })
+
+  it("drops a budget that is not an object, and says so", () => {
+    for (const declaration of ["budget:", "budget: soon", "budget:\n  - 1000"]) {
+      const result = fromMarkdown(["---", "description: Review", declaration, "---", "Review."].join("\n"))
+
+      expect(Option.getOrThrow(result.descriptor).budget).toBeUndefined()
+      expect(result.warnings).toContainEqual(expect.objectContaining({ code: "invalid_budget" }))
+    }
+  })
+
+  it("drops a ceiling that is not a number greater than zero, and keeps the one that is", () => {
+    const result = fromMarkdown(
+      [
+        "---",
+        "description: Review",
+        "budget:",
+        "  tokens: 0",
+        "  milliseconds: 900000",
+        "---",
+        "Review."
+      ].join("\n")
+    )
+
+    // A budget has no conservative reading. Its conservative number is zero,
+    // which refuses the run's first call, so an unreadable ceiling is reported
+    // and dropped rather than enforced.
+    expect(Option.getOrThrow(result.descriptor).budget).toEqual({ milliseconds: 900000 })
+    expect(result.warnings).toContainEqual(expect.objectContaining({
+      code: "invalid_budget",
+      message: "Frontmatter budget.tokens must be a number greater than zero; ignoring it"
+    }))
+  })
+
+  it("names a budget key it does not know, so a misspelled ceiling is not silence", () => {
+    const result = fromMarkdown(
+      ["---", "description: Review", "budget:", "  token: 500", "---", "Review."].join("\n")
+    )
+
+    expect(Option.getOrThrow(result.descriptor).budget).toBeUndefined()
+    expect(result.warnings).toContainEqual(expect.objectContaining({
+      code: "invalid_budget",
+      message: "Unknown frontmatter budget key: token"
+    }))
+  })
+
+  it("drops a budget whose every ceiling is unreadable", () => {
+    const result = fromMarkdown(
+      [
+        "---",
+        "description: Review",
+        "budget:",
+        "  tokens: soon",
+        "  milliseconds:",
+        "    at: noon",
+        "---",
+        "Review."
+      ].join("\n")
+    )
+
+    expect(Option.getOrThrow(result.descriptor).budget).toBeUndefined()
+    expect(result.warnings.filter((warning) => warning.code === "invalid_budget")).toHaveLength(2)
+  })
+
   it("strips frontmatter exactly when loading a body", () => {
     expect(MarkdownFlow.loadBody(
       "---\ndescription: Review\n---\nLine one\n\nLine two",
