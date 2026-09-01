@@ -132,7 +132,11 @@ export const withDigest = <A, E, R, E2>(
         () =>
           fs.readFileString(lockPath).pipe(
             Effect.flatMap((found) => found === owner ? fs.remove(lockPath) : Effect.void),
-            Effect.catch(() => Effect.void)
+            // A concurrent stale-lock reaper can win release. `NotFound`
+            // means no lock remains for this owner to release or leak.
+            Effect.catch((cause): Effect.Effect<void, E2> =>
+              isReason(cause, "NotFound") ? Effect.void : Effect.fail(failure(cause))
+            )
           )
       )
     })
