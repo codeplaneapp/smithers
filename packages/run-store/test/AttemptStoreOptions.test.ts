@@ -136,11 +136,13 @@ describe("AttemptStore options", () => {
           const terminal = attempt({ state: "succeeded", finishedAtMs: 3 })
           expect(yield* store.put(terminal, owner)).toEqual({ _tag: "ExistingSame" })
           expect(yield* store.put({ ...terminal, meta: { a: 2 } }, owner)).toEqual({ _tag: "Conflict" })
-          expect(Option.getOrThrow(yield* store.get({
-            runId: terminal.runId,
-            stepKeyDigest: terminal.stepKeyDigest,
-            attempt: terminal.attempt
-          }))).toMatchObject({
+          expect(Option.getOrThrow(
+            yield* store.get({
+              runId: terminal.runId,
+              stepKeyDigest: terminal.stepKeyDigest,
+              attempt: terminal.attempt
+            })
+          )).toMatchObject({
             state: "succeeded",
             finishedAtMs: 3,
             meta: { a: 1 }
@@ -158,13 +160,15 @@ describe("AttemptStore options", () => {
           states.push("succeeded")
           yield* store.put(attempt(), owner)
           expect(yield* store.heartbeat("run", "digest", 0, owner, 2)).toEqual({ _tag: "Updated" })
-          expect(yield* store.finish({
-            runId: "run",
-            stepKeyDigest: "digest",
-            attempt: 0,
-            state: "succeeded",
-            finishedAtMs: 3
-          }, owner)).toEqual({ _tag: "Finished" })
+          expect(
+            yield* store.finish({
+              runId: "run",
+              stepKeyDigest: "digest",
+              attempt: 0,
+              state: "succeeded",
+              finishedAtMs: 3
+            }, owner)
+          ).toEqual({ _tag: "Finished" })
         })
     )
   })

@@ -92,11 +92,13 @@ describe("AttemptStore JSON boundary", () => {
       Object.defineProperty(meta, "late", { value: true, enumerable: true })
       expect(yield* Fiber.join(running)).toEqual({ _tag: "Inserted" })
 
-      const stored = Option.getOrThrow(yield* store.get({
-        runId: "json-run",
-        stepKeyDigest: "json-step",
-        attempt: 0
-      }))
+      const stored = Option.getOrThrow(
+        yield* store.get({
+          runId: "json-run",
+          stepKeyDigest: "json-step",
+          attempt: 0
+        })
+      )
       expect(stored.meta).toEqual({ nested: { value: "before" } })
       expect(Object.isFrozen(stored)).toBe(true)
       expect(Object.isFrozen(stored.meta)).toBe(true)

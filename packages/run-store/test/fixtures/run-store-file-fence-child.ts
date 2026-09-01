@@ -1,6 +1,7 @@
 import { DurableWriter } from "@smthrs/database"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import { Effect, Layer } from "effect"
+import { TestClock } from "effect/testing"
 import * as AttemptStore from "../../src/AttemptStore.ts"
 import * as Migrations from "../../src/Migrations.ts"
 import type { OwnerId } from "../../src/Ownership.ts"
@@ -89,6 +90,7 @@ const program = Effect.scoped(
     }
 
     yield* awaitCommand("go")
+    yield* TestClock.setTime(30_001)
     if (role === "a") {
       const heartbeat = yield* runs.heartbeat(runId, ownerA, 30_001)
       yield* emit({ phase: "race", role, heartbeat })
@@ -107,6 +109,7 @@ const program = Effect.scoped(
     }
 
     yield* awaitCommand("verify")
+    yield* TestClock.setTime(30_002)
     const heartbeat = yield* runs.heartbeat(runId, owner, 30_002)
     const transition = yield* runs.transitionOwned(runId, owner, "running", JSON.stringify({ writer: role }))
     const put = yield* attempts.put({
@@ -125,7 +128,7 @@ const program = Effect.scoped(
     }, owner)
     const row = yield* runs.get(runId)
     yield* emit({ phase: "verified", role, heartbeat, transition, put, finish, row })
-  }).pipe(Effect.provide(services))
+  }).pipe(Effect.provide(services), Effect.provide(TestClock.layer()))
 )
 
 // A process entrypoint: running the Effect here is the intended boundary.

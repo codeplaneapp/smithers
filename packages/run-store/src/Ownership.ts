@@ -221,11 +221,12 @@ export const leaseLiveness = (
 export const sameHostPidProbe: LivenessCheck = (expectedOwner, context) =>
   Effect.sync(() => {
     if (!sameHostIncarnation(expectedOwner, context.claimant)) return false
+    if (!Number.isSafeInteger(expectedOwner.pid) || expectedOwner.pid <= 0) return true
     try {
       process.kill(expectedOwner.pid, 0)
       return true
     } catch (error) {
-      return (error as { readonly code?: string | undefined } | null)?.code === "EPERM"
+      return (error as { readonly code?: string | undefined } | null)?.code !== "ESRCH"
     }
   })
 

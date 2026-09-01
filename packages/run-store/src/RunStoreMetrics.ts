@@ -18,7 +18,8 @@ import * as Metric from "effect/Metric"
 
 /**
  * Counter over ownership claim compare-and-swaps, dimensioned by `op`
- * (`claim`, `claim_and_own`, `activate`, or `steal`) and `outcome` (the
+ * (`claim`, `claim_and_own`, `activate`, `abandon_claim`, `recover_claim`, or
+ * `steal`) and `outcome` (the
  * operation's result tag in snake case).
  *
  * @category metrics
@@ -100,6 +101,30 @@ export const activate = byOutcome(
   claims,
   { op: "activate" },
   ["Activated", "ClaimLost", "SnapshotChanged"] as const
+)
+
+/**
+ * `claims` views for `RunStore.abandonClaim`, keyed by outcome tag.
+ *
+ * @category metrics
+ * @since 1.0.0-rc.0
+ */
+export const abandonClaim = byOutcome(
+  claims,
+  { op: "abandon_claim" },
+  ["Abandoned", "ClaimLost"] as const
+)
+
+/**
+ * `claims` views for `RunStore.recoverClaim`, keyed by outcome tag.
+ *
+ * @category metrics
+ * @since 1.0.0-rc.0
+ */
+export const recoverClaim = byOutcome(
+  claims,
+  { op: "recover_claim" },
+  ["Recovered", "NotFound", "ClaimFresh", "ClaimChanged", "LivenessUnconfirmed"] as const
 )
 
 /**

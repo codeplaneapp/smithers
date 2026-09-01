@@ -54,6 +54,14 @@ describe("RunStoreMetrics", () => {
         "EvidenceRequired"
       ])
       expect(Object.keys(RunStoreMetrics.activate)).toEqual(["Activated", "ClaimLost", "SnapshotChanged"])
+      expect(Object.keys(RunStoreMetrics.recoverClaim)).toEqual([
+        "Recovered",
+        "NotFound",
+        "ClaimFresh",
+        "ClaimChanged",
+        "LivenessUnconfirmed"
+      ])
+      expect(Object.keys(RunStoreMetrics.abandonClaim)).toEqual(["Abandoned", "ClaimLost"])
       expect(Object.keys(RunStoreMetrics.steal)).toEqual([
         "Claimed",
         "NotFound",
@@ -84,6 +92,16 @@ describe("RunStoreMetrics", () => {
         [RunStoreMetrics.activate.Activated, { op: "activate", outcome: "activated" }],
         [RunStoreMetrics.activate.ClaimLost, { op: "activate", outcome: "claim_lost" }],
         [RunStoreMetrics.activate.SnapshotChanged, { op: "activate", outcome: "snapshot_changed" }],
+        [RunStoreMetrics.recoverClaim.Recovered, { op: "recover_claim", outcome: "recovered" }],
+        [RunStoreMetrics.recoverClaim.NotFound, { op: "recover_claim", outcome: "not_found" }],
+        [RunStoreMetrics.recoverClaim.ClaimFresh, { op: "recover_claim", outcome: "claim_fresh" }],
+        [RunStoreMetrics.recoverClaim.ClaimChanged, { op: "recover_claim", outcome: "claim_changed" }],
+        [
+          RunStoreMetrics.recoverClaim.LivenessUnconfirmed,
+          { op: "recover_claim", outcome: "liveness_unconfirmed" }
+        ],
+        [RunStoreMetrics.abandonClaim.Abandoned, { op: "abandon_claim", outcome: "abandoned" }],
+        [RunStoreMetrics.abandonClaim.ClaimLost, { op: "abandon_claim", outcome: "claim_lost" }],
         [RunStoreMetrics.steal.Claimed, { op: "steal", outcome: "claimed" }],
         [RunStoreMetrics.steal.NotFound, { op: "steal", outcome: "not_found" }],
         [RunStoreMetrics.steal.AlreadyClaimed, { op: "steal", outcome: "already_claimed" }],
@@ -123,7 +141,7 @@ describe("RunStoreMetrics", () => {
         attributes
       })).sort((left, right) => normalized(left).localeCompare(normalized(right)))
 
-      expect(matrix).toHaveLength(46)
+      expect(matrix).toHaveLength(53)
       expect(actual).toEqual(expected)
     }))
 
@@ -183,6 +201,32 @@ describe("RunStoreMetrics", () => {
 
         expect(yield* count(RunStoreMetrics.claimAndOwn.Activated)).toBe(1)
         expect(yield* count(RunStoreMetrics.steal.SnapshotChanged)).toBe(1)
+      }))
+    }))
+
+  it.effect("counts claim recovery and abandonment outcomes through the provided registry", () =>
+    Effect.gen(function*() {
+      yield* migrated(Effect.gen(function*() {
+        const store = yield* RunStore
+        yield* store.create("run-metrics-claim-recovery", "{}")
+        const pending = snapshot(yield* store.get("run-metrics-claim-recovery"))
+
+        yield* store.claim("run-metrics-claim-recovery", pending, ownerA, 0)
+        expect(yield* store.abandonClaim("run-metrics-claim-recovery", ownerA, 0)).toEqual({
+          _tag: "Abandoned"
+        })
+        yield* store.claim("run-metrics-claim-recovery", pending, ownerA, 0)
+        yield* TestClock.adjust("31000 millis")
+        expect(
+          yield* store.recoverClaim("run-metrics-claim-recovery", ownerA, 0, ownerB, 31_000, {
+            expectedOwner: ownerA,
+            checkedAtMs: 31_000,
+            kind: "same-host-pid-dead"
+          })
+        ).toEqual({ _tag: "Recovered" })
+
+        expect(yield* count(RunStoreMetrics.abandonClaim.Abandoned)).toBe(1)
+        expect(yield* count(RunStoreMetrics.recoverClaim.Recovered)).toBe(1)
       }))
     }))
 })

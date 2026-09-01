@@ -719,19 +719,21 @@ const decodeRow = (input: unknown): Effect.Effect<Attempt, AttemptStoreError> =>
         outcome: decode(row.outcome_json, "outcome_json"),
         meta: decodeRequired(row.meta_json, "meta_json")
       }).pipe(
-        Effect.map(({ checkpoint, error: attemptError, outcome, meta }) => Object.freeze({
-          runId: row.run_id,
-          stepKeyDigest: row.step_key_digest,
-          attempt: row.attempt,
-          state: row.state,
-          startedAtMs: row.started_at_ms,
-          ...(row.finished_at_ms === null ? {} : { finishedAtMs: row.finished_at_ms }),
-          ...(row.heartbeat_at_ms === null ? {} : { heartbeatAtMs: row.heartbeat_at_ms }),
-          ...(checkpoint === undefined ? {} : { checkpoint }),
-          ...(attemptError === undefined ? {} : { error: attemptError }),
-          ...(outcome === undefined ? {} : { outcome }),
-          meta
-        }))
+        Effect.map(({ checkpoint, error: attemptError, outcome, meta }) =>
+          Object.freeze({
+            runId: row.run_id,
+            stepKeyDigest: row.step_key_digest,
+            attempt: row.attempt,
+            state: row.state,
+            startedAtMs: row.started_at_ms,
+            ...(row.finished_at_ms === null ? {} : { finishedAtMs: row.finished_at_ms }),
+            ...(row.heartbeat_at_ms === null ? {} : { heartbeatAtMs: row.heartbeat_at_ms }),
+            ...(checkpoint === undefined ? {} : { checkpoint }),
+            ...(attemptError === undefined ? {} : { error: attemptError }),
+            ...(outcome === undefined ? {} : { outcome }),
+            meta
+          })
+        )
       )
     })
   )

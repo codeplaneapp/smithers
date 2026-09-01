@@ -83,11 +83,13 @@ describe("run-store payload and timeline limits", () => {
             atStart,
             earlyFinish,
             earlyHeartbeat,
-            heartbeatRow: Option.getOrThrow(yield* attempts.get({
-              runId: running.runId,
-              stepKeyDigest: running.stepKeyDigest,
-              attempt: running.attempt
-            })),
+            heartbeatRow: Option.getOrThrow(
+              yield* attempts.get({
+                runId: running.runId,
+                stepKeyDigest: running.stepKeyDigest,
+                attempt: running.attempt
+              })
+            ),
             reversedHeartbeatPut,
             reversedPut
           }

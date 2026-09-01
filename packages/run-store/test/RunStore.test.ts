@@ -63,6 +63,81 @@ const staleEvidence = (
     : "cross-host-unreachable-stale"
 })
 
+describe("RunStore well-formed durable text", () => {
+  it.effect("rejects lone high and low surrogate run identifiers", () =>
+    Effect.gen(function*() {
+      const failures = yield* migrated(Effect.gen(function*() {
+        const store = yield* RunStore
+        return yield* Effect.forEach(
+          ["run-\uD800", "run-\uDC00"],
+          (runId) => Effect.flip(store.create(runId, "{}"))
+        )
+      }))
+
+      expect(failures).toEqual([
+        expect.objectContaining({ code: "invalid_run", method: "create" }),
+        expect.objectContaining({ code: "invalid_run", method: "create" })
+      ])
+    }))
+
+  it.effect("rejects lone surrogates in parent, lineage, and executable state", () =>
+    Effect.gen(function*() {
+      const failures = yield* migrated(Effect.gen(function*() {
+        const store = yield* RunStore
+        yield* store.create("parent", "{}")
+        return yield* Effect.all([
+          Effect.flip(store.create("bad-parent", "{}", { parentRunId: "parent-\uD800" })),
+          Effect.flip(store.create("bad-lineage", "{}", { lineageId: "lineage-\uDC00", roundOrdinal: 1 })),
+          Effect.flip(store.create("bad-state", `{"value":"\uD800"}`))
+        ])
+      }))
+
+      expect(failures).toEqual([
+        expect.objectContaining({ code: "invalid_run", method: "create" }),
+        expect.objectContaining({ code: "invalid_run", method: "create" }),
+        expect.objectContaining({ code: "invalid_run", method: "create" })
+      ])
+    }))
+
+  it.effect("accepts U+FFFD as a well-formed identifier", () =>
+    Effect.gen(function*() {
+      const row = yield* migrated(Effect.gen(function*() {
+        const store = yield* RunStore
+        yield* store.create("run-�", "{}")
+        return yield* store.get("run-�")
+      }))
+
+      expect(row.runId).toBe("run-�")
+    }))
+
+  it.effect("round-trips a valid astral identifier byte-identically", () =>
+    Effect.gen(function*() {
+      const runId = "run-\u{1F600}"
+      const row = yield* migrated(Effect.gen(function*() {
+        const store = yield* RunStore
+        yield* store.create(runId, "{}")
+        return yield* store.get(runId)
+      }))
+
+      expect(row.runId).toBe(runId)
+    }))
+
+  it.effect("rejects lone surrogates in transitionOwned executable state", () =>
+    Effect.gen(function*() {
+      const result = yield* migrated(Effect.gen(function*() {
+        const store = yield* RunStore
+        const running = yield* activateNew(store, "run-bad-transition-state", ownerA)
+        const failure = yield* Effect.flip(
+          store.transitionOwned(running.runId, ownerA, "running", `{"value":"\uD800"}`)
+        )
+        return { failure, row: yield* store.get(running.runId) }
+      }))
+
+      expect(result.failure).toMatchObject({ code: "invalid_run", method: "transitionOwned" })
+      expect(result.row.stateJson).toBe("{}")
+    }))
+})
+
 describe("RunStore", () => {
   it.effect("round-trips a newly created run", () =>
     Effect.gen(function*() {
@@ -88,20 +163,6 @@ describe("RunStore", () => {
         roundOrdinal: null,
         stateJson: "{\"cursor\":1}"
       })
-    }))
-
-  it.effect("reproduces SQLite aliasing of a lone UTF-16 surrogate", () =>
-    Effect.gen(function*() {
-      const result = yield* migrated(Effect.gen(function*() {
-        const store = yield* RunStore
-        yield* store.create("\uD800", "{}")
-        const row = yield* store.get("\uD800")
-        const duplicate = yield* Effect.flip(store.create("�", "{}"))
-        return { duplicate, row }
-      }))
-
-      expect(result.row.runId).toBe("�")
-      expect(result.duplicate.code).toBe("constraint")
     }))
 
   it.effect("returns typed errors for invalid, duplicate, missing, and corrupt runs", () =>
@@ -310,7 +371,7 @@ describe("RunStore", () => {
       expect([ownerA, ownerB]).toContainEqual(result.row.owner)
     }))
 
-  it.effect("refuses claim-and-own while a different owner's heartbeat is fresh", () =>
+  it.effect("requires liveness evidence before replacing a different owner", () =>
     Effect.gen(function*() {
       const result = yield* migrated(Effect.gen(function*() {
         const store = yield* RunStore
@@ -324,7 +385,7 @@ describe("RunStore", () => {
         return { outcome, row: yield* store.get(running.runId) }
       }))
 
-      expect(result.outcome).toEqual({ _tag: "HeartbeatFresh" })
+      expect(result.outcome).toEqual({ _tag: "EvidenceRequired" })
       expect(result.row.owner).toEqual(ownerA)
       expect(result.row.heartbeatAtMs).toBe(0)
     }))
@@ -366,6 +427,59 @@ describe("RunStore", () => {
       expect(result.row.status).toBe("running")
     }))
 
+  it.effect("reports SnapshotChanged when a no-evidence claim-and-own snapshot was suspended", () =>
+    Effect.gen(function*() {
+      const result = yield* migrated(Effect.gen(function*() {
+        const store = yield* RunStore
+        const running = yield* activateNew(store, "run-no-evidence-suspended", ownerA)
+        const expectedSnapshot = snapshot(running)
+        expect(
+          yield* store.transitionOwned(running.runId, ownerA, "suspended")
+        ).toEqual({ _tag: "Transitioned" })
+        const staleNowMs = Duration.toMillis(heartbeatStaleAfter) + 1
+        const stale = yield* store.claimAndOwn(
+          running.runId,
+          expectedSnapshot,
+          ownerB,
+          staleNowMs
+        )
+        const freshSnapshot = snapshot(yield* store.get(running.runId))
+        const fresh = yield* store.claimAndOwn(
+          running.runId,
+          freshSnapshot,
+          ownerB,
+          staleNowMs
+        )
+        return { fresh, row: yield* store.get(running.runId), stale }
+      }))
+
+      expect(result.stale).toEqual({ _tag: "SnapshotChanged" })
+      expect(result.fresh).toEqual({ _tag: "Activated" })
+      expect(result.row).toMatchObject({ status: "running", owner: ownerB })
+    }))
+
+  it.effect("reports SnapshotChanged when a no-evidence claim-and-own snapshot completed", () =>
+    Effect.gen(function*() {
+      const result = yield* migrated(Effect.gen(function*() {
+        const store = yield* RunStore
+        const running = yield* activateNew(store, "run-no-evidence-completed", ownerA)
+        const expectedSnapshot = snapshot(running)
+        expect(
+          yield* store.transitionOwned(running.runId, ownerA, "completed")
+        ).toEqual({ _tag: "Transitioned" })
+        const outcome = yield* store.claimAndOwn(
+          running.runId,
+          expectedSnapshot,
+          ownerB,
+          Duration.toMillis(heartbeatStaleAfter) + 1
+        )
+        return { outcome, row: yield* store.get(running.runId) }
+      }))
+
+      expect(result.outcome).toEqual({ _tag: "SnapshotChanged" })
+      expect(result.row).toMatchObject({ status: "completed", owner: null })
+    }))
+
   it.effect("refuses claim-and-own when the expected snapshot has changed", () =>
     Effect.gen(function*() {
       const result = yield* migrated(Effect.gen(function*() {
@@ -395,7 +509,7 @@ describe("RunStore", () => {
       expect(result.row.owner).toBeNull()
     }))
 
-  it.effect("rejects an ordinary claim while the recorded heartbeat is fresh", () =>
+  it.effect("rejects an ordinary claim on every running snapshot", () =>
     Effect.gen(function*() {
       const outcome = yield* migrated(Effect.gen(function*() {
         const store = yield* RunStore
@@ -408,7 +522,7 @@ describe("RunStore", () => {
         )
       }))
 
-      expect(outcome).toEqual({ _tag: "HeartbeatFresh" })
+      expect(outcome).toEqual({ _tag: "SnapshotChanged" })
     }))
 
   it.effect("rejects an ordinary claim on a running run even once its heartbeat is stale (D4)", () =>
@@ -1125,6 +1239,33 @@ describe("RunStore", () => {
       expect(outcome).toEqual({ _tag: "SnapshotChanged" })
     }))
 
+  it.effect("does not steal a terminal run through its pre-completion snapshot", () =>
+    Effect.gen(function*() {
+      const result = yield* migrated(Effect.gen(function*() {
+        const store = yield* RunStore
+        const running = yield* activateNew(store, "run-terminal-steal", ownerA)
+        const expectedSnapshot = snapshot(running)
+        yield* store.transitionOwned(running.runId, ownerA, "completed")
+        const nowMs = Duration.toMillis(heartbeatStaleAfter) + 1
+        const outcome = yield* store.steal(
+          running.runId,
+          expectedSnapshot,
+          ownerB,
+          nowMs,
+          staleEvidence(ownerA, ownerB, nowMs)
+        )
+        return { outcome, row: yield* store.get(running.runId) }
+      }))
+
+      expect(result.outcome).toEqual({ _tag: "SnapshotChanged" })
+      expect(result.row).toMatchObject({
+        status: "completed",
+        owner: null,
+        claim: null,
+        claimedAtMs: null
+      })
+    }))
+
   it.effect("never persists owner columns for a non-running status", () =>
     Effect.gen(function*() {
       const rows = yield* migrated(Effect.gen(function*() {
@@ -1154,52 +1295,49 @@ describe("RunStore ownership evidence boundaries", () => {
     Effect.gen(function*() {
       const staleAfterMs = Duration.toMillis(heartbeatStaleAfter)
       const points = [staleAfterMs - 1, staleAfterMs, staleAfterMs + 1] as const
-      const outcomes = yield* migrated(Effect.gen(function*() {
-        const store = yield* RunStore
-        const claimAndOwn: Array<string> = []
-        const recoverClaim: Array<string> = []
-        const steal: Array<string> = []
-
-        for (const [index, nowMs] of points.entries()) {
-          const direct = yield* activateNew(store, `boundary-direct-${index}`, ownerA)
-          claimAndOwn.push(
-            (yield* store.claimAndOwn(
-              direct.runId,
-              snapshot(direct),
-              ownerB,
-              nowMs,
-              staleEvidence(ownerA, ownerB, nowMs)
-            ))._tag
-          )
-
-          const claimRunId = `boundary-claim-${index}`
-          yield* store.create(claimRunId, "{}")
-          const pending = snapshot(yield* store.get(claimRunId))
-          yield* store.claim(claimRunId, pending, ownerA, 0)
-          recoverClaim.push(
-            (yield* store.recoverClaim(
-              claimRunId,
-              ownerA,
-              0,
-              ownerB,
-              nowMs,
-              staleEvidence(ownerA, ownerB, nowMs)
-            ))._tag
-          )
-
-          const running = yield* activateNew(store, `boundary-steal-${index}`, ownerA)
-          steal.push(
-            (yield* store.steal(
-              running.runId,
-              snapshot(running),
-              ownerC,
-              nowMs,
-              staleEvidence(ownerA, ownerC, nowMs)
-            ))._tag
-          )
-        }
-        return { claimAndOwn, recoverClaim, steal }
-      }))
+      const cases = yield* Effect.forEach(
+        points.map((nowMs, index) => ({ index, nowMs })),
+        ({ index, nowMs }) =>
+          migrated(Effect.gen(function*() {
+            const store = yield* RunStore
+            const direct = yield* activateNew(store, `boundary-direct-${index}`, ownerA)
+            const claimRunId = `boundary-claim-${index}`
+            yield* store.create(claimRunId, "{}")
+            const pending = snapshot(yield* store.get(claimRunId))
+            yield* store.claim(claimRunId, pending, ownerA, 0)
+            const running = yield* activateNew(store, `boundary-steal-${index}`, ownerA)
+            yield* TestClock.setTime(nowMs)
+            return {
+              claimAndOwn: (yield* store.claimAndOwn(
+                direct.runId,
+                snapshot(direct),
+                ownerB,
+                nowMs,
+                staleEvidence(ownerA, ownerB, nowMs)
+              ))._tag,
+              recoverClaim: (yield* store.recoverClaim(
+                claimRunId,
+                ownerA,
+                0,
+                ownerB,
+                nowMs,
+                staleEvidence(ownerA, ownerB, nowMs)
+              ))._tag,
+              steal: (yield* store.steal(
+                running.runId,
+                snapshot(running),
+                ownerC,
+                nowMs,
+                staleEvidence(ownerA, ownerC, nowMs)
+              ))._tag
+            }
+          }))
+      )
+      const outcomes = {
+        claimAndOwn: cases.map((value) => value.claimAndOwn),
+        recoverClaim: cases.map((value) => value.recoverClaim),
+        steal: cases.map((value) => value.steal)
+      }
 
       expect(outcomes).toEqual({
         claimAndOwn: ["HeartbeatFresh", "HeartbeatFresh", "Activated"],
@@ -1279,7 +1417,7 @@ describe("RunStore ownership evidence boundaries", () => {
       })))
     }))
 
-  it.effect("pins both ten-second clock-skew edges around the stale lease boundary", () =>
+  it.effect("ignores caller clock skew on both sides of the stale lease boundary", () =>
     Effect.gen(function*() {
       const staleAtMs = Duration.toMillis(heartbeatStaleAfter) + 1
       const skewMs = Duration.toMillis(heartbeatSkewAllowance)
@@ -1289,8 +1427,24 @@ describe("RunStore ownership evidence boundaries", () => {
         const ahead = yield* activateNew(store, "skew-ahead", ownerA)
         const behindAtMs = staleAtMs - skewMs
         const aheadAtMs = staleAtMs + skewMs
+        const behindFresh = yield* store.steal(
+          behind.runId,
+          snapshot(behind),
+          ownerC,
+          behindAtMs,
+          staleEvidence(ownerA, ownerC, behindAtMs)
+        )
+        const aheadFresh = yield* store.steal(
+          ahead.runId,
+          snapshot(ahead),
+          ownerC,
+          aheadAtMs,
+          staleEvidence(ownerA, ownerC, aheadAtMs)
+        )
+        yield* TestClock.setTime(staleAtMs)
         return {
-          ahead: yield* store.steal(
+          aheadFresh,
+          aheadStale: yield* store.steal(
             ahead.runId,
             snapshot(ahead),
             ownerC,
@@ -1298,7 +1452,8 @@ describe("RunStore ownership evidence boundaries", () => {
             staleEvidence(ownerA, ownerC, aheadAtMs)
           ),
           aheadAtMs,
-          behind: yield* store.steal(
+          behindFresh,
+          behindStale: yield* store.steal(
             behind.runId,
             snapshot(behind),
             ownerC,
@@ -1309,13 +1464,15 @@ describe("RunStore ownership evidence boundaries", () => {
         }
       }))
 
-      // CONTRACT: the store judges the supplied wall-clock instant literally;
-      // heartbeatLoop's write-tolerance budget, not the SQL predicate, absorbs skew.
+      // The caller values bind evidence to one observation, but only the
+      // host-owned clock determines whether a lease has expired.
       expect(skewMs).toBe(10_000)
       expect(result.behindAtMs).toBe(20_001)
-      expect(result.behind).toEqual({ _tag: "HeartbeatFresh" })
+      expect(result.behindFresh).toEqual({ _tag: "HeartbeatFresh" })
       expect(result.aheadAtMs).toBe(40_001)
-      expect(result.ahead).toEqual({ _tag: "Claimed", claimedAtMs: 40_001 })
+      expect(result.aheadFresh).toEqual({ _tag: "HeartbeatFresh" })
+      expect(result.behindStale).toEqual({ _tag: "Claimed", claimedAtMs: staleAtMs })
+      expect(result.aheadStale).toEqual({ _tag: "Claimed", claimedAtMs: staleAtMs })
     }))
 })
 

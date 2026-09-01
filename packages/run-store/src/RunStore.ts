@@ -7,19 +7,86 @@
  * The two-phase snapshot/claim/activation CAS and heartbeat fence are adapted
  * from smithers `packages/db` and `packages/engine`.
  *
+ * Operations that accept or verify `LivenessEvidence` (`claim`,
+ * `claimAndOwn`, `steal`, `heartbeat`, `requestCancel`, and `recoverClaim`)
+ * take the caller's `nowMs` and judge it literally, including the lease cutoff
+ * and exact `evidence.checkedAtMs === nowMs` freshness rule. Lifecycle stamps
+ * use the Effect `Clock`: `create` writes `created_at_ms`, `activate` writes
+ * `heartbeat_at_ms` and `started_at_ms`, and `transitionOwned` writes
+ * `finished_at_ms`. A row can therefore carry readings from two clocks. A
+ * composition must give both sources the same reading; the store trusts the
+ * caller's clock completely, which is appropriate for an in-process library
+ * over local SQLite and must not cross a trust boundary.
+ *
  * @since 0.1.0
  */
 import { DurableWriter, fromSqlError } from "@smthrs/database/DurableWriter"
-import type { OwnerId } from "@smthrs/journal/OwnerId"
+import { OwnerId } from "@smthrs/journal/OwnerId"
 import { Cause, Clock, Context, Duration, Effect, Layer, Metric, Schema } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as SqlError from "effect/unstable/sql/SqlError"
 import { heartbeatStaleAfter } from "./Heartbeat.ts"
+import * as Boundary from "./internal/Boundary.ts"
 import type { LivenessEvidence } from "./Ownership.ts"
 import * as RunStoreMetrics from "./RunStoreMetrics.ts"
 
 /** JSON text carrying an arbitrary decoded value. */
 const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown)
+
+/**
+ * A UTF-16 surrogate without its partner. The journal uses the same ES2022
+ * compatible check because `String.prototype.isWellFormed` needs ES2024.
+ */
+const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+/** A non-empty identifier whose UTF-16 encoding survives SQLite unchanged. */
+const wellFormedIdentifier = (value: string): boolean => value.length > 0 && !loneSurrogate.test(value)
+
+const NonNegativeSafeInt = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)
+)
+
+const durableIdentifier = Schema.NonEmptyString.check(
+  Schema.isMaxLength(Boundary.maximumIdentifierLength),
+  Schema.makeFilter(
+    (value: string) => wellFormedIdentifier(value) && Boundary.isDurableText(value),
+    { title: "durableIdentifier" }
+  )
+)
+
+/**
+ * Maximum encoded size of executable run state.
+ *
+ * @since 1.0.0-rc.0
+ * @category constants
+ */
+export const maximumRunStateBytes = 4 * 1024 * 1024
+
+/**
+ * Maximum nesting admitted for executable run state.
+ *
+ * @since 1.0.0-rc.0
+ * @category constants
+ */
+export const maximumRunJsonDepth = 128
+
+/**
+ * Maximum values and members admitted for executable run state.
+ *
+ * @since 1.0.0-rc.0
+ * @category constants
+ */
+export const maximumRunJsonNodes = 100_000
+
+const runJsonLimits: Boundary.JsonLimits = {
+  maxBytes: maximumRunStateBytes,
+  maxDepth: maximumRunJsonDepth,
+  maxMembers: maximumRunJsonNodes,
+  maxNodes: maximumRunJsonNodes,
+  maxStringBytes: maximumRunStateBytes,
+  maxKeyBytes: 16 * 1024
+}
 
 /**
  * Stable run states understood by the durability layer.
@@ -188,9 +255,17 @@ export interface CreateOptions {
  * @since 0.1.0
  * @category models
  */
-export interface TransitionGuard {
-  readonly cancelRequested?: "absent" | "present" | undefined
-}
+export const TransitionGuard = Schema.Struct({
+  cancelRequested: Schema.optional(Schema.Literals(["absent", "present"] as const))
+})
+
+/**
+ * An extra compare-and-swap predicate over first-class run metadata.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type TransitionGuard = typeof TransitionGuard.Type
 
 /**
  * Result of recording a cancellation request.
@@ -464,23 +539,23 @@ const heartbeatStaleAfterMs = Duration.toMillis(heartbeatStaleAfter)
 const terminalStatuses: ReadonlySet<RunStatus> = new Set(["completed", "failed", "cancelled"])
 
 const DatabaseRunRow = Schema.Struct({
-  runId: Schema.String,
+  runId: durableIdentifier,
   status: RunStatus,
-  createdAtMs: Schema.Number,
-  startedAtMs: Schema.NullOr(Schema.Number),
-  finishedAtMs: Schema.NullOr(Schema.Number),
-  ownerHostId: Schema.NullOr(Schema.String),
-  ownerPid: Schema.NullOr(Schema.Number),
-  ownerNonce: Schema.NullOr(Schema.String),
-  heartbeatAtMs: Schema.NullOr(Schema.Number),
-  claimHostId: Schema.NullOr(Schema.String),
-  claimPid: Schema.NullOr(Schema.Number),
-  claimNonce: Schema.NullOr(Schema.String),
-  claimedAtMs: Schema.NullOr(Schema.Number),
-  parentRunId: Schema.NullOr(Schema.String),
-  cancelRequestedAtMs: Schema.NullOr(Schema.Number),
-  lineageId: Schema.NullOr(Schema.String),
-  roundOrdinal: Schema.NullOr(Schema.Number),
+  createdAtMs: NonNegativeSafeInt,
+  startedAtMs: Schema.NullOr(NonNegativeSafeInt),
+  finishedAtMs: Schema.NullOr(NonNegativeSafeInt),
+  ownerHostId: Schema.NullOr(durableIdentifier),
+  ownerPid: Schema.NullOr(NonNegativeSafeInt),
+  ownerNonce: Schema.NullOr(durableIdentifier),
+  heartbeatAtMs: Schema.NullOr(NonNegativeSafeInt),
+  claimHostId: Schema.NullOr(durableIdentifier),
+  claimPid: Schema.NullOr(NonNegativeSafeInt),
+  claimNonce: Schema.NullOr(durableIdentifier),
+  claimedAtMs: Schema.NullOr(NonNegativeSafeInt),
+  parentRunId: Schema.NullOr(durableIdentifier),
+  cancelRequestedAtMs: Schema.NullOr(NonNegativeSafeInt),
+  lineageId: Schema.NullOr(durableIdentifier),
+  roundOrdinal: Schema.NullOr(NonNegativeSafeInt),
   stateJson: Schema.String
 })
 
@@ -500,17 +575,204 @@ const runStoreError = (
   })
 
 const persistenceError = (method: string, cause: unknown): RunStoreError => {
+  if (Schema.is(RunStoreError)(cause)) return cause
   const code = typeof cause === "object" && cause !== null && "code" in cause && cause.code === "constraint"
     ? "constraint"
     : "persistence_failed"
-  return runStoreError(method, code, "database operation failed", cause)
+  return runStoreError(method, code, "database operation failed", { category: code })
 }
 
-const invalidRunError = (method: string, cause: unknown): RunStoreError =>
-  runStoreError(method, "invalid_run", "run input is invalid", cause)
+const invalidRunError = (
+  method: string,
+  causeOrField: unknown,
+  detail = "violates the durable contract"
+): RunStoreError =>
+  runStoreError(
+    method,
+    "invalid_run",
+    "run input is invalid",
+    typeof causeOrField === "string" ? { field: causeOrField, detail } : causeOrField
+  )
 
-const isJsonString = (value: string): boolean =>
+const requestCancelDecodeError = (cause: unknown): RunStoreError =>
+  runStoreError("requestCancel", "decode_failed", "could not decode flows_runs status", cause)
+
+const stateAdmission = (value: unknown) => Boundary.admitJsonText(value, runJsonLimits)
+
+const isJsonString = (value: unknown): value is string =>
   Schema.decodeUnknownResult(UnknownFromJsonString)(value)._tag === "Success"
+
+const validOwner = (value: unknown): value is OwnerId =>
+  Schema.is(OwnerId)(value) &&
+  Boundary.isDurableText(value.hostId) &&
+  Boundary.isDurableText(value.nonce) &&
+  Number.isSafeInteger(value.pid) &&
+  value.pid >= 0
+
+/** Caller timestamps are SQLite-safe, non-negative integer millisecond readings. */
+const validTimestamp = (value: number): boolean => Number.isSafeInteger(value) && value >= 0
+
+const ownData = (input: object, key: string): unknown => {
+  const descriptor = Object.getOwnPropertyDescriptor(input, key)
+  return descriptor !== undefined && "value" in descriptor && descriptor.enumerable
+    ? descriptor.value
+    : undefined
+}
+
+const inertRecord = (input: unknown, allowed: ReadonlySet<string>): input is object => {
+  if (typeof input !== "object" || input === null) return false
+  try {
+    const prototype = Object.getPrototypeOf(input)
+    if (prototype !== Object.prototype && prototype !== null) return false
+    for (const key of Reflect.ownKeys(input)) {
+      const descriptor = Object.getOwnPropertyDescriptor(input, key)
+      if (descriptor === undefined || !descriptor.enumerable) continue
+      if (typeof key !== "string" || !allowed.has(key) || !("value" in descriptor)) return false
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+const snapshotOwner = (method: string, field: string, input: unknown): Effect.Effect<OwnerId, RunStoreError> =>
+  Effect.suspend(() => {
+    if (!inertRecord(input, new Set(["hostId", "pid", "nonce"]))) {
+      return Effect.fail(invalidRunError(method, field, "must be an inert owner record"))
+    }
+    const owner = Object.freeze({
+      hostId: ownData(input, "hostId"),
+      pid: ownData(input, "pid"),
+      nonce: ownData(input, "nonce")
+    })
+    return validOwner(owner)
+      ? Effect.succeed(owner)
+      : Effect.fail(invalidRunError(method, field, "must be a valid owner identity"))
+  })
+
+const snapshotRunId = (method: string, input: unknown): Effect.Effect<string, RunStoreError> =>
+  typeof input === "string" && wellFormedIdentifier(input) && Boundary.isDurableText(input)
+    ? Effect.succeed(input)
+    : Effect.fail(invalidRunError(method, "runId", "must be well-formed durable text"))
+
+const snapshotTimestamp = (
+  method: string,
+  field: string,
+  input: unknown,
+  cause?: unknown
+): Effect.Effect<number, RunStoreError> =>
+  typeof input === "number" && validTimestamp(input)
+    ? Effect.succeed(input)
+    : Effect.fail(
+      invalidRunError(method, cause ?? field, "must be a non-negative safe integer")
+    )
+
+const snapshotState = (
+  method: string,
+  input: unknown,
+  cause?: unknown
+): Effect.Effect<string, RunStoreError> => {
+  const admitted = stateAdmission(input)
+  return admitted.ok && !loneSurrogate.test(admitted.value)
+    ? Effect.succeed(admitted.value)
+    : Effect.fail(
+      invalidRunError(
+        method,
+        cause ?? "stateJson",
+        admitted.ok ? "contains an unpaired UTF-16 surrogate" : admitted.complaint
+      )
+    )
+}
+
+const snapshotCreateOptions = (
+  input: unknown
+): Effect.Effect<
+  Readonly<{ parentRunId: string | null; lineageId: string | null; roundOrdinal: number | null }>,
+  RunStoreError
+> =>
+  Effect.suspend(() => {
+    const value = input ?? {}
+    if (!inertRecord(value, new Set(["parentRunId", "lineageId", "roundOrdinal"]))) {
+      return Effect.fail(invalidRunError("create", "options", "must be an inert data record"))
+    }
+    const rawParent = ownData(value, "parentRunId")
+    const rawLineage = ownData(value, "lineageId")
+    const rawRound = ownData(value, "roundOrdinal")
+    const parentRunId = rawParent === undefined ? null : rawParent
+    const lineageId = rawLineage === undefined ? null : rawLineage
+    const roundOrdinal = rawRound === undefined ? null : rawRound
+    if (
+      (parentRunId !== null &&
+        (typeof parentRunId !== "string" ||
+          !wellFormedIdentifier(parentRunId) ||
+          !Boundary.isDurableText(parentRunId))) ||
+      (lineageId !== null &&
+        (typeof lineageId !== "string" ||
+          !wellFormedIdentifier(lineageId) ||
+          !Boundary.isDurableText(lineageId))) ||
+      (roundOrdinal !== null && (typeof roundOrdinal !== "number" || !validTimestamp(roundOrdinal))) ||
+      (lineageId === null) !== (roundOrdinal === null)
+    ) return Effect.fail(invalidRunError("create", "options", "contains invalid ancestry or lineage"))
+    return Effect.succeed(Object.freeze({ parentRunId, lineageId, roundOrdinal }))
+  })
+
+const snapshotExpected = (
+  method: string,
+  input: unknown
+): Effect.Effect<RunSnapshot, RunStoreError> =>
+  Effect.gen(function*() {
+    if (!inertRecord(input, new Set(["status", "owner", "heartbeatAtMs"]))) {
+      return yield* Effect.fail(invalidRunError(method, "expected", "must be an inert exact snapshot"))
+    }
+    const status = ownData(input, "status")
+    const rawOwner = ownData(input, "owner")
+    const heartbeatAtMs = ownData(input, "heartbeatAtMs")
+    if (
+      !Schema.is(RunStatus)(status) ||
+      (heartbeatAtMs !== null && (typeof heartbeatAtMs !== "number" || !validTimestamp(heartbeatAtMs)))
+    ) {
+      return yield* Effect.fail(invalidRunError(method, "expected", "contains an invalid status or heartbeat"))
+    }
+    const owner = rawOwner === null ? null : yield* snapshotOwner(method, "expected.owner", rawOwner)
+    if ((status === "running") !== (owner !== null && heartbeatAtMs !== null)) {
+      return yield* Effect.fail(invalidRunError(method, "expected", "violates ownership invariants"))
+    }
+    return Object.freeze({ status, owner, heartbeatAtMs })
+  })
+
+const snapshotEvidence = (
+  method: string,
+  input: unknown
+): Effect.Effect<LivenessEvidence, RunStoreError> =>
+  Effect.gen(function*() {
+    if (!inertRecord(input, new Set(["expectedOwner", "checkedAtMs", "kind"]))) {
+      return yield* Effect.fail(invalidRunError(method, "evidence", "must be an inert evidence record"))
+    }
+    const expectedOwner = yield* snapshotOwner(method, "evidence.expectedOwner", ownData(input, "expectedOwner"))
+    const checkedAtMs = yield* snapshotTimestamp(method, "evidence.checkedAtMs", ownData(input, "checkedAtMs"))
+    const kind = ownData(input, "kind")
+    if (
+      kind !== "same-host-pid-dead" &&
+      kind !== "cross-host-unreachable-stale" &&
+      kind !== "lease-expired"
+    ) return yield* Effect.fail(invalidRunError(method, "evidence.kind"))
+    return Object.freeze({ expectedOwner, checkedAtMs, kind })
+  })
+
+const snapshotGuard = (
+  input: unknown
+): Effect.Effect<TransitionGuard | undefined, RunStoreError> =>
+  Effect.suspend(() => {
+    if (input === undefined) return Effect.succeed(undefined)
+    if (!inertRecord(input, new Set(["cancelRequested"]))) {
+      return Effect.fail(invalidRunError("transitionOwned", "guard", "must be an inert exact guard"))
+    }
+    const cancelRequested = ownData(input, "cancelRequested")
+    if (cancelRequested !== undefined && cancelRequested !== "absent" && cancelRequested !== "present") {
+      return Effect.fail(invalidRunError("transitionOwned", "guard.cancelRequested"))
+    }
+    return Effect.succeed(Object.freeze(cancelRequested === undefined ? {} : { cancelRequested }))
+  })
 
 const ownerFromColumns = (
   hostId: string | null,
@@ -518,7 +780,10 @@ const ownerFromColumns = (
   nonce: string | null
 ): OwnerId | null | undefined => {
   if (hostId === null && pid === null && nonce === null) return null
-  if (hostId !== null && pid !== null && nonce !== null) return { hostId, pid, nonce }
+  if (hostId !== null && pid !== null && nonce !== null) {
+    const owner = Object.freeze({ hostId, pid, nonce })
+    return validOwner(owner) ? owner : undefined
+  }
   return undefined
 }
 
@@ -531,12 +796,23 @@ const rowMatchesClaim = (row: DatabaseRunRow, claimant: OwnerId, claimedAtMs: nu
   row.claimNonce === claimant.nonce &&
   row.claimedAtMs === claimedAtMs
 
-const decodeRunRow = (method: string, input: unknown): Effect.Effect<RunRow, RunStoreError> =>
+const rowMatchesSnapshot = (row: DatabaseRunRow, expected: RunSnapshot): boolean =>
+  row.status === expected.status &&
+  row.ownerHostId === (expected.owner?.hostId ?? null) &&
+  row.ownerPid === (expected.owner?.pid ?? null) &&
+  row.ownerNonce === (expected.owner?.nonce ?? null) &&
+  row.heartbeatAtMs === expected.heartbeatAtMs
+
+const decodeRunRow = (method: string, runId: string, input: unknown): Effect.Effect<RunRow, RunStoreError> =>
   Schema.decodeUnknownEffect(DatabaseRunRow)(input).pipe(
-    Effect.mapError((cause) => runStoreError(method, "decode_failed", "could not decode flows_runs row", cause)),
+    Effect.mapError(() =>
+      runStoreError(method, "decode_failed", "could not decode flows_runs row", { runId, stage: "row-schema" })
+    ),
     Effect.flatMap((row) => {
       const owner = ownerFromColumns(row.ownerHostId, row.ownerPid, row.ownerNonce)
       const claim = ownerFromColumns(row.claimHostId, row.claimPid, row.claimNonce)
+      const admittedState = stateAdmission(row.stateJson)
+      const stateJsonValid = isJsonString(row.stateJson)
       const invalidOwner = owner === undefined ||
         (owner === null && row.heartbeatAtMs !== null) ||
         (owner !== null && row.heartbeatAtMs === null) ||
@@ -544,12 +820,35 @@ const decodeRunRow = (method: string, input: unknown): Effect.Effect<RunRow, Run
       const invalidClaim = claim === undefined ||
         (claim === null && row.claimedAtMs !== null) ||
         (claim !== null && row.claimedAtMs === null)
-      if (invalidOwner || invalidClaim || !isJsonString(row.stateJson)) {
+      const invalidTimeline = (row.startedAtMs !== null && row.startedAtMs < row.createdAtMs) ||
+        (row.finishedAtMs !== null && (row.startedAtMs === null || row.finishedAtMs < row.startedAtMs)) ||
+        (row.heartbeatAtMs !== null && (row.startedAtMs === null || row.heartbeatAtMs < row.startedAtMs)) ||
+        (row.claimedAtMs !== null && row.claimedAtMs < row.createdAtMs) ||
+        (row.cancelRequestedAtMs !== null && row.cancelRequestedAtMs < row.createdAtMs) ||
+        (row.status === "running" && (row.startedAtMs === null || row.finishedAtMs !== null)) ||
+        (isTerminalRunStatus(row.status) && row.finishedAtMs === null) ||
+        (!isTerminalRunStatus(row.status) && row.finishedAtMs !== null)
+      if (invalidOwner || invalidClaim || invalidTimeline || !admittedState.ok) {
+        // The cause is published to logs, spans, and telemetry. Executable
+        // state may carry credentials, so report only the invariants read here.
         return Effect.fail(
-          runStoreError(method, "decode_failed", "flows_runs row violates ownership invariants", row)
+          runStoreError(method, "decode_failed", "flows_runs row violates durable invariants", {
+            runId,
+            status: row.status,
+            createdAtMs: row.createdAtMs,
+            startedAtMs: row.startedAtMs,
+            finishedAtMs: row.finishedAtMs,
+            heartbeatAtMs: row.heartbeatAtMs,
+            claimedAtMs: row.claimedAtMs,
+            cancelRequestedAtMs: row.cancelRequestedAtMs,
+            hasClaimColumns: row.claimHostId !== null || row.claimPid !== null || row.claimNonce !== null,
+            hasOwnerColumns: row.ownerHostId !== null || row.ownerPid !== null || row.ownerNonce !== null,
+            stateJsonValid,
+            timelineValid: !invalidTimeline
+          })
         )
       }
-      return Effect.succeed({
+      return Effect.succeed(Object.freeze({
         runId: row.runId,
         status: row.status,
         createdAtMs: row.createdAtMs,
@@ -564,7 +863,7 @@ const decodeRunRow = (method: string, input: unknown): Effect.Effect<RunRow, Run
         lineageId: row.lineageId,
         roundOrdinal: row.roundOrdinal,
         stateJson: row.stateJson
-      })
+      }))
     })
   )
 
@@ -676,30 +975,29 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     effect.pipe(Effect.mapError((cause) => persistenceError(method, fromSqlError(cause))))
 
   const create = Effect.fn("RunStore.create")(
-    (runId: string, stateJson: string, options?: CreateOptions | undefined): Effect.Effect<void, RunStoreError> =>
-      Effect.annotateCurrentSpan({ runId }).pipe(
-        Effect.andThen(Effect.suspend(() => {
-          const parentRunId = options?.parentRunId ?? null
-          const lineageId = options?.lineageId ?? null
-          const roundOrdinal = options?.roundOrdinal ?? null
-          const invalidLineage = (lineageId === null) !== (roundOrdinal === null) ||
-            (lineageId !== null && lineageId.length === 0) ||
-            (roundOrdinal !== null && (!Number.isSafeInteger(roundOrdinal) || roundOrdinal < 0))
-          if (
-            runId.length === 0 ||
-            !isJsonString(stateJson) ||
-            parentRunId?.length === 0 ||
-            invalidLineage
-          ) {
-            return Effect.fail(
-              invalidRunError("create", { runId, stateJson, parentRunId, lineageId, roundOrdinal })
-            )
-          }
-          return Clock.currentTimeMillis.pipe(
-            Effect.flatMap((createdAtMs) =>
-              write(
-                "create",
-                sql`
+    (
+      runIdInput: string,
+      stateInput: string,
+      optionsInput?: CreateOptions | undefined
+    ): Effect.Effect<void, RunStoreError> =>
+      Effect.gen(function*() {
+        const runId = yield* snapshotRunId("create", runIdInput)
+        const { lineageId, parentRunId, roundOrdinal } = yield* snapshotCreateOptions(optionsInput)
+        // This cause is published to logs, spans, and telemetry. Executable
+        // state may carry credentials, so include its shape but never its text.
+        const stateJson = yield* snapshotState("create", stateInput, {
+          runId,
+          parentRunId,
+          lineageId,
+          roundOrdinal,
+          stateJsonLength: stateInput.length,
+          stateJsonValid: isJsonString(stateInput)
+        })
+        yield* Effect.annotateCurrentSpan({ runId })
+        const createdAtMs = yield* Clock.currentTimeMillis
+        yield* write(
+          "create",
+          sql`
             INSERT INTO flows_runs (
               run_id,
               status,
@@ -738,46 +1036,44 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
               ${stateJson}
             )
           `.pipe(Effect.asVoid)
-              )
-            )
-          )
-        })),
-        observeExit
-      )
+        )
+      }).pipe(observeExit)
   )
 
-  const get = Effect.fn("RunStore.get")((runId: string): Effect.Effect<RunRow, RunStoreError> =>
-    Effect.annotateCurrentSpan({ runId }).pipe(
-      Effect.andThen(
-        read("get", selectRun(sql, runId)).pipe(
-          Effect.flatMap((rows) =>
-            rows[0] === undefined
-              ? Effect.fail(runStoreError("get", "not_found_row", `run ${runId} was not found`, runId))
-              : decodeRunRow("get", rows[0])
-          )
+  const get = Effect.fn("RunStore.get")((runIdInput: string): Effect.Effect<RunRow, RunStoreError> =>
+    Effect.gen(function*() {
+      const runId = yield* snapshotRunId("get", runIdInput)
+      yield* Effect.annotateCurrentSpan({ runId })
+      const rows = yield* read("get", selectRun(sql, runId))
+      return rows[0] === undefined
+        ? yield* Effect.fail(
+          runStoreError("get", "not_found_row", `run ${runId} was not found`, { runId })
         )
-      ),
-      observeExit
-    )
+        : yield* decodeRunRow("get", runId, rows[0])
+    }).pipe(observeExit)
   )
 
   const requestCancel = Effect.fn("RunStore.requestCancel")((
-    runId: string,
-    nowMs: number
+    runIdInput: string,
+    nowMsInput: number
   ): Effect.Effect<RequestCancelOutcome, RunStoreError> =>
-    Effect.annotateCurrentSpan({ runId }).pipe(
-      Effect.andThen(Effect.suspend(() => {
-        if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
-          return Effect.fail(invalidRunError("requestCancel", { runId, nowMs }))
-        }
-        return write(
-          "requestCancel",
-          Effect.gen(function*() {
-            // The status predicate is part of the compare-and-swap rather than
-            // a read-then-write check: a run that settles between a caller's
-            // read and this UPDATE must lose the write, not race it.
-            const record = () =>
-              sql<{ readonly requestedAtMs: number }>`
+    Effect.gen(function*() {
+      const runId = yield* snapshotRunId("requestCancel", runIdInput)
+      const nowMs = yield* snapshotTimestamp(
+        "requestCancel",
+        "nowMs",
+        nowMsInput,
+        { runId, nowMs: nowMsInput }
+      )
+      yield* Effect.annotateCurrentSpan({ runId })
+      return yield* write(
+        "requestCancel",
+        Effect.gen(function*() {
+          // The status predicate is part of the compare-and-swap rather than
+          // a read-then-write check: a run that settles between a caller's
+          // read and this UPDATE must lose the write, not race it.
+          const record = () =>
+            sql<{ readonly requestedAtMs: number }>`
           UPDATE flows_runs
           SET cancel_requested_at_ms = ${nowMs}
           WHERE run_id = ${runId}
@@ -785,93 +1081,110 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             AND status NOT IN ('completed', 'failed', 'cancelled')
           RETURNING cancel_requested_at_ms AS "requestedAtMs"
         `
-            const rows = yield* record()
-            if (rows[0] !== undefined) {
-              return { _tag: "CancelRequested", requestedAtMs: Number(rows[0].requestedAtMs) } as const
-            }
-            const current = yield* sql<{ readonly requestedAtMs: number | null; readonly status: string }>`
+          const rows = yield* record()
+          if (rows[0] !== undefined) {
+            return { _tag: "CancelRequested", requestedAtMs: Number(rows[0].requestedAtMs) } as const
+          }
+          const current = yield* sql<{ readonly requestedAtMs: number | null; readonly status: string }>`
           SELECT cancel_requested_at_ms AS "requestedAtMs", status AS "status"
           FROM flows_runs WHERE run_id = ${runId}
         `
-            const row = current[0]
-            if (row === undefined) {
-              return notFound
-            }
-            const status = yield* Schema.decodeUnknownEffect(RunStatus)(row.status).pipe(
-              Effect.orDie
-            )
-            // Read before the request column, so the answer does not depend on
-            // whether the run's own closing request is still on the row: a
-            // settled run reports how it ended either way.
-            if (isTerminalRunStatus(status)) {
-              return { _tag: "Terminal", status } as const
-            }
-            if (row.requestedAtMs !== null) {
-              return { _tag: "AlreadyRequested", requestedAtMs: Number(row.requestedAtMs) } as const
-            }
-            // The row is present and the column is NULL. `row === undefined` and
-            // `requestedAtMs === null` used to collapse into one `== null` test, so
-            // a writer on another connection clearing the column between the UPDATE
-            // and this read made a live run report `NotFound` — and the caller
-            // skipped the retry it performs for a genuine race. The UPDATE's own
-            // precondition holds again, so re-run it.
-            const retried = yield* record()
-            const recorded = retried[0]
-            if (recorded !== undefined) {
-              return { _tag: "CancelRequested", requestedAtMs: Number(recorded.requestedAtMs) } as const
-            }
-            // Two things can refuse the retry, and they are not the same
-            // answer: the row is gone, which is what this retry exists to
-            // distinguish, or the run settled in the statement between the
-            // read above and this write and lost to the status predicate.
-            // Reported as `NotFound`, a run that had just completed sent its
-            // caller looking for a row that is sitting right there. The
-            // terminal test rides in the WHERE clause so the read answers one
-            // question: did it end?
-            const closing = yield* sql<{ readonly status: string }>`
-          SELECT status AS "status" FROM flows_runs
-          WHERE run_id = ${runId} AND status IN ('completed', 'failed', 'cancelled')
+          const row = current[0]
+          if (row === undefined) {
+            return notFound
+          }
+          const status = yield* Schema.decodeUnknownEffect(RunStatus)(row.status).pipe(
+            Effect.mapError(requestCancelDecodeError)
+          )
+          // Read before the request column, so the answer does not depend on
+          // whether the run's own closing request is still on the row: a
+          // settled run reports how it ended either way.
+          if (isTerminalRunStatus(status)) {
+            return { _tag: "Terminal", status } as const
+          }
+          if (row.requestedAtMs !== null) {
+            return { _tag: "AlreadyRequested", requestedAtMs: Number(row.requestedAtMs) } as const
+          }
+          // The row is present and the column is NULL. `row === undefined` and
+          // `requestedAtMs === null` used to collapse into one `== null` test, so
+          // a writer on another connection clearing the column between the UPDATE
+          // and this read made a live run report `NotFound` — and the caller
+          // skipped the retry it performs for a genuine race. The UPDATE's own
+          // precondition holds again, so re-run it.
+          const retried = yield* record()
+          const recorded = retried[0]
+          if (recorded !== undefined) {
+            return { _tag: "CancelRequested", requestedAtMs: Number(recorded.requestedAtMs) } as const
+          }
+          // Three races can refuse the retry: the row disappeared, it
+          // settled, or another writer recorded the request first. Read both
+          // columns so each live row receives its truthful domain outcome.
+          const closing = yield* sql<{
+            readonly requestedAtMs: number | null
+            readonly status: string
+          }>`
+          SELECT status AS "status", cancel_requested_at_ms AS "requestedAtMs"
+          FROM flows_runs WHERE run_id = ${runId}
         `
-            const ending = closing[0]
-            if (ending === undefined) {
-              return notFound
-            }
+          const ending = closing[0]
+          if (ending === undefined) {
+            return notFound
+          }
+          const endingStatus = yield* Schema.decodeUnknownEffect(RunStatus)(ending.status).pipe(
+            Effect.mapError(requestCancelDecodeError)
+          )
+          if (isTerminalRunStatus(endingStatus)) {
             return {
               _tag: "Terminal",
-              status: yield* Schema.decodeUnknownEffect(TerminalRunStatus)(ending.status).pipe(Effect.orDie)
+              status: yield* Schema.decodeUnknownEffect(TerminalRunStatus)(endingStatus).pipe(
+                Effect.mapError(requestCancelDecodeError)
+              )
             } as const
-          })
-        )
-      })),
-      observeOutcome<RequestCancelOutcome>()
-    )
+          }
+          if (ending.requestedAtMs !== null) {
+            return { _tag: "AlreadyRequested", requestedAtMs: Number(ending.requestedAtMs) } as const
+          }
+          return notFound
+        })
+      )
+    }).pipe(observeOutcome<RequestCancelOutcome>())
   )
 
   const claim = Effect.fn("RunStore.claim")((
-    runId: string,
-    expected: RunSnapshot,
-    claimant: OwnerId,
-    nowMs: number
+    runIdInput: string,
+    expectedInput: RunSnapshot,
+    claimantInput: OwnerId,
+    nowMsInput: number
   ): Effect.Effect<ClaimOutcome, RunStoreError> =>
-    Effect.annotateCurrentSpan({ runId, claimantHostId: claimant.hostId }).pipe(
-      Effect.andThen(
-        write(
-          "claim",
-          Effect.gen(function*() {
-            // `claim` never admits a running run, so it needs no staleness
-            // disjunction. `status IN ('pending', 'suspended')` already excludes
-            // 'running', which made the preceding `status <> 'running'` redundant
-            // and the trailing `(status <> 'running' OR heartbeat IS NULL OR
-            // heartbeat < cutoff)` a tautology — its first branch was already
-            // known true. `claimAndOwn` is the method that genuinely needs the
-            // staleness test, because it does admit 'running'.
-            const rows = yield* sql<{ readonly runId: string }>`
+    Effect.gen(function*() {
+      const runId = yield* snapshotRunId("claim", runIdInput)
+      const expected = yield* snapshotExpected("claim", expectedInput)
+      const claimant = yield* snapshotOwner("claim", "claimant", claimantInput)
+      yield* snapshotTimestamp(
+        "claim",
+        "nowMs",
+        nowMsInput,
+        { runId, nowMs: nowMsInput }
+      )
+      yield* Effect.annotateCurrentSpan({ runId, claimantHostId: claimant.hostId })
+      const claimedAtMs = yield* Clock.currentTimeMillis
+      return yield* write(
+        "claim",
+        Effect.gen(function*() {
+          // `claim` never admits a running run, so it needs no staleness
+          // disjunction. `status IN ('pending', 'suspended')` already excludes
+          // 'running', which made the preceding `status <> 'running'` redundant
+          // and the trailing `(status <> 'running' OR heartbeat IS NULL OR
+          // heartbeat < cutoff)` a tautology — its first branch was already
+          // known true. `claimAndOwn` is the method that genuinely needs the
+          // staleness test, because it does admit 'running'.
+          const rows = yield* sql<{ readonly runId: string }>`
           UPDATE flows_runs
           SET
             claim_host_id = ${claimant.hostId},
             claim_pid = ${claimant.pid},
             claim_nonce = ${claimant.nonce},
-            claimed_at_ms = ${nowMs}
+            claimed_at_ms = ${claimedAtMs}
           WHERE run_id = ${runId}
             AND status IN ('pending', 'suspended')
             AND status = ${expected.status}
@@ -885,42 +1198,51 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             AND claimed_at_ms IS NULL
           RETURNING run_id AS "runId"
         `
-            if (rows.length > 0) return claimed(nowMs)
-            const current = yield* selectRun(sql, runId)
-            return classifyClaimLoss(current[0], nowMs)
-          })
-        )
-      ),
-      observeOutcome((outcome) => RunStoreMetrics.claim[outcome._tag])
-    )
+          if (rows.length > 0) return claimed(claimedAtMs)
+          const current = yield* selectRun(sql, runId)
+          return current[0]?.status === "running"
+            ? snapshotChanged
+            : classifyClaimLoss(current[0], claimedAtMs)
+        })
+      )
+    }).pipe(observeOutcome((outcome) => RunStoreMetrics.claim[outcome._tag]))
   )
 
   const claimAndOwn = Effect.fn("RunStore.claimAndOwn")((
-    runId: string,
-    expected: RunSnapshot,
-    owner: OwnerId,
-    nowMs: number,
-    evidence?: LivenessEvidence | undefined
+    runIdInput: string,
+    expectedInput: RunSnapshot,
+    ownerInput: OwnerId,
+    nowMsInput: number,
+    evidenceInput?: LivenessEvidence | undefined
   ): Effect.Effect<ClaimAndOwnOutcome, RunStoreError> =>
-    Effect.annotateCurrentSpan({ runId, ownerHostId: owner.hostId }).pipe(
-      Effect.andThen(Effect.suspend((): Effect.Effect<ClaimAndOwnOutcome, RunStoreError> => {
+    Effect.gen(function*() {
+      const runId = yield* snapshotRunId("claimAndOwn", runIdInput)
+      const expected = yield* snapshotExpected("claimAndOwn", expectedInput)
+      const owner = yield* snapshotOwner("claimAndOwn", "owner", ownerInput)
+      const checkedAtMs = yield* snapshotTimestamp(
+        "claimAndOwn",
+        "nowMs",
+        nowMsInput,
+        { runId, nowMs: nowMsInput }
+      )
+      const evidence = evidenceInput === undefined
+        ? undefined
+        : yield* snapshotEvidence("claimAndOwn", evidenceInput)
+      yield* Effect.annotateCurrentSpan({ runId, ownerHostId: owner.hostId })
+      const observedAtMs = yield* Clock.currentTimeMillis
+      return yield* Effect.suspend((): Effect.Effect<ClaimAndOwnOutcome, RunStoreError> => {
         const canReplaceExpectedOwner = expected.status !== "running" ||
           (expected.owner !== null && sameOwner(expected.owner, owner)) ||
-          (evidence !== undefined && evidenceMatches(expected, owner, nowMs, evidence))
+          (evidence !== undefined && evidenceMatches(expected, owner, checkedAtMs, evidence))
 
         if (!canReplaceExpectedOwner) {
           return read("claimAndOwn", selectRun(sql, runId)).pipe(
             Effect.map((current) => {
-              const loss = classifyClaimLoss(current[0], nowMs)
-              // No CAS ran on this path — the caller expected a running run owned
-              // by someone else and supplied no matching evidence, so it was
-              // refused before the write. `SnapshotChanged` therefore asserts
-              // something this branch never tested, and it is the one classification
-              // that misdirects: a recovery sweeper told its snapshot was wrong
-              // re-reads, gets the identical snapshot, and calls again, livelocking
-              // on a run that is genuinely recoverable. The other three still
-              // describe the row itself and are reported unchanged.
-              return loss === snapshotChanged ? evidenceRequired : loss
+              const row = current[0]
+              if (row === undefined) return notFound
+              if (row.claimHostId !== null) return alreadyClaimed
+              if (rowMatchesSnapshot(row, expected)) return evidenceRequired
+              return classifyClaimLoss(row, observedAtMs)
             })
           )
         }
@@ -932,12 +1254,12 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
           UPDATE flows_runs
           SET
             status = 'running',
-            started_at_ms = COALESCE(started_at_ms, ${nowMs}),
+            started_at_ms = COALESCE(started_at_ms, ${observedAtMs}),
             finished_at_ms = NULL,
             owner_host_id = ${owner.hostId},
             owner_pid = ${owner.pid},
             owner_nonce = ${owner.nonce},
-            heartbeat_at_ms = ${nowMs}
+            heartbeat_at_ms = ${observedAtMs}
           WHERE run_id = ${runId}
             AND status IN ('pending', 'suspended', 'running')
             AND status = ${expected.status}
@@ -952,34 +1274,41 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             AND (
               status <> 'running'
               OR heartbeat_at_ms IS NULL
-              OR heartbeat_at_ms < ${nowMs - heartbeatStaleAfterMs}
+              OR heartbeat_at_ms < ${observedAtMs - heartbeatStaleAfterMs}
             )
           RETURNING run_id AS "runId"
         `
             if (rows.length > 0) return activated
             const current = yield* selectRun(sql, runId)
-            return classifyClaimLoss(current[0], nowMs)
+            return classifyClaimLoss(current[0], observedAtMs)
           })
         )
-      })),
-      observeOutcome((outcome) => RunStoreMetrics.claimAndOwn[outcome._tag])
-    )
+      })
+    }).pipe(observeOutcome((outcome) => RunStoreMetrics.claimAndOwn[outcome._tag]))
   )
 
   const activate = Effect.fn("RunStore.activate")((
-    runId: string,
-    claimant: OwnerId,
-    claimedAtMs: number,
-    expected: RunSnapshot
+    runIdInput: string,
+    claimantInput: OwnerId,
+    claimedAtMsInput: number,
+    expectedInput: RunSnapshot
   ): Effect.Effect<ActivateOutcome, RunStoreError> =>
-    Effect.annotateCurrentSpan({ runId, claimantHostId: claimant.hostId }).pipe(
-      Effect.andThen(
-        Clock.currentTimeMillis.pipe(
-          Effect.flatMap((activatedAtMs) =>
-            write(
-              "activate",
-              Effect.gen(function*() {
-                const rows = yield* sql<{ readonly runId: string }>`
+    Effect.gen(function*() {
+      const runId = yield* snapshotRunId("activate", runIdInput)
+      const claimant = yield* snapshotOwner("activate", "claimant", claimantInput)
+      const claimedAtMs = yield* snapshotTimestamp(
+        "activate",
+        "claimedAtMs",
+        claimedAtMsInput,
+        { runId, claimedAtMs: claimedAtMsInput }
+      )
+      const expected = yield* snapshotExpected("activate", expectedInput)
+      yield* Effect.annotateCurrentSpan({ runId, claimantHostId: claimant.hostId })
+      const activatedAtMs = yield* Clock.currentTimeMillis
+      return yield* write(
+        "activate",
+        Effect.gen(function*() {
+          const rows = yield* sql<{ readonly runId: string }>`
               UPDATE flows_runs
               SET
                 status = 'running',
@@ -1005,12 +1334,12 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
                 AND claimed_at_ms = ${claimedAtMs}
               RETURNING run_id AS "runId"
             `
-                if (rows.length > 0) return activated
+          if (rows.length > 0) return activated
 
-                const current = yield* selectRun(sql, runId)
-                if (current[0] === undefined || !rowMatchesClaim(current[0], claimant, claimedAtMs)) return claimLost
+          const current = yield* selectRun(sql, runId)
+          if (current[0] === undefined || !rowMatchesClaim(current[0], claimant, claimedAtMs)) return claimLost
 
-                yield* sql`
+          yield* sql`
               UPDATE flows_runs
               SET
                 claim_host_id = NULL,
@@ -1023,23 +1352,23 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
                 AND claim_nonce = ${claimant.nonce}
                 AND claimed_at_ms = ${claimedAtMs}
             `
-                return snapshotChanged
-              })
-            )
-          )
-        )
-      ),
-      observeOutcome((outcome) => RunStoreMetrics.activate[outcome._tag])
-    )
+          return snapshotChanged
+        })
+      )
+    }).pipe(observeOutcome((outcome) => RunStoreMetrics.activate[outcome._tag]))
   )
 
   const abandonClaim = Effect.fn("RunStore.abandonClaim")((
-    runId: string,
-    claimant: OwnerId,
-    claimedAtMs: number
+    runIdInput: string,
+    claimantInput: OwnerId,
+    claimedAtMsInput: number
   ): Effect.Effect<AbandonClaimOutcome, RunStoreError> =>
-    Effect.annotateCurrentSpan({ runId, claimantHostId: claimant.hostId }).pipe(
-      Effect.andThen(write(
+    Effect.gen(function*() {
+      const runId = yield* snapshotRunId("abandonClaim", runIdInput)
+      const claimant = yield* snapshotOwner("abandonClaim", "claimant", claimantInput)
+      const claimedAtMs = yield* snapshotTimestamp("abandonClaim", "claimedAtMs", claimedAtMsInput)
+      yield* Effect.annotateCurrentSpan({ runId, claimantHostId: claimant.hostId })
+      return yield* write(
         "abandonClaim",
         Effect.map(
           sql<{ readonly runId: string }>`
@@ -1058,22 +1387,35 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
         `,
           (rows) => rows.length > 0 ? abandoned : claimLost
         )
-      )),
-      observeOutcome<AbandonClaimOutcome>()
-    )
+      )
+    }).pipe(observeOutcome((outcome) => RunStoreMetrics.abandonClaim[outcome._tag]))
   )
 
   const recoverClaim = Effect.fn("RunStore.recoverClaim")((
-    runId: string,
-    staleClaimant: OwnerId,
-    claimedAtMs: number,
-    observer: OwnerId,
-    nowMs: number,
-    evidence: LivenessEvidence
+    runIdInput: string,
+    staleClaimantInput: OwnerId,
+    claimedAtMsInput: number,
+    observerInput: OwnerId,
+    nowMsInput: number,
+    evidenceInput: LivenessEvidence
   ): Effect.Effect<RecoverClaimOutcome, RunStoreError> =>
-    Effect.annotateCurrentSpan({ runId, observerHostId: observer.hostId }).pipe(
-      Effect.andThen(Effect.suspend((): Effect.Effect<RecoverClaimOutcome, RunStoreError> => {
-        if (!evidenceMatchesOwner(staleClaimant, observer, nowMs, evidence)) {
+    Effect.gen(function*() {
+      const runId = yield* snapshotRunId("recoverClaim", runIdInput)
+      const staleClaimant = yield* snapshotOwner("recoverClaim", "staleClaimant", staleClaimantInput)
+      const timestampCause = { runId, claimedAtMs: claimedAtMsInput, nowMs: nowMsInput }
+      const claimedAtMs = yield* snapshotTimestamp(
+        "recoverClaim",
+        "claimedAtMs",
+        claimedAtMsInput,
+        timestampCause
+      )
+      const observer = yield* snapshotOwner("recoverClaim", "observer", observerInput)
+      const checkedAtMs = yield* snapshotTimestamp("recoverClaim", "nowMs", nowMsInput, timestampCause)
+      const evidence = yield* snapshotEvidence("recoverClaim", evidenceInput)
+      yield* Effect.annotateCurrentSpan({ runId, observerHostId: observer.hostId })
+      const observedAtMs = yield* Clock.currentTimeMillis
+      return yield* Effect.suspend((): Effect.Effect<RecoverClaimOutcome, RunStoreError> => {
+        if (!evidenceMatchesOwner(staleClaimant, observer, checkedAtMs, evidence)) {
           return Effect.succeed(livenessUnconfirmed)
         }
         return write(
@@ -1091,51 +1433,53 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             AND claim_pid = ${staleClaimant.pid}
             AND claim_nonce = ${staleClaimant.nonce}
             AND claimed_at_ms = ${claimedAtMs}
-            AND claimed_at_ms < ${nowMs - heartbeatStaleAfterMs}
+            AND claimed_at_ms < ${observedAtMs - heartbeatStaleAfterMs}
           RETURNING run_id AS "runId"
         `
             if (rows.length > 0) return recovered
             const current = yield* selectRun(sql, runId)
             if (current[0] === undefined) return notFound
             return rowMatchesClaim(current[0], staleClaimant, claimedAtMs) &&
-                claimedAtMs >= nowMs - heartbeatStaleAfterMs
+                claimedAtMs >= observedAtMs - heartbeatStaleAfterMs
               ? claimFresh
               : claimChanged
           })
         )
-      })),
-      observeOutcome<RecoverClaimOutcome>()
-    )
+      })
+    }).pipe(observeOutcome((outcome) => RunStoreMetrics.recoverClaim[outcome._tag]))
   )
 
   const heartbeat = Effect.fn("RunStore.heartbeat")((
-    runId: string,
-    owner: OwnerId,
-    nowMs: number
+    runIdInput: string,
+    ownerInput: OwnerId,
+    nowMsInput: number
   ): Effect.Effect<HeartbeatOutcome, RunStoreError> =>
-    Effect.annotateCurrentSpan({ runId, ownerHostId: owner.hostId }).pipe(
-      Effect.andThen(Effect.suspend(() => {
-        // Validated before the write because the monotonic MAX below would
-        // otherwise silently absorb a negative or non-integer timestamp
-        // instead of letting the column CHECK reject it.
-        if (!Number.isSafeInteger(nowMs) || nowMs < 0) {
-          return Effect.fail(invalidRunError("heartbeat", { runId, nowMs }))
-        }
-        return write(
-          "heartbeat",
-          Effect.gen(function*() {
-            // The lease timestamp is monotonic: MAX() keeps a heartbeat that
-            // arrives late — delayed past a newer one from the same owner —
-            // from moving `heartbeat_at_ms` backwards and making a live run
-            // look stale to `claimAndOwn`/`steal`'s cutoff. The outcome is
-            // still `Updated`: the fence held, and the write proves liveness
-            // regardless of which caller clock reading it carried. Prior art:
-            // Temporal's shard `rangeID` only ever advances
-            // (`reference/temporal/service/history/shard/context_impl.go`,
-            // `renewRangeLocked`).
-            const rows = yield* sql<{ readonly runId: string }>`
+    Effect.gen(function*() {
+      const runId = yield* snapshotRunId("heartbeat", runIdInput)
+      const owner = yield* snapshotOwner("heartbeat", "owner", ownerInput)
+      yield* snapshotTimestamp(
+        "heartbeat",
+        "nowMs",
+        nowMsInput,
+        { runId, nowMs: nowMsInput }
+      )
+      yield* Effect.annotateCurrentSpan({ runId, ownerHostId: owner.hostId })
+      const heartbeatAtMs = yield* Clock.currentTimeMillis
+      return yield* write(
+        "heartbeat",
+        Effect.gen(function*() {
+          // The lease timestamp is monotonic: MAX() keeps a heartbeat that
+          // arrives late — delayed past a newer one from the same owner —
+          // from moving `heartbeat_at_ms` backwards and making a live run
+          // look stale to `claimAndOwn`/`steal`'s cutoff. The outcome is
+          // still `Updated`: the fence held, and the write proves liveness
+          // regardless of which caller clock reading it carried. Prior art:
+          // Temporal's shard `rangeID` only ever advances
+          // (`reference/temporal/service/history/shard/context_impl.go`,
+          // `renewRangeLocked`).
+          const rows = yield* sql<{ readonly runId: string }>`
           UPDATE flows_runs
-          SET heartbeat_at_ms = MAX(heartbeat_at_ms, ${nowMs})
+          SET heartbeat_at_ms = MAX(heartbeat_at_ms, ${heartbeatAtMs})
           WHERE run_id = ${runId}
             AND status = 'running'
             AND owner_host_id = ${owner.hostId}
@@ -1143,43 +1487,47 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             AND owner_nonce = ${owner.nonce}
           RETURNING run_id AS "runId"
         `
-            if (rows.length > 0) return updated
-            const current = yield* selectRun(sql, runId)
-            return current.length === 0 ? notFound : fenceLost
-          })
-        )
-      })),
-      observeOutcome((outcome) => RunStoreMetrics.heartbeat[outcome._tag])
-    )
+          if (rows.length > 0) return updated
+          const current = yield* selectRun(sql, runId)
+          return current.length === 0 ? notFound : fenceLost
+        })
+      )
+    }).pipe(observeOutcome((outcome) => RunStoreMetrics.heartbeat[outcome._tag]))
   )
 
   const transitionOwned = Effect.fn("RunStore.transitionOwned")((
-    runId: string,
-    owner: OwnerId,
-    toStatus: RunStatus,
-    stateJson?: string | undefined,
-    guard?: TransitionGuard | undefined
+    runIdInput: string,
+    ownerInput: OwnerId,
+    toStatusInput: RunStatus,
+    stateInput?: string | undefined,
+    guardInput?: TransitionGuard | undefined
   ): Effect.Effect<TransitionOutcome, RunStoreError> =>
-    Effect.annotateCurrentSpan({ runId, ownerHostId: owner.hostId, to: toStatus }).pipe(
-      Effect.andThen(Effect.suspend(() => {
-        if (
-          Schema.decodeUnknownResult(RunStatus)(toStatus)._tag === "Failure" ||
-          (stateJson !== undefined && !isJsonString(stateJson))
-        ) {
-          return Effect.fail(invalidRunError("transitionOwned", { runId, toStatus, stateJson }))
-        }
-        const state = stateJson ?? null
-        // A guard is compiled into the same UPDATE as the ownership fence, so a
-        // concurrent cancellation request can never slip between check and write.
-        const requireCancelAbsent = guard?.cancelRequested === "absent" ? 1 : 0
-        const requireCancelPresent = guard?.cancelRequested === "present" ? 1 : 0
-        return Clock.currentTimeMillis.pipe(
-          Effect.flatMap((transitionedAtMs) =>
-            write(
-              "transitionOwned",
-              Effect.gen(function*() {
-                const rows = toStatus === "running"
-                  ? yield* sql<{ readonly runId: string }>`
+    Effect.gen(function*() {
+      const runId = yield* snapshotRunId("transitionOwned", runIdInput)
+      const owner = yield* snapshotOwner("transitionOwned", "owner", ownerInput)
+      if (!Schema.is(RunStatus)(toStatusInput) || toStatusInput === "pending") {
+        return yield* Effect.fail(invalidRunError("transitionOwned", "toStatus"))
+      }
+      const toStatus = toStatusInput
+      const state = stateInput === undefined
+        ? null
+        : yield* snapshotState("transitionOwned", stateInput, {
+          runId,
+          stateJsonLength: typeof stateInput === "string" ? stateInput.length : null,
+          stateJsonValid: isJsonString(stateInput)
+        })
+      const guard = yield* snapshotGuard(guardInput)
+      yield* Effect.annotateCurrentSpan({ runId, ownerHostId: owner.hostId, to: toStatus })
+      // A guard is compiled into the same UPDATE as the ownership fence, so a
+      // concurrent cancellation request can never slip between check and write.
+      const requireCancelAbsent = guard?.cancelRequested === "absent" ? 1 : 0
+      const requireCancelPresent = guard?.cancelRequested === "present" ? 1 : 0
+      const transitionedAtMs = yield* Clock.currentTimeMillis
+      return yield* write(
+        "transitionOwned",
+        Effect.gen(function*() {
+          const rows = toStatus === "running"
+            ? yield* sql<{ readonly runId: string }>`
                 UPDATE flows_runs
                 SET
                   status = 'running',
@@ -1194,7 +1542,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
                   AND (${requireCancelPresent} = 0 OR cancel_requested_at_ms IS NOT NULL)
                 RETURNING run_id AS "runId"
               `
-                  : yield* sql<{ readonly runId: string }>`
+            : yield* sql<{ readonly runId: string }>`
                 UPDATE flows_runs
                 SET
                   status = ${toStatus},
@@ -1217,35 +1565,49 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
                   AND (${requireCancelPresent} = 0 OR cancel_requested_at_ms IS NOT NULL)
                 RETURNING run_id AS "runId"
               `
-                /* v8 ignore next -- both CAS outcomes are asserted; V8 reports a synthetic implicit branch */
-                if (rows.length > 0) return transitioned
-                const current = yield* selectRun(sql, runId)
-                const row = current[0]
-                if (row === undefined) return notFound
-                const ownsRow = row.status === "running" &&
-                  row.ownerHostId === owner.hostId &&
-                  row.ownerPid === owner.pid &&
-                  row.ownerNonce === owner.nonce
-                return ownsRow ? guardFailed : fenceLost
-              })
-            )
-          )
-        )
-      })),
-      observeOutcome((outcome) => Metric.withAttributes(RunStoreMetrics.transition[outcome._tag], { to: toStatus }))
+          /* v8 ignore next -- both CAS outcomes are asserted; V8 reports a synthetic implicit branch */
+          if (rows.length > 0) return transitioned
+          const current = yield* selectRun(sql, runId)
+          const row = current[0]
+          if (row === undefined) return notFound
+          const ownsRow = row.status === "running" &&
+            row.ownerHostId === owner.hostId &&
+            row.ownerPid === owner.pid &&
+            row.ownerNonce === owner.nonce
+          return ownsRow ? guardFailed : fenceLost
+        })
+      )
+    }).pipe(
+      observeOutcome((outcome) =>
+        Metric.withAttributes(RunStoreMetrics.transition[outcome._tag], {
+          to: Schema.is(RunStatus)(toStatusInput) ? toStatusInput : "invalid"
+        })
+      )
     )
   )
 
   const steal = Effect.fn("RunStore.steal")((
-    runId: string,
-    expected: RunSnapshot,
-    claimant: OwnerId,
-    nowMs: number,
-    evidence: LivenessEvidence
+    runIdInput: string,
+    expectedInput: RunSnapshot,
+    claimantInput: OwnerId,
+    nowMsInput: number,
+    evidenceInput: LivenessEvidence
   ): Effect.Effect<ClaimOutcome, RunStoreError> =>
-    Effect.annotateCurrentSpan({ runId, claimantHostId: claimant.hostId }).pipe(
-      Effect.andThen(Effect.suspend(() => {
-        if (!evidenceMatches(expected, claimant, nowMs, evidence)) {
+    Effect.gen(function*() {
+      const runId = yield* snapshotRunId("steal", runIdInput)
+      const expected = yield* snapshotExpected("steal", expectedInput)
+      const claimant = yield* snapshotOwner("steal", "claimant", claimantInput)
+      const checkedAtMs = yield* snapshotTimestamp(
+        "steal",
+        "nowMs",
+        nowMsInput,
+        { runId, nowMs: nowMsInput }
+      )
+      const evidence = yield* snapshotEvidence("steal", evidenceInput)
+      yield* Effect.annotateCurrentSpan({ runId, claimantHostId: claimant.hostId })
+      const observedAtMs = yield* Clock.currentTimeMillis
+      return yield* Effect.suspend(() => {
+        if (!evidenceMatches(expected, claimant, checkedAtMs, evidence)) {
           return Effect.succeed(snapshotChanged)
         }
         const expectedOwner = expected.owner!
@@ -1258,28 +1620,27 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
             claim_host_id = ${claimant.hostId},
             claim_pid = ${claimant.pid},
             claim_nonce = ${claimant.nonce},
-            claimed_at_ms = ${nowMs}
+            claimed_at_ms = ${observedAtMs}
           WHERE run_id = ${runId}
             AND status = ${expected.status}
             AND owner_host_id IS ${expectedOwner.hostId}
             AND owner_pid IS ${expectedOwner.pid}
             AND owner_nonce IS ${expectedOwner.nonce}
             AND heartbeat_at_ms IS ${expected.heartbeatAtMs}
-            AND heartbeat_at_ms < ${nowMs - heartbeatStaleAfterMs}
+            AND heartbeat_at_ms < ${observedAtMs - heartbeatStaleAfterMs}
             AND claim_host_id IS NULL
             AND claim_pid IS NULL
             AND claim_nonce IS NULL
             AND claimed_at_ms IS NULL
           RETURNING run_id AS "runId"
         `
-            if (rows.length > 0) return claimed(nowMs)
+            if (rows.length > 0) return claimed(observedAtMs)
             const current = yield* selectRun(sql, runId)
-            return classifyClaimLoss(current[0], nowMs)
+            return classifyClaimLoss(current[0], observedAtMs)
           })
         )
-      })),
-      observeOutcome((outcome) => RunStoreMetrics.steal[outcome._tag])
-    )
+      })
+    }).pipe(observeOutcome((outcome) => RunStoreMetrics.steal[outcome._tag]))
   )
 
   return RunStore.of({

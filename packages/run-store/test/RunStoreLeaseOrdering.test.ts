@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import type { DurableWriter } from "@smthrs/database"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import { Effect, Exit } from "effect"
+import { TestClock } from "effect/testing"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as Migrations from "../src/Migrations.ts"
 import type { OwnerId } from "../src/Ownership.ts"
@@ -16,7 +17,8 @@ const migrated = <A, E>(
   effect.pipe(
     Effect.provide(RunStoreLive.layer),
     Effect.provide(Migrations.layer),
-    Effect.provide(TestDatabase.layer)
+    Effect.provide(TestDatabase.layer),
+    Effect.provide(TestClock.layer())
   )
 
 const activate = (store: RunStoreLive.Service, runId: string) =>
@@ -43,9 +45,11 @@ describe("RunStore heartbeat timestamp ordering", () => {
         Effect.gen(function*() {
           const store = yield* RunStore
           yield* activate(store, "lease-monotonic")
+          yield* TestClock.adjust("200 millis")
           expect(yield* store.heartbeat("lease-monotonic", owner, 200)).toEqual({ _tag: "Updated" })
           expect(yield* store.heartbeat("lease-monotonic", owner, 150)).toEqual({ _tag: "Updated" })
           const afterLate = yield* store.get("lease-monotonic")
+          yield* TestClock.adjust("50 millis")
           expect(yield* store.heartbeat("lease-monotonic", owner, 250)).toEqual({ _tag: "Updated" })
           return { afterLate, afterNewer: yield* store.get("lease-monotonic") }
         })
@@ -56,7 +60,7 @@ describe("RunStore heartbeat timestamp ordering", () => {
       expect(rows.afterNewer.heartbeatAtMs).toBe(250)
     }))
 
-  it.effect("accepts a safe-integer timestamp arbitrarily far in the future", () =>
+  it.effect("validates but never trusts a caller timestamp arbitrarily far in the future", () =>
     Effect.gen(function*() {
       const future = 8_000_000_000_000
       const result = yield* migrated(
@@ -68,9 +72,10 @@ describe("RunStore heartbeat timestamp ordering", () => {
         })
       )
 
-      // CONTRACT: RunStore applies no wall-clock plausibility window.
+      // The value remains an evidence nonce for API compatibility. It cannot
+      // pin the durable lease beyond the host-owned Effect clock.
       expect(result.outcome).toEqual({ _tag: "Updated" })
-      expect(result.row.heartbeatAtMs).toBe(future)
+      expect(result.row.heartbeatAtMs).toBe(0)
     }))
 
   it.effect("rejects negative, fractional, and NaN heartbeat timestamps before persistence", () =>
@@ -79,6 +84,8 @@ describe("RunStore heartbeat timestamp ordering", () => {
         Effect.gen(function*() {
           const store = yield* RunStore
           yield* activate(store, "lease-invalid")
+          yield* TestClock.adjust("100 millis")
+          expect(yield* store.heartbeat("lease-invalid", owner, 100)).toEqual({ _tag: "Updated" })
           const exits = yield* Effect.forEach(
             [-1, 1.5, Number.NaN],
             (timestamp) => Effect.exit(store.heartbeat("lease-invalid", owner, timestamp))

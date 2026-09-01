@@ -54,8 +54,9 @@ describe("durable run state redaction", () => {
         const sql = yield* Effect.service(SqlClient.SqlClient)
         yield* sql`
         INSERT INTO flows_runs (
-          run_id, status, created_at_ms, owner_host_id, owner_pid, owner_nonce, heartbeat_at_ms, state_json
-        ) VALUES ('run-transition', 'running', 1, 'host-a', 42, 'nonce-a', 1, '{}')
+          run_id, status, created_at_ms, started_at_ms,
+          owner_host_id, owner_pid, owner_nonce, heartbeat_at_ms, state_json
+        ) VALUES ('run-transition', 'running', 1, 1, 'host-a', 42, 'nonce-a', 1, '{}')
       `
         const store = yield* RunStore.RunStore
         const owner = { hostId: "host-a", pid: 42, nonce: "nonce-a" }

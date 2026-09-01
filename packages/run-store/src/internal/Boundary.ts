@@ -2,12 +2,23 @@
  * Inert text and JSON admission for values crossing run-store boundaries.
  *
  * @since 1.0.0-rc.0
+ * @private
  */
 
-/** Maximum UTF-16 length of one durable identifier. */
+/**
+ * Maximum UTF-16 length of one durable identifier.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
 export const maximumIdentifierLength = 1_024
 
-/** Resource limits for one admitted JSON tree. */
+/**
+ * Resource limits for one admitted JSON tree.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
 export interface JsonLimits {
   readonly maxBytes: number
   readonly maxDepth: number
@@ -17,15 +28,30 @@ export interface JsonLimits {
   readonly maxKeyBytes: number
 }
 
-/** Detached JSON value accepted by the persistence boundary. */
+/**
+ * Detached JSON value accepted by the persistence boundary.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
 export type Json = null | boolean | number | string | ReadonlyArray<Json> | { readonly [key: string]: Json }
 
-/** Result of admitting or refusing an unknown JSON candidate. */
+/**
+ * Result of admitting or refusing an unknown JSON candidate.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
 export type JsonResult =
   | { readonly ok: true; readonly value: Json; readonly bytes: number }
   | { readonly ok: false; readonly complaint: string }
 
-/** Whether text has a complete UTF-16 encoding and contains no NUL. */
+/**
+ * Whether text has a complete UTF-16 encoding and contains no NUL.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
 export const isDurableText = (value: unknown, maximum = maximumIdentifierLength): value is string => {
   if (typeof value !== "string" || value.length === 0 || value.length > maximum || value.includes("\0")) return false
   for (let index = 0; index < value.length; index++) {
@@ -61,6 +87,9 @@ const stringBytes = (value: string, maximum: number): number | undefined => {
 /**
  * Copies a JSON tree without invoking getters or `toJSON`, under explicit
  * byte, depth, node, and member limits.
+ *
+ * @since 1.0.0-rc.0
+ * @private
  */
 export const admitJson = (input: unknown, limits: JsonLimits): JsonResult => {
   let bytes = 0
@@ -167,13 +196,19 @@ export const admitJson = (input: unknown, limits: JsonLimits): JsonResult => {
   return visit(input, 0)
 }
 
-/** Parses and bounds JSON text while preserving the caller's original bytes. */
+/**
+ * Parses and bounds JSON text while preserving the caller's original bytes.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
 export const admitJsonText = (
   input: unknown,
   limits: JsonLimits
 ):
   | { readonly ok: true; readonly value: string; readonly json: Json }
-  | { readonly ok: false; readonly complaint: string } => {
+  | { readonly ok: false; readonly complaint: string } =>
+{
   if (typeof input !== "string" || input.length === 0) return { ok: false, complaint: "must be non-empty JSON text" }
   let parsed: unknown
   try {

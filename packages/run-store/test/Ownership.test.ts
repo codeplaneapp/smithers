@@ -17,6 +17,7 @@ import { TestClock } from "effect/testing"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import { spawn } from "node:child_process"
 import { once } from "node:events"
+import { vi } from "vitest"
 import * as Migrations from "../src/Migrations.ts"
 import {
   heartbeatStaleAfter,
@@ -173,6 +174,47 @@ describe("sameHostPidProbe", () => {
   /** This test process's own identity, which is the one live pid a case can count on. */
   const self: OwnerId = { hostId: "probe-host", pid: process.pid, nonce: "self" }
   const claimant: OwnerId = { hostId: "probe-host", pid: process.pid, nonce: "claimant" }
+
+  it.effect("treats ESRCH as the sole proof that a same-host process is gone", () =>
+    Effect.gen(function*() {
+      const cases = [
+        { name: "normal return", thrown: undefined, alive: true },
+        { name: "ESRCH", thrown: { code: "ESRCH" }, alive: false },
+        { name: "EPERM", thrown: { code: "EPERM" }, alive: true },
+        { name: "EACCES", thrown: { code: "EACCES" }, alive: true },
+        { name: "unrecognized throw", thrown: "boom", alive: true }
+      ] as const
+
+      for (const probeCase of cases) {
+        const kill = vi.spyOn(process, "kill").mockImplementation(
+          (() => {
+            if (probeCase.thrown !== undefined) throw probeCase.thrown
+            return true
+          }) as typeof process.kill
+        )
+        try {
+          expect(
+            yield* sameHostPidProbe(self, { claimant, heartbeatAtMs: 0, nowMs: 1 }),
+            probeCase.name
+          ).toBe(probeCase.alive)
+          expect(kill).toHaveBeenCalledOnce()
+        } finally {
+          kill.mockRestore()
+        }
+      }
+    }))
+
+  it.effect("does not call process.kill for a cross-host owner", () =>
+    Effect.gen(function*() {
+      const kill = vi.spyOn(process, "kill").mockImplementation((() => true) as typeof process.kill)
+      try {
+        const elsewhere: OwnerId = { hostId: "other-host", pid: process.pid, nonce: "remote" }
+        expect(yield* sameHostPidProbe(elsewhere, { claimant, heartbeatAtMs: 0, nowMs: 1 })).toBe(false)
+        expect(kill).not.toHaveBeenCalled()
+      } finally {
+        kill.mockRestore()
+      }
+    }))
 
   it.effect("reports a live pid on the claimant's own host as alive", () =>
     Effect.gen(function*() {

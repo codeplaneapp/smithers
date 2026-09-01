@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { DurableWriter } from "@smthrs/database/DurableWriter"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Effect, Layer } from "effect"
+import { Effect, Exit, Layer } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as Statement from "effect/unstable/sql/Statement"
 import * as Migrations from "../src/Migrations.ts"
@@ -22,6 +22,42 @@ const effect = <E>(
 
 const own = (store: RunStore.Service, runId: string) =>
   store.claimAndOwn(runId, { status: "pending", owner: null, heartbeatAtMs: null }, owner, 1_000)
+
+/** Runs `interfere` immediately before the `nth` statement matching `match`. */
+const interleaving = (
+  match: string,
+  nth: number,
+  interfere: (base: SqlClient.SqlClient) => Effect.Effect<unknown, unknown>
+) =>
+  Layer.effect(
+    SqlClient.SqlClient,
+    Effect.gen(function*() {
+      const base = yield* Effect.service(SqlClient.SqlClient)
+      let seen = 0
+      return new Proxy(base, {
+        apply(target, thisArgument, argumentsList) {
+          const statement = Reflect.apply(target, thisArgument, argumentsList) as Statement.Statement<unknown>
+          if (typeof statement.compile !== "function" || !statement.compile()[0].includes(match)) {
+            return statement
+          }
+          seen += 1
+          return seen === nth ? Effect.andThen(interfere(base), statement) : statement
+        }
+      }) as SqlClient.SqlClient
+    })
+  )
+
+const expectRunStoreFailure = <A>(
+  exit: Exit.Exit<A, RunStore.RunStoreError>,
+  method: string,
+  code = "invalid_run"
+): void => {
+  expect(Exit.isFailure(exit)).toBe(true)
+  const failure = Exit.isFailure(exit)
+    ? exit.cause.reasons.find((reason) => reason._tag === "Fail")
+    : undefined
+  expect(failure?.error).toEqual(expect.objectContaining({ code, method }))
+}
 
 describe("run metadata", () => {
   effect("create records lineage and exposes it on the row", () =>
@@ -151,6 +187,42 @@ describe("run metadata", () => {
       ).toEqual({ _tag: "GuardFailed" })
     }))
 
+  for (
+    const [name, guard] of [
+      ["an unknown cancelRequested value", { cancelRequested: "typo" }],
+      ["a null value", null],
+      ["an excess property", { cancelRequested: "absent", typo: true }]
+    ] as const
+  ) {
+    effect(`transitionOwned rejects ${name} in its guard`, () =>
+      Effect.gen(function*() {
+        const store = yield* RunStore.RunStore
+        const runId = `invalid-guard-${name}`
+        yield* store.create(runId, "{}")
+        yield* own(store, runId)
+        const exit = yield* Effect.exit(
+          store.transitionOwned(runId, owner, "completed", undefined, guard as never)
+        )
+        expectRunStoreFailure(exit, "transitionOwned")
+        expect(yield* store.get(runId)).toMatchObject({ status: "running", owner })
+      }))
+  }
+
+  effect("transitionOwned rejects pending without changing the owned run", () =>
+    Effect.gen(function*() {
+      const store = yield* RunStore.RunStore
+      yield* store.create("run-no-transition-to-pending", "{}")
+      yield* own(store, "run-no-transition-to-pending")
+      const exit = yield* Effect.exit(
+        store.transitionOwned("run-no-transition-to-pending", owner, "pending")
+      )
+      expectRunStoreFailure(exit, "transitionOwned")
+      expect(yield* store.get("run-no-transition-to-pending")).toMatchObject({
+        status: "running",
+        owner
+      })
+    }))
+
   effect("create rejects an empty parent run id", () =>
     Effect.gen(function*() {
       const store = yield* RunStore.RunStore
@@ -204,30 +276,6 @@ describe("run metadata", () => {
  * inside the client, at the exact point a second connection would have.
  */
 describe("requestCancel distinguishes an absent row from a cleared column (B10)", () => {
-  /** Runs `interfere` immediately before the `nth` statement matching `match`. */
-  const interleaving = (
-    match: string,
-    nth: number,
-    interfere: (base: SqlClient.SqlClient) => Effect.Effect<unknown, unknown>
-  ) =>
-    Layer.effect(
-      SqlClient.SqlClient,
-      Effect.gen(function*() {
-        const base = yield* Effect.service(SqlClient.SqlClient)
-        let seen = 0
-        return new Proxy(base, {
-          apply(target, thisArgument, argumentsList) {
-            const statement = Reflect.apply(target, thisArgument, argumentsList) as Statement.Statement<unknown>
-            if (typeof statement.compile !== "function" || !statement.compile()[0].includes(match)) {
-              return statement
-            }
-            seen += 1
-            return seen === nth ? Effect.andThen(interfere(base), statement) : statement
-          }
-        }) as SqlClient.SqlClient
-      })
-    )
-
   const withInterleaving = (
     match: string,
     nth: number,
@@ -304,6 +352,98 @@ describe("requestCancel distinguishes an absent row from a cleared column (B10)"
               })
             ),
             Layer.provideMerge(Migrations.layer, TestDatabase.layer)
+          )
+        )
+      ),
+      Effect.scoped
+    ))
+
+  it.effect("reports the cancellation another writer recorded before the retry", () =>
+    Effect.gen(function*() {
+      const store = yield* RunStore.RunStore
+      yield* store.create("run", "{}")
+      expect(yield* store.requestCancel("run", 500)).toEqual({ _tag: "CancelRequested", requestedAtMs: 500 })
+      expect(yield* store.requestCancel("run", 900)).toEqual({ _tag: "AlreadyRequested", requestedAtMs: 777 })
+      expect(yield* store.get("run")).toMatchObject({
+        status: "pending",
+        cancelRequestedAtMs: 777
+      })
+    }).pipe(
+      Effect.provide(
+        Layer.provideMerge(
+          RunStore.layer,
+          Layer.provideMerge(
+            interleaving(
+              "SET cancel_requested_at_ms",
+              3,
+              (base) => base`UPDATE flows_runs SET cancel_requested_at_ms = 777 WHERE run_id = 'run'`
+            ),
+            Layer.provideMerge(
+              interleaving(
+                "SELECT cancel_requested_at_ms",
+                1,
+                (base) => base`UPDATE flows_runs SET cancel_requested_at_ms = NULL WHERE run_id = 'run'`
+              ),
+              Layer.provideMerge(Migrations.layer, TestDatabase.layer)
+            )
+          )
+        )
+      ),
+      Effect.scoped
+    ))
+})
+
+describe("requestCancel status decode failures", () => {
+  effect("fails decode_failed at the fallback status read", () =>
+    Effect.gen(function*() {
+      const store = yield* RunStore.RunStore
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      yield* store.create("bad-fallback-status", "{}")
+      yield* sql`PRAGMA ignore_check_constraints = ON`
+      yield* sql`
+        UPDATE flows_runs
+        SET status = 'not-a-status', cancel_requested_at_ms = 1
+        WHERE run_id = 'bad-fallback-status'
+      `
+      yield* sql`PRAGMA ignore_check_constraints = OFF`
+      const exit = yield* Effect.exit(store.requestCancel("bad-fallback-status", 2))
+      expectRunStoreFailure(exit, "requestCancel", "decode_failed")
+    }))
+
+  it.effect("fails decode_failed at the closing status read", () =>
+    Effect.gen(function*() {
+      const store = yield* RunStore.RunStore
+      yield* store.create("run", "{}")
+      expect(yield* store.requestCancel("run", 500)).toEqual({ _tag: "CancelRequested", requestedAtMs: 500 })
+      const exit = yield* Effect.exit(store.requestCancel("run", 900))
+      expectRunStoreFailure(exit, "requestCancel", "decode_failed")
+    }).pipe(
+      Effect.provide(
+        Layer.provideMerge(
+          RunStore.layer,
+          Layer.provideMerge(
+            interleaving(
+              "SET cancel_requested_at_ms",
+              3,
+              (base) =>
+                Effect.gen(function*() {
+                  yield* base`PRAGMA ignore_check_constraints = ON`
+                  yield* base`
+                    UPDATE flows_runs
+                    SET status = 'not-a-status', cancel_requested_at_ms = 777
+                    WHERE run_id = 'run'
+                  `
+                  yield* base`PRAGMA ignore_check_constraints = OFF`
+                })
+            ),
+            Layer.provideMerge(
+              interleaving(
+                "SELECT cancel_requested_at_ms",
+                1,
+                (base) => base`UPDATE flows_runs SET cancel_requested_at_ms = NULL WHERE run_id = 'run'`
+              ),
+              Layer.provideMerge(Migrations.layer, TestDatabase.layer)
+            )
           )
         )
       ),
@@ -410,7 +550,22 @@ describe("requestCancel refuses a run that already settled (B-02)", () => {
                       // The third UPDATE is the re-record after the SELECT.
                       if (updates === 3) {
                         return Effect.andThen(
-                          base`UPDATE flows_runs SET status = 'completed' WHERE run_id = 'run'`,
+                          base`
+                            UPDATE flows_runs
+                            SET
+                              status = 'completed',
+                              started_at_ms = COALESCE(started_at_ms, created_at_ms),
+                              finished_at_ms = COALESCE(started_at_ms, created_at_ms),
+                              owner_host_id = NULL,
+                              owner_pid = NULL,
+                              owner_nonce = NULL,
+                              heartbeat_at_ms = NULL,
+                              claim_host_id = NULL,
+                              claim_pid = NULL,
+                              claim_nonce = NULL,
+                              claimed_at_ms = NULL
+                            WHERE run_id = 'run'
+                          `,
                           statement
                         )
                       }

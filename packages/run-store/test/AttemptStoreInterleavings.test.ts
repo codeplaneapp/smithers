@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import { Effect, Layer, Option } from "effect"
+import { TestClock } from "effect/testing"
 import * as AttemptStore from "../src/AttemptStore.ts"
 import * as Migrations from "../src/Migrations.ts"
 import type { OwnerId } from "../src/Ownership.ts"
@@ -16,7 +17,7 @@ const layer = Layer.mergeAll(RunStore.layer, AttemptStore.layer).pipe(
 
 const migrated = <A, E>(
   effect: Effect.Effect<A, E, RunStore.RunStore | AttemptStore.AttemptStore>
-) => effect.pipe(Effect.provide(layer), Effect.scoped)
+) => effect.pipe(Effect.provide(layer), Effect.provide(TestClock.layer()), Effect.scoped)
 
 const arrange = Effect.gen(function*() {
   const runs = yield* RunStore.RunStore
@@ -40,6 +41,7 @@ const arrange = Effect.gen(function*() {
     }, ownerA)
   ).toEqual({ _tag: "Inserted" })
   const stale = yield* runs.get(id.runId)
+  yield* TestClock.adjust("30001 millis")
   expect(
     yield* runs.claimAndOwn(
       id.runId,
