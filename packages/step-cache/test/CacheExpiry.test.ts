@@ -18,6 +18,7 @@ import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { CacheStore } from "../src/CacheStore.ts"
 import * as CacheStoreLive from "../src/CacheStore.ts"
+import * as CombinedCacheStore from "../src/CombinedCacheStore.ts"
 import * as Migrations from "../src/Migrations.ts"
 
 const layers = Layer.mergeAll(
@@ -129,6 +130,49 @@ describe("expiry sweeps", () => {
       expect(rows.length).toBe(1)
       const recorded = yield* cache.get("ledger", { recordedBy: { runId: "run-1", eventSeq: 3 } })
       expect(Option.isSome(recorded)).toBe(true)
+    })))
+
+  it.effect("keeps a head row recorded exactly at the floor", () =>
+    withStore(Effect.gen(function*() {
+      // The sweep deletes strictly below the floor, mirroring the at-bound
+      // serve on the read side: one row is expired for a reader exactly when
+      // the sweep would remove it, never a millisecond earlier.
+      const cache = yield* CacheStore
+      yield* cache.put(entry("at-floor", 1000))
+      yield* cache.put(entry("below-floor", 999))
+      yield* TestClock.adjust("3 seconds")
+      expect(yield* cache.sweepExpired(2000)).toBe(1)
+      expect(Option.isSome(yield* cache.get("at-floor"))).toBe(true)
+      expect(Option.isNone(yield* cache.get("below-floor"))).toBe(true)
+    })))
+
+  it.effect("never reclaims a write-back ledger row recorded by a foreign run", () =>
+    withStore(Effect.gen(function*() {
+      // The documented growth: a shared-tier write-back lands a ledger row
+      // under the recording machine's run id. No verb here removes it, and
+      // engine-store's run-scoped retention has no local run to match it to,
+      // so this is the price of composing a shared tier.
+      const cache = yield* CacheStore
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      const foreign = { ...entry("write-back", 0), recordedRunId: "run-on-another-host" }
+      const combined = CombinedCacheStore.make({
+        local: cache,
+        remote: {
+          get: () => Effect.succeed(Option.some(foreign)),
+          put: () => Effect.succeed({ _tag: "ExistingSame" }),
+          evict: () => Effect.succeed(false),
+          sweepExpired: () => Effect.succeed(0)
+        }
+      })
+      expect(Option.isSome(yield* combined.get("write-back"))).toBe(true)
+
+      yield* TestClock.adjust("10 seconds")
+      expect(yield* cache.evict("write-back")).toBe(true)
+      expect(yield* cache.sweepExpired(0)).toBe(0)
+      const ledger = yield* sql<{ readonly recorded_run_id: string }>`
+        SELECT recorded_run_id FROM flows_step_cache_recorded WHERE key_digest = 'write-back'
+      `.pipe(Effect.orDie)
+      expect(ledger.map((row) => row.recorded_run_id)).toEqual(["run-on-another-host"])
     })))
 
   it.effect("refuses a negative sweep bound", () =>

@@ -7,10 +7,12 @@ import type { DurableWriter } from "@smthrs/database"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import * as Effect from "effect/Effect"
 import * as Metric from "effect/Metric"
+import * as Option from "effect/Option"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import { CacheStore } from "../src/CacheStore.ts"
 import * as CacheStoreLive from "../src/CacheStore.ts"
 import * as CacheStoreMetrics from "../src/CacheStoreMetrics.ts"
+import * as CombinedCacheStore from "../src/CombinedCacheStore.ts"
 import * as Migrations from "../src/Migrations.ts"
 
 const migrated = <A, E>(
@@ -56,6 +58,33 @@ describe("CacheStoreMetrics", () => {
         // carried an outcome attribute.
         expect(yield* count(CacheStoreMetrics.lookups)).toBe(0)
         expect(yield* count(CacheStoreMetrics.puts)).toBe(0)
+      }))
+    }))
+
+  it.effect("registers a remote-served lookup as a local miss plus its write-back", () =>
+    Effect.gen(function*() {
+      yield* migrated(Effect.gen(function*() {
+        const local = yield* CacheStore
+        // The shared tier holds the entry and updates no counters of its own,
+        // which is what makes a two-tier hit rate read low: the numbers below
+        // are the contract an operator's dashboard is built on.
+        const remote: CacheStoreLive.Service = {
+          get: () => Effect.succeed(Option.some(entry)),
+          put: () => Effect.succeed({ _tag: "ExistingSame" }),
+          evict: () => Effect.succeed(false),
+          sweepExpired: () => Effect.succeed(0)
+        }
+        const combined = CombinedCacheStore.make({ local, remote })
+
+        expect(Option.isSome(yield* combined.get(entry.keyDigest))).toBe(true)
+
+        expect(yield* count(CacheStoreMetrics.miss)).toBe(1)
+        expect(yield* count(CacheStoreMetrics.hit)).toBe(0)
+        expect(yield* count(CacheStoreMetrics.put.Inserted)).toBe(1)
+        // The write-back made it local, so the next lookup is the hit the
+        // first one was not.
+        expect(Option.isSome(yield* combined.get(entry.keyDigest))).toBe(true)
+        expect(yield* count(CacheStoreMetrics.hit)).toBe(1)
       }))
     }))
 })

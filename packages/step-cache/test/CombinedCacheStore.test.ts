@@ -7,9 +7,14 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as Metric from "effect/Metric"
 import * as Option from "effect/Option"
 import * as CacheStore from "../src/CacheStore.ts"
+import * as CacheStoreMetrics from "../src/CacheStoreMetrics.ts"
 import * as CombinedCacheStore from "../src/CombinedCacheStore.ts"
+
+const count = (metric: Metric.Metric<number, Metric.CounterState<number>>) =>
+  Effect.map(Metric.value(metric), (state) => state.count)
 
 const entry: CacheStore.CacheEntry = {
   keyDigest: "key-digest",
@@ -184,6 +189,31 @@ describe("publications", () => {
       expect(local.rows.get(entry.keyDigest)).toEqual(entry)
       expect(remote.calls).toEqual([])
     }))
+
+  it.effect("counts a shared-tier Conflict without changing the caller's outcome", () =>
+    Effect.gen(function*() {
+      // A remote `Conflict` means another machine recorded a different result
+      // under this key: cross-host divergence, and the only place it is
+      // observable. The caller's answer stays the local outcome, so the
+      // divergence has to reach an operator as a metric or not at all.
+      const local = tier()
+      const remote = tier({ putOutcome: { _tag: "Conflict" } })
+      const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
+      expect(yield* combined.put(entry)).toEqual({ _tag: "Inserted" })
+      expect(yield* count(CacheStoreMetrics.put.Conflict)).toBe(1)
+      expect(yield* count(CacheStoreMetrics.put.Inserted)).toBe(0)
+    }).pipe(Effect.provideService(Metric.MetricRegistry, new Map())))
+
+  it.effect("counts nothing extra when the shared tier accepts the entry", () =>
+    Effect.gen(function*() {
+      const local = tier()
+      const remote = tier()
+      const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
+      expect(yield* combined.put(entry)).toEqual({ _tag: "Inserted" })
+      // The stub tiers update no counters, so a zero here is the composition
+      // adding none of its own: only a shared `Conflict` is worth a count.
+      expect(yield* count(CacheStoreMetrics.put.Conflict)).toBe(0)
+    }).pipe(Effect.provideService(Metric.MetricRegistry, new Map())))
 
   it.effect("does not publish a result the local tier says conflicts", () =>
     Effect.gen(function*() {

@@ -23,8 +23,10 @@
  */
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Metric from "effect/Metric"
 import * as Option from "effect/Option"
 import * as CacheStore from "./CacheStore.ts"
+import * as CacheStoreMetrics from "./CacheStoreMetrics.ts"
 
 /**
  * The two tiers to compose.
@@ -106,7 +108,20 @@ export const make = (options: Options): CacheStore.Service => {
       if (outcome._tag === "Conflict") return outcome
       // In `"deferred"` mode the shared write is the caller's, precisely so it
       // can happen outside whatever transaction this `put` runs in.
-      if (!deferred) yield* remote.put(entry)
+      if (!deferred) {
+        const published = yield* remote.put(entry)
+        // The shared outcome is deliberately not the caller's answer: this
+        // machine replays from its own row, and `@smthrs/engine-store`'s
+        // `CacheSync` makes the same call for the deferred path. But a shared
+        // `Conflict` is not the harmless "another machine got there first"
+        // that an `ExistingSame` is: by `RemoteCacheStore`'s status mapping it
+        // means the shared tier holds a *different* result under this digest,
+        // which is cross-host determinism divergence and the very thing
+        // `CacheStoreMetrics.put.Conflict` exists to surface. Counting it is
+        // the only way an operator ever sees it, because nothing else on this
+        // path returns, fails, or records it.
+        if (published._tag === "Conflict") yield* Metric.update(CacheStoreMetrics.put.Conflict, 1)
+      }
       return outcome
     })
   )

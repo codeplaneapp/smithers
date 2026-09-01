@@ -312,6 +312,45 @@ describe("lookups", () => {
     })
   })
 
+  it.effect("spends one deadline across the request and the response body", () =>
+    Effect.gen(function*() {
+      // Headers arrive after six tenths of the budget and the body never
+      // completes. The deadline is the operation's, so the caller is refused at
+      // the value it configured rather than at nearly twice it.
+      const client = HttpClient.make((request) =>
+        Effect.as(
+          Effect.sleep("6 millis"),
+          HttpClientResponse.fromWeb(
+            request,
+            new Response(new ReadableStream({ start: () => undefined }), { status: 200 })
+          )
+        )
+      )
+      const store = yield* RemoteCacheStore.make({
+        endpoint: "https://cache.example.com",
+        requestTimeout: "10 millis"
+      }).pipe(Effect.provide(Layer.succeed(HttpClient.HttpClient)(client)))
+      const fiber = yield* store.get(entry.keyDigest).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Effect.yieldNow
+      yield* TestClock.adjust("10 millis")
+      const exit = fiber.pollUnsafe()
+      expect(exit === undefined ? "still running" : errorOf(exit).code).toBe("persistence_failed")
+    }).pipe(Effect.provide(TestClock.layer())))
+
+  it.effect("accepts an entry recorded under different provenance as the tier's head", () =>
+    Effect.gen(function*() {
+      // A conforming tier answers a fenced lookup with its head when it holds
+      // no row for that provenance, exactly as the SQL tier does, and nothing
+      // on the wire separates that from a tier that ignored the parameters.
+      const head = { ...entry, recordedRunId: "run-9", recordedEventSeq: 41 }
+      const tier = tierOf(() => new Response(JSON.stringify(head), { status: 200 }))
+      const found = yield* Effect.flatMap(
+        tier.store,
+        (store) => store.get(entry.keyDigest, { recordedBy: { runId: "run-1", eventSeq: 3 } })
+      )
+      expect(Option.getOrThrow(found)).toEqual(head)
+    }))
+
   it.effect("refuses an entry recorded under a different key", () =>
     Effect.gen(function*() {
       // A tier that answers a lookup with someone else's entry would hand the

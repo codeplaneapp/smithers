@@ -13,6 +13,17 @@ import * as Metric from "effect/Metric"
 /**
  * Counter over cache lookups, dimensioned by `outcome` (`hit` or `miss`).
  *
+ * Read the attributed views, {@link hit} and {@link miss}: every update
+ * carries an `outcome` attribute, so this bare handle aggregates nothing and
+ * always reads zero.
+ *
+ * These are one host's durable-tier counts. `RemoteCacheStore` updates no
+ * counters, so a lookup that `CombinedCacheStore` serves from the shared tier
+ * registers one `miss` for the local tier that did not hold it, plus the
+ * write-back's {@link put} outcome. A two-tier deployment's hit rate is
+ * therefore the rate at which this machine already held the entry, not the
+ * rate at which a result was reused.
+ *
  * @category metrics
  * @since 0.1.0
  */
@@ -45,6 +56,14 @@ export const miss: Metric.Metric<number, Metric.CounterState<number>> = Metric.w
  * `existing_same`, or `conflict`). A `conflict` is the signal
  * `Inconsistency` receivers act on: the same key digest recorded a different
  * result.
+ *
+ * Read the attributed views on {@link put}: every update carries an `outcome`
+ * attribute, so this bare handle aggregates nothing and always reads zero.
+ *
+ * One `CombinedCacheStore.put` can register two outcomes. The local tier
+ * records its own, and a shared tier answering `Conflict` adds a `conflict`,
+ * because a differing result under one digest on another machine is
+ * cross-host divergence that reaches an operator nowhere else.
  *
  * @category metrics
  * @since 0.1.0

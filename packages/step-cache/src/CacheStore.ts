@@ -308,9 +308,18 @@ export interface Service {
    *
    * The sweep is the collection half of {@link GetOptions.maxAgeMs}: the
    * bound decides what a read serves, this decides what the database keeps.
-   * The append-only `flows_step_cache_recorded` ledger is never swept — an
-   * old frame's projection is a function of what that event recorded, and
+   * The append-only `flows_step_cache_recorded` ledger is never swept: an old
+   * frame's projection is a function of what that event recorded, and
    * deleting the evidence would change a replayed answer.
+   *
+   * No verb in this package reclaims a ledger row. Whole-run reclamation is
+   * `@smthrs/engine-store`'s Retention, which deletes ledger rows by
+   * `recorded_run_id` when it erases that run's journal, so the evidence and
+   * the frames that would read it go together. Rows whose `recorded_run_id`
+   * names no run on this host, which is every row
+   * `CombinedCacheStore`'s write-back lands from a shared tier, match no
+   * run-scoped delete and are never reclaimed: a host composing a shared tier
+   * accepts ledger growth proportional to the remote entries it has read.
    */
   readonly sweepExpired: (olderThanMs: number) => Effect.Effect<number, CacheStoreError>
 }
@@ -698,8 +707,10 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       const floorMs = (yield* Clock.currentTimeMillis) - olderThanMs
       yield* Effect.annotateCurrentSpan({ floorMs })
       // Only the head table is swept. The recorded ledger is the durable
-      // evidence a replay of an old frame reads, so it is append-only by
-      // contract and no retention policy may touch it.
+      // evidence a replay of an old frame reads, so no verb in this package
+      // deletes from it; the one policy that does is `@smthrs/engine-store`'s
+      // Retention, erasing a terminal run's ledger rows together with the
+      // journal that could have replayed them.
       const deleted = yield* writer.write(
         sql`DELETE FROM flows_step_cache WHERE created_at_ms < ${floorMs}`.raw
       ).pipe(
@@ -714,7 +725,10 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
 })
 
 /**
- * Creates a cache store from an implementation.
+ * Creates a cache store whose every operation fails as unavailable, with
+ * optional per-method overrides. This is the test and {@link layerNoop} seam:
+ * a caller that reaches an operation the test did not supply is told which one
+ * it was, instead of reading a silent miss.
  *
  * @category constructors
  * @since 0.1.0

@@ -22,6 +22,35 @@
  * never journaled; see the
  * {@link https://smithers.sh/concepts/step-keys | step-key contract}.
  *
+ * ## Server contract
+ *
+ * A conforming tier owes three answers under `/ac/{keyDigest}`, and this
+ * client speaks two extensions plain Bazel HTTP does not define:
+ *
+ * - `GET` answers `200` with the {@link CacheStore.CacheEntry} JSON or `404`
+ *   for a miss. When the request carries `recordedRunId` and
+ *   `recordedEventSeq`, the tier answers the entry that provenance recorded if
+ *   it still holds it, and its head otherwise, which is exactly the SQL tier's
+ *   ledger-then-head rule.
+ * - `PUT` answers `201` for a first write, any other 2xx for an entry
+ *   identical to the one already held, and `409` for a different one. That is
+ *   what makes first-writer-wins decidable over dumb HTTP.
+ * - `DELETE` answers 2xx when it removed the entry and `404` when it did not.
+ *   With `recordedRunId` and `recordedEventSeq` the delete is a
+ *   compare-and-swap: remove the entry only while it still carries that
+ *   provenance, and answer `404` on a mismatch.
+ *
+ * **Against a tier that ignores query parameters both extensions degrade
+ * silently.** A fenced eviction becomes an unconditional `DELETE`, which is
+ * the poison-drop the fence exists to prevent (issue #119), and a fenced
+ * lookup becomes a head read. The client cannot tell the two apart, because a
+ * conforming tier answers a fenced lookup with its head whenever it holds no
+ * row for that provenance: a returned entry recorded under different
+ * provenance is therefore accepted as that documented fallback, the same value
+ * the SQL tier serves. Provenance-fenced reads and evictions need a conforming
+ * server; against any other tier, compose this store for its head semantics
+ * alone.
+ *
  * @since 0.1.0
  */
 import * as Clock from "effect/Clock"
@@ -53,7 +82,12 @@ export interface Options {
    * deliberately construction-time — see the module doc.
    */
   readonly headers?: Readonly<Record<string, string>> | undefined
-  /** Deadline for one request and its response body. Defaults to 60 seconds. */
+  /**
+   * Deadline for one whole cache operation: its request, its response body,
+   * and the decoding between them, measured from the call. Defaults to 60
+   * seconds. It is one budget rather than one per phase, so a tier that
+   * answers headers promptly and then stalls the body cannot spend it twice.
+   */
   readonly requestTimeout?: Duration.Input | undefined
   /** Largest cache-entry response accepted. Defaults to four MiB. */
   readonly maxResponseBytes?: number | undefined
@@ -239,11 +273,20 @@ export const make = (
       if (!target.pathname.startsWith(acPrefix)) throw new Error("cache-key path escaped its namespace")
       return target.toString()
     }
-    const send = (operation: string, request: HttpClientRequest.HttpClientRequest) =>
-      client.execute(authorize(request)).pipe(
-        Effect.mapError((cause) => transportFailure(operation, cause)),
+    // One budget for the whole operation, not one per phase. `client.execute`
+    // resolves when the response *headers* arrive, so a per-phase deadline let
+    // a tier that answered headers promptly and then stalled the body spend the
+    // configured value twice, and a caller budgeting 60 s waited 120 s.
+    const withDeadline = <A>(
+      effect: Effect.Effect<A, CacheStore.CacheStoreError>
+    ): Effect.Effect<A, CacheStore.CacheStoreError> =>
+      effect.pipe(
         Effect.timeout(requestDeadline),
         Effect.catchTag("TimeoutError", () => Effect.fail(timedOut()))
+      )
+    const send = (operation: string, request: HttpClientRequest.HttpClientRequest) =>
+      client.execute(authorize(request)).pipe(
+        Effect.mapError((cause) => transportFailure(operation, cause))
       )
     const readBounded = (response: HttpClientResponse.HttpClientResponse) =>
       Effect.gen(function*() {
@@ -280,7 +323,7 @@ export const make = (
       })
 
     const get: CacheStore.Service["get"] = Effect.fn("RemoteCacheStore.get")((keyDigest, getOptions) =>
-      Effect.gen(function*() {
+      withDeadline(Effect.gen(function*() {
         yield* Effect.annotateCurrentSpan({ keyDigest })
         yield* CacheStore.validateKey(keyDigest)
         yield* CacheStore.validateRecordedBy(getOptions?.recordedBy)
@@ -299,10 +342,7 @@ export const make = (
         const response = yield* send("a lookup", request)
         if (response.status === 404) return Option.none()
         if (!isOk(response.status)) return yield* Effect.fail(unexpectedStatus("a lookup", response.status))
-        const bytes = yield* readBounded(response).pipe(
-          Effect.timeout(requestDeadline),
-          Effect.catchTag("TimeoutError", () => Effect.fail(timedOut()))
-        )
+        const bytes = yield* readBounded(response)
         const body = yield* Effect.try({
           try: () => JSON.parse(decoder.decode(bytes)) as unknown,
           catch: (cause) => transportFailure("a lookup body", cause)
@@ -326,13 +366,20 @@ export const make = (
             })
           )
         }
+        // A tier answering a fenced lookup with an entry recorded under
+        // different provenance is serving its head, which is what the server
+        // contract asks of a tier holding no row for that provenance and what
+        // the SQL tier does in the same position. It is accepted as that
+        // fallback: nothing on the wire distinguishes it from a tier that
+        // ignored the parameters, which is why the module doc makes a
+        // conforming server a precondition of a fenced read.
         if (floorMs !== undefined && entry.createdAtMs < floorMs) return Option.none()
         return Option.some(entry)
-      })
+      }))
     )
 
     const put: CacheStore.Service["put"] = Effect.fn("RemoteCacheStore.put")((candidate: CacheStore.CacheEntry) =>
-      Effect.gen(function*() {
+      withDeadline(Effect.gen(function*() {
         const entry = yield* CacheStore.snapshotEntry(candidate)
         yield* Effect.annotateCurrentSpan({ keyDigest: entry.keyDigest })
         // The wire bytes are the canonical form itself. Besides refusing
@@ -352,11 +399,11 @@ export const make = (
         if (response.status === 409) return { _tag: "Conflict" } as const
         if (!isOk(response.status)) return yield* Effect.fail(unexpectedStatus("a publication", response.status))
         return response.status === 201 ? { _tag: "Inserted" } as const : { _tag: "ExistingSame" } as const
-      })
+      }))
     )
 
     const evict: CacheStore.Service["evict"] = Effect.fn("RemoteCacheStore.evict")((keyDigest, evictOptions) =>
-      Effect.gen(function*() {
+      withDeadline(Effect.gen(function*() {
         yield* Effect.annotateCurrentSpan({ keyDigest })
         // An empty key would aim the protocol's one destructive verb at the
         // `/ac/` collection root instead of a single entry, so the preflight
@@ -379,7 +426,7 @@ export const make = (
         if (response.status === 404) return false
         if (!isOk(response.status)) return yield* Effect.fail(unexpectedStatus("an eviction", response.status))
         return true
-      })
+      }))
     )
 
     const sweepExpired: CacheStore.Service["sweepExpired"] = Effect.fn("RemoteCacheStore.sweepExpired")(
