@@ -12,10 +12,13 @@ import type { Report } from "./Regression.ts"
 /**
  * Thresholds accepted by a CI score gate.
  *
- * @see docs/specs/Concepts/Scoring.md
+ * `mean` gates the arithmetic mean of every score observation, `min` gates the
+ * lowest one, and `perCase` gates each named case's lowest score. With none of
+ * them set the gate still runs, as `mean(0)`, so a run with no score at all is
+ * undecidable rather than a pass.
+ *
  * @since 0.1.0
  * @category models
- * @slop
  */
 export interface Options {
   readonly mean?: number | undefined
@@ -50,7 +53,7 @@ const samples = (report: Report): ReadonlyArray<ScoreSample> =>
  */
 const environmentFaults = (report: Report): ReadonlyArray<string> => [
   ...report.run.cases.flatMap((result) =>
-    result.error === undefined ? [] : [`case '${result.case}' failed: ${result.error.message}`]
+    result.error === undefined ? [] : [`case '${result.case}' failed: ${result.error.code}: ${result.error.message}`]
   ),
   ...report.missing.map((item) => `missing ${item.side} observation for ${item.case}/${item.scorer}/${item.stepKey}`)
 ]
@@ -75,7 +78,6 @@ const findings = (report: Report): ReadonlyArray<string> => [
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const check = (report: Report, options: Options = {}): Effect.Effect<Verdict, ScoreGateError> =>
   Effect.gen(function*() {
@@ -98,6 +100,5 @@ export const check = (report: Report, options: Options = {}): Effect.Effect<Verd
  *
  * @category grading
  * @since 0.1.0
- * @slop
  */
 export const ciGrade = (verdict: Verdict): { readonly exitCode: 0 | 1 | 5; readonly summary: string } => grade(verdict)

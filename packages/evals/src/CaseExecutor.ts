@@ -1,7 +1,11 @@
 /**
  * Injectable target-flow execution boundary.
  *
- * @see docs/specs/Concepts/Scoring.md
+ * A suite says what to run; this service says how. Keeping it injectable is
+ * what lets the same suite run against a real flow, a scripted host, or nothing
+ * at all, and it is the only place a target's failure is converted into a typed
+ * evaluation failure.
+ *
  * @since 0.1.0
  */
 import type { Flow } from "@smthrs/core"
@@ -14,9 +18,12 @@ import type { Case } from "./Suite.ts"
 /**
  * The result of executing one target-flow case.
  *
+ * `target` is the flow value the case actually executed. A run matches it
+ * against each binding's `appliesTo` by reference identity, so it has to be the
+ * declared flow itself rather than a copy of it.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Execution {
   readonly output: unknown
@@ -30,81 +37,95 @@ export interface Execution {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type CaseInput = Case
+
+/**
+ * The one callback a case executor is.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Run = (suiteCase: CaseInput) => Effect.Effect<Execution, EvalError>
 
 /**
  * Runtime shape for an injectable target-flow executor.
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export interface Service {
-  readonly run: (suiteCase: CaseInput) => Effect.Effect<Execution, EvalError>
-  readonly execute: (suiteCase: CaseInput) => Effect.Effect<Execution, EvalError>
+  readonly run: Run
 }
 
 /**
  * Implementation accepted by {@link make}.
  *
+ * `run` and `execute` name the same callback; the union accepts exactly one of
+ * them, so an object supplying both is a type error instead of a service whose
+ * two halves can disagree.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
-export interface Implementation {
-  readonly run?: ((suiteCase: CaseInput) => Effect.Effect<Execution, EvalError>) | undefined
-  readonly execute?: ((suiteCase: CaseInput) => Effect.Effect<Execution, EvalError>) | undefined
-}
+export type Implementation =
+  | { readonly run: Run; readonly execute?: undefined }
+  | { readonly execute: Run; readonly run?: undefined }
 
 /**
  * Injectable execution boundary for a target flow.
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export class CaseExecutor extends Context.Service<CaseExecutor, Service>()("flows/evals/CaseExecutor") {}
 
 /**
- * Builds an executor; `run` and `execute` are aliases by design.
+ * Builds an executor from a callback, or from an object naming it `run` or
+ * `execute`.
+ *
+ * Throws a `TypeError` when neither is a function. An executor that silently
+ * degraded to {@link makeNoop} turned one wiring mistake into a whole suite of
+ * cases failing with `executor`, which reads as a broken target rather than a
+ * missing one.
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
-export const make = (
-  implementation: Implementation | ((suiteCase: CaseInput) => Effect.Effect<Execution, EvalError>)
-): Service => {
-  const run = typeof implementation === "function" ? implementation : implementation.run ?? implementation.execute
-  if (run === undefined) return makeNoop()
-  return CaseExecutor.of({
-    run,
-    execute: implementation instanceof Function ? implementation : implementation.execute ?? run
-  })
+export const make = (implementation: Implementation | Run): Service => {
+  const run = typeof implementation === "function"
+    ? implementation
+    : typeof implementation.run === "function"
+    ? implementation.run
+    : implementation.execute
+  if (typeof run !== "function") {
+    throw new TypeError("CaseExecutor.make needs a callback, or an object with a `run` or `execute` callback")
+  }
+  return CaseExecutor.of({ run })
 }
-
-const unavailable = (suiteCase: CaseInput): Effect.Effect<Execution, EvalError> =>
-  Effect.fail(new EvalError({ code: "executor", message: `No executor is available for case '${suiteCase.name}'` }))
 
 /**
- * Builds an executor that fails with a typed executor error.
+ * Builds an executor that fails every case with a typed executor error.
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
-export const makeNoop = (overrides: Partial<Service> = {}): Service => {
-  const run = unavailable
-  return CaseExecutor.of({ run, execute: run, ...overrides })
-}
+export const makeNoop = (): Service =>
+  CaseExecutor.of({
+    run: (suiteCase) =>
+      Effect.fail(
+        new EvalError({
+          code: "executor",
+          message: `No executor is available for case '${suiteCase.name}'`,
+          path: `cases['${suiteCase.name}']`
+        })
+      )
+  })
 
 /**
  * Provides the unavailable executor.
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerNoop: Layer.Layer<CaseExecutor> = Layer.succeed(CaseExecutor)(makeNoop())
