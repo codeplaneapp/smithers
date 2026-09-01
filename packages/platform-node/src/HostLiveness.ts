@@ -45,8 +45,11 @@ const signalable = (send: (pid: number, signal: 0) => void, pid: number): boolea
     return true
   } catch (cause) {
     // ESRCH means the process is gone. EPERM means it exists and belongs to
-    // another user, which is still a live owner this host must not rob.
-    return (cause as { readonly code?: string }).code !== "ESRCH"
+    // another user, which is still a live owner this host must not rob. A throw
+    // that is not an object at all carries no code, and reading through it
+    // rather than off it is what stops that crashing the probe: a thrown string
+    // or `null` is an answer nobody gave, which is a live owner.
+    return (cause as { readonly code?: string } | null | undefined)?.code !== "ESRCH"
   }
 }
 
@@ -71,6 +74,25 @@ const signalable = (send: (pid: number, signal: 0) => void, pid: number): boolea
  *
  * A multi-process deployment with a supervisor or a lease system knows better
  * than any pid probe and should answer from that instead.
+ *
+ * **There is a second shipped implementation of this slot, and it disagrees.**
+ * `@smthrs/run-store`'s `Ownership.sameHostPidProbe` fills the same
+ * `LivenessCheck` and answers the OPPOSITE question on two inputs:
+ *
+ * - an owner on a DIFFERENT `hostId`. `sameHostPidProbe` returns `false`, so the
+ *   run is reclaimable; this returns `true`, so a permanently dead foreign
+ *   host's runs are stranded until an operator intervenes.
+ * - a signal error that is neither `ESRCH` nor `EPERM`. `sameHostPidProbe`
+ *   returns `code === "EPERM"`, so that error reads as DEAD; this returns
+ *   `code !== "ESRCH"`, so the same error reads as ALIVE.
+ *
+ * Which answer a deployment gets depends on the entry point it used:
+ * `@smthrs/flows`' `NodeRuntime` defaults to this function, while
+ * `@smthrs/cli`'s `NodeControl` passes `sameHostPidProbe`. This function also
+ * returns a ONE-argument function, which is structurally accepted as an
+ * `Ownership.LivenessCheck` and silently discards the `context` argument the
+ * sibling reads. Reconciling the two is open work, tracked as B-09 in
+ * `docs/pages/release/support-matrix.md`.
  *
  * @category constructors
  * @since 0.1.0

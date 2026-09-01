@@ -343,7 +343,11 @@ describe("atomic helper limits", () => {
             listing: yield* Effect.flip(fs.readDirectory(root))
           }
         }),
-        AtomicFileSystem.layerWith({ limits: { response: 128 } })
+        // Large enough that the REJECTION still fits inside it — a refusal the
+        // helper cannot frame degrades to the fail-closed reason instead of the
+        // typed one — and far smaller than the 64 names either call would
+        // return.
+        AtomicFileSystem.layerWith({ limits: { response: 256 } })
       )
       expect(outcome.listing).toMatchObject({ reason: { _tag: "BadResource" } })
       expect(outcome.glob).toMatchObject({ reason: { _tag: "BadResource" } })
@@ -457,6 +461,7 @@ describe("atomic helper response framing", () => {
     ["a non-object envelope", frame("5")],
     ["an envelope without ok", frame("{}")],
     ["a rejection with a non-string code", frame(`{"ok":false,"code":7}`)],
+    ["a rejection with a non-string syscall", frame(`{"ok":false,"code":"ENOENT","syscall":7}`)],
     ["a rejection with a non-boolean badArgument", frame(`{"ok":false,"badArgument":"yes"}`)],
     ["a rejection with a non-string message", frame(`{"ok":false,"message":{"text":"no"}}`)]
   ]
@@ -980,13 +985,165 @@ describe("atomic special files", () => {
       expect(outcome.gone).toBe(false)
     }), 30_000)
 
-  it.live("reports a glob pattern the helper cannot translate as bad input", () =>
+  /**
+   * The two grammar bounds are refusals rather than silent truncation: a
+   * pattern that expands past them would otherwise match some prefix of what
+   * the caller asked for, which is the worst possible answer for a selector.
+   */
+  it.live("reports a glob pattern past the grammar bounds as bad input", () =>
     Effect.gen(function*() {
       const root = yield* Effect.promise(() => temporaryDirectory())
+      // 2^20 alternatives, refused before a single directory is read.
+      const braces = yield* run(
+        root,
+        Effect.flatMap(
+          FileSystem.FileSystem,
+          (fs) => Effect.flip(fs.glob(join(root, `${"{a,b}".repeat(20)}.txt`), { root }))
+        )
+      )
+      // The length bound is driven directly: the kernel's own capability schema
+      // refuses a 5000-character resource before the helper is reached, so the
+      // helper's bound is only observable underneath it.
+      const long = yield* Effect.flip(runDirect(
+        {
+          operation: "glob",
+          pattern: join(root, `${"a".repeat(5000)}.txt`),
+          root,
+          boundaryRoot: root,
+          logicalRoot: root,
+          options: { exclude: [] }
+        },
+        AtomicFileSystem.layer
+      ))
+
+      expect(braces.reason._tag).toBe("BadArgument")
+      expect(long).toMatchObject({ reason: { _tag: "BadArgument" } })
+    }))
+
+  /**
+   * A character class the old regex translation could not close was reported as
+   * bad input. It is not bad input: "[]]" is a class holding one bracket, and
+   * the native globber matches a file named "]" with it.
+   */
+  it.live("reads a bracket in the first position of a class as a member", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      yield* Effect.promise(() => writeFile(join(root, "]"), ""))
+      yield* Effect.promise(() => writeFile(join(root, "a"), ""))
+      const matched = yield* run(
+        root,
+        Effect.flatMap(FileSystem.FileSystem, (fs) => fs.glob(join(root, "[]]"), { root }))
+      )
+      expect(matched).toEqual([join(root, "]")])
+    }))
+
+  /**
+   * Every operation is one CPython fork, so without a ceiling an unbounded
+   * `Effect.forEach` starts one interpreter per entry and pins every core. The
+   * ceiling is one semaphore for the whole layer, which is the only arrangement
+   * that bounds anything: one built per request would bound nothing.
+   */
+  it.live("never runs more helper processes at once than the configured ceiling", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      const log = join(yield* Effect.promise(() => temporaryDirectory()), "overlap.log")
+      // Each stand-in marks its own start and end in one shared file. Small
+      // appends from separate processes do not interleave, so the running sum
+      // of the marks is the live process count.
+      const executable = yield* Effect.promise(() =>
+        fakeInterpreter(
+          `const fs = require("node:fs");` +
+            `fs.appendFileSync(${JSON.stringify(log)}, "+");` +
+            `setTimeout(() => {` +
+            `fs.appendFileSync(${JSON.stringify(log)}, "-");` +
+            `process.stdout.write(Buffer.from(${JSON.stringify(frame(`{"ok":true,"value":true}`))}, "utf8"));` +
+            `}, 150);`
+        )
+      )
+
+      yield* run(
+        root,
+        Effect.forEach(
+          Array.from({ length: 8 }, (_, index) => index),
+          (index) => Effect.flatMap(FileSystem.FileSystem, (fs) => fs.exists(join(root, `probe-${index}.txt`))),
+          { concurrency: "unbounded" }
+        ),
+        AtomicFileSystem.layerWith({ executable, concurrency: 2 })
+      )
+
+      const marks = yield* Effect.promise(() => readFile(log, "utf8"))
+      let live = 0
+      let peak = 0
+      for (const mark of marks) {
+        live += mark === "+" ? 1 : -1
+        peak = Math.max(peak, live)
+      }
+      // Every request ran, and never more than two interpreters at a time.
+      expect(marks.split("+").length - 1).toBe(8)
+      expect(peak).toBeLessThanOrEqual(2)
+    }), 60_000)
+
+  /**
+   * Every other ceiling bounds what a helper may SAY. Nothing bounded how long
+   * it could take to say it, so a helper that never answered held the fiber
+   * until the run itself was interrupted.
+   */
+  it.live("kills a helper that never answers and fails the operation closed", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      const executable = yield* Effect.promise(() => fakeInterpreter(`setTimeout(() => {}, 600000);`))
+
+      const started = Date.now()
       const failure = yield* run(
         root,
-        Effect.flatMap(FileSystem.FileSystem, (fs) => Effect.flip(fs.glob(join(root, "[]]"), { root })))
+        Effect.flatMap(FileSystem.FileSystem, (fs) => Effect.flip(fs.exists(join(root, "any.txt")))),
+        AtomicFileSystem.layerWith({ executable, timeoutMs: 250 })
       )
-      expect(failure.reason._tag).toBe("BadArgument")
+
+      expect(failure).toMatchObject({ reason: { _tag: "PermissionDenied" } })
+      expect(described(failure)).toContain("did not answer within 250 ms")
+      expect(Date.now() - started).toBeLessThan(30_000)
+    }), 60_000)
+
+  it.live("refuses a concurrency ceiling or a timeout that would disable the bound", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      const attempt = (options: AtomicFileSystem.Options) =>
+        run(
+          root,
+          Effect.flatMap(FileSystem.FileSystem, (fs) => Effect.flip(fs.exists(join(root, "any.txt")))),
+          AtomicFileSystem.layerWith(options)
+        )
+      for (const options of [{ concurrency: 0 }, { concurrency: 1.5 }, { timeoutMs: 0 }, { timeoutMs: -1 }]) {
+        expect(yield* attempt(options)).toMatchObject({ reason: { _tag: "BadArgument" } })
+      }
+    }))
+
+  /**
+   * `Options` is a plain object the caller still holds. Re-reading it per
+   * request meant a byte ceiling could change under a running host, which is
+   * not a ceiling at all.
+   */
+  it.live("holds the ceilings it was built with even when the options object changes", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      yield* Effect.promise(() => writeFile(join(root, "over.txt"), "123456789"))
+      const limits: { content: number } = { content: 8 }
+      const host = AtomicFileSystem.layerWith({ limits })
+
+      const before = yield* run(
+        root,
+        Effect.flatMap(FileSystem.FileSystem, (fs) => Effect.flip(fs.readFile(join(root, "over.txt")))),
+        host
+      )
+      limits.content = 16 * 1024 * 1024
+      const after = yield* run(
+        root,
+        Effect.flatMap(FileSystem.FileSystem, (fs) => Effect.flip(fs.readFile(join(root, "over.txt")))),
+        host
+      )
+
+      expect(before).toMatchObject({ reason: { _tag: "BadResource" } })
+      expect(after).toMatchObject({ reason: { _tag: "BadResource" } })
     }))
 })

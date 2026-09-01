@@ -17,8 +17,12 @@
  * - its owner is gone. A pid that exists but belongs to another user counts as
  *   alive, exactly as {@link HostLiveness} counts it, so only `ESRCH` reads as
  *   dead and every other answer keeps the record;
- * - it has a process group of its own. A record with `pgid: null` shared the
- *   group of the incarnation that started it, which is not a group to signal;
+ * - it names a target the platform can actually signal. On POSIX that is a
+ *   process group the child leads itself, so `pgid` has to be a safe integer
+ *   above 1 and equal to `pid`; on Windows it is a pid, so `pgid` has to be
+ *   absent. The check is made against the DURABLE record rather than trusted
+ *   from it: `process.kill(-0, "SIGKILL")` signals this host's own process
+ *   group, and `@smthrs/kernel`'s ledger schema admits zero;
  * - that group is not THIS process's group, and its pid is not this process's
  *   pid. The host's real process group is read from the operating system,
  *   because a stored number can claim anything and the shell that started this
@@ -26,16 +30,21 @@
  * - the number still names the process the record describes. A record written
  *   before this machine booted names a pid from a pid space that no longer
  *   exists, and within one boot the recorded start time has to match the start
- *   time the operating system reports for that pid.
+ *   time the operating system reports for that pid. A host that cannot ASK the
+ *   question answers {@link StartTime} `unavailable`, which refuses the kill
+ *   and keeps the record; no evidence never authorizes a signal.
  *
  * The outcome of the signal is part of the record. A kill that succeeds, or
  * that reports the group is already gone, retires the record through
  * {@link ProcessLedger.Service.reaped}; a kill that FAILS for any other reason
  * leaves the record inherited so the next incarnation tries again. A record
- * refused on identity grounds is retired through
- * {@link ProcessLedger.Service.skipped}, which says in the journal that nothing
- * was signalled and stops every later incarnation re-examining a number the
- * operating system has moved on from.
+ * refused on grounds the operating system will not revisit — a number no
+ * platform can signal, a pid that is gone, a start time that does not match — is
+ * retired through {@link ProcessLedger.Service.skipped}, which says in the
+ * journal that nothing was signalled and stops every later incarnation
+ * re-examining a number the operating system has moved on from. The two
+ * refusals a later incarnation CAN answer differently — `owner-alive` and
+ * `identity-unverified` — retire nothing.
  *
  * @since 0.1.0
  */
@@ -72,6 +81,30 @@ export type KillOutcome =
   | "failed"
 
 /**
+ * What the operating system can say about when a pid started.
+ *
+ * The three negative answers are deliberately distinct, because they authorize
+ * three different decisions. `gone` is evidence — the pid does not exist, so
+ * the record describes nothing and is retired unsignalled. `unavailable` is the
+ * ABSENCE of evidence: `ps` is missing, unanswerable, or printed something no
+ * clock can read, so the record is kept for an incarnation that can ask.
+ * `unsupported` is a platform that has no such column at all, which falls back
+ * to the boot-time comparison alone.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type StartTime =
+  /** The operating system reports this start time, in epoch milliseconds. */
+  | { readonly _tag: "started"; readonly startedAtMs: number }
+  /** The pid names no process. */
+  | { readonly _tag: "gone" }
+  /** The question could not be asked on this host. */
+  | { readonly _tag: "unavailable" }
+  /** The platform has no start-time column at all. */
+  | { readonly _tag: "unsupported" }
+
+/**
  * The operating-system operations reaping needs.
  *
  * It is a seam, not an abstraction: `flows` ships exactly the two
@@ -84,15 +117,17 @@ export type KillOutcome =
 export interface System {
   /** Whether a pid names a process that still exists. */
   readonly isAlive: (pid: number) => Liveness
-  /**
-   * When the process behind a pid started, in epoch milliseconds, or
-   * `undefined` when this platform cannot answer.
-   */
-  readonly startedAtMs: (pid: number) => number | undefined
+  /** When the process behind a pid started. */
+  readonly startedAtMs: (pid: number) => StartTime
   /** The process group THIS process belongs to, or `null` where there are none. */
   readonly ownGroup: () => number | null
   /** When this machine booted, in epoch milliseconds. */
   readonly bootedAtMs: () => number
+  /**
+   * Whether the numbers in a record name something this platform may signal,
+   * checked before any other guard consults them.
+   */
+  readonly refuseTarget: (record: ProcessLedger.ProcessRecord) => Refusal | undefined
   /** Ends an abandoned process and everything below it. */
   readonly killTree: (record: ProcessLedger.ProcessRecord) => KillOutcome
 }
@@ -115,24 +150,62 @@ const liveness = (pid: number): Liveness => {
 const bootedAtMs = (): number => Date.now() - Math.round(uptime() * 1000)
 
 /**
- * The start time `ps` reports for a pid, or `undefined` when it cannot say.
+ * The start time `ps` reports for a pid.
  *
  * `lstart` is the one start-time column both BSD (macOS) and procps (Linux)
  * spell the same way, and it prints an absolute time rather than an elapsed
- * one, so the answer does not drift between reading it and comparing it.
+ * one, so the answer does not drift between reading it and comparing it. It is
+ * also a LOCALIZED column, which is why the probe below pins `LC_ALL=C`:
+ * `Date.parse` reads the C spelling and nothing else.
  */
-const startedAtMs = (pid: number): number | undefined => {
-  const printed = ps("lstart", pid)
-  if (printed === undefined) return undefined
-  const parsed = Date.parse(printed)
-  return Number.isNaN(parsed) ? undefined : parsed
+const startedAtMs = (executable: string) => (pid: number): StartTime => {
+  const answer = ps(executable, "lstart", pid)
+  if (answer._tag !== "printed") return answer
+  const parsed = Date.parse(answer.text)
+  return Number.isNaN(parsed) ? { _tag: "unavailable" } : { _tag: "started", startedAtMs: parsed }
 }
 
-/** One `ps` column for one pid, or `undefined` when `ps` could not answer. */
-const ps = (column: string, pid: number): string | undefined => {
-  const result = spawnSync("ps", ["-o", `${column}=`, "-p", String(pid)], { encoding: "utf8" })
-  const printed = result.status === 0 ? result.stdout.trim() : ""
-  return printed === "" ? undefined : printed
+/**
+ * The absolute path the process probe is run from.
+ *
+ * Never a `PATH` lookup. The inherited environment belongs to whoever started
+ * this host, and a planted `ps` that prints a fabricated start time — or none
+ * at all — would decide whether a `SIGKILL` is authorized.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const defaultPsExecutable = "/bin/ps"
+
+/** How long the probe may take before it counts as an answer nobody gave. */
+const psTimeoutMs = 5000
+
+/**
+ * One `ps` column for one pid.
+ *
+ * `printed` is an answer; every other tag is the absence of one. A nonzero exit
+ * with no error is `ps` saying the pid does not exist, which is evidence; a
+ * spawn that failed, a signal, or a timeout is not.
+ */
+const ps = (
+  executable: string,
+  column: string,
+  pid: number
+): { readonly _tag: "printed"; readonly text: string } | StartTime => {
+  const result = spawnSync(executable, ["-o", `${column}=`, "-p", String(pid)], {
+    encoding: "utf8",
+    timeout: psTimeoutMs,
+    // An empty-ish environment for the same reason the interpreter in
+    // `AtomicFileSystem` gets one: nothing the caller exported may change what
+    // this answers. `LC_ALL` pins the one column format `Date.parse` can read.
+    env: { LC_ALL: "C", PATH: "/usr/bin:/bin" }
+  })
+  if (result.error !== undefined || result.signal !== null || result.status === null) {
+    return { _tag: "unavailable" }
+  }
+  if (result.status !== 0) return { _tag: "gone" }
+  const printed = result.stdout.trim()
+  return printed === "" ? { _tag: "unavailable" } : { _tag: "printed", text: printed }
 }
 
 /**
@@ -142,29 +215,79 @@ const ps = (column: string, pid: number): string | undefined => {
  * procps spell `pgid`. A host that cannot read it answers `null` and loses one
  * guard, which is why the pid comparison below is kept as well.
  */
-const ownGroup = (): number | null => {
-  const printed = ps("pgid", process.pid)
-  if (printed === undefined) return null
-  const parsed = Number.parseInt(printed, 10)
+const ownGroup = (executable: string) => (): number | null => {
+  const answer = ps(executable, "pgid", process.pid)
+  if (answer._tag !== "printed") return null
+  const parsed = Number.parseInt(answer.text, 10)
   return Number.isNaN(parsed) ? null : parsed
 }
 
 /**
- * Reaping on a POSIX host: one `SIGKILL` to the abandoned process group.
+ * How a POSIX {@link System} asks the operating system its questions.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export interface SystemOptions {
+  /**
+   * The absolute `ps` the identity probe runs. Default
+   * {@link defaultPsExecutable}. It is configuration for a host that installs
+   * `ps` somewhere else, and the seam the probe's own parsing is driven
+   * through; it is never a `PATH` lookup.
+   */
+  readonly psExecutable?: string | undefined
+}
+
+/**
+ * Whether a durable record names a POSIX process group this host may signal.
+ *
+ * `process.kill(-pgid, ...)` turns the stored number into a target directly, so
+ * every value that is not a real foreign group has to be refused before it gets
+ * there: `0` signals THIS process's group, a negative value stops naming a
+ * group at all and names a single pid, and a `pgid` that differs from `pid`
+ * describes a child that does not lead the group it claims —
+ * `ContainedSpawner.groupOf` writes `pgid === pid` for every detached POSIX
+ * child, so anything else is a record no writer in this repository produced.
+ */
+const refusePosixTarget = (record: ProcessLedger.ProcessRecord): Refusal | undefined => {
+  if (record.pgid === null) return "no-group"
+  if (!Number.isSafeInteger(record.pid) || record.pid <= 1) return "invalid-record"
+  if (!Number.isSafeInteger(record.pgid) || record.pgid <= 1) return "invalid-record"
+  return record.pgid === record.pid ? undefined : "invalid-record"
+}
+
+/**
+ * Whether a durable record names a Windows process tree this host may signal.
+ *
+ * Windows has no process groups, so `ContainedSpawner.groupOf` records `null`
+ * there and `taskkill /T` walks the tree from the pid instead. A win32 record
+ * carrying a number is therefore a record some other platform wrote.
+ */
+const refuseWindowsTarget = (record: ProcessLedger.ProcessRecord): Refusal | undefined => {
+  if (record.pgid !== null) return "invalid-record"
+  return Number.isSafeInteger(record.pid) && record.pid > 1 ? undefined : "invalid-record"
+}
+
+/**
+ * Reaping on a POSIX host, with the identity probe configured.
  *
  * The group is killed outright rather than asked politely first. `SIGTERM`
  * buys a graceful shutdown only when someone is left to wait for it, and the
  * incarnation that owned these processes is by definition gone.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const posixSystem: System = {
+export const posixSystemWith = (options?: SystemOptions): System => ({
   isAlive: liveness,
-  startedAtMs,
-  ownGroup,
+  startedAtMs: startedAtMs(options?.psExecutable ?? defaultPsExecutable),
+  ownGroup: ownGroup(options?.psExecutable ?? defaultPsExecutable),
   bootedAtMs,
+  refuseTarget: refusePosixTarget,
   killTree: (record) => {
+    // Repeated here and not only in `refuse`: this function is exported, and
+    // the negation below is the one place a stored number becomes a signal.
+    if (refusePosixTarget(record) !== undefined) return "failed"
     try {
       process.kill(-(record.pgid as number), "SIGKILL")
       return "signalled"
@@ -175,10 +298,27 @@ export const posixSystem: System = {
       return errorCode(cause) === "ESRCH" ? "already-gone" : "failed"
     }
   }
-}
+})
+
+/**
+ * Reaping on a POSIX host: one `SIGKILL` to the abandoned process group, with
+ * the identity probe at {@link defaultPsExecutable}.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const posixSystem: System = posixSystemWith()
 
 /**
  * Reaping on Windows, which has no process groups: `taskkill /T /F` by pid.
+ *
+ * **Windows is outside the 1.0.0-rc.0 support contract**
+ * (`docs/pages/installation.md`), and `AtomicFileSystem` fails every filesystem
+ * call closed there, so nothing in this repository runs this path in
+ * production. It is kept — and reachable through {@link reap} rather than only
+ * by calling it directly — because a reaper that silently retired every win32
+ * record would be the "excluded feature that appears to work partially" the
+ * release contract forbids. Treat it as unsupported best-effort.
  *
  * Windows has no `lstart` and no process groups, so two of the guards above
  * cannot be answered here: the identity check falls back to the boot-time
@@ -190,10 +330,12 @@ export const posixSystem: System = {
  */
 export const windowsSystem: System = {
   isAlive: liveness,
-  startedAtMs: () => undefined,
+  startedAtMs: () => ({ _tag: "unsupported" }),
   ownGroup: () => null,
   bootedAtMs,
+  refuseTarget: refuseWindowsTarget,
   killTree: (record) => {
+    if (refuseWindowsTarget(record) !== undefined) return "failed"
     const result = spawnSync("taskkill", ["/pid", String(record.pid), "/T", "/F"], { stdio: "ignore" })
     if (result.error !== undefined) return "failed"
     // 128 is `taskkill`'s "no such process", which is the same end state a
@@ -251,12 +393,30 @@ export type Refusal =
   | "no-group"
   /** It named this host's own process group or pid. */
   | "own-group"
+  /** Its numbers do not name anything this platform may signal. */
+  | "invalid-record"
   /** It was written before this machine booted, so the pid space is not the same. */
   | "pre-boot"
+  /** The pid it names does not exist, so there is no identity to confirm. */
+  | "process-gone"
   /** The pid exists but did not start when the record says it did. */
   | "identity-mismatch"
+  /** This host could not ask when the pid started, so it must not signal it. */
+  | "identity-unverified"
   /** The signal was refused, so the record stays for the next incarnation. */
   | "kill-failed"
+
+/**
+ * The refusals that leave a record inherited instead of retiring it.
+ *
+ * A refusal is final when the operating system has moved on from the number:
+ * saying so in the journal is what stops every later incarnation re-examining
+ * it. These two are not final. `owner-alive` means the incarnation that owns
+ * the record will contain its own children, and `identity-unverified` means
+ * this host could not ask the question at all — a host that CAN ask has to get
+ * the chance.
+ */
+const retained: ReadonlySet<Refusal> = new Set<Refusal>(["owner-alive", "identity-unverified"])
 
 /**
  * One record, and what the reaper decided about it.
@@ -282,10 +442,22 @@ const refuseOnIdentity = (
   // `uptime` is second-granular, so a record written moments after boot could
   // otherwise be read as predating it, and refusing to kill is the safe way to
   // be wrong.
+  //
+  // The consequence is a narrow, deliberate leak, and it is a leak rather than
+  // a retry: `reap` retires a `pre-boot` refusal through `ledger.skipped`, so a
+  // group spawned within `identityToleranceMs` of the computed boot instant is
+  // never reaped by any later incarnation either. That is the price of refusing
+  // to kill on an instant `uptime` can only place to the nearest second.
   if (record.startedAtMs < bootMs + identityToleranceMs) return "pre-boot"
   const started = system.startedAtMs(record.pid)
-  if (started === undefined) return undefined
-  return Math.abs(started - record.startedAtMs) <= identityToleranceMs ? undefined : "identity-mismatch"
+  // A platform with no start-time column at all has already been checked
+  // against this boot, which is the whole of its documented weaker guarantee.
+  if (started._tag === "unsupported") return undefined
+  if (started._tag === "gone") return "process-gone"
+  if (started._tag === "unavailable") return "identity-unverified"
+  return Math.abs(started.startedAtMs - record.startedAtMs) <= identityToleranceMs
+    ? undefined
+    : "identity-mismatch"
 }
 
 /** Everything the reaper checks before it is willing to signal a record. */
@@ -296,9 +468,13 @@ const refuse = (
   ownGroup: number | null,
   bootMs: number
 ): Refusal | undefined => {
-  if (record.pgid === null) return "no-group"
+  // The host's own identity comes first, before the platform is consulted at
+  // all: a record naming this process is refused on every platform, whatever
+  // shape its numbers have.
   if (record.pgid === ownerPid || record.pid === ownerPid) return "own-group"
   if (ownGroup !== null && (record.pgid === ownGroup || record.pid === ownGroup)) return "own-group"
+  const target = system.refuseTarget(record)
+  if (target !== undefined) return target
   if (system.isAlive(record.ownerPid) !== "dead") return "owner-alive"
   return refuseOnIdentity(system, record, bootMs)
 }
@@ -337,10 +513,9 @@ export const reap = (
         decided.push({ record, killed: true })
         continue
       }
-      // An owner that is still alive will contain its own children, so the
-      // record is not this host's to retire. Every other refusal is final and
-      // says so in the journal.
-      if (refusal !== "owner-alive") {
+      // A retained refusal is not this host's to retire; every other refusal is
+      // final and says so in the journal.
+      if (!retained.has(refusal)) {
         yield* retire(ledger.skipped(record, refusal), record.pid, "reap-skipped")
       }
       decided.push({ record, killed: false, refusal })

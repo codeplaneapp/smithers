@@ -87,20 +87,72 @@ const windowsRecord = {
   commandDigest: "agent.exe"
 } as const
 
-/** Runs `body` with a `ps` on PATH that prints `printed` and exits 0. */
-const withPs = <A>(name: string, printed: string, body: () => A): A =>
-  withShim(`ps-${name}`, "ps", `#!/bin/sh\nprintf '%s' '${printed}'\nexit 0\n`, body)
+/**
+ * A `ps` stand-in at an absolute path that prints `printed` and exits `status`.
+ *
+ * The probe resolves `ps` as an absolute path and never through `PATH`, so a
+ * shim on `PATH` can no longer reach it — which is the point of the guard. The
+ * parsing branches are driven through the configured executable instead.
+ */
+const psShim = (name: string, printed: string, status = 0): string => {
+  const bin = join(directory, `ps-${name}`)
+  mkdirSync(bin, { recursive: true })
+  const executable = join(bin, "ps")
+  writeFileSync(executable, `#!/bin/sh\nprintf '%s' '${printed}'\nexit ${status}\n`)
+  chmodSync(executable, 0o755)
+  return executable
+}
+
+/** A POSIX system whose identity probe runs `executable`. */
+const withPs = (executable: string) => ProcessReaper.posixSystemWith({ psExecutable: executable })
 
 /** Runs `body` with a `taskkill` on PATH that exits with `status`. */
 const withTaskkill = <A>(status: number, body: () => A): A =>
   withShim(`taskkill-${status}`, "taskkill", `#!/bin/sh\nexit ${status}\n`, body)
 
-/** Runs `body` with one scripted executable shadowing `command` on PATH. */
-const withShim = <A>(name: string, command: string, script: string, body: () => A): A => {
+/** Writes one scripted executable and returns the directory holding it. */
+const shimBin = (name: string, command: string, script: string): string => {
   const bin = join(directory, name)
   mkdirSync(bin, { recursive: true })
   writeFileSync(join(bin, command), script)
   chmodSync(join(bin, command), 0o755)
+  return bin
+}
+
+/**
+ * A record built by hand, standing in for one read out of a durable journal.
+ *
+ * `ProcessLedger` will not WRITE most of the shapes the reaper has to defend
+ * against, which is exactly why the reaper defends against them: the input is a
+ * row that outlived the process that produced it.
+ */
+const target = (pid: number, pgid: number | null, commandDigest: string): ProcessLedger.ProcessRecord => ({
+  pid,
+  pgid,
+  hostId: "targets",
+  ownerPid: 2_147_483_646,
+  startedAtMs: 0,
+  commandDigest
+})
+
+/** A ledger that answers with `orphans` and records what the sweep retired. */
+const spyLedger = (orphans: ReadonlyArray<ProcessLedger.ProcessRecord>) => {
+  const skipped: Array<readonly [number, string]> = []
+  const reaped: Array<number> = []
+  const service: ProcessLedger.Service = {
+    record: () => Effect.die("the sweep never records"),
+    release: () => Effect.die("the sweep never releases"),
+    reaped: (record) => Effect.sync(() => void reaped.push(record.pid)),
+    skipped: (record, reason) => Effect.sync(() => void skipped.push([record.pid, reason])),
+    live: Effect.succeed([]),
+    orphans: Effect.succeed(orphans)
+  }
+  return { service, skipped, reaped }
+}
+
+/** Runs `body` with one scripted executable shadowing `command` on PATH. */
+const withShim = <A>(name: string, command: string, script: string, body: () => A): A => {
+  const bin = shimBin(name, command, script)
   const previous = process.env["PATH"]
   process.env["PATH"] = `${bin}:${previous ?? ""}`
   try {
@@ -208,6 +260,171 @@ describe("ProcessReaper", () => {
       })
     ))
 
+  /**
+   * The numbers a reaper signals arrive from durable state, so the sweep has to
+   * refuse the ones no platform can turn into a target. `pgid: 0` is the one
+   * that matters most: `process.kill(-0, "SIGKILL")` is `process.kill(0, ...)`,
+   * which POSIX defines as signalling THIS process's entire process group.
+   */
+  it.effect("refuses a durable record whose numbers name nothing it may signal", () =>
+    Effect.gen(function*() {
+      // Held by hand rather than through the ledger: `ProcessLedger`'s schema
+      // types `pid` as an integer, so the corrupt shapes this guard exists for
+      // cannot be written through it. They can still be READ out of a journal
+      // an older or foreign writer produced, which is the input under test.
+      const orphans = [
+        target(0, 0, "own-group-through-zero"),
+        target(-5, -5, "negative"),
+        target(2.5, 2.5, "fractional"),
+        target(4321, 9876, "leads-no-group")
+      ]
+      const killed: Array<number> = []
+      const ledger = spyLedger(orphans)
+      const reaped = yield* ProcessReaper.reap({
+        ownerPid: 987_653,
+        system: {
+          ...ProcessReaper.posixSystem,
+          isAlive: () => "dead",
+          ownGroup: () => null,
+          killTree: (record) => {
+            killed.push(record.pid)
+            return "signalled"
+          }
+        }
+      }).pipe(Effect.provideService(ProcessLedger.ProcessLedger, ledger.service))
+
+      expect(reaped.map((entry) => entry.refusal)).toEqual([
+        "invalid-record",
+        "invalid-record",
+        "invalid-record",
+        "invalid-record"
+      ])
+      expect(killed).toEqual([])
+      // Nothing the operating system will revisit, so all four are retired.
+      expect(ledger.skipped).toEqual([
+        [0, "invalid-record"],
+        [-5, "invalid-record"],
+        [2.5, "invalid-record"],
+        [4321, "invalid-record"]
+      ])
+    }))
+
+  /**
+   * The identity guard is the one that catches pid reuse inside a single boot,
+   * so a host that cannot ASK the question must not signal anyway. It is also
+   * the one refusal that has to keep its record: a later incarnation, or the
+   * same host with `ps` installed, can answer what this one could not.
+   */
+  it.effect("keeps a record it could not verify instead of killing on no evidence", () =>
+    Effect.gen(function*() {
+      const ledger = spyLedger([{ ...target(987_654, 987_654, "unverifiable"), startedAtMs: Date.now() }])
+      const killed: Array<number> = []
+      const reaped = yield* ProcessReaper.reap({
+        ownerPid: 1,
+        system: {
+          ...ProcessReaper.posixSystem,
+          isAlive: () => "dead",
+          ownGroup: () => null,
+          // A host with no usable `ps`: busybox, distroless, or a probe that
+          // timed out.
+          startedAtMs: () => ({ _tag: "unavailable" }),
+          killTree: (record) => {
+            killed.push(record.pid)
+            return "signalled"
+          }
+        }
+      }).pipe(Effect.provideService(ProcessLedger.ProcessLedger, ledger.service))
+
+      expect(reaped.map((entry) => entry.refusal)).toEqual(["identity-unverified"])
+      expect(killed).toEqual([])
+      // Retired nothing: the record is still there for a host that can ask.
+      expect(ledger.skipped).toEqual([])
+      expect(ledger.reaped).toEqual([])
+    }))
+
+  it.effect("retires a record whose pid the operating system says is gone", () =>
+    Effect.gen(function*() {
+      const ledger = spyLedger([{ ...target(987_654, 987_654, "already-exited"), startedAtMs: Date.now() }])
+      const killed: Array<number> = []
+      const reaped = yield* ProcessReaper.reap({
+        ownerPid: 1,
+        system: {
+          ...ProcessReaper.posixSystem,
+          isAlive: () => "dead",
+          ownGroup: () => null,
+          startedAtMs: () => ({ _tag: "gone" }),
+          killTree: (record) => {
+            killed.push(record.pid)
+            return "signalled"
+          }
+        }
+      }).pipe(Effect.provideService(ProcessLedger.ProcessLedger, ledger.service))
+
+      expect(reaped.map((entry) => entry.refusal)).toEqual(["process-gone"])
+      expect(killed).toEqual([])
+      expect(ledger.skipped).toEqual([[987_654, "process-gone"]])
+    }))
+
+  /**
+   * `identityToleranceMs` decides which side of the boot instant a record falls
+   * on, and the cut is deliberately inclusive of the tolerance window: a record
+   * written exactly `identityToleranceMs` after the computed boot is the first
+   * one the sweep is willing to look at.
+   */
+  it.effect("pins which side of the boot cut each tolerance boundary falls on", () =>
+    Effect.gen(function*() {
+      const bootMs = 1_000_000_000_000
+      const at = (offset: number) => bootMs + ProcessReaper.identityToleranceMs + offset
+      const orphans = [-1, 0, 1].map((offset, index) => ({
+        ...target(900_000 + index, 900_000 + index, "boundary"),
+        startedAtMs: at(offset)
+      }))
+      const ledger = spyLedger(orphans)
+      const reaped = yield* ProcessReaper.reap({
+        ownerPid: 1,
+        system: {
+          ...ProcessReaper.posixSystem,
+          isAlive: () => "dead",
+          ownGroup: () => null,
+          bootedAtMs: () => bootMs,
+          startedAtMs: () => ({ _tag: "unsupported" }),
+          killTree: () => "signalled"
+        }
+      }).pipe(Effect.provideService(ProcessLedger.ProcessLedger, ledger.service))
+
+      expect(reaped.map((entry) => entry.refusal)).toEqual(["pre-boot", undefined, undefined])
+      expect(reaped.map((entry) => entry.killed)).toEqual([false, true, true])
+      // A `pre-boot` refusal is RETIRED, not retried: the group it names is
+      // never reaped by any later incarnation either.
+      expect(ledger.skipped).toEqual([[900_000, "pre-boot"]])
+    }))
+
+  /**
+   * Windows containment is unsupported best-effort at 1.0.0-rc.0, but it must
+   * not be a silent no-op: before the platform-specific target check existed, a
+   * win32 record — which always carries `pgid: null` — was refused as
+   * `no-group` before `taskkill` was ever consulted, so `windowsSystem` was
+   * unreachable through `reap` and every Windows orphan was retired unkilled.
+   */
+  it.effect("reaches taskkill for a Windows record through the sweep, not only by hand", () =>
+    Effect.gen(function*() {
+      const record = { ...target(4321, null, "agent.exe"), startedAtMs: Date.now() }
+      const ledger = spyLedger([record])
+      const bin = shimBin("taskkill-reap", "taskkill", `#!/bin/sh\nexit 0\n`)
+      const previous = process.env["PATH"]
+      process.env["PATH"] = `${bin}:${previous ?? ""}`
+      try {
+        const reaped = yield* ProcessReaper.reap({
+          ownerPid: 1,
+          system: ProcessReaper.systemFor("win32")
+        }).pipe(Effect.provideService(ProcessLedger.ProcessLedger, ledger.service))
+        expect(reaped).toEqual([{ record, killed: true }])
+        expect(ledger.reaped).toEqual([4321])
+      } finally {
+        process.env["PATH"] = previous
+      }
+    }))
+
   it("answers liveness from the operating system, and never confuses EPERM with gone", () => {
     expect(ProcessReaper.posixSystem.isAlive(process.pid)).toBe("alive")
     // ESRCH: nothing has this pid.
@@ -220,20 +437,59 @@ describe("ProcessReaper", () => {
 
   it("reads a process start time and this process's own group from the system", () => {
     const started = ProcessReaper.posixSystem.startedAtMs(process.pid)
-    expect(started).toBeTypeOf("number")
+    expect(started._tag).toBe("started")
+    const startedAtMs = (started as { readonly startedAtMs: number }).startedAtMs
     // This process started before now and after this machine booted.
-    expect(started!).toBeLessThanOrEqual(Date.now() + 1000)
-    expect(started!).toBeGreaterThanOrEqual(ProcessReaper.posixSystem.bootedAtMs() - 60_000)
-    expect(ProcessReaper.posixSystem.startedAtMs(2_147_483_646)).toBeUndefined()
+    expect(startedAtMs).toBeLessThanOrEqual(Date.now() + 1000)
+    expect(startedAtMs).toBeGreaterThanOrEqual(ProcessReaper.posixSystem.bootedAtMs() - 60_000)
+    // A pid nothing owns is EVIDENCE the record describes nothing, which is a
+    // different answer from a probe that could not be run at all.
+    expect(ProcessReaper.posixSystem.startedAtMs(2_147_483_646)).toEqual({ _tag: "gone" })
     expect(ProcessReaper.posixSystem.ownGroup()).toBeTypeOf("number")
+    // The probe is an absolute path, so it is `/bin/ps` and never a `PATH` hit.
+    expect(ProcessReaper.defaultPsExecutable).toBe("/bin/ps")
 
     // A `ps` that answers with something unusable is the same as a `ps` that
     // cannot answer: no evidence, and no evidence never authorizes a kill.
-    expect(withPs("garbage", "not a date", () => ProcessReaper.posixSystem.startedAtMs(process.pid)))
-      .toBeUndefined()
-    expect(withPs("silent", "", () => ProcessReaper.posixSystem.startedAtMs(process.pid))).toBeUndefined()
-    expect(withPs("wordy", "not a number", () => ProcessReaper.posixSystem.ownGroup())).toBeNull()
-    expect(withPs("mute", "", () => ProcessReaper.posixSystem.ownGroup())).toBeNull()
+    expect(withPs(psShim("garbage", "not a date")).startedAtMs(process.pid)).toEqual({ _tag: "unavailable" })
+    expect(withPs(psShim("silent", "")).startedAtMs(process.pid)).toEqual({ _tag: "unavailable" })
+    // A `ps` that is not there at all is the same absence of evidence.
+    expect(withPs(join(directory, "no-such-ps")).startedAtMs(process.pid)).toEqual({ _tag: "unavailable" })
+    expect(withPs(psShim("wordy", "not a number")).ownGroup()).toBeNull()
+    expect(withPs(psShim("mute", "")).ownGroup()).toBeNull()
+    expect(withPs(psShim("absent", "", 1)).ownGroup()).toBeNull()
+  })
+
+  it("refuses to signal a durable record whose numbers name nothing it may kill", () => {
+    const row = (pid: number, pgid: number | null) => target(pid, pgid, "target")
+    // `process.kill(-0, ...)` signals THIS process's group, so zero is the one
+    // value that must never reach the negation.
+    expect(ProcessReaper.posixSystem.refuseTarget(row(0, 0))).toBe("invalid-record")
+    expect(ProcessReaper.posixSystem.refuseTarget(row(-5, -5))).toBe("invalid-record")
+    expect(ProcessReaper.posixSystem.refuseTarget(row(2.5, 2.5))).toBe("invalid-record")
+    expect(ProcessReaper.posixSystem.refuseTarget(row(1, 1))).toBe("invalid-record")
+    // A plausible pid carrying an unsignalable group, which is the half of the
+    // record the negation actually reaches.
+    expect(ProcessReaper.posixSystem.refuseTarget(row(4321, 0))).toBe("invalid-record")
+    expect(ProcessReaper.posixSystem.refuseTarget(row(4321, -5))).toBe("invalid-record")
+    expect(ProcessReaper.posixSystem.refuseTarget(row(4321, 2.5))).toBe("invalid-record")
+    // A child that does not lead the group it claims.
+    expect(ProcessReaper.posixSystem.refuseTarget(row(4321, 9876))).toBe("invalid-record")
+    expect(ProcessReaper.posixSystem.refuseTarget(row(4321, null))).toBe("no-group")
+    expect(ProcessReaper.posixSystem.refuseTarget(row(4321, 4321))).toBeUndefined()
+
+    // Windows records the absence of a group, so there the numbers invert.
+    expect(ProcessReaper.windowsSystem.refuseTarget(row(4321, 4321))).toBe("invalid-record")
+    expect(ProcessReaper.windowsSystem.refuseTarget(row(0, null))).toBe("invalid-record")
+    expect(ProcessReaper.windowsSystem.refuseTarget(row(4321, null))).toBeUndefined()
+
+    // The guard is repeated inside the kill itself, because both systems are
+    // exported and a caller can reach them without going through `reap`.
+    expect(ProcessReaper.posixSystem.killTree(row(0, 0))).toBe("failed")
+    expect(ProcessReaper.posixSystem.killTree(row(4321, null))).toBe("failed")
+    expect(ProcessReaper.windowsSystem.killTree(row(4321, 4321))).toBe("failed")
+    // This process is still here, which is what the zero check exists for.
+    expect(ProcessReaper.posixSystem.isAlive(process.pid)).toBe("alive")
   })
 
   it("tells a group that settled apart from a signal that never left the process", () => {
@@ -248,13 +504,13 @@ describe("ProcessReaper", () => {
         commandDigest: "gone"
       })
     ).toBe("already-gone")
-    // Anything else is a kill that did NOT happen. A record carrying a number
-    // the operating system will not accept is the cheapest way to produce one
-    // without signalling a real process to prove it.
+    // Anything else is a kill that did NOT happen. A group id past the 32-bit
+    // range the kernel accepts is the cheapest way to produce one: it passes
+    // every record check and is still a number `process.kill` refuses.
     expect(
       ProcessReaper.posixSystem.killTree({
-        pid: 3,
-        pgid: 2.5,
+        pid: 4_294_967_296,
+        pgid: 4_294_967_296,
         hostId: "unsignalable",
         ownerPid: 2,
         startedAtMs: 0,
@@ -275,7 +531,7 @@ describe("ProcessReaper", () => {
     expect(withTaskkill(128, () => ProcessReaper.windowsSystem.killTree(windowsRecord))).toBe("already-gone")
     expect(withTaskkill(1, () => ProcessReaper.windowsSystem.killTree(windowsRecord))).toBe("failed")
 
-    expect(ProcessReaper.windowsSystem.startedAtMs(process.pid)).toBeUndefined()
+    expect(ProcessReaper.windowsSystem.startedAtMs(process.pid)).toEqual({ _tag: "unsupported" })
     expect(ProcessReaper.windowsSystem.ownGroup()).toBeNull()
     expect(ProcessReaper.systemFor("win32")).toBe(ProcessReaper.windowsSystem)
     expect(ProcessReaper.systemFor("darwin")).toBe(ProcessReaper.posixSystem)
@@ -403,7 +659,7 @@ describe("ProcessReaper", () => {
               ...ProcessReaper.posixSystem,
               // The operating system says this pid has been running for an
               // hour, so it is not the process the record describes.
-              startedAtMs: () => Date.now() - 3_600_000,
+              startedAtMs: () => ({ _tag: "started", startedAtMs: Date.now() - 3_600_000 }),
               killTree: (record) => {
                 killed.push(record.pid)
                 return "signalled"
@@ -430,12 +686,12 @@ describe("ProcessReaper", () => {
           yield* previous.record({ pid: group.leader, pgid: group.leader, commandDigest: "sh -c sleep" })
           const current = yield* ProcessLedger.make({ hostId: "stubborn-host", ownerPid: process.pid })
           const reaped = yield* ProcessReaper.reap({
-            // A platform that cannot read a start time has only the boot
+            // A platform with no start-time column at all has only the boot
             // check, which this record passes, so the kill is attempted and
             // its refusal is the whole subject of this case.
             system: {
               ...ProcessReaper.posixSystem,
-              startedAtMs: () => undefined,
+              startedAtMs: () => ({ _tag: "unsupported" }),
               killTree: () => "failed"
             }
           }).pipe(Effect.provideService(ProcessLedger.ProcessLedger, current))

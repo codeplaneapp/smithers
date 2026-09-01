@@ -111,6 +111,39 @@ describe("NodeHost.layerContained", () => {
       expect(yield* ledger.live).toEqual([])
     }))
 
+  /**
+   * `ContainedSpawner.Options.platform` decides only whether a child gets a
+   * process group of its own, and Effect's Node spawner decides that from the
+   * REAL `process.platform` whatever the ledger was told. A caller-supplied
+   * `"win32"` therefore used to win the spread and record `pgid: null` for a
+   * child that genuinely leads a group: the reaper then refuses that record as
+   * `no-group` and the orphan outlives every incarnation. The option is gone
+   * from the type, and this pins that a cast cannot put it back.
+   */
+  it.live("records the real process group even when a caller claims another platform", () =>
+    Effect.gen(function*() {
+      const spoofed = { graceMs: 300, platform: "win32" } as NodeHost.ContainedOptions
+      for (
+        const build of [
+          () => NodeHost.layerContained(spoofed),
+          () => NodeHost.layerContainedAt(realpathSync(tmpdir()), spoofed)
+        ]
+      ) {
+        const ledger = yield* ProcessLedger.makeMemory({ hostId: "spoofed", ownerPid: process.pid })
+        const host = build().pipe(Layer.provide(Layer.succeed(ProcessLedger.ProcessLedger)(ledger)))
+        const observed = yield* Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const handle = yield* spawner.spawn(ChildProcess.make("sleep", ["30"]))
+          return { pid: handle.pid as number, live: yield* ledger.live }
+        }).pipe(Effect.provide(host), Effect.scoped)
+
+        expect(observed.live).toEqual([
+          expect.objectContaining({ pid: observed.pid, pgid: observed.pid })
+        ])
+        expect(yield* Effect.promise(() => waitForExit(observed.pid, 2_000))).toBe(true)
+      }
+    }), 30_000)
+
   it.live("records the children `jj` starts, instead of letting them out the side", () =>
     Effect.gen(function*() {
       // `NodeJj.layer` spawns through `node:child_process` directly, so a jj

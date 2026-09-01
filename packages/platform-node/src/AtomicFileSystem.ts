@@ -28,17 +28,26 @@
  * {@link defaultLimits}, so neither a large file nor a malfunctioning helper
  * can make the host allocate without limit.
  *
+ * **Cost.** Every operation is one CPython fork, roughly 130 ms on a current
+ * host. That is the price of descriptor-relative confinement on a runtime with
+ * no `openat`, and it is why {@link Options.concurrency} exists: without a
+ * ceiling an `Effect.forEach(..., { concurrency: "unbounded" })` over fifty
+ * paths starts fifty interpreters at once. Batch a wide fan-out, and prefer one
+ * recursive `readDirectory` (one fork for the whole tree) to a read per entry.
+ * {@link Options.timeoutMs} is the wall-clock backstop underneath all of it.
+ *
  * @since 0.1.0
  */
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
-import { Effect, FileSystem, Layer, Option, PlatformError } from "effect"
+import { Effect, FileSystem, Layer, Option, PlatformError, Semaphore } from "effect"
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process"
 import { accessSync, constants, realpathSync, statSync } from "node:fs"
+import { availableParallelism } from "node:os"
 import { isAbsolute, relative } from "node:path"
 
 const helper = String.raw`
-import base64, errno, json, os, re, stat, sys
+import base64, errno, json, os, stat, sys
 
 PROTOCOL = "flows-atomic/1"
 # The header is read one byte at a time, so it is capped before anything is
@@ -49,6 +58,33 @@ HARD_CAP = 256 * 1024 * 1024
 MESSAGE_CAP = 4096
 CHUNK = 65536
 ENTRY_CAP = 100000
+# A recursive removal opens one descriptor per level, so the depth is bounded
+# rather than left to the process descriptor limit.
+REMOVE_DEPTH_CAP = 512
+# Glob grammar bounds. Brace expansion is multiplicative, so both the pattern
+# and the number of alternatives it produces are capped before any walking.
+BRACE_CAP = 64
+PATTERN_CAP = 4096
+
+# Glob segment token kinds, and the marker for a "**" segment.
+STAR = 0
+ANY = 1
+CLASS = 2
+LITERAL = 3
+GLOBSTAR = object()
+
+# The syscall the operation in flight would name in a Node ErrnoException.
+# Effect's own Node adapter sets syscall on every system error it reports, so a
+# caller that switches on it reads the same field from either adapter.
+SYSCALLS = {
+    "readFile": "open", "readFileString": "open",
+    "writeFile": "open", "writeFileString": "open",
+    "exists": "access", "stat": "stat", "readLink": "readlink",
+    "realPath": "realpath", "makeDirectory": "mkdir",
+    "readDirectory": "scandir", "glob": "scandir",
+    "remove": "unlink", "rename": "rename",
+}
+SYSCALL = [None]
 
 required_dir_fd = (os.open, os.mkdir, os.readlink, os.rename, os.rmdir, os.stat, os.unlink)
 if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
@@ -168,7 +204,7 @@ def open_file(root, path, flags, mode=0o666):
         raise
     return fd
 
-def list_dir(root, path, recursive, budget):
+def list_dir(root, path, recursive, budget, with_kind=False):
     if not parts(path):
         fd = os.dup(root)
     else:
@@ -213,10 +249,13 @@ def list_dir(root, path, recursive, budget):
         names.sort(key=lambda item: item[0])
         for entry, relative in names:
             info = os.stat(entry, dir_fd=current, follow_symlinks=False)
-            result.append(relative)
-            # The lstat above makes S_ISDIR false for a link to a directory,
-            # so this descends only into real subdirectories.
-            if recursive and stat.S_ISDIR(info.st_mode):
+            # The lstat makes S_ISDIR false for a link to a directory, so this
+            # descends only into real subdirectories — and the kind travels with
+            # the name, because glob needs it to answer a directory-only pattern
+            # without lstatting every candidate a second time.
+            directory = stat.S_ISDIR(info.st_mode)
+            result.append((relative, directory))
+            if recursive and directory:
                 child = os.open(entry, os.O_RDONLY | DIRECTORY | NOFOLLOW, dir_fd=current)
                 try:
                     result.extend(walk(child, relative))
@@ -224,73 +263,342 @@ def list_dir(root, path, recursive, budget):
                     os.close(child)
         return result
     try:
-        return walk(fd)
+        found = walk(fd)
     finally:
         os.close(fd)
+    return found if with_kind else [name for name, _ in found]
 
-def segment_regex(segment):
+def split_alternatives(body):
+    """The top-level members of a brace body, or None when there is no
+    top-level comma. "{a}" is literal text to a globber, not a one-member
+    alternation, so the caller leaves it alone."""
+    members = []
+    depth = 0
+    current = []
+    for char in body:
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        if char == "," and depth == 0:
+            members.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    if not members:
+        return None
+    members.append("".join(current))
+    return members
+
+def expand_braces(pattern):
+    """A pattern's brace alternations expanded into whole patterns.
+
+    Bounded by BRACE_CAP, because expansion is the one part of the grammar
+    whose cost is multiplicative in the pattern's own length. An UNBALANCED
+    brace is literal text rather than an error: that is what the globber this
+    adapter replaces does with it, and it matches nothing."""
     out = []
+    def walk(text):
+        index = 0
+        depth = 0
+        start = -1
+        while index < len(text):
+            char = text[index]
+            if char == "{":
+                if depth == 0:
+                    start = index
+                depth += 1
+            elif char == "}" and depth > 0:
+                depth -= 1
+                if depth == 0:
+                    members = split_alternatives(text[start + 1:index])
+                    if members is not None:
+                        for member in members:
+                            walk(text[:start] + member + text[index + 1:])
+                        return
+            index += 1
+        if len(out) >= BRACE_CAP:
+            raise BadArgument("glob pattern expands past %d alternatives" % BRACE_CAP)
+        out.append(text)
+    walk(pattern)
+    return out
+
+def class_token(segment, index):
+    """A "[...]" character class, and where the segment continues after it."""
+    cursor = index + 1
+    negated = False
+    if cursor < len(segment) and segment[cursor] in ("!", "^"):
+        negated = True
+        cursor += 1
+    ranges = []
+    first = True
+    while cursor < len(segment):
+        char = segment[cursor]
+        # A "]" in the FIRST position is a member, not the terminator, which is
+        # what makes "[]]" a class holding one bracket.
+        if char == "]" and not first:
+            return (CLASS, negated, tuple(ranges)), cursor + 1
+        first = False
+        if cursor + 2 < len(segment) and segment[cursor + 1] == "-" and segment[cursor + 2] != "]":
+            ranges.append((char, segment[cursor + 2]))
+            cursor += 3
+        else:
+            ranges.append((char, char))
+            cursor += 1
+    # Never closed, so the bracket is an ordinary character. "*.tx[t" matches
+    # nothing rather than failing, exactly as the native globber reads it.
+    return (LITERAL, "["), index + 1
+
+def compile_segment(segment):
+    """One path segment as a token list.
+
+    Tokens rather than a regular expression: "*" compiles to an independent
+    greedy "[^/]*" in a regex, so a pattern of repeated "*<char>" fragments
+    costs exponential backtracking. match_segment below is the classic
+    single-star backtracking matcher, which is O(len(name) * len(tokens))."""
+    tokens = []
     index = 0
     while index < len(segment):
         char = segment[index]
         if char == "*":
-            out.append("[^/]*")
+            # Consecutive stars inside one segment are one star: "a**b" is "a*b".
+            if not tokens or tokens[-1][0] != STAR:
+                tokens.append((STAR,))
         elif char == "?":
-            out.append("[^/]")
+            tokens.append((ANY,))
         elif char == "[":
-            end = segment.find("]", index + 1)
-            if end == -1:
-                out.append(re.escape(char))
-            else:
-                body = segment[index + 1:end]
-                out.append("[" + ("^" + body[1:] if body.startswith("!") else body) + "]")
-                index = end
+            token, index = class_token(segment, index)
+            tokens.append(token)
+            continue
         else:
-            out.append(re.escape(char))
+            tokens.append((LITERAL, char))
         index += 1
-    return "".join(out)
+    return tokens
 
-def glob_regex(pattern):
-    # fnmatch is not a glob: its "*" crosses "/", so "*.txt" would match
-    # "nested/text.txt" and "**/*.txt" would miss a top-level file. Translate
-    # segment by segment instead, so "*" and "?" stay inside one segment and
-    # "**" spans zero or more whole segments.
-    segments = [segment for segment in pattern.split("/") if segment != ""]
-    out = ""
-    for index, segment in enumerate(segments):
-        last = index == len(segments) - 1
-        if segment == "**":
-            out += "[^/]+(?:/[^/]+)*" if last else "(?:[^/]+/)*"
+def token_matches(token, char):
+    kind = token[0]
+    if kind == LITERAL:
+        return char == token[1]
+    if kind == ANY:
+        return True
+    inside = any(low <= char <= high for low, high in token[2])
+    return inside != token[1]
+
+def allows_leading_dot(tokens):
+    """Whether a segment SPELLS its leading dot rather than wildcarding it.
+
+    A literal "." does, and so does a character class that admits one: the
+    native globber matches ".dot.txt" with "[.]dot.txt". A "*", a "?", and a
+    class that does not admit "." do not, which is the whole dotfile rule."""
+    if not tokens:
+        return False
+    first = tokens[0]
+    if first[0] == LITERAL:
+        return first[1] == "."
+    return first[0] == CLASS and token_matches(first, ".")
+
+def match_segment(compiled, text):
+    tokens, allows_dot = compiled
+    # A leading dot is matched only by a pattern that spells one. A wildcard
+    # never reaches into a dotfile, which is the rule the native globber
+    # applies and the reason "**/*.txt" skips ".hidden/in.txt".
+    if text.startswith(".") and not allows_dot:
+        return False
+    count = len(tokens)
+    length = len(text)
+    position = 0
+    cursor = 0
+    star = -1
+    mark = 0
+    while cursor < length:
+        if position < count and tokens[position][0] != STAR and token_matches(tokens[position], text[cursor]):
+            position += 1
+            cursor += 1
+        elif position < count and tokens[position][0] == STAR:
+            star = position
+            mark = cursor
+            position += 1
+        elif star >= 0:
+            mark += 1
+            cursor = mark
+            position = star + 1
         else:
-            out += segment_regex(segment) + ("" if last else "/")
-    try:
-        return re.compile("\\A" + out + "\\Z")
-    except re.error as invalid:
-        # A character class the translation cannot close ("[]]") is caller
-        # input, not a host failure, so it is reported the way an unknown open
-        # flag is rather than as an opaque interpreter crash.
-        raise BadArgument("glob pattern is not translatable: " + str(invalid))
+            return False
+    while position < count and tokens[position][0] == STAR:
+        position += 1
+    return position == count
+
+def parse_pattern(pattern):
+    """A brace-free pattern as (segments, directory_only).
+
+    A trailing "/" is not noise: it makes the pattern name directories only,
+    which is the whole difference between "**/" and "**"."""
+    directory_only = pattern.endswith("/")
+    segments = []
+    for raw in pattern.split("/"):
+        if raw in ("", "."):
+            continue
+        if raw == "**":
+            if not segments or segments[-1] is not GLOBSTAR:
+                segments.append(GLOBSTAR)
+            continue
+        tokens = compile_segment(raw)
+        segments.append((tokens, allows_leading_dot(tokens)))
+    return segments, directory_only
+
+def match_segments(segments, directory_only, names, is_dir, anchor):
+    """Whether one parsed pattern names one entry.
+
+    The walk over "**" is a reachable-state sweep rather than a backtracking
+    search, so the cost is len(names) * len(segments) and never more."""
+    if directory_only and not is_dir:
+        return False
+    # A trailing "**" spans ZERO or more segments, so as a SELECTOR it names the
+    # anchor itself as well as everything below it: "nested/**" includes
+    # "nested". As an EXCLUDE it does not, which is the native globber's own
+    # asymmetry: excluding "nested/**" removes what is below "nested" and leaves
+    # the directory entry itself in the result.
+    trailing = bool(segments) and segments[-1] is GLOBSTAR
+    core = segments[:-1] if trailing else segments
+    def advance(index, out):
+        while True:
+            if index in out:
+                return
+            out.add(index)
+            if index < len(core) and core[index] is GLOBSTAR:
+                index += 1
+                continue
+            return
+    def accepts(consumed):
+        if consumed == len(names):
+            return anchor or not trailing
+        # Only a trailing "**" may span what is left, and it never crosses a
+        # dotted segment.
+        return trailing and all(not part.startswith(".") for part in names[consumed:])
+    states = set()
+    advance(0, states)
+    if len(core) in states and accepts(0):
+        return True
+    for position, part in enumerate(names):
+        following = set()
+        for index in states:
+            if index >= len(core):
+                continue
+            if core[index] is GLOBSTAR:
+                # "**" spans whole segments but never crosses into a dotted one.
+                if not part.startswith("."):
+                    advance(index, following)
+            elif match_segment(core[index], part):
+                advance(index + 1, following)
+        states = following
+        if not states:
+            return False
+        if len(core) in states and accepts(position + 1):
+            return True
+    return False
+
+class GlobMatcher:
+    """A compiled glob pattern, with its brace alternations expanded.
+
+    "anchor" is False for an exclusion, where a trailing "**" names what is
+    below a directory but not the directory entry itself."""
+    def __init__(self, pattern, anchor=True):
+        if len(pattern) > PATTERN_CAP:
+            raise BadArgument("glob pattern is longer than %d characters" % PATTERN_CAP)
+        self.alternatives = [parse_pattern(expanded) for expanded in expand_braces(pattern)]
+        self.anchor = anchor
+    def matches(self, names, is_dir):
+        for segments, directory_only in self.alternatives:
+            if match_segments(segments, directory_only, names, is_dir, self.anchor):
+                return True
+        return False
+
+def relative_pattern(pattern, root_path):
+    """A pattern rewritten relative to the glob root.
+
+    Both relpath and normpath drop a trailing slash, so it is put back: it is
+    the directory-only marker. Excludes go through this too, which is what
+    makes an ABSOLUTE exclude the caller passed apply to the same names the
+    selecting pattern is matched against."""
+    directory_only = pattern.endswith("/")
+    relative = (os.path.relpath(pattern, root_path) if os.path.isabs(pattern)
+                else os.path.normpath(pattern))
+    if relative == ".":
+        relative = ""
+    return relative + "/" if directory_only else relative
 
 def remove_at(directory, name, recursive):
     info = os.stat(name, dir_fd=directory, follow_symlinks=False)
     if stat.S_ISLNK(info.st_mode):
         raise OSError(errno.ELOOP, "symbolic links are outside the atomic boundary", name)
     if not stat.S_ISDIR(info.st_mode):
+        SYSCALL[0] = "unlink"
         os.unlink(name, dir_fd=directory)
         return
     if not recursive:
+        SYSCALL[0] = "rmdir"
         os.rmdir(name, dir_fd=directory)
         return
-    child = os.open(name, os.O_RDONLY | DIRECTORY | NOFOLLOW, dir_fd=directory)
+    remove_tree(directory, name)
+
+def remove_tree(directory, name):
+    """Removes a directory and everything below it, iteratively.
+
+    The bounds are the point. Recursion held one open descriptor per level and
+    listed each directory with os.listdir, so a deep tree hit the interpreter's
+    recursion limit or the process descriptor limit and a wide one was
+    materialized in full: both failed AFTER deleting part of the tree, with no
+    stated policy. The policy is stated here instead. Depth is bounded by
+    REMOVE_DEPTH_CAP, the total number of entries visited by ENTRY_CAP, and each
+    directory is read incrementally through scandir so a hostile wide directory
+    is refused after ENTRY_CAP names rather than allocated whole. Progress is
+    still partial on refusal — entries already unlinked stay unlinked — and
+    every descriptor is closed on every exit, refusal and interruption alike."""
+    visited = [0]
+    stack = []
     try:
-        for entry in os.listdir(child):
-            remove_at(child, entry, True)
+        stack.append([directory, name, os.open(name, os.O_RDONLY | DIRECTORY | NOFOLLOW, dir_fd=directory), None])
+        while stack:
+            frame = stack[-1]
+            holder, entry, fd, pending = frame
+            if pending is None:
+                pending = []
+                with os.scandir(fd) as iterator:
+                    for item in iterator:
+                        visited[0] += 1
+                        if visited[0] > ENTRY_CAP:
+                            raise OSError(errno.EFBIG, "directory tree has too many entries to remove", name)
+                        pending.append((item.name, item.is_symlink(), item.is_dir(follow_symlinks=False)))
+                frame[3] = pending
+            descended = False
+            while pending:
+                child, link, directory_child = pending.pop()
+                if link:
+                    raise OSError(errno.ELOOP, "symbolic links are outside the atomic boundary", child)
+                if directory_child:
+                    if len(stack) >= REMOVE_DEPTH_CAP:
+                        raise OSError(errno.EFBIG, "directory tree is deeper than the removal limit", name)
+                    stack.append([fd, child, os.open(child, os.O_RDONLY | DIRECTORY | NOFOLLOW, dir_fd=fd), None])
+                    descended = True
+                    break
+                SYSCALL[0] = "unlink"
+                os.unlink(child, dir_fd=fd)
+            if descended:
+                continue
+            stack.pop()
+            os.close(fd)
+            SYSCALL[0] = "rmdir"
+            os.rmdir(entry, dir_fd=holder)
     finally:
-        os.close(child)
-    os.rmdir(name, dir_fd=directory)
+        for _, _, fd, _ in stack:
+            os.close(fd)
 
 def main(request, content_limit, response_limit):
     operation = request["operation"]
+    # Set before anything runs, so a failure inside the walk to the target is
+    # still attributed to the syscall the OPERATION names. remove_at narrows it
+    # further, because unlink and rmdir are two different answers.
+    SYSCALL[0] = SYSCALLS.get(operation)
     options = request.get("options") or {}
     logical_root = request["logicalRoot"]
     def confined(path):
@@ -418,10 +726,20 @@ def main(request, content_limit, response_limit):
         if operation == "readDirectory":
             return list_dir(root, confined(request["path"]), bool(options.get("recursive")), response_limit)
         if operation == "remove":
-            directory, name = parent(root, confined(request["path"]))
+            force = bool(options.get("force"))
+            # Resolving the parent is INSIDE the force-aware handling, not
+            # before it: parent() opens every intermediate component, so a
+            # missing ancestor raised out here and force suppressed nothing.
+            # Node's fs.rm(..., { force: true }) succeeds for a path whose
+            # ancestors do not exist, and so does this.
+            try:
+                directory, name = parent(root, confined(request["path"]))
+            except FileNotFoundError:
+                if not force: raise
+                return None
             try: remove_at(directory, name, bool(options.get("recursive")))
             except FileNotFoundError:
-                if not options.get("force"): raise
+                if not force: raise
             finally: os.close(directory)
             return None
         if operation == "rename":
@@ -461,7 +779,11 @@ def main(request, content_limit, response_limit):
             return {"type": file_type(info.st_mode),
                     "mtime": info.st_mtime * 1000, "atime": info.st_atime * 1000,
                     "birthtime": None if birthtime is None else birthtime * 1000,
-                    "dev": info.st_dev, "ino": info.st_ino, "mode": stat.S_IMODE(info.st_mode),
+                    # The RAW st_mode, file-type bits included, because that is
+                    # what @effect/platform-node's stat returns and a caller
+                    # testing "mode & S_IFMT" has to get the same answer from
+                    # both. The "type" field above is the decoded convenience one.
+                    "dev": info.st_dev, "ino": info.st_ino, "mode": info.st_mode,
                     "nlink": info.st_nlink, "uid": info.st_uid, "gid": info.st_gid,
                     "rdev": info.st_rdev, "size": str(info.st_size),
                     "blksize": (None if getattr(info, "st_blksize", None) is None
@@ -469,18 +791,35 @@ def main(request, content_limit, response_limit):
                     "blocks": getattr(info, "st_blocks", None)}
         if operation == "glob":
             root_path = request["root"]
-            relative_pattern = os.path.relpath(request["pattern"], root_path)
-            # Translated before the tree is walked, so an untranslatable
-            # pattern costs no listing at all.
-            selected = glob_regex(relative_pattern)
-            excluded = [glob_regex(pattern) for pattern in options.get("exclude", [])]
-            names = list_dir(root, confined(root_path), True, response_limit)
+            # Compiled before the tree is walked, so a pattern past the grammar
+            # bounds costs no listing at all. Excludes are relativized exactly
+            # as the selecting pattern is: an absolute exclude that stayed
+            # absolute could never match a root-relative name, so the caller
+            # received the paths it had forbidden.
+            selected = GlobMatcher(relative_pattern(request["pattern"], root_path))
+            excluded = [GlobMatcher(relative_pattern(item, root_path), False)
+                        for item in options.get("exclude", [])]
+            entries = list_dir(root, confined(root_path), True, response_limit, True)
             matches = []
             total = 32
-            for name in names:
-                if not selected.match(name) or any(pattern.match(name) for pattern in excluded):
+            pruned = set()
+            # The pinned root is a candidate in its own right: "**" and "**/"
+            # both name it, exactly as the native globber returns "." for it.
+            for name, is_dir in [("", True)] + entries:
+                segments = name.split("/") if name else []
+                # An excluded directory takes its whole subtree with it, which
+                # is what excluding a directory means and what the native
+                # globber does. The listing is pre-order, so a parent is always
+                # decided before the entries below it.
+                if segments and "/".join(segments[:-1]) in pruned:
+                    pruned.add(name)
                     continue
-                match = os.path.join(root_path, name)
+                if any(pattern.matches(segments, is_dir) for pattern in excluded):
+                    pruned.add(name)
+                    continue
+                if not selected.matches(segments, is_dir):
+                    continue
+                match = os.path.join(root_path, name) if name else root_path
                 total += len(json.dumps(match, ensure_ascii=False).encode("utf-8")) + 1
                 if total > response_limit:
                     raise OSError(errno.EFBIG, "glob result exceeds the response limit", root_path)
@@ -552,6 +891,7 @@ except BaseException as error:
     number = getattr(error, "errno", None)
     respond({"ok": False,
              "code": errno.errorcode.get(number) if isinstance(number, int) else None,
+             "syscall": SYSCALL[0],
              "badArgument": isinstance(error, BadArgument),
              "message": str(error)[:MESSAGE_CAP]}, response_limit)
 `
@@ -587,8 +927,15 @@ export const defaultExecutable = "/usr/bin/python3"
  * - `request` bounds the framed request; an over-limit request is refused
  *   before an interpreter is even started.
  * - `response` bounds the framed response, and is what a directory listing is
- *   charged against as it is built.
+ *   charged against as it is built. It bounds the REJECTION envelope too, so a
+ *   ceiling small enough to cut one off degrades that operation's typed reason
+ *   to the fail-closed one.
  * - `stderr` bounds the diagnostic text retained from a failing helper.
+ *
+ * These four are byte ceilings. The two ceilings that decide whether the host
+ * survives a wide fan-out are {@link Options.concurrency}, which bounds how
+ * many interpreters run at once, and {@link Options.timeoutMs}, which bounds
+ * how long any one of them may take.
  *
  * @since 0.1.0
  * @category models
@@ -616,10 +963,33 @@ export const defaultLimits: Limits = {
 }
 
 /**
+ * The default number of helper processes that may run at once:
+ * `os.availableParallelism()`.
+ *
+ * @since 1.0.0-rc.0
+ * @category constants
+ */
+export const defaultConcurrency: number = availableParallelism()
+
+/**
+ * How long one helper may run before it is killed and the operation fails
+ * closed: five minutes.
+ *
+ * It is a backstop, not a latency budget. A read at the content ceiling over a
+ * slow disk has to fit under it, so it is generous; what it bounds is a helper
+ * that will never answer at all.
+ *
+ * @since 1.0.0-rc.0
+ * @category constants
+ */
+export const defaultTimeoutMs = 300_000
+
+/**
  * The deliberate seam for a POSIX host that installs CPython somewhere other
- * than {@link defaultExecutable}, or that needs different byte ceilings. It is
- * configuration, never discovery: the value is validated as an absolute,
- * executable regular file outside the confined workspace on every request.
+ * than {@link defaultExecutable}, or that needs different ceilings. It is
+ * configuration, never discovery: the executable is validated as an absolute,
+ * executable regular file outside the confined workspace on every request, and
+ * every other field is read ONCE, when the layer is built.
  *
  * @since 0.1.0
  * @category models
@@ -627,12 +997,42 @@ export const defaultLimits: Limits = {
 export interface Options {
   readonly executable?: string | undefined
   readonly limits?: Partial<Limits> | undefined
+  /**
+   * How many helper processes may run at once. Default
+   * {@link defaultConcurrency}.
+   *
+   * Every operation is one CPython fork, which costs roughly 130 ms on a
+   * current host, so an unbounded `Effect.forEach` over a directory would start
+   * one interpreter per entry. This ceiling is what keeps a wide fan-out from
+   * pinning every core; it is a contract, not a tuning knob.
+   */
+  readonly concurrency?: number | undefined
+  /**
+   * How long one helper may run before it is killed and the operation fails
+   * closed, in milliseconds. Default {@link defaultTimeoutMs}.
+   */
+  readonly timeoutMs?: number | undefined
+}
+
+/**
+ * Everything read out of {@link Options} once, when the layer is built.
+ *
+ * Snapshotted rather than re-read per request: `Options` is a plain object the
+ * caller still holds, and a byte ceiling that changes under a running host is
+ * not a ceiling. The executable is deliberately NOT here — it is re-validated
+ * per request, because the file it names can be replaced while the host runs.
+ */
+interface Settings {
+  readonly limits: Limits
+  readonly timeoutMs: number
+  readonly semaphore: Semaphore.Semaphore
 }
 
 interface HelperResult {
   readonly ok: boolean
   readonly value?: unknown
   readonly code?: string | null
+  readonly syscall?: string | null
   readonly badArgument?: boolean
   readonly message?: string
 }
@@ -696,6 +1096,10 @@ const failure = (
     module: moduleName,
     method,
     pathOrDescriptor: request.path ?? request.from ?? request.pattern,
+    // `@effect/platform-node` sets `syscall` on every system error it reports,
+    // so a consumer that switches on it has to read the same field here. A
+    // transport failure names no syscall, because no syscall ran.
+    syscall: rejection?.syscall ?? undefined,
     _tag: code === undefined ? "PermissionDenied" : reasons[code] ?? "Unknown",
     // The cause is repeated into the description because a fail-closed refusal
     // that says only "failed closed" is unactionable: an absent interpreter, a
@@ -758,6 +1162,30 @@ const resolveLimits = (overrides: Partial<Limits> | undefined): Limits => {
   return limits
 }
 
+/**
+ * Reads the whole of {@link Options} once, at layer construction.
+ *
+ * A rejected value is carried rather than thrown, because the failure a caller
+ * sees for it is a typed `BadArgument` on the first operation and not an
+ * exception escaping a layer.
+ */
+const resolveSettings = (options: Options): Settings | { readonly invalid: unknown } => {
+  try {
+    const limits = resolveLimits(options.limits)
+    const concurrency = options.concurrency ?? defaultConcurrency
+    if (!Number.isSafeInteger(concurrency) || concurrency <= 0) {
+      throw new Error("atomic helper concurrency must be a positive integer")
+    }
+    const timeoutMs = options.timeoutMs ?? defaultTimeoutMs
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
+      throw new Error("atomic helper timeoutMs must be a positive integer")
+    }
+    return { limits, timeoutMs, semaphore: Semaphore.makeUnsafe(concurrency) }
+  } catch (invalid) {
+    return { invalid }
+  }
+}
+
 const decode = (frame: Buffer, limits: Limits): HelperResult => {
   const newline = frame.indexOf(10)
   if (newline < 0 || newline >= frameHeaderBytes) {
@@ -789,6 +1217,9 @@ const decode = (frame: Buffer, limits: Limits): HelperResult => {
   }
   if (value.code !== undefined && value.code !== null && typeof value.code !== "string") {
     throw new Error("atomic helper response carries a non-string error code")
+  }
+  if (value.syscall !== undefined && value.syscall !== null && typeof value.syscall !== "string") {
+    throw new Error("atomic helper response carries a non-string syscall")
   }
   if (value.badArgument !== undefined && typeof value.badArgument !== "boolean") {
     throw new Error("atomic helper response carries a non-boolean badArgument flag")
@@ -970,9 +1401,10 @@ const spawnHelper = <A>(
   request: KernelFileSystem.AtomicRequest,
   executable: string,
   payload: Buffer,
-  limits: Limits
+  settings: Settings
 ): Effect.Effect<A, PlatformError.PlatformError> =>
   Effect.callback<A, PlatformError.PlatformError>((resume) => {
+    const limits = settings.limits
     let settled = false
     const stdout: Array<Buffer> = []
     let stdoutBytes = 0
@@ -1014,7 +1446,11 @@ const spawnHelper = <A>(
       resume(Effect.fail(failure(request, cause)))
       return Effect.void
     }
+    // `deadline` is armed below, after the completion it resumes through
+    // exists. Reading it here is safe because nothing calls `cleanup` before
+    // then: the one earlier exit, a spawn that threw, resumes and returns.
     const cleanup = () => {
+      clearTimeout(deadline)
       child.stdin.destroy()
       child.stdout.destroy()
       child.stderr.destroy()
@@ -1028,6 +1464,17 @@ const spawnHelper = <A>(
       cleanup()
       resume(effect)
     }
+    // A wall-clock backstop, independent of every byte ceiling. Those bound
+    // what a helper may SAY; nothing bounds how long it may take to say it, and
+    // a helper that never answers would otherwise hold the fiber until the run
+    // itself is interrupted.
+    const deadline = setTimeout(() => {
+      complete(Effect.fail(failure(
+        request,
+        new Error(`atomic helper did not answer within ${settings.timeoutMs} ms`)
+      )))
+    }, settings.timeoutMs)
+    deadline.unref()
     // Raw buffers, never decoded strings: a chunk boundary in the middle of a
     // multi-byte character would otherwise be decoded as two replacement
     // characters before the JSON parse ever saw it. Concatenating once at the
@@ -1120,15 +1567,13 @@ const spawnHelper = <A>(
     return Effect.sync(cleanup)
   })
 
-const execute = (options: Options) =>
+const execute = (options: Options, resolved: Settings | { readonly invalid: unknown }) =>
 <A>(
   request: KernelFileSystem.AtomicRequest
 ): Effect.Effect<A, PlatformError.PlatformError> =>
   Effect.suspend(() => {
-    let limits: Limits
-    try {
-      limits = resolveLimits(options.limits)
-    } catch (cause) {
+    if ("invalid" in resolved) {
+      const cause = resolved.invalid
       return Effect.fail(PlatformError.badArgument({
         module: moduleName,
         method: request.operation,
@@ -1136,6 +1581,7 @@ const execute = (options: Options) =>
         cause
       }))
     }
+    const limits = resolved.limits
     let body: Buffer
     try {
       const serialized = JSON.stringify(request)
@@ -1170,29 +1616,42 @@ const execute = (options: Options) =>
     } catch (cause) {
       return Effect.fail(failure(request, cause))
     }
-    return spawnHelper<A>(
+    // The permit is taken around the CHILD and nothing else, so a request
+    // refused before an interpreter exists never queues behind one.
+    return resolved.semaphore.withPermits(1)(spawnHelper<A>(
       request,
       executable,
       Buffer.concat([header, body], header.byteLength + body.byteLength),
-      limits
-    )
+      resolved
+    ))
   })
 
 /**
  * A Node filesystem layer carrying the kernel's atomic host extension, built
- * against an explicitly configured interpreter and set of byte limits.
+ * against an explicitly configured interpreter, byte limits, process ceiling,
+ * and helper timeout.
+ *
+ * Every field of {@link Options} except `executable` is read once, here. The
+ * concurrency ceiling is one semaphore for the whole layer rather than one per
+ * request, which is the only arrangement that bounds anything.
  *
  * @since 0.1.0
  * @category layers
  */
-export const layerWith = (options: Options): Layer.Layer<FileSystem.FileSystem> =>
-  Layer.effect(
+export const layerWith = (options: Options): Layer.Layer<FileSystem.FileSystem> => {
+  // Outside the layer body on purpose. Inside it the settings would be read
+  // again on every BUILD, so two compositions of the same layer value could
+  // enforce two different ceilings out of one mutated object, and each would
+  // get a process ceiling of its own instead of sharing one.
+  const settings = resolveSettings(options)
+  return Layer.effect(
     FileSystem.FileSystem,
     Effect.map(
       FileSystem.FileSystem,
-      (fileSystem) => KernelFileSystem.withAtomicFileSystem(fileSystem, { execute: execute(options) })
+      (fileSystem) => KernelFileSystem.withAtomicFileSystem(fileSystem, { execute: execute(options, settings) })
     )
   ).pipe(Layer.provide(NodeFileSystem.layer))
+}
 
 /** A Node filesystem layer carrying the kernel's atomic host extension.
  *

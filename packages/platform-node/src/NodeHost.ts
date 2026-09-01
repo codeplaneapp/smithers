@@ -63,6 +63,39 @@ export type NodeHost = FileSystem | Path.Path | ChildProcessSpawner | Jj | HttpC
 const platform = Layer.mergeAll(AtomicFileSystem.layer, Path.layer)
 
 /**
+ * What a caller may configure about a contained Node host.
+ *
+ * `platform` is deliberately absent. `ContainedSpawner.Options` declares it so a
+ * caller that supplies its own spawner can describe one, but here the spawner
+ * IS Effect's Node spawner, which detaches by `process.platform` whatever a
+ * record claims. A caller-supplied `"win32"` on a POSIX host would therefore
+ * record `pgid: null` for a child that really does lead a group, and
+ * {@link ProcessReaper.reap} would retire that record as `no-group` and leave
+ * the orphan running forever — a durable lie rather than a compile error.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type ContainedOptions = Omit<ContainedSpawner.Options, "platform"> & ProcessReaper.Options
+
+/**
+ * The spawner half of {@link ContainedOptions}, with the REAL platform last.
+ *
+ * Split from the reaper half rather than passed as one merged object, so a
+ * property meant for one of them can never be read by the other.
+ */
+const containment = (options?: ContainedOptions): ContainedSpawner.Options => ({
+  graceMs: options?.graceMs,
+  platform: process.platform
+})
+
+/** The reaper half of {@link ContainedOptions}. */
+const reaping = (options?: ContainedOptions): ProcessReaper.Options => ({
+  ownerPid: options?.ownerPid,
+  system: options?.system
+})
+
+/**
  * Provides the default Node implementations for the whole closed Host surface.
  *
  * @category layers
@@ -116,10 +149,10 @@ export const layerAt = (repositoryRoot: string): Layer.Layer<NodeHost> =>
  * @since 0.1.0
  */
 export const layerContained = (
-  options?: ContainedSpawner.Options & ProcessReaper.Options
+  options?: ContainedOptions
 ): Layer.Layer<NodeHost, never, ProcessLedger.ProcessLedger> => {
   const spawner = Layer.provide(
-    ContainedSpawner.layer({ platform: process.platform, ...options }),
+    ContainedSpawner.layer(containment(options)),
     Layer.provide(NodeChildProcessSpawner.layer, platform)
   )
   return Layer.mergeAll(
@@ -131,7 +164,7 @@ export const layerContained = (
     // recorded process group, appears in no ledger, and survives the
     // incarnation that started it.
     Layer.provideMerge(NodeJj.layerSpawner, spawner)
-  ).pipe(Layer.provideMerge(ProcessReaper.layer(options)))
+  ).pipe(Layer.provideMerge(ProcessReaper.layer(reaping(options))))
 }
 
 /**
@@ -143,15 +176,15 @@ export const layerContained = (
  */
 export const layerContainedAt = (
   repositoryRoot: string,
-  options?: ContainedSpawner.Options & ProcessReaper.Options
+  options?: ContainedOptions
 ): Layer.Layer<NodeHost, never, ProcessLedger.ProcessLedger> => {
   const spawner = Layer.provide(
-    ContainedSpawner.layer({ platform: process.platform, ...options }),
+    ContainedSpawner.layer(containment(options)),
     Layer.provide(NodeChildProcessSpawner.layer, platform)
   )
   return Layer.mergeAll(
     platform,
     NodeHttpClient.layerUndici,
     Layer.provideMerge(NodeJj.layerSpawnerAt(repositoryRoot), spawner)
-  ).pipe(Layer.provideMerge(ProcessReaper.layer(options)))
+  ).pipe(Layer.provideMerge(ProcessReaper.layer(reaping(options))))
 }

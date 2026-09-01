@@ -40,6 +40,39 @@ afterEach(async () => {
   directories.clear()
 })
 
+/** Whether nothing is at `path` any more. */
+const gone = (path: string) => lstat(path).then(() => false, () => true)
+
+/**
+ * Removes a chain of nested `d` directories descriptor-relative.
+ *
+ * A tree deeper than PATH_MAX cannot be named, so `rm -rf` and `fs.rm` both
+ * fail on it. The suite builds one deliberately, and this is how it takes it
+ * back down.
+ */
+const unwind = (base: string) =>
+  promisify(execFile)(AtomicFileSystem.defaultExecutable, [
+    "-I",
+    "-c",
+    [
+      "import os, sys",
+      "stack = [os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY)]",
+      "while True:",
+      "    try:",
+      "        stack.append(os.open('d', os.O_RDONLY | os.O_DIRECTORY, dir_fd=stack[-1]))",
+      "    except FileNotFoundError:",
+      "        break",
+      "for name in os.listdir(stack[-1]):",
+      "    os.unlink(name, dir_fd=stack[-1])",
+      "while len(stack) > 1:",
+      "    os.close(stack.pop())",
+      "    os.rmdir('d', dir_fd=stack[-1])",
+      "os.close(stack[0])",
+      "os.rmdir(sys.argv[1])"
+    ].join("\n"),
+    base
+  ]).then(() => undefined)
+
 const guarded = (root: string, host: Layer.Layer<FileSystem.FileSystem> = AtomicFileSystem.layer) =>
   KernelFileSystem.layer.pipe(
     Layer.provide(host),
@@ -199,7 +232,12 @@ describe("Node atomic filesystem", () => {
       // named as the listing target or as a glob root.
       expect(result.listing._tag).toBe("Failure")
       expect(result.rootedGlob._tag).toBe("Failure")
-      expect(result.matched).toEqual([])
+      // A trailing `**` names the anchor itself as well as everything below
+      // it, which is what the native globber does, so the swapped entry's own
+      // name is returned. Nothing BELOW it is, which is the confinement claim:
+      // the listing never descended through the symlink, and reading the name
+      // that came back is itself refused as a symlink.
+      expect(result.matched).toEqual([gate])
       expect(result.everything).toContain("gate")
       expect(result.everything.some((entry) => entry.startsWith("gate/"))).toBe(false)
       expect(yield* Effect.promise(() => readFile(join(outside, "victim.txt"), "utf8"))).toBe("outside")
@@ -566,7 +604,7 @@ describe("Node atomic filesystem", () => {
    */
   it.live("selects and excludes the same paths the native globber does", () =>
     Effect.gen(function*() {
-      const patterns: ReadonlyArray<readonly [string, ReadonlyArray<string> | undefined]> = [
+      const patterns = (root: string): ReadonlyArray<readonly [string, ReadonlyArray<string> | undefined]> => [
         ["*.txt", undefined],
         ["**/*.txt", undefined],
         ["nested/*", undefined],
@@ -577,13 +615,67 @@ describe("Node atomic filesystem", () => {
         ["nested/?id.txt", undefined],
         ["**/*.[tl]??", undefined],
         ["**/*.[!l]??", undefined],
-        ["**/*.txt", ["**"]]
+        ["**/*.txt", ["**"]],
+        // An exclude the caller passed as an ABSOLUTE path, which the kernel
+        // forwards verbatim while it normalizes the pattern. It used to match
+        // nothing at all, so the caller received the paths it had forbidden.
+        ["**/*.txt", [join(root, "nested", "**")]],
+        ["**/*.txt", [join(root, "nested")]],
+        // Excluding a directory excludes its subtree, not just its own entry.
+        ["**/*.txt", ["nested"]],
+        ["**/*.txt", ["nested/"]],
+        ["**/*.txt", ["**/deep"]],
+        ["**/*.txt", ["*"]],
+        // Matched against the whole relative name, so a bare basename does not.
+        ["**/*.txt", ["mid.txt"]],
+        ["**/*.txt", ["**/mid.txt"]],
+        // Brace alternation, which used to compile to literal braces and match
+        // nothing.
+        ["{top,a-b}.txt", undefined],
+        ["**/{mid,low}.txt", undefined],
+        ["**/*.{txt,log}", undefined],
+        ["{nested,.}/*.txt", undefined],
+        ["nested/{deep,}/*", undefined],
+        // An unbalanced brace is literal text, not a failure.
+        ["{a,b", undefined],
+        ["*.tx[t", undefined],
+        // A trailing slash selects directories only, and "**" spans zero
+        // segments, so both of these name the glob root itself.
+        ["**/", undefined],
+        ["nested/", undefined],
+        ["nested/**", undefined],
+        ["nested/**/", undefined],
+        ["**", undefined],
+        ["**/**", undefined],
+        ["*", undefined],
+        ["[tn]*", undefined],
+        ["**/*", undefined],
+        ["top.txt/**", undefined],
+        ["nested/../*.txt", undefined],
+        ["./*.txt", undefined],
+        // The dotfile rule: a wildcard never reaches into a name that starts
+        // with a dot, but a segment that SPELLS the dot does, including inside
+        // a character class.
+        [".*", undefined],
+        [".hidden/*", undefined],
+        ["[.]dot.txt", undefined],
+        ["[.]*", undefined],
+        // Excluding a directory's contents leaves the directory entry itself,
+        // which is the native globber's own asymmetry between a trailing "**"
+        // used to select and one used to exclude.
+        ["**/*", ["nested/**"]],
+        ["**/*", ["nested"]]
       ]
       const seed = async () => {
         const root = await temporaryDirectory()
         await mkdir(join(root, "nested", "deep"), { recursive: true })
+        await mkdir(join(root, ".hidden"), { recursive: true })
         await writeFile(join(root, "top.txt"), "")
+        await writeFile(join(root, "a-b.txt"), "")
+        await writeFile(join(root, ".dot.txt"), "")
+        await writeFile(join(root, ".hidden", "in.txt"), "")
         await writeFile(join(root, "nested", "mid.txt"), "")
+        await writeFile(join(root, "nested", ".deep.txt"), "")
         await writeFile(join(root, "nested", "deep", "low.txt"), "")
         await writeFile(join(root, "nested", "skip.log"), "")
         return root
@@ -597,7 +689,7 @@ describe("Node atomic filesystem", () => {
         Effect.gen(function*() {
           const root = yield* Effect.promise(() => seed())
           const rows: Array<string> = []
-          for (const [pattern, exclude] of patterns) {
+          for (const [index, [pattern, exclude]] of patterns(root).entries()) {
             const found = yield* execute(
               root,
               Effect.flatMap(
@@ -605,8 +697,11 @@ describe("Node atomic filesystem", () => {
                 (fs) => Effect.orDie(fs.glob(join(root, pattern), exclude === undefined ? { root } : { exclude, root }))
               )
             )
+            // Labelled by row index rather than by the exclude list: the two
+            // runs seed two different roots, and an absolute exclude would put
+            // one of them into the label and make every row differ.
             rows.push(
-              `${pattern} !${exclude?.join(",") ?? ""} -> ${found.map((v) => relative(root, v)).sort().join(" ")}`
+              `${index} ${pattern} -> ${found.map((v) => relative(root, v) || ".").sort().join(" ")}`
             )
           }
           return rows
@@ -615,6 +710,53 @@ describe("Node atomic filesystem", () => {
       expect(yield* matches((root, effect) => run(root, effect))).toEqual(
         yield* matches((_root, effect) => effect.pipe(Effect.provide(NodeFileSystem.layer)))
       )
+    }), 60_000)
+
+  /**
+   * Two grammar answers are pinned here rather than against the native
+   * globber, because the native globber does not agree with ITSELF about them
+   * across the supported Node range: on 22.19.0 a dotted segment after `**`
+   * matches nothing at all, and on 24 it matches the dotfiles. The adapter
+   * follows the newer reading, which is the one a caller can reason about: a
+   * pattern that spells the dot finds the dotfile, wherever it sits.
+   *
+   * Everything the adapter does NOT implement is pinned here too, as one
+   * documented answer instead of a silent partial one: extglob (`+(a|b)`),
+   * POSIX classes (`[[:digit:]]`), numeric brace ranges (`{1..3}`), and
+   * backslash escaping all read as ordinary characters and match nothing.
+   */
+  it.live("pins the glob answers the native globber cannot be compared on", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      yield* Effect.promise(() => mkdir(join(root, "nested")))
+      yield* Effect.promise(() => writeFile(join(root, "a.txt"), ""))
+      yield* Effect.promise(() => writeFile(join(root, "1.txt"), ""))
+      yield* Effect.promise(() => writeFile(join(root, ".dot.txt"), ""))
+      yield* Effect.promise(() => writeFile(join(root, "nested", ".deep.txt"), ""))
+
+      const found = yield* run(
+        root,
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          const glob = (pattern: string) =>
+            Effect.map(fs.glob(join(root, pattern), { root }), (rows) => rows.map((v) => relative(root, v)).sort())
+          return {
+            dottedAfterGlobstar: yield* glob("**/.*"),
+            dottedLeafAfterGlobstar: yield* glob("**/.deep.txt"),
+            extglob: yield* glob("+(a|b).txt"),
+            posixClass: yield* glob("[[:digit:]].txt"),
+            braceRange: yield* glob("{1..3}.txt"),
+            escaped: yield* glob("\\a.txt")
+          }
+        })
+      )
+
+      expect(found.dottedAfterGlobstar).toEqual([".dot.txt", "nested/.deep.txt"])
+      expect(found.dottedLeafAfterGlobstar).toEqual(["nested/.deep.txt"])
+      expect(found.extglob).toEqual([])
+      expect(found.posixClass).toEqual([])
+      expect(found.braceRange).toEqual([])
+      expect(found.escaped).toEqual([])
     }))
 
   it.live("classifies flag, encoding, and errno failures the way the native filesystem does", () =>
@@ -662,6 +804,212 @@ describe("Node atomic filesystem", () => {
       expect(outcome.notEmpty.reason._tag).toBe("Unknown")
       expect(yield* Effect.promise(() => readFile(target, "utf8"))).toBe("seed")
     }))
+
+  /**
+   * Effect's own Node adapter puts the failing syscall on every system error it
+   * reports, so a consumer that switches on `syscall` has to read the same
+   * field from the atomic adapter. It used to be absent, which made the two
+   * adapters interchangeable everywhere except in error handling.
+   */
+  it.live("names the failing syscall on a system error, the way the native adapter does", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      const missing = join(root, "absent", "file.txt")
+      const syscall = (failure: { readonly reason: unknown }) =>
+        (failure.reason as { readonly syscall?: string }).syscall
+
+      const outcome = yield* run(
+        root,
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          return {
+            read: yield* Effect.flip(fs.readFile(missing)),
+            makeDirectory: yield* Effect.flip(fs.makeDirectory(missing)),
+            rename: yield* Effect.flip(fs.rename(missing, join(root, "moved.txt"))),
+            stat: yield* Effect.flip(fs.stat(missing)),
+            remove: yield* Effect.flip(fs.remove(join(root, "absent-leaf.txt")))
+          }
+        })
+      )
+
+      expect(syscall(outcome.read)).toBe("open")
+      expect(syscall(outcome.makeDirectory)).toBe("mkdir")
+      expect(syscall(outcome.rename)).toBe("rename")
+      expect(syscall(outcome.stat)).toBe("stat")
+      expect(syscall(outcome.remove)).toBe("unlink")
+      // The native adapter names one too, for the same operation.
+      const native = yield* Effect.flatMap(
+        FileSystem.FileSystem,
+        (fs) => Effect.flip(fs.readFile(missing))
+      ).pipe(Effect.provide(NodeFileSystem.layer))
+      expect(syscall(native)).toBe("open")
+    }))
+
+  /**
+   * `force: true` means "the end state is that this path does not exist", and
+   * `fs.rm` reaches that state for a path whose ANCESTORS do not exist either.
+   * The atomic helper resolved the parent before it entered the force-aware
+   * branch, so it reported ENOENT for exactly the shape force exists to cover.
+   */
+  it.live(
+    "removes the same shapes with and without force that the native filesystem does",
+    () =>
+      Effect.gen(function*() {
+        const shapes = ["missing-leaf.txt", "absent/child.txt", "absent/deeper/child.txt"] as const
+        const outcome = (force: boolean, recursive: boolean) =>
+          Effect.gen(function*() {
+            const rows: Array<string> = []
+            for (const shape of shapes) {
+              const root = yield* Effect.promise(() => temporaryDirectory())
+              const attempt = Effect.flatMap(
+                FileSystem.FileSystem,
+                (fs) => Effect.result(fs.remove(join(root, shape), { force, recursive }))
+              )
+              const atomic = yield* run(root, attempt)
+              const native = yield* attempt.pipe(Effect.provide(NodeFileSystem.layer))
+              rows.push(`${shape} force=${force} recursive=${recursive} ${atomic._tag} ${native._tag}`)
+              expect(atomic._tag, `${shape} force=${force} recursive=${recursive}`).toBe(native._tag)
+            }
+            return rows
+          })
+
+        expect(yield* outcome(true, true)).toEqual([
+          "missing-leaf.txt force=true recursive=true Success Success",
+          "absent/child.txt force=true recursive=true Success Success",
+          "absent/deeper/child.txt force=true recursive=true Success Success"
+        ])
+        expect(yield* outcome(true, false)).toEqual([
+          "missing-leaf.txt force=true recursive=false Success Success",
+          "absent/child.txt force=true recursive=false Success Success",
+          "absent/deeper/child.txt force=true recursive=false Success Success"
+        ])
+        // Without force every one of them still fails, on both adapters.
+        expect(yield* outcome(false, true)).toEqual([
+          "missing-leaf.txt force=false recursive=true Failure Failure",
+          "absent/child.txt force=false recursive=true Failure Failure",
+          "absent/deeper/child.txt force=false recursive=true Failure Failure"
+        ])
+      }),
+    60_000
+  )
+
+  /**
+   * `stat` used to mask st_mode down to its permission bits, so the same
+   * `FileSystem.stat` call answered 420 through the atomic path and 33188
+   * through the raw one. A caller testing `mode & S_IFMT` got a correct answer
+   * from one adapter and zero from the other.
+   */
+  it.live("reports every stat field the native adapter reports, mode bits included", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      yield* Effect.promise(() => writeFile(join(root, "plain.txt"), "seed"))
+      yield* Effect.promise(() => writeFile(join(root, "runnable.sh"), "#!/bin/sh\n"))
+      yield* Effect.promise(() => chmod(join(root, "runnable.sh"), 0o755))
+      yield* Effect.promise(() => mkdir(join(root, "directory")))
+
+      const targets = ["plain.txt", "runnable.sh", "directory"] as const
+      const read = Effect.forEach(
+        targets,
+        (name) => Effect.flatMap(FileSystem.FileSystem, (fs) => fs.stat(join(root, name)))
+      )
+      const atomic = yield* run(root, read)
+      const native = yield* read.pipe(Effect.provide(NodeFileSystem.layer))
+
+      for (const [index, name] of targets.entries()) {
+        const mine = atomic[index] as FileSystem.File.Info
+        const theirs = native[index] as FileSystem.File.Info
+        expect(mine.mode, name).toBe(theirs.mode)
+        expect(mine.type, name).toBe(theirs.type)
+        expect(mine.dev, name).toBe(theirs.dev)
+        expect(mine.ino, name).toEqual(theirs.ino)
+        expect(mine.nlink, name).toEqual(theirs.nlink)
+        expect(mine.uid, name).toEqual(theirs.uid)
+        expect(mine.gid, name).toEqual(theirs.gid)
+        expect(mine.rdev, name).toEqual(theirs.rdev)
+        expect(mine.size, name).toEqual(theirs.size)
+      }
+      // The file-type bits survive, which is what the mask used to discard.
+      expect((atomic[0] as FileSystem.File.Info).mode & 0o170000).toBe(0o100000)
+      expect((atomic[2] as FileSystem.File.Info).mode & 0o170000).toBe(0o040000)
+      expect((atomic[1] as FileSystem.File.Info).mode & 0o777).toBe(0o755)
+    }))
+
+  /**
+   * Recursive removal used to recurse in the helper and list each directory in
+   * full, so a deep tree hit the interpreter's recursion limit and a wide one
+   * was materialized whole. Both are bounded now, and the outcome is one
+   * documented result rather than either of two.
+   */
+  it.live("removes a wide and a deep tree, and refuses one past the depth bound", () =>
+    Effect.gen(function*() {
+      const root = yield* Effect.promise(() => temporaryDirectory())
+      const wide = join(root, "wide")
+      yield* Effect.promise(() => mkdir(wide))
+      yield* Effect.promise(async () => {
+        for (let index = 0; index < 2_000; index += 1) {
+          await writeFile(join(wide, `entry-${index}.txt`), "")
+        }
+      })
+      // Built descriptor-relative, because these depths overrun PATH_MAX and
+      // no path-based mkdir can reach them. That is also the point: the
+      // removal walk is descriptor-relative, so it can delete a tree the
+      // ordinary tools cannot even name.
+      const chain = (depth: number, name: string) => {
+        const base = join(root, name)
+        return Effect.promise(async () => {
+          await mkdir(base)
+          await promisify(execFile)(AtomicFileSystem.defaultExecutable, [
+            "-I",
+            "-c",
+            [
+              "import os, sys",
+              "fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY)",
+              "for _ in range(int(sys.argv[2])):",
+              "    os.mkdir('d', dir_fd=fd)",
+              "    nxt = os.open('d', os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)",
+              "    os.close(fd)",
+              "    fd = nxt",
+              "os.close(os.open('leaf.txt', os.O_WRONLY | os.O_CREAT, 0o644, dir_fd=fd))",
+              "os.close(fd)"
+            ].join("\n"),
+            base,
+            String(depth)
+          ])
+          return base
+        })
+      }
+      // Comfortably inside the 512-level ceiling, and far past the depth the
+      // old recursive helper could reach without exhausting the interpreter.
+      const deep = yield* chain(400, "deep")
+      // Past the ceiling, so it is refused with a typed reason instead of
+      // half-deleting the tree and reporting an interpreter crash.
+      const beyond = yield* chain(600, "beyond")
+
+      const outcome = yield* run(
+        root,
+        Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          return {
+            wide: yield* Effect.result(fs.remove(wide, { recursive: true })),
+            deep: yield* Effect.result(fs.remove(deep, { recursive: true })),
+            bounded: yield* Effect.flip(fs.remove(beyond, { recursive: true }))
+          }
+        })
+      )
+
+      expect(outcome.wide._tag).toBe("Success")
+      expect(outcome.deep._tag).toBe("Success")
+      expect(outcome.bounded).toMatchObject({ reason: { _tag: "BadResource" } })
+      expect(yield* Effect.promise(() => gone(wide))).toBe(true)
+      expect(yield* Effect.promise(() => gone(deep))).toBe(true)
+      // The refused removal stopped rather than finishing, so the tree is
+      // still there for an operator to deal with. It also cannot be cleaned up
+      // by name, which is why this case unwinds it descriptor-relative before
+      // the suite's own rm reaches it.
+      expect(yield* Effect.promise(() => gone(beyond))).toBe(false)
+      yield* Effect.promise(() => unwind(beyond))
+      expect(yield* Effect.promise(() => gone(beyond))).toBe(true)
+    }), 120_000)
 
   /**
    * A named pipe used to read as a successful, EMPTY regular file, and a

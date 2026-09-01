@@ -25,6 +25,10 @@ There is no shell service. Running a command is Effect's `ChildProcess` /
 `ChildProcessSpawner`; a wall-clock budget is `Effect.timeout` around the
 effect, and cancellation is fiber interruption, not an `AbortSignal`.
 
+`NodeHost.layerAt` and `NodeHost.layerContainedAt` are the same two layers with
+`Jj` bound to one absolute repository root rather than the process working
+directory; `@smthrs/flows`' `NodeRuntime` composes `layerContainedAt`.
+
 `NodeHost.layerContained` is the bundle with process containment turned on. It
 composes `@smthrs/kernel`'s `ContainedSpawner` over the raw spawner, so every
 child gets a `SIGTERM`-then-`SIGKILL` deadline and a `ProcessLedger` entry, and
@@ -49,21 +53,40 @@ const host = Layer.provide(
 invocation a crashed host left running is a ledger record like any other rather
 than a process that went around the host.
 
-A stored pid outlives the process that wrote it and the operating system reuses
-the number, so `ProcessReaper` signals a record only when its owner is provably
-gone (`ESRCH`, never `EPERM`), it names a process group that is neither this
-process's pid nor its real process group, it was written during this boot, and
-the pid's start time still matches the record. Anything else is retired with
-`flows.host.process-reap-skipped.v1` and nothing is signalled. A kill that FAILS
-retires nothing, so the record stays inherited and the next incarnation tries
-again.
+`ProcessReaper` is narrow on purpose, because a stored pid outlives the process
+that wrote it and the operating system reuses the number. It signals a record
+only when the record belongs to a different incarnation of the same `hostId`,
+its numbers name something this platform can signal (`pgid == pid` above 1 on
+POSIX, `pgid: null` on Windows), that target is neither this process's pid nor
+its real process group, the owner that wrote it is provably gone (`ESRCH`, never
+`EPERM`), the record was written during this boot, and the pid's start time still
+matches the record. A host that cannot ASK for the start time refuses too: no
+evidence never authorizes a `SIGKILL`.
 
-`ProcessReaper` is narrow on purpose, because a pid outlives the process that
-recorded it. It signals a record only when the record belongs to a different
-incarnation of the same `hostId`, the owner that wrote it is gone, the record
-names a process group of its own, and that group is not this host's. A reaped
-record is retired through the ledger, so a third incarnation does not re-signal
-a pid the operating system has since reused.
+Each refusal decides whether the record is retired through
+`flows.host.process-reap-skipped.v1` or left inherited for the next incarnation:
+
+| Refusal               | Meaning                                                     | Retired |
+| --------------------- | ----------------------------------------------------------- | ------- |
+| `owner-alive`         | the incarnation that started it is still running            | no      |
+| `identity-unverified` | this host could not read the pid's start time               | no      |
+| `kill-failed`         | the signal was refused, so it is tried again                | no      |
+| `no-group`            | it shared its owner's group, so there is no group to signal | yes     |
+| `own-group`           | it named this host's own group or pid                       | yes     |
+| `invalid-record`      | its numbers name nothing this platform may signal           | yes     |
+| `pre-boot`            | it was written before this machine booted                   | yes     |
+| `process-gone`        | the pid it names does not exist                             | yes     |
+| `identity-mismatch`   | the pid exists but did not start when the record says       | yes     |
+
+A `pre-boot` refusal covers a two-second window after the computed boot instant,
+because `uptime` is second-granular. A group spawned inside that window is
+retired unsignalled and never reaped, which is the deliberate price of refusing
+to kill on an instant the host can only place to the nearest second.
+
+Windows reaping is unsupported best-effort: the release contract lists Windows
+as unsupported and `AtomicFileSystem` fails every operation closed there, but
+`systemFor("win32")` still reaches `taskkill /T /F` through the sweep rather than
+retiring every record unsignalled.
 
 There is no HTTP service either. An outgoing request is Effect's `HttpClient`,
 and the bundle provides `NodeHttpClient.layerUndici`. Undici installs no
@@ -135,12 +158,43 @@ one addition: a helper failure that carries no errno at all stays
 
 ## Modules
 
-| Module             | What it provides                                                                                                                                                         |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `AtomicFileSystem` | Descriptor-relative/no-follow Node filesystem layer, with typed fail-closed behavior on unsupported hosts                                                                |
-| `NodeHost`         | The complete closed Host bundle, plus `layer` and contained `layerContained`; re-exports `AtomicFileSystem` and Effect's raw `NodeFileSystem`, spawner, and `HttpClient` |
-| `HostLiveness`     | Whether a recorded run owner is still alive: `isAlive`, `Owner`, `Options`                                                                                               |
-| `ProcessReaper`    | Killing the process groups a dead incarnation of this host abandoned: `reap`, `layer`, `System`, `posixSystem`, `windowsSystem`, `systemFor`                             |
+The barrel exports three namespaces: `NodeHost`, `HostLiveness`, and
+`ProcessReaper`. `AtomicFileSystem` is deliberately not among them; it is reached
+as `NodeHost.AtomicFileSystem` or through the `@smthrs/platform-node/AtomicFileSystem`
+subpath.
+
+| Module             | What it provides                                                                                                                                                                                                                          |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NodeHost`         | The complete closed Host bundle: `layer`, `layerAt`, `layerContained`, `layerContainedAt`, `ContainedOptions`; re-exports `AtomicFileSystem`, `ProcessReaper`, `NodeCrypto`, and Effect's raw `NodeFileSystem`, spawner, and `HttpClient` |
+| `AtomicFileSystem` | Descriptor-relative/no-follow Node filesystem layer: `layer`, `layerWith`, `Options`, `Limits`, `defaultExecutable`, `defaultLimits`, `defaultConcurrency`, `defaultTimeoutMs`, `program`                                                 |
+| `HostLiveness`     | Whether a recorded run owner is still alive: `isAlive`, `Owner`, `Options`                                                                                                                                                                |
+| `ProcessReaper`    | Killing the process groups a dead incarnation of this host abandoned: `reap`, `layer`, `System`, `SystemOptions`, `StartTime`, `Refusal`, `posixSystem`, `posixSystemWith`, `windowsSystem`, `systemFor`, `defaultPsExecutable`           |
+
+`NodeCrypto` is re-exported for a different reason than the rest: `Crypto` is not
+a Host service, so it is not in the closed list, but every durable composition
+needs one and a program that already depends on this package for its host should
+not need a second dependency for the digest.
+
+`AtomicFileSystem`'s ceilings are `defaultLimits` (16 MiB of file content, 24 MiB
+of framed request and response, 64 KiB of retained helper diagnostics), a
+listing ceiling of 100000 entries, a recursive-removal depth ceiling of 512
+levels, `defaultConcurrency` helper processes at once, and `defaultTimeoutMs`
+(300000) per helper. Every one of them except the executable is read once, when
+the layer is built. Each operation is one CPython fork, roughly 130 ms, so batch
+a wide fan-out rather than reading a directory one entry at a time.
+
+`glob` implements the grammar itself rather than calling Node's globber: `*` and
+`?` within a segment, `[...]` classes with `!` or `^` negation, `**` across zero
+or more whole segments, `{a,b}` alternation, a trailing `/` for directory-only
+matching, and the dotfile rule, which keeps a wildcard out of a leading dot while
+letting a segment that spells the dot match one. Exclusions prune whole subtrees,
+an absolute exclude is rewritten against the glob root, and a trailing `**` in an
+exclude leaves the directory entry itself. A pattern past 4096 characters, or one
+whose braces expand past 64 alternatives, is a `BadArgument`. Extglob
+(`+(a|b)`), POSIX classes (`[[:digit:]]`), numeric brace ranges (`{1..3}`), and
+backslash escaping are not implemented and match nothing. The parity suite
+compares every supported row against `@effect/platform-node`'s own globber; the
+two answers Node itself gives differently on 22 and 24 are pinned separately.
 
 `HostLiveness.isAlive` is the answer `EngineStore` steals runs on. An owner
 from a different host is alive, because a pid means nothing across machines; an

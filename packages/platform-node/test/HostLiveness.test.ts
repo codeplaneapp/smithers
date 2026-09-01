@@ -7,6 +7,7 @@
  * run twice. These cases pin which way each input errs.
  */
 import { describe, expect, it } from "@effect/vitest"
+import type * as OwnerId from "@smthrs/journal/OwnerId"
 import { Effect } from "effect"
 import * as HostLiveness from "../src/HostLiveness.ts"
 
@@ -60,5 +61,45 @@ describe("HostLiveness.isAlive", () => {
       const isAlive = HostLiveness.isAlive({ hostId: "engine", signal: throwing("ESRCH") })
 
       expect(yield* isAlive({ hostId: "engine", pid: 1 })).toBe(false)
+    }))
+
+  /**
+   * The probe reads `code` off whatever was thrown. A thrown string, or a
+   * thrown `null`, carries no `code` at all, and the rule that only `ESRCH`
+   * means gone has to hold for those too: an owner nobody could ask about is a
+   * live owner, not a run to steal.
+   */
+  it.effect("treats a throw that carries no errno as a live owner", () =>
+    Effect.gen(function*() {
+      const nonObject = HostLiveness.isAlive({
+        hostId: "engine",
+        signal: () => {
+          throw "boom"
+        }
+      })
+      const nullish = HostLiveness.isAlive({
+        hostId: "engine",
+        signal: () => {
+          throw null
+        }
+      })
+
+      expect(yield* nonObject({ hostId: "engine", pid: 1 })).toBe(true)
+      expect(yield* nullish({ hostId: "engine", pid: 1 })).toBe(true)
+    }))
+
+  /**
+   * `Owner` is structural on purpose: the JSDoc claims a journal `OwnerId` is
+   * accepted here without this package taking a dependency on the journal to
+   * name a type. A claim about another package's type is only true while that
+   * type still has the shape, so it is asserted rather than restated.
+   */
+  it.effect("accepts a journal OwnerId as the owner it decides about", () =>
+    Effect.gen(function*() {
+      const owner: OwnerId.OwnerId = { hostId: "engine", pid: process.pid, nonce: "abc" }
+      const accepted: HostLiveness.Owner = owner
+
+      expect(yield* HostLiveness.isAlive({ hostId: "engine" })(accepted)).toBe(true)
+      expect(yield* HostLiveness.isAlive({ hostId: "other" })(accepted)).toBe(true)
     }))
 })
