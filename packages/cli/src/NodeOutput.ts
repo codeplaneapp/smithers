@@ -42,6 +42,19 @@ export interface Node {
   readonly message?: string | undefined
   readonly startedAt?: number | undefined
   readonly settledAt?: number | undefined
+  /**
+   * The sequence of the event that started this call, and of the one that
+   * settled it.
+   *
+   * Ordinals are assigned within one projection, so they only mean the same
+   * thing across two projections of the same events. A delta reader that
+   * projected a filtered slice to find what changed renumbered the second
+   * `bash` call as `bash#1` and then read the first call's output. Carrying
+   * the sequences lets a caller ask what moved after a cursor from the ONE
+   * run-wide projection instead.
+   */
+  readonly startedSequence?: number | undefined
+  readonly settledSequence?: number | undefined
 }
 
 const asRecord = (value: unknown): Record<string, unknown> =>
@@ -65,6 +78,7 @@ export const project = (events: ReadonlyArray<ControlSchema.ControlEvent>): Read
   const nodes: Array<Node> = []
   let finalOutput: string | undefined
   let finalAt: number | undefined
+  let finalSequence: number | undefined
 
   for (const event of events) {
     const payload = asRecord(event.payload)
@@ -77,7 +91,8 @@ export const project = (events: ReadonlyArray<ControlSchema.ControlEvent>): Read
         flowName,
         outcome: "pending",
         input: payload["input"],
-        startedAt: event.occurredAt
+        startedAt: event.occurredAt,
+        startedSequence: event.sequence
       }
       open.push(node)
       nodes.push(node)
@@ -96,13 +111,15 @@ export const project = (events: ReadonlyArray<ControlSchema.ControlEvent>): Read
         outcome: asString(payload["outcome"]) === "failure" ? "failure" : "success",
         value: payload["value"],
         message: asString(payload["message"]),
-        settledAt: event.occurredAt
+        settledAt: event.occurredAt,
+        settledSequence: event.sequence
       }
       continue
     }
     if (event.kind === "control.agent.resolved") {
       finalOutput = asString(payload["text"])
       finalAt = event.occurredAt
+      finalSequence = event.sequence
     }
   }
 
@@ -112,7 +129,8 @@ export const project = (events: ReadonlyArray<ControlSchema.ControlEvent>): Read
       flowName: "agent",
       outcome: "success",
       value: finalOutput,
-      settledAt: finalAt
+      settledAt: finalAt,
+      settledSequence: finalSequence
     })
   }
   return nodes

@@ -186,8 +186,22 @@ export interface Frame {
  */
 export const defaultMaxOutputChars = 2000
 
-const truncate = (value: string, max: number): string =>
-  value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`
+const ellipsis = "…"
+
+/**
+ * Cuts a value to at most `max` characters, counting code points.
+ *
+ * Slicing UTF-16 units split an astral character into a lone surrogate, and
+ * the ellipsis was appended without being counted, so the result could exceed
+ * the bound it exists to enforce. A bound of zero yields the empty string
+ * rather than a bare ellipsis, which was itself one character over.
+ */
+const truncate = (value: string, max: number): string => {
+  const points = [...value]
+  if (points.length <= max) return value
+  if (max <= 0) return ""
+  return `${points.slice(0, max - 1).join("")}${ellipsis}`
+}
 
 const stateOf = (node: NodeOutput.Node): MirrorNode["state"] =>
   node.outcome === "pending" ? "running" : node.outcome === "failure" ? "failed" : "finished"
@@ -215,9 +229,18 @@ export const frame = (
 ): Frame => {
   const afterSeq = Math.max(0, Math.floor(options.afterSeq ?? 0))
   const maxOutputChars = Math.max(0, Math.floor(options.maxOutputChars ?? defaultMaxOutputChars))
+  // One run-wide projection decides both the node list and the delta. Two
+  // projections cannot: `project` numbers each flow's calls within the slice
+  // it is given, so a second `bash` call in a filtered tail is `bash#1` there
+  // and `bash#2` here, and matching the two by id reported the first call's
+  // output as the thing that changed.
   const nodes = NodeOutput.project(events)
-  const recent = NodeOutput.project(events.filter((event) => event.sequence > afterSeq))
-  const changed = new Set(recent.map((node) => node.nodeId))
+  const changed = new Set(
+    nodes.filter((node) =>
+      (node.startedSequence !== undefined && node.startedSequence > afterSeq) ||
+      (node.settledSequence !== undefined && node.settledSequence > afterSeq)
+    ).map((node) => node.nodeId)
+  )
   const outputs: Record<string, string> = {}
   for (const node of nodes) {
     if (!changed.has(node.nodeId) || node.outcome === "pending") continue
