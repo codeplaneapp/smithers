@@ -90,6 +90,19 @@ const consoleMethods = {
 } as const
 
 /**
+ * The parts of a log message.
+ *
+ * Effect's logging API passes an array, one entry per argument, including for
+ * a single argument. A caller that builds `LogOptions` by hand may pass the
+ * message itself, so it is wrapped rather than walked.
+ *
+ * @since 0.1.0
+ * @category redaction
+ * @slop
+ */
+const toArray = (message: unknown): ReadonlyArray<unknown> => Array.isArray(message) ? message : [message]
+
+/**
  * Redacts one value on its way to the console.
  *
  * @since 0.1.0
@@ -177,7 +190,21 @@ export const wrap = <Message, Output>(
   if (isRedacted(logger)) return logger
   const redactor = Redaction.make(options)
   const wrapped = Logger.make<Message, Output>((logOptions) =>
-    logger.log({ ...logOptions, fiber: redactedFiber(logOptions.fiber, redactor) })
+    logger.log({
+      ...logOptions,
+      // The message is redacted here, not only behind the fiber's Console,
+      // because a logger is free to read it directly: `Logger.tracerLogger`
+      // ships in Effect's default set and publishes the message as a span
+      // event name, so a Console-only substitution would export a credential
+      // in clear to whatever collector is configured.
+      //
+      // Effect delivers the message as an array of parts, one per argument,
+      // including the single-argument case; a non-array reaches here only from
+      // a caller that builds `LogOptions` by hand, and `toArray` covers it
+      // without a branch no test could reach through the logging API.
+      message: (toArray(logOptions.message).map((part) => redactArgument(part, redactor))) as Message,
+      fiber: redactedFiber(logOptions.fiber, redactor)
+    })
   )
   Object.defineProperty(wrapped, TypeId, { value: true })
   return wrapped

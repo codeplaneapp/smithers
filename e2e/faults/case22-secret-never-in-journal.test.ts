@@ -23,8 +23,10 @@
  * deliverable closed it: `@smthrs/journal` `RedactedLogger` puts every log
  * line through the same rules the journal applies on the write path, and
  * `packages/cli/src/bin.ts` and `packages/flows/src/NodeRuntime.ts` install
- * it. The test went green with no edit to this file, which is what a plain
- * failing test is for, and `e2e-faults` became a required CI job.
+ * it. The assertion that was failing went green with no change to it, which is
+ * what a plain failing test is for, and `e2e-faults` became a required CI job.
+ * Two assertions were added afterwards, pinning that redaction rewrites the
+ * line rather than swallowing it.
  *
  * Both halves are required gates now. Neither may be marked `.fails`, skipped,
  * or deleted; `scripts/repo-contract/fault-skips.test.mjs` refuses all three

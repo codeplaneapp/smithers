@@ -184,6 +184,25 @@ describe("the fault-suite skip audit", () => {
     }
   })
 
+  it("keeps the fault job's CI status in step with the required-red set", () => {
+    // The comment over `requiredRedGates` states this rule; without a case it
+    // is enforced by nothing, and the two limitation cases below pass over an
+    // empty collection. A red gate the matrix is required to carry means
+    // `e2e-faults` cannot fail the pipeline, and an empty map means it must.
+    const build = readFileSync(join(root, "BUILD.ts"), "utf8")
+    const faultsJob = build.slice(build.indexOf("id: \"e2e-faults\""))
+    const jobBody = faultsJob.slice(0, faultsJob.indexOf("\n    }"))
+    const advisory = /continueOnError:\s*true/.test(jobBody)
+    const required = /requiredJobs:[^\]]*"e2e-faults"/.test(build)
+    if (requiredRedGates.size === 0) {
+      assert.ok(!advisory, "requiredRedGates is empty, so e2e-faults must not carry continueOnError")
+      assert.ok(required, "requiredRedGates is empty, so e2e-faults belongs in requiredJobs")
+    } else {
+      assert.ok(advisory, "a required red gate is listed, so e2e-faults must carry continueOnError")
+      assert.ok(!required, "a required red gate is listed, so e2e-faults must not be in requiredJobs")
+    }
+  })
+
   it("states every required red gate as a shipped limitation on the release page", () => {
     const page = readFileSync(knownLimitations, "utf8")
     for (const [relative, gate] of requiredRedGates) {

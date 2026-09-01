@@ -101,6 +101,53 @@ describe("RedactedLogger", () => {
       expect(text).not.toContain("=shhh")
     }))
 
+  it.effect("redacts the message a logger reads directly, not only what the console prints", () =>
+    Effect.gen(function*() {
+      // `Logger.tracerLogger` ships in Effect's default logger set and never
+      // reads the fiber's Console: it publishes the message as a span event
+      // name. A wrapper that only substitutes the Console leaves the raw
+      // credential on the exported span.
+      const seen: Array<unknown> = []
+      const direct = Logger.make<unknown, void>(({ message }) => {
+        seen.push(message)
+      })
+      yield* Effect.logInfo("calling with Bearer sk-live-e2ecase22NEVERLOGTHIS").pipe(
+        Effect.provide(Logger.layer([RedactedLogger.wrap(direct)]))
+      )
+      // A multi-part message arrives as an array, and every part is redacted.
+      yield* Effect.logInfo("deploying with", "sk-proj-abcdefghij", { apiKey: "sk-ant-api03-abcdefgh" }).pipe(
+        Effect.provide(Logger.layer([RedactedLogger.wrap(direct)]))
+      )
+      const text = seen.map((entry) =>
+        Array.isArray(entry) ? entry.map((part) => JSON.stringify(part)).join(" ") : String(entry)
+      ).join("\n")
+      expect(text).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+      expect(text).not.toContain("sk-proj-abcdefghij")
+      expect(text).not.toContain("sk-ant-api03-abcdefgh")
+      expect(text).toContain("[REDACTED_API_KEY]")
+    }))
+
+  it.effect("redacts a message a caller passed without wrapping it in parts", () =>
+    Effect.gen(function*() {
+      // Effect's own logging API always delivers an array of parts, but
+      // `Logger.log` takes whatever LogOptions a caller builds; a bare message
+      // is redacted the same way rather than walked as a sequence. The options
+      // are captured from a real log call so the fiber is a real one.
+      const seen: Array<unknown> = []
+      let captured: Parameters<typeof direct.log>[0] | undefined
+      const direct = Logger.make<unknown, void>((options) => {
+        captured = options
+        seen.push(options.message)
+      })
+      const wrapped = RedactedLogger.wrap(direct)
+      yield* Effect.logInfo("warm").pipe(Effect.provide(Logger.layer([wrapped])))
+      seen.length = 0
+      yield* Effect.sync(() => wrapped.log({ ...captured!, message: "bare Bearer sk-live-e2ecase22NEVERLOGTHIS" }))
+      const text = JSON.stringify(seen)
+      expect(text).not.toContain("sk-live-e2ecase22NEVERLOGTHIS")
+      expect(text).toContain("[REDACTED_API_KEY]")
+    }))
+
   it.effect("redacts a credential-named log annotation wholesale", () =>
     Effect.gen(function*() {
       const recorded = yield* logged(
