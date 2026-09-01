@@ -170,7 +170,10 @@ export const shadow: Effect.Effect<{
     // type infers as `never` and the scorer cannot read it.
     shadow: (): Effect.Effect<string, string> => Effect.fail("the cheap seat is out of quota"),
     score: ({ primary, shadow }) => Effect.succeed({ primary: primary.length, shadow: shadow.length })
-  })
+    // `Sidecar.run` refuses an unsafe configuration with a `PatternError`, the
+    // same way `Optimizer.run` above does. Every input here is a literal, so a
+    // refusal would be a defect in this file rather than a run-time outcome.
+  }).pipe(Effect.orDie)
   return {
     primary: result.primary,
     quarantined: result.shadow.quarantined,
