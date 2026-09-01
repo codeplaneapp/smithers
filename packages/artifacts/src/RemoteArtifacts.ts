@@ -39,12 +39,11 @@
  * not hold.
  *
  * The endpoint and its credentials arrive as **layer construction options**.
- * They are a capability, never an input: they are not hashed into a step key,
- * not journaled, and not part of any recorded result — see
- * `docs/specs/Specs/Input.md` ("secrets are never input") and
- * `docs/specs/Concepts/Remote Cache.md`.
+ * They are capabilities, never step inputs: they are not hashed into a step
+ * key, journaled, or returned in a recorded result. Invalid endpoint errors are
+ * sanitized before they cross the boundary.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -61,7 +60,7 @@ import * as ArtifactStore from "./ArtifactStore.ts"
  * How eagerly a composition materializes shared blobs into its local store.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const DownloadPolicy = Schema.Literals(["all", "toplevel", "minimal"] as const)
 
@@ -77,7 +76,7 @@ export type DownloadPolicy = typeof DownloadPolicy.Type
  * Every download policy, in materialization order.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const downloadPolicies: ReadonlyArray<DownloadPolicy> = Object.freeze(["all", "toplevel", "minimal"])
 
@@ -86,7 +85,7 @@ export const downloadPolicies: ReadonlyArray<DownloadPolicy> = Object.freeze(["a
  * eagerly a composition reading through it should materialize blobs locally.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Service extends ArtifactStore.Service {
   readonly downloadPolicy: DownloadPolicy
@@ -97,7 +96,7 @@ export interface Service extends ArtifactStore.Service {
  * declares none — every local store, and any foreign implementation.
  *
  * @category getters
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const downloadPolicyOf = (store: ArtifactStore.Service): DownloadPolicy | undefined => {
   const declared = (store as { readonly downloadPolicy?: unknown }).downloadPolicy
@@ -108,7 +107,7 @@ export const downloadPolicyOf = (store: ArtifactStore.Service): DownloadPolicy |
  * How to reach the shared artifact tier.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface Options {
@@ -248,7 +247,7 @@ const isOk = (response: HttpClientResponse.HttpClientResponse): boolean =>
  * Builds a remote artifact store over Effect's `HttpClient`.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const make = (
@@ -658,7 +657,7 @@ export const make = (
  * tier.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer = (

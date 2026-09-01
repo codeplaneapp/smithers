@@ -13,10 +13,10 @@
  * The *policy* — which digests are live, how old a dead blob must be before it
  * goes — belongs to the engine composition, which is the only place the
  * durable roots (attempt rows, cache entries) are visible. This module ships
- * mechanics alone, mirroring the store/boundary split
- * (`docs/specs/Concepts/Remote Cache.md`).
+ * mechanics alone; `@smthrs/engine-store` owns the mark policy and grace
+ * period.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -37,7 +37,7 @@ import * as ArtifactLocks from "./internal/ArtifactLocks.ts"
  * the one timestamp a filesystem maintains without any bookkeeping of ours.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface BlobStat {
@@ -50,7 +50,7 @@ export interface BlobStat {
  * Fencing predicate for a sweep deletion.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface RemoveOptions {
@@ -68,7 +68,7 @@ export interface RemoveOptions {
  * Host-local blob enumeration and fenced deletion.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface Service {
@@ -96,7 +96,7 @@ export interface Service {
  * that a new identity is the defining module path.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export class ArtifactSweep extends Context.Service<ArtifactSweep, Service>()("@smthrs/artifacts/ArtifactSweep") {}
@@ -129,7 +129,7 @@ const defaultDirectory = ".flows/objects"
  * likewise skipped.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const makeFileSystem = (
@@ -227,7 +227,7 @@ export const makeFileSystem = (
  * Provides the filesystem-backed sweep surface.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layerFileSystem = (
@@ -240,7 +240,7 @@ export const layerFileSystem = (
  * per-method overrides.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const makeNoop = (overrides: Partial<Service> = {}): Service => ({
@@ -253,7 +253,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service => ({
  * Provides a no-op sweep surface.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layerNoop = (overrides: Partial<Service> = {}): Layer.Layer<ArtifactSweep> =>

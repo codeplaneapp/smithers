@@ -8,14 +8,11 @@
  * found back into the disk cache* so the next read is local
  * (`downloadActionResultFromRemote`, lines 230-303). A write goes to both.
  *
- * Deviation from Bazel: it threads a per-request `ReadCachePolicy` /
- * `WriteCachePolicy` through every call so a spawn can opt a tier out. We have
- * no such policy object, and the analogous dial — Bazel's
- * `RemoteOutputChecker` download policy — is deliberately out of scope and
- * ticketed (`.smithers/tickets/remote-cache-download-policy.md`). Composing
- * only the local tier is how a caller opts out today.
+ * Deviation from Bazel: policy is declared once by the remote tier rather than
+ * threaded through every call. `downloadPolicy` controls prefetch and local
+ * materialization; composing only the local tier opts out of shared storage.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
@@ -31,7 +28,7 @@ import * as RemoteArtifacts from "./RemoteArtifacts.ts"
  * The two tiers to compose.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface Options {
@@ -72,7 +69,7 @@ const defaultUploadTimeout = Duration.seconds(60)
  * Composes a local and a remote artifact store.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const make = (
@@ -258,7 +255,7 @@ export const make = (
  * `RemoteArtifacts.make`.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface LayerOptions<EL, RL, ER, RR> {

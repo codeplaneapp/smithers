@@ -7,7 +7,7 @@
  * actually touched. No exporter ships in this package; provide one — for
  * example `@smthrs/observability` — and these counters appear in it.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Metric from "effect/Metric"
 
@@ -17,7 +17,7 @@ import * as Metric from "effect/Metric"
  * an address either way.
  *
  * @category metrics
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const puts = Metric.counter("flows_artifact_puts", {
@@ -30,7 +30,7 @@ export const puts = Metric.counter("flows_artifact_puts", {
  * evidence, not throughput.
  *
  * @category metrics
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const gets = Metric.counter("flows_artifact_gets", {

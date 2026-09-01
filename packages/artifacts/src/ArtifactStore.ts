@@ -2,20 +2,13 @@
  * The content-addressed artifact store: bytes addressed by their own SHA-256
  * digest.
  *
- * This is the "content-addressed store for artifacts" the `Cache` service owns
- * in `docs/specs/Specs/Object Model.md`. It is deliberately *not* the step
- * cache: the step cache maps a step key to a recorded result, and a recorded
- * result may reference artifacts by digest. The two tiers are separate because
- * their publication order matters — see `docs/specs/Concepts/Remote Cache.md`.
+ * It is deliberately *not* the step cache: the step cache maps a step key to a
+ * recorded result, while large result bytes live here under their digest. The
+ * two tiers remain separate because artifacts must be published before a cache
+ * record may reference them. See the package README and
+ * {@link https://smithers.sh/concepts/step-keys | step-key documentation}.
  *
- * The package is named for what it stores, per the naming rule in
- * `docs/specs/Concepts/Journal Split.md`.
- *
- * Governing designs: `docs/specs/Specs/Input.md` (large values enter by
- * digest), `docs/specs/Concepts/Step Keys.md`, and
- * `docs/specs/Concepts/Remote Cache.md`.
- *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { Sha256 } from "@smthrs/crypto"
 import * as Clock from "effect/Clock"
@@ -38,7 +31,7 @@ import * as ArtifactLocks from "./internal/ArtifactLocks.ts"
  * to reach past this package for the address type it stores under.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const Digest = Sha256.Digest
@@ -53,7 +46,7 @@ export const Digest = Sha256.Digest
  * brand, because it measured the bytes itself.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export type Digest = typeof Sha256.Digest.Type
@@ -62,7 +55,7 @@ export type Digest = typeof Sha256.Digest.Type
  * Stable error codes returned by artifact store operations.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const ArtifactStoreErrorCode = Schema.Literals([
@@ -77,23 +70,24 @@ export const ArtifactStoreErrorCode = Schema.Literals([
  * Stable error codes returned by artifact store operations.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export type ArtifactStoreErrorCode = typeof ArtifactStoreErrorCode.Type
 
 /**
- * A transient or configuration failure of the store itself: the host refused
- * the I/O, the remote tier refused the request, or the caller supplied
- * something that is not a content address.
+ * A typed failure of the store itself: the host or crypto provider refused an
+ * operation, the remote tier refused a request, or the caller supplied invalid
+ * configuration or an invalid content address.
  *
  * Distinct from {@link ArtifactMissing} and {@link ArtifactCorruption} on
  * purpose. A miss is an ordinary, expected outcome that a second tier may
  * still satisfy; corruption is an integrity violation of the store's strongest
- * invariant; this is neither, and stays retryable.
+ * invariant. `invalid_configuration` and `invalid_digest` are permanent;
+ * retryability of host, crypto, and transport failures depends on the cause.
  *
  * @category errors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export class ArtifactStoreError extends Schema.TaggedError<ArtifactStoreError>()(
@@ -113,7 +107,7 @@ export class ArtifactStoreError extends Schema.TaggedError<ArtifactStoreError>()
  * `unavailable` code that a caller would have to string-match.
  *
  * @category errors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export class ArtifactMissing extends Schema.TaggedError<ArtifactMissing>()(
@@ -132,7 +126,7 @@ export class ArtifactMissing extends Schema.TaggedError<ArtifactMissing>()(
  * recorded artifact.
  *
  * @category errors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export class ArtifactCorruption extends Schema.TaggedError<ArtifactCorruption>()(
@@ -156,7 +150,7 @@ export class ArtifactCorruption extends Schema.TaggedError<ArtifactCorruption>()
  * per-digest existence probe over a network tier is the wrong shape entirely.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface Service {
@@ -189,7 +183,7 @@ export interface Service {
  * that an identity is the defining module path.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export class ArtifactStore extends Context.Service<ArtifactStore, Service>()("@smthrs/artifacts/ArtifactStore") {}
@@ -232,7 +226,7 @@ export const snapshotBytes = (bytes: Uint8Array): Effect.Effect<Uint8Array, Arti
  * hostile multi-megabyte value cannot be copied into logs or durable errors.
  *
  * @category predicates
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const validateDigest = (digest: string): Effect.Effect<Digest, ArtifactStoreError> =>
@@ -250,7 +244,7 @@ const distinct = (digests: Iterable<string>): Array<string> => [...new Set(diges
  * be moved or copied whole and still resolve its own artifacts.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface FileSystemOptions {
@@ -294,9 +288,9 @@ const isNotFound = (cause: unknown): boolean =>
  * "to bypass possible folder file count limits"
  * (`reference/bazel/.../remote/disk/DiskCacheClient.java`). The store moved out
  * of `StepBoundary` with a flat `${dir}/${digest}` layout, which puts every
- * artifact a workspace ever spilled into one directory. There is no
- * compatibility shim for the flat layout: nothing is released yet, so the old
- * addresses are simply cache misses that re-publish.
+ * artifact a workspace ever spilled into one directory. The rc.0 contract has
+ * no compatibility shim for the provisional flat layout; old addresses are
+ * cache misses that re-publish.
  */
 const fanout = (directory: string, digest: string): { readonly parent: string; readonly path: string } => {
   const parent = `${directory}/${digest.slice(0, 2)}`
@@ -311,7 +305,7 @@ const fanout = (directory: string, digest: string): { readonly parent: string; r
  * bun, browser, sandbox) already provides.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const makeFileSystem = (fs: FileSystem.FileSystem, options: FileSystemOptions = {}): Service => {
@@ -359,8 +353,7 @@ export const makeFileSystem = (fs: FileSystem.FileSystem, options: FileSystemOpt
    *
    * This is a sweep of scratch files, not garbage collection. Reclaiming
    * *published* artifacts is `ArtifactSweep` driven by an explicit
-   * `ArtifactGc.gc()` call in `@smthrs/engine-store` — an explicit verb per
-   * `docs/specs/Concepts/Reconciliation.md`, never folded in here.
+   * `ArtifactGc.gc()` call in `@smthrs/engine-store`, never folded in here.
    */
   let sweepDone = false
   const sweepOrphanedTemps = Effect.gen(function*() {
@@ -542,7 +535,7 @@ export const makeFileSystem = (fs: FileSystem.FileSystem, options: FileSystemOpt
  * Provides the filesystem-backed artifact store.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layerFileSystem = (
@@ -563,7 +556,7 @@ export const layerFileSystem = (
  * because their address spaces are genuinely shared.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const makeMemory = (): Service => {
@@ -622,7 +615,7 @@ export const makeMemory = (): Service => {
  * Provides an in-memory artifact store.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layerMemory: Layer.Layer<ArtifactStore> = Layer.effect(ArtifactStore)(Effect.sync(makeMemory))
@@ -632,7 +625,7 @@ export const layerMemory: Layer.Layer<ArtifactStore> = Layer.effect(ArtifactStor
  * per-method overrides.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const makeNoop = (overrides: Partial<Service> = {}): Service => {
@@ -650,7 +643,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service => {
  * Provides a no-op artifact store.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layerNoop = (overrides: Partial<Service> = {}): Layer.Layer<ArtifactStore> =>
