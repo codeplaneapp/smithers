@@ -1272,3 +1272,49 @@ describe("the executor's engine ports", () => {
     expect(observed.signal).toBe("unknown")
   })
 })
+
+describe("the settlement a failure is persisted as", () => {
+  /**
+   * `agent/run` declares `error: Schema.Unknown`, which `Schema.toCodecJson`
+   * reads as "any JSON value". Every real agent failure is an `Error`
+   * instance, so the codec rejected every one, `engine-store` degraded the
+   * settlement into a projection, and it announced that in a second WARN stack
+   * beside the run's own `An agent run failed` (Phase 7 smoke observation N1).
+   * Rendering the error to the text the operator already reads is what makes
+   * the settlement encodable.
+   */
+  it("renders an error to the text `Cause.pretty` gives the operator", () => {
+    const rendered = AgentSession.settlementFailure(
+      new Seat.SeatUnresolved({ seat: "anthropic:test-model", message: "no credits remaining" })
+    )
+
+    expect(typeof rendered).toBe("string")
+    expect(String(rendered)).toContain("no credits remaining")
+  })
+
+  it("renders a class instance that is not an error", () => {
+    class Refusal {
+      readonly reason = "billing"
+    }
+
+    expect(typeof AgentSession.settlementFailure(new Refusal())).toBe("string")
+  })
+
+  it("renders a value the JSON codec cannot take", () => {
+    expect(typeof AgentSession.settlementFailure(Number.POSITIVE_INFINITY)).toBe("string")
+    expect(typeof AgentSession.settlementFailure(() => undefined)).toBe("string")
+    expect(typeof AgentSession.settlementFailure({ nested: { deep: new Error("boom") } })).toBe("string")
+    expect(typeof AgentSession.settlementFailure([1, new Error("boom")])).toBe("string")
+  })
+
+  it("passes a JSON value through untouched", () => {
+    const json = { flowId: "agents/notes", attempts: 2, ok: false, tags: ["a", "b"], note: null }
+
+    expect(AgentSession.settlementFailure(json)).toBe(json)
+    expect(AgentSession.settlementFailure("plain")).toBe("plain")
+    expect(AgentSession.settlementFailure(7)).toBe(7)
+    expect(AgentSession.settlementFailure(true)).toBe(true)
+    expect(AgentSession.settlementFailure(null)).toBe(null)
+    expect(AgentSession.settlementFailure(Object.create(null) as Record<string, unknown>)).toEqual({})
+  })
+})

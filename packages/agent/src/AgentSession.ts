@@ -579,8 +579,11 @@ const isJsonValue = (value: unknown): boolean => {
  * it and the duplicate warning has nothing to report. A value that already is
  * a JSON value is passed through untouched, and a defect stays a defect: this
  * maps the failure channel only.
+ *
+ * @category conversions
+ * @since 1.0.0
  */
-const settlementFailure = (error: unknown): unknown =>
+export const settlementFailure = (error: unknown): unknown =>
   isJsonValue(error) ? error : Cause.pretty(Cause.fail(error))
 
 /**

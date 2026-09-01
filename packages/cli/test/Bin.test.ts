@@ -91,7 +91,6 @@ const inEmptyDirectory = <A>(use: (cwd: string) => A): A => {
   }
 }
 
-
 describe("smithers executable", processBudget, () => {
   it("reports the package version", () => {
     const result = run(["--version"])
@@ -370,7 +369,7 @@ describe("an invocation that never runs a command answers before the control pla
 
       expect(result.error).toBeUndefined()
       expect(result.status).toBe(2)
-      expect(result.stderr).toContain('Unknown subcommand "lss" for "smithers"')
+      expect(result.stderr).toContain("Unknown subcommand \"lss\" for \"smithers\"")
       expect(result.stdout).toContain("USAGE")
       expect(readdirSync(cwd)).toEqual([])
     })
@@ -382,7 +381,7 @@ describe("an invocation that never runs a command answers before the control pla
 
       expect(result.error).toBeUndefined()
       expect(result.status).toBe(2)
-      expect(result.stderr).toContain('Unknown subcommand "gateway status" for "smithers"')
+      expect(result.stderr).toContain("Unknown subcommand \"gateway status\" for \"smithers\"")
       expect(readdirSync(cwd)).toEqual([])
     })
   })
