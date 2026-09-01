@@ -36,7 +36,7 @@ There is no global order across runs.
 
 ## The journal is intended to be flows' authoritative logical WAL
 
-The journal is flows' own logical (domain) write-ahead log: run decisions, attempt lifecycle, deferred completions, clock schedules, permission decisions, and cache provenance. It is intended to become the authoritative state history. The SQLite or PostgreSQL WAL underneath it is only the storage durability substrate; it is never read as the application event API.
+The journal is flows' own logical (domain) write-ahead log: run decisions, attempt lifecycle, deferred completions, clock schedules, permission decisions, and cache provenance. It is intended to become the authoritative state history. The SQLite WAL underneath it is only the storage durability substrate; it is never read as the application event API.
 
 The rule that follows is that **a durable boundary may not advance the run or expose its result until the corresponding logical WAL entry is committed**. `emitDurable` allocates inside the write transaction and returns a receipt that is already committed.
 

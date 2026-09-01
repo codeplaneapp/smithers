@@ -44,7 +44,7 @@ Rules the write enforces:
 - `seq` must name a committed entry. The surviving row is what keeps the run's durable `MAX(seq)` allocation floor at or above the boundary, so a restarted process can never re-mint a truncated sequence.
 - `seq` must lie above the run's compaction floor; otherwise the write fails with `checkpoint_invalid`.
 - Re-checkpointing an uncompacted `seq` replaces its state. Last writer wins.
-- With an `owner`, the write is fenced on the run's persisted ownership like `emitDurable`: a reclaimed run fails with `fence_lost`.
+- The write is fenced on the run's persisted ownership like `emitDurable`: a reclaimed run fails with `fence_lost`. `owner` is mandatory, and a malformed one fails with `invalid_event`.
 
 The write shares `Journal.transact`'s discipline. Inside an open `transact` it joins the caller's transaction as a savepoint and rolls back with it, so you can capture state and write the checkpoint describing it atomically.
 
@@ -85,6 +85,8 @@ Sequence gaps are normal in the journal (rejected admissions consume sequences),
 - Every live in-process `stream` registers its durable cursor. `compact` refuses with `reader_behind` while any of them is behind the boundary, so a live follower's next page is never deleted out from under it.
 - Every other reader (`entries` pollers, `stream` subscribers in other processes, sync followers) is covered on the read side: a read whose cursor starts below the floor fails with `compacted`, carrying `checkpointSeq`, the floor to resync from. `@smthrs/sync` reads through `Journal.entries` and `Journal.stream`, so a remote follower behind the floor sees its read or subscription fail rather than a gapped history.
 
+Compaction is not fatal to a sync follower. The sync server maps that failure onto `SyncError` code `compacted` with a `Resync` of `{ runId, checkpointSeq }`, and `SyncClient.subscribe` performs the resync itself: it moves that run's cursor to the checkpoint, logs the skipped range, and restarts the subscription. What it cannot do is hand the follower the state below the checkpoint, because the sync wire does not carry it. A follower rebuilding derived state from scratch still does the three steps below against the journal itself. See the [`@smthrs/sync` reference](/api/sync).
+
 Resync is three steps.
 
 ::::steps
@@ -124,9 +126,10 @@ Once a run's committed entry count reaches `entryThreshold`, the journal calls `
 
 Constraints on `capture`:
 
-- It runs post-commit in the fiber that crossed the threshold. Keep it to storage reads.
-- It must not emit through the same journal, because the triggering durable emit still holds the allocation permit, and it must not call `flush`.
-- A failure or a `reader_behind` refusal is logged at warning, damped for `entryThreshold` further commits, and never fails the emit that triggered it.
+- It runs post-commit, after the triggering emit has released the allocation permit, so a slow `capture` no longer stalls admission on unrelated runs. Keep it to storage reads anyway: it still delays the emit that triggered it.
+- It must not call `flush`, which waits on the lossy writer.
+- A capture is bounded by a 30 second timeout, so caller code cannot wedge the policy indefinitely.
+- A failure, a timeout, or a `reader_behind` refusal is logged at warning, damped for `entryThreshold` further commits, and never fails the emit that triggered it.
 
 ## Operational guidance
 
@@ -150,8 +153,8 @@ The implementation ships for the SQLite dialect (the `SqlJournal` all stores sha
 
 | Method | Returns | Behavior |
 | --- | --- | --- |
-| `checkpoint(options, owner?)` | `Checkpoint` | durably captures replay state at a committed sequence |
+| `checkpoint(options, owner)` | `Checkpoint` | durably captures replay state at a committed sequence |
 | `latestCheckpoint(runId)` | `Option<Checkpoint>` | the resync point; `compactedAtMs` non-null once it is the floor |
-| `compact(options, owner?)` | `Compacted` | truncates strictly below the checkpoint, atomically with the floor |
+| `compact(options, owner)` | `Compacted` | truncates strictly below the checkpoint, atomically with the floor |
 
 Schema: `flows_journal_checkpoints`, migration `journal/0002_checkpoints`, one row per `(run_id, seq)`.
