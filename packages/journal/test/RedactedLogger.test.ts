@@ -280,6 +280,89 @@ describe("RedactedLogger", () => {
       expect(rendered).toContain("Bearer [REDACTED_API_KEY]")
     }))
 
+  it("survives every exotic value a log line can carry", () => {
+    // The failure mode is one thing: a value the walk cannot faithfully
+    // rebuild must never throw out of the logger, because the throw happens
+    // while the line is being rendered and it kills the run. Own-key counts
+    // do not predict it (Event carries four own symbols AND private fields),
+    // so these cover the shapes an inferred rule kept missing.
+    const redactor = Redaction.make()
+    const revoked = Proxy.revocable({}, {})
+    revoked.revoke()
+    const throwingGetter = {}
+    Object.defineProperty(throwingGetter, "boom", {
+      get: () => {
+        throw new Error("nope")
+      },
+      enumerable: true
+    })
+    const deepUnderError = new Error("outer") as Error & { detail?: unknown }
+    let chain: Record<string, unknown> = { token: "sk-live-abcdefgh" }
+    for (let level = 0; level < 5_000; level++) chain = { chain }
+    deepUnderError.detail = chain
+    const cases: ReadonlyArray<readonly [string, unknown]> = [
+      ["Event", new Event("evt-sk-live-abcdefgh")],
+      ["CustomEvent", new CustomEvent("evt", { detail: "sk-live-abcdefgh" })],
+      ["Headers", new Headers({ authorization: "Bearer sk-live-abcdefgh" })],
+      ["URLSearchParams", new URLSearchParams({ token: "sk-live-abcdefgh" })],
+      ["AbortController", new AbortController()],
+      ["Blob", new Blob(["sk-live-abcdefgh"])],
+      ["unparseable RegExp after redaction", new RegExp("(?<sk_live_abcdefgh>x)")],
+      ["RegExp whose class breaks", new RegExp("[q sk_livexyz1234]", "u")],
+      ["URL whose host is credential-shaped", new URL("https://sk-live-abcdefgh.example.com/")],
+      ["revoked proxy", revoked.proxy],
+      ["throwing getter", throwingGetter],
+      ["deep value under an Error", deepUnderError]
+    ]
+    for (const [name, value] of cases) {
+      const rendered = expect(() => RedactedLogger.redactArgument(value, redactor), name).not.toThrow
+      void rendered
+      const out = RedactedLogger.redactArgument(value, redactor)
+      expect(() => inspect(out), name).not.toThrow()
+      expect(inspect(out), name).not.toContain("sk-live-abcdefgh")
+      expect(inspect(out), name).not.toContain("sk_live_abcdefgh")
+    }
+  })
+
+  it("keeps the line when the console itself refuses to render it", () => {
+    // The delegate renders what the wrapper hands it, and a value can survive
+    // redaction and still break the renderer. The line degrades to text; the
+    // run does not die.
+    const redactor = Redaction.make()
+    const seen: Array<ReadonlyArray<unknown>> = []
+    let refuse = true
+    // Every method the wrapper binds must exist, so the double is the real
+    // console with `log` replaced.
+    const brittle = {
+      ...console,
+      log: (...args: ReadonlyArray<unknown>) => {
+        if (refuse) {
+          refuse = false
+          throw new TypeError("cannot render that")
+        }
+        seen.push(args)
+      }
+    } as unknown as Console.Console
+    const view = RedactedLogger.redactingConsole(brittle, redactor)
+    // A BigInt survives redaction and still breaks `JSON.stringify`, so the
+    // text fallback needs its own fallback.
+    expect(() => view.log("token=sk-live-abcdefgh", { a: 1 }, 7n, undefined)).not.toThrow()
+    expect(JSON.stringify(seen.map((entry) => entry.map((value) => String(value))))).not.toContain(
+      "sk-live-abcdefgh"
+    )
+    expect(seen.length).toBe(1)
+  })
+
+  it("names a prototype chain it cannot rebuild rather than guessing", () => {
+    // A chain that never reaches Object.prototype is not a plain object and
+    // not an ordinary class instance, so it is not rebuilt.
+    const redactor = Redaction.make()
+    const orphan = Object.create(Object.create(null) as object) as Record<string, unknown>
+    orphan["token"] = "sk-live-abcdefgh"
+    expect(() => RedactedLogger.redactArgument(orphan, redactor)).not.toThrow()
+    expect(inspect(RedactedLogger.redactArgument(orphan, redactor))).not.toContain("sk-live-abcdefgh")
+  })
+
   it("survives a host object whose state lives in internal slots", () => {
     // A brand-checked class (Headers, URLSearchParams, Request, ...) keeps its
     // state in internal slots, so a clone built on its prototype with only its

@@ -102,6 +102,49 @@ const consoleMethods = {
   warn: true
 } as const
 
+/**
+ * Whether a prototype chain is one this module can rebuild faithfully.
+ *
+ * A chain that reaches `Object.prototype` (or ends at `null`) without passing
+ * through a host constructor is a plain object or an ordinary class instance,
+ * whose state is its own properties. A chain carrying anything else keeps
+ * state the walk cannot see and cannot copy.
+ *
+ * @private
+ */
+const isRebuildablePrototype = (prototype: object | null): boolean => {
+  for (let link = prototype; link !== null; link = Object.getPrototypeOf(link) as object | null) {
+    if (link === Object.prototype) return true
+    const constructor = (link as { readonly constructor?: { readonly name?: string } }).constructor
+    if (constructor !== undefined && hostConstructors.has(constructor)) return false
+  }
+  return false
+}
+
+/** The host classes whose state is invisible to a property walk. */
+const hostConstructors: ReadonlySet<unknown> = new Set<unknown>(
+  [
+    "Event",
+    "EventTarget",
+    "Headers",
+    "Request",
+    "Response",
+    "FormData",
+    "URLSearchParams",
+    "AbortController",
+    "AbortSignal",
+    "Blob",
+    "File",
+    "MessagePort",
+    "MessageChannel",
+    "ReadableStream",
+    "WritableStream",
+    "Performance",
+    "WeakRef",
+    "Promise"
+  ].map((name) => (globalThis as Record<string, unknown>)[name]).filter((value) => value !== undefined)
+)
+
 /** How deep the logger walks a value before it names it instead. */
 const renderDepthLimit = 200
 
@@ -133,7 +176,12 @@ const toArray = (message: unknown): ReadonlyArray<unknown> => Array.isArray(mess
  * `stack` ACCESSOR whose getter would read the unredacted text straight back
  * out of the original.
  */
-const redactError = (error: Error, redactor: Redaction.Redactor, seen: WeakMap<Error, Error>): Error => {
+const redactError = (
+  error: Error,
+  redactor: Redaction.Redactor,
+  seen: WeakMap<Error, Error>,
+  depth = 0
+): Error => {
   // The memo holds the CLONE, not a visited mark: returning the original on a
   // repeat reference put the unredacted error back into the output, so a
   // diamond (two fields naming one error) leaked on its second field. The
@@ -153,7 +201,9 @@ const redactError = (error: Error, redactor: Redaction.Redactor, seen: WeakMap<E
       ? descriptor.value
       : (error as unknown as Record<PropertyKey, unknown>)[key]
     Object.defineProperty(clone, key, {
-      value: value instanceof Error ? redactError(value, redactor, seen) : redactor(value),
+      // Through `redactRendered`, so the depth cap and the rendering rules
+      // bind under an Error exactly as they do beside one.
+      value: redactRendered(value, redactor, seen as WeakMap<object, unknown>, depth + 1),
       writable: true,
       enumerable: descriptor.enumerable === true,
       configurable: true
@@ -182,8 +232,47 @@ const redactError = (error: Error, redactor: Redaction.Redactor, seen: WeakMap<E
  * @category redaction
  * @slop
  */
-export const redactArgument = (value: unknown, redactor: Redaction.Redactor): unknown =>
-  redactRendered(value, redactor, new WeakMap())
+export const redactArgument = (value: unknown, redactor: Redaction.Redactor): unknown => {
+  try {
+    return redactRendered(value, redactor, new WeakMap())
+  } catch {
+    // The last line of defence, and the one that makes this whole class of
+    // defect non-fatal. Every rule above is a guess about what an arbitrary
+    // logged value will tolerate, and a guess that is wrong throws while the
+    // line is being rendered, which kills the run the line was describing.
+    // Three rounds of review found three such guesses. So a failure here
+    // degrades to the plain redacted form, which is lossy and safe, and the
+    // run survives to be told what happened.
+    try {
+      return redactor(value)
+    } catch {
+      return unrenderableMarker
+    }
+  }
+}
+
+/** What the logger renders in place of a value that cannot be rendered. */
+const unrenderableMarker = "[Unrenderable]"
+
+/**
+ * A value as text, for a renderer that refused the value itself.
+ *
+ * Total by construction: `JSON.stringify` throws on a BigInt and answers
+ * `undefined` for `undefined`, a function, or a symbol, and `String` can throw
+ * through a hostile `Symbol.toPrimitive`. Each of those falls through to the
+ * next form, and the marker ends the chain.
+ *
+ * @private
+ */
+const asText = (value: unknown): string => {
+  try {
+    if (typeof value === "string") return value
+    const json = JSON.stringify(value)
+    return json === undefined ? String(value) : json
+  } catch {
+    return unrenderableMarker
+  }
+}
 
 /**
  * Redacts a value for a log line, keeping the type the operator was given.
@@ -208,19 +297,37 @@ const redactRendered = (
   depth = 0
 ): unknown => {
   if (value === null || typeof value !== "object") return redactor(value)
-  if (value instanceof Error) return redactError(value, redactor, seen as WeakMap<Error, Error>)
+  // The cap is tested before anything else that recurses, including the Error
+  // walk: a deep value carried under an Error is as able to exhaust the stack
+  // as one carried beside it, and a RangeError raised here is raised while the
+  // line is being rendered, which kills the run over a log line.
+  if (depth >= renderDepthLimit) return renderDepthMarker
+  if (value instanceof Error) return redactError(value, redactor, seen as WeakMap<Error, Error>, depth)
   const memoized = seen.get(value)
   if (memoized !== undefined) return memoized
-  // A logged value is arbitrary: without a cap a deep one exhausts the stack
-  // and the RangeError is thrown from inside the logger, killing the fiber
-  // over a log line. Past the cap the value is named rather than walked.
-  if (depth >= renderDepthLimit) return renderDepthMarker
   if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return value
   if (value instanceof Date) return value
-  // A pattern can be built from a credential, so its source is redacted; the
-  // flags carry no text.
-  if (value instanceof RegExp) return new RegExp(String(redactor(value.source)), value.flags)
-  if (value instanceof URL) return new URL(String(redactor(value.href)))
+  // A pattern or a URL can carry a credential in its text, but redacting that
+  // text can also make it unparseable: `(?<sk_live_x>y)` becomes a capture
+  // group named `[REDACTED_API_KEY]`, and a credential-shaped host is not a
+  // host. Rebuilding is attempted and the redacted text is the fallback, since
+  // a log line must never fail to render.
+  if (value instanceof RegExp) {
+    const source = String(redactor(value.source))
+    try {
+      return new RegExp(source, value.flags)
+    } catch {
+      return source
+    }
+  }
+  if (value instanceof URL) {
+    const href = String(redactor(value.href))
+    try {
+      return new URL(href)
+    } catch {
+      return href
+    }
+  }
   if (value instanceof Map) {
     const clone = new Map<unknown, unknown>()
     seen.set(value, clone)
@@ -268,15 +375,18 @@ const redactRendered = (
     Object.assign(clone, Object.fromEntries(entries))
     return clone
   }
+  // Everything below this line is rebuilt, so only shapes this module can
+  // faithfully rebuild reach it. Anything else takes the plain redacted form.
+  //
+  // Whether a class is safe to clone cannot be INFERRED: a brand-checked host
+  // class keeps its state in internal slots or `#private` fields, and copying
+  // its own keys onto a fresh object of the same prototype yields an impostor
+  // that throws the moment a brand check reads it, including the inspector
+  // rendering this very line. Own-key count does not predict it either, since
+  // `Event` carries four own symbols and still fails. So the rule is an
+  // allowlist of prototypes this module vouches for, not a test on the value.
+  if (!isRebuildablePrototype(prototype)) return redactor(value)
   const ownKeys = Reflect.ownKeys(value)
-  // A brand-checked host class (Headers, URLSearchParams, Request, Response,
-  // FormData, AbortController, Event) keeps its state in internal slots or
-  // private fields and exposes no own keys. Rebuilding one on its prototype
-  // produces an impostor that fails the brand check the moment anything reads
-  // it, including the inspector rendering this very log line, which threw from
-  // inside the logger and killed the run. Such a value has nothing to carry,
-  // so it takes the plain redacted form instead.
-  if (ownKeys.length === 0) return redactor(value)
   const clone = Object.create(prototype) as Record<PropertyKey, unknown>
   seen.set(value, clone)
   for (const key of ownKeys) {
@@ -310,7 +420,17 @@ export const redactingConsole = (target: Console.Console, redactor: Redaction.Re
   for (const [name, redacts] of Object.entries(consoleMethods)) {
     const method = methods[name]!.bind(target)
     view[name] = redacts
-      ? (...args: ReadonlyArray<unknown>) => method(...args.map((value) => redactArgument(value, redactor)))
+      ? (...args: ReadonlyArray<unknown>) => {
+        const redacted = args.map((value) => redactArgument(value, redactor))
+        try {
+          return method(...redacted)
+        } catch {
+          // The delegate renders what we hand it, and a value that survives
+          // redaction can still break the renderer. Falling back to the text
+          // keeps the line, and the run, alive.
+          return method(...redacted.map(asText))
+        }
+      }
       : method
   }
   return view as unknown as Console.Console
