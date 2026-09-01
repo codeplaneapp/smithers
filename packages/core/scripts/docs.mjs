@@ -55,8 +55,11 @@ const moduleDoc = (source) => {
   return withoutContractPointer(delink(description(ungutter(match[1]))))
 }
 
-const declared = /\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*\nexport (type|const|class|function|interface) (\w+)/g
-const renamed = /\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*\n\s+(?:\w+) as (\w+)/g
+// Both patterns anchor the opening `/**` to the start of a line so a `/**`
+// inside a string literal (for example `endsWith("/**")` in Effects.covers)
+// can never open a phantom doc block that swallows the next real one.
+const declared = /^[ \t]*\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*\nexport (type|const|class|function|interface) (\w+)/gm
+const renamed = /^[ \t]*\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*\n\s+(?:\w+) as (\w+)/gm
 
 const collect = (source, pattern, nameIndex, kindOf) => {
   const entries = []
