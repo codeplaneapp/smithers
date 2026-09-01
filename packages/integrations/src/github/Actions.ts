@@ -56,7 +56,9 @@ export const Comment = Schema.Struct({
  *
  * The tier is `irreversible`: the comment is visible the moment GitHub
  * accepts it, and deleting it afterwards is a different call with a different
- * outcome, so the engine must never retry this step on its own.
+ * outcome, so the engine must never retry this step on its own. Nor does the
+ * client underneath: a 5xx or a dropped connection on the POST reports
+ * `outcomeUnknown` rather than posting a second comment.
  *
  * @category actions
  * @since 1.0.0

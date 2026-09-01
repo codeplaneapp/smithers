@@ -14,7 +14,7 @@ import type { CredentialRef } from "@smthrs/control/Credential"
 import type { Effect, Redacted } from "effect"
 import * as Core from "../core/Channel.ts"
 import type { ExternalEvent } from "../core/ExternalEvent.ts"
-import { readHeader, readJsonPath, readString } from "../core/JsonPath.ts"
+import { type HasHeaders, readHeader, readJsonPath, readString } from "../core/JsonPath.ts"
 import * as SignalName from "../core/SignalName.ts"
 import { verifySignature } from "../core/Signature.ts"
 
@@ -55,9 +55,22 @@ export const timestampMs = (value: unknown): number | null => {
  * @since 1.0.0
  */
 export interface VerifyOptions {
+  /**
+   * How far a `webhookTimestamp` may sit from now, in milliseconds. Must be a
+   * finite integer from 0 to {@link MAX_TIMESTAMP_SKEW_MS}; `Infinity` would
+   * silently turn the replay window off, which is the check's whole point.
+   */
   readonly maxTimestampSkewMs?: number | undefined
   readonly nowMs?: number | undefined
 }
+
+/**
+ * The largest replay window this module accepts, one hour.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const MAX_TIMESTAMP_SKEW_MS = 3_600_000
 
 /**
  * Whether the delivery's signature matches and its timestamp is fresh.
@@ -76,7 +89,45 @@ export const verify = (raw: RawInbound, secret: string, options: VerifyOptions =
   const sentAt = timestampMs(readJsonPath(payload, "webhookTimestamp"))
   if (sentAt === null) return false
   const skew = options.maxTimestampSkewMs ?? DEFAULT_TIMESTAMP_SKEW_MS
-  return Math.abs((options.nowMs ?? Date.now()) - sentAt) <= skew
+  // An unbounded or nonsensical window disables the replay check, so it is
+  // refused rather than honored: verification fails closed.
+  if (!Number.isFinite(skew) || skew < 0 || skew > MAX_TIMESTAMP_SKEW_MS) return false
+  const nowMs = options.nowMs ?? Date.now()
+  if (!Number.isFinite(nowMs)) return false
+  return Math.abs(nowMs - sentAt) <= skew
+}
+
+/**
+ * The idempotency key for one Linear delivery.
+ *
+ * `Channels.ingest` drops a replayed `RawInbound.idempotencyKey`, and that is
+ * the whole redelivery guarantee: nothing derives the key on the caller's
+ * behalf. An ingress builds its `RawInbound` with this, so a Linear
+ * redelivery is recognized rather than processed twice.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const idempotencyKey = (raw: HasHeaders, payload: unknown): string => `linear:${deliveryId(raw, payload)}`
+
+/**
+ * Linear's delivery identity: the `Linear-Delivery` header when present, and
+ * otherwise the webhook id, entity, action, and timestamp, which together
+ * identify the same delivery across a redelivery.
+ *
+ * One derivation, so the idempotency key and the event's dedupe key cannot
+ * come to disagree about what "the same delivery" means.
+ */
+const deliveryId = (raw: HasHeaders, payload: unknown): string => {
+  const header = readHeader(raw, "linear-delivery")
+  if (header !== undefined && header.length > 0) return header
+  return [
+    readString(payload, "webhookId") ?? "-",
+    (readString(payload, "type") ?? "unknown").toLowerCase(),
+    (readString(payload, "action") ?? "unknown").toLowerCase(),
+    readString(payload, "data.id") ?? "-",
+    String(readJsonPath(payload, "webhookTimestamp") ?? "-")
+  ].join(":")
 }
 
 /**
@@ -126,16 +177,6 @@ export const decode = (
   source: string = SERVICE,
   receivedAtMs: number = Date.now()
 ): ExternalEvent => {
-  const type = (readString(payload, "type") ?? "unknown").toLowerCase()
-  const action = (readString(payload, "action") ?? "unknown").toLowerCase()
-  const deliveryId = readHeader(raw, "linear-delivery") ??
-    [
-      readString(payload, "webhookId") ?? "-",
-      type,
-      action,
-      readString(payload, "data.id") ?? "-",
-      String(readJsonPath(payload, "webhookTimestamp") ?? "-")
-    ].join(":")
   const eventName = names(payload)[0] as string
   const correlationId = correlations(payload)[0] as string | null
   return {
@@ -143,7 +184,7 @@ export const decode = (
     eventName,
     correlationId,
     payload: payload as ExternalEvent["payload"],
-    dedupeKey: `${deliveryId}#${eventName}#${correlationId ?? ""}`,
+    dedupeKey: `${deliveryId(raw, payload)}#${eventName}#${correlationId ?? ""}`,
     receivedAtMs
   }
 }

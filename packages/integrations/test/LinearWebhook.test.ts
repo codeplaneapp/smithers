@@ -3,7 +3,15 @@ import { Effect, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import { computeHmacSha256Hex } from "../src/core/Signature.ts"
 import * as Payload from "../src/linear/Payload.ts"
-import { correlations, decode, names, timestampMs, verify } from "../src/linear/Webhook.ts"
+import {
+  correlations,
+  decode,
+  idempotencyKey,
+  MAX_TIMESTAMP_SKEW_MS,
+  names,
+  timestampMs,
+  verify
+} from "../src/linear/Webhook.ts"
 
 const SECRET = "linear-webhook-secret"
 const NOW = 1_700_000_000_000
@@ -141,5 +149,37 @@ describe("payload schemas", () => {
 
   it("still rejects a modelled field of the wrong type", async () => {
     expect((await decodeWith(Payload.IssueDelivery, { ...issueUpdate, data: { id: 7 } }))._tag).toBe("Failure")
+  })
+})
+
+describe("the replay window cannot be turned off by configuration", () => {
+  // An unbounded skew disables exactly the check the module exists for, so it
+  // is refused rather than honored: verification fails closed.
+  it("refuses a skew that is not a usable window", () => {
+    for (
+      const maxTimestampSkewMs of [
+        Number.POSITIVE_INFINITY,
+        Number.NaN,
+        -1,
+        MAX_TIMESTAMP_SKEW_MS + 1
+      ]
+    ) {
+      expect(verify(raw(issueUpdate), SECRET, { nowMs: NOW, maxTimestampSkewMs })).toBe(false)
+    }
+    expect(verify(raw(issueUpdate), SECRET, { nowMs: Number.NaN })).toBe(false)
+  })
+
+  it("still honors a window inside the bound", () => {
+    expect(verify(raw(issueUpdate), SECRET, { nowMs: NOW + 120_000, maxTimestampSkewMs: 300_000 })).toBe(true)
+  })
+
+  it("derives the same delivery identity with and without the header", () => {
+    const payload = issueUpdate
+    const withoutHeader = { headers: {} }
+    expect(idempotencyKey(withoutHeader, payload)).toBe(idempotencyKey(withoutHeader, payload))
+    // The webhook id, type, action, entity, and timestamp are all in it.
+    expect(idempotencyKey(withoutHeader, { ...payload, webhookId: "other" }))
+      .not.toBe(idempotencyKey(withoutHeader, payload))
+    expect(idempotencyKey(withoutHeader, {})).toBe("linear:-:unknown:unknown:-:-")
   })
 })

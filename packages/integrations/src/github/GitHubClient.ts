@@ -18,9 +18,9 @@
  *   nothing else, not a message, not `details`, not a log line, and every
  *   request URL, including a `rel="next"` target, is pinned to the configured
  *   API origin so a redirected link cannot carry the token elsewhere. The
- *   origin pin is not a path pin: a caller that builds a path from
- *   provider data uses `repositoryPath` from `ListenerRegistry`, which
- *   validates each segment, because `new URL` resolves `..` inside a path.
+ *   origin pin is not a path pin: a caller that builds a path from provider
+ *   data uses `Repository.repositoryPath`, which validates each segment,
+ *   because `new URL` resolves `..` inside a path.
  *
  * Interruption is forwarded to `fetch`, so interrupting the fiber aborts the
  * request in flight rather than leaving it running.
@@ -305,10 +305,25 @@ export const make = (
   ): Effect.Effect<string, IntegrationError> =>
     Effect.try({ try: () => buildUrl(path, query), catch: (cause) => cause as IntegrationError })
 
+  // Serialized once, before the attempt. `JSON.stringify` throws on a cyclic
+  // or unserializable body, and inside the transport attempt that throw was
+  // reported as an unknown write outcome even though no request was sent.
+  const encodeBody = (body: unknown): Effect.Effect<string | undefined, IntegrationError> =>
+    body === undefined ? Effect.succeed(undefined) : Effect.try({
+      try: () => JSON.stringify(body),
+      catch: (cause) =>
+        new IntegrationError(
+          "invalid-config",
+          "GitHub request body could not be serialized as JSON.",
+          { retryable: false, outcomeUnknown: false },
+          { cause }
+        )
+    })
+
   const attemptOnce = (
     method: RequestMethod,
     url: string,
-    body?: unknown,
+    body?: string,
     retryUnsafeWrites: boolean = false
   ): Effect.Effect<{ readonly json: unknown; readonly headers: Headers }, IntegrationError> => {
     // A rate limit is a refusal: the request was not performed, so repeating
@@ -328,7 +343,7 @@ export const make = (
         const response = await fetch(url, {
           method,
           headers,
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          ...(body === undefined ? {} : { body }),
           signal
         })
         const text = await response.text()
@@ -380,7 +395,7 @@ export const make = (
   const requestUrl = (
     method: RequestMethod,
     url: string,
-    body?: unknown,
+    body?: string,
     retryUnsafeWrites?: boolean
   ): Effect.Effect<{ readonly json: unknown; readonly headers: Headers }, IntegrationError> => {
     const schedule = Schedule.exponential("250 millis").pipe(
@@ -403,8 +418,8 @@ export const make = (
     body?: unknown,
     options?: RequestOptions<A>
   ): Effect.Effect<A, IntegrationError> =>
-    urlFor(path, options?.query).pipe(
-      Effect.flatMap((url) => requestUrl(method, url, body, options?.retryUnsafeWrites)),
+    Effect.all([urlFor(path, options?.query), encodeBody(body)]).pipe(
+      Effect.flatMap(([url, encoded]) => requestUrl(method, url, encoded, options?.retryUnsafeWrites)),
       Effect.flatMap(({ json }) => {
         const schema = options?.schema
         if (schema === undefined) return Effect.succeed(json as A)

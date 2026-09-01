@@ -257,3 +257,155 @@ describe("IntegrationFailure conversions", () => {
     expect(error.details).toMatchObject({ reason: "permission-denied", retryable: false })
   })
 })
+
+describe("what an action journals", () => {
+  // The package promises every failure carries a machine-readable reason.
+  // `TelegramApiError` is not an `IntegrationError`, so before the adapter
+  // every Telegram failure journaled as an unclassified, non-retryable
+  // `delivery-failed`: an exhausted rate limit was indistinguishable from a
+  // chat that does not exist.
+  const telegramFailure = async (status: number, body: Record<string, unknown>) => {
+    fixture = await startFixture((request, response) => {
+      if (request.url.endsWith("/sendChatAction")) {
+        json(response, 200, { ok: true, result: true })
+        return
+      }
+      json(response, status, body)
+    })
+    const failure = await runAction<never>(
+      TelegramActions.SendMessage,
+      TelegramActions.layer as never,
+      { chatId: "55", text: "hello" },
+      TelegramClient.layer({ botToken: "1:abc", apiBaseUrl: fixture.origin }, {}) as never
+    ).then(() => undefined, (error: any) => error)
+    const carried: any = failure?.cause?.error ?? failure?.error ?? failure
+    await fixture.close()
+    fixture = undefined
+    return carried
+  }
+
+  it("classifies an exhausted rate limit as retryable", async () => {
+    const carried = await telegramFailure(429, {
+      ok: false,
+      error_code: 429,
+      description: "Too Many Requests",
+      parameters: { retry_after: 0 }
+    })
+    expect(carried).toBeInstanceOf(IntegrationFailure)
+    expect(carried.reason).toBe("delivery-failed")
+    expect(carried.retryable).toBe(true)
+  })
+
+  it("distinguishes a chat that does not exist from a permission problem", async () => {
+    const notFound = await telegramFailure(400, {
+      ok: false,
+      error_code: 400,
+      description: "Bad Request: chat not found"
+    })
+    expect(notFound.reason).toBe("decode-failed")
+    expect(notFound.retryable).toBe(false)
+
+    const blocked = await telegramFailure(403, {
+      ok: false,
+      error_code: 403,
+      description: "Forbidden: bot was blocked by the user"
+    })
+    expect(blocked.reason).toBe("permission-denied")
+    expect(blocked.retryable).toBe(false)
+  })
+
+  // `owner`/`repo` become the request path, and `new URL` resolves `..`, so an
+  // unvalidated payload used to walk the token-bearing POST to another GitHub
+  // endpoint. The payload schema stops it before any request is made.
+  it("refuses a GitHub comment payload that would leave the endpoint", async () => {
+    fixture = await startFixture((_request, response) => json(response, 201, { id: 1, url: "https://x" }))
+    await runAction<never>(
+      GitHubActions.CommentOnIssue,
+      GitHubActions.layer as never,
+      { owner: "..", repo: "..", issueNumber: 1, body: "hello" },
+      GitHubClient.layer({ token: "t", apiBaseUrl: fixture.origin }, {}) as never
+    ).then(() => undefined, (error: unknown) => error)
+    expect(fixture.requests).toHaveLength(0)
+  })
+})
+
+describe("a partial or ambiguous outcome reaches the journal", () => {
+  // The ids exist on the client error, but the journal is what an operator
+  // reads after a restart. If they stop at the action boundary the typed
+  // partial outcome does not exist where it is needed.
+  it("names the chunks a failed multi-chunk send already delivered", async () => {
+    let calls = 0
+    fixture = await startFixture((request, response) => {
+      if (request.url.endsWith("/sendChatAction")) {
+        json(response, 200, { ok: true, result: true })
+        return
+      }
+      calls += 1
+      if (calls === 1) {
+        json(response, 200, { ok: true, result: { message_id: 101 } })
+        return
+      }
+      json(response, 400, { ok: false, error_code: 400, description: "Bad Request: chat not found" })
+    })
+    const failure = await runAction<never>(
+      TelegramActions.SendMessage,
+      TelegramActions.layer as never,
+      { chatId: "55", text: "a".repeat(4200) },
+      TelegramClient.layer({ botToken: "1:abc", apiBaseUrl: fixture.origin }, {}) as never
+    ).then(() => undefined, (error: any) => error)
+    const carried: any = failure?.cause?.error ?? failure?.error ?? failure
+    expect(carried).toBeInstanceOf(IntegrationFailure)
+    expect(carried.deliveredMessageIds).toEqual([101])
+    // A 400 is a refusal, so the send's outcome is not in doubt: the field
+    // stays absent rather than saying "false" on every ordinary failure.
+    expect(carried.outcomeUnknown).toBeUndefined()
+  })
+
+  // "This did not happen" and "nobody knows" are different answers, and an
+  // operator deciding whether to run the step again needs the difference.
+  it("says when a write's outcome is unknown", async () => {
+    fixture = await startFixture((_request, response) => json(response, 502, { message: "bad gateway" }))
+    const failure = await runAction<never>(
+      GitHubActions.CommentOnIssue,
+      GitHubActions.layer as never,
+      { owner: "o", repo: "r", issueNumber: 7, body: "hello" },
+      GitHubClient.layer({ token: "t", apiBaseUrl: fixture.origin }, {}) as never
+    ).then(() => undefined, (error: any) => error)
+    const carried: any = failure?.cause?.error ?? failure?.error ?? failure
+    expect(carried).toBeInstanceOf(IntegrationFailure)
+    expect(carried.outcomeUnknown).toBe(true)
+    // Exactly one attempt: the client did not repeat the write.
+    expect(fixture.requests).toHaveLength(1)
+  })
+
+  it("leaves the field absent for a failure that definitely did not happen", async () => {
+    fixture = await startFixture((_request, response) => json(response, 404, { message: "Not Found" }))
+    const failure = await runAction<never>(
+      GitHubActions.CommentOnIssue,
+      GitHubActions.layer as never,
+      { owner: "o", repo: "r", issueNumber: 7, body: "hello" },
+      GitHubClient.layer({ token: "t", apiBaseUrl: fixture.origin }, {}) as never
+    ).then(() => undefined, (error: any) => error)
+    const carried: any = failure?.cause?.error ?? failure?.error ?? failure
+    expect(carried.outcomeUnknown).toBeUndefined()
+  })
+
+  it("round-trips both fields through the journal codec", () => {
+    const failure = new IntegrationFailure({
+      reason: "delivery-failed",
+      message: "partial",
+      retryable: false,
+      outcomeUnknown: true,
+      deliveredMessageIds: [101, 102]
+    })
+    const encoded = Effect.runSync(Schema.encodeEffect(Schema.toCodecJson(IntegrationFailure))(failure))
+    const decoded = Effect.runSync(Schema.decodeUnknownEffect(Schema.toCodecJson(IntegrationFailure))(encoded))
+    expect(decoded.outcomeUnknown).toBe(true)
+    expect(decoded.deliveredMessageIds).toEqual([101, 102])
+    // And the class conversion keeps them.
+    expect(toIntegrationError(decoded).details).toMatchObject({
+      outcomeUnknown: true,
+      deliveredMessageIds: [101, 102]
+    })
+  })
+})

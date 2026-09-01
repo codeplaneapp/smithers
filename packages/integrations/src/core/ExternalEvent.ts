@@ -9,6 +9,7 @@
  * @since 1.0.0
  */
 import { Schema } from "effect"
+import { isEventName } from "./SignalName.ts"
 
 /**
  * A decoded external event.
@@ -19,8 +20,17 @@ import { Schema } from "effect"
 export const ExternalEvent = Schema.Struct({
   /** The source that produced it: `github`, `linear`, `telegram`. */
   source: Schema.NonEmptyString,
-  /** The signal name, `integration:<service>:<event>` by convention. */
-  eventName: Schema.NonEmptyString,
+  /**
+   * The signal name, `integration:<service>:<event>`.
+   *
+   * The same refinement `SignalName.eventName` builds against, so a name that
+   * module could not have produced, such as one whose event segment carries a
+   * second colon, cannot enter persistence and become a routing identity
+   * nothing can rebuild.
+   */
+  eventName: Schema.String.pipe(
+    Schema.refine(isEventName, { expected: "an integration signal name SignalName.eventName could build" })
+  ),
   /** What the event is about, or `null` when it addresses nothing narrower. */
   correlationId: Schema.NullOr(Schema.String),
   /** The provider payload, as delivered. */

@@ -22,8 +22,10 @@
  */
 import { SmithersError } from "@smthrs/errors/SmithersError"
 import { Context, Duration, Effect, Layer, Schedule } from "effect"
+import { IntegrationError } from "../core/IntegrationError.ts"
+import * as Environment from "../Environment.ts"
 import { chunk } from "./Chunk.ts"
-import type { TelegramConfig } from "./Config.ts"
+import { resolve as resolveConfig, type TelegramConfig } from "./Config.ts"
 import { clean, toTelegram } from "./Markdown.ts"
 
 const DEFAULT_API_BASE_URL = "https://api.telegram.org"
@@ -42,22 +44,34 @@ const DEFAULT_MAX_RETRY_AFTER_SECONDS = 30
 export class TelegramApiError extends SmithersError {
   readonly errorCode: number | null
   readonly retryAfterSeconds: number | null
+  /**
+   * The messages a partially completed multi-chunk send had already delivered.
+   *
+   * A long message is several `sendMessage` calls. One that fails after the
+   * third of five leaves three messages the reader can see, so the failure
+   * names them: a caller deciding whether to resend knows what the chat
+   * already holds.
+   */
+  readonly deliveredMessageIds: ReadonlyArray<number>
 
   constructor(message: string, options: {
     readonly method: string
     readonly errorCode?: number | null | undefined
     readonly description?: string | null | undefined
     readonly retryAfterSeconds?: number | null | undefined
+    readonly deliveredMessageIds?: ReadonlyArray<number> | undefined
     readonly cause?: unknown
   }) {
     super("TELEGRAM_API_ERROR", message, {
       method: options.method,
       errorCode: options.errorCode ?? null,
       description: options.description ?? null,
-      retryAfterSeconds: options.retryAfterSeconds ?? null
+      retryAfterSeconds: options.retryAfterSeconds ?? null,
+      deliveredMessageIds: options.deliveredMessageIds ?? []
     }, { cause: options.cause, name: "TelegramApiError" })
     this.errorCode = options.errorCode ?? null
     this.retryAfterSeconds = options.retryAfterSeconds ?? null
+    this.deliveredMessageIds = options.deliveredMessageIds ?? []
   }
 }
 
@@ -67,8 +81,54 @@ export class TelegramApiError extends SmithersError {
  * @category refinements
  * @since 1.0.0
  */
-export const isTelegramApiError = (error: unknown): error is TelegramApiError =>
-  error instanceof TelegramApiError || (error instanceof Error && error.name === "TelegramApiError")
+export const isTelegramApiError = (error: unknown): error is TelegramApiError => {
+  if (error instanceof TelegramApiError) return true
+  if (!(error instanceof Error) || error.name !== "TelegramApiError") return false
+  // A name is forgeable, so the fields every reader of this refinement touches
+  // have to be there too. An error that only claims the name falls through to
+  // the caller's unclassified path.
+  const candidate = error as { readonly summary?: unknown; readonly errorCode?: unknown }
+  return typeof candidate.summary === "string" &&
+    (candidate.errorCode === null || typeof candidate.errorCode === "number")
+}
+
+/**
+ * The classification a Bot API failure carries once it leaves this module.
+ *
+ * A `TelegramApiError` is not an `IntegrationError`, so an action that mapped
+ * it through `ActionFailure.fromIntegrationError` reported every Telegram
+ * failure as an unclassified, non-retryable `delivery-failed`: a rate limit
+ * that exhausted its retries looked exactly like a chat that does not exist.
+ * This is the mapping that keeps the package's one promise, that every failure
+ * carries a machine-readable reason, true for Telegram as well.
+ *
+ * @category conversions
+ * @since 1.0.0
+ */
+export const toIntegrationError = (error: unknown): unknown => {
+  if (!isTelegramApiError(error)) return error
+  const code = error.errorCode
+  const transient = code === 429 || (typeof code === "number" && code >= 500)
+  const reason = transient
+    ? "delivery-failed" as const
+    : code === 401 || code === 403
+    ? "permission-denied" as const
+    : code === 400 || code === 404
+    ? "decode-failed" as const
+    : "delivery-failed" as const
+  return new IntegrationError(reason, error.summary, {
+    method: error.details?.["method"],
+    errorCode: code,
+    // A 429 that outlived its retries is worth another attempt later; a chat
+    // that does not exist is not.
+    retryable: transient,
+    // A transport failure or a 5xx may have delivered the message anyway, and
+    // a multi-chunk send that failed partway through certainly delivered the
+    // chunks it names. Both cross to the journal.
+    outcomeUnknown: code === null || (typeof code === "number" && code >= 500),
+    deliveredMessageIds: [...error.deliveredMessageIds]
+  }, { cause: error })
+}
 
 /**
  * Removes the bot token from a string.
@@ -145,7 +205,11 @@ export interface SendOptions {
  */
 export interface SendResult {
   readonly chatId: string
-  /** The `message_id` of every chunk, in send order. */
+  /**
+   * The `message_id` of every chunk, in send order. On success this always
+   * has `chunkCount` members: a chunk whose answer carried no usable id fails
+   * the send rather than leaving the record short.
+   */
   readonly messageIds: ReadonlyArray<number>
   readonly chunkCount: number
   /** True when at least one chunk fell back to plain text. */
@@ -228,17 +292,20 @@ const linkInterrupt = (signal: AbortSignal, controller: AbortController): void =
 /**
  * Builds a Bot API client bound to `config`.
  *
+ * `env` is the fallback source for the bot token, the same shape the GitHub
+ * and Linear clients take. Passing one replaces the ambient environment rather
+ * than layering over it, so a caller that supplies its own credential cannot
+ * be surprised by an ambient `SMITHERS_TELEGRAM_BOT_TOKEN` deciding which bot
+ * a send runs as.
+ *
  * @category constructors
  * @since 1.0.0
  */
-export const make = (config: TelegramConfig): TelegramClient => {
-  const botToken = config.botToken
-  if (typeof botToken !== "string" || botToken.length === 0) {
-    throw new SmithersError(
-      "INVALID_INPUT",
-      "Telegram client requires a bot token (config.botToken or SMITHERS_TELEGRAM_BOT_TOKEN)."
-    )
-  }
+export const make = (
+  config: Partial<TelegramConfig> = {},
+  env: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
+): TelegramClient => {
+  const { botToken } = resolveConfig(config, env)
   const apiBaseUrl = (config.apiBaseUrl ?? DEFAULT_API_BASE_URL).replace(/\/+$/, "")
   const maxRateLimitRetries = config.maxRateLimitRetries ?? DEFAULT_MAX_RATE_LIMIT_RETRIES
   const maxRetryAfterSeconds = config.maxRetryAfterSeconds ?? DEFAULT_MAX_RETRY_AFTER_SECONDS
@@ -293,6 +360,17 @@ export const make = (config: TelegramConfig): TelegramClient => {
               { method, errorCode: response.status }
             )
         })
+        // The Bot API envelope is `{ ok, result }` or `{ ok: false, ... }`.
+        // Anything else is not a Bot API answer, so it is reported as one
+        // rather than read through a cast that happens not to throw.
+        if (payload !== null && typeof payload !== "object") {
+          return yield* Effect.fail(
+            new TelegramApiError(
+              `Telegram API returned a response that is not a Bot API envelope for method "${method}" (status ${response.status}).`,
+              { method, errorCode: response.status }
+            )
+          )
+        }
         const body = (payload ?? {}) as {
           ok?: boolean
           result?: unknown
@@ -388,10 +466,39 @@ export const make = (config: TelegramConfig): TelegramClient => {
           ...(options.disableNotification === true ? { disable_notification: true } : {})
         }
         const formatted = parseModeOption === "markdown" ? toTelegram(piece) : piece
-        const sent = yield* sendChunk(base, formatted, piece, parseModeFor(parseModeOption))
+        const sent = yield* sendChunk(base, formatted, piece, parseModeFor(parseModeOption)).pipe(
+          // A chunk that fails after earlier ones landed leaves messages the
+          // reader can already see. The failure says how many, so a caller
+          // resending knows what the chat already holds rather than repeating
+          // the whole message.
+          Effect.mapError((error) =>
+            chunks.length === 1 || !isTelegramApiError(error) ? error : new TelegramApiError(
+              `${error.summary} (chunk ${index + 1} of ${chunks.length}; ${messageIds.length} already delivered)`,
+              {
+                method: "sendMessage",
+                errorCode: error.errorCode,
+                description: String(error.details?.["description"] ?? ""),
+                retryAfterSeconds: error.retryAfterSeconds,
+                deliveredMessageIds: [...messageIds],
+                cause: error
+              }
+            )
+          )
+        )
         usedPlainTextFallback = usedPlainTextFallback || sent.usedPlainTextFallback
         const messageId = (sent.result as { message_id?: unknown } | null)?.message_id
-        if (typeof messageId === "number") messageIds.push(messageId)
+        // The record has to name every message it claims to have sent, so a
+        // result with no usable id is a decode failure rather than a silent
+        // shortfall between `messageIds` and `chunkCount`.
+        if (typeof messageId !== "number" || !Number.isSafeInteger(messageId) || messageId <= 0) {
+          return yield* Effect.fail(
+            new TelegramApiError(
+              `Telegram sendMessage returned no usable message_id for chunk ${index + 1} of ${chunks.length}.`,
+              { method: "sendMessage", deliveredMessageIds: [...messageIds] }
+            )
+          )
+        }
+        messageIds.push(messageId)
       }
       return { chatId: String(chatId), messageIds, chunkCount: chunks.length, usedPlainTextFallback }
     })
@@ -460,5 +567,7 @@ export const make = (config: TelegramConfig): TelegramClient => {
  * @category layers
  * @since 1.0.0
  */
-export const layer = (config: TelegramConfig): Layer.Layer<TelegramClient> =>
-  Layer.sync(TelegramClient, () => make(config))
+export const layer = (
+  config: Partial<TelegramConfig> = {},
+  env: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
+): Layer.Layer<TelegramClient> => Layer.sync(TelegramClient, () => make(config, env))

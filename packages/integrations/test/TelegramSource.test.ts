@@ -7,6 +7,7 @@ import {
   CALLBACK_QUERY_EVENT,
   chatCorrelationId,
   EDITED_MESSAGE_EVENT,
+  idempotencyKey,
   make,
   MESSAGE_EVENT,
   threadCorrelationId,
@@ -41,9 +42,23 @@ describe("updateToEvents", () => {
       eventName: MESSAGE_EVENT,
       correlationId: chatCorrelationId(-100),
       payload: message(),
-      dedupeKey: "update:7",
+      dedupeKey: "update:8:telegram:7",
       receivedAtMs: NOW
     }])
+  })
+
+  // `update_id` is scoped per bot, so two configured sources routinely produce
+  // the same number. `SignalName.toNotification` uses the dedupe key as the
+  // durable notification id, so an unscoped key drops the second bot's event.
+  it("scopes the dedupe key to the source, so two bots cannot collide", () => {
+    const update = { update_id: 7, message: message() }
+    const [first] = updateToEvents("telegram", update, NOW)
+    const [second] = updateToEvents("telegram-ops", update, NOW)
+    expect(first?.dedupeKey).not.toBe(second?.dedupeKey)
+    // Length-prefixed, so a source id carrying the delimiter cannot forge
+    // another source's key.
+    expect(updateToEvents("a:b", update, NOW)[0]?.dedupeKey)
+      .not.toBe(updateToEvents("a", { ...update, update_id: "b:7" as never }, NOW)[0]?.dedupeKey)
   })
 
   // One delivered event carries one correlation, and each variant dedupes on
@@ -54,8 +69,8 @@ describe("updateToEvents", () => {
       message: message({ message_thread_id: 5 })
     }, NOW)
     expect(events.map((event) => [event.correlationId, event.dedupeKey])).toEqual([
-      [chatCorrelationId(-100), "update:7"],
-      [threadCorrelationId(-100, 5), "update:7:thread"]
+      [chatCorrelationId(-100), "update:8:telegram:7"],
+      [threadCorrelationId(-100, 5), "update:8:telegram:7:thread"]
     ])
   })
 
@@ -65,10 +80,10 @@ describe("updateToEvents", () => {
       message: message({ web_app_data: { data: "{}" }, message_thread_id: 5 })
     }, NOW)
     expect(events.map((event) => [event.eventName, event.dedupeKey])).toEqual([
-      [MESSAGE_EVENT, "update:7"],
-      [MESSAGE_EVENT, "update:7:thread"],
-      [WEB_APP_DATA_EVENT, "update:7:webappdata"],
-      [WEB_APP_DATA_EVENT, "update:7:webappdata:thread"]
+      [MESSAGE_EVENT, "update:8:telegram:7"],
+      [MESSAGE_EVENT, "update:8:telegram:7:thread"],
+      [WEB_APP_DATA_EVENT, "update:8:telegram:7:webappdata"],
+      [WEB_APP_DATA_EVENT, "update:8:telegram:7:webappdata:thread"]
     ])
   })
 
@@ -81,8 +96,8 @@ describe("updateToEvents", () => {
     const query = { id: "q", data: "sap:t:a", message: { chat: { id: -100 }, message_thread_id: 5 } }
     const events = updateToEvents("telegram", { update_id: 9, callback_query: query }, NOW)
     expect(events.map((event) => [event.eventName, event.correlationId, event.dedupeKey])).toEqual([
-      [CALLBACK_QUERY_EVENT, chatCorrelationId(-100), "update:9"],
-      [CALLBACK_QUERY_EVENT, threadCorrelationId(-100, 5), "update:9:thread"]
+      [CALLBACK_QUERY_EVENT, chatCorrelationId(-100), "update:8:telegram:9"],
+      [CALLBACK_QUERY_EVENT, threadCorrelationId(-100, 5), "update:8:telegram:9:thread"]
     ])
   })
 
@@ -135,14 +150,34 @@ describe("poll", () => {
     expect(batch.cursor).toBe("13")
   })
 
-  it("proposes no cursor when the poll returned nothing usable", async () => {
+  // An update with no numeric `update_id` cannot be acknowledged, so reading
+  // it as an empty batch would poll the same broken batch forever.
+  it("refuses an update with no numeric update_id rather than skipping it", async () => {
     fixture = await startFixture((_request, response) => json(response, 200, { ok: true, result: [{ no_id: true }] }))
-    expect(await Effect.runPromise(source().poll(null))).toEqual({ events: [] })
+    const failure = await Effect.runPromise(Effect.flip(source().poll(null)))
+    expect(failure.reason).toBe("decode-failed")
+    expect(failure.details).toMatchObject({ index: 0, sourceId: "telegram" })
   })
 
-  it("tolerates a result that is not an array", async () => {
+  // A Bot API contract change read as "no updates" looks like a healthy idle
+  // poll forever, which is the worst possible way to be broken.
+  it("refuses a result that is not an update array", async () => {
     fixture = await startFixture((_request, response) => json(response, 200, { ok: true, result: true }))
-    expect(await Effect.runPromise(source().poll(null))).toEqual({ events: [] })
+    const failure = await Effect.runPromise(Effect.flip(source().poll(null)))
+    expect(failure.reason).toBe("decode-failed")
+    expect(failure.message).toContain("not an update array")
+  })
+
+  // A cursor that does not parse used to be dropped, which sent getUpdates
+  // with no offset and replayed Telegram's whole retained backlog.
+  it("refuses a corrupt stored cursor instead of replaying the backlog", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, { ok: true, result: [] }))
+    for (const cursor of ["not-a-number", "-1", "1.5"]) {
+      const failure = await Effect.runPromise(Effect.flip(source().poll(cursor)))
+      expect(failure.reason).toBe("invalid-config")
+      expect(failure.details).toMatchObject({ cursor })
+    }
+    expect(fixture.requests).toHaveLength(0)
   })
 
   // The offset still advances past a dropped update, or the source would
@@ -160,6 +195,28 @@ describe("poll", () => {
     const batch = await Effect.runPromise(source({ allowedChatIds: [-100] }).poll(null))
     expect(batch.events).toHaveLength(1)
     expect(batch.cursor).toBe("3")
+  })
+
+  // An allowlist that admits what it cannot classify is not one. A press on an
+  // inline keyboard whose message is inaccessible is exactly that case.
+  it("drops an update whose chat it cannot determine when an allow list is set", async () => {
+    fixture = await startFixture((_request, response) =>
+      json(response, 200, {
+        ok: true,
+        result: [{ update_id: 4, callback_query: { id: "q", data: "sap:t:a" } }]
+      })
+    )
+    const batch = await Effect.runPromise(source({ allowedChatIds: [-100] }).poll(null))
+    expect(batch.events).toEqual([])
+    // The offset still advances, or the source re-polls the same update forever.
+    expect(batch.cursor).toBe("5")
+  })
+
+  it("still emits an unclassifiable update when no allow list is configured", async () => {
+    fixture = await startFixture((_request, response) =>
+      json(response, 200, { ok: true, result: [{ update_id: 4, callback_query: { id: "q" } }] })
+    )
+    expect((await Effect.runPromise(source().poll(null))).events).toHaveLength(1)
   })
 
   it("takes an explicit source id, timeout, and allowed updates", async () => {
@@ -186,6 +243,21 @@ describe("poll", () => {
     fixture = await startFixture((_request, response) => json(response, 200, { ok: true, result: [] }))
     await Effect.runPromise(make({ botToken: TOKEN, apiBaseUrl: fixture.origin }).poll(null))
     expect(fixture.requests[0]?.url).toBe(`/bot${TOKEN}/getUpdates`)
+  })
+
+  // Every doc names SMITHERS_TELEGRAM_BOT_TOKEN as the source a Telegram
+  // source reads. It has to actually read it.
+  it("takes the bot token from the environment it was built with", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, { ok: true, result: [] }))
+    await Effect.runPromise(
+      make({ apiBaseUrl: fixture.origin }, { SMITHERS_TELEGRAM_BOT_TOKEN: TOKEN }).poll(null)
+    )
+    expect(fixture.requests[0]?.url).toBe(`/bot${TOKEN}/getUpdates`)
+  })
+
+  it("refuses to build when neither the config nor the environment has a token", () => {
+    expect(() => make({ apiBaseUrl: "https://example.invalid" }, {}))
+      .toThrow(/SMITHERS_TELEGRAM_BOT_TOKEN/)
   })
 })
 
@@ -301,5 +373,51 @@ describe("payload schemas", () => {
     expect((await decodeWith(Payload.Message, { ...full, message_id: "one" }))._tag).toBe("Failure")
     expect((await decodeWith(Payload.Chat, { id: "-100" }))._tag).toBe("Failure")
     expect((await decodeWith(Payload.User, { id: 7 }))._tag).toBe("Success")
+  })
+})
+
+describe("idempotencyKey", () => {
+  // A long poll has no `Channels.ingest` in front of it, but a host routing
+  // these events through the control plane needs the same delivery identity
+  // the webhook providers supply.
+  it("is the event's source-scoped dedupe key", () => {
+    const [event] = updateToEvents("telegram", { update_id: 7, message: message() }, NOW)
+    expect(idempotencyKey(event as ExternalEvent)).toBe(event?.dedupeKey)
+    const [other] = updateToEvents("telegram-ops", { update_id: 7, message: message() }, NOW)
+    expect(idempotencyKey(event as ExternalEvent)).not.toBe(idempotencyKey(other as ExternalEvent))
+  })
+})
+
+describe("the poll refuses what it cannot read", () => {
+  // `Number()` accepts "", "0x10", and " 7 ", so a corrupt cursor could
+  // silently skip or replay updates instead of failing before the request.
+  it("accepts only a canonical decimal offset", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, { ok: true, result: [] }))
+    for (const cursor of ["", "0x10", " 7 ", "1e3", "+7"]) {
+      const failure = await Effect.runPromise(Effect.flip(source().poll(cursor)))
+      expect(failure.reason).toBe("invalid-config")
+    }
+    expect(fixture.requests).toHaveLength(0)
+    await Effect.runPromise(source().poll("41"))
+    expect(JSON.parse(fixture.requests[0]?.body ?? "{}").offset).toBe(41)
+  })
+
+  // `update["message"] !== undefined` is true for `null`, and updateToEvents
+  // then reads through it and throws, which dies as a defect.
+  it("refuses an update member that is not an object rather than dying", async () => {
+    fixture = await startFixture((_request, response) =>
+      json(response, 200, { ok: true, result: [{ update_id: 1, message: null }] })
+    )
+    const failure = await Effect.runPromise(Effect.flip(source().poll(null)))
+    expect(failure.reason).toBe("decode-failed")
+    expect(failure.details).toMatchObject({ member: "message", index: 0 })
+  })
+
+  // The source id is every event's `source` and the scope of every dedupe key.
+  it("refuses a source id that would make an unusable event", () => {
+    for (const sourceId of ["", "   ", " telegram"]) {
+      expect(() => make({ sourceId, botToken: TOKEN, apiBaseUrl: "https://example.invalid" }))
+        .toThrow(/source id must be a non-empty string/)
+    }
   })
 })

@@ -50,7 +50,8 @@ export const Issue = Schema.Struct({
  *
  * The tier is `irreversible`: the issue exists and notifies its team as soon
  * as Linear accepts the mutation, so the engine must never retry this step on
- * its own.
+ * its own. Nor does the client underneath: a 5xx on `issueCreate` reports that
+ * the outcome is unknown rather than filing a second issue.
  *
  * @category actions
  * @since 1.0.0

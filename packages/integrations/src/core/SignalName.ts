@@ -35,6 +35,18 @@ export const INTEGRATION_SIGNAL_PREFIX = "integration:"
 export const isSegment = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0 && value.trim() === value && !value.includes(":")
 
+/**
+ * Whether `value` is a complete integration signal name.
+ *
+ * The same refinement the constructor and {@link parse} agree on, exported so
+ * `ExternalEvent` can demand it too: a name that reaches persistence but that
+ * nothing can rebuild is a routing identity with no owner.
+ *
+ * @category refinements
+ * @since 1.0.0
+ */
+export const isEventName = (value: unknown): value is string => parse(value as string) !== null
+
 const requireSegment = (value: string, label: string): string => {
   const normalized = typeof value === "string" ? value.trim() : ""
   if (normalized.length === 0) {

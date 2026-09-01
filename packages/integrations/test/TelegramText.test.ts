@@ -13,6 +13,39 @@ describe("chunk", () => {
     expect(chunk("hello")).toEqual(["hello"])
   })
 
+  // `chunk(text, 0)` used to spin forever: the loop condition stayed true,
+  // no character was consumed, and the event loop never yielded again.
+  it("refuses a limit that cannot make progress", () => {
+    for (const maxLength of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, MAX_MESSAGE_LENGTH + 1]) {
+      expect(() => chunk("hello world", maxLength)).toThrow(/maxLength must be an integer/)
+    }
+  })
+
+  it("terminates at the smallest usable limit", () => {
+    expect(chunk("abc", 1)).toEqual(["a", "b", "c"])
+    expect(chunk("a b", 1)).toEqual(["a", "b"])
+  })
+
+  // Any message over the limit whose boundary lands mid-emoji used to produce
+  // two chunks that Telegram renders as replacement characters.
+  it("never splits a surrogate pair", () => {
+    const [first, second] = chunk(`${"a".repeat(4095)}\u{1F600}`, MAX_MESSAGE_LENGTH)
+    expect(first).toBe("a".repeat(4095))
+    expect(second).toBe("\u{1F600}")
+    for (const piece of chunk(`${"\u{1F600}".repeat(10)}`, 3)) {
+      expect(piece).toBe(piece.normalize())
+      expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(piece)).toBe(false)
+    }
+  })
+
+  it("keeps an astral character whole even at a limit of one", () => {
+    expect(chunk("\u{1F600}b", 1)).toEqual(["\u{1F600}", "b"])
+  })
+
+  it("splits an unbroken run longer than the limit", () => {
+    expect(chunk("a".repeat(7), 3)).toEqual(["aaa", "aaa", "a"])
+  })
+
   it("keeps every chunk inside the limit", () => {
     const text = "word ".repeat(3000)
     for (const piece of chunk(text)) expect(piece.length).toBeLessThanOrEqual(MAX_MESSAGE_LENGTH)

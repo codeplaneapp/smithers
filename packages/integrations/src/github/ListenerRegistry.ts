@@ -15,7 +15,10 @@
  * Ownership is written before and after every remote mutation. The `pending`
  * record written first is what makes a crash converge: the next run recognizes
  * the hook it was about to claim and adopts it, instead of reporting a
- * `conflict` against a hook it created itself one second earlier.
+ * `conflict` against a hook it created itself one second earlier. A record is
+ * retired as soon as GitHub says it refused the create, and it is dropped
+ * outright once the declaration that produced it changes, so the adoption path
+ * covers a lost answer and nothing wider.
  *
  * There is no `smithers listeners` verb at 1.0. This is library code an
  * application calls.
@@ -127,7 +130,32 @@ export interface PendingCreate {
   readonly listenerId: string
   readonly repository: string
   readonly callbackUrl: string
+  /** When the create was started, in Unix milliseconds. */
+  readonly startedAtMs: number
 }
+
+/**
+ * How long a pending create stays adoptable.
+ *
+ * An intent is evidence, not proof: it says this workspace was creating a hook
+ * on that URL, not that the hook now sitting there is the one it created. The
+ * window bounds how long that inference is allowed to stand, so a record left
+ * by a run that died months ago cannot license adopting a stranger's hook
+ * today.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const PENDING_CREATE_MAX_AGE_MS = 86_400_000
+
+/**
+ * The key a pending create is matched on.
+ *
+ * Length-prefixed rather than delimiter-joined, so a listener id or a
+ * repository containing the delimiter cannot forge another entry's key.
+ */
+const pendingKey = (listenerId: string, repository: string, callbackUrl: string): string =>
+  `${listenerId.length}:${listenerId}|${repository.length}:${repository}|${callbackUrl}`
 
 /**
  * The workspace's ownership state.
@@ -361,14 +389,16 @@ const parseOwnership = (value: unknown, path: string): OwnershipState => {
   for (const entry of rawPending ?? []) {
     if (
       !isRecord(entry) || typeof entry["listenerId"] !== "string" || typeof entry["repository"] !== "string" ||
-      typeof entry["callbackUrl"] !== "string"
+      typeof entry["callbackUrl"] !== "string" || typeof entry["startedAtMs"] !== "number" ||
+      !Number.isSafeInteger(entry["startedAtMs"]) || entry["startedAtMs"] < 0
     ) {
       throw bad()
     }
     pending.push({
       listenerId: entry["listenerId"],
       repository: entry["repository"],
-      callbackUrl: entry["callbackUrl"]
+      callbackUrl: entry["callbackUrl"],
+      startedAtMs: entry["startedAtMs"]
     })
   }
   return { version: 1, github, pending }
@@ -403,8 +433,10 @@ export const parseRemoteHooks = (value: ReadonlyArray<unknown>, repository: stri
     if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) bad(index, "id")
     const config = hook["config"]
     if (!isRecord(config)) bad(index, "config")
+    // Required, not optional: `plan` decides drift and collisions by comparing
+    // this URL, so a hook without one is a hook it cannot compare.
     const url = (config as Record<string, unknown>)["url"]
-    if (url !== undefined && typeof url !== "string") bad(index, "config.url")
+    if (typeof url !== "string") bad(index, "config.url")
     const contentType = (config as Record<string, unknown>)["content_type"]
     if (contentType !== undefined && typeof contentType !== "string") bad(index, "config.content_type")
     const insecure = (config as Record<string, unknown>)["insecure_ssl"]
@@ -420,7 +452,7 @@ export const parseRemoteHooks = (value: ReadonlyArray<unknown>, repository: stri
       active: active as boolean,
       events: events as ReadonlyArray<string>,
       config: {
-        url: url as string | undefined,
+        url: url as string,
         content_type: contentType as string | undefined,
         insecure_ssl: insecure as string | number | undefined
       }
@@ -478,6 +510,8 @@ export interface PlanInput {
   readonly hooksByRepository: ReadonlyMap<string, ReadonlyArray<RemoteHook>>
   /** Digests of the current secrets, so a rotated secret shows as drift. */
   readonly secretDigests?: ReadonlyMap<string, string> | undefined
+  /** "Now", for aging out a pending create. Defaults to the wall clock. */
+  readonly nowMs?: number | undefined
 }
 
 /**
@@ -492,8 +526,11 @@ export const plan = (input: PlanInput): ReadonlyArray<PlanAction> => {
   const desiredById = new Map(input.registry.listeners.map((listener) => [listener.id, listener]))
   const ownershipById = new Map(input.state.github.map((owned) => [owned.listenerId, owned]))
   const ownedHookKeys = new Set(input.state.github.map((owned) => `${owned.repository}:${owned.hookId}`))
+  const nowMs = input.nowMs ?? Date.now()
   const pendingKeys = new Set(
-    (input.state.pending ?? []).map((entry) => `${entry.listenerId} ${entry.repository} ${entry.callbackUrl}`)
+    (input.state.pending ?? [])
+      .filter((entry) => nowMs - entry.startedAtMs <= PENDING_CREATE_MAX_AGE_MS)
+      .map((entry) => pendingKey(entry.listenerId, entry.repository, entry.callbackUrl))
   )
   const actions: Array<PlanAction> = []
 
@@ -501,11 +538,17 @@ export const plan = (input: PlanInput): ReadonlyArray<PlanAction> => {
   // the declared callback URL means a second hook would double every delivery
   // to that endpoint, which is exactly what `conflict` exists to prevent, and
   // it is just as true for a listener that moved repositories or whose hook
-  // was deleted remotely as for one this workspace has never seen. The one
-  // exception is a hook a previous run of this workspace was recorded as
-  // creating: that one is ours, so it is adopted rather than refused.
+  // was deleted remotely as for one this workspace has never seen.
+  //
+  // The one exception is a hook a recent run of this workspace was recorded as
+  // creating. That inference is bounded on purpose: the record must still be
+  // inside {@link PENDING_CREATE_MAX_AGE_MS}, and exactly one hook may hold
+  // the URL. Two hooks on one URL means the workspace cannot tell its own from
+  // the other, so it refuses rather than guessing, which is the whole point of
+  // requiring ownership by hook id everywhere else.
   const createOrClaim = (listener: Listener, reason: string): PlanAction => {
-    const collision = hooksFor(listener.repository).find((hook) => hook.config.url === listener.callbackUrl)
+    const collisions = hooksFor(listener.repository).filter((hook) => hook.config.url === listener.callbackUrl)
+    const collision = collisions[0]
     if (collision === undefined) {
       return {
         action: "create",
@@ -516,8 +559,8 @@ export const plan = (input: PlanInput): ReadonlyArray<PlanAction> => {
         destructive: false
       }
     }
-    const key = `${listener.id} ${listener.repository} ${listener.callbackUrl}`
-    if (pendingKeys.has(key)) {
+    const key = pendingKey(listener.id, listener.repository, listener.callbackUrl)
+    if (collisions.length === 1 && pendingKeys.has(key)) {
       return {
         action: "update",
         listenerId: listener.id,
@@ -546,14 +589,21 @@ export const plan = (input: PlanInput): ReadonlyArray<PlanAction> => {
       continue
     }
     if (owned.repository !== listener.repository) {
-      actions.push({
-        action: "delete",
-        listenerId: listener.id,
-        repository: owned.repository,
-        hookId: owned.hookId,
-        reason: "owned listener moved repositories",
-        destructive: true
-      })
+      // Only delete a hook that is still there. A run that deleted the old
+      // hook and died before writing ownership used to leave a plan that
+      // deleted it again forever: GitHub answered 404, apply aborted before
+      // the create, and the move never completed. Skipping an absent delete
+      // makes the move converge on the next run with no journal at all.
+      if (hooksFor(owned.repository).some((hook) => hook.id === owned.hookId)) {
+        actions.push({
+          action: "delete",
+          listenerId: listener.id,
+          repository: owned.repository,
+          hookId: owned.hookId,
+          reason: "owned listener moved repositories",
+          destructive: true
+        })
+      }
       actions.push(createOrClaim(listener, "declared listener moved repositories"))
       continue
     }
@@ -831,10 +881,15 @@ export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<Reconci
         .map((action) => action.listenerId as string)
     )
     let github: Array<Ownership> = state.github.map((owned) => ({ ...owned }))
-    // The pending set carries over: an entry stays until the create it records
-    // has been confirmed as ownership, so two interrupted runs in a row still
-    // converge.
-    let pending: Array<PendingCreate> = (state.pending ?? []).map((entry) => ({ ...entry }))
+    // The pending set carries over so two interrupted runs in a row still
+    // converge, but only for a create this declaration still asks for. A
+    // record kept past the declaration that produced it would be a standing
+    // licence to adopt whatever hook later appeared on that URL.
+    let pending: Array<PendingCreate> = (state.pending ?? []).filter((entry) => {
+      const listener = desiredById.get(entry.listenerId)
+      return listener !== undefined && listener.repository === entry.repository &&
+        listener.callbackUrl === entry.callbackUrl
+    }).map((entry) => ({ ...entry }))
     const commit = () => attempt(() => writeOwnershipState(workspaceRoot, { version: 1, github, pending }))
     const applied: Array<PlanAction> = []
     const skipped: Array<PlanAction> = []
@@ -876,12 +931,28 @@ export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<Reconci
           // reads as "this is mine" instead of "somebody else owns this URL".
           pending = [
             ...pending.filter((entry) => entry.listenerId !== listener.id),
-            { listenerId: listener.id, repository: listener.repository, callbackUrl: listener.callbackUrl }
+            {
+              listenerId: listener.id,
+              repository: listener.repository,
+              callbackUrl: listener.callbackUrl,
+              startedAtMs: Date.now()
+            }
           ]
           yield* commit()
         }
         const hook = action.action === "create"
-          ? yield* client.request<{ readonly id?: unknown }>("POST", `/repos/${path}/hooks`, body)
+          ? yield* client.request<{ readonly id?: unknown }>("POST", `/repos/${path}/hooks`, body).pipe(
+            // A refusal is not an unknown outcome: GitHub says it did not
+            // create the hook, so the pending record is retired before the
+            // failure escapes. Only a lost answer, which the client marks
+            // `outcomeUnknown`, leaves a claim behind for the next run.
+            Effect.tapError((cause) =>
+              cause.details?.["outcomeUnknown"] === true ? Effect.void : Effect.suspend(() => {
+                pending = pending.filter((entry) => entry.listenerId !== listener.id)
+                return commit()
+              })
+            )
+          )
           : yield* client.request<{ readonly id?: unknown }>("PATCH", `/repos/${path}/hooks/${action.hookId}`, body)
         const hookId = Number(hook?.id ?? action.hookId)
         if (!Number.isInteger(hookId) || hookId <= 0) {

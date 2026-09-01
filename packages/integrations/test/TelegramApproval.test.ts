@@ -66,6 +66,13 @@ describe("callbackData", () => {
     expect(parseCallbackData("sap:t:s")).toBeNull()
     expect(parseCallbackData("sap:t:s:")).toBeNull()
   })
+
+  // The encoder cannot produce `sap:<tok>:a:<extra>`, so reading it as an
+  // approval accepts a press nothing here built.
+  it("refuses approve and reject data with trailing parts the encoder cannot emit", () => {
+    expect(parseCallbackData("sap:t:a:extra")).toBeNull()
+    expect(parseCallbackData("sap:t:d:extra")).toBeNull()
+  })
 })
 
 describe("keyboard", () => {
@@ -158,8 +165,28 @@ describe("decision", () => {
     expect(isOwnPress({}, { mode: "approve", token: TOKEN })).toBe(false)
   })
 
-  it("treats an absent token as the empty one, consistently", () => {
-    expect(decision({ data: callbackData({ kind: "approve" }, "") }, { mode: "approve" }, NOW))
-      .toMatchObject({ approved: true })
+  // Falling back to the empty string gave every tokenless prompt the same
+  // namespace, so any tokenless press resolved any tokenless approval.
+  it("never matches a spec with no token", () => {
+    const press = { data: callbackData({ kind: "approve" }, "") }
+    expect(decision(press, { mode: "approve" }, NOW))
+      .toMatchObject({ approved: false, note: "press did not match this approval's prompt" })
+    expect(isOwnPress(press, { mode: "approve" })).toBe(false)
+    expect(isOwnPress(press, { mode: "approve", token: "" })).toBe(false)
+  })
+
+  it("keeps two tokenless prompts from resolving each other", () => {
+    const first = { mode: "approve" } as const
+    const second = { mode: "approve" } as const
+    const pressOnFirst = { data: keyboard(first)[0]?.[0]?.callback_data }
+    expect(decision(pressOnFirst, second, NOW)).toMatchObject({ approved: false })
+  })
+
+  it("returns no selection for a tokenless select prompt", () => {
+    const spec = { mode: "select", options: [{ key: "a", label: "A" }] } as const
+    expect(decision({ data: keyboard(spec)[0]?.[0]?.callback_data }, spec, NOW)).toEqual({
+      selected: "",
+      notes: null
+    })
   })
 })

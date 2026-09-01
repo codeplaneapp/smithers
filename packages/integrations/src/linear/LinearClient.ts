@@ -9,9 +9,13 @@
  *   write `ENG`, `In Progress`, `bug`, and `ENG-123`. Every lookup that turns
  *   one into an id is cached per client, so a workflow that touches ten issues
  *   on one team resolves its team, states, and labels once.
- * - **Rate limits.** A 429 or 5xx is retried up to five attempts, waiting the
- *   server's `Retry-After` or `X-RateLimit-Requests-Reset`, capped at 30 s,
- *   and falling back to exponential backoff when neither header is present.
+ * - **Rate limits.** A 429 is retried up to five attempts for every operation,
+ *   waiting the server's `Retry-After` or `X-RateLimit-Requests-Reset`, capped
+ *   at 30 s, and falling back to exponential backoff when neither header is
+ *   present. A 5xx is retried only for a query: on `issueCreate`,
+ *   `issueUpdate`, or `commentCreate` the server may have applied the mutation
+ *   and lost the answer, so repeating files a second issue. Those report
+ *   `outcomeUnknown` instead.
  * - **Key hygiene.** The API key reaches the `Authorization` header and
  *   nothing else.
  *
@@ -82,7 +86,10 @@ export interface IssueFields {
   readonly title?: string | undefined
   readonly description?: string | undefined
   readonly priority?: Priority | undefined
-  /** Label names, resolved per team and cached. */
+  /**
+   * Label names, resolved per team and cached. An empty array clears the
+   * issue's labels; omit the field to leave them alone.
+   */
   readonly labels?: ReadonlyArray<string> | undefined
   /** Raw label ids, which skip resolution. */
   readonly labelIds?: ReadonlyArray<string> | undefined
@@ -102,9 +109,13 @@ export interface IssueFields {
  * @since 1.0.0
  */
 export interface CreateIssueInput extends IssueFields {
-  /** A team key such as `ENG`, resolved to an id. */
+  /** A team key such as `ENG`, resolved to an id. Case-insensitive. */
   readonly teamKey?: string | undefined
-  /** A team id, which skips the lookup. One of the two is required. */
+  /**
+   * A team id, which skips the lookup. Exactly one of the two is required:
+   * supplying both fails `decode-failed` rather than silently filing on the
+   * team `teamId` names.
+   */
   readonly teamId?: string | undefined
   readonly title: string
 }
@@ -116,12 +127,23 @@ export interface CreateIssueInput extends IssueFields {
  * @since 1.0.0
  */
 export interface LinearClient {
-  /** A raw GraphQL request, resolving with the `data` payload. */
+  /**
+   * A raw GraphQL request, resolving with the `data` payload.
+   *
+   * `retryServerErrors` says whether a 5xx may be repeated. It defaults to
+   * true, which is right for a query, and the three mutations pass `false`,
+   * because a repeated `issueCreate` files a second issue.
+   */
   readonly query: (
     gql: string,
-    variables?: Record<string, unknown>
+    variables?: Record<string, unknown>,
+    options?: { readonly retryServerErrors?: boolean | undefined }
   ) => Effect.Effect<Record<string, any>, IntegrationError>
-  /** Resolves a team by key, or passes an explicit id through. Cached. */
+  /**
+   * Resolves a team by key, or passes an explicit id through. Cached, and the
+   * key is uppercased for both the cache and the query, so the same key
+   * decides the same way on a cold client and a warm one.
+   */
   readonly resolveTeam: (
     ref: { readonly teamId?: string | undefined; readonly teamKey?: string | undefined }
   ) => Effect.Effect<TeamRef, IntegrationError>
@@ -168,6 +190,11 @@ const MAX_RETRY_DELAY_MS = 30_000
 /**
  * Normalizes a priority name or number onto Linear's 0-4 scale.
  *
+ * Throws an `IntegrationError` with reason `decode-failed` for a number
+ * outside 0 to 4 or an unrecognized name. Callers inside an Effect use
+ * {@link requirePriority}, because a throw inside `Effect.gen` is a defect
+ * that a `catchAll` on `IntegrationError` will not see.
+ *
  * @category constructors
  * @since 1.0.0
  */
@@ -187,6 +214,17 @@ export const normalizePriority = (priority: Priority | undefined): number | unde
   }
   return mapped
 }
+
+/**
+ * {@link normalizePriority} in the Effect channel.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const requirePriority = (
+  priority: Priority | undefined
+): Effect.Effect<number | undefined, IntegrationError> =>
+  Effect.try({ try: () => normalizePriority(priority), catch: (cause) => cause as IntegrationError })
 
 /**
  * How long to wait before retrying, from `Retry-After` (seconds) or
@@ -238,6 +276,81 @@ interface NamedNode {
   readonly name?: string | undefined
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const decodeFailed = (path: string, expected: string): IntegrationError =>
+  new IntegrationError(
+    "decode-failed",
+    `Linear response field ${path} is not ${expected}.`,
+    { path, expected }
+  )
+
+/**
+ * The members of a GraphQL connection, checked rather than cast.
+ *
+ * `query` returns `Record<string, any>`, so `data.teams.nodes.find(...)` on a
+ * wrong-shaped answer throws a raw `TypeError` inside `Effect.gen`, which dies
+ * as a defect instead of failing `decode-failed`. Every read of a connection
+ * goes through here, and the failure names the field path and nothing of the
+ * body.
+ */
+const connectionNodes = (
+  connection: unknown,
+  field: string
+): Effect.Effect<ReadonlyArray<Record<string, unknown>>, IntegrationError> => {
+  if (connection === undefined || connection === null) return Effect.succeed([])
+  if (!isRecord(connection)) return Effect.fail(decodeFailed(field, "an object"))
+  const raw = connection["nodes"]
+  if (raw === undefined || raw === null) return Effect.succeed([])
+  if (!Array.isArray(raw)) return Effect.fail(decodeFailed(`${field}.nodes`, "an array"))
+  const members: Array<Record<string, unknown>> = []
+  for (const [index, node] of raw.entries()) {
+    if (!isRecord(node)) return Effect.fail(decodeFailed(`${field}.nodes[${index}]`, "an object"))
+    members.push(node)
+  }
+  return Effect.succeed(members)
+}
+
+/** The same, narrowed to nodes carrying a string `id`. */
+const namedNodes = (connection: unknown, field: string): Effect.Effect<ReadonlyArray<NamedNode>, IntegrationError> =>
+  connectionNodes(connection, field).pipe(
+    Effect.flatMap((members) => {
+      const named: Array<NamedNode> = []
+      for (const [index, node] of members.entries()) {
+        if (typeof node["id"] !== "string") return Effect.fail(decodeFailed(`${field}.nodes[${index}].id`, "a string"))
+        const name = node["name"]
+        // Erasing a wrong-typed name silently turned "Linear changed this
+        // field" into "no state by that name", which reads as a caller error.
+        if (name !== undefined && name !== null && typeof name !== "string") {
+          return Effect.fail(decodeFailed(`${field}.nodes[${index}].name`, "a string"))
+        }
+        named.push({ id: node["id"], name: typeof name === "string" ? name : undefined })
+      }
+      return Effect.succeed(named)
+    })
+  )
+
+/** An issue, checked for the fields every caller of this client reads. */
+const requireIssue = (value: unknown, field: string): Effect.Effect<IssueResult, IntegrationError> => {
+  if (!isRecord(value)) return Effect.fail(decodeFailed(field, "an object"))
+  for (const key of ["id", "identifier", "title", "url"]) {
+    if (typeof value[key] !== "string") return Effect.fail(decodeFailed(`${field}.${key}`, "a string"))
+  }
+  const team = value["team"]
+  if (team !== undefined && team !== null && !isRecord(team)) {
+    return Effect.fail(decodeFailed(`${field}.team`, "an object"))
+  }
+  if (isRecord(team)) {
+    if (typeof team["id"] !== "string") return Effect.fail(decodeFailed(`${field}.team.id`, "a string"))
+    const key = team["key"]
+    if (key !== undefined && key !== null && typeof key !== "string") {
+      return Effect.fail(decodeFailed(`${field}.team.key`, "a string"))
+    }
+  }
+  return Effect.succeed(value as unknown as IssueResult)
+}
+
 /**
  * Builds a Linear client bound to `config`.
  *
@@ -257,8 +370,9 @@ export const make = (
   const statesByTeam = new Map<string, ReadonlyArray<NamedNode>>()
   const labelsByTeam = new Map<string, ReadonlyArray<NamedNode>>()
 
-  const query: LinearClient["query"] = (gql, variables) =>
+  const query: LinearClient["query"] = (gql, variables, queryOptions) =>
     Effect.gen(function*() {
+      const retryServerErrors = queryOptions?.retryServerErrors ?? true
       if (apiKey === undefined) {
         return yield* Effect.fail(
           new IntegrationError(
@@ -293,10 +407,29 @@ export const make = (
             })
           },
           catch: (cause) =>
-            new IntegrationError("delivery-failed", "Linear API request failed (network error).", { apiBaseUrl }, {
-              cause
-            })
+            new IntegrationError(
+              "delivery-failed",
+              retryServerErrors
+                ? "Linear API request failed (network error)."
+                : "Linear API request for a write failed (network error), so its outcome is unknown.",
+              // A dropped connection on a mutation is the same ambiguity a 5xx
+              // is: Linear may have applied it and lost the answer.
+              { apiBaseUrl, outcomeUnknown: !retryServerErrors },
+              { cause }
+            )
         })
+        // A 429 was refused, so repeating it is safe for any operation. A 5xx
+        // is ambiguous: Linear may have committed the mutation and lost the
+        // answer, so a write stops here and says the outcome is unknown.
+        if (response.status >= 500 && !retryServerErrors) {
+          return yield* Effect.fail(
+            new IntegrationError(
+              "delivery-failed",
+              `Linear API responded ${response.status} to a write, so its outcome is unknown and it was not repeated.`,
+              { status: response.status, apiBaseUrl, outcomeUnknown: true }
+            )
+          )
+        }
         if (response.status === 429 || response.status >= 500) {
           if (attempt >= MAX_ATTEMPTS) {
             return yield* Effect.fail(
@@ -355,24 +488,48 @@ export const make = (
 
   const resolveTeam: LinearClient["resolveTeam"] = (ref) =>
     Effect.gen(function*() {
-      if (ref.teamId !== undefined) return { id: ref.teamId, key: ref.teamKey }
+      // Documented as exactly one of the two. Accepting both and silently
+      // preferring `teamId` files the issue on a team the caller did not name,
+      // on an action whose tier is irreversible.
+      if (ref.teamId !== undefined && ref.teamKey !== undefined) {
+        return yield* Effect.fail(
+          new IntegrationError(
+            "decode-failed",
+            "Linear team is over-specified: pass teamId or teamKey, not both.",
+            { teamId: ref.teamId, teamKey: ref.teamKey }
+          )
+        )
+      }
+      if (ref.teamId !== undefined) return Object.freeze({ id: ref.teamId })
       const key = ref.teamKey?.trim()
       if (key === undefined || key.length === 0) {
         return yield* Effect.fail(
           new IntegrationError("decode-failed", "Linear team is required: pass teamId or teamKey.")
         )
       }
-      const cached = teamByKey.get(key.toUpperCase())
+      // Linear team keys are uppercase, and the cache is keyed that way, so
+      // the query has to be too. Sending the raw key made `resolveTeam("eng")`
+      // succeed or fail depending on whether some earlier call had warmed the
+      // cache with `ENG`.
+      const normalized = key.toUpperCase()
+      const cached = teamByKey.get(normalized)
       if (cached !== undefined) return cached
-      const data = yield* query(TEAM_BY_KEY, { key })
-      const team = data?.["teams"]?.nodes?.[0]
-      if (team?.id === undefined) {
+      const data = yield* query(TEAM_BY_KEY, { key: normalized })
+      const team = (yield* connectionNodes(data?.["teams"], "teams"))[0]
+      if (team === undefined || typeof team["id"] !== "string") {
         return yield* Effect.fail(
           new IntegrationError("decode-failed", `Linear team with key "${key}" not found.`, { teamKey: key })
         )
       }
-      const found: TeamRef = { id: team.id, key: team.key, name: team.name }
-      teamByKey.set(key.toUpperCase(), found)
+      // Frozen, because the cache hands the same object to every later call on
+      // this client: a consumer that mutated it would change the identity the
+      // next mutation runs against.
+      const found: TeamRef = Object.freeze({
+        id: team["id"],
+        key: typeof team["key"] === "string" ? team["key"] : undefined,
+        name: typeof team["name"] === "string" ? team["name"] : undefined
+      })
+      teamByKey.set(normalized, found)
       return found
     })
 
@@ -381,7 +538,7 @@ export const make = (
       const cached = statesByTeam.get(teamId)
       if (cached !== undefined) return cached
       const data = yield* query(WORKFLOW_STATES, { teamId })
-      const states = (data?.["workflowStates"]?.nodes ?? []) as ReadonlyArray<NamedNode>
+      const states = yield* namedNodes(data?.["workflowStates"], "workflowStates")
       statesByTeam.set(teamId, states)
       return states
     })
@@ -407,7 +564,7 @@ export const make = (
       let labels = labelsByTeam.get(teamId)
       if (labels === undefined) {
         const data = yield* query(ISSUE_LABELS, { teamId })
-        labels = (data?.["issueLabels"]?.nodes ?? []) as ReadonlyArray<NamedNode>
+        labels = yield* namedNodes(data?.["issueLabels"], "issueLabels")
         labelsByTeam.set(teamId, labels)
       }
       const ids: Array<string> = []
@@ -432,12 +589,12 @@ export const make = (
     Effect.gen(function*() {
       const data = yield* query(ISSUE, { id: idOrIdentifier })
       const issue = data?.["issue"]
-      if (issue?.id === undefined) {
+      if (issue === undefined || issue === null) {
         return yield* Effect.fail(
           new IntegrationError("decode-failed", `Linear issue "${idOrIdentifier}" not found.`, { idOrIdentifier })
         )
       }
-      return issue as IssueResult
+      return yield* requireIssue(issue, "issue")
     })
 
   const buildIssueInput = (
@@ -452,7 +609,7 @@ export const make = (
       if (fields.projectId !== undefined) input["projectId"] = fields.projectId
       if (fields.estimate !== undefined) input["estimate"] = fields.estimate
       if (fields.dueDate !== undefined) input["dueDate"] = fields.dueDate
-      const priority = normalizePriority(fields.priority)
+      const priority = yield* requirePriority(fields.priority)
       if (priority !== undefined) input["priority"] = priority
       if (fields.stateId !== undefined) {
         input["stateId"] = fields.stateId
@@ -468,15 +625,18 @@ export const make = (
       }
       if (fields.labelIds !== undefined) {
         input["labelIds"] = fields.labelIds
-      } else if (fields.labels !== undefined && fields.labels.length > 0) {
-        if (teamId === undefined) {
+      } else if (fields.labels !== undefined) {
+        // An explicit empty array is a request to clear the labels, not an
+        // absent field. Treating it as absent left a caller with no way to
+        // remove a label through the name path at all.
+        if (fields.labels.length === 0) input["labelIds"] = []
+        else if (teamId === undefined) {
           return yield* Effect.fail(
             new IntegrationError("decode-failed", "Resolving Linear label names requires the issue's team.", {
               labels: fields.labels
             })
           )
-        }
-        input["labelIds"] = yield* resolveLabelIds(teamId, fields.labels)
+        } else input["labelIds"] = yield* resolveLabelIds(teamId, fields.labels)
       }
       return input
     })
@@ -486,16 +646,16 @@ export const make = (
       const team = yield* resolveTeam({ teamId: input.teamId, teamKey: input.teamKey })
       const issueInput = yield* buildIssueInput(team.id, input)
       issueInput["teamId"] = team.id
-      const data = yield* query(ISSUE_CREATE, { input: issueInput })
+      const data = yield* query(ISSUE_CREATE, { input: issueInput }, { retryServerErrors: false })
       const payload = data?.["issueCreate"]
-      if (payload?.success !== true || payload.issue === undefined) {
+      if (!isRecord(payload) || payload["success"] !== true || payload["issue"] == null) {
         return yield* Effect.fail(
           new IntegrationError("delivery-failed", "Linear issueCreate did not return an issue.", {
-            success: payload?.success ?? false
+            success: isRecord(payload) ? payload["success"] ?? false : false
           })
         )
       }
-      return payload.issue as IssueResult
+      return yield* requireIssue(payload["issue"], "issueCreate.issue")
     })
 
   const updateIssue: LinearClient["updateIssue"] = (idOrIdentifier, fields) =>
@@ -510,17 +670,17 @@ export const make = (
         teamId = issue.team?.id
       }
       const input = yield* buildIssueInput(teamId, fields)
-      const data = yield* query(ISSUE_UPDATE, { id: issueId, input })
+      const data = yield* query(ISSUE_UPDATE, { id: issueId, input }, { retryServerErrors: false })
       const payload = data?.["issueUpdate"]
-      if (payload?.success !== true || payload.issue === undefined) {
+      if (!isRecord(payload) || payload["success"] !== true || payload["issue"] == null) {
         return yield* Effect.fail(
           new IntegrationError("delivery-failed", "Linear issueUpdate did not return an issue.", {
-            success: payload?.success ?? false,
+            success: isRecord(payload) ? payload["success"] ?? false : false,
             idOrIdentifier
           })
         )
       }
-      return payload.issue as IssueResult
+      return yield* requireIssue(payload["issue"], "issueUpdate.issue")
     })
 
   const commentOnIssue: LinearClient["commentOnIssue"] = (idOrIdentifier, body) =>
@@ -529,17 +689,33 @@ export const make = (
       const issueId = IDENTIFIER.test(idOrIdentifier)
         ? (yield* getIssue(idOrIdentifier)).id
         : idOrIdentifier
-      const data = yield* query(COMMENT_CREATE, { input: { issueId, body } })
+      const data = yield* query(COMMENT_CREATE, { input: { issueId, body } }, { retryServerErrors: false })
       const payload = data?.["commentCreate"]
-      if (payload?.success !== true || payload.comment === undefined) {
+      if (!isRecord(payload) || payload["success"] !== true || payload["comment"] == null) {
         return yield* Effect.fail(
           new IntegrationError("delivery-failed", "Linear commentCreate did not return a comment.", {
-            success: payload?.success ?? false,
+            success: isRecord(payload) ? payload["success"] ?? false : false,
             idOrIdentifier
           })
         )
       }
-      return payload.comment as CommentResult
+      const comment = payload["comment"]
+      if (!isRecord(comment)) return yield* Effect.fail(decodeFailed("commentCreate.comment", "an object"))
+      for (const key of ["id", "body"]) {
+        if (typeof comment[key] !== "string") {
+          return yield* Effect.fail(decodeFailed(`commentCreate.comment.${key}`, "a string"))
+        }
+      }
+      // The optional `issue` is typed as a record with a string id, so a
+      // wrong-typed one must fail rather than reach the caller under that type.
+      const issue = comment["issue"]
+      if (issue !== undefined && issue !== null) {
+        if (!isRecord(issue)) return yield* Effect.fail(decodeFailed("commentCreate.comment.issue", "an object"))
+        if (typeof issue["id"] !== "string") {
+          return yield* Effect.fail(decodeFailed("commentCreate.comment.issue.id", "a string"))
+        }
+      }
+      return comment as unknown as CommentResult
     })
 
   return LinearClient.of({

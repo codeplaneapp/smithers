@@ -1,7 +1,8 @@
 import { Effect } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
+import type { IntegrationError } from "../src/core/IntegrationError.ts"
 import { DEFAULT_API_BASE_URL, resolve } from "../src/linear/Config.ts"
-import { make, normalizePriority, retryDelayMs } from "../src/linear/LinearClient.ts"
+import { make, normalizePriority, type Priority, retryDelayMs } from "../src/linear/LinearClient.ts"
 import { type Fixture, json, startFixture } from "./Fixture.ts"
 
 const API_KEY = "lin_api_fixture"
@@ -358,5 +359,199 @@ describe("LinearClient over a real HTTP server", () => {
     expect(exit._tag).toBe("Failure")
     await Effect.runPromise(Effect.sleep("100 millis"))
     expect(closed).toBe(true)
+  })
+})
+
+describe("mutations are not repeated on an ambiguous answer", () => {
+  // Linear may have committed the mutation and lost the answer, so a repeat
+  // files a second issue. The action's tier says irreversible.
+  it("issues a mutation exactly once when the server errors", async () => {
+    const runs: ReadonlyArray<() => Effect.Effect<unknown, IntegrationError>> = [
+      () => client().createIssue({ teamId: "team-eng-id", title: "t" }),
+      () => client().updateIssue("issue-uuid", { title: "t" }),
+      () => client().commentOnIssue("issue-uuid", "hi")
+    ]
+    for (const run of runs) {
+      fixture = await startFixture((_request, response) => json(response, 503, {}, { "retry-after": "0" }))
+      const failure = await Effect.runPromise(Effect.flip(run()))
+      expect(fixture.requests).toHaveLength(1)
+      expect(failure.details).toMatchObject({ outcomeUnknown: true })
+      expect(failure.message).toContain("outcome is unknown")
+      await fixture.close()
+      fixture = undefined
+    }
+  })
+
+  it("still retries a read, where repeating costs nothing", async () => {
+    let calls = 0
+    fixture = await startFixture((_request, response) => {
+      calls += 1
+      if (calls === 1) {
+        json(response, 503, {}, { "retry-after": "0" })
+        return
+      }
+      json(response, 200, { data: { issue: ISSUE } })
+    })
+    await Effect.runPromise(client().getIssue("issue-uuid"))
+    expect(calls).toBe(2)
+  })
+})
+
+describe("typed failures the client used to raise as defects", () => {
+  // `normalizePriority` throws, and a throw inside `Effect.gen` is a defect, so
+  // a caller's `catchAll` on `IntegrationError` missed it entirely.
+  it("fails decode-failed for a priority outside the scale", async () => {
+    fixture = await graphql()
+    for (const priority of [9, -1, 1.5, "urgentish"] as ReadonlyArray<Priority>) {
+      const failure = await Effect.runPromise(
+        Effect.flip(client().createIssue({ teamId: "team-eng-id", title: "t", priority }))
+      )
+      expect(failure.reason).toBe("decode-failed")
+    }
+  })
+
+  it("fails decode-failed rather than throwing on a connection of the wrong shape", async () => {
+    fixture = await graphql({ WorkflowStates: { workflowStates: { nodes: { not: "an array" } } } })
+    const failure = await Effect.runPromise(Effect.flip(client().resolveStateId("team-eng-id", "Todo")))
+    expect(failure.reason).toBe("decode-failed")
+    expect(failure.details).toMatchObject({ path: "workflowStates.nodes" })
+  })
+
+  it("names the member path of a malformed node", async () => {
+    fixture = await graphql({ IssueLabels: { issueLabels: { nodes: [{ name: "Bug" }] } } })
+    const failure = await Effect.runPromise(Effect.flip(client().resolveLabelIds("team-eng-id", ["Bug"])))
+    expect(failure.details).toMatchObject({ path: "issueLabels.nodes[0].id" })
+  })
+
+  it("fails decode-failed for a mutation result missing a field it promises", async () => {
+    fixture = await graphql({ IssueCreate: { issueCreate: { success: true, issue: { id: "i" } } } })
+    const failure = await Effect.runPromise(Effect.flip(client().createIssue({ teamId: "t", title: "t" })))
+    expect(failure.reason).toBe("decode-failed")
+    expect(failure.details).toMatchObject({ path: "issueCreate.issue.identifier" })
+  })
+
+  it("never carries the response body into the failure", async () => {
+    fixture = await graphql({ Issue: { issue: { id: 7, secret: "do-not-persist" } } })
+    const failure = await Effect.runPromise(Effect.flip(client().getIssue("issue-uuid")))
+    expect(JSON.stringify(failure.details)).not.toContain("do-not-persist")
+  })
+})
+
+describe("team resolution", () => {
+  // Documented as exactly one of the two. Preferring `teamId` silently filed
+  // on a team the caller did not name, on an irreversible action.
+  it("refuses both a team id and a team key", async () => {
+    fixture = await graphql()
+    const failure = await Effect.runPromise(
+      Effect.flip(client().resolveTeam({ teamId: "team-eng-id", teamKey: "ENG" }))
+    )
+    expect(failure.reason).toBe("decode-failed")
+    expect(failure.message).toContain("not both")
+    expect(fixture.requests).toHaveLength(0)
+  })
+
+  // The cache was keyed uppercase while the query sent the raw key, so the
+  // same call succeeded or failed depending on unrelated history.
+  it("decides the same way for a lowercase key on a cold client and a warm one", async () => {
+    fixture = await graphql()
+    const cold = client()
+    expect((await Effect.runPromise(cold.resolveTeam({ teamKey: "eng" }))).id).toBe(TEAM.id)
+    expect(JSON.parse(fixture.requests[0]?.body ?? "{}").variables.key).toBe("ENG")
+
+    const warm = client()
+    await Effect.runPromise(warm.resolveTeam({ teamKey: "ENG" }))
+    const before = fixture.requests.length
+    expect((await Effect.runPromise(warm.resolveTeam({ teamKey: "eng" }))).id).toBe(TEAM.id)
+    expect(fixture.requests).toHaveLength(before)
+  })
+
+  // The cache hands the same object to every later call on this client, so a
+  // consumer that mutated it would change the identity the next mutation uses.
+  it("hands back a frozen team", async () => {
+    fixture = await graphql()
+    const team = await Effect.runPromise(client().resolveTeam({ teamKey: "ENG" }))
+    expect(Object.isFrozen(team)).toBe(true)
+  })
+})
+
+describe("label clearing", () => {
+  // `labels: []` used to read as an absent field, so the name path could not
+  // remove a label at all.
+  it("maps an explicit empty label list to an empty labelIds", async () => {
+    fixture = await graphql()
+    await Effect.runPromise(client().updateIssue("issue-uuid", { labels: [] }))
+    const update = fixture.requests.find((request) => operation(request.body) === "IssueUpdate")
+    expect(JSON.parse(update?.body ?? "{}").variables.input).toEqual({ labelIds: [] })
+  })
+
+  it("still leaves labels alone when the field is absent", async () => {
+    fixture = await graphql()
+    await Effect.runPromise(client().updateIssue("issue-uuid", { title: "t" }))
+    const update = fixture.requests.find((request) => operation(request.body) === "IssueUpdate")
+    expect(JSON.parse(update?.body ?? "{}").variables.input).not.toHaveProperty("labelIds")
+  })
+})
+
+describe("adversarial mutation results", () => {
+  it("names a team member of the wrong shape on an issue", async () => {
+    fixture = await graphql({ Issue: { issue: { ...ISSUE, team: "ENG" } } })
+    expect((await Effect.runPromise(Effect.flip(client().getIssue("issue-uuid")))).details)
+      .toMatchObject({ path: "issue.team" })
+    await fixture.close()
+    fixture = await graphql({ Issue: { issue: { ...ISSUE, team: { key: "ENG" } } } })
+    expect((await Effect.runPromise(Effect.flip(client().getIssue("issue-uuid")))).details)
+      .toMatchObject({ path: "issue.team.id" })
+  })
+
+  it("names a comment field of the wrong shape", async () => {
+    fixture = await graphql({ CommentCreate: { commentCreate: { success: true, comment: "hi" } } })
+    expect((await Effect.runPromise(Effect.flip(client().commentOnIssue("issue-uuid", "hi")))).details)
+      .toMatchObject({ path: "commentCreate.comment" })
+    await fixture.close()
+    fixture = await graphql({ CommentCreate: { commentCreate: { success: true, comment: { id: "c1" } } } })
+    expect((await Effect.runPromise(Effect.flip(client().commentOnIssue("issue-uuid", "hi")))).details)
+      .toMatchObject({ path: "commentCreate.comment.body" })
+  })
+
+  it("reports a mutation envelope that is not a record", async () => {
+    fixture = await graphql({ IssueUpdate: { issueUpdate: "nope" } })
+    const failure = await Effect.runPromise(Effect.flip(client().updateIssue("issue-uuid", { title: "t" })))
+    expect(failure.reason).toBe("delivery-failed")
+  })
+
+  it("reports a connection that is not an object", async () => {
+    fixture = await graphql({ WorkflowStates: { workflowStates: "nope" } })
+    expect((await Effect.runPromise(Effect.flip(client().resolveStateId("team-eng-id", "Todo")))).details)
+      .toMatchObject({ path: "workflowStates" })
+    await fixture.close()
+    fixture = await graphql({ IssueLabels: { issueLabels: { nodes: [7] } } })
+    expect((await Effect.runPromise(Effect.flip(client().resolveLabelIds("team-eng-id", ["Bug"])))).details)
+      .toMatchObject({ path: "issueLabels.nodes[0]" })
+  })
+
+  // Erasing a wrong-typed member silently turned "Linear changed this field"
+  // into "no state by that name", which reads as a caller error.
+  it("names a wrong-typed optional member instead of erasing it", async () => {
+    fixture = await graphql({ WorkflowStates: { workflowStates: { nodes: [{ id: "s", name: 7 }] } } })
+    expect((await Effect.runPromise(Effect.flip(client().resolveStateId("team-eng-id", "Todo")))).details)
+      .toMatchObject({ path: "workflowStates.nodes[0].name" })
+    await fixture.close()
+
+    fixture = await graphql({ Issue: { issue: { ...ISSUE, team: { id: "t", key: 7 } } } })
+    expect((await Effect.runPromise(Effect.flip(client().getIssue("issue-uuid")))).details)
+      .toMatchObject({ path: "issue.team.key" })
+    await fixture.close()
+
+    fixture = await graphql({
+      CommentCreate: { commentCreate: { success: true, comment: { id: "c", body: "b", issue: { id: 7 } } } }
+    })
+    expect((await Effect.runPromise(Effect.flip(client().commentOnIssue("issue-uuid", "hi")))).details)
+      .toMatchObject({ path: "commentCreate.comment.issue.id" })
+  })
+
+  it("treats an absent connection as no members", async () => {
+    fixture = await graphql({ IssueLabels: { issueLabels: null } })
+    const failure = await Effect.runPromise(Effect.flip(client().resolveLabelIds("team-eng-id", ["Bug"])))
+    expect(failure.message).toContain("label(s) not found")
   })
 })

@@ -140,7 +140,7 @@ export const make = (config: Config): Channel => {
     isIntegrationError(cause)
       ? Effect.fail(toInvalidInput(cause))
       : Effect.logWarning(`${config.name} webhook decoder failed`, cause).pipe(
-        Effect.zipRight(
+        Effect.andThen(
           Effect.fail(new InvalidInput({ issue: `${config.name} webhook payload could not be decoded.` }))
         )
       )
@@ -169,7 +169,7 @@ export const make = (config: Config): Channel => {
               decodeExternalEvent(event).pipe(
                 Effect.catch((issue) =>
                   Effect.logWarning(`${config.name} webhook decoder produced a malformed event`, issue).pipe(
-                    Effect.zipRight(
+                    Effect.andThen(
                       Effect.fail(
                         new InvalidInput({ issue: `${config.name} webhook decoder produced a malformed event.` })
                       )

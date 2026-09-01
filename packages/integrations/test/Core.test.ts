@@ -1,6 +1,9 @@
+import { SmithersError } from "@smthrs/errors/SmithersError"
 import { Effect } from "effect"
+import { resolve as resolvePath } from "node:path"
 import { describe, expect, it } from "vitest"
-import { buildAuthorizationUrl } from "../src/core/AuthorizationUrl.ts"
+import { fromIntegrationError, MAX_MESSAGE_LENGTH } from "../src/core/ActionFailure.ts"
+import { buildAuthorizationUrl, RESERVED_PARAMS } from "../src/core/AuthorizationUrl.ts"
 import * as ExternalEvent from "../src/core/ExternalEvent.ts"
 import {
   IntegrationError,
@@ -12,6 +15,8 @@ import {
 import { readInteger, readJsonPath, readString } from "../src/core/JsonPath.ts"
 import { createCodeVerifier, createPkcePair, deriveCodeChallenge } from "../src/core/Pkce.ts"
 import * as SignalName from "../src/core/SignalName.ts"
+import * as Environment from "../src/Environment.ts"
+import * as GitHubConfig from "../src/github/Config.ts"
 
 describe("readJsonPath", () => {
   const payload = { repository: { full_name: "smithersai/smithers" }, issue: { number: 12 }, list: [1, 2] }
@@ -35,6 +40,22 @@ describe("readJsonPath", () => {
     expect(readJsonPath(null, "a")).toBeUndefined()
   })
 
+  // The getter reads attacker-supplied provider payloads at caller-chosen
+  // paths, and its contract says a missing segment reads as `undefined`. An
+  // inherited member is missing.
+  it("reads own properties only, so a prototype member is not data", () => {
+    expect(readJsonPath({}, "constructor")).toBeUndefined()
+    expect(readJsonPath({}, "toString")).toBeUndefined()
+    expect(readJsonPath({}, "__proto__.constructor")).toBeUndefined()
+    expect(readJsonPath({ a: {} }, "a.hasOwnProperty")).toBeUndefined()
+  })
+
+  // `JSON.parse` produces `__proto__` as an ordinary own key, and a webhook
+  // body can contain one. That is data and stays readable.
+  it("still reads an own __proto__ key a JSON body carried", () => {
+    expect(readJsonPath(JSON.parse("{\"__proto__\":{\"a\":1}}"), "__proto__.a")).toBe(1)
+  })
+
   it("rejects a value of the wrong type", () => {
     expect(readString(payload, "issue.number")).toBeUndefined()
     expect(readString({ a: "" }, "a")).toBeUndefined()
@@ -52,11 +73,27 @@ describe("IntegrationError", () => {
     expect(isIntegrationError(error)).toBe(true)
   })
 
-  it("recognizes an error that crossed a module boundary by name", () => {
-    const foreign = new Error("copy")
-    foreign.name = "IntegrationError"
+  it("recognizes an error that crossed a module boundary by name and shape", () => {
+    const foreign = Object.assign(new Error("copy"), {
+      name: "IntegrationError",
+      summary: "copy",
+      reason: "poll-failed"
+    })
     expect(isIntegrationError(foreign)).toBe(true)
     expect(isIntegrationError(new Error("plain"))).toBe(false)
+  })
+
+  // The name alone is forgeable, and a copy of this module whose reason list
+  // has drifted carries a reason the local schema cannot encode. Trusting
+  // either made `fromIntegrationError` throw inside `Effect.mapError`, which
+  // turns a typed action failure into a defect.
+  it("refuses an error that only claims the name", () => {
+    expect(isIntegrationError(Object.assign(new Error("boom"), { name: "IntegrationError" }))).toBe(false)
+    expect(isIntegrationError(Object.assign(new Error("boom"), {
+      name: "IntegrationError",
+      summary: "boom",
+      reason: "invented-in-a-newer-build"
+    }))).toBe(false)
   })
 
   it("marks only the failures the clients tagged retryable", () => {
@@ -103,6 +140,18 @@ describe("SignalName", () => {
     expect(SignalName.parse("my-signal")).toBeNull()
     expect(SignalName.parse("integration::event")).toBeNull()
     expect(SignalName.parse("integration:service:")).toBeNull()
+  })
+
+  // The parser used to accept names the constructor refuses to build, which
+  // let a routing identity into persistence that nothing could reproduce.
+  it("refuses a name the constructor could not have produced", () => {
+    expect(() => SignalName.eventName("github", "a:b")).toThrow(/must not contain/)
+    expect(SignalName.parse("integration:github:a:b")).toBeNull()
+    expect(SignalName.parse("integration: gh :ev")).toBeNull()
+    expect(SignalName.parse("integration:gh: ev ")).toBeNull()
+    expect(SignalName.isSegment("gh")).toBe(true)
+    expect(SignalName.isSegment(" gh")).toBe(false)
+    expect(SignalName.isSegment("")).toBe(false)
   })
 })
 
@@ -259,14 +308,28 @@ describe("buildAuthorizationUrl", () => {
     const url = new URL(buildAuthorizationUrl({
       ...BASE,
       authorizationEndpoint: "https://login.example/tenant/authorize?tenant=acme&prompt=consent",
-      extraParams: { audience: "https://api.example", client_id: "tenant-client", response_type: "custom-code" }
+      extraParams: { audience: "https://api.example", response_type: "custom-code" }
     }))
     expect(url.searchParams.get("tenant")).toBe("acme")
     expect(url.searchParams.get("prompt")).toBe("consent")
     expect(url.searchParams.get("audience")).toBe("https://api.example")
-    expect(url.searchParams.get("client_id")).toBe("tenant-client")
+    // `response_type` is the one override the parameter exists for.
     expect(url.searchParams.get("response_type")).toBe("custom-code")
     expect(url.searchParams.get("redirect_uri")).toBe(BASE.redirectUri)
+  })
+
+  // `extraParams` used to be able to replace `state`, `code_challenge`, and
+  // its method, which disables exactly the CSRF and PKCE protections the
+  // validation above exists to guarantee.
+  it("refuses an extra parameter that would overwrite a security parameter", () => {
+    for (const key of RESERVED_PARAMS) {
+      expect(() => buildAuthorizationUrl({ ...BASE, extraParams: { [key]: "attacker" } }))
+        .toThrow(new RegExp(`reserved parameter "${key}"`))
+    }
+    // The validated values survive.
+    const url = new URL(buildAuthorizationUrl({ ...BASE, extraParams: { audience: "a" } }))
+    expect(url.searchParams.get("state")).toBe(BASE.state)
+    expect(url.searchParams.get("code_challenge")).toBe(BASE.codeChallenge)
   })
 
   it("takes the challenge a PKCE pair produced", () => {
@@ -293,5 +356,96 @@ describe("buildAuthorizationUrl", () => {
     for (const field of ["clientId", "redirectUri", "state", "codeChallenge"] as const) {
       expect(() => buildAuthorizationUrl({ ...BASE, [field]: "" })).toThrow(TypeError)
     }
+  })
+})
+
+describe("ActionFailure conversion is total", () => {
+  // The guard used to trust a bare `name`, and `Schema.TaggedError` validates
+  // at construction, so `Effect.mapError(fromIntegrationError)` threw and the
+  // typed action failure became a defect.
+  it("converts a forged IntegrationError to an unclassified failure instead of throwing", () => {
+    const forged = Object.assign(new Error("boom"), { name: "IntegrationError" })
+    expect(fromIntegrationError(forged)).toMatchObject({ reason: "delivery-failed", retryable: false })
+    const drifted = Object.assign(new Error("boom"), {
+      name: "IntegrationError",
+      summary: "boom",
+      reason: "a-reason-this-build-cannot-encode"
+    })
+    expect(fromIntegrationError(drifted)).toMatchObject({ reason: "delivery-failed", message: "boom" })
+  })
+
+  // `SmithersError.message` carries " See https://…" and `summary` does not,
+  // so reading `message` made one provider's failures look different from the
+  // others' for no reason.
+  it("journals the summary of a SmithersError, not its documentation URL", () => {
+    const failure = fromIntegrationError(new SmithersError("INVALID_INPUT", "chat not found"))
+    expect(failure.message).toBe("chat not found")
+    expect(failure.message).not.toContain("smithers.sh/reference/errors")
+  })
+
+  it("prefers the summary of any error that carries one", () => {
+    // Not only a `SmithersError`: an error from another module instance with
+    // the same shape journals the same way.
+    const foreign = Object.assign(new Error("message with a docs URL"), { summary: "just the summary" })
+    expect(fromIntegrationError(foreign).message).toBe("just the summary")
+  })
+
+  it("caps the provider text it persists", () => {
+    const failure = fromIntegrationError(new Error("x".repeat(5000)))
+    expect(failure.message.length).toBe(MAX_MESSAGE_LENGTH)
+    expect(failure.message.endsWith("…")).toBe(true)
+  })
+
+  it("still reports a value that is not an Error", () => {
+    expect(fromIntegrationError("not an error")).toMatchObject({ message: "not an error" })
+  })
+})
+
+describe("Environment", () => {
+  // Both ambient reads are spelled once, in this module, rather than appearing
+  // as a bare `process.env` or `process.cwd()` in the middle of an API that
+  // takes its environment as an argument. What has to hold is that omitting
+  // the argument really does reach the host.
+  it("is what a client omitting its env argument reads", () => {
+    const previous = process.env["SMITHERS_GITHUB_TOKEN"]
+    process.env["SMITHERS_GITHUB_TOKEN"] = "ambient-for-this-test"
+    try {
+      expect(GitHubConfig.resolve({}).token).toBe("ambient-for-this-test")
+      expect(GitHubConfig.resolve({}, {}).token).toBeUndefined()
+    } finally {
+      if (previous === undefined) delete process.env["SMITHERS_GITHUB_TOKEN"]
+      else process.env["SMITHERS_GITHUB_TOKEN"] = previous
+    }
+  })
+
+  it("resolves a workspace root the caller did not name", () => {
+    expect(resolvePath(Environment.ambientWorkingDirectory())).toBe(process.cwd())
+  })
+})
+
+describe("ExternalEvent names are the ones SignalName can build", () => {
+  // A name that reaches persistence but that nothing can rebuild is a routing
+  // identity with no owner, and the ingress validation would have waved it
+  // through while `SignalName.parse` returned null for it.
+  it("refuses a name the constructor could not have produced", async () => {
+    for (const eventName of ["integration:github:a:b", "integration:github:", "integration::x", "github.issues"]) {
+      const exit = await Effect.runPromise(Effect.exit(ExternalEvent.decode({ ...event, eventName })))
+      expect(exit._tag).toBe("Failure")
+    }
+  })
+
+  it("still accepts every name the providers build", async () => {
+    for (
+      const eventName of [
+        SignalName.eventName("github", "pull_request.opened"),
+        SignalName.eventName("linear", "issue.update"),
+        SignalName.eventName("telegram", "callback_query")
+      ]
+    ) {
+      const exit = await Effect.runPromise(Effect.exit(ExternalEvent.decode({ ...event, eventName })))
+      expect(exit._tag).toBe("Success")
+    }
+    expect(SignalName.isEventName("integration:github:issues")).toBe(true)
+    expect(SignalName.isEventName("integration:github:a:b")).toBe(false)
   })
 })

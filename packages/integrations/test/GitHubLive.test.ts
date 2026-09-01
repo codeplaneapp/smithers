@@ -39,10 +39,13 @@ describe.skipIf(token === undefined)("GitHub live contract (GITHUB_TOKEN)", () =
   }, 30_000)
 
   it("paginates a real Link header", async () => {
-    const items = await Effect.runPromise(
+    const page = await Effect.runPromise(
       client.paginate("/repos/microsoft/TypeScript/issues", { perPage: 5, maxPages: 2 })
     )
-    expect(items.length).toBeGreaterThan(5)
+    expect(page.items.length).toBeGreaterThan(5)
+    // Two pages of five out of a repository with thousands of issues: the cap
+    // is what stopped the walk, and the client says so.
+    expect(page.truncated).toBe(true)
   }, 60_000)
 
   it("classifies a real 404 as a non-retryable delivery failure", async () => {

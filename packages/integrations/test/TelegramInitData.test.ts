@@ -197,14 +197,53 @@ describe("verifySignature", () => {
     await expect(verifySignature(initData, BOT_ID, { nowMs: NOW })).rejects.toThrow(/not valid base64url/)
   })
 
-  it("rejects a malformed public key as an unsupported runtime rather than a crash", async () => {
+  // A typo pointing at the test-datacenter key used to be reported as
+  // "Ed25519 is not supported in this runtime", which sends an operator
+  // looking at Node versions instead of at their own argument.
+  it("names a malformed public key as caller input, not an unsupported runtime", async () => {
     const { initData } = await signEd25519(ed25519Fields())
-    await expect(verifySignature(initData, BOT_ID, { publicKeyHex: "zz", nowMs: NOW }))
-      .rejects.toThrow(/not supported in this runtime/)
+    for (const publicKeyHex of ["zz", "abc", `${ED25519_PUBLIC_KEY_TEST}00`]) {
+      await expect(verifySignature(initData, BOT_ID, { publicKeyHex, nowMs: NOW }))
+        .rejects.toThrow(/publicKeyHex must be 64 hexadecimal characters/)
+    }
   })
 
   it("ships Telegram's production and test keys", () => {
     expect(ED25519_PUBLIC_KEY_PROD).toHaveLength(64)
     expect(ED25519_PUBLIC_KEY_TEST).toHaveLength(64)
+  })
+})
+
+describe("the freshness window is bounded at both ends", () => {
+  // Only bounding the old end let a correctly signed far-future `auth_date`
+  // stay fresh for as long as it was dated ahead.
+  it("refuses a payload dated beyond the accepted future skew", async () => {
+    const future = Math.floor(NOW / 1000) + 3600
+    const initData = await hmacInitData(baseFields(future))
+    await expect(verifyWithBotToken(initData, BOT_TOKEN, { nowMs: NOW })).rejects.toThrow(/expired/)
+  })
+
+  it("accepts a small clock difference", async () => {
+    const nearFuture = Math.floor(NOW / 1000) + 60
+    const initData = await hmacInitData(baseFields(nearFuture))
+    await expect(verifyWithBotToken(initData, BOT_TOKEN, { nowMs: NOW })).resolves.toBeDefined()
+  })
+
+  // A zero or negative policy silently disabled the check rather than
+  // reporting the configuration mistake it is.
+  it("refuses a freshness policy that is not a usable window", async () => {
+    const initData = await hmacInitData()
+    for (const maxAgeSeconds of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 86_401]) {
+      await expect(verifyWithBotToken(initData, BOT_TOKEN, { maxAgeSeconds, nowMs: NOW }))
+        .rejects.toThrow(/maxAgeSeconds must be an integer/)
+    }
+    await expect(verifyWithBotToken(initData, BOT_TOKEN, { nowMs: Number.NaN }))
+      .rejects.toThrow(/nowMs must be a finite number/)
+  })
+
+  it("still lets an explicit zero disable the age check", async () => {
+    const ancient = Math.floor(NOW / 1000) - 999_999
+    const initData = await hmacInitData(baseFields(ancient))
+    await expect(verifyWithBotToken(initData, BOT_TOKEN, { maxAgeSeconds: 0, nowMs: NOW })).resolves.toBeDefined()
   })
 })

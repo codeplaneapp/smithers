@@ -131,23 +131,36 @@ describe("GitHubClient over a real HTTP server", () => {
       }
       json(response, 200, [{ id: 3 }])
     })
-    const items = await Effect.runPromise(client().paginate("/repos/o/r/hooks"))
-    expect(items).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }])
+    const page = await Effect.runPromise(client().paginate("/repos/o/r/hooks"))
+    expect(page.items).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }])
+    expect(page.truncated).toBe(false)
     expect(new URL(`http://x${fixture.requests[0]?.url}`).searchParams.get("per_page")).toBe("100")
   })
 
-  it("stops at maxPages even when a next link remains", async () => {
+  // A truncated list read as a complete one is how a reconciliation plans work
+  // for resources it simply did not see, so the cap has to be reported.
+  it("stops at maxPages and says the answer is truncated", async () => {
     fixture = await startFixture((_request, response) =>
       json(response, 200, [{ id: 1 }], { link: `<${(fixture as Fixture).origin}/x?page=9>; rel="next"` })
     )
-    const items = await Effect.runPromise(client().paginate("/x", { perPage: 1, maxPages: 2 }))
-    expect(items).toHaveLength(2)
+    const page = await Effect.runPromise(client().paginate("/x", { perPage: 1, maxPages: 2 }))
+    expect(page.items).toHaveLength(2)
+    expect(page.truncated).toBe(true)
     expect(fixture.requests).toHaveLength(2)
+  })
+
+  it("refuses a page budget that is not a finite bound", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, []))
+    for (const options of [{ maxPages: Number.POSITIVE_INFINITY }, { maxPages: 0 }, { perPage: 1000 }]) {
+      const failure = await Effect.runPromise(Effect.flip(client().paginate("/x", options)))
+      expect(failure.reason).toBe("invalid-config")
+    }
+    expect(fixture.requests).toHaveLength(0)
   })
 
   it("wraps a single object page rather than dropping it", async () => {
     fixture = await startFixture((_request, response) => json(response, 200, { id: 1 }))
-    expect(await Effect.runPromise(client().paginate("/x"))).toEqual([{ id: 1 }])
+    expect((await Effect.runPromise(client().paginate("/x"))).items).toEqual([{ id: 1 }])
   })
 
   it("retries a 429 that names its own delay, then succeeds", async () => {
@@ -168,6 +181,101 @@ describe("GitHubClient over a real HTTP server", () => {
     fixture = await startFixture((_request, response) => json(response, 503, { message: "unavailable" }))
     const exit = await Effect.runPromise(Effect.exit(client({ maxRetries: 1 }).request("GET", "/x")))
     expect(exit._tag).toBe("Failure")
+    expect(fixture.requests).toHaveLength(2)
+  })
+
+  // GitHub may have committed the write and lost the answer, so repeating a
+  // POST posts a second comment. The action's tier says irreversible; the
+  // client has to mean it.
+  it("issues an unsafe write exactly once when the server errors", async () => {
+    fixture = await startFixture((_request, response) => json(response, 502, { message: "bad gateway" }))
+    for (const method of ["POST", "PATCH", "PUT", "DELETE"] as const) {
+      const before = fixture.requests.length
+      const failure = await Effect.runPromise(Effect.flip(client().request(method, "/repos/o/r/x", { a: 1 })))
+      expect(fixture.requests.length - before).toBe(1)
+      expect(failure.details).toMatchObject({ outcomeUnknown: true, retryable: false })
+      expect(failure.message).toContain("outcome unknown")
+    }
+  })
+
+  it("issues an unsafe write exactly once when the transport fails", async () => {
+    fixture = await startFixture((_request, response) => {
+      response.destroy()
+    })
+    const failure = await Effect.runPromise(Effect.flip(client().request("POST", "/x", { a: 1 })))
+    expect(fixture.requests).toHaveLength(1)
+    expect(failure.details).toMatchObject({ outcomeUnknown: true, retryable: false })
+  })
+
+  // A rate limit is a refusal, not an ambiguous outcome: the request was not
+  // performed, so repeating it is safe for any verb.
+  it("still retries a rate-limited write, because it was refused rather than applied", async () => {
+    let calls = 0
+    fixture = await startFixture((_request, response) => {
+      calls += 1
+      if (calls === 1) {
+        json(response, 429, { message: "rate limited" }, { "retry-after": "0" })
+        return
+      }
+      json(response, 201, { ok: true })
+    })
+    expect(await Effect.runPromise(client().request("POST", "/x", { a: 1 }))).toEqual({ ok: true })
+    expect(calls).toBe(2)
+  })
+
+  it("repeats an unsafe write when the caller opts in", async () => {
+    let calls = 0
+    fixture = await startFixture((_request, response) => {
+      calls += 1
+      if (calls < 3) {
+        json(response, 502, { message: "bad gateway" })
+        return
+      }
+      json(response, 201, { ok: true })
+    })
+    expect(
+      await Effect.runPromise(client().request("POST", "/x", { a: 1 }, { retryUnsafeWrites: true }))
+    ).toEqual({ ok: true })
+    expect(calls).toBe(3)
+  })
+
+  // `new URL("httpx")` throws a bare TypeError, which used to escape the
+  // declared IntegrationError channel as a defect.
+  it("fails invalid-config for a path that is not a URL rather than dying", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, {}))
+    const failure = await Effect.runPromise(Effect.flip(client().request("GET", "httpx")))
+    expect(failure.reason).toBe("invalid-config")
+    expect(fixture.requests).toHaveLength(0)
+  })
+
+  it("refuses a retry budget that is not a finite bound", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, {}))
+    expect(() => client({ maxRetries: Number.POSITIVE_INFINITY })).toThrow(/maxRetries/)
+  })
+
+  // A read is repeatable by definition, so its failure must never claim the
+  // outcome is in doubt.
+  it("never marks a read's failure outcome-unknown", async () => {
+    fixture = await startFixture((_request, response) => json(response, 502, { message: "bad gateway" }))
+    const failure = await Effect.runPromise(Effect.flip(client({ maxRetries: 1 }).request("GET", "/x")))
+    expect(failure.details).toMatchObject({ outcomeUnknown: false, retryable: true })
+    expect(fixture.requests).toHaveLength(2)
+  })
+
+  // The boundary that matters: the budget was spent exactly, and the last page
+  // had no successor, so the answer is complete rather than truncated.
+  it("reports a walk that ends exactly on the budget as complete", async () => {
+    fixture = await startFixture((request, response) => {
+      const page = new URL(`http://x${request.url}`).searchParams.get("page") ?? "1"
+      if (page === "1") {
+        json(response, 200, [{ id: 1 }], { link: `<${(fixture as Fixture).origin}/x?page=2>; rel="next"` })
+        return
+      }
+      json(response, 200, [{ id: 2 }])
+    })
+    const page = await Effect.runPromise(client().paginate("/x", { perPage: 1, maxPages: 2 }))
+    expect(page.items).toEqual([{ id: 1 }, { id: 2 }])
+    expect(page.truncated).toBe(false)
     expect(fixture.requests).toHaveLength(2)
   })
 
@@ -256,5 +364,20 @@ describe("GitHubClient over a real HTTP server", () => {
     fixture = await startFixture((_request, response) => json(response, 200, {}))
     await Effect.runPromise(make({ apiBaseUrl: fixture.origin }, {}).request("GET", "/x"))
     expect(fixture.requests[0]?.headers["authorization"]).toBeUndefined()
+  })
+})
+
+describe("a body that cannot be serialized", () => {
+  // The throw used to happen inside the transport attempt, where every failure
+  // is a lost answer, so a request that was never sent was reported as a write
+  // whose outcome nobody knows.
+  it("is caller input, not an unknown write outcome", async () => {
+    fixture = await startFixture((_request, response) => json(response, 201, {}))
+    const cyclic: Record<string, unknown> = {}
+    cyclic["self"] = cyclic
+    const failure = await Effect.runPromise(Effect.flip(client().request("POST", "/x", cyclic)))
+    expect(failure.reason).toBe("invalid-config")
+    expect(failure.details).toMatchObject({ outcomeUnknown: false, retryable: false })
+    expect(fixture.requests).toHaveLength(0)
   })
 })

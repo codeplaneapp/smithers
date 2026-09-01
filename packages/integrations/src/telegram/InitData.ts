@@ -5,8 +5,12 @@
  * `window.Telegram.WebApp.initData`. A backend must verify it before trusting
  * the user; `initDataUnsafe` is named that for a reason.
  *
- * Two paths, both on Web Crypto so the same code runs under Node, Bun, and a
- * Cloudflare Worker:
+ * Two paths, both on Web Crypto and no `node:` builtin, which is what would
+ * let the same code run under Bun and a Cloudflare Worker. Only Node is
+ * verified: this package is in neither the Bun matrix in `ci/BUILD.ts` nor the
+ * browser-contract list in `scripts/browser-check.mjs`, and the Ed25519
+ * `importKey` is the call most likely to differ between engines, which is why
+ * this module has an `UNSUPPORTED` branch at all.
  *
  * - **HMAC**, when you hold the bot token. The secret is
  *   `HMAC_SHA256(key="WebAppData", msg=botToken)`, and the data-check string is
@@ -40,6 +44,17 @@ export const ED25519_PUBLIC_KEY_PROD = "e7bf03a2fa4602af4580703d88dda5bb59f32ed8
 export const ED25519_PUBLIC_KEY_TEST = "40055058a4ee38156a06562e52eece92a771bcd8346a8c4615cb7376eddf72ec"
 
 const DEFAULT_MAX_AGE_SECONDS = 3600
+/** A day. Any freshness window longer than this is a configuration mistake. */
+const MAX_MAX_AGE_SECONDS = 86_400
+/**
+ * How far into the future an `auth_date` may sit and still be accepted.
+ *
+ * Telegram signs `auth_date` itself, so this is defense in depth: without an
+ * upper bound a correctly signed payload dated a year ahead stays fresh for
+ * that whole year.
+ */
+const MAX_FUTURE_SKEW_SECONDS = 300
+const ED25519_KEY_PATTERN = /^[0-9a-fA-F]{64}$/
 const encoder = new TextEncoder()
 
 /**
@@ -93,7 +108,11 @@ export interface InitData {
  * @since 1.0.0
  */
 export interface VerifyOptions {
-  /** Reject `initData` older than this. `0` disables the check. Defaults to 3600. */
+  /**
+   * Reject `initData` older than this, in seconds. Must be an integer from 0
+   * to 86400; `0` disables the age check, and anything outside the range is a
+   * configuration error rather than a silently disabled check.
+   */
   readonly maxAgeSeconds?: number | undefined
   /** Overrides "now", in epoch milliseconds. */
   readonly nowMs?: number | undefined
@@ -106,7 +125,11 @@ export interface VerifyOptions {
  * @since 1.0.0
  */
 export interface VerifySignatureOptions extends VerifyOptions {
-  /** The Ed25519 public key, in hex. Defaults to the production key. */
+  /**
+   * The Ed25519 public key, as exactly 64 hexadecimal characters. Defaults to
+   * the production key. A malformed value fails `INVALID_INPUT` naming the
+   * field, not `UNSUPPORTED`.
+   */
   readonly publicKeyHex?: string | undefined
 }
 
@@ -117,10 +140,8 @@ const bytesToHex = (buffer: ArrayBuffer | Uint8Array): string => {
   return out
 }
 
+/** Decodes hex its caller has already validated against a pattern. */
 const hexToBytes = (hex: string): Uint8Array => {
-  if (hex.length % 2 !== 0 || /[^0-9a-fA-F]/.test(hex)) {
-    throw new SmithersError("INVALID_INPUT", "Expected an even-length hex string.")
-  }
   const bytes = new Uint8Array(hex.length / 2)
   for (let index = 0; index < bytes.length; index += 1) {
     bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16)
@@ -208,10 +229,33 @@ const dataCheckString = (params: URLSearchParams, exclude: ReadonlySet<string>):
   return pairs.join("\n")
 }
 
+/** The validated freshness policy, or an `INVALID_INPUT` failure. */
+const requirePolicy = (options: VerifyOptions): { readonly maxAgeSeconds: number; readonly nowMs: number } => {
+  const maxAgeSeconds = options.maxAgeSeconds ?? DEFAULT_MAX_AGE_SECONDS
+  if (!Number.isSafeInteger(maxAgeSeconds) || maxAgeSeconds < 0 || maxAgeSeconds > MAX_MAX_AGE_SECONDS) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      `maxAgeSeconds must be an integer between 0 and ${MAX_MAX_AGE_SECONDS}.`,
+      { maxAgeSeconds }
+    )
+  }
+  const nowMs = options.nowMs ?? Date.now()
+  if (!Number.isFinite(nowMs)) throw new SmithersError("INVALID_INPUT", "nowMs must be a finite number.", { nowMs })
+  return { maxAgeSeconds, nowMs }
+}
+
+/**
+ * Whether `authDate` sits inside the accepted window.
+ *
+ * Both ends are bounded. Only bounding the old end let a correctly signed
+ * far-future `auth_date` stay fresh for as long as it was dated ahead.
+ */
 const isFresh = (authDate: number | null, maxAgeSeconds: number, nowMs: number): boolean => {
   if (maxAgeSeconds <= 0) return true
   if (authDate === null) return false
-  return authDate * 1000 + maxAgeSeconds * 1000 >= nowMs
+  const authMs = authDate * 1000
+  if (authMs > nowMs + MAX_FUTURE_SKEW_SECONDS * 1000) return false
+  return authMs + maxAgeSeconds * 1000 >= nowMs
 }
 
 const invalid = (message: string, details?: Record<string, unknown>): SmithersError =>
@@ -247,8 +291,9 @@ export const verifyWithBotToken = async (
   const hash = params.get("hash")
   if (hash === null || hash.length === 0) throw invalid("initData is missing the hash field.")
   const parsed = parse(initData)
-  if (!isFresh(parsed.authDate, options.maxAgeSeconds ?? DEFAULT_MAX_AGE_SECONDS, options.nowMs ?? Date.now())) {
-    throw invalid("initData is expired or missing auth_date.", { authDate: parsed.authDate })
+  const policy = requirePolicy(options)
+  if (!isFresh(parsed.authDate, policy.maxAgeSeconds, policy.nowMs)) {
+    throw invalid("initData is expired, dated in the future, or missing auth_date.", { authDate: parsed.authDate })
   }
   const subtle = subtleCrypto()
   const webAppDataKey = await subtle.importKey(
@@ -287,9 +332,22 @@ export const verifySignature = async (
   const signature = params.get("signature")
   if (signature === null || signature.length === 0) throw invalid("initData is missing the signature field.")
   const parsed = parse(initData)
-  if (!isFresh(parsed.authDate, options.maxAgeSeconds ?? DEFAULT_MAX_AGE_SECONDS, options.nowMs ?? Date.now())) {
-    throw invalid("initData is expired or missing auth_date.", { authDate: parsed.authDate })
+  const policy = requirePolicy(options)
+  if (!isFresh(parsed.authDate, policy.maxAgeSeconds, policy.nowMs)) {
+    throw invalid("initData is expired, dated in the future, or missing auth_date.", { authDate: parsed.authDate })
   }
+  // Validated before the try below, so a mistyped key is reported as the
+  // caller error it is instead of as "this runtime has no Ed25519", which
+  // sends an operator looking at Node versions.
+  const publicKeyHex = options.publicKeyHex ?? ED25519_PUBLIC_KEY_PROD
+  if (!ED25519_KEY_PATTERN.test(publicKeyHex)) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      "publicKeyHex must be 64 hexadecimal characters (a 32-byte Ed25519 public key).",
+      { length: publicKeyHex.length }
+    )
+  }
+  const publicKey = hexToBytes(publicKeyHex)
   const subtle = subtleCrypto()
   const message = `${botId}:WebAppData\n${dataCheckString(params, new Set(["hash", "signature"]))}`
   // The signature is attacker-controlled: a malformed base64url value must
@@ -302,13 +360,7 @@ export const verifySignature = async (
   }
   let key: CryptoKey
   try {
-    key = await subtle.importKey(
-      "raw",
-      hexToBytes(options.publicKeyHex ?? ED25519_PUBLIC_KEY_PROD) as BufferSource,
-      { name: "Ed25519" },
-      false,
-      ["verify"]
-    )
+    key = await subtle.importKey("raw", publicKey as BufferSource, { name: "Ed25519" }, false, ["verify"])
   } catch (cause) {
     throw new SmithersError("UNSUPPORTED", "Ed25519 verification is not supported in this runtime.", undefined, {
       cause

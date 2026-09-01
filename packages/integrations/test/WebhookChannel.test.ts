@@ -108,15 +108,19 @@ const githubChannel = (secret = SECRET) =>
     route: Core.startFlow("triage")
   })
 
-const githubDelivery = (body: string, signature: string): Channels.RawInbound => ({
-  body: bytes(body),
-  headers: {
-    "x-github-event": "issues",
-    "x-github-delivery": "delivery-1",
-    "x-hub-signature-256": signature
-  },
-  idempotencyKey: "delivery-1"
+const githubHeaders = (signature: string) => ({
+  "x-github-event": "issues",
+  "x-github-delivery": "delivery-1",
+  "x-hub-signature-256": signature
 })
+
+// Built the way an ingress must build one: the idempotency key comes from the
+// provider's own delivery identity, through the helper the module exports, not
+// from a literal this test invented.
+const githubDelivery = (body: string, signature: string): Channels.RawInbound => {
+  const raw = { body: bytes(body), headers: githubHeaders(signature) }
+  return { ...raw, idempotencyKey: GitHubWebhook.idempotencyKey(raw) as string }
+}
 
 const ISSUE_BODY = JSON.stringify({
   action: "opened",
@@ -184,8 +188,9 @@ describe("redelivery", () => {
     const calls: Array<string> = []
     const signature = `sha256=${computeHmacSha256Hex(ISSUE_BODY, SECRET)}`
     const receipts = await ingestTwice(githubChannel(), githubDelivery(ISSUE_BODY, signature), calls)
-    // The second delivery carries the same `x-github-delivery`, so it is the
-    // same idempotency key and must not start a second run.
+    // The second delivery carries the same `x-github-delivery`, and
+    // `GitHubWebhook.idempotencyKey` derives the key from that header, so it
+    // is the same key and must not start a second run.
     expect(calls).toEqual(["plan", "run"])
     expect(receipts[0]?._tag).toBe("Accepted")
     expect(receipts[1]?._tag).toBe("AlreadyApplied")
@@ -380,5 +385,110 @@ describe("secret resolution", () => {
     })
     const failure = await Effect.runPromise(Effect.flip(resolver(CREDENTIAL)))
     expect(failure.message).toBe("denied")
+  })
+})
+
+// `Channels.ingest` drops a replayed `RawInbound.idempotencyKey`, and that is
+// the whole redelivery guarantee. Nothing derives the key for the caller, so
+// each provider exports the derivation an ingress has to use.
+describe("idempotency keys", () => {
+  it("derives a GitHub key from the delivery header", () => {
+    expect(GitHubWebhook.idempotencyKey({ headers: githubHeaders("sha256=x") })).toBe("github:delivery-1")
+    expect(GitHubWebhook.idempotencyKey({ headers: {} })).toBeUndefined()
+    expect(GitHubWebhook.idempotencyKey({ headers: { "x-github-delivery": "" } })).toBeUndefined()
+  })
+
+  it("prefers Linear's delivery header and falls back to the delivery's own identity", () => {
+    const body = linearBody(1_700_000_000_000)
+    const payload = JSON.parse(body) as unknown
+    const withHeader = { headers: { "linear-delivery": "d-9" } }
+    expect(LinearWebhook.idempotencyKey(withHeader, payload)).toBe("linear:d-9")
+    const withoutHeader = { headers: {} }
+    const derived = LinearWebhook.idempotencyKey(withoutHeader, payload)
+    expect(derived.startsWith("linear:")).toBe(true)
+    // Two deliveries of the same event produce the same key; a different
+    // action does not.
+    expect(LinearWebhook.idempotencyKey(withoutHeader, payload)).toBe(derived)
+    expect(LinearWebhook.idempotencyKey(withoutHeader, { ...(payload as object), action: "remove" }))
+      .not.toBe(derived)
+  })
+})
+
+describe("a channel refuses rather than dies", () => {
+  const raw = (): Channels.RawInbound => ({
+    body: bytes(ISSUE_BODY),
+    headers: githubHeaders(`sha256=${computeHmacSha256Hex(ISSUE_BODY, SECRET)}`),
+    idempotencyKey: "delivery-1"
+  })
+
+  const custom = (config: Partial<Core.Config>) =>
+    Core.make({
+      name: "custom",
+      credential: CREDENTIAL,
+      secret: Core.constantSecret(Redacted.make(SECRET)),
+      verify: () => true,
+      decode: (_raw, payload) => ({
+        source: "custom",
+        eventName: "integration:custom:thing",
+        correlationId: null,
+        payload: payload as never,
+        dedupeKey: "d1",
+        receivedAtMs: 1
+      }),
+      route: Core.startFlow("triage"),
+      ...config
+    })
+
+  // An application-supplied verifier is ordinary code. A throw is a refusal,
+  // not a defect that kills the ingress fiber.
+  it("treats a throwing verifier as a failed verification", async () => {
+    const exit = await ingest(
+      custom({
+        verify: () => {
+          throw new TypeError("verifier bug")
+        }
+      }),
+      raw()
+    )
+    expect(exit._tag).toBe("Failure")
+    // The internal message does not cross to the control plane.
+    expect(JSON.stringify(exit)).not.toContain("verifier bug")
+  })
+
+  it("reports a decoder that throws a plain error without quoting it", async () => {
+    const exit = await ingest(
+      custom({
+        decode: () => {
+          throw new TypeError("cannot read properties of undefined")
+        }
+      }),
+      raw()
+    )
+    expect(exit._tag).toBe("Failure")
+    expect(JSON.stringify(exit)).toContain("custom webhook payload could not be decoded")
+    expect(JSON.stringify(exit)).not.toContain("cannot read properties")
+  })
+
+  // `ExternalEvent.decode` was documented as the ingress validator and called
+  // by nothing, so a decoder bug surfaced as a malformed signal three hops on.
+  it("refuses an event the decoder built wrong", async () => {
+    const calls: Array<string> = []
+    const exit = await ingest(
+      custom({
+        decode: (_raw, payload) => ({
+          source: "",
+          eventName: "integration:custom:thing",
+          correlationId: null,
+          payload: payload as never,
+          dedupeKey: "d1",
+          receivedAtMs: 1
+        })
+      }),
+      raw(),
+      calls
+    )
+    expect(exit._tag).toBe("Failure")
+    expect(JSON.stringify(exit)).toContain("malformed event")
+    expect(calls).toEqual([])
   })
 })

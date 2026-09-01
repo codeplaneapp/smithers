@@ -9,7 +9,12 @@
  * The per-approval {@link token} is what keeps one prompt's buttons from
  * resolving another's. A press whose token does not match this approval fails
  * safe: a non-approval in `approve` mode, an empty selection in `select` mode.
- * A stale or foreign press can therefore never produce a false approval.
+ * A prompt built with no token, or an empty one, matches nothing at all, so
+ * two tokenless prompts cannot resolve each other.
+ *
+ * The namespace is a 32-bit hash, not a secret. Two approval ids can collide,
+ * and `callback_data` carries no trust in any case: a caller that needs a
+ * decision to be authorized re-checks the presser's user id.
  *
  * @since 1.0.0
  */
@@ -58,7 +63,11 @@ export interface Option {
  */
 export interface KeyboardSpec {
   readonly mode: "approve" | "select"
-  /** Namespaces this approval's buttons. See {@link token}. */
+  /**
+   * Namespaces this approval's buttons. See {@link token}. A spec without one
+   * still builds a keyboard, but no press ever matches it, so a prompt that
+   * needs to be answerable must carry a token.
+   */
   readonly token?: string | undefined
   /** Required and non-empty in `select` mode. */
   readonly options?: ReadonlyArray<Option> | undefined
@@ -99,7 +108,9 @@ const byteLength = (value: string): number => new TextEncoder().encode(value).le
  * A short, colon-free token derived from an id.
  *
  * Not security-sensitive. It is a namespace, so that a press on a different
- * prompt in the same chat cannot resolve this approval.
+ * prompt in the same chat is unlikely to resolve this approval. The hash is 32
+ * bits wide, so two ids can collide; the guarantee is a namespace, not a
+ * capability.
  *
  * @category constructors
  * @since 1.0.0
@@ -156,14 +167,30 @@ export const parseCallbackData = (data: string | undefined | null): (Choice & { 
   if (parts[0] !== PREFIX || parts.length < 3) return null
   const value = parts[1] as string
   const kind = parts[2]
-  if (kind === "a") return { token: value, kind: "approve" }
-  if (kind === "d") return { token: value, kind: "reject" }
-  if (kind === "s" && parts.length >= 4) {
-    const key = parts.slice(3).join(":")
+  // The grammar is exactly what `callbackData` emits. `sap:<tok>:a:<extra>` is
+  // data this encoder cannot produce, so reading it as an approval would
+  // accept a press nothing here built.
+  if (kind === "a" && parts.length === 3) return { token: value, kind: "approve" }
+  if (kind === "d" && parts.length === 3) return { token: value, kind: "reject" }
+  // Exactly four parts: `callbackData` refuses every select key containing a
+  // colon, so data with a fifth part is data this encoder cannot produce.
+  if (kind === "s" && parts.length === 4) {
+    const key = parts[3] as string
     return key.length === 0 ? null : { token: value, kind: "select", key }
   }
   return null
 }
+
+/**
+ * Whether the press belongs to this approval.
+ *
+ * An absent or empty `spec.token` matches nothing. Falling back to the empty
+ * string would give every tokenless prompt the same namespace, so any
+ * tokenless press would resolve any tokenless approval, which is the opposite
+ * of what the token is for.
+ */
+const matchesSpec = <A extends { readonly token: string }>(choice: A | null, spec: KeyboardSpec): choice is A =>
+  choice !== null && typeof spec.token === "string" && spec.token.length > 0 && choice.token === spec.token
 
 /**
  * Whether a delivered callback query is a press on this approval's buttons.
@@ -171,10 +198,8 @@ export const parseCallbackData = (data: string | undefined | null): (Choice & { 
  * @category refinements
  * @since 1.0.0
  */
-export const isOwnPress = (callbackQuery: { readonly data?: string | undefined }, spec: KeyboardSpec): boolean => {
-  const choice = parseCallbackData(callbackQuery?.data)
-  return choice !== null && choice.token === (spec.token ?? "")
-}
+export const isOwnPress = (callbackQuery: { readonly data?: string | undefined }, spec: KeyboardSpec): boolean =>
+  matchesSpec(parseCallbackData(callbackQuery?.data), spec)
 
 /**
  * A Mini App button. The URL must be HTTPS, which is Telegram's own rule.
@@ -256,7 +281,7 @@ export const decision = (
   nowMs: number = Date.now()
 ): Decision | Selection => {
   const choice = parseCallbackData(callbackQuery?.data)
-  const own = choice !== null && choice.token === (spec.token ?? "")
+  const own = matchesSpec(choice, spec)
   if (spec.mode === "select") {
     // Accept only a key this approval offered. A stale `sap:s:<key>` press
     // resolves to no selection rather than to somebody else's option.

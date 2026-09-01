@@ -20,6 +20,7 @@ import { CursorStore } from "../core/CursorStore.ts"
 import type { ExternalEvent } from "../core/ExternalEvent.ts"
 import { IntegrationError } from "../core/IntegrationError.ts"
 import * as SignalName from "../core/SignalName.ts"
+import * as Environment from "../Environment.ts"
 import type { TelegramConfig } from "./Config.ts"
 import { make as makeClient, type TelegramClient } from "./TelegramClient.ts"
 
@@ -96,6 +97,13 @@ export const updateToEvents = (
 ): ReadonlyArray<ExternalEvent> => {
   const updateId = update["update_id"]
   const events: Array<ExternalEvent> = []
+  // Telegram scopes `update_id` per bot, so two configured sources routinely
+  // produce the same number for unrelated updates. The key carries the source
+  // as a length prefix rather than a delimiter, so a source id containing a
+  // colon cannot forge another source's key. `SignalName.toNotification` uses
+  // this key as the durable notification id, so a collision here silently
+  // drops the second bot's event as a duplicate.
+  const scope = `update:${source.length}:${source}:`
   const pushMessage = (eventName: string, message: Record<string, any>, keySuffix = "") => {
     const chatId = message?.["chat"]?.id
     if (chatId == null) return
@@ -104,7 +112,7 @@ export const updateToEvents = (
       eventName,
       correlationId: chatCorrelationId(chatId),
       payload: message,
-      dedupeKey: `update:${updateId}${keySuffix}`,
+      dedupeKey: `${scope}${updateId}${keySuffix}`,
       receivedAtMs
     })
     // A thread-scoped variant whenever the message carries a thread id, so a
@@ -115,7 +123,7 @@ export const updateToEvents = (
         eventName,
         correlationId: threadCorrelationId(chatId, message["message_thread_id"]),
         payload: message,
-        dedupeKey: `update:${updateId}${keySuffix}:thread`,
+        dedupeKey: `${scope}${updateId}${keySuffix}:thread`,
         receivedAtMs
       })
     }
@@ -138,7 +146,7 @@ export const updateToEvents = (
       eventName: CALLBACK_QUERY_EVENT,
       correlationId: chatId == null ? null : chatCorrelationId(chatId),
       payload: callbackQuery,
-      dedupeKey: `update:${updateId}`,
+      dedupeKey: `${scope}${updateId}`,
       receivedAtMs
     })
     const threadId = callbackQuery?.["message"]?.message_thread_id
@@ -148,13 +156,26 @@ export const updateToEvents = (
         eventName: CALLBACK_QUERY_EVENT,
         correlationId: threadCorrelationId(chatId, threadId),
         payload: callbackQuery,
-        dedupeKey: `update:${updateId}:thread`,
+        dedupeKey: `${scope}${updateId}:thread`,
         receivedAtMs
       })
     }
   }
   return events
 }
+
+/**
+ * The idempotency key for one `getUpdates` update.
+ *
+ * A long poll has no `Channels.ingest` in front of it, but a host that routes
+ * these events through the control plane needs the same delivery identity the
+ * webhook providers supply. It is the event's dedupe key, which is already
+ * scoped to the source, so two configured bots cannot collide.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const idempotencyKey = (event: ExternalEvent): string => event.dedupeKey
 
 const updateChatId = (update: Record<string, any>): number | string | null =>
   update["message"]?.chat?.id ?? update["edited_message"]?.chat?.id ??
@@ -188,8 +209,11 @@ export interface Options extends Partial<TelegramConfig> {
   /** `allowed_updates`. Defaults to message, edited_message, and callback_query. */
   readonly allowedUpdates?: ReadonlyArray<string> | undefined
   /**
-   * When set, updates from other chats are dropped. The offset still advances
-   * past them once the rest of the batch is handled.
+   * When set, updates from other chats are dropped, and so is an update whose
+   * chat this source cannot determine: an allowlist that admits what it cannot
+   * classify is not one. A press on an inline keyboard whose message is
+   * inaccessible is exactly that case. The offset still advances past every
+   * dropped update once the rest of the batch is handled.
    */
   readonly allowedChatIds?: ReadonlyArray<number | string> | undefined
   /** An already-built client, for a caller that has one. */
@@ -219,28 +243,64 @@ export interface Source {
 /**
  * Builds a long-poll source.
  *
+ * `env` is the fallback source for the bot token, the same shape the clients
+ * take: `Telegram.Source.make({})` with `SMITHERS_TELEGRAM_BOT_TOKEN` exported
+ * works, and passing an explicit `env` replaces the ambient environment rather
+ * than layering over it.
+ *
  * @category constructors
  * @since 1.0.0
  */
-export const make = (options: Options = {}): Source => {
+export const make = (
+  options: Options = {},
+  env: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
+): Source => {
   const sourceId = options.sourceId ?? SERVICE
+  // The source id is every event's `source` and the scope of every dedupe key.
+  // An empty one produces events `ExternalEvent` refuses and keys two sources
+  // could share, so it is refused where it is configured.
+  if (typeof sourceId !== "string" || sourceId.trim().length === 0 || sourceId.trim() !== sourceId) {
+    throw new IntegrationError(
+      "invalid-config",
+      "Telegram source id must be a non-empty string with no surrounding whitespace.",
+      { sourceId }
+    )
+  }
   const pollTimeoutSeconds = options.pollTimeoutSeconds ?? DEFAULT_POLL_TIMEOUT_SECONDS
   const allowedUpdates = options.allowedUpdates ?? DEFAULT_ALLOWED_UPDATES
   const allowedChats = options.allowedChatIds === undefined
     ? null
     : new Set(options.allowedChatIds.map((id) => String(id)))
   const client = options.client ?? makeClient({
-    botToken: options.botToken as string,
+    ...(options.botToken === undefined ? {} : { botToken: options.botToken }),
     apiBaseUrl: options.apiBaseUrl,
     maxRateLimitRetries: options.maxRateLimitRetries,
     maxRetryAfterSeconds: options.maxRetryAfterSeconds
-  })
+  }, env)
 
   const poll: Source["poll"] = (cursor) =>
     Effect.gen(function*() {
       const params: Record<string, unknown> = { timeout: pollTimeoutSeconds, allowed_updates: allowedUpdates }
-      const offset = cursor === null ? Number.NaN : Number(cursor)
-      if (Number.isFinite(offset)) params["offset"] = offset
+      if (cursor !== null) {
+        // A cursor that does not parse used to be dropped, which sent
+        // `getUpdates` with no offset and replayed Telegram's whole retained
+        // backlog as if it were new. Unusable durable state is a failure, not
+        // a reason to start over.
+        // `Number()` accepts "", "0x10", and " 7 ", so a corrupt cursor could
+        // silently skip or replay updates. Only the canonical decimal form the
+        // source itself writes is accepted.
+        const offset = /^\d+$/.test(cursor) ? Number(cursor) : Number.NaN
+        if (!Number.isSafeInteger(offset)) {
+          return yield* Effect.fail(
+            new IntegrationError(
+              "invalid-config",
+              `Telegram source "${sourceId}" has a stored cursor that is not an update offset, so polling would replay the backlog.`,
+              { sourceId, cursor }
+            )
+          )
+        }
+        params["offset"] = offset
+      }
       const result = yield* client.call("getUpdates", params).pipe(
         Effect.mapError((cause) =>
           new IntegrationError(
@@ -251,16 +311,52 @@ export const make = (options: Options = {}): Source => {
           )
         )
       )
-      const updates = Array.isArray(result) ? result : []
+      // A non-array result is a Bot API contract change, not an empty batch.
+      // Reading it as "no updates" would look like a healthy idle poll forever.
+      if (!Array.isArray(result)) {
+        return yield* Effect.fail(
+          new IntegrationError(
+            "decode-failed",
+            `Telegram getUpdates returned a result that is not an update array for source "${sourceId}".`,
+            { sourceId, resultType: result === null ? "null" : typeof result }
+          )
+        )
+      }
       const receivedAtMs = Date.now()
       const events: Array<ExternalEvent> = []
       let maxUpdateId: number | null = null
-      for (const update of updates as Array<Record<string, any>>) {
+      for (const [index, update] of (result as Array<Record<string, any>>).entries()) {
         const updateId = update?.["update_id"]
-        if (typeof updateId !== "number") continue
+        if (typeof updateId !== "number" || !Number.isSafeInteger(updateId)) {
+          return yield* Effect.fail(
+            new IntegrationError(
+              "decode-failed",
+              `Telegram getUpdates returned an update with no numeric update_id for source "${sourceId}".`,
+              { sourceId, index }
+            )
+          )
+        }
+        for (const key of ["message", "edited_message", "callback_query"]) {
+          const member = update[key]
+          // `update["message"] !== undefined` is true for `null`, and
+          // `updateToEvents` then reads through it and throws a TypeError,
+          // which dies as a defect instead of failing decode-failed.
+          if (member !== undefined && (typeof member !== "object" || member === null || Array.isArray(member))) {
+            return yield* Effect.fail(
+              new IntegrationError(
+                "decode-failed",
+                `Telegram getUpdates returned an update whose ${key} is not an object for source "${sourceId}".`,
+                { sourceId, index, member: key }
+              )
+            )
+          }
+        }
         maxUpdateId = maxUpdateId === null ? updateId : Math.max(maxUpdateId, updateId)
         const chatId = updateChatId(update)
-        if (allowedChats !== null && chatId != null && !allowedChats.has(String(chatId))) continue
+        // Fail closed. An update whose chat cannot be determined is exactly the
+        // case an allowlist exists to refuse, and a callback query on an
+        // inaccessible message is that case in practice.
+        if (allowedChats !== null && (chatId == null || !allowedChats.has(String(chatId)))) continue
         events.push(...updateToEvents(sourceId, update, receivedAtMs))
       }
       // The acknowledgement offset is proposed, not committed: `run` stores it

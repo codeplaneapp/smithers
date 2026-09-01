@@ -1,7 +1,14 @@
 import { Effect } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
+import { type IntegrationError, isIntegrationError, isRetryable } from "../src/core/IntegrationError.ts"
 import { resolve } from "../src/telegram/Config.ts"
-import { isTelegramApiError, make, redactBotToken } from "../src/telegram/TelegramClient.ts"
+import {
+  isTelegramApiError,
+  make,
+  redactBotToken,
+  TelegramApiError,
+  toIntegrationError
+} from "../src/telegram/TelegramClient.ts"
 import { type Fixture, json, startFixture } from "./Fixture.ts"
 
 const TOKEN = "123456:AA-bot-token"
@@ -28,7 +35,24 @@ describe("Telegram config", () => {
 
   it("names the ways to supply a token, and quotes none of it", () => {
     expect(() => resolve({}, {})).toThrow(/SMITHERS_TELEGRAM_BOT_TOKEN/)
-    expect(() => make({ botToken: "" })).toThrow(/requires a bot token/)
+    expect(() => make({ botToken: "" }, {})).toThrow(/SMITHERS_TELEGRAM_BOT_TOKEN/)
+  })
+
+  // Every doc names this variable as the one the client reads. Before the
+  // client took an `env`, nothing in `src` called `resolve` at all, so an
+  // operator who exported it got a throw naming the variable it ignored.
+  it("takes the bot token from the environment the client was built with", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, { ok: true, result: true }))
+    await Effect.runPromise(
+      make({ apiBaseUrl: fixture.origin }, { SMITHERS_TELEGRAM_BOT_TOKEN: TOKEN }).call("getMe")
+    )
+    expect(fixture.requests[0]?.url).toBe(`/bot${TOKEN}/getMe`)
+  })
+
+  // The same rule the GitHub and Linear clients follow: an explicit `env`
+  // replaces the ambient one rather than layering over it.
+  it("replaces the ambient environment rather than layering over it", () => {
+    expect(() => make({ apiBaseUrl: "https://example.invalid" }, {})).toThrow(/SMITHERS_TELEGRAM_BOT_TOKEN/)
   })
 })
 
@@ -318,5 +342,96 @@ describe("TelegramClient over a real HTTP server", () => {
     expect(exit._tag).toBe("Failure")
     await Effect.runPromise(Effect.sleep("100 millis"))
     expect(closed).toBe(true)
+  })
+})
+
+describe("a multi-chunk send names what it delivered", () => {
+  const long = `${"a".repeat(4200)}`
+
+  // The durable record claims `chunkCount` messages, so it has to be able to
+  // name every one of them.
+  it("fails rather than reporting more chunks than it can name", async () => {
+    fixture = await startFixture((request, response) => {
+      if (request.url.endsWith("/sendChatAction")) {
+        json(response, 200, ok(true))
+        return
+      }
+      json(response, 200, ok({ chat: { id: 55 } }))
+    })
+    const failure = await Effect.runPromise(
+      Effect.flip(client().sendMessageSmart(55, "hello", { typing: false }))
+    )
+    expect(failure.message).toContain("no usable message_id")
+  })
+
+  it("reports every chunk id on success", async () => {
+    let id = 100
+    fixture = await startFixture((_request, response) => json(response, 200, ok({ message_id: ++id })))
+    const sent = await Effect.runPromise(client().sendMessageSmart(55, long, { typing: false }))
+    expect(sent.chunkCount).toBeGreaterThan(1)
+    expect(sent.messageIds).toHaveLength(sent.chunkCount)
+  })
+
+  // A send is not atomic: a failure after chunk one leaves a message the
+  // reader can already see, and an operator deciding whether to resend needs
+  // to know which.
+  it("carries the already-delivered ids on a partial failure", async () => {
+    let calls = 0
+    fixture = await startFixture((_request, response) => {
+      calls += 1
+      if (calls === 1) {
+        json(response, 200, ok({ message_id: 101 }))
+        return
+      }
+      json(response, 400, { ok: false, error_code: 400, description: "Bad Request: chat not found" })
+    })
+    const failure = await Effect.runPromise(
+      Effect.flip(client().sendMessageSmart(55, long, { typing: false }))
+    )
+    expect(isTelegramApiError(failure)).toBe(true)
+    expect((failure as TelegramApiError).deliveredMessageIds).toEqual([101])
+    expect(failure.message).toContain("already delivered")
+  })
+
+  it("refuses a response that is not a Bot API envelope", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, "just a string"))
+    const failure = await Effect.runPromise(Effect.flip(client().call("getMe")))
+    expect(failure.message).toContain("not a Bot API envelope")
+  })
+})
+
+describe("toIntegrationError", () => {
+  // `TelegramApiError` is not an `IntegrationError`, so without this mapping
+  // every Telegram failure journaled as an unclassified, non-retryable
+  // `delivery-failed`: an exhausted rate limit looked exactly like a chat that
+  // does not exist.
+  it("classifies each Bot API code, and marks only the transient ones retryable", () => {
+    const cases: ReadonlyArray<readonly [number, string, boolean]> = [
+      [429, "delivery-failed", true],
+      [500, "delivery-failed", true],
+      [401, "permission-denied", false],
+      [403, "permission-denied", false],
+      [400, "decode-failed", false],
+      [404, "decode-failed", false]
+    ]
+    for (const [errorCode, reason, retryable] of cases) {
+      const mapped = toIntegrationError(new TelegramApiError("boom", { method: "sendMessage", errorCode }))
+      expect(isIntegrationError(mapped)).toBe(true)
+      expect((mapped as IntegrationError).reason).toBe(reason)
+      expect(isRetryable(mapped)).toBe(retryable)
+    }
+  })
+
+  it("leaves anything that is not a Bot API failure alone", () => {
+    const other = new Error("socket hang up")
+    expect(toIntegrationError(other)).toBe(other)
+    // A forged name with no shape behind it is not a Bot API failure either.
+    const forged = Object.assign(new Error("forged"), { name: "TelegramApiError" })
+    expect(toIntegrationError(forged)).toBe(forged)
+  })
+
+  it("keeps the original failure as the cause", () => {
+    const original = new TelegramApiError("boom", { method: "sendMessage", errorCode: 429 })
+    expect((toIntegrationError(original) as IntegrationError).cause).toBe(original)
   })
 })

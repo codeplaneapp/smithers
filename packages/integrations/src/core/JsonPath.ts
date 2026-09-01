@@ -62,6 +62,19 @@ export const readInteger = (value: unknown, path: string): number | undefined =>
 }
 
 /**
+ * Just the headers of an inbound delivery.
+ *
+ * Narrower than `RawInbound` on purpose: the idempotency-key derivations read
+ * headers to *build* a `RawInbound`, so they cannot demand a complete one.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface HasHeaders {
+  readonly headers: RawInbound["headers"]
+}
+
+/**
  * A header value, matched case-insensitively.
  *
  * A Node HTTP server lowercases incoming header names, but `RawInbound` is a
@@ -71,7 +84,7 @@ export const readInteger = (value: unknown, path: string): number | undefined =>
  * @category getters
  * @since 1.0.0
  */
-export const readHeader = (raw: RawInbound, name: string): string | undefined => {
+export const readHeader = (raw: HasHeaders, name: string): string | undefined => {
   const wanted = name.toLowerCase()
   const direct = raw.headers[wanted]
   if (direct !== undefined) return direct

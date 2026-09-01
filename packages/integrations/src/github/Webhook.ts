@@ -22,7 +22,7 @@ import type { Effect, Redacted } from "effect"
 import * as Core from "../core/Channel.ts"
 import type { ExternalEvent } from "../core/ExternalEvent.ts"
 import { IntegrationError } from "../core/IntegrationError.ts"
-import { readHeader, readInteger, readString } from "../core/JsonPath.ts"
+import { type HasHeaders, readHeader, readInteger, readString } from "../core/JsonPath.ts"
 import * as SignalName from "../core/SignalName.ts"
 import { GITHUB_SIGNATURE_PREFIX, verifySignature } from "../core/Signature.ts"
 
@@ -123,6 +123,26 @@ export const decode = (raw: RawInbound, payload: unknown, receivedAtMs: number =
     dedupeKey: `${deliveryId}:${eventName}:${correlationId ?? "*"}`,
     receivedAtMs
   }
+}
+
+/**
+ * The idempotency key for one GitHub delivery.
+ *
+ * `Channels.ingest` drops a replayed `RawInbound.idempotencyKey`, and that is
+ * the whole redelivery guarantee: nothing derives the key on the caller's
+ * behalf, so an ingress that leaves the field unset has none. An HTTP handler
+ * builds its `RawInbound` with this, which is `X-GitHub-Delivery`, GitHub's
+ * own delivery identity, and the same value a redelivery carries.
+ *
+ * Returns `undefined` when the header is absent, which is a delivery
+ * {@link decode} refuses anyway.
+ *
+ * @category getters
+ * @since 1.0.0
+ */
+export const idempotencyKey = (raw: HasHeaders): string | undefined => {
+  const deliveryId = readHeader(raw, "x-github-delivery")
+  return deliveryId === undefined || deliveryId.length === 0 ? undefined : `github:${deliveryId}`
 }
 
 /**

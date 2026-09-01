@@ -5,7 +5,7 @@
  * its own. Every database this repository opens through `NodeDatabase.layer`
  * records what it has applied in one `flows_migrations` table (rc-contract
  * section 2), and the open refuses a file that carries tables and no such
- * table — that is how a 0.x `smithers.db` is told apart from a 1.0 one. A
+ * table, which is how a 0.x `smithers.db` is told apart from a 1.0 one. A
  * bespoke ledger left `cursors.db` looking exactly like a 0.x file to its own
  * second open.
  *

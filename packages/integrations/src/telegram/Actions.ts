@@ -12,7 +12,7 @@
 import { Action, type FlowRuntime } from "@smthrs/flow"
 import { Effect, type Layer, Schema } from "effect"
 import { fromIntegrationError, IntegrationFailure } from "../core/ActionFailure.ts"
-import { TelegramClient } from "./TelegramClient.ts"
+import { TelegramClient, toIntegrationError } from "./TelegramClient.ts"
 
 /**
  * What {@link SendMessage} needs.
@@ -51,7 +51,16 @@ export const Sent = Schema.Struct({
  * Sends a message to a chat.
  *
  * The tier is `irreversible`: the message is delivered and may already have
- * been read, so the engine must never retry this step on its own.
+ * been read, so the engine must never retry this step on its own. The client
+ * underneath retries only a 429, which Telegram refused rather than
+ * delivered.
+ *
+ * A send is not atomic. Text over Telegram's 4096-character limit becomes
+ * several `sendMessage` calls inside this one step, and a failure partway
+ * through leaves the earlier chunks visible in the chat. The failure names
+ * them, in `deliveredMessageIds` on the client error and in the message the
+ * action journals, so an operator deciding whether to resend can see what the
+ * reader already has.
  *
  * @category actions
  * @since 1.0.0
@@ -87,7 +96,11 @@ export const layerSendMessage: Layer.Layer<
       chunkCount: sent.chunkCount,
       usedPlainTextFallback: sent.usedPlainTextFallback
     }
-  }).pipe(Effect.mapError(fromIntegrationError))
+    // `TelegramApiError` is not an `IntegrationError`, so without this every
+    // Telegram failure journaled as an unclassified non-retryable
+    // `delivery-failed`: an exhausted rate limit was indistinguishable from a
+    // chat that does not exist.
+  }).pipe(Effect.mapError(toIntegrationError), Effect.mapError(fromIntegrationError))
 )
 
 /**
