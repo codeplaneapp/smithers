@@ -411,6 +411,7 @@
     },
     "packages/build/infra": {
       "name": "@smthrs/build-infra",
+      "version": "0.1.0",
       "dependencies": {
         "@effect/platform-bun": "4.0.0-rc.108",
         "@effect/platform-node": "4.0.0-rc.108",
@@ -516,8 +517,10 @@
         "@effect/platform-node": "4.0.0-rc.108",
         "@effect/platform-node-shared": "4.0.0-rc.108",
         "@smthrs/agent": "1.0.0-rc.0",
+        "@smthrs/canonical": "1.0.0-rc.0",
         "@smthrs/capability": "1.0.0-rc.0",
         "@smthrs/control": "1.0.0-rc.0",
+        "@smthrs/crypto": "1.0.0-rc.0",
         "@smthrs/database": "1.0.0-rc.0",
         "@smthrs/engine-store": "1.0.0-rc.0",
         "@smthrs/flows": "1.0.0-rc.0",
@@ -786,7 +789,6 @@
         "@effect/vitest": "4.0.0-rc.108",
         "@eslint/js": "9.39.1",
         "@smthrs/core": "1.0.0-rc.0",
-        "@smthrs/keys": "1.0.0-rc.0",
         "@smthrs/patterns": "1.0.0-rc.0",
         "@smthrs/platform-node": "1.0.0-rc.0",
         "@types/node": "25.9.5",
@@ -1902,7 +1904,7 @@
     },
     "packages/triggers": {
       "name": "@smthrs/triggers",
-      "version": "0.1.0",
+      "version": "1.0.0-rc.0",
       "dependencies": {
         "@smthrs/control": "1.0.0-rc.0",
         "@smthrs/database": "1.0.0-rc.0",
