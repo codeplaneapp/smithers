@@ -32,7 +32,10 @@ interface Stub {
 }
 
 const stub = (
-  exec: (commandLine: string) => Promise<{ stdout: string; stderr: string; exitCode: number }>
+  exec: (
+    commandLine: string,
+    signal?: AbortSignal
+  ) => Promise<{ stdout: string; stderr: string; exitCode: number }>
 ): Stub => {
   const calls: Array<Call> = []
   return {
@@ -40,7 +43,7 @@ const stub = (
     bash: {
       exec: (commandLine, options) => {
         calls.push({ command: commandLine, cwd: options?.cwd, env: options?.env })
-        return exec(commandLine)
+        return exec(commandLine, options?.signal)
       }
     }
   }
@@ -414,7 +417,7 @@ describe("BrowserChildProcessSpawner rejected inputs", () => {
 })
 
 describe("BrowserChildProcessSpawner handle capabilities", () => {
-  it.effect("hands out increasing pids, a failing stdin, a failing kill, and a no-op unref", () =>
+  it.effect("hands out increasing pids, a failing stdin, an aborting kill, and a no-op unref", () =>
     Effect.gen(function*() {
       const { bash } = stub(ok())
 
@@ -425,39 +428,35 @@ describe("BrowserChildProcessSpawner handle capabilities", () => {
           const first = yield* spawner.spawn(ChildProcess.make("one"))
           const second = yield* spawner.spawn(ChildProcess.make("two"))
           const stdin = yield* Effect.flip(Stream.run(Stream.make(new Uint8Array([1])), second.stdin))
-          const kill = yield* Effect.flip(second.kill())
+          yield* second.kill()
           const reref = yield* second.unref
           yield* reref
           const fd = yield* Stream.runCollect(second.getOutputFd(3))
           yield* Stream.run(Stream.make(new Uint8Array([1])), second.getInputFd(3))
-          return { pids: [first.pid, second.pid], stdin, kill, fd: Array.from(fd) }
+          return { pids: [first.pid, second.pid], stdin, fd: Array.from(fd) }
         }))
       )
 
       expect(observed.pids).toEqual([1, 2])
       expect(observed.stdin.reason).toMatchObject({ method: "stdin", _tag: "Unknown" })
-      expect(observed.kill.reason).toMatchObject({ method: "kill", _tag: "Unknown" })
       expect(observed.fd).toEqual([])
     }))
 })
 
 describe("BrowserChildProcessSpawner boundary", () => {
-  /**
-   * The adapter does not use just-bash's abort `signal` option yet, so it runs
-   * each call uninterruptibly. Both of these pin the same property from the two
-   * directions a caller can approach it: the interpreter always finishes, and
-   * the caller only hears about it afterwards.
-   */
-  it.effect("waits for the interpreter before reporting an interruption", () =>
+  it.effect("aborts the interpreter before reporting an interruption", () =>
     Effect.gen(function*() {
-      let finished = false
+      let aborted = false
       const started = Deferred.makeUnsafe<void>()
-      const { bash } = stub(async () => {
-        Deferred.doneUnsafe(started, Exit.void)
-        await new Promise((resolve) => setTimeout(resolve, 25))
-        finished = true
-        return { stdout: "", stderr: "", exitCode: 0 }
-      })
+      const { bash } = stub((_command, signal) =>
+        new Promise((_resolve, reject) => {
+          Deferred.doneUnsafe(started, Exit.void)
+          signal?.addEventListener("abort", () => {
+            aborted = true
+            reject(signal.reason)
+          }, { once: true })
+        })
+      )
 
       const exit = yield* Effect.exit(
         Effect.provide(
@@ -474,18 +473,21 @@ describe("BrowserChildProcessSpawner boundary", () => {
       )
 
       expect(Exit.isSuccess(exit)).toBe(true)
-      expect(finished).toBe(true)
+      expect(aborted).toBe(true)
     }))
 
   // Real elapsed time: `it.effect`'s TestClock would stall this.
-  it.live("waits for the interpreter before reporting a timeout", () =>
+  it.live("aborts the interpreter before reporting a timeout", () =>
     Effect.gen(function*() {
-      let finished = false
-      const { bash } = stub(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 25))
-        finished = true
-        return { stdout: "", stderr: "", exitCode: 0 }
-      })
+      let aborted = false
+      const { bash } = stub((_command, signal) =>
+        new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => {
+            aborted = true
+            reject(signal.reason)
+          }, { once: true })
+        })
+      )
 
       const exit = yield* runExit(
         bash,
@@ -493,7 +495,7 @@ describe("BrowserChildProcessSpawner boundary", () => {
       )
 
       expect(Exit.isFailure(exit)).toBe(true)
-      expect(finished).toBe(true)
+      expect(aborted).toBe(true)
     }))
 
   it.effect("serializes concurrent runs so one interpreter call never overlaps another", () =>

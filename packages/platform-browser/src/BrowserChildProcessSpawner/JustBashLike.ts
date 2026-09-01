@@ -13,8 +13,8 @@
  * (3.2.0, `dist/Bash.d.ts`). Only the members this adapter touches are
  * declared, under their real names: `cwd` and `env` from `ExecOptions`, and
  * `stdout`/`stderr`/`exitCode` from the result. The real `ExecOptions` also
- * carries a string `stdin` and an abort `signal`; the adapter does not use
- * them yet.
+ * carries a string `stdin` and an abort `signal`; the adapter uses the signal
+ * to tie interpreter execution to the owning Effect scope.
  *
  * We take an instance rather than the package so the browser bundle owns
  * construction — mounting the interpreter on the *same* virtual filesystem
@@ -28,6 +28,10 @@ export interface JustBashLike {
   /** Run a command line to completion through the interpreter and return its captured result. */
   readonly exec: (
     commandLine: string,
-    options?: { readonly cwd?: string; readonly env?: Record<string, string> }
+    options?: {
+      readonly cwd?: string
+      readonly env?: Record<string, string>
+      readonly signal?: AbortSignal
+    }
   ) => Promise<{ readonly stdout: string; readonly stderr: string; readonly exitCode: number }>
 }
