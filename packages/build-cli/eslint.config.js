@@ -2,7 +2,7 @@ import js from "@eslint/js"
 import importPlugin from "eslint-plugin-import"
 import unicorn from "eslint-plugin-unicorn"
 import tseslint from "typescript-eslint"
-import { invariants, swallowedCause, uninstalledSafety } from "../../eslint.invariants.js"
+import { ambientAuthority, invariants, swallowedCause, uninstalledSafety } from "../../eslint.invariants.js"
 import { jsdocConvention } from "../../eslint.jsdoc.js"
 
 export default tseslint.config(
@@ -92,7 +92,5 @@ export default tseslint.config(
       "jsdoc/check-tag-names": ["error", { definedTags: ["category", "since", "slop"] }]
     }
   },
-  // `ambientAuthority` (27 sites across 13 modules) is not wired yet. The
-  // values need threading through a parameter before the rule can hold here.
-  ...invariants(uninstalledSafety, swallowedCause)
+  ...invariants(uninstalledSafety, swallowedCause, ambientAuthority)
 )

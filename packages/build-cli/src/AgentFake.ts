@@ -266,7 +266,7 @@ export const makeScriptedSessionFactory = (
  */
 export const sessionFactoryFromEnvironment = (
   options: CliSessionOptions,
-  env: Readonly<Record<string, string | undefined>> = process.env
+  env: Readonly<Record<string, string | undefined>>
 ): SessionFactory => {
   const declared = env[fakeEnvironmentVariable]
   if (declared === undefined || declared === "") {

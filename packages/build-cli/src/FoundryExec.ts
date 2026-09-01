@@ -79,7 +79,7 @@ export const resolveMiseBin = async (
   root: string,
   workspace: WorkspaceDeclaration.WorkspaceDeclaration,
   name: string,
-  environment: Readonly<Record<string, string | undefined>> = process.env
+  environment: Readonly<Record<string, string | undefined>>
 ): Promise<ResolvedTool> => {
   const mise = toolchainsOf(workspace).find((entry) => entry["_tag"] === "Mise")
   const config = mise?.["config"]

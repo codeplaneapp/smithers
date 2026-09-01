@@ -22,7 +22,7 @@ const repositoryRoot = NodePath.resolve(
 
 describe("committed BUILD.ts files", () => {
   it("every committed BUILD.ts loads and all of its declarations construct", async () => {
-    const workspace = await Workspace.make(repositoryRoot)
+    const workspace = await Workspace.make(repositoryRoot, repositoryRoot)
     expect(workspace.buildFiles.length).toBeGreaterThan(0)
     for (const file of workspace.buildFiles) {
       // `loadBuild` imports the module, which runs every target call in it, so
@@ -38,7 +38,7 @@ describe("committed BUILD.ts files", () => {
     // undeclared, editing one left the Vitest target's key unchanged and the
     // suite reported a cache hit on the previous result: a stale green over
     // changed behaviour, which is the one thing a result cache must never do.
-    const workspace = await Workspace.make(repositoryRoot)
+    const workspace = await Workspace.make(repositoryRoot, repositoryRoot)
     const module = await workspace.loadBuild("packages/build-cli/BUILD.ts")
     const target = module.targets.get("test")
     expect(target).toBeDefined()
@@ -48,7 +48,7 @@ describe("committed BUILD.ts files", () => {
   })
 
   it("the standard-package BUILD.ts files declare six package-local targets", async () => {
-    const workspace = await Workspace.make(repositoryRoot)
+    const workspace = await Workspace.make(repositoryRoot, repositoryRoot)
     for (
       const file of [
         "packages/engine/BUILD.ts",

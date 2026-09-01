@@ -21,6 +21,7 @@ import type * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration
 import * as NodeChildProcess from "node:child_process"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
+import * as Environment from "./Environment.ts"
 
 /**
  * The memory backend is not available on this host or in this workspace.
@@ -205,7 +206,7 @@ const executableCandidates = (name: string): ReadonlyArray<string> =>
  * @category constructors
  * @since 0.1.0
  */
-export const pathLocator = (environment: Readonly<Record<string, string | undefined>> = process.env): CliLocator => ({
+export const pathLocator = (environment: Readonly<Record<string, string | undefined>>): CliLocator => ({
   find: async () => {
     const path = environment["PATH"] ?? ""
     for (const directory of path.split(NodePath.delimiter)) {
@@ -362,7 +363,7 @@ export const retain = async (options: RetainOptions): Promise<RetainResult> => {
       "the S.Memory.SmithersCloud declaration names no bank to retain into"
     )
   }
-  const locator = options.locator ?? pathLocator()
+  const locator = options.locator ?? pathLocator(Environment.ambientEnvironment())
   const binary = await locator.find()
   if (binary === undefined) {
     throw new MemoryBackendUnavailable(
