@@ -11,8 +11,8 @@ The pure plan-time data model for flows.
 Every value this package constructs is inert. A flow is a schema-described declaration, a node is a pipeable AST, and a graph is the topology those two reveal when planned. Nothing here executes a step, resolves a registry name, or touches a host.
 
 A flow is a schema-described declaration. A node is an inert, pipeable value
-that records an AST. Nothing in this package runs anything: `Graph.build`
-evaluates pure flow bodies and pure `Node.andThen` builders exactly once
+that records an AST. Production code in this package executes no steps:
+`Graph.build` evaluates pure flow bodies and pure `Node.andThen` builders exactly once
 against symbolic predecessor values so the complete static topology is visible
 before the first step executes.
 
@@ -30,6 +30,19 @@ const greeting = Flow.make({
 const graph = Graph.build(greeting, { name: "world" })
 const material = Graph.keyMaterial(graph)
 ```
+
+## Testing declarations
+
+`TestRuntime.evaluate` is a pure, synchronous test helper that executes the
+deferred maps, continuations, and recovery arms stored in one in-memory Node
+AST. Dynamic nodes and flow-call leaves cross an explicit deterministic
+resolver. `evaluateInline` additionally enters called flows that carry an
+in-memory body.
+
+It intentionally does not model capabilities, persistence, scheduling,
+retries, cache, concurrency, or output-schema enforcement. Higher-order
+builder packages use it for declaration behavior; durable-engine integration
+tests remain responsible for host semantics.
 
 ## Identity and caching
 
@@ -296,3 +309,20 @@ Serializable placement annotations for flow graph values.
 | `Placement` (type) | models | A serializable directive describing where a flow node should run. |
 | `remote` (const) | constructors | Creates a placement directive for a remote control-plane host. |
 | `sandbox` (const) | constructors | Creates a placement directive for an isolated sandbox host. |
+
+### TestRuntime
+
+Pure, synchronous execution support for tests of node-building libraries.
+
+Production hosts execute compiled plans through the durable engine. A higher-order builder still needs to test the deferred maps, continuations, and recovery arms it records in a `Node.Node`. This module evaluates that in-memory AST without capabilities, persistence, scheduling, or any other host behavior. Dynamic nodes and flow calls cross one explicit resolver boundary supplied by the test.
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `DynamicRequest` (interface) | models | A dynamic-model request presented to a test resolver. |
+| `evaluate` (const) | testing | Evaluates a node's in-memory declaration with a deterministic leaf resolver. |
+| `evaluateInline` (const) | testing | Evaluates a node while recursively entering every called flow that carries an in-memory body. |
+| `EvaluationError` (class) | errors | A malformed or unresolved declaration encountered by the test evaluator. |
+| `EvaluationErrorCode` (type) | models | Stable failure codes emitted by the test evaluator itself. |
+| `FlowCallRequest` (interface) | models | A declared flow call presented to a test resolver. |
+| `Request` (type) | models | An execution leaf whose value the pure evaluator cannot invent. |
+| `Resolver` (type) | models | Supplies deterministic values or typed failures for execution leaves. |
