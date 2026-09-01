@@ -188,6 +188,36 @@ export const effectVersion = Smithers.NodeTest({
 })
 
 /**
+ * `bun.lock` records the dependency ranges the manifests declare.
+ *
+ * A manifest change is required to refresh both lockfiles, but only
+ * `pnpm-lock.yaml` was ever proved: every CI job installs with pnpm and
+ * `--frozen-lockfile` rejects a stale one on the spot, while no job runs `bun
+ * install` at all. Bun still executes `apps/*`, the `ci/BUILD.ts` matrix, and
+ * `evals/agent`, so a stale entry resolves a real package at the wrong version
+ * on exactly those surfaces and nowhere else. `packages/fs` reached rc.0 still
+ * asking for `@smthrs/core@0.1.0` that way.
+ *
+ * The target compares rather than installs. It reads the lockfile's own
+ * `workspaces` table against the manifests on disk, which is offline,
+ * deterministic, and needs no Bun on the machine.
+ *
+ * @since 0.1.0
+ * @category test
+ */
+export const lockfileParity = Smithers.NodeTest({
+  runtime,
+  runner: Smithers.entrypoint(Smithers.file("//scripts/check-lockfile-parity.mjs")),
+  srcs: [
+    ...sources,
+    Smithers.file("//bun.lock"),
+    Smithers.glob("//packages/*/package.json"),
+    Smithers.glob("//apps/*/package.json")
+  ],
+  deps: []
+})
+
+/**
  * What an npm consumer of the published set actually resolves.
  *
  * pnpm settles every internal edge from one workspace-wide pin, so
