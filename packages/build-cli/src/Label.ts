@@ -3,7 +3,7 @@
  *
  * @since 0.1.0
  */
-import * as NodePath from "node:path"
+import * as Path from "./internal/Path.ts"
 
 /**
  * A parsed exact label or recursive package pattern.
@@ -85,9 +85,9 @@ export const format = (packagePath: string, target: string): string => `//${norm
  * @slop
  */
 export const currentPackageOrUndefined = (workspaceRoot: string, cwd: string): string | undefined => {
-  const relative = NodePath.relative(workspaceRoot, cwd)
+  const relative = Path.containedRelative(workspaceRoot, cwd)
+  if (relative === undefined) return undefined
   if (relative === "" || relative === ".") return ""
-  if (relative.startsWith("..") || NodePath.isAbsolute(relative)) return undefined
   return normalizePackage(relative)
 }
 

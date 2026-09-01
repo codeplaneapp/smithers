@@ -13,11 +13,8 @@
 import * as SafeFs from "@smthrs/targets/SafeFs"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
+import { byCodeUnit, posix } from "./internal/Text.ts"
 import { PackageError } from "./PackageError.ts"
-
-const posix = (value: string): string => value.split(NodePath.sep).join("/")
-
-const byCodeUnit = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
 
 /** Hard traversal ceilings; a workspace beyond them fails, never truncates. */
 const limits = {

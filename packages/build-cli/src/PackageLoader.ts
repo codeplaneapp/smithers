@@ -38,13 +38,12 @@ import * as NodePath from "node:path"
 import { pathToFileURL } from "node:url"
 import * as Diagnostic from "./Diagnostic.ts"
 import { importDeclarationModule, installEffectResolution } from "./effect-resolution.js"
+import { byCodeUnit, posix } from "./internal/Text.ts"
 import type { Discovery } from "./PackageDiscovery.ts"
 import { PackageError } from "./PackageError.ts"
 import { validateWorkspaceModule } from "./WorkspaceLoader.ts"
 
 installEffectResolution()
-
-const posix = (value: string): string => value.split(NodePath.sep).join("/")
 
 /**
  * One evaluated, validated PACKAGE.ts module.
@@ -343,8 +342,6 @@ const scanImports = async (discovery: Discovery): Promise<StaticScan> => {
   return { edges, files: [...scanned].sort(byCodeUnit) }
 }
 
-const byCodeUnit = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
-
 /**
  * Fails on the first import cycle that passes through a PACKAGE.ts, with the
  * full module chain — helper modules included. A cycle among helper modules
@@ -501,7 +498,7 @@ const importGraph = async (discovery: Discovery): Promise<LoadedGraph> => {
     // so fold it in rather than blaming WORKSPACE.ts for every failure.
     throw new PackageError(
       "module_import_failed",
-      `evaluating the workspace's declaration modules failed: ${undefinedNamespaceHint(Diagnostic.message(cause))}`,
+      `evaluating the workspace's declaration modules failed: ${undefinedNamespaceHint(Diagnostic.describe(cause))}`,
       { cause }
     )
   } finally {
@@ -582,7 +579,7 @@ export const loadWorkspaceDeclaration = async (
     if (cause instanceof PackageError) throw cause
     throw new PackageError(
       "module_import_failed",
-      `evaluating the workspace declaration failed: ${undefinedNamespaceHint(Diagnostic.message(cause))}`,
+      `evaluating the workspace declaration failed: ${undefinedNamespaceHint(Diagnostic.describe(cause))}`,
       { path: workspaceFile, cause }
     )
   }

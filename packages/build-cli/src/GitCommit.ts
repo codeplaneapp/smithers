@@ -35,6 +35,7 @@ export type ErrorCode =
   | "agent_message_unavailable"
   | "empty_message"
   | "git_failed"
+  | "spawn_failed"
 
 /**
  * One typed commit refusal.
@@ -125,20 +126,35 @@ interface GitOutput {
   readonly stderr: string
 }
 
-/** Runs one git command with no shell, capturing bounded output. */
+/**
+ * Runs one git command with no shell, capturing bounded output.
+ *
+ * Node reports a spawn-level failure with a *string* `code`: `ENOENT` when git
+ * is not installed, `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` when the output
+ * exceeds `maxBuffer`. Collapsing those to a synthetic exit 1 with empty
+ * output made a host without git report `not_a_git_repository` — sending an
+ * operator to check the repository rather than the toolchain — and made an
+ * oversized `git diff --cached` report an exit 1 with no stderr and no mention
+ * of the limit. They raise `spawn_failed` naming the code instead.
+ */
 const git = (root: string, args: ReadonlyArray<string>): Promise<GitOutput> =>
-  new Promise((resolve) => {
+  new Promise((resolve, reject) => {
     NodeChildProcess.execFile(
       "git",
       [...args],
       { cwd: root, maxBuffer: 8 * 1024 * 1024 },
       (error, stdout, stderr) => {
-        const exitCode = error === null
-          ? 0
-          : typeof (error as NodeJS.ErrnoException & { code?: unknown }).code === "number"
-          ? (error as { code: number }).code
-          : 1
-        resolve({ exitCode, stdout, stderr })
+        const code: unknown = error === null ? undefined : (error as NodeJS.ErrnoException & { code?: unknown }).code
+        if (typeof code === "string") {
+          reject(
+            new GitCommitError(
+              "spawn_failed",
+              `git ${args.join(" ")} could not run: ${code}${stderr.trim() === "" ? "" : `: ${stderr.trim()}`}`
+            )
+          )
+          return
+        }
+        resolve({ exitCode: typeof code === "number" ? code : error === null ? 0 : 1, stdout, stderr })
       }
     )
   })

@@ -71,6 +71,8 @@ export const text = (plan: Planner.Plan, style: Ansi.Palette = Ansi.none): strin
 export interface PackageRow {
   readonly label: string
   readonly target: string
+  /** Why a `Repo.Target` row resolved to nothing, when it did. */
+  readonly refusal?: string | undefined
 }
 
 /**
@@ -99,14 +101,47 @@ export const packageText = (
 ): string =>
   rows.map((row) => {
     const own = edges.filter((edge) => edge.from === row.label)
-    const name = row.target === "Filegroup" ? style.dim(row.label) : style.bold(row.label)
+    const plain = row.target === "Filegroup" ? style.dim(row.label) : style.bold(row.label)
+    // A refused repository row resolved to nothing. It used to survive only in
+    // the JSON envelope, so the person reading the terminal saw a row that
+    // looked as ordinary as every other one.
+    const name = row.refusal === undefined ? plain : `${plain} ${style.dim(`(refused: ${row.refusal})`)}`
     return own.length === 0
       ? name
       : `${name}\n${own.map((edge) => `  ${style.dim(`-${edge.kind}->`)} ${edge.to}`).join("\n")}`
   }).join("\n")
 
+/**
+ * Renders the package-mode graph as Mermaid: one node per selected label and
+ * one arrow per edge, labeled with the edge kind.
+ *
+ * The `graph --mermaid` flag used to be accepted and dropped in package mode,
+ * which printed the text tree under a `format: "text"` envelope. Node ids are
+ * hex-encoded labels, so no label text can reach the flowchart's grammar.
+ *
+ * @category formatting
+ * @since 0.1.0
+ */
+export const packageMermaid = (
+  rows: ReadonlyArray<PackageRow>,
+  edges: ReadonlyArray<PackageEdge>
+): string => {
+  const lines = ["flowchart LR"]
+  for (const row of rows) {
+    const caption = row.refusal === undefined
+      ? `${row.label}\\n${row.target}`
+      : `${row.label}\\n${row.target}\\nrefused: ${row.refusal}`
+    lines.push(`  ${mermaidId(row.label)}["${mermaidLabel(caption)}"]`)
+  }
+  for (const edge of edges) {
+    lines.push(`  ${mermaidId(edge.from)} -->|${mermaidLabel(edge.kind)}| ${mermaidId(edge.to)}`)
+  }
+  return lines.join("\n")
+}
+
 const mermaidId = (label: string): string => `n_${Buffer.from(label).toString("hex")}`
-const mermaidLabel = (label: string): string => label.replaceAll("\"", "&quot;")
+const mermaidLabel = (label: string): string =>
+  label.replaceAll("\"", "&quot;").replaceAll("\r", " ").replaceAll("\n", " ")
 
 /**
  * Renders a Mermaid target graph.

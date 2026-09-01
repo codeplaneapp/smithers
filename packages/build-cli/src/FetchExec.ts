@@ -17,6 +17,7 @@ import * as Target from "@smthrs/targets/Target"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Stream from "effect/Stream"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import { createHash, randomBytes } from "node:crypto"
@@ -41,7 +42,13 @@ export const sandbox = { network: true } as const
  */
 export class FetchError extends Error {
   readonly _tag = "smithers-build/FetchError"
-  readonly code: "invalid_output" | "request_failed" | "unexpected_status" | "digest_mismatch" | "write_failed"
+  readonly code:
+    | "invalid_output"
+    | "request_failed"
+    | "unexpected_status"
+    | "digest_mismatch"
+    | "write_failed"
+    | "body_too_large"
   readonly expectedSha256: string | undefined
   readonly actualSha256: string | undefined
 
@@ -51,7 +58,13 @@ export class FetchError extends Error {
    * @since 0.1.0
    */
   constructor(
-    code: "invalid_output" | "request_failed" | "unexpected_status" | "digest_mismatch" | "write_failed",
+    code:
+      | "invalid_output"
+      | "request_failed"
+      | "unexpected_status"
+      | "digest_mismatch"
+      | "write_failed"
+      | "body_too_large",
     message: string,
     expectedSha256?: string,
     actualSha256?: string,
@@ -108,7 +121,7 @@ export const planAttrs = (options: {
     return {
       outFiles: [],
       sandbox,
-      refusal: `Fetch output is invalid: ${Diagnostic.message(cause)}`
+      refusal: `Fetch output is invalid: ${Diagnostic.describe(cause)}`
     }
   }
 }
@@ -148,28 +161,118 @@ const transportReason = (cause: unknown, fallback: string): string => {
   return fallback
 }
 
+/**
+ * Largest response body one `S.Fetch` will hold, in bytes.
+ *
+ * A fetch used to call `arrayBuffer` with no bound and no deadline of its own,
+ * so a large or endless chunked response exhausted memory or hung until an
+ * optional caller-supplied signal fired — and a declared Fetch may pass none.
+ * The body is measured as it arrives and abandoned the moment it crosses this
+ * line.
+ *
+ * @category limits
+ * @since 0.1.0
+ */
+export const maximumFetchBytes = 512 * 1024 * 1024
+
+/**
+ * How long one fetch may take, in milliseconds, when the caller passed no
+ * signal of its own.
+ *
+ * @category limits
+ * @since 0.1.0
+ */
+export const fetchDeadlineMs = 30 * 60 * 1000
+
+/**
+ * Renders a URL without its credentials.
+ *
+ * The accepted grammar admits userinfo and a query, so a signed S3 URL or a
+ * `https://user:token@host/...` form used to land verbatim in CLI output, the
+ * reporter's stream, and every cached diagnostic. Only the origin and path
+ * survive here; the full value stays in the failure's `cause`.
+ *
+ * @category rendering
+ * @since 0.1.0
+ */
+export const redactUrl = (url: string): string => {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return "<unparsable url>"
+  }
+  const credentials = parsed.username !== "" || parsed.password !== ""
+  const query = parsed.search !== "" || parsed.hash !== ""
+  return `${parsed.protocol}//${credentials ? "<redacted>@" : ""}${parsed.host}${parsed.pathname}` +
+    `${query ? "?<redacted>" : ""}`
+}
+
 const downloadedBytes = async (
   url: string,
   signal: AbortSignal | undefined
 ): Promise<Uint8Array> => {
+  const safeUrl = redactUrl(url)
   const effect = Effect.scoped(Effect.gen(function*() {
     const transport = yield* HttpClient.HttpClient
     const client = HttpClient.followRedirects(transport)
     const response = yield* client.execute(HttpClientRequest.get(url))
     if (response.status < 200 || response.status >= 300) {
       return yield* Effect.fail(
-        new FetchError("unexpected_status", `Fetch request for ${url} answered HTTP ${response.status}`)
+        new FetchError("unexpected_status", `Fetch request for ${safeUrl} answered HTTP ${response.status}`)
       )
     }
-    return new Uint8Array(yield* response.arrayBuffer)
-  })).pipe(Effect.provide(NodeHttpClient.layerUndici))
+    const declared = response.headers["content-length"]
+    if (declared !== undefined && /^\d+$/.test(declared)) {
+      const declaredBytes = Number(declared)
+      if (Number.isSafeInteger(declaredBytes) && declaredBytes > maximumFetchBytes) {
+        return yield* Effect.fail(
+          new FetchError(
+            "body_too_large",
+            `Fetch response for ${safeUrl} declares ${declaredBytes} bytes, over the ${maximumFetchBytes} limit`
+          )
+        )
+      }
+    }
+    const chunks: Array<Uint8Array> = []
+    let received = 0
+    yield* Stream.runForEach(response.stream, (chunk: Uint8Array) =>
+      Effect.suspend(() => {
+        received += chunk.byteLength
+        if (received > maximumFetchBytes) {
+          return Effect.fail(
+            new FetchError(
+              "body_too_large",
+              `Fetch response for ${safeUrl} exceeded the ${maximumFetchBytes} byte limit`
+            )
+          )
+        }
+        chunks.push(new Uint8Array(chunk))
+        return Effect.void
+      }))
+    const bytes = new Uint8Array(received)
+    let offset = 0
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    return bytes
+  })).pipe(
+    Effect.provide(NodeHttpClient.layerUndici),
+    // A declared Fetch may carry no signal at all, so the request owns a
+    // deadline of its own rather than trusting the caller to interrupt it.
+    Effect.timeoutOrElse({
+      duration: fetchDeadlineMs,
+      orElse: () => Effect.fail(new FetchError("request_failed", `Fetch request for ${safeUrl} did not finish in time`))
+    })
+  )
   const exit = await Effect.runPromiseExit(effect, { signal })
   if (Exit.isSuccess(exit)) return exit.value
   const cause: unknown = Cause.squash(exit.cause)
   if (cause instanceof FetchError) throw cause
   throw new FetchError(
     "request_failed",
-    `Fetch request failed for ${url}: ${transportReason(cause, "HTTP transport failed")}`,
+    `Fetch request failed for ${safeUrl}: ${transportReason(cause, "HTTP transport failed")}`,
     undefined,
     undefined,
     { cause }
@@ -197,7 +300,7 @@ const atomicWrite = async (destination: string, bytes: Uint8Array): Promise<void
     await Fs.rm(temporary, { force: true }).catch(() => undefined)
     throw new FetchError(
       "write_failed",
-      `Fetch could not publish ${destination}: ${Diagnostic.message(cause)}`,
+      `Fetch could not publish ${destination}: ${Diagnostic.describe(cause)}`,
       undefined,
       undefined,
       { cause }

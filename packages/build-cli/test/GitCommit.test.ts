@@ -219,3 +219,27 @@ describe("refusals before staging", () => {
     })).rejects.toThrow("expected a Git.Commit target")
   })
 })
+
+describe("a git command that cannot run is not an exit code", () => {
+  /**
+   * Node reports a spawn-level failure with a string `code`. Collapsing that
+   * to a synthetic exit 1 with empty output made a host without git report
+   * `not_a_git_repository: <root> is not inside a git work tree`, which sends
+   * an operator to check the repository rather than the toolchain.
+   */
+  it("reports spawn_failed with the OS code when git is not on PATH", async () => {
+    const root = await temporaryRepo()
+    const path = process.env["PATH"]
+    process.env["PATH"] = NodePath.join(root, "no-tools")
+    try {
+      const error = await failure(
+        GitCommit.commit({ root, target: fixedCommit(), gateRunner: greenGates })
+      )
+      expect(error.code).toBe("spawn_failed")
+      expect(error.message).toMatch(/could not run: ENOENT/)
+    } finally {
+      if (path === undefined) delete process.env["PATH"]
+      else process.env["PATH"] = path
+    }
+  })
+})

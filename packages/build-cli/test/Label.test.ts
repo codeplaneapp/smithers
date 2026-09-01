@@ -71,3 +71,23 @@ describe("Label.currentPackage", () => {
     expect(() => Label.currentPackage(root, outside)).toThrow(/outside workspace/)
   })
 })
+
+describe("containment is judged by path segment", () => {
+  const root = NodePath.resolve("/workspace")
+
+  /**
+   * The check used to be `relative.startsWith("..")`, which reads the rendered
+   * text rather than the first segment: a workspace child literally named
+   * `..foo` renders as `..foo/pkg` and was reported as outside the workspace it
+   * is plainly inside, so no relative label could resolve from it.
+   */
+  it("keeps a directory whose name begins with two dots inside the workspace", () => {
+    expect(Label.currentPackageOrUndefined(root, NodePath.join(root, "..foo"))).toBe("..foo")
+    expect(Label.currentPackageOrUndefined(root, NodePath.join(root, "..foo", "pkg"))).toBe("..foo/pkg")
+  })
+
+  it("still reports a genuine escape and the exact parent", () => {
+    expect(Label.currentPackageOrUndefined(root, NodePath.join(root, "..", "sibling"))).toBeUndefined()
+    expect(Label.currentPackageOrUndefined(root, NodePath.dirname(root))).toBeUndefined()
+  })
+})

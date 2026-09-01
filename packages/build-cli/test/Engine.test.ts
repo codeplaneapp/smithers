@@ -70,10 +70,30 @@ describe("install engine boundary", () => {
     expect(() => packageManagerEnvironment({ "A\u0007B": "x" }, [], true)).toThrow(/non-portable name/)
   })
 
-  /** Off Windows the portable name rule is unchanged. */
-  it("keeps the portable name rule on a POSIX host", () => {
-    expect(() => packageManagerEnvironment({ "ProgramFiles(x86)": "x" }, [], false))
-      .toThrow(/non-portable name/)
+  /**
+   * A POSIX host carries names the `export NAME=` convention never produces:
+   * bash exports shell functions as `BASH_FUNC_which%%`, and every host running
+   * environment-modules adds more. Every child inherits them, so refusing the
+   * copy failed every target on such a host before anything ran. The
+   * package-manager layer selects from its own allowlist, so a dropped name
+   * could never have reached a child; the copy skips it and keeps going.
+   */
+  it("skips a name outside the POSIX convention instead of refusing the copy", () => {
+    expect(packageManagerEnvironment(
+      {
+        PATH: "/usr/bin",
+        "BASH_FUNC_which%%": "() {  declare -f which\n}",
+        "ProgramFiles(x86)": "x",
+        SMITHERS_CACHE_TOKEN: "secret"
+      },
+      [],
+      false
+    )).toEqual({ PATH: "/usr/bin" })
+  })
+
+  /** A Windows name the environment block cannot carry names itself in the refusal. */
+  it("names the offending environment variable", () => {
+    expect(() => packageManagerEnvironment({ "A=B": "x" }, [], true)).toThrow(/non-portable name: "A=B"/)
   })
 
   it("rejects malformed sensitive-name declarations", () => {
@@ -128,5 +148,52 @@ describe("install engine boundary", () => {
     await expect(runInstall("/path/need/not/exist", { signal: {} as AbortSignal })).rejects.toThrow(
       /must be an AbortSignal/
     )
+  })
+})
+
+describe("runInstall option normalization", () => {
+  const toolchain = {
+    manager: "bun" as const,
+    managerVersion: "1.3.14",
+    managerExecutable: undefined,
+    runtime: "bun" as const,
+    runtimeVersion: "1.3.14",
+    runtimeExecutable: undefined
+  }
+
+  /**
+   * `runInstall` documented a `toolchain` option and read it, but the option
+   * normalizer's allowlist did not carry the name, so every call passing one
+   * threw `unknown property: toolchain` and the non-default branch was
+   * unreachable.
+   */
+  it("accepts the documented toolchain option", async () => {
+    // Normalization must let it through; the call then fails on the workspace
+    // path, which is what proves it got past the allowlist.
+    await expect(runInstall("/path/need/not/exist", { toolchain })).rejects.toThrow(/ENOENT/)
+  })
+
+  it("rejects a toolchain whose fields are accessors", async () => {
+    let reads = 0
+    const hostile = Object.defineProperty({ ...toolchain }, "manager", {
+      enumerable: true,
+      get: () => {
+        reads += 1
+        return "bun"
+      }
+    })
+    await expect(runInstall("/path/need/not/exist", { toolchain: hostile as never }))
+      .rejects.toThrow(/install toolchain must be a plain object/)
+    expect(reads).toBe(0)
+  })
+
+  it("rejects a toolchain naming a package manager that does not exist", async () => {
+    await expect(runInstall("/path/need/not/exist", { toolchain: { ...toolchain, manager: "yarn" } as never }))
+      .rejects.toThrow(/is not a package manager/)
+  })
+
+  it("still rejects an unknown option", async () => {
+    await expect(runInstall("/path/need/not/exist", { nope: 1 } as never))
+      .rejects.toThrow(/unknown property: nope/)
   })
 })

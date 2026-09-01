@@ -7,11 +7,15 @@
     "group": "tooling"
   },
   "private": true,
-  "description": "Incur CLI for smithers build BUILD.ts workspaces",
+  "description": "Executes BUILD.ts and PACKAGE.ts target graphs with content-addressed caching",
   "engines": {
     "node": ">=22.19.0"
   },
-  "sideEffects": [],
+  "sideEffects": [
+    "./src/main.js",
+    "./src/Workspace.ts",
+    "./src/PackageLoader.ts"
+  ],
   "bin": {
     "smithers-build": "./src/main.js"
   },
@@ -21,23 +25,6 @@
     "./*": "./src/*.ts",
     "./internal/*": null,
     "./index": null
-  },
-  "publishConfig": {
-    "exports": {
-      "./package.json": "./package.json",
-      ".": {
-        "types": "./dist/esm/index.d.ts",
-        "import": "./dist/esm/index.js",
-        "require": "./dist/cjs/index.js"
-      },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
-      "./internal/*": null,
-      "./*/index": null
-    }
   },
   "files": [
     "src/**/*.js",

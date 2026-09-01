@@ -35,6 +35,7 @@ import * as NodeHttp from "node:http"
 import * as NodeHttps from "node:https"
 import * as NodeNet from "node:net"
 import * as NodePath from "node:path"
+import * as NodeUtil from "node:util/types"
 
 /**
  * The readiness probe of a Serve target: an open TCP port on the loopback
@@ -314,8 +315,61 @@ const canonicalize = (spec: ServiceSpec): string =>
     stop: spec.stop === undefined ? null : { grace: spec.stop.grace, signal: spec.stop.signal }
   })
 
+/**
+ * A frozen plain-data copy of the caller's spec.
+ *
+ * `parseSpec` used to validate the caller's object and hand the same reference
+ * on, and `startService` then awaited secret resolution and the prepare hook
+ * before re-reading argv, env, and readiness off it. A caller could therefore
+ * change the command, or its declared capabilities, *after* the canonical
+ * same-key identity had been computed from the earlier values, so the identity
+ * and the thing it identified could disagree. Snapshotting the flat data here
+ * means everything after the first await reads what was validated.
+ *
+ * Secret declarations are carried by reference on purpose: they are validated
+ * by `Secret.isHttpCredential`/`Secret.isSecret` and the resolution boundary
+ * matches them by identity.
+ */
+const snapshotSpec = (spec: ServiceSpec): ServiceSpec => {
+  const argv = [...spec.argv] as [string, ...Array<string>]
+  const commands = (
+    value: ReadonlyArray<readonly [string, ...Array<string>]> | undefined
+  ): ReadonlyArray<readonly [string, ...Array<string>]> | undefined =>
+    value === undefined
+      ? undefined
+      : Object.freeze(value.map((argv) => Object.freeze([...argv]) as unknown as readonly [string, ...Array<string>]))
+  return Object.freeze({
+    key: spec.key,
+    cwd: spec.cwd,
+    argv: Object.freeze(argv),
+    ...(spec.env === undefined ? {} : { env: Object.freeze({ ...spec.env }) }),
+    ...(spec.secrets === undefined ? {} : { secrets: Object.freeze([...spec.secrets]) }),
+    ...(spec.secretUrls === undefined
+      ? {}
+      : { secretUrls: Object.freeze(spec.secretUrls.map((entry) => Object.freeze({ ...entry }))) }),
+    ...(spec.readiness === undefined ? {} : { readiness: Object.freeze({ ...spec.readiness }) as Readiness }),
+    ...(spec.health === undefined ? {} : { health: Object.freeze({ ...spec.health }) }),
+    ...(spec.stop === undefined ? {} : { stop: Object.freeze({ ...spec.stop }) }),
+    ...(spec.prepare === undefined ? {} : { prepare: commands(spec.prepare)! }),
+    ...(spec.init === undefined ? {} : { init: commands(spec.init)! }),
+    ...(spec.cleanup === undefined ? {} : { cleanup: commands(spec.cleanup)! })
+  })
+}
+
 /** Validates one spec and parses its durations, or throws the exact reason. */
-const parseSpec = (spec: ServiceSpec): ParsedSpec => {
+const parseSpec = (caller: ServiceSpec): ParsedSpec => {
+  if (typeof caller !== "object" || caller === null || NodeUtil.isProxy(caller)) {
+    throw new Error("a service spec must be a plain object")
+  }
+  if (
+    !Array.isArray(caller.argv) || caller.argv.length === 0 ||
+    caller.argv.some((entry) => typeof entry !== "string")
+  ) {
+    throw new Error(
+      `service ${typeof caller.key === "string" ? caller.key : "<unnamed>"} requires a non-empty argv of strings`
+    )
+  }
+  const spec = snapshotSpec(caller)
   if (typeof spec.key !== "string" || spec.key === "") {
     throw new Error("a service spec requires a non-empty key")
   }
@@ -540,8 +594,27 @@ type Probe = { readonly ok: true } | { readonly ok: false; readonly reason: stri
 
 const miss = (reason: string): Probe => ({ ok: false, reason })
 
+/**
+ * Where an exec probe runs: the service's own working directory and the same
+ * resolved environment the service process was given.
+ *
+ * A probe used to inherit the CLI process's cwd and be handed
+ * `serviceEnvironment(undefined)`, so a probe naming a relative executable or
+ * reading a declared variable failed even though the identical command worked
+ * in the service's own context. `healthLoop` reuses the probe, so a healthy
+ * service was then reported unhealthy and torn down.
+ */
+interface ProbeContext {
+  readonly cwd: string
+  readonly environment: Readonly<Record<string, string>>
+}
+
 /** Runs one readiness probe attempt; never fails, reports the miss reason. */
-const probeOnce = (readiness: Readiness, attemptTimeoutMs: number): Effect.Effect<Probe> =>
+const probeOnce = (
+  readiness: Readiness,
+  attemptTimeoutMs: number,
+  context: ProbeContext
+): Effect.Effect<Probe> =>
   Effect.callback<Probe>((resume) => {
     let settled = false
     let cleanup: () => void = () => {}
@@ -583,7 +656,12 @@ const probeOnce = (readiness: Readiness, attemptTimeoutMs: number): Effect.Effec
       const child = NodeChildProcess.execFile(
         readiness.exec[0]!,
         readiness.exec.slice(1),
-        { env: serviceEnvironment(undefined), timeout: Math.max(attemptTimeoutMs, 1), maxBuffer: 1 << 20 },
+        {
+          cwd: context.cwd,
+          env: serviceEnvironment(context.environment),
+          timeout: Math.max(attemptTimeoutMs, 1),
+          maxBuffer: 1 << 20
+        },
         (error, stdout, stderr) => {
           settle(
             error === null
@@ -744,7 +822,8 @@ const stopService = (
 const awaitReadiness = (
   parsed: ParsedSpec,
   readiness: Readiness,
-  tail: () => string
+  tail: () => string,
+  context: ProbeContext
 ): Effect.Effect<void, ServiceError> =>
   Effect.gen(function*() {
     const attemptMs = "port" in readiness
@@ -754,7 +833,7 @@ const awaitReadiness = (
     let lastMiss = "the probe never ran"
     while (Date.now() < deadline) {
       const remaining = deadline - Date.now()
-      const result = yield* probeOnce(readiness, Math.min(attemptMs, remaining))
+      const result = yield* probeOnce(readiness, Math.min(attemptMs, remaining), context)
       if (result.ok) return
       lastMiss = result.reason
       yield* Effect.sleep(Math.min(readinessPollMs, Math.max(deadline - Date.now(), 0)))
@@ -776,14 +855,15 @@ const healthLoop = (
   intervalMs: number,
   state: ServiceState,
   unhealthy: Deferred.Deferred<never, ServiceError>,
-  tail: () => string
+  tail: () => string,
+  context: ProbeContext
 ): Effect.Effect<void> => {
   const attemptMs = Math.min(intervalMs, probeAttemptCapMs)
   const step = (misses: number): Effect.Effect<void> =>
     Effect.gen(function*() {
       yield* Effect.sleep(intervalMs)
       if (state.stopping || Deferred.isDoneUnsafe(unhealthy)) return
-      const result = yield* probeOnce(readiness, attemptMs)
+      const result = yield* probeOnce(readiness, attemptMs, context)
       if (state.stopping || Deferred.isDoneUnsafe(unhealthy)) return
       if (result.ok) return yield* step(0)
       const next = misses + 1
@@ -900,6 +980,9 @@ const startService = (parsed: ParsedSpec): Effect.Effect<RunningService, Service
     }
     const secretBoundary = yield* serviceSecretBoundary(parsed.spec)
     const environment = { ...parsed.spec.env, ...secretBoundary.environment }
+    // Every hook and the service itself run in the declared cwd under this
+    // environment; the probes run there too.
+    const probeContext: ProbeContext = { cwd: parsed.spec.cwd, environment }
     yield* runPrepare(parsed, environment)
     const child = yield* Effect.try({
       try: () =>
@@ -945,7 +1028,7 @@ const startService = (parsed: ParsedSpec): Effect.Effect<RunningService, Service
     )
     if (parsed.spec.readiness !== undefined) {
       yield* Effect.raceFirst(
-        awaitReadiness(parsed, parsed.spec.readiness, tail.read),
+        awaitReadiness(parsed, parsed.spec.readiness, tail.read, probeContext),
         Deferred.await(unhealthy)
       )
     } else {
@@ -957,7 +1040,7 @@ const startService = (parsed: ParsedSpec): Effect.Effect<RunningService, Service
     yield* runInit(parsed, tail.read, environment)
     if (parsed.healthIntervalMs !== undefined && parsed.spec.readiness !== undefined) {
       yield* Effect.forkScoped(
-        healthLoop(parsed, parsed.spec.readiness, parsed.healthIntervalMs, state, unhealthy, tail.read)
+        healthLoop(parsed, parsed.spec.readiness, parsed.healthIntervalMs, state, unhealthy, tail.read, probeContext)
       )
     }
     return { key, pid: child.pid ?? -1, unhealthy, tail: tail.read }

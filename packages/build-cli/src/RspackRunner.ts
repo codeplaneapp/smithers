@@ -37,6 +37,7 @@ import * as Schema from "effect/Schema"
 import { randomUUID } from "node:crypto"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
+import { byCodeUnit } from "./internal/Text.ts"
 
 /**
  * Host wiring for one bundler runner: where the workspace is, where scratch
@@ -70,7 +71,6 @@ export const defaultTimeoutMs = 15 * 60 * 1000
 const maximumResponseBytes = 128 * 1024 * 1024
 
 /** UTF-16 code-unit ordering, host-locale independent. */
-const byCodeUnit = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
 
 const execError = (
   argv: readonly [string, ...Array<string>],

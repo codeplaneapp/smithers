@@ -10,6 +10,7 @@ import { createHash } from "node:crypto"
 import * as NodePath from "node:path"
 import { fileURLToPath } from "node:url"
 import * as NodeUtil from "node:util/types"
+import { byCodeUnit } from "./internal/Text.ts"
 import * as Label from "./Label.ts"
 import type * as Workspace from "./Workspace.ts"
 
@@ -109,7 +110,6 @@ export const EXECUTION_FORMAT = 5
  * hash to different cache keys on different machines; code-unit order is the
  * same everywhere.
  */
-const byCodeUnit = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
 
 /**
  * One value in key material could not be encoded injectively.

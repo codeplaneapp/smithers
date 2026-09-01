@@ -40,13 +40,13 @@ import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
-import { createHash } from "node:crypto"
 import type { Dirent } from "node:fs"
 import * as NodeFs from "node:fs/promises"
 import { builtinModules } from "node:module"
 import * as NodePath from "node:path"
 import * as ts from "typescript"
 import type { CachedResult, CacheStore } from "./Cache.ts"
+import { posix, sha256Hex as sha256 } from "./internal/Text.ts"
 
 /**
  * Identity of this resolver implementation, combined with `ts.version` into
@@ -146,10 +146,6 @@ export interface FileRow {
   readonly digest: string
   readonly edges: ReadonlyArray<RowEdge>
 }
-
-const posix = (value: string): string => value.split(NodePath.sep).join("/")
-
-const sha256 = (content: string | Buffer): string => createHash("sha256").update(content).digest("hex")
 
 /** JSON with sorted object keys, so digests never depend on insertion order. */
 const canonicalJson = (value: unknown): string =>

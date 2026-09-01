@@ -38,6 +38,7 @@ import * as NodeUtil from "node:util/types"
 import { entryLimit, openCache } from "./Cache.ts"
 import * as Diagnostic from "./Diagnostic.ts"
 import { declaredToolchain, layerInstall, layerNonInteractiveNodeServices, layerPackageManager } from "./engine.ts"
+import { byCodeUnit } from "./internal/Text.ts"
 import type * as Planner from "./Planner.ts"
 import * as Reporter from "./Reporter.ts"
 import { credentialEnvNames, type ExpandedInput, type RemoteCacheAccess, type Workspace } from "./Workspace.ts"
@@ -336,7 +337,6 @@ export const resolveJobs = (jobs?: number | undefined): number => {
  * Diagnostics are deterministic: offenders are listed in code-unit order.
  */
 const validateWorkList = (targets: ReadonlyArray<Planner.PlannedTarget>): string | undefined => {
-  const byCodeUnit = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
   const labels = new Set<string>()
   const duplicates = new Set<string>()
   for (const target of targets) {

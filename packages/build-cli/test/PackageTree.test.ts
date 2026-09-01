@@ -218,3 +218,150 @@ describe("the write-set guard reads git honestly", () => {
     await expect(PackageTree.snapshotPortals(root, ".flows")).rejects.toThrow(/git (ls-files|status) failed/)
   })
 })
+
+describe("treeMatchesManifest compares the tree, not just the manifest", () => {
+  const capture = async (): Promise<PackageTree.OutDirManifest> => {
+    await Fs.mkdir(NodePath.join(root, "dist", "nested"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "dist", "a.txt"), "art")
+    await Fs.writeFile(NodePath.join(root, "dist", "nested", "b.txt"), "deep")
+    return PackageTree.captureOutDir(root, ".flows", "dist")
+  }
+
+  it("matches the tree it captured", async () => {
+    const manifest = await capture()
+    expect(await PackageTree.treeMatchesManifest(root, manifest)).toBeUndefined()
+  })
+
+  /**
+   * `PackageExec` skips materialization entirely when this answers undefined,
+   * so anything it cannot see survives a cache hit into the declared output
+   * tree. Iterating only the manifest's own entries left a stale artifact from
+   * a previous build in place forever.
+   */
+  it("reports a file on disk that the manifest does not name", async () => {
+    const manifest = await capture()
+    await Fs.writeFile(NodePath.join(root, "dist", "nested", "stale.txt"), "left over")
+    expect(await PackageTree.treeMatchesManifest(root, manifest)).toMatch(/nested\/stale\.txt is not in the captured/)
+  })
+
+  it("reports a symlink on disk that the manifest does not name", async () => {
+    const manifest = await capture()
+    await Fs.symlink("a.txt", NodePath.join(root, "dist", "alias"))
+    expect(await PackageTree.treeMatchesManifest(root, manifest)).toMatch(/dist\/alias is not in the captured/)
+  })
+
+  /** Capture records the executable bit; the comparison used to ignore it. */
+  it("reports executable-bit drift", async () => {
+    const manifest = await capture()
+    await Fs.chmod(NodePath.join(root, "dist", "a.txt"), 0o755)
+    expect(await PackageTree.treeMatchesManifest(root, manifest)).toMatch(
+      /dist\/a\.txt does not match the captured mode/
+    )
+  })
+})
+
+describe("output capture refuses a symlinked parent", () => {
+  it("refuses an outFile whose parent leaves the workspace", async () => {
+    await Fs.symlink(outside, NodePath.join(root, "link"))
+    await Fs.writeFile(NodePath.join(outside, "secret.txt"), "host bytes")
+    await expect(PackageTree.captureFile(root, ".flows", "link/secret.txt"))
+      .rejects.toThrow(/resolves outside the workspace through a symlinked parent/)
+  })
+
+  it("refuses an outDir whose parent leaves the workspace", async () => {
+    await Fs.symlink(outside, NodePath.join(root, "link"))
+    await Fs.mkdir(NodePath.join(outside, "dist"), { recursive: true })
+    await expect(PackageTree.captureOutDir(root, ".flows", "link/dist"))
+      .rejects.toThrow(/resolves outside the workspace through a symlinked parent/)
+  })
+
+  it("refuses to restore a file through a symlinked parent", async () => {
+    const cas = NodePath.join(root, ".flows", "cas")
+    await Fs.mkdir(cas, { recursive: true })
+    const digest = sha256("restored")
+    await Fs.writeFile(NodePath.join(cas, digest), "restored")
+    await Fs.symlink(outside, NodePath.join(root, "link"))
+    await expect(
+      PackageTree.materializeFile(root, ".flows", { path: "link/a.txt", digest, executable: false })
+    ).rejects.toThrow(/resolves outside the workspace through a symlinked parent/)
+    expect(await Fs.readdir(outside)).toEqual([])
+  })
+})
+
+describe("captureFile heals a tampered CAS blob", () => {
+  /**
+   * `captureOutDir` verified an existing blob's bytes; `captureFile` trusted
+   * the name, so a poisoned blob was re-admitted by every rebuild and every
+   * restore kept refusing with `cas blob tampered`.
+   */
+  it("rewrites an existing blob whose bytes no longer match its name", async () => {
+    await Fs.writeFile(NodePath.join(root, "out.txt"), "art")
+    const first = await PackageTree.captureFile(root, ".flows", "out.txt")
+    const blob = NodePath.join(root, ".flows", "cas", first.digest)
+    await Fs.writeFile(blob, "tampered")
+    await PackageTree.captureFile(root, ".flows", "out.txt")
+    expect(await Fs.readFile(blob, "utf8")).toBe("art")
+    expect(await PackageTree.verifyFileManifest(root, ".flows", first)).toBeUndefined()
+  })
+})
+
+describe("captureOutDir bounds the tree it walks", () => {
+  it("refuses a tree deeper than the declared depth limit", async () => {
+    const segments = Array.from({ length: PackageTree.outDirLimits.depth + 2 }, (_, index) => `d${index}`)
+    await Fs.mkdir(NodePath.join(root, "dist", ...segments), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "dist", ...segments, "leaf.txt"), "deep")
+    await expect(PackageTree.captureOutDir(root, ".flows", "dist")).rejects.toThrow(/crosses the depth limit/)
+  })
+
+  it("captures a tree exactly at the depth limit", async () => {
+    const segments = Array.from({ length: PackageTree.outDirLimits.depth }, (_, index) => `d${index}`)
+    await Fs.mkdir(NodePath.join(root, "dist", ...segments), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "dist", ...segments, "leaf.txt"), "deep")
+    const manifest = await PackageTree.captureOutDir(root, ".flows", "dist")
+    expect(manifest.entries).toHaveLength(1)
+  })
+})
+
+describe("the portal census refuses what it cannot measure", () => {
+  const git = (...args: ReadonlyArray<string>): void => {
+    ChildProcess.execFileSync("git", [...args], { cwd: root, stdio: "ignore" })
+  }
+
+  /**
+   * `snapshotPortals` used to catch every failure of the portal walk — the
+   * documented over-`portalEntryCap` case, but also a permission error or a
+   * directory racing the census — report it through a log line, and run the
+   * target anyway with the write-set guard silently disarmed over that portal.
+   */
+  it("fails the census when an escaping portal's target cannot be read", async () => {
+    git("init", "--quiet", ".")
+    await Fs.mkdir(NodePath.join(outside, "sealed"), { recursive: true })
+    await Fs.writeFile(NodePath.join(outside, "sealed", "a.txt"), "x")
+    await Fs.symlink(NodePath.join(outside, "sealed"), NodePath.join(root, "portal"))
+    await Fs.chmod(NodePath.join(outside, "sealed"), 0o000)
+    try {
+      const censused = await PackageTree.snapshotPortals(root, ".flows").then(
+        () => undefined,
+        (cause: unknown) => cause
+      )
+      expect(censused).toBeInstanceOf(PackageTree.PortalCensusError)
+      expect((censused as PackageTree.PortalCensusError).link).toBe("portal")
+      expect((censused as PackageTree.PortalCensusError).reason).toBe("unreadable")
+    } finally {
+      await Fs.chmod(NodePath.join(outside, "sealed"), 0o755)
+    }
+  })
+
+  it("measures a readable escaping portal", async () => {
+    git("init", "--quiet", ".")
+    await Fs.mkdir(NodePath.join(outside, "open"), { recursive: true })
+    await Fs.writeFile(NodePath.join(outside, "open", "a.txt"), "x")
+    await Fs.symlink(NodePath.join(outside, "open"), NodePath.join(root, "portal"))
+    const snapshot = await PackageTree.snapshotPortals(root, ".flows")
+    try {
+      expect(snapshot.portals.map((portal) => portal.link)).toEqual(["portal"])
+    } finally {
+      await PackageTree.releasePortals(snapshot)
+    }
+  })
+})

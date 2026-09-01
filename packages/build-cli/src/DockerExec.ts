@@ -216,7 +216,12 @@ export const serviceSpec = async (options: {
   const attrs = options.attrs
   const argv: Array<string> = [tool.path, "run", "--rm", "--name", name]
   for (const [container, host] of Object.entries(attrs.ports ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
-    argv.push("-p", `${host}:${container}`)
+    // Bind loopback explicitly. An unqualified `-p host:container` publishes on
+    // 0.0.0.0, which puts a developer fixture or a CI container on the LAN and
+    // on anything sharing the CI host's network. The rest of this machinery is
+    // already local-only — the HTTP readiness probe targets 127.0.0.1 — so the
+    // port mapping was the one place the posture was not stated.
+    argv.push("-p", `127.0.0.1:${host}:${container}`)
   }
   for (const [key, value] of Object.entries(attrs.env ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
     argv.push("-e", `${key}=${value}`)

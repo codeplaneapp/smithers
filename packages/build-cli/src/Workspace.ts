@@ -22,6 +22,8 @@ import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import { pathToFileURL } from "node:url"
 import { buildModuleUrl, importDeclarationModule, installEffectResolution } from "./effect-resolution.js"
+import { errorCode, failureMessage, optionalOpenFlag } from "./internal/Fs.ts"
+import { byCodeUnit, posix } from "./internal/Text.ts"
 import * as Label from "./Label.ts"
 
 // Workspace is also imported as a library by tests and embedding hosts that do
@@ -77,17 +79,6 @@ export interface PackageDefaultsEntry {
   readonly declaration: PackageDefaults.PackageDefaults
   readonly packagePath: string
 }
-
-const posix = (value: string): string => value.split(NodePath.sep).join("/")
-
-/**
- * Orders strings by UTF-16 code unit. `localeCompare` answers differently
- * under different host locales and ICU versions, which would let one workspace
- * pick a different configuration declaration, or synthesize targets in a
- * different order, on two machines looking at the same files; code-unit order
- * is the same everywhere.
- */
-const byCodeUnit = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
 
 /**
  * The most a git listing may produce.
@@ -578,7 +569,29 @@ export const resolveRemoteCache = async (
 ): Promise<ResolvedRemoteCache | undefined> => {
   const canonical = await SafeFs.canonicalRoot(root)
   const entry = await buildEntry(canonical, "BUILD.ts")
-  const declaration = entry === undefined ? undefined : declaredRemoteCache(await importNamespace(entry))
+  return remoteCacheOf(
+    entry === undefined ? undefined : declaredRemoteCache(await importNamespace(entry)),
+    endpointOverride
+  )
+}
+
+/**
+ * Resolves a remote cache from an already-read declaration.
+ *
+ * BUILD mode reads its declaration out of the root BUILD.ts namespace; package
+ * mode reads the same declaration out of `WORKSPACE.ts`'s `S.Cache({ remote })`
+ * field, which `WorkspaceDeclaration.CacheDeclaration` schema-validates as a
+ * real `RemoteCache`. Both then need the identical endpoint-override and
+ * credential-name precedence, so it lives here rather than being reimplemented
+ * once per mode.
+ *
+ * @category discovery
+ * @since 0.1.0
+ */
+export const remoteCacheOf = (
+  declaration: RemoteCache.RemoteCache | undefined,
+  endpointOverride?: string | undefined
+): ResolvedRemoteCache | undefined => {
   const credentials = (): ResolvedRemoteCacheCredentials => {
     const read = declaration?.token.env ?? RemoteCache.defaultTokenEnv
     const write = declaration?.write?.env
@@ -606,39 +619,6 @@ const gitignoreForms = (cacheDirectory: string): ReadonlyArray<string> => [
   `/${cacheDirectory}`,
   `/${cacheDirectory}/`
 ]
-
-/**
- * Returns an open(2) flag the platform may not provide. Windows builds of
- * libuv define neither `O_NOFOLLOW` nor `O_NONBLOCK`; a missing flag
- * contributes nothing rather than crashing the open.
- */
-const optionalOpenFlag = (name: "O_NOFOLLOW" | "O_NONBLOCK"): number =>
-  (NodeFs.constants as Partial<Record<string, number>>)[name] ?? 0
-
-const errorCode = (cause: unknown): string | undefined => {
-  if (typeof cause !== "object" || cause === null) return undefined
-  try {
-    const descriptor = Object.getOwnPropertyDescriptor(cause, "code")
-    return descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "string"
-      ? descriptor.value
-      : undefined
-  } catch {
-    return undefined
-  }
-}
-
-const failureMessage = (cause: unknown): string => {
-  if (typeof cause !== "object" || cause === null) return "unavailable failure"
-  try {
-    const descriptor = Object.getOwnPropertyDescriptor(cause, "message")
-    return descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "string" &&
-        descriptor.value !== ""
-      ? descriptor.value
-      : "unavailable failure"
-  } catch {
-    return "unavailable failure"
-  }
-}
 
 /**
  * Reads the root `.gitignore`, or returns undefined when there is none.
@@ -849,6 +829,8 @@ export class Workspace {
   private readonly targetLabels = new Map<Target.AnyTarget, string>()
   private readonly synthesized = new Map<string, ReadonlyMap<string, Target.AnyTarget>>()
   private readonly inputPackages = new WeakMap<ExpandedInput, string>()
+  /** Constant-time membership over {@link files}. */
+  private readonly fileSet: ReadonlySet<string>
   /** BUILD.ts files whose import has started and not finished. */
   private readonly importing = new Set<string>()
   /** Cancels discovery, input expansion, planning, and execution as one operation. */
@@ -865,6 +847,12 @@ export class Workspace {
     this.currentPackage = Label.currentPackage(root, cwd)
     this.cacheDirectory = cacheDirectory
     this.files = files
+    // Membership is asked once per (default rule x marker-bearing file) during
+    // default-target synthesis. As a linear scan over `files` that is
+    // O(rules x F x F), and this module admits a listing of up to
+    // `gitPathLimit` paths, so it was bounded only by the wall clock in a
+    // module that bounds everything else explicitly.
+    this.fileSet = new Set(files)
     this.signal = signal
     this.buildFiles = files.filter((file) => file === "BUILD.ts" || file.endsWith("/BUILD.ts"))
   }
@@ -1084,7 +1072,7 @@ export class Workspace {
   }
 
   private hasFile(path: string): boolean {
-    return this.files.includes(path)
+    return this.fileSet.has(path)
   }
 
   private eligible(entry: PackageDefaultsEntry, directory: string): boolean {

@@ -14,11 +14,10 @@ import * as PackageValue from "@smthrs/targets/Package"
 import * as Target from "@smthrs/targets/Target"
 import * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration"
 import * as NodePath from "node:path"
+import { byCodeUnit } from "./internal/Text.ts"
 import * as Label from "./Label.ts"
 import { PackageError } from "./PackageError.ts"
 import type { LoadedGraph } from "./PackageLoader.ts"
-
-const byCodeUnit = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
 
 /**
  * One labeled target row.
@@ -165,7 +164,14 @@ export class PackageIndex {
     this.root = root
     this.workspace = workspace
     this.currentPackage = currentPackage
-    this.rows = rows
+    // The class documents itself as immutable and used to store, and hand
+    // back, the caller's live array. `ReadonlyArray` is erased at runtime, so
+    // that promise held for TypeScript consumers and for nothing else: a
+    // mutated row would have left subtree resolution and edge computation
+    // reading one set of rows while exact resolution still consulted the
+    // separately built `byLabel` map.
+    for (const row of rows) Object.freeze(row)
+    this.rows = Object.freeze(rows)
     this.byLabel = byLabel
     this.labelsByTarget = labelsByTarget
     this.owners = owners

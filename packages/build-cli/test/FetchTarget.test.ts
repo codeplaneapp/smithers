@@ -363,3 +363,71 @@ describe("S.Fetch in a PACKAGE.ts workspace", () => {
     expect(await Fs.readFile(NodePath.join(root, "data/direct.graphql"), "utf8")).toBe("unchanged\n")
   })
 })
+
+describe("fetch failures name the endpoint without its credentials", () => {
+  /**
+   * The accepted URL grammar admits userinfo and a query, so a signed URL or a
+   * `https://user:token@host/...` form used to land verbatim in CLI output,
+   * the reporter's stream, and every cached diagnostic.
+   */
+  it("strips userinfo, query, and fragment", () => {
+    expect(FetchExec.redactUrl("https://user:t0ken@cache.example.test/blob?X-Amz-Signature=abc#frag"))
+      .toBe("https://<redacted>@cache.example.test/blob?<redacted>")
+    expect(FetchExec.redactUrl("https://cache.example.test/blob")).toBe("https://cache.example.test/blob")
+    expect(FetchExec.redactUrl("not a url")).toBe("<unparsable url>")
+  })
+
+  it("reports an HTTP status against the redacted URL", async () => {
+    const target = FetchTarget.Fetch({
+      url: serverUrl.replace("http://", "http://user:secret@").replace("/schema.graphql", "/missing"),
+      sha256: schemaSha256,
+      out: "out.bin"
+    })
+    const error = await FetchExec.execute({
+      root: await temporaryWorkspace(),
+      target,
+      outFile: "out.bin"
+    }).then(() => undefined, (cause: unknown) => cause)
+    expect(String((error as Error).message)).not.toContain("secret")
+    expect(String((error as Error).message)).toContain("<redacted>@127.0.0.1")
+  })
+})
+
+describe("the declared remote cache reaches package mode", () => {
+  /**
+   * `WorkspaceDeclaration.CacheDeclaration` schema-validates `remote` as a real
+   * `RemoteCache`, and package mode used to drop it: both `openCache` calls
+   * passed no endpoint and no credentials, so a workspace declaring a shared
+   * cache ran local-only with no warning, no refusal, and nothing in the plan.
+   */
+  it("attempts and reports the declared endpoint instead of running local-only", async () => {
+    const root = await fixtureWorkspace()
+    const result = await serve(root, ["//data:schemaPinned", "--ui", "plain"])
+    expect(result.exitCode, result.logs).toBe(0)
+    expect(result.logs).toContain("smthrs: remote cache disabled after a failure")
+  }, 120_000)
+})
+
+describe("package-mode failures report why, not that", () => {
+  /**
+   * `SchemaError` and the `Data.TaggedError` family define `message` as a
+   * prototype accessor. `Diagnostic.message` reads own data properties only —
+   * the right posture at a boundary handed an arbitrary value — so every such
+   * failure rendered as the caller's fallback and the reason was lost.
+   * `Diagnostic.describe` exists for exactly that, and had one call site in the
+   * whole package: BUILD mode's executor.
+   */
+  it("carries an Effect schema failure out of a declaration module", async () => {
+    const root = await temporaryWorkspace()
+    await write(
+      root,
+      "WORKSPACE.ts",
+      `import * as Schema from "effect/Schema"\nSchema.decodeUnknownSync(Schema.String)(42)\n`
+    )
+    await write(root, "data/PACKAGE.ts", dataModule())
+    const result = await serve(root, ["query", "//..."])
+    expect(result.exitCode).toBe(1)
+    expect(result.output).toContain("Expected string")
+    expect(result.output).not.toContain("operation failed")
+  })
+})

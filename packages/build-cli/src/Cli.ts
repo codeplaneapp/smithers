@@ -33,7 +33,9 @@ import {
   credentialEnvNames,
   ensureGitignored,
   type RemoteCacheAccess,
+  remoteCacheOf,
   resolveConfig,
+  type ResolvedRemoteCache,
   resolveRemoteCache,
   Workspace
 } from "./Workspace.ts"
@@ -221,6 +223,40 @@ const present = <A>(
  * captures and clears the default names for its own short-lived process,
  * which is a choice only a process owner may make.
  */
+/**
+ * Binds a resolved remote cache to the readers that fetch its credentials.
+ *
+ * Shared by both modes. BUILD mode reaches it through {@link prepare}; package
+ * mode builds the same access from the `WORKSPACE.ts` declaration, which used
+ * to be schema-validated and then dropped, so a workspace declaring a remote
+ * cache ran local-only with no warning and no line in the plan.
+ */
+const remoteCacheAccess = (
+  remoteCache: ResolvedRemoteCache | undefined,
+  runtime: RuntimeConfig
+): RemoteCacheAccess | undefined => {
+  if (remoteCache === undefined) return undefined
+  // The process entry point captures and clears the default name, so its
+  // value arrives as `cacheToken`; every other declared name is read from
+  // the environment at the instant a request is built.
+  const tokenAt = (name: string) => (): string | undefined =>
+    name === "SMITHERS_CACHE_TOKEN"
+      ? runtime.cacheToken ?? environmentOf(runtime)[name]
+      : environmentOf(runtime)[name]
+  const credentials = remoteCache.credentials
+  const readToken = tokenAt(
+    credentials._tag === "shared" ? credentials.tokenEnv : credentials.readTokenEnv
+  )
+  return {
+    ...remoteCache,
+    readToken,
+    // One declared credential authenticates both directions, which is the
+    // posture every deployment had before the split existed.
+    writeToken: credentials._tag === "shared" ? readToken : tokenAt(credentials.writeTokenEnv),
+    publishNamespace: publishNamespaceOf(runtime)
+  }
+}
+
 const prepare = async (
   flags: WorkspaceFlags,
   runtime: RuntimeConfig = {},
@@ -231,28 +267,7 @@ const prepare = async (
   const config = await resolveConfig(root, flags.cacheDir)
   runtime.signal?.throwIfAborted()
   const remoteCache = await resolveRemoteCache(root, runtime.cacheUrl)
-  let preparedRemote: PreparedWorkspace["remoteCache"]
-  if (remoteCache !== undefined) {
-    // The process entry point captures and clears the default name, so its
-    // value arrives as `cacheToken`; every other declared name is read from
-    // the environment at the instant a request is built.
-    const tokenAt = (name: string) => (): string | undefined =>
-      name === "SMITHERS_CACHE_TOKEN"
-        ? runtime.cacheToken ?? environmentOf(runtime)[name]
-        : environmentOf(runtime)[name]
-    const credentials = remoteCache.credentials
-    const readToken = tokenAt(
-      credentials._tag === "shared" ? credentials.tokenEnv : credentials.readTokenEnv
-    )
-    preparedRemote = {
-      ...remoteCache,
-      readToken,
-      // One declared credential authenticates both directions, which is the
-      // posture every deployment had before the split existed.
-      writeToken: credentials._tag === "shared" ? readToken : tokenAt(credentials.writeTokenEnv),
-      publishNamespace: publishNamespaceOf(runtime)
-    }
-  }
+  const preparedRemote = remoteCacheAccess(remoteCache, runtime)
   if (writeState && config.gitignored) await ensureGitignored(root, config.cacheDirectory)
   runtime.signal?.throwIfAborted()
   return preparedRemote === undefined
@@ -355,7 +370,11 @@ const packageQuery = async (
 }
 
 /** Package-mode `graph`: labeled nodes plus classified local and repository edges. */
-const packageGraph = async (index: PackageIndex.PackageIndex, pattern: string): Promise<{
+const packageGraph = async (
+  index: PackageIndex.PackageIndex,
+  pattern: string,
+  mermaid: boolean
+): Promise<{
   readonly rows: ReadonlyArray<GraphOutput.PackageRow>
   readonly edges: ReadonlyArray<GraphOutput.PackageEdge>
   readonly data: unknown
@@ -372,7 +391,14 @@ const packageGraph = async (index: PackageIndex.PackageIndex, pattern: string): 
     .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined)
     .map(({ resolution, row }) => ({ from: row.label, to: resolution.externalLabel, kind: "repo" as const }))
   const edges = [...localEdges, ...repositoryEdges]
-  const renderRows = rows.map((row) => ({ label: row.label, target: Target.metadata(row.target).target }))
+  const renderRows = rows.map((row) => {
+    const refusal = resolutions.find((entry) => entry?.row === row)?.resolution?.refusal
+    return {
+      label: row.label,
+      target: Target.metadata(row.target).target,
+      ...(refusal === undefined ? {} : { refusal })
+    }
+  })
   const targets = await Promise.all(rows.map(async (row) => {
     const resolution = resolutions.find((entry) => entry?.row === row)?.resolution
     return {
@@ -382,14 +408,13 @@ const packageGraph = async (index: PackageIndex.PackageIndex, pattern: string): 
       ...(resolution?.refusal === undefined ? {} : { refusal: resolution.refusal })
     }
   }))
-  const text = GraphOutput.packageText(renderRows, edges)
   return {
     rows: renderRows,
     edges,
     data: {
       pattern,
-      format: "text",
-      graph: text,
+      format: mermaid ? "mermaid" : "text",
+      graph: mermaid ? GraphOutput.packageMermaid(renderRows, edges) : GraphOutput.packageText(renderRows, edges),
       roots: rows.map((row) => row.label),
       targets,
       edges,
@@ -458,9 +483,16 @@ const runPackageVerb = async (
   const cacheDirectory = flags.cacheDir === undefined
     ? index.workspace.cache.directory
     : Config.normalizeCacheDirectory(flags.cacheDir)
+  // The WORKSPACE.ts declaration and SMITHERS_CACHE_URL both reach package
+  // mode here, under the same precedence BUILD mode applies.
+  const remoteCache = remoteCacheAccess(
+    remoteCacheOf(index.workspace.cache.remote, config.cacheUrl),
+    config
+  )
   return PackageExec.run({
     index,
     cacheDirectory,
+    ...(remoteCache === undefined ? {} : { remoteCache }),
     verb,
     pattern,
     write: flags.write,
@@ -645,7 +677,7 @@ const executeCommand = async <A extends Outcome>(
   try {
     outcome = await body(reporter)
   } catch (cause) {
-    return context.error({ code, exitCode: 1, message: Diagnostic.message(cause) })
+    return context.error({ code, exitCode: 1, message: Diagnostic.describe(cause) })
   } finally {
     reporter.close()
   }
@@ -684,7 +716,7 @@ export const makeCli = (config: RuntimeConfig = {}) =>
           return context.error({
             code: "install_failed",
             exitCode: 1,
-            message: Diagnostic.message(cause),
+            message: Diagnostic.describe(cause),
             retryable: false
           })
         }
@@ -711,7 +743,7 @@ export const makeCli = (config: RuntimeConfig = {}) =>
           return context.error({
             code: "create_app_failed",
             exitCode: 1,
-            message: Diagnostic.message(cause),
+            message: Diagnostic.describe(cause),
             retryable: false
           })
         }
@@ -813,7 +845,7 @@ export const makeCli = (config: RuntimeConfig = {}) =>
         try {
           outcome = await runGitHooks(context.options, config)
         } catch (cause) {
-          return context.error({ code: "git_hooks_failed", exitCode: 1, message: Diagnostic.message(cause) })
+          return context.error({ code: "git_hooks_failed", exitCode: 1, message: Diagnostic.describe(cause) })
         }
         if (outcome.mode === "check" && !outcome.clean) {
           return context.error({
@@ -861,7 +893,7 @@ export const makeCli = (config: RuntimeConfig = {}) =>
           }
           return present(context, config, result, (style) => Query.text(result, style))
         } catch (cause) {
-          return context.error({ code: "query_failed", exitCode: 1, message: Diagnostic.message(cause) })
+          return context.error({ code: "query_failed", exitCode: 1, message: Diagnostic.describe(cause) })
         }
       }
     })
@@ -876,7 +908,8 @@ export const makeCli = (config: RuntimeConfig = {}) =>
         try {
           const index = await openPackageIndex(context.options, config)
           if (index !== undefined) {
-            const { data, edges, rows } = await packageGraph(index, context.args.pattern)
+            const { data, edges, rows } = await packageGraph(index, context.args.pattern, context.options.mermaid)
+            // Mermaid is meant for a file or a renderer, never a terminal.
             if (context.options.mermaid) return data
             return present(context, config, data, (style) => GraphOutput.packageText(rows, edges, style))
           }
@@ -895,7 +928,7 @@ export const makeCli = (config: RuntimeConfig = {}) =>
           if (context.options.mermaid) return data
           return present(context, config, data, (style) => GraphOutput.text(plan, style))
         } catch (cause) {
-          return context.error({ code: "graph_failed", exitCode: 1, message: Diagnostic.message(cause) })
+          return context.error({ code: "graph_failed", exitCode: 1, message: Diagnostic.describe(cause) })
         }
       }
     })

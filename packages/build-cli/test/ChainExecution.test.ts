@@ -236,6 +236,25 @@ describe.sequential("Docker package execution", () => {
 })
 
 describe("Docker service spec", () => {
+  /**
+   * An unqualified `-p host:container` publishes on 0.0.0.0, putting a
+   * developer fixture or a CI container on the LAN and on anything sharing the
+   * CI host's network. The rest of the local service machinery is already
+   * loopback-only: the HTTP readiness probe targets 127.0.0.1.
+   */
+  it("publishes declared ports on loopback only", async () => {
+    const docker = await DockerExec.resolveDocker()
+    if (!docker.ok) return
+    const spec = await DockerExec.serviceSpec({
+      label: "//:dockerPorts",
+      cwd: process.cwd(),
+      attrs: { image: "alpine", ports: { "5432": 15_432, "6379": 16_379 } } as never
+    })
+    if ("error" in spec) throw new Error(spec.error)
+    const published = spec.argv.filter((entry, index) => spec.argv[index - 1] === "-p")
+    expect(published).toEqual(["127.0.0.1:15432:5432", "127.0.0.1:16379:6379"])
+  })
+
   it("removes its own stale container before running and after stopping", async () => {
     const docker = await DockerExec.resolveDocker()
     if (!docker.ok) return

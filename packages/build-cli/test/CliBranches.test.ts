@@ -189,7 +189,11 @@ describe("package-mode branches", () => {
     const graph = await serve(root, ["graph", "//:all", "--mermaid", "--ui", "tty"], true)
     expect(graph.exitCode).toBe(0)
     expect(graph.stdout).toBe("")
-    expect(graph.envelope).toContain("format: text")
+    // Package mode used to accept --mermaid and render the text tree anyway,
+    // labelling the envelope `format: text`. The flag now renders a flowchart
+    // in both modes, and the envelope says which one it carries.
+    expect(graph.envelope).toContain("format: mermaid")
+    expect(graph.envelope).toContain("flowchart LR")
   })
 
   it("falls back to the structured error on a red human run when no exit hook exists", async () => {

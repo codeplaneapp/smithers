@@ -12,9 +12,8 @@
 import * as Package from "@smthrs/targets/Package"
 import * as Target from "@smthrs/targets/Target"
 import * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration"
+import { byCodeUnit } from "./internal/Text.ts"
 import { PackageError } from "./PackageError.ts"
-
-const byCodeUnit = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
 
 /**
  * Validates one evaluated workspace module namespace.

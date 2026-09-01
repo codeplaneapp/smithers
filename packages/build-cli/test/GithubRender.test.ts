@@ -986,3 +986,55 @@ describe("toolchain variants", () => {
     ).toBe("unsupported_affected")
   })
 })
+
+describe("the generated setup action never interpolates an input into bash", () => {
+  const rendered = (): string => {
+    const setup = S.Github.Setup({
+      cacheUrl: S.Secret("SMITHERS_CACHE_URL"),
+      cacheToken: S.Secret("SMITHERS_CACHE_TOKEN")
+    })
+    const workflow = S.Github.Workflow({ name: "ci", on: { pullRequest: true }, setup, run: [] })
+    const ciGen = S.Github.CiGen({ workflows: [workflow] })
+    const files = GithubRender.render({
+      ciGen,
+      workspace: unitWorkspace,
+      resolve: resolver([[ciGen, "//.github:github"]]),
+      packageDir: ".github"
+    }).files
+    return files.find((file) => file.path === "actions/setup/action.yml")!.content
+  }
+
+  /** The `run:` script's body, everything between `- run: |` and the next `shell:` line. */
+  const runScript = (content: string): string => {
+    const lines = content.split("\n")
+    const start = lines.findIndex((line) => line.trim() === "- run: |" && line.includes("    -"))
+    const rest = lines.slice(start + 1)
+    const end = rest.findIndex((line) => line.trim() === "shell: bash")
+    return rest.slice(0, end).join("\n")
+  }
+
+  /**
+   * GitHub substitutes `${{ ... }}` textually before bash parses the script, so
+   * an input carrying a double quote, `$(...)`, a backtick, or a newline used
+   * to escape the string and either run commands on the runner or inject extra
+   * `NAME=VALUE` records into $GITHUB_ENV. The values here are cache
+   * credentials.
+   */
+  it("keeps every expression out of the script and binds inputs through env", () => {
+    const content = rendered()
+    expect(runScript(content)).not.toContain("${{")
+    expect(content).toContain("      env:")
+    expect(content).toContain("        SMTHRS_INPUT_CACHE_URL: ${{ inputs.cache-url }}")
+    expect(content).toContain("        SMTHRS_INPUT_CACHE_TOKEN: ${{ inputs.cache-token }}")
+  })
+
+  /** The documented multiline form under a delimiter drawn at runtime. */
+  it("writes each record with a heredoc under an unpredictable delimiter", () => {
+    const script = runScript(rendered())
+    expect(script).toMatch(/delimiter="smthrs_\$\(openssl rand -hex 16/)
+    expect(script).toContain("printf '%s<<%s\\n' SMITHERS_CACHE_URL \"$delimiter\" >> \"$GITHUB_ENV\"")
+    expect(script).toContain("printf '%s\\n' \"$SMTHRS_INPUT_CACHE_URL\" >> \"$GITHUB_ENV\"")
+    expect(script).toContain("case \"$SMTHRS_INPUT_CACHE_URL\" in *\"$delimiter\"*) exit 1 ;; esac")
+    expect(script).not.toContain("echo \"SMITHERS_CACHE_URL=")
+  })
+})

@@ -1,7 +1,9 @@
 # smithers-build CLI
 
-`smithers-build` uses incur and the Bazel verb model. A verb selects a target set.
-Targets do not contain per-command scripts.
+`smithers-build` executes target graphs. A verb selects a set of targets by
+label or pattern, the CLI plans them, consults a content-addressed cache, and
+runs whatever is missing. Targets declare inputs, outputs, and permissions;
+they never contain per-command scripts.
 
 ```sh
 smithers-build install --workspace /path/to/smithers
@@ -10,50 +12,33 @@ smithers-build test //packages/flow:test
 smithers-build lint //packages/flow:lint
 smithers-build query 'deps(//packages/flow:lib)'
 smithers-build graph //packages/... --mermaid
+smithers-build //packages/flow:lint          # the bare-label form
 ```
 
-`install` executes the `smithers-build` package's Install Flow with the pnpm layer.
-`build`, `test`, `lint`, `query`, and `graph` evaluate and print plans only.
+Verbs execute by default. `--plan` prints the inert plan instead, `--no-cache`
+bypasses cache reads, and `--jobs` bounds concurrency. `install` runs the
+install Flow under the declared package manager.
 
-## Cache directory
+Two authoring surfaces are supported and discovery picks between them: a
+workspace of `BUILD.ts` modules, or the routed `WORKSPACE.ts` plus one
+`PACKAGE.ts` per package. Both go through the same planner, the same cache, and
+the same execution boundary.
 
-Every command takes `--cache-dir`, a workspace-relative directory holding the
-result cache and rule scratch files. Precedence is the flag, then the `Workspace`
-declaration exported from the root `BUILD.ts` file, then `.flows`. An empty
-value, an absolute path, and any `..` segment fail the command.
+This package is private. It is the implementation behind the `smithers-build`
+binary, not a library anyone installs.
 
-When the declaration sets `gitignored: true`, the command first ensures the
-root `.gitignore` carries an entry for the directory, creating the file when it
-is absent and leaving it alone when an equivalent entry is already there.
+## Documentation
 
-Discovery never lists a path inside the directory, so its content cannot feed
-input discovery or a digest, and the directory name itself never enters a cache
-key.
+Prose lives beside the code it describes, in [`docs/`](./docs/README.md):
 
-## BUILD.ts runtime
+- [Commands](./docs/cli.md) — every command, argument, and option.
+- [Package mode](./docs/package-mode.md) — `WORKSPACE.ts` and `PACKAGE.ts`
+  discovery, the verbs it supports, and what it refuses.
+- [Caching](./docs/caching.md) — the cache directory, the content-addressed
+  store, and the remote cache's endpoint, credentials, and trust domain.
+- [Execution](./docs/execution.md) — write-set confinement and rollback,
+  sandboxing and where it is enforced, services, and the resource ceilings.
 
-The source package requires Node 22.19 or newer. Its JavaScript bin bootstrap
-uses the programmatic `tsx` loader that ships as a CLI dependency, then loads
-the TypeScript command modules and BUILD.ts files. A built JavaScript
-distribution can remove the command-module loader, but BUILD.ts evaluation
-still requires tsx or equivalent runtime TypeScript support. BUILD.ts files
-must use erasable TypeScript syntax and top-level imports.
-
-Discovery asks git for tracked and non-ignored files, skips `node_modules` and
-the resolved cache directory, and falls back to a root `.gitignore` walker
-outside a git worktree that skips the same paths. Exact labels
-load one BUILD.ts module. Recursive patterns load BUILD.ts modules in the
-selected subtree. Direct imports evaluate dependency BUILD.ts modules through
-the normal ESM module graph.
-
-## Remote cache
-
-The root `BUILD.ts` may export `RemoteCache.make({ endpoint, tokenEnv })`.
-Endpoints must use HTTPS and `tokenEnv` defaults to `SMITHERS_CACHE_TOKEN`.
-`SMITHERS_CACHE_URL` overrides the declared endpoint. Token values are read only
-from the named environment variable and are removed before target tools spawn.
-
-The CLI reads through HTTP `/ac`: local hits avoid the network, remote hits
-hydrate local JSON, and puts publish to both tiers. A remote failure warns once
-and disables the remote for the rest of the process; `409` conflicts warn but
-do not fail the run.
+The API reference is the JSDoc on the exported declarations in `src/`; the
+package's lint configuration requires a description, a `@category`, and a
+`@since` on each one.

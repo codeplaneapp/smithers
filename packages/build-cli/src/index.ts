@@ -36,5 +36,18 @@ export * as ServiceSupervisor from "./ServiceSupervisor.ts"
 export * as Workspace from "./Workspace.ts"
 /** @category constructors @since 0.1.0 */
 export { cli, makeCli } from "./Cli.ts"
+/**
+ * The process-scoped configuration {@link makeCli} takes.
+ *
+ * The barrel exported both functions and neither of their types, so a consumer
+ * of `@smthrs/build-cli` could call `makeCli` and `runInstall` without being
+ * able to name what either one accepts or returns.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type { RuntimeConfig } from "./Cli.ts"
 /** @category execution @since 0.1.0 */
 export { runInstall } from "./engine.ts"
+/** @category models @since 0.1.0 */
+export type { InstallResult, Toolchain } from "./engine.ts"

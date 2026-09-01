@@ -45,7 +45,6 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
 import { minimatch } from "minimatch"
-import { createHash } from "node:crypto"
 import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
@@ -63,6 +62,7 @@ import * as GitCommit from "./GitCommit.ts"
 import * as GithubRender from "./GithubRender.ts"
 import * as GitSubmoduleExec from "./GitSubmoduleExec.ts"
 import * as GoExec from "./GoExec.ts"
+import { posix, sha256Hex } from "./internal/Text.ts"
 import * as MemoryBackend from "./MemoryBackend.ts"
 import * as OverlayExec from "./OverlayExec.ts"
 import type * as PackageIndexModule from "./PackageIndex.ts"
@@ -75,8 +75,6 @@ import * as RspackRunner from "./RspackRunner.ts"
 import * as ServiceSupervisor from "./ServiceSupervisor.ts"
 import * as StampExec from "./StampExec.ts"
 import type * as Workspace from "./Workspace.ts"
-
-const posix = (value: string): string => value.split(NodePath.sep).join("/")
 
 /**
  * Cache-key salt for package-mode execution semantics.
@@ -477,6 +475,15 @@ export interface PlanReport {
     /** A cargo target's per-crate commands, when it renders more than one. */
     readonly commands?: ReadonlyArray<ReadonlyArray<string>> | undefined
     readonly sandbox?: PackageNode["sandbox"]
+    /**
+     * Whether this host can enforce the declared sandbox.
+     *
+     * Confinement is `sandbox-exec`, which exists only on macOS, so a target
+     * declaring `sandbox: { network: false }` runs with unrestricted egress
+     * everywhere else. The plan used to report the declaration and stay silent
+     * about the posture.
+     */
+    readonly sandboxEnforced?: boolean | undefined
     readonly refusal?: string | undefined
   }>
 }
@@ -490,6 +497,16 @@ export interface PlanReport {
 export interface RunOptions {
   readonly index: PackageIndexModule.PackageIndex
   readonly cacheDirectory: string
+  /**
+   * The remote cache this invocation reads and publishes through.
+   *
+   * `WORKSPACE.ts` may declare `S.Cache({ remote })` and the host may set
+   * `SMITHERS_CACHE_URL`; both were schema-validated and then dropped, so a
+   * workspace that declared a shared cache ran local-only with no warning and
+   * no line in the plan. The CLI resolves it once and hands it here, exactly
+   * as it does for BUILD mode's executor.
+   */
+  readonly remoteCache?: Workspace.RemoteCacheAccess | undefined
   readonly verb: PackageVerb
   readonly pattern: string
   readonly write?: boolean | undefined
@@ -654,6 +671,8 @@ interface PlanContext {
   /** Lazily opened cache store for plan-time closure rows and graph digests. */
   store: CacheStore | undefined
   storeWarned: boolean
+  /** The remote cache the plan-time store reads through, when one is declared. */
+  readonly remoteCache: Workspace.RemoteCacheAccess | undefined
   /** ImportClosure label → canonical result digest (plan-time, memoized). */
   /** Expanded crate sets, memoized per `S.Cargo.AppSet` label. */
   readonly crateSets: Map<string, ReadonlyArray<CrateRow>>
@@ -678,17 +697,19 @@ const planStore = async (context: PlanContext): Promise<CacheStore | undefined> 
     context.store = await openCache({
       workspaceRoot: context.root,
       cacheDirectory: context.cacheDirectory,
+      endpoint: context.remoteCache?.endpoint,
+      readToken: context.remoteCache?.readToken,
+      writeToken: context.remoteCache?.writeToken,
+      publishNamespace: context.remoteCache?.publishNamespace,
       warn: context.log
     })
     return context.store
   } catch (cause) {
     context.storeWarned = true
-    context.log(`smthrs: plan-time cache unavailable: ${Diagnostic.message(cause)}`)
+    context.log(`smthrs: plan-time cache unavailable: ${Diagnostic.describe(cause)}`)
     return undefined
   }
 }
-
-const sha256Hex = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex")
 
 /** Parses the strict Shell duration syntax admitted by the declaration schema. */
 const durationMs = (text: string): number => {
@@ -1500,7 +1521,7 @@ const visit = async (
       try {
         repositoryState = await RepoResolution.gitState(repositoryResolution, context.signal)
       } catch (cause) {
-        noteRefusal(`child repository @${repositoryResolution.repoName}: ${Diagnostic.message(cause)}`)
+        noteRefusal(`child repository @${repositoryResolution.repoName}: ${Diagnostic.describe(cause)}`)
       }
       if (context.childPlan && refusal === undefined) {
         try {
@@ -1510,7 +1531,7 @@ const visit = async (
             signal: context.signal
           })
         } catch (cause) {
-          noteRefusal(`child repository @${repositoryResolution.repoName} plan refused: ${Diagnostic.message(cause)}`)
+          noteRefusal(`child repository @${repositoryResolution.repoName} plan refused: ${Diagnostic.describe(cause)}`)
         }
       }
     }
@@ -1897,7 +1918,7 @@ const visit = async (
           toolchain.push({ tag: "GoClosure", value: plannedGo.closureIdentity })
         }
       } catch (cause) {
-        noteRefusal(`Go planning failed: ${Diagnostic.message(cause)}`)
+        noteRefusal(`Go planning failed: ${Diagnostic.describe(cause)}`)
       }
     }
   }
@@ -2236,7 +2257,7 @@ const visit = async (
       try {
         manifest = JSON.parse(await Fs.readFile(NodePath.join(context.root, ...manifestPath.split("/")), "utf8"))
       } catch (cause) {
-        noteRefusal(`could not read package manifest ${manifestPath}: ${Diagnostic.message(cause)}`)
+        noteRefusal(`could not read package manifest ${manifestPath}: ${Diagnostic.describe(cause)}`)
         break
       }
       if (
@@ -2363,7 +2384,7 @@ const visit = async (
       try {
         manifest = JSON.parse(await Fs.readFile(NodePath.join(context.root, ...manifestPath.split("/")), "utf8"))
       } catch (cause) {
-        noteRefusal(`could not read package manifest ${manifestPath}: ${Diagnostic.message(cause)}`)
+        noteRefusal(`could not read package manifest ${manifestPath}: ${Diagnostic.describe(cause)}`)
         break
       }
       if (typeof manifest.name !== "string" || manifest.name === "") {
@@ -2441,7 +2462,7 @@ const visit = async (
       noteRefusal(
         value instanceof AgentTarget.AgentNeedsInput
           ? `needs input: ${value.message} (expected: ${value.expected}); pass --input ${value.field}=<value>`
-          : `needs input: ${Diagnostic.message(value)}`
+          : `needs input: ${Diagnostic.describe(value)}`
       )
     }
   }
@@ -2857,6 +2878,7 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
     },
     store: undefined,
     storeWarned: false,
+    remoteCache: options.remoteCache,
     crateSets: new Map(),
     closureDigests: new Map(),
     closureResults: new Map(),
@@ -2916,17 +2938,33 @@ const sandboxProfileWithLoopback = `${sandboxProfile}` +
   `(allow network-inbound (local ip "localhost:*"))` +
   `(allow network-outbound (remote ip "localhost:*"))`
 
+/**
+ * Whether the declared sandbox would actually be applied on this host.
+ *
+ * A declaration that asks for nothing (`"none"`, or `network: true`) is
+ * vacuously enforced. Anything stricter needs `sandbox-exec`, which is macOS
+ * only, so on every other platform — Linux included, which is where CI runs —
+ * the answer is false and the target runs with unrestricted egress.
+ */
+const sandboxEnforceable = (sandbox: PackageNode["sandbox"]): boolean => {
+  if (sandbox === "none") return true
+  if (typeof sandbox === "object" && sandbox !== null && sandbox.network === true) return true
+  return process.platform === "darwin"
+}
+
 const wrapSandbox = (
   argv: ReadonlyArray<string>,
   sandbox: PackageNode["sandbox"],
   label: string,
-  log: (line: string) => void,
+  warn: (line: string) => void,
   loopback = false
 ): ReadonlyArray<string> => {
   if (sandbox === "none") return argv
   if (typeof sandbox === "object" && sandbox !== null && sandbox.network === true) return argv
   if (process.platform !== "darwin") {
-    log(`${label}  sandbox: unenforced on this platform`)
+    // The warning channel, not the note channel: a declared confinement that
+    // is not applied has to survive every renderer, not just the chatty ones.
+    warn(`${label}  sandbox: unenforced on this platform`)
     return argv
   }
   const loopbackDeclared = typeof sandbox === "object" && sandbox !== null && sandbox.network === "loopback"
@@ -3008,7 +3046,15 @@ export const execute = async (
   const reporter = Reporter.of(options)
   const log = reporter.note
   const startedAt = performance.now()
-  const store = await openCache({ workspaceRoot: root, cacheDirectory, warn: reporter.warn })
+  const store = await openCache({
+    workspaceRoot: root,
+    cacheDirectory,
+    endpoint: options.remoteCache?.endpoint,
+    readToken: options.remoteCache?.readToken,
+    writeToken: options.remoteCache?.writeToken,
+    publishNamespace: options.remoteCache?.publishNamespace,
+    warn: reporter.warn
+  })
   const reports = new Map<string, Executor.TargetReport>()
   const notGreen = new Set<string>()
   const byLabel = new Map(planned.workList.map((node) => [node.label, node]))
@@ -3088,7 +3134,13 @@ export const execute = async (
   ): Promise<ExecOutcome> => {
     const resolved = await resolveSpawn(node, override)
     if ("error" in resolved) return { ok: false, error: resolved.error }
-    const wrapped = wrapSandbox(resolved.argv, node.sandbox, node.label, log, node.serviceDeps.length > 0)
+    const wrapped = wrapSandbox(
+      resolved.argv,
+      node.sandbox,
+      node.label,
+      reporter.warn,
+      node.serviceDeps.length > 0
+    )
     const payload: Exec.Payload = {
       cwd: node.cwd,
       argv: wrapped as [string, ...Array<string>],
@@ -3126,7 +3178,7 @@ export const execute = async (
     ) {
       return { ok: false, error: execErrorText(value as Exec.ExecError) }
     }
-    return { ok: false, error: Diagnostic.message(value, "tool run failed") }
+    return { ok: false, error: Diagnostic.describe(value, "tool run failed") }
   }
 
   interface BuildOutput {
@@ -3207,7 +3259,7 @@ export const execute = async (
       output,
       storedAt: new Date().toISOString()
     }).catch((cause: unknown) => {
-      log(`smthrs: could not store ${node.label} in the cache: ${Diagnostic.message(cause)}`)
+      log(`smthrs: could not store ${node.label} in the cache: ${Diagnostic.describe(cause)}`)
     })
   }
 
@@ -3387,7 +3439,7 @@ export const execute = async (
     const value: unknown = Cause.squash(cause)
     if (typeof value === "string") return value
     if (isServiceError(value)) return serviceErrorText(value)
-    return Diagnostic.message(value, `${what} failed`)
+    return Diagnostic.describe(value, `${what} failed`)
   }
 
   const outcomeOfExit = (exit: Exit.Exit<Outcome, unknown>, what: string): Outcome =>
@@ -3493,17 +3545,13 @@ export const execute = async (
     const ignored = await PackageTree.snapshotIgnored(root, cacheDirectory)
     // Git cannot see a write that lands through an in-workspace symlink whose
     // real target leaves the workspace; those portals are measured directly.
-    const portals = await PackageTree.snapshotPortals(
-      root,
-      cacheDirectory,
-      (link) => log(`${label}  portal left unconfined (target too large): ${link}`)
-    )
+    const portals = await PackageTree.snapshotPortals(root, cacheDirectory)
     try {
       let ran: ExecOutcome
       try {
         ran = await body()
       } catch (cause) {
-        ran = { ok: false, error: Diagnostic.message(cause, "write failed") }
+        ran = { ok: false, error: Diagnostic.describe(cause, "write failed") }
       }
       const changed = await PackageTree.changedSinceSnapshot(snapshot, cacheDirectory)
       const changedIgnored = await PackageTree.changedIgnored(ignored, cacheDirectory)
@@ -3512,8 +3560,18 @@ export const execute = async (
       // or failed.
       const escapedPortals = await PackageTree.revertChangedPortals(portals)
       if (!ran.ok) {
-        // A failed apply reverts everything it touched: a partial write from
-        // a tool that then errored is not a state anyone asked for.
+        // A failed apply reverts every tracked change it made: a partial write
+        // from a tool that then errored is not a state anyone asked for.
+        //
+        // Gitignored paths are the documented exception, and the asymmetry is
+        // deliberate. Their prior bytes are never stashed, so `revertIgnored`
+        // deletes rather than restores. Applying that to a path inside the
+        // node's own write set would destroy a pre-existing regenerable
+        // artifact the run merely rewrote, which is worse than the partial
+        // state. So an out-of-set ignored write is reverted (it was never
+        // authorized) and an in-set one is kept. A target author who needs an
+        // ignored output to be all-or-nothing declares it as an `outDir`,
+        // which is captured and restored whole.
         for (const path of changed) await PackageTree.revertPath(snapshot, path)
         for (const path of changedIgnored) {
           const resolved = PackageTree.resolveChangedPath(root, path)
@@ -3561,11 +3619,7 @@ export const execute = async (
     // dry-run write through one lands in the same external target the real tree
     // points at. Measure those portals against the real tree: check mode must
     // never touch it.
-    const portals = await PackageTree.snapshotPortals(
-      root,
-      cacheDirectory,
-      (link) => log(`${node.label}  portal left unconfined (target too large): ${link}`)
-    )
+    const portals = await PackageTree.snapshotPortals(root, cacheDirectory)
     const scratch = await PackageTree.scratchCopy(root, cacheDirectory)
     try {
       const spawned = await spawnNode(node, scratch, signal)
@@ -3613,11 +3667,7 @@ export const execute = async (
     skip: ReadonlyArray<string> = []
   ): Promise<ExecOutcome> => {
     if (node.overlays.length === 0) return body(root)
-    const portals = await PackageTree.snapshotPortals(
-      root,
-      cacheDirectory,
-      (link) => log(`${node.label}  portal left unconfined (target too large): ${link}`)
-    )
+    const portals = await PackageTree.snapshotPortals(root, cacheDirectory)
     const scratch = await PackageTree.scratchCopy(root, cacheDirectory, skip)
     try {
       await OverlayExec.apply(scratch, node.overlays)
@@ -3754,7 +3804,7 @@ export const execute = async (
     phase: (typeof AgentTarget.AgentSessionError)["Type"]["phase"],
     cause: unknown
   ): AgentTarget.AgentSessionError =>
-    new AgentTarget.AgentSessionError({ phase, message: Diagnostic.message(cause, `${phase} failed`) })
+    new AgentTarget.AgentSessionError({ phase, message: Diagnostic.describe(cause, `${phase} failed`) })
 
   /**
    * The agent verdict store over the invocation's cache: one entry per
@@ -3794,7 +3844,7 @@ export const execute = async (
               output: { kind: "agent-verdict", value },
               storedAt: new Date().toISOString()
             }).catch((cause: unknown) => {
-              log(`smthrs: could not store the ${node.label} verdict in the cache: ${Diagnostic.message(cause)}`)
+              log(`smthrs: could not store the ${node.label} verdict in the cache: ${Diagnostic.describe(cause)}`)
             }),
           catch: (cause) => agentSessionError("cache", cause)
         })
@@ -4035,7 +4085,7 @@ export const execute = async (
       })
       const exit = await Effect.runPromiseExit(program, { signal })
       if (Exit.isFailure(exit)) {
-        throw new Error(`agent message composition failed: ${Diagnostic.message(Cause.squash(exit.cause))}`)
+        throw new Error(`agent message composition failed: ${Diagnostic.describe(Cause.squash(exit.cause))}`)
       }
       return exit.value
     }
@@ -4074,7 +4124,7 @@ export const execute = async (
   const agentFailureText = async (node: PackageNode, cause: Cause.Cause<unknown>): Promise<string> => {
     if (Cause.hasInterruptsOnly(cause)) return "agent session interrupted"
     const value: unknown = Cause.squash(cause)
-    if (typeof value !== "object" || value === null) return Diagnostic.message(value, "agent target failed")
+    if (typeof value !== "object" || value === null) return Diagnostic.describe(value, "agent target failed")
     const tag = (value as { readonly _tag?: unknown })._tag
     switch (tag) {
       case "smithers-build/AgentFindingsError": {
@@ -4108,7 +4158,7 @@ export const execute = async (
         return `agent ${error.phase}: ${error.message}`
       }
       default:
-        return Diagnostic.message(value, "agent target failed")
+        return Diagnostic.describe(value, "agent target failed")
     }
   }
 
@@ -4315,7 +4365,7 @@ export const execute = async (
             try {
               absolute = Exec.resolveWorkspacePath(root, declared)
             } catch (cause) {
-              return fail(`clean path refused: ${Diagnostic.message(cause)}`)
+              return fail(`clean path refused: ${Diagnostic.describe(cause)}`)
             }
             await Fs.rm(absolute, { recursive: true, force: true })
           }
@@ -4610,7 +4660,7 @@ export const execute = async (
                 : undefined
             }, { environment, approvalGranted: false })
           } catch (cause) {
-            return fail(Diagnostic.message(cause))
+            return fail(Diagnostic.describe(cause))
           }
           return fail(`${node.rule} outward gate returned unexpectedly`)
         }
@@ -4737,7 +4787,7 @@ export const execute = async (
                 await Fs.readFile(NodePath.join(root, ...node.lane.expectedPath.split("/")), "utf8")
               )
             } catch (cause) {
-              return fail(`could not read digest baseline ${node.lane.expectedPath}: ${Diagnostic.message(cause)}`)
+              return fail(`could not read digest baseline ${node.lane.expectedPath}: ${Diagnostic.describe(cause)}`)
             }
             if (JSON.stringify(expected) !== JSON.stringify(actual)) {
               return fail(`file digest differs from ${node.lane.expectedPath}`)
@@ -4752,7 +4802,7 @@ export const execute = async (
             left = await testOperandPaths(node.lane.left, "left")
             right = new Set(await testOperandPaths(node.lane.right, "right"))
           } catch (cause) {
-            return fail(isFilesTestError(cause) ? filesTestErrorText(cause) : Diagnostic.message(cause))
+            return fail(isFilesTestError(cause) ? filesTestErrorText(cause) : Diagnostic.describe(cause))
           }
           const leftover = left.filter((path) => !right.has(path))
           if (leftover.length > 0) {
@@ -4786,7 +4836,7 @@ export const execute = async (
               typeof value === "object" && value !== null &&
                 (value as { readonly _tag?: unknown })._tag === "smithers-build/ExecError"
                 ? execErrorText(value as Exec.ExecError)
-                : Diagnostic.message(value, "bundler resolve failed")
+                : Diagnostic.describe(value, "bundler resolve failed")
             )
           }
           const stored: StoredResolve = { kind: "bundler-resolve", result: exit.value }
@@ -4819,7 +4869,7 @@ export const execute = async (
               typeof value === "object" && value !== null &&
                 (value as { readonly _tag?: unknown })._tag === "smithers-build/ExecError"
                 ? execErrorText(value as Exec.ExecError)
-                : Diagnostic.message(value, "bundler build failed")
+                : Diagnostic.describe(value, "bundler build failed")
             )
           }
           await captureBuild(node, key)
@@ -4973,7 +5023,7 @@ export const execute = async (
           try {
             GithubTarget.openPr(node.declaration, { environment, approvalGranted: false })
           } catch (cause) {
-            return fail(GithubTarget.isPrRefused(cause) ? `refused: ${cause.message}` : Diagnostic.message(cause))
+            return fail(GithubTarget.isPrRefused(cause) ? `refused: ${cause.message}` : Diagnostic.describe(cause))
           }
           return fail("Github.Pr settled without opening a pull request")
         }
@@ -5007,7 +5057,7 @@ export const execute = async (
           return fail(refusalFor(node.rule))
       }
     } catch (cause) {
-      return fail(Diagnostic.message(cause, "target failed"))
+      return fail(Diagnostic.describe(cause, "target failed"))
     }
   }
 
@@ -5187,7 +5237,9 @@ export const run = async (options: RunOptions): Promise<Executor.Summary | PlanR
         ...(node.argv === undefined ? {} : { argv: node.argv }),
         ...(node.shards === 1 ? {} : { shards: node.shards }),
         ...(node.lane?.kind === "cargo" && node.argv === undefined ? { commands: node.lane.commands } : {}),
-        ...(node.sandbox === undefined ? {} : { sandbox: node.sandbox }),
+        ...(node.sandbox === undefined
+          ? {}
+          : { sandbox: node.sandbox, sandboxEnforced: sandboxEnforceable(node.sandbox) }),
         ...(node.refusal === undefined ? {} : { refusal: node.refusal })
       }))
     }

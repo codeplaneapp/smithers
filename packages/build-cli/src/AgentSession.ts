@@ -40,8 +40,11 @@ import * as Schema from "effect/Schema"
 import { minimatch } from "minimatch"
 import * as NodeChildProcess from "node:child_process"
 import { createHash } from "node:crypto"
+import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
+import { optionalOpenFlag } from "./internal/Fs.ts"
+import * as Path from "./internal/Path.ts"
 
 /**
  * Maximum stdout bytes accepted from one agent CLI process.
@@ -1261,11 +1264,53 @@ const resolvePromptPath = (
   const absolute = promptPath.startsWith("//")
     ? NodePath.resolve(workspaceRoot, promptPath.slice(2))
     : NodePath.resolve(packageDirectory ?? workspaceRoot, promptPath)
-  const relative = NodePath.relative(NodePath.resolve(workspaceRoot), absolute)
-  if (relative.startsWith("..") || NodePath.isAbsolute(relative)) {
+  if (!Path.contains(NodePath.resolve(workspaceRoot), absolute)) {
     throw new Error(`prompt file ${JSON.stringify(promptPath)} resolves outside the workspace`)
   }
   return absolute
+}
+
+/**
+ * Reads one workspace file into a prompt through a descriptor that cannot
+ * leave the workspace.
+ *
+ * Lexical containment is not enough here. `resolve` plus a `..` check judges
+ * the text of a path, and `stat`/`readFile` then follow symlinks, so an
+ * in-workspace link pointing at `~/.ssh/id_rsa` plus a declared path that
+ * traverses it used to send a host file straight into a model prompt. The file
+ * is opened, then the *opened descriptor* is resolved and re-checked against
+ * the real workspace root, and the size is taken from the descriptor rather
+ * than from a prior `stat` so the file cannot grow between the two.
+ */
+const readWithinWorkspace = async (
+  workspaceRoot: string,
+  absolute: string,
+  label: string,
+  limit: number
+): Promise<
+  { readonly kind: "read"; readonly bytes: Buffer } | { readonly kind: "oversize"; readonly size: number }
+> => {
+  const realRoot = await Fs.realpath(NodePath.resolve(workspaceRoot))
+  const handle = await Fs.open(absolute, NodeFs.constants.O_RDONLY | optionalOpenFlag("O_NOFOLLOW"))
+  try {
+    const stat = await handle.stat()
+    if (!stat.isFile()) throw new Error(`${label} is not a regular file`)
+    const real = await Fs.realpath(absolute)
+    if (!Path.contains(realRoot, real)) {
+      throw new Error(`${label} resolves outside the workspace through a symlink`)
+    }
+    if (stat.size > limit) return { kind: "oversize", size: stat.size }
+    const bytes = Buffer.alloc(stat.size)
+    let offset = 0
+    while (offset < stat.size) {
+      const { bytesRead } = await handle.read(bytes, offset, stat.size - offset, offset)
+      if (bytesRead === 0) break
+      offset += bytesRead
+    }
+    return { kind: "read", bytes: bytes.subarray(0, offset) }
+  } finally {
+    await handle.close()
+  }
 }
 
 const readPrompt = (
@@ -1276,11 +1321,16 @@ const readPrompt = (
   Effect.tryPromise({
     try: async () => {
       const absolute = resolvePromptPath(workspaceRoot, promptPath, packageDirectory)
-      const stat = await Fs.stat(absolute)
-      if (stat.size > AgentTarget.maximumPromptBytes) {
+      const read = await readWithinWorkspace(
+        workspaceRoot,
+        absolute,
+        `prompt file ${promptPath}`,
+        AgentTarget.maximumPromptBytes
+      )
+      if (read.kind === "oversize") {
         throw new Error(`prompt file ${promptPath} exceeds ${AgentTarget.maximumPromptBytes} bytes`)
       }
-      return await Fs.readFile(absolute, "utf8")
+      return read.bytes.toString("utf8")
     },
     catch: (cause) => sessionError("read", cause)
   })
@@ -1325,17 +1375,25 @@ export const renderDataFiles = (
       const sections: Array<string> = []
       for (const file of files) {
         const absolute = NodePath.join(workspaceRoot, file)
-        const stat = await Fs.stat(absolute)
-        if (stat.size > maximumSessionFileBytes) {
-          sections.push(`--- ${file} (omitted: ${stat.size} bytes) ---`)
+        // The data-file path had no containment check at all, only a join.
+        if (!Path.contains(NodePath.resolve(workspaceRoot), absolute)) {
+          throw new Error(`data file ${file} resolves outside the workspace`)
+        }
+        const read = await readWithinWorkspace(
+          workspaceRoot,
+          absolute,
+          `data file ${file}`,
+          maximumSessionFileBytes
+        )
+        if (read.kind === "oversize") {
+          sections.push(`--- ${file} (omitted: ${read.size} bytes) ---`)
           continue
         }
-        const bytes = await Fs.readFile(absolute)
-        if (bytes.includes(0)) {
+        if (read.bytes.includes(0)) {
           sections.push(`--- ${file} (omitted: binary) ---`)
           continue
         }
-        sections.push(`--- ${file} ---\n${bytes.toString("utf8")}`)
+        sections.push(`--- ${file} ---\n${read.bytes.toString("utf8")}`)
       }
       return `\n\n=== FILES ===\n\n${sections.join("\n\n")}`
     },

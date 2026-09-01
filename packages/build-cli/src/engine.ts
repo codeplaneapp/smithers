@@ -160,7 +160,21 @@ export const packageManagerEnvironment = (
   let bytes = 0
   for (const key of keys) {
     if (typeof key !== "string" || !usableEnvironmentName(key, windows)) {
-      throw new TypeError("environment source contains a non-portable name")
+      // A Windows name outside the environment block's own grammar cannot be
+      // carried by any spawn, so a source holding one is corrupt and the whole
+      // copy is refused. A POSIX name outside the `export NAME=` convention is
+      // a different thing: bash exports shell functions as `BASH_FUNC_which%%`
+      // and environment-modules adds more, every child inherits them, and
+      // refusing here failed every target on such a host. The package-manager
+      // layer selects from a 16-name allowlist anyway, so a name this copy
+      // drops could never have reached a child; skipping it is the honest
+      // answer, refusing the command is not.
+      if (windows || typeof key !== "string") {
+        throw new TypeError(
+          `environment source contains a non-portable name: ${JSON.stringify(String(key))}`
+        )
+      }
+      continue
     }
     let descriptor: PropertyDescriptor | undefined
     try {
@@ -358,10 +372,66 @@ export const layerInstall = Layer.mergeAll(
   Interpreter.layer(Install.Install)
 )
 
+/** Whether a value is a plain object whose own keys are all enumerable data. */
+const plainData = (value: unknown): value is Record<string, unknown> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value) || NodeUtil.isProxy(value)) return false
+  let prototype: object | null
+  let keys: Array<string | symbol>
+  try {
+    prototype = Object.getPrototypeOf(value) as object | null
+    keys = Reflect.ownKeys(value)
+  } catch {
+    return false
+  }
+  if (prototype !== Object.prototype && prototype !== null) return false
+  for (const key of keys) {
+    if (typeof key !== "string") return false
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (descriptor === undefined || !("value" in descriptor) || descriptor.enumerable !== true) return false
+  }
+  return true
+}
+
+/**
+ * Validates a caller-supplied toolchain into a frozen plain-data copy.
+ *
+ * The value crosses the same boundary as the rest of the install options, so
+ * it is read the same way: enumerable own data properties only, no accessors,
+ * no proxies, and every field checked before anything spawns.
+ */
+const normalizeToolchain = (value: unknown): Toolchain => {
+  if (!plainData(value)) throw new TypeError("install toolchain must be a plain object")
+  const text = (key: string, optional: boolean): string | undefined => {
+    const member = value[key]
+    if (member === undefined && optional) return undefined
+    if (typeof member !== "string" || member === "" || member.includes("\0") || !member.isWellFormed()) {
+      throw new TypeError(`install toolchain ${key} must be non-empty usable text`)
+    }
+    return member
+  }
+  const manager = text("manager", false)!
+  if (!managerNames.has(manager)) {
+    throw new TypeError(`install toolchain manager is not a package manager: ${JSON.stringify(manager)}`)
+  }
+  const runtime = text("runtime", false)!
+  if (!runtimeNames.has(runtime)) {
+    throw new TypeError(`install toolchain runtime is not a runtime: ${JSON.stringify(runtime)}`)
+  }
+  return Object.freeze({
+    manager: manager as PackageManager.Name,
+    managerVersion: text("managerVersion", false)!,
+    managerExecutable: text("managerExecutable", true),
+    runtime: runtime as Runtime.Name,
+    runtimeVersion: text("runtimeVersion", false)!,
+    runtimeExecutable: text("runtimeExecutable", true)
+  })
+}
+
 const normalizeRunInstallOptions = (value: unknown): {
   readonly cacheDirectory: string
   readonly sensitiveEnvironment: ReadonlyArray<string>
   readonly signal: AbortSignal | undefined
+  readonly toolchain: Toolchain | undefined
 } => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new TypeError("install options must be a plain object")
@@ -377,7 +447,7 @@ const normalizeRunInstallOptions = (value: unknown): {
   if (prototype !== Object.prototype && prototype !== null) {
     throw new TypeError("install options must be a plain object")
   }
-  const allowed = new Set(["cacheDirectory", "sensitiveEnvironment", "signal"])
+  const allowed = new Set(["cacheDirectory", "sensitiveEnvironment", "signal", "toolchain"])
   for (const key of keys) {
     if (typeof key !== "string" || !allowed.has(key)) {
       throw new TypeError(`install options contain an unknown property: ${String(key)}`)
@@ -405,10 +475,12 @@ const normalizeRunInstallOptions = (value: unknown): {
     throw new TypeError("install signal must be an AbortSignal")
   }
   const sensitive = read("sensitiveEnvironment")
+  const configuredToolchain = read("toolchain")
   return Object.freeze({
     cacheDirectory: Config.normalizeCacheDirectory(configuredCacheDirectory ?? Config.defaultCacheDirectory),
     sensitiveEnvironment: normalizeSensitiveEnvironment(sensitive ?? []),
-    signal: configuredSignal
+    signal: configuredSignal,
+    toolchain: configuredToolchain === undefined ? undefined : normalizeToolchain(configuredToolchain)
   })
 }
 
@@ -451,7 +523,10 @@ export const runInstall = async (
     )
   }
   const workspace = await Fs.realpath(NodePath.resolve(workspaceRoot))
-  const toolchain = options.toolchain ?? defaultToolchain
+  // The normalized copy, never the caller's object: the awaits above give a
+  // caller time to mutate what it passed, and the manager this pins is what
+  // actually spawns.
+  const toolchain = normalized.toolchain ?? defaultToolchain
   const runtime = layerInstall.pipe(
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),

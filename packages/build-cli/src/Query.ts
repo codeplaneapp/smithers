@@ -21,6 +21,14 @@ export interface Listing {
     readonly label: string
     readonly target: string
     readonly kinds: ReadonlyArray<Target.Kind>
+    /**
+     * Why a package-mode `Repo.Target` row resolved to nothing, when it did.
+     *
+     * Package mode has always attached this to the JSON envelope; the row type
+     * did not carry it, so {@link text} could not show it and a person reading
+     * the terminal saw a refused repository as an ordinary row.
+     */
+    readonly refusal?: string | undefined
   }>
 }
 
@@ -106,7 +114,8 @@ export const text = (result: Listing | Dependencies, style: Ansi.Palette = Ansi.
   const header = style.dim(`${"LABEL".padEnd(labelWidth)}  ${"TARGET".padEnd(targetWidth)}  KINDS`)
   const rows = result.targets.map((row) => {
     const kinds = row.kinds.map((name) => kind(name, style)).join(" ")
-    return `${row.label.padEnd(labelWidth)}  ${style.dim(row.target.padEnd(targetWidth))}  ${kinds}`
+    const line = `${row.label.padEnd(labelWidth)}  ${style.dim(row.target.padEnd(targetWidth))}  ${kinds}`
+    return row.refusal === undefined ? line : `${line}  ${style.dim(`(refused: ${row.refusal})`)}`
   })
   return [header, ...rows].join("\n")
 }

@@ -3,26 +3,38 @@
  *
  * @since 0.1.0
  */
-/* eslint-disable jsdoc/require-description, jsdoc/no-restricted-syntax */
 import type * as Go from "@smthrs/targets/Go"
 import * as Input from "@smthrs/targets/Input"
 import * as Target from "@smthrs/targets/Target"
 import type * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration"
 import * as NodeChildProcess from "node:child_process"
-import { createHash } from "node:crypto"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
+import * as Path from "./internal/Path.ts"
+import * as Text from "./internal/Text.ts"
 import * as PackageTree from "./PackageTree.ts"
 import * as StampExec from "./StampExec.ts"
 
-/** */
+/**
+ * Where one Go rule is being planned: the workspace root, the declaring
+ * package, and the workspace declaration whose toolchain shapes the build.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface Context {
   readonly root: string
   readonly packagePath: string
   readonly workspace: WorkspaceDeclaration.WorkspaceDeclaration
 }
 
-/** */
+/**
+ * The result of planning one Go rule: either a refusal, or the argv, the
+ * environment, the outputs, and the key material the executor needs.
+ *
+ * @category models
+ * @since 0.1.0
+ */
 export interface Planned {
   readonly refusal?: string
   readonly argv?: ReadonlyArray<string>
@@ -60,7 +72,13 @@ const execFile = (
     )
   })
 
-/** */
+/**
+ * Locates the host `go` toolchain and describes it as key material, or refuses
+ * with the reason the target cannot run.
+ *
+ * @category planning
+ * @since 0.1.0
+ */
 export const resolveGo = async (context: Context): Promise<
   | { readonly ok: true; readonly path: string; readonly identity: unknown }
   | { readonly ok: false; readonly refusal: string; readonly identity: unknown }
@@ -105,7 +123,13 @@ export const resolveGo = async (context: Context): Promise<
   }
 }
 
-/** */
+/**
+ * Locates `nix` and the declared dev shell, returning either the resolved
+ * interpreter path plus its key material or the reason it is unavailable.
+ *
+ * @category planning
+ * @since 0.1.0
+ */
 export const resolveNix = async (name: string, context: Context): Promise<
   | { readonly ok: true; readonly path: string; readonly identity: unknown }
   | { readonly ok: false; readonly refusal: string; readonly identity: unknown }
@@ -176,6 +200,12 @@ const patternsOf = (value: unknown, context: Context): ReadonlyArray<string> => 
 interface GoListRow {
   readonly ImportPath?: string
   readonly Dir?: string
+  readonly Standard?: boolean
+  readonly Module?: {
+    readonly Path?: string
+    readonly Dir?: string
+    readonly Replace?: { readonly Path?: string; readonly Dir?: string }
+  }
   readonly GoFiles?: ReadonlyArray<string>
   readonly CgoFiles?: ReadonlyArray<string>
   readonly TestGoFiles?: ReadonlyArray<string>
@@ -183,7 +213,43 @@ interface GoListRow {
   readonly EmbedFiles?: ReadonlyArray<string>
   readonly TestEmbedFiles?: ReadonlyArray<string>
   readonly XTestEmbedFiles?: ReadonlyArray<string>
+  readonly CFiles?: ReadonlyArray<string>
+  readonly CXXFiles?: ReadonlyArray<string>
+  readonly MFiles?: ReadonlyArray<string>
+  readonly HFiles?: ReadonlyArray<string>
+  readonly FFiles?: ReadonlyArray<string>
+  readonly SFiles?: ReadonlyArray<string>
+  readonly SwigFiles?: ReadonlyArray<string>
+  readonly SwigCXXFiles?: ReadonlyArray<string>
+  readonly SysoFiles?: ReadonlyArray<string>
 }
+
+/**
+ * Every collection `go list -json` reports that the compiler reads.
+ *
+ * The union used to stop at the Go and embed files, so editing a `.c`, `.h`,
+ * or `.s` file consumed by cgo, or swapping a prebuilt `.syso`, left the
+ * target key unchanged and the cache served a binary built from the previous
+ * sources. Every compiler input `go list` names belongs in the key.
+ */
+const compilerInputCollections = [
+  "GoFiles",
+  "CgoFiles",
+  "TestGoFiles",
+  "XTestGoFiles",
+  "EmbedFiles",
+  "TestEmbedFiles",
+  "XTestEmbedFiles",
+  "CFiles",
+  "CXXFiles",
+  "MFiles",
+  "HFiles",
+  "FFiles",
+  "SFiles",
+  "SwigFiles",
+  "SwigCXXFiles",
+  "SysoFiles"
+] as const satisfies ReadonlyArray<keyof GoListRow>
 
 const jsonRows = (text: string): ReadonlyArray<GoListRow> => {
   const rows: Array<GoListRow> = []
@@ -246,29 +312,37 @@ const closure = async (
   env: Readonly<Record<string, string>>
 ): Promise<unknown> => {
   const rows = await listed(goPath, moduleDirectory(context), packages, true, env)
-  const files = new Set<string>()
+  // Key → absolute path. In-workspace files key on their workspace-relative
+  // path. A module a `replace` directive points at a local directory outside
+  // the workspace is neither pinned by go.sum nor covered by that path, so its
+  // files key on the replacement's module path and their position inside it —
+  // stable across machines, unlike the absolute directory itself. The standard
+  // library and the module cache stay out: the toolchain identity and go.sum
+  // already pin them.
+  const files = new Map<string, string>()
   for (const row of rows) {
-    if (row.Dir === undefined) continue
-    for (
-      const name of [
-        ...(row.GoFiles ?? []),
-        ...(row.CgoFiles ?? []),
-        ...(row.TestGoFiles ?? []),
-        ...(row.XTestGoFiles ?? []),
-        ...(row.EmbedFiles ?? []),
-        ...(row.TestEmbedFiles ?? []),
-        ...(row.XTestEmbedFiles ?? [])
-      ]
-    ) {
-      const absolute = NodePath.join(row.Dir, name)
-      const relative = NodePath.relative(context.root, absolute).split(NodePath.sep).join("/")
-      if (!relative.startsWith("../") && relative !== "") files.add(relative)
+    if (row.Dir === undefined || row.Standard === true) continue
+    const replacementDir = row.Module?.Replace?.Dir
+    const replacementPath = row.Module?.Replace?.Path ?? row.Module?.Path
+    for (const collection of compilerInputCollections) {
+      for (const name of row[collection] ?? []) {
+        const absolute = NodePath.join(row.Dir, name)
+        const inside = Path.containedRelative(context.root, absolute)
+        if (inside !== undefined && inside !== "") {
+          files.set(Text.posix(inside), absolute)
+          continue
+        }
+        if (replacementDir === undefined || replacementPath === undefined) continue
+        const withinReplacement = Path.containedRelative(replacementDir, absolute)
+        if (withinReplacement === undefined || withinReplacement === "") continue
+        files.set(`replace:${replacementPath}/${Text.posix(withinReplacement)}`, absolute)
+      }
     }
   }
   const digests: Array<readonly [string, string]> = []
-  for (const file of [...files].sort()) {
-    const bytes = await Fs.readFile(NodePath.join(context.root, file))
-    digests.push([file, createHash("sha256").update(bytes).digest("hex")])
+  for (const key of [...files.keys()].sort(Text.byCodeUnit)) {
+    const bytes = await Fs.readFile(files.get(key)!)
+    digests.push([key, Text.sha256Hex(bytes)])
   }
   return { packages: [...packages].sort(), files: digests }
 }
@@ -335,10 +409,22 @@ const environment = (context: Context, attrs: Record<string, unknown>): Record<s
   return env
 }
 
-/** */
+/**
+ * The environment a Go toolchain probe runs under: the declared toolchain
+ * settings with no target-specific additions.
+ *
+ * @category planning
+ * @since 0.1.0
+ */
 export const toolchainEnvironment = (context: Context): Readonly<Record<string, string>> => environment(context, {})
 
-/** */
+/**
+ * Plans one `Go.*` rule into argv, environment, outputs, and the closure the
+ * cache key is computed over.
+ *
+ * @category planning
+ * @since 0.1.0
+ */
 export const planRule = async (
   rule: string,
   attrs: Record<string, unknown>,

@@ -242,6 +242,39 @@ describe("readiness", () => {
     }
   })
 
+  /**
+   * The exec probe used to run with no `cwd` (so it inherited the CLI
+   * process's directory) and with `serviceEnvironment(undefined)` rather than
+   * the resolved declared environment the service itself runs under. A probe
+   * naming a relative executable, or one reading a declared variable, failed
+   * even though the identical command worked in the service's own context —
+   * and `healthLoop` reuses the probe, so a healthy service was reported
+   * unhealthy and torn down.
+   */
+  it("runs an exec probe in the service's cwd under the service's environment", async () => {
+    const port = await freePort()
+    await run(Effect.scoped(Effect.gen(function*() {
+      const supervisor = yield* ServiceSupervisor.make
+      const handle = yield* supervisor.acquire({
+        ...serverSpec("//x:probe-context", port, [], {}),
+        env: { SMTHRS_PROBE_MARKER: "declared" },
+        readiness: {
+          exec: [
+            process.execPath,
+            "-e",
+            // Both facts at once: the relative path resolves only from the
+            // service's cwd, and the variable exists only in its environment.
+            "const fs=require('node:fs');" +
+            "if(!fs.existsSync('./server.mjs'))process.exit(1);" +
+            "process.exit(process.env.SMTHRS_PROBE_MARKER==='declared'?0:1)"
+          ],
+          timeout: "10s"
+        }
+      })
+      expect(alive(handle.pid)).toBe(true)
+    })))
+  })
+
   it("http readiness gates a consumer behind a delayed listen", async () => {
     const port = await freePort()
     const started = Date.now()

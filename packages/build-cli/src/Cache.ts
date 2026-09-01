@@ -22,6 +22,7 @@ import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import * as NodeUtil from "node:util/types"
+import { errorCode, failureMessage, optionalOpenFlag } from "./internal/Fs.ts"
 
 /**
  * One stored target execution result.
@@ -157,33 +158,6 @@ export const sanitizeKey = (key: string): string => {
     throw new TypeError(`cache key must contain 1 to ${maximumCacheKeyCodeUnits} UTF-16 code units`)
   }
   return wellFormedKey.test(key) ? key : createHash("sha256").update(Buffer.from(key, "utf16le")).digest("hex")
-}
-
-const errorCode = (error: unknown): string | undefined => {
-  if (typeof error !== "object" || error === null || NodeUtil.isProxy(error)) return undefined
-  try {
-    const descriptor = Object.getOwnPropertyDescriptor(error, "code")
-    return descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "string"
-      ? descriptor.value
-      : undefined
-  } catch {
-    return undefined
-  }
-}
-
-const failureMessage = (cause: unknown): string => {
-  if ((typeof cause !== "object" && typeof cause !== "function") || cause === null || NodeUtil.isProxy(cause)) {
-    return "unavailable failure"
-  }
-  try {
-    const descriptor = Object.getOwnPropertyDescriptor(cause, "message")
-    if (descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "string") {
-      return descriptor.value === "" ? "unavailable failure" : descriptor.value
-    }
-  } catch {
-    // Fall through to the deliberately generic message.
-  }
-  return "unavailable failure"
 }
 
 const combinedFailure = (primary: unknown, secondary: unknown, secondaryLabel: string): Error => {
@@ -506,9 +480,6 @@ const localPath = (cacheRoot: string, key: string): string => {
  * libuv define neither `O_NOFOLLOW` nor `O_NONBLOCK`; a missing flag
  * contributes nothing rather than crashing the open.
  */
-const optionalOpenFlag = (name: "O_NOFOLLOW" | "O_NONBLOCK"): number =>
-  (NodeFs.constants as Partial<Record<string, number>>)[name] ?? 0
-
 /**
  * Reads one entry file as JSON, or null when it is absent, not a plain file,
  * too large, or not JSON.
