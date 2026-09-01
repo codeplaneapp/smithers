@@ -37,7 +37,10 @@ describe("Runner", () => {
         )
       )
     )
-    expect(output[0]).toMatchObject({ kind: "inconclusive", reason: expect.stringContaining("inconclusive") })
+    // The observation has to name what went wrong. A fixed sentence made a
+    // scorer bug and an unreachable judge produce the same record, and this
+    // reason is the only field a reader downstream ever sees.
+    expect(output[0]).toMatchObject({ kind: "inconclusive", reason: expect.stringContaining("boom") })
     expect(seen).toEqual(output)
   })
 
