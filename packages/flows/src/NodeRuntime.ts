@@ -84,9 +84,32 @@ const Configuration = Schema.Struct({
   owner: Schema.Struct({ hostId: Schema.NonEmptyString })
 })
 
-const validate = (options: Options): Options => {
-  Schema.decodeUnknownSync(Configuration)(options)
-  return options
+interface ValidatedOptions {
+  readonly filename: string
+  readonly workspaceRoot: string
+  readonly owner: Readonly<{ readonly hostId: string }>
+  readonly isAlive: Ownership.LivenessCheck
+}
+
+/** Captures one absolute, immutable runtime configuration at API entry. */
+const validate = (options: Options): ValidatedOptions => {
+  const filename = options.filename
+  const workspaceRoot = options.workspaceRoot
+  const owner = options.owner
+  const isAlive = options.isAlive
+  const decoded = Schema.decodeUnknownSync(Configuration)({
+    filename,
+    ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
+    owner
+  })
+  if (typeof isAlive !== "function") throw new TypeError("NodeRuntime isAlive must be a function")
+  const absoluteFilename = resolve(decoded.filename)
+  return Object.freeze({
+    filename: absoluteFilename,
+    workspaceRoot: resolve(decoded.workspaceRoot ?? dirname(absoluteFilename)),
+    owner: Object.freeze({ hostId: decoded.owner.hostId }),
+    isAlive
+  })
 }
 
 /**
@@ -122,7 +145,7 @@ const databaseLayer = (filename: string) =>
  * @slop
  */
 export const storage = (filename: string, workspaceRoot?: string) => {
-  const validatedFilename = Schema.decodeUnknownSync(Schema.NonEmptyString)(filename)
+  const validatedFilename = resolve(Schema.decodeUnknownSync(Schema.NonEmptyString)(filename))
   const databaseRoot = dirname(validatedFilename)
   const resolvedWorkspaceRoot = resolve(
     Schema.decodeUnknownSync(Schema.NonEmptyString)(workspaceRoot ?? databaseRoot)
@@ -136,7 +159,7 @@ export const storage = (filename: string, workspaceRoot?: string) => {
     DurableEngineState.layer,
     OwnerIdentity.layer,
     Workspace.layer(resolvedWorkspaceRoot),
-    ArtifactStore.layerFileSystem({ directory: join(databaseRoot, ".flows/objects") })
+    ArtifactStore.layerFileSystem({ directory: join(databaseRoot, "objects") })
   ).pipe(Layer.provideMerge(database))
 }
 
@@ -307,7 +330,7 @@ export interface HostOptions {
 }
 
 /** The signals a host shuts down on when its program names none. */
-const defaultSignals: ReadonlyArray<NodeJS.Signals> = ["SIGINT", "SIGTERM"]
+const defaultSignals: ReadonlyArray<NodeJS.Signals> = Object.freeze(["SIGINT", "SIGTERM"])
 
 /**
  * How long a graceful shutdown may take before the host leaves anyway.
@@ -316,6 +339,130 @@ const defaultSignals: ReadonlyArray<NodeJS.Signals> = ["SIGINT", "SIGTERM"]
  * @category models
  */
 export const defaultShutdownTimeoutMs = 30_000
+
+/** Largest delay Node accepts without truncating it to a one-millisecond timer. */
+export const maximumShutdownTimeoutMs = 2_147_483_647
+
+const catchableSignals = new Set<NodeJS.Signals>(
+  Object.keys(constants.signals)
+    .filter((signal) => signal !== "SIGKILL" && signal !== "SIGSTOP") as Array<NodeJS.Signals>
+)
+
+/** Validates, de-duplicates, and snapshots signal configuration. */
+const snapshotSignals = (
+  signals: ReadonlyArray<NodeJS.Signals> | undefined
+): ReadonlyArray<NodeJS.Signals> => {
+  const configured = signals ?? defaultSignals
+  if (!Array.isArray(configured)) throw new TypeError("NodeRuntime signals must be an array")
+  const snapshot: Array<NodeJS.Signals> = []
+  const seen = new Set<NodeJS.Signals>()
+  for (const candidate of configured as ReadonlyArray<unknown>) {
+    if (typeof candidate !== "string" || !catchableSignals.has(candidate as NodeJS.Signals)) {
+      throw new TypeError(`NodeRuntime cannot install signal ${String(candidate)}`)
+    }
+    const signal = candidate as NodeJS.Signals
+    if (!seen.has(signal)) {
+      seen.add(signal)
+      snapshot.push(signal)
+    }
+  }
+  return Object.freeze(snapshot)
+}
+
+/** Validates and snapshots the one timer used by graceful shutdown. */
+const snapshotShutdownTimeout = (timeoutMs: number | undefined): number => {
+  const timeout = timeoutMs ?? defaultShutdownTimeoutMs
+  if (!Number.isSafeInteger(timeout) || timeout < 0 || timeout > maximumShutdownTimeoutMs) {
+    throw new TypeError(
+      `NodeRuntime shutdownTimeoutMs must be an integer from 0 through ${maximumShutdownTimeoutMs}`
+    )
+  }
+  return timeout
+}
+
+const snapshotRule = (rule: Permission.Rule): Permission.Rule =>
+  new Permission.Rule({
+    effect: rule.effect,
+    pattern: new Capability.CapabilityPattern({
+      action: rule.pattern.action,
+      resource: rule.pattern.resource
+    })
+  })
+
+/** Detaches policy arrays and rule objects from mutable caller-owned input. */
+const snapshotRules = (
+  rules: GrantStore.MakeOptions["rules"]
+): GrantStore.MakeOptions["rules"] => {
+  if (rules === undefined) return undefined
+  if (!Array.isArray(rules)) throw new TypeError("NodeRuntime rules must be an array")
+  if (rules.length > 0 && Array.isArray(rules[0])) {
+    return Object.freeze(
+      (rules as ReadonlyArray<ReadonlyArray<Permission.Rule>>).map((ruleset) => {
+        if (!Array.isArray(ruleset)) throw new TypeError("NodeRuntime rulesets must be arrays")
+        return Object.freeze(ruleset.map(snapshotRule))
+      })
+    )
+  }
+  return Object.freeze((rules as ReadonlyArray<Permission.Rule>).map(snapshotRule))
+}
+
+/** Detaches containment callbacks and scalars from a caller-owned options object. */
+const snapshotContainment = (
+  options: (ContainedSpawner.Options & ProcessReaper.Options) | undefined
+): (ContainedSpawner.Options & ProcessReaper.Options) | undefined => {
+  if (options === undefined) return undefined
+  const graceMs = options.graceMs
+  const platform = options.platform
+  const ownerPid = options.ownerPid
+  const system = options.system
+  const systemSnapshot = system === undefined
+    ? undefined
+    : Object.freeze({
+      isAlive: system.isAlive,
+      startedAtMs: system.startedAtMs,
+      ownGroup: system.ownGroup,
+      bootedAtMs: system.bootedAtMs,
+      killTree: system.killTree
+    })
+  return Object.freeze({
+    ...(graceMs === undefined ? {} : { graceMs }),
+    ...(platform === undefined ? {} : { platform }),
+    ...(ownerPid === undefined ? {} : { ownerPid }),
+    ...(systemSnapshot === undefined ? {} : { system: systemSnapshot })
+  })
+}
+
+interface ValidatedHostOptions extends ValidatedOptions {
+  readonly rules: GrantStore.MakeOptions["rules"]
+  readonly signals: ReadonlyArray<NodeJS.Signals>
+  readonly shutdownTimeoutMs: number
+  readonly containment: (ContainedSpawner.Options & ProcessReaper.Options) | undefined
+}
+
+/** Captures every host option before construction returns to the caller. */
+const validateHost = (options: HostOptions): ValidatedHostOptions => {
+  const filename = options.filename
+  const workspaceRoot = options.workspaceRoot
+  const owner = options.owner
+  const configuredLiveness = options.isAlive
+  const rules = options.rules
+  const signals = options.signals
+  const shutdownTimeoutMs = options.shutdownTimeoutMs
+  const containment = options.containment
+  const validated = validate({
+    filename,
+    ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
+    owner,
+    isAlive: configuredLiveness ?? HostLiveness.isAlive({ hostId: owner.hostId })
+  })
+  return Object.freeze({
+    ...validated,
+    rules: snapshotRules(rules),
+    signals: snapshotSignals(signals),
+    shutdownTimeoutMs: snapshotShutdownTimeout(shutdownTimeoutMs),
+    containment: snapshotContainment(containment)
+  })
+}
 
 /**
  * The status a process that was ended by `signal` exits with.
@@ -424,13 +571,17 @@ const onSignal = (
       }
       return { signal, handler }
     })
-    for (const { handler, signal } of handlers) process.on(signal, handler)
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         if (deadline !== undefined) clearTimeout(deadline)
-        for (const { handler, signal } of handlers) process.removeListener(signal, handler)
       })
     )
+    for (const { handler, signal } of handlers) {
+      yield* Effect.acquireRelease(
+        Effect.sync(() => process.on(signal, handler)),
+        () => Effect.sync(() => process.removeListener(signal, handler))
+      )
+    }
   })
 
 /**
@@ -487,13 +638,8 @@ export const layerHost = <
   registerFlows: Layer.Layer<Registered, RegistrationError, RegistrationRequirements>,
   registry: Layer.Layer<RegistryOut, RegistryError, RegistryRequirements> = emptyRegistry()
 ) => {
-  const validated = validate({
-    filename: options.filename,
-    ...(options.workspaceRoot === undefined ? {} : { workspaceRoot: options.workspaceRoot }),
-    owner: options.owner,
-    isAlive: options.isAlive ?? HostLiveness.isAlive({ hostId: options.owner.hostId })
-  })
-  const workspaceRoot = resolve(validated.workspaceRoot ?? dirname(validated.filename))
+  const validated = validateHost(options)
+  const workspaceRoot = validated.workspaceRoot
   // The layering is the design decision this function makes, and it has two
   // sides. The engine's MACHINERY — the SQLite storage, the step boundary, the
   // workspace sandbox — runs on the raw host: a database directory the engine
@@ -509,8 +655,8 @@ export const layerHost = <
     Layer.provideMerge(store)
   )
   const guarded = HostServices.layer.pipe(
-    Layer.provide(Layer.orDie(GrantStore.layer({ attended: false, rules: withEngineRules(options.rules) }))),
-    Layer.provideMerge(NodeHost.layerContainedAt(workspaceRoot, options.containment)),
+    Layer.provide(Layer.orDie(GrantStore.layer({ attended: false, rules: withEngineRules(validated.rules) }))),
+    Layer.provideMerge(NodeHost.layerContainedAt(workspaceRoot, validated.containment)),
     Layer.provideMerge(ProcessLedger.layer({ hostId: validated.owner.hostId, ownerPid: process.pid })),
     Layer.provideMerge(execution)
   )
@@ -534,9 +680,9 @@ export const layerHost = <
     const runtime = yield* Scope.fork(parent)
     const context = yield* Effect.provideService(Layer.build(composed), Scope.Scope, runtime)
     yield* onSignal(
-      options.signals ?? defaultSignals,
+      validated.signals,
       runtime,
-      options.shutdownTimeoutMs ?? defaultShutdownTimeoutMs
+      validated.shutdownTimeoutMs
     )
     return context
   }))

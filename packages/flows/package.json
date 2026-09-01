@@ -103,8 +103,13 @@
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {
+    "@effect/platform-node": "4.0.0-rc.108",
     "@effect/language-service": "0.87.1",
     "@effect/vitest": "4.0.0-rc.108",
+    "@smthrs/agent": "1.0.0-rc.0",
+    "@smthrs/cli": "1.0.0-rc.0",
+    "@smthrs/control": "1.0.0-rc.0",
+    "@smthrs/model": "1.0.0-rc.0",
     "@eslint/js": "9.39.1",
     "@types/node": "25.9.5",
     "@vitest/coverage-v8": "4.1.9",
