@@ -8,6 +8,8 @@ import * as FileSystem from "effect/FileSystem"
 import * as PlatformError from "effect/PlatformError"
 import { fileInfo } from "./fileInfo.ts"
 import { platformError } from "./platformError.ts"
+import { readDirectory } from "./readDirectory.ts"
+import { realPath } from "./realPath.ts"
 import { streamFile } from "./streamFile.ts"
 import type { ZenFsPromisesLike } from "./ZenFsPromisesLike.ts"
 
@@ -63,6 +65,35 @@ const unsupported = (method: string): Effect.Effect<never, PlatformError.Platfor
   )
 
 /**
+ * The permission bits `access` checks a stats `mode` against.
+ *
+ * A mounted volume has no user identity to check a request against, so the
+ * reported `mode` is the whole answer: a path is readable when any read bit
+ * is set and writable when any write bit is set. That is stricter than
+ * dropping the option, which reports a read-only file as writable.
+ *
+ * @private
+ */
+const permitted = (mode: number, options: { readonly readable?: boolean | undefined; readonly writable?: boolean | undefined }): boolean =>
+  (options.readable !== true || (mode & 0o444) !== 0) &&
+  (options.writable !== true || (mode & 0o222) !== 0)
+
+/**
+ * The refusal `access` answers with when the path exists but not with the
+ * permission the caller asked about.
+ *
+ * @private
+ */
+const denied = (path: string): PlatformError.PlatformError =>
+  PlatformError.systemError({
+    _tag: "PermissionDenied",
+    module: "FileSystem",
+    method: "access",
+    pathOrDescriptor: path,
+    description: "the path does not carry the requested permission"
+  })
+
+/**
  * Constructs a `FileSystem` over a ZenFS-shaped backend.
  *
  * Only the operations a browser backend can actually serve are wired up.
@@ -80,6 +111,16 @@ const unsupported = (method: string): Effect.Effect<never, PlatformError.Platfor
  * `makeNoop` — unlike `make` — does not derive them. Each gap that
  * turns out to matter becomes a ticket, not a silently-wrong implementation
  * (`Concepts/Tickets Not Exceptions.md`).
+ *
+ * The operations that *are* served honour their options rather than dropping
+ * them: `readDirectory` walks the tree for `recursive`, `access` answers
+ * `readable`/`writable` from the reported mode, `makeDirectory` forwards
+ * `mode`, `realPath` canonicalizes, `writeFile` forwards `flag` and `mode`,
+ * and `exists` reports `false` only for a path that is absent, propagating
+ * every other backend failure the way effect's own derivation does.
+ *
+ * The service this builds carries **no** kernel isolation attestation; `layer`
+ * is the composition that makes that claim.
  *
  * @category constructors
  * @since 0.1.0
@@ -126,25 +167,29 @@ export const make = (fs: ZenFsPromisesLike): FileSystem.FileSystem =>
         }),
         (bytes) => writeBytes(fs, path, bytes, options)
       ),
+    /**
+     * `mode` is forwarded for the same reason `writeBytes` forwards it:
+     * creating a directory 0755 when the caller asked for 0700 is a silent
+     * permission widening, not a missing feature.
+     */
     makeDirectory: (path, options) =>
       Effect.asVoid(
         Effect.tryPromise({
-          try: () => fs.mkdir(path, { recursive: options?.recursive ?? false }),
+          try: () =>
+            fs.mkdir(path, {
+              recursive: options?.recursive ?? false,
+              ...(options?.mode === undefined ? {} : { mode: options.mode })
+            }),
           catch: platformError("makeDirectory", path)
         })
       ),
-    readDirectory: (path) =>
-      Effect.tryPromise({ try: () => fs.readdir(path), catch: platformError("readDirectory", path) }),
+    readDirectory: (path, options) => readDirectory(fs, path, options),
     stat: (path) =>
       Effect.map(
         Effect.tryPromise({ try: () => fs.stat(path), catch: platformError("stat", path) }),
         fileInfo
       ),
-    realPath: (path) =>
-      Effect.as(
-        Effect.tryPromise({ try: () => fs.stat(path), catch: platformError("realPath", path) }),
-        path
-      ),
+    realPath: (path) => realPath(fs, path),
     remove: (path, options) =>
       Effect.tryPromise({
         try: () =>
@@ -154,17 +199,30 @@ export const make = (fs: ZenFsPromisesLike): FileSystem.FileSystem =>
           }),
         catch: platformError("remove", path)
       }),
-    access: (path) =>
-      Effect.asVoid(
-        Effect.tryPromise({ try: () => fs.stat(path), catch: platformError("access", path) })
+    /**
+     * `readable` and `writable` are answered from the reported `mode` rather
+     * than dropped: a `writable` check that succeeds on a read-only file is a
+     * false green for a caller using `access` as a permission pre-check. `ok`
+     * asks for the existence check a bare `access` already performs.
+     */
+    access: (path, options) =>
+      Effect.flatMap(
+        Effect.tryPromise({ try: () => fs.stat(path), catch: platformError("access", path) }),
+        (stats) =>
+          options === undefined || permitted(stats.mode, options)
+            ? Effect.void
+            : Effect.fail(denied(path))
       ),
     /**
      * `makeNoop` hardcodes `exists` to `false` (it does not derive it from
-     * `access` the way `make` does), so it has to be overridden explicitly.
+     * `access` the way `make` does), so it has to be overridden explicitly —
+     * with effect's own derivation, where only `NotFound` becomes `false` and
+     * every other failure propagates. Collapsing a permission refusal into
+     * "this path does not exist" answers a question the backend refused.
      */
     exists: (path) =>
-      Effect.match(
-        Effect.tryPromise({ try: () => fs.stat(path), catch: platformError("exists", path) }),
-        { onFailure: () => false, onSuccess: () => true }
+      Effect.tryPromise({ try: () => fs.stat(path), catch: platformError("exists", path) }).pipe(
+        Effect.as(true),
+        Effect.catch((error) => error.reason._tag === "NotFound" ? Effect.succeed(false) : Effect.fail(error))
       )
   })
