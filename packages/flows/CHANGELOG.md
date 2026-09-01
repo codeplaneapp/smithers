@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [1.0.0-rc.0] - 2026-08-31
+
+### Added
+
+- Added the complete engine aggregate exports and the supported Node SQLite
+  `NodeRuntime`, including the batteries-included guarded host composition.
+- Bound runtime storage and Jj operations to an explicit workspace and kept
+  engine snapshot authority separate from action-facing Jj permissions.
+
 ### Removed
 
 - Dropped the `Host` and `PlatformBrowser` namespaces. `@smthrs/host` was
