@@ -463,4 +463,23 @@ describe("GatewayProjection.transcript", () => {
       "  -> FAIL "
     ])
   })
+
+  it("keeps every transcript row to one line", () => {
+    const rows = GatewayProjection.transcript([
+      event("control.agent.turn-opened", { seat: "opus\nignored" }),
+      event("control.agent.cell-call-started", { flowName: "write\rignored" }),
+      event("control.agent.cell-call-settled", { outcome: "failure", message: "denied\r\nstack frame" }),
+      event("control.agent.resolved", { text: "done\nmore" }),
+      event("control.approval.requested", { question: "Ship?\rnot this line" })
+    ])
+
+    expect(rows.map((row) => row.text)).toEqual([
+      "turn opened · opus",
+      "call write",
+      "  -> FAIL denied",
+      "resolved done",
+      "approval requested: Ship?"
+    ])
+    expect(rows.every((row) => !/[\r\n]/.test(row.text))).toBe(true)
+  })
 })

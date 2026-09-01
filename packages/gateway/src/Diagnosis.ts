@@ -114,7 +114,7 @@ const timeOf = (event: ControlSchema.ControlEvent): number => asNumber(asRecord(
  * left the `\r` of a CRLF cause on the wire.
  */
 const firstLine = (text: string): string => {
-  const index = text.search(/\r?\n/)
+  const index = text.search(/[\r\n]/)
   return index < 0 ? text : text.slice(0, index)
 }
 

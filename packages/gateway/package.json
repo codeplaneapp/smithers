@@ -81,10 +81,7 @@
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-rc.108",
-    "@effect/platform-node-shared": "4.0.0-rc.108",
     "@smthrs/control": "1.0.0-rc.0",
-    "@smthrs/journal": "1.0.0-rc.0",
-    "@smthrs/notifications": "1.0.0-rc.0",
     "@smthrs/run-store": "1.0.0-rc.0",
     "@smthrs/sync": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"
@@ -97,7 +94,9 @@
     "@smthrs/engine-store": "1.0.0-rc.0",
     "@smthrs/flow": "1.0.0-rc.0",
     "@smthrs/flows": "1.0.0-rc.0",
+    "@smthrs/journal": "1.0.0-rc.0",
     "@smthrs/kernel": "1.0.0-rc.0",
+    "@smthrs/notifications": "1.0.0-rc.0",
     "@smthrs/registry": "1.0.0-rc.0",
     "@types/node": "25.9.5",
     "@vitest/coverage-v8": "4.1.9",

@@ -31,7 +31,7 @@ import type { ApprovalPayload, PlanCard } from "@smthrs/control/ControlSchema"
 import { SyncAuth as SyncAuthTag } from "@smthrs/sync/SyncRpcs"
 import * as SyncServer from "@smthrs/sync/SyncServer"
 import { Effect, Layer, type Scope, Stream } from "effect"
-import { HttpServer } from "effect/unstable/http"
+import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
 import { connect } from "node:net"
 import { GatewayError, GatewayErrorCode, type GatewayErrorCode as GatewayErrorCodeValue } from "../src/GatewayError.ts"
@@ -122,6 +122,137 @@ const raw = (
   })
 }
 
+/**
+ * One authenticated WebSocket exchange, framed by hand.
+ *
+ * No `ws` package resolves from this package, and Node's global `WebSocket`
+ * cannot attach an `Authorization` header to the upgrade request.
+ */
+const socketExchange = (
+  target: string,
+  credential: string,
+  payload: string
+): Promise<ReadonlyArray<string>> => {
+  const url = new URL(target)
+  return new Promise((resolve, reject) => {
+    let received = Buffer.alloc(0)
+    let upgraded = false
+    let finished = false
+    const texts: Array<string> = []
+    const socket = connect({ host: url.hostname, port: Number(url.port) }, () => {
+      socket.write([
+        `GET ${url.pathname}${url.search} HTTP/1.1`,
+        `Host: ${url.host}`,
+        "Connection: Upgrade",
+        "Upgrade: websocket",
+        "Sec-WebSocket-Version: 13",
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+        `Authorization: Bearer ${credential}`,
+        "",
+        ""
+      ].join("\r\n"))
+    })
+    const fail = (error: Error) => {
+      if (finished) return
+      finished = true
+      socket.destroy()
+      reject(error)
+    }
+    const done = () => {
+      if (finished) return
+      finished = true
+      socket.destroy()
+      resolve(texts)
+    }
+    const clientFrame = () => {
+      const data = Buffer.from(payload, "utf8")
+      const mask = Buffer.from([0x12, 0x34, 0x56, 0x78])
+      let head: Buffer
+      if (data.length < 126) {
+        head = Buffer.from([0x81, 0x80 | data.length])
+      } else if (data.length <= 0xffff) {
+        head = Buffer.alloc(4)
+        head[0] = 0x81
+        head[1] = 0x80 | 126
+        head.writeUInt16BE(data.length, 2)
+      } else {
+        head = Buffer.alloc(10)
+        head[0] = 0x81
+        head[1] = 0x80 | 127
+        head.writeBigUInt64BE(BigInt(data.length), 2)
+      }
+      const masked = Buffer.alloc(data.length)
+      for (let index = 0; index < data.length; index++) {
+        masked[index] = data[index]! ^ mask[index % mask.length]!
+      }
+      return Buffer.concat([head, mask, masked])
+    }
+    const read = () => {
+      if (!upgraded) {
+        const separator = received.indexOf("\r\n\r\n")
+        if (separator < 0) return
+        const headers = received.subarray(0, separator).toString("utf8")
+        const status = Number(/^HTTP\/1\.1 (\d+)/.exec(headers)?.[1] ?? 0)
+        if (status !== 101) {
+          fail(new Error(`WebSocket upgrade answered ${status}`))
+          return
+        }
+        upgraded = true
+        received = received.subarray(separator + 4)
+        socket.write(clientFrame())
+      }
+
+      while (received.length >= 2) {
+        const opcode = received[0]! & 0x0f
+        if ((received[1]! & 0x80) !== 0) {
+          fail(new Error("WebSocket server sent a masked frame"))
+          return
+        }
+        let length = received[1]! & 0x7f
+        let offset = 2
+        if (length === 126) {
+          if (received.length < 4) return
+          length = received.readUInt16BE(2)
+          offset = 4
+        } else if (length === 127) {
+          if (received.length < 10) return
+          const wideLength = received.readBigUInt64BE(2)
+          if (wideLength > BigInt(Number.MAX_SAFE_INTEGER)) {
+            fail(new Error("WebSocket frame is too large to decode"))
+            return
+          }
+          length = Number(wideLength)
+          offset = 10
+        }
+        if (received.length < offset + length) return
+        const data = received.subarray(offset, offset + length)
+        received = received.subarray(offset + length)
+        if (opcode === 0x8) {
+          if (texts.length > 0) done()
+          else fail(new Error("WebSocket closed before answering"))
+          return
+        }
+        if (opcode === 0x1 || opcode === 0x2) {
+          const text = data.toString("utf8")
+          texts.push(text)
+          if (text.includes("\"Exit\"")) {
+            done()
+            return
+          }
+        }
+        // Ping and pong control frames carry no RPC data.
+      }
+    }
+    socket.setTimeout(5_000, () => fail(new Error("WebSocket exchange timed out")))
+    socket.on("data", (chunk: Buffer) => {
+      received = Buffer.concat([received, chunk])
+      read()
+    })
+    socket.on("end", () => fail(new Error("WebSocket ended before answering")))
+    socket.on("error", fail)
+  })
+}
+
 /** A control client speaking to the served gateway over real HTTP and WebSocket. */
 const client = (url: string, credential?: string | undefined) =>
   ControlClient.layer(credential === undefined ? { url: `${url}/rpc` } : { url: `${url}/rpc`, credential }).pipe(
@@ -190,6 +321,82 @@ describe("telling a size overflow from every other body-read failure", () => {
     expect(unreadable.error.message).toBe("POST /projections carries a body the server could not read")
   })
 })
+
+describe("classifying a request target the way the router will", () => {
+  // Measured against `HttpRouter` on this tree with a single `/rpc` route:
+  // every spelling on the left of the first list answered 200 and every
+  // spelling in the second answered 404. The guard has to agree, because it
+  // decides authentication and the body limit before the router runs.
+  it.each([
+    ["/rpc", "/rpc"],
+    ["/%72pc", "/rpc"],
+    ["/%72%70%63", "/rpc"],
+    ["/rpc;transport-parameter", "/rpc"],
+    ["/rpc;p/", "/rpc"],
+    ["/rpc/;p", "/rpc"],
+    ["/rpc/", "/rpc"],
+    ["//rpc", "/rpc"],
+    ["///rpc", "/rpc"],
+    ["/rpc//", "/rpc"],
+    ["/RPC", "/rpc"],
+    ["/./rpc", "/rpc"],
+    ["/foo/../rpc", "/rpc"],
+    ["/rpc?x=1", "/rpc"],
+    ["/rpc#fragment", "/rpc"],
+    ["http://gateway.invalid/rpc", "/rpc"],
+    // The client the product ships posts here, and a literal comparison
+    // recognised none of it.
+    ["/rpc/ws", "/rpc/ws"],
+    ["//rpc/ws", "/rpc/ws"],
+    ["/RPC/WS", "/rpc/ws"]
+  ])("resolves %s to the mount %s", (target, expected) => {
+    expect(GatewayServer.routedPath(target)).toBe(expected)
+  })
+
+  it.each([
+    // A reserved character left encoded is not a separator, to the router or
+    // here, so none of these names a mount.
+    "/rpc%2f",
+    "/rpc%3Bp",
+    "/%2frpc",
+    "/rpc%20",
+    "/ rpc"
+  ])("keeps %s off the mounts, as the router does", (target) => {
+    expect(GatewayServer.protectedPaths).not.toContain(GatewayServer.routedPath(target))
+  })
+
+  it("leaves an invalid escape as written rather than refusing to classify", () => {
+    // `decodeURI` throws on `%ZZ`. The segment is kept as it stands: it names
+    // no mount either way, and the router answers it as an unknown route.
+    expect(GatewayServer.routedPath("/%ZZ")).toBe("/%zz")
+  })
+
+  it("compares an unparseable absolute target as written", () => {
+    // A target that is not a URL at all names no mount. `URL.parse` answers
+    // null rather than throwing, so the guard returns the target unchanged
+    // and the router answers the unknown route.
+    expect(GatewayServer.routedPath("http://[")).toBe("http://[")
+  })
+})
+
+it.effect("leaves an invalid percent escape as an unknown route", () =>
+  Effect.acquireUseRelease(
+    Effect.sync(() =>
+      HttpRouter.toWebHandler(
+        Layer.mergeAll(
+          HttpRouter.add("GET", "/health", HttpServerResponse.text("ok")),
+          GatewayServer.layerIngress()
+        ).pipe(Layer.provide(RpcSerialization.layerNdjson)),
+        { disableLogger: true }
+      )
+    ),
+    ({ handler }) =>
+      Effect.gen(function*() {
+        const response = yield* Effect.promise(() => handler(new Request("http://gateway.invalid/%ZZ")))
+        expect(response.status).toBe(404)
+      }),
+    ({ dispose }) => Effect.promise(dispose)
+  ))
 
 describe("the assembled gateway over a real loopback bind", () => {
   test("answers GET /health with the workspace identity and the package version", () =>
@@ -338,6 +545,51 @@ describe("the assembled gateway over a real loopback bind", () => {
       credential: "edge-secret",
       maxRequestBodyBytes: 64
     }))))
+
+  test("authenticates router-equivalent aliases before reading or upgrading", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const body = "{}"
+      // Every spelling here reaches the `/rpc` handler: the router decodes
+      // percent escapes, drops a `;` parameter, ignores empty segments, and
+      // matches without regard to case. The guard has to classify a request
+      // the way the router will, or an alias walks past the credential check
+      // and the body limit and is answered by the mount itself.
+      for (
+        const target of [
+          "/%72pc",
+          "/rpc;transport-parameter",
+          "/rpc/",
+          "//rpc",
+          "///rpc",
+          "/rpc//",
+          "/RPC",
+          "/rpc;p/"
+        ]
+      ) {
+        const response = yield* Effect.promise(() =>
+          raw(`${url}${target}`, [
+            `POST ${target} HTTP/1.1`,
+            "Content-Type: application/json",
+            `Content-Length: ${body.length}`
+          ], body)
+        )
+        expect([target, response.status]).toEqual([target, 401])
+      }
+
+      for (const target of ["/%72pc/ws", "/rpc/ws;transport-parameter", "//rpc/ws", "/rpc/ws/", "/RPC/WS"]) {
+        const response = yield* Effect.promise(() =>
+          raw(`${url}${target}`, [
+            `GET ${target} HTTP/1.1`,
+            "Connection: Upgrade",
+            "Upgrade: websocket",
+            "Sec-WebSocket-Version: 13",
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="
+          ])
+        )
+        expect([target, response.status]).toEqual([target, 401])
+      }
+    }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, credential: "edge-secret" }))))
 
   test("lets an authenticated request reach the body guard", () =>
     Effect.gen(function*() {
@@ -590,6 +842,70 @@ describe("the assembled gateway over a real loopback bind", () => {
       }
     }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, credential: "edge-secret" }))))
 
+  test("admits a credentialed WebSocket upgrade on every protected socket", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      // This is the positive half of the edge-authentication contract: the
+      // same guard that refuses a missing bearer must admit the configured one
+      // on every protected socket mount.
+      for (const path of ["/rpc/ws", "/projections/ws", "/sync/ws"]) {
+        const response = yield* Effect.promise(() =>
+          raw(`${url}${path}`, [
+            `GET ${path} HTTP/1.1`,
+            "Connection: Upgrade",
+            "Upgrade: websocket",
+            "Sec-WebSocket-Version: 13",
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+            "Authorization: Bearer edge-secret"
+          ])
+        )
+        expect([path, response.status]).toEqual([path, 101])
+      }
+    }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, credential: "edge-secret" }))))
+
+  test("serves a projection over an authenticated /projections/ws socket", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const projections = yield* Projections
+      const control = yield* Control
+      const card = yield* control.plan({ flowId: "system/test", input: {} })
+      yield* control.approve(approvalOf(card))
+      const receipt = yield* control.run({
+        _tag: "Plan",
+        planId: card.planId,
+        digest: card.digest,
+        envelope: card.envelope,
+        idempotencyKey: `run:${card.planId}`
+      })
+      if (receipt._tag !== "Accepted" || receipt.runId === undefined) return yield* Effect.die("expected a run")
+      const selector = { _tag: "run-summary" as const, runId: receipt.runId }
+      const request = `${
+        JSON.stringify({
+          _tag: "Request",
+          id: 1,
+          tag: "Projection.Snapshot",
+          payload: { selector },
+          headers: []
+        })
+      }\n`
+
+      // A 101 alone does not prove the protected mount serves. This sends the
+      // relay's projection RPC through the authenticated upgrade and compares
+      // its answer with the same in-process read path.
+      const frames = yield* Effect.promise(() => socketExchange(`${url}/projections/ws`, "edge-secret", request))
+      expect(frames.length).toBeGreaterThan(0)
+      const exitLine = frames.flatMap((frame) => frame.split("\n"))
+        .find((line) => line.includes("\"Exit\""))
+      const exit = JSON.parse(exitLine ?? "{}") as {
+        readonly _tag: string
+        readonly exit: { readonly _tag: string; readonly value: unknown }
+      }
+
+      expect(exit._tag).toBe("Exit")
+      expect(exit.exit._tag).toBe("Success")
+      expect(exit.exit.value).toEqual(yield* projections.snapshot(selector))
+    }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, credential: "edge-secret" }))))
+
   test("streams a projection snapshot and keeps the connection alive between changes", () =>
     Effect.gen(function*() {
       const projections = yield* Projections
@@ -802,20 +1118,41 @@ describe("gateway bind policy", () => {
 })
 
 describe("gateway credential policy", () => {
-  test("refuses an unauthenticated call and accepts the configured credential", () =>
+  /** The path `ControlClient`'s HTTP protocol actually posts a call to. */
+  const clientRpcPath = "/rpc/"
+
+  test("refuses an unauthenticated call at the edge and accepts the configured credential", () =>
     Effect.gen(function*() {
       const url = yield* baseUrl
-      const plan = (credential: string | undefined) =>
-        Effect.flatMap(Control, (control) => control.plan({ flowId: "system/test", input: {} })).pipe(
-          Effect.provide(client(url, credential))
-        )
+      const body = `${JSON.stringify({ _tag: "Request", id: 1, tag: "List", payload: {}, headers: [] })}\n`
+      const call = (credential: string | undefined) =>
+        raw(`${url}${clientRpcPath}`, [
+          `POST ${clientRpcPath} HTTP/1.1`,
+          "Content-Type: application/json",
+          `Content-Length: ${new TextEncoder().encode(body).byteLength}`,
+          ...(credential === undefined ? [] : [`Authorization: Bearer ${credential}`])
+        ], body)
 
-      const refused = yield* Effect.flip(plan(undefined))
-      const accepted = yield* plan("alpha-secret")
+      // Fail closed at the edge, on the path the client really uses. The
+      // guard used to compare the raw pathname, so `/rpc/` matched no entry
+      // of `protectedPaths` and every `ControlClient` call reached the mount
+      // with neither the credential check nor the body limit applied; only
+      // the RPC middleware behind it refused the call, after reading the
+      // whole body.
+      const none = yield* Effect.promise(() => call(undefined))
+      const wrong = yield* Effect.promise(() => call("alpha-secre"))
+      for (const [name, response] of [["none", none], ["wrong", wrong]] as const) {
+        expect([name, response.status]).toEqual([name, 401])
+        expect([name, JSON.parse(response.body) as unknown]).toEqual([name, {
+          _tag: "flows/gateway/GatewayError",
+          code: "unauthorized",
+          message: "A valid bearer credential is required"
+        }])
+      }
 
-      // Fail closed: no credential is refused with the same answer a wrong
-      // one gets, and only the configured token is served.
-      expect(refused._tag).toBe("/control/Unauthorized")
+      // The configured credential still travels the same path and is served.
+      const accepted = yield* Effect.flatMap(Control, (control) => control.plan({ flowId: "system/test", input: {} }))
+        .pipe(Effect.provide(client(url, "alpha-secret")))
       expect(accepted.flowId).toBe("system/test")
     }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, credential: "alpha-secret" }))))
 
@@ -827,7 +1164,11 @@ describe("gateway credential policy", () => {
           Effect.provide(client(url, "alpha-secre"))
         )
       )
-      expect(refused._tag).toBe("/control/Unauthorized")
+      // The edge answers 401 before the RPC layer sees the call, so the
+      // Effect client reports the refusal as a transport failure rather than
+      // as the mount's own `Unauthorized`. The status and the typed body a
+      // caller reads are asserted above.
+      expect(refused._tag).toBe("/control/TransportError")
     }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, credential: "alpha-secret" }))))
 })
 

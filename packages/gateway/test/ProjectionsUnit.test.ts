@@ -98,11 +98,13 @@ describe("Projections run-list pagination", () => {
         list: () => {
           const page = listCalls
           listCalls += 1
-          return Effect.succeed({
-            _tag: "runs",
-            items: Array.from({ length: 100 }, (_, index) => numberedRun(page * 100 + index + 1)),
-            nextCursor: `page-${page + 1}`
-          } satisfies ListResponse)
+          return Effect.succeed(
+            {
+              _tag: "runs",
+              items: Array.from({ length: 100 }, (_, index) => numberedRun(page * 100 + index + 1)),
+              nextCursor: `page-${page + 1}`
+            } satisfies ListResponse
+          )
         }
       }))
 
@@ -118,20 +120,26 @@ describe("Projections run-list pagination", () => {
       const projections = Projections.make(control({
         list: (request) => {
           limits.push(request.limit)
-          return Effect.succeed({ _tag: "runs", items: [] } satisfies ListResponse)
+          return Effect.succeed(
+            limits.length === 1
+              ? { _tag: "runs", items: [run], nextCursor: "page-2" } satisfies ListResponse
+              : { _tag: "runs", items: [] } satisfies ListResponse
+          )
         }
       }))
 
       yield* projections.snapshot({ _tag: "workspace-runs" })
-      expect(limits).toEqual([expect.any(Number)])
+      expect(limits).toEqual([Projections.maxWorkspaceRuns, Projections.maxWorkspaceRuns - 1])
     }))
 
   it.effect("does not page a run-scoped lookup past its first match", () =>
     Effect.gen(function*() {
       let listCalls = 0
+      const limits: Array<number | undefined> = []
       const projections = Projections.make(control({
-        list: () => {
+        list: (request) => {
           listCalls += 1
+          limits.push(request.limit)
           return Effect.succeed({ _tag: "runs", items: [run], nextCursor: "another-page" } satisfies ListResponse)
         }
       }))
@@ -139,6 +147,7 @@ describe("Projections run-list pagination", () => {
       const snapshot = yield* projections.snapshot({ _tag: "run-summary", runId: run.runId })
       expect(snapshot.rows).toHaveLength(1)
       expect(listCalls).toBe(1)
+      expect(limits).toEqual([1])
     }))
 
   it.effect("maps and redacts a failure from a later run-list page", () =>
@@ -415,6 +424,182 @@ describe("Projections subscriptions", () => {
       expect(deltas.at(-1)?.delta).toEqual(fresh.rows)
     }))
 
+  it.effect("delivers workspace deltas with the workspace cursor", () =>
+    Effect.gen(function*() {
+      const completed: RunSummary = { ...run, status: "completed", updatedAt: 3 }
+      const planEvent: ControlEvent = {
+        sequence: 1,
+        kind: "control.plan.created",
+        occurredAt: 1,
+        payload: { planId: "plan-1" }
+      }
+      const changed = event(1, "control.run.completed", { runId: run.runId })
+      const projections = Projections.make(
+        control({
+          list: (request) =>
+            Effect.succeed({
+              _tag: "runs",
+              items: request._tag === "runs" && request.filters?.runId === run.runId ? [completed] : [run]
+            }),
+          watch: (filter) => filter.follow === true ? Stream.fromIterable([planEvent, changed]) : Stream.empty
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "workspace-runs" }))
+      const delta = frames.find((frame) => frame._tag === "delta")
+      // Without the unscoped follow, a dashboard keeps the snapshot's stale
+      // waiting status after the control row has completed under a fence.
+      expect(delta?._tag).toBe("delta")
+      if (delta?._tag !== "delta") return
+      expect(delta.cursor).toEqual({ projection: "workspace-runs", runId: null, value: 0 })
+      expect(delta.delta).toMatchObject([{ runId: "run-1", status: "completed", verdict: "completed" }])
+    }))
+
+  it.effect("admits a newly followed run with one journal read", () =>
+    Effect.gen(function*() {
+      const second = { ...numberedRun(2), status: "running" } satisfies RunSummary
+      const accepted: ControlEvent = {
+        ...event(1, "control.run.accepted", { runId: second.runId }),
+        runId: second.runId
+      }
+      let nonFollowingReads = 0
+      const projections = Projections.make(
+        control({
+          list: (request) =>
+            Effect.succeed({
+              _tag: "runs",
+              items: request._tag === "runs" && request.filters?.runId === second.runId ? [second] : []
+            }),
+          watch: (filter) => {
+            if (filter.follow === true) return Stream.fromIterable([accepted])
+            nonFollowingReads += 1
+            return Stream.fromIterable([accepted])
+          }
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "workspace-runs" }))
+      const delta = frames.find((frame) => frame._tag === "delta")
+      // Re-listing or re-reading the whole workspace for one new run turns a
+      // live dashboard into work proportional to workspace size per event.
+      expect(delta?._tag).toBe("delta")
+      if (delta?._tag !== "delta") return
+      expect(delta.delta).toMatchObject([{ runId: "run-2", status: "running" }])
+      expect(nonFollowingReads).toBe(1)
+    }))
+
+  it.effect("suppresses the replayed workspace prefix", () =>
+    Effect.gen(function*() {
+      const history = [
+        event(1, "control.run.accepted", { runId: run.runId }),
+        event(2, "control.run.running", { runId: run.runId })
+      ]
+      const projections = Projections.make(
+        control({
+          list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+          watch: () => Stream.fromIterable(history)
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "workspace-runs" }))
+      // An unscoped control follow replays every partition. Re-emitting that
+      // prefix would send rows the snapshot already delivered.
+      expect(frames.filter((frame) => frame._tag === "delta")).toEqual([])
+    }))
+
+  it.effect("skips an unlistable followed run without ending the workspace subscription", () =>
+    Effect.gen(function*() {
+      const second = { ...numberedRun(2), status: "running" } satisfies RunSummary
+      const missing: ControlEvent = {
+        ...event(1, "control.run.accepted", { runId: "run-missing" }),
+        runId: "run-missing"
+      }
+      const accepted: ControlEvent = {
+        ...event(1, "control.run.accepted", { runId: second.runId }),
+        runId: second.runId
+      }
+      const projections = Projections.make(
+        control({
+          list: (request) =>
+            Effect.succeed({
+              _tag: "runs",
+              items: request._tag === "runs" && request.filters?.runId === second.runId ? [second] : []
+            }),
+          watch: (filter) =>
+            filter.follow === true
+              ? Stream.fromIterable([missing, accepted])
+              : filter.runId === second.runId
+              ? Stream.fromIterable([accepted])
+              : Stream.empty
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "workspace-runs" }))
+      const deltas = frames.filter((frame) => frame._tag === "delta")
+      // A journal notification can race visibility in the run listing. That
+      // one row must not kill the subscription before the next visible run.
+      expect(deltas).toHaveLength(1)
+      expect(deltas[0]?.delta).toMatchObject([{ runId: "run-2" }])
+    }))
+
+  it.effect("keeps followed workspace rows within the workspace ceiling", () =>
+    Effect.gen(function*() {
+      const initial = Array.from({ length: Projections.maxWorkspaceRuns }, (_, index) => numberedRun(index + 1))
+      const extra = numberedRun(Projections.maxWorkspaceRuns + 1)
+      const accepted: ControlEvent = {
+        ...event(1, "control.run.accepted", { runId: extra.runId }),
+        runId: extra.runId
+      }
+      const projections = Projections.make(
+        control({
+          list: (request) => {
+            const named = request._tag === "runs" ? request.filters?.runId : undefined
+            return Effect.succeed({
+              _tag: "runs",
+              items: named === extra.runId ? [extra] : named === undefined ? initial : []
+            })
+          },
+          watch: (filter) =>
+            filter.follow === true || filter.runId === extra.runId ? Stream.fromIterable([accepted]) : Stream.empty
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "workspace-runs" }))
+      const rowIds = frames.flatMap((frame) =>
+        frame._tag === "row" ? [(frame.row as { readonly runId: string }).runId] : []
+      )
+      // Admitting beyond the documented ceiling makes one long-lived stream
+      // consume more journals than the bounded snapshot contract allows.
+      expect(rowIds).toHaveLength(Projections.maxWorkspaceRuns)
+      expect(rowIds).not.toContain(extra.runId)
+      expect(frames.filter((frame) => frame._tag === "delta")).toEqual([])
+    }))
+
+  it.effect("delivers new gates to an unscoped approvals inbox", () =>
+    Effect.gen(function*() {
+      const projections = Projections.make(
+        control({
+          list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+          watch: (filter) => filter.follow === true ? Stream.fromIterable([approvalRequested]) : Stream.empty
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      const frames = yield* Stream.runCollect(projections.subscribe({ _tag: "approvals" }))
+      const delta = frames.find((frame) => frame._tag === "delta")
+      // Without workspace deltas, an operator never sees a gate requested
+      // after the approvals inbox snapshot was read.
+      expect(delta?._tag).toBe("delta")
+      if (delta?._tag !== "delta") return
+      expect(delta.cursor).toEqual({ projection: "approvals", runId: null, value: 0 })
+      expect(delta.delta).toMatchObject([{ runId: "run-1", requestId: "gate", status: "pending" }])
+    }))
+
   it.effect("resumes after a run cursor without emitting snapshot frames", () =>
     Effect.gen(function*() {
       const history = [
@@ -445,6 +630,86 @@ describe("Projections subscriptions", () => {
         [history[1]],
         [history[2]]
       ])
+    }))
+
+  it.effect("refuses negative and fractional resume cursor values before following", () =>
+    Effect.gen(function*() {
+      const history = [event(1, "control.run.accepted", { runId: "run-1" })]
+      let follows = 0
+      const projections = Projections.make(
+        control({
+          list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+          watch: (filter) => {
+            if (filter.follow !== true) return Stream.fromIterable(history)
+            follows += 1
+            return Stream.fromIterable(history.filter((item) => item.sequence > (filter.afterSequence ?? 0)))
+          }
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      for (const value of [-1, 0.5]) {
+        const failure = yield* Effect.flip(Stream.runCollect(projections.subscribe(
+          { _tag: "run-events", runId: "run-1" },
+          { projection: "run-events", runId: "run-1", value }
+        )))
+        expect(failure.code).toBe("malformed_request")
+        expect(failure.message).toContain(String(value))
+      }
+      expect(follows).toBe(0)
+    }))
+
+  it.effect("refuses a resume cursor ahead of the run's last sequence", () =>
+    Effect.gen(function*() {
+      const history = [
+        event(1, "control.run.accepted", { runId: "run-1" }),
+        event(2, "control.run.running", { runId: "run-1" })
+      ]
+      let follows = 0
+      const projections = Projections.make(
+        control({
+          list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+          watch: (filter) => {
+            if (filter.follow !== true) return Stream.fromIterable(history)
+            follows += 1
+            return Stream.empty
+          }
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      const failure = yield* Effect.flip(Stream.runCollect(projections.subscribe(
+        { _tag: "run-events", runId: "run-1" },
+        { projection: "run-events", runId: "run-1", value: 3 }
+      )))
+      expect(failure.code).toBe("malformed_request")
+      expect(failure.message).toContain("3")
+      expect(failure.message).toContain("2")
+      expect(follows).toBe(0)
+    }))
+
+  it.effect("refuses a positive resume cursor for a run with no events", () =>
+    Effect.gen(function*() {
+      let follows = 0
+      const projections = Projections.make(
+        control({
+          list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+          watch: (filter) => {
+            if (filter.follow === true) follows += 1
+            return Stream.empty
+          }
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+
+      const failure = yield* Effect.flip(Stream.runCollect(projections.subscribe(
+        { _tag: "run-events", runId: "run-1" },
+        { projection: "run-events", runId: "run-1", value: 1 }
+      )))
+      expect(failure.code).toBe("malformed_request")
+      expect(failure.message).toContain("1")
+      expect(failure.message).toContain("0")
+      expect(follows).toBe(0)
     }))
 
   for (
@@ -499,15 +764,17 @@ describe("Projections subscriptions", () => {
   it.live("keeps a workspace subscription open on keepalives alone", () =>
     Effect.gen(function*() {
       const projections = Projections.make(
-        control({ list: () => Effect.succeed({ _tag: "runs", items: [] }) }),
+        control({
+          list: () => Effect.succeed({ _tag: "runs", items: [] }),
+          watch: (filter) => filter.follow === true ? Stream.never : Stream.empty
+        }),
         { heartbeatMillis: 1 }
       )
       const frames = yield* Stream.runCollect(
         Stream.take(projections.subscribe({ _tag: "workspace-runs" }), 3)
       )
-      // A workspace selector has no single event stream to follow, so after
-      // the snapshot the connection is held open by keepalives and refreshed
-      // by re-subscribing.
+      // An empty workspace produces no delta, so the keepalive is what proves
+      // its live follow remains connected while there is nothing to report.
       expect(frames.map((frame) => frame._tag)).toEqual(["snapshot-start", "snapshot-end", "heartbeat"])
       const heartbeat = frames[2]
       expect(heartbeat?._tag === "heartbeat" && typeof heartbeat.atMs).toBe("number")
@@ -530,7 +797,8 @@ describe("Projections subscriptions", () => {
       const workspaceFrames = yield* Stream.runCollect(Stream.take(
         Projections.make(
           control({
-            list: () => Effect.succeed({ _tag: "runs", items: [] })
+            list: () => Effect.succeed({ _tag: "runs", items: [] }),
+            watch: (filter) => filter.follow === true ? Stream.never : Stream.empty
           }),
           { heartbeatMillis: 1 }
         ).subscribe({ _tag: "workspace-runs" }),
@@ -561,6 +829,28 @@ describe("Projections delta failures", () => {
         Stream.runCollect(projections.subscribe({ _tag: "run-summary", runId: "run-1" }))
       )
       expect(failure.message).toBe("Following run-1 failed")
+    }))
+
+  it.effect("reports a workspace follow that broke mid-stream as a gateway refusal", () =>
+    Effect.gen(function*() {
+      const projections = Projections.make(
+        control({
+          list: () => Effect.succeed({ _tag: "runs", items: [] }),
+          watch: (filter) =>
+            filter.follow === true
+              ? Stream.fail(new Unavailable({ code: "unavailable", feature: "watch", ticket: "T-4" }))
+              : Stream.empty
+        }),
+        { heartbeatMillis: 60_000 }
+      )
+      // A broken workspace follow must become a typed refusal. Leaving the
+      // snapshot open on keepalives would silently freeze every workspace view.
+      const failure = yield* Effect.flip(
+        Stream.runCollect(projections.subscribe({ _tag: "workspace-runs" }))
+      )
+      expect(failure.code).toBe("run_unavailable")
+      expect(failure.message).toBe("Following the workspace failed")
+      expect(failure.cause).toEqual({ _tag: "/control/Unavailable", code: "unavailable" })
     }))
 })
 

@@ -254,6 +254,14 @@ describe("Diagnosis.clip", () => {
     expect(card).toContain("Cause     boom")
     expect(card).not.toContain("\r")
   })
+
+  it("treats a bare carriage return as a line ending", () => {
+    const digest = Diagnosis.digest([event("control.run.failed", { cause: "boom\rstack frame" })])
+    expect(Diagnosis.verdict(digest)).toBe("failed — boom")
+    const card = Diagnosis.render({ runId: "run-1" }, digest)
+    expect(card).toContain("Cause     boom")
+    expect(card).not.toContain("\r")
+  })
 })
 
 describe("Diagnosis.render", () => {

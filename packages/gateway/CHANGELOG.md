@@ -35,6 +35,8 @@
 
 ### Changed
 
+- A workspace subscription now reports new runs, status changes, and new gates
+  instead of emitting a snapshot and then keepalives forever.
 - A subscription now reads the control plane exactly once. The rows, the cursor
   the snapshot advertises, and the sequence its deltas start after all come
   from that read, so an event landing mid-read is no longer delivered as both a
@@ -58,6 +60,28 @@
   which output.
 - `GatewayServer.layer` now takes an options object rather than two positional
   optionals.
+- `Approval.Submit` now declares exactly the failures `Control.approve` and
+  `Control.deny` raise. It gained `PlanNotFound`, which a decision naming a plan
+  the control plane does not have answers with, and lost `ClaimLost`, which
+  neither command raises: a declared tag no command produces is a recovery
+  branch no client's code can reach.
+- The ingress guard now classifies a request target the way the router resolves
+  it rather than by its literal spelling. `HttpRouter` reaches `/rpc` from
+  `/%72pc`, `/rpc;transport-parameter`, `/rpc/`, `//rpc`, `/rpc//`, `/RPC`, and
+  `/foo/../rpc`, and the guard recognised none of them, so on a credentialed
+  bind those spellings reached the mount with neither the bearer check nor the
+  body limit applied. `ControlClient`'s HTTP protocol posts every call to
+  `/rpc/`, so this was the ordinary client path and not only a crafted alias.
+  An uncredentialed call is now refused 401 at the edge before its body is
+  read, which an Effect RPC client reports as a transport failure rather than
+  as the mount's own `Unauthorized`.
+- A transcript row now carries one display line per event: a seat, flow name,
+  failure message, resolved output, or approval question containing a newline
+  no longer splits one row into several.
+- The published runtime dependency set no longer includes
+  `@effect/platform-node-shared`, `@smthrs/journal`, or
+  `@smthrs/notifications`. Journal and notifications remain development-only
+  fixtures for the real SQLite gateway tests.
 
 ### Removed
 

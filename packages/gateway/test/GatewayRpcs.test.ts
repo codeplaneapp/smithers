@@ -255,6 +255,23 @@ describe("Approval.Submit", () => {
       }))
       expect(failure._tag).toBe("/control/RunNotFound")
     }).pipe(Effect.provide(served)))
+
+  test("answers a decision for a plan that does not exist with PlanNotFound", () =>
+    Effect.gen(function*() {
+      const rpc = yield* RpcTest.makeClient(GatewayRpcs)
+      const failure = yield* Effect.flip(rpc["Approval.Submit"]({
+        target: {
+          _tag: "Plan",
+          planId: "no-such-plan",
+          digest: "plan-digest",
+          envelope: { capabilities: [], flows: [], budget: {} }
+        },
+        scope: "run",
+        idempotencyKey: "missing-plan",
+        decision: "approve"
+      }))
+      expect(failure._tag).toBe("/control/PlanNotFound")
+    }).pipe(Effect.provide(served)))
 })
 
 describe("Projection.Snapshot and Projection.Subscribe", () => {
@@ -326,7 +343,13 @@ describe("run visibility", () => {
       // created it, the ordinary listing every run surface renders must show
       // it. A child that only a debug escape hatch can see is a child a human
       // cannot reach.
-      yield* runs.create(`${parentRunId}:child`, "{}", { parentRunId })
+      //
+      // The state the child is created with is an ENGINE-owned state, so it
+      // carries the flow name every engine row carries
+      // (`@smthrs/engine-store` `DurableEngineState`). `@smthrs/control`
+      // decodes that column before it projects the row, so a placeholder `{}`
+      // would fail the listing rather than exercise the listing.
+      yield* runs.create(`${parentRunId}:child`, JSON.stringify({ flowName: "system/test" }), { parentRunId })
 
       const rows = (yield* projections.snapshot({ _tag: "workspace-runs" })).rows as ReadonlyArray<
         GatewayProjection.RunSummaryRow

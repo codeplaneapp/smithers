@@ -22,6 +22,12 @@
  * The events are accumulated in the stream rather than re-read, so following a
  * run costs one journal read no matter how many deltas arrive.
  *
+ * A workspace subscription follows every journal partition without a cursor.
+ * Control replays each partition's history before tailing it, so the follower
+ * seeds one last sequence per snapshotted run and drops that replayed prefix.
+ * It admits an unseen run with one read until the same run ceiling as the
+ * snapshot, keeping a live view inside the snapshot's cost model.
+ *
  * @since 1.0.0
  */
 import type { Service as ControlService } from "@smthrs/control/Control"
@@ -389,18 +395,77 @@ export const make = (
   }
 
   /**
+   * Workspace deltas from the unscoped control follow.
+   *
+   * Control sequences belong to run partitions, so this stream cannot start
+   * after one workspace cursor. It follows without a cursor instead. That
+   * replays each partition from its beginning, and the map seeded from the
+   * snapshot drops events at or below each run's last folded sequence. An
+   * unseen run costs one read to admit, and the map never exceeds the snapshot
+   * ceiling.
+   */
+  const workspaceDeltaFrames = (
+    selector: GatewaySchema.ProjectionSelector,
+    runs: ReadonlyArray<RunSource>
+  ): Stream.Stream<GatewaySchema.GatewayFrame, GatewayError> =>
+    Stream.unwrap(Effect.sync(() => {
+      const sources = new Map<string, RunSource>(runs.map((source) => [source.run.runId, source]))
+      const noFrames: ReadonlyArray<GatewaySchema.GatewayFrame> = []
+      const delta = (): ReadonlyArray<GatewaySchema.GatewayFrame> => [{
+        _tag: "delta",
+        selector,
+        cursor: cursorOf(selector, 0),
+        delta: rowsOfWorkspace(selector, [...sources.values()])
+      }]
+      const message = "Following the workspace failed"
+      return control.watch({ follow: true }).pipe(
+        Stream.tapError((cause) => Effect.logWarning(message, cause)),
+        Stream.mapError((cause) => unavailable(message, cause)),
+        Stream.mapEffect((event) => {
+          const runId = event.runId
+          if (runId === undefined) return Effect.succeed(noFrames)
+
+          const current = sources.get(runId)
+          if (current !== undefined) {
+            if (event.sequence <= (current.events.at(-1)?.sequence ?? 0)) return Effect.succeed(noFrames)
+            const events = [...current.events, event]
+            return Effect.map(runOf(runId), (fresh) => {
+              sources.set(runId, { run: fresh, events })
+              return delta()
+            })
+          }
+
+          if (sources.size >= maxWorkspaceRuns) return Effect.succeed(noFrames)
+          return runSourceOf(runId).pipe(
+            Effect.map((source) => {
+              sources.set(runId, source)
+              return delta()
+            }),
+            Effect.catchIf(
+              (failure) => failure.code === "run_not_found",
+              () => Effect.succeed(noFrames)
+            )
+          )
+        }),
+        Stream.flattenIterable
+      )
+    }))
+
+  /**
    * Deltas for a selector.
    *
-   * A workspace selector has no cursor to follow from, because control journal
-   * sequences belong to per-run partitions, so its subscription is the snapshot
-   * plus keepalives and a client refreshes it by re-subscribing.
+   * A run selector follows after its sequence cursor. A workspace selector has
+   * no resume cursor because control journal sequences belong to per-run
+   * partitions, but it can follow every partition without one.
    */
   const deltaFrames = (
     selector: GatewaySchema.ProjectionSelector,
     source: Source,
     from: number
   ): Stream.Stream<GatewaySchema.GatewayFrame, GatewayError> =>
-    source._tag === "workspace" ? Stream.never : runDeltaFrames(selector, source.run, from)
+    source._tag === "workspace"
+      ? workspaceDeltaFrames(selector, source.runs)
+      : runDeltaFrames(selector, source.run, from)
 
   /**
    * The keepalive channel. `Stream.tick` emits immediately and then on the
@@ -437,6 +502,11 @@ export const make = (
     if (after.runId !== runId) {
       return malformed(`A cursor for run ${after.runId ?? "none"} cannot resume a subscription to run ${runId}`)
     }
+    if (!Number.isSafeInteger(after.value) || after.value < 0) {
+      return malformed(
+        `Cursor value ${String(after.value)} cannot resume run ${runId}; it must be a non-negative safe integer`
+      )
+    }
     return runId
   }
 
@@ -463,7 +533,14 @@ export const make = (
   ): Effect.Effect<Stream.Stream<GatewaySchema.GatewayFrame, GatewayError>, GatewayError> => {
     const scope = resumeScope(selector, after)
     return typeof scope === "string"
-      ? Effect.map(runSourceOf(scope), (source) => runDeltaFrames(selector, source, after.value))
+      ? Effect.flatMap(runSourceOf(scope), (source) => {
+        const last = source.events.at(-1)?.sequence ?? 0
+        return after.value > last
+          ? Effect.fail(malformed(
+            `Cursor value ${after.value} cannot resume run ${scope} past its last sequence ${last}`
+          ))
+          : Effect.succeed(runDeltaFrames(selector, source, after.value))
+      })
       : Effect.fail(scope)
   }
 

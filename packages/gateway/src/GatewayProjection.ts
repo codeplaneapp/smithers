@@ -184,6 +184,12 @@ const asNumber = (value: unknown): number | undefined => typeof value === "numbe
 
 const timeOf = (event: ControlSchema.ControlEvent): number => asNumber(asRecord(event.payload).at) ?? event.occurredAt
 
+/** Text one transcript row can carry without becoming several display rows. */
+const firstLine = (text: string): string => {
+  const index = text.search(/[\r\n]/)
+  return index < 0 ? text : text.slice(0, index)
+}
+
 /** Copies only the optional fields a run summary actually carries. */
 const optional = <A>(key: string, value: A | undefined): Record<string, A> =>
   value === undefined ? {} : { [key]: value }
@@ -435,7 +441,13 @@ const transcriptKinds: ReadonlySet<string> = new Set(["control.approval.requeste
 /**
  * Folds one run's events into a turn-numbered transcript.
  *
-
+ * A row is reported for every `control.run.*` and `control.agent.*` event and
+ * for an approval request, and for nothing else: the transcript is what a
+ * reader follows, not the whole journal, which `run-events` already serves.
+ * The turn counter advances on `control.agent.turn-opened`, so every row
+ * carries the turn it belongs to, and each row's text is one display line, so
+ * a multi-line seat, message, or question cannot split one row into several.
+ *
  * @param events the run's ordered control events
  * @since 1.0.0
  * @category projections
@@ -470,21 +482,21 @@ export const transcript = (
 const line = (kind: string, payload: Record<string, unknown>): string => {
   switch (kind) {
     case "control.agent.turn-opened":
-      return `turn opened · ${asString(payload.seat) ?? ""}`
+      return `turn opened · ${firstLine(asString(payload.seat) ?? "")}`
     case "control.agent.model-settled": {
       const usage = asRecord(payload.usage)
       return `model ${asNumber(usage.inputTokens) ?? 0} in / ${asNumber(usage.outputTokens) ?? 0} out`
     }
     case "control.agent.cell-call-started":
-      return `call ${asString(payload.flowName) ?? "?"}`
+      return `call ${firstLine(asString(payload.flowName) ?? "?")}`
     case "control.agent.cell-call-settled":
       return asString(payload.outcome) === "failure"
-        ? `  -> FAIL ${Diagnosis.clip(asString(payload.message) ?? "", 100)}`
+        ? `  -> FAIL ${Diagnosis.clip(firstLine(asString(payload.message) ?? ""), 100)}`
         : "  -> ok"
     case "control.agent.resolved":
-      return `resolved ${Diagnosis.clip(asString(payload.text) ?? "", 100)}`
+      return `resolved ${Diagnosis.clip(firstLine(asString(payload.text) ?? ""), 100)}`
     case "control.approval.requested":
-      return `approval requested: ${asString(payload.question) ?? ""}`
+      return `approval requested: ${firstLine(asString(payload.question) ?? "")}`
     default:
       return kind.slice("control.".length)
   }

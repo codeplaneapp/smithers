@@ -75,12 +75,19 @@ export const SubmitApprovalOutput = Schema.Struct({
  */
 export type SubmitApprovalOutput = typeof SubmitApprovalOutput.Type
 
+/**
+ * The failures `Approval.Submit` can answer with: exactly the union
+ * `@smthrs/control` `Control.approve` and `Control.deny` declare, because the
+ * handler is a transport adapter over those two commands and adds no failure of
+ * its own. A member neither command raises would be a recovery branch no
+ * client's code could ever reach.
+ */
 const submitErrors = Schema.Union([
   ControlError.PlanDigestMismatch,
   ControlError.EnvelopeMismatch,
   ControlError.AlreadyResolved,
+  ControlError.PlanNotFound,
   ControlError.RunNotFound,
-  ControlError.ClaimLost,
   ControlError.PersistenceError,
   ControlError.Unavailable
 ])
