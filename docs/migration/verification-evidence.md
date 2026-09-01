@@ -1,6 +1,28 @@
 # Clean-checkout verification evidence
 
-All seventeen Phase 7 gates pass. The adversarial verdict over the full
+## This record measures one commit, not the branch
+
+Everything below is the validation run at `341c8fa87e` and is accurate for that
+commit. It is not a statement about the current branch head, and it should not
+be read as one before publishing.
+
+Work landed after that verdict, and re-running the full suite later found seven
+packages red that the verdict had covered: `build-cli` (77 tests),
+`time-travel` (9), `examples` (4), `testing` (3), `agent` (2), `targets` (1)
+and `create-app` (1), with `flows` below its coverage floor, the browser bundle
+contract broken, and four of the script gates failing. Two causes account for
+most of it: the in-memory engine began snapshotting replay payloads through a
+codec that cannot encode a live BUILD.ts target reference, which failed every
+target naming a dependency, and a resolver kept BUILD.ts modules and the CLI on
+two physical copies of `effect`. Both are fixed, along with the rest.
+
+The lesson is recorded because it will recur: a green verdict is a statement
+about one commit. Before publishing, re-run the gates at the head being tagged
+rather than citing this document.
+
+## The run at `341c8fa87e`
+
+All seventeen Phase 7 gates passed at that commit. The adversarial verdict over the full
 evidence set returns `ready=true` at `341c8fa87e`; the verdict document is
 [verdict-341c8fa87e.md](evidence/verdict-341c8fa87e.md), and the superseded
 `ready=false` round it closes is
