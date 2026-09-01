@@ -731,7 +731,10 @@ describe("secrets", () => {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const push = S.Shell.Run({ command: "true", secrets: [S.Secret("SMTHRS_TEST_ABSENT_SECRET")] })
+const push = S.Shell.Run({
+  command: "true",
+  secrets: [S.HttpSecret(S.Secret("SMTHRS_TEST_ABSENT_SECRET"), ["https://example.test"])]
+})
 export const Package = S.Package({ targets: { push } })
 `
     )
@@ -764,7 +767,7 @@ export const Package = S.Package({ targets: { push } })
         `import { Smithers as S } from "@smthrs/targets"
 const push = S.Shell.Run({
   command: ${JSON.stringify(command)},
-  secrets: [S.Secret("SMTHRS_TEST_BOUNDARY_SECRET")],
+  secrets: [S.HttpSecret(S.Secret("SMTHRS_TEST_BOUNDARY_SECRET"), ["http://127.0.0.1:${port}"])],
   sandbox: "none"
 })
 export const Package = S.Package({ targets: { push } })

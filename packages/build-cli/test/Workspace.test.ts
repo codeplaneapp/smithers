@@ -164,7 +164,51 @@ describe("resolveRemoteCache", () => {
     )
     expect(await resolveRemoteCache(root)).toEqual({
       endpoint: "https://declared.example.test",
-      tokenEnv: "DECLARED_CACHE_TOKEN"
+      credentials: { _tag: "shared", tokenEnv: "DECLARED_CACHE_TOKEN" }
+    })
+  })
+
+  /**
+   * The declaration accepted a read/write pair long before anything carried
+   * the write half anywhere, so the split existed in shape and nowhere else.
+   * Resolution now names which posture a workspace declared, and the
+   * single-credential case is a tag rather than an absent field.
+   */
+  it("resolves a declared read/write pair as a split credential", async () => {
+    await write(
+      "BUILD.ts",
+      remoteCacheBuildFile(`{
+      endpoint: "https://declared.example.test",
+      read: Secret("DECLARED_READ_TOKEN"),
+      write: Secret("DECLARED_WRITE_TOKEN")
+    }`)
+    )
+    expect(await resolveRemoteCache(root)).toEqual({
+      endpoint: "https://declared.example.test",
+      credentials: {
+        _tag: "split",
+        readTokenEnv: "DECLARED_READ_TOKEN",
+        writeTokenEnv: "DECLARED_WRITE_TOKEN"
+      }
+    })
+  })
+
+  it("keeps the declared split when SMITHERS_CACHE_URL overrides the endpoint", async () => {
+    await write(
+      "BUILD.ts",
+      remoteCacheBuildFile(`{
+      endpoint: "https://declared.example.test",
+      read: Secret("DECLARED_READ_TOKEN"),
+      write: Secret("DECLARED_WRITE_TOKEN")
+    }`)
+    )
+    expect(await resolveRemoteCache(root, "https://override.example.test")).toEqual({
+      endpoint: "https://override.example.test",
+      credentials: {
+        _tag: "split",
+        readTokenEnv: "DECLARED_READ_TOKEN",
+        writeTokenEnv: "DECLARED_WRITE_TOKEN"
+      }
     })
   })
 
@@ -181,7 +225,7 @@ describe("resolveRemoteCache", () => {
       const resolved = await resolveRemoteCache(root)
       expect(resolved).toEqual({
         endpoint: "https://declared.example.test",
-        tokenEnv: "PROJECT_CACHE_TOKEN"
+        credentials: { _tag: "shared", tokenEnv: "PROJECT_CACHE_TOKEN" }
       })
       expect(JSON.stringify(resolved)).not.toContain("top-secret")
     } finally {
@@ -231,14 +275,14 @@ describe("resolveRemoteCache", () => {
     )
     expect(await resolveRemoteCache(root, "https://override.example.test/")).toEqual({
       endpoint: "https://override.example.test",
-      tokenEnv: "DECLARED_CACHE_TOKEN"
+      credentials: { _tag: "shared", tokenEnv: "DECLARED_CACHE_TOKEN" }
     })
   })
 
   it("uses the default tokenEnv for an environment-only endpoint", async () => {
     expect(await resolveRemoteCache(root, "https://override.example.test")).toEqual({
       endpoint: "https://override.example.test",
-      tokenEnv: "SMITHERS_CACHE_TOKEN"
+      credentials: { _tag: "shared", tokenEnv: "SMITHERS_CACHE_TOKEN" }
     })
   })
 

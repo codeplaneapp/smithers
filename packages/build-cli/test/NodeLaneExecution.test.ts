@@ -79,11 +79,17 @@ const publishMissing = S.Npm.Publish({ pack, gates: [gate] })
 const publishApproval = S.Npm.Publish({
   pack,
   gates: [gate],
-  secrets: [S.Secret("NPM_TOKEN")],
+  secrets: [S.HttpSecret(S.Secret("NPM_TOKEN"), ["https://registry.npmjs.org"])],
   approval: "required"
 })
-const pages = S.Github.Pages({ site: literal, secrets: [S.Secret("GITHUB_TOKEN")] })
-const pr = S.Git.Pr({ gates: [gate], secrets: [S.Secret("GITHUB_TOKEN")] })
+const pages = S.Github.Pages({
+  site: literal,
+  secrets: [S.HttpSecret(S.Secret("GITHUB_TOKEN"), ["https://api.github.com"])]
+})
+const pr = S.Git.Pr({
+  gates: [gate],
+  secrets: [S.HttpSecret(S.Secret("GITHUB_TOKEN"), ["https://api.github.com"])]
+})
 export const Package = S.Package({ targets: {
   ci, copy, cron, digest, digestBuild, downstream, gate, literal, markdown, overlay, overlayBuild,
   overlayConflictBuild, overlayDownstream, overlayPack, pack, pages, pr,

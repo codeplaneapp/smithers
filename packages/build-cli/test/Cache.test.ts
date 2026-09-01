@@ -1040,3 +1040,212 @@ describe("openCache", () => {
     await cache.close()
   })
 })
+
+/**
+ * The cache had one credential, so every job that could read it could publish
+ * to it. Reads and writes now authenticate separately, and the property is on
+ * the wire: what the transport sends, not what the configuration says.
+ */
+describe("the remote cache authenticates reads and writes separately", () => {
+  it("presents the read credential on GET and the write credential on PUT", async () => {
+    respond = (_request, response) => {
+      response.writeHead(404).end()
+    }
+    const cache = await openCache({
+      workspaceRoot: root,
+      endpoint,
+      readToken: () => "read-only-credential",
+      writeToken: () => "write-credential"
+    })
+
+    expect(await cache.get(result.key)).toBeNull()
+    await cache.put(result.key, result)
+
+    expect(requests.map(({ authorization, method }) => ({ authorization, method }))).toEqual([
+      { method: "GET", authorization: "Bearer read-only-credential" },
+      { method: "PUT", authorization: "Bearer write-credential" }
+    ])
+    await cache.close()
+  })
+
+  /** A deployment with one credential keeps sending it in both directions. */
+  it("presents the single credential in both directions when no write credential is declared", async () => {
+    respond = (_request, response) => {
+      response.writeHead(404).end()
+    }
+    const cache = await openCache({ workspaceRoot: root, endpoint, readToken: () => "one-credential" })
+
+    expect(await cache.get(result.key)).toBeNull()
+    await cache.put(result.key, result)
+
+    expect(requests.map(({ authorization }) => authorization)).toEqual([
+      "Bearer one-credential",
+      "Bearer one-credential"
+    ])
+    await cache.close()
+  })
+
+  /**
+   * A read-only job is the expected posture, not a broken deployment: the
+   * server refuses its publication and its reads are still exactly what the
+   * cache is for. Treating the refusal as a remote failure disabled the whole
+   * store, so the first cacheable target in a pull request cost the run every
+   * later cache hit.
+   */
+  it.each([401, 403])("keeps reading after the server refuses a publication with %i", async (status) => {
+    const warnings: Array<string> = []
+    respond = (request, response) => {
+      if (request.method === "PUT") {
+        response.writeHead(status).end()
+        return
+      }
+      response.writeHead(200, { "content-type": "application/json" })
+        .end(JSON.stringify({ keyDigest: "beta", result: { ...result, key: "beta" } }))
+    }
+    const cache = await openCache({
+      workspaceRoot: root,
+      endpoint,
+      readToken: () => "read-only-credential",
+      warn: (line) => warnings.push(line)
+    })
+
+    await cache.put(result.key, result)
+    expect(await cache.get("beta")).toEqual({ ...result, key: "beta" })
+
+    expect(warnings).toEqual(["smthrs: remote cache publication refused; this credential may only read"])
+    expect(requests.map(({ method }) => method)).toEqual(["PUT", "GET"])
+    await cache.close()
+  })
+
+  it("stops attempting publications once one was refused", async () => {
+    const warnings: Array<string> = []
+    respond = (request, response) => {
+      response.writeHead(request.method === "PUT" ? 403 : 404).end()
+    }
+    const cache = await openCache({ workspaceRoot: root, endpoint, warn: (line) => warnings.push(line) })
+
+    await cache.put(result.key, result)
+    await cache.put("second", { ...result, key: "second" })
+
+    expect(requests.map(({ method }) => method)).toEqual(["PUT"])
+    expect(warnings).toHaveLength(1)
+    await cache.close()
+  })
+
+  it("reads the write credential only while a publication is being built", async () => {
+    respond = (request, response) => {
+      response.writeHead(request.method === "PUT" ? 201 : 404).end()
+    }
+    let reads = 0
+    const cache = await openCache({
+      workspaceRoot: root,
+      endpoint,
+      readToken: () => "read-only-credential",
+      writeToken: () => {
+        reads += 1
+        return "write-credential"
+      }
+    })
+
+    expect(await cache.get(result.key)).toBeNull()
+    expect(reads).toBe(0)
+    await cache.put(result.key, result)
+    expect(reads).toBe(1)
+    await cache.close()
+  })
+})
+
+/**
+ * Defence in depth behind the credential split. A job whose inputs nobody
+ * reviewed can publish a green result for a target whose real input was never
+ * declared. The split stops it from publishing at all when it holds only the
+ * read credential; the namespace stops what it does publish from ever being
+ * the answer a trusted build reads.
+ */
+describe("a publication namespace keeps an untrusted result off the trusted key", () => {
+  /** A server that stores what is published and serves it back by path. */
+  const storeByPath = (): Map<string, string> => {
+    const stored = new Map<string, string>()
+    respond = (request, response) => {
+      const path = request.url ?? ""
+      if (request.method === "PUT") {
+        const body = requests[requests.length - 1]?.body ?? ""
+        stored.set(path, body)
+        response.writeHead(201).end()
+        return
+      }
+      const entry = stored.get(path)
+      if (entry === undefined) {
+        response.writeHead(404).end()
+        return
+      }
+      response.writeHead(200, { "content-type": "application/json" }).end(entry)
+    }
+    return stored
+  }
+
+  it("publishes under the namespaced key and leaves the trusted key a miss", async () => {
+    const stored = storeByPath()
+    const trustedRoot = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smithers-build-cache-trusted-"))
+    try {
+      const untrusted = await openCache({
+        workspaceRoot: root,
+        endpoint,
+        writeToken: () => "write-credential",
+        publishNamespace: "pull-request"
+      })
+      await untrusted.put(result.key, result)
+      await untrusted.close()
+
+      // The publication really happened, under the namespaced key.
+      expect([...stored.keys()]).toEqual(["/ac/pull-request%2Falpha"])
+      expect(JSON.parse(stored.get("/ac/pull-request%2Falpha")!)).toMatchObject({
+        keyDigest: "pull-request/alpha"
+      })
+
+      // Trunk computes the same content key and finds nothing.
+      const trusted = await openCache({ workspaceRoot: trustedRoot, endpoint })
+      expect(await trusted.get(result.key)).toBeNull()
+      await trusted.close()
+    } finally {
+      await Fs.rm(trustedRoot, { recursive: true, force: true })
+    }
+  })
+
+  it("still reads the trusted keyspace, so an untrusted job keeps its cache hits", async () => {
+    const stored = storeByPath()
+    try {
+      const trunk = await openCache({ workspaceRoot: root, endpoint, writeToken: () => "write-credential" })
+      await trunk.put(result.key, result)
+      await trunk.close()
+      expect([...stored.keys()]).toEqual(["/ac/alpha"])
+
+      const untrustedRoot = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smithers-build-cache-untrusted-"))
+      try {
+        const untrusted = await openCache({ workspaceRoot: untrustedRoot, endpoint, publishNamespace: "pull-request" })
+        expect(await untrusted.get(result.key)).toEqual(result)
+        await untrusted.close()
+      } finally {
+        await Fs.rm(untrustedRoot, { recursive: true, force: true })
+      }
+    } finally {
+      respond = (_request, response) => {
+        response.writeHead(404).end()
+      }
+    }
+  })
+
+  it.each([
+    ["a path separator", "pull/request"],
+    ["a leading separator", "/trunk"],
+    ["a leading dot", ".trunk"],
+    ["a control character", "trunk\n"],
+    ["an unpaired surrogate", "\ud800"],
+    ["an unbounded name", "n".repeat(200)],
+    ["a non-string", 7]
+  ])("refuses %s as a publication namespace before creating cache state", async (_name, namespace) => {
+    await expect(openCache({ workspaceRoot: root, endpoint, publishNamespace: namespace as never }))
+      .rejects.toThrow(/publishNamespace/)
+    await expect(Fs.stat(NodePath.join(root, ".flows"))).rejects.toMatchObject({ code: "ENOENT" })
+  })
+})

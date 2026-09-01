@@ -146,7 +146,10 @@ const publishAssets = S.Shell.Run({
   bin: S.Runtime.bin,
   args: ["scripts/uploadToS3.js"],
   data: [buildClient],
-  secrets: [S.Secret("AWS_ACCESS_KEY_ID"), S.Secret("AWS_SECRET_ACCESS_KEY")],
+  secrets: [
+    S.HttpSecret(S.Secret("AWS_ACCESS_KEY_ID"), ["https://sts.amazonaws.com"]),
+    S.HttpSecret(S.Secret("AWS_SECRET_ACCESS_KEY"), ["https://sts.amazonaws.com"])
+  ],
   sandbox: { network: true },
 })
 

@@ -501,7 +501,10 @@ request.end()
           key: "//x:secret-boundary",
           cwd: fixtureDir,
           argv: [process.execPath, "-e", program],
-          secrets: [Secret.Secret("SMITHERS_SERVICE_BOUNDARY_SECRET")]
+          secrets: [Secret.HttpSecret(
+            Secret.Secret("SMITHERS_SERVICE_BOUNDARY_SECRET"),
+            [`http://127.0.0.1:${port}`]
+          )]
         })
         yield* Effect.promise(() => waitFor(() => authorization !== undefined, 5_000))
         tail = handle.outputTail()

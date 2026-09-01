@@ -30,7 +30,10 @@ const detectSecretsRegen = S.Shell.Diff({
 const syncEnv = S.Shell.Diff({
   bin: S.Host.bin("aws"),
   args: ["s3", "cp", "s3://artsy-citadel/force/.env.shared", "./"],
-  secrets: [S.Secret("AWS_ACCESS_KEY_ID"), S.Secret("AWS_SECRET_ACCESS_KEY")],
+  secrets: [
+    S.HttpSecret(S.Secret("AWS_ACCESS_KEY_ID"), ["https://sts.amazonaws.com"]),
+    S.HttpSecret(S.Secret("AWS_SECRET_ACCESS_KEY"), ["https://sts.amazonaws.com"])
+  ],
   sandbox: { network: true },
   changes: [".env.shared"],
 })

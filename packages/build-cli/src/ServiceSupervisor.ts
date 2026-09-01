@@ -94,8 +94,8 @@ export interface ServiceSpec {
   readonly cwd: string
   readonly argv: readonly [string, ...Array<string>]
   readonly env?: Readonly<Record<string, string>> | undefined
-  /** Secret declarations exposed to the service only as proxy placeholders. */
-  readonly secrets?: ReadonlyArray<Secret.Secret> | undefined
+  /** Destination-bound credentials exposed only as proxy placeholders. */
+  readonly secrets?: ReadonlyArray<Secret.HttpCredential> | undefined
   /**
    * Argv positions that receive loopback egress URLs. The real URL is read
    * from the declaration only when the service requests the loopback URL.
@@ -288,7 +288,11 @@ const canonicalize = (spec: ServiceSpec): string =>
     argv: spec.argv,
     cwd: spec.cwd,
     env: Object.fromEntries(Object.entries(spec.env ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
-    secrets: (spec.secrets ?? []).map(({ env, fallback }) => ({ env, fallback: fallback ?? null })),
+    secrets: (spec.secrets ?? []).map(({ secret: { env, fallback }, audiences }) => ({
+      env,
+      fallback: fallback ?? null,
+      audiences: [...audiences]
+    })),
     secretUrls: (spec.secretUrls ?? []).map(({ index, secret: { env, fallback } }) => ({
       index,
       env,
@@ -321,7 +325,7 @@ const parseSpec = (spec: ServiceSpec): ParsedSpec => {
   if (spec.argv[0] === "") throw new Error(`service ${spec.key} argv[0] must name an executable`)
   if (
     spec.secrets !== undefined && (
-      !Array.isArray(spec.secrets) || spec.secrets.some((secret) => !Secret.isSecret(secret))
+      !Array.isArray(spec.secrets) || spec.secrets.some((secret) => !Secret.isHttpCredential(secret))
     )
   ) {
     throw new Error(`service ${spec.key} secrets must contain only secret declarations`)
@@ -653,7 +657,7 @@ const serviceSecretBoundary = (
   }
   const vault = SecretProxy.makeVault()
   const minted: Record<string, string> = {}
-  for (const secret of spec.secrets ?? []) minted[secret.env] = vault.mint(secret)
+  for (const credential of spec.secrets ?? []) minted[credential.secret.env] = vault.mint(credential)
   return Effect.map(
     Effect.acquireRelease(
       Effect.tryPromise({

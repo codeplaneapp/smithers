@@ -657,8 +657,9 @@ describe("Github.Pr dispatch", () => {
         `import { Smithers as S } from "@smthrs/targets"
 const gate = S.Shell.Test({ command: "true" })
 const prNoToken = S.Github.Pr({ gates: [gate] })
-const pr = S.Github.Pr({ gates: [gate], secrets: [S.Secret("GITHUB_TOKEN")] })
-const prApproval = S.Github.Pr({ gates: [gate], secrets: [S.Secret("GITHUB_TOKEN")], approval: "required" })
+const github = S.HttpSecret(S.Secret("GITHUB_TOKEN"), ["https://api.github.com"])
+const pr = S.Github.Pr({ gates: [gate], secrets: [github] })
+const prApproval = S.Github.Pr({ gates: [gate], secrets: [github], approval: "required" })
 export const Package = S.Package({ targets: { gate, prNoToken, pr, prApproval } })
 `
       )
@@ -669,7 +670,8 @@ export const Package = S.Package({ targets: { gate, prNoToken, pr, prApproval } 
       const undeclared = await serve(root, ["//:prNoToken"], { environment: withoutToken })
       expect(undeclared.exitCode).toBe(1)
       expect(undeclared.logs).toContain(
-        "refused: missing_token_secret: Github.Pr declares no S.Secret(\"GITHUB_TOKEN\")"
+        "refused: missing_token_secret: Github.Pr declares no " +
+          "S.HttpSecret(S.Secret(\"GITHUB_TOKEN\"), [...]) in secrets"
       )
 
       const noValue = await serve(root, ["//:pr"], { environment: withoutToken })

@@ -407,7 +407,7 @@ export interface PackageNode extends Planner.PlannedTarget {
   readonly keyTemplate: Planner.KeyMaterial | undefined
   readonly refusal: string | undefined
   readonly sandbox: "none" | { readonly network?: boolean | "loopback" | undefined } | undefined
-  readonly secrets: ReadonlyArray<Secret.Secret>
+  readonly secrets: ReadonlyArray<Secret.HttpCredential>
   readonly argv: ReadonlyArray<string> | undefined
   /** Shell.Test fan-out count; each shard owns a distinct key and execution. */
   readonly shards: number
@@ -1628,11 +1628,11 @@ const visit = async (
   let materializeOf: string | undefined
   const cleanOutDirs: Array<string> = []
   const cleanPaths: Array<string> = []
-  const secrets: Array<Secret.Secret> = []
+  const secrets: Array<Secret.HttpCredential> = []
   const secretRecords: Array<Record<string, unknown>> = []
-  collectTagged(attrMember(attrs, "secrets"), "Secret", secretRecords, new Set())
+  collectTagged(attrMember(attrs, "secrets"), "HttpCredential", secretRecords, new Set())
   for (const record of secretRecords) {
-    if (Secret.isSecret(record)) secrets.push(record)
+    if (Secret.isHttpCredential(record)) secrets.push(record)
   }
   let sandbox = attrMember(attrs, "sandbox") as PackageNode["sandbox"]
 
@@ -2447,9 +2447,12 @@ const visit = async (
   }
   if (lane?.kind === "outward") {
     for (const required of lane.required) {
-      const declaration = secrets.find((secret) => secret.env === required)
+      const declaration = secrets.find((credential) => credential.secret.env === required)
       if (declaration === undefined) {
-        noteRefusal(`${rule}: missing secret: declaration requires S.Secret(${JSON.stringify(required)})`)
+        noteRefusal(
+          `${rule}: missing secret: declaration requires ` +
+            `S.HttpSecret(S.Secret(${JSON.stringify(required)}), [...])`
+        )
       }
     }
   }
@@ -3045,7 +3048,7 @@ export const execute = async (
     {
       readonly argv: [string, ...Array<string>]
       readonly env: Record<string, string>
-      readonly secrets: ReadonlyArray<Secret.Secret>
+      readonly secrets: ReadonlyArray<Secret.HttpCredential>
     } | { readonly error: string }
   > => {
     const planned = override ?? node.argv

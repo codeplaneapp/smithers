@@ -39,7 +39,7 @@ import * as Diagnostic from "./Diagnostic.ts"
 import { declaredToolchain, layerInstall, layerNonInteractiveNodeServices, layerPackageManager } from "./engine.ts"
 import type * as Planner from "./Planner.ts"
 import * as Reporter from "./Reporter.ts"
-import type { ExpandedInput, Workspace } from "./Workspace.ts"
+import { credentialEnvNames, type ExpandedInput, type RemoteCacheAccess, type Workspace } from "./Workspace.ts"
 
 /**
  * One target's reported execution outcome.
@@ -114,11 +114,7 @@ export interface ExecuteOptions {
   readonly targets: ReadonlyArray<Planner.PlannedTarget>
   readonly jobs?: number | undefined
   readonly readCache?: boolean | undefined
-  readonly remoteCache?: {
-    readonly endpoint: string
-    readonly tokenEnv: string
-    readonly readToken: () => string | undefined
-  } | undefined
+  readonly remoteCache?: RemoteCacheAccess | undefined
   readonly signal?: AbortSignal | undefined
   readonly packageName?: string | undefined
   readonly log?: ((line: string) => void) | undefined
@@ -891,6 +887,8 @@ export const execute = async (options: ExecuteOptions): Promise<Summary> => {
     cacheDirectory: workspace.cacheDirectory,
     endpoint: options.remoteCache?.endpoint,
     readToken: options.remoteCache?.readToken,
+    writeToken: options.remoteCache?.writeToken,
+    publishNamespace: options.remoteCache?.publishNamespace,
     warn: log
   })
   const byLabel = new Map(options.targets.map((target) => [target.label, target]))
@@ -989,7 +987,7 @@ export const execute = async (options: ExecuteOptions): Promise<Summary> => {
       flow,
       isFilegroup(flow) ? filegroupAttrs(target) : target.attrs,
       `smithers-build-target-${target.keyPreview.slice(0, 24)}`,
-      options.remoteCache === undefined ? [] : [options.remoteCache.tokenEnv],
+      options.remoteCache === undefined ? [] : credentialEnvNames(options.remoteCache.credentials),
       options.packageName,
       options.signal
     )
