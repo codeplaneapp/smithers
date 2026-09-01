@@ -467,10 +467,10 @@ const incarnation = (
     })
     return Layer.mergeAll(Inheriting.layer, Interpreter.layer(InheritingFlow)).pipe(
       Layer.provideMerge(AgentAction.layerHost(composition)),
-      Layer.provideMerge(classifier),
-      Layer.provideMerge(Budget.layerUnbounded()),
       Layer.provideMerge(seats(model)),
       Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+      Layer.provideMerge(classifier),
+      Layer.provideMerge(Budget.layerUnbounded()),
       Layer.provideMerge(Action.layerImplementations),
       Layer.provideMerge(Layer.succeed(FlowRuntime.FlowRuntime)(engine))
     )

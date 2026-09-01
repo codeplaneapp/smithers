@@ -191,10 +191,10 @@ const memory = <ROut, RIn>(
 ) =>
   steps.pipe(
     Layer.provideMerge(AgentAction.layerHost(host)),
-    Layer.provideMerge(budget),
-    Layer.provideMerge(QuotaPolicy.layerUnclassified()),
     Layer.provideMerge(seats(model)),
     Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+    Layer.provideMerge(budget),
+    Layer.provideMerge(QuotaPolicy.layerUnclassified()),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),
     Layer.provideMerge(NodeCrypto.layer)
@@ -469,10 +469,10 @@ describe("a budget on the durable engine", () => {
         })
         const wiring = Layer.mergeAll(First.layer, Interpreter.layer(OneStep)).pipe(
           Layer.provideMerge(AgentAction.layerHost(host)),
-          Layer.provideMerge(Budget.layer({ tokens: { max: 1_000, onExceeded: "warn" } })),
-          Layer.provideMerge(QuotaPolicy.layerUnclassified()),
           Layer.provideMerge(seats(spending(600, [thinking, answering(`{"approved":true}`)], calls))),
           Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+          Layer.provideMerge(Budget.layer({ tokens: { max: 1_000, onExceeded: "warn" } })),
+          Layer.provideMerge(QuotaPolicy.layerUnclassified()),
           Layer.provideMerge(Action.layerImplementations),
           Layer.provideMerge(Layer.succeed(FlowRuntime.FlowRuntime)(engine))
         )
@@ -508,10 +508,10 @@ describe("a budget on the durable engine", () => {
         })
         const wiring = Layer.mergeAll(First.layer, Second.layer, Interpreter.layer(TwoSteps)).pipe(
           Layer.provideMerge(AgentAction.layerHost(host)),
-          Layer.provideMerge(Budget.layer({ tokens: { max: 1_000, onExceeded: "skip-remaining" } })),
-          Layer.provideMerge(QuotaPolicy.layerUnclassified()),
           Layer.provideMerge(seats(spending(600, [answering(`{"approved":true}`)], calls))),
           Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+          Layer.provideMerge(Budget.layer({ tokens: { max: 1_000, onExceeded: "skip-remaining" } })),
+          Layer.provideMerge(QuotaPolicy.layerUnclassified()),
           Layer.provideMerge(Action.layerImplementations),
           Layer.provideMerge(Layer.succeed(FlowRuntime.FlowRuntime)(engine))
         )
@@ -601,12 +601,12 @@ describe("a budget across an engine boundary", () => {
         })
         return Layer.mergeAll(First.layer, Second.layer, Interpreter.layer(TwoSteps)).pipe(
           Layer.provideMerge(AgentAction.layerHost(host)),
+          Layer.provideMerge(seats(parkingBetweenSteps(300, calls))),
+          Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
           // A ceiling no part of this run reaches: the assertion is the tally,
           // not a refusal.
           Layer.provideMerge(Budget.layer({ tokens: { max: 5_000 } })),
           Layer.provideMerge(QuotaPolicy.layerDefault()),
-          Layer.provideMerge(seats(parkingBetweenSteps(300, calls))),
-          Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
           Layer.provideMerge(Action.layerImplementations),
           Layer.provideMerge(Layer.succeed(FlowRuntime.FlowRuntime)(engine))
         )
@@ -745,13 +745,13 @@ describe("a budget refusing a resumed run", () => {
           })
           return Layer.mergeAll(First.layer, Second.layer, pausing, Interpreter.layer(ParkedSteps)).pipe(
             Layer.provideMerge(AgentAction.layerHost(host)),
+            Layer.provideMerge(seats(spending(600, [answering(`{"approved":true}`)], calls))),
+            Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
             // 600 spent and 600 projected is 1,200 against a 1,000 ceiling, so
             // the step after the boundary cannot be made — but ONLY if the 600
             // the first incarnation spent is still known.
             Layer.provideMerge(attributed({ tokens: { max: 1_000 } }, asked, counted)),
             Layer.provideMerge(QuotaPolicy.layerUnclassified()),
-            Layer.provideMerge(seats(spending(600, [answering(`{"approved":true}`)], calls))),
-            Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
             Layer.provideMerge(Action.layerImplementations),
             Layer.provideMerge(Layer.succeed(FlowRuntime.FlowRuntime)(engine))
           )
@@ -1119,10 +1119,10 @@ describe("a budget whose journal keeps nothing lossy", () => {
         })
         return Layer.mergeAll(First.layer, Second.layer, Interpreter.layer(TwoSteps)).pipe(
           Layer.provideMerge(AgentAction.layerHost(host)),
-          Layer.provideMerge(Budget.layer({ tokens: { max: 5_000 } })),
-          Layer.provideMerge(QuotaPolicy.layerDefault()),
           Layer.provideMerge(seats(parkingBetweenSteps(300, calls))),
           Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+          Layer.provideMerge(Budget.layer({ tokens: { max: 5_000 } })),
+          Layer.provideMerge(QuotaPolicy.layerDefault()),
           Layer.provideMerge(Action.layerImplementations),
           Layer.provideMerge(Layer.succeed(FlowRuntime.FlowRuntime)(engine))
         )
@@ -1212,10 +1212,10 @@ describe("a budget whose ledger cannot be written", () => {
           })
           const wiring = Layer.mergeAll(First.layer, Interpreter.layer(OneStep)).pipe(
             Layer.provideMerge(AgentAction.layerHost(host)),
-            Layer.provideMerge(Budget.layer({ tokens: { max: 10_000 } })),
-            Layer.provideMerge(QuotaPolicy.layerUnclassified()),
             Layer.provideMerge(seats(spending(600, [answering(`{"approved":true}`)], calls))),
             Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+            Layer.provideMerge(Budget.layer({ tokens: { max: 10_000 } })),
+            Layer.provideMerge(QuotaPolicy.layerUnclassified()),
             Layer.provideMerge(Action.layerImplementations),
             Layer.provideMerge(Layer.succeed(FlowRuntime.FlowRuntime)(engine))
           )
@@ -1247,10 +1247,10 @@ describe("a budget shared by every run of one composition", () => {
   const shared = (budget: Layer.Layer<Budget.Budget>, model: Model.Model) =>
     Layer.mergeAll(First.layer, Interpreter.layer(OneStep)).pipe(
       Layer.provideMerge(AgentAction.layerHost(host)),
-      Layer.provideMerge(budget),
-      Layer.provideMerge(QuotaPolicy.layerUnclassified()),
       Layer.provideMerge(seats(model)),
       Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+      Layer.provideMerge(budget),
+      Layer.provideMerge(QuotaPolicy.layerUnclassified()),
       Layer.provideMerge(Action.layerImplementations)
     )
 

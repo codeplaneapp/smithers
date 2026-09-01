@@ -283,7 +283,11 @@ const stack = (options: StackOptions) => {
   }).pipe(
     // The agent and the seat resolver are the executor's own dependencies;
     // everything else in its `Services` union comes from the engine stack.
-    Layer.provide(Layer.merge(Agent.layer, SeatResolver.layer({ resolve: options.resolve })))
+    Layer.provide(
+      Layer.merge(Agent.layer, SeatResolver.layer({ resolve: options.resolve })).pipe(
+        Layer.provideMerge(Safety.layer)
+      )
+    )
   )
   let snapshot = 0
   const jj = Jj.layerNoop({

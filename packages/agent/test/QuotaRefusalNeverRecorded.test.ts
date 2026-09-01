@@ -257,10 +257,10 @@ const refusedThenReopened = (
     const model = provider(1, refusal, calls)
     const wiring = Layer.mergeAll(Step.layer, Interpreter.layer(OneStep)).pipe(
       Layer.provideMerge(AgentAction.layerHost(host)),
-      Layer.provideMerge(quota),
-      Layer.provideMerge(Budget.layerUnbounded()),
       Layer.provideMerge(seats(model)),
       Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+      Layer.provideMerge(quota),
+      Layer.provideMerge(Budget.layerUnbounded()),
       Layer.provideMerge(Action.layerImplementations),
       Layer.provideMerge(Layer.succeed(FlowRuntime.FlowRuntime)(engine))
     )
@@ -330,13 +330,13 @@ describe("a quota refusal under a sealed model step", () => {
         })
         const wiring = Layer.mergeAll(Step.layer, Interpreter.layer(OneStep)).pipe(
           Layer.provideMerge(AgentAction.layerHost(host)),
+          Layer.provideMerge(seats(provider(1, rateLimited, calls))),
+          Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
           // A one-millisecond window: the park is real and durable, and the
           // wake is immediate, so the case measures the recovery rather than
           // the wait.
           Layer.provideMerge(QuotaPolicy.layerDefault({ defaultWaitMillis: 1 })),
           Layer.provideMerge(Budget.layerUnbounded()),
-          Layer.provideMerge(seats(provider(1, rateLimited, calls))),
-          Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
           Layer.provideMerge(Action.layerImplementations),
           Layer.provideMerge(Layer.succeed(FlowRuntime.FlowRuntime)(engine))
         )
@@ -368,10 +368,10 @@ describe("a quota refusal under a sealed model step", () => {
         })
         const wiring = Layer.mergeAll(Step.layer, Interpreter.layer(OneStep)).pipe(
           Layer.provideMerge(AgentAction.layerHost(host)),
-          Layer.provideMerge(dialectClassifier()),
-          Layer.provideMerge(Budget.layerUnbounded()),
           Layer.provideMerge(seats(provider(1, dialectRefusal, calls))),
           Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+          Layer.provideMerge(dialectClassifier()),
+          Layer.provideMerge(Budget.layerUnbounded()),
           Layer.provideMerge(Action.layerImplementations),
           Layer.provideMerge(Layer.succeed(FlowRuntime.FlowRuntime)(engine))
         )

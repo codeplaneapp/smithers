@@ -180,7 +180,13 @@ const host = (root: string, owner: Ownership.OwnerId, engineHost = "approval-res
     ],
     limits: { memoryBytes: 64 * 1024 * 1024, steps: 5_000_000 },
     maxFrames: 4
-  }).pipe(Layer.provide(Layer.merge(Agent.layer, SeatResolver.layer({ resolve: seat }))))
+  }).pipe(
+    Layer.provide(
+      Layer.merge(Agent.layer, SeatResolver.layer({ resolve: seat })).pipe(
+        Layer.provideMerge(Safety.layer)
+      )
+    )
+  )
   const engine = NodeRuntime.layer(
     {
       filename: join(root, "engine.db"),

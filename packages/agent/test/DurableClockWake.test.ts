@@ -135,11 +135,10 @@ describe("a durable wait nested inside a cell action", () => {
           maxFrames: 3
         }).pipe(
           Stream.runForEach((event) => Effect.sync(() => collected.push(event))),
-          Effect.provide(Agent.layerDefaults),
-          Effect.provide(Safety.layer)
+          Effect.provide(Agent.layerDefaults)
         )
         return collected
-      }).pipe(Effect.provide(Agent.layer))
+      }).pipe(Effect.provide(Agent.layer), Effect.provide(Safety.layer))
     )
     expect(outcome._tag, outcome._tag === "failed" ? String(outcome.error) : undefined).toBe("completed")
     if (outcome._tag !== "completed") return

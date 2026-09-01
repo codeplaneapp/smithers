@@ -248,10 +248,10 @@ const incarnation = (
     })
     return Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)).pipe(
       Layer.provideMerge(AgentAction.layerHost(composition)),
-      Layer.provideMerge(classifier),
-      Layer.provideMerge(Budget.layerUnbounded()),
       Layer.provideMerge(seats(model)),
       Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+      Layer.provideMerge(classifier),
+      Layer.provideMerge(Budget.layerUnbounded()),
       Layer.provideMerge(Action.layerImplementations),
       Layer.provideMerge(Layer.succeed(FlowRuntime.FlowRuntime)(engine))
     )
@@ -267,10 +267,10 @@ const incarnation = (
 const memory = (model: Model.Model, classifier: Layer.Layer<QuotaPolicy.QuotaClassifier>) =>
   Layer.mergeAll(Reviewer.layer, Interpreter.layer(ReviewFlow)).pipe(
     Layer.provideMerge(AgentAction.layerHost(host)),
-    Layer.provideMerge(classifier),
-    Layer.provideMerge(Budget.layerUnbounded()),
     Layer.provideMerge(seats(model)),
     Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+    Layer.provideMerge(classifier),
+    Layer.provideMerge(Budget.layerUnbounded()),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),
     Layer.provideMerge(NodeCrypto.layer)
