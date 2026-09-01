@@ -61,9 +61,8 @@ export interface Options {
 export const defaultRequestTimeout = Duration.seconds(60)
 
 /** Default and absolute maximum encoded cache entry size. */
-export const maximumEntryBytes = 4 * 1024 * 1024
+export const maximumEntryBytes = CacheStore.maximumJsonBytes
 
-const encoder = new TextEncoder()
 const decoder = new TextDecoder("utf-8", { fatal: true })
 
 const isWellFormedText = (value: string): boolean => {
@@ -140,7 +139,8 @@ export const make = (
         const endpoint = data("endpoint")
         if (
           typeof endpoint !== "string" || endpoint.length > 16 * 1024 ||
-          !isWellFormedText(endpoint) || /[\u0000-\u001f\u007f]/.test(endpoint)
+          endpoint.trim() !== endpoint || !isWellFormedText(endpoint) ||
+          /[\u0000-\u001f\u007f]/.test(endpoint)
         ) throw new TypeError("endpoint")
         const rawHeaders = data("headers")
         let headers: Readonly<Record<string, string>> | undefined
@@ -194,6 +194,7 @@ export const make = (
     const base = endpoint.origin
     const requestDeadlineOption = yield* Effect.try({
       try: () => Duration.fromInput(configured.requestTimeout ?? defaultRequestTimeout),
+      /* v8 ignore next -- defensive normalization if a future Duration input implementation throws */
       catch: () => invalidConfiguration("requestTimeout")
     })
     if (
@@ -214,6 +215,7 @@ export const make = (
     const acUrl = (keyDigest: string) => {
       const target = new URL(base)
       target.pathname = `${acPrefix}${keyDigest}`
+      /* v8 ignore next -- KeyDigest excludes every path separator and dot segment */
       if (!target.pathname.startsWith(acPrefix)) throw new Error("cache-key path escaped its namespace")
       return target.toString()
     }
@@ -313,15 +315,6 @@ export const make = (
       Effect.gen(function*() {
         const entry = yield* CacheStore.snapshotEntry(candidate)
         yield* Effect.annotateCurrentSpan({ keyDigest: entry.keyDigest })
-        const encoded = yield* Schema.encodeEffect(CacheStore.CacheEntry)(entry).pipe(
-          Effect.mapError((cause) =>
-            new CacheStore.CacheStoreError({
-              code: "invalid_cache",
-              message: "cache entry violates the persistence contract",
-              cause
-            })
-          )
-        )
         // The wire bytes are the canonical form itself. Besides refusing
         // values JSON cannot represent, this gives structurally equal entries
         // identical bytes on every host regardless of object insertion order.
@@ -329,15 +322,7 @@ export const make = (
         // a struct encoder may omit an `undefined` member.
         yield* CacheStore.encodeCanonical(entry.result, "result")
         yield* CacheStore.encodeCanonical(entry.meta, "meta")
-        const body = yield* CacheStore.encodeCanonical(encoded, "cache entry")
-        if (encoder.encode(body).byteLength > maximumEntryBytes) {
-          return yield* Effect.fail(
-            new CacheStore.CacheStoreError({
-              code: "invalid_cache",
-              message: `cache entry exceeds the ${maximumEntryBytes}-byte wire limit`
-            })
-          )
-        }
+        const body = yield* CacheStore.encodeCanonical(entry, "cache entry")
         const response = yield* send(
           "a publication",
           HttpClientRequest.put(acUrl(entry.keyDigest)).pipe(

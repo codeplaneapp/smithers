@@ -315,6 +315,7 @@ export const encodeCanonical = (value: unknown, field: string): Effect.Effect<st
     const admitted = BoundedJson.admit(value, jsonLimits)
     return admitted.ok
       ? Schema.decodeUnknownEffect(Canonical)(admitted.value).pipe(
+        /* v8 ignore next -- bounded inert JSON is exactly Canonical's accepted domain */
         Effect.mapError(() => error("invalid_cache", `${field} must have a bounded canonical JSON form`))
       )
       : Effect.fail(error("invalid_cache", `${field} ${admitted.complaint}`))
@@ -392,12 +393,6 @@ export const validateAge = (field: string, value: number | undefined): Effect.Ef
   value === undefined || (Number.isSafeInteger(value) && value >= 0)
     ? Effect.void
     : Effect.fail(error("invalid_cache", `${field} must be a non-negative safe integer`))
-
-const validateEntry = (entry: CacheEntry): Effect.Effect<void, CacheStoreError> =>
-  Schema.decodeUnknownEffect(CacheEntry)(entry).pipe(
-    Effect.asVoid,
-    Effect.mapError((cause) => error("invalid_cache", "cache entry violates the persistence contract", cause))
-  )
 
 /**
  * Takes an inert, detached snapshot of a cache entry at effect start.
@@ -555,7 +550,6 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     Effect.gen(function*() {
       const entry = yield* snapshotEntry(candidate)
       yield* Effect.annotateCurrentSpan({ keyDigest: entry.keyDigest })
-      yield* validateEntry(entry)
       const result = yield* encodeCanonical(entry.result, "result")
       const meta = yield* encodeCanonical(entry.meta, "meta")
       return yield* writer.write(

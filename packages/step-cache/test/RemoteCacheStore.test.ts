@@ -5,6 +5,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as HttpClient from "effect/unstable/http/HttpClient"
@@ -230,6 +231,82 @@ describe("lookups", () => {
       expect(errorOf(exit).code).toBe("decode_failed")
     }))
 
+  it.effect("bounds declared and chunked response bodies before decoding", () =>
+    Effect.gen(function*() {
+      const declared = tierOf(
+        () => new Response("{}", { status: 200, headers: { "content-length": "11" } }),
+        { endpoint: "https://cache.example.com", maxResponseBytes: 10 }
+      )
+      const chunked = tierOf(
+        () => new Response("x".repeat(11), { status: 200 }),
+        { endpoint: "https://cache.example.com", maxResponseBytes: 10 }
+      )
+      const malformed = tierOf(
+        () => new Response("{}", { status: 200, headers: { "content-length": "unknown" } }),
+        { endpoint: "https://cache.example.com", maxResponseBytes: 10 }
+      )
+      const within = tierOf(
+        () => new Response(JSON.stringify(entry), {
+          status: 200,
+          headers: { "content-length": String(JSON.stringify(entry).length) }
+        }),
+        { endpoint: "https://cache.example.com", maxResponseBytes: 1_000 }
+      )
+      const exits = yield* Effect.forEach([declared, chunked, malformed], (tier) =>
+        Effect.flatMap(tier.store, (store) => store.get(entry.keyDigest)).pipe(Effect.exit))
+      expect(exits.map((exit) => errorOf(exit).code)).toEqual([
+        "persistence_failed",
+        "persistence_failed",
+        "persistence_failed"
+      ])
+      expect(Option.isSome(yield* Effect.flatMap(within.store, (store) => store.get(entry.keyDigest)))).toBe(true)
+    }))
+
+  it.effect("rejects invalid UTF-8 and a failing response stream", () =>
+    Effect.gen(function*() {
+      const invalidUtf8 = tierOf(
+        () => new Response(new Uint8Array([0xff]), { status: 200 }),
+        { endpoint: "https://cache.example.com", maxResponseBytes: 10 }
+      )
+      const failedStream = tierOf(
+        () => new Response(new ReadableStream({ start: (controller) => controller.error(new Error("stream")) }), {
+          status: 200
+        }),
+        { endpoint: "https://cache.example.com", maxResponseBytes: 10 }
+      )
+      for (const tier of [invalidUtf8, failedStream]) {
+        const exit = yield* Effect.flatMap(tier.store, (store) => store.get(entry.keyDigest)).pipe(Effect.exit)
+        expect(errorOf(exit).code).toBe("persistence_failed")
+      }
+    }))
+
+  it.effect("times out both a stalled request and a stalled response body", () => {
+    const stalledRequest = HttpClient.make(() => Effect.never)
+    const stalledBody = HttpClient.make((request) =>
+      Effect.succeed(HttpClientResponse.fromWeb(
+        request,
+        new Response(new ReadableStream({ start: () => undefined }), { status: 200 })
+      )))
+    const runTimeout = (client: HttpClient.HttpClient) =>
+      Effect.gen(function*() {
+        const store = yield* RemoteCacheStore.make({
+          endpoint: "https://cache.example.com",
+          requestTimeout: "1 millis"
+        }).pipe(Effect.provide(Layer.succeed(HttpClient.HttpClient)(client)))
+        const fiber = yield* store.get(entry.keyDigest).pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Effect.yieldNow
+        yield* TestClock.adjust("2 millis")
+        return yield* Fiber.await(fiber)
+      }).pipe(Effect.provide(TestClock.layer()))
+
+    return Effect.gen(function*() {
+      for (const client of [stalledRequest, stalledBody]) {
+        const exit = yield* runTimeout(client)
+        expect(errorOf(exit).code).toBe("persistence_failed")
+      }
+    })
+  })
+
   it.effect("refuses an entry recorded under a different key", () =>
     Effect.gen(function*() {
       // A tier that answers a lookup with someone else's entry would hand the
@@ -316,6 +393,104 @@ describe("publications", () => {
       )
       expect(exits.map((exit) => errorOf(exit).code)).toEqual(malformed.map(() => "invalid_cache"))
       expect(tier.calls).toEqual([])
+    }))
+
+  it.effect("refuses an encoded entry larger than the remote wire bound", () =>
+    Effect.gen(function*() {
+      const tier = tierOf(() => new Response(null, { status: 201 }))
+      const oversized = {
+        ...entry,
+        result: "x".repeat(CacheStore.maximumJsonBytes - 2)
+      }
+      const exit = yield* Effect.flatMap(tier.store, (store) => store.put(oversized)).pipe(Effect.exit)
+      expect(errorOf(exit).code).toBe("invalid_cache")
+      expect(tier.calls).toEqual([])
+    }))
+})
+
+describe("configuration", () => {
+  const rejects = (options: RemoteCacheStore.Options) =>
+    Effect.gen(function*() {
+      const stub = stubClient(() => new Response(null))
+      const exit = yield* Effect.exit(
+        RemoteCacheStore.make(options).pipe(Effect.provide(stub.layer))
+      )
+      expect(errorOf(exit).code).toBe("invalid_cache")
+      expect(stub.calls).toEqual([])
+    })
+
+  it.effect.each([
+    null,
+    {},
+    { endpoint: 1 },
+    { endpoint: "not a url" },
+    { endpoint: "http://cache.example.com" },
+    { endpoint: "ftp://cache.example.com" },
+    { endpoint: "https://user@cache.example.com" },
+    { endpoint: "https://cache.example.com?q=1" },
+    { endpoint: "https://cache.example.com#fragment" },
+    { endpoint: " https://cache.example.com" },
+    { endpoint: `https://cache.example.com/${"x".repeat(16 * 1024)}` },
+    { endpoint: "https://cache.example.com/\ud800" },
+    { endpoint: "https://cache.example.com/\udc00" },
+    { endpoint: "https://cache.example.com", unknown: true },
+    { endpoint: "https://cache.example.com", requestTimeout: "0 millis" },
+    { endpoint: "https://cache.example.com", requestTimeout: Symbol("bad") },
+    {
+      endpoint: "https://cache.example.com",
+      requestTimeout: new Proxy({}, { get: () => { throw new Error("hostile") } })
+    },
+    { endpoint: "https://cache.example.com", maxResponseBytes: 0 },
+    { endpoint: "https://cache.example.com", maxResponseBytes: 1.5 },
+    { endpoint: "https://cache.example.com", maxResponseBytes: RemoteCacheStore.maximumEntryBytes + 1 },
+    { endpoint: "https://cache.example.com", headers: null },
+    { endpoint: "https://cache.example.com", headers: new Date() },
+    { endpoint: "https://cache.example.com", headers: { "bad header": "value" } },
+    { endpoint: "https://cache.example.com", headers: { authorization: "line\nbreak" } },
+    { endpoint: "https://cache.example.com", headers: { authorization: 1 } }
+  ] as ReadonlyArray<unknown>)("rejects invalid options %# before I/O", (options) =>
+    rejects(options as RemoteCacheStore.Options))
+
+  it.effect("rejects symbol and accessor option fields", () =>
+    Effect.gen(function*() {
+      const symbol = { endpoint: "https://cache.example.com", [Symbol("x")]: true }
+      let reads = 0
+      const accessor = Object.defineProperty({}, "endpoint", {
+        enumerable: true,
+        get: () => {
+          reads++
+          return "https://cache.example.com"
+        }
+      })
+      yield* rejects(symbol as RemoteCacheStore.Options)
+      yield* rejects(accessor as RemoteCacheStore.Options)
+      expect(reads).toBe(0)
+    }))
+
+  it.effect("rejects symbol-bearing header records", () =>
+    Effect.gen(function*() {
+      const headers = Object.defineProperty({}, Symbol("authorization"), {
+        value: "Bearer secret",
+        enumerable: true
+      })
+      yield* rejects({ endpoint: "https://cache.example.com", headers } as RemoteCacheStore.Options)
+    }))
+
+  it.effect("accepts HTTPS and loopback HTTP roots with path prefixes", () =>
+    Effect.gen(function*() {
+      for (const endpoint of [
+        "https://cache.example.com/base/",
+        "https://cache.example.com/base/😀",
+        "http://127.0.0.1:1234/base",
+        "http://api.localhost:1234/base",
+        "http://[::1]:1234/base"
+      ]) {
+        const tier = tierOf(() => new Response(null, { status: 404 }), { endpoint })
+        const store = yield* tier.store
+        yield* store.get(entry.keyDigest)
+        const root = new URL(endpoint).pathname.replace(/\/+$/, "")
+        expect(new URL(tier.calls[0]!.url).pathname).toBe(`${root}/ac/key-digest`)
+      }
     }))
 })
 

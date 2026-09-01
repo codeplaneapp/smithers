@@ -529,6 +529,61 @@ describe("CacheStore", () => {
       expect(result.count).toBe(0)
     }))
 
+  it.effect("rejects ill-formed run ids while preserving valid astral text", () =>
+    Effect.gen(function*() {
+      const result = yield* migrated(Effect.gen(function*() {
+        const store = yield* CacheStore
+        const failures = yield* Effect.forEach(
+          ["\ud800", "\udc00", "run\0id", "x".repeat(CacheStoreLive.maximumRecordedRunIdLength + 1)],
+          (recordedRunId) => Effect.flip(store.put({ ...entry, recordedRunId }))
+        )
+        const valid = { ...entry, keyDigest: "astral", recordedRunId: "run-😀" }
+        return { failures, put: yield* store.put(valid), found: yield* store.get(valid.keyDigest) }
+      }))
+
+      expect(result.failures.every((failure) => failure.code === "invalid_cache")).toBe(true)
+      expect(result.put).toEqual({ _tag: "Inserted" })
+      expect(Option.getOrThrow(result.found).recordedRunId).toBe("run-😀")
+    }))
+
+  it.effect("rejects hostile entry shells without invoking accessors", () =>
+    Effect.gen(function*() {
+      let reads = 0
+      const accessor = Object.defineProperty({ ...entry }, "result", {
+        enumerable: true,
+        get: () => {
+          reads++
+          return { output: "secret" }
+        }
+      })
+      const extra = { ...entry, extra: true }
+      const symbol = Object.defineProperty({ ...entry }, Symbol("extra"), { value: true, enumerable: true })
+      const failures = yield* migrated(Effect.gen(function*() {
+        const store = yield* CacheStore
+        return yield* Effect.forEach(
+          [null, accessor, extra, symbol] as ReadonlyArray<unknown>,
+          (candidate) => Effect.flip(store.put(candidate as CacheStoreLive.CacheEntry))
+        )
+      }))
+      expect(failures.every((failure) => failure.code === "invalid_cache")).toBe(true)
+      expect(reads).toBe(0)
+    }))
+
+  it.effect("ignores non-enumerable shell metadata while snapshotting", () =>
+    Effect.gen(function*() {
+      const candidate = Object.defineProperty({ ...entry, keyDigest: "hidden-shell" }, "hidden", {
+        value: "not durable",
+        enumerable: false
+      })
+      const result = yield* migrated(Effect.gen(function*() {
+        const store = yield* CacheStore
+        yield* store.put(candidate)
+        return yield* store.get(candidate.keyDigest)
+      }))
+      expect(Option.getOrThrow(result).keyDigest).toBe("hidden-shell")
+      expect(result).not.toHaveProperty("hidden")
+    }))
+
   it.effect("reports decode_failed for corrupt durable cache JSON", () =>
     Effect.gen(function*() {
       const codes = yield* migrated(Effect.gen(function*() {
@@ -552,6 +607,34 @@ describe("CacheStore", () => {
       }))
 
       expect(codes).toEqual(["decode_failed", "decode_failed"])
+    }))
+
+  it.effect("refuses an oversized durable JSON row before parsing it", () =>
+    Effect.gen(function*() {
+      const failure = yield* migrated(Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        const store = yield* CacheStore
+        yield* store.put(entry)
+        yield* sql`UPDATE flows_step_cache SET result_json = ${JSON.stringify(
+          "x".repeat(CacheStoreLive.maximumJsonBytes + 1)
+        )}`
+        return yield* Effect.flip(store.get(entry.keyDigest))
+      }))
+      expect(failure.code).toBe("decode_failed")
+    }))
+
+  it.effect("refuses a durable JSON row beyond the nesting policy", () =>
+    Effect.gen(function*() {
+      const failure = yield* migrated(Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        const store = yield* CacheStore
+        yield* store.put(entry)
+        let deep: unknown = true
+        for (let depth = 0; depth <= CacheStoreLive.maximumJsonDepth; depth++) deep = { child: deep }
+        yield* sql`UPDATE flows_step_cache SET result_json = ${JSON.stringify(deep)}`
+        return yield* Effect.flip(store.get(entry.keyDigest))
+      }))
+      expect(failure.code).toBe("decode_failed")
     }))
 
   it.effect("decodes complete durable cache rows before exposing provenance", () =>
