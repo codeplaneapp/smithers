@@ -87,7 +87,7 @@ export const make = (options: Options): CacheStore.Service => {
       // over a local `Conflict` would be a cache collision the caller cannot
       // detect. If the winner is already gone again, the remote entry is the
       // only row anyone holds and stands.
-      const durable = yield* local.get(keyDigest)
+      const durable = yield* local.get(keyDigest, options)
       return Option.isSome(durable) ? durable : shared
     })
   )
@@ -147,7 +147,15 @@ export const make = (options: Options): CacheStore.Service => {
 export const layer = <EL, RL, ER, RR>(options: {
   readonly local: Effect.Effect<CacheStore.Service, EL, RL>
   readonly remote: Effect.Effect<CacheStore.Service, ER, RR>
+  readonly publication?: Options["publication"]
 }): Layer.Layer<CacheStore.CacheStore, EL | ER, RL | RR> =>
   Layer.effect(CacheStore.CacheStore)(
-    Effect.map(Effect.all({ local: options.local, remote: options.remote }), make)
+    Effect.map(
+      Effect.all({ local: options.local, remote: options.remote }),
+      ({ local, remote }) => make({
+        local,
+        remote,
+        ...(options.publication === undefined ? {} : { publication: options.publication })
+      })
+    )
   )

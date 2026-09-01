@@ -183,6 +183,45 @@ describe("CacheStore", () => {
       expect(Option.getOrThrow(result.recorded)).toEqual(entry)
     }))
 
+  it.effect("never recreates a head from conflicting bytes after eviction", () =>
+    Effect.gen(function*() {
+      const result = yield* migrated(Effect.gen(function*() {
+        const store = yield* CacheStore
+        yield* store.put(entry)
+        yield* store.evict(entry.keyDigest)
+        const put = yield* store.put({ ...entry, result: { output: "different" } })
+        return {
+          put,
+          head: yield* store.get(entry.keyDigest),
+          recorded: yield* store.get(entry.keyDigest, {
+            recordedBy: { runId: entry.recordedRunId, eventSeq: entry.recordedEventSeq }
+          })
+        }
+      }))
+
+      expect(result.put).toEqual({ _tag: "Conflict" })
+      expect(Option.isNone(result.head)).toBe(true)
+      expect(Option.getOrThrow(result.recorded)).toEqual(entry)
+    }))
+
+  it.effect("restores an evicted head only from identical provenance bytes", () =>
+    Effect.gen(function*() {
+      const result = yield* migrated(Effect.gen(function*() {
+        const store = yield* CacheStore
+        yield* store.put(entry)
+        yield* store.evict(entry.keyDigest)
+        const put = yield* store.put({
+          ...entry,
+          result: { output: "ok" },
+          meta: { source: "recorded" }
+        })
+        return { put, head: yield* store.get(entry.keyDigest) }
+      }))
+
+      expect(result.put).toEqual({ _tag: "Inserted" })
+      expect(Option.getOrThrow(result.head)).toEqual(entry)
+    }))
+
   it.effect("recognizes an identical re-put", () =>
     Effect.gen(function*() {
       const result = yield* migrated(Effect.gen(function*() {
@@ -233,12 +272,11 @@ describe("CacheStore", () => {
       expect(Option.getOrThrow(result.found).result).toEqual(first)
     }))
 
-  it.effect("reports ExistingSame for an identical result with different meta, keeping the first writer's meta", () =>
+  it.effect("rejects changed metadata under the same immutable provenance", () =>
     Effect.gen(function*() {
-      // Pinning the current behaviour, which was undocumented: `meta_json` is
-      // not compared, so a second writer agreeing on the result never conflicts
-      // and never overwrites. Meta is provenance about the recording, not part
-      // of the cached value, so the first writer's copy is the one the row keeps.
+      // A provenance identity names complete immutable bytes. Letting a retry
+      // alter metadata would make its ledger row disagree with the head it
+      // restores after eviction.
       const result = yield* migrated(Effect.gen(function*() {
         const store = yield* CacheStore
         yield* store.put(entry)
@@ -247,7 +285,7 @@ describe("CacheStore", () => {
         return { put, found }
       }))
 
-      expect(result.put).toEqual({ _tag: "ExistingSame" })
+      expect(result.put).toEqual({ _tag: "Conflict" })
       expect(Option.getOrThrow(result.found).meta).toEqual({ source: "recorded" })
     }))
 
@@ -406,6 +444,27 @@ describe("CacheStore", () => {
       expect(result.count).toBe(1)
     }))
 
+  it.effect("rejects malformed lookup provenance before any SQL statement", () =>
+    Effect.gen(function*() {
+      const malformed = [
+        { runId: "", eventSeq: 1 },
+        { runId: "run", eventSeq: -1 },
+        { runId: "run", eventSeq: 0.5 },
+        { runId: "run", eventSeq: Number.NaN },
+        { runId: "run", eventSeq: Number.MAX_SAFE_INTEGER + 1 }
+      ] as const
+      const codes = yield* Effect.forEach(malformed, (recordedBy) =>
+        Effect.gen(function*() {
+          const store = yield* CacheStore
+          return (yield* Effect.flip(store.get(entry.keyDigest, { recordedBy }))).code
+        }).pipe(
+          Effect.provide(CacheStoreLive.layer),
+          Effect.provide(failingDatabase(new Error("SQL must not run")))
+        ))
+
+      expect(codes).toEqual(malformed.map(() => "invalid_cache"))
+    }))
+
   it.effect("counts affected rows on a driver that reports rowCount rather than changes", () =>
     Effect.gen(function*() {
       // node-postgres hands `.raw` back a `{rowCount}` result; a bun:sqlite
@@ -441,7 +500,6 @@ describe("CacheStore", () => {
 
       expect(failures.every((failure) => failure.code === "invalid_cache")).toBe(true)
       expect(failures.some((failure) => failure.cause !== undefined)).toBe(true)
-      expect(failures.some((failure) => failure.cause === undefined)).toBe(true)
     }))
 
   it.effect("rejects every invalid provenance field before persistence", () =>

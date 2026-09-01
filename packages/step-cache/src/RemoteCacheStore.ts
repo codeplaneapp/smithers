@@ -22,12 +22,16 @@
  *
  * @since 0.1.0
  */
+import * as Clock from "effect/Clock"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import * as CacheStore from "./CacheStore.ts"
 
 /**
@@ -46,14 +50,37 @@ export interface Options {
    * Headers sent with every request. This is the credential seam, and it is
    * deliberately construction-time — see the module doc.
    */
-  readonly headers?: Record<string, string> | undefined
+  readonly headers?: Readonly<Record<string, string>> | undefined
+  /** Deadline for one request and its response body. Defaults to 60 seconds. */
+  readonly requestTimeout?: Duration.Input | undefined
+  /** Largest cache-entry response accepted. Defaults to four MiB. */
+  readonly maxResponseBytes?: number | undefined
 }
 
-const transportFailure = (operation: string, cause: unknown): CacheStore.CacheStoreError =>
+/** Default deadline for one remote cache request. */
+export const defaultRequestTimeout = Duration.seconds(60)
+
+/** Default and absolute maximum encoded cache entry size. */
+export const maximumEntryBytes = 4 * 1024 * 1024
+
+const encoder = new TextEncoder()
+const decoder = new TextDecoder("utf-8", { fatal: true })
+
+const isWellFormedText = (value: string): boolean => {
+  for (let index = 0; index < value.length; index++) {
+    const unit = value.charCodeAt(index)
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const low = value.charCodeAt(++index)
+      if (!(low >= 0xdc00 && low <= 0xdfff)) return false
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) return false
+  }
+  return true
+}
+
+const transportFailure = (operation: string, _cause: unknown): CacheStore.CacheStoreError =>
   new CacheStore.CacheStoreError({
     code: "persistence_failed",
-    message: `the remote cache tier refused ${operation}`,
-    cause
+    message: `the remote cache tier refused ${operation}`
   })
 
 const unexpectedStatus = (operation: string, status: number): CacheStore.CacheStoreError =>
@@ -63,6 +90,24 @@ const unexpectedStatus = (operation: string, status: number): CacheStore.CacheSt
   })
 
 const isOk = (status: number): boolean => status >= 200 && status < 300
+
+const invalidConfiguration = (field: string): CacheStore.CacheStoreError =>
+  new CacheStore.CacheStoreError({
+    code: "invalid_cache",
+    message: `remote cache ${field} is invalid`
+  })
+
+const bodyTooLarge = (received: number, bound: number): CacheStore.CacheStoreError =>
+  new CacheStore.CacheStoreError({
+    code: "persistence_failed",
+    message: `the remote cache tier returned ${received} bytes, past the ${bound}-byte bound`
+  })
+
+const timedOut = (): CacheStore.CacheStoreError =>
+  new CacheStore.CacheStoreError({
+    code: "persistence_failed",
+    message: "the remote cache tier did not finish within its configured deadline"
+  })
 
 /**
  * Builds a remote cache store over Effect's `HttpClient`.
@@ -78,22 +123,149 @@ const isOk = (status: number): boolean => status >= 200 && status < 300
  */
 export const make = (
   options: Options
-): Effect.Effect<CacheStore.Service, never, HttpClient.HttpClient> =>
+): Effect.Effect<CacheStore.Service, CacheStore.CacheStoreError, HttpClient.HttpClient> =>
   Effect.gen(function*() {
+    const configured = yield* Effect.try({
+      try: () => {
+        if (typeof options !== "object" || options === null) throw new TypeError("options")
+        const allowed = new Set(["endpoint", "headers", "requestTimeout", "maxResponseBytes"])
+        for (const key of Reflect.ownKeys(options)) {
+          if (typeof key !== "string" || !allowed.has(key)) throw new TypeError("option")
+          const descriptor = Object.getOwnPropertyDescriptor(options, key)
+          if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+            throw new TypeError("option")
+          }
+        }
+        const data = (key: keyof Options): unknown => Object.getOwnPropertyDescriptor(options, key)?.value
+        const endpoint = data("endpoint")
+        if (
+          typeof endpoint !== "string" || endpoint.length > 16 * 1024 ||
+          !isWellFormedText(endpoint) || /[\u0000-\u001f\u007f]/.test(endpoint)
+        ) throw new TypeError("endpoint")
+        const rawHeaders = data("headers")
+        let headers: Readonly<Record<string, string>> | undefined
+        if (rawHeaders !== undefined) {
+          if (typeof rawHeaders !== "object" || rawHeaders === null) throw new TypeError("headers")
+          const prototype = Object.getPrototypeOf(rawHeaders)
+          if (prototype !== Object.prototype && prototype !== null) throw new TypeError("headers")
+          const snapshot = Object.create(null) as Record<string, string>
+          for (const key of Reflect.ownKeys(rawHeaders)) {
+            if (typeof key !== "string") throw new TypeError("headers")
+            const descriptor = Object.getOwnPropertyDescriptor(rawHeaders, key)
+            if (
+              descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable ||
+              typeof descriptor.value !== "string" ||
+              !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(key) ||
+              descriptor.value.length > 16 * 1024 || !isWellFormedText(descriptor.value) ||
+              /[\u0000-\u001f\u007f]/.test(descriptor.value)
+            ) throw new TypeError("headers")
+            Object.defineProperty(snapshot, key, {
+              value: descriptor.value,
+              enumerable: true,
+              configurable: false,
+              writable: false
+            })
+          }
+          headers = Object.freeze(snapshot)
+        }
+        return {
+          endpoint,
+          headers,
+          requestTimeout: data("requestTimeout") as Duration.Input | undefined,
+          maxResponseBytes: data("maxResponseBytes") as number | undefined
+        }
+      },
+      catch: () => invalidConfiguration("options")
+    })
+    const endpoint = yield* Effect.try({
+      try: () => new URL(configured.endpoint),
+      catch: () => invalidConfiguration("endpoint")
+    })
+    const loopback = endpoint.hostname === "localhost" || endpoint.hostname.endsWith(".localhost") ||
+      endpoint.hostname === "127.0.0.1" || endpoint.hostname === "[::1]"
+    if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && loopback)) {
+      return yield* Effect.fail(invalidConfiguration("endpoint protocol"))
+    }
+    if (endpoint.username !== "" || endpoint.password !== "" || endpoint.search !== "" || endpoint.hash !== "") {
+      return yield* Effect.fail(invalidConfiguration("endpoint authority"))
+    }
+    endpoint.pathname = endpoint.pathname.replace(/\/+$/, "")
+    const acPrefix = `${endpoint.pathname}/ac/`.replace(/\/{2,}/g, "/")
+    const base = endpoint.origin
+    const requestDeadlineOption = yield* Effect.try({
+      try: () => Duration.fromInput(configured.requestTimeout ?? defaultRequestTimeout),
+      catch: () => invalidConfiguration("requestTimeout")
+    })
+    if (
+      Option.isNone(requestDeadlineOption) ||
+      !Number.isFinite(Duration.toMillis(requestDeadlineOption.value)) ||
+      Duration.toMillis(requestDeadlineOption.value) <= 0
+    ) return yield* Effect.fail(invalidConfiguration("requestTimeout"))
+    const requestDeadline = requestDeadlineOption.value
+    const maxResponseBytes = configured.maxResponseBytes ?? maximumEntryBytes
+    if (
+      !Number.isSafeInteger(maxResponseBytes) || maxResponseBytes <= 0 ||
+      maxResponseBytes > maximumEntryBytes
+    ) return yield* Effect.fail(invalidConfiguration("maxResponseBytes"))
     const client = yield* HttpClient.HttpClient
-    const base = options.endpoint.replace(/\/+$/, "")
-    const headers = options.headers
+    const headers = configured.headers
     const authorize = (request: HttpClientRequest.HttpClientRequest): HttpClientRequest.HttpClientRequest =>
       headers === undefined ? request : HttpClientRequest.setHeaders(request, headers)
-    const acUrl = (keyDigest: string) => `${base}/ac/${encodeURIComponent(keyDigest)}`
+    const acUrl = (keyDigest: string) => {
+      const target = new URL(base)
+      target.pathname = `${acPrefix}${keyDigest}`
+      if (!target.pathname.startsWith(acPrefix)) throw new Error("cache-key path escaped its namespace")
+      return target.toString()
+    }
     const send = (operation: string, request: HttpClientRequest.HttpClientRequest) =>
-      client.execute(authorize(request)).pipe(Effect.mapError((cause) => transportFailure(operation, cause)))
+      client.execute(authorize(request)).pipe(
+        Effect.mapError((cause) => transportFailure(operation, cause)),
+        Effect.timeout(requestDeadline),
+        Effect.catchTag("TimeoutError", () => Effect.fail(timedOut()))
+      )
+    const readBounded = (response: HttpClientResponse.HttpClientResponse) =>
+      Effect.gen(function*() {
+        const declared = response.headers["content-length"]
+        if (declared !== undefined) {
+          const declaredBytes = Number(declared)
+          if (!/^\d+$/.test(declared) || !Number.isSafeInteger(declaredBytes)) {
+            return yield* Effect.fail(transportFailure("a lookup body", undefined))
+          }
+          if (declaredBytes > maxResponseBytes) {
+            return yield* Effect.fail(bodyTooLarge(declaredBytes, maxResponseBytes))
+          }
+        }
+        const chunks: Array<Uint8Array> = []
+        let received = 0
+        yield* Stream.runForEach(response.stream, (chunk: Uint8Array) =>
+          Effect.suspend(() => {
+            received += chunk.byteLength
+            if (received > maxResponseBytes) return Effect.fail(bodyTooLarge(received, maxResponseBytes))
+            chunks.push(new Uint8Array(chunk))
+            return Effect.void
+          })).pipe(Effect.mapError((cause) =>
+            Schema.is(CacheStore.CacheStoreError)(cause)
+              ? cause
+              : transportFailure("a lookup body", cause)
+          ))
+        const bytes = new Uint8Array(received)
+        let offset = 0
+        for (const chunk of chunks) {
+          bytes.set(chunk, offset)
+          offset += chunk.byteLength
+        }
+        return bytes
+      })
 
     const get: CacheStore.Service["get"] = Effect.fn("RemoteCacheStore.get")((keyDigest, getOptions) =>
       Effect.gen(function*() {
         yield* Effect.annotateCurrentSpan({ keyDigest })
         yield* CacheStore.validateKey(keyDigest)
-        yield* CacheStore.validateFence(getOptions?.recordedBy)
+        yield* CacheStore.validateRecordedBy(getOptions?.recordedBy)
+        yield* CacheStore.validateAge("maxAgeMs", getOptions?.maxAgeMs)
+        const floorMs = getOptions?.maxAgeMs === undefined
+          ? undefined
+          : (yield* Clock.currentTimeMillis) - getOptions.maxAgeMs
         const recordedBy = getOptions?.recordedBy
         const lookup = HttpClientRequest.get(acUrl(keyDigest))
         const request = recordedBy === undefined
@@ -105,15 +277,19 @@ export const make = (
         const response = yield* send("a lookup", request)
         if (response.status === 404) return Option.none()
         if (!isOk(response.status)) return yield* Effect.fail(unexpectedStatus("a lookup", response.status))
-        const body = yield* response.json.pipe(
-          Effect.mapError((cause) => transportFailure("a lookup body", cause))
+        const bytes = yield* readBounded(response).pipe(
+          Effect.timeout(requestDeadline),
+          Effect.catchTag("TimeoutError", () => Effect.fail(timedOut()))
         )
-        const entry = yield* Schema.decodeUnknownEffect(CacheStore.CacheEntry)(body).pipe(
-          Effect.mapError((cause) =>
+        const body = yield* Effect.try({
+          try: () => JSON.parse(decoder.decode(bytes)) as unknown,
+          catch: (cause) => transportFailure("a lookup body", cause)
+        })
+        const entry = yield* CacheStore.snapshotEntry(body as CacheStore.CacheEntry).pipe(
+          Effect.mapError(() =>
             new CacheStore.CacheStoreError({
               code: "decode_failed",
-              message: "the remote cache tier returned an entry that is not a CacheEntry",
-              cause
+              message: "the remote cache tier returned an entry that is not a bounded CacheEntry"
             })
           )
         )
@@ -128,12 +304,14 @@ export const make = (
             })
           )
         }
+        if (floorMs !== undefined && entry.createdAtMs < floorMs) return Option.none()
         return Option.some(entry)
       })
     )
 
-    const put: CacheStore.Service["put"] = Effect.fn("RemoteCacheStore.put")((entry: CacheStore.CacheEntry) =>
+    const put: CacheStore.Service["put"] = Effect.fn("RemoteCacheStore.put")((candidate: CacheStore.CacheEntry) =>
       Effect.gen(function*() {
+        const entry = yield* CacheStore.snapshotEntry(candidate)
         yield* Effect.annotateCurrentSpan({ keyDigest: entry.keyDigest })
         const encoded = yield* Schema.encodeEffect(CacheStore.CacheEntry)(entry).pipe(
           Effect.mapError((cause) =>
@@ -152,6 +330,14 @@ export const make = (
         yield* CacheStore.encodeCanonical(entry.result, "result")
         yield* CacheStore.encodeCanonical(entry.meta, "meta")
         const body = yield* CacheStore.encodeCanonical(encoded, "cache entry")
+        if (encoder.encode(body).byteLength > maximumEntryBytes) {
+          return yield* Effect.fail(
+            new CacheStore.CacheStoreError({
+              code: "invalid_cache",
+              message: `cache entry exceeds the ${maximumEntryBytes}-byte wire limit`
+            })
+          )
+        }
         const response = yield* send(
           "a publication",
           HttpClientRequest.put(acUrl(entry.keyDigest)).pipe(
@@ -216,5 +402,5 @@ export const make = (
  */
 export const layer = (
   options: Options
-): Layer.Layer<CacheStore.CacheStore, never, HttpClient.HttpClient> =>
+): Layer.Layer<CacheStore.CacheStore, CacheStore.CacheStoreError, HttpClient.HttpClient> =>
   Layer.effect(CacheStore.CacheStore)(make(options))
