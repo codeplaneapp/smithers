@@ -3,6 +3,7 @@
  * poisoned manifest must never place bytes outside the outDir tree it is
  * materialized into, and a rebuild must heal a tampered CAS blob.
  */
+import * as ChildProcess from "node:child_process"
 import { createHash } from "node:crypto"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
@@ -158,5 +159,62 @@ describe("scratchCopy keeps installed dependencies as host state", () => {
     } finally {
       await Fs.rm(scratch, { recursive: true, force: true })
     }
+  })
+})
+
+describe("the write-set guard reads git honestly", () => {
+  const git = (args: ReadonlyArray<string>, input?: Buffer): Buffer =>
+    ChildProcess.execFileSync("git", [...args], {
+      cwd: root,
+      ...(input === undefined ? {} : { input }),
+      encoding: "buffer",
+      stdio: ["pipe", "pipe", "pipe"]
+    })
+
+  /**
+   * Stages one path whose bytes are not valid UTF-8.
+   *
+   * The path is placed in the index rather than on disk because APFS refuses
+   * a filename that is not valid UTF-8 (EILSEQ), while ext4 accepts one. Git
+   * reports the staged-then-missing entry in `status` and `ls-files` either
+   * way, which is the output the guard decodes.
+   */
+  const stageInvalidUtf8Path = (): void => {
+    const blob = git(["hash-object", "-w", "--stdin"], Buffer.from("body\n")).toString("utf8").trim()
+    const entry = Buffer.concat([
+      Buffer.from(`100644 blob ${blob}\tbad-`),
+      Buffer.from([0xff]),
+      Buffer.from(".txt\0")
+    ])
+    const tree = git(["mktree", "-z"], entry).toString("utf8").trim()
+    git(["read-tree", tree])
+  }
+
+  beforeEach(() => {
+    git(["init", "--quiet", "."])
+  })
+
+  it("refuses git output that is not valid UTF-8 instead of returning a lossy decoding", async () => {
+    stageInvalidUtf8Path()
+    // A silent U+FFFD substitution names a path that does not exist. The guard
+    // would report it out of set and then "revert" it with a `force: true`
+    // removal that cannot fail, leaving the real write in the tree while the
+    // node failed claiming it had been reverted.
+    await expect(PackageTree.runGit(root, ["ls-files", "-z"])).rejects.toThrow(/not valid UTF-8/)
+    await expect(PackageTree.snapshotTree(root, ".flows")).rejects.toThrow(/not valid UTF-8/)
+  })
+
+  it("fails the ignored-path census when git cannot answer, instead of reporting nothing ignored", async () => {
+    // `listIgnored` runs once before the body and once after. Swallowing the
+    // failure disarms the guard when it fails after, and makes every ignored
+    // path read as newly created when it fails before, which sends each one
+    // that does not match the write-set to a recursive removal.
+    await Fs.rm(NodePath.join(root, ".git"), { recursive: true, force: true })
+    await expect(PackageTree.snapshotIgnored(root, ".flows")).rejects.toThrow(/git status failed/)
+  })
+
+  it("fails the portal census when git cannot answer, instead of measuring no portals", async () => {
+    await Fs.rm(NodePath.join(root, ".git"), { recursive: true, force: true })
+    await expect(PackageTree.snapshotPortals(root, ".flows")).rejects.toThrow(/git (ls-files|status) failed/)
   })
 })

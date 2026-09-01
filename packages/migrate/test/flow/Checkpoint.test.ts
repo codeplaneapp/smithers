@@ -75,6 +75,26 @@ describe("Checkpoint.detectVcs", () => {
 })
 
 describe("Checkpoint.take on git", () => {
+  it.effect("leaves a recovery instruction before any transform can start", () =>
+    Effect.gen(function*() {
+      const root = gitProject("pending")
+
+      const ref = yield* Checkpoint.take(payload(root, ["workflow.jsx"]))
+      write(root, "workflow.jsx", "half migrated\n")
+
+      const marker = join(root, ".smithers-migrate", "pending-unit.json")
+      const pending = JSON.parse(readFileSync(marker, "utf8")) as {
+        unit: string
+        root: string
+        checkpoint: { ref: string; restore: string }
+        instruction: string
+      }
+      expect(pending.unit).toBe("workflow:demo")
+      expect(pending.root).toBe(root)
+      expect(pending.checkpoint).toMatchObject({ ref: ref.ref, restore: ref.restore })
+      expect(pending.instruction).toContain(ref.restore)
+    }).pipe(Effect.provide(platform)))
+
   it.effect("writes a ref, leaves the working tree alone, and survives an unrelated dirty file", () =>
     Effect.gen(function*() {
       const root = gitProject("ref")

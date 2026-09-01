@@ -99,8 +99,16 @@ message text, then `Config.defaultWaitMillis`. Above `Config.maxWaitMillis` it
 answers `None` and the original `ModelError` propagates, because a run parked
 for a day is indistinguishable from a run that hung.
 
-`QuotaPolicy.layerNoop()`, and providing nothing at all, keeps today's behavior:
-the refusal fails the step.
+The classifier is required. A composition that binds none is a type error, and
+`QuotaPolicy.layerUnclassified()` is how one opts out in writing.
+
+What it opts out of is parking, not the recording floor. `FlowEngineLike` fails
+every capacity refusal it normalizes, whichever classifier is composed:
+`rate_limited`, `quota_exceeded`, `provider_internal`, and any refusal carrying
+HTTP 429, 503, 504, or 529. Under `layerUnclassified` such a refusal fails the
+step instead of parking it, and it is still never written as the sealed step's
+durable value. Policy decides what happens on top of that floor; no policy
+weakens it.
 
 A classified refusal parks for real:
 
@@ -118,10 +126,12 @@ A classified refusal parks for real:
 
 One thing changes at the engine port. `FlowEngineLike` records a provider
 refusal as the sealed step's *result*, which is right for every failure but this
-one: a quota refusal says nothing about the request, so recording it under a
+one: a capacity refusal says nothing about the request, so recording it under a
 content key would pin "this prompt is refused" into the shared cache and make
-the wake pointless. A classified refusal fails the sealed action instead, which
-records an attempt rather than a result, and nothing outlives the window.
+the wake pointless. A capacity refusal fails the sealed action instead, which
+records an attempt rather than a result, and nothing outlives the window. That
+is the recorder's own floor, applied before any classifier is consulted. The
+classifier then decides whether the failed step parks and waits or ends the run.
 
 ## Budgets
 
@@ -188,7 +198,11 @@ a composition never recorded anything to lose.
 `Budget.budgetWarningEvent` is the opposite record and stays on the lossy
 channel: nothing reads it back, so losing one costs a line in an operator view.
 
-Providing no `Budget` layer accounts nothing and refuses nothing.
+The budget is required too. A composition that binds none is a type error, and
+`Budget.layerUnbounded()` is how one gives up token and latency ceilings in
+writing. The local CLI binds `Budget.layerFromEnvelope`, so a flow that declares
+`budget: { tokens, milliseconds }` in its frontmatter is held to what it
+declared and a flow that declares nothing runs unbounded.
 
 ## Where these live
 

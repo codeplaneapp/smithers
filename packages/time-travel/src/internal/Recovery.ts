@@ -38,12 +38,18 @@ export interface Options {
 /**
  * Outcome for one recovered audit.
  *
+ * `Busy` is a "not yet", not a failure: another process holds the run, so this
+ * pass declines it and the audit row is left exactly as the crash left it —
+ * still `in_progress`, still in `pendingAudits`, still recoverable. `Failed`
+ * is terminal and closes the audit.
+ *
  * @since 0.1.0
  * @category models
  */
 export type Outcome =
   | { readonly _tag: "Completed"; readonly auditId: string }
   | { readonly _tag: "RolledBack"; readonly auditId: string }
+  | { readonly _tag: "Busy"; readonly auditId: string; readonly error: TimeTravelFailure }
   | { readonly _tag: "Failed"; readonly auditId: string; readonly error: TimeTravelFailure }
 
 interface Ownership {
@@ -262,9 +268,23 @@ const recoverOne = (
         })
       )
     )
-    return Exit.isSuccess(recoveryExit)
-      ? recoveryExit.value
-      : yield* terminalFailure(store, audit, detail, toFailure(recoveryExit.cause))
+    if (Exit.isSuccess(recoveryExit)) return recoveryExit.value
+    const failure = toFailure(recoveryExit.cause)
+    // A `busy` refusal says only that someone else holds the run right now:
+    // an active claim, a live owner, a fence taken while this pass ran.
+    // Recording it as `failed` removed the audit from `pendingAudits`
+    // permanently, so a rewind interrupted after its compensation but before
+    // its archive commit could never be rolled back by any later pass, and
+    // the engine's stale-heartbeat steal would resume the run against a
+    // workspace this rewind had already rewound.
+    //
+    // Nothing is written on this path on purpose. The audit's detail is the
+    // live rewind's own bookkeeping; a recovery pass that stamped a message
+    // on it would clobber the phase the owner is still advancing.
+    if (failure.code === "busy") {
+      return { _tag: "Busy" as const, auditId: audit.id, error: failure }
+    }
+    return yield* terminalFailure(store, audit, detail, failure)
   })
 
 /**
@@ -274,6 +294,12 @@ const recoverOne = (
  * rewind restores its jj snapshot and handler receipts. Per-audit failures are
  * returned as typed terminal outcomes and recorded on the same audit row;
  * recovery never invents a run status.
+ *
+ * An audit whose run another process still holds is reported `Busy` and left
+ * untouched, so it is picked up by the next pass rather than closed on the
+ * strength of a race. {@link Options.livenessEvidence} is what turns "held by
+ * a process that died" back into progress; with none supplied, a run that is
+ * still `running` under a foreign owner is always refused.
  *
  * @since 0.1.0
  * @category constructors

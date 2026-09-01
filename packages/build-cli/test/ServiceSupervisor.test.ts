@@ -14,8 +14,10 @@
  * 5. SIGINT on the embedding process tears the service down (pgrep proves no
  *    orphan survives).
  */
+import * as Secret from "@smthrs/targets/Secret"
 import * as Effect from "effect/Effect"
 import { execFile, spawn } from "node:child_process"
+import { randomUUID } from "node:crypto"
 import * as Fs from "node:fs/promises"
 import * as NodeNet from "node:net"
 import * as Os from "node:os"
@@ -85,6 +87,14 @@ const run = <A>(effect: Effect.Effect<A, unknown, never>): Promise<A> =>
     throw error
   })
 
+const acquireFlipped = (
+  spec: ServiceSupervisor.ServiceSpec
+): Promise<ServiceSupervisor.ServiceError> =>
+  run(Effect.scoped(Effect.gen(function*() {
+    const supervisor = yield* ServiceSupervisor.make
+    return yield* Effect.flip(supervisor.acquire(spec))
+  }))) as Promise<ServiceSupervisor.ServiceError>
+
 describe("parseDurationMs", () => {
   it("parses ms, s, m, and h", () => {
     expect(ServiceSupervisor.parseDurationMs("500ms", "t")).toBe(500)
@@ -103,14 +113,6 @@ describe("parseDurationMs", () => {
 })
 
 describe("spec validation", () => {
-  const acquireFlipped = (
-    spec: ServiceSupervisor.ServiceSpec
-  ): Promise<ServiceSupervisor.ServiceError> =>
-    run(Effect.scoped(Effect.gen(function*() {
-      const supervisor = yield* ServiceSupervisor.make
-      return yield* Effect.flip(supervisor.acquire(spec))
-    }))) as Promise<ServiceSupervisor.ServiceError>
-
   it("refuses a bad readiness timeout format", async () => {
     const error = await acquireFlipped({
       key: "//x:bad-timeout",
@@ -461,11 +463,132 @@ describe("spawn failure", () => {
   })
 })
 
+describe("secret boundary", () => {
+  it("keeps the value out of the service and substitutes it at HTTP egress", async () => {
+    let authorization: string | undefined
+    const upstream = (await import("node:http")).createServer((request, response) => {
+      authorization = request.headers.authorization
+      response.end("ok")
+    })
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve))
+    const address = upstream.address()
+    const port = typeof address === "object" && address !== null ? address.port : 0
+    const secret = "service-boundary-secret"
+    process.env["SMITHERS_SERVICE_BOUNDARY_SECRET"] = secret
+    let tail = ""
+    try {
+      const program = String.raw`
+const http = require("node:http")
+const value = process.env.SMITHERS_SERVICE_BOUNDARY_SECRET || ""
+if (!value.startsWith("smithers-build-secret-")) process.exit(91)
+const proxy = new URL(process.env.HTTP_PROXY)
+const target = "http://127.0.0.1:${port}/"
+const request = http.request({
+  host: proxy.hostname,
+  port: proxy.port,
+  path: target,
+  headers: { authorization: "Bearer " + value }
+}, (response) => {
+  response.resume()
+  response.on("end", () => setInterval(() => {}, 1000))
+})
+request.on("error", () => process.exit(92))
+request.end()
+`
+      await run(Effect.scoped(Effect.gen(function*() {
+        const supervisor = yield* ServiceSupervisor.make
+        const handle = yield* supervisor.acquire({
+          key: "//x:secret-boundary",
+          cwd: fixtureDir,
+          argv: [process.execPath, "-e", program],
+          secrets: [Secret.HttpSecret(
+            Secret.Secret("SMITHERS_SERVICE_BOUNDARY_SECRET"),
+            [`http://127.0.0.1:${port}`]
+          )]
+        })
+        yield* Effect.promise(() => waitFor(() => authorization !== undefined, 5_000))
+        tail = handle.outputTail()
+        expect(alive(handle.pid)).toBe(true)
+      })))
+      expect(authorization).toBe(`Bearer ${secret}`)
+      expect(tail).not.toContain(secret)
+    } finally {
+      delete process.env["SMITHERS_SERVICE_BOUNDARY_SECRET"]
+      await new Promise<void>((resolve) => upstream.close(() => resolve()))
+    }
+  })
+
+  it("replaces a secret URL argv slot with a loopback egress capability", async () => {
+    let requested = false
+    const upstream = (await import("node:http")).createServer((_request, response) => {
+      requested = true
+      response.end("ok")
+    })
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve))
+    const address = upstream.address()
+    const port = typeof address === "object" && address !== null ? address.port : 0
+    const target = `http://127.0.0.1:${port}/rpc`
+    process.env["SMITHERS_SERVICE_DESTINATION"] = target
+    let tail = ""
+    try {
+      const program = String.raw`
+const http = require("node:http")
+const destination = process.argv[1]
+if (new URL(destination).hostname !== "127.0.0.1") process.exit(93)
+if (process.env.SMITHERS_SERVICE_DESTINATION) process.exit(94)
+http.get(destination, (response) => {
+  response.resume()
+  response.on("end", () => setInterval(() => {}, 1000))
+}).on("error", () => process.exit(95))
+`
+      await run(Effect.scoped(Effect.gen(function*() {
+        const supervisor = yield* ServiceSupervisor.make
+        const handle = yield* supervisor.acquire({
+          key: "//x:secret-destination",
+          cwd: fixtureDir,
+          argv: [process.execPath, "-e", program, "{secret-url:SMITHERS_SERVICE_DESTINATION}"],
+          secretUrls: [{ index: 3, secret: Secret.Secret("SMITHERS_SERVICE_DESTINATION") }]
+        })
+        yield* Effect.promise(() => waitFor(() => requested, 5_000))
+        tail = handle.outputTail()
+        expect(alive(handle.pid)).toBe(true)
+      })))
+      expect(requested).toBe(true)
+      expect(tail).not.toContain(target)
+    } finally {
+      delete process.env["SMITHERS_SERVICE_DESTINATION"]
+      await new Promise<void>((resolve) => upstream.close(() => resolve()))
+    }
+  })
+
+  it("refuses malformed and duplicate secret URL argv bindings", async () => {
+    const base = {
+      key: "//x:secret-url",
+      cwd: fixtureDir,
+      argv: [process.execPath, serverPath, "placeholder"] as [string, ...Array<string>]
+    }
+    for (
+      const secretUrls of [
+        [null],
+        [{ index: 0, secret: Secret.Secret("BOUNDARY_URL") }],
+        [
+          { index: 2, secret: Secret.Secret("BOUNDARY_URL") },
+          { index: 2, secret: Secret.Secret("OTHER_BOUNDARY_URL") }
+        ]
+      ]
+    ) {
+      const error = await acquireFlipped({ ...base, secretUrls } as never)
+      expect(error.reason).toBe("invalid-spec")
+      expect(error.message).toContain("secretUrls")
+    }
+  })
+})
+
 describe("SIGINT teardown", () => {
   it("kills the service process group when the embedding process gets SIGINT (pgrep proves no orphan)", async () => {
     const port = await freePort()
-    const marker = "service-supervisor-sigint-proof"
-    const driver = spawn(process.execPath, ["--import", "tsx", driverPath, String(port), serverPath], {
+    const marker = `service-supervisor-sigint-proof-${randomUUID()}`
+    const driver = spawn(process.execPath, ["--import", "tsx", driverPath, String(port), serverPath, marker], {
       cwd: packageDir,
       stdio: ["ignore", "pipe", "pipe"]
     })

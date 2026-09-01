@@ -8,7 +8,7 @@
  * cursor starts below it fail with `compacted` instead of returning a
  * silently shortened history.
  *
- * Prior art: Temporal's mutable state is exactly this shape — a durable
+ * Prior art: Temporal's mutable state is exactly this shape, a durable
  * snapshot pinned to a history offset (`last_first_event_id` in
  * `reference/temporal/proto/internal/temporal/server/api/persistence/v1/executions.proto`),
  * with history below it never replayed.
@@ -23,7 +23,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  *
  * @category migrations
  * @since 0.1.0
- * @slop
  */
 const checkpoints: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient

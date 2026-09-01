@@ -20,10 +20,10 @@ import { GenerateCheckLive } from "@smthrs/targets/Compose"
 import { CheckDocsLive } from "@smthrs/targets/DocsParity"
 import { ExecLive } from "@smthrs/targets/Exec"
 import { ExpandFilegroupLive, isFilegroup } from "@smthrs/targets/Filegroup"
-import { CheckFileLive, WriteFileLive } from "@smthrs/targets/GeneratedFile"
+import { CheckFileLive, resolveOutputPath, WriteFileLive } from "@smthrs/targets/GeneratedFile"
 import { LlmReviewLive } from "@smthrs/targets/LlmLint"
 import { ScaffoldPackageLive } from "@smthrs/targets/NewPackage"
-import { SyncPackageJsonLive } from "@smthrs/targets/PackageJson"
+import { PackageJsonWrite, SyncPackageJsonLive } from "@smthrs/targets/PackageJson"
 import * as Target from "@smthrs/targets/Target"
 import { CaptureOutputsLive, verifyOutputs } from "@smthrs/targets/ToolBuild"
 import * as Cause from "effect/Cause"
@@ -31,6 +31,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import type * as Schema from "effect/Schema"
+import * as SchemaIssue from "effect/SchemaIssue"
 import * as Os from "node:os"
 import { performance } from "node:perf_hooks"
 import * as NodeUtil from "node:util/types"
@@ -39,7 +40,7 @@ import * as Diagnostic from "./Diagnostic.ts"
 import { declaredToolchain, layerInstall, layerNonInteractiveNodeServices, layerPackageManager } from "./engine.ts"
 import type * as Planner from "./Planner.ts"
 import * as Reporter from "./Reporter.ts"
-import type { ExpandedInput, Workspace } from "./Workspace.ts"
+import { credentialEnvNames, type ExpandedInput, type RemoteCacheAccess, type Workspace } from "./Workspace.ts"
 
 /**
  * One target's reported execution outcome.
@@ -114,11 +115,7 @@ export interface ExecuteOptions {
   readonly targets: ReadonlyArray<Planner.PlannedTarget>
   readonly jobs?: number | undefined
   readonly readCache?: boolean | undefined
-  readonly remoteCache?: {
-    readonly endpoint: string
-    readonly tokenEnv: string
-    readonly token?: string | undefined
-  } | undefined
+  readonly remoteCache?: RemoteCacheAccess | undefined
   readonly signal?: AbortSignal | undefined
   readonly packageName?: string | undefined
   readonly log?: ((line: string) => void) | undefined
@@ -515,8 +512,22 @@ export const schedule = (
   })
 }
 
+/** Effect's own rendering of a schema issue tree, built once. */
+const formatSchemaIssue = SchemaIssue.makeFormatterDefault()
+
 /** Renders a failure value compactly for a status line. */
 const describeFailure = (value: unknown): string => {
+  if (typeof value === "object" && value !== null && !NodeUtil.isProxy(value)) {
+    // A schema refusal reaches here as the bare issue tree as often as it
+    // reaches here wrapped in a SchemaError, and the tree carries no `message`
+    // of any kind. Effect's own formatter is what turns it back into the
+    // sentence naming the path and the expectation.
+    try {
+      if (SchemaIssue.isIssue(value)) return Diagnostic.message(formatSchemaIssue(value), "target failed")
+    } catch {
+      // Fall through to the generic renderings.
+    }
+  }
   if (typeof value === "object" && value !== null) {
     try {
       const cloned = cloneCacheJson(
@@ -532,7 +543,11 @@ const describeFailure = (value: unknown): string => {
       // Fall through to the generic renderings.
     }
   }
-  return Diagnostic.message(value, "target failed")
+  // Every Error reaches this line: the clone above refuses any prototype that
+  // is not a plain object. `Diagnostic.describe` is what makes the reason
+  // survive that refusal, including for the Effect errors whose message is a
+  // prototype accessor.
+  return Diagnostic.describe(value, "target failed")
 }
 
 /**
@@ -820,7 +835,8 @@ const checkDeclaredOutputs = async (
  */
 const revalidateInputs = async (
   workspace: Workspace,
-  target: Planner.PlannedTarget
+  target: Planner.PlannedTarget,
+  rewritten?: string | undefined
 ): Promise<string | undefined> => {
   if (target.declaredInputs.length === 0) return undefined
   let expanded: ReadonlyArray<ExpandedInput>
@@ -834,7 +850,12 @@ const revalidateInputs = async (
   }
   for (const [index, planned] of target.declaredInputs.entries()) {
     const now = expanded[index]!
-    if (now.digest !== planned.digest) {
+    // The exemption is one PATH, not one declaration and not the whole input
+    // set: a declaration that also names the rewritten file still has every
+    // other file it matches revalidated, and every other declaration is
+    // revalidated whole.
+    const carriesRewritten = rewritten !== undefined && planned.files.some((file) => file.path === rewritten)
+    if (!carriesRewritten && now.digest !== planned.digest) {
       return `declared input ${JSON.stringify(planned.declaration)} changed since the plan was made`
     }
     if (now.files.length !== planned.files.length) {
@@ -842,12 +863,39 @@ const revalidateInputs = async (
     }
     for (const [position, file] of planned.files.entries()) {
       const observed = now.files[position]!
-      if (observed.path !== file.path || observed.digest !== file.digest) {
+      if (observed.path !== file.path) {
+        return `declared input file ${file.path} changed since the plan was made`
+      }
+      if (file.path === rewritten) continue
+      if (observed.digest !== file.digest) {
         return `declared input file ${file.path} changed since the plan was made`
       }
     }
   }
   return undefined
+}
+
+/**
+ * The workspace-relative path a target rewrites as its whole purpose, which
+ * the post-run revalidation exempts, or undefined for every other target.
+ *
+ * `PackageJsonWrite` deliberately reads and then replaces one manifest, so
+ * requiring that file to be unchanged after the action would reject every
+ * successful write by definition. Only that one path is exempt: waiving the
+ * target's whole declared input set instead would also waive a lockfile or a
+ * projected filegroup source that changed while the action ran.
+ *
+ * The identifier comes from the target definition rather than a literal, so
+ * renaming the target moves the exemption with it instead of silently turning
+ * every successful write into a "declared inputs changed" failure.
+ *
+ * @category execution
+ * @since 0.1.0
+ */
+export const rewrittenInputPath = (target: Planner.PlannedTarget): string | undefined => {
+  if (target.target !== PackageJsonWrite.id) return undefined
+  const output = (target.attrs as { readonly output?: unknown }).output
+  return typeof output === "string" ? resolveOutputPath(output) : undefined
 }
 
 /**
@@ -890,7 +938,9 @@ export const execute = async (options: ExecuteOptions): Promise<Summary> => {
     workspaceRoot: workspace.root,
     cacheDirectory: workspace.cacheDirectory,
     endpoint: options.remoteCache?.endpoint,
-    token: options.remoteCache?.token,
+    readToken: options.remoteCache?.readToken,
+    writeToken: options.remoteCache?.writeToken,
+    publishNamespace: options.remoteCache?.publishNamespace,
     warn: log
   })
   const byLabel = new Map(options.targets.map((target) => [target.label, target]))
@@ -989,11 +1039,13 @@ export const execute = async (options: ExecuteOptions): Promise<Summary> => {
       flow,
       isFilegroup(flow) ? filegroupAttrs(target) : target.attrs,
       `smithers-build-target-${target.keyPreview.slice(0, 24)}`,
-      options.remoteCache === undefined ? [] : [options.remoteCache.tokenEnv],
+      options.remoteCache === undefined ? [] : credentialEnvNames(options.remoteCache.credentials),
       options.packageName,
       options.signal
     )
-    if (!Exit.isSuccess(exit)) return fail(describeFailure(Cause.squash(exit.cause)))
+    if (!Exit.isSuccess(exit)) {
+      return fail(describeFailure(Cause.squash(exit.cause)))
+    }
     // A success is not a success until the target's declared outputs are on
     // disk and match what it reported. An implementation that returns without
     // its manifest fails here rather than caching green.
@@ -1005,11 +1057,10 @@ export const execute = async (options: ExecuteOptions): Promise<Summary> => {
       options.signal
     )
     if (produced !== undefined) return fail(produced)
-    // PackageJsonWrite deliberately reads and then replaces package.json so it
-    // can preserve manager-owned dependency fields. Its pre-run snapshot still
-    // closes the plan-to-execution race; requiring that input to remain equal
-    // after the action would reject every successful write by definition.
-    const afterRun = target.target === "PackageJsonWrite" ? undefined : await revalidateInputs(workspace, target)
+    // The pre-run snapshot closes the plan-to-execution race; this closes the
+    // execution window itself, minus the one path the action rewrote on
+    // purpose. See {@link rewrittenInputPath}.
+    const afterRun = await revalidateInputs(workspace, target, rewrittenInputPath(target))
     if (afterRun !== undefined) return fail(afterRun)
     report({
       label,

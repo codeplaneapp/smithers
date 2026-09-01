@@ -59,7 +59,7 @@ const test = <E>(title: string, body: () => Effect.Effect<void, E, Scope.Scope>)
   it(title, () => Effect.runPromise(Effect.scoped(body())))
 
 describe("Approval.Submit", () => {
-  test("approves a parked node and resumes its run in one call", () =>
+  test("delegates one durable resume when a parked node is approved", () =>
     Effect.gen(function*() {
       const rpc = yield* RpcTest.makeClient(GatewayRpcs)
       const runtime = yield* ControlRuntime
@@ -87,28 +87,25 @@ describe("Approval.Submit", () => {
       })
 
       expect(submitted.decision._tag).toBe("Accepted")
-      // One call, two mutations: the grant AND the restart. Nothing is left
-      // for the client to remember to do.
-      expect(submitted.resume).toBeDefined()
-      // The run really left the parked state, which is the requirement
-      // `server-resume-lifecycle` pinned: an approval that grants but never
-      // restarts is the state a human reads as "nothing happened".
-      expect((yield* runtime.getRun(runId)).status).not.toBe("waiting-approval")
+      expect(submitted.resume).toBeUndefined()
+      // This fixture's executor owns no engine row. Control therefore leaves
+      // the row parked and records a durable delegation for its real host.
+      expect((yield* runtime.getRun(runId)).status).toBe("waiting-approval")
+      expect((yield* runtime.pendingResumes).map((entry) => entry.runId)).toEqual([runId])
       const events = yield* Stream.runCollect(
         (yield* Control).watch({ runId, follow: false })
       )
-      // `Control.resume` journals `control.run.resume`, which is an operation
-      // and not a status. The verdict must still read the run's own status:
-      // folding a status off the `control.run.` prefix made it read "resume".
-      expect(events.map((event) => event.kind)).toContain("control.run.resume")
+      const kinds = events.map((event) => event.kind)
+      expect(kinds.filter((kind) => kind === "control.run.resumed")).toHaveLength(1)
+      expect(kinds).not.toContain("control.run.resume")
       const summary = ((yield* (yield* Projections).snapshot({ _tag: "run-summary", runId }))
         .rows as ReadonlyArray<GatewayProjection.RunSummaryRow>)[0]
       const resumed = yield* runtime.getRun(runId)
-      expect(summary?.verdict).toBe(resumed.status)
       expect(summary?.status).toBe(resumed.status)
+      expect(summary?.verdict).toContain(resumed.status)
     }).pipe(Effect.provide(served)))
 
-  test("denies a gate without resuming the run it parked", () =>
+  test("delegates one durable resume when a gate is denied", () =>
     Effect.gen(function*() {
       const rpc = yield* RpcTest.makeClient(GatewayRpcs)
       const runtime = yield* ControlRuntime
@@ -132,9 +129,12 @@ describe("Approval.Submit", () => {
       })
 
       expect(submitted.decision._tag).toBe("Accepted")
-      // A denial means the run stays where it is.
       expect(submitted.resume).toBeUndefined()
       expect((yield* runtime.getRun(runId)).status).toBe("waiting-approval")
+      expect((yield* runtime.pendingResumes).map((entry) => entry.runId)).toEqual([runId])
+      const events = yield* Stream.runCollect((yield* Control).watch({ runId, follow: false }))
+      expect(events.map((event) => event.kind).filter((kind) => kind === "control.run.resumed"))
+        .toHaveLength(1)
     }).pipe(Effect.provide(served)))
 
   test("approves a plan without a run to resume", () =>
@@ -152,6 +152,32 @@ describe("Approval.Submit", () => {
 
       expect(submitted.decision._tag).toBe("Accepted")
       expect(submitted.resume).toBeUndefined()
+    }).pipe(Effect.provide(served)))
+
+  /**
+   * `Approval.Submit` is a control mutation wearing a gateway payload, and the
+   * decision it records is the one an operator is answerable for. The
+   * composition here defaults to `local`/`operator` and the middleware
+   * authenticates `gateway-test`, so a handler that never read
+   * `ControlPrincipal` writes the wrong name into the journal.
+   */
+  test("journals the authenticated principal rather than the runtime's default", () =>
+    Effect.gen(function*() {
+      const rpc = yield* RpcTest.makeClient(GatewayRpcs)
+      const control = yield* Control
+      const card = yield* control.plan({ flowId: "system/test", input: {} })
+
+      yield* rpc["Approval.Submit"]({
+        target: { _tag: "Plan", planId: card.planId, digest: card.digest, envelope: card.envelope },
+        scope: "run",
+        idempotencyKey: `attributed:${card.planId}`,
+        decision: "approve"
+      })
+
+      const events = yield* Stream.runCollect(control.watch({ runId: `plan:${card.planId}`, follow: false }))
+      const decided = events.find((event) => event.kind === "control.approval.approved")
+      expect((decided?.payload as { readonly principal?: unknown } | null)?.principal)
+        .toMatchObject({ id: "gateway-test", kind: "test" })
     }).pipe(Effect.provide(served)))
 
   test("denies a plan, which has no run to resume either way", () =>

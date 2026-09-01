@@ -131,6 +131,49 @@ describe("FlowDescriptor", () => {
     expect(Schema.decodeUnknownSync(Descriptor.FlowDescriptor)(encodedDescriptor)).toEqual(descriptor)
   })
 
+  it("round-trips a declared budget and answers an absent one as unbounded", () => {
+    const base = {
+      name: "review",
+      description: "Review a pull request",
+      body: new Descriptor.BodyRefMarkdown({
+        path: "/project/flows/review/SKILL.md",
+        baseDirectory: "/project/flows/review"
+      }),
+      input: new Descriptor.SchemaRefMarkdownArgs({}),
+      output: new Descriptor.SchemaRefMarkdownOutput({}),
+      model: Option.none<string>(),
+      flows: [],
+      capabilities: [],
+      effects: {
+        reads: [],
+        writes: [],
+        mode: "hermetic" as const,
+        onConflict: "serialize" as const,
+        tier: "sealed" as const
+      },
+      placement: Option.none<Descriptor.Placement>(),
+      modelInvocable: true,
+      path: "/project/flows/review/SKILL.md",
+      frontmatter: {},
+      provenance: new Descriptor.Provenance({ source: "project", root: "/project/flows" })
+    }
+    const declared = new Descriptor.FlowDescriptor({ ...base, budget: { tokens: 120000, milliseconds: 900000 } })
+    const undeclared = new Descriptor.FlowDescriptor(base)
+
+    // A descriptor crosses into a control-plane envelope as JSON, so the two
+    // ceilings have to survive the encode a plan is stored under.
+    const encoded = Schema.encodeSync(Descriptor.FlowDescriptor)(declared)
+    expect(encoded).toMatchObject({ budget: { tokens: 120000, milliseconds: 900000 } })
+    expect(Schema.decodeUnknownSync(Descriptor.FlowDescriptor)(encoded)).toEqual(declared)
+    expect(Descriptor.budgetOf(declared)).toEqual({ tokens: 120000, milliseconds: 900000 })
+
+    // Absent is unbounded, and it is the named value rather than a fresh empty
+    // object, so a host cannot mistake one host's silence for another's.
+    expect(undeclared.budget).toBeUndefined()
+    expect(Descriptor.budgetOf(undeclared)).toBe(Descriptor.budgetUnbounded)
+    expect(Descriptor.budgetUnbounded).toEqual({})
+  })
+
   it.each([
     ["MarkdownArgs", new Descriptor.SchemaRefMarkdownArgs({}), Descriptor.SchemaRefMarkdownArgs],
     ["MarkdownOutput", new Descriptor.SchemaRefMarkdownOutput({}), Descriptor.SchemaRefMarkdownOutput],

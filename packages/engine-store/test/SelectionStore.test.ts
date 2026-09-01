@@ -6,8 +6,10 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import { TestClock } from "effect/testing"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as Selection from "../src/Selection.ts"
 import * as SelectionStore from "../src/SelectionStore.ts"
 import * as TestStores from "../src/test/TestStores.ts"
@@ -25,7 +27,7 @@ const edge = (overrides: Partial<Selection.SuspectedEdge> = {}): Selection.Suspe
 })
 
 const withStore = <A>(
-  body: (store: SelectionStore.Service) => Effect.Effect<A>
+  body: (store: SelectionStore.Service) => Effect.Effect<A, SelectionStore.SelectionStoreError>
 ) =>
   withCrypto(
     Effect.gen(function*() {
@@ -33,6 +35,11 @@ const withStore = <A>(
       return yield* body(store)
     }).pipe(Effect.provide(storeLayer))
   )
+
+const errorOf = (exit: Exit.Exit<unknown, unknown>): SelectionStore.SelectionStoreError => {
+  const reason = Exit.isFailure(exit) ? exit.cause.reasons[0] : undefined
+  return (reason as { readonly error: SelectionStore.SelectionStoreError }).error
+}
 
 describe("SelectionStore", () => {
   it.effect("round-trips edges through upsert and list, ordered by scope then affects", () =>
@@ -133,5 +140,154 @@ describe("SelectionStore", () => {
       )
       expect(listed[0]!.confidence).toBeCloseTo(0.405, 10)
       expect(listed[0]!.evidence).toHaveLength(3)
+    }))
+
+  it.effect("rejects every non-negative-safe-integer violation before writing", () =>
+    Effect.gen(function*() {
+      for (
+        const validFromMs of [
+          -1,
+          Number.NaN,
+          Number.POSITIVE_INFINITY,
+          1.5,
+          Number.MAX_SAFE_INTEGER + 1
+        ]
+      ) {
+        const exit = yield* withStore((store) => store.upsert([edge({ validFromMs })]).pipe(Effect.exit))
+        expect(errorOf(exit)).toMatchObject({ code: "invalid_input" })
+      }
+      expect(yield* withStore((store) => store.list())).toEqual([])
+    }))
+
+  it.effect("rejects malformed training observations before reading or writing", () =>
+    Effect.gen(function*() {
+      const exit = yield* withStore((store) =>
+        store.train([{
+          scope: edge().scope,
+          affects: edge().affects,
+          outcome: "unknown"
+        } as never]).pipe(Effect.exit)
+      )
+      expect(errorOf(exit)).toMatchObject({ code: "invalid_input" })
+    }))
+
+  it.effect("reports corrupt persisted evidence with its natural key", () =>
+    Effect.gen(function*() {
+      const exit = yield* withCrypto(
+        Effect.gen(function*() {
+          const store = yield* SelectionStore.SelectionStore
+          const sql = yield* SqlClient.SqlClient
+          yield* store.upsert([edge()])
+          yield* sql`UPDATE flows_selection_suspected_edges SET evidence_json = '{}'`
+          return yield* store.list().pipe(Effect.exit)
+        }).pipe(Effect.provide(storeLayer))
+      )
+      expect(errorOf(exit)).toMatchObject({
+        code: "decode_failed",
+        scope: edge().scope,
+        affects: edge().affects
+      })
+    }))
+
+  it.effect("reports a corrupt persisted timestamp instead of returning it", () =>
+    Effect.gen(function*() {
+      const exit = yield* withCrypto(
+        Effect.gen(function*() {
+          const store = yield* SelectionStore.SelectionStore
+          const sql = yield* SqlClient.SqlClient
+          yield* store.upsert([edge()])
+          yield* sql`PRAGMA ignore_check_constraints = ON`
+          yield* sql`UPDATE flows_selection_suspected_edges SET valid_from_ms = -1`
+          return yield* store.list().pipe(Effect.exit)
+        }).pipe(Effect.provide(storeLayer))
+      )
+      expect(errorOf(exit)).toMatchObject({ code: "decode_failed" })
+    }))
+
+  it.effect("reports a persisted confidence outside the domain after decoding its row", () =>
+    Effect.gen(function*() {
+      const exit = yield* withCrypto(
+        Effect.gen(function*() {
+          const store = yield* SelectionStore.SelectionStore
+          const sql = yield* SqlClient.SqlClient
+          yield* store.upsert([edge()])
+          yield* sql`PRAGMA ignore_check_constraints = ON`
+          yield* sql`UPDATE flows_selection_suspected_edges SET confidence = 2`
+          return yield* store.list().pipe(Effect.exit)
+        }).pipe(Effect.provide(storeLayer))
+      )
+      expect(errorOf(exit)).toMatchObject({
+        code: "decode_failed",
+        scope: edge().scope,
+        affects: edge().affects
+      })
+    }))
+
+  it.effect("rolls an entire multi-edge upsert back when a later row refuses", () =>
+    Effect.gen(function*() {
+      const observed = yield* withCrypto(
+        Effect.gen(function*() {
+          const store = yield* SelectionStore.SelectionStore
+          const sql = yield* SqlClient.SqlClient
+          yield* sql`CREATE TRIGGER selection_refuse_insert
+            BEFORE INSERT ON flows_selection_suspected_edges
+            WHEN NEW.affects = 'refuse'
+            BEGIN SELECT RAISE(ABORT, 'refused'); END`
+          const exit = yield* store.upsert([
+            edge({ scope: "a/**", affects: "accepted" }),
+            edge({ scope: "b/**", affects: "refuse" })
+          ]).pipe(Effect.exit)
+          yield* sql`DROP TRIGGER selection_refuse_insert`
+          return { exit, listed: yield* store.list() }
+        }).pipe(Effect.provide(storeLayer))
+      )
+      expect(errorOf(observed.exit)).toMatchObject({ code: "persistence_failed" })
+      expect(observed.listed).toEqual([])
+    }))
+
+  it.effect("rolls an entire training batch back when a later update refuses", () =>
+    Effect.gen(function*() {
+      const observed = yield* withCrypto(
+        Effect.gen(function*() {
+          const store = yield* SelectionStore.SelectionStore
+          const sql = yield* SqlClient.SqlClient
+          const accepted = edge({ scope: "a/**", affects: "accepted" })
+          const refused = edge({ scope: "b/**", affects: "refuse" })
+          yield* store.upsert([accepted, refused])
+          yield* sql`CREATE TRIGGER selection_refuse_update
+            BEFORE UPDATE ON flows_selection_suspected_edges
+            WHEN NEW.affects = 'refuse'
+            BEGIN SELECT RAISE(ABORT, 'refused'); END`
+          const exit = yield* store.train([
+            { scope: accepted.scope, affects: accepted.affects, outcome: "hit" },
+            { scope: refused.scope, affects: refused.affects, outcome: "hit" }
+          ]).pipe(Effect.exit)
+          yield* sql`DROP TRIGGER selection_refuse_update`
+          return { exit, listed: yield* store.list() }
+        }).pipe(Effect.provide(storeLayer))
+      )
+      expect(errorOf(observed.exit)).toMatchObject({ code: "persistence_failed" })
+      expect(observed.listed.map((stored) => stored.confidence)).toEqual([0.8, 0.8])
+    }))
+
+  it.effect("normalizes unavailable-table failures for every public operation", () =>
+    Effect.gen(function*() {
+      const failures = yield* withCrypto(
+        Effect.gen(function*() {
+          const store = yield* SelectionStore.SelectionStore
+          const sql = yield* SqlClient.SqlClient
+          yield* sql`DROP TABLE flows_selection_suspected_edges`
+          return yield* Effect.all([
+            store.upsert([edge()]).pipe(Effect.exit),
+            store.list().pipe(Effect.exit),
+            store.train([{ scope: edge().scope, affects: edge().affects, outcome: "hit" }]).pipe(Effect.exit)
+          ])
+        }).pipe(Effect.provide(storeLayer))
+      )
+      expect(failures.map((exit) => errorOf(exit).code)).toEqual([
+        "persistence_failed",
+        "persistence_failed",
+        "persistence_failed"
+      ])
     }))
 })

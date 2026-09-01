@@ -9,7 +9,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as ArtifactStore from "../src/ArtifactStore.ts"
 import * as CombinedArtifacts from "../src/CombinedArtifacts.ts"
-import type * as RemoteArtifacts from "../src/RemoteArtifacts.ts"
+import * as RemoteArtifacts from "../src/RemoteArtifacts.ts"
 import { bytes, sha256, text, withCrypto } from "./Crypto.ts"
 
 const artifact = "an artifact that travels"
@@ -34,7 +34,7 @@ describe("reads", () => {
     Effect.gen(function*() {
       const local = countingMemory()
       const remote = countingMemory()
-      const combined = CombinedArtifacts.make({ local: local.store, remote: remote.store })
+      const combined = yield* CombinedArtifacts.make({ local: local.store, remote: remote.store })
       yield* withCrypto(local.store.put(bytes(artifact)))
       expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
       expect(remote.calls).toEqual([])
@@ -44,7 +44,7 @@ describe("reads", () => {
     Effect.gen(function*() {
       const local = countingMemory()
       const remote = countingMemory()
-      const combined = CombinedArtifacts.make({ local: local.store, remote: remote.store })
+      const combined = yield* CombinedArtifacts.make({ local: local.store, remote: remote.store })
       yield* withCrypto(remote.store.put(bytes(artifact)))
       expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
       // The write-back means the next read is local.
@@ -72,13 +72,13 @@ describe("reads", () => {
       })
       const remote = countingMemory()
       yield* withCrypto(remote.store.put(bytes(artifact)))
-      const combined = CombinedArtifacts.make({ local: corrupt, remote: remote.store })
+      const combined = yield* CombinedArtifacts.make({ local: corrupt, remote: remote.store })
       expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
     }))
 
   it.effect("propagates a remote miss", () =>
     Effect.gen(function*() {
-      const combined = CombinedArtifacts.make({
+      const combined = yield* CombinedArtifacts.make({
         local: ArtifactStore.makeMemory(),
         remote: ArtifactStore.makeMemory()
       })
@@ -92,7 +92,7 @@ describe("writes", () => {
     Effect.gen(function*() {
       const local = countingMemory()
       const remote = countingMemory()
-      const combined = CombinedArtifacts.make({ local: local.store, remote: remote.store })
+      const combined = yield* CombinedArtifacts.make({ local: local.store, remote: remote.store })
       expect(yield* withCrypto(combined.put(bytes(artifact)))).toBe(digest)
       expect(yield* withCrypto(local.store.has(digest))).toBe(true)
       expect(yield* withCrypto(remote.store.has(digest))).toBe(true)
@@ -105,7 +105,7 @@ describe("writes", () => {
       // this machine's replays resolve it, and the publication protocol's
       // findMissing → upload → confirm is what actually gates a shared entry.
       const local = countingMemory()
-      const combined = CombinedArtifacts.make({ local: local.store, remote: ArtifactStore.makeNoop() })
+      const combined = yield* CombinedArtifacts.make({ local: local.store, remote: ArtifactStore.makeNoop() })
       expect(yield* withCrypto(combined.put(bytes(artifact)))).toBe(digest)
       expect(yield* withCrypto(local.store.has(digest))).toBe(true)
     }))
@@ -123,7 +123,7 @@ describe("writes", () => {
             return yield* ArtifactStore.makeMemory().put(payload)
           })
       })
-      const combined = CombinedArtifacts.make({ local: local.store, remote })
+      const combined = yield* CombinedArtifacts.make({ local: local.store, remote })
       const running = yield* Effect.forkChild(
         withCrypto(
           Effect.all([combined.put(bytes(artifact)), combined.put(bytes(artifact))], { concurrency: 2 })
@@ -156,7 +156,7 @@ describe("writes", () => {
             return yield* ArtifactStore.makeMemory().put(payload)
           })
       })
-      const combined = CombinedArtifacts.make({ local: ArtifactStore.makeMemory(), remote })
+      const combined = yield* CombinedArtifacts.make({ local: ArtifactStore.makeMemory(), remote })
       const published = yield* withCrypto(
         Effect.gen(function*() {
           const leader = yield* combined.put(bytes(artifact)).pipe(Effect.forkChild({ startImmediately: true }))
@@ -189,7 +189,7 @@ describe("writes", () => {
             return yield* ArtifactStore.makeMemory().put(payload)
           })
       })
-      const combined = CombinedArtifacts.make({ local: ArtifactStore.makeMemory(), remote })
+      const combined = yield* CombinedArtifacts.make({ local: ArtifactStore.makeMemory(), remote })
       const published = yield* withCrypto(
         Effect.gen(function*() {
           const leader = yield* combined.put(bytes(artifact)).pipe(Effect.forkChild({ startImmediately: true }))
@@ -214,7 +214,7 @@ describe("writes", () => {
         put: (payload) => Effect.andThen(Deferred.await(gate), ArtifactStore.makeMemory().put(payload))
       })
       const local = countingMemory()
-      const combined = CombinedArtifacts.make({ local: local.store, remote, uploadTimeout: "50 millis" })
+      const combined = yield* CombinedArtifacts.make({ local: local.store, remote, uploadTimeout: "50 millis" })
       expect(yield* withCrypto(combined.put(bytes(artifact)))).toBe(digest)
       expect(yield* withCrypto(local.store.has(digest))).toBe(true)
     }))
@@ -229,10 +229,79 @@ describe("writes", () => {
             return yield* ArtifactStore.makeMemory().put(payload)
           })
       })
-      const combined = CombinedArtifacts.make({ local: ArtifactStore.makeMemory(), remote })
+      const combined = yield* CombinedArtifacts.make({ local: ArtifactStore.makeMemory(), remote })
       yield* withCrypto(combined.put(bytes(artifact)))
       yield* withCrypto(combined.put(bytes(artifact)))
       expect(uploads).toHaveLength(2)
+    }))
+
+  it.effect("snapshots the caller's bytes before either tier can yield", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const localBacking = ArtifactStore.makeMemory()
+      const local = ArtifactStore.makeNoop({
+        put: (payload) =>
+          Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.andThen(localBacking.put(payload))
+          ),
+        get: localBacking.get,
+        has: localBacking.has,
+        findMissing: localBacking.findMissing
+      })
+      const remote = ArtifactStore.makeMemory()
+      const combined = yield* CombinedArtifacts.make({ local, remote })
+      const input = bytes(artifact)
+      const running = yield* withCrypto(combined.put(input)).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(entered)
+      input.fill(0)
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Fiber.join(running)).toBe(digest)
+      expect(text(yield* withCrypto(localBacking.get(digest)))).toBe(artifact)
+      expect(text(yield* withCrypto(remote.get(digest)))).toBe(artifact)
+    }))
+
+  it.effect.each(["not a duration", "Infinity", "0 millis", "-1 millis"])(
+    "rejects invalid uploadTimeout %s during construction",
+    (uploadTimeout) =>
+      Effect.gen(function*() {
+        const exit = yield* CombinedArtifacts.make({
+          local: ArtifactStore.makeMemory(),
+          remote: ArtifactStore.makeMemory(),
+          uploadTimeout: uploadTimeout as never
+        }).pipe(Effect.exit)
+        expect(exit).toMatchObject({
+          _tag: "Failure",
+          cause: { reasons: [{ error: { code: "invalid_configuration" } }] }
+        })
+      })
+  )
+
+  it.effect("normalizes a duration parser throw into invalid_configuration", () =>
+    Effect.gen(function*() {
+      const exit = yield* CombinedArtifacts.make({
+        local: ArtifactStore.makeMemory(),
+        remote: ArtifactStore.makeMemory(),
+        uploadTimeout: Symbol("invalid") as never
+      }).pipe(Effect.exit)
+      expect(exit).toMatchObject({
+        _tag: "Failure",
+        cause: { reasons: [{ error: { code: "invalid_configuration" } }] }
+      })
+    }))
+
+  it.effect("rejects an unsupported download policy during construction", () =>
+    Effect.gen(function*() {
+      const exit = yield* CombinedArtifacts.make({
+        local: ArtifactStore.makeMemory(),
+        remote: ArtifactStore.makeMemory(),
+        downloadPolicy: "everything" as never
+      }).pipe(Effect.exit)
+      expect(exit).toMatchObject({
+        _tag: "Failure",
+        cause: { reasons: [{ error: { code: "invalid_configuration" } }] }
+      })
     }))
 })
 
@@ -241,11 +310,11 @@ describe("probes", () => {
     Effect.gen(function*() {
       const remote = countingMemory()
       yield* withCrypto(remote.store.put(bytes(artifact)))
-      const combined = CombinedArtifacts.make({ local: ArtifactStore.makeMemory(), remote: remote.store })
+      const combined = yield* CombinedArtifacts.make({ local: ArtifactStore.makeMemory(), remote: remote.store })
       expect(yield* withCrypto(combined.has(digest))).toBe(true)
       const local = ArtifactStore.makeMemory()
       yield* withCrypto(local.put(bytes(artifact)))
-      const localFirst = CombinedArtifacts.make({ local, remote: remote.store })
+      const localFirst = yield* CombinedArtifacts.make({ local, remote: remote.store })
       const before = remote.calls.length
       expect(yield* withCrypto(localFirst.has(digest))).toBe(true)
       expect(remote.calls).toHaveLength(before)
@@ -258,7 +327,7 @@ describe("probes", () => {
       yield* withCrypto(local.put(bytes(artifact)))
       const remote = countingMemory()
       yield* withCrypto(remote.store.put(bytes("another artifact")))
-      const combined = CombinedArtifacts.make({ local, remote: remote.store })
+      const combined = yield* CombinedArtifacts.make({ local, remote: remote.store })
       expect(yield* withCrypto(combined.findMissing([digest, other]))).toEqual([])
     }))
 
@@ -267,14 +336,14 @@ describe("probes", () => {
       const local = ArtifactStore.makeMemory()
       yield* withCrypto(local.put(bytes(artifact)))
       const remote = countingMemory()
-      const combined = CombinedArtifacts.make({ local, remote: remote.store })
+      const combined = yield* CombinedArtifacts.make({ local, remote: remote.store })
       expect(yield* withCrypto(combined.findMissing([digest]))).toEqual([])
       expect(remote.calls).toEqual([])
     }))
 
   it.effect("reports what neither tier holds", () =>
     Effect.gen(function*() {
-      const combined = CombinedArtifacts.make({
+      const combined = yield* CombinedArtifacts.make({
         local: ArtifactStore.makeMemory(),
         remote: ArtifactStore.makeMemory()
       })
@@ -299,6 +368,21 @@ describe("layer", () => {
       expect(published).toBe(digest)
       expect(yield* withCrypto(remote.has(digest))).toBe(true)
     }))
+
+  it.effect("forwards an explicit download policy override", () =>
+    Effect.gen(function*() {
+      const policy = yield* Effect.map(
+        ArtifactStore.ArtifactStore,
+        RemoteArtifacts.downloadPolicyOf
+      ).pipe(
+        Effect.provide(CombinedArtifacts.layer({
+          local: Effect.succeed(ArtifactStore.makeMemory()),
+          remote: Effect.succeed(ArtifactStore.makeMemory()),
+          downloadPolicy: "minimal"
+        }))
+      )
+      expect(policy).toBe("minimal")
+    }))
 })
 
 describe("the download policy", () => {
@@ -312,7 +396,7 @@ describe("the download policy", () => {
     Effect.gen(function*() {
       const local = countingMemory()
       const remote = countingMemory()
-      const combined = CombinedArtifacts.make({ local: local.store, remote: remote.store })
+      const combined = yield* CombinedArtifacts.make({ local: local.store, remote: remote.store })
       expect(combined.downloadPolicy).toBe("all")
       yield* withCrypto(remote.store.put(bytes(artifact)))
       expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
@@ -323,7 +407,7 @@ describe("the download policy", () => {
     Effect.gen(function*() {
       const local = countingMemory()
       const remote = declaring("minimal")
-      const combined = CombinedArtifacts.make({ local: local.store, remote: remote.store })
+      const combined = yield* CombinedArtifacts.make({ local: local.store, remote: remote.store })
       expect(combined.downloadPolicy).toBe("minimal")
       yield* withCrypto(remote.store.put(bytes(artifact)))
 
@@ -341,7 +425,7 @@ describe("the download policy", () => {
     Effect.gen(function*() {
       const local = countingMemory()
       const remote = declaring("toplevel")
-      const combined = CombinedArtifacts.make({ local: local.store, remote: remote.store })
+      const combined = yield* CombinedArtifacts.make({ local: local.store, remote: remote.store })
       expect(combined.downloadPolicy).toBe("toplevel")
       yield* withCrypto(remote.store.put(bytes(artifact)))
       expect(text(yield* withCrypto(combined.get(digest)))).toBe(artifact)
@@ -355,7 +439,7 @@ describe("the download policy", () => {
     Effect.gen(function*() {
       const local = countingMemory()
       const remote = declaring("minimal")
-      const combined = CombinedArtifacts.make({
+      const combined = yield* CombinedArtifacts.make({
         local: local.store,
         remote: remote.store,
         downloadPolicy: "all"
@@ -366,13 +450,14 @@ describe("the download policy", () => {
       expect(yield* withCrypto(local.store.has(digest))).toBe(true)
     }))
 
-  it("ignores a declaration that is not a policy", () => {
-    const local = countingMemory()
-    const remote = countingMemory()
-    const combined = CombinedArtifacts.make({
-      local: local.store,
-      remote: { ...remote.store, downloadPolicy: "everything" } as never
-    })
-    expect(combined.downloadPolicy).toBe("all")
-  })
+  it.effect("ignores a declaration that is not a policy", () =>
+    Effect.gen(function*() {
+      const local = countingMemory()
+      const remote = countingMemory()
+      const combined = yield* CombinedArtifacts.make({
+        local: local.store,
+        remote: { ...remote.store, downloadPolicy: "everything" } as never
+      })
+      expect(combined.downloadPolicy).toBe("all")
+    }))
 })

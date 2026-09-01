@@ -430,7 +430,12 @@ describe("wave 13 C-1 — the surfaces menu is a command", () => {
     expect(store.session().surfacesMenuOpen).toBe(false)
   })
 
-  test("the agent cannot reach the menu — it is user-only chrome", async () => {
+  // Re-pinned 2026-09-01. This asserted the agent could not reach the menu until
+  // 1e18cb3339 narrowed the user-only set to USER_ONLY_VISIBLE, so that every
+  // flow the slash menu lists is also a tool call. The menu is listed chrome
+  // with no destructive effect, so it is callable now, and what the test pins is
+  // that the agent's call goes through the same toggle the human's does.
+  test("the agent reaches the menu through the same toggle the human uses", async () => {
     const store = await webStore()
     const { agent } = scriptedToolAgent([() => []])
     const controller = createAppController(store, unavailableRepositories, agent)
@@ -438,7 +443,8 @@ describe("wave 13 C-1 — the surfaces menu is a command", () => {
       name: "commands",
       arguments: JSON.stringify({ action: "execute", name: "chat.surfaces" })
     })
-    expect(result.startsWith("failed:")).toBe(true)
-    expect(store.session().surfacesMenuOpen).toBe(false)
+    expect(result.startsWith("failed:")).toBe(false)
+    await settle(2)
+    expect(store.session().surfacesMenuOpen).toBe(true)
   })
 })

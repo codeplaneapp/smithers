@@ -217,16 +217,14 @@ describe("GrantStore.reply", () => {
       })
     ))
 
-  itEffect("refuses a run grant when the active plan digest is empty", () =>
+  itEffect("refuses an empty active plan digest at construction", () =>
     Effect.scoped(
       Effect.gen(function*() {
-        const store = yield* make({ planDigest: "" })
-        const waiter = yield* store.check(read).pipe(Effect.forkChild({ startImmediately: true }))
-        const [pending] = yield* awaitPending(store, 1)
-
-        expect((yield* Effect.flip(store.reply(pending!.requestId, "run"))).code).toBe("invalid_resolution")
-        yield* store.reply(pending!.requestId, "once")
-        yield* Fiber.join(waiter)
+        const failure = yield* Effect.flip(make({ planDigest: "" }))
+        expect(failure).toMatchObject({
+          code: "invalid_resolution",
+          message: "planDigest is empty, malformed, or too long"
+        })
       })
     ))
 

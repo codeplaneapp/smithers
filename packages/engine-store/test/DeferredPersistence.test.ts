@@ -90,6 +90,47 @@ const build = (
   )
 
 describe("DeferredPersistence", () => {
+  it.effect("rehydrates valid exits and leaves malformed lookalikes inert", () =>
+    Effect.gen(function*() {
+      const state = DurableEngineState.makeMemory()
+      const malformed: ReadonlyArray<unknown> = [
+        1,
+        { _id: "Other" },
+        { _id: "Exit", _tag: "Other" },
+        { _id: "Exit", _tag: "Failure", cause: null },
+        { _id: "Exit", _tag: "Failure", cause: {} },
+        { _id: "Exit", _tag: "Failure", cause: { failures: [null] } },
+        { _id: "Exit", _tag: "Failure", cause: { failures: [{ _tag: "Unknown" }] } }
+      ]
+      for (const [index, exit] of malformed.entries()) {
+        const completed = yield* state.completeDeferred({
+          flowName: TestFlow._tag,
+          executionId: `malformed-${index}`,
+          deferredName: "answer",
+          exit,
+          completedAtMs: 0
+        })
+        expect(completed.row.exit).toEqual(exit)
+      }
+
+      const interrupted = yield* state.completeDeferred({
+        flowName: TestFlow._tag,
+        executionId: "numeric-interrupt",
+        deferredName: "answer",
+        exit: {
+          _id: "Exit",
+          _tag: "Failure",
+          cause: { failures: [{ _tag: "Interrupt", fiberId: 7 }] }
+        },
+        completedAtMs: 0
+      })
+      expect(Exit.isFailure(interrupted.row.exit as Exit.Exit<unknown, unknown>)).toBe(true)
+      expect((interrupted.row.exit as Exit.Failure<unknown, unknown>).cause.reasons[0]).toMatchObject({
+        _tag: "Interrupt",
+        fiberId: 7
+      })
+    }))
+
   it.effect("keeps the first duplicate or divergent completion", () =>
     Effect.gen(function*() {
       const result = yield* withCrypto(Effect.scoped(Effect.gen(function*() {
@@ -125,6 +166,71 @@ describe("DeferredPersistence", () => {
         "duplicate:deferred",
         "duplicate:deferred"
       ])
+    }))
+
+  it.effect("admits only the exact active wait and converges concurrent duplicates", () =>
+    Effect.gen(function*() {
+      const result = yield* withCrypto(Effect.scoped(Effect.gen(function*() {
+        const state = DurableEngineState.makeMemory()
+        const events: Array<string> = []
+        const resumes: Array<string> = []
+        const service = yield* build(state, makeJournal(events), resumes)
+        const address = {
+          flowName: TestFlow._tag,
+          executionId: "approval-cas",
+          deferredName: "answer"
+        }
+        const completion = {
+          ...address,
+          reason: "approval",
+          token: "attempt-1",
+          exit: Exit.succeed("yes")
+        }
+
+        const unopened = yield* service.deferredDoneIfWaiting(completion)
+        yield* state.park(address.executionId, {
+          reason: "approval",
+          token: completion.token
+        }, owner)
+        const duplicates = yield* Effect.all([
+          service.deferredDoneIfWaiting(completion),
+          service.deferredDoneIfWaiting({ ...completion, exit: Exit.succeed("different") })
+        ], { concurrency: "unbounded" })
+
+        yield* state.park(address.executionId, {
+          reason: "approval",
+          token: "attempt-2"
+        }, owner)
+        const stale = yield* service.deferredDoneIfWaiting({
+          ...completion,
+          deferredName: "answer-2"
+        })
+        const current = yield* service.deferredDoneIfWaiting({
+          ...completion,
+          deferredName: "answer-2",
+          token: "attempt-2"
+        })
+
+        return {
+          unopened,
+          duplicates,
+          stale,
+          current,
+          first: Option.getOrThrow(yield* state.deferred(address)),
+          second: Option.getOrThrow(yield* state.deferred({ ...address, deferredName: "answer-2" })),
+          events,
+          resumes
+        }
+      })))
+
+      expect(result.unopened).toBe("NotWaiting")
+      expect([...result.duplicates].sort()).toEqual(["Completed", "Existing"])
+      expect(result.stale).toBe("NotWaiting")
+      expect(result.current).toBe("Completed")
+      expect([Exit.succeed("yes"), Exit.succeed("different")]).toContainEqual(result.first.exit)
+      expect(result.second.exit).toEqual(Exit.succeed("yes"))
+      expect(result.events.filter((event) => event === "emit:flows.engine.deferred-completed")).toHaveLength(2)
+      expect(result.resumes).toHaveLength(3)
     }))
 
   it.effect("makes delivery durable before scheduling a resume", () =>
@@ -448,6 +554,88 @@ describe("DeferredPersistence", () => {
         "deferred-test:wake:[\"DeferredPersistence/Test\",\"historical-completion\",\"answer\"]",
         "deferred-test:wake:[\"DeferredPersistence/Test\",\"historical-completion\",\"answer\"]"
       ])
+    }))
+})
+
+describe("active-wait deferred admission on SQLite", () => {
+  const migratedDatabase = Layer.provideMerge(Migrations.layer, TestDatabase.layer)
+
+  const seedRun = (sql: SqlClient.SqlClient, runId: string) =>
+    sql`
+      INSERT INTO flows_runs (
+        run_id,
+        status,
+        created_at_ms,
+        owner_host_id,
+        owner_pid,
+        owner_nonce,
+        heartbeat_at_ms,
+        state_json
+      ) VALUES (
+        ${runId},
+        'running',
+        0,
+        ${owner.hostId},
+        ${owner.pid},
+        ${owner.nonce},
+        0,
+        '{}'
+      )
+    `.pipe(Effect.orDie, Effect.asVoid)
+
+  it.effect("commits only the exact parked token across fresh persistence instances", () =>
+    Effect.gen(function*() {
+      const result = yield* withCrypto(Effect.scoped(
+        Effect.gen(function*() {
+          const sql = yield* Effect.service(SqlClient.SqlClient)
+          const state = yield* DurableEngineState.make
+          const events: Array<string> = []
+          const resumes: Array<string> = []
+          const service = yield* build(state, makeJournal(events), resumes)
+          const runId = "sql-approval-cas"
+          const unopenedRunId = "sql-unopened-cas"
+          yield* seedRun(sql, runId)
+          yield* seedRun(sql, unopenedRunId)
+          yield* state.park(runId, { reason: "approval", token: "attempt-1" }, owner)
+
+          const base = {
+            flowName: TestFlow._tag,
+            executionId: runId,
+            deferredName: "answer",
+            reason: "approval",
+            token: "attempt-1",
+            exit: Exit.succeed("accepted")
+          }
+          const wrong = yield* service.deferredDoneIfWaiting({ ...base, token: "other" })
+          const duplicates = yield* Effect.all([
+            service.deferredDoneIfWaiting(base),
+            service.deferredDoneIfWaiting({ ...base, exit: Exit.succeed("duplicate") })
+          ], { concurrency: "unbounded" })
+          const unopened = yield* service.deferredDoneIfWaiting({
+            ...base,
+            executionId: unopenedRunId
+          })
+
+          const restarted = yield* DurableEngineState.make
+          return {
+            wrong,
+            duplicates,
+            unopened,
+            row: Option.getOrThrow(yield* restarted.deferred(base)),
+            unopenedRow: yield* restarted.deferred({ ...base, executionId: unopenedRunId }),
+            events,
+            resumes
+          }
+        }).pipe(Effect.provide(migratedDatabase))
+      ))
+
+      expect(result.wrong).toBe("NotWaiting")
+      expect([...result.duplicates].sort()).toEqual(["Completed", "Existing"])
+      expect(result.unopened).toBe("NotWaiting")
+      expect([Exit.succeed("accepted"), Exit.succeed("duplicate")]).toContainEqual(result.row.exit)
+      expect(Option.isNone(result.unopenedRow)).toBe(true)
+      expect(result.events.filter((event) => event === "emit:flows.engine.deferred-completed")).toHaveLength(1)
+      expect(result.resumes).toHaveLength(2)
     }))
 })
 

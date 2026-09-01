@@ -506,7 +506,7 @@ export const ciGenAttrsOf = (target: Target.AnyTarget): (typeof CiGenAttrs)["Typ
 export const prAttrsOf = (target: Target.AnyTarget): (typeof PrAttrs)["Type"] => attrsOf(target, "Github.Pr")
 
 /**
- * The secret name a `Github.Pr` invocation must declare and satisfy.
+ * The secret name a `Github.Pr` invocation must declare.
  *
  * @category constants
  * @since 0.1.0
@@ -516,8 +516,8 @@ export const prTokenSecret = "GITHUB_TOKEN"
 /**
  * A `Github.Pr` invocation was refused before any outward action.
  *
- * `missing_token_secret` covers both a declaration that never names
- * {@link prTokenSecret} and an environment that carries no value for it.
+ * `missing_token_secret` covers a declaration that never names
+ * {@link prTokenSecret}. The HTTP transport owns value resolution.
  * `approval_unsatisfied` covers `approval: "required"` with no granted
  * approval. Refusal happens before any provider call, so a refused
  * invocation has no side effect to undo.
@@ -546,14 +546,16 @@ export const isPrRefused = (value: unknown): value is PrRefused => value instanc
 /**
  * The facts one `Github.Pr` invocation presents to the refusal gate.
  *
- * `environment` is the invoking process environment (values are read for
- * presence only and never logged). `approvalGranted` reports whether a
- * durable approval satisfied `approval: "required"`.
+ * `environment` is retained for source compatibility but is never read:
+ * secret values resolve only when the HTTP transport sends its request.
+ * `approvalGranted` reports whether a durable approval satisfied
+ * `approval: "required"`.
  *
  * @category models
  * @since 0.1.0
  */
 export interface PrInvocation {
+  /** @deprecated Secret values are resolved only by the outbound transport. */
   readonly environment: Readonly<Record<string, string | undefined>>
   readonly approvalGranted: boolean
 }
@@ -567,18 +569,11 @@ export interface PrInvocation {
  */
 export const refusePr = (target: Target.AnyTarget, invocation: PrInvocation): PrRefused | undefined => {
   const attrs = prAttrsOf(target)
-  const token = (attrs.secrets ?? []).find((secret) => secret.env === prTokenSecret)
+  const token = (attrs.secrets ?? []).find((credential) => credential.secret.env === prTokenSecret)
   if (token === undefined) {
     return new PrRefused(
       "missing_token_secret",
-      `Github.Pr declares no S.Secret(${JSON.stringify(prTokenSecret)}) in secrets`
-    )
-  }
-  const value = invocation.environment[token.env]
-  if (value === undefined || value === "") {
-    return new PrRefused(
-      "missing_token_secret",
-      `the declared ${token.env} secret has no value in the invoking environment`
+      `Github.Pr declares no S.HttpSecret(S.Secret(${JSON.stringify(prTokenSecret)}), [...]) in secrets`
     )
   }
   if (attrs.approval === "required" && !invocation.approvalGranted) {

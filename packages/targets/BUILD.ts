@@ -9,7 +9,7 @@
  * unchanged.
  */
 import { Smithers } from "@smthrs/targets"
-import { packageManager, rootJSDocConfig, runtime } from "../../BUILD.ts"
+import { packageManager, rootInvariantsConfig, rootJSDocConfig, runtime } from "../../BUILD.ts"
 
 const cwd = "packages/targets"
 const sources = Smithers.glob("src/**/*.ts")
@@ -50,7 +50,7 @@ export const lint = Smithers.EsLint({
   packageManager,
   sources: [sources],
   deps: [],
-  configs: [Smithers.file("eslint.config.js"), rootJSDocConfig],
+  configs: [Smithers.file("eslint.config.js"), rootJSDocConfig, rootInvariantsConfig],
   maxWarnings: 0,
   fix: false,
   cwd

@@ -29,16 +29,16 @@
  * a day is indistinguishable from a run that hung, and an operator who wants
  * that wait can declare it.
  *
- * The service is injected rather than assumed: {@link layerNoop} keeps the
- * failure a failure, which is what a composition wants when a refusal should
- * page someone instead of being slept off.
+ * The service is injected rather than assumed. A composition that wants every
+ * refusal to stay a failure must say so explicitly with
+ * {@link layerUnclassified}; omitting the decision is a type error.
  *
  * @since 0.1.0
  */
 import { HarnessError } from "@smthrs/harness/HarnessError"
 import { ModelError } from "@smthrs/model/ModelError"
 import * as Context from "effect/Context"
-import * as Effect from "effect/Effect"
+import type * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -159,18 +159,26 @@ export const make = (implementation: Service): Service => QuotaClassifier.of(imp
 /**
  * A classifier that classifies nothing, so every refusal stays a failure.
  *
+ * This is an explicit safety-policy decision, not a default. It gives up
+ * durable quota parking: provider refusals fail the run immediately. The
+ * recorder's independent capacity-refusal floor still prevents those failures
+ * from becoming durable values.
+ *
  * @category constructors
  * @since 0.1.0
  */
-export const makeNoop = (): Service => make({ classify: () => Option.none() })
+export const makeUnclassified = (): Service => make({ classify: () => Option.none() })
 
 /**
- * Provides {@link makeNoop}.
+ * Explicitly provides {@link makeUnclassified}.
+ *
+ * This gives up durable quota parking. It does not permit quota or overload
+ * failures to enter the sealed step cache.
  *
  * @category layers
  * @since 0.1.0
  */
-export const layerNoop = (): Layer.Layer<QuotaClassifier> => Layer.succeed(QuotaClassifier)(makeNoop())
+export const layerUnclassified = (): Layer.Layer<QuotaClassifier> => Layer.succeed(QuotaClassifier)(makeUnclassified())
 
 /**
  * The delays a provider spells out in prose rather than in a field.
@@ -327,17 +335,12 @@ export const quotaParkedEvent = "flows.agent.quota-parked.v1"
 export const defaultMaxParks = 8
 
 /**
- * Reads the classifier a composition provided, or the no-op when it provided
- * none.
+ * Reads the classifier a composition explicitly provided.
  *
- * The optional lookup is the whole point of the injection: a composition that
- * says nothing about quotas keeps today's behavior, and no existing layer list
- * has to grow a service to stay buildable.
+ * There is deliberately no fallback. Every production composition must choose
+ * quota parking or explicitly choose {@link layerUnclassified}.
  *
  * @category accessors
  * @since 0.1.0
  */
-export const current: Effect.Effect<Service> = Effect.map(
-  Effect.serviceOption(QuotaClassifier),
-  Option.getOrElse(makeNoop)
-)
+export const current: Effect.Effect<Service, never, QuotaClassifier> = QuotaClassifier

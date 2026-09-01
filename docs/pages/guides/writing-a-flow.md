@@ -85,7 +85,7 @@ const Approval = DurableDeferred.make("example/input-ready", {
   success: Schema.String
 })
 
-const value = yield* DurableDeferred.await(Approval)
+const value = yield * DurableDeferred.await(Approval)
 ```
 
 The handler re-runs from the beginning after wake. Completed actions and durable primitives return recorded results, so code before the frontier must be deterministic and safe to evaluate again.
@@ -93,7 +93,7 @@ The handler re-runs from the beginning after wake. Completed actions and durable
 ## Retry deliberately
 
 ```ts
-const artifact = yield* Action.retry(Compile, { times: 2 })
+const artifact = yield * Action.retry(Compile, { times: 2 })
 ```
 
 Use `tier: "irreversible"` for effects that cannot be rolled back, and give them an idempotency key before allowing retries. Use `tier: "compensable"` only when snapshot and restore are meaningful for the supplied `Jj` implementation.
@@ -144,8 +144,18 @@ The agent itself comes from `@smthrs/agent/Agent`:
 
 ```ts
 import * as Agent from "@smthrs/agent/Agent"
+import * as Budget from "@smthrs/agent/Budget"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
+import * as Layer from "effect/Layer"
+
+// A production host parks reset-bearing refusals. Without an approved plan
+// envelope, unbounded is the only ceiling the author actually chose.
+const AgentPolicyLayer = Layer.mergeAll(
+  QuotaPolicy.layerDefault(),
+  Budget.layerUnbounded()
+)
 ```
 
-Provide `HostLayer`, `SeatLayer`, `Agent.layer`, and `Agent.layerDefaults` alongside the engine layers. `Agent.layer` is the production agent; `Agent.layerDefaults` supplies the two services a run leaves to the host, the QuickJS sandbox and an empty steering source. A test provides a `SeatResolver` layer that answers with a scripted model and needs no API key; see [`11-agent-step.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/11-agent-step.ts).
+Provide `HostLayer`, `SeatLayer`, `Agent.layer`, `AgentPolicyLayer`, and `Agent.layerDefaults` alongside the engine layers. `Agent.layer` is the production agent and requires the policy layer, so omitting either policy is a type error. `Agent.layerDefaults` supplies the two services a run leaves to the host, the QuickJS sandbox and an empty steering source. A control-plane host should use `Budget.layerFromEnvelope` once it has the approved plan envelope. A test provides a `SeatResolver` layer that answers with a scripted model and needs no API key; see [`11-agent-step.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/11-agent-step.ts).
 
 Continue with [Determinism and replay](/concepts/determinism-and-replay), [Step keys](/concepts/step-keys), and [Failure and retry](/concepts/failure-and-retry).

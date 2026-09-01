@@ -86,6 +86,12 @@ export interface Service {
     FlowRuntime.FlowInstance
   >
   readonly deferredDone: (options: DeferredDoneOptions) => Effect.Effect<void>
+  readonly deferredDoneIfWaiting: (
+    options: DeferredDoneOptions & {
+      readonly reason: string
+      readonly token: string
+    }
+  ) => Effect.Effect<FlowRuntime.DeferredDoneIfWaitingOutcome>
   readonly scheduleClock: (
     flow: Flow.Any,
     options: {
@@ -167,10 +173,11 @@ export const make = (
       )
     )
 
-    const completeDeferred = (
+    const persistDeferred = (
       options: DeferredDoneOptions,
-      reason: ResumeReason = "deferred"
-    ): Effect.Effect<void> =>
+      reason: ResumeReason = "deferred",
+      expectedWaiting?: { readonly reason: string; readonly token: string } | undefined
+    ): Effect.Effect<FlowRuntime.DeferredDoneIfWaitingOutcome> =>
       Effect.gen(function*() {
         const completedAtMs = yield* Clock.currentTimeMillis
         // The completion row and the record describing it commit as one unit:
@@ -178,8 +185,18 @@ export const make = (
         // announced. The lossy flush below stays outside — it waits on the
         // journal's writer fiber, which would deadlock against the write
         // transaction this holds.
-        const completion = yield* journal.transact(
-          Effect.gen(function*() {
+        const admission = yield* journal.transact(
+          state.transaction(Effect.gen(function*() {
+            if (expectedWaiting !== undefined) {
+              const waiting = yield* state.waiting(options.executionId)
+              if (
+                Option.isNone(waiting) ||
+                waiting.value.reason !== expectedWaiting.reason ||
+                waiting.value.token !== expectedWaiting.token
+              ) {
+                return { _tag: "NotWaiting" as const }
+              }
+            }
             const completion = yield* state.completeDeferred({
               flowName: options.flowName,
               executionId: options.executionId,
@@ -211,17 +228,24 @@ export const make = (
                 ...(row.metadata === undefined ? {} : { metadata: row.metadata })
               })
             ).pipe(Effect.orDie)
-            return completion
-          })
+            return { _tag: "Admitted" as const, completion }
+          }))
         ).pipe(Effect.orDie)
-        const row = completion.row
+        if (admission._tag === "NotWaiting") return "NotWaiting"
+        const row = admission.completion.row
         yield* flushLossy
         yield* dependencies.scheduleResume(
           row.flowName,
           row.executionId,
           reason
         )
+        return admission.completion._tag
       })
+
+    const completeDeferred = (
+      options: DeferredDoneOptions,
+      reason: ResumeReason = "deferred"
+    ): Effect.Effect<void> => persistDeferred(options, reason).pipe(Effect.asVoid)
 
     const fireClock = (row: DurableEngineState.ClockRow): Effect.Effect<void> =>
       Effect.gen(function*() {
@@ -360,6 +384,12 @@ export const make = (
         return Option.map(row, (value) => value.exit as Exit.Exit<unknown, unknown>)
       }),
       deferredDone: Effect.fn("DeferredPersistence.deferredDone")(completeDeferred),
+      deferredDoneIfWaiting: Effect.fn("DeferredPersistence.deferredDoneIfWaiting")((options) =>
+        persistDeferred(options, "deferred", {
+          reason: options.reason,
+          token: options.token
+        })
+      ),
       scheduleClock,
       sweepDue
     }

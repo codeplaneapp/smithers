@@ -9,6 +9,7 @@
 import { Flow, Node } from "@smthrs/core"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as Compose from "./internal/Compose.ts"
 import { PatternError } from "./PatternError.ts"
 
 /**
@@ -161,8 +162,10 @@ const bound = (value: number): boolean => Number.isSafeInteger(value) && value >
 export const ordered = <M extends { readonly id: string; readonly priority?: number | undefined }>(
   members: ReadonlyArray<M>,
   priority: number
-): ReadonlyArray<Position<M>> =>
-  members
+): ReadonlyArray<Position<M>> => {
+  const refusal = priorityRefusal(members, priority)
+  if (refusal !== undefined) throw refusal
+  return members
     .map((member, index) => ({
       id: member.id,
       priority: member.priority ?? priority,
@@ -173,9 +176,21 @@ export const ordered = <M extends { readonly id: string; readonly priority?: num
       left.priority === right.priority ? left.position - right.position : right.priority - left.priority
     )
     .map((entry, index) => ({ ...entry, position: index }))
+}
+
+const priorityRefusal = (
+  members: ReadonlyArray<{ readonly id: string; readonly priority?: number | undefined }>,
+  priority: number
+): PatternError | undefined => {
+  for (const member of members) {
+    const refusal = Compose.safeIntegerPriorityRefusal("MergeQueue", member.id, member.priority ?? priority)
+    if (refusal !== undefined) return refusal
+  }
+  return undefined
+}
 
 const validate = (
-  members: ReadonlyArray<{ readonly id: string }>,
+  members: ReadonlyArray<{ readonly id: string; readonly priority?: number | undefined }>,
   concurrency: number,
   priority: number
 ): PatternError | undefined => {
@@ -192,10 +207,7 @@ const validate = (
       message: "MergeQueue concurrency must be a positive safe integer"
     })
   }
-  if (!Number.isSafeInteger(priority)) {
-    return new PatternError({ code: "invalid_decorator", message: "MergeQueue priority must be a safe integer" })
-  }
-  return undefined
+  return priorityRefusal(members, priority)
 }
 
 /**
@@ -204,8 +216,8 @@ const validate = (
  *
  * At the default concurrency of 1 the queue is a plain `Node.andThen` chain,
  * with no `Node.all` at all, so the declared plan admits exactly one landing at
- * a time. Each call carries `{ member, position, input }`, so a built graph
- * names each member's place in the queue.
+ * a time. Each call carries `{ id, position, input }`, so a built graph names
+ * each member's place in the queue.
  *
  * A member's effective priority reaches the plan as a `Node.priority`
  * annotation rather than as call input, which is what lets the scheduler start
@@ -214,11 +226,17 @@ const validate = (
  * same steps rather than re-landing the queue.
  *
  * `failurePolicy` picks the topology. Under `quarantine` every member gains a
- * recovery arm settling it as the `Quarantined` marker `Quarantine.all`
- * produces, so a failing member neither fails the chain nor interrupts the
- * batch beside it: the queue {@link run} lands. Under `halt` the chain has no
- * continuation past a failed member, and a batch join fails on the first
- * failing member and interrupts the rest.
+ * recovery arm settling it as MergeQueue's `Quarantined` result, so a failing
+ * member neither fails the chain nor interrupts the batch beside it: the
+ * queue {@link run} lands. Under `halt` the chain has no continuation past a
+ * failed member, and a batch join fails on the first failing member and
+ * interrupts the rest.
+ *
+ * That wire marker deliberately remains
+ * `{ _tag: "Quarantined", member, error }`; its `member` key is protocol
+ * metadata, not the landing-call payload. MergeQueue stores successful and
+ * quarantined results in separate arrays, so it does not classify arbitrary
+ * successful values by this shape.
  *
  * `make` throws a `PatternError` when there are no members, when two members
  * share an id, when `concurrency` is not a positive safe integer, or when
@@ -237,8 +255,8 @@ export const make = (
   if (invalid !== undefined) throw invalid
   const queue = ordered(members, priority)
   // Priority is deliberately absent: it reaches the plan as an annotation, and
-  // an annotation never enters key material. What it changes — the order, and
-  // therefore each member's position — is captured through `members`.
+  // an annotation never enters key material. What it changes, the order and
+  // therefore each member's position, is captured through `members`.
   const captures = {
     members: queue.map((entry) => entry.id),
     concurrency,
@@ -252,17 +270,17 @@ export const make = (
       const landing = (entry: Position<Member>): Node.Node<unknown, unknown> => {
         const declared = Node.priority(
           call(entry.member.flow, {
-            member: entry.id,
+            id: entry.id,
             position: entry.position,
             input
           }),
           entry.priority
         )
         if (options.failurePolicy === "halt") return declared
-        // The same marker `Quarantine.all` settles an isolated member with, so
-        // a caller reads a held-back landing the same way whatever the queue's
-        // concurrency is. The arm goes on the member rather than on the join,
-        // because a serial queue has no join to put it on.
+        // The arm goes on the member rather than on the join because a serial
+        // queue has no join to put it on. Runtime results keep successful and
+        // quarantined members in separate arrays, so this marker never
+        // classifies an arbitrary successful value.
         return Node.catch(declared, {
           onFailure: Node.capture(
             { member: entry.id },
@@ -282,8 +300,9 @@ export const make = (
         return walk(0)
       }
       const batchAt = (offset: number): Node.Node<unknown, unknown> => {
-        const group: Record<string, Node.Any> = {}
-        for (const entry of queue.slice(offset, offset + concurrency)) group[entry.id] = landing(entry)
+        const group = Object.fromEntries(
+          queue.slice(offset, offset + concurrency).map((entry) => [entry.id, landing(entry)])
+        ) as Record<string, Node.Any>
         // A plain join: under quarantine every member already carries its own
         // recovery arm, so no member can fail this join on the batch's behalf.
         return Node.all(group)

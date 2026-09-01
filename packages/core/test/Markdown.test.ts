@@ -15,6 +15,7 @@ describe("Markdown", () => {
 
     expect(typeof flow).toBe("function")
     expect(flow({ args: "hello" }).ast._tag).toBe("FlowCall")
+    expect(flow.effects).toBeUndefined()
   })
 
   it("forwards the markdown body as the dynamic prompt and applies defaults", () => {
@@ -27,9 +28,15 @@ describe("Markdown", () => {
       flows: [],
       prompt: "The markdown prompt."
     })
+    expect(flow.implementation).toEqual({
+      _tag: "Dynamic",
+      model: "smart",
+      flows: [],
+      prompt: "The markdown prompt."
+    })
   })
 
-  it("preserves normalized capability and effect declarations", () => {
+  it("normalizes capability and effect declarations", () => {
     const flow = Markdown.lowerMarkdown({
       capabilities: ["shell", "shell", "git"],
       effects: {
@@ -40,7 +47,7 @@ describe("Markdown", () => {
       }
     }, "Prompt")
 
-    expect(flow.capabilities).toEqual(["shell", "shell", "git"])
+    expect(flow.capabilities).toEqual(["git", "shell"])
     expect(flow.effects).toEqual(Effects.make({
       reads: ["src", "src"],
       writes: ["dist", "dist"],
@@ -90,5 +97,14 @@ describe("Markdown", () => {
     const result = Markdown.parseSkill("---\nname: example\n---\n")
 
     expect(Result.isFailure(result) && result.failure.code).toBe("skill_missing_description")
+  })
+
+  it("keeps untyped skill extras out of lowering and uses the smart default seat", () => {
+    const flow = Result.getOrThrow(Markdown.lowerSkill(
+      "---\nname: example\ndescription: Example skill\nmodel: fast\nplacement: remote\n---\nPrompt"
+    ))
+
+    // lowerSkill's JSDoc keeps untyped extras at the parse boundary, so lowerMarkdown supplies its documented default.
+    expect(flow.implementation).toMatchObject({ _tag: "Dynamic", model: "smart" })
   })
 })

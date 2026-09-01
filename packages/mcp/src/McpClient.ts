@@ -70,10 +70,26 @@ export interface ConnectOptions {
   readonly args: ReadonlyArray<string>
   readonly cwd?: string | undefined
   readonly env?: Record<string, string | undefined> | undefined
+  /** Deadline for each initialize/catalog request. Default 10 seconds. */
+  readonly handshakeTimeoutMs?: number | undefined
+  /** Deadline for each later tool request. Default 120 seconds. */
+  readonly requestTimeoutMs?: number | undefined
+  /** Maximum outbound frames waiting to be written. Default 64. */
+  readonly queueCapacity?: number | undefined
+  /** Maximum UTF-8 bytes in one inbound JSON-RPC frame. Default one MiB. */
+  readonly maxFrameBytes?: number | undefined
 }
 
 const CLIENT_INFO = { name: "flows", version: "0.1.0" }
 const PROTOCOL_VERSION = "2025-06-18"
+
+/**
+ * Default deadline for each MCP handshake request.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const defaultHandshakeTimeoutMs = 10_000
 
 const invalidResponse = (server: string, message: string): McpError =>
   new McpError({ code: "invalid_response", message, server })
@@ -137,17 +153,22 @@ export const connect = (
 ): Effect.Effect<McpClient, McpError, ChildProcessSpawner | Scope.Scope> =>
   Effect.gen(function*() {
     const transport = yield* StdioTransport.connect(options)
+    const handshakeTimeoutMs = options.handshakeTimeoutMs ?? defaultHandshakeTimeoutMs
 
-    yield* transport.request("initialize", {
-      protocolVersion: PROTOCOL_VERSION,
-      capabilities: {},
-      clientInfo: CLIENT_INFO
-    })
+    yield* transport.request(
+      "initialize",
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: CLIENT_INFO
+      },
+      handshakeTimeoutMs
+    )
     // A notification, not a request: the server never replies to it, and the
     // handshake is not complete until the client sends it.
     yield* transport.notify("notifications/initialized")
 
-    const listed = yield* transport.request("tools/list", {})
+    const listed = yield* transport.request("tools/list", {}, handshakeTimeoutMs)
     const tools = yield* Effect.fromResult(asToolList(options.server, listed))
 
     const callTool = (name: string, args: Record<string, unknown>): Effect.Effect<ToolResult, McpError> =>

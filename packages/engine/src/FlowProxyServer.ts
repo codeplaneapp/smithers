@@ -16,7 +16,7 @@
  * on this side of an RPC boundary too — the client, which only encodes a
  * payload and decodes a result, still requires nothing of the kind.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import type { Flow, FlowRuntime } from "@smthrs/flow"
 import type { NonEmptyReadonlyArray } from "effect/Array"
@@ -27,13 +27,14 @@ import type * as HttpApi from "effect/unstable/httpapi/HttpApi"
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder"
 import type * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup"
 import type * as Rpc from "effect/unstable/rpc/Rpc"
+import * as FlowProxy from "./FlowProxy.ts"
 
 /**
  * Creates handlers for a flow HTTP API group, wiring execute, discard, and
  * resume endpoints to the supplied flows.
  *
  * @category layers
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const layerHttpApi = <
@@ -51,8 +52,9 @@ export const layerHttpApi = <
   | FlowRuntime.FlowRuntime
   | Flow.Requirements<Flows[number]>
   | Flow.RequirementsHandler<Flows[number]>
-> =>
-  HttpApiBuilder.group(
+> => {
+  FlowProxy.assertNoCollisions(flows)
+  return HttpApiBuilder.group(
     api,
     identifier,
     // Untraced because proxy handler construction recursively resolves flows.
@@ -112,13 +114,14 @@ export const layerHttpApi = <
       return handlers as HttpApiBuilder.Handlers<never>
     })
   )
+}
 
 /**
  * Creates RPC handlers for the supplied flows, wiring execute, discard,
  * and resume RPCs to flow operations.
  *
  * @category layers
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const layerRpcHandlers = <
@@ -132,16 +135,18 @@ export const layerRpcHandlers = <
   | FlowRuntime.FlowRuntime
   | Flow.Requirements<Flows[number]>
   | Flow.RequirementsHandler<Flows[number]>
-> =>
-  Layer.effectContext(Effect.gen(function*() {
+> => {
+  const prefix = options?.prefix ?? ""
+  FlowProxy.assertNoCollisions(flows, prefix)
+  return Layer.effectContext(Effect.gen(function*() {
     const context = yield* Effect.context<never>()
-    const prefix = options?.prefix ?? ""
     const handlers = new Map<string, Rpc.Handler<string>>()
     for (const flow_ of flows) {
       const flow = flow_ as Flow.AnyWithProps
-      const tag = `${prefix}${flow._tag}`
-      const tagDiscard = `${tag}Discard`
-      const tagResume = `${tag}Resume`
+      const operation = FlowProxy.operationAddresses(flow._tag, prefix)
+      const tag = operation.execute
+      const tagDiscard = operation.discard
+      const tagResume = operation.resume
       const key = `effect/rpc/Rpc/${tag}`
       const keyDiscard = `${key}Discard`
       const keyResume = `${key}Resume`
@@ -170,13 +175,14 @@ export const layerRpcHandlers = <
     }
     return Context.makeUnsafe(handlers)
   }))
+}
 
 /**
  * Union of RPC handler services required to serve the generated flow
  * execute, discard, and resume RPCs.
  *
  * @category services
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export type RpcHandlers<Flows extends Flow.Any, Prefix extends string> = Flows extends Flow.Flow<

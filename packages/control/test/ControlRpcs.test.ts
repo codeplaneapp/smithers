@@ -1,11 +1,15 @@
+import { NotificationQueue } from "@smthrs/notifications"
 import { Effect, Layer, Stream } from "effect"
 import { RpcTest } from "effect/unstable/rpc"
 import { describe, expect, it } from "vitest"
+import { Control } from "../src/Control.ts"
 import { isControlError } from "../src/ControlClient.ts"
 import { PlanDigestMismatch, RunNotFound, TransportError, Unauthorized } from "../src/ControlError.ts"
-import { bearerAuthenticator, ControlRpcs, layerNoopAuth } from "../src/ControlRpcs.ts"
+import { bearerAuthenticator, ControlRpcs, layerAuth, layerNoopAuth } from "../src/ControlRpcs.ts"
+import type { Principal, RunSummary, SteerMessage } from "../src/ControlSchema.ts"
 import * as ControlServer from "../src/ControlServer.ts"
 import * as TestControl from "../src/test/TestControl.ts"
+import { durable, type DurableStack } from "./DurableStack.ts"
 
 const principal = { id: "server", kind: "test", stampedAt: 1 }
 
@@ -172,5 +176,213 @@ describe("ControlRpcs", () => {
     ))
 
     expect(result._tag).toBe("Failure")
+  })
+})
+
+/**
+ * Who an operator action is journaled as.
+ *
+ * Every case above authenticates the identity the composition already defaults
+ * to, so a handler that dropped the authenticated principal and one that
+ * forwarded it produced byte-identical journals. That is the gap this section
+ * closes: `Approve` and `Deny` stamped the principal, `Steer`, `Cancel`, and
+ * `Resume` did not, and no fixture could tell.
+ *
+ * So the composition here deliberately defaults to a DIFFERENT identity than
+ * the one the middleware authenticates. A remote bearer operator cancels, and
+ * the durable record has to say the bearer did it, not `local`.
+ *
+ * The stack is the durable one. What an operator reads back is a journal write
+ * and a projection over it: the `control.run.cancel-requested` entry, and
+ * `RunSummary.cancellation`.
+ */
+/** What the middleware authenticated. Never `local`, which is the default. */
+const authenticated: Principal = { id: "remote-operator", kind: "bearer", stampedAt: 0 }
+
+/** What a client would name if the wire let it. */
+const spoofed: Principal = { id: "victim", kind: "human", stampedAt: 0 }
+
+const attributed = Layer.merge(ControlServer.layer, layerNoopAuth(authenticated)).pipe(
+  Layer.provideMerge(durable())
+)
+
+/** The client, and everything the durable stack exposes, over one database. */
+const durably = <A, E>(
+  body: (rpc: ControlRpcClient) => Effect.Effect<A, E, DurableStack>,
+  stack: typeof attributed = attributed
+): Promise<A> =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      const rpc = yield* makeClient
+      return yield* body(rpc)
+    }).pipe(Effect.provide(stack), Effect.scoped, Effect.orDie)
+  )
+
+/** Plans, approves, and starts one run through the authenticated boundary. */
+const start = (rpc: ControlRpcClient, suffix: string) =>
+  Effect.gen(function*() {
+    const card = yield* rpc.Plan({ flowId: "system/test", input: { suite: suffix }, idempotencyKey: `plan:${suffix}` })
+    yield* rpc.Approve({ ...card.approval, idempotencyKey: `approve:${suffix}` })
+    const receipt = yield* rpc.Run({
+      _tag: "Plan",
+      planId: card.planId,
+      digest: card.digest,
+      envelope: card.envelope,
+      idempotencyKey: `run:${suffix}`
+    })
+    if (receipt._tag !== "Accepted" || receipt.runId === undefined) return yield* Effect.die("expected a started run")
+    return { runId: receipt.runId, planId: card.planId }
+  })
+
+/** The principal one journal entry recorded, whatever the entry's shape. */
+const principalOf = (payload: unknown): Principal | undefined =>
+  (payload as { readonly principal?: Principal | undefined } | null)?.principal
+
+const entries = (rpc: ControlRpcClient, runId: string, kind: string) =>
+  Effect.map(
+    Stream.runCollect(rpc.Watch({ runId, follow: false })),
+    (events) => events.filter((event) => event.kind === kind)
+  )
+
+const summaryOf = (rpc: ControlRpcClient, runId: string) =>
+  Effect.map(
+    rpc.List({ _tag: "runs", filters: { runId } }),
+    (listed): RunSummary | undefined => listed._tag === "runs" ? listed.items[0] : undefined
+  )
+
+describe("the identity an authenticated control mutation is journaled under", () => {
+  it("stamps the authenticated principal on an approval and on a denial", async () => {
+    const observed = await durably((rpc) =>
+      Effect.gen(function*() {
+        const approved = yield* rpc.Plan({ flowId: "system/test", input: { a: 1 }, idempotencyKey: "plan:approve" })
+        yield* rpc.Approve({ ...approved.approval, idempotencyKey: "decide:approve" })
+        const denied = yield* rpc.Plan({ flowId: "system/test", input: { a: 2 }, idempotencyKey: "plan:deny" })
+        yield* rpc.Deny({ ...denied.approval, idempotencyKey: "decide:deny" })
+        return {
+          approve: yield* entries(rpc, `plan:${approved.planId}`, "control.approval.approved"),
+          deny: yield* entries(rpc, `plan:${denied.planId}`, "control.approval.denied")
+        }
+      })
+    )
+
+    expect(principalOf(observed.approve[0]?.payload)).toMatchObject({ id: "remote-operator", kind: "bearer" })
+    expect(principalOf(observed.deny[0]?.payload)).toMatchObject({ id: "remote-operator", kind: "bearer" })
+  })
+
+  it("stamps the authenticated principal on a cancel, in the journal and in the projection", async () => {
+    const observed = await durably((rpc) =>
+      Effect.gen(function*() {
+        const { runId } = yield* start(rpc, "cancel")
+        yield* rpc.Cancel({ runId, reason: "budget", idempotencyKey: `cancel:${runId}` })
+        return {
+          requested: yield* entries(rpc, runId, "control.run.cancel-requested"),
+          summary: yield* summaryOf(rpc, runId)
+        }
+      })
+    )
+
+    expect(principalOf(observed.requested[0]?.payload)).toMatchObject({ id: "remote-operator", kind: "bearer" })
+    expect(observed.summary?.cancellation?.principal).toMatchObject({ id: "remote-operator", kind: "bearer" })
+    expect(observed.summary?.cancellation?.reason).toBe("budget")
+  })
+
+  it("overwrites a client-named steer principal with the authenticated one", async () => {
+    const observed = await durably((rpc) =>
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        const { runId } = yield* start(rpc, "steer")
+        const message: SteerMessage = {
+          messageId: "steer-spoof",
+          runId,
+          principal: spoofed,
+          createdAt: 1,
+          body: "do the thing"
+        }
+        yield* rpc.Steer({ runId, message, idempotencyKey: "steer:spoof" })
+        return yield* queue.pending(runId)
+      })
+    )
+
+    expect(observed).toHaveLength(1)
+    // Provenance is what a notification's reader and the run transcript show,
+    // so a client that could name it could attribute its own message to anyone.
+    expect(observed[0]?.provenance.sourceActor).toBe("bearer:remote-operator")
+  })
+
+  it("keeps a repeated cancel idempotent even though the principal is stamped per request", async () => {
+    // The server stamps a wall clock into every principal it authenticates, so
+    // no two requests carry the same one. A mutation fingerprint that included
+    // it would make the second `smithers cancel` of one run look like a
+    // different mutation under the same key, and answer `Conflict` instead of
+    // the cancel's own receipt.
+    let stampedAt = 0
+    const clocked = Layer.merge(
+      ControlServer.layer,
+      layerAuth({ authenticate: () => Effect.succeed({ ...authenticated, stampedAt: ++stampedAt }) })
+    ).pipe(Layer.provideMerge(durable()))
+
+    const observed = await durably(
+      (rpc) =>
+        Effect.gen(function*() {
+          const { runId } = yield* start(rpc, "retry")
+          const first = yield* rpc.Cancel({ runId, reason: "budget", idempotencyKey: `cancel:${runId}` })
+          const again = yield* rpc.Cancel({ runId, reason: "budget", idempotencyKey: `cancel:${runId}` })
+          return { first, again }
+        }),
+      clocked
+    )
+
+    expect(observed.first._tag).not.toBe("Conflict")
+    expect(observed.again._tag).not.toBe("Conflict")
+  })
+
+  it("forwards the authenticated principal to steer, cancel, and resume", async () => {
+    // `resume` carries a principal in its contract and journals none, so a
+    // recording seam is the only place its attribution is observable. The
+    // three are asserted together because they are the three handlers that
+    // forwarded a raw payload.
+    const forwarded: Array<readonly [string, Principal | undefined]> = []
+    const recording = Layer.effect(Control)(
+      Effect.map(Control, (control) =>
+        Control.of({
+          ...control,
+          steer: (input) => {
+            forwarded.push(["steer", input.message.principal])
+            return control.steer(input)
+          },
+          cancel: (input) => {
+            forwarded.push(["cancel", input.principal])
+            return control.cancel(input)
+          },
+          resume: (input) => {
+            forwarded.push(["resume", input.principal])
+            return control.resume(input)
+          }
+        }))
+    )
+    const recorded = Layer.merge(ControlServer.layer, layerNoopAuth(authenticated)).pipe(
+      Layer.provide(recording),
+      Layer.provideMerge(durable())
+    )
+
+    await durably(
+      (rpc) =>
+        Effect.gen(function*() {
+          const { runId } = yield* start(rpc, "forward")
+          yield* rpc.Steer({
+            runId,
+            message: { messageId: "steer-forward", runId, principal: spoofed, createdAt: 1, body: "hello" },
+            idempotencyKey: "steer:forward"
+          })
+          yield* rpc.Resume({ runId, idempotencyKey: `resume:${runId}` })
+          yield* rpc.Cancel({ runId, idempotencyKey: `cancel:${runId}` })
+        }),
+      recorded
+    )
+
+    expect(forwarded.map(([operation]) => operation)).toEqual(["steer", "resume", "cancel"])
+    for (const [operation, principal] of forwarded) {
+      expect([operation, principal?.id]).toEqual([operation, "remote-operator"])
+    }
   })
 })

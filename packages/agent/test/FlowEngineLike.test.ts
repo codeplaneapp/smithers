@@ -41,8 +41,24 @@ import {
 import type * as Crypto from "effect/Crypto"
 import { TestClock } from "effect/testing"
 import { describe, expect, it } from "vitest"
+import * as Budget from "../src/Budget.ts"
 import * as FlowEngineLike from "../src/FlowEngineLike.ts"
+import * as QuotaPolicy from "../src/QuotaPolicy.ts"
 import * as WorkspaceObservation from "../src/WorkspaceObservation.ts"
+
+/**
+ * Everything `FlowEngineLike.make` reads, the two safety policies included.
+ *
+ * The port requires a budget and a quota classifier outright, so every helper
+ * here carries them: a composition that names neither cannot build the port,
+ * which is the whole point of them not being optional.
+ */
+type PortServices =
+  | Crypto.Crypto
+  | FlowRuntime.FlowRuntime
+  | FlowRuntime.FlowInstance
+  | Budget.Budget
+  | QuotaPolicy.QuotaClassifier
 
 const preparedFor = (routeId: string, body: string): Route.PreparedRequest => ({
   routeId,
@@ -77,7 +93,7 @@ const step = (
 ): EngineLike.SealedModelStep => ({
   request: request(text),
   keyMaterial: {
-    version: "flows/key-material/v1",
+    version: "flows/key-material/v2",
     kind: "sealed",
     body: { _tag: "ModelCall", request: request(text) },
     inputs: [{
@@ -193,7 +209,15 @@ const awaitParked = (
  * recorded step surviving a park.
  */
 const drive = <A, E>(
-  body: Effect.Effect<A, E, Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance>,
+  body: Effect.Effect<
+    A,
+    E,
+    | Crypto.Crypto
+    | FlowRuntime.FlowRuntime
+    | FlowRuntime.FlowInstance
+    | Budget.Budget
+    | QuotaPolicy.QuotaClassifier
+  >,
   options: { readonly resume?: boolean } = {}
 ): Promise<Outcome> =>
   Effect.gen(function*() {
@@ -218,7 +242,18 @@ const drive = <A, E>(
     yield* engine.resume(flow, "exec-1")
     return yield* Deferred.await(settled)
   }).pipe(
-    Effect.provide(Layer.merge(FlowEngine.layerMemory, NodeCrypto.layer)),
+    // Both safety services are declared outright rather than defaulted: the
+    // port requires them, so a suite states the policy it runs under. These
+    // are the explicit "no ceiling, no park" choices, which is what these
+    // cases were always exercising.
+    Effect.provide(
+      Layer.mergeAll(
+        FlowEngine.layerMemory,
+        NodeCrypto.layer,
+        Budget.layerUnbounded(),
+        QuotaPolicy.layerUnclassified()
+      )
+    ),
     Effect.scoped,
     Effect.runPromise
   )
@@ -473,6 +508,23 @@ describe("FlowEngineLike.make", () => {
       expect(attempts).toBe(1)
     }
   )
+
+  it("lets an explicit classifier add a non-capacity refusal to parking policy", async () => {
+    const original = new ModelError({ code: "invalid_provider_output", message: "provider-specific wait" })
+    const quota = QuotaPolicy.make({
+      classify: () => Option.some({ wakeAt: 1, source: "default" })
+    })
+    const outcome = await drive(Effect.gen(function*() {
+      const engine = yield* FlowEngineLike.make({
+        model: Model.make({ stream: () => Stream.fail(original) }),
+        route: staticRoute(),
+        modelRetryPolicy: Schedule.recurs(0)
+      }).pipe(Effect.provideService(QuotaPolicy.QuotaClassifier, quota))
+      return yield* Stream.runCollect(engine.sealStep(step("provider-specific wait")))
+    }))
+
+    expect(failure(outcome)).toStrictEqual(original)
+  })
 
   it("surfaces the original typed transport error after bounded retries are exhausted", async () => {
     let attempts = 0
@@ -870,8 +922,8 @@ describe("FlowEngineLike.layer", () => {
  * to the same store.
  */
 const driveBoth = <A, E>(
-  first: Effect.Effect<A, E, Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance>,
-  second: Effect.Effect<A, E, Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance>
+  first: Effect.Effect<A, E, PortServices>,
+  second: Effect.Effect<A, E, PortServices>
 ): Promise<ReadonlyArray<Outcome>> =>
   Effect.gen(function*() {
     const engine = yield* FlowRuntime.FlowRuntime
@@ -897,7 +949,18 @@ const driveBoth = <A, E>(
     yield* engine.execute(flow, { executionId: "run-b", payload: {}, discard: true })
     const b = yield* Deferred.await(settled[1]!)
     return [a, b]
-  }).pipe(Effect.provide(Layer.merge(FlowEngine.layerMemory, NodeCrypto.layer)), Effect.scoped, Effect.runPromise)
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        FlowEngine.layerMemory,
+        NodeCrypto.layer,
+        Budget.layerUnbounded(),
+        QuotaPolicy.layerUnclassified()
+      )
+    ),
+    Effect.scoped,
+    Effect.runPromise
+  )
 
 const spliceOnce = (
   calls: Array<string>,
@@ -934,7 +997,7 @@ describe("child call identity", () => {
     const calls: Array<string> = []
     const sealed = (
       collected: Array<string>
-    ): Effect.Effect<unknown, unknown, Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance> =>
+    ): Effect.Effect<unknown, unknown, PortServices> =>
       Effect.gen(function*() {
         const engine = yield* FlowEngineLike.make({
           model: countingModel([]),
@@ -961,7 +1024,7 @@ describe("child call identity", () => {
     const withLayers = (
       collected: Array<string>,
       layers: ReadonlyArray<string>
-    ): Effect.Effect<unknown, unknown, Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance> =>
+    ): Effect.Effect<unknown, unknown, PortServices> =>
       Effect.gen(function*() {
         const engine = yield* FlowEngineLike.make({
           model: countingModel([]),
@@ -988,7 +1051,7 @@ describe("child call identity", () => {
     const calls: Array<string> = []
     const withLayers = (
       collected: Array<string>
-    ): Effect.Effect<unknown, unknown, Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance> =>
+    ): Effect.Effect<unknown, unknown, PortServices> =>
       Effect.gen(function*() {
         const engine = yield* FlowEngineLike.make({
           model: countingModel([]),
@@ -1011,7 +1074,7 @@ describe("child call identity", () => {
     const calls: Array<string> = []
     const withLayers = (
       layers: ReadonlyArray<string>
-    ): Effect.Effect<unknown, unknown, Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance> =>
+    ): Effect.Effect<unknown, unknown, PortServices> =>
       Effect.gen(function*() {
         const engine = yield* FlowEngineLike.make({
           model: countingModel([]),
@@ -1178,7 +1241,7 @@ describe("cell call identity across runs", () => {
     executed: Array<string>,
     tier: "sealed" | "irreversible",
     capabilities: Readonly<Record<string, ReadonlyArray<string>>> | undefined
-  ): Effect.Effect<unknown, unknown, Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance> =>
+  ): Effect.Effect<unknown, unknown, PortServices> =>
     Effect.gen(function*() {
       const port = yield* FlowEngineLike.make({
         model: countingModel([]),
@@ -1460,7 +1523,7 @@ describe("FlowEngineLike.defaultModelRetryPolicy", () => {
   it("spends no delay and no attempt on a terminal failure", async () => {
     const observed: Observed = { attempts: 0, gaps: [] }
     const { error, model } = alwaysFailing("quota_exceeded", observed)
-    const recorded = await exhaust(model)
+    await expect(exhaust(model)).rejects.toStrictEqual(error)
 
     // Widening the backoff must not widen what it applies to: an exhausted
     // quota is terminal for the request as written, and waiting on it is pure
@@ -1469,8 +1532,28 @@ describe("FlowEngineLike.defaultModelRetryPolicy", () => {
     // happened either.
     expect(observed.attempts).toBe(1)
     expect(observed.gaps).toEqual([])
-    expect(retriesOf(recorded)).toEqual([])
-    expect(FlowEngineLike.normalizeRecordedModelStep(recorded).error).toStrictEqual(error)
+    // Capacity is not a recorded value at all: the sealed action fails so no
+    // later run can inherit this provider window as a durable success.
+  })
+
+  it.each(
+    [
+      ["provider_internal", undefined],
+      ["unknown", 503]
+    ] as const
+  )("never records capacity spelled as %s / %s", async (code, httpStatus) => {
+    const error = new ModelError({
+      code,
+      message: "provider overloaded",
+      ...(httpStatus === undefined ? {} : { httpStatus })
+    })
+    const model = Model.make({ stream: () => Stream.fail(error) })
+
+    await expect(
+      Effect.runPromise(
+        FlowEngineLike.recordModelStep(model, request("hello"), Schedule.recurs(0))
+      )
+    ).rejects.toStrictEqual(error)
   })
 })
 

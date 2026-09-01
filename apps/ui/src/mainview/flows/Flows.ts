@@ -181,6 +181,23 @@ const NumberedTarget = Schema.Struct({
  *
  * @category constructors
  */
+/**
+ * The ONLY flows that may be listed in the slash menu and still refuse the
+ * model ("every workflow in the / menu is available as a tool call" — Will).
+ * Each entry is here for a structural reason, not taste; adding to this list
+ * is a conscious act pinned by flows/invocable.test.ts.
+ */
+export const USER_ONLY_VISIBLE: ReadonlyArray<{ readonly name: string; readonly why: string }> = [
+  { name: "chat.send", why: "turn mechanics: the model is already the turn; sending would nest one" },
+  { name: "chat.stop", why: "turn mechanics: stopping the model's own turn from inside it" },
+  { name: "admin.reset", why: "destroys the whole store with no undo; the confirm dialog is the only door" },
+  { name: "billing.upgrade", why: "external checkout with real money; the human clicks" },
+  { name: "billing.portal", why: "external billing portal; the human clicks" },
+  { name: "admin.devtools", why: "admin panel presentation toggle" },
+  { name: "debug.backend", why: "admin diagnostics presentation" },
+  { name: "debug.grants.reset", why: "admin-only grant wipe" }
+]
+
 export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => {
   /*
    * The canonical declarations that also keep a bare alias: declared once so
@@ -189,7 +206,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   const THEME = {
     name: "appearance.theme",
     summary: "Set the color theme",
-    userOnly: true,
     args: PALETTES.join(" | "),
     input: Schema.Struct({ palette: Schema.String }),
     handler: ({ palette }: { readonly palette: string }) => actions.setPalette(palette)
@@ -197,14 +213,12 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   const DARK_MODE = {
     name: "appearance.dark-mode",
     summary: "Toggle light and dark mode",
-    userOnly: true,
     input: NoPayload,
     handler: () => actions.toggleTheme()
   }
   const SURFACES = {
     name: "chat.surfaces",
     summary: "Open the surfaces menu",
-    userOnly: true,
     input: NoPayload,
     handler: () => actions.toggleSurfacesMenu()
   }
@@ -219,7 +233,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   const VERBOSE = {
     name: "debug.verbose",
     summary: "Show everything Smithers is doing",
-    userOnly: true,
     input: NoPayload,
     handler: () => actions.toggleVerbose()
   }
@@ -246,7 +259,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   const CLEAR = {
     name: "chat.clear",
     summary: "Clear the chat, keeping anything worth remembering",
-    userOnly: true,
     input: NoPayload,
     handler: () => actions.clearConversation()
   }
@@ -304,7 +316,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   const RELOAD = {
     name: "chat.reload",
     summary: "Reload the app",
-    userOnly: true,
     input: NoPayload,
     handler: () => actions.reloadApp()
   }
@@ -703,7 +714,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "auth.sign-in",
     summary: "Sign in with GitHub",
     runtime: ["identity"],
-    userOnly: true,
     input: NoPayload,
     handler: () => actions.signIn()
   }),
@@ -725,7 +735,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "auth.sign-out",
     summary: "Sign out of Smithers",
     runtime: ["identity"],
-    userOnly: true,
     requires: ["signed-in"],
     input: NoPayload,
     handler: () => actions.signOut()
@@ -734,7 +743,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "auth.request-access",
     summary: "Request access to Smithers",
     runtime: ["identity"],
-    userOnly: true,
     requires: ["signed-in"],
     input: NoPayload,
     handler: () => actions.requestAccess()
@@ -881,14 +889,14 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     /*
-     * Landing is the human's consequential act (it queues a merge): user-only,
-     * like flow.repo.choose — the model can show the PR card, never queue the
-     * land itself.
+     * Landing is consequential (it queues a merge), so the model may ASK for
+     * it but never perform it: `confirm` turns an agent invocation into a
+     * confirmation message whose button runs the land as the user.
      */
     name: "prs.land",
     summary: "Land a pull request (queues the merge)",
     runtime: ["jjhub"],
-    userOnly: true,
+    confirm: "land the pull request",
     args: "<number> [owner/repo]",
     requires: ["signed-in"],
     input: NumberedTarget,
@@ -917,11 +925,11 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: () => actions.listKeys()
   }),
   flow({
-    /* Removing a credential is the human's destructive act: user-only. */
+    /* Removing a credential is destructive: agent invocations confirm first. */
     name: "keys.remove",
     summary: "Remove a provider API key",
     runtime: ["keys.byok"],
-    userOnly: true,
+    confirm: "remove the provider API key",
     args: "<provider>",
     requires: ["signed-in"],
     input: Schema.Struct({ provider: Schema.String }),
@@ -1164,7 +1172,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "files.add",
     summary: "Add files to the conversation",
-    userOnly: true,
     input: NoPayload,
     handler: () => actions.addFiles()
   }),

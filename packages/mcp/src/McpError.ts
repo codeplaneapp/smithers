@@ -14,6 +14,7 @@ import { Schema } from "effect"
 export const Code = Schema.Literals([
   "spawn_failed",
   "connection_closed",
+  "timeout",
   "protocol_error",
   "tool_not_found",
   "tool_failed",

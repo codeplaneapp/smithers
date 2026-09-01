@@ -67,6 +67,17 @@ const Confidence = Schema.Number.check(
 )
 
 /**
+ * Epoch/counter values accepted by both public schemas and SQLite.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const NonNegativeSafeInt = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)
+)
+
+/**
  * A recorded guess with a fixed shape: "changes matching this path pattern
  * tend to affect this flow". It is a belief, not a dependency — it carries
  * confidence and evidence, and training moves the confidence; nothing here
@@ -84,7 +95,7 @@ export const SuspectedEdge = Schema.Struct({
   /** In `[0, 1]`; moved by outcomes, never by hand. */
   confidence: Confidence,
   /** The edge is inert until the snapshot's `pinnedAtMs` reaches this. */
-  validFromMs: Schema.Number,
+  validFromMs: NonNegativeSafeInt,
   /** References to the journal facts the guess was learned from. */
   evidence: Schema.Array(Schema.String)
 })
@@ -108,7 +119,7 @@ export type SuspectedEdge = typeof SuspectedEdge.Type
  * @slop
  */
 export const BeliefSnapshot = Schema.Struct({
-  pinnedAtMs: Schema.Number,
+  pinnedAtMs: NonNegativeSafeInt,
   edges: Schema.Array(SuspectedEdge)
 })
 

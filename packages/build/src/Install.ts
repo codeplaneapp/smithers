@@ -400,17 +400,6 @@ const verifyEnvironment = (
     return yield* manager.verify
   })
 
-/** Refuses to run when the composition wired a different manager than declared. */
-const verifyDeclaredManager = (
-  declared: PackageManager.Name,
-  manager: PackageManager.Service
-): Effect.Effect<void, PackageManager.PackageManagerError> =>
-  declared === manager.name ? Effect.void : Effect.fail(
-    environmentMismatch(
-      `BUILD.ts declares ${declared} and the composition provided the ${manager.name} layer`
-    )
-  )
-
 /**
  * Refuses to link a store with a different manager implementation.
  *
@@ -564,21 +553,3 @@ export const layer = Layer.mergeAll(
   FetchBunLive,
   LinkLive
 )
-
-/**
- * Refuses an install whose declared manager is not the one provided.
- *
- * Exported so a composition root can apply the check once, before it builds a
- * plan, rather than discovering the mismatch inside a fetch.
- *
- * @category validation
- * @since 0.1.0
- * @slop
- */
-export const checkDeclaredManager = (
-  declared: PackageManager.Name
-): Effect.Effect<void, PackageManager.PackageManagerError, PackageManager.PackageManager> =>
-  Effect.gen(function*() {
-    const manager = yield* PackageManager.PackageManager
-    yield* verifyDeclaredManager(declared, manager)
-  })

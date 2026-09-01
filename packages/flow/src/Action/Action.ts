@@ -3,7 +3,7 @@
 /**
  * Defines the schemas and interfaces of a durable action.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import type * as Node from "@smthrs/plan/Node"
 import type * as Planned from "@smthrs/plan/Planned"
@@ -24,7 +24,6 @@ import type { TypeId } from "./TypeId.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const Tier = Schema.Literals(["sealed", "compensable", "irreversible"])
 
@@ -33,7 +32,6 @@ export const Tier = Schema.Literals(["sealed", "compensable", "irreversible"])
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Tier = typeof Tier.Type
 
@@ -42,7 +40,6 @@ export type Tier = typeof Tier.Type
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const IdempotencyKey = Schema.Union([
   Schema.String,
@@ -58,7 +55,6 @@ export const IdempotencyKey = Schema.Union([
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type IdempotencyKey = typeof IdempotencyKey.Type
 
@@ -68,7 +64,6 @@ export type IdempotencyKey = typeof IdempotencyKey.Type
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type PlannedPayload<T> =
   | Planned.Planned<T>
@@ -90,7 +85,6 @@ export type PlannedPayload<T> =
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Requirement<Tag extends string> {
   readonly _: unique symbol
@@ -108,7 +102,6 @@ export interface Requirement<Tag extends string> {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Declared<
   Tag extends string,
@@ -164,8 +157,7 @@ export interface Declared<
  * engine.
  *
  * @category models
- * @since 4.0.0
- * @slop
+ * @since 0.1.0
  */
 export interface Action<
   Success extends Schema.Constraint = Schema.Void,
@@ -236,8 +228,7 @@ export interface Action<
  * name, annotations, and encoded execution.
  *
  * @category models
- * @since 4.0.0
- * @slop
+ * @since 0.1.0
  */
 export interface Any {
   readonly [TypeId]: typeof TypeId
@@ -256,8 +247,7 @@ export interface Any {
  * derived flow APIs.
  *
  * @category models
- * @since 4.0.0
- * @slop
+ * @since 0.1.0
  */
 export interface AnyWithProps {
   readonly [TypeId]: typeof TypeId

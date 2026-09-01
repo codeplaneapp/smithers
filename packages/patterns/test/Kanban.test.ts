@@ -33,7 +33,9 @@ describe("Kanban", () => {
 
     expect(Graph.nodes(graph).filter((node) => node.kind === "FlowCall")).toHaveLength(7)
     expect(Graph.nodes(graph).filter((node) => node.kind === "All")).toHaveLength(4)
-    expect(Graph.nodes(graph).filter((node) => node.kind === "Map")).toHaveLength(2)
+    // Six maps wrap successful card values in unambiguous quarantine-protocol
+    // envelopes; the other two merge each column's batches.
+    expect(Graph.nodes(graph).filter((node) => node.kind === "Map")).toHaveLength(8)
   })
 
   it("declares one recovery arm per card so a rejected card leaves its column alone", () => {
@@ -67,9 +69,35 @@ describe("Kanban", () => {
   })
 
   it("rejects an empty board and an invalid concurrency", () => {
-    expect(() => Kanban.make({ columns: [], items, concurrency: 1 })).toThrow(PatternError)
-    expect(() => Kanban.make({ columns, items: [], concurrency: 1 })).toThrow(PatternError)
-    expect(() => Kanban.make({ columns, items, concurrency: 0 })).toThrow(PatternError)
+    expect(() => Kanban.make({ columns: [], items, concurrency: 1 })).toThrow(
+      expect.objectContaining({ code: "invalid_decorator", message: "Kanban requires at least one column" })
+    )
+    expect(() => Kanban.make({ columns, items: [], concurrency: 1 })).toThrow(
+      expect.objectContaining({ code: "invalid_decorator", message: "Kanban requires at least one item" })
+    )
+    expect(() => Kanban.make({ columns, items, concurrency: 0 })).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Kanban concurrency must be a positive safe integer"
+      })
+    )
+  })
+
+  it("refuses duplicate column names in a declaration", () => {
+    let refusal: unknown
+    try {
+      Kanban.make({
+        columns: [{ name: "same", flow: step }, { name: "same", flow: step }],
+        items: [{ id: "a" }],
+        concurrency: 1
+      })
+    } catch (error) {
+      refusal = error
+    }
+
+    expect(refusal).toBeInstanceOf(PatternError)
+    expect((refusal as PatternError).code).toBe("invalid_decorator")
+    expect((refusal as PatternError).message).toBe("Kanban column names must be unique")
   })
 
   it.effect("finishes a column for every item before the next column starts", () =>
@@ -164,6 +192,56 @@ describe("Kanban", () => {
       expect(result.board.b).toEqual(undefined)
     }))
 
+  it.effect("does not admit a column appended while a pass is in flight", () =>
+    Effect.gen(function*() {
+      const trace: Array<string> = []
+      const runtimeColumns: Array<Kanban.RuntimeColumn<Kanban.Item, string, never, never>> = []
+      const late: Kanban.RuntimeColumn<Kanban.Item, string, never, never> = {
+        name: "late",
+        run: () => Effect.sync(() => (trace.push("late"), "late-done"))
+      }
+      runtimeColumns.push({
+        name: "first",
+        run: () => Effect.sync(() => (trace.push("first"), runtimeColumns.push(late), "first-done"))
+      })
+
+      const result = yield* Kanban.run([{ id: "a" }], { columns: runtimeColumns, concurrency: 1 })
+
+      expect(trace).toEqual(["first"])
+      expect(result).toEqual({
+        board: { a: { first: "first-done" } },
+        completed: ["a"],
+        failed: [],
+        iterations: 1
+      })
+    }))
+
+  it.effect("materialises prototype-shaped item and column names as own data properties", () =>
+    Effect.gen(function*() {
+      const names = ["__proto__", "constructor", "toString", "normal"]
+      const result = yield* Kanban.run(
+        names.map((id) => ({ id })),
+        {
+          concurrency: 4,
+          columns: names.map((name) => ({
+            name,
+            run: ({ item }) => Effect.succeed(`${item.id}:${name}`)
+          }))
+        }
+      )
+
+      expect(Object.getPrototypeOf(result.board)).toBe(Object.prototype)
+      for (const id of names) {
+        expect(Object.hasOwn(result.board, id)).toBe(true)
+        const row = result.board[id]!
+        expect(Object.getPrototypeOf(row)).toBe(Object.prototype)
+        for (const column of names) {
+          expect(Object.hasOwn(row, column)).toBe(true)
+          expect(row[column]).toBe(`${id}:${column}`)
+        }
+      }
+    }))
+
   it.effect("stops the until loop at maxIterations", () =>
     Effect.gen(function*() {
       let passes = 0
@@ -184,6 +262,40 @@ describe("Kanban", () => {
 
       expect(passes).toBe(3)
       expect(result.iterations).toBe(3)
+    }))
+
+  it.effect("evaluates until on the final allowed pass", () =>
+    Effect.gen(function*() {
+      let calls = 0
+      const result = yield* Kanban.run([{ id: "a" }], {
+        concurrency: 1,
+        maxIterations: 1,
+        until: () => {
+          calls += 1
+          return true
+        },
+        columns: [{ name: "triage", run: () => Effect.succeed("ok") }]
+      })
+
+      expect(result.iterations).toBe(1)
+      expect(calls).toBe(1)
+    }))
+
+  it.effect("evaluates until once per completed pass before stopping on pass two", () =>
+    Effect.gen(function*() {
+      let calls = 0
+      const result = yield* Kanban.run([{ id: "a" }], {
+        concurrency: 1,
+        maxIterations: 3,
+        until: () => {
+          calls += 1
+          return calls === 2
+        },
+        columns: [{ name: "triage", run: () => Effect.succeed("ok") }]
+      })
+
+      expect(result.iterations).toBe(2)
+      expect(calls).toBe(2)
     }))
 
   it.effect("stops the until loop as soon as the predicate holds", () =>
@@ -232,6 +344,46 @@ describe("Kanban", () => {
       expect(once.iterations).toBe(1)
     }))
 
+  it.effect("calls onComplete exactly once with the final board", () =>
+    Effect.gen(function*() {
+      const seen: Array<{ readonly items: ReadonlyArray<Kanban.Item>; readonly board: Kanban.Board<string, never> }> =
+        []
+      const declaredItems = [{ id: "a" }]
+      const result = yield* Kanban.run(declaredItems, {
+        concurrency: 1,
+        maxIterations: 2,
+        columns: [{ name: "triage", run: () => Effect.succeed("ok") }],
+        onComplete: (input) => Effect.sync(() => seen.push(input))
+      })
+
+      expect(seen).toHaveLength(1)
+      expect(seen[0]).toEqual({ items: declaredItems, board: result })
+
+      const without = yield* Kanban.run(declaredItems, {
+        concurrency: 1,
+        columns: [{ name: "triage", run: () => Effect.succeed("ok") }]
+      })
+      expect(without).toEqual({
+        board: { a: { triage: "ok" } },
+        completed: ["a"],
+        failed: [],
+        iterations: 1
+      })
+    }))
+
+  it.effect("uses an onComplete failure as the run failure", () =>
+    Effect.gen(function*() {
+      const failure = yield* Effect.flip(
+        Kanban.run([{ id: "a" }], {
+          concurrency: 1,
+          columns: [{ name: "triage", run: () => Effect.succeed("ok") }],
+          onComplete: () => Effect.fail("report failed")
+        })
+      )
+
+      expect(failure).toBe("report failed")
+    }))
+
   it.effect("rejects an invalid runtime concurrency", () =>
     Effect.gen(function*() {
       const failure = yield* Kanban.run(items, {
@@ -240,10 +392,14 @@ describe("Kanban", () => {
       }).pipe(Effect.flip)
 
       expect(failure).toBeInstanceOf(PatternError)
+      expect(failure.code).toBe("invalid_decorator")
+      expect(failure.message).toBe("Kanban concurrency must be a positive safe integer")
     }))
 
   it("rejects duplicate item ids", () => {
-    expect(() => Kanban.make({ columns, items: [{ id: "a" }, { id: "a" }], concurrency: 1 })).toThrow(PatternError)
+    expect(() => Kanban.make({ columns, items: [{ id: "a" }, { id: "a" }], concurrency: 1 })).toThrow(
+      expect.objectContaining({ code: "invalid_decorator", message: "Kanban item ids must be unique" })
+    )
   })
 
   it.effect("rejects duplicate item ids at runtime instead of collapsing the board", () =>
@@ -263,7 +419,39 @@ describe("Kanban", () => {
       }).pipe(Effect.flip)
 
       expect(failure).toBeInstanceOf(PatternError)
+      expect(failure.code).toBe("invalid_decorator")
       expect(failure.message).toBe("Kanban item ids must be unique")
+      expect(ran).toBe(0)
+    }))
+
+  it.effect("refuses duplicate column names at runtime before a column runs", () =>
+    Effect.gen(function*() {
+      let ran = 0
+      const duplicate = {
+        name: "same",
+        run: () => Effect.sync(() => (ran += 1, "ok"))
+      }
+      const failure = yield* Effect.flip(
+        Kanban.run([{ id: "a" }], { concurrency: 1, columns: [duplicate, duplicate] })
+      )
+
+      expect(failure.code).toBe("invalid_decorator")
+      expect(failure.message).toBe("Kanban column names must be unique")
+      expect(ran).toBe(0)
+    }))
+
+  it.effect("refuses an empty runtime board before a column runs", () =>
+    Effect.gen(function*() {
+      let ran = 0
+      const failure = yield* Effect.flip(
+        Kanban.run([], {
+          concurrency: 1,
+          columns: [{ name: "triage", run: () => Effect.sync(() => (ran += 1, "ok")) }]
+        })
+      )
+
+      expect(failure.code).toBe("invalid_decorator")
+      expect(failure.message).toBe("Kanban requires at least one item")
       expect(ran).toBe(0)
     }))
 
@@ -276,6 +464,7 @@ describe("Kanban", () => {
         until: () => false,
         columns: [column]
       }).pipe(Effect.flip)
+      expect(unbounded.code).toBe("invalid_decorator")
       expect(unbounded.message).toBe("Kanban until requires maxIterations")
 
       const negative = yield* Kanban.run(items, {
@@ -284,9 +473,11 @@ describe("Kanban", () => {
         until: () => false,
         columns: [column]
       }).pipe(Effect.flip)
+      expect(negative.code).toBe("invalid_decorator")
       expect(negative.message).toBe("Kanban maxIterations must be a positive safe integer")
 
       const empty = yield* Kanban.run(items, { concurrency: 1, columns: [] }).pipe(Effect.flip)
+      expect(empty.code).toBe("invalid_decorator")
       expect(empty.message).toBe("Kanban requires at least one column")
     }))
 

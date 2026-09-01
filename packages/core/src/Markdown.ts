@@ -6,10 +6,8 @@
  * frontmatter is parsed with the complete failsafe YAML schema before this
  * module lowers the document to the ordinary flow shape.
  *
- * Governing contracts:
- * `docs/specs/Concepts/Flow Builder Brief.md`,
- * `docs/specs/Concepts/Flow Registry.md`, and
- * `docs/specs/Specs/API Sketch.md`.
+ * Governing contract: `packages/core/docs/api.md`, published as
+ * https://smithers.sh/api/core.
  *
  * @since 0.0.0
  */
@@ -31,19 +29,19 @@ const output = Schema.String
  * @slop
  */
 export interface MarkdownFrontmatter {
-  readonly name?: string
-  readonly description?: string
-  readonly model?: string
-  readonly flows?: ReadonlyArray<string>
-  readonly capabilities?: ReadonlyArray<string>
+  readonly name?: string | undefined
+  readonly description?: string | undefined
+  readonly model?: string | undefined
+  readonly flows?: ReadonlyArray<string> | undefined
+  readonly capabilities?: ReadonlyArray<string> | undefined
   readonly effects?: {
-    readonly reads?: ReadonlyArray<string>
-    readonly writes?: ReadonlyArray<string>
-    readonly mode?: "hermetic" | "expected"
-    readonly onConflict?: "serialize" | "lane" | "fail"
-    readonly tier?: "sealed" | "compensable" | "irreversible"
-  }
-  readonly placement?: "sandbox" | "remote" | "client" | "local"
+    readonly reads?: ReadonlyArray<string> | undefined
+    readonly writes?: ReadonlyArray<string> | undefined
+    readonly mode?: "hermetic" | "expected" | undefined
+    readonly onConflict?: "serialize" | "lane" | "fail" | undefined
+    readonly tier?: "sealed" | "compensable" | "irreversible" | undefined
+  } | undefined
+  readonly placement?: "sandbox" | "remote" | "client" | "local" | undefined
 }
 
 /**
@@ -102,7 +100,8 @@ export class MarkdownError extends Schema.TaggedError<MarkdownError>()("flows/co
  * The prompt is the markdown body. Harnesses append non-empty runtime `args`
  * when rendering that prompt, preserving the markdown-flow calling convention.
  * Flow names remain declarations at this layer; no flow implementation is
- * resolved while lowering.
+ * resolved while lowering. The `smart` model seat is the explicit fallback
+ * when frontmatter declares no `model`.
  *
  * @category constructors
  * @since 0.0.0
@@ -118,13 +117,17 @@ export const lowerMarkdown = (
     input,
     output,
     capabilities: frontmatter.capabilities,
-    effects: Effects.make({
-      reads: frontmatter.effects?.reads ?? [],
-      writes: frontmatter.effects?.writes ?? [],
-      mode: frontmatter.effects?.mode ?? "hermetic",
-      onConflict: frontmatter.effects?.onConflict ?? "serialize",
-      tier: frontmatter.effects?.tier
-    }),
+    ...(frontmatter.effects === undefined
+      ? {}
+      : {
+        effects: Effects.make({
+          reads: frontmatter.effects.reads ?? [],
+          writes: frontmatter.effects.writes ?? [],
+          mode: frontmatter.effects.mode ?? "hermetic",
+          onConflict: frontmatter.effects.onConflict ?? "serialize",
+          tier: frontmatter.effects.tier
+        })
+      }),
     model: frontmatter.model ?? "smart",
     flows: frontmatter.flows ?? [],
     prompt: body
@@ -210,12 +213,18 @@ export const parseSkill = (text: string): Result.Result<SkillDocument, MarkdownE
     )
   }
 
-  const extra: Record<string, unknown> = {}
+  const extra = Object.create(null) as Record<string, unknown>
   for (const [key, value] of Object.entries(parsed.success)) {
     if (key !== "name" && key !== "description" && key !== "allowed-tools") {
-      extra[key] = value
+      Object.defineProperty(extra, key, {
+        value,
+        enumerable: true,
+        writable: false,
+        configurable: false
+      })
     }
   }
+  Object.freeze(extra)
 
   return Result.succeed({
     name,
@@ -228,6 +237,12 @@ export const parseSkill = (text: string): Result.Result<SkillDocument, MarkdownE
 
 /**
  * Parses and lowers an Agent Skills document to an ordinary flow.
+ *
+ * Only `name`, `description`, and `allowed-tools` are lowered. Every other
+ * frontmatter field remains in {@link parseSkill}'s `extra` record for the
+ * caller to interpret. Agent Skills frontmatter is untyped failsafe YAML;
+ * coercing extra fields here would duplicate the strict validation owned by
+ * `@smthrs/registry`.
  *
  * @category constructors
  * @since 0.0.0

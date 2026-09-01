@@ -12,7 +12,7 @@
  * `docs/specs/Concepts/Trust Granularity.md`, and
  * `docs/specs/Concepts/Host Adapters.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { Jj as JjPort } from "@smthrs/jj"
 import { FileSystem as EffectFileSystem, Layer, Path as EffectPath } from "effect"
@@ -59,7 +59,7 @@ import * as Path from "./Path.ts"
  * Smithers wrapper around it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export type HostService =
@@ -74,7 +74,7 @@ export type HostService =
  * {@link layer}, and digested by the step-key planner.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const HostServiceTags = [
@@ -96,7 +96,7 @@ export const HostServiceTags = [
  * replaced by Effect's `ChildProcessSpawner`.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const HostServiceIds = [
@@ -119,7 +119,7 @@ export const HostServiceIds = [
  * `FileSystem` decorates Effect's filesystem tag.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer = Layer.mergeAll(

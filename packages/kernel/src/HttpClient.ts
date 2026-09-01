@@ -26,16 +26,73 @@
  * `docs/specs/Concepts/Effect Taxonomy.md`, and
  * `docs/specs/Concepts/Host Adapters.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 
 import { type Capability, make as makeCapability } from "@smthrs/capability/Capability"
 import { formatError, isPermissionError, PermissionDenied, type PermissionError } from "@smthrs/capability/Permission"
 import { Context, Effect, Layer, Option } from "effect"
+import * as Headers from "effect/unstable/http/Headers"
+import * as HttpBody from "effect/unstable/http/HttpBody"
 import * as EffectHttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
-import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as UrlParams from "effect/unstable/http/UrlParams"
 import { GrantStore } from "./GrantStore.ts"
+
+const snapshotRawBody = (value: unknown): unknown => {
+  if (value instanceof globalThis.Uint8Array) return value.slice()
+  if (value instanceof ArrayBuffer) return value.slice(0)
+  if (value instanceof URLSearchParams) {
+    return new URLSearchParams(value)
+  }
+  if (value instanceof Blob) return value
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value
+  }
+  throw new TypeError("raw HTTP bodies must be immutable or copyable")
+}
+
+const snapshotBody = (body: HttpBody.HttpBody): HttpBody.HttpBody => {
+  switch (body._tag) {
+    case "Empty":
+      return HttpBody.empty
+    case "Raw":
+      return HttpBody.raw(snapshotRawBody(body.body), {
+        contentType: body.contentType,
+        contentLength: body.contentLength
+      })
+    case "Uint8Array":
+      return HttpBody.uint8Array(body.body.slice(), body.contentType)
+    case "FormData": {
+      const formData = new globalThis.FormData()
+      for (const [name, value] of body.formData.entries()) formData.append(name, value)
+      return HttpBody.formData(formData)
+    }
+    case "Stream":
+      return HttpBody.stream(body.stream, body.contentType, body.contentLength)
+  }
+}
+
+const snapshotRequest = (request: HttpClientRequest.HttpClientRequest): HttpClientRequest.HttpClientRequest =>
+  HttpClientRequest.makeWith(
+    request.method,
+    request.url,
+    UrlParams.make(
+      Object.freeze(request.urlParams.params.map(([name, value]) => Object.freeze([name, value] as const)))
+    ),
+    Option.map(request.hash, (value) => value),
+    Headers.fromInput(request.headers),
+    snapshotBody(request.body)
+  )
+
+const invalidRequest = (request: HttpClientRequest.HttpClientRequest): HttpClientError.HttpClientError =>
+  new HttpClientError.HttpClientError({
+    reason: new HttpClientError.TransportError({
+      request,
+      description: "HTTP request must be an immutable supported request description"
+    })
+  })
 
 /**
  * The outgoing HTTP client service — Effect's tag, unchanged. Re-exported so
@@ -43,7 +100,7 @@ import { GrantStore } from "./GrantStore.ts"
  * one.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export { HttpClient } from "effect/unstable/http/HttpClient"
 
@@ -52,7 +109,7 @@ export { HttpClient } from "effect/unstable/http/HttpClient"
  * URL construction, tracing, header redaction, and interruption behavior.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export { make } from "effect/unstable/http/HttpClient"
 
@@ -66,7 +123,7 @@ export { make } from "effect/unstable/http/HttpClient"
  * for `model:call` rather than `net:get`/`net:post`.
  *
  * @category references
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const ModelCall: Context.Reference<string | undefined> = Context.Reference<string | undefined>(
@@ -79,7 +136,7 @@ export const ModelCall: Context.Reference<string | undefined> = Context.Referenc
  * `modelId` instead of as plain network access.
  *
  * @category references
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const withModelCall = (modelId: string) => <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
@@ -97,7 +154,7 @@ export const withModelCall = (modelId: string) => <A, E, R>(effect: Effect.Effec
  * `capability`, `tier`, `requestId`, and `reason`.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const toHttpClientError = (options: {
@@ -118,7 +175,7 @@ export const toHttpClientError = (options: {
  * and an unattended report can still name the capability.
  *
  * @category refinements
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const fromHttpClientError = (
@@ -135,7 +192,7 @@ export const fromHttpClientError = (
  * request, so an unconfigured capability answers rather than vanishing.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const makeNoop = (): EffectHttpClient.HttpClient =>
@@ -154,7 +211,7 @@ export const makeNoop = (): EffectHttpClient.HttpClient =>
  * Provides an unavailable HTTP client stub.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layerNoop = (): Layer.Layer<EffectHttpClient.HttpClient> =>
@@ -202,7 +259,7 @@ const capabilityFor = (
  * second hop instead of being fetched.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer: Layer.Layer<
@@ -214,8 +271,16 @@ export const layer: Layer.Layer<
   Effect.gen(function*() {
     const client = yield* EffectHttpClient.HttpClient
     const grants = yield* GrantStore
-    const guarded = EffectHttpClient.transform(
+    const snapshotted = EffectHttpClient.mapRequestEffect(
       client,
+      (request) =>
+        Effect.try({
+          try: () => snapshotRequest(request),
+          catch: () => invalidRequest(request)
+        })
+    )
+    const guarded = EffectHttpClient.transform(
+      snapshotted,
       (execute, request) =>
         Effect.withFiber((fiber) =>
           capabilityFor(request, fiber.getRef(ModelCall)).pipe(

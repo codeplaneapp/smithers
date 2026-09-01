@@ -396,6 +396,85 @@ describe("RemoteChildProcessSpawner", () => {
       expect(provider.state.commands).toEqual([])
     }))
 
+  it.effect("delivers command-supplied stdin whole when the provider declares it", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        stdin: true,
+        scripts: { cat: { stdout: "echoed" } }
+      })
+      const output = yield* Effect.flatMap(ChildProcessSpawner, (spawner) =>
+        spawner.string(
+          ChildProcess.make("cat", [], {
+            stdin: Stream.fromArray([new Uint8Array([1, 2]), new Uint8Array([3])])
+          })
+        )).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      expect(output).toBe("echoed")
+      expect(Array.from(provider.state.inputs[0]!)).toEqual([1, 2, 3])
+      // A command without input hands the provider none, and so does a
+      // config whose stream is an OS disposition rather than data.
+      yield* Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.string(ChildProcess.make("cat"))).pipe(
+        Effect.provide(RemoteChildProcessSpawner.layer(provider))
+      )
+      expect(provider.state.inputs[1]).toBeUndefined()
+      yield* Effect.flatMap(ChildProcessSpawner, (spawner) =>
+        spawner.string(ChildProcess.make("cat", [], { stdin: { stream: "pipe" } }))).pipe(
+          Effect.provide(RemoteChildProcessSpawner.layer(provider))
+        )
+      expect(provider.state.inputs[2]).toBeUndefined()
+    }))
+
+  it.effect("feeds standard input to the first command of a pipeline only", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        stdin: true,
+        scripts: { "cat | wc": { stdout: "3" } }
+      })
+      const accepted = yield* Effect.flatMap(ChildProcessSpawner, (spawner) =>
+        spawner.string(
+          ChildProcess.make("cat", [], { stdin: Stream.fromArray([new Uint8Array([7])]) }).pipe(
+            ChildProcess.pipeTo(ChildProcess.make("wc"))
+          )
+        )).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      expect(accepted).toBe("3")
+      expect(Array.from(provider.state.inputs[0]!)).toEqual([7])
+      const error = yield* Effect.flip(
+        Effect.flatMap(ChildProcessSpawner, (spawner) =>
+          spawner.string(
+            ChildProcess.make("cat").pipe(
+              ChildProcess.pipeTo(ChildProcess.make("wc", [], { stdin: Stream.fromArray([new Uint8Array([7])]) }))
+            )
+          )).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+      expect(error.message).toContain("first command of a pipeline only")
+    }))
+
+  it.effect("refuses standard input beyond the bound and reports one it cannot read", () =>
+    Effect.gen(function*() {
+      const provider = RemoteChildProcessSpawner.TestRemote.make({ stdin: true, scripts: { cat: {} } })
+      const oversize = yield* Effect.flip(
+        Effect.flatMap(ChildProcessSpawner, (spawner) =>
+          spawner.string(
+            ChildProcess.make("cat", [], { stdin: Stream.make(new Uint8Array(16 * 1024 * 1024 + 1)) })
+          )).pipe(Effect.provide(RemoteChildProcessSpawner.layer(provider)))
+      )
+      expect(oversize.message).toContain("exceeds")
+      const unreadable = yield* Effect.flip(
+        Effect.flatMap(ChildProcessSpawner, (spawner) =>
+          spawner.string(
+            ChildProcess.make("cat", [], {
+              stdin: Stream.fail(
+                PlatformError.badArgument({ module: "ChildProcess", method: "stdin", description: "torn" })
+              )
+            })
+          )).pipe(
+            Effect.provide(RemoteChildProcessSpawner.layer(provider))
+          )
+      )
+      expect(reason(unreadable)).toBe("Unknown")
+      expect(unreadable.message).toContain("could not be read")
+      expect(provider.state.commands).toEqual([])
+    }))
+
   it.effect("rejects command-supplied stdin inside a config", () =>
     Effect.gen(function*() {
       const provider = RemoteChildProcessSpawner.TestRemote.make({ scripts: { quiet: {} } })

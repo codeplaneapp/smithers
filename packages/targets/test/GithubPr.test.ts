@@ -1,24 +1,32 @@
 /**
  * `S.Github.Pr` refusal paths: the target never reaches its outward action
- * without the declared token secret carrying a value and a satisfied
- * approval. This lane ships only the refusals; a satisfied gate is a loud
+ * without the declared token secret and a satisfied approval. Values are a
+ * transport concern. This lane ships only the refusals; a satisfied gate is a loud
  * NotImplemented, never a silent green.
  */
 import { describe, expect, it } from "vitest"
 import * as GithubTarget from "../src/GithubTarget.ts"
-import { Secret } from "../src/Secret.ts"
+import { HttpSecret, Secret } from "../src/Secret.ts"
 import type * as Target from "../src/Target.ts"
 
 const withToken = (approval?: "required"): Target.AnyTarget =>
   GithubTarget.Pr({
     gates: [],
-    secrets: [Secret("GITHUB_TOKEN")],
+    secrets: [HttpSecret(Secret("GITHUB_TOKEN"), ["https://api.github.com"])],
     ...(approval === undefined ? {} : { approval })
   })
 
 describe("refusePr", () => {
+  it("rejects an unbound secret source at the target boundary", () => {
+    expect(() => GithubTarget.Pr({ gates: [], secrets: [Secret("GITHUB_TOKEN") as never] }))
+      .toThrow(/declaration is invalid/)
+  })
+
   it("refuses a declaration that never names the GITHUB_TOKEN secret", () => {
-    const pr = GithubTarget.Pr({ gates: [], secrets: [Secret("OTHER_TOKEN")] })
+    const pr = GithubTarget.Pr({
+      gates: [],
+      secrets: [HttpSecret(Secret("OTHER_TOKEN"), ["https://api.github.com"])]
+    })
     const refusal = GithubTarget.refusePr(pr, {
       environment: { GITHUB_TOKEN: "ghp_value", OTHER_TOKEN: "x" },
       approvalGranted: true
@@ -34,12 +42,13 @@ describe("refusePr", () => {
     expect(refusal!.code).toBe("missing_token_secret")
   })
 
-  it("refuses a declared token whose environment value is absent or empty", () => {
-    for (const environment of [{}, { GITHUB_TOKEN: "" }]) {
-      const refusal = GithubTarget.refusePr(withToken(), { environment, approvalGranted: true })
-      expect(refusal!.code).toBe("missing_token_secret")
-      expect(refusal!.message).toContain("no value in the invoking environment")
-    }
+  it("does not read a declared token before the transport sends a request", () => {
+    const environment = new Proxy({}, {
+      get: () => {
+        throw new Error("secret read before HTTP boundary")
+      }
+    })
+    expect(GithubTarget.refusePr(withToken(), { environment, approvalGranted: true })).toBeUndefined()
   })
 
   it("refuses approval:\"required\" without a granted approval", () => {

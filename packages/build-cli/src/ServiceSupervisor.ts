@@ -23,6 +23,8 @@
  * @since 0.1.0
  */
 import { inheritedEnvironmentNames } from "@smthrs/targets/Exec"
+import * as Secret from "@smthrs/targets/Secret"
+import * as SecretProxy from "@smthrs/targets/SecretProxy"
 import * as Data from "effect/Data"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -91,9 +93,19 @@ export interface ServiceSpec {
   readonly key: string
   readonly cwd: string
   readonly argv: readonly [string, ...Array<string>]
-  /** Redacted argv used for in-process identity comparison when spawn argv contains secrets. */
-  readonly canonicalArgv?: readonly [string, ...Array<string>] | undefined
   readonly env?: Readonly<Record<string, string>> | undefined
+  /** Destination-bound credentials exposed only as proxy placeholders. */
+  readonly secrets?: ReadonlyArray<Secret.HttpCredential> | undefined
+  /**
+   * Argv positions that receive loopback egress URLs. The real URL is read
+   * from the declaration only when the service requests the loopback URL.
+   */
+  readonly secretUrls?:
+    | ReadonlyArray<{
+      readonly index: number
+      readonly secret: Secret.Secret
+    }>
+    | undefined
   readonly readiness?: Readiness | undefined
   readonly health?: Health | undefined
   readonly stop?: Stop | undefined
@@ -273,9 +285,19 @@ interface ParsedSpec {
 
 const canonicalize = (spec: ServiceSpec): string =>
   JSON.stringify({
-    argv: spec.canonicalArgv ?? spec.argv,
+    argv: spec.argv,
     cwd: spec.cwd,
     env: Object.fromEntries(Object.entries(spec.env ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+    secrets: (spec.secrets ?? []).map(({ secret: { env, fallback }, audiences }) => ({
+      env,
+      fallback: fallback ?? null,
+      audiences: [...audiences]
+    })),
+    secretUrls: (spec.secretUrls ?? []).map(({ index, secret: { env, fallback } }) => ({
+      index,
+      env,
+      fallback: fallback ?? null
+    })),
     health: spec.health === undefined
       ? null
       : { failures: spec.health.failures ?? null, interval: spec.health.interval },
@@ -302,11 +324,24 @@ const parseSpec = (spec: ServiceSpec): ParsedSpec => {
   }
   if (spec.argv[0] === "") throw new Error(`service ${spec.key} argv[0] must name an executable`)
   if (
-    spec.canonicalArgv !== undefined &&
-    (!Array.isArray(spec.canonicalArgv) || spec.canonicalArgv.length !== spec.argv.length ||
-      spec.canonicalArgv.some((entry) => typeof entry !== "string"))
+    spec.secrets !== undefined && (
+      !Array.isArray(spec.secrets) || spec.secrets.some((secret) => !Secret.isHttpCredential(secret))
+    )
   ) {
-    throw new Error(`service ${spec.key} canonicalArgv must be a same-length argv of strings`)
+    throw new Error(`service ${spec.key} secrets must contain only secret declarations`)
+  }
+  if (
+    spec.secretUrls !== undefined &&
+    (!Array.isArray(spec.secretUrls) ||
+      spec.secretUrls.some((entry) =>
+        typeof entry !== "object" || entry === null ||
+        !Number.isSafeInteger(entry.index) || entry.index < 1 || entry.index >= spec.argv.length ||
+        !Secret.isSecret(entry.secret)
+      ) || new Set(spec.secretUrls.map((entry) => entry.index)).size !== spec.secretUrls.length)
+  ) {
+    throw new Error(
+      `service ${spec.key} secretUrls must contain unique, non-executable argv indexes and secret declarations`
+    )
   }
   if (typeof spec.cwd !== "string" || !NodePath.isAbsolute(spec.cwd)) {
     throw new Error(`service ${spec.key} requires an absolute cwd; received ${JSON.stringify(spec.cwd)}`)
@@ -601,6 +636,61 @@ const serviceEnvironment = (declared: Readonly<Record<string, string>> | undefin
   return env
 }
 
+/**
+ * Gives a service only unguessable placeholders and keeps the substituting
+ * proxy scoped to the service process. Real values are read only when the
+ * proxy forwards an outbound request.
+ */
+interface ServiceSecretBoundary {
+  readonly environment: Readonly<Record<string, string>>
+  readonly argv: readonly [string, ...Array<string>]
+}
+
+const serviceSecretBoundary = (
+  spec: ServiceSpec
+): Effect.Effect<ServiceSecretBoundary, ServiceError, Scope.Scope> => {
+  if (
+    (spec.secrets === undefined || spec.secrets.length === 0) &&
+    (spec.secretUrls === undefined || spec.secretUrls.length === 0)
+  ) {
+    return Effect.succeed({ environment: {}, argv: spec.argv })
+  }
+  const vault = SecretProxy.makeVault()
+  const minted: Record<string, string> = {}
+  for (const credential of spec.secrets ?? []) minted[credential.secret.env] = vault.mint(credential)
+  return Effect.map(
+    Effect.acquireRelease(
+      Effect.tryPromise({
+        try: () => SecretProxy.startProxy(vault),
+        catch: (cause) =>
+          new ServiceError({
+            key: spec.key,
+            reason: "spawn-failed",
+            message: `service ${spec.key} secret boundary could not start: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }`,
+            outputTail: ""
+          })
+      }),
+      (proxy) => Effect.promise(() => proxy.close())
+    ),
+    (proxy) => {
+      const environment: Record<string, string> = {
+        ...minted,
+        HTTP_PROXY: proxy.endpoint,
+        HTTPS_PROXY: proxy.endpoint
+      }
+      if (process.platform !== "win32") {
+        environment["http_proxy"] = proxy.endpoint
+        environment["https_proxy"] = proxy.endpoint
+      }
+      const argv = [...spec.argv] as [string, ...Array<string>]
+      for (const { index, secret } of spec.secretUrls ?? []) argv[index] = proxy.urlFor(secret)
+      return { environment, argv }
+    }
+  )
+}
+
 /** Signals a child's process group, falling back to the child itself. */
 const signalGroup = (child: NodeChildProcess.ChildProcess, signal: NodeJS.Signals): void => {
   if (child.pid !== undefined) {
@@ -717,7 +807,11 @@ const healthLoop = (
 }
 
 /** Runs service init commands sequentially after readiness. */
-const runInit = (parsed: ParsedSpec, tail: () => string): Effect.Effect<void, ServiceError> =>
+const runInit = (
+  parsed: ParsedSpec,
+  tail: () => string,
+  environment: Readonly<Record<string, string>>
+): Effect.Effect<void, ServiceError> =>
   Effect.gen(function*() {
     for (const argv of parsed.spec.init ?? []) {
       const result = yield* Effect.callback<{ readonly ok: boolean; readonly detail: string }>((resume) => {
@@ -726,7 +820,7 @@ const runInit = (parsed: ParsedSpec, tail: () => string): Effect.Effect<void, Se
           argv.slice(1),
           {
             cwd: parsed.spec.cwd,
-            env: serviceEnvironment(parsed.spec.env),
+            env: serviceEnvironment(environment),
             timeout: parsed.readinessTimeoutMs,
             maxBuffer: 1 << 20
           },
@@ -757,7 +851,8 @@ const runInit = (parsed: ParsedSpec, tail: () => string): Effect.Effect<void, Se
 /** Runs one list of best-effort commands to completion, ignoring their exit status. */
 const runBestEffort = (
   parsed: ParsedSpec,
-  commands: ReadonlyArray<readonly [string, ...Array<string>]> | undefined
+  commands: ReadonlyArray<readonly [string, ...Array<string>]> | undefined,
+  environment: Readonly<Record<string, string>>
 ): Effect.Effect<void> =>
   Effect.gen(function*() {
     for (const argv of commands ?? []) {
@@ -767,7 +862,7 @@ const runBestEffort = (
           argv.slice(1),
           {
             cwd: parsed.spec.cwd,
-            env: serviceEnvironment(parsed.spec.env),
+            env: serviceEnvironment(environment),
             timeout: parsed.stopGraceMs + stopSettleMs
           },
           () => resume(Effect.void)
@@ -778,10 +873,12 @@ const runBestEffort = (
   }).pipe(Effect.asVoid)
 
 /** Runs best-effort prepare commands before the service process is spawned. */
-const runPrepare = (parsed: ParsedSpec): Effect.Effect<void> => runBestEffort(parsed, parsed.spec.prepare)
+const runPrepare = (parsed: ParsedSpec, environment: Readonly<Record<string, string>>): Effect.Effect<void> =>
+  runBestEffort(parsed, parsed.spec.prepare, environment)
 
 /** Runs best-effort cleanup commands during scope finalization. */
-const runCleanup = (parsed: ParsedSpec): Effect.Effect<void> => runBestEffort(parsed, parsed.spec.cleanup)
+const runCleanup = (parsed: ParsedSpec, environment: Readonly<Record<string, string>>): Effect.Effect<void> =>
+  runBestEffort(parsed, parsed.spec.cleanup, environment)
 
 /**
  * Spawns one service in its own process group, awaits readiness, and starts
@@ -801,13 +898,15 @@ const startService = (parsed: ParsedSpec): Effect.Effect<RunningService, Service
         Effect.fail(new ServiceError({ key, reason, message, outputTail: tail.read() }))
       )
     }
-    yield* runPrepare(parsed)
+    const secretBoundary = yield* serviceSecretBoundary(parsed.spec)
+    const environment = { ...parsed.spec.env, ...secretBoundary.environment }
+    yield* runPrepare(parsed, environment)
     const child = yield* Effect.try({
       try: () =>
-        NodeChildProcess.spawn(parsed.spec.argv[0], parsed.spec.argv.slice(1), {
+        NodeChildProcess.spawn(secretBoundary.argv[0], secretBoundary.argv.slice(1), {
           cwd: parsed.spec.cwd,
           detached: true,
-          env: serviceEnvironment(parsed.spec.env),
+          env: serviceEnvironment(environment),
           stdio: ["ignore", "pipe", "pipe"]
         }),
       catch: (cause) =>
@@ -841,7 +940,9 @@ const startService = (parsed: ParsedSpec): Effect.Effect<RunningService, Service
     if (child.pid !== undefined) registerGroup(child.pid)
     // The finalizer is registered before readiness so a failed or interrupted
     // acquisition still stops the child through the declared stop contract.
-    yield* Effect.addFinalizer(() => stopService(child, parsed, state, exited).pipe(Effect.andThen(runCleanup(parsed))))
+    yield* Effect.addFinalizer(() =>
+      stopService(child, parsed, state, exited).pipe(Effect.andThen(runCleanup(parsed, environment)))
+    )
     if (parsed.spec.readiness !== undefined) {
       yield* Effect.raceFirst(
         awaitReadiness(parsed, parsed.spec.readiness, tail.read),
@@ -853,7 +954,7 @@ const startService = (parsed: ParsedSpec): Effect.Effect<RunningService, Service
       // error instead of a ready handle.
       yield* Effect.raceFirst(Effect.sleep(50), Deferred.await(unhealthy))
     }
-    yield* runInit(parsed, tail.read)
+    yield* runInit(parsed, tail.read, environment)
     if (parsed.healthIntervalMs !== undefined && parsed.spec.readiness !== undefined) {
       yield* Effect.forkScoped(
         healthLoop(parsed, parsed.spec.readiness, parsed.healthIntervalMs, state, unhealthy, tail.read)

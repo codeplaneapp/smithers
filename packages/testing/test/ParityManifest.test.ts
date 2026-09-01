@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
 import * as Conformance from "../src/Conformance.ts"
 import {
@@ -11,21 +12,39 @@ import {
 // Manifest rows keep their former superproject-relative `flows/` or `agent/`
 // prefix, but the files they name now live in this repository, so they resolve
 // against the repo root. That stays correct in the canonical checkout, in
-// isolated worktrees, and on CI. The OpenCode corpus is a gitignored sibling
-// of the checkout
-// (`../reference` in the canonical layout, `reference/` in a repo-local
-// clone); corpus-dependent suites skip when no clone is present, as in
-// worktrees and CI.
+// isolated worktrees, and on CI.
+//
+// The OpenCode corpus is an unpinned external clone, so reading it is opt-in:
+// point `FLOWS_OPENCODE_CORPUS` at the directory holding the `opencode/` clone
+// to run the drift checks that compare the vendored inventory in
+// `src/ParityManifest.ts` against the live sources. Probing the filesystem for
+// it instead made one commit produce two different suites: a checkout whose
+// `reference/` held some other corpus crashed on ENOENT, and CI, which has no
+// `reference/` at all, skipped both checks without saying so. The inventory
+// those checks guard is vendored, so every checkout runs the same suite over
+// the same data whether or not a clone is present.
 const repositoryRoot = new URL("../../../", import.meta.url)
-const corpusRoot = [
-  new URL("../reference/", repositoryRoot),
-  new URL("reference/", repositoryRoot)
-].find((candidate) => existsSync(candidate))
+const corpusSources = "opencode/packages/core/test/"
+const namedCorpus = process.env["FLOWS_OPENCODE_CORPUS"]
+const corpusRoot = namedCorpus === undefined || namedCorpus.trim() === ""
+  ? undefined
+  : new URL(namedCorpus.endsWith("/") ? namedCorpus : `${namedCorpus}/`, pathToFileURL(`${process.cwd()}/`))
+
+// A directory is a corpus when it holds the sources the scrape reads, not when
+// it merely exists.
+const hasCorpusSources = (root: URL): boolean => existsSync(new URL(corpusSources, root))
+
+// A corpus that was named and is not there is a red, never a skip: this run was
+// asked for the drift check and could not perform it.
+const requireCorpus = (root: URL): URL => {
+  expect(hasCorpusSources(root), `FLOWS_OPENCODE_CORPUS=${namedCorpus} has no ${corpusSources}`).toBe(true)
+  return new URL(corpusSources, root)
+}
 const testFile = /\.test\.ts$/
 
 describe("ParityManifest", () => {
   it("maps every conformance pin entry to an executable suite case", () => {
-    const names = new Set(Conformance.suite().map((conformanceCase) => conformanceCase.name))
+    const names = new Set(Conformance.coreSuite().map((conformanceCase) => conformanceCase.name))
     for (const row of rows) {
       if (testFile.test(row.flowsEquivalent) || row.flowsEquivalent === "—") continue
       expect(names.has(row.flowsEquivalent), `${row.source}: ${row.flowsEquivalent}`).toBe(true)
@@ -79,9 +98,29 @@ describe("ParityManifest", () => {
     ])
   })
 
+  // A directory that happens to be called `reference/`, or a repository root
+  // with any sibling at all, used to be accepted as the corpus; the scrape then
+  // read a path inside it that does not exist and the target went red on
+  // ENOENT. The probe names the directory the scrape actually reads.
+  it("accepts a corpus root only when it holds the sources the scrape reads", () => {
+    expect(hasCorpusSources(new URL("packages/testing/", repositoryRoot))).toBe(false)
+    expect(hasCorpusSources(repositoryRoot)).toBe(false)
+  })
+
+  // The vendored inventory is what every checkout reads, so its shape is
+  // asserted here rather than only where a clone happens to exist.
+  it("vendors a behavior inventory for every targeted OpenCode source", () => {
+    expect(requiredOpenCodeSources.length).toBeGreaterThan(0)
+    for (const source of requiredOpenCodeSources) {
+      const behaviors = openCodeBehaviorInventory[source as keyof typeof openCodeBehaviorInventory]
+      expect(behaviors.length, source).toBeGreaterThan(0)
+      expect(new Set(behaviors).size, source).toBe(behaviors.length)
+    }
+  })
+
   it.skipIf(corpusRoot === undefined)("accounts for every targeted OpenCode session source", () => {
     if (corpusRoot === undefined) return
-    const sourceDirectory = new URL("opencode/packages/core/test/", corpusRoot)
+    const sourceDirectory = requireCorpus(corpusRoot)
     const discovered = readdirSync(sourceDirectory)
       .filter((name) =>
         /^session-(?:runner.*|tool-progress|create|prompt|projector|compaction|todo|run-coordinator|history)\.test\.ts$/
@@ -96,6 +135,7 @@ describe("ParityManifest", () => {
 
   it.skipIf(corpusRoot === undefined)("inventories every static behavior in each targeted OpenCode source", () => {
     if (corpusRoot === undefined) return
+    requireCorpus(corpusRoot)
     for (const source of requiredOpenCodeSources) {
       const text = readFileSync(new URL(`opencode/${source}`, corpusRoot), "utf8")
       const discovered = [

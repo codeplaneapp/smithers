@@ -176,7 +176,7 @@ export const banner = (bind: Bind): string => {
  * @category constructors
  * @since 1.0.0
  */
-export const host = (bind: Bind, root: string = process.cwd()) =>
+export const host = (bind: Bind, root: string) =>
   Effect.gen(function*() {
     const refusal = refuse(bind)
     if (refusal !== undefined) return yield* Effect.fail(refusal)

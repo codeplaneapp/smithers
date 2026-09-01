@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.0.0-rc.0] - 2026-08-31
+
 ### Breaking Changes
 
 - Split the flow authoring model out into `@smthrs/flow`. `Flow`, `Action`,
@@ -21,18 +23,25 @@
   `Encoded.ts`, `SnapshotBoundary.ts`, `FlowInstance.ts`, `ActionKey.ts`,
   `make.ts`, `layerMemory.ts`, and the barrel.
 
-- Renamed `Flow.withCompensation` to the clearer `Flow.withRollback`.
-- Moved `BoundaryMode` beside the `Action` model it configures.
-- Split the `Flow` module into focused definition, result, runtime, annotation,
-  constructor, and error files without changing the `@smthrs/engine/Flow`
-  import.
-- Split `Action` and its identity, boundary, retry, context, constructor, and
-  error code into focused files without changing its public import paths.
+- Renamed `Flow.withCompensation` to `Flow.withRollback` in the new
+  `@smthrs/flow` authoring package.
+- Moved `BoundaryMode` beside the `Action` model it configures in
+  `@smthrs/flow`.
+- Split the `Flow` and `Action` implementations into focused modules while
+  moving their public imports to `@smthrs/flow`.
 
 ### Fixed
 
 - Scoped sealed action keys to one run until the composition declares its
   complete layer and capability identity.
+- Made in-memory action execution single-flight, snapshotted replay payloads,
+  and encoded deferred and clock addresses as injective tuples.
+- Made journal lineage and trampoline-round identities injective and added
+  typed validation for malformed round bounds.
+- Refused colliding proxy operation names and encoded every HTTP flow tag as
+  one case-preserving URL-safe segment.
+- Made diagnostic rendering total, bounded, accessor-free, and redacting so a
+  hostile failure cannot replace the original cause.
 
 ## [0.1.0] - 2026-08-05
 

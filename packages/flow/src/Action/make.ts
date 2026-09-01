@@ -3,7 +3,7 @@
 /**
  * Constructs executable durable action values.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import * as Node from "@smthrs/plan/Node"
 import * as Context from "effect/Context"
@@ -21,6 +21,8 @@ import { FlowRuntime } from "../FlowRuntime/FlowRuntime.ts"
 import type * as RetryPolicy from "../RetryPolicy.ts"
 import type { Action, Declared, IdempotencyKey, Requirement, Tier } from "./Action.ts"
 import { CurrentAttempt } from "./Context.ts"
+import { InfraInterruptRetriesExhausted } from "./Errors.ts"
+import type { InfraInterrupt } from "./Errors.ts"
 import { type Implementation, Implementations } from "./Implementations.ts"
 import { TypeId } from "./TypeId.ts"
 
@@ -29,7 +31,7 @@ import { TypeId } from "./TypeId.ts"
  * encode successes and failures for durable execution.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.1.0
  */
 const makeInline = <
   R,
@@ -238,8 +240,7 @@ const makeDeclared = <
  * declaration, selected by whether the first argument is a string.
  *
  * @category constructors
- * @since 4.0.0
- * @slop
+ * @since 0.1.0
  */
 export const make: {
   <
@@ -300,7 +301,6 @@ export const make: {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const makeSystem = <
   const Tag extends string,
@@ -334,7 +334,8 @@ export const makeSystem = <
     never
   >
 
-const isInfraInterrupt = Predicate.isTagged("@smthrs/flow/InfraInterrupt")
+const isInfraInterrupt = (value: unknown): value is InfraInterrupt =>
+  Predicate.isTagged("@smthrs/flow/InfraInterrupt")(value)
 
 const retryInfraInterrupt = (
   name: string,
@@ -343,17 +344,36 @@ const retryInfraInterrupt = (
 <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
   policy === undefined
     ? effect
-    : effect.pipe(
-      Effect.retry({
-        schedule: policy,
-        while: isInfraInterrupt
-      }),
-      Effect.catch((error) =>
-        isInfraInterrupt(error)
-          ? Effect.die(`Action "${name}" infrastructure interrupt retry attempts exhausted`)
-          : Effect.fail(error)
+    : Effect.suspend(() => {
+      let attempts = 0
+      return effect.pipe(
+        // Each failed execution reaches this tap once, including the final
+        // failure the schedule declines to retry, so this is the real attempt
+        // count rather than an estimate derived from schedule shape.
+        Effect.tapError((error) =>
+          isInfraInterrupt(error)
+            ? Effect.sync(() => void attempts++)
+            : Effect.void
+        ),
+        Effect.retry({
+          schedule: policy,
+          while: isInfraInterrupt
+        }),
+        Effect.catch((error) =>
+          isInfraInterrupt(error)
+            ? Effect.die(
+              new InfraInterruptRetriesExhausted({
+                actionName: name,
+                attempts,
+                interrupt: error,
+                message: `Action "${name}" infrastructure interrupt retry attempts exhausted after ` +
+                  `${attempts} attempts.`
+              })
+            )
+            : Effect.fail(error)
+        )
       )
-    )
+    })
 
 // Untraced because action execution is retried in the flow hot path.
 const makeExecute = Effect.fnUntraced(function*<

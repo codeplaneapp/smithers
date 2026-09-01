@@ -31,11 +31,16 @@ export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0",
 export const nodeModules = Smithers.Install({ packageManager })
 ```
 
-`Smithers.Secret("NAME")` declares a credential without reading it. The value is
-resolved lazily, at execution, and only for a target that declared the secret;
-what reaches a child process is an unguessable placeholder that the
-substituting proxy replaces on outbound requests. Key material records the
-variable name, never the value.
+`Smithers.Secret("NAME")` declares an inert source without reading it. A child
+target binds that source to exact origins with
+`Smithers.HttpSecret(source, ["https://api.example.com"])`; the source alone is
+not egress authority. The child receives an unguessable placeholder. The
+loopback proxy resolves it once, only after an authorized destination is known,
+and removes an exact value echoed in the bounded response. A mismatched origin
+is denied before any upstream connection. Opaque HTTPS `CONNECT` is refused
+while placeholders exist; HTTPS credentials require a brokered destination or
+a host-owned request adapter. Key material records the source and audience,
+never the value.
 
 `Smithers.Workspace` is the workspace configuration declaration the root
 `BUILD.ts` file exports. It validates and performs
@@ -77,6 +82,10 @@ export const Workspace = S.Workspace("aomi-sdk", {
   host: S.Host({ bins: ["cargo"] })
 })
 ```
+
+`toolchain` is a declared file input. Its content digest, not only its path, is
+key material, so changing the channel in `rust-toolchain.toml` re-keys the Cargo
+targets that use it.
 
 The declared channel is selected, not hoped for: every cargo run carries it as
 `RUSTUP_TOOLCHAIN`, so a host without the pin fails at the start of the run
@@ -157,6 +166,10 @@ declaration names one and no BUILD-era call ever passes one, so
 `Smithers.Cargo.Clippy()` is still a check value and
 `Smithers.Cargo.Clippy({ workspace: true })` is a target. A repository moving
 from `BUILD.ts` to `PACKAGE.ts` does not rename its cargo gates.
+
+The BUILD-era `RustToolchain.Pinned` declaration follows the same content rule:
+`pin` defaults to `S.file("//rust-toolchain.toml")`, and Cargo targets digest it
+without callers also listing it in `srcs`.
 
 A build target may be a tool edge. `S.Shell.Build({ bin: sdk.buildCli })` and
 `S.Generate({ bin: sdk.buildCli })` spawn the one binary that build declares

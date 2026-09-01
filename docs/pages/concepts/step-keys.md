@@ -4,7 +4,7 @@ description: "How a step key is computed, what goes into it, and why the engine 
 
 # Step keys and content addressing
 
-`@smthrs/keys` only provides the generic `Key` transformation. `@smthrs/crypto` provides SHA-256. The engine owns the policy deciding what data is hashed.
+[`@smthrs/keys`](/api/keys) provides generic key derivation and stored-key validation. [`@smthrs/crypto`](/api/crypto) provides SHA-256. The engine owns the policy deciding what data is hashed.
 
 For a sealed action with an `idempotencyKey`, the engine hashes:
 

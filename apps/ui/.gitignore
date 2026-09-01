@@ -34,6 +34,9 @@ reports/playwright/
 # Hutch-generated Electrobun devkit projection (electrobun 2.x); never commit
 .hutch/
 
+# Portable Node runtime copied into production Electrobun packages.
+packaged-runtime/
+
 # Cottontail scratch left by the electrobun bootstrap
 .cottontail-tmp/
 

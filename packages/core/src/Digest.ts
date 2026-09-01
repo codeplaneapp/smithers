@@ -1,18 +1,16 @@
 /**
- * The synchronous face of the main tree's hashing chokepoint.
+ * Compatibility helpers for synchronous identity construction.
  *
  * `@smthrs/keys/Digest` was deleted at `f5f3dda`, which reduced `@smthrs/keys`
  * to the canonical `Key` schema and moved hashing to `@smthrs/crypto`'s
- * `Sha256` and canonicalization to `@smthrs/canonical`'s `Canonical`. Both
- * successors are Effect schemas that read the injected `Crypto` service, and
- * that is the right shape for the engine: a browser host injects WebCrypto, a
- * test host injects a recorded one.
+ * `Sha256` and canonicalization to `@smthrs/canonical`'s `Canonical`.
  *
  * The agent side computes content fingerprints inside *pure, synchronous*
- * constructors — a prompt section's identity, a context-window segment, a
- * cell's source digest, a plan card's digest. Those cannot take an Effect, so
- * this module runs the successor schemas synchronously against {@link crypto},
- * a `Crypto` implementation whose only capability is a dependency-free SHA-256.
+ * constructors: a prompt section's identity, a context-window segment, a
+ * cell's source digest, a plan card's digest. `@smthrs/crypto` now owns that
+ * policy and its only handwritten implementation. This module delegates to
+ * `digestSync` and retains its old `crypto`, `layer`, and `runSync` names for
+ * existing Core consumers.
  *
  * The digest is therefore the *same digest*: same canonical bytes, same hash,
  * same hexadecimal encoding, just reached without suspending. `Digest.test.ts`
@@ -21,32 +19,27 @@
  * @since 0.1.0
  */
 import { Canonical } from "@smthrs/canonical"
-import { Sha256 } from "@smthrs/crypto"
+import { digestSync, syncCrypto } from "@smthrs/crypto"
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import { sha256 } from "./internal/sha256.ts"
 
 /**
- * A `Crypto` service that hashes and nothing else.
+ * The package-owned synchronous, SHA-256-only `Crypto` service.
  *
  * Randomness is deliberately absent rather than weakly implemented: a
  * fingerprint needs a hash, and a caller that reaches for `randomBytes` here
- * wants a real platform layer, not a plausible-looking substitute. The
- * requirement is met by `@effect/platform-node`'s `NodeCrypto` or the browser
- * equivalent, which is what every non-fingerprint caller already provides.
+ * wants a real platform layer, not a plausible-looking substitute.
+ * Non-SHA-256 algorithms fail with `BadArgument`. The requirement for ordinary
+ * application code is met by `@effect/platform-node`'s `NodeCrypto` or the
+ * browser equivalent.
  *
  * @category services
  * @since 0.1.0
  * @slop
  */
-export const crypto: Crypto.Crypto = Crypto.make({
-  randomBytes: () => {
-    throw new Error("@smthrs/core/Digest provides hashing only; supply a platform Crypto layer for randomness")
-  },
-  digest: (_algorithm, data) => Effect.succeed(sha256(data))
-})
+export const crypto: Crypto.Crypto = syncCrypto
 
 /**
  * Provides {@link crypto} as a layer, for Effect-shaped callers that only hash.
@@ -71,8 +64,6 @@ export const layer: Layer.Layer<Crypto.Crypto> = Layer.succeed(Crypto.Crypto)(cr
 export const runSync = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>): A =>
   Effect.runSync(Effect.provideService(effect, Crypto.Crypto, crypto))
 
-const decodeSha256 = Schema.decodeUnknownEffect(Sha256)
-
 const decodeCanonical = Schema.decodeUnknownEffect(Canonical)
 
 /**
@@ -86,13 +77,15 @@ const decodeCanonical = Schema.decodeUnknownEffect(Canonical)
  * @since 0.1.0
  * @slop
  */
-export const digest = (input: Uint8Array | string): string => runSync(decodeSha256(input))
+export const digest = digestSync
 
 /**
  * Returns the RFC 8785 canonical JSON serialization of a value.
  *
- * Throws on a value canonical JSON cannot represent, which is the contract the
- * agent-side callers were written against.
+ * A function, symbol, `bigint`, cyclic object, non-finite number, or top-level
+ * `undefined` has no canonical JSON representation. For those values this
+ * throws the `SchemaError` from `effect/Schema` raised through
+ * `Effect.runSync`; the canonical package's failure is not wrapped.
  *
  * @category serialization
  * @since 0.1.0

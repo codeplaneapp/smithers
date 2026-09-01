@@ -11,6 +11,8 @@
  */
 import * as Agent from "@smthrs/agent/Agent"
 import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Budget from "@smthrs/agent/Budget"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import * as Capability from "@smthrs/capability/Capability"
@@ -166,10 +168,31 @@ export const layerFor = (options: LayerOptions) => {
         )
       )
   })
+  // Routed apps spend real model calls, so a reset-bearing refusal should
+  // park. This boundary has no approved plan envelope, so an invented ceiling
+  // would be policy the app author never chose.
+  // eslint-disable-next-line no-restricted-syntax -- no approved envelope exists, see above
+  const agentPolicy = Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())
   return Layer.mergeAll(host, seats, Agent.layer).pipe(
+    Layer.provideMerge(agentPolicy),
     Layer.provideMerge(Agent.layerDefaults),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),
     Layer.provideMerge(options.crypto)
   )
 }
+
+/** Refuses a composition root that still owes a service. */
+type Complete<L> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>] ? [R] extends [never] ? true : false
+  : false
+
+/** Fails to compile unless its argument is `true`. */
+type Expect<T extends true> = T
+
+/**
+ * The routed-app runtime supplies every service its flow can require.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type CompositionRootsAreComplete = [Expect<Complete<ReturnType<typeof layerFor>>>]

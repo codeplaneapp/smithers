@@ -59,6 +59,7 @@ import * as ChildFlows from "../src/ChildFlows.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as Seat from "../src/Seat.ts"
 import * as StandardFlows from "../src/StandardFlows.ts"
+import * as Safety from "./Safety.ts"
 
 const prepared: Route.PreparedRequest = {
   routeId: "route-a",
@@ -254,7 +255,7 @@ const collect = (options: {
       Effect.provide(Agent.layerDefaults)
     )
     return collected
-  }).pipe(Effect.provide(Agent.layer))
+  }).pipe(Effect.provide(Agent.layer), Effect.provide(Safety.layer))
 
 describe("standard capabilities are flows", () => {
   it("runs a std filesystem read, a std shell command, and a memory write through one call boundary", async () => {

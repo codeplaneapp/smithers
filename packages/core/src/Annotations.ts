@@ -1,10 +1,8 @@
 /**
  * Typed immutable annotations attached to flow graph values.
  *
- * Governing contracts:
- * `docs/specs/Concepts/Flow Builder Brief.md`,
- * `docs/specs/Concepts/Effect Taxonomy.md`, and
- * `docs/specs/Concepts/Placement.md`.
+ * Governing contract: `packages/core/docs/api.md`, published as
+ * https://smithers.sh/api/core.
  *
  * @since 0.0.0
  */

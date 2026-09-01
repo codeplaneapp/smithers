@@ -156,6 +156,17 @@ const inconclusive = (caseName: string, scorer: string, stepKey: string, reason:
   at
 })
 
+/**
+ * Names what actually went wrong.
+ *
+ * A scorer that threw a `TypeError` is a bug in the scorer and an unreachable
+ * judge is an outage. A fixed sentence made the two observations identical, so
+ * a permanently broken scorer kept producing inconclusive observations, which
+ * no gate reads as a result, with nothing to debug from.
+ */
+const inconclusiveReason = (what: string, cause: Cause.Cause<unknown>): string =>
+  `${what}: ${String(Cause.squash(cause))}`
+
 const runCase = (executor: CaseExecutorService, suiteCase: Case): Effect.Effect<CaseResult> =>
   executor.run(suiteCase).pipe(
     Effect.match({
@@ -252,7 +263,7 @@ const score = (
             : Effect.succeed({
               ...job.observation,
               kind: "inconclusive" as const,
-              reason: "Scorer execution was inconclusive",
+              reason: inconclusiveReason("Scorer execution failed", cause),
               at: job.at
             })
         )
@@ -267,7 +278,7 @@ const score = (
               jobs.map((job) => ({
                 ...job.observation,
                 kind: "inconclusive" as const,
-                reason: "Scorer batch failed",
+                reason: inconclusiveReason("Scorer batch failed", cause),
                 at: job.at
               }))
             )

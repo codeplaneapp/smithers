@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as DurableWriter from "@smthrs/database/DurableWriter"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
+import { FlowEngine } from "@smthrs/engine"
 import * as Journal from "@smthrs/journal/Journal"
 import type * as JournalEvent from "@smthrs/journal/JournalEvent"
 import * as SqlJournal from "@smthrs/journal/SqlJournal"
@@ -32,6 +33,16 @@ const projection = {
     `${entry.seq}:${String((entry.payload as { readonly value: string }).value)}:${String(sealed)}`
   ]
 }
+
+/**
+ * The engine-driven run's root lineage, taken from the constructor that mints it.
+ *
+ * Re-derived on 2026-09-01. `FlowEngine.Lineage` moved the root address from
+ * `<runId>/root` to a versioned encoded tuple, so the old literal addressed a
+ * lineage the engine no longer writes. The hand-seeded rows below keep their
+ * own opaque `"run/root"` because nothing but this file produces or reads them.
+ */
+const engineLineage = FlowEngine.Lineage.root("replay-engine-run")
 
 const replay = Replay.rederive(
   { lineageId: "run/root", seq: 5 },
@@ -124,7 +135,7 @@ describe("durable replay", () => {
                 const tail = rows[0]!.tail
                 const timeTravel = yield* TimeTravel
                 const state = yield* timeTravel.inspect(
-                  { runId: "replay-engine-run", frame: { lineageId: "replay-engine-run/root", seq: tail } },
+                  { runId: "replay-engine-run", frame: { lineageId: engineLineage, seq: tail } },
                   fold
                 )
                 return { state, tail }
@@ -144,7 +155,7 @@ describe("durable replay", () => {
                 return yield* timeTravel.inspect(
                   {
                     runId: "replay-engine-run",
-                    frame: { lineageId: "replay-engine-run/root", seq: first.tail }
+                    frame: { lineageId: engineLineage, seq: first.tail }
                   },
                   fold
                 )

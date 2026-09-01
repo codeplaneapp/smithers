@@ -5,7 +5,7 @@
  * `docs/specs/Concepts/Permission Kernel.md` and
  * `docs/specs/Concepts/Journal Queue.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import type { CapabilityPattern } from "@smthrs/capability/Capability"
 import { GrantStoreError, Rule } from "@smthrs/capability/Permission"
@@ -34,7 +34,7 @@ import { Workspace } from "./Workspace.ts"
  * because a dropped grant decision cannot safely be treated as persisted.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface JournalGrantStoreOptions {
@@ -66,6 +66,22 @@ const knownEventTypes: ReadonlySet<string> = new Set([
 ])
 
 const invalidReplay = (message: string): GrantStoreError => new GrantStoreError({ code: "invalid_resolution", message })
+
+const validId = (value: unknown): value is string => {
+  if (typeof value !== "string" || value.length === 0 || value.length > GrantStore.maximumIdentityLength) return false
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index)
+    if (unit === 0) return false
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1)
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false
+      index += 1
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false
+    }
+  }
+  return true
+}
 
 const encodeGrantEvent = Schema.encodeSync(GrantEventSchema)
 
@@ -232,24 +248,33 @@ const replayRunRules = (
  * `journal_failed`, so permission decisions fail closed.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const make = (options: JournalGrantStoreOptions) =>
   Effect.gen(function*() {
-    if (options.planDigest.length === 0) {
-      return yield* Effect.fail(
-        new GrantStoreError({
-          code: "invalid_resolution",
-          message: "journal-backed grants require a plan digest"
-        })
-      )
+    const runId = options.runId
+    const policyRunId = options.policyRunId
+    const sourceId = options.sourceId
+    const planDigest = options.planDigest
+    if (!validId(runId)) return yield* Effect.fail(invalidReplay("runId must be non-empty, bounded, well-formed text"))
+    if (!validId(policyRunId)) {
+      return yield* Effect.fail(invalidReplay("policyRunId must be non-empty, bounded, well-formed text"))
+    }
+    if (!validId(sourceId)) {
+      return yield* Effect.fail(invalidReplay("sourceId must be non-empty, bounded, well-formed text"))
+    }
+    if (!validId(planDigest)) {
+      return yield* Effect.fail(invalidReplay("planDigest must be non-empty, bounded, well-formed text"))
+    }
+    if (runId === policyRunId) {
+      return yield* Effect.fail(invalidReplay("runId and policyRunId must be distinct"))
     }
     const journal = yield* JournalModule.Journal
     const workspace = yield* Workspace
     const replayPolicy = replayRememberedRules(
-      options.policyRunId,
-      options.sourceId,
+      policyRunId,
+      sourceId,
       workspace.root
     ).pipe(
       Effect.mapError((cause) =>
@@ -257,9 +282,9 @@ export const make = (options: JournalGrantStoreOptions) =>
       )
     )
     const replayRun = replayRunRules(
-      options.runId,
-      options.sourceId,
-      options.planDigest,
+      runId,
+      sourceId,
+      planDigest,
       workspace.root
     ).pipe(
       Effect.mapError((cause) =>
@@ -279,10 +304,10 @@ export const make = (options: JournalGrantStoreOptions) =>
             runId: (
               event.eventType === "flows.kernel.grant.remembered.v1"
                 || (event.eventType === "flows.kernel.grant.envelope.v1" && event.scope === "remembered")
-                ? options.policyRunId
-                : options.runId
+                ? policyRunId
+                : runId
             ) as JournalEvent.RunId,
-            sourceId: options.sourceId as JournalEvent.SourceId,
+            sourceId: sourceId as JournalEvent.SourceId,
             eventType: event.eventType,
             payload
           })
@@ -295,8 +320,8 @@ export const make = (options: JournalGrantStoreOptions) =>
     const envelope = options.envelope
     const build = () =>
       GrantStore.make({
-        runId: options.runId,
-        planDigest: options.planDigest,
+        runId,
+        planDigest,
         ...(options.attended === undefined ? {} : { attended: options.attended }),
         rules: options.rules === undefined || options.rules.length === 0
           ? [[], replayedPolicy.rules]
@@ -308,7 +333,7 @@ export const make = (options: JournalGrantStoreOptions) =>
         ],
         ...(envelope === undefined ? {} : {
           envelope: {
-            planDigest: options.planDigest,
+            planDigest,
             patterns: envelope.patterns,
             ...(envelope.scope === undefined ? {} : { scope: envelope.scope })
           }
@@ -319,7 +344,7 @@ export const make = (options: JournalGrantStoreOptions) =>
       return yield* build()
     }
     const scope = envelope.scope ?? "run"
-    const signature = GrantStore.envelopeSignature(options.planDigest, scope, envelope.patterns)
+    const signature = GrantStore.envelopeSignature(planDigest, scope, envelope.patterns)
     const replayedSignatures = scope === "remembered"
       ? replayedPolicy.envelopeSignatures
       : replayedRun.envelopeSignatures
@@ -348,7 +373,7 @@ export const make = (options: JournalGrantStoreOptions) =>
  * Provides a journal-backed `GrantStore`.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer = (options: JournalGrantStoreOptions) => Layer.effect(GrantStore.GrantStore)(make(options))

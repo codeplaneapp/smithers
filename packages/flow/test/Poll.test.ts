@@ -202,6 +202,23 @@ describe("Poll.delayMillis", () => {
   })
 })
 
+describe("stable error codes", () => {
+  it("defaults every newly frozen code", () => {
+    expect(new Poll.PollExhausted({ poll: "poll/code", attempts: 1, message: "done" })).toMatchObject({
+      _tag: "@smthrs/flow/PollExhausted",
+      code: "poll_exhausted"
+    })
+    expect(new FlowRuntime.FlowCycleDetected({ path: ["parent", "child"] })).toMatchObject({
+      _tag: "@smthrs/flow/FlowCycleDetected",
+      code: "flow_cycle_detected"
+    })
+    expect(new FlowRuntime.FlowExecutionNotFound({ executionId: "missing" })).toMatchObject({
+      _tag: "@smthrs/flow/FlowExecutionNotFound",
+      code: "execution_not_found"
+    })
+  })
+})
+
 describe("Poll as a plan", () => {
   it("shows the attempt's check, its sleep, and the handoff that opens the next round", () => {
     const graph = Graph.build(Rising, { until: 3, attempt: 1 })
@@ -277,6 +294,18 @@ describe("Poll as a plan", () => {
     expect(declare(1)).not.toThrow()
   })
 
+  it("reserves the durable attempt field for the poll lineage", () => {
+    expect(() =>
+      Poll.make("poll/reserved-attempt", {
+        input: { attempt: Schema.Number },
+        result: Schema.String,
+        intervalMs: 10,
+        maxAttempts: 2,
+        check: ({ attempt }) => Probe.call({ until: 2, attempt })
+      })
+    ).toThrow(/reserved "attempt"/)
+  })
+
   it("refuses a schedule whose longest wait no durable clock can be armed with", () => {
     const declare = (options: {
       readonly intervalMs: number
@@ -322,6 +351,22 @@ describe("Poll as a plan", () => {
 })
 
 describe("Poll rounds", () => {
+  effect("rejects an invalid caller-visible attempt before running the round", () => {
+    probes.length = 0
+    return Effect.gen(function*() {
+      const result = yield* Rising.execute(
+        { until: 3, attempt: Number.NaN },
+        { executionId: "poll-invalid-attempt/1" }
+      ).pipe(Effect.exit)
+
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(String(result)).toContain("attempt")
+      expect(probes).toEqual([])
+    }).pipe(
+      Effect.provide(wired(Layer.mergeAll(probeLayer, Sleep.layer, Poll.layer, Interpreter.layer(Rising))))
+    )
+  })
+
   effect("waits the declared schedule between attempts, then answers with what satisfied the check", () => {
     probes.length = 0
     return Effect.gen(function*() {
@@ -395,7 +440,12 @@ describe("Poll rounds", () => {
         expect(Exit.isFailure(second.exit)).toBe(true)
         if (Exit.isFailure(second.exit)) {
           expect(second.exit.cause.reasons[0]).toMatchObject({
-            error: { _tag: "@smthrs/flow/PollExhausted", poll: "poll/failing", attempts: 2 }
+            error: {
+              _tag: "@smthrs/flow/PollExhausted",
+              code: "poll_exhausted",
+              poll: "poll/failing",
+              attempts: 2
+            }
           })
         }
       }

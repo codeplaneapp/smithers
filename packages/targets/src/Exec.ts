@@ -136,7 +136,7 @@ export const Payload = Schema.Struct({
   env: Schema.Record(Schema.String, Schema.String).pipe(
     Schema.withConstructorDefault(Effect.succeed({}))
   ),
-  secrets: Schema.Array(Secret.Declaration).check(Schema.isMaxLength(maximumSecrets)).pipe(
+  secrets: Schema.Array(Secret.HttpCredential).check(Schema.isMaxLength(maximumSecrets)).pipe(
     Schema.withConstructorDefault(Effect.succeed([]))
   ),
   expectedExitCodes: Schema.Array(
@@ -476,7 +476,8 @@ const validatedPayload = (untrusted: Payload): Payload => {
     throw new TypeError("exec expected exit codes contain a duplicate")
   }
   const secretNames = new Set<string>()
-  for (const secret of payload.secrets) {
+  for (const binding of payload.secrets) {
+    const secret = binding.secret
     usableText(secret.env, "exec secret name")
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(secret.env)) {
       throw new TypeError(`exec secret name is not portable: ${JSON.stringify(secret.env)}`)
@@ -498,7 +499,7 @@ const validatedPayload = (untrusted: Payload): Payload => {
     ...payload,
     argv: [...payload.argv],
     env,
-    secrets: [...payload.secrets],
+    secrets: payload.secrets.map((credential) => Secret.HttpSecret(credential.secret, [...credential.audiences])),
     expectedExitCodes: [...payload.expectedExitCodes]
   }
 }
@@ -833,14 +834,14 @@ const spawnTool = (
  * passes it to a subprocess leaks a value that is worthless off this host.
  */
 const withSecretEnvironment = <A, E>(
-  secrets: ReadonlyArray<Secret.Secret>,
+  secrets: ReadonlyArray<Secret.HttpCredential>,
   diagnostic: { readonly argv: readonly [string, ...Array<string>]; readonly cwd: string },
   use: (secretEnv: Readonly<Record<string, string>>) => Effect.Effect<A, E>
 ): Effect.Effect<A, E | ExecError> => {
   if (secrets.length === 0) return use({})
   const vault = SecretProxy.makeVault()
   const minted: Record<string, string> = {}
-  for (const secret of secrets) minted[secret.env] = vault.mint(secret)
+  for (const binding of secrets) minted[binding.secret.env] = vault.mint(binding)
   return Effect.acquireUseRelease(
     Effect.tryPromise({
       try: () => SecretProxy.startProxy(vault),

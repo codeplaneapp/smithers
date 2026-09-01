@@ -217,11 +217,15 @@ const nonTerminalControl = Layer.effect(
 
 describe("Control surface", () => {
   it("parses the remote bearer credential from either CLI spelling", () => {
-    const resolved = NodeControl.makeConfig([
-      "--remote",
-      "https://control.example.test",
-      "--credential=alpha-secret"
-    ], {})
+    const resolved = NodeControl.makeConfig(
+      [
+        "--remote",
+        "https://control.example.test",
+        "--credential=alpha-secret"
+      ],
+      {},
+      "/work"
+    )
 
     expect(resolved.remote).toBe("https://control.example.test")
     expect(resolved.credential).toBe("alpha-secret")
@@ -359,8 +363,12 @@ describe("Control surface", () => {
     const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
     expect(error).toBeInstanceOf(CliError.UnsupportedError)
     const message = (error as CliError.UnsupportedError).message
-    expect(message).toContain("the executor did not take it")
-    expect(message).toContain("smithers ps")
+    // Restated in the cli-boot-hygiene lane: the sentence used to blame a
+    // missing seat and send the operator to `smithers doctor`, which has
+    // nothing to say about a launch no executor drives.
+    expect(message).toContain("no executor took it")
+    expect(message).toContain("registers its delegates")
+    expect(message).toContain("smithers cancel run-1")
     expect(CliError.exitCode(error as CliError.UnsupportedError)).toBe(1)
   })
 
@@ -616,7 +624,7 @@ describe("Control surface", () => {
         const server = yield* HttpServer.HttpServer
         const shared = ["--remote", addressUrl(server), "--credential", "alpha-secret"]
         const result = yield* scenario(shared).pipe(
-          Effect.provide(NodeControl.layerControl(NodeControl.makeConfig(shared, {}))),
+          Effect.provide(NodeControl.layerControl(NodeControl.makeConfig(shared, {}, "/work"))),
           Effect.provide(scenarioServices)
         )
         return { hostname: server.address._tag === "TcpAddress" ? server.address.hostname : "", result }

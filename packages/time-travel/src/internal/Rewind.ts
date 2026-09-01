@@ -646,7 +646,18 @@ export const rewind = (
               compensation = { handlerReceipts }
               yield* runHook(options, "compensate-effects")
 
-              compensation = yield* Compensation.restoreWorkspace(plan, handlerReceipts)
+              // `restoreWorkspace` owns these receipts: every failure path in
+              // it rolls them back before failing. The tracked compensation is
+              // therefore emptied so the outer failure branch cannot roll them
+              // back a SECOND time. A handler's `rollback` re-performs the
+              // effect the revert undid and nothing requires it to be
+              // idempotent, so the duplicate was a duplicated side effect.
+              const restored = yield* Effect.exit(Compensation.restoreWorkspace(plan, handlerReceipts))
+              if (Exit.isFailure(restored)) {
+                compensation = { handlerReceipts: [] }
+                return yield* Effect.failCause(restored.cause)
+              }
+              compensation = restored.value
               yield* runHook(options, "restore-workspace")
               detail = {
                 ...detail,

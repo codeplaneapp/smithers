@@ -14,7 +14,7 @@
  * `docs/specs/Concepts/Effect Taxonomy.md`, and
  * `docs/specs/Concepts/Host Adapters.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { make as makeCapability } from "@smthrs/capability/Capability"
 import { permissionDenied, type PermissionError, toPlatformError } from "@smthrs/capability/Permission"
@@ -39,7 +39,7 @@ import { Workspace } from "./Workspace.ts"
  * Platform adapters opt in only when they can pin a root handle and reject
  * symlinks while traversing from it. Hosts without this extension fail closed.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category security
  * @slop
  */
@@ -47,7 +47,7 @@ export const AtomicFileSystemTypeId = Symbol.for("@smthrs/kernel/AtomicFileSyste
 
 /** A serializable operation executed relative to a pinned filesystem root.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category security
  * @slop
  */
@@ -67,7 +67,7 @@ export interface AtomicRequest {
 
 /** Trusted host extension implementing atomic path resolution and operation.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category security
  * @slop
  */
@@ -83,7 +83,7 @@ export interface AtomicFileSystem {
 
 /** An Effect filesystem carrying the atomic host extension.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category security
  * @slop
  */
@@ -93,7 +93,7 @@ export type AtomicHostFileSystem = EffectFileSystem.FileSystem & {
 
 /** Attaches a trusted platform's descriptor-relative executor to its service.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category security
  * @slop
  */
@@ -107,7 +107,7 @@ export const withAtomicFileSystem = (
  * browser/test volumes whose implementation cannot address the host
  * filesystem at all; native path-based adapters must not use this shortcut.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category security
  * @slop
  */
@@ -119,7 +119,10 @@ export const withIsolatedFileSystem = (
     execute: (request) => {
       switch (request.operation) {
         case "glob":
-          return fileSystem.glob(request.pattern!, { root: request.root })
+          return fileSystem.glob(request.pattern!, {
+            ...(request.options as { readonly exclude?: ReadonlyArray<string> | undefined } | undefined),
+            root: request.root
+          })
         case "exists":
           return fileSystem.exists(request.path!)
         case "makeDirectory":
@@ -200,7 +203,7 @@ const identityOf = (info: EffectFileSystem.File.Info): Option.Option<string> =>
  * a symlink.
  *
  * @category security
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const canonicalResource = (
@@ -275,7 +278,7 @@ export const canonicalResource = (
  * `Permission.fromPlatformError` reads it back.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer: Layer.Layer<
@@ -429,6 +432,17 @@ export const layer: Layer.Layer<
       directory === undefined
         ? write(path.resolve(workspace.root, "..", "<system-temp>"))
         : write(directory)
+    const snapshotOptions = <T>(value: T): T => {
+      if (Array.isArray(value)) return Object.freeze(value.map(snapshotOptions)) as T
+      if (typeof value !== "object" || value === null) return value
+      const snapshot: Record<string, unknown> = {}
+      for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+        if (!descriptor.enumerable) continue
+        if (!("value" in descriptor)) throw new TypeError("filesystem options must contain only data properties")
+        snapshot[name] = snapshotOptions(descriptor.value)
+      }
+      return Object.freeze(snapshot) as T
+    }
     const normalizeTempOptions = <T extends { readonly directory?: string | undefined }>(options: T | undefined) =>
       options?.directory === undefined ? options : { ...options, directory: normalize(options.directory) }
     const openChecks = (value: string, flag: EffectFileSystem.OpenFlag) => {
@@ -515,17 +529,21 @@ export const layer: Layer.Layer<
     // implementation, so delegation semantics do not change.
     const guarded: EffectFileSystem.FileSystem = {
       ...EffectFileSystem.make({
-        access: Effect.fn("FileSystem.access")((value, options) =>
-          isolatedOne("fs:read", value, "access", (host) => host.access(normalize(value), options))
-        ),
-        copy: Effect.fn("FileSystem.copy")((from, to, options) =>
-          isolatedTwo(
-            ["fs:read", from],
-            ["fs:write", to],
-            "copy",
-            (host) => host.copy(normalize(from), normalize(to), options)
+        access: Effect.fn("FileSystem.access")((value, options) => {
+          const captured = snapshotOptions(options)
+          return isolatedOne("fs:read", value, "access", (host) => host.access(normalize(value), captured))
+        }),
+        copy: Effect.fn("FileSystem.copy")((from, to, options) => {
+          const captured = snapshotOptions(options)
+          return (
+            isolatedTwo(
+              ["fs:read", from],
+              ["fs:write", to],
+              "copy",
+              (host) => host.copy(normalize(from), normalize(to), captured)
+            )
           )
-        ),
+        }),
         copyFile: Effect.fn("FileSystem.copyFile")((from, to) =>
           isolatedTwo(
             ["fs:read", from],
@@ -541,61 +559,81 @@ export const layer: Layer.Layer<
           isolatedOne("fs:write", value, "chown", (host) => host.chown(normalize(value), uid, gid))
         ),
         glob: Effect.fn("FileSystem.glob")((pattern, options) => {
-          const root = options?.root === undefined ? workspace.root : normalize(options.root)
+          const captured = snapshotOptions(options)
+          const root = captured?.root === undefined ? workspace.root : normalize(captured.root)
           const normalizedPattern = normalizeFrom(root, pattern)
           return atomicOne<Array<string>>("fs:read", normalizedPattern, "glob", {
             operation: "glob",
             pattern: normalizedPattern,
             root,
-            options: options === undefined ? undefined : { exclude: options.exclude ?? [] }
+            options: captured === undefined ? undefined : { exclude: captured.exclude ?? [] }
           })
         }),
         link: Effect.fn("FileSystem.link")((from, to) =>
           isolatedTwo(["fs:read", from], ["fs:write", to], "link", (host) => host.link(normalize(from), normalize(to)))
         ),
-        makeDirectory: Effect.fn("FileSystem.makeDirectory")((value, options) =>
-          atomicOne<void>("fs:write", value, "makeDirectory", {
+        makeDirectory: Effect.fn("FileSystem.makeDirectory")((value, options) => {
+          const captured = snapshotOptions(options)
+          return atomicOne<void>("fs:write", value, "makeDirectory", {
             operation: "makeDirectory",
             path: normalize(value),
-            options
+            options: captured
           })
-        ),
-        makeTempDirectory: Effect.fn("FileSystem.makeTempDirectory")((options) =>
-          atomic?.isolated === undefined
-            ? Effect.fail(atomicUnavailable("fs:write", options?.directory ?? "../<system-temp>", "makeTempDirectory"))
-            : temp(options?.directory).pipe(
-              Effect.andThen(atomic.isolated.makeTempDirectory(normalizeTempOptions(options)))
-            )
-        ),
-        makeTempDirectoryScoped: Effect.fn("FileSystem.makeTempDirectoryScoped")((options) =>
-          atomic?.isolated === undefined
-            ? Effect.fail(
-              atomicUnavailable("fs:write", options?.directory ?? "../<system-temp>", "makeTempDirectoryScoped")
-            )
-            : temp(options?.directory).pipe(
-              Effect.andThen(atomic.isolated.makeTempDirectoryScoped(normalizeTempOptions(options)))
-            )
-        ),
-        makeTempFile: Effect.fn("FileSystem.makeTempFile")((options) =>
-          atomic?.isolated === undefined
-            ? Effect.fail(atomicUnavailable("fs:write", options?.directory ?? "../<system-temp>", "makeTempFile"))
-            : temp(options?.directory).pipe(
-              Effect.andThen(atomic.isolated.makeTempFile(normalizeTempOptions(options)))
-            )
-        ),
-        makeTempFileScoped: Effect.fn("FileSystem.makeTempFileScoped")((options) =>
-          atomic?.isolated === undefined
-            ? Effect.fail(atomicUnavailable("fs:write", options?.directory ?? "../<system-temp>", "makeTempFileScoped"))
-            : temp(options?.directory).pipe(
-              Effect.andThen(atomic.isolated.makeTempFileScoped(normalizeTempOptions(options)))
-            )
-        ),
+        }),
+        makeTempDirectory: Effect.fn("FileSystem.makeTempDirectory")((options) => {
+          const captured = snapshotOptions(options)
+          return (
+            atomic?.isolated === undefined
+              ? Effect.fail(
+                atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempDirectory")
+              )
+              : temp(captured?.directory).pipe(
+                Effect.andThen(atomic.isolated.makeTempDirectory(normalizeTempOptions(captured)))
+              )
+          )
+        }),
+        makeTempDirectoryScoped: Effect.fn("FileSystem.makeTempDirectoryScoped")((options) => {
+          const captured = snapshotOptions(options)
+          return (
+            atomic?.isolated === undefined
+              ? Effect.fail(
+                atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempDirectoryScoped")
+              )
+              : temp(captured?.directory).pipe(
+                Effect.andThen(atomic.isolated.makeTempDirectoryScoped(normalizeTempOptions(captured)))
+              )
+          )
+        }),
+        makeTempFile: Effect.fn("FileSystem.makeTempFile")((options) => {
+          const captured = snapshotOptions(options)
+          return (
+            atomic?.isolated === undefined
+              ? Effect.fail(atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempFile"))
+              : temp(captured?.directory).pipe(
+                Effect.andThen(atomic.isolated.makeTempFile(normalizeTempOptions(captured)))
+              )
+          )
+        }),
+        makeTempFileScoped: Effect.fn("FileSystem.makeTempFileScoped")((options) => {
+          const captured = snapshotOptions(options)
+          return (
+            atomic?.isolated === undefined
+              ? Effect.fail(
+                atomicUnavailable("fs:write", captured?.directory ?? "../<system-temp>", "makeTempFileScoped")
+              )
+              : temp(captured?.directory).pipe(
+                Effect.andThen(atomic.isolated.makeTempFileScoped(normalizeTempOptions(captured)))
+              )
+          )
+        }),
         open: Effect.fn("FileSystem.open")((value, options) => {
+          const captured = snapshotOptions(options)
+          const flag = captured?.flag ?? "r"
           const isolated = atomic?.isolated
           return isolated === undefined
             ? Effect.fail(atomicUnavailable("fs:read", value, "open"))
-            : openChecks(value, options?.flag ?? "r").pipe(
-              Effect.andThen(isolated.open(normalize(value), options)),
+            : openChecks(value, flag).pipe(
+              Effect.andThen(isolated.open(normalize(value), captured)),
               // fstat the handle the moment it exists: the authorization the
               // open checks granted binds to THIS resource identity, and every
               // later handle operation verifies the authorized path still
@@ -607,13 +645,14 @@ export const layer: Layer.Layer<
               )
             )
         }),
-        readDirectory: Effect.fn("FileSystem.readDirectory")((value, options) =>
-          atomicOne<Array<string>>("fs:read", value, "readDirectory", {
+        readDirectory: Effect.fn("FileSystem.readDirectory")((value, options) => {
+          const captured = snapshotOptions(options)
+          return atomicOne<Array<string>>("fs:read", value, "readDirectory", {
             operation: "readDirectory",
             path: normalize(value),
-            options
+            options: captured
           })
-        ),
+        }),
         readFile: Effect.fn("FileSystem.readFile")((value) =>
           atomicOne<Uint8Array>("fs:read", value, "readFile", {
             operation: "readFile",
@@ -632,13 +671,14 @@ export const layer: Layer.Layer<
             path: normalize(value)
           })
         ),
-        remove: Effect.fn("FileSystem.remove")((value, options) =>
-          atomicOne<void>("fs:write", value, "remove", {
+        remove: Effect.fn("FileSystem.remove")((value, options) => {
+          const captured = snapshotOptions(options)
+          return atomicOne<void>("fs:write", value, "remove", {
             operation: "remove",
             path: normalize(value),
-            options
+            options: captured
           })
-        ),
+        }),
         rename: Effect.fn("FileSystem.rename")((from, to) =>
           atomicTwo<void>(["fs:write", from], ["fs:write", to], "rename", {
             operation: "rename",
@@ -671,14 +711,16 @@ export const layer: Layer.Layer<
               )
             )()
           ),
-        writeFile: Effect.fn("FileSystem.writeFile")((value, data, options) =>
-          atomicOne<void>("fs:write", value, "writeFile", {
+        writeFile: Effect.fn("FileSystem.writeFile")((value, data, options) => {
+          const captured = snapshotOptions(options)
+          const bytes = data.slice()
+          return atomicOne<void>("fs:write", value, "writeFile", {
             operation: "writeFile",
             path: normalize(value),
-            data: Encoding.encodeBase64(data),
-            options
+            data: Encoding.encodeBase64(bytes),
+            options: captured
           })
-        )
+        })
       }),
       exists: Effect.fn("FileSystem.exists")((value) =>
         atomicOne<boolean>("fs:read", value, "exists", {
@@ -693,35 +735,44 @@ export const layer: Layer.Layer<
           encoding
         })
       ),
-      sink: (value, options) =>
-        Sink.unwrap(
-          Effect.fn("FileSystem.sink")(
-            () =>
+      sink: (value, options) => {
+        const captured = snapshotOptions(options)
+        return (
+          Sink.unwrap(
+            Effect.fn("FileSystem.sink")(
+              () =>
+                Effect.suspend(() =>
+                  atomic?.isolated === undefined
+                    ? Effect.fail(atomicUnavailable("fs:write", value, "sink"))
+                    : write(value).pipe(Effect.map(() => atomic.isolated!.sink(normalize(value), captured)))
+                )
+            )()
+          )
+        )
+      },
+      stream: (value, options) => {
+        const captured = snapshotOptions(options)
+        return (
+          Stream.unwrap(
+            Effect.fn("FileSystem.stream")(() =>
               Effect.suspend(() =>
                 atomic?.isolated === undefined
-                  ? Effect.fail(atomicUnavailable("fs:write", value, "sink"))
-                  : write(value).pipe(Effect.map(() => atomic.isolated!.sink(normalize(value), options)))
+                  ? Effect.fail(atomicUnavailable("fs:read", value, "stream"))
+                  : read(value).pipe(Effect.map(() => atomic.isolated!.stream(normalize(value), captured)))
               )
-          )()
-        ),
-      stream: (value, options) =>
-        Stream.unwrap(
-          Effect.fn("FileSystem.stream")(() =>
-            Effect.suspend(() =>
-              atomic?.isolated === undefined
-                ? Effect.fail(atomicUnavailable("fs:read", value, "stream"))
-                : read(value).pipe(Effect.map(() => atomic.isolated!.stream(normalize(value), options)))
-            )
-          )()
-        ),
-      writeFileString: Effect.fn("FileSystem.writeFileString")((value, data, options) =>
-        atomicOne<void>("fs:write", value, "writeFileString", {
+            )()
+          )
+        )
+      },
+      writeFileString: Effect.fn("FileSystem.writeFileString")((value, data, options) => {
+        const captured = snapshotOptions(options)
+        return atomicOne<void>("fs:write", value, "writeFileString", {
           operation: "writeFileString",
           path: normalize(value),
           data,
-          options
+          options: captured
         })
-      )
+      })
     }
     return guarded
   })

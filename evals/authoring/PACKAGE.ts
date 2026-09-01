@@ -1,6 +1,6 @@
 import { Smithers as S } from "@smthrs/targets"
 
-const fireworksKey = S.Secret("FIREWORKS_API_KEY")
+const fireworksKey = S.HttpSecret(S.Secret("FIREWORKS_API_KEY"), ["https://api.fireworks.ai"])
 
 const srcs = S.Filegroup({
   srcs: [S.file("validate.ts"), S.file("data/pilot-sft.jsonl")]

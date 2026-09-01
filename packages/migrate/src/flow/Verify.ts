@@ -14,6 +14,7 @@
  * @since 0.1.0
  */
 import { Action } from "@smthrs/flow"
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import type * as Path from "effect/Path"
@@ -98,26 +99,29 @@ const one = (
   command: string,
   timeoutMs: number
 ): Effect.Effect<Report.CommandResult, never, ChildProcessSpawner> =>
-  Exec.run(command, { cwd: root, timeoutMs }).pipe(
-    Effect.map((result): Report.CommandResult => ({
-      command,
-      exitCode: result.exitCode,
-      durationMs: result.durationMs,
-      stdoutTail: Exec.tail(result.stdout),
-      stderrTail: Exec.tail(result.stderr)
-    })),
-    // A command that could not start, or that ran out of time, is a failing
-    // command rather than a failing tool: the repair round has to see it.
-    Effect.catch((failure) =>
-      Effect.succeed<Report.CommandResult>({
+  Effect.gen(function*() {
+    const started = yield* Clock.currentTimeMillis
+    return yield* Exec.run(command, { cwd: root, timeoutMs }).pipe(
+      Effect.map((result): Report.CommandResult => ({
         command,
-        exitCode: 124,
-        durationMs: timeoutMs,
-        stdoutTail: "",
-        stderrTail: failure.reason
-      })
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        stdoutTail: Exec.tail(result.stdout),
+        stderrTail: Exec.tail(result.stderr)
+      })),
+      // A command that could not start, or that ran out of time, is a failing
+      // command rather than a failing tool: the repair round has to see it.
+      Effect.catch((failure) =>
+        Effect.map(Clock.currentTimeMillis, (finished): Report.CommandResult => ({
+          command,
+          exitCode: failure.reason === `exceeded ${timeoutMs}ms` ? 124 : 127,
+          durationMs: Math.max(0, finished - started),
+          stdoutTail: "",
+          stderrTail: failure.reason
+        }))
+      )
     )
-  )
+  })
 
 const discoveryResult = (
   root: string,

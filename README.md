@@ -36,7 +36,7 @@ policy.
 You need Node.js 22.19.0 or later. The durable engine runs on Node only.
 
 ```sh
-pnpm add @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108
+pnpm add @smthrs/flow@rc @smthrs/engine@rc effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108 @effect/platform-node-shared@4.0.0-rc.108
 ```
 
 Release candidates publish to the `rc` dist-tag, so the `@rc` suffix is
@@ -45,27 +45,28 @@ required. `latest` still resolves the Smithers 0.x line. Install
 `4.0.0-rc.108`: a project with two Effect instances is unsupported, because
 schema internals are not interoperable between them.
 
-Pin one transitive package as well. `@effect/platform-node@4.0.0-rc.108` asks
-for `@effect/platform-node-shared` `^4.0.0-rc.108`, the registry answers
-`4.0.0-rc.112`, and that version's own peer range demands Effect
-`4.0.0-rc.112`. The install runs, on a single Effect copy, and `npm ls` exits 1
-until you override the range. In `package.json`, for npm and for Bun:
+`@effect/platform-node-shared` is on that line because
+`@effect/platform-node@4.0.0-rc.108` asks for it as `^4.0.0-rc.108`, the
+registry answers `4.0.0-rc.112`, and that version's own peer range demands
+Effect `4.0.0-rc.112`. Naming the package yourself settles the range: npm, Bun,
+and pnpm each then resolve one copy, at `4.0.0-rc.108`.
 
-```json
-{
-  "overrides": {
-    "@effect/platform-node-shared": "4.0.0-rc.108"
-  }
-}
+If you installed without it, `npm ls --all` exits 1 with
+`invalid: "^4.0.0-rc.112"`, while bare `npm ls` exits 0 because the drifted copy
+nests below the depth it prints. Adding the package repairs the tree in place,
+with no reinstall:
+
+```sh
+npm install --save-exact @effect/platform-node-shared@4.0.0-rc.108
 ```
 
-pnpm 11 no longer reads a `pnpm` field from `package.json`. Put the same pin in
-`pnpm-workspace.yaml`:
-
-```yaml
-overrides:
-  "@effect/platform-node-shared": 4.0.0-rc.108
-```
+An `overrides` pin also works, `"@effect/platform-node-shared": "4.0.0-rc.108"`
+under `overrides` in `package.json` for npm and Bun, and under `overrides` in
+`pnpm-workspace.yaml` for pnpm 11, which no longer reads a `pnpm` field from
+`package.json`. It is the heavier route. npm does not reconcile a tree that is
+already on disk when `overrides` changes: it answers `up to date` and leaves the
+drifted copy nested, so an installed project has to delete `node_modules` and
+the lockfile (`package-lock.json` or `bun.lock`) and install again.
 
 The only way to learn a new system is to write programs in it. The first program
 to write is the same as it has always been: print a greeting.
@@ -166,7 +167,7 @@ and the browser example is bundled by a real bundler.
 | `@smthrs/database` | Driver-neutral SQL contract with transactional write retry |
 | `@smthrs/capability` | Capability vocabulary and typed permission failures, shared by the kernel and `@smthrs/jj` |
 | `@smthrs/kernel` | The closed host service list, capability sets, grants, and permission-decorated host services |
-| `@smthrs/crypto` | Injected cryptographic schema transformations |
+| `@smthrs/crypto` | Strict injected and synchronous SHA-256 |
 | `@smthrs/keys` | Canonical flow keys |
 | `@smthrs/plan` | The persisted plan: a keyed action graph, its append-only store, and its diff |
 | `@smthrs/flow` | Flow definitions, actions, durable primitives, retry policy, and the `FlowRuntime` port |

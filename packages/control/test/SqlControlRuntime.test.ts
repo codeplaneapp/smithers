@@ -271,6 +271,27 @@ describe("SqlControlRuntime", () => {
     expect(observed.flows.length).toBeGreaterThan(0)
   })
 
+  it("stamps a submitted principal over the composition's own", async () => {
+    // The durable twin of the memory runtime's precedence. `Control.ts` says
+    // the runtime supplies its own principal when the caller names none, so a
+    // named one wins; the reverse would rename a server-authenticated operator
+    // to whatever the host was composed with.
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const composed = yield* SqlControlRuntime.make({ principal: { id: "composed", kind: "host" } }).pipe(
+          Effect.orDie
+        )
+        const submitted = yield* composed.stampPrincipal({ id: "remote", kind: "bearer", stampedAt: 99 })
+        const unnamed = yield* composed.stampPrincipal()
+        return { submitted, unnamed }
+      }).pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie)
+    )
+
+    expect(observed.submitted).toMatchObject({ id: "remote", kind: "bearer" })
+    expect(observed.submitted.stampedAt).not.toBe(99)
+    expect(observed.unnamed).toMatchObject({ id: "composed", kind: "host" })
+  })
+
   it("records and replays a mutation receipt across runtimes", async () => {
     const observed = await twoOwners((first, second) =>
       Effect.gen(function*() {

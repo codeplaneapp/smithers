@@ -7,6 +7,7 @@
  *
  * @since 1.0.0
  */
+import * as Environment from "../Environment.ts"
 
 /**
  * The public GraphQL endpoint.
@@ -61,7 +62,7 @@ const firstNonEmpty = (candidates: ReadonlyArray<string | undefined>): string | 
  */
 export const resolve = (
   config: LinearConfig = {},
-  env: Readonly<Record<string, string | undefined>> = process.env
+  env: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
 ): ResolvedLinearConfig => ({
   apiKey: firstNonEmpty([config.apiKey, env["SMITHERS_LINEAR_API_KEY"]]),
   webhookSecret: firstNonEmpty([config.webhookSecret, env["SMITHERS_LINEAR_WEBHOOK_SECRET"]]),

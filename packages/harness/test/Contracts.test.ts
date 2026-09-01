@@ -318,7 +318,7 @@ describe("EngineLike", () => {
       Stream.runDrain(service.sealStep({
         request,
         keyMaterial: {
-          version: "flows/key-material/v1",
+          version: "flows/key-material/v2",
           kind: "sealed",
           body: request,
           inputs: [{ _tag: "Literal", value: { contextDigest: "context-digest" } }],

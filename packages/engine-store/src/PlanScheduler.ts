@@ -86,6 +86,7 @@ import * as EngineStoreMetrics from "./EngineStoreMetrics.ts"
 import * as ActionPersistence from "./internal/ActionPersistence.ts"
 import * as FileEnumeration from "./internal/FileEnumeration.ts"
 import * as JournalRecords from "./internal/JournalRecords.ts"
+import { compareText } from "./internal/Ordering.ts"
 import * as Reconciliation from "./Reconciliation.ts"
 import * as Selection from "./Selection.ts"
 import * as StepBoundary from "./StepBoundary.ts"
@@ -430,6 +431,20 @@ type CoordinatorEvent =
 const storeFailure = (message: string) => (cause: unknown) =>
   new SchedulerError({ code: "store_failed", message, cause })
 
+const positiveSafeInteger = (name: string, value: number): number => {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new RangeError(`${name} must be a positive safe integer`)
+  }
+  return value
+}
+
+const nonNegativeSafeInteger = (name: string, value: number): number => {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`${name} must be a non-negative safe integer`)
+  }
+  return value
+}
+
 /**
  * Constructs a scheduler bound to one run.
  *
@@ -438,12 +453,9 @@ const storeFailure = (message: string) => (cause: unknown) =>
  * @slop
  */
 export const make = (options: Options): Service => {
-  const rebaseLimit = options.rebaseLimit ?? 3
-  // A cap below one is not admission control, it is a stop: no node could ever
-  // acquire a permit, so ready work would wait forever. Both caps therefore
-  // floor at one — the scheduler narrows latency, never liveness.
-  const stepCap = Math.max(1, options.concurrency?.steps ?? Number.MAX_SAFE_INTEGER)
-  const agentCap = Math.max(1, options.concurrency?.agents ?? Number.MAX_SAFE_INTEGER)
+  const rebaseLimit = nonNegativeSafeInteger("rebaseLimit", options.rebaseLimit ?? 3)
+  const stepCap = positiveSafeInteger("concurrency.steps", options.concurrency?.steps ?? Number.MAX_SAFE_INTEGER)
+  const agentCap = positiveSafeInteger("concurrency.agents", options.concurrency?.agents ?? Number.MAX_SAFE_INTEGER)
 
   // Every scheduler record addresses the run's root lineage, so a frame can
   // reach it (`docs/specs/Concepts/Time Travel.md`).
@@ -466,6 +478,11 @@ export const make = (options: Options): Service => {
       )
     )
 
+  const atomically = <A, E, R>(message: string, effect: Effect.Effect<A, E, R>) =>
+    Effect.flatMap(Journal.Journal, (journal) => journal.transact(effect)).pipe(
+      Effect.mapError((error) => error instanceof SchedulerError ? error : storeFailure(message)(error))
+    )
+
   const record: Service["record"] = Effect.fn("PlanScheduler.record")((plan) =>
     Effect.gen(function*() {
       yield* Effect.annotateCurrentSpan({
@@ -476,17 +493,25 @@ export const make = (options: Options): Service => {
       })
       const store = yield* PlanStore.PlanStore
       const now = yield* Clock.currentTimeMillis
-      const outcome = yield* store.record(plan, now).pipe(Effect.mapError(storeFailure("could not record the plan")))
+      const outcome = yield* atomically(
+        "could not atomically record the plan",
+        Effect.gen(function*() {
+          const recorded = yield* store.record(plan, now).pipe(
+            Effect.mapError(storeFailure("could not record the plan"))
+          )
+          yield* emit(JournalRecords.planRecorded(source(`plan/${plan.planId}`), {
+            planId: plan.planId,
+            flow: plan.flow,
+            digest: plan.digest,
+            baseDigest: plan.baseDigest,
+            generation: plan.generation,
+            nodes: plan.nodes.length,
+            outcome: recorded._tag
+          }))
+          return recorded
+        })
+      )
       yield* Effect.annotateCurrentSpan({ outcome: outcome._tag })
-      yield* emit(JournalRecords.planRecorded(source(`plan/${plan.planId}`), {
-        planId: plan.planId,
-        flow: plan.flow,
-        digest: plan.digest,
-        baseDigest: plan.baseDigest,
-        generation: plan.generation,
-        nodes: plan.nodes.length,
-        outcome: outcome._tag
-      }))
       return outcome
     })
   )
@@ -500,15 +525,20 @@ export const make = (options: Options): Service => {
         generation: plan.generation
       })
       const store = yield* PlanStore.PlanStore
-      yield* store.append(plan).pipe(Effect.mapError(storeFailure("could not append the subgraph")))
+      yield* atomically(
+        "could not atomically append the subgraph",
+        Effect.gen(function*() {
+          yield* store.append(plan).pipe(Effect.mapError(storeFailure("could not append the subgraph")))
+          yield* emit(JournalRecords.subgraphAppended(source(`plan/${plan.planId}/${plan.generation}`), {
+            planId: plan.planId,
+            digest: plan.digest,
+            baseDigest: plan.baseDigest,
+            generation: plan.generation,
+            nodeIds: Plan.generationNodes(plan).map((node) => node.id)
+          }))
+        })
+      )
       yield* Effect.annotateCurrentSpan({ outcome: "appended" })
-      yield* emit(JournalRecords.subgraphAppended(source(`plan/${plan.planId}/${plan.generation}`), {
-        planId: plan.planId,
-        digest: plan.digest,
-        baseDigest: plan.baseDigest,
-        generation: plan.generation,
-        nodeIds: Plan.generationNodes(plan).map((node) => node.id)
-      }))
     })
   )
 
@@ -767,7 +797,7 @@ export const make = (options: Options): Service => {
             for (const entry of prepared.readSnapshot) measured.set(entry.path, entry.digest)
           }
           return {
-            readSet: [...measured].sort(([left], [right]) => left.localeCompare(right)).map(([path, digest]) => ({
+            readSet: [...measured].sort(([left], [right]) => compareText(left, right)).map(([path, digest]) => ({
               path,
               digest
             })),
@@ -828,22 +858,31 @@ export const make = (options: Options): Service => {
       const runtimeStrategyOf = (node: Plan.PlanNode): Plan.RuntimeStrategy =>
         node.conflicts.some((conflict) => conflict.runtime === "stop-merge") ? "stop-merge" : node.runtime
 
-      const settle = (node: Plan.PlanNode, outcome: Outcome) =>
+      const markSettled = (node: Plan.PlanNode, outcome: Outcome): void => {
+        const state = stateOf(node)
+        state.status = "settled"
+        state.outcome = outcome
+      }
+
+      const emitSettlement = (node: Plan.PlanNode) =>
         Effect.gen(function*() {
           const state = stateOf(node)
-          state.status = "settled"
-          state.outcome = outcome
           yield* emit(JournalRecords.nodeSettled(source(`node/${node.id}/settled`), {
             planId: plan.planId,
             nodeId: node.id,
             planKey: node.key,
             dispatchKey: state.dispatchKey,
-            outcome,
+            outcome: state.outcome,
             attempts: state.attempts,
             rebases: state.rebases
           }))
-          yield* Metric.update(EngineStoreMetrics.node[outcome], 1)
+          yield* Metric.update(EngineStoreMetrics.node[state.outcome], 1)
         })
+
+      const settle = (node: Plan.PlanNode, outcome: Outcome) => {
+        markSettled(node, outcome)
+        return emitSettlement(node)
+      }
 
       const applyVerdict = (nodeId: string, verdict: Reconciliation.Verdict, trigger: string) =>
         Effect.gen(function*() {
@@ -991,7 +1030,7 @@ export const make = (options: Options): Service => {
             id: mergeId,
             kind: "merge",
             material: {
-              version: "flows/key-material/v1",
+              version: "flows/key-material/v2",
               kind: "sealed",
               body: { merge: { stopped: node.id, winners } },
               inputs: winners.map((id) => ({ _tag: "Pending" as const, from: id })),
@@ -1112,7 +1151,10 @@ export const make = (options: Options): Service => {
             // record arrived first, or is being durably replayed into an
             // all-clean invocation — preserve first dispatch order.
             const nodeId = nodeIds.find((candidate) => states.get(candidate)!.outcome === "built") ?? nodeIds[0]!
-            const signature = [...payload.value.paths].sort().join(" ")
+            const signature = JSON.stringify([
+              "expected-set-deviation/v1",
+              [...new Set(payload.value.paths)].sort(compareText)
+            ])
             deviationSignatures.set(nodeId, signature)
             attributed.push({ nodeId, signature, payload: payload.value })
           }
@@ -1381,14 +1423,14 @@ export const make = (options: Options): Service => {
             case "built":
             case "clean":
               results.set(node.id, result.result)
-              yield* settle(node, result.outcome)
+              markSettled(node, result.outcome)
               break
             case "failed":
-              yield* settle(node, "failed")
+              markSettled(node, "failed")
               break
             case "conflicted": {
               if (result.strategy === "stop-merge") {
-                yield* settle(node, "skipped")
+                markSettled(node, "skipped")
                 // The former dispatch barrier guaranteed that every
                 // conflicting sibling admitted beside this node had reported
                 // its result before `appendMerge` selected winners. Preserve
@@ -1410,7 +1452,7 @@ export const make = (options: Options): Service => {
                 strategy: result.strategy,
                 conflictsWith: node.conflicts.map((conflict) => conflict.with)
               })
-              yield* settle(node, "failed")
+              markSettled(node, "failed")
               yield* applyVerdict(node.id, verdict, "materialization-conflict")
               break
             }
@@ -1421,6 +1463,10 @@ export const make = (options: Options): Service => {
           // The dispatch durably journalled every deviation before its event.
           // Apply those verdicts before consulting downstream readiness.
           yield* drainDeviations
+          // A dispatch outcome is provisional until its deviations have been
+          // reconciled. Persist exactly one terminal fact, after a Fail
+          // verdict has had the chance to replace built with failed.
+          yield* emitSettlement(node)
           // Process terminal events already observed by the journal drain
           // before opening more permits. This preserves fail-fast behavior for
           // an already-failed sibling while still admitting immediately when

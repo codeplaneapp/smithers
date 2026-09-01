@@ -163,7 +163,7 @@ describe("Action.idempotencyKey", () => {
 })
 
 describe("Action infrastructure-interrupt retry", () => {
-  effect("exhausting the interrupt policy dies rather than failing", () => {
+  effect("exhaustion dies with the action, real attempt count, and final interrupt", () => {
     let attempts = 0
     const action = Action.make({
       name: "Gaps/infra",
@@ -179,7 +179,20 @@ describe("Action infrastructure-interrupt retry", () => {
     return Effect.gen(function*() {
       const exit = yield* Host.execute({ id: "infra" }).pipe(Effect.exit)
       expect(Exit.isFailure(exit)).toBe(true)
-      expect(JSON.stringify(exit)).toContain("infrastructure interrupt retry attempts exhausted")
+      if (Exit.isFailure(exit)) {
+        const defect = exit.cause.reasons.find(Cause.isDieReason)?.defect
+        expect(defect).toMatchObject({
+          _tag: "@smthrs/flow/InfraInterruptRetriesExhausted",
+          code: "infra_interrupt_retries_exhausted",
+          actionName: "Gaps/infra",
+          attempts: 3,
+          interrupt: {
+            _tag: "@smthrs/flow/InfraInterrupt",
+            code: "infra_interrupt",
+            reason: "host lost"
+          }
+        })
+      }
       expect(attempts).toBe(3)
     }).pipe(Effect.provide(layer))
   })

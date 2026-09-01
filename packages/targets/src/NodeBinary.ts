@@ -37,7 +37,7 @@ export const Attrs = Schema.Struct({
   entry: Input.File,
   args: Schema.Array(Schema.NonEmptyString).check(Schema.isMaxLength(NodeTest.maximumArguments)),
   srcs: Schema.Array(Input.Declared),
-  deps: Schema.Array(Target.Target),
+  deps: Schema.Array(Target.Dependency),
   env: Schema.Record(Schema.String, Schema.String).pipe(
     Schema.withConstructorDefault(Effect.succeed({}))
   ),

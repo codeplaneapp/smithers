@@ -29,8 +29,7 @@ import type { WaitingAnnotation } from "./WaitingAnnotation.ts"
  * contract; a runtime — `@smthrs/engine` — constructs the value.
  *
  * @category services
- * @since 4.0.0
- * @slop
+ * @since 0.1.0
  */
 export class FlowInstance extends Context.Service<
   FlowInstance,
@@ -102,9 +101,12 @@ export class FlowInstance extends Context.Service<
     cause: Cause.Cause<never> | undefined
 
     /**
-     * Deferred names registered before their result read. Runtimes use this
-     * set to preempt a suspension when completion lands in the read-to-park
-     * window. Older runtime implementations may initialize it lazily.
+     * Deferred names registered before their result read.
+     *
+     * No runtime shipped in this repository reads this set. It is reserved for
+     * a runtime that wants to preempt a suspension when completion lands in the
+     * read-to-park window. Today a completion wakes a parked run through
+     * `FlowRuntime.resume`.
      */
     awaitedDeferreds?: Set<string> | undefined
 

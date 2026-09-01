@@ -3,7 +3,7 @@
 /**
  * Durable actions, identity, boundaries, retries, and runtime context.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 export * from "./Action.ts"
 export * from "./BoundaryMode.ts"

@@ -1,3 +1,4 @@
+import * as PersistedPlan from "@smthrs/plan/Plan"
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import * as ControlSchema from "../src/ControlSchema.ts"
@@ -5,6 +6,8 @@ import * as ControlSchema from "../src/ControlSchema.ts"
 const roundTrip = <A>(schema: Schema.Codec<A, unknown, never, never>, value: A): void => {
   expect(Schema.decodeUnknownSync(schema)(Schema.encodeSync(schema)(value))).toEqual(value)
 }
+
+const storedKey = Schema.decodeUnknownSync(PersistedPlan.KeyDigest)
 
 describe("ControlSchema", () => {
   it("round-trips a plan card", () => {
@@ -24,17 +27,17 @@ describe("ControlSchema", () => {
         planId: "plan-1",
         flow: "review/pull-request",
         generation: 0,
-        baseDigest: "key1_11b2e91c473a67599d8110873b2a08150496946e0c0da82bfc56ffbe28df02f6",
-        digest: "key1_11b2e91c473a67599d8110873b2a08150496946e0c0da82bfc56ffbe28df02f6",
+        baseDigest: storedKey("key1_11b2e91c473a67599d8110873b2a08150496946e0c0da82bfc56ffbe28df02f6"),
+        digest: storedKey("key1_11b2e91c473a67599d8110873b2a08150496946e0c0da82bfc56ffbe28df02f6"),
         nodes: []
       },
       nodes: [
         {
           id: "read-pr",
-          key: "key1_11b2e91c473a67599d8110873b2a08150496946e0c0da82bfc56ffbe28df02f6",
+          key: storedKey("key1_11b2e91c473a67599d8110873b2a08150496946e0c0da82bfc56ffbe28df02f6"),
           kind: "agent",
           material: {
-            version: "flows/key-material/v1",
+            version: "flows/key-material/v2",
             kind: "sealed",
             body: { activity: "read-pr" },
             inputs: [],
@@ -52,10 +55,10 @@ describe("ControlSchema", () => {
         },
         {
           id: "propose-patch",
-          key: "key1_145095f202f310b317aa8ff75dd2244751fb12e723816e3d399d351a83be5693",
+          key: storedKey("key1_145095f202f310b317aa8ff75dd2244751fb12e723816e3d399d351a83be5693"),
           kind: "agent",
           material: {
-            version: "flows/key-material/v1",
+            version: "flows/key-material/v2",
             kind: "sealed",
             body: { activity: "propose-patch" },
             inputs: [],

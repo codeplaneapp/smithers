@@ -78,13 +78,14 @@ const miseVersion = async (root: string, config: unknown, name: string): Promise
 export const resolveMiseBin = async (
   root: string,
   workspace: WorkspaceDeclaration.WorkspaceDeclaration,
-  name: string
+  name: string,
+  environment: Readonly<Record<string, string | undefined>>
 ): Promise<ResolvedTool> => {
   const mise = toolchainsOf(workspace).find((entry) => entry["_tag"] === "Mise")
   const config = mise?.["config"]
   const authority = await digestDeclared(root, config)
   const pinned = await miseVersion(root, config, name)
-  const path = PackageTree.findOnPath("mise")
+  const path = PackageTree.findOnPath("mise", environment)
   const identity = { tag: "MiseBin", name, authority, pinned }
   if (mise === undefined) {
     return {
@@ -102,7 +103,7 @@ export const resolveMiseBin = async (
       identity: { ...identity, absent: true }
     }
   }
-  const probe = await PackageTree.probeVersion(path)
+  const probe = await PackageTree.probeVersion(path, { environment })
   return {
     ok: true,
     path,
@@ -110,10 +111,12 @@ export const resolveMiseBin = async (
   }
 }
 
-const resolveForge = async (): Promise<ResolvedTool> => {
-  const candidates = PackageTree.findAllOnPath("forge")
+const resolveForge = async (
+  environment: Readonly<Record<string, string | undefined>>
+): Promise<ResolvedTool> => {
+  const candidates = PackageTree.findAllOnPath("forge", environment)
   for (const path of candidates) {
-    const probe = await PackageTree.probeVersion(path)
+    const probe = await PackageTree.probeVersion(path, { environment })
     if (/^forge Version:/m.test(probe.output)) {
       return { ok: true, path, identity: { tag: "FoundryForge", path, probe } }
     }
@@ -154,12 +157,13 @@ export const plan = async (options: {
   readonly workspace: WorkspaceDeclaration.WorkspaceDeclaration
   readonly rule: "Foundry.Build" | "Foundry.Test" | "Foundry.Fmt"
   readonly mode: "execute" | "check" | "write"
+  readonly environment?: Readonly<Record<string, string | undefined>> | undefined
   readonly attrs:
     | (typeof Foundry.BuildAttrs)["Type"]
     | (typeof Foundry.TestAttrs)["Type"]
     | (typeof Foundry.FmtAttrs)["Type"]
 }): Promise<Plan> => {
-  const resolved = await resolveForge()
+  const resolved = await resolveForge(options.environment ?? process.env)
   const foundry = toolchainsOf(options.workspace).find((entry) => entry["_tag"] === "FoundryToolchain")
   const configValue = (options.attrs as { readonly config?: unknown }).config ?? foundry?.["config"]
   const configAuthority = await digestDeclared(

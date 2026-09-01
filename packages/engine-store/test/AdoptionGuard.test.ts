@@ -24,6 +24,7 @@
  * exact retry the journal collapses into a `Duplicate`.
  */
 import { describe, expect, it } from "@effect/vitest"
+import { FlowEngine } from "@smthrs/engine"
 import { Journal } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
 import { AttemptStore, type Ownership, RunStore } from "@smthrs/run-store"
@@ -255,6 +256,64 @@ describe("adopted compensable attempts restore their own pre-image (issue #87)",
       }
     }))
 
+  it.effect("settles a completed compensable crossing from the row instead of restoring and re-running", () =>
+    Effect.gen(function*() {
+      // The pre-image exists to undo a PARTIAL mutation. A crossing that
+      // recorded `succeeded` completed, so the workspace already holds the
+      // whole mutation and the recorded outcome is its result: restoring the
+      // pre-image here would throw finished work away and run the body again.
+      const calls: Array<{ readonly op: string; readonly id?: string }> = []
+      let dispatches = 0
+      const key = "adoption/compensable-crossed"
+      const result = yield* withCrypto(
+        Effect.gen(function*() {
+          yield* activate("adoption-crossed")
+          const attempts = yield* AttemptStore.AttemptStore
+          yield* attempts.put(
+            {
+              runId: "adoption-crossed",
+              stepKeyDigest: sha256(key),
+              attempt: 1,
+              state: "running",
+              startedAtMs: 0,
+              outcome: "rebased",
+              meta: {
+                tier: "compensable",
+                snapshotId: "pre-image",
+                admittedBy: deadOwner,
+                effectCrossing: "succeeded"
+              }
+            },
+            owner
+          )
+          const outcome = yield* ActionPersistence.make({
+            runId: "adoption-crossed",
+            owner,
+            sourceId: "adoption-test",
+            execute: () =>
+              Effect.sync(() => {
+                dispatches++
+                return "must-not-run"
+              })
+          })({ action: {}, attempt: 1, key, tier: "compensable" })
+          const row = yield* attempts.get({
+            runId: "adoption-crossed",
+            stepKeyDigest: sha256(key),
+            attempt: 1
+          })
+          return { outcome, row }
+        }).pipe(Effect.provide(layers(calls)), Effect.scoped)
+      )
+      expect(dispatches).toBe(0)
+      expect(result.outcome).toBe("rebased")
+      expect(calls).toEqual([])
+      const row = Option.getOrThrow(result.row)
+      expect(row.state).toBe("succeeded")
+      // The tier-2 anchor the dead incarnation recorded survives the
+      // settlement, so a later rewind still has a pointer to restore against.
+      expect((row.meta as { readonly snapshotId?: string }).snapshotId).toBe("pre-image")
+    }))
+
   it.effect("persists the pre-image into the running row before executing the body", () =>
     Effect.gen(function*() {
       const calls: Array<{ readonly op: string; readonly id?: string }> = []
@@ -317,7 +376,7 @@ describe("adoption re-emissions are producer-idempotent (issue #91)", () => {
             JournalRecords.attemptStarted(
               {
                 runId: "adoption-dedupe",
-                lineageId: "adoption-dedupe/root",
+                lineageId: FlowEngine.Lineage.root("adoption-dedupe"),
                 sourceId: `adoption-test:attempt:${digest}:1:started`,
                 sourceSeq: 0
               },
@@ -329,7 +388,7 @@ describe("adoption re-emissions are producer-idempotent (issue #91)", () => {
             JournalRecords.snapshotIdentified(
               {
                 runId: "adoption-dedupe",
-                lineageId: "adoption-dedupe/root",
+                lineageId: FlowEngine.Lineage.root("adoption-dedupe"),
                 sourceId: `adoption-test:attempt:${digest}:1:snapshot`,
                 sourceSeq: 0
               },

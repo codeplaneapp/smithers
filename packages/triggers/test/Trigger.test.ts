@@ -32,4 +32,27 @@ describe("Trigger", () => {
     expect(schedule.code).toBe("invalid_schedule")
     expect(trigger.code).toBe("invalid_trigger")
   })
+
+  // February 30 passes every field range check and never arrives. Refusing it
+  // here is what keeps the scheduler's occurrence search from exhausting its
+  // bound on a tick, which is a defect the supervising fiber cannot recover.
+  it("refuses a declared cron the calendar never satisfies", async () => {
+    const schedule = await Effect.runPromise(
+      Effect.flip(Schedule.make({ cron: "0 0 30 2 *", maxCatchUp: 0 }))
+    )
+    const trigger = await Effect.runPromise(
+      Effect.flip(
+        Trigger.make({
+          id: "february-30",
+          flowId: "flow",
+          input: {},
+          cron: "0 0 30 2 *",
+          maxCatchUp: 0,
+          enabled: true
+        })
+      )
+    )
+    expect(schedule.code).toBe("unsatisfiable_cron")
+    expect(trigger.code).toBe("unsatisfiable_cron")
+  })
 })

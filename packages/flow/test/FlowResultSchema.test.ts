@@ -19,6 +19,8 @@ const ResultSchema = Flow.Result({
   error: Schema.String
 })
 
+const resultMarker = "@smthrs/flow/Flow/Result"
+
 describe("Flow.Complete.Schema", () => {
   effect("decodes a completed success exit into a Complete result", () =>
     Effect.gen(function*() {
@@ -89,5 +91,51 @@ describe("Flow.Result round trips", () => {
     expect(Flow.isResult({ _tag: "Complete" })).toBe(false)
     expect(Flow.isResult("Complete")).toBe(false)
     return Effect.void
+  })
+})
+
+describe("Flow.isResult", () => {
+  it("rejects an own marker with the wrong value", () => {
+    expect(Flow.isResult({ [resultMarker]: false, _tag: "Complete" })).toBe(false)
+  })
+
+  it("rejects an inherited marker", () => {
+    const inherited = Object.assign(Object.create({ [resultMarker]: resultMarker }) as object, {
+      _tag: "Complete"
+    })
+    expect(Flow.isResult(inherited)).toBe(false)
+  })
+
+  it("does not invoke a marker getter", () => {
+    let reads = 0
+    const getterBacked = { _tag: "Complete" }
+    Object.defineProperty(getterBacked, resultMarker, {
+      get: () => {
+        reads++
+        return resultMarker
+      }
+    })
+
+    expect(Flow.isResult(getterBacked)).toBe(false)
+    expect(reads).toBe(0)
+  })
+
+  it("rejects a valid marker with a missing, accessor, or unknown tag", () => {
+    const missing = { [resultMarker]: resultMarker }
+    const accessor = { [resultMarker]: resultMarker }
+    Object.defineProperty(accessor, "_tag", { get: () => "Complete" })
+    const unknown = { [resultMarker]: resultMarker, _tag: "Unknown" }
+
+    expect(Flow.isResult(missing)).toBe(false)
+    expect(Flow.isResult(accessor)).toBe(false)
+    expect(Flow.isResult(unknown)).toBe(false)
+  })
+
+  it("accepts all three real result shapes", () => {
+    expect([
+      new Flow.Complete({ exit: Exit.succeed(1) }),
+      new Flow.Suspended(),
+      new Flow.Handoff({ flow: "next", payload: { value: 1 } })
+    ].every(Flow.isResult)).toBe(true)
   })
 })

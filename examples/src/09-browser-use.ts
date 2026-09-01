@@ -17,7 +17,7 @@
  */
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
-import { Key } from "@smthrs/keys"
+import { deriveKey } from "@smthrs/keys"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -56,7 +56,7 @@ export interface Summary {
 export const main: Effect.Effect<Summary, never, Crypto.Crypto> = Effect.gen(function*() {
   const result = yield* Compile.execute({ target: "web" })
 
-  const key = yield* Schema.decodeUnknownEffect(Key)({
+  const key = yield* deriveKey({
     body: "examples/compile/v1",
     target: "web"
   })

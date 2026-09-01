@@ -19,7 +19,6 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category schemas
  * @since 0.1.0
- * @slop
  */
 export const Approved = Schema.Literal("approved")
 
@@ -28,7 +27,6 @@ export const Approved = Schema.Literal("approved")
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Approved = typeof Approved.Type
 
@@ -37,12 +35,21 @@ export type Approved = typeof Approved.Type
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Options {
   readonly reason: string
+  /**
+   * Called with `{ input, reason, scope }`; its declared input must be that
+   * struct or `Schema.Unknown`. `scope` is currently the string `"run"`.
+   */
   readonly approval: Flow.Any
 }
+
+const ApprovalInput = Schema.Struct({
+  input: Schema.Unknown,
+  reason: Schema.String,
+  scope: Schema.String
+})
 
 const declaration = (inner: Flow.Any, options: Options): Flow.Any => {
   if (options.reason.trim().length === 0) {
@@ -52,7 +59,7 @@ const declaration = (inner: Flow.Any, options: Options): Flow.Any => {
     })
   }
   const approval = Pattern.bind(
-    Pattern.slot({ input: Schema.Unknown, output: Approved }),
+    Pattern.slot({ input: ApprovalInput, output: Approved }),
     options.approval
   )
   const details = Compose.details(inner)
@@ -81,7 +88,6 @@ const declaration = (inner: Flow.Any, options: Options): Flow.Any => {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: Options): Pattern.Decorator => (inner) => declaration(inner, options)
 
@@ -93,6 +99,5 @@ export const make = (options: Options): Pattern.Decorator => (inner) => declarat
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const withApproval = (inner: Flow.Any, options: Options): Flow.Any => Pattern.decorate(inner, make(options))

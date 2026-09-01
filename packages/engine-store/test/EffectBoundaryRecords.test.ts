@@ -7,6 +7,7 @@
  * `@smthrs/time-travel` reads them under.
  */
 import { describe, expect, it } from "@effect/vitest"
+import { FlowEngine } from "@smthrs/engine"
 import { Journal } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
 import { type Ownership, RunStore } from "@smthrs/run-store"
@@ -91,7 +92,7 @@ describe("effect-boundary records", () => {
           tier: "irreversible",
           status: "intended",
           runId: "boundary-ok",
-          lineageId: "boundary-ok/root",
+          lineageId: FlowEngine.Lineage.root("boundary-ok"),
           attempt: 1,
           durableBoundary: true,
           providerStream: false,
@@ -103,7 +104,7 @@ describe("effect-boundary records", () => {
           tier: "irreversible",
           status: "succeeded",
           runId: "boundary-ok",
-          lineageId: "boundary-ok/root",
+          lineageId: FlowEngine.Lineage.root("boundary-ok"),
           attempt: 1,
           durableBoundary: true,
           providerStream: false,

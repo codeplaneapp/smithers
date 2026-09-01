@@ -48,7 +48,9 @@ describe("BrowserJj", () => {
         [jj.diff("a", "b"), "jj diff"],
         [jj.workspaceAdd("lane", "/tmp/lane"), "jj workspace add"],
         [jj.workspaceForget("lane"), "jj workspace forget"],
-        [jj.status(), "jj status"]
+        [jj.status(), "jj status"],
+        [jj.root!("/tmp"), "jj root"],
+        [jj.revert!("abc"), "jj revert"]
       ]
 
       for (const [effect, command] of calls) {

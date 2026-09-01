@@ -14,6 +14,7 @@ import * as Target from "@smthrs/targets/Target"
 import { Cli, z } from "incur"
 import * as NodePath from "node:path"
 import * as Ansi from "./Ansi.ts"
+import { normalizePublishNamespace } from "./Cache.ts"
 import * as CreateApp from "./CreateApp.ts"
 import * as Diagnostic from "./Diagnostic.ts"
 import { runInstall } from "./engine.ts"
@@ -29,9 +30,10 @@ import * as Query from "./Query.ts"
 import * as RepoResolution from "./RepoResolution.ts"
 import * as Reporter from "./Reporter.ts"
 import {
+  credentialEnvNames,
   ensureGitignored,
+  type RemoteCacheAccess,
   resolveConfig,
-  type ResolvedRemoteCache,
   resolveRemoteCache,
   Workspace
 } from "./Workspace.ts"
@@ -121,7 +123,7 @@ export interface RuntimeConfig {
 interface PreparedWorkspace {
   readonly root: string
   readonly cacheDirectory: string
-  readonly remoteCache?: (ResolvedRemoteCache & { readonly token?: string | undefined }) | undefined
+  readonly remoteCache?: RemoteCacheAccess | undefined
 }
 
 /** The slice of an incur command context the presentation helpers read. */
@@ -140,6 +142,20 @@ type ErrorResult = (options: {
 }) => never
 
 const environmentOf = (config: RuntimeConfig): Ansi.Environment => config.environment ?? process.env
+
+/**
+ * The trust domain this process publishes cache results into.
+ *
+ * Which domain a job belongs to is a property of the job, not of the workspace
+ * it builds, so it comes from the environment rather than from BUILD.ts. An
+ * unset value means the trusted domain, which is what a post-merge build has.
+ */
+const publishNamespaceOf = (config: RuntimeConfig): string | undefined => {
+  const declared = environmentOf(config)["SMITHERS_CACHE_NAMESPACE"]?.trim()
+  return declared === undefined || declared === ""
+    ? undefined
+    : normalizePublishNamespace(declared, "SMITHERS_CACHE_NAMESPACE")
+}
 
 const terminalsOf = (
   config: RuntimeConfig
@@ -194,7 +210,8 @@ const present = <A>(
  * the declared gitignore policy before writing state; query, graph, and plan
  * commands pass `writeState = false` and remain observational.
  *
- * Reading the declared token from the environment is a read, never a write.
+ * The declared token is not read here. The cache transport receives a reader
+ * and invokes it only while constructing an outbound request.
  * Removing the name from `process.env` here would mutate state the caller
  * owns: `makeCli` is a library entry point, and two concurrent commands with
  * different declared token names would delete each other's credentials. The
@@ -216,10 +233,25 @@ const prepare = async (
   const remoteCache = await resolveRemoteCache(root, runtime.cacheUrl)
   let preparedRemote: PreparedWorkspace["remoteCache"]
   if (remoteCache !== undefined) {
-    const token = remoteCache.tokenEnv === "SMITHERS_CACHE_TOKEN"
-      ? runtime.cacheToken ?? process.env[remoteCache.tokenEnv]
-      : process.env[remoteCache.tokenEnv]
-    preparedRemote = { ...remoteCache, token }
+    // The process entry point captures and clears the default name, so its
+    // value arrives as `cacheToken`; every other declared name is read from
+    // the environment at the instant a request is built.
+    const tokenAt = (name: string) => (): string | undefined =>
+      name === "SMITHERS_CACHE_TOKEN"
+        ? runtime.cacheToken ?? environmentOf(runtime)[name]
+        : environmentOf(runtime)[name]
+    const credentials = remoteCache.credentials
+    const readToken = tokenAt(
+      credentials._tag === "shared" ? credentials.tokenEnv : credentials.readTokenEnv
+    )
+    preparedRemote = {
+      ...remoteCache,
+      readToken,
+      // One declared credential authenticates both directions, which is the
+      // posture every deployment had before the split existed.
+      writeToken: credentials._tag === "shared" ? readToken : tokenAt(credentials.writeTokenEnv),
+      publishNamespace: publishNamespaceOf(runtime)
+    }
   }
   if (writeState && config.gitignored) await ensureGitignored(root, config.cacheDirectory)
   runtime.signal?.throwIfAborted()
@@ -645,7 +677,7 @@ export const makeCli = (config: RuntimeConfig = {}) =>
             cacheDirectory: prepared.cacheDirectory,
             sensitiveEnvironment: prepared.remoteCache === undefined
               ? []
-              : [prepared.remoteCache.tokenEnv],
+              : credentialEnvNames(prepared.remoteCache.credentials),
             signal: config.signal
           })
         } catch (cause) {

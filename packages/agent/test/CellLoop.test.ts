@@ -31,7 +31,10 @@ import * as Checkpoints from "@smthrs/std/Checkpoints"
 import { Cause, Deferred, Effect, Exit, Layer, Option, Schema, Scope, Stream } from "effect"
 import type * as Crypto from "effect/Crypto"
 import { describe, expect, it } from "vitest"
+import type * as Budget from "../src/Budget.ts"
 import * as FlowEngineLike from "../src/FlowEngineLike.ts"
+import type * as QuotaPolicy from "../src/QuotaPolicy.ts"
+import * as Safety from "./Safety.ts"
 
 const prepared: Route.PreparedRequest = {
   routeId: "route-a",
@@ -203,7 +206,15 @@ const awaitParked = (
   })
 
 const drive = <A, E>(
-  body: Effect.Effect<A, E, Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance>,
+  body: Effect.Effect<
+    A,
+    E,
+    | Crypto.Crypto
+    | FlowRuntime.FlowRuntime
+    | FlowRuntime.FlowInstance
+    | Budget.Budget
+    | QuotaPolicy.QuotaClassifier
+  >,
   options: { readonly resume?: boolean } = {}
 ): Promise<Outcome> =>
   Effect.gen(function*() {
@@ -224,7 +235,11 @@ const drive = <A, E>(
     settled = Deferred.makeUnsafe<Outcome>()
     yield* engine.resume(flow, "exec-1")
     return yield* Deferred.await(settled)
-  }).pipe(Effect.provide(Layer.merge(FlowEngine.layerMemory, NodeCrypto.layer)), Effect.scoped, Effect.runPromise)
+  }).pipe(
+    Effect.provide(Layer.mergeAll(FlowEngine.layerMemory, NodeCrypto.layer, Safety.layer)),
+    Effect.scoped,
+    Effect.runPromise
+  )
 
 /** Runs the cell loop as the body of one real durable flow execution. */
 const loop = (options: {
@@ -243,7 +258,7 @@ const loop = (options: {
       Effect.provideService(EngineLike.EngineLike, port)
     )
     return events.map((event) => event._tag)
-  })
+  }).pipe(Effect.provide(Safety.layer))
 
 describe("the cell loop on the durable engine", () => {
   it("runs each call in a cell as its own keyed activity, not one opaque cell activity", async () => {
@@ -321,7 +336,8 @@ describe("the cell loop on the durable engine", () => {
           seatChanges: [],
           activatedToolNames: [],
           remaining: Steering.empty(),
-          queued: false
+          queued: false,
+          duplicate: false
         }).pipe(Effect.tap(() => Effect.sync(() => drains.push(input.boundary))))
     })
     const executed: Array<string> = []

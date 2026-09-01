@@ -94,7 +94,13 @@ export const locate = (content: string, needle: string): ReadonlyArray<Located> 
       if (needle[index] === "\n") endLine++
     }
     found.push({ start: cursor, end: cursor + needle.length, startLine, endLine })
-    cursor = content.indexOf(needle, cursor + 1)
+    // Resume past the match, not one byte into it. A caller replaces these spans
+    // in order, so overlapping occurrences are not separately replaceable: in
+    // "aaa" the anchor "aa" is reported once, because consuming the first
+    // occurrence leaves no second one. Scanning by one byte instead reported
+    // both, and the splice wrote the replacement over bytes the first span
+    // already owned.
+    cursor = content.indexOf(needle, cursor + needle.length)
   }
   return found
 }

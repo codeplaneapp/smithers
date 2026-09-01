@@ -125,6 +125,102 @@ describe("in-memory durable state ordering", () => {
       // An unbounded (`wakeAt: null`) wait is never due, whatever the bound.
       expect(result.dueAtBoundary.map((row) => row.runId)).toEqual(["tie-a", "tie-b"])
     }))
+
+  it.effect("snapshots deferred inputs and every returned value", () =>
+    Effect.gen(function*() {
+      const state = DurableEngineState.makeMemory()
+      const exit = { nested: { value: "original" } }
+      const metadata = { labels: ["original"] }
+      const address = {
+        flowName: "Ordering/Flow",
+        executionId: "aliased",
+        deferredName: "answer"
+      }
+
+      const completed = yield* state.completeDeferred({
+        ...address,
+        exit,
+        metadata,
+        completedAtMs: 0
+      })
+      exit.nested.value = "caller mutation"
+      metadata.labels.push("caller mutation")
+      ;(completed.row.exit as typeof exit).nested.value = "result mutation"
+      ;(completed.row.metadata as typeof metadata).labels.push("result mutation")
+
+      const firstRead = Option.getOrThrow(yield* state.deferred(address))
+      expect(firstRead.exit).toEqual({ nested: { value: "original" } })
+      expect(firstRead.metadata).toEqual({ labels: ["original"] })
+      ;(firstRead.exit as typeof exit).nested.value = "read mutation"
+      ;(firstRead.metadata as typeof metadata).labels.push("read mutation")
+      const secondRead = Option.getOrThrow(yield* state.deferred(address))
+      expect(secondRead.exit).toEqual({ nested: { value: "original" } })
+      expect(secondRead.metadata).toEqual({ labels: ["original"] })
+    }))
+
+  it.effect("matches SQL by rejecting non-JSON deferred values", () =>
+    Effect.gen(function*() {
+      const state = DurableEngineState.makeMemory()
+      const circular: Record<string, unknown> = {}
+      circular["self"] = circular
+      const exit = yield* Effect.exit(state.completeDeferred({
+        flowName: "Ordering/Flow",
+        executionId: "non-json",
+        deferredName: "answer",
+        exit: circular,
+        completedAtMs: 0
+      }))
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      const defect = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+      expect((defect as Error).message).toBe("exit must be JSON-serializable")
+    }))
+
+  it.effect("rolls every in-memory state family back when a transaction fails", () =>
+    Effect.gen(function*() {
+      const state = DurableEngineState.makeMemory()
+      const address = {
+        flowName: "Ordering/Flow",
+        executionId: "rollback",
+        deferredName: "answer"
+      }
+      const failed = yield* Effect.exit(state.transaction(Effect.gen(function*() {
+        yield* state.completeDeferred({ ...address, exit: { value: 1 }, completedAtMs: 0 })
+        yield* state.scheduleClock({
+          ...address,
+          clockName: "timer",
+          dueAtMs: 1,
+          completedAtMs: null
+        }, owner)
+        yield* state.park("rollback", { reason: "timer", wakeAt: 1 }, owner)
+        yield* state.recordRunParent("rollback", "parent")
+        return yield* Effect.fail("rollback")
+      })))
+
+      expect(Exit.isFailure(failed)).toBe(true)
+      expect(Option.isNone(yield* state.deferred(address))).toBe(true)
+      expect(Option.isNone(yield* state.clock({ ...address, clockName: "timer" }))).toBe(true)
+      expect(Option.isNone(yield* state.waiting("rollback"))).toBe(true)
+      expect(yield* state.runParents("rollback")).toEqual([])
+    }))
+
+  it.effect("uses nested in-memory transactions as savepoints", () =>
+    Effect.gen(function*() {
+      const state = DurableEngineState.makeMemory()
+      yield* state.transaction(Effect.gen(function*() {
+        yield* state.recordRunParent("child", "outer-before")
+        yield* state.transaction(Effect.gen(function*() {
+          yield* state.recordRunParent("child", "inner")
+          return yield* Effect.fail("inner rollback")
+        })).pipe(Effect.catchCause(() => Effect.void))
+        yield* state.recordRunParent("child", "outer-after")
+      }))
+
+      expect((yield* state.runParents("child")).map((edge) => edge.parentId)).toEqual([
+        "outer-before",
+        "outer-after"
+      ])
+    }))
 })
 
 describe("SQL durable state encoding failures", () => {

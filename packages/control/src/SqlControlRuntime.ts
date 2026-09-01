@@ -1271,11 +1271,20 @@ export const make_ = (
         })
         return yield* transition(runId, presented, summaryOf(row), status)
       }),
+      /**
+       * The submitted identity wins, and only the clock is the runtime's.
+       *
+       * `Control.RunMutationInput` states the order: the runtime "supplies its
+       * own principal when the caller names none". The submitted one is the
+       * identity the server authenticated at its boundary, so a composition
+       * default that overrode it would rename every remote operator to
+       * whatever this process was built with.
+       */
       stampPrincipal: Effect.fn("SqlControlRuntime.stampPrincipal")(function*(submitted?: Principal | undefined) {
         const timestamp = yield* now
         return {
-          id: options.principal?.id ?? submitted?.id ?? "local",
-          kind: options.principal?.kind ?? submitted?.kind ?? "operator",
+          id: submitted?.id ?? options.principal?.id ?? "local",
+          kind: submitted?.kind ?? options.principal?.kind ?? "operator",
           stampedAt: timestamp
         }
       }),

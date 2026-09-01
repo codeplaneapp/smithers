@@ -12,6 +12,7 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
+import { FlowEngine } from "@smthrs/engine"
 import { Action, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
 import { Journal, SqlJournal } from "@smthrs/journal"
 import * as Notifying from "@smthrs/journal/test/Notifying"
@@ -195,12 +196,29 @@ const cancelRaceStore = (
   })
 }
 
+/** Presents one otherwise-valid persisted row with a malformed round ordinal. */
+const invalidRoundStore = (
+  store: RunStore.RunStore["Service"],
+  executionId: string
+): RunStore.RunStore["Service"] =>
+  RunStore.makeNoop({
+    ...store,
+    get: (runId) =>
+      store.get(runId).pipe(
+        Effect.map((row) =>
+          runId === executionId
+            ? { ...row, lineageId: executionId, roundOrdinal: -1 }
+            : row
+        )
+      )
+  })
+
 /** Runs one body against a fresh database and the real durable stores. */
 const durable = <A, E, R>(
   body: Effect.Effect<A, E, R>
 ) => withCrypto(Effect.scoped(body.pipe(Effect.provide(services)) as Effect.Effect<A>))
 
-const roundId = (lineageId: string, ordinal: number) => sha256(`flow-round-${lineageId}-${ordinal}`)
+const roundId = (lineageId: string, ordinal: number) => sha256(JSON.stringify(["flow-round/v2", lineageId, ordinal]))
 
 describe("a durable lineage", () => {
   it.effect("counts to its target across rounds, chaining each one under the lineage", () =>
@@ -265,7 +283,7 @@ describe("a durable lineage", () => {
       expect(
         observed.journalLineages.every((lineages, index) =>
           lineages.length > 0 &&
-          lineages.every((lineage) => lineage === `${observed.rows[index]?.runId}/root`)
+          lineages.every((lineage) => lineage === FlowEngine.Lineage.root(observed.rows[index]!.runId))
         )
       ).toBe(true)
     }))
@@ -522,6 +540,47 @@ describe("a durable lineage", () => {
       // successor is opened for it.
       expect(observed.last.status).toBe("failed")
       expect(Exit.isFailure(observed.beyond)).toBe(true)
+    }))
+
+  it.effect("fails a handoff whose persisted round identity is malformed", () =>
+    Effect.gen(function*() {
+      const observed = yield* durable(Effect.gen(function*() {
+        const store = yield* RunStore.RunStore
+        const malformed = invalidRoundStore(store, "invalid-round-lineage")
+        const { calls, wiring } = yield* incarnation("invalid-round-host", [Counter], malformed)
+        const exit = yield* Counter.execute({ value: 0, target: 2 }, {
+          executionId: "invalid-round-lineage"
+        }).pipe(Effect.exit, Effect.provide(wiring))
+        return {
+          calls,
+          exit,
+          root: yield* store.get("invalid-round-lineage"),
+          successor: yield* Effect.exit(store.get(roundId("invalid-round-lineage", 0)))
+        }
+      }))
+
+      expect(observed.calls).toEqual([0])
+      expect(observed.root.status).toBe("failed")
+      expect(Exit.isFailure(observed.exit) && observed.exit.cause.toString()).toContain("InvalidRound")
+      expect(Exit.isFailure(observed.successor)).toBe(true)
+    }))
+
+  it.effect("honors cancellation that races an invalid-round terminal transition", () =>
+    Effect.gen(function*() {
+      const observed = yield* durable(Effect.gen(function*() {
+        const store = yield* RunStore.RunStore
+        const racing = cancelRaceStore(store, "invalid-round-cancel-race", "failed")
+        const malformed = invalidRoundStore(racing, "invalid-round-cancel-race")
+        const { calls, wiring } = yield* incarnation("invalid-round-cancel-host", [Counter], malformed)
+        yield* Counter.execute({ value: 0, target: 2 }, {
+          executionId: "invalid-round-cancel-race",
+          discard: true
+        }).pipe(Effect.provide(wiring))
+        return { calls, root: yield* store.get("invalid-round-cancel-race") }
+      }))
+
+      expect(observed.calls).toEqual([0])
+      expect(observed.root.status).toBe("cancelled")
     }))
 
   it.effect("honors cancellation that races the max-round terminal transition", () =>

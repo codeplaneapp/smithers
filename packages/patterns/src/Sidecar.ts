@@ -17,6 +17,7 @@ import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
+import { PatternError } from "./PatternError.ts"
 
 /**
  * Configuration for {@link make}.
@@ -26,7 +27,6 @@ import * as Schema from "effect/Schema"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly primary: Flow.Any
@@ -39,7 +39,6 @@ export interface MakeOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Scores {
   readonly primary: number
@@ -54,9 +53,10 @@ export interface Scores {
  * produce: the shadow matched or beat the primary, and the cheaper seat is a
  * candidate for the real work.
  *
+ * Both scores and their computed difference are always finite numbers.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Delta extends Scores {
   readonly difference: number
@@ -74,7 +74,6 @@ export interface Delta extends Scores {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Shadow<S> =
   | { readonly quarantined: false; readonly value: S }
@@ -88,7 +87,6 @@ export type Shadow<S> =
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Result<P, S> {
   readonly primary: P
@@ -101,11 +99,11 @@ export interface Result<P, S> {
  *
  * `score` receives both outputs and is called only when the shadow produced
  * one. Its failure is the run's failure: an unreadable measurement is worse
- * than no measurement.
+ * than no measurement. Both returned scores and their computed difference
+ * must be finite, or `run` fails with a `PatternError`.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions<I, P, S, E, R, E2, R2, E3 = never, R3 = never> {
   readonly primary: (input: I) => Effect.Effect<P, E, R>
@@ -124,6 +122,35 @@ const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
 // the scorer reads, and the run must actually read it.
 const field = (value: unknown, key: string): unknown => (value as Record<string, unknown>)[key]
 
+const scoreRefusal = (primary: number, shadow: number): PatternError | undefined => {
+  if (!Number.isFinite(primary)) {
+    return new PatternError({
+      code: "invalid_decorator",
+      message: `Sidecar primary score must be a finite number, received ${primary}`
+    })
+  }
+  if (!Number.isFinite(shadow)) {
+    return new PatternError({
+      code: "invalid_decorator",
+      message: `Sidecar shadow score must be a finite number, received ${shadow}`
+    })
+  }
+  const difference = primary - shadow
+  return Number.isFinite(difference)
+    ? undefined
+    : new PatternError({
+      code: "invalid_decorator",
+      message: `Sidecar score difference must be a finite number, received ${difference}`
+    })
+}
+
+const measuredDelta = (primary: number, shadow: number): Delta => ({
+  primary,
+  shadow,
+  difference: Number((primary - shadow).toFixed(12)),
+  cheaperWins: shadow >= primary
+})
+
 /**
  * Compares two scores.
  *
@@ -131,17 +158,16 @@ const field = (value: unknown, key: string): unknown => (value as Record<string,
  * floating-point difference reports `0.30000000000000004` for two scores an
  * operator entered as `0.8` and `0.5`. A tie counts as `cheaperWins`: equal
  * quality at lower cost is the cheaper seat winning.
+ * Both scores and the difference must be finite.
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
-export const delta = (primary: number, shadow: number): Delta => ({
-  primary,
-  shadow,
-  difference: Number((primary - shadow).toFixed(12)),
-  cheaperWins: shadow >= primary
-})
+export const delta = (primary: number, shadow: number): Delta => {
+  const refusal = scoreRefusal(primary, shadow)
+  if (refusal !== undefined) throw refusal
+  return measuredDelta(primary, shadow)
+}
 
 /**
  * Declares the sidecar topology: primary and shadow under one `All`, with the
@@ -161,7 +187,6 @@ export const delta = (primary: number, shadow: number): Delta => ({
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   const score = options.score
@@ -192,7 +217,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
           Node.capture({ scores: true }, (scores: unknown) => ({
             primary: field(both, "primary"),
             shadow: field(both, "shadow"),
-            delta: delta(field(scores, "primary") as number, field(scores, "shadow") as number)
+            delta: measuredDelta(field(scores, "primary") as number, field(scores, "shadow") as number)
           }))
         )
       return Node.andThen(
@@ -212,12 +237,11 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <I, P, S, E, R, E2, R2, E3 = never, R3 = never>(
   input: I,
   options: RuntimeOptions<I, P, S, E, R, E2, R2, E3, R3>
-): Effect.Effect<Result<P, S>, E | E3, R | R2 | R3> =>
+): Effect.Effect<Result<P, S>, E | E3 | PatternError, R | R2 | R3> =>
   Effect.gen(function*() {
     const quarantine: Effect.Effect<Shadow<S>, never, R2> = Effect.flatMap(
       Effect.exit(options.shadow(input)),
@@ -237,6 +261,8 @@ export const run = <I, P, S, E, R, E2, R2, E3 = never, R3 = never>(
       return reported
     }
     const scores = yield* options.score({ primary, shadow: shadow.value })
-    const reported: Result<P, S> = { primary, shadow, delta: delta(scores.primary, scores.shadow) }
+    const refusal = scoreRefusal(scores.primary, scores.shadow)
+    if (refusal !== undefined) return yield* Effect.fail(refusal)
+    const reported: Result<P, S> = { primary, shadow, delta: measuredDelta(scores.primary, scores.shadow) }
     return reported
   })

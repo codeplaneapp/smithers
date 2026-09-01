@@ -49,6 +49,7 @@ import * as AgentSession from "../src/AgentSession.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as Seat from "../src/Seat.ts"
 import * as SeatResolver from "../src/SeatResolver.ts"
+import * as Safety from "./Safety.ts"
 
 const prepared: Route.PreparedRequest = {
   routeId: "route-a",
@@ -162,6 +163,8 @@ const notes: Array<string> = []
 /** One process's worth of composition over one `.flows` directory, as `NodeControl` composes it. */
 const host = (root: string, owner: Ownership.OwnerId, engineHost: string) => {
   const registration = AgentSession.layer({
+    quotaPolicy: Safety.quotaPolicy,
+    budget: Safety.budget,
     flows: [
       FlowBinding.source("test/notes", [
         FlowBinding.make({
@@ -176,7 +179,13 @@ const host = (root: string, owner: Ownership.OwnerId, engineHost: string) => {
     ],
     limits: { memoryBytes: 64 * 1024 * 1024, steps: 5_000_000 },
     maxFrames: 4
-  }).pipe(Layer.provide(Layer.merge(Agent.layer, SeatResolver.layer({ resolve: seatFor(engineHost) }))))
+  }).pipe(
+    Layer.provide(
+      Layer.merge(Agent.layer, SeatResolver.layer({ resolve: seatFor(engineHost) })).pipe(
+        Layer.provide(Safety.layer)
+      )
+    )
+  )
   const engine = NodeRuntime.layer(
     {
       filename: join(root, "engine.db"),

@@ -38,6 +38,51 @@ export interface Round {
 }
 
 /**
+ * A malformed trampoline identity or resource bound.
+ *
+ * @category errors
+ * @since 1.0.0
+ */
+export class InvalidRound extends Schema.TaggedError<InvalidRound>()(
+  "@smthrs/engine/InvalidRound",
+  {
+    code: Schema.Literal("invalid_round").pipe(
+      Schema.withConstructorDefault(Effect.succeed("invalid_round"))
+    ),
+    message: Schema.String
+  }
+) {}
+
+const invalid = (message: string): InvalidRound => new InvalidRound({ message })
+
+const wellFormed = (value: string): boolean => {
+  for (let index = 0; index < value.length; index++) {
+    const unit = value.charCodeAt(index)
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(++index)
+      if (next < 0xdc00 || next > 0xdfff) return false
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) return false
+  }
+  return true
+}
+
+const validLineage = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && wellFormed(value)
+
+const validOrdinal = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+
+const validate = (round: Round): InvalidRound | undefined => {
+  try {
+    if (!validLineage(round.lineageId)) return invalid("Round lineageId must be non-empty well-formed text")
+    if (!validOrdinal(round.ordinal)) return invalid("Round ordinal must be a non-negative safe integer")
+    return undefined
+  } catch {
+    return invalid("Round must expose inert lineageId and ordinal data")
+  }
+}
+
+/**
  * The round a lineage starts at: ordinal zero, with the caller's execution id
  * as the lineage id every later round derives from.
  *
@@ -45,10 +90,10 @@ export interface Round {
  * @category constructors
  * @slop
  */
-export const initial = (executionId: string): Round => ({
-  lineageId: executionId,
-  ordinal: 0
-})
+export const initial = (executionId: string): Round => {
+  if (!validLineage(executionId)) throw invalid("Round lineageId must be non-empty well-formed text")
+  return { lineageId: executionId, ordinal: 0 }
+}
 
 /**
  * The execution id a round runs under.
@@ -60,10 +105,15 @@ export const initial = (executionId: string): Round => ({
  * @category constructors
  * @slop
  */
-export const executionId = (round: Round): Effect.Effect<string, never, Crypto.Crypto> =>
-  Schema.decodeUnknownEffect(Sha256)(
-    `flow-round-${round.lineageId}-${round.ordinal}`
-  ).pipe(Effect.orDie)
+export const executionId = (round: Round): Effect.Effect<string, InvalidRound, Crypto.Crypto> =>
+  Effect.suspend(() => {
+    const refusal = validate(round)
+    return refusal === undefined
+      ? Schema.decodeUnknownEffect(Sha256)(
+        JSON.stringify(["flow-round/v2", round.lineageId, round.ordinal])
+      ).pipe(Effect.orDie)
+      : Effect.fail(refusal)
+  })
 
 /**
  * The round that follows this one, and the execution id it runs under.
@@ -87,14 +137,22 @@ export const next = (round: Round, options: {
   readonly maxRounds: number | undefined
 }): Effect.Effect<
   { readonly round: Round; readonly executionId: string },
-  Flow.MaxRoundsExceeded,
+  Flow.MaxRoundsExceeded | InvalidRound,
   Crypto.Crypto
 > =>
-  Effect.suspend(() => {
-    const advanced: Round = { lineageId: round.lineageId, ordinal: round.ordinal + 1 }
+  Effect.gen(function*() {
+    const refusal = validate(round)
+    if (refusal !== undefined) return yield* Effect.fail(refusal)
     const budget = options.maxRounds
-    return budget !== undefined && advanced.ordinal >= budget
-      ? Effect.fail(
+    if (budget !== undefined && (!Number.isSafeInteger(budget) || budget < 1)) {
+      return yield* Effect.fail(invalid("Round maxRounds must be a positive safe integer when supplied"))
+    }
+    if (round.ordinal === Number.MAX_SAFE_INTEGER) {
+      return yield* Effect.fail(invalid("Round ordinal cannot be advanced beyond Number.MAX_SAFE_INTEGER"))
+    }
+    const advanced: Round = { lineageId: round.lineageId, ordinal: round.ordinal + 1 }
+    if (budget !== undefined && advanced.ordinal >= budget) {
+      return yield* Effect.fail(
         new Flow.MaxRoundsExceeded({
           flowName: options.flowName,
           lineageId: advanced.lineageId,
@@ -105,5 +163,6 @@ export const next = (round: Round, options: {
             "with Flow.done sooner."
         })
       )
-      : Effect.map(executionId(advanced), (id) => ({ round: advanced, executionId: id }))
+    }
+    return { round: advanced, executionId: yield* executionId(advanced) }
   })

@@ -11,7 +11,7 @@ import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import { describe, expect, it } from "vitest"
 import * as CiToolchain from "../src/CiToolchain.ts"
-import { artifactSteps, Attrs, Gate, GithubCiGen, Job, render, TargetStep } from "../src/GithubCiGen.ts"
+import { artifactSteps, Attrs, Gate, GithubCiGen, Job, MatrixRow, render, TargetStep } from "../src/GithubCiGen.ts"
 import { parseWorkflow as parseStrictWorkflow } from "../src/GithubWorkflow.ts"
 import * as RustToolchain from "../src/RustToolchain.ts"
 import { Secret } from "../src/Secret.ts"
@@ -187,7 +187,7 @@ describe("the declaration surface", () => {
     expect(Object.keys(Gate.fields).sort()).toEqual(["job", "name", "pattern", "verb"])
     // A job says what it requires and what it runs.
     expect(Object.keys(Job.fields).sort())
-      .toEqual(["continueOnError", "id", "name", "runsOn", "steps", "timeoutMinutes", "toolchain"])
+      .toEqual(["continueOnError", "id", "matrix", "name", "runsOn", "steps", "timeoutMinutes", "toolchain"])
   })
 
   it("refuses a step whose verb is not a CLI verb value", () => {
@@ -587,8 +587,11 @@ describe("render", () => {
     expect(rendered).toContain(
       "          for f in '/tmp/shot-'*'.png'; do if [ -e \"$f\" ]; then cp -R -- \"$f\" \"$RUNNER_TEMP/e2e-artifacts\"; fi; done\n"
     )
+    // A fixed source needs the existence guard alone. Looping over one quoted
+    // literal is SC2041 to the shellcheck actionlint runs, which failed the
+    // required job on run 33442975322 at `.github/workflows/ci.yml:123:9`.
     expect(rendered).toContain(
-      "          for f in 'apps/reports'; do if [ -e \"$f\" ]; then cp -R -- \"$f\" \"$RUNNER_TEMP/e2e-artifacts/reports\"; fi; done\n"
+      "          if [ -e 'apps/reports' ]; then cp -R -- 'apps/reports' \"$RUNNER_TEMP/e2e-artifacts/reports\"; fi\n"
     )
     expect(rendered).not.toContain("cp -R -- '/tmp/shot-'*'.png'")
     expect(rendered).not.toContain("2>/dev/null || true")
@@ -617,6 +620,35 @@ describe("render", () => {
         }]
       }))
     ).toThrow(/not usable as a generated diagnostic/)
+  })
+
+  /**
+   * The workflow-lint step runs actionlint, and actionlint runs shellcheck over
+   * every generated script. A source with no glob rendered
+   * `for f in 'apps/reports'; do ...`, one quoted literal as the whole list,
+   * which shellcheck reports as SC2041 ("This is a literal string. To run as a
+   * command, use $(..) instead of '..'"). That finding failed the required
+   * `test` job on run 33442975322 at `.github/workflows/ci.yml:123:9` while the
+   * pipeline it lints was otherwise fine.
+   *
+   * A loop is what a GLOB needs. A fixed path needs the existence guard alone,
+   * and gets it.
+   */
+  it("collects a fixed artifact source without looping over one literal", () => {
+    const steps = artifactSteps({
+      artifact: "e2e-artifacts",
+      sources: [{ from: "/tmp/shot-*.png" }, { from: "apps/reports", as: "reports" }]
+    })
+    const script = steps[0]!.run!
+    expect(script).toContain(
+      "if [ -e 'apps/reports' ]; then cp -R -- 'apps/reports' \"$RUNNER_TEMP/e2e-artifacts/reports\"; fi"
+    )
+    // The glob still needs the loop: `cp` on an unexpanded pattern exits 1.
+    expect(script).toContain(
+      "for f in '/tmp/shot-'*'.png'; do if [ -e \"$f\" ]; then cp -R -- \"$f\" \"$RUNNER_TEMP/e2e-artifacts\"; fi; done"
+    )
+    // No `for` loop anywhere whose whole list is a single quoted literal.
+    expect(script.split("\n").filter((line) => /^\s*for \w+ in '[^'*]*';/.test(line))).toEqual([])
   })
 
   it("validates artifact values again at the rendering boundary", () => {
@@ -669,5 +701,139 @@ describe("GithubCiGen target wiring", () => {
     // A writing target is not cacheable; its checking form is.
     expect(metadata.cacheable).toBe(false)
     expect(metadata.forKind("lint").cacheable).toBe(true)
+  })
+})
+
+/**
+ * One build matrix over the platforms, instead of one copy-pasted job per
+ * platform.
+ *
+ * The generator emits no `if:` key, so a lane that is allowed to be red cannot
+ * say so with a condition. It says so with data: each row carries its own
+ * `advisory` bit in an `include:` row, and the job's `continue-on-error` reads
+ * that bit out of the matrix context. A platform is promoted from advisory to
+ * required by flipping one boolean in BUILD.ts, which is a diff a reviewer can
+ * read, and the promotion is checked — a job listed in `requiredJobs` whose
+ * every lane is advisory is refused rather than rendered.
+ */
+describe("a platform matrix", () => {
+  const toolchain = CiToolchain.Needs({ runtimes: [node] })
+  const step = { name: "Package test targets", verb: Verb.Test, pattern: "//packages/..." }
+  const matrixJob = {
+    id: "packages",
+    name: "package suites (${{ matrix.os }})",
+    matrix: [
+      { os: "ubuntu-latest", advisory: false },
+      { os: "macos-latest", advisory: true },
+      { os: "windows-latest", advisory: true }
+    ],
+    timeoutMinutes: 60,
+    toolchain,
+    steps: [step]
+  }
+  const withMatrixJob = (job: unknown, requiredJobs: ReadonlyArray<string> = []): never =>
+    attrsOf({ ...goldenAttrs, gates: [], requiredJobs, jobs: [job] })
+
+  it("renders one job over every declared platform, with the advisory bit as data", () => {
+    const rendered = render(withMatrixJob(matrixJob, ["packages"]))
+    expect(rendered).toContain(
+      `  packages:
+    name: "package suites (\${{ matrix.os }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            advisory: false
+          - os: macos-latest
+            advisory: true
+          - os: windows-latest
+            advisory: true
+    runs-on: \${{ matrix.os }}
+    timeout-minutes: 60
+    continue-on-error: \${{ matrix.advisory }}
+    steps:
+`
+    )
+    // Every row runs the same steps, rendered once.
+    expect(rendered.split("smithers-build test '//packages/...'").length - 1).toBe(1)
+    // The rule the whole module rests on survives the new key.
+    expect(rendered).not.toContain("if:")
+  })
+
+  it("renders deterministically and reads back as one job", () => {
+    const rendered = render(withMatrixJob(matrixJob))
+    expect(render(withMatrixJob(matrixJob))).toBe(rendered)
+    const workflow = parseWorkflow(rendered)
+    expect(workflow.jobs.map((job) => job.id)).toEqual(["packages"])
+    expect(workflow.jobs[0]!.runsOn).toBe("${{ matrix.os }}")
+    expect(workflow.jobs[0]!.condition).toBeUndefined()
+    expect(workflow.jobs[0]!.continueOnError).toBe("${{ matrix.advisory }}")
+  })
+
+  it("refuses a job that declares both a runner and a matrix, or neither", () => {
+    expect(() => render(withMatrixJob({ ...matrixJob, runsOn: "ubuntu-latest" })))
+      .toThrow(/declares both runs-on and a matrix/)
+    const { matrix: _matrix, ...noRunner } = matrixJob
+    expect(() => render(withMatrixJob(noRunner))).toThrow(/declares no runs-on and no matrix/)
+  })
+
+  it("refuses a matrix row that is not one runner label", () => {
+    for (const os of ["[self-hosted, linux]", "${{ matrix.os }}", "ubuntu latest", "false", "on"]) {
+      expect(() => render(withMatrixJob({ ...matrixJob, matrix: [{ os, advisory: false }] })))
+        .toThrow(/is not a runner label; use one label per matrix row/)
+    }
+    // The schema refuses an empty label before `render` ever sees it.
+    expect(() => withMatrixJob({ ...matrixJob, matrix: [{ os: "", advisory: false }] }))
+      .toThrow(/length of at least 1/)
+  })
+
+  it("refuses an empty matrix and a repeated platform", () => {
+    expect(() => render(withMatrixJob({ ...matrixJob, matrix: [] }))).toThrow(/declares an empty matrix/)
+    expect(() =>
+      render(withMatrixJob({
+        ...matrixJob,
+        matrix: [{ os: "ubuntu-latest", advisory: false }, { os: "ubuntu-latest", advisory: true }]
+      }))
+    ).toThrow(/repeats the matrix platform "ubuntu-latest"/)
+  })
+
+  /**
+   * A job-level `continue-on-error: true` would make every row advisory while
+   * the include rows still claim otherwise: two descriptions of one thing, free
+   * to disagree.
+   */
+  it("refuses a job-level advisory bit beside a per-row one", () => {
+    expect(() => render(withMatrixJob({ ...matrixJob, continueOnError: true })))
+      .toThrow(/declares continue-on-error beside a matrix/)
+  })
+
+  /**
+   * `requiredJobs` is the list of lanes the pipeline promises to run. A lane
+   * that is advisory everywhere runs nothing the pipeline can fail on, so
+   * naming it required is a claim the workflow does not keep.
+   */
+  it("refuses a required job whose every lane is advisory", () => {
+    expect(() =>
+      render(withMatrixJob(
+        { ...matrixJob, matrix: matrixJob.matrix.map((row) => ({ ...row, advisory: true })) },
+        ["packages"]
+      ))
+    ).toThrow(/required job "packages" is advisory on every platform/)
+    expect(() =>
+      render(attrsOf({
+        ...goldenAttrs,
+        gates: [],
+        requiredJobs: ["rust"],
+        jobs: goldenAttrs.jobs.map((job) => job.id !== "rust" ? job : { ...job, continueOnError: true })
+      }))
+    ).toThrow(/required job "rust" is advisory on every platform/)
+  })
+
+  it("still admits no free-form command through the matrix", () => {
+    expect(Object.keys(Job.fields).sort())
+      .toEqual(["continueOnError", "id", "matrix", "name", "runsOn", "steps", "timeoutMinutes", "toolchain"])
+    expect(Object.keys(MatrixRow.fields).sort()).toEqual(["advisory", "os"])
   })
 })

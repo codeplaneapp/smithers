@@ -29,7 +29,13 @@ const coreCases: ReadonlyArray<ConformanceCase> = [
 ]
 
 /**
- * Builds the mandatory black-box suite every `EngineSubject` must pass.
+ * Builds the mandatory black-box suite every `EngineSubject` must pass:
+ * identity, interruption, replay, and race.
+ *
+ * This is the whole conformance vocabulary. A second entry point named
+ * `suite`, documented as "the complete engine conformance suite" and returning
+ * exactly these cases, was deleted rather than kept: two names for one list
+ * claimed a superset that does not exist.
  *
  * @category constructors
  * @since 0.0.0
@@ -37,15 +43,3 @@ const coreCases: ReadonlyArray<ConformanceCase> = [
 export const coreSuite = (options?: {
   readonly filter?: ((conformanceCase: ConformanceCase) => boolean) | undefined
 }): ReadonlyArray<ConformanceCase> => options?.filter === undefined ? coreCases : coreCases.filter(options.filter)
-
-/**
- * Builds the complete engine conformance suite.
- *
- * @category constructors
- * @since 0.0.0
- */
-export const suite = (options?: {
-  readonly filter?: ((conformanceCase: ConformanceCase) => boolean) | undefined
-}): ReadonlyArray<ConformanceCase> => {
-  return coreSuite(options)
-}

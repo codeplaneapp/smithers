@@ -99,6 +99,22 @@ export const Ref = Schema.Struct({
  */
 export type Ref = typeof Ref.Type
 
+/** The recovery record written before a unit is allowed to transform files. */
+interface Pending {
+  readonly status: "pending"
+  readonly unit: string
+  readonly root: string
+  readonly checkpoint: {
+    readonly vcs: Vcs
+    readonly ref: string
+    readonly restore: string
+    readonly backup: string
+  }
+  readonly takenAt: number
+  readonly instruction: string
+  readonly rollback?: Rollback | undefined
+}
+
 /**
  * The checkpoint step: record where the unit started before anything edits it.
  *
@@ -157,6 +173,34 @@ export const detectVcs = (
   })
 
 const absolute = (path: Path.Path, root: string, file: string): string => path.join(root, ...file.split("/"))
+
+const pendingFile = (path: Path.Path, backupDir: string): string =>
+  path.join(path.dirname(backupDir), "pending-unit.json")
+
+const pending = (
+  payload: { readonly root: string; readonly unit: string; readonly backupDir: string },
+  ref: Ref
+): Effect.Effect<Ref, MigrateError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const file = pendingFile(path, payload.backupDir)
+    const record: Pending = {
+      status: "pending",
+      unit: payload.unit,
+      root: payload.root,
+      checkpoint: { vcs: ref.vcs, ref: ref.ref, restore: ref.restore, backup: ref.backup },
+      takenAt: ref.takenAt,
+      instruction: `This unit may have stopped after editing the project. From "${payload.root}", run: ${ref.restore}`
+    }
+    yield* fs.makeDirectory(path.dirname(file), { recursive: true }).pipe(
+      Effect.mapError(io(`could not create ${path.dirname(file)}`))
+    )
+    yield* fs.writeFileString(file, `${JSON.stringify(record, null, 2)}\n`).pipe(
+      Effect.mapError(io(`could not record the pending checkpoint ${file}`))
+    )
+    return ref
+  })
 
 /** Copies the unit's existing files into the backup directory, byte for byte. */
 const backup = (
@@ -431,7 +475,7 @@ export const take = (payload: {
       if (opened.exitCode !== 0) {
         return yield* Effect.fail(make("checkpoint-failed", `jj new failed: ${Exec.tail(opened.stderr)}`))
       }
-      return { vcs, ref: change, restore: `jj restore --from ${change}`, ...recorded }
+      return yield* pending(payload, { vcs, ref: change, restore: `jj restore --from ${change}`, ...recorded })
     }
 
     if (vcs === "git") {
@@ -452,15 +496,15 @@ export const take = (payload: {
       if (updated.exitCode !== 0) {
         return yield* Effect.fail(make("checkpoint-failed", `git update-ref failed: ${Exec.tail(updated.stderr)}`))
       }
-      return { vcs, ref, restore: `git checkout ${ref} -- .`, ...recorded }
+      return yield* pending(payload, { vcs, ref, restore: `git checkout ${ref} -- .`, ...recorded })
     }
 
-    return {
+    return yield* pending(payload, {
       vcs,
       ref: directory,
       restore: `cp -R ${directory}/. .`,
       ...recorded
-    }
+    })
   })
 
 /**
@@ -566,7 +610,36 @@ export const restore = (
 export interface Rollback {
   readonly restored: ReadonlyArray<string>
   readonly unrestored: ReadonlyArray<string>
+  readonly deletedAdds: ReadonlyArray<{
+    readonly path: string
+    readonly backup: string
+  }>
 }
+
+const preserveAdded = (
+  root: string,
+  ref: Ref,
+  added: ReadonlyArray<string>
+): Effect.Effect<Rollback["deletedAdds"], MigrateError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const directory = `${ref.backup}.post-checkpoint`
+    const preserved: Array<{ path: string; backup: string }> = []
+    for (const file of added) {
+      const bytes = yield* fs.readFile(absolute(path, root, file)).pipe(Effect.option)
+      if (bytes._tag === "None") continue
+      const target = path.join(directory, ...file.split("/"))
+      yield* fs.makeDirectory(path.dirname(target), { recursive: true }).pipe(
+        Effect.mapError(io(`could not create ${path.dirname(target)}`))
+      )
+      yield* fs.writeFile(target, bytes.value).pipe(
+        Effect.mapError(io(`could not preserve the post-checkpoint file ${file}`))
+      )
+      preserved.push({ path: file, backup: target })
+    }
+    return preserved
+  })
 
 /**
  * Puts a unit back the way the checkpoint found it, deciding what to put back
@@ -587,7 +660,8 @@ export interface Rollback {
  *   unit edited it, deleted it, or moved it into the archive. The archive copy
  *   of a file that went back is removed with it: an archive is the record of a
  *   migration that happened.
- * - Every path added since is removed, the unit's own targets included.
+ * - Every path added since is copied beside the checkpoint backup before it is
+ *   removed, the unit's own targets included. The caller reports the copy.
  * - A file the unit modified or deleted that the checkpoint never copied is
  *   returned as `unrestored` rather than guessed at. The checkpoint copies the
  *   unit's own files and nothing else, so the honest answer is the path, which
@@ -617,13 +691,66 @@ export const rollback = (
     const unrestored = changes
       .filter((file) => file.change !== "added" && !recorded.has(file.path))
       .map((file) => file.path)
+    const deletedAdds = yield* preserveAdded(root, ref, added)
     const restored = yield* restore(root, ref, [...recorded, ...added, ...(options.paths ?? [])])
     if (options.archiveDir !== undefined) {
       for (const file of restored) {
         yield* fs.remove(path.join(options.archiveDir, ...file.split("/"))).pipe(Effect.ignore)
       }
     }
-    return { restored, unrestored }
+    return { restored, unrestored, deletedAdds }
+  })
+
+/**
+ * Records rollback damage in the pending marker when finish itself fails.
+ *
+ * @category execution
+ * @since 0.1.0
+ */
+export const recordRollback = (
+  backupDir: string,
+  ref: Ref,
+  rollback: Rollback
+): Effect.Effect<void, MigrateError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const file = pendingFile(path, backupDir)
+    const text = yield* fs.readFileString(file).pipe(
+      Effect.mapError(io(`could not read the pending checkpoint ${file}`))
+    )
+    const record = yield* Effect.try({
+      try: () => JSON.parse(text) as Pending,
+      catch: io(`could not read the pending checkpoint ${file}`)
+    })
+    if (record.checkpoint.ref !== ref.ref || record.takenAt !== ref.takenAt) return
+    yield* fs.writeFileString(file, `${JSON.stringify({ ...record, rollback }, null, 2)}\n`).pipe(
+      Effect.mapError(io(`could not update the pending checkpoint ${file}`))
+    )
+  })
+
+/**
+ * Removes this unit's marker only after its durable report exists.
+ *
+ * @category execution
+ * @since 0.1.0
+ */
+export const clearPending = (
+  backupDir: string,
+  ref: Ref
+): Effect.Effect<void, MigrateError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const file = pendingFile(path, backupDir)
+    const text = yield* fs.readFileString(file).pipe(Effect.option)
+    if (text._tag === "None") return
+    const record = yield* Effect.try({
+      try: () => JSON.parse(text.value) as Pending,
+      catch: io(`could not read the pending checkpoint ${file}`)
+    })
+    if (record.checkpoint.ref !== ref.ref || record.takenAt !== ref.takenAt) return
+    yield* fs.remove(file).pipe(Effect.mapError(io(`could not clear the pending checkpoint ${file}`)))
   })
 
 /**

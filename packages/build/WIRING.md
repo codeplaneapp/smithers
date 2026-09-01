@@ -10,12 +10,12 @@ install step.
 | Dependency       | Version        | Use                                            |
 | ---------------- | -------------- | ---------------------------------------------- |
 | `effect`         | `4.0.0-rc.108` | Effects, schemas, layers, files, and processes |
-| `@smthrs/flow`   | `0.1.0`        | Actions, flows, annotations, and file inputs   |
-| `@smthrs/plan`   | `0.1.0`        | Planned nodes                                  |
-| `@smthrs/crypto` | `0.1.0`        | SHA-256 digests                                |
+| `@smthrs/flow`   | `1.0.0-rc.0`   | Actions, flows, annotations, and file inputs   |
+| `@smthrs/plan`   | `1.0.0-rc.0`   | Planned nodes                                  |
+| `@smthrs/crypto` | `1.0.0-rc.0`   | SHA-256 digests                                |
 
-The CLI additionally uses the Smithers engine, action implementations, and Node
-platform services declared in `../build-cli/package.json`.
+The build CLI additionally uses the Smithers engine, action implementations,
+and Node platform services declared in `../build-cli/package.json`.
 
 ## Workspace membership
 
@@ -24,14 +24,14 @@ The Smithers checkout uses pnpm. Its `pnpm-workspace.yaml` includes
 
 1. The three packages live at `packages/build`, `packages/targets`,
    and `packages/build-cli`.
-2. Cross-package dependencies use the exact `0.1.0` workspace versions.
-   `linkWorkspacePackages` resolves them to the local packages; no `file:` or
-   `link:` specifiers remain.
+2. Published runtime dependencies use exact `1.0.0-rc.0` versions. Private
+   tooling edges use `workspace:*`. `linkWorkspacePackages` resolves both to
+   local packages; no `file:` or `link:` specifiers remain.
 3. The root `pnpm install` creates the package links and owns the single
    `pnpm-lock.yaml`. The old per-package npm lockfiles are deleted.
 4. `pnpm --filter @smthrs/build check` typechecks the library. The
-   root `pnpm check` recurses into every package, including `rules`, `cli`,
-   and `infra`.
+   root `pnpm check` recurses into every package, including `targets`,
+   `build-cli`, and `infra`.
 
 No TypeScript path mapping is required. `tsconfig.json`, the build scripts,
 the dual ESM/CJS export map, and the pinned tooling dependencies copy the
@@ -39,11 +39,11 @@ current `@smthrs/flow` package shape.
 
 ## BUILD.ts imports
 
-The Smithers workspace root declares `"@smthrs/targets": "0.1.0"` and
-`"@smthrs/build-cli": "0.1.0"` as devDependencies, resolved to the workspace
-packages. `BUILD.ts` files import the rule catalog by bare specifier:
-`import { ... } from "@smthrs/targets"`, and `pnpm exec smthrs` resolves the
-CLI's workspace bin.
+The Smithers workspace root declares `"@smthrs/targets": "workspace:*"` and
+`"@smthrs/build-cli": "workspace:*"` as devDependencies. `BUILD.ts` files
+import the rule catalog by bare specifier: `import { ... } from
+"@smthrs/targets"`, and `pnpm exec smithers-build` resolves the build CLI's
+workspace bin.
 
 Embedding the install flow requires:
 
@@ -112,9 +112,9 @@ separately.
 
 ## Remote caches
 
-The CLI target-result cache speaks `/ac` directly. `RemoteCacheStore` and
+The `smithers-build` target-result cache speaks `/ac` directly. `RemoteCacheStore` and
 `RemoteArtifacts` in the Smithers engine are a different composition: they store
-engine step rows and artifact blobs through `/ac` and `/cas`. The smthrs CLI
+engine step rows and artifact blobs through `/ac` and `/cas`. The `smithers-build` CLI
 does not provide those engine layers today.
 
 An embedding host that needs engine-level remote artifacts must compose those

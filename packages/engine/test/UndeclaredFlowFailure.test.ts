@@ -65,9 +65,8 @@ describe("a flow body failure outside the declared error schema", () => {
 
   effect("still names the flow when the error cannot be rendered as JSON", () =>
     Effect.gen(function*() {
-      // A cause chain that points back at itself: `JSON.stringify` throws on
-      // it, and a log line that threw would replace the defect under
-      // diagnosis with a defect about the diagnosis.
+      // A cause chain that points back at itself also has a hostile coercion
+      // hook. Diagnostics must invoke neither and must preserve the defect.
       const circular: { self?: unknown; toString: () => string } = {
         toString: () => "circular-failure"
       }
@@ -78,7 +77,84 @@ describe("a flow body failure outside the declared error schema", () => {
       const line = logs.find((entry) => String(entry.message).includes("outside its declared error schema"))
       expect(line?.annotations).toMatchObject({
         flow: "UndeclaredFlowFailure/flow",
-        error: "circular-failure"
+        error: "[object]"
       })
+    }))
+
+  effect("renders only inert bounded fields without replacing the original cause", () =>
+    Effect.gen(function*() {
+      let hooks = 0
+      const sparse = new Array<unknown>(10)
+      sparse[0] = true
+      sparse[1] = undefined
+      sparse[2] = 12n
+      sparse[3] = Symbol("hidden")
+      sparse[4] = () => "hidden"
+      sparse[5] = null
+      sparse[6] = Number.POSITIVE_INFINITY
+      Object.defineProperty(sparse, "7", {
+        enumerable: true,
+        get: () => {
+          hooks++
+          throw new Error("must not run")
+        }
+      })
+      const error = {
+        code: "outside-contract",
+        message: "Bearer operator-secret",
+        value: Number.NEGATIVE_INFINITY,
+        failures: sparse,
+        token: "operator-secret",
+        toJSON: () => {
+          hooks++
+          throw new Error("must not run")
+        },
+        toString: () => {
+          hooks++
+          throw new Error("must not run")
+        }
+      }
+      Object.defineProperty(error, "cause", {
+        enumerable: true,
+        get: () => {
+          hooks++
+          throw new Error("must not run")
+        }
+      })
+
+      const { exit, logs } = yield* failWith(error, "undeclared-inert")
+
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
+      expect(hooks).toBe(0)
+      const line = logs.find((entry) => String(entry.message).includes("outside its declared error schema"))
+      expect(line?.annotations.error).toContain("[REDACTED]")
+      expect(line?.annotations.error).toContain("[2 more]")
+      expect(line?.annotations.error).not.toContain("operator-secret")
+    }))
+
+  effect("handles cycles, depth bounds, and hostile proxies without invoking user code", () =>
+    Effect.gen(function*() {
+      const cycle: { cause?: unknown } = {}
+      cycle.cause = cycle
+      const deep = { cause: { cause: { cause: { cause: { cause: { message: "too deep" } } } } } }
+      const hostile = new Proxy({}, {
+        getOwnPropertyDescriptor: () => {
+          throw new Error("hostile proxy")
+        }
+      })
+
+      const cyclic = yield* failWith(cycle, "undeclared-cycle")
+      const bounded = yield* failWith(deep, "undeclared-depth")
+      const refused = yield* failWith(hostile, "undeclared-proxy")
+
+      const annotation = (captured: typeof cyclic) =>
+        captured.logs.find((entry) => String(entry.message).includes("outside its declared error schema"))
+          ?.annotations.error
+      expect(annotation(cyclic)).toContain("[circular]")
+      expect(annotation(bounded)).toContain("[object]")
+      expect(annotation(refused)).toBe("[unrenderable]")
+      for (const captured of [cyclic, bounded, refused]) {
+        expect(Exit.isFailure(captured.exit) && Cause.hasDies(captured.exit.cause)).toBe(true)
+      }
     }))
 })

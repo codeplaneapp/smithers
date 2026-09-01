@@ -2,15 +2,15 @@
  * The key-material contract: what a planner hands the step-key compiler.
  *
  * Revived from the module deleted at `f5f3dda` (then
- * `packages/keys/src/KeyMaterial.ts`). It does NOT return to `@smthrs/keys` —
- * that package's reduction to the single `Key` transformation was deliberate,
- * and material is a *plan-shaped* concept, not a hashing primitive. It lives
- * here, above `@smthrs/keys`, so the hashing package stays a leaf.
+ * `packages/keys/src/KeyMaterial.ts`). It does NOT return to `@smthrs/keys`:
+ * that package owns generic derivation and stored-key validation, while
+ * material is a *plan-shaped* concept. It lives here, above `@smthrs/keys`,
+ * so the key package stays a leaf.
  *
- * Governing contracts: `docs/specs/Concepts/Step Keys.md`,
- * `docs/specs/Concepts/Build Phases.md` (material is computed with no I/O),
- * and `docs/specs/Concepts/Engine Hardening Round 1.md` section 3 — the
- * nominal (never shape-sniffed) `InputRef` and the hashed `version`.
+ * Governing contract: the step-key rules at
+ * https://smithers.sh/concepts/step-keys. Material is computed with no I/O,
+ * and two hardening rules shape it: the nominal, never shape-sniffed
+ * `InputRef` and the hashed `version`.
  *
  * @since 0.1.0
  */
@@ -51,7 +51,7 @@ export type InputRef = typeof InputRef.Type
  * @category constants
  * @slop
  */
-export const version = "flows/key-material/v1"
+export const version = "flows/key-material/v2"
 
 /**
  * Everything that can change a node's result, handed to the digest.

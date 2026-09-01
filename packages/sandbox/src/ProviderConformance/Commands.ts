@@ -33,6 +33,28 @@ export interface Commands {
    * calls the kill a no-op. Default {@link defaultStopsWithin}.
    */
   readonly stopsWithin?: Duration.Input | undefined
+  /**
+   * A command that exits zero while the work `runs` started is still alive,
+   * and non-zero once it is gone.
+   *
+   * A signal that stops the wrapper shell and leaves its child running
+   * satisfies every observation the suite can make through the process
+   * handle, because the handle IS the wrapper. Only a second look at the
+   * machine can tell the difference, and this is that look. It runs in the
+   * same session after the signalled command's exit is observed; exit zero is
+   * a violation. A command line that cannot match itself (`pgrep -f 'x[y]'`)
+   * is the usual shape.
+   */
+  readonly survivor?: string | undefined
+  /**
+   * Whether the three commands are shell lines rather than a single program
+   * token. A rendered single token is POSIX-quoted whole, so a fixture like
+   * `printf 'hi'` reaches a shell-running session as one garbled word; a
+   * fixture that declares `shell` renders verbatim, which is what a session
+   * whose contract is "a POSIX line" has to be handed. Default `false`, the
+   * rendering every existing scripted fixture is keyed under.
+   */
+  readonly shell?: boolean | undefined
 }
 
 /**

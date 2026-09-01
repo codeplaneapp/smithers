@@ -4,6 +4,7 @@
  *
  * @since 0.1.0
  */
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 /**
@@ -24,13 +25,15 @@ import * as Schema from "effect/Schema"
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class FlowExecutionNotFound extends Schema.TaggedError<FlowExecutionNotFound>()(
   "@smthrs/flow/FlowExecutionNotFound",
   {
     /** Stable public error code. */
-    code: Schema.Literal("execution_not_found"),
+    // This wire shape freezes at 1.0.0-rc.0.
+    code: Schema.Literal("execution_not_found").pipe(
+      Schema.withConstructorDefault(Effect.succeed("execution_not_found"))
+    ),
     /** The execution id the runtime has no record of. */
     executionId: Schema.String
   }

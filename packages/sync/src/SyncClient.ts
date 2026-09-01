@@ -20,6 +20,7 @@ import {
   defaultMaxFrameBytes,
   encodedByteLength,
   type EntriesFrame,
+  type Resync,
   type Scope,
   type WorkspaceCursor
 } from "./SyncProtocol.ts"
@@ -54,6 +55,12 @@ export const defaultCredit = 256
  */
 export interface SubscribeOptions {
   readonly scope: Scope
+  /**
+   * Where this subscription starts, per run. The effective position is the
+   * LATER of this and what the client has already acknowledged, so a caller
+   * ahead of the shared view keeps its place and a caller behind it is
+   * fast-forwarded. Rebuild from an earlier position with a fresh client.
+   */
   readonly cursors: WorkspaceCursor
   readonly capability?: ShareCapability
   /**
@@ -230,6 +237,18 @@ const frameViolation = (frame: EntriesFrame): SyncError | undefined => {
  * resubscribing from the cursors it has acknowledged, so an entry is never
  * re-read and the round-trip cost does not scale with the run's traffic.
  *
+ * A `compacted` refusal is recoverable rather than terminal: the run's cursor
+ * moves to the checkpoint the server named and the subscription restarts, so
+ * one compacted run costs a reconnect instead of the whole subscription. The
+ * entries below that checkpoint are gone from the journal and are logged as
+ * skipped, because this wire carries no checkpoint state to stand in for them.
+ *
+ * A subscription's effective cursor per run is the LATER of the caller's and
+ * the acknowledged one: a caller that restored its own progress is never
+ * regressed, and a caller asking for history this client already acknowledged
+ * is fast-forwarded. Rebuild a projection from an earlier position with a
+ * fresh client, whose acknowledged map is empty.
+ *
  * @category constructors
  * @since 0.1.0
  */
@@ -250,7 +269,24 @@ export const make = ({ client, maxFrameBytes = defaultMaxFrameBytes }: {
       Stream.unwrap(Effect.gen(function*() {
         const credit = options.credit ?? defaultCredit
         const cursor = cursorMap(options.cursors)
-        for (const [runId, afterSeq] of yield* Ref.get(acknowledged)) cursor.set(runId, afterSeq)
+        // The contract: the effective cursor is `max(caller, acknowledged)`
+        // per run. The shared map used to win in BOTH directions, which broke
+        // the promise this client is built on from either side — a caller that
+        // restored its own progress was regressed and re-received entries it
+        // had already materialized, and a caller asking for history the client
+        // had already acknowledged was silently fast-forwarded past it.
+        //
+        // Dedupe wins the tie because it is the promise every consumer of a
+        // shared client already depends on: an entry is never re-read, and the
+        // subscriptions sharing this map would each have to re-decide what to
+        // do about a redelivery if one of them could rewind it. Rebuilding a
+        // projection from an older position is a different object, and it has
+        // an exact answer: construct a fresh client, whose acknowledged map is
+        // empty, so the caller's cursor is the only one there is.
+        for (const [runId, afterSeq] of yield* Ref.get(acknowledged)) {
+          const supplied = cursor.get(runId)
+          if (supplied === undefined || supplied < afterSeq) cursor.set(runId, afterSeq)
+        }
 
         const snapshot = (): WorkspaceCursor => canonicalCursors(cursor)
 
@@ -372,7 +408,60 @@ export const make = ({ client, maxFrameBytes = defaultMaxFrameBytes }: {
             )
           )
 
-        return bootstrap()
+        /**
+         * The checkpoint one failure says to resume from, or `undefined` when
+         * the failure is not a recoverable compaction.
+         *
+         * A compaction whose checkpoint is at or below what this subscription
+         * already covers cannot move it forward, so retrying would re-read the
+         * same refusal forever. That is the same non-convergence rule the
+         * empty incomplete bootstrap page is refused under, and it is why a
+         * `compacted` failure carrying no {@link Resync} stays a failure
+         * rather than becoming a silent stall.
+         */
+        const resyncTarget = (failure: SyncError | SyncGapError): Resync | undefined => {
+          if (!SyncError.is(failure) || failure.code !== "compacted" || failure.resync === undefined) {
+            return undefined
+          }
+          const covered: number = cursor.get(failure.resync.runId) ?? -1
+          return covered >= failure.resync.checkpointSeq ? undefined : failure.resync
+        }
+
+        /**
+         * The subscription, restarted from a run's checkpoint whenever the
+         * server refuses a cursor below that run's compaction floor.
+         *
+         * Compaction is opt-in today, but the day a workspace enables it this
+         * is the difference between a follower that catches up and one that
+         * never can: the refusal repeats for the same cursors, so without a
+         * resync every resubscribe fails identically, and a whole-workspace
+         * subscription dies over a single compacted run.
+         *
+         * The entries between the old cursor and the checkpoint are gone from
+         * the journal and are therefore never delivered. That is a REAL hole
+         * in what the consumer sees, so it is logged rather than absorbed: the
+         * checkpoint state that stands for those entries is not carried on
+         * this wire, and a consumer rebuilding a projection has to read it
+         * from the journal's own `latestCheckpoint`.
+         */
+        const resynced = (): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
+          Stream.catch(bootstrap(), (failure) => {
+            const resync = resyncTarget(failure)
+            if (resync === undefined) return Stream.fail(failure)
+            return Stream.unwrap(
+              Effect.logWarning(
+                "sync follower resyncing a compacted run from its checkpoint; entries below it are gone"
+              ).pipe(
+                Effect.annotateLogs({ runId: resync.runId, checkpointSeq: resync.checkpointSeq }),
+                // The cursor must move BEFORE the restart reads it: the
+                // bootstrap snapshots the cursors as it is constructed.
+                Effect.andThen(commit(resync.runId, resync.checkpointSeq)),
+                Effect.map(resynced)
+              )
+            )
+          })
+
+        return resynced()
       }))
 
     return Sync.of({ subscribe, cursors })

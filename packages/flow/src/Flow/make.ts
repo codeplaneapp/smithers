@@ -3,7 +3,7 @@
 /**
  * Constructs executable flow declarations from schema and policy data.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import { Sha256 } from "@smthrs/crypto"
 import * as Node from "@smthrs/plan/Node"
@@ -27,6 +27,10 @@ import { TypeId } from "./TypeId.ts"
  * statement — this author said what makes two invocations of THIS flow the
  * same — where the source is the host's blanket answer for every flow it
  * drives.
+ *
+ * The tag and declared key are JSON-tuple framed before hashing. Their strings
+ * are used exactly as given and encoded as UTF-8, with no Unicode
+ * normalization. This preimage encoding freezes at rc.0.
  */
 const makeExecutionIdFromPayload = (
   self: AnyWithProps,
@@ -35,7 +39,8 @@ const makeExecutionIdFromPayload = (
   const idempotencyKey = self.idempotencyKey
   return idempotencyKey === undefined
     ? Effect.flatMap(CurrentExecutionIds, (source) => source.mint(self, payload))
-    : Schema.decodeUnknownEffect(Sha256)(`${self._tag}-${idempotencyKey(payload)}`).pipe(Effect.orDie)
+    // The JSON tuple prevents delimiter splicing. This exact framing freezes at rc.0.
+    : Schema.decodeUnknownEffect(Sha256)(JSON.stringify([self._tag, idempotencyKey(payload)])).pipe(Effect.orDie)
 }
 
 const resolveExecutionId = (
@@ -139,6 +144,7 @@ const Proto = {
   },
   executionId(this: AnyWithProps, payload: any) {
     return Effect.flatMap(
+      // The channel stays never: precomputing callers must validate first, and an invalid payload dies here.
       Effect.orDie(this.payloadSchema.makeEffect(payload)),
       (payload) => makeExecutionIdFromPayload(this, payload)
     )
@@ -230,8 +236,7 @@ type PayloadSchemaOf<Payload extends Schema.Struct.Fields | AnyStructSchema> = P
  * whose implementation attaches separately as a Layer.
  *
  * @category constructors
- * @since 4.0.0
- * @slop
+ * @since 0.1.0
  */
 export const make = <
   const Tag extends string,

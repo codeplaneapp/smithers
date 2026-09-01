@@ -43,6 +43,12 @@ const run = <A, E>(effect: Effect.Effect<A, E, Environment>) => withCrypto(Effec
 const restoredDatabase = (databaseFile: string) =>
   Layer.provideMerge(DurableWriter.layer(), NodeDatabase.layer({ filename: databaseFile }))
 
+const snapshotDatabase = (databaseFile: string) => NodeDatabase.layer({ filename: databaseFile })
+
+const backup = (
+  options: Omit<DisasterRecovery.BackupOptions, "snapshotDatabaseLayer">
+) => DisasterRecovery.backup({ ...options, snapshotDatabaseLayer: snapshotDatabase })
+
 /** Plants a blob at its content address inside a store objects directory. */
 const plantBlob = (objectsDirectory: string, bytes: string): string => {
   const digest = sha256(bytes)
@@ -75,7 +81,7 @@ describe("backup", () => {
       writeFileSync(join(objects, wrongPrefix, digestOne), "artifact-one")
 
       const manifest = yield* run(
-        DisasterRecovery.backup({ directory: backupDirectory, objectsDirectory: objects })
+        backup({ directory: backupDirectory, objectsDirectory: objects })
       )
 
       expect(manifest.formatVersion).toBe(1)
@@ -105,7 +111,7 @@ describe("backup", () => {
     Effect.gen(function*() {
       const backupDirectory = join(root(), "backup")
       mkdirSync(backupDirectory, { recursive: true })
-      const manifest = yield* run(DisasterRecovery.backup({ directory: backupDirectory }))
+      const manifest = yield* run(backup({ directory: backupDirectory }))
       expect(manifest.artifacts).toEqual([])
     }))
 
@@ -113,7 +119,7 @@ describe("backup", () => {
     Effect.gen(function*() {
       const base = root()
       const manifest = yield* run(
-        DisasterRecovery.backup({
+        backup({
           directory: join(base, "backup"),
           objectsDirectory: join(base, "never-created")
         })
@@ -126,7 +132,7 @@ describe("backup", () => {
       const backupDirectory = join(root(), "backup")
       mkdirSync(backupDirectory, { recursive: true })
       writeFileSync(join(backupDirectory, "existing.txt"), "occupied")
-      const exit = yield* run(DisasterRecovery.backup({ directory: backupDirectory }).pipe(Effect.exit))
+      const exit = yield* run(backup({ directory: backupDirectory }).pipe(Effect.exit))
       expect(failure(exit).code).toBe("not_empty")
     }))
 
@@ -137,9 +143,114 @@ describe("backup", () => {
       const digest = plantBlob(objects, "honest-bytes")
       writeFileSync(join(objects, digest.slice(0, 2), digest), "tampered-bytes")
       const exit = yield* run(
-        DisasterRecovery.backup({ directory: join(base, "backup"), objectsDirectory: objects }).pipe(Effect.exit)
+        backup({ directory: join(base, "backup"), objectsDirectory: objects }).pipe(Effect.exit)
       )
       expect(failure(exit).code).toBe("artifact_corruption")
+    }))
+
+  it.effect("refuses success when the frozen database references an absent artifact", () =>
+    Effect.gen(function*() {
+      const base = root()
+      const missing = sha256("referenced-but-absent")
+      const exit = yield* run(Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`
+          INSERT INTO flows_step_cache (
+            key_digest, result_json, meta_json, created_at_ms, recorded_run_id, recorded_event_seq
+          ) VALUES (
+            'backup-root', '{}', ${
+          JSON.stringify({
+            boundary: {
+              declaredOutputs: {
+                outputs: [{ path: "out/result.bin", digest: missing, sizeBytes: 1 }]
+              },
+              diffIdentity: "backup-root"
+            }
+          })
+        }, 0, 'backup-run', 0
+          )
+        `
+        return yield* backup({
+          directory: join(base, "backup"),
+          objectsDirectory: join(base, "objects")
+        }).pipe(Effect.exit)
+      }))
+
+      expect(failure(exit).code).toBe("snapshot_incomplete")
+      expect(failure(exit).cause).toEqual({ missing: [missing] })
+      expect(() => readFileSync(join(base, "backup", DisasterRecovery.manifestFileName))).toThrow()
+    }))
+
+  it.effect("freezes artifact roots held only by attempt metadata and checkpoints", () =>
+    Effect.gen(function*() {
+      const base = root()
+      const objects = join(base, "objects")
+      const metadataDigest = plantBlob(objects, "attempt-metadata-root")
+      const checkpointDigest = plantBlob(objects, "attempt-checkpoint-root")
+      const manifest = yield* run(Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`
+          INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
+          VALUES ('backup-attempt-roots', 'pending', 0, '{}')
+        `
+        yield* sql`INSERT INTO flows_attempts ${
+          sql.insert({
+            run_id: "backup-attempt-roots",
+            step_key_digest: "attempt-roots",
+            attempt: 0,
+            state: "running",
+            started_at_ms: 0,
+            checkpoint_json: JSON.stringify({ retainedArtifacts: [checkpointDigest] }),
+            meta_json: JSON.stringify({
+              boundary: {
+                declaredOutputs: {
+                  outputs: [{ path: "out/result.bin", digest: metadataDigest, sizeBytes: 1 }]
+                },
+                diffIdentity: "attempt-root"
+              }
+            })
+          })
+        }`
+        return yield* backup({
+          directory: join(base, "backup"),
+          objectsDirectory: objects
+        })
+      }))
+
+      expect(manifest.artifacts.map((entry) => entry.digest)).toEqual(
+        [checkpointDigest, metadataDigest].sort()
+      )
+    }))
+
+  it.effect("fails closed on malformed frozen attempt metadata or checkpoints", () =>
+    Effect.gen(function*() {
+      for (const column of ["meta_json", "checkpoint_json"] as const) {
+        const base = root()
+        const exit = yield* run(Effect.gen(function*() {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql`
+            INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
+            VALUES ('backup-corrupt-root', 'pending', 0, '{}')
+          `
+          yield* sql`INSERT INTO flows_attempts ${
+            sql.insert({
+              run_id: "backup-corrupt-root",
+              step_key_digest: "corrupt-root",
+              attempt: 0,
+              state: "running",
+              started_at_ms: 0,
+              checkpoint_json: "{}",
+              meta_json: "{}"
+            })
+          }`
+          yield* sql`PRAGMA ignore_check_constraints = ON`
+          yield* sql.unsafe(
+            `UPDATE flows_attempts SET ${column} = '{' WHERE run_id = 'backup-corrupt-root'`
+          )
+          return yield* backup({ directory: join(base, "backup") }).pipe(Effect.exit)
+        }))
+        expect(failure(exit).code).toBe("snapshot_incomplete")
+      }
     }))
 
   it.effect("surfaces the host filesystem's refusal as the io code", () =>
@@ -150,7 +261,7 @@ describe("backup", () => {
       const notADirectory = join(base, "objects")
       writeFileSync(notADirectory, "a file, not a directory")
       const exit = yield* run(
-        DisasterRecovery.backup({ directory: join(base, "backup"), objectsDirectory: notADirectory }).pipe(
+        backup({ directory: join(base, "backup"), objectsDirectory: notADirectory }).pipe(
           Effect.exit
         )
       )
@@ -161,7 +272,7 @@ describe("backup", () => {
     Effect.gen(function*() {
       // An unmigrated database has no flows_migrations table to record.
       const exit = yield* withCrypto(
-        DisasterRecovery.backup({ directory: join(root(), "backup") }).pipe(
+        backup({ directory: join(root(), "backup") }).pipe(
           Effect.exit,
           Effect.provide(Layer.mergeAll(TestDatabase.layer, NodeFileSystem.layer))
         )
@@ -178,7 +289,7 @@ describe("verify", () => {
       const digest = plantBlob(objects, "verified-artifact")
       const backupDirectory = join(base, "backup")
       const manifest = yield* run(
-        DisasterRecovery.backup({ directory: backupDirectory, objectsDirectory: objects })
+        backup({ directory: backupDirectory, objectsDirectory: objects })
       )
       return { base, backupDirectory, manifest, digest }
     })
@@ -194,6 +305,17 @@ describe("verify", () => {
     Effect.gen(function*() {
       const { backupDirectory } = yield* captured()
       writeFileSync(join(backupDirectory, DisasterRecovery.manifestFileName), "{\"formatVersion\": 2}")
+      const exit = yield* run(DisasterRecovery.verify(backupDirectory).pipe(Effect.exit))
+      expect(failure(exit).code).toBe("invalid_manifest")
+    }))
+
+  it.effect("rejects a manifest database path before it can escape the backup directory", () =>
+    Effect.gen(function*() {
+      const { backupDirectory, manifest } = yield* captured()
+      writeFileSync(
+        join(backupDirectory, DisasterRecovery.manifestFileName),
+        JSON.stringify({ ...manifest, database: { ...manifest.database, file: "../outside.sqlite3" } })
+      )
       const exit = yield* run(DisasterRecovery.verify(backupDirectory).pipe(Effect.exit))
       expect(failure(exit).code).toBe("invalid_manifest")
     }))
@@ -231,7 +353,7 @@ describe("restore", () => {
       const digest = plantBlob(objects, "restored-artifact")
       const backupDirectory = join(base, "backup")
       const manifest = yield* run(
-        DisasterRecovery.backup({ directory: backupDirectory, objectsDirectory: objects })
+        backup({ directory: backupDirectory, objectsDirectory: objects })
       )
 
       const target = join(base, "restored")
@@ -253,7 +375,7 @@ describe("restore", () => {
     Effect.gen(function*() {
       const base = root()
       const backupDirectory = join(base, "backup")
-      yield* run(DisasterRecovery.backup({ directory: backupDirectory }))
+      yield* run(backup({ directory: backupDirectory }))
       const target = join(base, "restored")
       mkdirSync(target, { recursive: true })
       writeFileSync(join(target, "existing.txt"), "occupied")
@@ -267,7 +389,7 @@ describe("restore", () => {
     Effect.gen(function*() {
       const base = root()
       const backupDirectory = join(base, "backup")
-      const manifest = yield* run(DisasterRecovery.backup({ directory: backupDirectory }))
+      const manifest = yield* run(backup({ directory: backupDirectory }))
       const restored = yield* run(
         DisasterRecovery.restoreAndFence({
           backupDirectory,
@@ -290,7 +412,7 @@ describe("fence", () => {
     Effect.gen(function*() {
       const base = root()
       const backupDirectory = join(base, "backup")
-      const manifest = yield* run(DisasterRecovery.backup({ directory: backupDirectory }))
+      const manifest = yield* run(backup({ directory: backupDirectory }))
       const restored = yield* run(
         DisasterRecovery.restore({ backupDirectory, targetDirectory: join(base, "restored") })
       )

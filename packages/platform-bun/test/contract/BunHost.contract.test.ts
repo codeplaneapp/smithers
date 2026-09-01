@@ -13,18 +13,34 @@ import { runHostContract } from "@smthrs/kernel/test/contract"
 import { Deferred, Effect, Fiber, Schedule } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import { spawnSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterAll } from "vitest"
 import * as BunHost from "../../src/BunHost.ts"
 
 const jjAvailable = spawnSync("jj", ["--version"], { stdio: "ignore" }).status === 0
-const jjStatusWorks = jjAvailable && spawnSync("jj", ["status"], { stdio: "ignore" }).status === 0
+const jjRoot = mkdtempSync(join(tmpdir(), "flows-bun-host-contract-jj-"))
+if (jjAvailable) execFileSync("jj", ["git", "init", jjRoot], { stdio: "ignore" })
+const jjStatusWorks = jjAvailable && spawnSync("jj", ["status"], { cwd: jjRoot, stdio: "ignore" }).status === 0
+const jjWorkspacePath = `${jjRoot}-workspace`
+afterAll(() => {
+  rmSync(jjWorkspacePath, { recursive: true, force: true })
+  rmSync(jjRoot, { recursive: true, force: true })
+})
 
-runHostContract("BunHost", BunHost.layer, {
+runHostContract("BunHost", BunHost.layerAt(jjRoot), {
   fileSystem: { expected: "success" },
   path: { expected: "success" },
   childProcess: { expected: "success" },
   jj: jjStatusWorks
-    ? { expected: "success" }
+    ? {
+      expected: "success",
+      prepareChange: (phase) => Effect.sync(() => writeFileSync(join(jjRoot, `${phase}.txt`), phase)),
+      workspacePath: jjWorkspacePath,
+      rootFrom: jjRoot
+    }
     : { expected: "failure", code: jjAvailable ? "unknown" : "not_installed" },
   httpClient: { expected: "failure", code: "TransportError" }
 })

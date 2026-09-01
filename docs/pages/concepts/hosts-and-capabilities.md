@@ -55,7 +55,7 @@ const rule = new Permission.Rule({
 })
 ```
 
-Capability matching normalizes path separators and matches the whole resource. `Capability.subsumes` is deliberately conservative: it returns `false` when containment cannot be proven syntactically.
+Capability matching compares the pattern against the whole resource byte-exactly and performs no path normalization and no case folding, so a backslash never matches a slash. `Capability.subsumes` is deliberately conservative: it returns `false` when containment cannot be proven syntactically.
 
 ## Ambient authority
 
@@ -112,8 +112,11 @@ of `docs/specs/Concepts/Diff Review.md` will attach.
 The transaction is a **deterministic transaction model, not a security
 boundary**. A body that reaches the host through a service the transaction does
 not seed, a spawned native process, an undecorated socket, is outside it.
-Actually denying that ambient access is the VM/`SandboxProvider` provisioning
-story in `docs/specs/Concepts/Agent Adapters.md`, and it is future work.
+Actually denying that ambient access now ships in the
+[`@smthrs/sandbox` reference](/api/sandbox#sandbox): `Sandbox.Provider`
+provisions the machine boundary, and `Sandbox.layerHost` supplies the held
+machine's filesystem, process spawner, and paths instead of relying on a path
+guard.
 
 ## Adapter limitations
 

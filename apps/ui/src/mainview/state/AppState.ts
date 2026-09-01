@@ -62,7 +62,7 @@ export const MessageSchema = z.object({
   status: z.enum(["complete", "failed", "interrupted"]),
   statusDetail: z.string().optional(),
   /** A message-ridden action (sign-in rides the opening message; retry rides the failed-OAuth one). */
-  action: z.object({ flow: z.string(), label: z.string() }).optional(),
+  action: z.object({ flow: z.string(), args: z.string().optional(), label: z.string() }).optional(),
   /** A one-line visible tool act ("Smithers ran /world.new-note") renders as a marker row, not a bubble. */
   act: z.string().optional(),
   createdAt: z.number(),
@@ -682,7 +682,7 @@ export type AppTransition =
     name: string
     args: string | null
     hidden: boolean
-    outcome: "executed" | "failed" | "unknown-command" | "deferred"
+    outcome: "executed" | "failed" | "unknown-command" | "deferred" | "confirm-requested"
     detail: string | null
     durationMs: number
   }
@@ -945,8 +945,8 @@ export type AppTransition =
     type: "message.appended"
     actor: "system"
     text: string
-    /** The action that rides the message (sign-in, request access, retry). */
-    action?: { flow: string; label: string }
+    /** The action that rides the message (sign-in, request access, retry, a confirm flow). */
+    action?: { flow: string; args?: string; label: string }
   }
   /* The local-app tabs (docs/LOCAL-APP.md "Tabs"). */
   | { type: "tab.opened"; actor: "user"; tab: Tab }

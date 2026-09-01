@@ -159,7 +159,11 @@ const gatedPageReads = (
         return new Proxy(base, {
           apply(target, thisArgument, argumentsList) {
             const statement = Reflect.apply(target, thisArgument, argumentsList) as Statement.Statement<unknown>
-            if (typeof statement.compile !== "function" || !statement.compile()[0].includes("seq >")) {
+            if (
+              typeof statement.compile !== "function" ||
+              !statement.compile()[0].includes("AND seq >") ||
+              statement.compile()[0].includes("seq >=")
+            ) {
               return statement
             }
             return Deferred.succeed(reached, undefined).pipe(
@@ -172,6 +176,106 @@ const gatedPageReads = (
     ),
     keepWriter
   )
+
+/** Counts durable page SELECTs while preserving the real SQLite statement. */
+const countingPageReads = (count: () => void): DatabaseDecorator =>
+  Layer.merge(
+    Layer.effect(
+      SqlClient.SqlClient,
+      Effect.gen(function*() {
+        const base = yield* Effect.service(SqlClient.SqlClient)
+        return new Proxy(base, {
+          apply(target, thisArgument, argumentsList) {
+            const statement = Reflect.apply(target, thisArgument, argumentsList) as Statement.Statement<unknown>
+            if (
+              typeof statement.compile === "function" &&
+              statement.compile()[0].includes("AND seq >") &&
+              !statement.compile()[0].includes("seq >=")
+            ) {
+              count()
+            }
+            return statement
+          }
+        }) as SqlClient.SqlClient
+      })
+    ),
+    keepWriter
+  )
+
+/** Parks only the first journal write, leaving later writes able to commit. */
+const gateFirstWrite = (
+  reached: Deferred.Deferred<void>,
+  gate: Deferred.Deferred<void>
+): DatabaseDecorator => {
+  let first = true
+  return Layer.merge(
+    Layer.effect(
+      DurableWriter,
+      Effect.gen(function*() {
+        const writer = yield* DurableWriter
+        return DurableWriter.of({
+          write: (write) => {
+            if (!first) return writer.write(write)
+            first = false
+            return Deferred.succeed(reached, undefined).pipe(
+              Effect.andThen(Deferred.await(gate)),
+              Effect.andThen(writer.write(write))
+            ) as never
+          }
+        })
+      })
+    ),
+    Layer.effect(SqlClient.SqlClient, Effect.service(SqlClient.SqlClient))
+  )
+}
+
+/**
+ * Parks the first journal write and forces a scheduling boundary after every
+ * canonical-sequence floor read.
+ *
+ * `node:sqlite` is synchronous, so without that boundary one durable write
+ * runs from admission to COMMIT without ever yielding, and two writers racing
+ * for one run can never actually overlap in a test.
+ */
+const gateFirstWriteWithYieldingFloors = (
+  reached: Deferred.Deferred<void>,
+  gate: Deferred.Deferred<void>
+): DatabaseDecorator => {
+  let first = true
+  return Layer.merge(
+    Layer.effect(
+      DurableWriter,
+      Effect.gen(function*() {
+        const writer = yield* DurableWriter
+        return DurableWriter.of({
+          write: (write) => {
+            if (!first) return writer.write(write)
+            first = false
+            return Deferred.succeed(reached, undefined).pipe(
+              Effect.andThen(Deferred.await(gate)),
+              Effect.andThen(writer.write(write))
+            ) as never
+          }
+        })
+      })
+    ),
+    Layer.effect(
+      SqlClient.SqlClient,
+      Effect.gen(function*() {
+        const base = yield* Effect.service(SqlClient.SqlClient)
+        return new Proxy(base, {
+          apply(target, thisArgument, argumentsList) {
+            const statement = Reflect.apply(target, thisArgument, argumentsList) as Statement.Statement<unknown>
+            if (typeof statement.compile !== "function" || !statement.compile()[0].includes("MAX(seq) + 1")) {
+              return statement
+            }
+            return statement.pipe(Effect.tap(() => Effect.yieldNow))
+          }
+        }) as SqlClient.SqlClient
+      })
+    )
+  )
+}
 
 const journal = (
   options?: Partial<SqlJournal.SqlJournalOptions>,
@@ -261,6 +365,33 @@ describe("Journal.checkpoint", () => {
       yield* service.checkpoint({ runId: run, seq: seqOf(2), state: { attempt: 2 } }, owner)
       const latest = yield* service.latestCheckpoint(run)
       expect(Option.getOrThrow(latest).state).toEqual({ attempt: 2 })
+    }).pipe(Effect.provide(journal()), Effect.scoped))
+
+  effect("returns the exact persisted JSON round trip without aliasing caller state", () =>
+    Effect.gen(function*() {
+      const service = yield* Journal
+      yield* claim(owner)
+      yield* emitMany(service, 0, 2)
+      const original = {
+        when: new Date("2026-08-31T12:34:56.000Z"),
+        omitted: undefined,
+        notANumber: Number.NaN
+      }
+      const written = yield* service.checkpoint({ runId: run, seq: seqOf(1), state: original }, owner)
+      const latest = Option.getOrThrow(yield* service.latestCheckpoint(run))
+
+      expect(written.state).toEqual(latest.state)
+      expect(written.state).toEqual({
+        when: "2026-08-31T12:34:56.000Z",
+        notANumber: null
+      })
+
+      original.when.setUTCFullYear(2030)
+      original.notANumber = 7
+      expect(written.state).toEqual({
+        when: "2026-08-31T12:34:56.000Z",
+        notANumber: null
+      })
     }).pipe(Effect.provide(journal()), Effect.scoped))
 
   effect("rolls back with the transaction that wrote it", () =>
@@ -389,6 +520,124 @@ describe("Journal.compact", () => {
 
       expect(yield* eventCount).toBe(3)
     }))
+
+  effect("waits for an admitted lossy entry before advancing the compaction floor", () =>
+    Effect.gen(function*() {
+      const reached = yield* Deferred.make<void>()
+      const gate = yield* Deferred.make<void>()
+      yield* Effect.gen(function*() {
+        const service = yield* Journal
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        yield* claim(owner)
+
+        const queued = yield* service.emitLossy(input(0))
+        expect(queued.seq).toBe(0)
+        yield* Deferred.await(reached)
+
+        const durable = yield* service.emitDurableUnfenced(input(1))
+        expect(durable.seq).toBe(1)
+        yield* service.checkpoint({ runId: run, seq: seqOf(1), state: null }, owner)
+
+        const compacting = yield* service.compact({ runId: run, upTo: seqOf(1) }, owner).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+        for (let attempt = 0; attempt < 8; attempt++) {
+          yield* Effect.yieldNow
+        }
+        expect(compacting.pollUnsafe()).toBeUndefined()
+
+        const lateAdmission = yield* service.emitLossy(input(2)).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+        for (let attempt = 0; attempt < 8; attempt++) {
+          yield* Effect.yieldNow
+        }
+        expect(lateAdmission.pollUnsafe()).toBeUndefined()
+
+        yield* Deferred.succeed(gate, undefined)
+        const compacted = yield* Fiber.join(compacting)
+        expect(compacted).toEqual({ runId: run, checkpointSeq: 1, deleted: 1 })
+        expect((yield* Fiber.join(lateAdmission)).seq).toBe(2)
+        yield* service.flush
+
+        const rows = yield* sql<{ readonly seq: number }>`
+          SELECT seq FROM flows_journal_events WHERE run_id = ${run} ORDER BY seq ASC
+        `
+        const floor = Option.getOrThrow(yield* service.latestCheckpoint(run)).seq
+        expect(rows.map((row) => row.seq)).toEqual([1, 2])
+        expect(rows.every((row) => row.seq >= floor)).toBe(true)
+
+        const behind = yield* Effect.flip(service.entries({ runId: run, limit: 10 }))
+        expect(behind.code).toBe("compacted")
+        expect(behind.checkpointSeq).toBe(1)
+      }).pipe(
+        Effect.ensuring(Deferred.succeed(gate, undefined)),
+        Effect.provide(journal({}, gateFirstWrite(reached, gate))),
+        Effect.scoped
+      )
+    }))
+
+  effect(
+    "holds concurrent durable writes behind the barrier and releases them when it ends",
+    () =>
+      Effect.gen(function*() {
+        const reached = yield* Deferred.make<void>()
+        const gate = yield* Deferred.make<void>()
+        yield* Effect.gen(function*() {
+          const service = yield* Journal
+          const sql = yield* Effect.service(SqlClient.SqlClient)
+          yield* claim(owner)
+
+          // One admitted lossy entry whose batch is parked, so the barrier has
+          // something to drain and stays open while we queue writers behind it.
+          expect((yield* service.emitLossy(input(0))).seq).toBe(0)
+          yield* Deferred.await(reached)
+
+          const compacting = yield* Effect.flip(service.compact({ runId: run }, owner)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          for (let attempt = 0; attempt < 8; attempt++) {
+            yield* Effect.yieldNow
+          }
+          expect(compacting.pollUnsafe()).toBeUndefined()
+
+          // Two durable writes on the SAME run: both are refused entry while the
+          // barrier owns it, and when it releases they run one at a time behind
+          // the allocation permit.
+          const first = yield* service.emitDurableUnfenced(input(1)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          const second = yield* service.emitDurableUnfenced(input(2)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          for (let attempt = 0; attempt < 8; attempt++) {
+            yield* Effect.yieldNow
+          }
+          expect(first.pollUnsafe()).toBeUndefined()
+          expect(second.pollUnsafe()).toBeUndefined()
+
+          yield* Deferred.succeed(gate, undefined)
+          // The run has no checkpoint, so the compaction refuses. The barrier
+          // must release the run anyway, or a refused compaction would wedge
+          // every later write.
+          const refused = yield* Fiber.join(compacting)
+          expect(refused.code).toBe("checkpoint_invalid")
+
+          const seqs = [(yield* Fiber.join(first)).seq, (yield* Fiber.join(second)).seq]
+          expect([...seqs].sort()).toEqual([1, 2])
+          yield* service.flush
+
+          const rows = yield* sql<{ readonly seq: number }>`
+          SELECT seq FROM flows_journal_events WHERE run_id = ${run} ORDER BY seq ASC
+        `
+          expect(rows.map((row) => row.seq)).toEqual([0, 1, 2])
+        }).pipe(
+          Effect.ensuring(Deferred.succeed(gate, undefined)),
+          Effect.provide(journal({}, gateFirstWriteWithYieldingFloors(reached, gate))),
+          Effect.scoped
+        )
+      })
+  )
 })
 
 describe("a crash injected mid-compaction", () => {
@@ -443,6 +692,77 @@ describe("a crash injected mid-compaction", () => {
 })
 
 describe("followers across compaction", () => {
+  effect("emits one historical page at a time and cancels without reading ahead", () =>
+    Effect.gen(function*() {
+      let pageReads = 0
+      const firstSeen = yield* Deferred.make<void>()
+      const holdFirst = yield* Deferred.make<void>()
+
+      yield* Effect.gen(function*() {
+        const service = yield* Journal
+        yield* claim(owner)
+        yield* emitMany(service, 0, 500)
+        yield* service.checkpoint({ runId: run, seq: seqOf(20), state: null }, owner)
+
+        const follower = yield* Stream.runForEach(service.stream({ runId: run }), (entry) =>
+          entry.seq === 0
+            ? Deferred.succeed(firstSeen, undefined).pipe(
+              Effect.andThen(Deferred.await(holdFirst))
+            )
+            : Effect.void).pipe(Effect.forkChild({ startImmediately: true }))
+
+        yield* Deferred.await(firstSeen)
+        expect(pageReads).toBe(1)
+
+        // A ten-entry page advances the registered cursor only through seq 9,
+        // so compaction at 20 must still see this live reader as behind.
+        const refused = yield* Effect.flip(service.compact({ runId: run, upTo: seqOf(20) }, owner))
+        expect(refused.code).toBe("reader_behind")
+
+        yield* Fiber.interrupt(follower)
+        yield* Effect.yieldNow
+        yield* Effect.yieldNow
+        expect(pageReads).toBe(1)
+      }).pipe(
+        Effect.ensuring(Deferred.succeed(holdFirst, undefined)),
+        Effect.provide(journal(
+          { batchSize: 10 },
+          countingPageReads(() => {
+            pageReads += 1
+          })
+        )),
+        Effect.scoped
+      )
+    }))
+
+  effect("surfaces compaction discovered after an emitted historical page", () =>
+    Effect.gen(function*() {
+      let floorReads = 0
+      const observed: Array<number> = []
+      yield* Effect.gen(function*() {
+        const service = yield* Journal
+        yield* emitMany(service, 0, 5)
+        const failure = yield* Effect.flip(
+          service.stream({ runId: run }).pipe(
+            Stream.tap((entry) => Effect.sync(() => observed.push(entry.seq))),
+            Stream.runCollect
+          )
+        )
+        expect(failure.code).toBe("compacted")
+        expect(failure.checkpointSeq).toBe(3)
+      }).pipe(
+        Effect.provide(journal(
+          { batchSize: 1 },
+          stubbedRows(
+            (text) => text.includes("MAX(seq) AS floor"),
+            () => [{ floor: floorReads++ === 0 ? null : 3 }]
+          )
+        )),
+        Effect.scoped
+      )
+      expect(observed).toEqual([0])
+    }))
+
   effect("a page read whose cursor starts below the floor fails with the resync point", () =>
     Effect.gen(function*() {
       const service = yield* Journal
@@ -643,9 +963,9 @@ describe("refused arguments and failing hosts", () => {
       // The floor read behind a page read, the latest-checkpoint read, and
       // the checkpoint write each map the host failure instead of leaking it.
       const page = yield* Effect.flip(service.entries({ runId: run, limit: 10 }))
-      expect(page.code).toBe("unknown")
+      expect(page.code).toBe("read_failed")
       const latest = yield* Effect.flip(service.latestCheckpoint(run))
-      expect(latest.code).toBe("unknown")
+      expect(latest.code).toBe("read_failed")
       const written = yield* Effect.flip(service.checkpoint({ runId: run, seq: seqOf(1), state: null }, owner))
       expect(written.code).toBe("sink_failed")
     }).pipe(Effect.provide(journal()), Effect.scoped))
@@ -671,6 +991,84 @@ describe("the compaction policy hook", () => {
       expect(yield* eventCount).toBe(12)
       expect(Option.isNone(yield* service.latestCheckpoint(run))).toBe(true)
     }).pipe(Effect.provide(journal()), Effect.scoped))
+
+  effect("does not hold another run's admission behind a slow durable capture", () =>
+    Effect.gen(function*() {
+      const gate = yield* Deferred.make<void>()
+      const reachedCapture = yield* Deferred.make<void>()
+      yield* Effect.gen(function*() {
+        const service = yield* Journal
+        const crossing = yield* service.emitDurableUnfenced(input(0)).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* Deferred.await(reachedCapture)
+
+        const unrelatedRun = runId("unrelated-capture")
+        const unrelated = yield* service.emitLossy(
+          new Input({
+            runId: unrelatedRun,
+            sourceId: source,
+            sourceSeq: 0 as SourceSeq,
+            eventType: "event",
+            payload: { value: 0 }
+          }, { disableChecks: true })
+        ).pipe(Effect.forkChild({ startImmediately: true }))
+        for (let attempt = 0; attempt < 8; attempt++) {
+          yield* Effect.yieldNow
+        }
+        expect(unrelated.pollUnsafe()?._tag).toBe("Success")
+
+        yield* Deferred.succeed(gate, undefined)
+        expect((yield* Fiber.join(crossing)).seq).toBe(0)
+        expect((yield* Fiber.join(unrelated)).seq).toBe(0)
+        yield* service.flush
+      }).pipe(
+        Effect.ensuring(Deferred.succeed(gate, undefined)),
+        Effect.provide(journal({
+          compaction: {
+            entryThreshold: 1,
+            capture: (activeRun) =>
+              activeRun === run
+                ? Deferred.succeed(reachedCapture, undefined).pipe(
+                  Effect.andThen(Deferred.await(gate)),
+                  Effect.as(null)
+                )
+                : Effect.succeed(null)
+          }
+        })),
+        Effect.scoped
+      )
+    }))
+
+  effect("times out a hanging capture and damps it without wedging the emit", () =>
+    Effect.gen(function*() {
+      const reachedCapture = yield* Deferred.make<void>()
+      yield* Effect.gen(function*() {
+        const service = yield* Journal
+        const crossing = yield* service.emitDurableUnfenced(input(0)).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+        yield* Deferred.await(reachedCapture)
+        expect(crossing.pollUnsafe()).toBeUndefined()
+
+        yield* TestClock.adjust("30 seconds")
+        for (let attempt = 0; attempt < 8; attempt++) {
+          yield* Effect.yieldNow
+        }
+        expect(crossing.pollUnsafe()?._tag).toBe("Success")
+        expect((yield* Fiber.join(crossing)).seq).toBe(0)
+        expect(Option.isNone(yield* service.latestCheckpoint(run))).toBe(true)
+        expect(yield* eventCount).toBe(1)
+      }).pipe(
+        Effect.provide(journal({
+          compaction: {
+            entryThreshold: 1,
+            capture: () => Deferred.succeed(reachedCapture, undefined).pipe(Effect.andThen(Effect.never))
+          }
+        })),
+        Effect.scoped
+      )
+    }))
 
   effect("checkpoints and compacts at the entry-count threshold, repeatedly", () =>
     Effect.gen(function*() {

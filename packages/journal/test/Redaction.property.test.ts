@@ -20,6 +20,13 @@ const credentialFragment = FastCheck.constantFrom(
   "sk-",
   "pk_",
   "sk_live_",
+  "ghp_",
+  "github_pat_",
+  "AKIA",
+  "xoxb-",
+  "AIza",
+  "postgres://admin:",
+  "@db.internal/app",
   "Bearer ",
   "bearer\t",
   "BEARER  ",
@@ -56,6 +63,16 @@ const hostileString = FastCheck.oneof(
   credentialText
 )
 
+const toJsonBearingValue = FastCheck.tuple(
+  FastCheck.jsonValue({ stringUnit: hostileString }),
+  FastCheck.constantFrom("own", "prototype", "nested")
+).map(([json, shape]) => {
+  if (shape === "own") return { ignored: true, toJSON: () => json }
+  const prototype = { toJSON: () => json }
+  const value = Object.assign(Object.create(prototype) as Record<string, unknown>, { ignored: true })
+  return shape === "prototype" ? value : { nested: value }
+})
+
 describe("Redaction properties", () => {
   it("redacting a string twice yields the first result", () => {
     // Idempotence: one pass must reach a fixed point, or a payload that is
@@ -73,7 +90,15 @@ describe("Redaction properties", () => {
           ["sk-aaaaaaaatoken=abc"],
           ["token=sk_abcdefghij"],
           ["Bearer tokenabcd=efgh"],
-          ["api_key=x=y"]
+          ["api_key=x=y"],
+          ["TOKEN='dummy secret'"],
+          ["ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"],
+          ["github_pat_11ABCDEFG0abcdefghijklmnop"],
+          ["AKIAIOSFODNN7EXAMPLE"],
+          ["xoxb-123456789012-123456789012-abcdefghijkl"],
+          ["AIzaSyA1234567890abcdefghijklmnopqrstuvw"],
+          ["postgres://admin:hunter2@db.internal/app"],
+          [`log line: {"apiToken":"abcd1234efgh5678"}`]
         ]
       }
     )
@@ -97,6 +122,17 @@ describe("Redaction properties", () => {
           [{ ["__proto__"]: null }]
         ]
       }
+    )
+  })
+
+  it("matches a JSON round trip for values carrying toJSON", () => {
+    FastCheck.assert(
+      FastCheck.property(toJsonBearingValue, (value) => {
+        const encoded = JSON.stringify(value)
+        const reparsed = JSON.parse(encoded) as unknown
+        expect(JSON.stringify(Redaction.redact(value))).toBe(JSON.stringify(Redaction.redact(reparsed)))
+      }),
+      { ...params }
     )
   })
 

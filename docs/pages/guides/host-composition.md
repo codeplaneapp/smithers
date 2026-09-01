@@ -22,33 +22,36 @@ Every durable program provides four things:
    `Inconsistency` for cache-conflict verdicts, `OwnerIdentity`, and the
    boundary and sandbox implementations.
 
-`@smthrs/flows/NodeRuntime` packages the first two on Node. The last two stay
-yours by design: a host bundle that installed itself would decide your
-capability policy for you.
+[`@smthrs/flows/NodeRuntime`](/api/flows#noderuntime) packages the first two on
+Node. Its lower-level `layer` constructor leaves the host composition to the
+application; `layerHost` supplies the contained, capability-guarded Node host
+for applications that want the batteries-included composition.
 
 ## Node
 
 ```ts
-import { NodeRuntime } from "@smthrs/flows/NodeRuntime"
+import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
 
 const runtime = NodeRuntime.layer({
   filename: ".flows/engine.db",
-  boundary,
-  sandbox
-})
+  workspaceRoot: process.cwd(),
+  owner: { hostId: "example" },
+  isAlive
+}, boundary, sandbox, registerFlows)
 ```
 
 `NodeRuntime.storage` opens the SQLite database, runs the migrations, and
 provides the stores, `OwnerIdentity`, `Workspace`, and a filesystem artifact
 store. `layer` and `make` add `EngineStore` over that and run `registerFlows`
-as the final startup phase. Shutdown is scope closure, and nothing installs a
-process or signal handler.
+as the final startup phase. `layerHost` additionally installs the contained
+Node host and signal-driven graceful shutdown. Engine checkpoint operations use
+a private repository-bound `Jj`; flow actions see only the guarded host service.
 
-What it does not install: `NodeHost.layer` and the guarded `HostServices`
-kernel. `Jj`, Effect's `FileSystem`, and Effect's `Crypto` stay requirements of
-the returned layer, and `StepBoundary` and `WorkspaceSandbox` are arguments. Add
-`@smthrs/platform-node` for the host services and `@smthrs/kernel` for the
-capability decoration.
+The lower-level `layer` does not install `NodeHost.layer` or the guarded
+`HostServices` kernel. `Jj`, Effect's `FileSystem`, and Effect's `Crypto` stay
+requirements of that returned layer, and `StepBoundary` and `WorkspaceSandbox`
+are arguments. Use `layerHost` when the standard contained Node composition and
+its capability policy are appropriate.
 
 The durable engine is Node-only. Opening a durable database under Bun fails with
 `unsupported_runtime`; Bun runs the applications and the non-durable packages.
@@ -57,7 +60,7 @@ Worked example: [`examples/src/durable-layer.ts`](https://github.com/smithersai/
 
 ## Browser
 
-Browser support is a bundling claim, not a deployment claim. Twenty-four entry
+Browser support is a bundling claim, not a deployment claim. Twenty-eight entry
 points bundle under esbuild's browser platform, and
 [`scripts/browser-check.mjs`](https://github.com/smithersai/smithers/blob/main/scripts/browser-check.mjs)
 executes that claim on every build. [Browser support](/architecture/browser-support)
@@ -74,12 +77,11 @@ ZenFS-shaped promises API and Effect's `ChildProcessSpawner` over an in-page
 bash interpreter. `@smthrs/jj/browser/BrowserJj` runs jj-lib compiled to
 `wasm32-wasip1` over an injected virtual filesystem.
 
-What a browser deployment still needs, and what this release does not ship, is a
-SQL client behind the `DurableWriter` contract. `@smthrs/journal` bundles
-because it depends on the contract rather than on a driver; a browser
-application supplies its own client, for example Effect's sqlite-wasm OPFS
-worker. Until it does, a browser bundle can author and inspect but not durably
-execute.
+`@smthrs/journal` bundles because it depends on the `DurableWriter` contract
+rather than on a driver. Durable execution itself is unsupported in browsers
+and edge workers in rc.0, even if an application supplies a SQL client. A
+browser bundle can author and inspect flows, but the supported durable host is
+Node.js with local SQLite.
 
 ## Capability decoration
 
@@ -93,7 +95,8 @@ engine. See [hosts and capabilities](/concepts/hosts-and-capabilities).
 
 - A supervisor process. Recovery is a running engine with the flow registered.
 - A cross-process event bus. Wakes land through the heartbeat sweep.
-- A durable process registry. Cancelling a run kills the process groups it
-  spawned; hard-killing the engine does not.
+- A multi-node lease service or an external process supervisor. Same-host child
+  processes are tracked by the contained host's `ProcessLedger`; abandoned runs
+  still require another registered engine process to reclaim them.
 
 See [known limitations](/release/known-limitations).

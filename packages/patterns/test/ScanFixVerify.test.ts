@@ -56,9 +56,20 @@ describe("ScanFixVerify", () => {
 
   it("rejects bounds below one", () => {
     const options = { scan, fix, verify, maxRetries: 1, maxIssues: 1, concurrency: 1 }
-    expect(() => ScanFixVerify.make({ ...options, maxRetries: 0 })).toThrow(PatternError)
-    expect(() => ScanFixVerify.make({ ...options, maxIssues: 0 })).toThrow(PatternError)
-    expect(() => ScanFixVerify.make({ ...options, concurrency: 0 })).toThrow(PatternError)
+    for (
+      const invalid of [
+        { ...options, maxRetries: 0 },
+        { ...options, maxIssues: 0 },
+        { ...options, concurrency: 0 }
+      ]
+    ) {
+      expect(() => ScanFixVerify.make(invalid)).toThrow(
+        expect.objectContaining({
+          code: "invalid_decorator",
+          message: "ScanFixVerify maxRetries, maxIssues, and concurrency must be positive safe integers"
+        })
+      )
+    }
   })
 
   it.effect("fixes every issue, verifies once, and stops when the next scan is clean", () =>
@@ -225,6 +236,9 @@ describe("ScanFixVerify", () => {
 
       expect(failure).toBeInstanceOf(PatternError)
       expect(failure.code).toBe("invalid_decorator")
+      expect(failure.message).toBe(
+        "ScanFixVerify maxRetries, maxIssues, and concurrency must be positive safe integers"
+      )
       expect(scanned).toBe(0)
     }))
 })

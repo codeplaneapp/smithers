@@ -21,8 +21,7 @@ import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import { pathToFileURL } from "node:url"
-import { tsImport } from "tsx/esm/api"
-import { buildModuleUrl, installEffectResolution } from "./effect-resolution.js"
+import { buildModuleUrl, importDeclarationModule, installEffectResolution } from "./effect-resolution.js"
 import * as Label from "./Label.ts"
 
 // Workspace is also imported as a library by tests and embedding hosts that do
@@ -425,10 +424,7 @@ const importNamespace = async (entry: SafeFs.Entry): Promise<unknown> => {
   const key = await moduleKey(entry)
   const existing = namespaces.get(key)
   if (existing !== undefined) return existing
-  const loaded = tsImport(buildModuleUrl(pathToFileURL(entry.path).href), {
-    parentURL: import.meta.url,
-    tsconfig: false
-  }) as Promise<unknown>
+  const loaded = importDeclarationModule(buildModuleUrl(pathToFileURL(entry.path).href), import.meta.url)
   namespaces.set(key, loaded)
   return loaded
 }
@@ -493,6 +489,24 @@ export const resolveConfig = async (
 }
 
 /**
+ * Which credentials a workspace declared for its remote cache.
+ *
+ * A remote build cache has untrusted readers and trusted writers: every job
+ * pulls, and only a job whose inputs were reviewed may publish. `split` is
+ * that posture. `shared` is one credential doing both jobs, which is what a
+ * deployment that has not separated its secrets yet has, and it is a tag
+ * rather than an absent field so no caller can read the single-credential case
+ * as an oversight.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export type ResolvedRemoteCacheCredentials =
+  | { readonly _tag: "shared"; readonly tokenEnv: string }
+  | { readonly _tag: "split"; readonly readTokenEnv: string; readonly writeTokenEnv: string }
+
+/**
  * The remote-cache settings one command runs under.
  *
  * @category models
@@ -501,17 +515,58 @@ export const resolveConfig = async (
  */
 export interface ResolvedRemoteCache {
   readonly endpoint: string
-  readonly tokenEnv: string
+  readonly credentials: ResolvedRemoteCacheCredentials
+}
+
+/**
+ * Every environment variable name a resolved credential reads.
+ *
+ * Callers withhold these from child processes, so both halves of a split have
+ * to be listed. Missing one is how a target got to read the credential it was
+ * never meant to hold.
+ *
+ * @category discovery
+ * @since 0.1.0
+ * @slop
+ */
+export const credentialEnvNames = (
+  credentials: ResolvedRemoteCacheCredentials
+): ReadonlyArray<string> =>
+  credentials._tag === "shared"
+    ? [credentials.tokenEnv]
+    : [credentials.readTokenEnv, credentials.writeTokenEnv]
+
+/**
+ * A resolved remote cache with the readers that fetch its credentials.
+ *
+ * The readers are invoked only while an outbound request is being built, so a
+ * credential is never held in a field anything can serialize. A shared
+ * declaration returns the same value from both.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface RemoteCacheAccess extends ResolvedRemoteCache {
+  readonly readToken: () => string | undefined
+  readonly writeToken: () => string | undefined
+  /**
+   * The trust domain this process publishes into, or undefined for the
+   * trusted one. Host state: which domain a job runs in is a property of the
+   * job, not of the workspace it builds.
+   */
+  readonly publishNamespace: string | undefined
 }
 
 /**
  * Resolves the optional remote cache for a workspace.
  *
  * `SMITHERS_CACHE_URL`, captured by the CLI before BUILD.ts evaluation, takes
- * precedence over the root BUILD.ts declaration. The declaration still
- * selects the bearer-token environment variable, which defaults to
- * `SMITHERS_CACHE_TOKEN`. Token values are never returned by this discovery
- * function and never enter declaration or target key material.
+ * precedence over the root BUILD.ts declaration. The declaration still selects
+ * the bearer-token environment variables: one for both directions, or a read
+ * name and a write name, defaulting to `SMITHERS_CACHE_TOKEN`. Token values
+ * are never returned by this discovery function and never enter declaration or
+ * target key material.
  *
  * @category discovery
  * @since 0.1.0
@@ -524,18 +579,25 @@ export const resolveRemoteCache = async (
   const canonical = await SafeFs.canonicalRoot(root)
   const entry = await buildEntry(canonical, "BUILD.ts")
   const declaration = entry === undefined ? undefined : declaredRemoteCache(await importNamespace(entry))
+  const credentials = (): ResolvedRemoteCacheCredentials => {
+    const read = declaration?.token.env ?? RemoteCache.defaultTokenEnv
+    const write = declaration?.write?.env
+    // The endpoint may be overridden per host; which credentials the workspace
+    // declared may not, so the split survives an override.
+    return write === undefined
+      ? { _tag: "shared", tokenEnv: RemoteCache.normalizeTokenEnv(read) }
+      : {
+        _tag: "split",
+        readTokenEnv: RemoteCache.normalizeTokenEnv(read),
+        writeTokenEnv: RemoteCache.normalizeTokenEnv(write)
+      }
+  }
   const override = endpointOverride?.trim()
   if (override !== undefined && override !== "") {
-    return {
-      endpoint: RemoteCache.normalizeEndpoint(override),
-      tokenEnv: declaration?.token.env ?? RemoteCache.defaultTokenEnv
-    }
+    return { endpoint: RemoteCache.normalizeEndpoint(override), credentials: credentials() }
   }
   if (declaration === undefined) return undefined
-  return {
-    endpoint: RemoteCache.normalizeEndpoint(declaration.endpoint),
-    tokenEnv: RemoteCache.normalizeTokenEnv(declaration.token.env)
-  }
+  return { endpoint: RemoteCache.normalizeEndpoint(declaration.endpoint), credentials: credentials() }
 }
 
 const gitignoreForms = (cacheDirectory: string): ReadonlyArray<string> => [
@@ -819,7 +881,7 @@ export class Workspace {
    */
   static async make(
     root: string,
-    cwd: string = process.cwd(),
+    cwd: string,
     options: {
       readonly cacheDirectory?: string | undefined
       readonly signal?: AbortSignal | undefined

@@ -33,7 +33,7 @@ export function ChatTranscript({
 }: ChatTranscriptProps) {
   useInjectUiCss();
   useInjectLaneCss(CONVERSATION_FOUNDATION_CSS_ID, conversationFoundationCss);
-  const isEmpty = Children.count(children) === 0;
+  const isEmpty = Children.toArray(children).length === 0;
   const internalScrollerProps = scrollerProps as
     | Omit<MessageScrollerProps, "children" | "contentClassName" | "ref">
     | undefined;

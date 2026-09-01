@@ -34,6 +34,21 @@ describe("DurableClock", () => {
       expect(clock.duration).toEqual(Duration.seconds(5))
     }))
 
+  it("rejects malformed, infinite, and negative durations before building an effect", () => {
+    const invalid = ["not a duration", "Infinity", Number.POSITIVE_INFINITY, -1] as const
+    for (const duration of invalid) {
+      expect(() => DurableClock.make({ name: "invalid", duration: duration as Duration.Input })).toThrow(/duration/)
+      expect(() => DurableClock.sleep({ name: "invalid", duration: duration as Duration.Input })).toThrow(/duration/)
+    }
+    expect(() =>
+      DurableClock.sleep({
+        name: "invalid-threshold",
+        duration: "1 second",
+        inMemoryThreshold: -1
+      })
+    ).toThrow(/inMemoryThreshold/)
+  })
+
   effect("a zero duration sleep returns without waiting on the clock", () => {
     const Step = Action.make("DurableClock/zero/step", {
       payload: { id: Schema.String },

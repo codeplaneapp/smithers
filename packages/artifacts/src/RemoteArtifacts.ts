@@ -39,15 +39,12 @@
  * not hold.
  *
  * The endpoint and its credentials arrive as **layer construction options**.
- * They are a capability, never an input: they are not hashed into a step key,
- * not journaled, and not part of any recorded result — see
- * `docs/specs/Specs/Input.md` ("secrets are never input") and
- * `docs/specs/Concepts/Remote Cache.md`.
+ * They are capabilities, never step inputs: they are not hashed into a step
+ * key, journaled, or returned in a recorded result. Invalid endpoint errors are
+ * sanitized before they cross the boundary.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-import { Sha256 } from "@smthrs/crypto"
-import type * as Crypto from "effect/Crypto"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -63,24 +60,32 @@ import * as ArtifactStore from "./ArtifactStore.ts"
  * How eagerly a composition materializes shared blobs into its local store.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export type DownloadPolicy = "all" | "toplevel" | "minimal"
+export const DownloadPolicy = Schema.Literals(["all", "toplevel", "minimal"] as const)
+
+/**
+ * How eagerly a composition materializes remote blobs.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type DownloadPolicy = typeof DownloadPolicy.Type
 
 /**
  * Every download policy, in materialization order.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const downloadPolicies: ReadonlyArray<DownloadPolicy> = ["all", "toplevel", "minimal"]
+export const downloadPolicies: ReadonlyArray<DownloadPolicy> = Object.freeze(["all", "toplevel", "minimal"])
 
 /**
  * A remote artifact tier, which is an ordinary store that also states how
  * eagerly a composition reading through it should materialize blobs locally.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Service extends ArtifactStore.Service {
   readonly downloadPolicy: DownloadPolicy
@@ -91,20 +96,18 @@ export interface Service extends ArtifactStore.Service {
  * declares none — every local store, and any foreign implementation.
  *
  * @category getters
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const downloadPolicyOf = (store: ArtifactStore.Service): DownloadPolicy | undefined => {
   const declared = (store as { readonly downloadPolicy?: unknown }).downloadPolicy
-  return typeof declared === "string" && (downloadPolicies as ReadonlyArray<string>).includes(declared)
-    ? declared as DownloadPolicy
-    : undefined
+  return Schema.is(DownloadPolicy)(declared) ? declared : undefined
 }
 
 /**
  * How to reach the shared artifact tier.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface Options {
@@ -133,6 +136,16 @@ export interface Options {
    */
   readonly downloadTimeout?: Duration.Input | undefined
   /**
+   * Deadline for an upload, including every resume probe and chunk. Defaults
+   * to 60 seconds.
+   */
+  readonly uploadTimeout?: Duration.Input | undefined
+  /**
+   * Deadline for an existence probe or one `findMissing` batch, including its
+   * response body. Defaults to 60 seconds.
+   */
+  readonly requestTimeout?: Duration.Input | undefined
+  /**
    * The largest download this client will buffer, in bytes. The body is read
    * incrementally and abandoned the moment it exceeds the bound — and refused
    * outright when `Content-Length` already declares the excess — so a
@@ -141,6 +154,11 @@ export interface Options {
    * 256 MiB.
    */
   readonly maxDownloadBytes?: number | undefined
+  /**
+   * Largest `findMissing` response body accepted. Defaults to the protocol's
+   * 256 KiB request/response bound and may only lower that bound.
+   */
+  readonly maxFindMissingResponseBytes?: number | undefined
   /**
    * Above this many bytes an upload travels as a sequence of `Content-Range`
    * `PUT`s instead of one whole-blob body, and a transfer that died partway
@@ -177,6 +195,8 @@ export interface Options {
  * default, governing the same dumb-HTTP cache protocol.
  */
 const defaultDownloadTimeout = Duration.seconds(60)
+const defaultUploadTimeout = Duration.seconds(60)
+const defaultRequestTimeout = Duration.seconds(60)
 
 /**
  * The default bound on a downloaded blob: 256 MiB. Artifacts are spilled step
@@ -185,12 +205,15 @@ const defaultDownloadTimeout = Duration.seconds(60)
  * deployment that knows better.
  */
 const defaultMaxDownloadBytes = 256 * 1024 * 1024
+const maxFindMissingBatchDigests = 1_000
+const maxFindMissingBodyBytes = 256 * 1024
+const encoder = new TextEncoder()
+const decoder = new TextDecoder("utf-8", { fatal: true })
 
-const transportFailure = (operation: string, cause: unknown): ArtifactStore.ArtifactStoreError =>
+const transportFailure = (operation: string): ArtifactStore.ArtifactStoreError =>
   new ArtifactStore.ArtifactStoreError({
     code: "transport_failed",
-    message: `the remote artifact tier refused ${operation}: ${String(cause)}`,
-    cause
+    message: `the remote artifact tier refused ${operation}`
   })
 
 const unexpectedStatus = (operation: string, status: number): ArtifactStore.ArtifactStoreError =>
@@ -199,14 +222,17 @@ const unexpectedStatus = (operation: string, status: number): ArtifactStore.Arti
     message: `the remote artifact tier answered ${operation} with HTTP ${status}`
   })
 
-const invalidOption = (name: string, value: unknown): ArtifactStore.ArtifactStoreError =>
+const invalidOption = (name: string): ArtifactStore.ArtifactStoreError =>
   new ArtifactStore.ArtifactStoreError({
-    code: "transport_failed",
-    message: `invalid remote artifact option ${name}: ${String(value)}`
+    code: "invalid_configuration",
+    message: `invalid remote artifact option: ${name}`
   })
 
 /** The batched-probe response body. */
 const FindMissingResponse = Schema.Struct({ missing: Schema.Array(Schema.String) })
+
+const configurationFailure = (message: string): ArtifactStore.ArtifactStoreError =>
+  new ArtifactStore.ArtifactStoreError({ code: "invalid_configuration", message })
 
 /**
  * A 2xx is success, a 404 is a miss, and everything else is a transport
@@ -221,29 +247,54 @@ const isOk = (response: HttpClientResponse.HttpClientResponse): boolean =>
  * Builds a remote artifact store over Effect's `HttpClient`.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const make = (
   options: Options
 ): Effect.Effect<Service, ArtifactStore.ArtifactStoreError, HttpClient.HttpClient> =>
   Effect.gen(function*() {
-    const client = yield* HttpClient.HttpClient
+    const configured = yield* Effect.try({
+      try: () => {
+        const headers = options.headers === undefined
+          ? undefined
+          : Object.freeze(Object.fromEntries(
+            Object.entries(options.headers).map(([name, value]) => {
+              if (typeof value !== "string") throw new TypeError("header value")
+              return [name, value]
+            })
+          ))
+        return {
+          endpoint: options.endpoint,
+          headers,
+          downloadTimeout: options.downloadTimeout,
+          uploadTimeout: options.uploadTimeout,
+          requestTimeout: options.requestTimeout,
+          maxDownloadBytes: options.maxDownloadBytes,
+          maxFindMissingResponseBytes: options.maxFindMissingResponseBytes,
+          chunkBytes: options.chunkBytes,
+          downloadPolicy: options.downloadPolicy
+        }
+      },
+      catch: () => invalidOption("options")
+    })
+    if (typeof configured.endpoint !== "string") return yield* Effect.fail(invalidOption("endpoint"))
     const endpoint = yield* Effect.try({
-      try: () => new URL(options.endpoint),
-      catch: (cause) => transportFailure("an invalid endpoint", cause)
+      try: () => new URL(configured.endpoint),
+      catch: () => configurationFailure("invalid remote artifact endpoint")
     })
     if (endpoint.protocol !== "https:") {
-      return yield* Effect.fail(transportFailure("a non-HTTPS endpoint", options.endpoint))
+      return yield* Effect.fail(configurationFailure("remote artifact endpoint must use HTTPS"))
     }
     if (endpoint.username !== "" || endpoint.password !== "" || endpoint.search !== "" || endpoint.hash !== "") {
       return yield* Effect.fail(
-        transportFailure("an endpoint containing credentials, a query, or a fragment", options.endpoint)
+        configurationFailure("remote artifact endpoint must not contain credentials, a query, or a fragment")
       )
     }
     endpoint.pathname = endpoint.pathname.replace(/\/+$/, "")
     const base = endpoint.toString().replace(/\/+$/, "")
-    const headers = options.headers
+    const headers = configured.headers
+    const client = yield* HttpClient.HttpClient
     const authorize = (request: HttpClientRequest.HttpClientRequest): HttpClientRequest.HttpClientRequest =>
       headers === undefined ? request : HttpClientRequest.setHeaders(request, headers)
     // The address is a URL path segment, so it is refused before it is
@@ -252,43 +303,67 @@ export const make = (
     // resource on the configured endpoint. `ArtifactStore.validateDigest` is
     // the same guard the filesystem tier applies to the same untrusted input —
     // a digest read back out of a durable row.
-    const casUrl = (digest: string) => `${base}/cas/${encodeURIComponent(digest)}`
+    const casUrl = (digest: ArtifactStore.Digest) => `${base}/cas/${digest}`
     const send = (operation: string, request: HttpClientRequest.HttpClientRequest) =>
-      client.execute(authorize(request)).pipe(Effect.mapError((cause) => transportFailure(operation, cause)))
-    const measure = (bytes: Uint8Array): Effect.Effect<ArtifactStore.Digest, never, Crypto.Crypto> =>
-      Schema.decodeUnknownEffect(Sha256)(bytes).pipe(Effect.orDie)
-    const parsedDownloadDeadline = Duration.fromInput(options.downloadTimeout ?? defaultDownloadTimeout)
-    if (
-      Option.isNone(parsedDownloadDeadline) ||
-      !Number.isFinite(Duration.toMillis(parsedDownloadDeadline.value)) ||
-      Duration.toMillis(parsedDownloadDeadline.value) <= 0
-    ) {
-      return yield* Effect.fail(invalidOption("downloadTimeout", options.downloadTimeout))
-    }
-    const downloadDeadline = parsedDownloadDeadline.value
-    const maxDownloadBytes = options.maxDownloadBytes ?? defaultMaxDownloadBytes
+      client.execute(authorize(request)).pipe(Effect.mapError(() => transportFailure(operation)))
+    const parseDeadline = (name: string, input: Duration.Input | undefined, fallback: Duration.Duration) =>
+      Effect.gen(function*() {
+        const parsed = Duration.fromInput(input ?? fallback)
+        if (
+          Option.isNone(parsed) ||
+          !Number.isFinite(Duration.toMillis(parsed.value)) ||
+          Duration.toMillis(parsed.value) <= 0
+        ) {
+          return yield* Effect.fail(invalidOption(name))
+        }
+        return parsed.value
+      })
+    const downloadDeadline = yield* parseDeadline(
+      "downloadTimeout",
+      configured.downloadTimeout,
+      defaultDownloadTimeout
+    )
+    const uploadDeadline = yield* parseDeadline("uploadTimeout", configured.uploadTimeout, defaultUploadTimeout)
+    const requestDeadline = yield* parseDeadline("requestTimeout", configured.requestTimeout, defaultRequestTimeout)
+    const maxDownloadBytes = configured.maxDownloadBytes ?? defaultMaxDownloadBytes
     if (!Number.isSafeInteger(maxDownloadBytes) || maxDownloadBytes <= 0) {
-      return yield* Effect.fail(invalidOption("maxDownloadBytes", maxDownloadBytes))
+      return yield* Effect.fail(invalidOption("maxDownloadBytes"))
     }
-    const chunkBytes = options.chunkBytes
+    const maxFindMissingResponseBytes = configured.maxFindMissingResponseBytes ?? maxFindMissingBodyBytes
+    if (
+      !Number.isSafeInteger(maxFindMissingResponseBytes) ||
+      maxFindMissingResponseBytes <= 0 ||
+      maxFindMissingResponseBytes > maxFindMissingBodyBytes
+    ) {
+      return yield* Effect.fail(invalidOption("maxFindMissingResponseBytes"))
+    }
+    const chunkBytes = configured.chunkBytes
     if (chunkBytes !== undefined && (!Number.isSafeInteger(chunkBytes) || chunkBytes <= 0)) {
-      return yield* Effect.fail(invalidOption("chunkBytes", chunkBytes))
+      return yield* Effect.fail(invalidOption("chunkBytes"))
     }
-    const downloadPolicy = options.downloadPolicy ?? "all"
-    if (!(downloadPolicies as ReadonlyArray<string>).includes(downloadPolicy)) {
-      return yield* Effect.fail(invalidOption("downloadPolicy", downloadPolicy))
+    const downloadPolicy = configured.downloadPolicy ?? "all"
+    if (!Schema.is(DownloadPolicy)(downloadPolicy)) {
+      return yield* Effect.fail(invalidOption("downloadPolicy"))
     }
-    const downloadTooLarge = (received: number): ArtifactStore.ArtifactStoreError =>
+    const bodyTooLarge = (operation: string, received: number, bound: number): ArtifactStore.ArtifactStoreError =>
       new ArtifactStore.ArtifactStoreError({
         code: "transport_failed",
-        message:
-          `the remote artifact tier answered a download with ${received} bytes, past the ${maxDownloadBytes}-byte bound`
+        message: `the remote artifact tier answered ${operation} with ${received} bytes, past the ${bound}-byte bound`
       })
-    const downloadTimedOut = (): ArtifactStore.ArtifactStoreError =>
+    const timedOut = (operation: string): ArtifactStore.ArtifactStoreError =>
       new ArtifactStore.ArtifactStoreError({
         code: "transport_failed",
-        message: `the remote artifact tier did not finish a download within ${Duration.format(downloadDeadline)}`
+        message: `the remote artifact tier did not finish ${operation} within its configured deadline`
       })
+    const within = <A, E, R>(
+      operation: string,
+      deadline: Duration.Duration,
+      effect: Effect.Effect<A, E, R>
+    ): Effect.Effect<A, E | ArtifactStore.ArtifactStoreError, R> =>
+      effect.pipe(
+        Effect.timeout(deadline),
+        Effect.catchTag("TimeoutError", () => Effect.fail(timedOut(operation)))
+      )
     /**
      * Reads a download body incrementally, refusing it the moment it exceeds
      * the size bound; a `Content-Length` that already declares the excess is
@@ -296,19 +371,27 @@ export const make = (
      * buffering the whole body means the guard fires at most one chunk past
      * the bound, never after an arbitrarily large response is in memory.
      */
-    const readBounded = (response: HttpClientResponse.HttpClientResponse) =>
+    const readBounded = (
+      response: HttpClientResponse.HttpClientResponse,
+      operation: string,
+      bound: number
+    ) =>
       Effect.gen(function*() {
         const declared = response.headers["content-length"]
-        if (declared !== undefined && Number(declared) > maxDownloadBytes) {
-          return yield* Effect.fail(downloadTooLarge(Number(declared)))
+        if (declared !== undefined) {
+          const declaredBytes = Number(declared)
+          if (!/^\d+$/.test(declared) || !Number.isSafeInteger(declaredBytes)) {
+            return yield* Effect.fail(transportFailure(`${operation} body`))
+          }
+          if (declaredBytes > bound) return yield* Effect.fail(bodyTooLarge(operation, declaredBytes, bound))
         }
         const chunks: Array<Uint8Array> = []
         let received = 0
         yield* Stream.runForEach(response.stream, (chunk: Uint8Array) =>
           Effect.suspend(() => {
             received += chunk.byteLength
-            if (received > maxDownloadBytes) return Effect.fail(downloadTooLarge(received))
-            chunks.push(chunk)
+            if (received > bound) return Effect.fail(bodyTooLarge(operation, received, bound))
+            chunks.push(new Uint8Array(chunk))
             return Effect.void
           })).pipe(
             Effect.catchTag("HttpClientError", (cause) =>
@@ -317,7 +400,7 @@ export const make = (
               // is the requested artifact.
               cause.reason._tag === "EmptyBodyError"
                 ? Effect.void
-                : Effect.fail(transportFailure("a download body", cause)))
+                : Effect.fail(transportFailure(`${operation} body`)))
           )
         const bytes = new Uint8Array(received)
         let offset = 0
@@ -328,18 +411,18 @@ export const make = (
         return bytes
       })
     /** The network half of `get`: request, status split, bounded body read. */
-    const download = (digest: string) =>
+    const download = (digest: ArtifactStore.Digest) =>
       Effect.gen(function*() {
         const response = yield* send("a download", HttpClientRequest.get(casUrl(digest)))
         if (response.status === 404) {
           return yield* Effect.fail(new ArtifactStore.ArtifactMissing({ code: "artifact_missing", digest }))
         }
         if (!isOk(response)) return yield* Effect.fail(unexpectedStatus("a download", response.status))
-        return yield* readBounded(response)
+        return yield* readBounded(response, "a download", maxDownloadBytes)
       })
 
     /** One whole-blob `PUT`: the protocol every dumb-HTTP CAS already speaks. */
-    const uploadWhole = (digest: string, bytes: Uint8Array) =>
+    const uploadWhole = (digest: ArtifactStore.Digest, bytes: Uint8Array) =>
       Effect.gen(function*() {
         const response = yield* send(
           "an upload",
@@ -375,7 +458,7 @@ export const make = (
      * its own behalf. A tier that answers `HEAD` without a length is not
      * refused — it simply proves nothing, so the caller sends the blob whole.
      */
-    const holdsWhole = (digest: string, total: number) =>
+    const holdsWhole = (digest: ArtifactStore.Digest, total: number) =>
       Effect.map(send("an existence probe", HttpClientRequest.head(casUrl(digest))), (response) => {
         if (!isOk(response)) return false
         const declared = response.headers["content-length"]
@@ -396,7 +479,7 @@ export const make = (
      * digest is published. Everything else falls back, and the whole-blob
      * `PUT` overwrites whatever partial body the sequence left behind.
      */
-    const uploadChunked = (digest: string, bytes: Uint8Array, chunk: number) =>
+    const uploadChunked = (digest: ArtifactStore.Digest, bytes: Uint8Array, chunk: number) =>
       Effect.gen(function*() {
         const total = bytes.byteLength
         const ranged = (range: string, body: Uint8Array) =>
@@ -442,40 +525,44 @@ export const make = (
       })
 
     const put: ArtifactStore.Service["put"] = Effect.fn("RemoteArtifacts.put")((bytes: Uint8Array) =>
-      Effect.gen(function*() {
-        const digest = yield* measure(bytes)
-        yield* Effect.annotateCurrentSpan({ digest })
-        if (chunkBytes === undefined || bytes.byteLength <= chunkBytes) {
-          yield* uploadWhole(digest, bytes)
+      Effect.flatMap(ArtifactStore.snapshotBytes(bytes), (snapshot) =>
+        Effect.gen(function*() {
+          const digest = yield* ArtifactStore.measureBytes(snapshot)
+          yield* Effect.annotateCurrentSpan({ digest })
+          yield* within(
+            "an upload",
+            uploadDeadline,
+            Effect.gen(function*() {
+              if (chunkBytes === undefined || snapshot.byteLength <= chunkBytes) {
+                yield* uploadWhole(digest, snapshot)
+                return
+              }
+              const transferred = yield* uploadChunked(digest, snapshot, chunkBytes)
+              if (!transferred) yield* uploadWhole(digest, snapshot)
+            })
+          )
           return digest
-        }
-        const transferred = yield* uploadChunked(digest, bytes, chunkBytes)
-        if (!transferred) yield* uploadWhole(digest, bytes)
-        return digest
-      })
+        }))
     )
 
     const get: ArtifactStore.Service["get"] = Effect.fn("RemoteArtifacts.get")((digest: string) =>
       Effect.gen(function*() {
-        yield* Effect.annotateCurrentSpan({ digest })
-        yield* ArtifactStore.validateDigest(digest)
+        const validated = yield* ArtifactStore.validateDigest(digest)
+        yield* Effect.annotateCurrentSpan({ digest: validated })
         // The deadline covers the whole exchange — request, headers, body —
         // because a tier that stalls mid-body is exactly as unanswering as
         // one that never accepts the connection.
-        const bytes = yield* download(digest).pipe(
-          Effect.timeout(downloadDeadline),
-          Effect.catchTag("TimeoutError", () => Effect.fail(downloadTimedOut()))
-        )
+        const bytes = yield* within("a download", downloadDeadline, download(validated))
         // The shared tier is the least trusted store there is: it is written
         // by machines this one has never met. Verifying the address here means
         // a mis-serving or compromised cache can waste a round trip but can
         // never substitute content.
-        const measured = yield* measure(bytes)
-        if (measured !== digest) {
+        const measured = yield* ArtifactStore.measureBytes(bytes)
+        if (measured !== validated) {
           return yield* Effect.fail(
             new ArtifactStore.ArtifactCorruption({
               code: "artifact_corruption",
-              recordedDigest: digest,
+              recordedDigest: validated,
               measuredDigest: measured
             })
           )
@@ -486,9 +573,13 @@ export const make = (
 
     const has: ArtifactStore.Service["has"] = Effect.fn("RemoteArtifacts.has")((digest: string) =>
       Effect.gen(function*() {
-        yield* Effect.annotateCurrentSpan({ digest })
-        yield* ArtifactStore.validateDigest(digest)
-        const response = yield* send("an existence probe", HttpClientRequest.head(casUrl(digest)))
+        const validated = yield* ArtifactStore.validateDigest(digest)
+        yield* Effect.annotateCurrentSpan({ digest: validated })
+        const response = yield* within(
+          "an existence probe",
+          requestDeadline,
+          send("an existence probe", HttpClientRequest.head(casUrl(validated)))
+        )
         if (response.status === 404) return false
         if (!isOk(response)) return yield* Effect.fail(unexpectedStatus("an existence probe", response.status))
         return true
@@ -499,34 +590,58 @@ export const make = (
       (digests: Iterable<string>) =>
         Effect.gen(function*() {
           const requested = [...new Set(digests)]
-          yield* Effect.annotateCurrentSpan({ count: requested.length })
           if (requested.length === 0) return []
           // The batch travels in a JSON body rather than a path, but an
           // unusable address is still an unusable address, and the local tier
           // refuses the same batch wholesale rather than probing part of it.
-          for (const digest of requested) yield* ArtifactStore.validateDigest(digest)
-          const response = yield* send(
-            "a batched existence probe",
-            HttpClientRequest.post(`${base}/cas/findMissing`).pipe(
-              HttpClientRequest.bodyJsonUnsafe({ digests: requested })
+          const validated: Array<ArtifactStore.Digest> = []
+          for (const digest of requested) validated.push(yield* ArtifactStore.validateDigest(digest))
+          yield* Effect.annotateCurrentSpan({ count: validated.length })
+          const missing = new Set<string>()
+          for (let offset = 0; offset < validated.length; offset += maxFindMissingBatchDigests) {
+            const batch = validated.slice(offset, offset + maxFindMissingBatchDigests)
+            const requestBody = encoder.encode(JSON.stringify({ digests: batch }))
+            /* v8 ignore next 3 -- strict 64-byte digests plus the 1,000-entry batch cap make this
+             * at most 67,013 bytes; keep the protocol assertion beside serialization in case either invariant changes. */
+            if (requestBody.byteLength > maxFindMissingBodyBytes) {
+              return yield* Effect.fail(configurationFailure("remote artifact findMissing request exceeds 256 KiB"))
+            }
+            const decoded = yield* within(
+              "a batched existence probe",
+              requestDeadline,
+              Effect.gen(function*() {
+                const response = yield* send(
+                  "a batched existence probe",
+                  HttpClientRequest.post(`${base}/cas/findMissing`).pipe(
+                    HttpClientRequest.bodyUint8Array(requestBody, "application/json")
+                  )
+                )
+                if (!isOk(response)) {
+                  return yield* Effect.fail(unexpectedStatus("a batched existence probe", response.status))
+                }
+                const bodyBytes = yield* readBounded(
+                  response,
+                  "a batched existence probe",
+                  maxFindMissingResponseBytes
+                )
+                const body = yield* Effect.try({
+                  try: () => JSON.parse(decoder.decode(bodyBytes)) as unknown,
+                  catch: () => transportFailure("a batched existence probe body")
+                })
+                return yield* Schema.decodeUnknownEffect(FindMissingResponse)(body).pipe(
+                  Effect.mapError(() => transportFailure("a batched existence probe body"))
+                )
+              })
             )
-          )
-          if (!isOk(response)) {
-            return yield* Effect.fail(unexpectedStatus("a batched existence probe", response.status))
+            const asked = new Set<string>(batch)
+            for (const digest of decoded.missing) if (asked.has(digest)) missing.add(digest)
           }
-          const body = yield* response.json.pipe(
-            Effect.mapError((cause) => transportFailure("a batched existence probe body", cause))
-          )
-          const decoded = yield* Schema.decodeUnknownEffect(FindMissingResponse)(body).pipe(
-            Effect.mapError((cause) => transportFailure("a batched existence probe body", cause))
-          )
           // "The returned set is guaranteed to be a subset of `digests`"
           // (`MissingDigestsFinder`). Bazel gets that from the server; we
           // enforce it on this side too, because a server that answered with
           // an unrequested digest would otherwise make the caller upload bytes
           // it never asked about.
-          const asked = new Set(requested)
-          return decoded.missing.filter((digest) => asked.has(digest))
+          return validated.filter((digest) => missing.has(digest))
         })
     )
 
@@ -542,7 +657,7 @@ export const make = (
  * tier.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer = (

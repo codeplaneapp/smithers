@@ -19,7 +19,7 @@ import * as ResolveJj from "@smthrs/jj/node/resolveJjBinary"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import type * as Namespace from "@smthrs/memory/Namespace"
 import * as MigrateCommand from "@smthrs/migrate/flow/Command"
-import { Console, Effect, Option, Schema, Stream } from "effect"
+import { Clock, Console, Effect, Option, Schema, Stream } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import * as Agents from "./Agents.ts"
 import * as Bug from "./Bug.ts"
@@ -211,6 +211,13 @@ const settled = (kind: string): boolean =>
   kind === "control.run.failed" ||
   kind === "control.run.cancelled"
 
+const recoverWatch = <A>(
+  error: unknown,
+  runId: string,
+  message: string,
+  fallback: A
+): Effect.Effect<A> => Console.error(`${message} (${runId})`, error).pipe(Effect.as(fallback))
+
 /**
  * Waits for the run to settle and reports the event kind that settled it, or
  * `undefined` when nothing was waited for.
@@ -227,7 +234,9 @@ const awaitRun = (
     Effect.map((events) => globalThis.Array.from(events)[0]?.kind),
     // A transport failure still lets the process close normally; remote CLI
     // ownership belongs to the server, and the receipt was already durable.
-    Effect.catchCause(() => Effect.succeed(undefined))
+    Effect.catch((error) =>
+      recoverWatch(error, runId, "The control watch failed while waiting for the run to settle", undefined)
+    )
   )
 
 /**
@@ -244,7 +253,9 @@ const latestPark = (
     Stream.filter((event) => event.kind === "control.run.waiting-approval"),
     Stream.runCollect,
     Effect.map((events) => events.length === 0 ? undefined : Math.max(...events.map((event) => event.sequence))),
-    Effect.catchCause(() => Effect.succeed(undefined))
+    Effect.catch((error) =>
+      recoverWatch(error, runId, "The control watch failed while finding the run's latest approval park", undefined)
+    )
   )
 
 const awaitOwnedRun = (
@@ -298,10 +309,11 @@ const declinedLaunch = (control: ControlService.Service, runId: string) =>
     const summary = yield* summaryOf(control, runId)
     if (summary !== undefined) yield* render(summary)
     return new CliError.UnsupportedError({
-      message: `Run ${runId} was accepted but the executor did not take it: it is ` +
-        `${summary?.status ?? "accepted"} with nothing running. This host resolved no seat for the flow, or ` +
-        `refused the launch. Read \`smithers status ${runId}\` and \`smithers ps\`, then run ` +
-        `\`smithers doctor\` to see which provider keys this project has.`
+      message: `Run ${runId} was accepted but no executor took it: it is ` +
+        `${summary?.status ?? "accepted"} with nothing running. This host drives prompt flows. A flow whose ` +
+        `body is a module (\`flow.ts\`) is driven by the host program that registers its delegates, and a flow ` +
+        `this project's registry does not hold belongs to another host: run the flow from that program, or end ` +
+        `the run with \`smithers cancel ${runId}\`. \`smithers status ${runId}\` shows what it waits for.`
     })
   })
 
@@ -360,7 +372,14 @@ const reportSettlement = (settlement: string | undefined) =>
 const eventsOf = (control: ControlService.Service, runId: string) =>
   Stream.runCollect(control.watch({ runId, follow: false })).pipe(
     Effect.map((events) => globalThis.Array.from(events)),
-    Effect.catchCause(() => Effect.succeed([] as ReadonlyArray<ControlSchema.ControlEvent>))
+    Effect.catch((error) =>
+      recoverWatch(
+        error,
+        runId,
+        "The control watch failed while reading the run's event history",
+        [] as ReadonlyArray<ControlSchema.ControlEvent>
+      )
+    )
   )
 
 /** One run's summary, or undefined when the control plane has no such run. */
@@ -687,23 +706,78 @@ const ps = Command.make("ps", {
   Effect.gen(function*() {
     yield* guardGlobals
     const control = yield* ControlService.Control
+    const now = yield* Clock.currentTimeMillis
     yield* render(
-      yield* control.list({
-        _tag: "runs",
-        filters: {
-          ...(Option.isNone(config.flow) ? {} : { flowId: config.flow.value }),
-          ...(Option.isNone(config.status) ? {} : { status: config.status.value })
-        }
-      })
+      labelled(
+        yield* control.list({
+          _tag: "runs",
+          filters: {
+            ...(Option.isNone(config.flow) ? {} : { flowId: config.flow.value }),
+            ...(Option.isNone(config.status) ? {} : { status: config.status.value })
+          }
+        }),
+        now
+      )
     )
   })).pipe(Command.withDescription(Verb.find("ps")!.help))
+
+/**
+ * The window a driven launch may sit at `accepted` before it claims the run.
+ *
+ * `accepted` with owner pid 0 is NOT proof on its own that no executor is
+ * coming: an ordinary driven launch commits that row and flips it to
+ * `running` a moment later, and a reader in another process sees the
+ * intermediate state (measured at 175 ms and 191 ms on this repository's own
+ * launch path). Every CLI-written run also carries pid 0, because
+ * `SqlControlRuntime` defaults the owner that way. So the listing waits out
+ * the handoff before it labels anything.
+ */
+const executorHandoffWindowMillis = 5_000
+
+/**
+ * Whether a listing should say a run is waiting for an executor.
+ *
+ * This is a rendering heuristic over the listing's own fields, not a durable
+ * verdict: the durable one is the `control.run.pending` event the status card
+ * reads from the run's journal. It answers true for a run that has sat at
+ * `accepted` with owner pid 0, declaring no other wait, for longer than
+ * {@link executorHandoffWindowMillis}. Such a run is real, durable, and
+ * waiting for a host that drives its flow — a module flow's delegates are
+ * registered in code by the program that hosts them — and only
+ * `smithers cancel` ends it if none arrives.
+ */
+const unclaimed = (run: ControlSchema.RunSummary, now: number): boolean => {
+  if (run.status !== "accepted" || run.waitingReason !== undefined) return false
+  if (now - run.updatedAt < executorHandoffWindowMillis) return false
+  if (run.ownerId === undefined) return true
+  try {
+    return (JSON.parse(run.ownerId) as { readonly pid?: unknown }).pid === 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Names what an unclaimed run waits for, in the field that already carries it.
+ *
+ * `RunSummary.waitingReason` is "what a parked run is holding on". This one
+ * holds on an executor, and before the label a listing showed it as an
+ * ordinary `accepted` run — indistinguishable from one a live peer owns.
+ */
+const labelled = (listed: ControlSchema.ListResponse, now: number): ControlSchema.ListResponse =>
+  listed._tag === "runs"
+    ? {
+      ...listed,
+      items: listed.items.map((run) => unclaimed(run, now) ? { ...run, waitingReason: "executor" } : run)
+    }
+    : listed
 
 const statusOf = (runId: Option.Option<string>) =>
   Effect.gen(function*() {
     yield* guardGlobals
     const control = yield* ControlService.Control
     const filters = Option.isSome(runId) ? { runId: runId.value } : undefined
-    const listed = yield* control.list({ _tag: "runs", filters })
+    const listed = labelled(yield* control.list({ _tag: "runs", filters }), yield* Clock.currentTimeMillis)
     const root = yield* rootCommand
     // `--json` keeps the stable listing shape untouched; a human reader with a
     // run id gets the diagnosis card computed from that run's own events.
@@ -811,7 +885,7 @@ const init = Command.make("init", {
     yield* refuseRemoved("init", { global: config.global })
     const projectRoot = yield* Project.ProjectRoot
     const name = Option.getOrElse(config.name, () => Init.defaultName(projectRoot))
-    yield* render(yield* Effect.sync(() => Init.scaffold(projectRoot, name)))
+    yield* render(yield* Effect.sync(() => Init.scaffold(projectRoot, name, process.env)))
   })).pipe(Command.withDescription(Verb.find("init")!.help))
 
 const docs = Command.make("docs", { full: Flag.boolean("full") }, (config) =>

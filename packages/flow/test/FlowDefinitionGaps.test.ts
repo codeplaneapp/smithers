@@ -3,7 +3,7 @@
 import { describe, expect, expectTypeOf, it } from "@effect/vitest"
 import { Action, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
-import { Effect, Exit, Layer, Option, Schema } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 import type * as Scope from "effect/Scope"
 import { withCrypto } from "./Crypto.ts"
@@ -140,7 +140,7 @@ describe("Flow.make requires a body", () => {
  * gone with the handler — and the authoring surface reaches a declared
  * action's implementation instead.
  *
- * DECIDED (2026-08-11, pending review): the definition-level combinator keeps
+ * DECIDED (2026-08-11): the definition-level combinator keeps
  * its own coverage through this cast rather than the assertions moving to the
  * module-level `Flow.withRollback`. A declared action's implementation is
  * exactly the position the marker stood for — inside a running execution, with
@@ -392,7 +392,7 @@ describe("suspension while siblings are still running", () => {
 })
 
 describe("typed caller-input errors", () => {
-  effect("fails an invalid execute payload with a typed SchemaError naming the field", () => {
+  effect("fails execute typed but makes executionId die for the same invalid payload", () => {
     const flow = Flow.make("Definition/invalid-payload", {
       payload: { count: Schema.Number },
       success: Schema.Number,
@@ -408,6 +408,13 @@ describe("typed caller-input errors", () => {
       // typed error, and its rendering names the offending field.
       expect(error).toMatchObject({ _tag: "SchemaError" })
       expect(String(error)).toContain("count")
+
+      const idExit = yield* flow.executionId(
+        { count: "not-a-number" } as unknown as { readonly count: number }
+      ).pipe(Effect.exit)
+      expect(Exit.isFailure(idExit)).toBe(true)
+      expect(Exit.isFailure(idExit) && Cause.hasDies(idExit.cause)).toBe(true)
+      expect(Exit.isFailure(idExit) && idExit.cause.toString()).toContain("count")
     }).pipe(Effect.provide(layer))
   })
 

@@ -14,13 +14,21 @@ durable engine does not yet perform automatically.
 A `Frame` identifies a durable point by lineage and journal sequence:
 
 ```ts
+import { Engine } from "@smthrs/flows"
 import { Frame } from "@smthrs/time-travel"
 
 const frame: Frame.Frame = {
-  lineageId: "build-42/root",
+  lineageId: Engine.FlowEngine.Lineage.root("build-42"),
   seq: 17
 }
 ```
+
+The lineage half of that address is minted, never spelled. `FlowEngine.Lineage`
+is the one constructor for it, the engine stamps its result on every record a
+run writes, and the encoding is versioned: a hand-written `<runId>/root` names
+no record, and every operation refuses it as `not_found`. Reading
+`meta.lineageId` off any entry the run committed is the other route, and the one
+a viewer takes when it holds records rather than a run id.
 
 A `Position` pairs that frame with the run it addresses: `{ runId, frame }` , 
 and is the only argument every operation takes. A frame is an address into
@@ -95,7 +103,7 @@ Behind the service, an effect-handler registry maps effect kinds to assessment a
 
 Detached child policy is either `block` (the default) or `cancel`. Terminal descendants are disclosed as warnings because their external effects cannot be erased by deleting a parent suffix.
 
-Step 8 is why recovery is not an operation: building `TimeTravel.layer` finishes or rolls back any rewind a crash interrupted, before the service accepts new work.
+Step 8 is why recovery is not an operation: building `TimeTravel.layer` finishes or rolls back any rewind a crash interrupted, before the service accepts new work, except one whose run a live process still holds. That one is left exactly as the crash left it, still pending and still recoverable, so a rewind a living process still owns is never stolen. `TimeTravel.layerWith({ isAlive })` decides what counts as live; the default is the lease check the engine's run driver already applies to those rows.
 
 ## Current integration boundary
 

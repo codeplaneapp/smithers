@@ -113,7 +113,7 @@ describe("a run whose failure the flow's own codec cannot encode", () => {
       }
       const projected = state.result.exit.cause[0]?.defect
       expect(projected?._tag).toBe(ExitEncoding.projectionTag)
-      expect(projected?.note).toContain("Expected JSON value")
+      expect(projected?.note).toBe("the flow result codec rejected the settlement")
       expect(projected?.reasons[0]?.error?.tag).toBe("test/SeatRejected")
       expect(projected?.reasons[0]?.error?.code).toBe("quota_exceeded")
       expect(projected?.reasons[0]?.error?.message).toBe("You have no credits remaining")

@@ -1,40 +1,40 @@
 /**
  * The plan: a node graph with every step key computed, inert until run.
  *
- * `docs/specs/Specs/Object Model.md` defines a `Plan` as exactly that, and
- * `docs/specs/Concepts/Build Phases.md` makes the way it is produced a law —
- * **planning performs no I/O**. Everything in this module is therefore a pure
- * function of declarations plus the injected `Crypto` service: no filesystem,
- * no clock, no network. A node's key is a function of what it consumes, so an
- * edited declaration re-keys that node and everything downstream of it, and
- * nothing else. That is the entire invalidation mechanism —
- * `docs/specs/Concepts/Hot Reload.md` ("invalidation is re-keying") and
- * `docs/specs/Concepts/Engine Hardening Round 1.md`, which **rejects**
+ * The way a plan is produced is a law: **planning performs no I/O**.
+ * Everything in this module is therefore a pure function of declarations plus
+ * the injected `Crypto` service: no filesystem, no clock, no network. A node's
+ * key is a function of what it consumes, so an edited declaration re-keys that
+ * node and everything downstream of it, and nothing else. That is the entire
+ * invalidation mechanism. Invalidation is re-keying, which **rejects**
  * Skyframe's reverse-dependency index and invalidating node visitor outright
  * because content addressing subsumes them. There is no reverse-dep index in
  * this file, and there must never be one.
  *
- * Growth is append-only (`docs/specs/Specs/Plan.md`): {@link append} adds a
- * pre-keyed subgraph to the same plan and never rewrites a node already in it.
+ * Growth is append-only: {@link append} adds a pre-keyed subgraph to the same
+ * plan and never rewrites a node already in it.
  *
  * @since 0.1.0
  */
+import { StoredKey } from "@smthrs/keys"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
+import * as Inspectable from "effect/Inspectable"
 import * as Schema from "effect/Schema"
 import * as FileSet from "./FileSet.ts"
 import * as KeyMaterial from "./KeyMaterial.ts"
 import * as StepKey from "./StepKey.ts"
 
 /**
- * The storage-facing form of a computed key. `StepKey.content` produces the
- * branded `Key`; a persisted plan carries the same string, validated.
+ * Compatibility name for the storage-facing key schema owned by
+ * `@smthrs/keys`. `StepKey.content` produces this branded value and a
+ * persisted plan validates it without re-hashing it.
  *
  * @since 0.1.0
  * @category schemas
  * @slop
  */
-export const KeyDigest = Schema.String.check(Schema.isPattern(/^key1_[0-9a-f]{64}$/))
+export const KeyDigest = StoredKey
 
 /**
  * What a node does to the world, declared. Paths only — measuring them is
@@ -68,8 +68,7 @@ export const NodeEffects = Schema.Struct({
 export type NodeEffects = typeof NodeEffects.Type
 
 /**
- * The plan-time write-conflict strategies of
- * `docs/specs/Concepts/Effect Taxonomy.md`.
+ * The plan-time write-conflict strategies of the effect taxonomy.
  *
  * @since 0.1.0
  * @category schemas
@@ -87,8 +86,7 @@ export const PairStrategy = Schema.Literals(["serialize", "lane", "fail"])
 export type PairStrategy = typeof PairStrategy.Type
 
 /**
- * The runtime half of a conflict annotation, added by
- * `docs/specs/Concepts/Runtime Conflict Strategies.md`: what the scheduler
+ * The runtime half of a conflict annotation: what the scheduler
  * does when the overlap the plan predicted actually bites, or when a
  * scheduled node's inputs are invalidated under it.
  *
@@ -106,6 +104,9 @@ export const RuntimeStrategy = Schema.Literals(["delay-rebase", "stop-merge"])
  * @slop
  */
 export type RuntimeStrategy = typeof RuntimeStrategy.Type
+
+/** @private */
+const NodeKind = Schema.Literals(["step", "agent", "merge"])
 
 /**
  * One resolved overlap between two writers that no dependency path already
@@ -151,7 +152,7 @@ export type ConflictAnnotation = typeof ConflictAnnotation.Type
  */
 export const PlanNode = Schema.Struct({
   id: Schema.NonEmptyString,
-  kind: Schema.Literals(["step", "agent", "merge"]),
+  kind: NodeKind,
   key: KeyDigest,
   material: KeyMaterial.KeyMaterial,
   effects: NodeEffects,
@@ -175,9 +176,8 @@ export type PlanNode = typeof PlanNode.Type
 /**
  * A plan: the whole keyed graph plus the digest an approval binds to.
  *
- * `baseDigest` is the digest at generation 0 — what a human approved and what
- * a `RUNNING` run pins per `docs/specs/Concepts/Hot Reload.md`. `digest`
- * advances with every appended elaboration.
+ * `baseDigest` is the digest at generation 0: what a human approved and what
+ * a `RUNNING` run pins. `digest` advances with every appended elaboration.
  *
  * @since 0.1.0
  * @category schemas
@@ -228,9 +228,36 @@ export interface NodeDraft {
  * @slop
  */
 export class PlanError extends Schema.TaggedError<PlanError>()("@smthrs/plan/PlanError", {
-  code: Schema.Literals(["cycle", "unknown_dependency", "duplicate_node", "overlap_forbidden", "invalid_effects"]),
+  code: Schema.Literals([
+    "cycle",
+    "unknown_dependency",
+    "duplicate_node",
+    "overlap_forbidden",
+    "invalid_effects",
+    "invalid_node",
+    "graph_too_large"
+  ]),
   message: Schema.String
 }) {}
+
+/**
+ * Maximum number of nodes retained by one compiled plan.
+ *
+ * Conflict analysis is quadratic in node count, so an explicit ceiling keeps
+ * untrusted declarations from turning planning into an unbounded CPU task.
+ *
+ * @since 1.0.0
+ * @category limits
+ * @slop
+ */
+export const maximumPlanNodes = 10_000
+
+/** @private */
+const graphSizeError = (size: number): PlanError =>
+  new PlanError({
+    code: "graph_too_large",
+    message: `A plan may contain at most ${maximumPlanNodes} nodes, received ${size}`
+  })
 
 /**
  * Resolves the pair's verdict. `fail` dominates — a flow that promised
@@ -259,15 +286,18 @@ const pairRuntime = (left: RuntimeStrategy, right: RuntimeStrategy): RuntimeStra
  *
  * @private
  */
-const produces = (effects: NodeEffects): ReadonlyArray<FileSet.Entry> => [
+const producedPaths = (effects: NodeEffects): ReadonlyArray<FileSet.Entry> => [
   ...FileSet.expand(effects.writes),
   ...effects.removes ?? []
 ]
 
 /** @private */
-const overlap = (left: NodeEffects, right: NodeEffects): ReadonlyArray<string> =>
-  produces(left).flatMap((leftEntry) =>
-    produces(right).some((rightEntry) => FileSet.overlaps(leftEntry, rightEntry))
+const overlap = (
+  left: ReadonlyArray<FileSet.Entry>,
+  right: ReadonlyArray<FileSet.Entry>
+): ReadonlyArray<string> =>
+  left.flatMap((leftEntry) =>
+    right.some((rightEntry) => FileSet.overlaps(leftEntry, rightEntry))
       ? [
         typeof leftEntry === "string"
           ? leftEntry
@@ -285,10 +315,10 @@ const overlap = (left: NodeEffects, right: NodeEffects): ReadonlyArray<string> =
  *
  * @private
  */
-const readsWhatItWrites = (reader: NodeEffects, writer: NodeEffects): boolean => {
-  const mutated = produces(writer)
-  return FileSet.expandReads(reader.reads).some((entry) => mutated.some((output) => FileSet.overlaps(entry, output)))
-}
+const readsWhatItWrites = (
+  reads: ReadonlyArray<FileSet.ReadEntry>,
+  produced: ReadonlyArray<FileSet.Entry>
+): boolean => reads.some((entry) => produced.some((output) => FileSet.overlaps(entry, output)))
 
 /** @private */
 type Ordered =
@@ -305,52 +335,48 @@ const topological = (drafts: ReadonlyArray<NodeDraft>, known: ReadonlySet<string
   const byId = new Map(drafts.map((draft) => [draft.id, draft]))
   const ordered: Array<NodeDraft> = []
   const state = new Map<string, "visiting" | "done">()
-  const visit = (draft: NodeDraft): PlanError | undefined => {
-    const mark = state.get(draft.id)
-    if (mark === "done") return undefined
-    if (mark === "visiting") return new PlanError({ code: "cycle", message: `Plan cycle through node ${draft.id}` })
+  interface Frame {
+    readonly draft: NodeDraft
+    readonly dependencies: ReadonlyArray<string>
+    next: number
+  }
+  for (const draft of drafts) {
+    if (state.get(draft.id) === "done") continue
     state.set(draft.id, "visiting")
-    for (const dependency of KeyMaterial.dependencies(draft.material)) {
+    const stack: Array<Frame> = [{ draft, dependencies: KeyMaterial.dependencies(draft.material), next: 0 }]
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1]!
+      if (frame.next === frame.dependencies.length) {
+        state.set(frame.draft.id, "done")
+        ordered.push(frame.draft)
+        stack.pop()
+        continue
+      }
+      const dependency = frame.dependencies[frame.next++]!
       if (known.has(dependency)) continue
       const next = byId.get(dependency)
       if (next === undefined) {
-        return new PlanError({
-          code: "unknown_dependency",
-          message: `Node ${draft.id} depends on unknown node ${dependency}`
-        })
+        return {
+          ok: false,
+          error: new PlanError({
+            code: "unknown_dependency",
+            message: `Node ${frame.draft.id} depends on unknown node ${dependency}`
+          })
+        }
       }
-      const failure = visit(next)
-      if (failure !== undefined) return failure
+      const mark = state.get(next.id)
+      if (mark === "done") continue
+      if (mark === "visiting") {
+        return {
+          ok: false,
+          error: new PlanError({ code: "cycle", message: `Plan cycle through node ${next.id}` })
+        }
+      }
+      state.set(next.id, "visiting")
+      stack.push({ draft: next, dependencies: KeyMaterial.dependencies(next.material), next: 0 })
     }
-    state.set(draft.id, "done")
-    ordered.push(draft)
-    return undefined
-  }
-  for (const draft of drafts) {
-    const failure = visit(draft)
-    if (failure !== undefined) return { ok: false, error: failure }
   }
   return { ok: true, drafts: ordered }
-}
-
-/**
- * Transitive dependency closure, computed in plan order. Every node's
- * dependencies precede it, so one pass suffices.
- *
- * @private
- */
-const reachable = (nodes: ReadonlyArray<PlanNode>): Map<string, Set<string>> => {
-  const closure = new Map<string, Set<string>>()
-  for (const node of nodes) {
-    const set = new Set<string>()
-    for (const dependency of node.dependsOn) {
-      set.add(dependency)
-      /* v8 ignore next -- plan order guarantees a dependency was closed before its dependent, so the fallback is unreachable for any graph `topological` accepted */
-      for (const transitive of closure.get(dependency) ?? []) set.add(transitive)
-    }
-    closure.set(node.id, set)
-  }
-  return closure
 }
 
 /**
@@ -379,17 +405,38 @@ const annotate = (
   frozen: ReadonlySet<string>
 ): Effect.Effect<ReadonlyArray<PlanNode>, PlanError> =>
   Effect.gen(function*() {
-    const closure = reachable(nodes)
+    const expanded = new Map(nodes.map((node) => [node.id, {
+      produced: producedPaths(node.effects),
+      reads: FileSet.expandReads(node.effects.reads)
+    }]))
     const conflicts = new Map<string, Array<ConflictAnnotation>>()
     const ordering = new Map<string, Array<string>>()
+    const edges = new Map(nodes.map((node) => [node.id, new Set(node.dependsOn)]))
+    const reaches = (from: string, to: string): boolean => {
+      const seen = new Set<string>()
+      const stack = [from]
+      while (stack.length > 0) {
+        const current = stack.pop()!
+        if (current === to) return true
+        if (seen.has(current)) continue
+        seen.add(current)
+        // Every edge is validated against this plan before conflict analysis.
+        for (const next of edges.get(current)!) stack.push(next)
+      }
+      return false
+    }
     for (let index = 0; index < nodes.length; index++) {
       const later = nodes[index]!
       if (frozen.has(later.id)) continue
+      const laterProduced = expanded.get(later.id)!.produced
+      if (laterProduced.length === 0) continue
       for (let before = 0; before < index; before++) {
         const earlier = nodes[before]!
-        const paths = overlap(earlier.effects, later.effects)
+        const earlierProduced = expanded.get(earlier.id)!.produced
+        if (earlierProduced.length === 0) continue
+        const paths = overlap(earlierProduced, laterProduced)
         if (paths.length === 0) continue
-        if (closure.get(later.id)!.has(earlier.id)) continue
+        if (reaches(later.id, earlier.id)) continue
         const strategy = pairStrategy(earlier.strategy, later.strategy)
         const runtime = pairRuntime(earlier.runtime, later.runtime)
         if (strategy === "fail") {
@@ -407,7 +454,7 @@ const annotate = (
         conflicts.set(later.id, [...conflicts.get(later.id) ?? [], annotation(earlier.id)])
         if (strategy === "serialize") {
           ordering.set(later.id, [...ordering.get(later.id) ?? [], earlier.id])
-          closure.get(later.id)!.add(earlier.id)
+          edges.get(later.id)!.add(earlier.id)
         }
       }
     }
@@ -424,29 +471,17 @@ const annotate = (
     // and never key material, because the reader computes the same result
     // either way and its content dependence is already keyed by the hermetic
     // boundary digests measured at dispatch.
-    const edges = new Map(
-      nodes.map((node) => [node.id, new Set([...node.dependsOn, ...ordering.get(node.id) ?? []])])
-    )
-    const reaches = (from: string, to: string): boolean => {
-      const seen = new Set<string>()
-      const stack = [from]
-      while (stack.length > 0) {
-        const current = stack.pop()!
-        if (current === to) return true
-        if (seen.has(current)) continue
-        seen.add(current)
-        /* v8 ignore next -- every id in an edge set names a node of this plan, so the fallback is unreachable */
-        for (const next of edges.get(current) ?? []) stack.push(next)
-      }
-      return false
-    }
     for (const reader of nodes) {
       // Append-only: a frozen node's row is never rewritten, so the edge lands
       // on the new node only — the same rule the conflict pass follows.
       if (frozen.has(reader.id)) continue
+      const reads = expanded.get(reader.id)!.reads
+      if (reads.length === 0) continue
       for (const writer of nodes) {
         if (writer.id === reader.id) continue
-        if (!readsWhatItWrites(reader.effects, writer.effects)) continue
+        const produced = expanded.get(writer.id)!.produced
+        if (produced.length === 0) continue
+        if (!readsWhatItWrites(reads, produced)) continue
         // Already ordered, by a material edge, a serialize edge, or a path
         // through either.
         if (reaches(reader.id, writer.id)) continue
@@ -464,18 +499,47 @@ const annotate = (
     return nodes.map((node) => {
       if (frozen.has(node.id)) return node
       const added = ordering.get(node.id) ?? []
-      return {
+      return freezeNode({
         ...node,
         conflicts: conflicts.get(node.id) ?? [],
         dependsOn: added.length === 0 ? node.dependsOn : [...node.dependsOn, ...added]
-      }
+      })
     })
   })
 
 /**
- * The plan's digest: what an approval binds to. It covers node identity,
- * every computed key, the edge set, and the resolved conflict annotations —
- * everything the plan card renders and a human therefore agreed to.
+ * The single approval projection. Its node list is the complete reviewable and
+ * behavior-bearing contract: id, kind, key, edges, conflict annotations,
+ * declared effects, conflict strategy, runtime strategy, and priority.
+ *
+ * @private
+ */
+const approvalPayload = (
+  planId: string,
+  flow: string,
+  nodes: ReadonlyArray<PlanNode>
+) => ({
+  body: { kind: "plan", planId, flow },
+  inputs: {
+    nodes: nodes.map((node) => ({
+      id: node.id,
+      kind: node.kind,
+      key: node.key,
+      dependsOn: node.dependsOn,
+      conflicts: node.conflicts,
+      effects: node.effects,
+      strategy: node.strategy,
+      runtime: node.runtime,
+      priority: node.priority
+    }))
+  },
+  layers: [],
+  capabilities: {}
+})
+
+/**
+ * The plan's digest: what an approval binds to. Deriving it only from
+ * {@link approvalPayload} keeps the approved field list in one place.
  *
  * @private
  */
@@ -483,54 +547,200 @@ const digestOf = (
   planId: string,
   flow: string,
   nodes: ReadonlyArray<PlanNode>
-): Effect.Effect<string, Schema.SchemaError, Crypto.Crypto> =>
-  StepKey.content({
-    body: { kind: "plan", planId, flow },
-    inputs: {
-      nodes: nodes.map((node) => ({
-        id: node.id,
-        kind: node.kind,
-        key: node.key,
-        dependsOn: node.dependsOn,
-        conflicts: node.conflicts,
-        effects: node.effects,
-        priority: node.priority
-      }))
-    },
-    layers: [],
-    capabilities: {}
-  })
+): Effect.Effect<StepKey.StepKey, StepKey.KeyMaterialError | Schema.SchemaError, Crypto.Crypto> =>
+  StepKey.content(approvalPayload(planId, flow, nodes))
+
+/** @private */
+const maximumDescriptionLength = 256
+
+/** @private */
+const describeValue = (value: unknown): string => {
+  const rendered = typeof value === "string" ? JSON.stringify(value) : Inspectable.toStringUnknown(value, 0)
+  return rendered.length > maximumDescriptionLength
+    ? `${rendered.slice(0, maximumDescriptionLength - 3)}...`
+    : rendered
+}
+
+/** @private */
+const describeNodeId = (id: string): string => id.length > maximumDescriptionLength ? describeValue(id) : id
+
+/** @private */
+const validateIdentity = (planId: unknown, flow: unknown): PlanError | undefined => {
+  if (typeof planId !== "string" || planId.length === 0) {
+    return new PlanError({
+      code: "invalid_node",
+      message: `Plan option planId must be a non-empty string, received ${describeValue(planId)}`
+    })
+  }
+  if (typeof flow !== "string" || flow.length === 0) {
+    return new PlanError({
+      code: "invalid_node",
+      message: `Plan option flow must be a non-empty string, received ${describeValue(flow)}`
+    })
+  }
+  return undefined
+}
+
+/** Whether `value` is a container this module may safely copy. */
+const isSnapshotContainer = (value: unknown): value is object => {
+  if (typeof value !== "object" || value === null) return false
+  if (Array.isArray(value)) return true
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+/** Creates an empty container with the source container's supported prototype. */
+const emptySnapshot = (source: object): object =>
+  Array.isArray(source) ? [] : Object.create(Object.getPrototypeOf(source)) as object
 
 /**
- * Declared effects are admitted exactly once, here. Drafts arrive as typed
- * values, never as decoded rows, so the `FileSet.Pattern` schema filter has
- * not seen them: a plan built in-process could otherwise carry absolute or
- * aliased spellings that defeat exact-string overlap detection, or declare
- * one path as both a write and a removal — the overlap the `FileBoundary`
- * schema refuses at the boundary but nothing refused at the plan.
+ * Copies and freezes only plain data containers, without native recursion.
+ * Shared references and cycles point at one cloned container through `memo`.
+ * Every other value passes through by reference and remains unfrozen. That is
+ * deliberate: a `Planned` proxy inside a material body must still reach the
+ * canonical serializer that refuses it, and freezing an object this package
+ * did not create would mutate caller-owned state.
+ */
+const snapshot = <A extends object>(value: A): A => {
+  const root = emptySnapshot(value)
+  const memo = new WeakMap<object, object>([[value, root]])
+  const pending: Array<{ readonly source: object; readonly target: object }> = [{ source: value, target: root }]
+  const created = [root]
+
+  while (pending.length > 0) {
+    const { source, target } = pending.pop()!
+    for (const key of Reflect.ownKeys(source)) {
+      const descriptor = Object.getOwnPropertyDescriptor(source, key)!
+      if ("value" in descriptor && isSnapshotContainer(descriptor.value)) {
+        let child = memo.get(descriptor.value)
+        if (child === undefined) {
+          child = emptySnapshot(descriptor.value)
+          memo.set(descriptor.value, child)
+          pending.push({ source: descriptor.value, target: child })
+          created.push(child)
+        }
+        descriptor.value = child
+      }
+      Object.defineProperty(target, key, descriptor)
+    }
+  }
+
+  for (const container of created) Object.freeze(container)
+  return root as A
+}
+
+/** Freezes one node built by this module while retaining its material snapshot. */
+const freezeNode = (node: PlanNode): PlanNode =>
+  Object.freeze({
+    ...node,
+    dependsOn: Object.freeze([...node.dependsOn]),
+    conflicts: Object.freeze(
+      node.conflicts.map((conflict) => Object.freeze({ ...conflict, paths: Object.freeze([...conflict.paths]) }))
+    )
+  })
+
+/** Plans whose complete immutable snapshot was created by this module. */
+const frozenPlans = new WeakSet<Plan>()
+
+/** Freezes the plan envelope and its newly built node list. */
+const freezePlan = (plan: Plan): Plan => {
+  const frozen = Object.freeze({ ...plan, nodes: Object.freeze([...plan.nodes]) })
+  frozenPlans.add(frozen)
+  return frozen
+}
+
+/**
+ * Validates the runtime-only parts of `NodeDraft` without replacing effect
+ * admission. Effect 4 Struct decoding strips excess properties and copies its
+ * schema arrays. Extras therefore remain accepted but are not hashed, matching
+ * `materialBody` and PlanStore's decode boundary, while every accepted draft
+ * receives a material snapshot.
+ *
+ * @private
+ */
+const validateDrafts = (
+  drafts: ReadonlyArray<NodeDraft>
+): Effect.Effect<ReadonlyArray<NodeDraft>, PlanError> =>
+  Effect.forEach(drafts, (draft) =>
+    Effect.gen(function*() {
+      if (typeof draft.id !== "string" || draft.id.length === 0) {
+        return yield* Effect.fail(
+          new PlanError({
+            code: "invalid_node",
+            message: `Node id must be a non-empty string, received ${describeValue(draft.id)}`
+          })
+        )
+      }
+      const nodeId = describeNodeId(draft.id)
+      if (draft.priority !== undefined && !Number.isSafeInteger(draft.priority)) {
+        return yield* Effect.fail(
+          new PlanError({
+            code: "invalid_node",
+            message: `Node ${nodeId} priority must be a safe integer, received ${describeValue(draft.priority)}`
+          })
+        )
+      }
+      if (draft.kind !== undefined && !Schema.is(NodeKind)(draft.kind)) {
+        return yield* Effect.fail(
+          new PlanError({
+            code: "invalid_node",
+            message: `Node ${nodeId} kind must be step, agent, or merge, received ${describeValue(draft.kind)}`
+          })
+        )
+      }
+      if (draft.conflictStrategy !== undefined && !Schema.is(PairStrategy)(draft.conflictStrategy)) {
+        return yield* Effect.fail(
+          new PlanError({
+            code: "invalid_node",
+            message: `Node ${nodeId} conflictStrategy must be serialize, lane, or fail, received ${
+              describeValue(draft.conflictStrategy)
+            }`
+          })
+        )
+      }
+      if (draft.runtimeStrategy !== undefined && !Schema.is(RuntimeStrategy)(draft.runtimeStrategy)) {
+        return yield* Effect.fail(
+          new PlanError({
+            code: "invalid_node",
+            message: `Node ${nodeId} runtimeStrategy must be delay-rebase or stop-merge, received ${
+              describeValue(draft.runtimeStrategy)
+            }`
+          })
+        )
+      }
+      const material = yield* Schema.decodeUnknownEffect(KeyMaterial.KeyMaterial)(draft.material).pipe(
+        Effect.mapError((cause) =>
+          new PlanError({
+            code: "invalid_node",
+            message: `Node ${nodeId} has invalid material: ${cause.message}`
+          })
+        )
+      )
+      const effects = yield* Schema.decodeUnknownEffect(NodeEffects)(draft.effects).pipe(
+        Effect.mapError((cause) =>
+          new PlanError({
+            code: "invalid_node",
+            message: `Node ${nodeId} has invalid effects: ${cause.message}`
+          })
+        )
+      )
+      return Object.freeze({
+        ...draft,
+        material: snapshot(material),
+        effects: snapshot(effects)
+      })
+    }))
+
+/**
+ * The effects schema admits each individual declaration in `validateDrafts`.
+ * This pass enforces the cross-field invariant that one path cannot be both a
+ * write and a removal.
  *
  * @private
  */
 const validateEffects = (id: string, effects: NodeEffects): PlanError | undefined => {
-  const patterns = (entry: FileSet.Entry): ReadonlyArray<string> =>
-    typeof entry === "string"
-      ? [entry]
-      : entry._tag === "TreeArtifact"
-      ? [entry.path]
-      : [...entry.include, ...entry.exclude ?? []]
   const removes = effects.removes ?? []
   const writes = FileSet.expand(effects.writes)
-  const declared = [...FileSet.expandReads(effects.reads), ...writes, ...removes]
-  for (const entry of declared) {
-    for (const pattern of patterns(entry)) {
-      if (!FileSet.workspaceRelative(pattern)) {
-        return new PlanError({
-          code: "invalid_effects",
-          message: `Node ${id} declares ${pattern}, which is not workspace-relative`
-        })
-      }
-    }
-  }
   for (const removal of removes) {
     if (writes.some((entry) => FileSet.overlaps(entry, removal))) {
       return new PlanError({
@@ -585,7 +795,7 @@ const keyNodes = (
         value: key,
         writable: true
       })
-      keyed.push({
+      keyed.push(freezeNode({
         id: draft.id,
         kind: draft.kind ?? "step",
         key,
@@ -597,7 +807,7 @@ const keyNodes = (
         runtime: draft.runtimeStrategy ?? "delay-rebase",
         priority: draft.priority ?? 0,
         generation
-      })
+      }))
     }
     return keyed
   })
@@ -605,6 +815,10 @@ const keyNodes = (
 /**
  * Compiles drafts into a plan: topological order, dependency-digest
  * substitution, overlap annotation, and the plan digest. No I/O.
+ *
+ * Traversal uses explicit stacks. Because the conflict and reader/writer
+ * passes consider a quadratic number of node pairs, plans are bounded by
+ * {@link maximumPlanNodes} and fail with `graph_too_large` above that limit.
  *
  * @since 0.1.0
  * @category constructors
@@ -614,20 +828,33 @@ export const compile = (options: {
   readonly planId: string
   readonly flow: string
   readonly nodes: ReadonlyArray<NodeDraft>
-}): Effect.Effect<Plan, PlanError | StepKey.KeyMaterialError | Schema.SchemaError, Crypto.Crypto> =>
-  Effect.gen(function*() {
-    const keyed = yield* keyNodes(options.nodes, [], 0)
+}): Effect.Effect<Plan, PlanError | StepKey.KeyMaterialError | Schema.SchemaError, Crypto.Crypto> => {
+  const captured = snapshot(options)
+  return Effect.gen(function*() {
+    const invalidIdentity = validateIdentity(captured.planId, captured.flow)
+    if (invalidIdentity !== undefined) return yield* Effect.fail(invalidIdentity)
+    if (captured.nodes.length > maximumPlanNodes) return yield* Effect.fail(graphSizeError(captured.nodes.length))
+    const drafts = yield* validateDrafts(captured.nodes)
+    const keyed = yield* keyNodes(drafts, [], 0)
     const nodes = yield* annotate(keyed, new Set())
-    const digest = yield* digestOf(options.planId, options.flow, nodes)
-    return { planId: options.planId, flow: options.flow, generation: 0, baseDigest: digest, digest, nodes }
+    const digest = yield* digestOf(captured.planId, captured.flow, nodes)
+    return freezePlan({
+      planId: captured.planId,
+      flow: captured.flow,
+      generation: 0,
+      baseDigest: digest,
+      digest,
+      nodes
+    })
   })
+}
 
 /**
  * Appends an elaborated subgraph to an existing plan.
  *
- * The plan GROWS; it is never invalidated (`docs/specs/Specs/Plan.md`). Nodes
- * already in it keep their id, key, edges, and generation byte for byte — the
- * new nodes arrive pre-keyed against them, so a `hit` shows instantly.
+ * The plan GROWS; it is never invalidated. Nodes already in it keep their id,
+ * key, edges, and generation byte for byte, and the new nodes arrive pre-keyed
+ * against them, so a `hit` shows instantly.
  * Re-ordering after a reconciliation happens by re-keying *future* steps,
  * never by rewriting history.
  *
@@ -638,17 +865,36 @@ export const compile = (options: {
 export const append = (
   plan: Plan,
   drafts: ReadonlyArray<NodeDraft>
-): Effect.Effect<Plan, PlanError | StepKey.KeyMaterialError | Schema.SchemaError, Crypto.Crypto> =>
-  Effect.gen(function*() {
-    const generation = plan.generation + 1
-    const keyed = yield* keyNodes(drafts, plan.nodes, generation)
-    const nodes = yield* annotate([...plan.nodes, ...keyed], new Set(plan.nodes.map((node) => node.id)))
-    const digest = yield* digestOf(plan.planId, plan.flow, nodes)
-    return { ...plan, generation, digest, nodes }
+): Effect.Effect<Plan, PlanError | StepKey.KeyMaterialError | Schema.SchemaError, Crypto.Crypto> => {
+  const capturedPlan = frozenPlans.has(plan) ? plan : snapshot(plan)
+  const capturedDrafts = snapshot(drafts)
+  return Effect.gen(function*() {
+    const invalidIdentity = validateIdentity(capturedPlan.planId, capturedPlan.flow)
+    if (invalidIdentity !== undefined) return yield* Effect.fail(invalidIdentity)
+    const nextSize = capturedPlan.nodes.length + capturedDrafts.length
+    if (nextSize > maximumPlanNodes) return yield* Effect.fail(graphSizeError(nextSize))
+    const validated = yield* validateDrafts(capturedDrafts)
+    if (validated.length === 0) {
+      return yield* Effect.fail(
+        new PlanError({
+          code: "invalid_node",
+          message: `Plan ${capturedPlan.planId} append requires at least one draft`
+        })
+      )
+    }
+    const generation = capturedPlan.generation + 1
+    const keyed = yield* keyNodes(validated, capturedPlan.nodes, generation)
+    const nodes = yield* annotate(
+      [...capturedPlan.nodes, ...keyed],
+      new Set(capturedPlan.nodes.map((node) => node.id))
+    )
+    const digest = yield* digestOf(capturedPlan.planId, capturedPlan.flow, nodes)
+    return freezePlan({ ...capturedPlan, generation, digest, nodes })
   })
+}
 
 /**
- * The nodes added by the newest generation — what {@link module:PlanStore}
+ * The nodes added by the newest generation: what {@link module:PlanStore}
  * appends and what the `subgraph-appended` journal record names.
  *
  * @since 0.1.0

@@ -876,7 +876,7 @@ const keyMaterialFrom = (
   contextWindow: ContextWindow.ContextWindow,
   request: ModelRequest.ModelRequest
 ): KeyMaterial.KeyMaterial => ({
-  version: "flows/key-material/v1",
+  version: "flows/key-material/v2",
   kind: "sealed",
   body: { _tag: "ModelCall", request },
   inputs: [{ _tag: "Literal", value: { contextDigest: contextWindow.digest } }],
@@ -1023,6 +1023,56 @@ const observedOn = (
   observation: string,
   echo: number
 ): ContextWindow.ContextWindow => appended(contextWindow, assistant, [ModelRequest.Message.user(observation)], echo)
+
+/** Whether one drain carried anything the next frame runs differently for. */
+const carries = (drained: Steering.DrainRecord): boolean =>
+  drained.inserts.length > 0 || drained.seatChanges.length > 0 || drained.activatedToolNames.length > 0
+
+/**
+ * The seat and generation parameters one drain leaves the next frame on.
+ *
+ * Applied in admission order, so the newest change of each kind wins.
+ */
+const steered = (
+  state: State,
+  changes: Steering.DrainRecord["seatChanges"]
+): { readonly seat: string; readonly modelParams: ModelRequest.GenerationParams } => {
+  let seat = state.seat
+  let modelParams = state.modelParams
+  for (const change of changes) {
+    if (change._tag === "SeatChange") seat = change.seat
+    else {
+      modelParams = ModelRequest.GenerationParams.make({
+        maxTokens: modelParams.maxTokens,
+        temperature: modelParams.temperature,
+        topP: modelParams.topP,
+        topK: modelParams.topK,
+        stopSequences: modelParams.stopSequences,
+        thinkingBudget: modelParams.thinkingBudget,
+        reasoningEffort: change.thinking
+      })
+    }
+  }
+  return { seat, modelParams }
+}
+
+/**
+ * The window the next frame renders, re-keyed when a steer moved the seat.
+ *
+ * A window carries the model it was measured against, so a seat change has to
+ * rebuild it or the next frame budgets its context against the model it left.
+ */
+const windowOn = (
+  state: State,
+  seat: string,
+  context: ContextWindow.ContextWindow
+): ContextWindow.ContextWindow =>
+  seat === state.seat ? context : ContextWindow.make({
+    modelId: modelIdFromSeat(seat),
+    segments: context.segments,
+    activeTools: context.activeTools,
+    replaced: context.replaced
+  })
 
 /**
  * The assistant's own reply, shortened from the middle when it is too long to
@@ -1368,14 +1418,94 @@ const pin = (
   state: State,
   cell: string,
   ordinal: number,
-  id: string
+  id: string,
+  callMs: number
 ): Effect.Effect<Option.Option<EngineLike.Snapshot>, HarnessError> =>
   engine.record({
     name: "checkpoint",
     identity: { session: state.session, frame: state.frame, boundary: `${cell}:${ordinal}` },
     success: RecordedSnapshot,
-    execute: engine.capture({ id, identity: { session: state.session, frame: state.frame, boundary: cell } })
+    // The per-call ceiling, applied INSIDE the record for the reason
+    // {@link settled} applies it inside its own: a store that hung past the
+    // budget left the cell told nothing was pinned while the pin itself was
+    // still in flight, so the resumed frame could be handed a snapshot the
+    // original attempt was told it never got. Cut off here, "nothing was
+    // pinned" is what the journal holds and what every later attempt reads.
+    execute: engine.capture({ id, identity: { session: state.session, frame: state.frame, boundary: cell } }).pipe(
+      Effect.timeoutOrElse({ duration: callMs, orElse: () => Effect.succeed(Option.none()) })
+    )
   })
+
+/**
+ * Issues one call under the run's per-call ceiling, through a journaled
+ * boundary.
+ *
+ * The ceiling is what makes this a boundary rather than a pass-through.
+ * `EngineLike.call` is already a keyed activity, so a call that SETTLES is
+ * durable on its own; a call the ceiling cuts off is durable nowhere, because
+ * the activity it interrupted never settled. Left there, a re-executed cell
+ * issues that call again against a world that has moved on, gets an answer this
+ * time, and takes a branch the original attempt never took — and every
+ * irreversible effect below the fork is bought twice.
+ *
+ * The record is written AFTER the call and read INSTEAD of it, which is the
+ * only order available and is the one that matters. The call cannot run inside
+ * the boundary: `EngineLike.call` is where a cell reaches a durable wait, and a
+ * `Flow.suspend` raised inside an enclosing activity suspends that activity's
+ * attempt rather than the run, so a cell that slept on the durable clock never
+ * woke. So this issues the call, records what the cell is about to be told, and
+ * on any later attempt hands back the recorded settlement whatever the re-issued
+ * call answered this time. The cell's branch is what has to be stable, and it
+ * is; the re-issued call is work the run pays for twice, which is what a call
+ * the ceiling cut off already cost before this existed.
+ *
+ * The drive loop is told the settlement is bounded here
+ * (`Sandbox.RealmEvaluation.bounded`): two clocks over one call would settle it
+ * from the reading nothing keeps.
+ *
+ * The boundary is keyed on the cell digest and the call's ordinal, which is the
+ * pair a re-executed cell re-derives.
+ */
+const issued = (
+  engine: EngineLike.EngineLike,
+  state: State,
+  cell: string,
+  ordinal: number,
+  callMs: number,
+  flow: string,
+  issue: Effect.Effect<Cell.CallResult, HarnessError>
+): Effect.Effect<Cell.CallResult, HarnessError> =>
+  Effect.gen(function*() {
+    // An escape — a permission park, an abort, an engine failure — never
+    // reaches the record at all, so nothing journals it and the attempt the
+    // grant answers asks again. That is the whole reason the call sits outside
+    // the boundary rather than inside its `execute`.
+    const settlement = yield* issue.pipe(
+      Effect.timeoutOrElse({
+        duration: callMs,
+        orElse: () => Effect.succeed(Sandbox.callTimedOut(flow, callMs))
+      })
+    )
+    return yield* engine.record({
+      name: "cell-call",
+      identity: { session: state.session, frame: state.frame, boundary: `${cell}:${ordinal}` },
+      success: Cell.CallResult,
+      execute: Effect.succeed(settlement)
+    })
+  })
+
+/**
+ * The schema one settled frame is journaled under.
+ *
+ * The realm's own answer, in full, because all three parts are things the loop
+ * branches on: the outcome decides the transition, the prints become the next
+ * frame's context, and the bindings become the variables panel.
+ */
+const RecordedFrame = Schema.Struct({
+  outcome: Cell.Outcome,
+  prints: Schema.String,
+  bindings: Schema.Array(VariablesPanel.Binding)
+})
 
 /**
  * Settles one `ctx.checkpoint()` from inside a running cell.
@@ -1391,6 +1521,7 @@ const minter = (
   cell: Cell.Source,
   engine: EngineLike.EngineLike,
   minted: Array<string>,
+  callMs: number,
   emit: (event: AgentEvent.AgentEvent) => Effect.Effect<void>
 ): Sandbox.Minter =>
 (mint) =>
@@ -1407,7 +1538,7 @@ const minter = (
       })
     }
     const id = `cp-${state.frame}-${mint.ordinal}`
-    const snapshot = yield* pin(engine, state, cell.digest, mint.ordinal, id)
+    const snapshot = yield* pin(engine, state, cell.digest, mint.ordinal, id, callMs)
     if (Option.isNone(snapshot)) {
       return new Cell.CallResult({
         outcome: "failure",
@@ -1519,6 +1650,7 @@ const callHandler = (
   engine: EngineLike.EngineLike,
   ledger: Array<TruncatedOutput.Capture>,
   performed: Set<number>,
+  callMs: number,
   emit: (event: AgentEvent.AgentEvent) => Effect.Effect<void>
 ): Sandbox.Handler =>
 (invocation) =>
@@ -1610,7 +1742,15 @@ const callHandler = (
     })
     performed.add(invocation.ordinal)
     yield* emit(new AgentEvent.CellCallStarted({ eventType: eventType.cellCallStarted, call }))
-    const result = yield* engine.call(call)
+    const result = yield* issued(
+      engine,
+      state,
+      cell.digest,
+      invocation.ordinal,
+      callMs,
+      invocation.flow,
+      engine.call(call)
+    )
     if (result.outcome === "success") ledger.push(...TruncatedOutput.captures(call.flowName, result.value))
     yield* emit(
       new AgentEvent.CellCallSettled({
@@ -1848,6 +1988,39 @@ const frame = (
       }
     }
 
+    /**
+     * Continues a park a steer answered, carrying what the steer changed.
+     *
+     * The same shape the continue path builds, because that is what this is: an
+     * answered park is a frame the run carries on from, and the only difference
+     * is that its trailing messages came from an operator rather than from the
+     * loop's own notices.
+     */
+    const resumed = (
+      drained: Steering.DrainRecord,
+      changes: Partial<ConstructorParameters<typeof State>[0]> = {}
+    ): Step => {
+      if (state.frame + 1 >= state.maxFrames) return { _tag: "Done" }
+      const { modelParams, seat } = steered(state, drained.seatChanges)
+      const context = appended(
+        contextWindow,
+        answer.message,
+        [ModelRequest.Message.user(printed), ...drained.inserts],
+        liveCellEcho
+      )
+      return {
+        _tag: "Continue",
+        state: advance(state, {
+          frame: state.frame + 1,
+          seat,
+          modelParams,
+          contextWindow: windowOn(state, seat, context),
+          truncatedOutputs: TruncatedOutput.retain(ledger),
+          ...changes
+        })
+      }
+    }
+
     if (produced === undefined) {
       const rejection = refused!
       yield* emit(
@@ -1975,8 +2148,12 @@ const frame = (
     }> = []
     /** Ordinals of the invocations that reached the engine this frame. */
     const performed = new Set<number>()
+    // The per-call ceiling this frame enforces, resolved once. It is applied
+    // where the settlement is recorded rather than in the drive loop, so the
+    // number a run armed and the number its journal holds are the same one.
+    const callMs = Sandbox.withDefaults(sandbox.capabilities, input.limits).callMs ?? Sandbox.defaultLimits.callMs
     const observing: Sandbox.Handler = (invocation) =>
-      callHandler(state, cell, descriptors, engine, ledger, performed, emit)(invocation).pipe(
+      callHandler(state, cell, descriptors, engine, ledger, performed, callMs, emit)(invocation).pipe(
         Effect.tap((result) =>
           Effect.sync(() => {
             const rendered = result.outcome === "success"
@@ -2032,7 +2209,7 @@ const frame = (
     // the run: a checkpoint a frame minted before it raised is still a tree the
     // run holds, and forgetting it would leak a stored tree nothing can name.
     const minted: Array<string> = []
-    const mint = minter(state, cell, engine, minted, emit)
+    const mint = minter(state, cell, engine, minted, callMs, emit)
     // The script the model may promote into a saved flow. It is recorded before
     // the realm evaluates the cell, so a cell that raises is still part of what
     // the run ran. A host that offers no way to save a flow binds no history and
@@ -2042,7 +2219,31 @@ const frame = (
       onNone: () => Effect.void,
       onSome: (recorder) => recorder.record(cell.text)
     })
-    const evaluated = yield* realm.evaluate({ cell, frame: state.frame, call: observing, mint })
+    const observedFrame = yield* realm.evaluate({
+      cell,
+      frame: state.frame,
+      call: observing,
+      mint,
+      // Every settlement this frame hands its cell is bounded and recorded by
+      // the boundary that produces it, so the loop must not race a clock of its
+      // own over the top. See `Sandbox.RealmEvaluation.bounded`.
+      bounded: true
+    })
+    // The realm is the run's memory, so a re-executed frame must still evaluate
+    // its cell: skipping it would leave every name a later frame reads unbound.
+    // What must not be re-derived is the frame's OUTCOME. A whole-frame ceiling
+    // cannot fire again on an attempt whose host calls all replay instantly, so
+    // an unrecorded outcome settles the frame differently from the attempt that
+    // wrote every key below it — with real prints where the record has none, and
+    // a completion the original never reached. That divergence runs in the
+    // dangerous direction: the run forks into fresh sealed keys and re-bought
+    // model calls.
+    const evaluated = yield* engine.record({
+      name: "cell-frame",
+      identity: { session: state.session, frame: state.frame, boundary: cell.digest },
+      success: RecordedFrame,
+      execute: Effect.succeed(observedFrame)
+    })
     const outcome = evaluated.outcome
     const bindings = evaluated.bindings
     printed = printsObservation(evaluated.prints)
@@ -2358,6 +2559,85 @@ const frame = (
         }
         return step
       }
+      // The drain on the park path, and the only thing that can ever answer an
+      // honored park.
+      //
+      // A parked run resumes by re-executing its own frames, so it reaches this
+      // park again with the same cell, the same transition, and the same
+      // question. One boundary per park would hand every later attempt the
+      // first attempt's empty answer, the run would park again, and the
+      // operator's message would sit in the durable queue for the life of the
+      // run — woken, replayed, re-parked, forever. That is what makes
+      // `waiting-input` unanswerable today.
+      //
+      // So the park has a LADDER of boundaries and walks it. Every rung the
+      // queue has answered before hands back exactly what it handed back then,
+      // which is what keeps a replay identical; the walk stops at the first
+      // rung this run has never consulted, which is the one read a resumed
+      // attempt is entitled to perform for real. One rung is consumed per
+      // attempt, so a steer admitted while the run was parked is delivered by
+      // the rung the resume reaches, and every attempt after that replays the
+      // delivery rather than draining a queue that no longer holds it.
+      //
+      // The queue is the record here, and deliberately: `EngineLike.record`
+      // would freeze the rung's answer, and a frozen `duplicate` tells every
+      // later attempt it was the first, which is the loop this is closing.
+      const answered = yield* Effect.gen(function*() {
+        for (let rung = 0;; rung++) {
+          const drained = yield* steering.drain({
+            boundary: `${state.frame}:${cell.digest}:park:${rung}`,
+            // A park IS the run going idle, which is the condition a queued
+            // follow-up was admitted to wait for. The continue path passes
+            // false because a continuing run is not idle; this is the boundary
+            // that owes those messages their delivery.
+            wouldIdle: true
+          })
+          const record = Steering.drainRecord(drained)
+          if (carries(record) || !drained.duplicate) return record
+        }
+      })
+      if (carries(answered)) {
+        yield* emit(
+          new AgentEvent.SteeringDrained({
+            eventType: eventType.steeringDrained,
+            messages: answered.inserts
+          })
+        )
+        // The park was answered, so the run carries on rather than waiting for
+        // an answer it has already been given. The frame is judged as an
+        // honored park still is — waiting is not evasion — so the read-only
+        // streak is carried rather than advanced.
+        const step = resumed(answered, {
+          pendingReadOnlyDemand: undefined,
+          workspace: closed,
+          repeatFrames,
+          callSignatures,
+          checkpointIds,
+          checks,
+          callLedger,
+          failures,
+          mutations,
+          openingDigest,
+          panel,
+          ...(mutated ? { readOnlyGrace: 0 } : {})
+        })
+        yield* emit(
+          new AgentEvent.TurnClosed({
+            eventType: eventType.turnClosed,
+            stopReason: answer.message.stopReason,
+            outcome: step._tag === "Done" ? "resolved" : "continue"
+          })
+        )
+        if (step._tag === "Done") {
+          yield* emit(
+            new AgentEvent.Resolved({
+              eventType: eventType.resolved,
+              message: ModelRequest.Message.assistant(budgetMessage(state), { stopReason: "stop" })
+            })
+          )
+        }
+        return step
+      }
       yield* emit(
         new AgentEvent.TurnClosed({
           eventType: eventType.turnClosed,
@@ -2642,22 +2922,7 @@ const frame = (
         outcome: "continue"
       })
     )
-    let seat = state.seat
-    let modelParams = state.modelParams
-    for (const change of drained.seatChanges) {
-      if (change._tag === "SeatChange") seat = change.seat
-      else {
-        modelParams = ModelRequest.GenerationParams.make({
-          maxTokens: modelParams.maxTokens,
-          temperature: modelParams.temperature,
-          topP: modelParams.topP,
-          topK: modelParams.topK,
-          stopSequences: modelParams.stopSequences,
-          thinkingBudget: modelParams.thinkingBudget,
-          reasoningEffort: change.thinking
-        })
-      }
-    }
+    const { modelParams, seat } = steered(state, drained.seatChanges)
     // The intervention. At the cap the next frame is told, structurally, that
     // it must write something or say why it cannot; a justification is typed
     // data on the transition, is recorded, and buys a bounded quiet spell
@@ -2748,12 +3013,7 @@ const frame = (
         frame: state.frame + 1,
         seat,
         modelParams,
-        contextWindow: seat === state.seat ? context : ContextWindow.make({
-          modelId: modelIdFromSeat(seat),
-          segments: context.segments,
-          activeTools: context.activeTools,
-          replaced: context.replaced
-        }),
+        contextWindow: windowOn(state, seat, context),
         truncatedOutputs: TruncatedOutput.retain(ledger),
         workspace: closed,
         readOnlyFrames,

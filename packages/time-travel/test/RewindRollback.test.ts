@@ -333,6 +333,72 @@ describe("Rewind protocol fault matrix", () => {
       }))
   }
 
+  // `Compensation.restoreWorkspace` rolls back every handler receipt itself on
+  // both of its failure paths, so the outer failure branch must not roll them
+  // back a second time. A handler's `rollback` re-performs the side effect the
+  // revert undid and nothing requires it to be idempotent, so a jj snapshot or
+  // restore failure at this phase used to duplicate the external effect. The
+  // fault matrix cannot see it: its hooks fire BETWEEN phases, never inside
+  // this one.
+  it.effect("rolls each handler receipt back exactly once when restoreWorkspace fails", () =>
+    Effect.gen(function*() {
+      for (
+        const scenario of [
+          {
+            name: "snapshot",
+            jj: Jj.makeNoop({
+              snapshot: () => Effect.fail(new Jj.JjError({ code: "unknown", message: "snapshot refused" })),
+              restore: () => Effect.void
+            })
+          },
+          {
+            name: "restore",
+            jj: Jj.makeNoop({
+              snapshot: () => Effect.succeed({ changeId: "current" }),
+              restore: () => Effect.fail(new Jj.JjError({ code: "unknown", message: "restore refused" }))
+            })
+          }
+        ]
+      ) {
+        const store = MemoryTimeTravelStore.make({
+          records: records(),
+          snapshots: [{ runId: "run", frame, changeId: "target" }]
+        })
+        const runs = makeRuns(runRow())
+        const external = ["sent"]
+        const rollbacks: Array<string> = []
+        const registry = Effect.runSync(
+          EffectHandlerRegistry.make([{
+            kind: "send",
+            tier: "irreversible",
+            requiresIdempotencyKey: true,
+            residue: () => "message remains sent",
+            revert: () => Effect.sync(() => ({ value: external.pop() })),
+            rollback: (effect, receipt) =>
+              Effect.sync(() => {
+                rollbacks.push(effect.id)
+                external.push(String((receipt as { readonly value: string }).value))
+              })
+          }])
+        )
+
+        const failure = yield* (
+          Effect.flip(
+            provide(
+              Rewind.rewind({ runId: "run", frame, owner, auditId: `audit-restore-${scenario.name}` }),
+              { store, runs, jj: scenario.jj, registry }
+            )
+          )
+        )
+
+        expect(failure.code, scenario.name).toBe("compensation_failed")
+        expect(rollbacks, scenario.name).toEqual(["send"])
+        expect(external, scenario.name).toEqual(["sent"])
+        expect(runs.state(), scenario.name).toEqual(runRow())
+        expect(store.state().records, scenario.name).toEqual(records())
+      }
+    }))
+
   it.effect("fails a journal read, rolls ownership back, and records the audit failure", () =>
     Effect.gen(function*() {
       const store = MemoryTimeTravelStore.make({ records: records() })

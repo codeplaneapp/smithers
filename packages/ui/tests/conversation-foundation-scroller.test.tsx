@@ -165,6 +165,23 @@ async function render(element: ReactElement, metrics: Metrics): Promise<void> {
   metricsByElement.set(getViewport(), { ...metrics, scrollTop: getViewport().scrollTop });
 }
 
+async function renderWithLateViewport(
+  view: (viewportMounted: boolean) => ReactElement,
+  metrics: Metrics,
+): Promise<void> {
+  defaultMetrics = { ...metrics };
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  const mountedRoot = root;
+  await act(async () => mountedRoot.render(view(false)));
+  await act(async () => {
+    await Promise.resolve();
+    mountedRoot.render(view(true));
+  });
+  metricsByElement.set(getViewport(), { ...metrics, scrollTop: getViewport().scrollTop });
+}
+
 function getViewport(): HTMLDivElement {
   return container!.querySelector<HTMLDivElement>('[data-slot="message-scroller-viewport"]')!;
 }
@@ -246,6 +263,70 @@ describe("MessageScroller compound", () => {
     const callback = resizeCallbacks.get(content)!;
     await act(async () => callback([], {} as ResizeObserver));
     expect(getViewport().scrollTop).toBe(1200);
+  });
+
+  test("attaches growth follow when the viewport mounts one tick after its provider", async () => {
+    const view = (viewportMounted: boolean) => (
+      <MessageScrollerProvider scrollAnchor="bottom">
+        {viewportMounted ? (
+          <MessageScrollerViewport>
+            <MessageScrollerContent>
+              <MessageScrollerItem messageId="m1">hello</MessageScrollerItem>
+            </MessageScrollerContent>
+          </MessageScrollerViewport>
+        ) : (
+          <span>loading</span>
+        )}
+      </MessageScrollerProvider>
+    );
+    await renderWithLateViewport(view, { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 });
+    const content = container!.querySelector('[data-slot="message-scroller-content"]')!;
+    const callback = resizeCallbacks.get(content);
+    expect(callback).toBeDefined();
+
+    metrics().scrollHeight = 1200;
+    await act(async () => callback!([], {} as ResizeObserver));
+    expect(getViewport().scrollTop).toBe(1200);
+  });
+
+  test("roots visibility tracking in a viewport that mounts one tick late", async () => {
+    const originalIntersectionObserver = globalThis.IntersectionObserver;
+    const roots: Array<Element | Document | null> = [];
+    class RecordingIntersectionObserver implements IntersectionObserver {
+      readonly root: Element | Document | null;
+      readonly rootMargin = "0px";
+      readonly thresholds = [0, 0.5];
+      constructor(_callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        this.root = options?.root ?? null;
+        roots.push(this.root);
+      }
+      disconnect(): void {}
+      observe(): void {}
+      takeRecords(): IntersectionObserverEntry[] {
+        return [];
+      }
+      unobserve(): void {}
+    }
+    globalThis.IntersectionObserver = RecordingIntersectionObserver;
+    try {
+      const view = (viewportMounted: boolean) => (
+        <MessageScrollerProvider>
+          {viewportMounted ? (
+            <MessageScrollerViewport>
+              <MessageScrollerContent>
+                <MessageScrollerItem messageId="m1">hello</MessageScrollerItem>
+              </MessageScrollerContent>
+            </MessageScrollerViewport>
+          ) : (
+            <span>loading</span>
+          )}
+        </MessageScrollerProvider>
+      );
+      await renderWithLateViewport(view, { scrollHeight: 1000, clientHeight: 200, scrollTop: 0 });
+      expect(roots.at(-1)).toBe(getViewport());
+    } finally {
+      globalThis.IntersectionObserver = originalIntersectionObserver;
+    }
   });
 
   test("scrollAnchor 'none' (the upstream default) never autoscrolls", async () => {

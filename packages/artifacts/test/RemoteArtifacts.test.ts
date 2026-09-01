@@ -4,7 +4,9 @@
  * `reference/bazel/.../remote/http/HttpCacheClient.java`.
  */
 import { describe, expect, it } from "@effect/vitest"
-import type * as Crypto from "effect/Crypto"
+import { syncCrypto } from "@smthrs/crypto"
+import * as Crypto from "effect/Crypto"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
@@ -74,7 +76,7 @@ describe("construction", () => {
       Effect.gen(function*() {
         const tier = remote(() => new Response(null, { status: 200 }), { maxDownloadBytes })
         const exit = yield* tier.store.pipe(Effect.exit)
-        expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("transport_failed")
+        expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("invalid_configuration")
         expect(tier.calls).toEqual([])
       })
   )
@@ -87,8 +89,82 @@ describe("construction", () => {
           downloadTimeout: downloadTimeout as never
         })
         const exit = yield* tier.store.pipe(Effect.exit)
-        expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("transport_failed")
+        expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("invalid_configuration")
         expect(tier.calls).toEqual([])
+      })
+  )
+
+  it.effect.each(["uploadTimeout", "requestTimeout"] as const)(
+    "refuses an invalid %s as permanent configuration",
+    (name) =>
+      Effect.gen(function*() {
+        const tier = remote(() => new Response(null, { status: 200 }), { [name]: "0 millis" })
+        const exit = yield* tier.store.pipe(Effect.exit)
+        expect(errorOf(exit)).toMatchObject({
+          code: "invalid_configuration",
+          message: `invalid remote artifact option: ${name}`
+        })
+        expect(tier.calls).toEqual([])
+      })
+  )
+
+  it.effect("never retains endpoint credentials in a rejected configuration", () =>
+    Effect.gen(function*() {
+      const secret = "supersecret-never-log"
+      for (
+        const endpoint of [
+          `https://user:${secret}@cache.example.com`,
+          `https://cache.example.com?token=${secret}`,
+          `https://cache.example.com#${secret}`,
+          `not-a-url-${secret}`
+        ]
+      ) {
+        const exit = yield* remote(() => new Response(null), { endpoint }).store.pipe(Effect.exit)
+        const failure = errorOf(exit) as ArtifactStore.ArtifactStoreError
+        expect(failure.code).toBe("invalid_configuration")
+        expect(failure.message).not.toContain(secret)
+        expect(failure.cause).toBeUndefined()
+        expect(JSON.stringify(failure)).not.toContain(secret)
+      }
+    }))
+
+  it.effect("normalizes hostile option access and non-string headers without retaining values", () =>
+    Effect.gen(function*() {
+      const stub = stubClient(() => new Response(null))
+      const hostile = { endpoint: "https://cache.example.com" } as RemoteArtifacts.Options
+      Object.defineProperty(hostile, "headers", {
+        get() {
+          throw new Error("secret getter value")
+        }
+      })
+      const getterExit = yield* Effect.provide(RemoteArtifacts.make(hostile), stub.layer).pipe(Effect.exit)
+      expect(errorOf(getterExit)).toMatchObject({
+        code: "invalid_configuration",
+        message: "invalid remote artifact option: options"
+      })
+
+      const headerExit = yield* remote(() => new Response(null), {
+        headers: { authorization: 42 } as never
+      }).store.pipe(Effect.exit)
+      expect(errorOf(headerExit)).toMatchObject({ code: "invalid_configuration" })
+    }))
+
+  it.effect("rejects non-string endpoints and throwing duration inputs as configuration", () =>
+    Effect.gen(function*() {
+      const endpointExit = yield* remote(() => new Response(null), { endpoint: 42 as never }).store.pipe(Effect.exit)
+      expect(errorOf(endpointExit)).toMatchObject({ code: "invalid_configuration" })
+      const durationExit = yield* remote(() => new Response(null), {
+        requestTimeout: Symbol("invalid") as never
+      }).store.pipe(Effect.exit)
+      expect(errorOf(durationExit)).toMatchObject({ code: "invalid_configuration" })
+    }))
+
+  it.effect.each([0, -1, 1.5, 256 * 1024 + 1])(
+    "refuses invalid maxFindMissingResponseBytes %s",
+    (maxFindMissingResponseBytes) =>
+      Effect.gen(function*() {
+        const exit = yield* remote(() => new Response(null), { maxFindMissingResponseBytes }).store.pipe(Effect.exit)
+        expect(errorOf(exit)).toMatchObject({ code: "invalid_configuration" })
       })
   )
 })
@@ -119,6 +195,31 @@ describe("uploads", () => {
       expect(tier.calls[0]!.method).toBe("PUT")
       // The trailing slash on the configured endpoint is ignored.
       expect(tier.calls[0]!.url).toBe(`https://cache.example.com/cas/${digest}`)
+      expect(tier.calls[0]!.body).toBe(artifact)
+    }))
+
+  it.effect("snapshots upload bytes before an asynchronous digest host yields", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const crypto = Crypto.make({
+        randomBytes: (size) => new Uint8Array(size),
+        digest: (algorithm, snapshot) =>
+          Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.andThen(syncCrypto.digest(algorithm, snapshot))
+          )
+      })
+      const tier = remote(() => new Response(null, { status: 201 }))
+      const input = bytes(artifact)
+      const running = yield* Effect.flatMap(tier.store, (store) => store.put(input)).pipe(
+        Effect.provideService(Crypto.Crypto, crypto),
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* Deferred.await(entered)
+      input.fill(0)
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Fiber.join(running)).toBe(digest)
       expect(tier.calls[0]!.body).toBe(artifact)
     }))
 
@@ -153,6 +254,20 @@ describe("uploads", () => {
       )
       const exit = yield* withCrypto(Effect.flatMap(store, (tier) => tier.put(bytes(artifact))).pipe(Effect.exit))
       expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("transport_failed")
+    }))
+
+  it.effect("bounds an upload whose transport never answers", () =>
+    Effect.gen(function*() {
+      const tier = remote(() => new Promise<Response>(() => {}), { uploadTimeout: "50 millis" })
+      const running = yield* withCrypto(
+        Effect.flatMap(tier.store, (store) => store.put(bytes(artifact))).pipe(
+          Effect.exit,
+          Effect.forkChild({ startImmediately: true })
+        )
+      )
+      yield* Effect.yieldNow
+      yield* TestClock.adjust("50 millis")
+      expect(errorOf(yield* Fiber.join(running))).toMatchObject({ code: "transport_failed" })
     }))
 })
 
@@ -191,7 +306,7 @@ describe("chunked uploads", () => {
     Effect.gen(function*() {
       const tier = remote(() => new Response(null, { status: 200 }), { chunkBytes })
       const exit = yield* tier.store.pipe(Effect.exit)
-      expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("transport_failed")
+      expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("invalid_configuration")
       expect(tier.calls).toEqual([])
     }))
 
@@ -534,6 +649,29 @@ describe("downloads", () => {
       expect(pulls).toBe(0)
     }))
 
+  it.effect("accepts a well-formed Content-Length within the configured bound", () =>
+    Effect.gen(function*() {
+      const body = bytes(artifact)
+      const tier = remote(
+        () => new Response(artifact, { headers: { "content-length": String(body.byteLength) } }),
+        { maxDownloadBytes: body.byteLength }
+      )
+      expect(yield* withCrypto(Effect.flatMap(tier.store, (store) => store.get(digest))))
+        .toEqual(body)
+    }))
+
+  it.effect.each(["not-a-number", "-1", "1.5", "999999999999999999999999"])(
+    "refuses malformed Content-Length %s",
+    (declared) =>
+      Effect.gen(function*() {
+        const tier = remote(() => new Response(artifact, { headers: { "content-length": declared } }))
+        const exit = yield* withCrypto(
+          Effect.flatMap(tier.store, (store) => store.get(digest)).pipe(Effect.exit)
+        )
+        expect(errorOf(exit)).toMatchObject({ code: "transport_failed" })
+      })
+  )
+
   it.effect("treats an empty 2xx body as empty content, refused by the digest check", () =>
     Effect.gen(function*() {
       const tier = remote(() => new Response(null, { status: 200 }))
@@ -579,6 +717,20 @@ describe("existence probes", () => {
       const exit = yield* withCrypto(Effect.flatMap(tier.store, (store) => store.has(digest)).pipe(Effect.exit))
       expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("transport_failed")
     }))
+
+  it.effect("bounds a probe whose transport never answers", () =>
+    Effect.gen(function*() {
+      const tier = remote(() => new Promise<Response>(() => {}), { requestTimeout: "50 millis" })
+      const running = yield* withCrypto(
+        Effect.flatMap(tier.store, (store) => store.has(digest)).pipe(
+          Effect.exit,
+          Effect.forkChild({ startImmediately: true })
+        )
+      )
+      yield* Effect.yieldNow
+      yield* TestClock.adjust("50 millis")
+      expect(errorOf(yield* Fiber.join(running))).toMatchObject({ code: "transport_failed" })
+    }))
 })
 
 describe("the batched probe", () => {
@@ -610,6 +762,68 @@ describe("the batched probe", () => {
       const tier = remote(() => new Response(JSON.stringify({ missing: [other, "unrequested"] }), { status: 200 }))
       expect(yield* withCrypto(Effect.flatMap(tier.store, (store) => store.findMissing([digest, other]))))
         .toEqual([other])
+    }))
+
+  it.effect("deduplicates server answers and restores first-request order", () =>
+    Effect.gen(function*() {
+      const tier = remote(() => new Response(JSON.stringify({ missing: [other, other, digest] })))
+      expect(yield* withCrypto(Effect.flatMap(tier.store, (store) => store.findMissing([digest, other]))))
+        .toEqual([digest, other])
+    }))
+
+  it.effect("splits 1,001 unique digests at the protocol's 1,000-entry boundary", () =>
+    Effect.gen(function*() {
+      const requested = Array.from(
+        { length: 1_001 },
+        (_, index) => index.toString(16).padStart(64, "0")
+      )
+      const tier = remote((call) => {
+        const parsed = JSON.parse(call.body) as { readonly digests: Array<string> }
+        return new Response(JSON.stringify({ missing: parsed.digests }))
+      })
+      expect(yield* withCrypto(Effect.flatMap(tier.store, (store) => store.findMissing(requested))))
+        .toEqual(requested)
+      expect(tier.calls.map((call) => (JSON.parse(call.body) as { digests: Array<string> }).digests.length))
+        .toEqual([1_000, 1])
+    }))
+
+  it.effect("refuses an oversized response before buffering it whole", () =>
+    Effect.gen(function*() {
+      let pulls = 0
+      const tier = remote(
+        () =>
+          new Response(
+            new ReadableStream({
+              pull(controller) {
+                pulls++
+                controller.enqueue(new Uint8Array(16))
+              }
+            })
+          ),
+        { maxFindMissingResponseBytes: 32 }
+      )
+      const exit = yield* withCrypto(
+        Effect.flatMap(tier.store, (store) => store.findMissing([digest])).pipe(Effect.exit)
+      )
+      expect(errorOf(exit)).toMatchObject({ code: "transport_failed" })
+      expect(pulls).toBeLessThan(32)
+    }))
+
+  it.effect("bounds a stalled response body", () =>
+    Effect.gen(function*() {
+      const tier = remote(
+        () => new Response(new ReadableStream({ start() {} })),
+        { requestTimeout: "50 millis" }
+      )
+      const running = yield* withCrypto(
+        Effect.flatMap(tier.store, (store) => store.findMissing([digest])).pipe(
+          Effect.exit,
+          Effect.forkChild({ startImmediately: true })
+        )
+      )
+      yield* Effect.yieldNow
+      yield* TestClock.adjust("50 millis")
+      expect(errorOf(yield* Fiber.join(running))).toMatchObject({ code: "transport_failed" })
     }))
 
   it.effect("fails on a non-2xx answer", () =>
@@ -701,7 +915,13 @@ describe("the declared download policy", () => {
     Effect.gen(function*() {
       const tier = remote(() => new Response(null, { status: 200 }), { downloadPolicy: "everything" as never })
       const exit = yield* tier.store.pipe(Effect.exit)
-      expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("transport_failed")
+      expect((errorOf(exit) as ArtifactStore.ArtifactStoreError).code).toBe("invalid_configuration")
       expect(tier.calls).toEqual([])
     }))
+
+  it("exports an immutable closed policy list", () => {
+    expect(Object.isFrozen(RemoteArtifacts.downloadPolicies)).toBe(true)
+    expect(() => (RemoteArtifacts.downloadPolicies as Array<string>).push("everything")).toThrow()
+    expect(RemoteArtifacts.downloadPolicies).toEqual(["all", "toplevel", "minimal"])
+  })
 })

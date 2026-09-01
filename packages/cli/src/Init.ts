@@ -130,7 +130,7 @@ export interface Seat {
  * @since 1.0.0
  */
 export const defaultSeat = (
-  environment: Environment.Source = process.env
+  environment: Environment.Source
 ): Seat => {
   const chatgpt = Environment.read(environment, "SMITHERS_OPENAI_AUTH") === "chatgpt"
   for (const [variable, seat] of providerSeats) {
@@ -167,7 +167,7 @@ const seatNote = (seat: Seat): string =>
  * @category constructors
  * @since 1.0.0
  */
-export const template = (name: string, seat: Seat = defaultSeat()): string =>
+export const template = (name: string, seat: Seat): string =>
   `---
 name: ${name}
 description: A starter Smithers flow.
@@ -223,7 +223,7 @@ export interface Scaffolded {
 export const scaffold = (
   root: string,
   name: string,
-  environment: Environment.Source = process.env
+  environment: Environment.Source
 ): Scaffolded => {
   const directory = join(root, "flows", name)
   const flowFile = join(directory, "flow.mdx")

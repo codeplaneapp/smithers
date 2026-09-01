@@ -6,7 +6,7 @@
   "smthrs": {
     "group": "engine"
   },
-  "description": "Effect schema for canonical flow keys",
+  "description": "Canonical flow-key derivation and stored-key validation",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
@@ -41,6 +41,7 @@
   },
   "files": [
     "src/**/*.ts",
+    "src/**/*.md",
     "dist/**/*.js",
     "dist/**/*.js.map",
     "dist/**/*.d.ts",

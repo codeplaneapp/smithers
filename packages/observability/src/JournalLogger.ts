@@ -88,7 +88,17 @@ export const layerJournalForwarding = (options: Options): Layer.Layer<never, nev
         const journal = yield* Journal.Journal
         const queue = yield* Queue.bounded<JournalEvent.Input>(options.capacity ?? 256)
         const forward = Effect.fn("JournalLogger.forward")((input: JournalEvent.Input) =>
-          journal.emitLossy(input).pipe(Effect.catchCause(() => Effect.void))
+          journal.emitLossy(input).pipe(
+            // This worker is forked before the returned logger is installed,
+            // so the warning uses only the ambient loggers and cannot enqueue
+            // itself recursively. Defects and interrupts still propagate.
+            Effect.catch((error) =>
+              Effect.annotateLogs(
+                Effect.logWarning("A telemetry log record could not be forwarded"),
+                { runId: options.runId, error }
+              )
+            )
+          )
         )
         yield* Effect.forever(
           Queue.take(queue).pipe(

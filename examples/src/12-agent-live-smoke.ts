@@ -18,7 +18,9 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as Agent from "@smthrs/agent/Agent"
 import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Budget from "@smthrs/agent/Budget"
 import * as FlowEngineLike from "@smthrs/agent/FlowEngineLike"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import { FlowEngine } from "@smthrs/engine"
@@ -117,6 +119,10 @@ const host = AgentAction.layerHost({
 export const liveLayer = (apiKey: string) =>
   Layer.mergeAll(LiveSmoke.layer, Interpreter.layer(LiveSmokeWorkflow)).pipe(
     Layer.provideMerge(Layer.mergeAll(host, liveOpenAiSeats(apiKey), Agent.layer)),
+    // Live refusals should park when the provider gives a reset. This smoke
+    // run has no approved plan envelope from which to derive a spend ceiling.
+    // eslint-disable-next-line no-restricted-syntax -- this standalone smoke has no approved envelope
+    Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())),
     Layer.provideMerge(Agent.layerDefaults),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),

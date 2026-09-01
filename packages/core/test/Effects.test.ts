@@ -33,6 +33,33 @@ describe("Effects", () => {
     expect(Effects.narrow(envelope, step)).toEqual({ ok: true })
   })
 
+  it("covers the exhaustive exact and prefix-glob grammar", () => {
+    expect(Effects.covers("**", "anything")).toBe(true)
+    expect(Effects.covers("*", "anything")).toBe(true)
+    expect(Effects.covers("src/**", "src")).toBe(false)
+    expect(Effects.covers("src/**", "srcX/a")).toBe(false)
+    expect(Effects.covers("src/**", "src/a")).toBe(true)
+    expect(Effects.covers("src*", "srcX/a")).toBe(true)
+    expect(Effects.covers("src/a", "src/a")).toBe(true)
+    expect(Effects.covers("src/a", "src/b")).toBe(false)
+  })
+
+  it("treats paths with whole dot segments as outside every envelope", () => {
+    const escaped = "repo/../../etc/passwd"
+    const envelope = declaration({ writes: ["repo/**"] })
+    const step = declaration({ writes: [escaped] })
+
+    expect(Effects.covers("repo/**", escaped)).toBe(false)
+    expect(Effects.covers("**", "repo/./file")).toBe(false)
+    expect(Effects.covers("repo/**", "repo/plain/file")).toBe(true)
+    expect(Effects.covers("repo/**", "repo/a..b/c")).toBe(true)
+    expect(Effects.narrow(envelope, step)).toEqual({
+      ok: false,
+      code: "effect_outside_envelope",
+      paths: [escaped]
+    })
+  })
+
   it("reports paths outside the envelope", () => {
     const envelope = declaration({ reads: ["src/**"], writes: ["out/*"] })
     const step = declaration({ reads: ["secret.txt"], writes: ["dist/index.js"] })
@@ -71,6 +98,24 @@ describe("Effects", () => {
     const second = declaration({ writes: ["src/**", "docs/readme.md", "out/result.json"] })
 
     expect(Effects.overlaps(first, second)).toEqual(["docs/readme.md", "src/a.ts"])
+  })
+
+  it("finds an overlap between a universal writer and a concrete writer", () => {
+    const universal = declaration({ writes: ["**"] })
+    const concrete = declaration({ writes: ["out/result.json"] })
+
+    expect(Effects.overlaps(universal, concrete)).toEqual(["out/result.json"])
+  })
+
+  it("overlaps two writers of the same unnormalized path that no glob covers", () => {
+    const escaped = declaration({ writes: ["repo/../secret"] })
+    const globbed = declaration({ writes: ["repo/**"] })
+
+    // Glob coverage stays strict, so the path still escapes no envelope.
+    expect(Effects.covers("repo/**", "repo/../secret")).toBe(false)
+    expect(Effects.overlaps(escaped, globbed)).toEqual([])
+    // Two writers naming the same resource still collide.
+    expect(Effects.overlaps(escaped, escaped)).toEqual(["repo/../secret"])
   })
 
   it("seals a declaration without changing the original", () => {

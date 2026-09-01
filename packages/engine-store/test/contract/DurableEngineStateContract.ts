@@ -375,6 +375,16 @@ export const describeContract = (harness: Harness): void => {
               owner
             )
             yield* context.state.scheduleClock(
+              {
+                ...base,
+                flowName: "other-flow",
+                executionId: "clocks-target",
+                clockName: "cross-flow",
+                dueAtMs: 4
+              },
+              owner
+            )
+            yield* context.state.scheduleClock(
               { ...base, executionId: "clocks-target", clockName: "done", dueAtMs: 1 },
               owner
             )
@@ -385,6 +395,10 @@ export const describeContract = (harness: Harness): void => {
             return {
               byExecution: yield* context.state.pendingClocks({ executionId: "clocks-target" }),
               byFlow: yield* context.state.pendingClocks({ flowName: "clocks-flow" }),
+              byExecutionAndFlow: yield* context.state.pendingClocks({
+                executionId: "clocks-target",
+                flowName: "clocks-flow"
+              }),
               all: yield* context.state.pendingClocks({})
             }
           })
@@ -392,9 +406,10 @@ export const describeContract = (harness: Harness): void => {
 
         // Execution scope: pending only (future ones included), never other
         // executions' rows, ordered by due time.
-        expect(result.byExecution.map((row) => row.clockName)).toEqual(["due", "future"])
+        expect(result.byExecution.map((row) => row.clockName)).toEqual(["cross-flow", "due", "future"])
         expect(result.byFlow.map((row) => row.clockName)).toEqual(["due", "other", "future"])
-        expect(result.all).toHaveLength(3)
+        expect(result.byExecutionAndFlow.map((row) => row.clockName)).toEqual(["due", "future"])
+        expect(result.all).toHaveLength(4)
       }))
 
     it.effect("keeps the first deferred completion and reads it back after a restart", () =>

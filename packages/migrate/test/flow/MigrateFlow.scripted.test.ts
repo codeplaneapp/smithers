@@ -235,6 +235,55 @@ describe("apply over a single-file JSX project", () => {
       expect(existsSync(join(root, "flows", "simple-workflow", "flow.ts"))).toBe(false)
     }))
 
+  it.effect("reports every rollback loss when verification fails before the outside-write check", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      committed(root)
+
+      const meddling = (_root: string, written: Array<string>): Layers.Script => (asked) => {
+        const unit = unitOf(asked)
+        if (unit !== "workflow:simple-workflow") return emptyAnswer(unit)
+        written.push(unit)
+        return [
+          `await ctx.call("write", { path: "flows/simple-workflow/flow.ts", content: ${JSON.stringify(golden)} })`,
+          `await ctx.call("write", { path: "tests/simple-workflow.test.ts", content: "changed outside the unit" })`,
+          `await ctx.call("write", { path: "scratch/operator-note.md", content: "created while migration ran" })`,
+          Layers.done({
+            unit,
+            changedFiles: ["flows/simple-workflow/flow.ts"],
+            decisions: [],
+            unresolved: [],
+            unsupported: [],
+            notes: "scripted"
+          })
+        ].join("\n")
+      }
+
+      const { report } = yield* apply(
+        root,
+        { maxRepairRounds: 0, commands: { typecheck: [], test: "node -e \"process.exit(1)\"" } },
+        meddling
+      )
+
+      const workflow = report.units.find((unit) => unit.id === "workflow:simple-workflow")
+      expect(workflow?.status).toBe("failed")
+      const outside = workflow?.unresolved.filter((entry) => entry.construct === "no write outside the unit's file set")
+      expect(outside?.map((entry) => entry.file).sort()).toEqual([
+        "scratch/operator-note.md",
+        "tests/simple-workflow.test.ts"
+      ])
+      const unrestored = workflow?.unresolved.find((entry) =>
+        entry.construct === "rollback could not restore a file" && entry.file === "tests/simple-workflow.test.ts"
+      )
+      expect(unrestored?.suggestion).toContain(workflow?.checkpoint?.restore ?? "missing restore command")
+      const deleted = workflow?.unresolved.find((entry) =>
+        entry.construct === "rollback deleted a post-checkpoint file" && entry.file === "scratch/operator-note.md"
+      )
+      expect(deleted?.reason).toContain("recovery copy")
+      expect(deleted?.suggestion).toContain("Copy")
+      expect(existsSync(join(root, "scratch", "operator-note.md"))).toBe(false)
+    }))
+
   it.effect("fails the unit that smuggles a write into a path named like a lockfile", () =>
     Effect.gen(function*() {
       const root = copyFixture("jsx-single")

@@ -1,14 +1,16 @@
 /**
  * Journal schema migrations.
  *
- * The journal owns exactly one table family, `flows_journal_events`. Run and
+ * The journal owns two tables: `flows_journal_events` and its event-type
+ * index in `0001_initial`, and `flows_journal_checkpoints` in
+ * `0002_checkpoints`. Run and
  * attempt state migrate from `@smthrs/run-store`, the step cache from
  * `@smthrs/step-cache`, and the durable deferred/clock tables from
  * `@smthrs/engine-store`; an application composes those sets with this one
  * through `@smthrs/database`'s `Migrations.layer`.
  *
- * Derived contracts: `docs/specs/Concepts/Journal Queue.md` and
- * `docs/specs/Concepts/Journal Split.md`.
+ * Derived contracts: `docs/pages/concepts/journal.md` and
+ * `docs/pages/architecture/package-map.md`.
  *
  * @since 0.1.0
  */
@@ -23,7 +25,6 @@ import checkpoints from "./migrations/0002_checkpoints.ts"
  *
  * @category migrations
  * @since 0.1.0
- * @slop
  */
 export const set: DatabaseMigrations.MigrationSet = {
   namespace: "journal",
@@ -39,7 +40,6 @@ export const set: DatabaseMigrations.MigrationSet = {
  *
  * @category migrations
  * @since 0.1.0
- * @slop
  */
 export const run = DatabaseMigrations.run([set])
 
@@ -49,6 +49,5 @@ export const run = DatabaseMigrations.run([set])
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer = Layer.effectDiscard(run)

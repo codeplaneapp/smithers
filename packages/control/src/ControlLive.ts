@@ -85,7 +85,19 @@ const terminalOrAccepted = (
     ? { _tag: "Terminal", runId: run.runId, status: run.status }
     : accepted(key, run.runId)
 
-const fingerprint = (operation: string, input: unknown): string => `${operation}:${JSON.stringify(input)}`
+/**
+ * What an idempotency key is bound to: the caller's stated intent, and only
+ * that.
+ *
+ * `principal` is dropped at every depth, because the server stamps it rather
+ * than the caller stating it, and it carries a wall clock. Keeping it made the
+ * second `smithers cancel` of one run look like a different mutation under the
+ * same key, so a bearer-authenticated retry answered `Conflict` instead of the
+ * cancel's own receipt. Two callers cannot collide on it either: an
+ * idempotency key already names one operation by one asker.
+ */
+const fingerprint = (operation: string, input: unknown): string =>
+  `${operation}:${JSON.stringify(input, (key, value) => key === "principal" ? undefined : value)}`
 
 const json = (value: unknown): ControlEvent["payload"] => JSON.parse(JSON.stringify(value)) as ControlEvent["payload"]
 

@@ -34,7 +34,7 @@ const dockerPush = S.Docker.Push({
   registry: "registry.example.invalid",
   name: "fixture",
   tags: ["latest"],
-  secrets: [S.Secret("CHAIN_DOCKER_TOKEN")],
+  secrets: [S.HttpSecret(S.Secret("CHAIN_DOCKER_TOKEN"), ["https://registry-1.docker.io"])],
   sandbox: { network: true },
   approval: "required"
 })

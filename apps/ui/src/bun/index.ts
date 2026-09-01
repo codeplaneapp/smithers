@@ -35,6 +35,7 @@ const server = await startLocalServer({
 
 let mainWindow: BrowserWindow | undefined
 let bridge: ReturnType<typeof startPackagedE2EBridge>
+const queuedRepositorySelections: Array<{ readonly path: string | null }> = []
 let shuttingDown = false
 const shutdown = async (): Promise<void> => {
   if (shuttingDown) return
@@ -51,12 +52,14 @@ if (headless) {
     handlers: {
       requests: {
         pickLocalRepository: async ({ access }) => {
-          const selectedPaths = await Utils.openFileDialog({
-            canChooseFiles: false,
-            canChooseDirectory: true,
-            allowsMultipleSelection: false
-          })
-          const selectedPath = selectedPaths.find((path) => path.trim() !== "")
+          const queued = queuedRepositorySelections.shift()
+          const selectedPath = queued === undefined
+            ? (await Utils.openFileDialog({
+              canChooseFiles: false,
+              canChooseDirectory: true,
+              allowsMultipleSelection: false
+            })).find((path) => path.trim() !== "")
+            : queued.path ?? undefined
           if (selectedPath === undefined) return { status: "cancelled" } as const
           return server.authorizeRepository(selectedPath, access)
         },
@@ -88,18 +91,25 @@ interface RendererEvalResponse {
 }
 
 interface RendererEvalRPC {
-  readonly request: {
+  readonly requestProxy?: {
     readonly evaluateJavascriptWithResponse: (
-      params: { readonly script: string },
-      options?: { readonly maxRequestTime?: number }
+      params: { readonly script: string }
     ) => Promise<unknown>
   }
 }
 
 const evaluateInMainWindow = async (script: string): Promise<unknown> => {
-  const rpc = mainWindow?.webview.rpc as RendererEvalRPC | undefined
-  if (rpc === undefined) throw new Error("The main WebView is not available.")
-  const response = await rpc.request.evaluateJavascriptWithResponse({
+  const window = mainWindow
+  if (window === undefined) throw new Error("The main WebView is not available.")
+  // WKWebView may defer animation-driven rendering while another application
+  // is frontmost. Packaged E2E assertions and captures must observe this app,
+  // not whichever window happened to have focus when the runner launched it.
+  await window.activate()
+  await Bun.sleep(50)
+  const rpc = window.webview.rpc as RendererEvalRPC | undefined
+  const evaluator = rpc?.requestProxy?.evaluateJavascriptWithResponse
+  if (evaluator === undefined) throw new Error("The main WebView is not available.")
+  const response = await evaluator({
     script: `
 return (async () => {
   try {
@@ -116,7 +126,7 @@ ${script}
   }
 })()
 `
-  }, { maxRequestTime: 30_000 })
+  })
   if (typeof response !== "object" || response === null || !("ok" in response)) {
     throw new Error(`Renderer evaluation failed: ${String(response)}`)
   }
@@ -149,8 +159,18 @@ bridge = startPackagedE2EBridge({
     }
   },
   evaluate: evaluateInMainWindow,
-  screenshot: () => {
-    const frame = mainWindow?.getFrame()
+  queueRepositorySelection: (path) => {
+    if (queuedRepositorySelections.length > 0) {
+      throw new Error("A repository picker answer is already queued.")
+    }
+    queuedRepositorySelections.push({ path })
+  },
+  screenshot: async () => {
+    const window = mainWindow
+    if (window === undefined) return null
+    await window.activate()
+    await Bun.sleep(100)
+    const frame = window.getFrame()
     if (frame === undefined) return null
     const width = Math.round(frame.width)
     const height = Math.round(frame.height)

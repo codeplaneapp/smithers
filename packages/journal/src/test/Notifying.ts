@@ -5,7 +5,7 @@
  * wrap a record-of-Effect-methods service so a listener hook fires around
  * every operation. The hook runs in the calling fiber, so a hook that dies,
  * interrupts, or awaits a `Latch` injects crashes, fence loss, and exact
- * sequencing at any durable transition point — the mechanism that makes
+ * sequencing at any durable transition point, the mechanism that makes
  * interstitial interleaving bugs testable at all.
  *
  * Deliberately NOT ported from Skyframe: `DeterministicHelper`'s
@@ -14,10 +14,7 @@
  * failure propagation across fiber joins, so those helpers have no residue
  * here.
  *
- * Vault: [[Engine Hardening Round 1]]
- * (`docs/specs/Concepts/Engine Hardening Round 1.md`), section 7.
- *
- * Governing designs: `docs/specs/Concepts/Run Ownership.md` and the bazel
+ * Governing designs: `docs/pages/concepts/concurrency.md` and the bazel
  * Skyframe audit (test-harness gap).
  *
  * @since 0.1.0
@@ -40,7 +37,7 @@ export type Order = "before" | "after"
  * Listener invoked around every delegated operation. `op` is the service
  * method name (Skyframe's `EventType`, but open-world), `args` the call
  * arguments. Express crash injection as `Effect.die` or `Effect.interrupt`
- * inside the hook — the hook's type stays `Effect<void>` so the wrapped
+ * inside the hook, the hook's type stays `Effect<void>` so the wrapped
  * service is structurally identical to the real one.
  *
  * The `after` firing only happens when the operation succeeds; a failed

@@ -18,6 +18,7 @@ const cwd = "evals/authoring"
 
 /** The Fireworks API token, read from the environment at execution time. */
 const fireworksKey = Smithers.Secret("FIREWORKS_API_KEY")
+const fireworksCredential = Smithers.HttpSecret(fireworksKey, ["https://api.fireworks.ai"])
 
 /** The validator and the dataset it gates. */
 const validator = Smithers.file("//evals/authoring/validate.ts")
@@ -68,7 +69,7 @@ export const datasetUpload = Smithers.ToolRun({
   args: ["dataset", "create", "pilot-sft-v0", "data/pilot-sft.jsonl"],
   inputs: [dataset],
   deps: [datasetValidate],
-  secrets: [fireworksKey],
+  secrets: [fireworksCredential],
   cwd
 })
 
@@ -99,7 +100,7 @@ export const sftLaunch = Smithers.ToolRun({
   ],
   inputs: [],
   deps: [],
-  secrets: [fireworksKey],
+  secrets: [fireworksCredential],
   cwd
 })
 
@@ -134,6 +135,6 @@ export const sftLaunchPilot = Smithers.ToolRun({
   ],
   inputs: [],
   deps: [],
-  secrets: [fireworksKey],
+  secrets: [fireworksCredential],
   cwd
 })

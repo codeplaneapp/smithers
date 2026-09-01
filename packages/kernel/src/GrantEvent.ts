@@ -5,7 +5,7 @@
  * `docs/specs/Concepts/Permission Kernel.md` and
  * `docs/specs/Concepts/Journal Queue.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { Capability, CapabilityPattern } from "@smthrs/capability/Capability"
 import * as Schema from "effect/Schema"
@@ -14,7 +14,7 @@ import * as Schema from "effect/Schema"
  * The tier at which a capability decision was made.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const GrantTier = Schema.Literals(["sealed", "compensable", "irreversible"])
@@ -23,7 +23,7 @@ export const GrantTier = Schema.Literals(["sealed", "compensable", "irreversible
  * The scope selected for a permission grant.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const GrantScope = Schema.Literals(["once", "run", "remembered"])
@@ -35,7 +35,7 @@ export const GrantScope = Schema.Literals(["once", "run", "remembered"])
  * authority.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export class OnceGrant extends Schema.TaggedClass<OnceGrant>()("@smthrs/kernel/GrantEvent/OnceGrant", {
@@ -53,7 +53,7 @@ export class OnceGrant extends Schema.TaggedClass<OnceGrant>()("@smthrs/kernel/G
  * A grant remembered across runs.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export class RememberedGrant extends Schema.TaggedClass<RememberedGrant>()(
@@ -74,7 +74,7 @@ export class RememberedGrant extends Schema.TaggedClass<RememberedGrant>()(
  * A grant scoped to the current run.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export class RunGrant extends Schema.TaggedClass<RunGrant>()("@smthrs/kernel/GrantEvent/RunGrant", {
@@ -92,7 +92,7 @@ export class RunGrant extends Schema.TaggedClass<RunGrant>()("@smthrs/kernel/Gra
  * A denied permission request.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export class DeniedGrant extends Schema.TaggedClass<DeniedGrant>()("@smthrs/kernel/GrantEvent/DeniedGrant", {
@@ -116,7 +116,7 @@ export class DeniedGrant extends Schema.TaggedClass<DeniedGrant>()("@smthrs/kern
  * origin digest as audit evidence.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export class EnvelopeGrant extends Schema.TaggedClass<EnvelopeGrant>()(
@@ -134,7 +134,7 @@ export class EnvelopeGrant extends Schema.TaggedClass<EnvelopeGrant>()(
  * All durable grant events understood by the kernel.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const GrantEventSchema = Schema.Union([
@@ -149,7 +149,7 @@ export const GrantEventSchema = Schema.Union([
  * All durable grant events understood by the kernel.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export type GrantEvent = typeof GrantEventSchema.Type
@@ -164,7 +164,7 @@ export type GrantEvent = typeof GrantEventSchema.Type
  * variant its declared keys happen to satisfy.
  *
  * @category decoding
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const decode = Schema.decodeUnknownResult(GrantEventSchema, { onExcessProperty: "error" })
@@ -173,7 +173,7 @@ export const decode = Schema.decodeUnknownResult(GrantEventSchema, { onExcessPro
  * Encodes a grant event into its JSON-compatible journal payload.
  *
  * @category encoding
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const encode = Schema.encodeUnknownResult(GrantEventSchema)

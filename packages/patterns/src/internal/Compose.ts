@@ -11,7 +11,6 @@ import { PatternError } from "../PatternError.ts"
 
 /**
  * @since 0.1.0
- * @slop
  * @private
  */
 export interface FlowDetails extends Flow.Any {
@@ -23,7 +22,6 @@ export interface FlowDetails extends Flow.Any {
 
 /**
  * @since 0.1.0
- * @slop
  * @private
  */
 export interface EffectIntersection {
@@ -36,18 +34,50 @@ export interface EffectIntersection {
 
 /**
  * @since 0.1.0
- * @slop
  * @private
  */
 export const details = (flow: Flow.Any): FlowDetails => flow as FlowDetails
 
 /**
  * @since 0.1.0
- * @slop
  * @private
  */
 export const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
   (flow as unknown as (input: unknown) => Node.Node<unknown, unknown>)(input)
+
+/**
+ * Reads the shared acceptance vocabulary using own properties only.
+ *
+ * @since 0.1.0
+ * @private
+ */
+export const accepted = (value: unknown): boolean => {
+  if (value === true || value === "approved") return true
+  if (typeof value !== "object" || value === null) return false
+  const record = value as Readonly<Record<string, unknown>>
+  return (
+    (Object.hasOwn(record, "approved") && record.approved === true) ||
+    (Object.hasOwn(record, "accepted") && record.accepted === true)
+  )
+}
+
+/**
+ * Refuses a priority before a pattern sorts, annotates, or runs its member.
+ *
+ * @since 1.0.0
+ * @private
+ */
+export const safeIntegerPriorityRefusal = (
+  pattern: string,
+  member: string,
+  value: unknown
+): PatternError | undefined =>
+  typeof value === "number" && Number.isSafeInteger(value)
+    ? undefined
+    : new PatternError({
+      code: "invalid_decorator",
+      message: `${pattern} priority for member "${member}" must be a safe integer, received ${value}`
+    })
 
 const normalized = (values: Iterable<string>): ReadonlyArray<string> => [...new Set(values)].sort()
 
@@ -78,7 +108,6 @@ const tierOf = (declaration: Effects.Declaration): keyof typeof tierRank => decl
 
 /**
  * @since 0.1.0
- * @slop
  * @private
  */
 export const intersectEffects = (
@@ -123,7 +152,6 @@ export const intersectEffects = (
 
 /**
  * @since 0.1.0
- * @slop
  * @private
  */
 export const intersectCapabilities = (
@@ -133,7 +161,6 @@ export const intersectCapabilities = (
 
 /**
  * @since 0.1.0
- * @slop
  * @private
  */
 export const redeclare = (
@@ -170,7 +197,6 @@ export const redeclare = (
 
 /**
  * @since 0.1.0
- * @slop
  * @private
  */
 export const seal = (flow: Flow.Any): Flow.Any =>
@@ -188,31 +214,79 @@ const isTop = (schema: Schema.Top): boolean => schema.ast._tag === "Any" || sche
 
 const isNever = (schema: Schema.Top): boolean => schema.ast._tag === "Never"
 
-const sameSchema = (left: Schema.Top, right: Schema.Top): boolean => {
-  if (left === right) return true
-  const leftDocument = schemaDocument(left)
-  const rightDocument = schemaDocument(right)
-  return leftDocument !== undefined && rightDocument !== undefined && leftDocument === rightDocument
+type SchemaSide = "input" | "output"
+
+type SchemaCompatibilityIssue =
+  | {
+    readonly _tag: "IncompatibleSchemas"
+    readonly side: SchemaSide
+    readonly expectedTag: string
+    readonly actualTag: string
+  }
+  | {
+    readonly _tag: "SchemaConversionFailed"
+    readonly side: SchemaSide
+    readonly schema: "expected" | "actual"
+    readonly tag: string
+  }
+
+const incompatible = (
+  side: SchemaSide,
+  expected: Schema.Top,
+  actual: Schema.Top
+): SchemaCompatibilityIssue => ({
+  _tag: "IncompatibleSchemas",
+  side,
+  expectedTag: expected.ast._tag,
+  actualTag: actual.ast._tag
+})
+
+const compareSchemas = (
+  side: SchemaSide,
+  expected: Schema.Top,
+  actual: Schema.Top
+): SchemaCompatibilityIssue | undefined => {
+  if (expected === actual) return undefined
+  const expectedDocument = schemaDocument(expected)
+  if (expectedDocument === undefined) {
+    return { _tag: "SchemaConversionFailed", side, schema: "expected", tag: expected.ast._tag }
+  }
+  const actualDocument = schemaDocument(actual)
+  if (actualDocument === undefined) {
+    return { _tag: "SchemaConversionFailed", side, schema: "actual", tag: actual.ast._tag }
+  }
+  return expectedDocument === actualDocument ? undefined : incompatible(side, expected, actual)
 }
 
 /**
  * @since 0.1.0
- * @slop
  * @private
  */
 export const schemasCompatible = (
   input: Schema.Top,
   output: Schema.Top,
   flow: Flow.Any
-): boolean => {
-  const flowAcceptsSlotInput = isNever(input) || isTop(flow.input) || (!isTop(input) && sameSchema(input, flow.input))
-  const flowProducesSlotOutput = isTop(output) || isNever(flow.output) || sameSchema(output, flow.output)
-  return flowAcceptsSlotInput && flowProducesSlotOutput
+): SchemaCompatibilityIssue | undefined => {
+  if (!isNever(input) && !isTop(flow.input)) {
+    const inputIssue = isTop(input)
+      ? incompatible("input", input, flow.input)
+      : compareSchemas("input", input, flow.input)
+    if (inputIssue !== undefined) return inputIssue
+  }
+  if (!isTop(output) && !isNever(flow.output)) {
+    return compareSchemas("output", output, flow.output)
+  }
+  return undefined
 }
 
 /**
  * @since 0.1.0
- * @slop
  * @private
  */
-export const displayName = (flow: Flow.Any): string => details(flow).name ?? "anonymous"
+// `Flow.make` defaults an unnamed flow's name to the empty string rather than
+// leaving it undefined, so a nullish check alone let decorator names read
+// `withRetry(, attempts=2)`. Both forms of "no name" answer "anonymous".
+export const displayName = (flow: Flow.Any): string => {
+  const name = details(flow).name
+  return name === undefined || name.length === 0 ? "anonymous" : name
+}

@@ -1,5 +1,6 @@
-import { readdirSync, statSync } from "node:fs"
+import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative, resolve, sep } from "node:path"
+import * as ts from "typescript"
 import { describe, expect, it } from "vitest"
 import { collectSources, fileBindsSpawningModule } from "./SpawnSpecifiers.ts"
 
@@ -157,6 +158,45 @@ describe("child-process containment conformance", () => {
     // deadline and outside the ledger. If it belongs there, add it above with
     // the bound that makes it safe; the reason is the review, not the entry.
     expect(importers.filter((id) => !allowed.has(id))).toEqual([])
+  })
+
+  it("never reads a secret declaration directly from an environment", () => {
+    const reads: Array<string> = []
+    for (const source of sources) {
+      const file = ts.createSourceFile(
+        source.path,
+        readFileSync(source.path, "utf8"),
+        ts.ScriptTarget.Latest,
+        true,
+        source.path.endsWith(".tsx")
+          ? ts.ScriptKind.TSX
+          : source.path.endsWith(".jsx")
+          ? ts.ScriptKind.JSX
+          : source.path.endsWith(".js")
+          ? ts.ScriptKind.JS
+          : ts.ScriptKind.TS
+      )
+      const visit = (node: ts.Node): void => {
+        if (
+          ts.isElementAccessExpression(node) && node.argumentExpression !== undefined &&
+          ts.isPropertyAccessExpression(node.argumentExpression) && node.argumentExpression.name.text === "env"
+        ) {
+          const parent = node.parent
+          const isWrite = ts.isBinaryExpression(parent) && parent.left === node &&
+            parent.operatorToken.kind === ts.SyntaxKind.EqualsToken
+          if (!isWrite) {
+            const line = file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1
+            reads.push(`${source.id}:${line}`)
+          }
+        }
+        ts.forEachChild(node, visit)
+      }
+      visit(file)
+    }
+    // A value lookup belongs in SecretProxy's private vault reader at the
+    // instant it constructs the outbound request. Indexing any environment
+    // with `secret.env` recreates eager resolution in a job or planner.
+    expect(reads).toEqual([])
   })
 
   it.each([...allowed.keys()].map((id) => ({ id })))(

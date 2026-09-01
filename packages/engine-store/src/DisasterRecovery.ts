@@ -31,6 +31,7 @@
  *
  * @since 0.1.0
  */
+import * as ArtifactBackupLease from "@smthrs/artifacts/ArtifactBackupLease"
 import { Sha256 } from "@smthrs/crypto"
 import { DurableWriter } from "@smthrs/database/DurableWriter"
 import * as Clock from "effect/Clock"
@@ -40,6 +41,7 @@ import * as FileSystem from "effect/FileSystem"
 import type * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as ArtifactRoots from "./internal/ArtifactRoots.ts"
 
 /**
  * The database file name inside a backup directory and a restored store
@@ -137,7 +139,7 @@ export const BackupManifest = Schema.Struct({
   formatVersion: Schema.Literal(1),
   createdAtMs: Schema.Number,
   database: Schema.Struct({
-    file: Schema.String,
+    file: Schema.Literal(databaseFileName),
     sha256: Sha256.Digest,
     sizeBytes: Schema.Number,
     migrations: Schema.Array(AppliedMigration)
@@ -170,6 +172,7 @@ export const DisasterRecoveryErrorCode = Schema.Literals([
   "missing_file",
   "digest_mismatch",
   "artifact_corruption",
+  "snapshot_incomplete",
   "schema_mismatch",
   "io",
   "sql"
@@ -210,7 +213,7 @@ export class DisasterRecoveryError extends Schema.TaggedError<DisasterRecoveryEr
  * @category models
  * @slop
  */
-export interface BackupOptions {
+export interface BackupOptions<R = never, E = never> {
   /** The directory the backup is written into. Created when absent; must be empty when present. */
   readonly directory: string
   /**
@@ -219,6 +222,12 @@ export interface BackupOptions {
    * has no filesystem artifact tier and the backup carries no blobs.
    */
   readonly objectsDirectory?: string | undefined
+  /**
+   * Opens the frozen `VACUUM INTO` file so backup can enumerate artifact
+   * roots and migrations from that exact snapshot, independently of the live
+   * connection. The host should open this file without applying migrations.
+   */
+  readonly snapshotDatabaseLayer: (databaseFile: string) => Layer.Layer<SqlClient.SqlClient, E, R>
 }
 
 /**
@@ -371,6 +380,55 @@ const appliedMigrations = (
     Effect.map((rows) => rows.map((row) => ({ migrationId: Number(row.migration_id), name: row.name })))
   )
 
+interface SnapshotState {
+  readonly migrations: Array<AppliedMigration>
+  readonly artifactRoots: ReadonlySet<string>
+}
+
+/** Reads every artifact root from the frozen database, never the live one. */
+const inspectSnapshot = (
+  sql: SqlClient.SqlClient
+): Effect.Effect<SnapshotState, DisasterRecoveryError> =>
+  Effect.gen(function*() {
+    const migrations = yield* appliedMigrations(sql, "backup")
+    const cacheRows = yield* sql<{ readonly meta_json: string }>`
+      SELECT meta_json FROM flows_step_cache
+    `.withoutTransform.pipe(
+      Effect.mapError(sqlFailure("backup", "reading artifact roots from snapshot step cache"))
+    )
+    const attemptRows = yield* sql<{
+      readonly checkpoint_json: string | null
+      readonly meta_json: string
+    }>`
+      SELECT checkpoint_json, meta_json FROM flows_attempts
+    `.withoutTransform.pipe(
+      Effect.mapError(sqlFailure("backup", "reading artifact roots from snapshot attempts"))
+    )
+    const artifactRoots = new Set<string>()
+    const decodeFailure = (cause: ArtifactRoots.ArtifactRootDecodeError): DisasterRecoveryError =>
+      error("backup", "snapshot_incomplete", cause.message, cause.cause)
+    for (const row of cacheRows) {
+      for (
+        const digest of yield* ArtifactRoots.rootDigests("flows_step_cache", row.meta_json).pipe(
+          Effect.mapError(decodeFailure)
+        )
+      ) artifactRoots.add(digest)
+    }
+    for (const row of attemptRows) {
+      for (
+        const digest of yield* ArtifactRoots.rootDigests("flows_attempts", row.meta_json).pipe(
+          Effect.mapError(decodeFailure)
+        )
+      ) artifactRoots.add(digest)
+      for (
+        const digest of yield* ArtifactRoots.checkpointDigests(row.checkpoint_json).pipe(
+          Effect.mapError(decodeFailure)
+        )
+      ) artifactRoots.add(digest)
+    }
+    return { migrations, artifactRoots }
+  })
+
 /** Reads and decodes the manifest a backup directory must carry. */
 const readManifest = (
   fs: FileSystem.FileSystem,
@@ -430,70 +488,109 @@ const checkedFile = (
  * @category operations
  * @slop
  */
-export const backup = Effect.fn("DisasterRecovery.backup")(function*(options: BackupOptions) {
-  const sql = yield* Effect.service(SqlClient.SqlClient)
-  const fs = yield* FileSystem.FileSystem
-  const createdAtMs = yield* Clock.currentTimeMillis
-  yield* ensureEmptyDirectory(fs, "backup", options.directory)
+export const backup = <R = never, E = never>(
+  options: BackupOptions<R, E>
+): Effect.Effect<
+  BackupManifest,
+  DisasterRecoveryError | E,
+  SqlClient.SqlClient | FileSystem.FileSystem | Crypto.Crypto | R
+> =>
+  Effect.gen(function*() {
+    const sql = yield* Effect.service(SqlClient.SqlClient)
+    const fs = yield* FileSystem.FileSystem
+    const createdAtMs = yield* Clock.currentTimeMillis
+    yield* ensureEmptyDirectory(fs, "backup", options.directory)
 
-  const databasePath = `${options.directory}/${databaseFileName}`
-  yield* sql`VACUUM INTO ${databasePath}`.pipe(
-    Effect.mapError(sqlFailure("backup", `snapshotting the database into ${databasePath}`))
-  )
-  const databaseBytes = yield* fs.readFile(databasePath).pipe(
-    Effect.mapError(ioFailure("backup", `reading ${databasePath} back`))
-  )
-  const sha256 = yield* measure(databaseBytes)
-  const migrations = yield* appliedMigrations(sql, "backup")
-
-  const artifacts: Array<ArtifactEntry> = []
-  if (options.objectsDirectory !== undefined) {
-    const objectsDirectory = options.objectsDirectory
-    const present = yield* fs.exists(objectsDirectory).pipe(
-      Effect.mapError(ioFailure("backup", `probing ${objectsDirectory}`))
-    )
-    const entries = present
-      ? yield* fs.readDirectory(objectsDirectory, { recursive: true }).pipe(
-        Effect.mapError(ioFailure("backup", `listing ${objectsDirectory}`))
+    const capture = Effect.gen(function*() {
+      const databasePath = `${options.directory}/${databaseFileName}`
+      yield* sql`VACUUM INTO ${databasePath}`.pipe(
+        Effect.mapError(sqlFailure("backup", `snapshotting the database into ${databasePath}`))
       )
-      : []
-    for (const entry of [...entries].sort()) {
-      const digest = blobEntry(entry)
-      if (digest === undefined) continue
-      const source = blobPath(objectsDirectory, digest)
-      const bytes = yield* fs.readFile(source).pipe(Effect.mapError(ioFailure("backup", `reading ${source}`)))
-      const measured = yield* measure(bytes)
-      if (measured !== digest) {
+      const snapshot = yield* Effect.flatMap(
+        Effect.service(SqlClient.SqlClient),
+        inspectSnapshot
+      ).pipe(Effect.provide(options.snapshotDatabaseLayer(databasePath)))
+      // Opening the frozen file may normalize SQLite journal metadata, so its
+      // manifest digest is measured only after the inspection connection closes.
+      const databaseBytes = yield* fs.readFile(databasePath).pipe(
+        Effect.mapError(ioFailure("backup", `reading ${databasePath} back`))
+      )
+      const sha256 = yield* measure(databaseBytes)
+
+      const artifacts: Array<ArtifactEntry> = []
+      const captured = new Set<string>()
+      if (options.objectsDirectory !== undefined) {
+        const objectsDirectory = options.objectsDirectory
+        const entries = yield* fs.readDirectory(objectsDirectory, { recursive: true }).pipe(
+          Effect.mapError(ioFailure("backup", `listing ${objectsDirectory}`))
+        )
+        for (const entry of [...entries].sort()) {
+          const digest = blobEntry(entry)
+          if (digest === undefined) continue
+          const source = blobPath(objectsDirectory, digest)
+          const bytes = yield* fs.readFile(source).pipe(
+            Effect.mapError(ioFailure("backup", `reading ${source}`))
+          )
+          const measured = yield* measure(bytes)
+          if (measured !== digest) {
+            return yield* Effect.fail(
+              error(
+                "backup",
+                "artifact_corruption",
+                `${source} hashes to ${measured}; repair the store before backing it up`,
+                source
+              )
+            )
+          }
+          const target = blobPath(`${options.directory}/${objectsDirectoryName}`, digest)
+          yield* fs.makeDirectory(`${options.directory}/${objectsDirectoryName}/${digest.slice(0, 2)}`, {
+            recursive: true
+          }).pipe(Effect.mapError(ioFailure("backup", `creating the objects directory for ${digest}`)))
+          yield* fs.writeFile(target, bytes).pipe(Effect.mapError(ioFailure("backup", `writing ${target}`)))
+          artifacts.push({ digest: measured, sizeBytes: bytes.length })
+          captured.add(measured)
+        }
+      }
+
+      const missing = [...snapshot.artifactRoots].filter((digest) => !captured.has(digest)).sort()
+      if (missing.length > 0) {
         return yield* Effect.fail(
           error(
             "backup",
-            "artifact_corruption",
-            `${source} hashes to ${measured}; repair the store before backing it up`,
-            source
+            "snapshot_incomplete",
+            `the frozen database references ${missing.length} artifact blobs absent from the backup`,
+            { missing }
           )
         )
       }
-      const target = blobPath(`${options.directory}/${objectsDirectoryName}`, digest)
-      yield* fs.makeDirectory(`${options.directory}/${objectsDirectoryName}/${digest.slice(0, 2)}`, {
-        recursive: true
-      }).pipe(Effect.mapError(ioFailure("backup", `creating the objects directory for ${digest}`)))
-      yield* fs.writeFile(target, bytes).pipe(Effect.mapError(ioFailure("backup", `writing ${target}`)))
-      artifacts.push({ digest: measured, sizeBytes: bytes.length })
-    }
-  }
 
-  const manifest: BackupManifest = {
-    formatVersion: 1,
-    createdAtMs,
-    database: { file: databaseFileName, sha256, sizeBytes: databaseBytes.length, migrations },
-    artifacts
-  }
-  yield* fs.writeFileString(
-    `${options.directory}/${manifestFileName}`,
-    `${JSON.stringify(manifest, null, 2)}\n`
-  ).pipe(Effect.mapError(ioFailure("backup", `writing ${manifestFileName}`)))
-  return manifest
-})
+      const manifest: BackupManifest = {
+        formatVersion: 1,
+        createdAtMs,
+        database: {
+          file: databaseFileName,
+          sha256,
+          sizeBytes: databaseBytes.length,
+          migrations: snapshot.migrations
+        },
+        artifacts
+      }
+      yield* fs.writeFileString(
+        `${options.directory}/${manifestFileName}`,
+        `${JSON.stringify(manifest, null, 2)}\n`
+      ).pipe(Effect.mapError(ioFailure("backup", `writing ${manifestFileName}`)))
+      return manifest
+    })
+
+    return options.objectsDirectory === undefined
+      ? yield* capture
+      : yield* ArtifactBackupLease.withLease(
+        fs,
+        options.objectsDirectory,
+        capture,
+        ioFailure("backup", `coordinating artifact backup in ${options.objectsDirectory}`)
+      )
+  }).pipe(Effect.withSpan("DisasterRecovery.backup"))
 
 /**
  * Verifies a backup directory against its manifest without restoring it:

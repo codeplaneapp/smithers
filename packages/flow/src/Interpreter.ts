@@ -41,7 +41,8 @@
  *
  * @since 0.1.0
  */
-import { Key } from "@smthrs/keys/Key"
+import { Key } from "@smthrs/keys"
+import type { GraphBuildError } from "@smthrs/plan/GraphBuildError"
 import * as KeyMaterial from "@smthrs/plan/KeyMaterial"
 import * as Node from "@smthrs/plan/Node"
 import * as Planned from "@smthrs/plan/Planned"
@@ -68,6 +69,8 @@ import { FlowRuntime } from "./FlowRuntime/FlowRuntime.ts"
 import { annotateWaiting } from "./FlowRuntime/WaitingAnnotation.ts"
 import * as Graph from "./Graph.ts"
 
+const OutcomeValueTypeId = Symbol.for("@smthrs/flow/Flow/OutcomeValue")
+
 /**
  * A graph the interpreter will not drive.
  *
@@ -78,13 +81,13 @@ import * as Graph from "./Graph.ts"
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class InterpreterError extends Schema.TaggedError<InterpreterError>()(
   "@smthrs/flow/InterpreterError",
   {
     code: Schema.Literals([
       "incomplete_graph",
+      "duplicate_node_id",
       "unresolved_action",
       "unresolved_reference",
       "unsupported_call",
@@ -103,7 +106,6 @@ export class InterpreterError extends Schema.TaggedError<InterpreterError>()(
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Interpretation {
   readonly value: unknown
@@ -133,7 +135,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 /**
  * The execution id a `.child()` boundary runs its child under.
  *
- * DECIDED (2026-08-11, pending review): the id is DERIVED from the parent
+ * DECIDED: the id is DERIVED from the parent
  * execution and the child node's structural address, not minted. That is what
  * makes a boundary at-most-once under replay, exactly as
  * `docs/specs/Concepts/Trampoline Loops.md` requires of a round handoff: a
@@ -142,11 +144,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
  * The canonical tuple includes the callee and a canonical payload digest, so
  * delimiter splicing and a changed invocation cannot alias an earlier child.
  * SHA-256 uses the same injected derivation services as the repository's
- * other durable identities.
+ * other durable identities. The versioned `Key` prefix is dropped because the
+ * existing child-id wire format is the bare digest. `Key.digest` owns the
+ * prefix knowledge, so this package never guesses at a stored-key format.
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const childExecutionId = (
   parentExecutionId: string,
@@ -162,7 +165,7 @@ export const childExecutionId = (
       calleeTag,
       payloadDigest
     ]).pipe(Effect.orDie)
-    return tupleDigest.slice("key1_".length)
+    return Key.digest(tupleDigest)
   })
 
 /**
@@ -174,7 +177,6 @@ export const childExecutionId = (
  *
  * @since 0.1.0
  * @category constructors
- * @slop
  */
 export const interpret = (
   flowOrNode: Parameters<typeof Graph.build>[0],
@@ -184,12 +186,37 @@ export const interpret = (
   Effect.gen(function*() {
     const table = yield* Implementations
     const name = "_tag" in flowOrNode ? flowOrNode._tag : "node"
-    const graph = Graph.build(flowOrNode, payload, options)
     const refuse = (
       code: InterpreterError["code"],
       node: string,
       message: string
     ): Effect.Effect<never, InterpreterError> => Effect.fail(new InterpreterError({ code, flow: name, node, message }))
+
+    const graph = yield* Effect.try({
+      try: () => Graph.build(flowOrNode, payload, options),
+      catch: (cause) => {
+        // Graph.build normalizes its own refusals to GraphBuildError, but the
+        // flow body runs inside this boundary and a body throws whatever it
+        // throws. Reading `node` and `message` off the value without checking
+        // built an InterpreterError its own schema rejects, and the
+        // constructor's "Schema validation failed" then replaced the reason
+        // the author needed. Both fields are narrowed here so a plain Error
+        // from a body arrives as a typed failure that still says why. A body
+        // that threw produced no topology, so it reports `incomplete_graph`.
+        const refusal = cause as Partial<GraphBuildError>
+        const node = typeof refusal?.node === "string" ? refusal.node : ""
+        const reported = typeof refusal?.message === "string" ? refusal.message : ""
+        return new InterpreterError({
+          code: refusal?.code === "duplicate_node" ? "duplicate_node_id" : "incomplete_graph",
+          flow: name,
+          node,
+          message: reported === "" ? `building the graph of flow ${name} threw ${String(cause)}` : reported
+        })
+      }
+    })
+
+    const graphNodes = Graph.nodes(graph)
+    const byId = new Map(graphNodes.map((node) => [node.id, node]))
 
     if (graph.diagnostics.length > 0) {
       const first = graph.diagnostics[0]!
@@ -200,7 +227,6 @@ export const interpret = (
       )
     }
 
-    const byId = new Map(Graph.nodes(graph).map((node) => [node.id, node] as const))
     // Everything the walk needs that the built graph can be asked for before it
     // runs, is asked for here — so neither refusal can surface halfway through a
     // body with the actions ahead of it already committed.
@@ -215,7 +241,7 @@ export const interpret = (
     const implementations = new Map<string, Implementation>()
     const handoffDeclarations = new Map<string, AnyFlow>()
     const childDeclarations = new Map<string, AnyWithProps>()
-    for (const node of Graph.nodes(graph)) {
+    for (const node of graphNodes) {
       for (const dependency of KeyMaterial.dependencies(node.draft.material)) {
         if (byId.has(dependency)) continue
         return yield* refuse(
@@ -321,6 +347,15 @@ export const interpret = (
           writable: true
         })
       }
+      const outcome = Object.getOwnPropertyDescriptor(value, OutcomeValueTypeId)
+      if (outcome !== undefined && "value" in outcome) {
+        Object.defineProperty(output, OutcomeValueTypeId, {
+          configurable: false,
+          enumerable: false,
+          value: outcome.value,
+          writable: false
+        })
+      }
       return output
     }
 
@@ -404,7 +439,7 @@ export const interpret = (
           return yield* settle(decide(subject) ? children[1]! : children[2]!)
         }
         if (ast._tag === "Catch") {
-          // DECIDED (2026-08-11, pending review): catch observes only typed
+          // DECIDED: catch observes only typed
           // failures from ordinary protected execution. Effect defects and
           // compensation failures remain outside this interpreter's error
           // channel, so recovery cannot conceal a broken invariant or weaken
@@ -488,7 +523,7 @@ export const interpret = (
           case "FlowCall": {
             if (ast.mode === "handoff") {
               const declaration = handoffDeclarations.get(node.id)!
-              // DECIDED (2026-08-11, pending review): a handoff target's schema
+              // DECIDED: a handoff target's schema
               // services come from the context registration captured. A
               // body's type cannot enumerate declarations hidden in its
               // topology, so erase only that dynamic service parameter after
@@ -500,11 +535,18 @@ export const interpret = (
                     Schema.encodeEffect(Schema.toCodecJson(declaration.payloadSchema))(decoded)
                   )
               ) as unknown as Effect.Effect<unknown, never, Services>
-              return {
+              const outcome = {
                 _tag: "To",
                 flow: ast.flow,
                 payload
               } satisfies Outcome.To<unknown>
+              Object.defineProperty(outcome, OutcomeValueTypeId, {
+                configurable: false,
+                enumerable: false,
+                value: "To",
+                writable: false
+              })
+              return outcome
             }
             if (ast.mode === "boundary") {
               // The real boundary of `docs/specs/Concepts/Subflows.md`: an
@@ -627,7 +669,6 @@ const settle = (value: unknown): Effect.Effect<unknown, never, FlowInstance> => 
  *
  * @since 0.1.0
  * @category layers
- * @slop
  */
 export const layer = <
   Tag extends string,

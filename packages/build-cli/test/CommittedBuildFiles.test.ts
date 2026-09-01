@@ -22,7 +22,7 @@ const repositoryRoot = NodePath.resolve(
 
 describe("committed BUILD.ts files", () => {
   it("every committed BUILD.ts loads and all of its declarations construct", async () => {
-    const workspace = await Workspace.make(repositoryRoot)
+    const workspace = await Workspace.make(repositoryRoot, repositoryRoot)
     expect(workspace.buildFiles.length).toBeGreaterThan(0)
     for (const file of workspace.buildFiles) {
       // `loadBuild` imports the module, which runs every target call in it, so
@@ -32,8 +32,23 @@ describe("committed BUILD.ts files", () => {
     }
   })
 
+  it("this package's test target keys on its fixtures, not only on its test sources", async () => {
+    // The fixtures under test/fixtures are the behavioural input to the
+    // PackageExecution, MultiRepo, and CI-render suites. While they were
+    // undeclared, editing one left the Vitest target's key unchanged and the
+    // suite reported a cache hit on the previous result: a stale green over
+    // changed behaviour, which is the one thing a result cache must never do.
+    const workspace = await Workspace.make(repositoryRoot, repositoryRoot)
+    const module = await workspace.loadBuild("packages/build-cli/BUILD.ts")
+    const target = module.targets.get("test")
+    expect(target).toBeDefined()
+    const files = (await workspace.expandInputs(target!)).flatMap((input) => input.files.map((file) => file.path))
+    expect(files).toContain("packages/build-cli/test/fixtures/force-spec/.github/PACKAGE.ts")
+    expect(files).toContain("packages/build-cli/test/fixtures/github-render/workflows/ci.yml")
+  })
+
   it("the standard-package BUILD.ts files declare six package-local targets", async () => {
-    const workspace = await Workspace.make(repositoryRoot)
+    const workspace = await Workspace.make(repositoryRoot, repositoryRoot)
     for (
       const file of [
         "packages/engine/BUILD.ts",

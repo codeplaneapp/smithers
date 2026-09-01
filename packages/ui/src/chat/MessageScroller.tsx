@@ -9,6 +9,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
   type ComponentProps,
   type CSSProperties,
@@ -144,6 +145,7 @@ function MessageScrollerProviderImpl({
   children,
 }: InternalProviderProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [viewportElement, setViewportElement] = useState<HTMLDivElement | null>(null);
   const itemsRef = useRef(new Map<string, HTMLElement>());
   const anchorFlagsRef = useRef(new Map<string, boolean>());
   const mountedRef = useRef(false);
@@ -569,6 +571,7 @@ function MessageScrollerProviderImpl({
         previous.removeEventListener("scrollend", onViewportScrollEnd);
       }
       viewportRef.current = el;
+      setViewportElement(el);
       if (el) {
         el.addEventListener("wheel", cancelProgrammaticScroll, { passive: true });
         el.addEventListener("touchmove", cancelProgrammaticScroll, { passive: true });
@@ -687,7 +690,7 @@ function MessageScrollerProviderImpl({
   /* ---- content growth re-pin + visibility fallback ------------------------ */
 
   useLayoutEffect(() => {
-    const viewport = viewportRef.current;
+    const viewport = viewportElement;
     const content = viewport?.firstElementChild;
     if (!viewport || !content || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
@@ -718,9 +721,10 @@ function MessageScrollerProviderImpl({
     });
     observer.observe(content);
     return () => observer.disconnect();
-  }, [measure, remember, recomputeVisibilityGeometric, setFollowing, setJumpTracking]);
+  }, [measure, remember, recomputeVisibilityGeometric, setFollowing, setJumpTracking, viewportElement]);
 
   useEffect(() => {
+    if (!viewportElement) return;
     if (typeof IntersectionObserver !== "undefined") {
       const observer = new IntersectionObserver(
         (entries) => {
@@ -734,7 +738,7 @@ function MessageScrollerProviderImpl({
             setMessageVisible(id, entry.isIntersecting && (entry.intersectionRatio >= 0.5 || fillsViewport));
           }
         },
-        { root: viewportRef.current, threshold: [0, 0.5] },
+        { root: viewportElement, threshold: [0, 0.5] },
       );
       observerRef.current = observer;
       for (const el of itemsRef.current.values()) observer.observe(el);
@@ -746,7 +750,7 @@ function MessageScrollerProviderImpl({
     recomputeVisibilityGeometric();
     window.addEventListener("resize", recomputeVisibilityGeometric);
     return () => window.removeEventListener("resize", recomputeVisibilityGeometric);
-  }, [recomputeVisibilityGeometric, setMessageVisible]);
+  }, [recomputeVisibilityGeometric, setMessageVisible, viewportElement]);
 
   /* ---- context ------------------------------------------------------------ */
 

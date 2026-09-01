@@ -69,7 +69,7 @@ const ingest = (
       yield* channels.register(channel)
       return yield* Effect.exit(channels.ingest({ channel: channel.name, raw }))
     }).pipe(
-      Effect.provide(Channels.layer.pipe(Layer.provide(controlLayer(calls))))
+      Effect.provide(Channels.layerMemory.pipe(Layer.provide(controlLayer(calls))))
     ) as Effect.Effect<{ readonly _tag: "Success" | "Failure" }>
   )
 
@@ -92,7 +92,7 @@ const ingestTwice = (
       const second = yield* channels.ingest({ channel: channel.name, raw })
       return [first, second]
     }).pipe(
-      Effect.provide(Channels.layer.pipe(Layer.provide(controlLayer(calls)))),
+      Effect.provide(Channels.layerMemory.pipe(Layer.provide(controlLayer(calls)))),
       // Both deliveries verify, so a control failure here is a defect in the
       // test rather than an outcome worth asserting on.
       Effect.orDie
@@ -209,7 +209,7 @@ describe("redelivery", () => {
         })
         return [first, second]
       }).pipe(
-        Effect.provide(Channels.layer.pipe(Layer.provide(controlLayer(calls)))),
+        Effect.provide(Channels.layerMemory.pipe(Layer.provide(controlLayer(calls)))),
         Effect.orDie
       )
     )

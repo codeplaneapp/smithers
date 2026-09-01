@@ -33,8 +33,11 @@ import { Cause, Deferred, Effect, Exit, Layer, Option, Schema, Scope, Stream } f
 import type * as Crypto from "effect/Crypto"
 import { describe, expect, it } from "vitest"
 import * as Agent from "../src/Agent.ts"
+import type * as Budget from "../src/Budget.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
+import type * as QuotaPolicy from "../src/QuotaPolicy.ts"
 import * as Seat from "../src/Seat.ts"
+import * as Safety from "./Safety.ts"
 
 const prepared: Route.PreparedRequest = {
   routeId: "route-a",
@@ -204,7 +207,15 @@ const awaitParked = (
 
 /** Runs one body as the whole of one real durable flow execution. */
 const drive = <A, E>(
-  body: Effect.Effect<A, E, Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance>,
+  body: Effect.Effect<
+    A,
+    E,
+    | Crypto.Crypto
+    | FlowRuntime.FlowRuntime
+    | FlowRuntime.FlowInstance
+    | Budget.Budget
+    | QuotaPolicy.QuotaClassifier
+  >,
   options: { readonly resume?: boolean } = {}
 ): Promise<Outcome> =>
   Effect.gen(function*() {
@@ -225,7 +236,11 @@ const drive = <A, E>(
     settled = Deferred.makeUnsafe<Outcome>()
     yield* engine.resume(flow, "exec-1")
     return yield* Deferred.await(settled)
-  }).pipe(Effect.provide(Layer.merge(FlowEngine.layerMemory, NodeCrypto.layer)), Effect.scoped, Effect.runPromise)
+  }).pipe(
+    Effect.provide(Layer.mergeAll(FlowEngine.layerMemory, NodeCrypto.layer, Safety.layer)),
+    Effect.scoped,
+    Effect.runPromise
+  )
 
 const flows = [descriptor("fs/list", { tier: "sealed" }), descriptor("fs/write", { tier: "irreversible" })]
 
@@ -263,7 +278,7 @@ const collect = (options: {
       Effect.provide(Agent.layerDefaults)
     )
     return events
-  }).pipe(Effect.provide(Agent.layer))
+  }).pipe(Effect.provide(Agent.layer), Effect.provide(Safety.layer))
 
 describe("Agent.run", () => {
   it("runs a whole cell frame on the assembled production stack", async () => {

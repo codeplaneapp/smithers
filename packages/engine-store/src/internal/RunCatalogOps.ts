@@ -34,7 +34,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  * @category models
  * @since 0.1.0
  */
-export const RunCatalogErrorCode = Schema.Literals(["list_failed"])
+export const RunCatalogErrorCode = Schema.Literals(["invalid_options", "list_failed"])
 
 /**
  * Stable error codes returned by the catalog read.
@@ -145,20 +145,31 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient> =>
     // reopen, including after retention has deleted rows out of the middle
     // and the end.
     const listRunIds: Service["listRunIds"] = Effect.fn("RunCatalog.listRunIds")((options?: ListOptions) =>
-      sql<{ readonly run_id: string }>`
-        SELECT run_id FROM flows_runs
-        ORDER BY rowid DESC
-        LIMIT ${options?.limit ?? defaultLimit}
-      `.pipe(
-        Effect.map((rows) => rows.map((row) => row.run_id).reverse()),
-        Effect.mapError((cause) =>
-          new RunCatalogError({
-            code: "list_failed",
-            message: "the workspace run set could not be read",
-            cause
-          })
+      Effect.gen(function*() {
+        const limit = options?.limit ?? defaultLimit
+        if (!Number.isSafeInteger(limit) || limit < 0) {
+          return yield* Effect.fail(
+            new RunCatalogError({
+              code: "invalid_options",
+              message: "the run catalog limit must be a non-negative safe integer"
+            })
+          )
+        }
+        return yield* sql<{ readonly run_id: string }>`
+          SELECT run_id FROM flows_runs
+          ORDER BY rowid DESC
+          LIMIT ${limit}
+        `.pipe(
+          Effect.map((rows) => rows.map((row) => row.run_id).reverse()),
+          Effect.mapError((cause) =>
+            new RunCatalogError({
+              code: "list_failed",
+              message: "the workspace run set could not be read",
+              cause
+            })
+          )
         )
-      )
+      })
     )
 
     return { listRunIds }

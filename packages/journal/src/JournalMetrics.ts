@@ -4,8 +4,8 @@
  * This module only defines the metric handles, following the shape of Effect's
  * `ClusterMetrics`. `SqlJournal` updates them as emission receipts are
  * produced, so the counters measure admissions on the hot path rather than
- * rows read back. No exporter ships in this package; provide one — for
- * example `@smthrs/observability` — and these counters appear in it.
+ * rows read back. No exporter ships in this package; provide one, for
+ * example `@smthrs/observability`, and these counters appear in it.
  *
  * @since 0.1.0
  */
@@ -21,11 +21,10 @@ import * as Metric from "effect/Metric"
  * write transaction returned; under `Journal.transact` that is still inside
  * the caller's transaction, so a receipt that later rolls back with the
  * enclosing transaction has already counted. The counter is throughput
- * evidence, not commit evidence — the journal rows themselves are the latter.
+ * evidence, not commit evidence: the journal rows themselves are the latter.
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const writes = Metric.counter("flows_journal_writes", {
   description: "Journal emissions by channel and receipt"
@@ -37,7 +36,6 @@ export const writes = Metric.counter("flows_journal_writes", {
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const durable: {
   readonly [Tag in "Accepted" | "Duplicate"]: Metric.Metric<number, Metric.CounterState<number>>
@@ -52,7 +50,6 @@ export const durable: {
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const lossy: {
   readonly [Tag in "Accepted" | "Duplicate" | "Dropped"]: Metric.Metric<number, Metric.CounterState<number>>

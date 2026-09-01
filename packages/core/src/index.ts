@@ -1,7 +1,12 @@
 /**
- * @since 0.0.0
+ * The pure plan-time data model for flows.
  *
- * `/core` — the pure plan-time data model for flows.
+ * Every value this package constructs is inert. A flow is a schema-described
+ * declaration, a node is a pipeable AST, and a graph is the topology those two
+ * reveal when planned. Nothing here executes a step, resolves a registry name,
+ * or touches a host.
+ *
+ * @since 0.0.0
  */
 
 /**
@@ -66,3 +71,9 @@ export * as Node from "./Node.ts"
  * @slop
  */
 export * as Placement from "./Placement.ts"
+
+/**
+ * @category testing
+ * @since 1.0.0
+ */
+export * as TestRuntime from "./TestRuntime.ts"

@@ -79,11 +79,17 @@ const publishMissing = S.Npm.Publish({ pack, gates: [gate] })
 const publishApproval = S.Npm.Publish({
   pack,
   gates: [gate],
-  secrets: [S.Secret("NPM_TOKEN")],
+  secrets: [S.HttpSecret(S.Secret("NPM_TOKEN"), ["https://registry.npmjs.org"])],
   approval: "required"
 })
-const pages = S.Github.Pages({ site: literal, secrets: [S.Secret("GITHUB_TOKEN")] })
-const pr = S.Git.Pr({ gates: [gate], secrets: [S.Secret("GITHUB_TOKEN")] })
+const pages = S.Github.Pages({
+  site: literal,
+  secrets: [S.HttpSecret(S.Secret("GITHUB_TOKEN"), ["https://api.github.com"])]
+})
+const pr = S.Git.Pr({
+  gates: [gate],
+  secrets: [S.HttpSecret(S.Secret("GITHUB_TOKEN"), ["https://api.github.com"])]
+})
 export const Package = S.Package({ targets: {
   ci, copy, cron, digest, digestBuild, downstream, gate, literal, markdown, overlay, overlayBuild,
   overlayConflictBuild, overlayDownstream, overlayPack, pack, pages, pr,
@@ -291,22 +297,9 @@ describe("Node lane package execution", () => {
     const root = await fixture()
     const missing = await serve(root, ["//:publishMissing", "--plan"])
     expect(missing.output).toContain("missing secret")
-    const oldNpm = process.env["NPM_TOKEN"]
-    process.env["NPM_TOKEN"] = "fixture-token"
-    try {
-      const approval = await serve(root, ["//:publishApproval", "--plan"])
-      expect(approval.output).toContain("approval required")
-    } finally {
-      if (oldNpm === undefined) delete process.env["NPM_TOKEN"]
-      else process.env["NPM_TOKEN"] = oldNpm
-    }
-    const oldGithub = process.env["GITHUB_TOKEN"]
-    delete process.env["GITHUB_TOKEN"]
-    try {
-      expect((await serve(root, ["//:pages"])).logs).toContain("missing secret")
-      expect((await serve(root, ["//:pr"])).logs).toContain("missing secret")
-    } finally {
-      if (oldGithub !== undefined) process.env["GITHUB_TOKEN"] = oldGithub
-    }
+    const approval = await serve(root, ["//:publishApproval", "--plan"])
+    expect(approval.output).toContain("approval required")
+    expect((await serve(root, ["//:pages"])).logs).toContain("NotImplemented: Github.Pages")
+    expect((await serve(root, ["//:pr"])).logs).toContain("NotImplemented: Git.Pr")
   })
 })

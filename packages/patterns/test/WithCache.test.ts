@@ -21,7 +21,10 @@ describe("WithCache", () => {
       throw new Error("expected withCache to fail")
     } catch (error) {
       expect(error).toBeInstanceOf(PatternError)
-      expect(error).toMatchObject({ code: "invalid_decorator" })
+      expect(error).toMatchObject({
+        code: "invalid_decorator",
+        message: "withCache requires an explicitly hermetic, sealed flow"
+      })
     }
   })
 
@@ -67,6 +70,13 @@ const sealedRead = () =>
     body: () => Node.dynamic({ output: Schema.String })
   })
 
+/** The canonical digest of everything `/keys` hashes for a built graph. */
+const keyDigest = (flow: Flow.Any): string => {
+  const material = Graph.keyMaterial(Graph.build(flow, "file"))
+  if (Result.isFailure(material)) throw material.failure
+  return Digest.canonical(material.success.map((entry) => entry.material))
+}
+
 describe("WithCache policy", () => {
   it("names every declared field in the wrapper", () => {
     const cached = WithCache.withCache(sealedRead(), { ttlMs: 1000, scope: "run", version: "v2" })
@@ -79,11 +89,13 @@ describe("WithCache policy", () => {
   })
 
   it("leaves an undeclared policy at the pre-policy declaration", () => {
-    const cached = WithCache.withCache(sealedRead())
+    const inner = sealedRead()
+    const cached = WithCache.withCache(inner)
+    const emptyPolicy = WithCache.withCache(inner, {})
     expect((cached as ReturnType<typeof sealedRead>).name).toBe("withCache(read)")
-    expect((cached as ReturnType<typeof sealedRead>).implementation).toEqual(
-      (WithCache.withCache(sealedRead(), {}) as ReturnType<typeof sealedRead>).implementation
-    )
+    // Core commit d54180b9fe embeds callable references in BodyDeclaration. Restore whole-implementation
+    // equality once core records stable flow identities there.
+    expect(keyDigest(cached)).toBe(keyDigest(emptyPolicy))
   })
 
   it("folds the policy into declaration key material", () => {
@@ -94,33 +106,60 @@ describe("WithCache policy", () => {
     const runScoped = WithCache.withCache(inner, { ttlMs: 1000, scope: "run" }) as typeof inner
     const versioned = WithCache.withCache(inner, { ttlMs: 1000, version: "v2" }) as typeof inner
 
-    expect(oneSecond.implementation).toEqual(oneSecondAgain.implementation)
+    // Core commit d54180b9fe embeds callable references in BodyDeclaration. Restore whole-implementation
+    // equality once core records stable flow identities there.
+    expect(keyDigest(oneSecond)).toBe(keyDigest(oneSecondAgain))
     expect(oneSecond.implementation).not.toEqual(twoSeconds.implementation)
+    expect(keyDigest(oneSecond)).not.toBe(keyDigest(twoSeconds))
     expect(oneSecond.implementation).not.toEqual(runScoped.implementation)
+    expect(keyDigest(oneSecond)).not.toBe(keyDigest(runScoped))
     expect(oneSecond.implementation).not.toEqual(versioned.implementation)
+    expect(keyDigest(oneSecond)).not.toBe(keyDigest(versioned))
   })
 
   it("refuses a time to live no clock reading satisfies", () => {
-    expect(() => WithCache.withCache(sealedRead(), { ttlMs: 0 })).toThrow(PatternError)
-    expect(() => WithCache.withCache(sealedRead(), { ttlMs: -1 })).toThrow(PatternError)
-    expect(() => WithCache.withCache(sealedRead(), { ttlMs: 1.5 })).toThrow(PatternError)
+    for (const ttlMs of [0, -1, 1.5]) {
+      expect(() => WithCache.withCache(sealedRead(), { ttlMs })).toThrow(
+        expect.objectContaining({
+          code: "invalid_decorator",
+          message: `withCache ttlMs must be a positive safe integer, received ${ttlMs}`
+        })
+      )
+    }
   })
 
   it("refuses a blank version", () => {
-    expect(() => WithCache.withCache(sealedRead(), { version: " " })).toThrow(PatternError)
+    expect(() => WithCache.withCache(sealedRead(), { version: " " })).toThrow(
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "withCache version must name a revision, not blank text"
+      })
+    )
+  })
+
+  it("refuses every non-cacheable effect envelope with its exact code", () => {
+    const inner = (mode: "expected" | "hermetic", tier: "sealed" | "compensable") =>
+      Flow.make({
+        input: Schema.String,
+        output: Schema.String,
+        effects: Effects.make({ reads: [], writes: [], mode, onConflict: "serialize", tier }),
+        body: (input) => Node.succeed(input)
+      })
+
+    for (const flow of [inner("expected", "sealed"), inner("hermetic", "compensable")]) {
+      expect(() => WithCache.withCache(flow)).toThrow(
+        expect.objectContaining({
+          code: "invalid_decorator",
+          message: "withCache requires an explicitly hermetic, sealed flow"
+        })
+      )
+    }
   })
 })
 
 /** The annotation bag a built flow carries; `Flow.Any` hides the field. */
 const annotationsOf = (flow: Flow.Any): Context.Context<never> =>
   (flow as unknown as { readonly annotations: Context.Context<never> }).annotations
-
-/** The canonical digest of everything `/keys` hashes for a built graph. */
-const keyDigest = (flow: Flow.Any): string => {
-  const material = Graph.keyMaterial(Graph.build(flow, "file"))
-  if (Result.isFailure(material)) throw material.failure
-  return Digest.canonical(material.success.map((entry) => entry.material))
-}
 
 describe("WithCache policy annotation", () => {
   it("annotates the wrapper with the policy the engine reads at dispatch", () => {

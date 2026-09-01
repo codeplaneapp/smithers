@@ -11,9 +11,10 @@
  * `docs/specs/Concepts/Effect Taxonomy.md`, and
  * `docs/specs/Concepts/Host Adapters.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { make as makeCapability } from "@smthrs/capability/Capability"
+import { permissionDenied } from "@smthrs/capability/Permission"
 import { type ChangeId, Jj } from "@smthrs/jj"
 import { Effect, FileSystem as EffectFileSystem, Layer, Path as EffectPath } from "effect"
 import { canonicalResource } from "./FileSystem.ts"
@@ -25,7 +26,7 @@ import { Workspace } from "./Workspace.ts"
  * kernel namespace stays one-stop; it is the *same* tag, never a second one.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export { Jj } from "@smthrs/jj"
 
@@ -33,7 +34,7 @@ export { Jj } from "@smthrs/jj"
  * Provides an unavailable Jujutsu stub.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export { layerNoop } from "@smthrs/jj"
 
@@ -41,7 +42,7 @@ export { layerNoop } from "@smthrs/jj"
  * Constructs a Jujutsu service from an implementation.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export { make } from "@smthrs/jj"
 
@@ -49,7 +50,7 @@ export { make } from "@smthrs/jj"
  * Constructs an unavailable Jujutsu stub.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export { makeNoop } from "@smthrs/jj"
 
@@ -68,7 +69,7 @@ export { makeNoop } from "@smthrs/jj"
  * authorized path from the directory jj is run in.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layer: Layer.Layer<
@@ -103,14 +104,16 @@ export const layer: Layer.Layer<
           Effect.flatMap((resource) =>
             grants.check(makeCapability("jj:workspace-add", resource)).pipe(
               Effect.andThen(grants.check(makeCapability("fs:write", resource))),
-              Effect.andThen(
-                jj.workspaceAdd(
-                  name,
-                  path.normalize(
-                    path.isAbsolute(destination) ? destination : path.resolve(workspace.root, destination)
-                  ),
-                  revision
-                )
+              Effect.andThen(canonicalResource(fileSystem, path, workspace.root, destination)),
+              Effect.flatMap((settled) =>
+                settled === resource
+                  ? jj.workspaceAdd(name, resource, revision)
+                  : Effect.fail(
+                    permissionDenied(
+                      makeCapability("jj:workspace-add", resource),
+                      "workspace destination no longer names the resource that was authorized"
+                    )
+                  )
               )
             )
           )

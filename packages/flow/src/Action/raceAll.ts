@@ -3,7 +3,7 @@
 /**
  * Races actions through durable deferred execution.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import type { NonEmptyReadonlyArray } from "effect/Array"
 import type * as Effect from "effect/Effect"
@@ -17,8 +17,7 @@ import type { Action, Any } from "./Action.ts"
  * first completed success or failure using unioned success and error schemas.
  *
  * @category racing
- * @since 4.0.0
- * @slop
+ * @since 0.1.0
  */
 export const raceAll = <const Actions extends NonEmptyReadonlyArray<Any>>(
   name: string,

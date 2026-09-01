@@ -55,6 +55,31 @@ describe("redactAlchemyState", () => {
     })
   })
 
+  /**
+   * The Worker's one credential became two, so its bindings are named
+   * `CACHE_READ_TOKEN` and `CACHE_WRITE_TOKEN`. Redaction that still looked
+   * only for `CACHE_TOKEN` would silently stop scrubbing anything.
+   */
+  it.each(["CACHE_READ_TOKEN", "CACHE_WRITE_TOKEN"])("redacts the %s binding too", async (name) => {
+    await withFixture(async (root) => {
+      const file = NodePath.join(root, "CacheWorker.json")
+      const token = "this-is-a-raw-secret-token"
+      await Fs.writeFile(
+        file,
+        JSON.stringify({
+          props: { env: { [name]: { __redacted__: token } } },
+          bindings: [{
+            sid: name,
+            data: { bindings: [{ type: "secret_text", name, text: token }] }
+          }]
+        })
+      )
+
+      expect(await redactAlchemyState({ directory: root, bearerToken: token })).toBe(1)
+      expect(await Fs.readFile(file, "utf8")).not.toContain(token)
+    })
+  })
+
   it("does not rewrite a state file when no matching bearer is present", async () => {
     await withFixture(async (root) => {
       const file = NodePath.join(root, "CacheWorker.json")

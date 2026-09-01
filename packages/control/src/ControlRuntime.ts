@@ -723,10 +723,13 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
             parkedBy: status === "parked" || status === "waiting-approval" ? fence : undefined
           })
         }),
+        // Precedence matches `SqlControlRuntime`: the submitted identity is
+        // the one a server authenticated, and the configured one is this
+        // composition's fallback for a caller that named none.
         stampPrincipal: Effect.fn("ControlRuntime.stampPrincipal")((submitted) =>
           Effect.sync(() => ({
-            id: options.principal?.id ?? submitted?.id ?? "memory",
-            kind: options.principal?.kind ?? submitted?.kind ?? "test",
+            id: submitted?.id ?? options.principal?.id ?? "memory",
+            kind: submitted?.kind ?? options.principal?.kind ?? "test",
             stampedAt: now()
           }))
         ),

@@ -150,10 +150,28 @@ Every one refused a real target, and each carries a red-then-green test.
    rather than target references, so `lint '//:ci'` was just another step. A
    workflow step that names a plain verb and label would close this.
 7. `S.Github.Workflow` has no `continueOnError`, so an advisory lane cannot
-   say so. `ci-faults`, `ci-node-macos`, and `ci-node-windows` are advisory by
-   convention here and would be enforcing if the repository's branch
-   protection required them.
-8. A declared `env` entry that names a path shadows the executor's own path
+   say so. `ci-node-macos` and `ci-node-windows` are advisory by convention
+   here and would be enforcing if the repository's branch protection required
+   them. `ci-faults` is required and needs no attr to say so, but nothing
+   holds it required either: see gap 8.
+8. `S.Github.Workflow` has no platform matrix, and `S.Github.CiGen` has no
+   `requiredJobs`. `WorkflowAttrs` takes one `runsOn` string
+   (`packages/targets/src/GithubTarget.ts:270`), and the only matrix
+   `GithubRender.ts` emits is the shard matrix it derives from a sharded
+   target (`:631-637`), so a job cannot run one target list across several
+   runners. BUILD mode grew exactly this vocabulary while the port was being
+   written: `packages/targets/src/GithubCiGen.ts` has `Job.matrix`, an array
+   of `MatrixRow { os, advisory }` rendered as `strategy.matrix` plus one
+   `include:` row per platform with `runs-on: ${{ matrix.os }}` and
+   `continue-on-error: ${{ matrix.advisory }}`, and `CiGenAttrs.requiredJobs`,
+   which refuses a required job whose every lane is advisory (commit
+   edc03f9a79). Package mode has neither, so `ci.yml`'s one `packages` matrix
+   job is written out here as `ci-node-ubuntu`, `ci-node-macos`, and
+   `ci-node-windows`, three lanes that cannot carry the per-row advisory bit
+   and that no `requiredJobs` assertion holds in the required set. Porting
+   `matrix`, the two matrix expressions, and `requiredJobs` from
+   `GithubCiGen.ts` into `WorkflowAttrs` and `GithubRender.ts` closes it.
+9. A declared `env` entry that names a path shadows the executor's own path
    wiring and stays relative. A `Cargo.Fetch` data edge sets `CARGO_HOME` to
    the fetch's delivery directory and registers it in `absoluteEnv`, which
    `PackageExec.ts` joins with the workspace root immediately before spawn.

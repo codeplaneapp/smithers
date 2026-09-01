@@ -7,11 +7,15 @@ import { NodeCrypto, NodeHttpClient, NodeHttpServer, NodeServices, NodeSocket } 
 import type * as Undici from "@effect/platform-node/Undici"
 import * as Agent from "@smthrs/agent/Agent"
 import * as AgentSession from "@smthrs/agent/AgentSession"
+import * as Budget from "@smthrs/agent/Budget"
 import * as FlowEngineLike from "@smthrs/agent/FlowEngineLike"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import * as StandardFlows from "@smthrs/agent/StandardFlows"
 import * as WorkspaceObservation from "@smthrs/agent/WorkspaceObservation"
+import { CapabilityPattern } from "@smthrs/capability/Capability"
+import { Rule } from "@smthrs/capability/Permission"
 import {
   ControlExecutor,
   ControlRpcs,
@@ -49,7 +53,7 @@ import * as RequestExecutor from "@smthrs/model/RequestExecutor"
 import * as Route from "@smthrs/model/Route"
 import type { NotificationQueue } from "@smthrs/notifications"
 import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
-import type * as Descriptor from "@smthrs/registry/Descriptor"
+import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Discovery from "@smthrs/registry/Discovery"
 import * as Registry from "@smthrs/registry/Registry"
 import { Migrations as RunStoreMigrations, Ownership, RunStore } from "@smthrs/run-store"
@@ -70,7 +74,7 @@ import type { SqlClient } from "effect/unstable/sql/SqlClient"
 import { existsSync, mkdirSync, readFileSync } from "node:fs"
 import { createServer } from "node:http"
 import type { ListenOptions } from "node:net"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import * as Application from "./Application.ts"
 import * as CodexAuth from "./CodexAuth.ts"
 import * as Environment_ from "./Environment.ts"
@@ -113,17 +117,31 @@ const valueFromArguments = (args: ReadonlyArray<string>, flag: string): string |
 }
 
 /** One entry of an `--mcp-config` file, structurally `McpClient.ConnectOptions`. */
-const isMcpServerEntry = (value: unknown): value is McpClient.ConnectOptions =>
-  typeof value === "object" &&
-  value !== null &&
-  typeof (value as { readonly server?: unknown }).server === "string" &&
-  typeof (value as { readonly command?: unknown }).command === "string" &&
-  Array.isArray((value as { readonly args?: unknown }).args)
+const isMcpServerEntry = (value: unknown): value is McpClient.ConnectOptions => {
+  if (typeof value !== "object" || value === null) return false
+  const entry = value as Record<string, unknown>
+  const positiveInteger = (key: string) =>
+    entry[key] === undefined || (typeof entry[key] === "number" && Number.isInteger(entry[key]) && entry[key] > 0)
+  const env = entry.env
+  return typeof entry.server === "string" &&
+    typeof entry.command === "string" &&
+    Array.isArray(entry.args) && entry.args.every((argument) => typeof argument === "string") &&
+    (entry.cwd === undefined || typeof entry.cwd === "string") &&
+    (env === undefined || (
+      typeof env === "object" && env !== null &&
+      Object.values(env).every((item) => item === undefined || typeof item === "string")
+    )) &&
+    positiveInteger("handshakeTimeoutMs") &&
+    positiveInteger("requestTimeoutMs") &&
+    positiveInteger("queueCapacity") &&
+    positiveInteger("maxFrameBytes")
+}
 
 /**
  * Reads and validates the MCP servers named by `--mcp-config`/`FLOWS_MCP_CONFIG`.
  *
- * The file is a JSON array of `{server, command, args, cwd?, env?}` entries —
+ * The file is a JSON array of `{server, command, args, cwd?, env?,
+ * handshakeTimeoutMs?, requestTimeoutMs?, queueCapacity?, maxFrameBytes?}` entries —
  * exactly `McpClient.ConnectOptions`. A missing path is not configured (no
  * MCP servers, the same as omitting the flag); a present but malformed file
  * is a startup defect, thrown here rather than silently ignored, since a
@@ -141,7 +159,7 @@ const mcpServersFromArguments = (
   const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))
   if (!Array.isArray(parsed) || !parsed.every(isMcpServerEntry)) {
     throw new Error(
-      `--mcp-config ${path} must be a JSON array of { server, command, args, cwd?, env? } entries`
+      `--mcp-config ${path} contains an invalid MCP server entry`
     )
   }
   return parsed
@@ -157,8 +175,8 @@ const mcpServersFromArguments = (
  */
 export const makeConfig = (
   args: ReadonlyArray<string>,
-  environment: Environment = process.env,
-  cwd: string = process.cwd()
+  environment: Environment,
+  cwd: string
 ): Application.Config => ({
   remote: valueFromArguments(args, "remote") ?? Environment_.read(environment, "SMITHERS_REMOTE"),
   // New in Phase 4: at the import reference `--credential` had no environment
@@ -182,7 +200,9 @@ export const makeConfig = (
  * @since 0.1.0
  * @slop
  */
-export const config: Effect.Effect<Application.Config> = Effect.sync(() => makeConfig(process.argv.slice(2)))
+export const config: Effect.Effect<Application.Config> = Effect.sync(() =>
+  makeConfig(process.argv.slice(2), process.env, process.cwd())
+)
 
 const websocketUrl = (remote: string): string => {
   const url = new URL(remote)
@@ -247,15 +267,40 @@ export const projectSources = (root: string): ReadonlyArray<Descriptor.Source> =
 export const layerHostPlatform = Layer.provideMerge(AtomicFileSystem.layer, NodeServices.layer)
 
 /**
+ * The local CLI's real permission store.
+ *
+ * Its configured rule preserves the operator-owned CLI's allow policy, while
+ * the real store still enforces the fiber's capability ceiling. This is
+ * intentionally distinct from `GrantStore.layerNoop`, which skips both policy
+ * evaluation and ceiling enforcement and is suitable only as an explicit test
+ * input.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerGrantStore = (root: string): Layer.Layer<GrantStore.GrantStore> =>
+  GrantStore.layer({
+    attended: false,
+    rules: [
+      new Rule({
+        effect: "allow",
+        pattern: new CapabilityPattern({ action: "*", resource: "*" })
+      })
+    ]
+  }).pipe(
+    Layer.provide(Workspace.layer(resolve(root))),
+    Layer.orDie
+  )
+
+/**
  * The kernel-guarded platform over one workspace root: every filesystem
  * operation resolved, authorized, re-resolved, and executed relative to a
  * pinned root descriptor.
  *
  * `grants` is the store the kernel asks before it authorizes an operation, and
  * it is a parameter rather than a constant so that one composition cannot end
- * up asking two different stores. The default is the allow-all one because the
- * local CLI is the operator's own process; a hosted composition supplies a real
- * `GrantStore`, and must supply the same one it gives
+ * up asking two different stores. The default is the local CLI's real store;
+ * a hosted composition may supply a stricter `GrantStore`, and must supply the same one it gives
  * `KernelChildProcessSpawner` — a filesystem pinned to the allow-all store
  * beside a shell pinned to a real one is a fail-open the types would not catch.
  *
@@ -273,7 +318,7 @@ export const layerHostPlatform = Layer.provideMerge(AtomicFileSystem.layer, Node
  */
 export const layerGuardedPlatform = (
   root: string,
-  grants: Layer.Layer<GrantStore.GrantStore> = GrantStore.layerNoop
+  grants: Layer.Layer<GrantStore.GrantStore> = layerGrantStore(root)
 ) =>
   Layer.orDie(KernelFileSystem.layer).pipe(
     Layer.provide([Workspace.layer(root), grants]),
@@ -315,7 +360,7 @@ export const layerObserver = (root: string): Layer.Layer<WorkspaceObservation.Ob
  * @since 0.1.0
  * @slop
  */
-export const layerRegistry = (root: string = process.cwd()): Layer.Layer<Registry.Registry> => {
+export const layerRegistry = (root: string): Layer.Layer<Registry.Registry> => {
   const platform = layerGuardedPlatform(root)
   const discovery = Discovery.layer.pipe(Layer.provide(platform))
   return Registry.layer({ sources: projectSources(root) }).pipe(
@@ -362,18 +407,34 @@ export const executionDatabasePath = (root: string): string => join(root, ".flow
  * @slop
  */
 export interface EngineDurable extends Application.Engine {
-  readonly stores: Layer.Layer<DurableWriter.DurableWriter | SqlClient>
+  readonly stores: Layer.Layer<DurableWriter.DurableWriter | SqlClient | RunStore.RunStore>
 }
 
-/** The reserved system catalog in the durable runtime's flow shape. */
+/**
+ * The reserved system catalog in the durable runtime's flow shape.
+ *
+ * The reserved verbs make no model calls of their own, so there is nothing for
+ * a ceiling to bound and `Descriptor.budgetUnbounded` says so by name rather
+ * than by an unlabelled `{}`.
+ */
 const systemFlows: ReadonlyArray<ControlRuntime.MemoryFlow> = SystemFlows.catalog.map((entry) => ({
   flowId: entry.flowId,
   description: `Reserved ${entry.verb} system flow`,
   deployClass: entry.deployClass,
-  envelope: { capabilities: [], flows: [], budget: {} }
+  envelope: { capabilities: [], flows: [], budget: Descriptor.budgetUnbounded }
 }))
 
-/** Projects one discovered flow into the durable runtime's flow shape. */
+/**
+ * Projects one discovered flow into the durable runtime's flow shape.
+ *
+ * The budget travels with the capabilities because it is enforced the same way
+ * they are: `layerExecutor` hands `Budget.layerFromEnvelope` to `AgentSession`,
+ * which builds one budget per run out of the approved card's envelope. A
+ * hardcoded `{}` here made that enforcement bind nothing on the shipped CLI,
+ * however carefully a flow declared its ceilings. `Descriptor.budgetOf` answers
+ * the undeclared case with `budgetUnbounded`, so a flow that names no ceiling
+ * still runs and a flow that names one is held to it.
+ */
 const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.MemoryFlow => ({
   flowId: descriptor.name,
   description: descriptor.description,
@@ -381,7 +442,7 @@ const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.Memo
   envelope: {
     capabilities: descriptor.capabilities,
     flows: descriptor.flows,
-    budget: {}
+    budget: Descriptor.budgetOf(descriptor)
   }
 })
 
@@ -404,7 +465,7 @@ const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.Memo
  * @slop
  */
 export const engineDurable = (
-  root: string = process.cwd(),
+  root: string,
   registry?: Layer.Layer<Registry.Registry> | undefined
 ): EngineDurable => {
   const file = databasePath(root)
@@ -590,7 +651,7 @@ const seatOf = <Body, Frame, Event, State>(
  * @since 0.1.0
  */
 export const layerSeatResolver = (
-  environment: Readonly<Record<string, string | undefined>> = process.env
+  environment: Readonly<Record<string, string | undefined>>
 ): Layer.Layer<SeatResolver.SeatResolver, never, RequestExecutor.RequestExecutor> =>
   Layer.effect(SeatResolver.SeatResolver)(
     Effect.gen(function*() {
@@ -752,6 +813,12 @@ const rebuildableUndici: Effect.Effect<RequestExecutor.RequestExecutor, never, S
   RequestExecutor.makeWith
 )
 
+/** The production model transport, replaceable only at the composition boundary. */
+const layerRequestExecutor: Layer.Layer<RequestExecutor.RequestExecutor> = Layer.effect(
+  RequestExecutor.RequestExecutor,
+  rebuildableUndici
+)
+
 /**
  * Provides the production run executor: the `@smthrs/agent` composition root
  * over the durable control stores, the local flow registry, and the standard
@@ -773,21 +840,24 @@ const rebuildableUndici: Effect.Effect<RequestExecutor.RequestExecutor, never, S
 export const layerExecutor = (
   registry: Layer.Layer<Registry.Registry>,
   engine: EngineDurable,
-  root: string = process.cwd(),
-  environment: Readonly<Record<string, string | undefined>> = process.env,
+  root: string,
+  environment: Readonly<Record<string, string | undefined>>,
   /**
    * MCP servers to connect at startup, each projected into the run's flow
    * catalog by `@smthrs/mcp/McpFlows` — one more source alongside filesystem,
    * shell, and memory below. Empty by default: a host that names none behaves
    * exactly as it always has.
    */
-  mcpServers: ReadonlyArray<McpClient.ConnectOptions> = []
+  mcpServers: ReadonlyArray<McpClient.ConnectOptions> = [],
+  grants: Layer.Layer<GrantStore.GrantStore> = layerGrantStore(root),
+  requestExecutor: Layer.Layer<RequestExecutor.RequestExecutor> = layerRequestExecutor,
+  quotaPolicy: Layer.Layer<QuotaPolicy.QuotaClassifier> = QuotaPolicy.layerDefault()
 ): Layer.Layer<
   ControlExecutor.ControlExecutor,
   never,
   ControlRuntime.ControlRuntime | Journal.Journal | NotificationQueue.NotificationQueue | Registry.Registry
 > => {
-  const grants = GrantStore.layerNoop
+  const workspaceRoot = resolve(root)
   // The same guarded platform the registry discovers under: kernel FileSystem
   // over descriptor-relative atomic access, with the Node service bundle
   // (Path, raw spawner, crypto) merged through. `grants` is passed rather than
@@ -799,6 +869,16 @@ export const layerExecutor = (
     Layer.provideMerge(platform)
   )
   const memory = MemoryStore.layer.pipe(Layer.provide(engine.stores), Layer.orDie)
+  // AgentSession installs the effective budget from the approved card around
+  // each `agent.run`. No card exists while this executor layer is built, so
+  // unbounded is the only honest construction-time budget. The provider is
+  // discarded after it closes `Agent.layer`; every run installs
+  // `Budget.layerFromEnvelope` directly around the call. The quota layer is
+  // the same policy the session installs for the run.
+  const sessionAgent = Agent.layer.pipe(
+    // eslint-disable-next-line no-restricted-syntax -- no envelope exists until AgentSession starts a run
+    Layer.provide(Layer.mergeAll(quotaPolicy, Budget.layerUnbounded()))
+  )
   // The dispatcher must live as long as the executor. A model captures this
   // service and uses it after seat resolution has returned.
   //
@@ -810,7 +890,6 @@ export const layerExecutor = (
   // `makeDispatcher` acquires a fresh one, so the honest rebuild here is a new
   // agent in a scope of its own — the previous one is closed as soon as the new
   // one is in hand, so a run that rebuilds many times still holds one pool.
-  const dispatcher = Layer.effect(RequestExecutor.RequestExecutor)(rebuildableUndici)
   const registration = Layer.effect(ControlExecutor.ControlExecutor)(
     Effect.gen(function*() {
       const filesystemServices = yield* Effect.context<FileSystem.FileSystem | Path.Path>()
@@ -837,7 +916,9 @@ export const layerExecutor = (
           ...testFlows(shellServices, container, runner),
           ...mcp
         ],
-        limits: cellLimits
+        limits: cellLimits,
+        quotaPolicy,
+        budget: Budget.layerFromEnvelope
       })
     })
   ).pipe(
@@ -845,7 +926,7 @@ export const layerExecutor = (
       guarded,
       memory,
       Recall.layerNoop,
-      Agent.layer,
+      sessionAgent,
       // The run's mutation accounting is measured rather than declared, and
       // this is what measures it: without an observer in the composition the
       // controller falls back to what a frame's calls claimed about
@@ -859,12 +940,13 @@ export const layerExecutor = (
       // between a run that can prove fails-before without reverting its own
       // work and one that cannot.
       Checkpoints.layerGit(checkpointStore(environment, root)),
-      layerSeatResolver(environment).pipe(Layer.provide(dispatcher))
+      layerSeatResolver(environment).pipe(Layer.provide(requestExecutor))
     ])
   )
   return NodeFlowsRuntime.layer(
     {
       filename: executionDatabasePath(root),
+      workspaceRoot,
       owner: { hostId: "flows-cli" },
       // Two terminals over one project are two engine processes over one
       // `.flows/engine.db`, so "one engine process at a time" was never true
@@ -878,7 +960,7 @@ export const layerExecutor = (
     WorkspaceSandbox.layerFileSystem(),
     registration
   ).pipe(
-    Layer.provide([platform, NodeCrypto.layer, NodeJj.layer]),
+    Layer.provide([platform, NodeCrypto.layer, NodeJj.layerAt(workspaceRoot)]),
     // Failure to open or migrate the local execution engine is a startup
     // defect, just like the control database above: no command can execute
     // honestly without this composition.
@@ -950,7 +1032,7 @@ export const layer = (applicationConfig: Application.Config) => {
     layerControl(applicationConfig),
     layerOutput,
     NodeServices.layer,
-    Project.layer(root, applicationConfig.migrationRoot),
+    Project.layer(root, applicationConfig.migrationRoot ?? Project.legacyRoot(undefined, root)),
     // `smithers memory` reads and writes the same durable store a run's
     // `memory` flow does, over the same control database. A separate
     // connection would be a second writer to one SQLite file. A remote
@@ -959,6 +1041,40 @@ export const layer = (applicationConfig: Application.Config) => {
     applicationConfig.remote === undefined ? layerMemory(root) : layerMemoryRemote
   )
 }
+
+/** Refuses a composition root that still owes a service. */
+type Complete<L> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>] ? [R] extends [never] ? true : false
+  : false
+
+/** Refuses a composition root whose allowed requirement channel is not exact. */
+type RequirementsAre<L, Expected> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>]
+  ? [R] extends [Expected] ? [Expected] extends [R] ? true : false : false
+  : false
+
+/** Fails to compile unless its argument is `true`. */
+type Expect<T extends true> = T
+
+/**
+ * Pins the executor and both complete control-plane compositions.
+ *
+ * The executor is installed beneath `Application.layer`, so its control
+ * runtime, journal, notification queue, and registry are deliberate inputs.
+ * `layerControl` supplies them, and the final command-handler root owes
+ * nothing.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type CompositionRootsAreComplete = [
+  Expect<
+    RequirementsAre<
+      ReturnType<typeof layerExecutor>,
+      ControlRuntime.ControlRuntime | Journal.Journal | NotificationQueue.NotificationQueue | Registry.Registry
+    >
+  >,
+  Expect<Complete<ReturnType<typeof layerControl>>>,
+  Expect<Complete<ReturnType<typeof layer>>>
+]
 
 /**
  * Provides the memory store a `--remote` invocation gets: none, said out loud.
@@ -999,7 +1115,7 @@ const remoteMemory = (verb: string): Effect.Effect<never, MemoryError.MemoryErro
  * @since 1.0.0
  * @slop
  */
-export const layerMemory = (root: string = process.cwd()): Layer.Layer<MemoryStore.MemoryStore> =>
+export const layerMemory = (root: string): Layer.Layer<MemoryStore.MemoryStore> =>
   MemoryStore.layer.pipe(
     Layer.provide([engineDurable(root).stores, NodeCrypto.layer]),
     Layer.orDie
@@ -1068,7 +1184,7 @@ export const layerServer = (
 export const layerGateway = (
   health: GatewayServer.Health,
   options: NodeGateway.ServerOptions = { host: "127.0.0.1", port: defaultServerOptions.port },
-  root: string = process.cwd()
+  root: string
 ) => {
   const journal = engineDurable(root).journal
   return NodeGateway.layer(health, options).pipe(
@@ -1106,5 +1222,9 @@ export const layerServerNoopAuth = (options: ServerOptions = defaultServerOption
   if (!isLoopbackHost(host)) {
     throw new Error(`Refusing non-loopback control bind ${host} with permissive authentication`)
   }
+  // The `isLoopbackHost` refusal three lines up is the whole guard: this
+  // composition cannot be built for a bind anything off this machine can
+  // reach. `listen: false` keeps it in-process on top of that.
+  // eslint-disable-next-line no-restricted-syntax -- guarded by the refusal above
   return layerServer(ControlRpcs.layerNoopAuth(), { ...options, listen: false })
 }

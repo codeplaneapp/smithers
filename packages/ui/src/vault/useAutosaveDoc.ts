@@ -7,7 +7,10 @@ import {
   type AutosaveState,
 } from "./autosaveMachine";
 
-export type UseAutosaveDocOptions = AutosaveDocOptions;
+export type UseAutosaveDocOptions = AutosaveDocOptions & {
+  /** Change this identity when switching documents so local state is re-seeded. */
+  resetKey?: string | number;
+};
 
 export type UseAutosaveDocResult = {
   value: string;
@@ -21,9 +24,9 @@ export type UseAutosaveDocResult = {
 };
 
 /**
- * React binding for the autosave state machine. The machine is created once
- * (callbacks proxied through refs so the latest closures are used without
- * recreating the document) and torn down on unmount.
+ * React binding for the autosave state machine. The machine is recreated when
+ * `resetKey` changes; callbacks are otherwise proxied through refs so the
+ * latest closures are used without resetting the active document.
  */
 export function useAutosaveDoc(options: UseAutosaveDocOptions): UseAutosaveDocResult {
   const saveRef = useRef(options.save);
@@ -36,6 +39,12 @@ export function useAutosaveDoc(options: UseAutosaveDocOptions): UseAutosaveDocRe
   optionsRef.current = options;
 
   const docRef = useRef<AutosaveDoc | null>(null);
+  const resetKeyRef = useRef(options.resetKey);
+  if (!Object.is(resetKeyRef.current, options.resetKey)) {
+    docRef.current?.dispose();
+    docRef.current = null;
+    resetKeyRef.current = options.resetKey;
+  }
   const getDoc = useCallback((): AutosaveDoc => {
     if (docRef.current) return docRef.current;
     const current = optionsRef.current;
@@ -55,7 +64,7 @@ export function useAutosaveDoc(options: UseAutosaveDocOptions): UseAutosaveDocRe
       },
     });
     return docRef.current;
-  }, []);
+  }, [options.resetKey]);
 
   getDoc();
 

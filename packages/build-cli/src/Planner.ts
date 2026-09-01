@@ -952,6 +952,7 @@ export const make = async (
       ? {
         attrs: metadata.attrs,
         dependencies: metadata.dependencies,
+        dependencySelectors: metadata.dependencySelectors,
         inputs: metadata.inputs,
         cacheable: metadata.cacheable,
         outputs: metadata.outputs
@@ -959,15 +960,38 @@ export const make = async (
       : metadata.forKind(verb)
     const depKeys = new Map<Target.AnyTarget, string>()
     const dependencies: Array<{ readonly label: string; readonly key: string }> = []
-    for (const dependency of view.dependencies) {
+    const selectedDependencies: Array<Target.AnyTarget> = []
+    for (const selector of view.dependencySelectors) {
+      const candidates = await workspace.targets(selector.pattern)
+      let matches = 0
+      for (const candidate of candidates) {
+        const candidateLabel = await workspace.label(candidate)
+        const parsedCandidate = Label.parse(candidateLabel, "")
+        if (parsedCandidate._tag === "Exact" && parsedCandidate.target === selector.target) {
+          selectedDependencies.push(candidate)
+          matches += 1
+        }
+      }
+      if (matches === 0) {
+        throw new Error(
+          `target ${label} dependency selector ${selector.pattern}:${selector.target} matched no targets`
+        )
+      }
+    }
+    for (const dependency of [...view.dependencies, ...selectedDependencies]) {
       const planned = await visit(dependency)
       depKeys.set(dependency, planned.keyPreview)
-      dependencies.push({ label: planned.label, key: planned.keyPreview })
+      // The label list and the edge list are two views of one relation, so
+      // they are deduplicated together. Two module instances of one BUILD.ts
+      // produce two target objects for one label, which `Target.metadata`
+      // cannot collapse because it deduplicates by object identity. Pushing
+      // the label twice made `Executor.validateWorkList` refuse the entire
+      // work list before dispatching anything.
       const edgeId = `${planned.label}\0${label}`
-      if (!edgeIds.has(edgeId)) {
-        edgeIds.add(edgeId)
-        edges.push({ from: planned.label, to: label })
-      }
+      if (edgeIds.has(edgeId)) continue
+      edgeIds.add(edgeId)
+      edges.push({ from: planned.label, to: label })
+      dependencies.push({ label: planned.label, key: planned.keyPreview })
     }
     const declaredInputs = await workspace.expandInputs(target, view.inputs, view.dependencies)
     const inputDigests = new Map<Input.Declared, string>()

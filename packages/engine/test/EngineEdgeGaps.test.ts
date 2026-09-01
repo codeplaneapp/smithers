@@ -261,11 +261,7 @@ describe("retry decisions on defects", () => {
 })
 
 describe("in-flight action identity", () => {
-  effect("two concurrent runs of the same keyed action both execute, then replay after settling", () => {
-    // The memory engine memoizes an action result once it settles. While an
-    // attempt is still in flight there is nothing to replay, so a concurrent
-    // sibling with the same key runs alongside it; a third, later call
-    // replays the settled result.
+  effect("joins one in-flight keyed action and replays its first settlement", () => {
     let executions = 0
     const keyed = Action.make({
       name: "Edge/concurrent-keyed",
@@ -291,7 +287,7 @@ describe("in-flight action identity", () => {
         Effect.gen(function*() {
           yield* Effect.all([keyed, keyed], { concurrency: "unbounded" })
           const inFlight = executions
-          expect(inFlight).toBe(2)
+          expect(inFlight).toBe(1)
           return yield* keyed
         })
       ),
@@ -302,8 +298,8 @@ describe("in-flight action identity", () => {
     return Effect.gen(function*() {
       const replayed = yield* flow.execute({ id: "x" }, { executionId: "run-concurrent" })
       // the third call replayed a settled result instead of running again
-      expect(executions).toBe(2)
-      expect(replayed).toBeLessThanOrEqual(2)
+      expect(executions).toBe(1)
+      expect(replayed).toBe(1)
     }).pipe(Effect.provide(layer))
   })
 })

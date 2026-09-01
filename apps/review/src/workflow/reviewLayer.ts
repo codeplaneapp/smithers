@@ -8,27 +8,29 @@
  *
  * @since 1.0.0
  */
-import * as Agent from "@smthrs/agent/Agent";
-import * as AgentAction from "@smthrs/agent/AgentAction";
-import * as SeatResolver from "@smthrs/agent/SeatResolver";
-import { FlowEngine } from "@smthrs/engine";
-import { Action, Interpreter } from "@smthrs/flow";
-import * as NodeRuntime from "@smthrs/flows/NodeRuntime";
-import * as Registry from "@smthrs/registry/Registry";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as Agent from "@smthrs/agent/Agent"
+import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Budget from "@smthrs/agent/Budget"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
+import * as SeatResolver from "@smthrs/agent/SeatResolver"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Interpreter } from "@smthrs/flow"
+import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+import * as Registry from "@smthrs/registry/Registry"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import {
   applyVerdictsLayer,
   finalizeReviewLayer,
   mergeFileBatchLayer,
   prepareReviewLayer,
-  renderWalkthroughLayer,
-} from "./reviewActions.ts";
-import { NarrateChanges, QuizChanges, ReviewFile, VerifyFindings } from "./reviewAgentActions.ts";
-import { NarrateReview, Review, ReviewFiles, VerifyReview } from "./reviewFlow.ts";
-import { modelCallEnvelope, modelCallRules } from "./reviewSeatResolver.ts";
+  renderWalkthroughLayer
+} from "./reviewActions.ts"
+import { NarrateChanges, QuizChanges, ReviewFile, VerifyFindings } from "./reviewAgentActions.ts"
+import { NarrateReview, Review, ReviewFiles, VerifyReview } from "./reviewFlow.ts"
+import { modelCallEnvelope, modelCallRules } from "./reviewSeatResolver.ts"
 
 /**
  * Every action implementation and flow registration the review workflow needs,
@@ -50,8 +52,8 @@ export const declarations = Layer.mergeAll(
   Interpreter.layer(Review),
   Interpreter.layer(ReviewFiles),
   Interpreter.layer(VerifyReview),
-  Interpreter.layer(NarrateReview),
-);
+  Interpreter.layer(NarrateReview)
+)
 
 /**
  * The agent host: an empty catalog, an explicit cell budget, and the one
@@ -75,12 +77,20 @@ export const agentHost = (environment: Readonly<Record<string, string | undefine
     registry: Registry.makeNoop({
       list: () => Effect.succeed([]),
       visible: () => Effect.succeed([]),
-      getOption: () => Effect.succeed(Option.none()),
+      getOption: () => Effect.succeed(Option.none())
     }),
     limits: { calls: 8 },
     capabilityEnvelope: modelCallEnvelope(environment),
-    maxFrames: 4,
-  });
+    maxFrames: 4
+  })
+
+/**
+ * Review calls real providers, so reset-bearing refusals park and resume. The
+ * review launcher has no approved plan budget envelope, so a numeric ceiling
+ * here would be one no reviewer selected.
+ */
+// eslint-disable-next-line no-restricted-syntax -- no approved envelope exists, see above
+const agentPolicy = Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())
 
 /**
  * Builds the review workflow over a caller-supplied seat resolver and the
@@ -95,15 +105,16 @@ export const agentHost = (environment: Readonly<Record<string, string | undefine
  */
 export const layerMemory = (
   seats: Layer.Layer<SeatResolver.SeatResolver>,
-  environment: Readonly<Record<string, string | undefined>> = process.env,
+  environment: Readonly<Record<string, string | undefined>> = process.env
 ) =>
   declarations.pipe(
     Layer.provideMerge(Layer.mergeAll(agentHost(environment), seats, Agent.layer)),
+    Layer.provideMerge(agentPolicy),
     Layer.provideMerge(Agent.layerDefaults),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),
-    Layer.provideMerge(NodeCrypto.layer),
-  );
+    Layer.provideMerge(NodeCrypto.layer)
+  )
 
 /**
  * Builds the review workflow over the durable Node runtime.
@@ -124,22 +135,41 @@ export const layerMemory = (
  * @category layers
  */
 export const layerNode = (options: {
-  readonly filename: string;
-  readonly seats: Layer.Layer<SeatResolver.SeatResolver>;
+  readonly filename: string
+  readonly seats: Layer.Layer<SeatResolver.SeatResolver>
   /** The environment the reachable model hosts are read from. */
-  readonly environment?: Readonly<Record<string, string | undefined>>;
+  readonly environment?: Readonly<Record<string, string | undefined>>
 }) => {
-  const environment = options.environment ?? process.env;
+  const environment = options.environment ?? process.env
   return NodeRuntime.layerHost(
     {
       filename: options.filename,
       owner: { hostId: "smithers-review" },
-      rules: modelCallRules(environment),
+      rules: modelCallRules(environment)
     },
     declarations.pipe(
       Layer.provideMerge(Layer.mergeAll(agentHost(environment), options.seats, Agent.layer)),
+      Layer.provideMerge(agentPolicy),
       Layer.provideMerge(Agent.layerDefaults),
-      Layer.provideMerge(Action.layerImplementations),
-    ),
-  );
-};
+      Layer.provideMerge(Action.layerImplementations)
+    )
+  )
+}
+
+/** Refuses a composition root that still owes a service. */
+type Complete<L> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>] ? [R] extends [never] ? true : false
+  : false
+
+/** Fails to compile unless its argument is `true`. */
+type Expect<T extends true> = T
+
+/**
+ * Both review runtimes supply every service the workflow can require.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type CompositionRootsAreComplete = [
+  Expect<Complete<ReturnType<typeof layerMemory>>>,
+  Expect<Complete<ReturnType<typeof layerNode>>>
+]

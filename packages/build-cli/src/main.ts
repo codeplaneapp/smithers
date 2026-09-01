@@ -14,8 +14,8 @@ await main({
   env: process.env,
   stdout: terminalOf(process.stdout),
   stderr: terminalOf(process.stderr),
-  once: (signal, listener) => {
-    process.once(signal, listener)
+  on: (signal, listener) => {
+    process.on(signal, listener)
   },
   removeListener: (signal, listener) => {
     process.removeListener(signal, listener)

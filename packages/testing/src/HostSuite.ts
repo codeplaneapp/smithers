@@ -176,7 +176,7 @@ export const hostSuite = (bundle: HostBundle, profile: HostProfile): ReadonlyArr
           yield* assertEqual(value, "host-suite", "FileSystem", "readFile")
         }).pipe(
           Effect.ensuring(
-            fs.remove(scratchPath, { force: true }).pipe(Effect.catch(() => Effect.void))
+            fs.remove(scratchPath, { force: true }).pipe(Effect.orDie)
           )
         )
       }),

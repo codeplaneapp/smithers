@@ -6,7 +6,7 @@
   "smthrs": {
     "group": "engine"
   },
-  "description": "Capability values and permission failures — the leaf vocabulary of the Smithers permission kernel",
+  "description": "Capability values and permission failures: the leaf vocabulary of the Smithers permission kernel",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",

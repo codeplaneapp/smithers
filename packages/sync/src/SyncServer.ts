@@ -70,12 +70,35 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service =>
  */
 export const layerNoop: Layer.Layer<SyncServer> = Layer.succeed(SyncServer, makeNoop())
 
-const journalFailure = (cause: unknown): SyncError =>
-  new SyncError({
-    code: "unknown",
-    message: cause instanceof Error ? cause.message : "Journal read failed",
-    cause
-  })
+/**
+ * Projects a journal failure onto the sync boundary.
+ *
+ * `compacted` is the one journal code that survives the crossing with its own
+ * identity. Every other failure is a fault the follower can only report, but a
+ * compacted read is a refusal with a documented resume point — the journal
+ * hands back the run's compaction floor for exactly that — and flattening it
+ * into `unknown` threw the floor away. The client retries only
+ * `transport_failed`, so the subscription died and every resubscribe from the
+ * same cursors died identically; because a whole-workspace subscription merges
+ * per-run reads, one compacted run took down the workspace.
+ *
+ * The run id comes from the call site rather than the error because the
+ * journal error carries only the sequence, and a workspace read fans out over
+ * many runs: without it a follower could not tell which cursor to move.
+ */
+const journalFailure = (runId: JournalEvent.RunId) => (cause: unknown): SyncError =>
+  cause instanceof Journal.JournalError && cause.code === "compacted" && cause.checkpointSeq !== undefined
+    ? new SyncError({
+      code: "compacted",
+      message: cause.message,
+      cause,
+      resync: { runId, checkpointSeq: cause.checkpointSeq }
+    })
+    : new SyncError({
+      code: "unknown",
+      message: cause instanceof Error ? cause.message : "Journal read failed",
+      cause
+    })
 
 const cursorOf = (
   cursors: SyncProtocol.WorkspaceCursor,
@@ -167,9 +190,12 @@ export interface Options {
  *
  * Reads page one run at a time so a single large run cannot starve the rest of
  * the workspace, and `done` is reported only when every covered run has been
- * paged to its durable tail. A page or frame whose encoded entries exceed the
- * frame ceiling is refused with `frame_too_large` instead of served, so one
- * oversized journal payload cannot take down every follower that pulls it.
+ * paged to its durable tail. The frame ceiling bounds the page: entries are
+ * served until the next one would cross it, and the page then reports
+ * `done: false` so the follower asks for the rest. Only a SINGLE entry whose
+ * own encoded size exceeds the ceiling is refused with `frame_too_large`, so
+ * one oversized journal payload cannot take down every follower that pulls it
+ * while an ordinary run of large-but-legal entries still replicates.
  *
  * A workspace subscription's fan-out is bounded without bounding what it
  * serves. It reads every run it covers — the runs the request covers plus the
@@ -212,16 +238,21 @@ export const makeLiveWith = (
     const concurrency = options.concurrency ?? defaultConcurrency
     const tailIntervalMs = options.tailIntervalMs ?? defaultTailIntervalMs
 
-    /** Refuses any page or frame whose encoded entries outgrow the ceiling. */
-    const guardFrameBytes = (bytes: number): Effect.Effect<void, SyncError> =>
-      bytes <= maxFrameBytes
-        ? Effect.void
-        : Effect.fail(
-          new SyncError({
-            code: "frame_too_large",
-            message: `Encoded entries of ${bytes} bytes exceed the ${maxFrameBytes}-byte frame ceiling`
-          })
-        )
+    /**
+     * Refuses ONE entry whose own encoded size outgrows the ceiling.
+     *
+     * This is the only shape the ceiling refuses. A single entry above it can
+     * never be served in any page, so paging around it would spin; a page that
+     * merely SUMS past it is ordinary traffic and is truncated instead (see
+     * {@link read}).
+     */
+    const frameTooLarge = (bytes: number): Effect.Effect<never, SyncError> =>
+      Effect.fail(
+        new SyncError({
+          code: "frame_too_large",
+          message: `Encoded entries of ${bytes} bytes exceed the ${maxFrameBytes}-byte frame ceiling`
+        })
+      )
 
     /**
      * Chunk-level admission for the live path. Each subscription frame
@@ -233,7 +264,7 @@ export const makeLiveWith = (
     const guardEntryChunk = (chunk: ReadonlyArray<JournalEvent.Entry>): Effect.Effect<void, SyncError> => {
       for (const entry of chunk) {
         const bytes = SyncProtocol.encodedByteLength(entry)
-        if (bytes > maxFrameBytes) return guardFrameBytes(bytes)
+        if (bytes > maxFrameBytes) return frameTooLarge(bytes)
       }
       return Effect.void
     }
@@ -322,6 +353,15 @@ export const makeLiveWith = (
         const cursors = new Map(request.cursors.map((cursor) => [cursor.runId, cursor.afterSeq]))
         let done = true
         let frameBytes = 0
+        // The byte ceiling is a PAGE budget, not a verdict on the read. A run
+        // whose next unserved entries sum past 1 MiB is ordinary — branch
+        // commands are admitted individually up to the same ceiling, so three
+        // 400 KB commands produce it — and failing the read for it wedged the
+        // follower forever: `frame_too_large` is neither retried nor
+        // retryable, and the client's next bootstrap carries the same cursors
+        // and gets the same refusal. So the page stops at the budget and
+        // reports `done: false`; only an entry that alone outgrows the
+        // ceiling still refuses, because no page can ever carry it.
         for (const runId of runIds) {
           if (entries.length >= request.limit) {
             done = false
@@ -332,14 +372,26 @@ export const makeLiveWith = (
             runId,
             ...(after === undefined ? {} : { after }),
             limit: request.limit - entries.length
-          }).pipe(Effect.mapError(journalFailure))
+          }).pipe(Effect.mapError(journalFailure(runId)))
+          let truncated = false
           for (const accepted of page.entries) {
-            frameBytes += SyncProtocol.encodedByteLength(accepted)
-            yield* guardFrameBytes(frameBytes)
+            const bytes = SyncProtocol.encodedByteLength(accepted)
+            if (bytes > maxFrameBytes) return yield* frameTooLarge(bytes)
+            if (frameBytes + bytes > maxFrameBytes) {
+              truncated = true
+              break
+            }
+            frameBytes += bytes
             entries.push(accepted)
+            // Cursors track what was SERVED, not what was read, so the next
+            // page resumes at the first entry this one dropped: no entry is
+            // skipped and none is served twice.
+            cursors.set(runId, accepted.seq)
           }
-          const last = page.entries.at(-1)
-          if (last !== undefined) cursors.set(runId, last.seq)
+          if (truncated) {
+            done = false
+            break
+          }
           if (page.hasMore) done = false
         }
         return {
@@ -355,7 +407,7 @@ export const makeLiveWith = (
     ): Stream.Stream<SyncProtocol.Frame, SyncError> => {
       const after = cursorOf(cursors, runId)
       return journal.stream({ runId, ...(after === undefined ? {} : { afterSequence: after }) }).pipe(
-        Stream.mapError(journalFailure),
+        Stream.mapError(journalFailure(runId)),
         Stream.chunks,
         Stream.tap(guardEntryChunk),
         Stream.flattenArray,
@@ -424,7 +476,7 @@ export const makeLiveWith = (
               runId,
               ...(after === undefined ? {} : { after }),
               limit: tailBatchSize
-            }).pipe(Effect.mapError(journalFailure))
+            }).pipe(Effect.mapError(journalFailure(runId)))
             yield* guardEntryChunk(page.entries)
             const frames: Array<SyncProtocol.Frame> = []
             let previous = after === undefined ? -1 : after

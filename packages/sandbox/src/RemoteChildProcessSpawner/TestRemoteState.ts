@@ -24,6 +24,8 @@ export interface TestRemoteKill {
 export interface TestRemoteState {
   readonly openedSessions: Array<string>
   readonly commands: Array<string>
+  /** The standard input each spawned command received, by spawn order. */
+  readonly inputs: Array<Uint8Array | undefined>
   /** Every signal the adapter asked the provider to deliver, in order. */
   readonly kills: Array<TestRemoteKill>
   cancellations: number

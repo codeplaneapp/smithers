@@ -241,6 +241,33 @@ export const maximumCommandTimeoutMs = 24 * 60 * 60 * 1000
 const maximumEnvironmentEntries = 4_096
 const maximumEnvironmentBytes = 256 * 1024
 
+/** The POSIX convention for an environment name: what `export NAME=` accepts. */
+const portableEnvironmentName = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/**
+ * The Windows environment block's own rule: `NAME=VALUE` entries separated by
+ * NUL, so a name is non-empty and carries neither `=` nor a control character.
+ *
+ * Windows sets names the POSIX convention never produces. `ProgramFiles(x86)`
+ * and `CommonProgramFiles(x86)` are on every 64-bit image, the GitHub Actions
+ * `windows-latest` runner included, so holding a Windows host to the POSIX rule
+ * refuses the whole environment before any command runs.
+ */
+const windowsEnvironmentName = /^[^=\u0000-\u001F\u007F]+$/
+
+/**
+ * Whether a name is one this host can carry into a child environment.
+ *
+ * The rule belongs to the host that named the variable, not to the repository.
+ * A name the repository declares is a different question and keeps the portable
+ * rule: the `.npmrc` placeholder syntax matches only a portable name, and every
+ * entry of `bootstrapEnvironment` is portable by construction. Those two lists
+ * are the whole of what a child receives, so relaxing the source's rule never
+ * puts a non-portable name on a command line or in a child environment.
+ */
+const usableEnvironmentName = (name: string, windows: boolean): boolean =>
+  windows ? windowsEnvironmentName.test(name) : portableEnvironmentName.test(name)
+
 /**
  * The two-verb contract every manager implements.
  *
@@ -330,6 +357,10 @@ export interface Options {
    * Host environment capability. Implementations select only process-startup
    * variables, network routing, and variables explicitly referenced by the
    * project `.npmrc`; the complete object is never inherited by a child.
+   *
+   * Because it is the host's environment, its names are held to the host's own
+   * rule rather than to the portable one. Windows names `ProgramFiles(x86)`,
+   * and a lookup table is not a declaration.
    */
   readonly environment?: Readonly<Record<string, string | undefined>> | undefined
   /** Wall-clock deadline for each fetch or link command. */
@@ -516,7 +547,7 @@ const normalizeEnvironment = (
       throw new TypeError("package-manager environment must not contain symbol properties")
     }
     const name = key
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    if (!usableEnvironmentName(name, windows)) {
       throw new TypeError(`package-manager environment name is not portable: ${JSON.stringify(name)}`)
     }
     const descriptor = inspect("package-manager environment", () => Object.getOwnPropertyDescriptor(record, name))

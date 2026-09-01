@@ -735,10 +735,6 @@ describe("command registry bindings", () => {
     // Browser mechanics never appear in the agent's tool catalog.
     for (
       const userOnly of [
-        "auth.sign-in",
-        "auth.sign-out",
-        "appearance.theme",
-        "appearance.dark-mode",
         "chat.stop",
         "chat.send",
         "card.maximize"
@@ -754,16 +750,18 @@ describe("command registry bindings", () => {
     // visible alternative — never a silent refusal, never an execution.
     const signIn = await executeAgentToolCall(controller.commands, {
       name: "commands",
-      arguments: JSON.stringify({ action: "execute", name: "auth.sign-in" })
+      arguments: JSON.stringify({ action: "execute", name: "chat.send" })
     })
     expect(signIn).toContain("user-only")
-    expect(signIn).toContain("button the human clicks")
+    expect(signIn).toContain("answer with text instead")
 
+    // The theme alias executes for the agent now — every listed flow is a
+    // tool call (flows/invocable.test.ts pins the invariant).
     const theme = await executeAgentToolCall(controller.commands, {
       name: "commands",
       arguments: JSON.stringify({ action: "execute", name: "theme" })
     })
-    expect(theme).toContain("user-only")
+    expect(theme).toBe("executed /theme")
 
     // The user-only guard never leaks into the user path: the human's own
     // invocation still executes.
@@ -919,12 +917,13 @@ describe("command registry bindings", () => {
     expect(executed).toBe("executed /connect")
     expect(store.session().surface).toBe("connectors")
 
-    // The user-only guard holds under the slash spelling too.
+    // The slash spelling resolves through the alias and executes now that the
+    // look-and-feel flows are model-invocable (flows/invocable.test.ts).
     const theme = await executeAgentToolCall(controller.commands, {
       name: "commands",
-      arguments: JSON.stringify({ action: "execute", name: "/theme" })
+      arguments: JSON.stringify({ action: "execute", name: "/appearance.dark-mode" })
     })
-    expect(theme).toContain("user-only")
+    expect(theme).toBe("executed /appearance.dark-mode")
 
     // A bare "/" names nothing.
     const empty = await executeAgentToolCall(controller.commands, {

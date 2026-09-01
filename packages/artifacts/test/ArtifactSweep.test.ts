@@ -152,6 +152,9 @@ const memoryFs = (options: {
   return { files, mtimes, writes, utimesCalls, hooks, fs }
 }
 
+const sweepFor = (host: ReturnType<typeof memoryFs>) =>
+  ArtifactSweep.makeFileSystem(host.fs, { coordination: "process" })
+
 describe("inventory", () => {
   it.effect("lists blobs with their age and size, and nothing else", () =>
     Effect.gen(function*() {
@@ -167,7 +170,7 @@ describe("inventory", () => {
         },
         mtimes: { [blobPath]: 1_000, [otherPath]: 2_000 }
       })
-      const listed = yield* withCrypto(ArtifactSweep.makeFileSystem(host.fs).inventory)
+      const listed = yield* withCrypto(sweepFor(host).inventory)
       expect(listed.map((blob) => [blob.digest, blob.modifiedAtMs, blob.sizeBytes])).toEqual([
         [digest, 1_000, bytes(artifact).length],
         [otherDigest, 2_000, bytes(other).length]
@@ -177,7 +180,7 @@ describe("inventory", () => {
   it.effect("reports an empty inventory when the store never published", () =>
     Effect.gen(function*() {
       const host = memoryFs()
-      expect(yield* withCrypto(ArtifactSweep.makeFileSystem(host.fs).inventory)).toEqual([])
+      expect(yield* withCrypto(sweepFor(host).inventory)).toEqual([])
     }))
 
   it.effect("reports an empty inventory when the objects directory cannot be read", () =>
@@ -207,7 +210,7 @@ describe("inventory", () => {
         },
         mtimes: { [blobPath]: 1_000 }
       })
-      const listed = yield* withCrypto(ArtifactSweep.makeFileSystem(host.fs).inventory)
+      const listed = yield* withCrypto(sweepFor(host).inventory)
       expect(listed.map((blob) => blob.digest)).toEqual([digest])
     }))
 
@@ -219,7 +222,7 @@ describe("inventory", () => {
         seed: { [blobPath]: artifact },
         withoutMtimeFor: blobPath
       })
-      expect(yield* withCrypto(ArtifactSweep.makeFileSystem(host.fs).inventory)).toEqual([])
+      expect(yield* withCrypto(sweepFor(host).inventory)).toEqual([])
     }))
 
   it.effect("skips nested paths, directories at blob addresses, and vanished entries", () =>
@@ -237,7 +240,7 @@ describe("inventory", () => {
         directories: [directoryShaped],
         phantoms: [`${otherDigest.slice(0, 2)}/${otherDigest}`]
       })
-      const listed = yield* withCrypto(ArtifactSweep.makeFileSystem(host.fs).inventory)
+      const listed = yield* withCrypto(sweepFor(host).inventory)
       expect(listed.map((blob) => blob.digest)).toEqual([digest])
     }))
 })
@@ -246,7 +249,7 @@ describe("fenced removal", () => {
   it.effect("removes a blob and reports the deletion", () =>
     Effect.gen(function*() {
       const host = memoryFs({ seed: { [blobPath]: artifact }, mtimes: { [blobPath]: 1_000 } })
-      const sweep = ArtifactSweep.makeFileSystem(host.fs)
+      const sweep = sweepFor(host)
       expect(yield* withCrypto(sweep.remove(digest))).toBe(true)
       expect(host.files.has(blobPath)).toBe(false)
       // Removing what is already gone is a completed deletion, not a failure —
@@ -257,7 +260,7 @@ describe("fenced removal", () => {
   it.effect("refuses the fence when the blob was freshened past the bound", () =>
     Effect.gen(function*() {
       const host = memoryFs({ seed: { [blobPath]: artifact }, mtimes: { [blobPath]: 5_000 } })
-      const sweep = ArtifactSweep.makeFileSystem(host.fs)
+      const sweep = sweepFor(host)
       expect(yield* withCrypto(sweep.remove(digest, { ifUnmodifiedSinceMs: 4_000 }))).toBe(false)
       expect(host.files.has(blobPath)).toBe(true)
       expect(yield* withCrypto(sweep.remove(digest, { ifUnmodifiedSinceMs: 5_000 }))).toBe(true)
@@ -270,8 +273,11 @@ describe("fenced removal", () => {
       const entered = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
       host.hooks.beforeRemove = () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
-      const sweep = ArtifactSweep.makeFileSystem(host.fs)
-      const store = ArtifactStore.makeFileSystem(host.fs, { durability: "best-effort" })
+      const sweep = sweepFor(host)
+      const store = ArtifactStore.makeFileSystem(host.fs, {
+        durability: "best-effort",
+        coordination: "process"
+      })
 
       const removing = yield* sweep.remove(digest, { ifUnmodifiedSinceMs: 1_000 }).pipe(
         Effect.forkChild({ startImmediately: true })
@@ -292,7 +298,7 @@ describe("fenced removal", () => {
   it.effect("refuses the fence when the blob's age cannot be measured", () =>
     Effect.gen(function*() {
       const host = memoryFs({ seed: { [blobPath]: artifact }, withoutMtimeFor: blobPath })
-      const sweep = ArtifactSweep.makeFileSystem(host.fs)
+      const sweep = sweepFor(host)
       expect(yield* withCrypto(sweep.remove(digest, { ifUnmodifiedSinceMs: Number.MAX_SAFE_INTEGER }))).toBe(false)
       expect(host.files.has(blobPath)).toBe(true)
     }))
@@ -300,7 +306,7 @@ describe("fenced removal", () => {
   it.effect("refuses the fence when the blob is already gone", () =>
     Effect.gen(function*() {
       const host = memoryFs()
-      const sweep = ArtifactSweep.makeFileSystem(host.fs)
+      const sweep = sweepFor(host)
       expect(yield* withCrypto(sweep.remove(digest, { ifUnmodifiedSinceMs: Number.MAX_SAFE_INTEGER }))).toBe(false)
     }))
 
@@ -308,7 +314,7 @@ describe("fenced removal", () => {
     Effect.gen(function*() {
       const host = memoryFs()
       const exit = yield* withCrypto(
-        ArtifactSweep.makeFileSystem(host.fs).remove("../escape").pipe(Effect.exit)
+        sweepFor(host).remove("../escape").pipe(Effect.exit)
       )
       expect(Exit.isFailure(exit)).toBe(true)
     }))
@@ -320,7 +326,7 @@ describe("fenced removal", () => {
         mtimes: { [blobPath]: 1_000 },
         failRemoveOf: blobPath
       })
-      const exit = yield* withCrypto(ArtifactSweep.makeFileSystem(host.fs).remove(digest).pipe(Effect.exit))
+      const exit = yield* withCrypto(sweepFor(host).remove(digest).pipe(Effect.exit))
       expect(Exit.isFailure(exit)).toBe(true)
       expect(host.files.has(blobPath)).toBe(true)
     }))
@@ -333,7 +339,7 @@ describe("fenced removal", () => {
         failRemoveOf: blobPath,
         failExists: true
       })
-      const exit = yield* withCrypto(ArtifactSweep.makeFileSystem(host.fs).remove(digest).pipe(Effect.exit))
+      const exit = yield* withCrypto(sweepFor(host).remove(digest).pipe(Effect.exit))
       expect(Exit.isFailure(exit)).toBe(true)
     }))
 })
@@ -375,7 +381,10 @@ describe("put freshens a deduplicated blob (git's loose-object freshening)", () 
   it.effect("re-stamps the mtime instead of rewriting, so the grace fence protects it", () =>
     Effect.gen(function*() {
       const host = memoryFs({ seed: { [blobPath]: artifact }, mtimes: { [blobPath]: 1_000 } })
-      const store = ArtifactStore.makeFileSystem(host.fs, { durability: "best-effort" })
+      const store = ArtifactStore.makeFileSystem(host.fs, {
+        durability: "best-effort",
+        coordination: "process"
+      })
       yield* TestClock.adjust("2 seconds")
       const before = yield* Clock.currentTimeMillis
       yield* withCrypto(store.put(bytes(artifact)))
@@ -384,7 +393,7 @@ describe("put freshens a deduplicated blob (git's loose-object freshening)", () 
       expect(host.mtimes.get(blobPath)!).toBeGreaterThanOrEqual(before)
       // The liveness half: a sweep that computed its bound before the freshen
       // now fails its fence, exactly like a laggard's fenced cache evict.
-      const sweep = ArtifactSweep.makeFileSystem(host.fs)
+      const sweep = sweepFor(host)
       expect(yield* withCrypto(sweep.remove(digest, { ifUnmodifiedSinceMs: 1_000 }))).toBe(false)
       expect(text(host.files.get(blobPath))).toBe(artifact)
     }))
@@ -399,7 +408,11 @@ describe("put freshens a deduplicated blob (git's loose-object freshening)", () 
         mtimes: { [blobPath]: 1_000 },
         utimesUnsupported: true
       })
-      yield* withCrypto(ArtifactStore.makeFileSystem(host.fs, { durability: "best-effort" }).put(bytes(artifact)))
+      yield* withCrypto(
+        ArtifactStore.makeFileSystem(host.fs, { durability: "best-effort", coordination: "process" }).put(
+          bytes(artifact)
+        )
+      )
       expect(host.writes).toEqual([])
       expect(host.mtimes.get(blobPath)).toBe(1_000)
     }))
@@ -415,7 +428,11 @@ describe("put freshens a deduplicated blob (git's loose-object freshening)", () 
         utimesUnsupported: true,
         failExistsAfter: 1
       })
-      yield* withCrypto(ArtifactStore.makeFileSystem(host.fs, { durability: "best-effort" }).put(bytes(artifact)))
+      yield* withCrypto(
+        ArtifactStore.makeFileSystem(host.fs, { durability: "best-effort", coordination: "process" }).put(
+          bytes(artifact)
+        )
+      )
       expect(host.writes).toEqual([])
       expect(host.mtimes.get(blobPath)).toBe(1_000)
     }))
@@ -432,7 +449,9 @@ describe("put freshens a deduplicated blob (git's loose-object freshening)", () 
         utimesVanishes: true
       })
       const published = yield* withCrypto(
-        ArtifactStore.makeFileSystem(host.fs, { durability: "best-effort" }).put(bytes(artifact))
+        ArtifactStore.makeFileSystem(host.fs, { durability: "best-effort", coordination: "process" }).put(
+          bytes(artifact)
+        )
       )
       expect(published).toBe(digest)
       expect(host.writes).toHaveLength(1)

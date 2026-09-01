@@ -41,6 +41,8 @@ describe("FileSet.workspaceRelative properties", () => {
     ["."],
     [".."],
     ["a\u0000b"],
+    ["a\u001fb"],
+    ["a\u007fb"],
     ["..."]
   ]
 
@@ -50,6 +52,7 @@ describe("FileSet.workspaceRelative properties", () => {
         if (!FileSet.workspaceRelative(path)) return
         // The oracle splits on both separators independently of the
         // implementation: an accepted spelling resolves strictly downward.
+        expect(/[\u0000-\u001f\u007f]/u.test(path)).toBe(false)
         expect(path.startsWith("/") || path.startsWith("\\")).toBe(false)
         const segments = path.split(/[/\\]/)
         expect(/^[A-Za-z]:$/.test(segments[0]!)).toBe(false)
@@ -178,7 +181,7 @@ describe("FileSet.matchesPattern properties", () => {
 // --- overlap: symmetric, and conservative against the boundary's own matcher --
 
 /** A tiny alphabet keeps entry pairs colliding often enough to matter. */
-const tinySegment = FastCheck.constantFrom("a", "b", "c", "a.b", "*")
+const tinySegment = FastCheck.constantFrom("a", "b", "c", "a.b", "*", "\u00e9", "e\u0301")
 
 const tinyPattern = FastCheck.array(
   FastCheck.oneof(tinySegment, FastCheck.constantFrom("*", "**")),
@@ -202,6 +205,22 @@ const tinyEntry: FastCheck.Arbitrary<FileSet.Entry> = FastCheck.oneof(
   tinyGlob,
   tinyPath.map((path): FileSet.TreeArtifact => ({ _tag: "TreeArtifact", path }))
 )
+
+const normalizeEntry = (entry: FileSet.Entry, form: "NFC" | "NFD"): FileSet.Entry => {
+  if (typeof entry === "string") return entry.normalize(form)
+  if (entry._tag === "TreeArtifact") return { ...entry, path: entry.path.normalize(form) }
+  const include: [string, ...Array<string>] = [
+    entry.include[0].normalize(form),
+    ...entry.include.slice(1).map((pattern) => pattern.normalize(form))
+  ]
+  return {
+    ...entry,
+    include,
+    ...(entry.exclude === undefined
+      ? {}
+      : { exclude: entry.exclude.map((pattern) => pattern.normalize(form)) })
+  }
+}
 
 /**
  * The execution boundary's own membership rule (StepBoundary `declaredCovers`):
@@ -238,6 +257,23 @@ describe("FileSet.overlaps properties", () => {
           ["a/b", { _tag: "TreeArtifact", path: "a" }, "a/b"],
           [{ _tag: "Glob", include: ["**"] }, "a/b/c", "a/b/c"],
           ["a/*", { _tag: "Glob", include: ["a/*"] }, "a/*"]
+        ]
+      }
+    )
+  })
+
+  it("is invariant under NFC and NFD spellings", () => {
+    FastCheck.assert(
+      FastCheck.property(tinyEntry, tinyEntry, (left, right) => {
+        expect(FileSet.overlaps(normalizeEntry(left, "NFC"), normalizeEntry(right, "NFC"))).toBe(
+          FileSet.overlaps(normalizeEntry(left, "NFD"), normalizeEntry(right, "NFD"))
+        )
+      }),
+      {
+        ...params,
+        examples: [
+          ["caf\u00e9.txt", "cafe\u0301.txt"],
+          [{ _tag: "Glob", include: ["caf\u00e9.*"] }, "cafe\u0301.txt"]
         ]
       }
     )

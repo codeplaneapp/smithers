@@ -122,6 +122,41 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
       expect(existsSync(editorMarker)).toBe(false)
     }))
 
+  it.effect("keeps a bound layer in its repository when process.cwd points elsewhere", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(async () => {
+        const target = await mkdtemp(join(tmpdir(), "flows-node-jj-bound-"))
+        execFileSync("jj", ["git", "init", target], { stdio: "ignore" })
+        return target
+      }),
+      (target) =>
+        Effect.gen(function*() {
+          yield* Effect.promise(() => writeFile(join(repository, "caller-only.txt"), "caller\n"))
+          yield* Effect.promise(() => writeFile(join(target, "target-only.txt"), "target\n"))
+          const current = (cwd: string) =>
+            execFileSync("jj", ["log", "-r", "@", "--no-graph", "-T", "change_id.short()"], {
+              cwd,
+              encoding: "utf8"
+            }).trim()
+          const callerBefore = current(repository)
+          const targetBefore = current(target)
+
+          yield* Effect.flatMap(Jj, (jj) => jj.snapshot("bound target")).pipe(
+            Effect.provide(NodeJj.layerAt(target))
+          )
+
+          expect(current(repository)).toBe(callerBefore)
+          expect(current(target)).not.toBe(targetBefore)
+          expect(
+            execFileSync("jj", ["log", "-r", "@-", "--no-graph", "-T", "change_id.short()"], {
+              cwd: target,
+              encoding: "utf8"
+            }).trim()
+          ).toBe(targetBefore)
+        }),
+      (target) => Effect.promise(() => rm(target, { recursive: true, force: true }))
+    ))
+
   it.effect("adds and forgets a named workspace lane", () =>
     Effect.gen(function*() {
       const lane = join(repository, "..", `lane-${process.pid}`)

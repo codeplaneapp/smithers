@@ -28,7 +28,9 @@ import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Agent from "@smthrs/agent/Agent"
 import type * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Budget from "@smthrs/agent/Budget"
 import * as FlowEngineLike from "@smthrs/agent/FlowEngineLike"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import { FlowEngine } from "@smthrs/engine"
@@ -50,6 +52,7 @@ import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import type * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
+import { isAbsolute } from "node:path"
 import * as Scan from "../Scan.ts"
 import * as Units from "../Units.ts"
 import type * as Contract from "./Contract.ts"
@@ -194,6 +197,13 @@ export const verificationCommands = (commands: Contract.Commands): ReadonlyArray
   ])
 ]
 
+const absoluteRoot = (root: string): string => {
+  if (!isAbsolute(root)) {
+    throw new TypeError(`migration root must be absolute before grant construction, received "${root}"`)
+  }
+  return root
+}
+
 /**
  * The permission rules one migration runs under: the project tree, the
  * commands that verify it, the model calls that rewrite it, and a denial for
@@ -228,7 +238,7 @@ export const rules = (options: {
   readonly runStatePaths: ReadonlyArray<string>
   readonly commands: Contract.Commands
 }): ReadonlyArray<Permission.Rule> => {
-  const root = options.root.replace(/\/+$/, "")
+  const root = absoluteRoot(options.root).replace(/\/+$/, "")
   const allow = (action: Capability.PatternAction, resource: string): Permission.Rule =>
     new Permission.Rule({ effect: "allow", pattern: new Capability.CapabilityPattern({ action, resource }) })
   const deny = (action: Capability.PatternAction, resource: string): Permission.Rule =>
@@ -316,10 +326,30 @@ const hostFor = (
   return Transform.hostLayer({ root: config.root, commands: config.commands }).pipe(Layer.provide(guarded))
 }
 
-const executor = RequestExecutor.layer.pipe(
-  Layer.provide(KernelHttpClient.layer),
-  Layer.provide([NodeHttpClient.layerUndici, GrantStore.layerNoop])
-)
+/**
+ * The two agent policies this tool decides for itself.
+ *
+ * `Agent.layer` requires both, and requiring them is the point: a composition
+ * that omits one used to reach a no-op and spend without a ceiling or park.
+ * Migration takes the real classifier, so a provider that names a reset instant
+ * parks the unit and resumes there rather than failing it. The budget is
+ * unbounded because a migration carries no approved envelope to derive one
+ * from, and inventing a ceiling here would refuse a repair round on a number
+ * nobody chose. That is a decision, spelled out, not a default.
+ */
+const agentPolicy = Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())
+
+// The credentialed half answers to the same store as the filesystem and the
+// shell, for the reason `hostFor` gives: a second store is a fail-open the
+// types cannot catch. `rules` grants `net:*` and `model:*` over `**` today, so
+// nothing a migration reaches is refused by this, but a host that narrows
+// either one gets the narrowing it asked for instead of a guard consulting a
+// store nobody configured.
+const executorFor = (config: NodeConfig): Layer.Layer<RequestExecutor.RequestExecutor, never, never> =>
+  RequestExecutor.layer.pipe(
+    Layer.provide(KernelHttpClient.layer),
+    Layer.provide([NodeHttpClient.layerUndici, grantsFor(config)])
+  )
 
 /**
  * Everything a migration needs on Node, including the credentialed half.
@@ -328,6 +358,7 @@ const executor = RequestExecutor.layer.pipe(
  * @since 0.1.0
  */
 export const layerNode = (config: NodeConfig) => {
+  absoluteRoot(config.root)
   const seats = Layer.effect(
     SeatResolver.SeatResolver,
     Effect.map(RequestExecutor.RequestExecutor, (request) =>
@@ -336,9 +367,10 @@ export const layerNode = (config: NodeConfig) => {
         seat: config.seat,
         executor: request
       }))
-  ).pipe(Layer.provide(executor))
+  ).pipe(Layer.provide(executorFor(config)))
   return MigrateFlow.layer.pipe(
     Layer.provideMerge(Layer.mergeAll(hostFor(config), seats, Agent.layer)),
+    Layer.provideMerge(agentPolicy),
     Layer.provideMerge(Agent.layerDefaults),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),
@@ -410,8 +442,9 @@ export const commandsFor = (
  * @category layers
  * @since 0.1.0
  */
-export const layerNodeScanned = (config: ScannedConfig) =>
-  Layer.unwrap(
+export const layerNodeScanned = (config: ScannedConfig) => {
+  absoluteRoot(config.root)
+  return Layer.unwrap(
     Effect.gen(function*() {
       const result = yield* Scan.scan(config.root, {
         ...(config.flowsDir === undefined ? {} : { flowsDir: config.flowsDir })
@@ -425,6 +458,7 @@ export const layerNodeScanned = (config: ScannedConfig) =>
       })
     })
   ).pipe(Layer.provide(NodeServices.layer))
+}
 
 /**
  * The cell a scripted model answers one frame with.
@@ -509,6 +543,7 @@ export const layerScripted = (config: NodeConfig & { readonly script: Script }) 
   })
   return MigrateFlow.layer.pipe(
     Layer.provideMerge(Layer.mergeAll(hostFor(config), seats, Agent.layer)),
+    Layer.provideMerge(agentPolicy),
     Layer.provideMerge(Agent.layerDefaults),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),
@@ -525,3 +560,34 @@ export const layerScripted = (config: NodeConfig & { readonly script: Script }) 
  * @since 0.1.0
  */
 export type Runtime = FlowRuntime.FlowRuntime
+
+/**
+ * Refuses a composition root that still owes a service.
+ *
+ * An unannotated root infers its requirement channel instead of proving it
+ * empty, so a service the composition forgot is not a type error: it is a
+ * `Service not found` the first time something builds the layer, which is a
+ * test on a good day and a user's run on a bad one. Making `QuotaPolicy` and
+ * `Budget` required services reached this file exactly that way, breaking
+ * `migrate --apply` at runtime while `tsc` stayed green. The two lines below
+ * are the pin: a root that forgets a service fails the build instead.
+ *
+ * @private
+ */
+type Complete<L> = [L] extends [Layer.Layer<infer _A, infer _E, infer R>] ? [R] extends [never] ? true : false
+  : false
+
+/** Fails to compile unless its argument is `true`. */
+type Expect<T extends true> = T
+
+/**
+ * Each composition root above owes nothing at the layer level.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type CompositionRootsAreComplete = [
+  Expect<Complete<ReturnType<typeof layerNode>>>,
+  Expect<Complete<ReturnType<typeof layerNodeScanned>>>,
+  Expect<Complete<ReturnType<typeof layerScripted>>>
+]

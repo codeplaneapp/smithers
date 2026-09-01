@@ -14,6 +14,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { describe, expect, it } from "@effect/vitest"
 import * as DurableWriter from "@smthrs/database/DurableWriter"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
+import { FlowEngine } from "@smthrs/engine"
 import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import * as EngineStore from "@smthrs/engine-store/EngineStore"
 import * as EngineMigrations from "@smthrs/engine-store/Migrations"
@@ -192,6 +193,18 @@ const entries = Effect.gen(function*() {
   return page.entries
 })
 
+/**
+ * The run's root journal lineage, taken from the constructor that mints it.
+ *
+ * Re-derived on 2026-09-01. `FlowEngine.Lineage` moved the root address from
+ * `<runId>/root` to a versioned encoded tuple so no two runs and node paths can
+ * name one durable record. These frames used to spell the old form as a
+ * literal, which addressed a lineage the engine no longer writes. Reading it
+ * from the constructor keeps the frames tracking the encoding instead of one
+ * spelling of it.
+ */
+const ledgerLineage = FlowEngine.Lineage.root("ledger-1")
+
 /** The seq of the `nth` (1-based) record of `eventType`, which is where frames land. */
 const seqOf = (
   committed: ReadonlyArray<JournalEvent.Entry>,
@@ -207,7 +220,7 @@ describe("time travel over an engine-written journal", () => {
           const committed = yield* entries
           const timeTravel = yield* TimeTravel
           const attempts = yield* timeTravel.inspect(
-            { runId: "ledger-1", frame: { lineageId: "ledger-1/root", seq: committed.at(-1)!.seq } },
+            { runId: "ledger-1", frame: { lineageId: ledgerLineage, seq: committed.at(-1)!.seq } },
             {
               initial: 0,
               reduce: (state: number, entry) => entry.eventType === "flows.engine.attempt-started" ? state + 1 : state
@@ -221,7 +234,7 @@ describe("time travel over an engine-written journal", () => {
         }))
 
       // The engine minted one lineage for the run and stamped it on every record.
-      expect(result.lineages).toEqual(["ledger-1/root"])
+      expect(result.lineages).toEqual([ledgerLineage])
       // Four dispatches, and the fold saw them: the body's own step, then the
       // three actions its implementation runs before the deferred parks it.
       expect(result.attempts).toBe(4)
@@ -241,7 +254,7 @@ describe("time travel over an engine-written journal", () => {
           const timeTravel = yield* TimeTravel
           const fork = yield* timeTravel.fork({
             runId: "ledger-1",
-            frame: { lineageId: "ledger-1/root", seq: frameSeq }
+            frame: { lineageId: ledgerLineage, seq: frameSeq }
           })
           const state = yield* sql<{ readonly run_id: string; readonly state_json: string }>`
           SELECT run_id, state_json FROM flows_runs WHERE run_id IN ('ledger-1', ${fork.runId})
@@ -293,7 +306,7 @@ describe("time travel over an engine-written journal", () => {
           const frameSeq = seqOf(committed, "flows.time-travel.effect-boundary") - 1
           const timeTravel = yield* TimeTravel
           return yield* Effect.flip(
-            timeTravel.rewind({ runId: "ledger-1", frame: { lineageId: "ledger-1/root", seq: frameSeq } })
+            timeTravel.rewind({ runId: "ledger-1", frame: { lineageId: ledgerLineage, seq: frameSeq } })
           )
         }))
 
@@ -321,7 +334,7 @@ describe("time travel over an engine-written journal", () => {
           const timeTravel = yield* TimeTravel
           const rewound = yield* timeTravel.rewind({
             runId: "ledger-1",
-            frame: { lineageId: "ledger-1/root", seq: frameSeq }
+            frame: { lineageId: ledgerLineage, seq: frameSeq }
           })
           const remaining = yield* entries
           return { rewound, remaining: remaining.length, total: committed.length }

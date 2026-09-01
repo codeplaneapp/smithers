@@ -30,7 +30,7 @@ const memory = S.Memory.SmithersCloud({
   autoInject: 5,
   init: {
     script: S.file("//scripts/init-smithers-cloud-memory.mjs"),
-    secrets: [S.Secret("GITHUB_TOKEN")],
+    secrets: [S.HttpSecret(S.Secret("GITHUB_TOKEN"), ["https://api.github.com"])],
   },
 })
 

@@ -27,7 +27,6 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type OnMaxReached = "fail" | "return-last"
 
@@ -48,7 +47,6 @@ export type OnMaxReached = "fail" | "return-last"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly body: Flow.Any
@@ -63,7 +61,6 @@ export interface MakeOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type RalphOptions = Omit<MakeOptions, "until">
 
@@ -74,7 +71,6 @@ export type RalphOptions = Omit<MakeOptions, "until">
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions<I, A, E, R, E2, R2> {
   readonly body: (input: {
@@ -94,7 +90,6 @@ export interface RuntimeOptions<I, A, E, R, E2, R2> {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type RalphRuntimeOptions<I, A, E, R> = Omit<RuntimeOptions<I, A, E, R, never, never>, "until">
 
@@ -106,7 +101,6 @@ export type RalphRuntimeOptions<I, A, E, R> = Omit<RuntimeOptions<I, A, E, R, ne
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Result<A> {
   readonly value: A
@@ -131,7 +125,6 @@ const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
  *
  * @category predicates
  * @since 0.1.0
- * @slop
  */
 export const done = (value: unknown): boolean =>
   value === true ||
@@ -153,10 +146,10 @@ const bound = (maxIterations: number): PatternError | undefined =>
  * know which iteration a run stops at. Reaching the bound is a value, not a
  * declared failure: core node declarations have no failure arm, so the
  * `"fail"` policy is applied by {@link run}.
+ * A very large `maxIterations` builds a very large graph before anything runs.
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   const invalid = bound(options.maxIterations)
@@ -205,7 +198,6 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const ralph = (options: RalphOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> =>
   make(options)
@@ -220,7 +212,6 @@ export const ralph = (options: RalphOptions): Flow.Flow<typeof Schema.Unknown, t
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <I, A, E, R, E2, R2>(
   input: I,
@@ -261,7 +252,6 @@ export const run = <I, A, E, R, E2, R2>(
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const runRalph = <I, A, E, R>(
   input: I,

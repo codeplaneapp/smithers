@@ -4,7 +4,7 @@
  *
  * @since 0.1.0
  */
-import { expectScores, type ScoreSample, type Verdict } from "@smthrs/testing/ScoreGate"
+import { combine, expectScores, grade, type ScoreSample, type Verdict } from "@smthrs/testing/ScoreGate"
 import type { ScoreGateError } from "@smthrs/testing/TestingError"
 import * as Effect from "effect/Effect"
 import type { Report } from "./Regression.ts"
@@ -44,7 +44,34 @@ const samples = (report: Report): ReadonlyArray<ScoreSample> =>
   )
 
 /**
+ * An environment fault: something the comparison needed was never observed, so
+ * the harness owes an answer it cannot give. A fault withholds a decision;
+ * it does not make one.
+ */
+const environmentFaults = (report: Report): ReadonlyArray<string> => [
+  ...report.run.cases.flatMap((result) =>
+    result.error === undefined ? [] : [`case '${result.case}' failed: ${result.error.message}`]
+  ),
+  ...report.missing.map((item) => `missing ${item.side} observation for ${item.case}/${item.scorer}/${item.stepKey}`)
+]
+
+/**
+ * A finding: the run measured something the baseline says it should not have.
+ * A regression scored lower at a changed step key, and nondeterminism moved a
+ * score at an unchanged one. Both are results, so both are red.
+ */
+const findings = (report: Report): ReadonlyArray<string> => [
+  ...report.regressions.map((item) => `regression for ${item.case}/${item.scorer}`),
+  ...report.nondeterminism.map((item) => `nondeterminism for ${item.case}/${item.scorer}`)
+]
+
+/**
  * Checks thresholds through `/testing`'s shared ScoreGate arithmetic.
+ *
+ * The threshold gates always run: an unobserved case cannot excuse the cases
+ * that were observed. Faults and findings are kept apart, and the verdict
+ * carries both, so a regression is a red while an unusable harness stays
+ * undecided.
  *
  * @category constructors
  * @since 0.1.0
@@ -52,45 +79,25 @@ const samples = (report: Report): ReadonlyArray<ScoreSample> =>
  */
 export const check = (report: Report, options: Options = {}): Effect.Effect<Verdict, ScoreGateError> =>
   Effect.gen(function*() {
-    const runFailures = report.run.cases.flatMap((result) =>
-      result.error === undefined ? [] : [`case '${result.case}' failed: ${result.error.message}`]
-    )
-    const auditFailures = [
-      ...report.missing.map((item) =>
-        `missing ${item.side} observation for ${item.case}/${item.scorer}/${item.stepKey}`
-      ),
-      ...report.regressions.map((item) => `regression for ${item.case}/${item.scorer}`),
-      ...report.nondeterminism.map((item) => `nondeterminism for ${item.case}/${item.scorer}`)
-    ]
-    if (runFailures.length > 0 || auditFailures.length > 0) {
-      return { _tag: "Inconclusive", reasons: [...runFailures, ...auditFailures] }
-    }
     const expectation = expectScores(samples(report))
-    let result: Verdict = { _tag: "Passed" }
-    const merge = (next: Verdict): void => {
-      if (next._tag === "Inconclusive") {
-        result = result._tag === "Passed"
-          ? next
-          : { _tag: "Inconclusive", reasons: [...result.reasons, ...next.reasons] }
-      }
-    }
-    if (options.mean !== undefined) merge(yield* expectation.mean(options.mean))
-    if (options.min !== undefined) merge(yield* expectation.min(options.min))
-    if (options.perCase !== undefined) merge(yield* expectation.perCase(options.perCase))
+    const verdicts: Array<Verdict> = []
+    if (options.mean !== undefined) verdicts.push(yield* expectation.mean(options.mean))
+    if (options.min !== undefined) verdicts.push(yield* expectation.min(options.min))
+    if (options.perCase !== undefined) verdicts.push(yield* expectation.perCase(options.perCase))
     if (options.mean === undefined && options.min === undefined && options.perCase === undefined) {
-      merge(yield* expectation.mean(0))
+      verdicts.push(yield* expectation.mean(0))
     }
-    return result
+    const reasons = findings(report)
+    if (reasons.length > 0) verdicts.push({ _tag: "Failed", reasons, inconclusive: [] })
+    return combine(verdicts, environmentFaults(report))
   })
 
 /**
- * Maps a gate verdict to the shared CI convention: inconclusive is exit code 5.
+ * Maps a gate verdict to the shared CI convention: a finding is exit code 1,
+ * an undecidable run is exit code 5.
  *
  * @category grading
  * @since 0.1.0
  * @slop
  */
-export const ciGrade = (verdict: Verdict): { readonly exitCode: 0 | 5; readonly summary: string } =>
-  verdict._tag === "Passed"
-    ? { exitCode: 0, summary: "passed" }
-    : { exitCode: 5, summary: `inconclusive: ${verdict.reasons.join("; ")}` }
+export const ciGrade = (verdict: Verdict): { readonly exitCode: 0 | 1 | 5; readonly summary: string } => grade(verdict)

@@ -341,12 +341,7 @@ describe("FlowProxyServer.layerHttpApi", () => {
 })
 
 describe("FlowProxy.toHttpApiGroup path lowering", () => {
-  it("folds case-distinct flow tags onto one colliding HTTP path", () => {
-    // `tagToPath` only lowercases, so two flows whose tags differ by case
-    // alone keep distinct endpoint names — the RPC side stays unambiguous —
-    // while every HTTP endpoint they generate lands on ONE path per
-    // operation. Mounting both in one API is a route collision; this pins
-    // the lossy lowering so a fix to it is a deliberate contract change.
+  it("keeps case-distinct and reserved-character tags in distinct path segments", () => {
     const CaseUpper = Flow.make("Proxy/Collide", {
       payload: { value: Schema.Number },
       success: Schema.Void,
@@ -368,10 +363,50 @@ describe("FlowProxy.toHttpApiGroup path lowering", () => {
       "proxy/collideDiscard",
       "proxy/collideResume"
     ])
-    expect(endpoints["Proxy/Collide"]!.path).toBe("/proxy/collide")
-    expect(endpoints["proxy/collide"]!.path).toBe("/proxy/collide")
-    expect(endpoints["Proxy/CollideDiscard"]!.path).toBe(endpoints["proxy/collideDiscard"]!.path)
-    expect(endpoints["Proxy/CollideResume"]!.path).toBe(endpoints["proxy/collideResume"]!.path)
+    expect(endpoints["Proxy/Collide"]!.path).toMatch(/^\/flow-[0-9a-f]+$/)
+    expect(endpoints["Proxy/Collide"]!.path).not.toBe(endpoints["proxy/collide"]!.path)
+    expect(endpoints["Proxy/CollideDiscard"]!.path).not.toBe(endpoints["proxy/collideDiscard"]!.path)
+    expect(endpoints["Proxy/CollideResume"]!.path).not.toBe(endpoints["proxy/collideResume"]!.path)
+    expect(endpoints["Proxy/Collide"]!.path.slice(1)).not.toContain("/")
+
+    const Reserved = Flow.make("Proxy/%?#/\ud83d\ude80", {
+      payload: {},
+      success: Schema.Void,
+      body: () => Node.succeed(undefined)
+    })
+    const reserved = FlowProxy.toHttpApiGroup("reserved", [Reserved])
+    const reservedEndpoints = reserved.endpoints as Record<string, { readonly path: string }>
+    expect(reservedEndpoints["Proxy/%?#/\ud83d\ude80"]!.path).toMatch(/^\/flow-[0-9a-f]+$/)
+  })
+
+  it("refuses operation names that suffix expansion makes ambiguous", () => {
+    const Foo = Flow.make("Foo", {
+      payload: {},
+      success: Schema.Void,
+      body: () => Node.succeed(undefined)
+    })
+    const FooDiscard = Flow.make("FooDiscard", {
+      payload: {},
+      success: Schema.Void,
+      body: () => Node.succeed(undefined)
+    })
+    expect(() => FlowProxy.toRpcGroup([Foo, FooDiscard])).toThrow(FlowProxy.FlowProxyCollision)
+    expect(() => FlowProxy.toHttpApiGroup("ambiguous", [Foo, FooDiscard])).toThrow(
+      FlowProxy.FlowProxyCollision
+    )
+  })
+
+  it("refuses ill-formed UTF-16 tags before constructing a route", () => {
+    for (const tag of ["Proxy/\ud800A", "Proxy/\ud800\uffff", "Proxy/\udc00"]) {
+      const Invalid = Flow.make(tag, {
+        payload: {},
+        success: Schema.Void,
+        body: () => Node.succeed(undefined)
+      })
+      expect(() => FlowProxy.toHttpApiGroup("invalid", [Invalid])).toThrow(
+        FlowProxy.FlowProxyCollision
+      )
+    }
   })
 })
 

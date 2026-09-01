@@ -120,12 +120,15 @@ describe("Flow.Handoff", () => {
 })
 
 describe("Flow.Outcome.isOutcome", () => {
-  it("recognizes the three settlements and nothing else", () => {
-    expect(Flow.isOutcome({ _tag: "Done", value: 1 })).toBe(true)
-    expect(Flow.isOutcome({ _tag: "To", flow: "f", payload: {} })).toBe(true)
-    expect(Flow.isOutcome({ _tag: "Park", reason: { reason: "quota" } })).toBe(true)
-    // A tagged value that is not an outcome, and a value with no tag at all:
-    // both arms of the guard.
+  it("recognizes explicitly authored settlements without treating lookalike data as control", () => {
+    const done = Graph.nodes(Graph.build(Flow.done(1)))[0]?.payload
+    const parked = Graph.nodes(Graph.build(Flow.park({ reason: "quota" })))[0]?.payload
+
+    expect(Flow.isOutcome(done)).toBe(true)
+    expect(Flow.isOutcome(parked)).toBe(true)
+    expect(Flow.isOutcome({ _tag: "Done", value: 1 })).toBe(false)
+    expect(Flow.isOutcome({ _tag: "To", flow: "f", payload: {} })).toBe(false)
+    expect(Flow.isOutcome({ _tag: "Park", reason: { reason: "quota" } })).toBe(false)
     expect(Flow.isOutcome({ _tag: "Complete" })).toBe(false)
     expect(Flow.isOutcome({ _tag: "To" })).toBe(false)
     expect(Flow.isOutcome({ _tag: "Park", reason: {} })).toBe(false)
@@ -135,6 +138,25 @@ describe("Flow.Outcome.isOutcome", () => {
 })
 
 describe("the interpreter settles a body's root outcome", () => {
+  it.effect("returns ordinary success data whose shape resembles a park request", () =>
+    Effect.gen(function*() {
+      const value = { _tag: "Park" as const, reason: { reason: "ordinary data" } }
+      const Ordinary = Flow.make("trampoline/ordinary-park-data", {
+        payload: {},
+        success: Schema.Struct({
+          _tag: Schema.Literal("Park"),
+          reason: Schema.Struct({ reason: Schema.String })
+        }),
+        body: () => Node.succeed(value)
+      })
+      const result = yield* withCrypto(
+        Ordinary.execute({}, { executionId: "ordinary-park-data" }).pipe(
+          Effect.provide(wired(Interpreter.layer(Ordinary)))
+        )
+      )
+      expect(result).toEqual(value)
+    }))
+
   it("records a to invocation as a handoff site in the static graph", () => {
     const graph = Graph.build(Counter, { value: 0, target: 10 })
     const handoff = Graph.nodes(graph).find(

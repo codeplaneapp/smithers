@@ -94,7 +94,6 @@ only.
 
 | Package | Test | Form |
 | --- | --- | --- |
-| `database` | `dies with the original lock defect after the fixed open-retry budget is exhausted` | `it.live.runIf(FLOWS_SLOW_TESTS === "1")` |
 | `harness` | `workerd smoke` | `describe.skipIf(FLOWS_WORKERD_SMOKE !== "1")` |
 | `create-app` | `layerTevm against a mainnet fork` | `it.skip` in `template/aomi` |
 | `migrate` | `migrates a single-file JSX project through the bin (${reason})` | `it.skip` without a seat |
@@ -177,31 +176,18 @@ skipped test it can enable with its own endpoint. It is listed because the pin
 register scans package directories, not vitest include globs, and a pin the
 scanner can see is a pin the register documents.
 
-**`database` — open-retry exhaustion.** The contract this test encodes is
-correct and the test passes: run under `FLOWS_SLOW_TESTS=1` on 2026-08-16 it
-exits 0, at 220-240 s over two measurements. It is gated off the default suite
-on cost alone. `NodeDatabase.layer` retries a locked open on a fixed ladder —
-`openAttempts = 40`, exponential from 5 ms, jittered, capped at 250 ms — that
-`NodeDatabaseOptions` deliberately does not expose, because the ladder bounds a
-driver-internal race during layer construction, before any service exists to
-configure (see the comment on `openSchedule` in
-`packages/database/src/node/NodeDatabase.ts`). Against a lock that is never
-released, each attempt also blocks inside SQLite's own WAL-conversion wait, so
-the real cost is about 6 s per attempt rather than the schedule's delay, and
-exhausting the ladder takes roughly four minutes — more than seven times the
-package's 30 s per-test budget. What breaks if it regresses: an open that can
-never succeed would surface a retry wrapper's error instead of SQLite's own
-`database is locked` defect, making a stuck peer harder to diagnose. Workaround
-— run it explicitly:
+### Resolved: the database open-retry pin
 
-```sh
-FLOWS_SLOW_TESTS=1 pnpm --filter @smthrs/database test
-```
-
-Closing it for the default gate needs either the ladder to become configurable
-or the per-attempt SQLite wait to be shortened with a `busy_timeout` on the open
-path. Both change production source to suit a test, and neither is an alpha
-blocker.
+`packages/database` pinned "dies with the original lock defect after the fixed
+open-retry budget is exhausted" behind `FLOWS_SLOW_TESTS=1` because every open
+attempt blocked inside SQLite's own WAL-conversion wait, and exhausting the
+retry ladder cost 220-240 s against the package's 30 s per-test budget.
+`ef7ee4d0c0` gave the open path a read-only probe that exhausts the ladder
+first. Against a lock nobody releases the case now costs 8.9 s, so it runs on
+every gate as `reports database_locked after the fixed guard-retry budget is
+exhausted` in `packages/database/test/NodeDatabaseConcurrentOpen.test.ts`. A
+resolved title does not authorize re-pinning the test: the guard reads the
+Surviving pins table only, so a pin here again needs a new row above.
 
 ### Resolved: the audit's `it.fails` count
 
@@ -233,7 +219,7 @@ green:
 | `flow`       | rejects a very deep unknown payload with a typed error instead of overflowing the stack     | `test/Graph.test.ts`                   |
 | `kernel`     | rejects an envelope carrying request-only payload fields                                    | `test/GrantEvent.test.ts`              |
 | `kernel`     | fails closed when a page repeats its last sequence with `hasMore`                           | `test/JournalGrantStoreReplay.test.ts` |
-| `keys`       | decodes a `key2_` key, which the version marker promises stays readable                     | `test/Key.test.ts`                     |
+| `keys`       | rejects an unsupported `key2_` key until its complete format is implemented                  | `test/Key.test.ts`                     |
 
 Agent-group packages are outside this register and outside the guard; F4's
 `harness` entry belongs to that group.

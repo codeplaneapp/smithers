@@ -7,28 +7,32 @@
  *
  * Two substitution seams exist, and they cover different things.
  *
- * 1. **In-process.** {@link Vault.substitute} is applied by every outbound
- *    request smithers build itself makes, which today means the remote-cache client.
- *    This seam is complete: the credential exists only inside the CLI process,
- *    for the duration of one request.
- * 2. **Child processes.** {@link startProxy} runs a local HTTP proxy a spawned
- *    tool is pointed at. Plain-HTTP requests through it are rewritten. HTTPS is
- *    tunnelled with `CONNECT` and is **not** rewritten, because rewriting an
- *    encrypted stream requires terminating TLS with a certificate authority the
- *    child trusts, which this module does not create. A tool that must send a
- *    real credential over HTTPS is therefore not yet covered; see the smithers build
- *    DESIGN.md limitations section rather than assuming the placeholder works.
+ * 1. **Request-scoped.** {@link Vault.request} opens an exact-origin boundary.
+ *    It resolves each authorized placeholder once while constructing that
+ *    request and replaces an exact value echoed in the response.
+ * 2. **Child request fields.** {@link startProxy} runs a local HTTP proxy a
+ *    spawned tool is pointed at. Plain-HTTP request headers and bodies are
+ *    rewritten. HTTPS `CONNECT` streams remain opaque because the boundary
+ *    does not terminate TLS, so a vault holding placeholders refuses them
+ *    before any connection reaches the destination.
+ * 3. **Secret destination URLs.** {@link Proxy.urlFor} gives a child a
+ *    loopback capability URL. The proxy resolves the real HTTP or HTTPS URL
+ *    only when the child calls that capability, then performs the outbound
+ *    request itself. The true destination never enters child argv or env.
  *
- * The value is read from the host environment at substitution time, never
- * cached in the vault. A run that plans without executing, or that never
- * reaches the request needing a secret, never reads the variable at all.
+ * The value is read from the host environment at substitution time and kept
+ * only in the request-local boundary, never in the durable vault. A run that
+ * plans without executing, or never reaches an authorized request, never
+ * reads the variable at all.
  *
  * @since 0.1.0
  */
 import { randomBytes } from "node:crypto"
 import * as NodeHttp from "node:http"
+import * as NodeHttps from "node:https"
 import * as NodeNet from "node:net"
-import type * as Secret from "./Secret.ts"
+import * as NodeUtil from "node:util/types"
+import * as Secret from "./Secret.ts"
 import { placeholderPattern, placeholderPrefix } from "./Secret.ts"
 
 /**
@@ -47,6 +51,39 @@ export class SecretUnavailable extends Error {
   constructor(env: string) {
     super(`the declared secret ${env} is not set on this host`)
     this.name = "SecretUnavailable"
+    this.env = env
+  }
+}
+
+/**
+ * Raised before egress when a placeholder is used for the wrong origin.
+ * @category errors
+ * @since 1.0.0
+ */
+export class SecretAudienceDenied extends Error {
+  /** The environment name identifying the declaration, never its value. */
+  readonly env: string
+  /** The normalized origin the request attempted to reach. */
+  readonly audience: string
+  constructor(env: string, audience: string) {
+    super(`the declared secret ${env} is not authorized for ${audience}`)
+    this.name = "SecretAudienceDenied"
+    this.env = env
+    this.audience = audience
+  }
+}
+
+/**
+ * Raised when a host value cannot safely cross an HTTP request boundary.
+ * @category errors
+ * @since 1.0.0
+ */
+export class SecretValueInvalid extends Error {
+  /** The environment name identifying the declaration, never its value. */
+  readonly env: string
+  constructor(env: string) {
+    super(`the declared secret ${env} is not bounded control-free text`)
+    this.name = "SecretValueInvalid"
     this.env = env
   }
 }
@@ -89,6 +126,31 @@ export const parseConnectAuthority = (
 export type Read = (name: string) => string | undefined
 
 /**
+ * Maximum UTF-8 bytes accepted for one resolved credential.
+ * @category constants
+ * @since 1.0.0
+ */
+export const maximumSecretValueBytes = 16 * 1024
+
+/**
+ * Request-scoped substitution and reverse-redaction state.
+ * @category models
+ * @since 1.0.0
+ */
+export interface RequestBoundary {
+  /** Replaces authorized placeholders, resolving each declaration once. */
+  readonly substitute: (text: string) => string
+  /** Replaces authorized placeholders in a header record. */
+  readonly substituteHeaders: (
+    headers: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>
+  ) => Record<string, string | Array<string>>
+  /** Replaces resolved values in response text with their placeholders. */
+  readonly redact: (text: string) => string
+  /** Replaces resolved values in response bytes with their placeholders. */
+  readonly redactBytes: (bytes: Uint8Array) => Buffer
+}
+
+/**
  * Mints placeholders and substitutes them lazily.
  *
  * @category models
@@ -101,13 +163,11 @@ export interface Vault {
    * Minting twice for the same declaration returns the same placeholder within
    * one vault, so a target that declares a secret in two attrs sees one value.
    */
-  readonly mint: (secret: Secret.Secret) => string
-  /** Replaces every known placeholder in `text` with its real value. */
-  readonly substitute: (text: string) => string
-  /** Replaces every known placeholder in a header record. */
-  readonly substituteHeaders: (
-    headers: Readonly<Record<string, string | ReadonlyArray<string> | undefined>>
-  ) => Record<string, string | Array<string>>
+  readonly mint: (credential: Secret.HttpCredential) => string
+  /** Resolves a source for a host-owned destination capability. */
+  readonly resolve: (secret: Secret.Secret) => string
+  /** Opens one exact-origin request boundary. */
+  readonly request: (audience: string) => RequestBoundary
   /** Whether any placeholder has been minted. */
   readonly isEmpty: () => boolean
 }
@@ -123,40 +183,126 @@ export interface Vault {
  * @since 0.1.0
  */
 export const makeVault = (options: { readonly read?: Read | undefined } = {}): Vault => {
-  const read: Read = options.read ?? ((name) => process.env[name])
-  const byEnv = new Map<string, string>()
-  const byPlaceholder = new Map<string, string>()
-  const mint = (secret: Secret.Secret): string => {
-    const existing = byEnv.get(secret.env)
+  if (
+    typeof options !== "object" || options === null || NodeUtil.isProxy(options) ||
+    (Object.getPrototypeOf(options) !== Object.prototype && Object.getPrototypeOf(options) !== null) ||
+    Object.getOwnPropertySymbols(options).length > 0
+  ) throw new TypeError("secret vault options must be a plain string-keyed object")
+  const names = Object.getOwnPropertyNames(options)
+  if (names.some((name) => name !== "read")) throw new TypeError("secret vault received an unknown option")
+  const readDescriptor = Object.getOwnPropertyDescriptor(options, "read")
+  if (readDescriptor !== undefined && (!("value" in readDescriptor) || readDescriptor.enumerable !== true)) {
+    throw new TypeError("secret vault read must be an enumerable data property")
+  }
+  const declaredRead = readDescriptor !== undefined && "value" in readDescriptor ? readDescriptor.value : undefined
+  if (declaredRead !== undefined && typeof declaredRead !== "function") {
+    throw new TypeError("secret vault read must be a function")
+  }
+  const read: Read = declaredRead ?? ((name) => process.env[name])
+  const byBinding = new Map<string, string>()
+  const byPlaceholder = new Map<string, Secret.HttpCredential>()
+  const resolveSecret = (secret: Secret.Secret): string => {
+    const hostValue = read(secret.env)
+    const value = hostValue === undefined ? secret.fallback : hostValue
+    if (value === undefined || value === "") throw new SecretUnavailable(secret.env)
+    if (
+      typeof value !== "string" || !value.isWellFormed() ||
+      Buffer.byteLength(value, "utf8") > maximumSecretValueBytes ||
+      /[\u0000-\u001f\u007f]/.test(value)
+    ) throw new SecretValueInvalid(secret.env)
+    return value
+  }
+  const mint = (credential: Secret.HttpCredential): string => {
+    if (!Secret.isHttpCredential(credential)) throw new TypeError("vault mint requires an HTTP credential binding")
+    const snapshot = Secret.HttpSecret(credential.secret, [...credential.audiences])
+    const key = JSON.stringify([
+      snapshot.secret.env,
+      snapshot.secret.fallback ?? null,
+      snapshot.audiences
+    ])
+    const existing = byBinding.get(key)
     if (existing !== undefined) return existing
     const placeholder = `${placeholderPrefix}${randomBytes(32).toString("hex")}`
-    byEnv.set(secret.env, placeholder)
-    byPlaceholder.set(placeholder, secret.env)
+    byBinding.set(key, placeholder)
+    byPlaceholder.set(placeholder, snapshot)
     return placeholder
-  }
-  const substitute = (text: string): string => {
-    if (byPlaceholder.size === 0 || !text.includes(placeholderPrefix)) return text
-    return text.replace(placeholderPattern, (match) => {
-      const env = byPlaceholder.get(match)
-      // An unminted placeholder is not ours. Leaving it untouched is what
-      // keeps substitution a capability: a target cannot obtain a value by
-      // spelling a placeholder it was never given.
-      if (env === undefined) return match
-      const value = read(env)
-      if (value === undefined || value === "") throw new SecretUnavailable(env)
-      return value
-    })
   }
   return {
     mint,
-    substitute,
-    substituteHeaders: (headers) => {
-      const output: Record<string, string | Array<string>> = {}
-      for (const [name, value] of Object.entries(headers)) {
-        if (value === undefined) continue
-        output[name] = typeof value === "string" ? substitute(value) : value.map(substitute)
+    resolve: (secret) => {
+      if (!Secret.isSecret(secret)) throw new TypeError("vault resolve requires a secret declaration")
+      return resolveSecret(secret)
+    },
+    request: (audience) => {
+      let parsed: URL
+      try {
+        parsed = new URL(audience)
+      } catch {
+        throw new TypeError("secret request audience must be an HTTP origin")
       }
-      return output
+      if (
+        (parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.origin !== audience ||
+        parsed.username !== "" || parsed.password !== ""
+      ) throw new TypeError("secret request audience must be an exact HTTP origin")
+      const normalized = parsed.origin
+      const resolved = new Map<string, { readonly placeholder: string; readonly value: string }>()
+      const substitute = (text: string): string => {
+        if (byPlaceholder.size === 0 || !text.includes(placeholderPrefix)) return text
+        return text.replace(placeholderPattern, (match) => {
+          const credential = byPlaceholder.get(match)
+          // An unminted placeholder is not ours. Leaving it untouched is what
+          // keeps substitution a capability: a target cannot obtain a value
+          // by spelling a placeholder it was never given.
+          if (credential === undefined) return match
+          if (!credential.audiences.includes(normalized)) {
+            throw new SecretAudienceDenied(credential.secret.env, normalized)
+          }
+          const previous = resolved.get(match)
+          if (previous !== undefined) return previous.value
+          const value = resolveSecret(credential.secret)
+          resolved.set(match, { placeholder: match, value })
+          return value
+        })
+      }
+      const redact = (text: string): string => {
+        let output = text
+        for (const { placeholder, value } of resolved.values()) output = output.split(value).join(placeholder)
+        return output
+      }
+      const redactBytes = (input: Uint8Array): Buffer => {
+        let output = Buffer.from(input)
+        for (const { placeholder, value } of resolved.values()) {
+          const needle = Buffer.from(value, "utf8")
+          if (needle.byteLength === 0) continue
+          const replacement = Buffer.from(placeholder, "utf8")
+          const pieces: Array<Buffer> = []
+          let offset = 0
+          let index = output.indexOf(needle, offset)
+          while (index !== -1) {
+            pieces.push(output.subarray(offset, index), replacement)
+            offset = index + needle.byteLength
+            index = output.indexOf(needle, offset)
+          }
+          if (pieces.length > 0) {
+            pieces.push(output.subarray(offset))
+            output = Buffer.concat(pieces)
+          }
+        }
+        return output
+      }
+      return {
+        substitute,
+        substituteHeaders: (headers) => {
+          const output: Record<string, string | Array<string>> = {}
+          for (const [name, value] of Object.entries(headers)) {
+            if (value === undefined) continue
+            output[name] = typeof value === "string" ? substitute(value) : value.map(substitute)
+          }
+          return output
+        },
+        redact,
+        redactBytes
+      }
     },
     isEmpty: () => byPlaceholder.size === 0
   }
@@ -171,9 +317,36 @@ export const makeVault = (options: { readonly read?: Read | undefined } = {}): V
 export interface Proxy {
   /** The loopback endpoint a child is pointed at. */
   readonly endpoint: string
+  /** Mints a loopback URL that resolves one secret destination on request. */
+  readonly urlFor: (secret: Secret.Secret) => string
   /** Stops the proxy and drops every in-flight connection. */
   readonly close: () => Promise<void>
 }
+
+/** Private path namespace used for secret destination capabilities. */
+const secretUrlPath = "/.well-known/smithers-secret-url/"
+
+/**
+ * Maximum request body buffered for placeholder substitution.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const maximumRequestBodyBytes = 16 * 1024 * 1024
+
+/**
+ * Maximum upstream response buffered so resolved values can be removed.
+ * @category constants
+ * @since 1.0.0
+ */
+export const maximumResponseBodyBytes = 16 * 1024 * 1024
+
+/**
+ * Wall-clock bound for one proxy-owned upstream request.
+ * @category constants
+ * @since 1.0.0
+ */
+export const upstreamTimeoutMs = 2 * 60 * 1000
 
 /** Hop-by-hop headers a proxy must not forward. */
 const hopByHop = new Set([
@@ -188,81 +361,211 @@ const hopByHop = new Set([
   "upgrade"
 ])
 
+const connectionHeaders = (headers: NodeHttp.IncomingHttpHeaders): ReadonlySet<string> => {
+  const value = headers.connection
+  const fields = Array.isArray(value) ? value : value === undefined ? [] : [value]
+  return new Set(fields.flatMap((field) => field.split(",")).map((field) => field.trim().toLowerCase()).filter(Boolean))
+}
+
 /**
- * Starts a loopback HTTP proxy that substitutes placeholders on the way out.
+ * Starts a loopback HTTP proxy that substitutes authorized placeholders.
  *
  * The proxy binds `127.0.0.1` on an ephemeral port so nothing outside the host
  * can reach it. Requests arrive in absolute form, as an HTTP proxy requires.
- * Request headers and request bodies are substituted; responses are forwarded
- * unchanged.
+ * Request paths, headers, and textual bodies are substituted only after the
+ * exact destination origin is known. Upstream bodies are bounded and buffered
+ * so exact resolved values can be replaced before the job sees the response.
  *
- * `CONNECT` is tunnelled byte for byte. The bytes are already encrypted by the
- * time they arrive, so no substitution is possible without terminating TLS.
+ * `CONNECT` is tunnelled only when the vault is empty. Once a placeholder has
+ * been minted, the bytes could contain it but are already encrypted by the
+ * time they arrive, so the proxy refuses the tunnel. Secret-bearing HTTPS
+ * requests must use a brokered destination from {@link Proxy.urlFor}; that path
+ * performs the outbound TLS request here, where substitution is possible.
  *
  * @category constructors
  * @since 0.1.0
  */
 export const startProxy = (vault: Vault): Promise<Proxy> =>
   new Promise((resolve, reject) => {
+    const destinations = new Map<string, Secret.Secret>()
+    const destinationByDeclaration = new Map<string, string>()
     const server = NodeHttp.createServer((request, response) => {
       let target: URL
-      try {
-        target = new URL(request.url ?? "")
-      } catch {
-        response.writeHead(400).end("proxy requires an absolute request URL")
+      let secretDestination = false
+      const requestUrl = request.url ?? ""
+      if (requestUrl.startsWith(secretUrlPath)) {
+        const route = requestUrl.slice(secretUrlPath.length)
+        const destination = destinations.get(route)
+        if (destination === undefined) {
+          response.writeHead(404).end("unknown secret destination")
+          return
+        }
+        let resolved: string
+        try {
+          resolved = vault.resolve(destination)
+        } catch (cause) {
+          const message = cause instanceof SecretUnavailable || cause instanceof SecretValueInvalid
+            ? cause.message
+            : "secret substitution failed"
+          response.writeHead(502).end(message)
+          return
+        }
+        try {
+          target = new URL(resolved)
+        } catch {
+          response.writeHead(502).end(`the declared secret ${destination.env} is not an http(s) URL`)
+          return
+        }
+        if (target.protocol !== "http:" && target.protocol !== "https:") {
+          response.writeHead(502).end(`the declared secret ${destination.env} is not an http(s) URL`)
+          return
+        }
+        secretDestination = true
+      } else {
+        try {
+          target = new URL(requestUrl)
+        } catch {
+          response.writeHead(400).end("proxy requires an absolute request URL")
+          return
+        }
+        if (target.protocol !== "http:") {
+          response.writeHead(400).end("proxy forwards http requests only")
+          return
+        }
+      }
+      if (target.username !== "" || target.password !== "") {
+        response.writeHead(400).end("proxy request URLs must not contain credentials")
         return
       }
-      if (target.protocol !== "http:") {
-        response.writeHead(400).end("proxy forwards http requests only")
+      const declaredLength = Number(request.headers["content-length"] ?? "0")
+      if (Number.isFinite(declaredLength) && declaredLength > maximumRequestBodyBytes) {
+        response.writeHead(413).end("proxy request body is too large")
+        request.resume()
         return
       }
       const chunks: Array<Buffer> = []
-      request.on("data", (chunk: Buffer) => chunks.push(chunk))
+      let bodyBytes = 0
+      let rejected = false
+      request.on("data", (chunk: Buffer) => {
+        if (rejected) return
+        bodyBytes += chunk.byteLength
+        if (bodyBytes > maximumRequestBodyBytes) {
+          rejected = true
+          chunks.length = 0
+          response.writeHead(413).end("proxy request body is too large")
+          return
+        }
+        chunks.push(chunk)
+      })
       request.on("end", () => {
+        if (rejected) return
         let headers: Record<string, string | Array<string>>
         let body: Buffer
+        let path: string
+        let boundary: RequestBoundary
         try {
           const forwarded: Record<string, string | Array<string> | undefined> = {}
+          const nominated = connectionHeaders(request.headers)
           for (const [name, value] of Object.entries(request.headers)) {
-            if (!hopByHop.has(name.toLowerCase())) forwarded[name] = value
+            const lower = name.toLowerCase()
+            if (!hopByHop.has(lower) && !nominated.has(lower) && lower !== "host" && lower !== "accept-encoding") {
+              forwarded[name] = value
+            }
           }
-          headers = vault.substituteHeaders(forwarded)
+          forwarded["accept-encoding"] = "identity"
+          boundary = vault.request(target.origin)
+          headers = boundary.substituteHeaders(forwarded)
+          headers.host = target.host
           const raw = Buffer.concat(chunks)
           const text = raw.toString("utf8")
           // Substituting a body only makes sense when it is text that survives
           // a round trip. Binary bodies are forwarded untouched.
           const substituted = Buffer.byteLength(text, "utf8") === raw.byteLength
-            ? Buffer.from(vault.substitute(text), "utf8")
+            ? Buffer.from(boundary.substitute(text), "utf8")
             : raw
           body = substituted
           if (body.byteLength !== raw.byteLength) headers["content-length"] = String(body.byteLength)
+          path = secretDestination
+            ? `${target.pathname}${target.search}`
+            : boundary.substitute(`${target.pathname}${target.search}`)
         } catch (cause) {
-          const message = cause instanceof SecretUnavailable ? cause.message : "secret substitution failed"
-          response.writeHead(502).end(message)
+          const denied = cause instanceof SecretAudienceDenied
+          const message = cause instanceof SecretUnavailable || cause instanceof SecretValueInvalid || denied
+            ? cause.message
+            : "secret substitution failed"
+          response.writeHead(denied ? 403 : 502).end(message)
           return
         }
-        const upstream = NodeHttp.request(
+        const requestUpstream = target.protocol === "https:" ? NodeHttps.request : NodeHttp.request
+        const upstream = requestUpstream(
           {
             protocol: target.protocol,
             hostname: target.hostname,
-            port: target.port === "" ? 80 : target.port,
+            port: target.port === "" ? (target.protocol === "https:" ? 443 : 80) : target.port,
             method: request.method,
-            path: `${target.pathname}${target.search}`,
+            path,
             headers
           },
           (upstreamResponse) => {
-            response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers)
-            upstreamResponse.pipe(response)
+            const encoding = upstreamResponse.headers["content-encoding"]
+            if (encoding !== undefined && encoding !== "identity") {
+              upstreamResponse.resume()
+              response.writeHead(502).end("upstream returned an encoded response")
+              return
+            }
+            const responseChunks: Array<Buffer> = []
+            let responseBytes = 0
+            let responseRejected = false
+            upstreamResponse.on("data", (chunk: Buffer) => {
+              if (responseRejected) return
+              responseBytes += chunk.byteLength
+              if (responseBytes > maximumResponseBodyBytes) {
+                responseRejected = true
+                responseChunks.length = 0
+                upstreamResponse.destroy()
+                response.writeHead(502).end("upstream response is too large")
+                return
+              }
+              responseChunks.push(chunk)
+            })
+            upstreamResponse.on("end", () => {
+              if (responseRejected) return
+              const responseHeaders: Record<string, string | Array<string>> = {}
+              const nominated = connectionHeaders(upstreamResponse.headers)
+              for (const [name, value] of Object.entries(upstreamResponse.headers)) {
+                const lower = name.toLowerCase()
+                if (
+                  value !== undefined && !hopByHop.has(lower) && !nominated.has(lower) &&
+                  lower !== "content-length" && lower !== "content-encoding"
+                ) {
+                  responseHeaders[name] = Array.isArray(value)
+                    ? value.map(boundary.redact)
+                    : boundary.redact(value)
+                }
+              }
+              const redacted = boundary.redactBytes(Buffer.concat(responseChunks))
+              responseHeaders["content-length"] = String(redacted.byteLength)
+              response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders)
+              response.end(redacted)
+            })
           }
         )
+        upstream.setTimeout(upstreamTimeoutMs, () => upstream.destroy(new Error("upstream request timed out")))
         upstream.on("error", () => {
           if (!response.headersSent) response.writeHead(502)
           response.end("upstream request failed")
+        })
+        response.once("close", () => {
+          if (!response.writableEnded) upstream.destroy()
         })
         upstream.end(body)
       })
     })
     server.on("connect", (request, socket: NodeNet.Socket, head: Buffer) => {
+      if (!vault.isEmpty()) {
+        socket.end("HTTP/1.1 501 Not Implemented\r\nConnection: close\r\n\r\n")
+        return
+      }
       const authority = parseConnectAuthority(request.url ?? "")
       if (authority === undefined) {
         socket.end("HTTP/1.1 400 Bad Request\r\n\r\n")
@@ -302,6 +605,18 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
       }
       resolve({
         endpoint: `http://127.0.0.1:${address.port}`,
+        urlFor: (secret) => {
+          if (!Secret.isSecret(secret)) throw new TypeError("proxy urlFor requires a secret declaration")
+          const snapshot = Secret.Secret(secret.env, secret.fallback === undefined ? {} : { fallback: secret.fallback })
+          const key = JSON.stringify([snapshot.env, snapshot.fallback ?? null])
+          const existing = destinationByDeclaration.get(key)
+          if (existing !== undefined) return existing
+          const route = randomBytes(32).toString("hex")
+          const url = `http://127.0.0.1:${address.port}${secretUrlPath}${route}`
+          destinations.set(route, snapshot)
+          destinationByDeclaration.set(key, url)
+          return url
+        },
         close: () =>
           new Promise<void>((done) => {
             server.closeAllConnections()

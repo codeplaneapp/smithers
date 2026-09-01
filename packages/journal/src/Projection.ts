@@ -1,7 +1,7 @@
 /**
  * Reproducible journal projections.
  *
- * Governing design: `docs/specs/Concepts/Journal Queue.md`.
+ * Governing design: `docs/pages/concepts/journal.md`.
  *
  * @since 0.1.0
  */
@@ -16,7 +16,6 @@ import type { Entry } from "./JournalEvent.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Projection<S, E = never, R = never> {
   readonly name: string
@@ -29,6 +28,5 @@ export interface Projection<S, E = never, R = never> {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = <S, E = never, R = never>(projection: Projection<S, E, R>): Projection<S, E, R> => projection

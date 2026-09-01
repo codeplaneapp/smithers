@@ -21,8 +21,8 @@ which is frozen for this candidate. A row here and a row there are the same row.
 | Bun | Supported for non-durable packages and for `apps/*` only. | `>=1.3.0` (root `package.json` `engines.bun`; `.smithers/WORKSPACE.ts` declares Bun as a host binary); CI pins `1.3.14`. |
 | Browser | Bundleable entry points only. No durable execution. | Bundles under esbuild `--platform=browser` as proven by `scripts/browser-check.mjs`. |
 | Linux x64 | Supported; the required CI lanes run here. | Ubuntu runner. |
-| macOS | Supported for development and the Phase 7 manual smoke; the `node-macos` CI lane is advisory. | arm64 and x64. |
-| Windows | Unsupported. | none |
+| macOS | Supported for development and the Phase 7 manual smoke; the `ci-node-macos` lane runs the package suites on `macos-latest` and is advisory by convention, since package mode has no `continueOnError` to say so (section 9 "CI lanes"). | arm64 and x64. |
+| Windows | Unsupported. The `ci-node-windows` lane runs the package suites on `windows-latest` and is advisory by the same convention. | none |
 
 ## Databases
 
@@ -51,15 +51,15 @@ SQLite only. PostgreSQL and PGlite exit with `unsupported_database`; see
 | [`smithers migrate`](/cli/migrate) | The reserved `system/migrate` flow id is retired so the verb does not collide with the project flow. |
 | [`smithers output`](/cli/output) | Registered node output from the `node-output` projection. |
 | [`smithers plan`](/cli/plan) | `Control.plan`; prints the `PlanCard` and the approval payload. |
-| [`smithers ps`](/cli/ps) | Run listing; `--status` validated against `accepted\|running\|parked\|waiting-approval\|cancelled\|completed\|failed`. |
+| [`smithers ps`](/cli/ps) | Run listing; `--status` validated against `accepted\|running\|parked\|waiting-approval\|cancelled\|completed\|failed`. A run left `accepted` because no executor took its launch is labelled `waitingReason: executor`. |
 | `smithers resume` | Alias of `run --resume`. |
 | [`smithers run`](/cli/run) | Launches an approved plan; blocks until settlement when the local process owns the executor. |
 | [`smithers serve`](/cli/serve) | Hosts the control server (section 10): `/rpc`, `/rpc/ws`, `/sync`, `/sync/ws`, `/projections/ws`, `GET /health`. Loopback default; non-loopback requires `--listen` and a bearer token. `gateway` is an alias for rc.0 only. |
 | [`smithers signal`](/cli/signal) | Delivers a named signal to a flow parked on `WaitFor` (section 5). |
 | [`smithers skills`](/cli/skills) | Writes the `smithers` skill into detected agents; no automatic refresh side effect on other commands. |
-| [`smithers status`](/cli/status) | Forensics diagnosis card for one run, or the run listing. `inspect` and `why` are aliases. |
+| [`smithers status`](/cli/status) | Forensics diagnosis card for one run, or the run listing. `inspect` and `why` are aliases. A run no executor took reads a `pending` verdict saying nothing is driving it, and carries `smithers cancel RUN_ID` as its unblock line. |
 | [`smithers steer`](/cli/steer) | Durable, attributed steer through the notification queue; drained at the agent's turn close. |
-| [`smithers up`](/cli/up) | One-shot launch: plan, approve with scope `run`, run; prints `{ runId }` under `--json`; exit code follows the terminal status. `-d` spawns `smithers run` detached, logs to `.flows/logs/<runId>.log`, and returns after the admission line (30 s default). Operator-supplied run ids are not supported; callers read `runId` from the receipt. |
+| [`smithers up`](/cli/up) | One-shot launch: plan, approve with scope `run`, run; prints `{ runId }` under `--json`; exit code follows the terminal status. `-d` spawns `smithers run` detached, logs to `.flows/logs/<runId>.log`, and returns after the admission line (30 s default). Operator-supplied run ids are not supported; callers read `runId` from the receipt. A launch nothing in this host drives, such as a module (`flow.ts`) body whose behavior the host program that registers its delegates supplies, or a flow this registry does not hold, is accepted durably and refused with exit 1: the run stays `accepted`, `ps` labels it `waitingReason: executor`, and `smithers cancel` ends it. |
 | [`smithers update`](/cli/update) | npm `latest`/`next` check for `@smthrs/cli`. |
 
 ## Run control
@@ -91,7 +91,7 @@ execution claim.
 | [`@smthrs/capability`](/api/capability) | Capability vocabulary, tiers, typed permission failures. | gated yes |
 | [`@smthrs/cli`](/cli) | The `smithers` executable and `NodeControl` composition. | Node |
 | [`@smthrs/control`](/api/control) | Control services, RPC schema, `ControlServer`/`ControlClient`, `SqlControlRuntime`, credentials. | no claim (no `node:` imports) |
-| `@smthrs/core` | Plan-time `Flow`/`Node` builders and `Graph`. | no claim |
+| [`@smthrs/core`](/api/core) | Plan-time `Flow`/`Node` builders and `Graph`. | no claim |
 | [`@smthrs/crypto`](/api/crypto) | Injected cryptographic schema transformations. | gated yes |
 | [`@smthrs/database`](/api/database) | `SqlClient` access, write retry, `Migrations` ladder. | gated yes (root); `node/NodeDatabase` gated Node-only |
 | [`@smthrs/engine`](/api/engine) | `FlowEngine`, `FlowProxy`, vendored `effect/unstable/workflow` fork. | gated yes |

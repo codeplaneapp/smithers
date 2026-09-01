@@ -211,7 +211,8 @@ describe("restore drill", () => {
 
             const manifest = yield* DisasterRecovery.backup({
               directory: backupDirectory,
-              objectsDirectory: liveObjects
+              objectsDirectory: liveObjects,
+              snapshotDatabaseLayer: (databaseFile) => NodeDatabase.layer({ filename: databaseFile })
             }).pipe(Effect.provide(NodeDatabase.layer({ filename: liveDatabase })))
 
             yield* Deferred.succeed(liveGate, undefined)
@@ -344,7 +345,8 @@ describe("restore drill", () => {
           // live store.
           const manifest = yield* DisasterRecovery.backup({
             directory: backupDirectory,
-            objectsDirectory: liveObjects
+            objectsDirectory: liveObjects,
+            snapshotDatabaseLayer: (databaseFile) => NodeDatabase.layer({ filename: databaseFile })
           }).pipe(Effect.provide(NodeDatabase.layer({ filename: liveDatabase })))
 
           yield* Fiber.interrupt(writer)

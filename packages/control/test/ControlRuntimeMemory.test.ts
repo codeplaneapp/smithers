@@ -65,9 +65,12 @@ describe("ControlRuntime.layerMemory", () => {
     )
 
     expect(observed.fingerprint).toBeInstanceOf(InvalidInput)
-    expect((observed.fingerprint as InvalidInput).issue).toContain("NaN is not allowed")
+    // Restated 2026-08-31: these pins formerly matched "NaN is not allowed"
+    // and "not valid JSON". Canonical's public contract now guarantees stable
+    // codes and located paths, which control must preserve for its callers.
+    expect((observed.fingerprint as InvalidInput).issue).toContain("canonical_nan: NaN at $.input")
     expect(observed.decode).toBeInstanceOf(InvalidInput)
-    expect((observed.decode as InvalidInput).issue).toContain("not valid JSON")
+    expect((observed.decode as InvalidInput).issue).toContain("canonical_unsupported_value: undefined at $")
   })
 
   it("replays a plan for a repeated idempotency key and refuses a reused one", async () => {
@@ -255,12 +258,17 @@ describe("ControlRuntime.layerMemory", () => {
     expect(observed.absent).toBeUndefined()
   })
 
-  it("stamps the configured principal over a submitted one and its own clock", async () => {
+  it("stamps a submitted principal over the composition's own, on its own clock", async () => {
+    // The submitted identity is the one the server authenticated, and the
+    // configured one is the composition's fallback for a caller that named
+    // none. A composition default that won would silently rename every
+    // authenticated operator to whatever the host was built with.
     const observed = await withRuntime(
       (runtime) =>
         Effect.gen(function*() {
-          const configured = yield* runtime.stampPrincipal({ id: "attacker", kind: "attacker", stampedAt: 99 })
-          return { configured }
+          const submitted = yield* runtime.stampPrincipal({ id: "remote", kind: "bearer", stampedAt: 99 })
+          const unnamed = yield* runtime.stampPrincipal()
+          return { submitted, unnamed }
         }),
       { principal: { id: "server", kind: "operator" }, now: () => 7 }
     )
@@ -269,7 +277,8 @@ describe("ControlRuntime.layerMemory", () => {
       runtime.stampPrincipal({ id: "cli", kind: "human", stampedAt: 99 })
     )
 
-    expect(observed.configured).toEqual({ id: "server", kind: "operator", stampedAt: 7 })
+    expect(observed.submitted).toEqual({ id: "remote", kind: "bearer", stampedAt: 7 })
+    expect(observed.unnamed).toEqual({ id: "server", kind: "operator", stampedAt: 7 })
     expect(defaulted).toMatchObject({ id: "memory", kind: "test" })
     // With nothing configured, a submitted identity is accepted but restamped.
     expect(submitted).toMatchObject({ id: "cli", kind: "human" })

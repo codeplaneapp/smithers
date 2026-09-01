@@ -233,10 +233,43 @@ describe("Node", () => {
     expect(one.operation(2)).toBe(3)
     expect(identity(one.node)).toEqual(identity(same.node))
     expect(identity(one.node)).not.toEqual(identity(two.node))
-    expect(identity(one.node).algorithm).toBe("sha256-source-captures/v3")
+    expect(identity(one.node).algorithm).toBe("sha256-source-captures/v4")
     expect(Object.isFrozen(one.captures)).toBe(true)
     expect(Object.isFrozen(one.captures.nested)).toBe(true)
     expect(() => Node.capture({ value: Number.NaN }, () => undefined)).toThrow(/is not finite/)
+  })
+
+  it("composes nested capture identity without erasing the inner operation", () => {
+    const identity = (operation: (value: number) => number) => {
+      const ast = Node.map(Node.succeed(1), operation).ast
+      if (ast._tag !== "Map") throw new Error("expected Map")
+      return ast.mapper
+    }
+    const add = (value: number) => value + 1
+    const multiply = (value: number) => value * 2
+
+    expect(identity(Node.capture({ outer: 1 }, Node.capture({ inner: 2 }, add))))
+      .not.toEqual(identity(Node.capture({ outer: 1 }, Node.capture({ inner: 2 }, multiply))))
+    expect(identity(Node.capture({ outer: 1 }, Node.capture({ inner: 2 }, add))))
+      .not.toEqual(identity(Node.capture({ outer: 1 }, Node.capture({ inner: 3 }, add))))
+  })
+
+  it("keeps identical nested captures stable and distinct from a single capture", () => {
+    const operation = (value: number) => value + 1
+    const identity = (captured: (value: number) => number) => {
+      const ast = Node.map(Node.succeed(1), captured).ast
+      if (ast._tag !== "Map") throw new Error("expected Map")
+      return ast.mapper
+    }
+    const nested = () => Node.capture({ outer: 1 }, Node.capture({ inner: 2 }, operation))
+
+    expect(identity(nested())).toEqual(identity(nested()))
+    expect(identity(nested())).not.toEqual(identity(Node.capture({ inner: 2, outer: 1 }, operation)))
+  })
+
+  it("rejects a malformed capture operation with the package-shaped message", () => {
+    expect(() => Node.capture({}, "nope" as unknown as () => unknown))
+      .toThrow(new TypeError("Node.capture requires a function operation"))
   })
 
   it("canonicalizes every supported capture shape and rejects ambiguous data", () => {
@@ -274,6 +307,53 @@ describe("Node", () => {
     const arraySymbol: Array<unknown> = []
     Object.defineProperty(arraySymbol, Symbol("extra"), { enumerable: true, value: 1 })
     expect(() => identity({ arraySymbol })).toThrow(/unsupported array key Symbol\(extra\)/)
+
+    const baseline = identity({ array: [1, 2, 3] })
+    expect(identity({ array: [1, 2, 3] })).toEqual(baseline)
+
+    const ghost = [1, 2, 3]
+    Object.defineProperty(ghost, "4294967295", { enumerable: true, value: 4 })
+    expect(() => identity({ array: ghost })).toThrow(
+      new TypeError(
+        "Node.capture: capture at $.array has unsupported array key 4294967295; captures must be finite, inert data"
+      )
+    )
+
+    let outOfRangeDescriptor: PropertyDescriptor | undefined
+    const outOfRange = new Proxy([1, 2, 3], {
+      defineProperty: (target, key, descriptor) => {
+        if (key !== "10") return Reflect.defineProperty(target, key, descriptor)
+        outOfRangeDescriptor = { ...descriptor, configurable: true }
+        return true
+      },
+      getOwnPropertyDescriptor: (target, key) =>
+        key === "10" ? outOfRangeDescriptor : Reflect.getOwnPropertyDescriptor(target, key),
+      ownKeys: (target) => [...Reflect.ownKeys(target), "10"]
+    })
+    Object.defineProperty(outOfRange, "10", { configurable: true, enumerable: true, value: 4 })
+    expect(Object.hasOwn(outOfRange, "10")).toBe(true)
+    expect(() => identity({ array: outOfRange })).toThrow(
+      new TypeError(
+        "Node.capture: capture at $.array has unsupported array key 10; captures must be finite, inert data"
+      )
+    )
+  })
+
+  it("bounds capture nesting with an exact typed error", () => {
+    const nested = (depth: number): Readonly<Record<string, unknown>> => {
+      let value: unknown = "leaf"
+      for (let index = 0; index < depth; index++) value = { value }
+      return value as Readonly<Record<string, unknown>>
+    }
+    const operation = () => undefined
+
+    expect(() => Node.capture(nested(256), operation)).not.toThrow()
+    const path = `$${".value".repeat(257)}`
+    expect(() => Node.capture(nested(257), operation)).toThrow(
+      new TypeError(
+        `Node.capture: capture at ${path} exceeds the maximum capture depth of 256; captures must be finite, inert data`
+      )
+    )
   })
 
   it("rejects non-Node members with NodeBuildError", () => {
@@ -289,5 +369,17 @@ describe("Node", () => {
         member: "invalid"
       })
     }
+  })
+
+  it("retains prototype-like Node.all member names", () => {
+    const combined = Node.all({
+      ["__proto__"]: Node.succeed("proto"),
+      constructor: Node.succeed("constructor"),
+      prototype: Node.succeed("prototype")
+    })
+
+    if (combined.ast._tag !== "All") throw new Error("expected All")
+    expect(Object.getPrototypeOf(combined.ast.nodes)).toBeNull()
+    expect(Object.keys(combined.ast.nodes)).toEqual(["__proto__", "constructor", "prototype"])
   })
 })

@@ -112,7 +112,7 @@ const parkBetweenPageAndFloor = (
               return statement
             }
             const [query] = statement.compile()
-            if (!query.includes("FROM flows_journal_events") || !query.includes("seq >")) {
+            if (!query.includes("AND seq >") || query.includes("seq >=")) {
               return statement
             }
             parked = true
@@ -123,6 +123,33 @@ const parkBetweenPageAndFloor = (
         }) as SqlClient.SqlClient)
     ),
     Layer.effect(DurableWriter, Effect.service(DurableWriter))
+  )
+}
+
+/** Parks only a connection's first journal write before opening its transaction. */
+const gateFirstWrite = (
+  reached: Deferred.Deferred<void>,
+  gate: Deferred.Deferred<void>
+): Layer.Layer<DurableWriter | SqlClient.SqlClient, never, DurableWriter | SqlClient.SqlClient> => {
+  let first = true
+  return Layer.merge(
+    Layer.effect(
+      DurableWriter,
+      Effect.gen(function*() {
+        const writer = yield* DurableWriter
+        return DurableWriter.of({
+          write: (write) => {
+            if (!first) return writer.write(write)
+            first = false
+            return Deferred.succeed(reached, undefined).pipe(
+              Effect.andThen(Deferred.await(gate)),
+              Effect.andThen(writer.write(write))
+            ) as never
+          }
+        })
+      })
+    ),
+    Layer.effect(SqlClient.SqlClient, Effect.service(SqlClient.SqlClient))
   )
 }
 
@@ -147,6 +174,58 @@ const seed = (journal: Service, count: number) =>
   )
 
 describe("SqlJournal reader and compactor on one file", () => {
+  it.effect(
+    "drops a queued entry when another connection advances the floor past it",
+    () =>
+      withTempFile((filename) =>
+        Effect.scoped(
+          Effect.gen(function*() {
+            const reached = yield* Deferred.make<void>()
+            const gate = yield* Deferred.make<void>()
+            yield* claim(filename)
+
+            const admitting = yield* connection(filename, gateFirstWrite(reached, gate))
+            const queued = yield* admitting.emitLossy(input(0))
+            expect(queued.seq).toBe(0)
+            yield* Deferred.await(reached)
+
+            const durable = yield* admitting.emitDurableUnfenced(input(1))
+            expect(durable.seq).toBe(1)
+            yield* admitting.checkpoint({ runId: run, seq: 1 as Seq, state: null }, owner)
+
+            const compactor = yield* connection(filename)
+            const compacted = yield* compactor.compact({ runId: run, upTo: 1 as Seq }, owner)
+            expect(compacted).toEqual({ runId: run, checkpointSeq: 1, deleted: 0 })
+
+            yield* Deferred.succeed(gate, undefined)
+            const dropped = yield* Effect.flip(admitting.flush)
+            expect(dropped.code).toBe("compacted")
+            expect(dropped.checkpointSeq).toBe(1)
+            expect(dropped.message).toContain("sequence 0")
+
+            yield* Effect.scoped(
+              Effect.provide(
+                Effect.gen(function*() {
+                  const sql = yield* Effect.service(SqlClient.SqlClient)
+                  const rows = yield* sql<{ readonly seq: number }>`
+                    SELECT seq FROM flows_journal_events WHERE run_id = ${run} ORDER BY seq ASC
+                  `
+                  expect(rows.map((row) => row.seq)).toEqual([1])
+                  expect(rows.every((row) => row.seq >= 1)).toBe(true)
+                }),
+                migrated(filename)
+              )
+            )
+
+            const behind = yield* Effect.flip(compactor.entries({ runId: run, limit: 10 }))
+            expect(behind.code).toBe("compacted")
+            expect(behind.checkpointSeq).toBe(1)
+          })
+        )
+      ),
+    30_000
+  )
+
   it.effect(
     "fails a page read with compacted rather than returning a shortened history",
     () =>

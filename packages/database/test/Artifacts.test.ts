@@ -11,6 +11,11 @@ describe("built artifacts", () => {
       execFileSync(process.execPath, ["scripts/build.mjs"], { cwd: packageRoot })
       execFileSync(process.execPath, ["test/fixtures/artifact-esm.mjs"], { cwd: packageRoot })
       execFileSync(process.execPath, ["test/fixtures/artifact-cjs.cjs"], { cwd: packageRoot })
+      // Runtime identity is only half of what is published. This type-checks a
+      // consumer against the export map npm writes, so a type the package
+      // exports but the packed declarations do not reach is a failure here
+      // rather than in someone's editor. Measured at 1.2 s on top of the build.
+      execFileSync(process.execPath, ["test/fixtures/artifact-types.mjs"], { cwd: packageRoot })
     },
     // This case runs a real build and two cold Node processes, so it is the
     // slowest in the repo: 13.5 s here even on an idle machine. The old 30 s

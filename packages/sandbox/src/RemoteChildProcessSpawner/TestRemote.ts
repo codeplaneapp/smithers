@@ -38,10 +38,13 @@ const makeTestRemote = (options: {
   readonly killIsNoop?: boolean | undefined
   /** Gives the provider a `ping`, backed by this effect. */
   readonly ping?: Effect.Effect<void, ProviderError> | undefined
+  /** Declares the provider able to deliver standard input, which it records. */
+  readonly stdin?: boolean | undefined
 } = {}): TestRemoteProvider => {
   const state: TestRemoteState = {
     openedSessions: [],
     commands: [],
+    inputs: [],
     kills: [],
     cancellations: 0
   }
@@ -67,8 +70,9 @@ const makeTestRemote = (options: {
             })
         )
         : Effect.fail(options.openFailure),
-    spawn: Effect.fnUntraced(function*(command: string) {
+    spawn: Effect.fnUntraced(function*(command: string, spawnOptions) {
       state.commands.push(command)
+      state.inputs.push(spawnOptions.stdin)
       const current = script(command)
       if (current.failure !== undefined) return yield* Effect.fail(current.failure)
       if (current.pending === true) {
@@ -107,7 +111,8 @@ const makeTestRemote = (options: {
           })
       }
       : {},
-    ...options.ping === undefined ? {} : { ping: options.ping }
+    ...options.ping === undefined ? {} : { ping: options.ping },
+    ...options.stdin === true ? { stdin: true as const } : {}
   }
   return Provider.of(provider) as TestRemoteProvider
 }

@@ -3,7 +3,7 @@
 /**
  * Execution policies attached to flow definitions through Effect context.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import * as FileSet from "@smthrs/plan/FileSet"
 import * as Context from "effect/Context"
@@ -15,7 +15,6 @@ import * as Schema from "effect/Schema"
  *
  * @category schemas
  * @since 0.1.0
- * @slop
  */
 export const Effects = Schema.Struct({
   reads: Schema.Array(FileSet.ReadDeclaration),
@@ -34,7 +33,6 @@ export const Effects = Schema.Struct({
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Effects = typeof Effects.Type
 
@@ -43,7 +41,6 @@ export type Effects = typeof Effects.Type
  *
  * @category schemas
  * @since 0.1.0
- * @slop
  */
 export const PlacementDirective = Schema.Unknown
 
@@ -52,7 +49,6 @@ export const PlacementDirective = Schema.Unknown
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type PlacementDirective = typeof PlacementDirective.Type
 
@@ -61,7 +57,6 @@ export type PlacementDirective = typeof PlacementDirective.Type
  *
  * @category annotations
  * @since 0.1.0
- * @slop
  */
 export const Capabilities = Context.Reference<ReadonlyArray<string>>(
   "@smthrs/flow/Flow/Capabilities",
@@ -73,7 +68,6 @@ export const Capabilities = Context.Reference<ReadonlyArray<string>>(
  *
  * @category annotations
  * @since 0.1.0
- * @slop
  */
 export const EffectsDeclaration = Context.Service<Effects>("@smthrs/flow/Flow/EffectsDeclaration")
 
@@ -82,7 +76,6 @@ export const EffectsDeclaration = Context.Service<Effects>("@smthrs/flow/Flow/Ef
  *
  * @category annotations
  * @since 0.1.0
- * @slop
  */
 export const Placement = Context.Service<PlacementDirective>("@smthrs/flow/Flow/Placement")
 
@@ -94,8 +87,7 @@ export const Placement = Context.Service<PlacementDirective>("@smthrs/flow/Flow/
  * By default, this annotation is set to `true`, meaning defects are captured.
  *
  * @category annotations
- * @since 4.0.0
- * @slop
+ * @since 0.1.0
  */
 export const CaptureDefects = Context.Reference<boolean>(
   "@smthrs/flow/Flow/CaptureDefects",
@@ -112,8 +104,7 @@ export const CaptureDefects = Context.Reference<boolean>(
  * The suspended execution can later be resumed with the flow's `resume` method, for example `MyFlow.resume(executionId)`.
  *
  * @category annotations
- * @since 4.0.0
- * @slop
+ * @since 0.1.0
  */
 export const SuspendOnFailure = Context.Reference<boolean>(
   "@smthrs/flow/Flow/SuspendOnFailure",

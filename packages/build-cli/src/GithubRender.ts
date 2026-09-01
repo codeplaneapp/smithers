@@ -50,6 +50,7 @@ export type ErrorCode =
   | "preserve_conflict"
   | "outside_write_set"
   | "write_failed"
+  | "unsupported_affected"
 
 /**
  * One typed CI-generation refusal.
@@ -427,11 +428,33 @@ const shardCountOf = (target: Target.AnyTarget, seen = new Set<Target.AnyTarget>
 }
 
 /**
- * The single provisional CLI flag a generated affected workflow passes: the
- * merge-base of the checked-out head and the pull request's base branch.
- * The spelling is pinned by the goldens and owned by the CLI integration.
+ * Refuses `affected: true` while no CLI flag restricts a run to a base.
+ *
+ * The renderer used to append `--affected-base "$(git merge-base ...)"` to
+ * every job command. No command in {@link Cli} defines that flag and the
+ * parser rejects an unknown one, so the workflow this produced failed at
+ * argument parsing in every job it generated: a workflow file that cannot run
+ * at all, checked in and byte-checked as though it were correct.
+ *
+ * Refusing at render time is the choice rather than defining the flag,
+ * because there is no sound answer here for what "affected" means yet. A
+ * target's key covers ambient inputs the file set does not name: the
+ * lockfile, the host Node version, the toolchain's own fingerprint. So a
+ * prune computed from changed files alone would skip targets a change really
+ * did affect and report green. A build system may cost time; it may not
+ * report a green it did not establish. The result cache already gives an
+ * unchanged target a hit, which is most of what the flag was reaching for.
+ *
+ * When the flag exists, this refusal is what has to be deleted.
  */
-const affectedSuffix = " --affected-base \"$(git merge-base HEAD \"origin/${GITHUB_BASE_REF:-main}\")\""
+const refuseAffected = (workflowName: string): never => {
+  throw new GithubRenderError(
+    "unsupported_affected",
+    `workflow ${workflowName} declares affected: true, which renders a --affected-base flag no ` +
+      "smithers-build command defines; the generated workflow would fail argument parsing in every job. " +
+      "Remove affected: true until the CLI restricts a run to a base."
+  )
+}
 
 /** Appends one run value, rendering line arrays and multiline strings as one script. */
 const renderRun = (lines: Array<string>, prefix: string, run: string | ReadonlyArray<string>): void => {
@@ -496,6 +519,7 @@ const renderWorkflow = (
   setup: (typeof GithubTarget.SetupAttrs)["Type"] | undefined,
   toolchain: Toolchain
 ): string => {
+  if (workflow.affected === true) refuseAffected(workflow.name)
   const lines: Array<string> = [header(label)]
   lines.push(`name: ${scalar(workflow.name)}`)
   lines.push("on:")
@@ -615,9 +639,6 @@ const renderWorkflow = (
     if (workflow.environment !== undefined) lines.push(`    environment: ${scalar(workflow.environment)}`)
     lines.push("    steps:")
     lines.push("      - uses: actions/checkout@v4")
-    if (workflow.affected === true) {
-      lines.push("        with:", ...mapping({ "fetch-depth": "0" }, "          "))
-    }
     if (setup !== undefined) {
       // The root package's directory is the empty string, and `./` + "" +
       // "/actions/setup" renders the double slash `.//actions/setup`, which is
@@ -630,8 +651,7 @@ const renderWorkflow = (
         lines.push("        with:", ...mapping(withEntries, "          "))
       }
     }
-    const command = [...toolchain.exec, `'${runLabel}'`].join(" ") +
-      (workflow.affected === true ? affectedSuffix : "")
+    const command = [...toolchain.exec, `'${runLabel}'`].join(" ")
     lines.push(`      - run: ${scalar(command)}`)
   }
   return `${lines.join("\n")}\n`

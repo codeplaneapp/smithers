@@ -32,6 +32,8 @@ A run cursor stores the last observed sequence. A workspace cursor is an array o
 
 The server merges workspace entries deterministically. Consumers should persist the returned cursor only after applying the returned batch.
 
+A page is also bounded by the encoded-entry ceiling, `maxFrameBytes`, which defaults to 1 MiB. The ceiling is a budget on the page, not a verdict on the read: the server serves entries until the next one would cross it, then returns `done: false` so the client asks for the rest. Only a single entry whose own encoded size exceeds the ceiling fails, with `frame_too_large`, because no page can carry it.
+
 ## Subscribe
 
 `Sync.Subscribe` streams:
@@ -43,6 +45,14 @@ The server merges workspace entries deterministically. Consumers should persist 
 The request includes a credit count. Credit is a hard limit on frames emitted by that subscription, not a sliding acknowledgement window. There is currently no Ack RPC. A client that needs more data opens another subscription from the last durable cursor.
 
 `SyncClient.subscribe` wraps the RPC stream and detects invalid cursor movement as `SyncGapError`. Transport, authentication, and reconnect policy remain application concerns.
+
+## Compacted runs
+
+A cursor below a run's compaction floor names entries the journal has deleted. The read or the subscription fails with `SyncError` code `compacted`, and the error carries a `Resync` of `{ runId, checkpointSeq }`: the floor to resume from. `SyncClient.subscribe` handles it rather than surfacing it. It moves that run's cursor to `checkpointSeq`, logs the skipped range, and restarts the subscription, so a workspace subscription costs one reconnect per compacted run instead of dying over one of them.
+
+:::warning
+The resync moves a cursor, not state. The entries below `checkpointSeq` are never delivered, and no sync RPC serves the checkpoint state that stands for them. A follower rebuilding a projection from scratch reads that prefix out of band: `journal.latestCheckpoint(runId)`, apply `checkpoint.state`, then continue from the sync stream. See [Checkpoints and compaction](/compaction).
+:::
 
 ## Authentication
 

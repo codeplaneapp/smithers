@@ -1,19 +1,18 @@
 /**
  * Internal AST and runtime representation for pipeable flow nodes.
  *
- * Governing contracts:
- * `docs/specs/Concepts/Schema Shaped Builder.md` and
- * `docs/specs/Concepts/Build Phases.md`.
+ * Governing contract: `packages/core/docs/api.md`, published as
+ * https://smithers.sh/api/core.
  *
  * @since 0.0.0
  */
+import { digestSync } from "@smthrs/crypto"
 import type * as Context from "effect/Context"
 import { identity } from "effect/Function"
 import type * as Pipeable from "effect/Pipeable"
 import { pipeArguments } from "effect/Pipeable"
 import type * as Types from "effect/Types"
 import type * as Effects from "../Effects.ts"
-import { sha256 } from "./sha256.ts"
 
 /**
  * @since 0.0.0
@@ -122,13 +121,13 @@ export interface Catch {
  */
 export interface FunctionIdentity {
   readonly _tag: "FunctionIdentity"
-  readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v3" | "static-node/v1"
+  readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v4" | "static-node/v1"
   readonly digest: string
 }
 
 /** @private */
 type OperationIdentity = FunctionIdentity & {
-  readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v3"
+  readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v4"
 }
 
 /** @private */
@@ -169,12 +168,31 @@ const nonce = (): string => {
   return ephemeralNonce
 }
 
+/**
+ * Returns the process-local nonce shared by every ephemeral identity.
+ *
+ * Exposed so a second ephemeral encoding, such as the projection of an
+ * unregistered symbol, folds in the same per-process value and can never
+ * collide with a different value observed by another process.
+ *
+ * @since 0.1.0
+ * @private
+ * @slop
+ */
+export const processNonce = (): string => nonce()
+
 /** @private */
 const captureError = (path: string, reason: string): TypeError =>
   new TypeError(`Node.capture: capture at ${path} ${reason}; captures must be finite, inert data`)
 
 /** @private */
-const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<object>): string => {
+const maximumCaptureDepth = 256
+
+/** @private */
+const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<object>, depth: number): string => {
+  if (depth > maximumCaptureDepth) {
+    throw captureError(path, `exceeds the maximum capture depth of ${maximumCaptureDepth}`)
+  }
   if (input === null) return "null"
   switch (typeof input) {
     case "boolean":
@@ -202,7 +220,7 @@ const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<objec
       const descriptors = Object.getOwnPropertyDescriptors(input)
       for (const key of Reflect.ownKeys(descriptors)) {
         if (key === "length") continue
-        if (typeof key === "symbol" || !/^(0|[1-9]\d*)$/.test(key)) {
+        if (typeof key === "symbol" || !/^(0|[1-9]\d*)$/.test(key) || Number(key) >= input.length) {
           throw captureError(path, `has unsupported array key ${String(key)}`)
         }
       }
@@ -211,7 +229,7 @@ const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<objec
         const descriptor = descriptors[String(index)]
         if (descriptor === undefined) throw captureError(`${path}[${index}]`, "is an array hole")
         if (!("value" in descriptor)) throw captureError(`${path}[${index}]`, "is an accessor")
-        items.push(canonicalCapture(descriptor.value, `${path}[${index}]`, ancestors))
+        items.push(canonicalCapture(descriptor.value, `${path}[${index}]`, ancestors, depth + 1))
       }
       return `["array",[${items.join(",")}]]`
     }
@@ -222,7 +240,7 @@ const canonicalCapture = (input: unknown, path: string, ancestors: WeakSet<objec
     const encoded = (keys as Array<string>).sort().map((key) => {
       const descriptor = members[key]!
       if (!("value" in descriptor)) throw captureError(`${path}.${key}`, "is an accessor")
-      return `${JSON.stringify(key)}:${canonicalCapture(descriptor.value, `${path}.${key}`, ancestors)}`
+      return `${JSON.stringify(key)}:${canonicalCapture(descriptor.value, `${path}.${key}`, ancestors, depth + 1)}`
     })
     return `["object",{${encoded.join(",")}}]`
   } finally {
@@ -252,8 +270,13 @@ export const capture = <Args extends ReadonlyArray<unknown>, A>(
   captures: Readonly<Record<string, unknown>>,
   operation: (...args: Args) => A
 ): (...args: Args) => A => {
-  const source = Function.prototype.toString.call(operation)
-  const canonical = canonicalCapture(captures, "$", new WeakSet())
+  if (typeof operation !== "function") throw new TypeError("Node.capture requires a function operation")
+  const metadata = (operation as CapturedFunction)[CapturedTypeId]
+  const source = metadata?.source ?? Function.prototype.toString.call(operation)
+  const outerCanonical = canonicalCapture(captures, "$", new WeakSet(), 0)
+  const canonical = metadata === undefined
+    ? outerCanonical
+    : `["nested",${outerCanonical},${metadata.captures}]`
   freezeCapture(captures, new WeakSet())
   const wrapped = function(this: unknown, ...args: ReadonlyArray<unknown>): unknown {
     return Reflect.apply(operation, this, args)
@@ -307,8 +330,8 @@ export const functionIdentity = (operation: unknown): OperationIdentity => {
   }
   return {
     _tag: "FunctionIdentity",
-    algorithm: metadata === undefined ? "sha256-source-ephemeral/v4" : "sha256-source-captures/v3",
-    digest: hex(sha256(metadata === undefined ? `${source}\0${ephemeral}` : `${source}\0${metadata.captures}`))
+    algorithm: metadata === undefined ? "sha256-source-ephemeral/v4" : "sha256-source-captures/v4",
+    digest: digestSync(metadata === undefined ? `${source}\0${ephemeral}` : `${source}\0${metadata.captures}`)
   }
 }
 
@@ -435,7 +458,7 @@ export const andThenNode = (
   continuation: {
     _tag: "FunctionIdentity",
     algorithm: "static-node/v1",
-    digest: hex(sha256("static-node"))
+    digest: digestSync("static-node")
   },
   next,
   annotations

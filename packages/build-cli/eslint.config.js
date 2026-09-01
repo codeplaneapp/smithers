@@ -2,6 +2,7 @@ import js from "@eslint/js"
 import importPlugin from "eslint-plugin-import"
 import unicorn from "eslint-plugin-unicorn"
 import tseslint from "typescript-eslint"
+import { ambientAuthority, invariants, swallowedCause, uninstalledSafety } from "../../eslint.invariants.js"
 import { jsdocConvention } from "../../eslint.jsdoc.js"
 
 export default tseslint.config(
@@ -81,7 +82,7 @@ export default tseslint.config(
   {
     files: ["src/**/*.{js,cjs,mjs}"],
     rules: {
-      "import/no-unresolved": ["error", { ignore: ["^tsx/esm/api$", "^@smthrs/targets$"] }]
+      "import/no-unresolved": ["error", { ignore: ["^tsx/cjs/api$", "^tsx/esm/api$", "^@smthrs/targets$"] }]
     }
   },
   ...jsdocConvention,
@@ -90,5 +91,6 @@ export default tseslint.config(
     rules: {
       "jsdoc/check-tag-names": ["error", { definedTags: ["category", "since", "slop"] }]
     }
-  }
+  },
+  ...invariants(uninstalledSafety, swallowedCause, ambientAuthority)
 )

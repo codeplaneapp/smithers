@@ -17,11 +17,14 @@ export default defineConfig({
       // each other's coverage scratch state (issues #115/#121).
       reportsDirectory: join(tmpdir(), `flows-patterns-coverage-${process.pid}`),
       include: ["src/**"],
+      // Frozen rc contract: deferred declaration callbacks are executed by the
+      // pure core test runtime, so the same 100% gate covers both topology and
+      // value behavior.
       thresholds: {
-        branches: 79,
-        functions: 83,
-        lines: 86,
-        statements: 86
+        branches: 100,
+        functions: 100,
+        lines: 100,
+        statements: 100
       }
     }
   }

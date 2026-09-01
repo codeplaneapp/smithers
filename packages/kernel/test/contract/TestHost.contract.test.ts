@@ -10,11 +10,34 @@ runHostContract(
       "host-contract-exec": { stdout: "test-exec" },
       "host-contract-stream": { stdout: "test-stream" },
       "host-contract-options": { stdout: "test-options" },
-      "host-contract-interrupt": { stdout: "" }
+      "host-contract-interrupt": { pending: true }
     }
   }),
   {
-    fileSystem: { expected: "success", scratchPath: "/test-host-contract" },
+    fileSystem: {
+      expected: "success",
+      scratchPath: "/test-host-contract",
+      unsupported: {
+        chmod: "NotFound",
+        chown: "NotFound",
+        copy: "NotFound",
+        copyFile: "NotFound",
+        glob: "NotFound",
+        link: "NotFound",
+        makeTempDirectory: "NotFound",
+        makeTempDirectoryScoped: "NotFound",
+        makeTempFile: "NotFound",
+        makeTempFileScoped: "NotFound",
+        open: "NotFound",
+        readLink: "NotFound",
+        rename: "NotFound",
+        sink: "NotFound",
+        symlink: "NotFound",
+        truncate: "NotFound",
+        utimes: "NotFound",
+        watch: "NotFound"
+      }
+    },
     path: { expected: "success" },
     childProcess: {
       expected: "success",
@@ -30,6 +53,7 @@ runHostContract(
       // The scripted interpreter runs a command line to completion; it has no
       // stdin to feed.
       stdin: { expected: "failure", code: "BadArgument" },
+      pipeline: { expected: "failure", code: "BadArgument" },
       interruptCommand: ChildProcess.make("host-contract-interrupt")
     },
     jj: { expected: "failure", code: "not_installed" },

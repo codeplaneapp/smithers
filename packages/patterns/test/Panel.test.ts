@@ -34,13 +34,33 @@ describe("Panel", () => {
   })
 
   it("rejects an empty panel", () => {
-    expect(() => Panel.make({ panelists: {}, moderator: participant })).toThrow(PatternError)
+    expect(() => Panel.make({ panelists: {}, moderator: participant })).toThrow(
+      expect.objectContaining({ code: "invalid_decorator", message: "Panel requires at least one panelist" })
+    )
   })
 
   it("rejects a role named for a panelist the panel does not have", () => {
     expect(() =>
       Panel.make({ panelists: { critic: participant }, moderator: participant, roles: { absent: "nobody" } })
-    ).toThrow(PatternError)
+    ).toThrow(expect.objectContaining({
+      code: "invalid_decorator",
+      message: "Panel declares a role for the unknown panelist \"absent\""
+    }))
+  })
+
+  it("rejects prototype-shaped roles that are not own panelist names", () => {
+    for (const name of ["__proto__", "constructor", "toString"]) {
+      expect(() =>
+        Panel.make({
+          panelists: { critic: participant },
+          moderator: participant,
+          roles: Object.fromEntries([[name, "unknown role"]])
+        })
+      ).toThrow(expect.objectContaining({
+        code: "invalid_decorator",
+        message: `Panel declares a role for the unknown panelist "${name}"`
+      }))
+    }
   })
 
   it.effect("fails run for an invalid concurrency", () =>
@@ -57,7 +77,7 @@ describe("Panel", () => {
 
       expect(error).toBeInstanceOf(PatternError)
       expect(error.code).toBe("invalid_decorator")
-      expect(error.message).toContain("received 0")
+      expect(error.message).toBe("Panel concurrency must be a positive safe integer, received 0")
     }))
 
   it("puts each declared role in that panelist's call payload", () => {
@@ -187,6 +207,23 @@ describe("Panel", () => {
       expect(seen.opinions).toEqual({ alpha: "alpha-said", beta: "beta-said", gamma: "gamma-said" })
     }))
 
+  it.effect("hands the moderator own properties for prototype-shaped panelist names", () =>
+    Effect.gen(function*() {
+      const names = ["__proto__", "constructor", "toString", "normal"]
+      const opinions = yield* Panel.run("topic", {
+        panelists: Object.fromEntries(
+          names.map((name) => [name, () => Effect.succeed(`${name}-opinion`)])
+        ),
+        moderator: ({ opinions }) => Effect.succeed(opinions)
+      })
+
+      expect(Object.getPrototypeOf(opinions)).toBe(Object.prototype)
+      for (const name of names) {
+        expect(Object.hasOwn(opinions, name)).toBe(true)
+        expect(opinions[name]).toBe(`${name}-opinion`)
+      }
+    }))
+
   it.effect("fails run with a typed PatternError for an empty panel", () =>
     Effect.gen(function*() {
       const error = yield* Effect.flip(
@@ -198,5 +235,6 @@ describe("Panel", () => {
 
       expect(error).toBeInstanceOf(PatternError)
       expect(error.code).toBe("invalid_decorator")
+      expect(error.message).toBe("Panel requires at least one panelist")
     }))
 })

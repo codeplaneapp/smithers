@@ -36,6 +36,20 @@ describe("TestHost memory filesystem operations", () => {
       expect(contents).toEqual({ text: "gamma", exists: true, missing: false })
     }))
 
+  it.effect("copies write inputs and read outputs", () =>
+    Effect.gen(function*() {
+      const fs = fileSystem()
+      const input = encoder.encode("stable")
+      yield* fs.writeFile("/w/copy.txt", input)
+      input.fill(0)
+
+      const first = yield* fs.readFile("/w/copy.txt")
+      first.fill(1)
+      const second = yield* fs.readFile("/w/copy.txt")
+
+      expect(decoder.decode(second)).toBe("stable")
+    }))
+
   it.effect("stats files and directories with the corresponding type and mtime", () =>
     Effect.gen(function*() {
       const fs = fileSystem()

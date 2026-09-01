@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import * as Input from "../src/Input.ts"
-import { Secret } from "../src/Secret.ts"
+import { HttpSecret, Secret } from "../src/Secret.ts"
 import * as Target from "../src/Target.ts"
 import { ToolRun } from "../src/ToolRun.ts"
 
@@ -11,7 +11,7 @@ describe("ToolRun", () => {
       args: ["dataset", "create", "pilot", "data/pilot.jsonl"],
       inputs: [Input.file("data/pilot.jsonl")],
       deps: [],
-      secrets: [Secret("FIREWORKS_API_KEY")],
+      secrets: [HttpSecret(Secret("FIREWORKS_API_KEY"), ["https://api.fireworks.ai"])],
       cwd: "evals/authoring"
     })
     const metadata = Target.metadata(target)

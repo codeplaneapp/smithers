@@ -20,7 +20,7 @@ flowchart TB
     ENGINE["@smthrs/engine<br/>FlowEngine, FlowProxy"]
     KEYS["@smthrs/keys<br/>canonical Key"]
     PLAN["@smthrs/plan<br/>Node AST, Planned, KeyMaterial,<br/>StepKey, Plan, PlanDiff, PlanStore"]
-    CRYPTO["@smthrs/crypto<br/>injected SHA-256"]
+    CRYPTO["@smthrs/crypto<br/>strict SHA-256"]
     CANONICAL["@smthrs/canonical<br/>RFC 8785 JSON"]
   end
 
@@ -107,7 +107,19 @@ The **host boundary** exists so flow code can run in a browser. `@smthrs/kernel`
 
 The **database and journal** split separates the storage driver from the shapes stored in it. `@smthrs/database` owns no domain tables; it wraps any Effect `SqlClient` and adds the transactional write retry that the rest of the system assumes. `@smthrs/journal`, `@smthrs/run-store`, `@smthrs/step-cache`, `@smthrs/plan`, and `@smthrs/engine-store` each own their own tables and the migration set that creates them, composed over one migrations table. Swap the driver and every shape survives.
 
-The **canonical, crypto, keys, and engine** chain decides identity before storage sees anything. `@smthrs/canonical` owns RFC 8785 JSON, `@smthrs/crypto` owns injected hashing, `@smthrs/keys` owns the canonical flow-key transformation, and `@smthrs/engine` owns action-key policy above the seam. The engine computes a key before it calls `FlowEngine.Encoded.actionExecute`, so storage never implements key policy.
+The **canonical, crypto, keys, and engine** chain decides identity before storage sees anything. `@smthrs/canonical` owns RFC 8785 JSON, `@smthrs/crypto` owns SHA-256, [`@smthrs/keys`](/api/keys) owns canonical flow-key derivation and stored-key validation, and `@smthrs/engine` owns action-key policy above the seam. The engine computes a key before it calls `FlowEngine.Encoded.actionExecute`, so storage never implements key policy.
+
+{/* generated:crypto-contract start */}
+
+`@smthrs/crypto` owns the repository's SHA-256 policy and its only handwritten
+implementation. `digest` sends a byte snapshot to an injected Effect `Crypto`
+service; `digestSync` uses the package-owned synchronous FIPS 180-4 path. Both
+reject unpaired UTF-16 surrogates, perform no Unicode normalization, and return
+the same branded 64-character lowercase hexadecimal `Digest`. The API is
+one-shot and whole-buffer; it does not offer streaming hashing. See the
+[Crypto API contract](/api/crypto) for host requirements and failure codes.
+
+{/* generated:crypto-contract end */}
 
 The **plan** boundary separates describing work from doing it. `@smthrs/plan` holds the authoring AST a flow body builds, the key material a planner declares, the step-key compiler, the compiled graph, its diff, and its append-only store. Planning performs no I/O, so nothing in it reads a file, a clock, or a network: declared effects carry read and write paths, never digests. A node's key is a function of what it consumes, which is the whole invalidation mechanism. An edited declaration re-keys that node and its dependent cone and nothing else, so there is no reverse-dependency index. Driving a compiled plan is `@smthrs/engine-store`'s `PlanScheduler`.
 

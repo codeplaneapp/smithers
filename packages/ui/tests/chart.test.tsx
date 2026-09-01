@@ -70,6 +70,21 @@ describe("<ChartContainer>", () => {
     expect(html).not.toContain("--color-styleClose");
     expect(html).not.toContain("bad};body");
   });
+
+  test("does not interpolate an unsafe chart id into the style block", () => {
+    const unsafeId = 'release</style><script data-xss="">owned</script><style>';
+    const html = renderToStaticMarkup(
+      <ChartContainer id={unsafeId} config={chartConfig([{ key: "safe" }])}>
+        <BarChart width={400} height={200} data={[]}>
+          <Bar dataKey="safe" fill="var(--color-safe)" />
+        </BarChart>
+      </ChartContainer>,
+    );
+
+    expect(html.match(/<style/g) ?? []).toHaveLength(1);
+    expect(html).not.toContain("<script data-xss");
+    expect(html).not.toContain("--color-safe");
+  });
 });
 
 describe("<ChartTooltipContent>", () => {

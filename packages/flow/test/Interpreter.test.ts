@@ -359,6 +359,19 @@ describe("Interpreter node variants", () => {
       expect(calls).toEqual(["read:counter.txt", "sum:counter.txt"])
     }))
 
+  it.effect("interprets dotted All member names whose addresses do not collide", () =>
+    Effect.gen(function*() {
+      const interpretation = yield* drive(Interpreter.interpret(Node.all({
+        "x.all.z": Node.succeed("outer"),
+        x: Node.all({ y: Node.succeed("nested") })
+      })))
+
+      expect(interpretation.value).toEqual({
+        "x.all.z": "outer",
+        x: { y: "nested" }
+      })
+    }))
+
   it.effect("preserves an own __proto__ member when joining a combination", () =>
     Effect.gen(function*() {
       const members = Object.create(null) as Record<string, Node.Any>
@@ -444,6 +457,90 @@ describe("Interpreter refusals", () => {
           flow: "interpreter/orphan",
           node: "root.flow",
           message: expect.stringContaining("interpreter/missing.toLayer(execute)")
+        }
+      })
+    }))
+
+  it.effect("refuses duplicate node ids before constructing a last-write-wins lookup", () =>
+    Effect.gen(function*() {
+      const collided = Node.all({
+        "x.all.y": Node.succeed("outer"),
+        x: Node.all({ y: Node.succeed("nested") })
+      })
+
+      expect(yield* refusal(Interpreter.interpret(collided))).toMatchObject({
+        error: {
+          _tag: "@smthrs/flow/InterpreterError",
+          code: "duplicate_node_id",
+          flow: "node",
+          node: "root.all.x.all.y",
+          message: expect.stringContaining("durable dispatch identity")
+        }
+      })
+    }))
+
+  it.effect("maps a synchronous graph-build refusal into the typed interpreter channel", () =>
+    Effect.gen(function*() {
+      const Recursive = Flow.make("interpreter/recursive", {
+        payload: { depth: Schema.Number },
+        success: Schema.Number,
+        body: ({ depth }): Node.Node<number> => Recursive.call({ depth })
+      })
+
+      const reason = yield* refusal(Interpreter.interpret(Recursive, { depth: 0 }))
+      expect(reason).toMatchObject({
+        error: {
+          _tag: "@smthrs/flow/InterpreterError",
+          code: "incomplete_graph",
+          flow: "interpreter/recursive",
+          node: "root.flow"
+        }
+      })
+      expect((reason as { readonly error: Error }).error.message).toContain("cannot call itself inline")
+    }))
+
+  it.effect("keeps the reason when a body throws something that is not a build refusal", () =>
+    Effect.gen(function*() {
+      // A body is arbitrary code: a target implementation validates its own
+      // declaration and throws a plain Error naming the fix. That value has no
+      // `node`, and reading one built an InterpreterError the schema rejected,
+      // so the author read "Schema validation failed" instead of the fix.
+      const Refusing = Flow.make("interpreter/body-throws", {
+        payload: {},
+        success: Schema.Number,
+        body: (): Node.Node<number> => {
+          throw new Error("the rendered workflow is missing required jobs: rust")
+        }
+      })
+
+      expect(yield* refusal(Interpreter.interpret(Refusing, {}))).toMatchObject({
+        error: {
+          _tag: "@smthrs/flow/InterpreterError",
+          code: "incomplete_graph",
+          flow: "interpreter/body-throws",
+          node: "",
+          message: "the rendered workflow is missing required jobs: rust"
+        }
+      })
+    }))
+
+  it.effect("names the thrown value when a body throws one that carries no message", () =>
+    Effect.gen(function*() {
+      const Refusing = Flow.make("interpreter/body-throws-bare", {
+        payload: {},
+        success: Schema.Number,
+        body: (): Node.Node<number> => {
+          throw "bare refusal"
+        }
+      })
+
+      expect(yield* refusal(Interpreter.interpret(Refusing, {}))).toMatchObject({
+        error: {
+          _tag: "@smthrs/flow/InterpreterError",
+          code: "incomplete_graph",
+          flow: "interpreter/body-throws-bare",
+          node: "",
+          message: "building the graph of flow interpreter/body-throws-bare threw bare refusal"
         }
       })
     }))
@@ -556,6 +653,7 @@ describe("a flow's behavior is its body", () => {
     expect("BodyDefinesBehavior" in Flow).toBe(false)
     expectTypeOf<Interpreter.InterpreterError["code"]>().toEqualTypeOf<
       | "incomplete_graph"
+      | "duplicate_node_id"
       | "unresolved_action"
       | "unresolved_reference"
       | "unsupported_call"

@@ -160,22 +160,30 @@ const bound = (value: number): boolean => Number.isSafeInteger(value) && value >
 
 const invalid = (message: string): PatternError => new PatternError({ code: "invalid_decorator", message })
 
-const planned = (input: unknown): ReadonlyArray<Task> => {
+const validateTasks = (input: unknown): ReadonlyArray<Task> | PatternError => {
   if (typeof input !== "object" || input === null || !("tasks" in input) || !Array.isArray(input.tasks)) {
-    throw invalid("Supervisor input must contain a tasks array")
+    return invalid("Supervisor input must contain a tasks array")
   }
   const tasks = input.tasks as ReadonlyArray<unknown>
-  if (tasks.length === 0) throw invalid("Supervisor input must contain at least one task")
-  return tasks.map((task) => {
+  if (tasks.length === 0) return invalid("Supervisor input must contain at least one task")
+  const snapshot: Array<Task> = []
+  for (const task of tasks) {
     const candidate = task as { readonly id?: unknown; readonly workerType?: unknown }
     if (
       typeof task !== "object" || task === null ||
       typeof candidate.id !== "string" || typeof candidate.workerType !== "string"
     ) {
-      throw invalid("Supervisor tasks must each carry a string id and a string workerType")
+      return invalid("Supervisor tasks must each carry a string id and a string workerType")
     }
-    return { id: candidate.id, workerType: candidate.workerType }
-  })
+    snapshot.push({ id: candidate.id, workerType: candidate.workerType })
+  }
+  return snapshot
+}
+
+const planned = (input: unknown): ReadonlyArray<Task> => {
+  const result = validateTasks(input)
+  if (result instanceof PatternError) throw result
+  return result
 }
 
 const retriableOf = (review: unknown): unknown =>
@@ -301,9 +309,9 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  * when an unaccepted review names no retriable task, because nothing is left
  * to re-delegate.
  *
- * `run` fails with a `PatternError` when the plan repeats a task id, because
- * outcomes are keyed by task id: a repeated id would delegate twice and hand
- * the review the same outcome twice.
+ * `run` fails with a `PatternError` when the plan is malformed, empty, or
+ * repeats a task id. Outcomes are keyed by task id, so a repeated id would
+ * delegate twice and hand the review the same outcome twice.
  *
  * @category combinators
  * @since 0.1.0
@@ -322,7 +330,9 @@ export const run = <I, P extends Plan, Out, Review, Final, E, R, E2, R2, E3, R3,
   }
   return Effect.gen(function*() {
     const plan = yield* options.plan(input)
-    const ids = plan.tasks.map((task) => task.id)
+    const tasks = validateTasks(plan)
+    if (tasks instanceof PatternError) return yield* Effect.fail(tasks)
+    const ids = tasks.map((task) => task.id)
     if (new Set(ids).size !== ids.length) {
       return yield* Effect.fail(
         new PatternError({ code: "invalid_decorator", message: "Supervisor task ids must be unique" })
@@ -358,22 +368,21 @@ export const run = <I, P extends Plan, Out, Review, Final, E, R, E2, R2, E3, R3,
           { concurrency: options.concurrency }
         )
         for (const outcome of outcomes) latest.set(outcome.id, outcome)
-        const results = plan.tasks.flatMap((task) => {
-          const outcome = latest.get(task.id)
-          return outcome === undefined ? [] : [outcome]
-        })
+        // Round one visits every task and later rounds only replace entries,
+        // so `latest` contains one outcome for every validated task here.
+        const results = tasks.map((task) => latest.get(task.id)!)
         const review = yield* options.review({ plan, results, round, input })
         if (done(review)) {
           const final = yield* options.finalize({ plan, results, review, rounds: round, input })
           return { exhausted: false, rounds: round, final } satisfies Completed<Final>
         }
         const ids = retriable(review)
-        const next = plan.tasks.filter((task) => ids.includes(task.id))
+        const next = tasks.filter((task) => ids.includes(task.id))
         if (next.length === 0 || round === options.maxRounds) {
           return { exhausted: true, rounds: round, review } satisfies Exhausted<Review>
         }
         return yield* supervise(next, round + 1)
       })
-    return yield* supervise(plan.tasks, 1)
+    return yield* supervise(tasks, 1)
   })
 }

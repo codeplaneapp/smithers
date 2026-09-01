@@ -88,6 +88,7 @@
     "@effect/platform-node": "4.0.0-rc.108",
     "@effect/platform-node-shared": "4.0.0-rc.108",
     "@smthrs/agent": "1.0.0-rc.0",
+    "@smthrs/capability": "1.0.0-rc.0",
     "@smthrs/control": "1.0.0-rc.0",
     "@smthrs/database": "1.0.0-rc.0",
     "@smthrs/engine-store": "1.0.0-rc.0",

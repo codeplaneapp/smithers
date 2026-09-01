@@ -181,6 +181,8 @@ export const declaredOutputs = (target: string, value: DeclaredOutputs): Declare
 export interface KindView {
   readonly attrs: unknown
   readonly dependencies: ReadonlyArray<AnyTarget>
+  /** Workspace targets selected without importing their BUILD.ts modules. */
+  readonly dependencySelectors: ReadonlyArray<DependencySelector>
   readonly inputs: ReadonlyArray<Input.Declared>
   readonly cacheable: boolean
   readonly outputs: DeclaredOutputs | undefined
@@ -214,6 +216,7 @@ export interface Metadata {
   /** Validates an untrusted cached value against the success type in this package's Schema runtime. */
   readonly decodeSuccess: (value: unknown) => unknown
   readonly dependencies: ReadonlyArray<AnyTarget>
+  readonly dependencySelectors: ReadonlyArray<DependencySelector>
   readonly inputs: ReadonlyArray<Input.Declared>
   readonly cacheable: boolean
   readonly outputs: DeclaredOutputs | undefined
@@ -260,6 +263,69 @@ export const Target = Schema.declare<AnyTarget>(
     description: "A direct import of another BUILD.ts target"
   }
 )
+
+const dependencySubtreePattern = /^\/\/(?:[A-Za-z0-9_@+=,.-]+\/)*\.\.\.$/
+const dependencyTargetPattern = /^[A-Za-z0-9_@+=,.-]+$/
+
+/**
+ * A graph dependency selected from every package below one workspace subtree.
+ *
+ * This is the graph-native form for aggregate BUILD.ts targets whose
+ * dependencies include synthesized packages and therefore cannot be imported
+ * as target objects. Selection is intentionally narrow: a recursive package
+ * pattern plus one exact exported target name.
+ *
+ * @category schemas
+ * @since 1.0.0-rc.0
+ */
+export const DependencySelector = Schema.TaggedStruct("TargetDependencySelector", {
+  pattern: Schema.NonEmptyString.check(
+    Schema.isMaxLength(4_096),
+    Schema.isPattern(dependencySubtreePattern)
+  ),
+  target: Schema.NonEmptyString.check(
+    Schema.isMaxLength(256),
+    Schema.isPattern(dependencyTargetPattern)
+  )
+})
+
+/**
+ * A graph dependency selected from every package below one workspace subtree.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type DependencySelector = typeof DependencySelector.Type
+
+/**
+ * A direct target dependency or a workspace subtree selection.
+ *
+ * @category schemas
+ * @since 1.0.0-rc.0
+ */
+export const Dependency = Schema.Union([Target, DependencySelector])
+
+/**
+ * A direct target dependency or a workspace subtree selection.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type Dependency = typeof Dependency.Type
+
+/**
+ * Selects one exported target name from every package in a subtree.
+ *
+ * @example
+ * ```ts
+ * Smithers.Target.subtree("//packages/...", "lib")
+ * ```
+ *
+ * @category constructors
+ * @since 1.0.0-rc.0
+ */
+export const subtree = (pattern: string, target: string): DependencySelector =>
+  Object.freeze(DependencySelector.make({ pattern, target }))
 
 /**
  * Error returned by every catalog stub when someone executes it.
@@ -362,6 +428,22 @@ const ownData = (value: object, key: PropertyKey): unknown | typeof missingPrope
   return descriptor !== undefined && "value" in descriptor ? descriptor.value : missingProperty
 }
 
+/**
+ * Checks whether a value is a workspace dependency selector.
+ *
+ * @category guards
+ * @since 1.0.0-rc.0
+ */
+export const isDependencySelector = (value: unknown): value is DependencySelector => {
+  if (!Predicate.isObject(value) || NodeUtil.isProxy(value)) return false
+  const tag = ownData(value, "_tag")
+  const pattern = ownData(value, "pattern")
+  const target = ownData(value, "target")
+  return tag === "TargetDependencySelector" &&
+    typeof pattern === "string" && dependencySubtreePattern.test(pattern) && pattern.length <= 4_096 &&
+    typeof target === "string" && dependencyTargetPattern.test(target) && target.length <= 256
+}
+
 /** Whether a value is a non-proxy array whose entries satisfy a predicate. */
 const isArrayOf = <A>(value: unknown, guard: (entry: unknown) => entry is A): value is ReadonlyArray<A> => {
   if (
@@ -386,6 +468,7 @@ const isMetadata = (value: unknown): value is Metadata => {
   const implementationDigest = ownData(value, "implementationDigest")
   const kinds = ownData(value, "kinds")
   const dependencies = ownData(value, "dependencies")
+  const dependencySelectors = ownData(value, "dependencySelectors")
   const inputs = ownData(value, "inputs")
   const cacheable = ownData(value, "cacheable")
   const outputs = ownData(value, "outputs")
@@ -399,6 +482,7 @@ const isMetadata = (value: unknown): value is Metadata => {
     typeof implementationDigest !== "string" || !/^[0-9a-f]{64}$/.test(implementationDigest) ||
     !isArrayOf(kinds, isKind) ||
     !isArrayOf(dependencies, (_entry): _entry is AnyTarget => true) ||
+    !isArrayOf(dependencySelectors, isDependencySelector) ||
     !isArrayOf(inputs, (_entry): _entry is Input.Declared => true) ||
     typeof cacheable !== "boolean" ||
     (source !== undefined && typeof source !== "string") ||
@@ -510,6 +594,7 @@ const collect = (
   value: unknown,
   inputs: Array<Input.Declared>,
   dependencies: Array<AnyTarget>,
+  dependencySelectors: Array<DependencySelector>,
   seen: Set<object>
 ): void => {
   if (
@@ -520,6 +605,10 @@ const collect = (
   }
   if (isTarget(value)) {
     dependencies.push(value)
+    return
+  }
+  if (isDependencySelector(value)) {
+    dependencySelectors.push(subtree(value.pattern, value.target))
     return
   }
   if (Input.isDeclared(value)) {
@@ -540,7 +629,7 @@ const collect = (
       if (names[index] !== String(index)) return
       const descriptor = Object.getOwnPropertyDescriptor(value, String(index))
       if (descriptor === undefined || !("value" in descriptor) || descriptor.enumerable !== true) return
-      collect(descriptor.value, inputs, dependencies, seen)
+      collect(descriptor.value, inputs, dependencies, dependencySelectors, seen)
     }
     return
   }
@@ -550,7 +639,7 @@ const collect = (
   for (const key of Object.getOwnPropertyNames(value)) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key)
     if (descriptor === undefined || !("value" in descriptor) || descriptor.enumerable !== true) return
-    collect(descriptor.value, inputs, dependencies, seen)
+    collect(descriptor.value, inputs, dependencies, dependencySelectors, seen)
   }
 }
 
@@ -726,7 +815,8 @@ export const make = <
     }
     const inputs: Array<Input.Declared> = []
     const dependencies: Array<AnyTarget> = []
-    collect(attrs, inputs, dependencies, new Set())
+    const dependencySelectors: Array<DependencySelector> = []
+    collect(attrs, inputs, dependencies, dependencySelectors, new Set())
     if (options.inputs !== undefined) inputs.push(...options.inputs(attrs))
     const cacheableFor = (value: Attrs["Type"]): boolean =>
       typeof options.cache === "function" ? options.cache(value) : options.cache ?? false
@@ -737,6 +827,10 @@ export const make = <
     const baseView: KindView = {
       attrs,
       dependencies: [...new Set(dependencies)],
+      dependencySelectors: [...new Map(dependencySelectors.map((selector) => [
+        `${selector.pattern}\0${selector.target}`,
+        selector
+      ])).values()],
       inputs: [...new Set(inputs)],
       cacheable: cacheableFor(attrs),
       outputs: outputsFor(attrs)
@@ -759,12 +853,17 @@ export const make = <
       }
       const mappedInputs: Array<Input.Declared> = []
       const mappedDependencies: Array<AnyTarget> = []
-      collect(mapped, mappedInputs, mappedDependencies, new Set())
+      const mappedDependencySelectors: Array<DependencySelector> = []
+      collect(mapped, mappedInputs, mappedDependencies, mappedDependencySelectors, new Set())
       if (options.inputs !== undefined) mappedInputs.push(...options.inputs(mapped))
       const dependenciesForKind = [...new Set(mappedDependencies)]
       const view: KindView = {
         attrs: mapped,
         dependencies: dependenciesForKind,
+        dependencySelectors: [...new Map(mappedDependencySelectors.map((selector) => [
+          `${selector.pattern}\0${selector.target}`,
+          selector
+        ])).values()],
         inputs: [...new Set(mappedInputs)],
         cacheable: cacheableFor(mapped),
         outputs: outputsFor(mapped)
@@ -787,6 +886,7 @@ export const make = <
       attrsSchema: options.attrs,
       decodeSuccess,
       dependencies: baseView.dependencies,
+      dependencySelectors: baseView.dependencySelectors,
       inputs: baseView.inputs,
       cacheable: baseView.cacheable,
       outputs: baseView.outputs,

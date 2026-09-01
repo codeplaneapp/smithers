@@ -52,6 +52,31 @@ const WHITESPACE_STRIPPED_PATCH = [
   .join("\n")
   .replace(/[ \t]+$/gm, "");
 
+const SQL_COMMENT_PATCH = `diff --git a/migrations/001.sql b/migrations/001.sql
+--- a/migrations/001.sql
++++ b/migrations/001.sql
+@@ -10,2 +10,1 @@
+--- migrate down
+ SELECT 1;
+`;
+
+const YAML_SEPARATOR_PATCH = `diff --git a/config/workflow.yaml b/config/workflow.yaml
+--- a/config/workflow.yaml
++++ b/config/workflow.yaml
+@@ -3,2 +3,1 @@
+----
+ steps:
+`;
+
+const AT_PREFIX_CONTEXT_PATCH = `diff --git a/docs/version.md b/docs/version.md
+--- a/docs/version.md
++++ b/docs/version.md
+@@ -4,3 +4,3 @@
+ before
+ @@ VERSION
+ after
+`;
+
 describe("parseUnifiedFile", () => {
   test("parses a multi-hunk patch into DiffFile totals and hunks", () => {
     const file = parseUnifiedFile(SAMPLE_PATCH);
@@ -92,6 +117,34 @@ describe("parseUnifiedFile", () => {
       { kind: "context", lnOld: 7, ln: 7, text: "before" },
       { kind: "context", lnOld: 8, ln: 8, text: "" },
       { kind: "context", lnOld: 9, ln: 9, text: "after" },
+    ]);
+  });
+
+  test("preserves deleted SQL comments and YAML separators with correct numbering", () => {
+    const sql = parseUnifiedFile(SQL_COMMENT_PATCH);
+    expect(sql.del).toBe(1);
+    expect(groupHunks(sql)[0]!.lines.slice(0, 2)).toEqual([
+      { kind: "del", lnOld: 10, text: "-- migrate down" },
+      { kind: "context", lnOld: 11, ln: 10, text: "SELECT 1;" },
+    ]);
+
+    const yaml = parseUnifiedFile(YAML_SEPARATOR_PATCH);
+    expect(yaml.del).toBe(1);
+    expect(groupHunks(yaml)[0]!.lines.slice(0, 2)).toEqual([
+      { kind: "del", lnOld: 3, text: "---" },
+      { kind: "context", lnOld: 4, ln: 3, text: "steps:" },
+    ]);
+  });
+
+  test("does not mistake a context line beginning with @@ for a hunk header", () => {
+    const file = parseUnifiedFile(AT_PREFIX_CONTEXT_PATCH);
+    const hunks = groupHunks(file);
+    expect(hunks).toHaveLength(1);
+    expect(hunks[0]!.header).toBe("@@ -4,3 +4,3 @@");
+    expect(hunks[0]!.lines.slice(0, 3)).toEqual([
+      { kind: "context", lnOld: 4, ln: 4, text: "before" },
+      { kind: "context", lnOld: 5, ln: 5, text: "@@ VERSION" },
+      { kind: "context", lnOld: 6, ln: 6, text: "after" },
     ]);
   });
 
@@ -194,11 +247,11 @@ describe("paginateHunks", () => {
     add: 3,
     del: 0,
     lines: [
-      { kind: "context", text: "@@ -1,3 +1,3 @@" },
+      { kind: "context", header: true, text: "@@ -1,3 +1,3 @@" },
       { kind: "context", ln: 1, lnOld: 1, text: "a" },
       { kind: "context", ln: 2, lnOld: 2, text: "b" },
       { kind: "add", ln: 3, text: "c" },
-      { kind: "context", text: "@@ -10,3 +10,3 @@" },
+      { kind: "context", header: true, text: "@@ -10,3 +10,3 @@" },
       { kind: "context", ln: 10, lnOld: 10, text: "d" },
       { kind: "add", ln: 11, text: "e" },
       { kind: "add", ln: 12, text: "f" },
@@ -242,7 +295,7 @@ describe("paginateHunks", () => {
 
 /** A file just over the pagination threshold, all in a single hunk. */
 function oversizedFile(): DiffFile {
-  const lines: DiffLine[] = [{ kind: "context", text: "@@ -1,2500 +1,2500 @@" }];
+  const lines: DiffLine[] = [{ kind: "context", header: true, text: "@@ -1,2500 +1,2500 @@" }];
   for (let i = 1; i <= PAGINATE_THRESHOLD + 1; i += 1) {
     lines.push({ kind: "add", ln: i, text: `line ${i}` });
   }

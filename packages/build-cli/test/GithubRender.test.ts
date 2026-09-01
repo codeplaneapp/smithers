@@ -1,10 +1,12 @@
 import { Smithers as S } from "@smthrs/targets"
 import type * as Target from "@smthrs/targets/Target"
+import * as NodeChildProcess from "node:child_process"
 import * as Fs from "node:fs/promises"
 import { createRequire } from "node:module"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
+import { makeCli, normalizeArgv } from "../src/Cli.ts"
 import * as GithubRender from "../src/GithubRender.ts"
 import * as PackageDiscovery from "../src/PackageDiscovery.ts"
 import { PackageIndex } from "../src/PackageIndex.ts"
@@ -23,6 +25,17 @@ afterAll(async () => {
 
 const forceSpec = NodePath.resolve(import.meta.dirname, "fixtures/force-spec")
 const stepsSpec = NodePath.resolve(import.meta.dirname, "fixtures/steps-form")
+/**
+ * Splits a rendered shell command the way a shell would, honouring the single
+ * quotes the renderer puts around a label. Nothing here needs more: a
+ * generated command is exec plus a quoted label plus flags.
+ */
+const shellWords = (command: string): ReadonlyArray<string> =>
+  (command.match(/'[^']*'|"[^"]*"|\S+/g) ?? []).map((word) =>
+    (word.startsWith("'") && word.endsWith("'")) || (word.startsWith("\"") && word.endsWith("\""))
+      ? word.slice(1, -1)
+      : word
+  )
 const goldenRoot = NodePath.resolve(import.meta.dirname, "fixtures/github-render")
 const originalRoot = NodePath.join(goldenRoot, "originals")
 
@@ -88,6 +101,48 @@ const renderSteps = async (): Promise<GithubRender.CiRender> => {
 
 const temporaryRoot = async (): Promise<string> =>
   tracked(Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-github-render-"))))
+
+/**
+ * A committed package-mode workspace whose only target answers to `//:build`,
+ * so a rendered job command can be planned by the real CLI.
+ */
+const parseableWorkspace = async (): Promise<string> => {
+  const root = await temporaryRoot()
+  const put = async (relative: string, text: string): Promise<void> => {
+    const path = NodePath.join(root, relative)
+    await Fs.mkdir(NodePath.dirname(path), { recursive: true })
+    await Fs.writeFile(path, text, "utf8")
+  }
+  await put(
+    "WORKSPACE.ts",
+    `import { Smithers as S } from "@smthrs/targets"
+const packageJson = S.file("//package.json")
+export const Workspace = S.Workspace("fixture", {
+  repository: "git+https://example.invalid/fixture.git",
+  cache: S.Cache({ directory: ".flows" }),
+  runtime: S.Runtime.Node({ version: "26" }),
+  packageManager: S.PackageManager.Yarn({ manifest: packageJson, lockfile: S.file("//yarn.lock") }),
+  nodeModules: S.Npm.NodeModules({ packageJson }),
+})
+`
+  )
+  await put(
+    "PACKAGE.ts",
+    `import { Smithers as S } from "@smthrs/targets"
+const build = S.Shell.Test({ command: "true" })
+export const Package = S.Package({ targets: { build } })
+`
+  )
+  await put("package.json", `${JSON.stringify({ name: "fixture", private: true }, undefined, 2)}\n`)
+  await put("yarn.lock", "# yarn lockfile v1\n")
+  const git = (...args: ReadonlyArray<string>): void => {
+    NodeChildProcess.execFileSync("git", ["-C", root, ...args], { encoding: "utf8" })
+  }
+  git("init", "-q")
+  git("add", "-A")
+  git("-c", "user.email=t@t.t", "-c", "user.name=t", "commit", "-qm", "init")
+  return root
+}
 
 /** Publishes a rendered set into a bare temp workspace, preserve files first. */
 const seedPreserved = async (root: string, rendered: GithubRender.CiRender): Promise<void> => {
@@ -870,8 +925,65 @@ describe("toolchain variants", () => {
     })
     const ci = rendered.files.find((file) => file.path === "workflows/ci.yml")
     expect(ci!.content).toContain("pnpm exec smithers-build '//:test'")
-    expect(ci!.content).not.toContain("--affected-base")
-    expect(ci!.content).not.toContain("fetch-depth")
+  })
+
+  it("renders job commands the real argument parser accepts", async () => {
+    // The renderer used to append `--affected-base "$(git merge-base ...)"`,
+    // which no command defines, so every generated job died at argument
+    // parsing. Nothing noticed because the only assertion about that flag was
+    // that it was absent from a workflow that never asked for it. Reading the
+    // rendered command back through the parser that will actually run it is
+    // the check whose absence let an unrunnable workflow ship.
+    const run = anyTarget()
+    const workflow = S.Github.Workflow({ name: "ci", on: { pullRequest: true }, run: [run] })
+    const ciGen = S.Github.CiGen({ workflows: [workflow] })
+    const rendered = GithubRender.render({
+      ciGen,
+      workspace: unitWorkspace,
+      resolve: resolver([[ciGen, "//.github:github"], [run, "//:build"]]),
+      packageDir: ".github"
+    })
+    const ci = rendered.files.find((file) => file.path === "workflows/ci.yml")!
+
+    const root = await parseableWorkspace()
+
+    const commands = ci.content.split("\n")
+      .filter((line) => line.trimStart().startsWith("- run: "))
+      .map((line) => line.trimStart().slice("- run: ".length))
+    expect(commands).toHaveLength(1)
+    for (const command of commands) {
+      // Drop the package-manager exec prefix the workflow uses to reach the
+      // binary; what is under test is the argv smithers-build itself receives.
+      const argv = shellWords(command).slice(3)
+      let exitCode = 0
+      let output = ""
+      await makeCli({}).serve([...normalizeArgv([...argv, "--workspace", root, "--plan"])], {
+        exit: (code) => {
+          exitCode = code
+        },
+        stdout: (text) => {
+          output += text
+        }
+      })
+      expect(output, command).not.toContain("Unknown flag")
+      expect(exitCode, `${command}\n${output}`).toBe(0)
+    }
+  })
+
+  it("refuses affected: true rather than rendering a flag the CLI cannot parse", () => {
+    const run = anyTarget()
+    const workflow = S.Github.Workflow({ name: "ci", on: { pullRequest: true }, affected: true, run: [run] })
+    const ciGen = S.Github.CiGen({ workflows: [workflow] })
+    expect(
+      thrownCode(() =>
+        GithubRender.render({
+          ciGen,
+          workspace: unitWorkspace,
+          resolve: resolver([[ciGen, "//.github:github"], [run, "//:build"]]),
+          packageDir: ".github"
+        })
+      )
+    ).toBe("unsupported_affected")
   })
 
   // A CiGen declared in the root PACKAGE.ts has the empty string for its

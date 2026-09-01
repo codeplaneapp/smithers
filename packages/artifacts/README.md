@@ -3,15 +3,10 @@
 The content-addressed artifact store: bytes addressed by their own SHA-256
 digest.
 
-This is the second half of the cache. `@smthrs/step-cache` maps a step key to a
-recorded result; a recorded result references its large outputs **by digest**
-rather than inlining them, and those bytes live here. `docs/specs/Specs/Object
-Model.md` names both halves as the `Cache` service's job; `docs/specs/Specs/Input.md`
-is where "large values enter by digest" comes from.
-
-The package name says what it stores, per the naming rule in
-`docs/specs/Concepts/Journal Split.md`. It depends on `effect` and
-`@smthrs/crypto` and nothing else, owns no SQL, and bundles for the browser.
+This is the byte half of the cache. [`@smthrs/step-cache`](https://smithers.sh/api/step-cache)
+maps a step key to a recorded result; large outputs are referenced **by digest**
+and live here. The package depends on `effect` and `@smthrs/crypto`, owns no
+SQL, and bundles for the browser.
 
 ## Public API
 
@@ -21,7 +16,7 @@ The package name says what it stores, per the naming rule in
 | `ArtifactStore.Service`                                                    | `put(bytes)`, `get(digest)`, `has(digest)`, `findMissing(digests)`                                                                      |
 | `ArtifactStore.ArtifactMissing`                                            | The typed miss — the answer a read-through composition acts on                                                                          |
 | `ArtifactStore.ArtifactCorruption`                                         | Bytes at an address no longer hash to it                                                                                                |
-| `ArtifactStore.ArtifactStoreError`                                         | Host, transport, or invalid-address failures; retryable                                                                                 |
+| `ArtifactStore.ArtifactStoreError`                                         | Typed digest, configuration, host, crypto, and transport failures                                                                       |
 | `ArtifactStore.makeFileSystem`, `.layerFileSystem`                         | Over Effect's `FileSystem` tag                                                                                                          |
 | `ArtifactStore.makeMemory`, `.layerMemory`                                 | For tests and browser hosts with no durable filesystem                                                                                  |
 | `ArtifactStore.makeNoop`, `.layerNoop`                                     | Everything unavailable, with per-method overrides                                                                                       |
@@ -33,6 +28,25 @@ The package name says what it stores, per the naming rule in
 | `RemoteArtifacts.Service`                                                  | An `ArtifactStore.Service` that also declares its `downloadPolicy`                                                                      |
 | `RemoteArtifacts.DownloadPolicy`, `.downloadPolicies`, `.downloadPolicyOf` | `all` \| `toplevel` \| `minimal`, the list of them, and the reader that answers `undefined` for a store declaring none                  |
 | `CombinedArtifacts.make`, `.layer`                                         | Local-first, remote-second, with local write-back under `all` and `toplevel` and none under `minimal`                                   |
+
+## Resource and failure contract
+
+| Boundary                                  | Default                 | Guarantee                                                                    |
+| ----------------------------------------- | ----------------------- | ---------------------------------------------------------------------------- |
+| Filesystem directory                      | `.flows/objects`        | Two-hex fanout, atomic publication, digest verification, required fsync      |
+| Cross-process coordination                | `required`              | Writers and sweepers share per-digest lock files; stale owners are recovered |
+| Remote request, upload, download deadline | 60 seconds each         | No remote exchange can wait forever                                          |
+| Maximum downloaded blob                   | 256 MiB                 | The body is rejected before or while buffering past the limit                |
+| `findMissing` batch / response            | 1,000 digests / 256 KiB | Inputs are validated and deduplicated in first-seen order                    |
+| Combined upload deadline                  | 60 seconds              | Local publication remains authoritative when the opportunistic upload fails  |
+
+`invalid_configuration` and `invalid_digest` are permanent caller failures.
+`ArtifactMissing` is an ordinary miss, and `ArtifactCorruption` is an integrity
+failure. `digest_failed`, `unavailable`, and `transport_failed` describe host
+or transport failures whose retryability depends on the host and operation.
+
+Every `put` snapshots its bytes when the Effect begins. Stores never retain a
+caller-owned buffer, and every successful `get` returns a new byte array.
 
 ```ts
 import { ArtifactStore, CombinedArtifacts, RemoteArtifacts } from "@smthrs/artifacts"
@@ -66,8 +80,8 @@ const layer = CombinedArtifacts.layer({
   address.
 - **The endpoint and its credentials are a capability, never an input.** They
   arrive as layer construction options: they are not hashed into a step key, not
-  journaled, and not part of any recorded result
-  (`docs/specs/Specs/Input.md`, "secrets are never input").
+  journaled, and not part of any recorded result. Endpoint validation and error
+  messages never retain embedded credentials.
 
 ## Prior art
 
@@ -98,14 +112,14 @@ shared tier entirely.
 
 ## Not here
 
-Reclaiming published artifacts is an explicit verb per
-`docs/specs/Concepts/Reconciliation.md`, never a side effect of a store
-operation. The `.tmp-*` sweep in `layerFileSystem` reclaims crash orphans only;
-`ArtifactSweep` is the deletion surface, and the mark phase that decides what
-is live belongs to `@smthrs/engine-store`'s `ArtifactGc`
-(`docs/pages/artifact-gc.mdx`).
+Reclaiming published artifacts is an explicit operation, never a side effect of
+a store call. The `.tmp-*` sweep in `layerFileSystem` reclaims crash orphans
+only; `ArtifactSweep` is the deletion surface, and the mark phase that decides
+what is live belongs to `@smthrs/engine-store`'s
+[`ArtifactGc`](https://smithers.sh/artifact-gc).
 
 Chunked and resumable transfer is `RemoteArtifacts.Options.chunkBytes`, and the
 `RemoteOutputChecker` analogue is `RemoteArtifacts.Options.downloadPolicy`
 (`all` | `toplevel` | `minimal`), honored by `CombinedArtifacts.get` and by
-`@smthrs/engine-store`'s `ArtifactSync.hydrate`.
+[`@smthrs/engine-store`](https://smithers.sh/api/engine-store)'s
+`ArtifactSync.hydrate`.

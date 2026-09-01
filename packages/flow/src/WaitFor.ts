@@ -42,7 +42,6 @@ import { annotateWaiting } from "./FlowRuntime/WaitingAnnotation.ts"
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class WaitForRequestInvalid extends Schema.TaggedError<WaitForRequestInvalid>()(
   "@smthrs/flow/WaitForRequestInvalid",
@@ -62,7 +61,6 @@ export class WaitForRequestInvalid extends Schema.TaggedError<WaitForRequestInva
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const tag = "system/wait-for"
 
@@ -82,7 +80,6 @@ export const tag = "system/wait-for"
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const deferred = (name: string): DurableDeferred.DurableDeferred<typeof Schema.Json> =>
   DurableDeferred.make(`WaitFor/${name}`, { success: Schema.Json })
@@ -99,7 +96,6 @@ export const deferred = (name: string): DurableDeferred.DurableDeferred<typeof S
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const action: Action.Declared<
   typeof tag,
@@ -127,18 +123,18 @@ export const action: Action.Declared<
  */
 const parseToken = (token: string): Effect.Effect<DurableDeferred.TokenParsed, WaitForRequestInvalid> =>
   Effect.mapError(
-    Schema.decodeEffect(DurableDeferred.TokenParsed.FromString)(token),
-    () =>
+    DurableDeferred.TokenParsed.parse(token),
+    (error) =>
       new WaitForRequestInvalid({
         code: "malformed_token",
-        message: `${tag} was called with a token that is not a durable deferred token.`
+        message: `${tag} was called with a token that is not a durable deferred token. ${error.message}`
       })
   )
 
 /**
  * The wait point a payload names, resolved against the running execution.
  *
- * DECIDED (2026-08-11, pending review): a payload names EXACTLY one of `name`
+ * DECIDED: a payload names EXACTLY one of `name`
  * and `token`, and a token must address the execution that is waiting. A
  * deferred result is recorded against (flow name, execution id, deferred name)
  * and read back the same way, so awaiting a foreign token would park forever
@@ -148,7 +144,7 @@ const parseToken = (token: string): Effect.Effect<DurableDeferred.TokenParsed, W
  * another flow completes under that flow while this one reads under its own,
  * which is the same permanent park by a different route.
  *
- * DECIDED (2026-08-11, pending review): a wait point is addressed by the
+ * DECIDED: a wait point is addressed by the
  * PAYLOAD, and the per-dispatch identity {@link module:Sleep} derives its clock
  * from is deliberately NOT applied here. A wait is a rendezvous with something
  * outside the run, and a resolver has to name the same wait point to complete
@@ -216,7 +212,6 @@ const target = (
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer: Layer.Layer<never, never, Crypto.Crypto | FlowRuntime> = action.toLayer((payload) =>
   Effect.gen(function*() {

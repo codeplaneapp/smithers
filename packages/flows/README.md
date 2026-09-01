@@ -6,7 +6,7 @@ without flattening neighboring service constructors; `namespaces` lists those
 runtime namespace names.
 
 ```sh
-pnpm add @smthrs/flows
+pnpm add @smthrs/flows@rc
 ```
 
 ```ts
@@ -15,24 +15,27 @@ import { Engine, EngineStore, Journal, Kernel } from "@smthrs/flows"
 
 ## Public API
 
-| Namespace                                                                                                         | Re-exported package                                   |
-| ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| `Canonical`                                                                                                       | `@smthrs/canonical`                                   |
-| `Capability`                                                                                                      | `@smthrs/capability`                                  |
-| `Crypto`                                                                                                          | `@smthrs/crypto`                                      |
-| `Database`                                                                                                        | `@smthrs/database`                                    |
-| `Engine`                                                                                                          | `@smthrs/engine`                                      |
-| `Flow`, `Action`, `RetryPolicy`, `DurableDeferred`, `DurableClock`, `DurableQueue`, `FlowRuntime`, `StepIdentity` | `@smthrs/flow` (re-exported flat)                     |
-| `EngineStore`                                                                                                     | `@smthrs/engine-store`                                |
-| `Jj`                                                                                                              | `@smthrs/jj`                                          |
-| `Journal`                                                                                                         | `@smthrs/journal`                                     |
-| `RunStore`                                                                                                        | `@smthrs/run-store`                                   |
-| `StepCache`                                                                                                       | `@smthrs/step-cache`                                  |
-| `Kernel`                                                                                                          | `@smthrs/kernel`                                      |
-| `Keys`                                                                                                            | `@smthrs/keys`                                        |
-| `Sandbox`                                                                                                         | `@smthrs/sandbox`                                     |
-| `Sync`                                                                                                            | `@smthrs/sync`                                        |
-| `TimeTravel`                                                                                                      | `@smthrs/time-travel` (service key, re-exported flat) |
+| Namespace                                                                                                                                                                          | Re-exported package                                   |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `Artifacts`                                                                                                                                                                        | `@smthrs/artifacts`                                   |
+| `Canonical`                                                                                                                                                                        | `@smthrs/canonical`                                   |
+| `Capability`                                                                                                                                                                       | `@smthrs/capability`                                  |
+| `Crypto`                                                                                                                                                                           | `@smthrs/crypto`                                      |
+| `Database`                                                                                                                                                                         | `@smthrs/database`                                    |
+| `Engine`                                                                                                                                                                           | `@smthrs/engine`                                      |
+| `EngineStore`                                                                                                                                                                      | `@smthrs/engine-store`                                |
+| `Action`, `DurableClock`, `DurableDeferred`, `DurableQueue`, `Flow`, `FlowRuntime`, `Graph`, `HumanTask`, `Interpreter`, `Poll`, `RetryPolicy`, `Sleep`, `StepIdentity`, `WaitFor` | `@smthrs/flow` (re-exported flat)                     |
+| `Jj`                                                                                                                                                                               | `@smthrs/jj`                                          |
+| `Journal`                                                                                                                                                                          | `@smthrs/journal`                                     |
+| `Kernel`                                                                                                                                                                           | `@smthrs/kernel`                                      |
+| `Keys`                                                                                                                                                                             | `@smthrs/keys`                                        |
+| `Observability`                                                                                                                                                                    | `@smthrs/observability`                               |
+| `Plan`                                                                                                                                                                             | `@smthrs/plan`                                        |
+| `RunStore`                                                                                                                                                                         | `@smthrs/run-store`                                   |
+| `Sandbox`                                                                                                                                                                          | `@smthrs/sandbox`                                     |
+| `StepCache`                                                                                                                                                                        | `@smthrs/step-cache`                                  |
+| `Sync`                                                                                                                                                                             | `@smthrs/sync`                                        |
+| `TimeTravel`                                                                                                                                                                       | `@smthrs/time-travel` (service key, re-exported flat) |
 
 Namespacing preserves APIs such as `Kernel.ChildProcessSpawner.layerNoop` and
 `RunStore.RunStore.layer`. Depend on an individual package when a narrower
@@ -53,14 +56,16 @@ with every package root it re-exports: `@smthrs/canonical`,
 `@smthrs/step-cache`, `@smthrs/flow`, `@smthrs/engine`,
 `@smthrs/engine-store`, `@smthrs/sync`, and `@smthrs/time-travel`.
 
-Bundling is a weaker claim than running. The durable composition still needs a
-SQL client behind the `DurableWriter` contract, and the only ones shipped here
-are `node:sqlite`-backed, so a browser deployment must supply its own.
+Bundling is not durable execution. The rc.0 durable engine is supported only on
+Node.js >= 22.19.0 with local SQLite; browser and edge runtimes may author and
+inspect declarations but are not supported durable hosts, even with another
+SQL client.
 
 Platform implementations are never re-exported through the namespaces here
 either. Import `@smthrs/platform-node`, `@smthrs/platform-bun`,
 `@smthrs/kernel/test/TestHost`, `@smthrs/database/node/NodeDatabase`, or
-`@smthrs/journal/test/TestJournal` directly. See [browser support](../../docs/pages/architecture/browser-support.md).
+`@smthrs/journal/test/TestJournal` directly. See
+[browser support](https://smithers.sh/architecture/browser-support).
 
 ## The Node runtime
 
@@ -72,7 +77,11 @@ leaves the host to the caller; `layerHost` supplies the host too:
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
 
 const runtime = NodeRuntime.layerHost(
-  { filename: ".flows/engine.sqlite", owner: { hostId: "local-worker" } },
+  {
+    filename: ".flows/engine.db",
+    workspaceRoot: ".",
+    owner: { hostId: "local-worker" }
+  },
   registerFlows
 )
 ```
@@ -82,15 +91,12 @@ an unattended `GrantStore`, the default step boundary and workspace sandbox, a
 process-table liveness probe, and signal handling that releases every run the
 host owns before it shuts down.
 
-Two details of that composition are decisions rather than defaults.
-`NodeRuntime.engineRules` is merged underneath `HostOptions.rules`, allowing the
-`jj:snapshot` and `jj:restore` the ENGINE takes for a compensable action's
-pre-image; without them a host with no jj policy could not run a compensable
-action at all, and a program that denies `jj:snapshot` still denies it. And the
-signal handler keeps two escapes, because installing it removes Node's default
-disposition: a second signal leaves immediately, and a shutdown that outlasts
-`HostOptions.shutdownTimeoutMs` leaves anyway, both with the status the default
-disposition would have produced.
+The runtime journal queue is fixed at 1,024 entries and rejects overflow. Jj
+snapshot bookkeeping uses an engine-private service; `HostOptions.rules`
+governs only action-facing host access. Signal names are validated and
+deduplicated before installation, and `shutdownTimeoutMs` must be an integer
+from 0 through 2,147,483,647. A second signal, or a shutdown exceeding that
+deadline, exits with the signal's default status.
 
-See the [documentation index](../../docs/README.md) and
-[flows reference](../../docs/pages/api/flows.md).
+See the [documentation](https://smithers.sh/) and
+[flows reference](https://smithers.sh/api/flows).

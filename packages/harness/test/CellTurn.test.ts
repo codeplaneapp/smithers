@@ -659,7 +659,8 @@ console.log(kept)`
               seatChanges: [],
               activatedToolNames: [],
               remaining: Steering.empty(),
-              queued: false
+              queued: false,
+              duplicate: false
             }
           }
           drained = true
@@ -671,7 +672,8 @@ console.log(kept)`
             ],
             activatedToolNames: [],
             remaining: Steering.empty(),
-            queued: false
+            queued: false,
+            duplicate: false
           }
         })
     })

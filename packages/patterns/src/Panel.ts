@@ -29,7 +29,6 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly panelists: Readonly<Record<string, Flow.Any>>
@@ -43,7 +42,6 @@ export interface MakeOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions<I, A, E, R, B, E2, R2> {
   readonly panelists: Readonly<Record<string, (input: I) => Effect.Effect<A, E, R>>>
@@ -69,7 +67,6 @@ const payload = (input: unknown, role: string | undefined): unknown => role === 
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   const panelists = Object.entries(options.panelists)
@@ -81,7 +78,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
   }
   const roles = options.roles
   for (const name of Object.keys(roles ?? {})) {
-    if (options.panelists[name] === undefined) {
+    if (!Object.hasOwn(options.panelists, name)) {
       throw new PatternError({
         code: "invalid_decorator",
         message: `Panel declares a role for the unknown panelist "${name}"`
@@ -99,8 +96,9 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
     output: Schema.Unknown,
     flows: [...panelists.map(([, flow]) => flow), options.moderator],
     body: Node.capture(material, (input) => {
-      const nodes: Record<string, Node.Any> = {}
-      for (const [name, panelist] of panelists) nodes[name] = call(panelist, payload(input, roles?.[name]))
+      const nodes = Object.fromEntries(
+        panelists.map(([name, panelist]) => [name, call(panelist, payload(input, roles?.[name]))])
+      ) as Record<string, Node.Any>
       return Node.andThen(
         options.concurrency === undefined ? Node.all(nodes) : Bounded.all(nodes, { concurrency: options.concurrency }),
         Node.capture(
@@ -122,7 +120,6 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <I, A, E, R, B, E2, R2>(
   input: I,

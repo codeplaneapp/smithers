@@ -19,7 +19,7 @@
  */
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import { ControlRpcs } from "@smthrs/control"
-import { Layer } from "effect"
+import { Effect, Layer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
 import { createServer } from "node:http"
@@ -43,6 +43,8 @@ export interface ServerOptions extends ListenOptions {
    * cut shorter than that one needs a shorter cadence here.
    */
   readonly heartbeatMillis?: number | undefined
+  /** Maximum bytes accepted on one HTTP RPC request. Default one MiB. */
+  readonly maxRequestBodyBytes?: number | undefined
 }
 
 /**
@@ -72,7 +74,7 @@ export const isLoopbackHost = (host: string): boolean => host === "127.0.0.1" ||
 export const listenOptions = (options: ServerOptions): ListenOptions => {
   // `credential`, `listen`, and the keepalive cadence are this module's, not
   // `node:net`'s: they are named here so the rest is exactly a bind.
-  const { credential, heartbeatMillis: _cadence, listen, ...node } = options
+  const { credential, heartbeatMillis: _cadence, listen, maxRequestBodyBytes: _maxBody, ...node } = options
   const host = node.host ?? "127.0.0.1"
   if (isLoopbackHost(host)) return { ...node, host }
   if (listen !== true) {
@@ -98,11 +100,35 @@ export const listenOptions = (options: ServerOptions): ListenOptions => {
  */
 export const layerAuth = (options: ServerOptions): Layer.Layer<ControlRpcs.ControlAuth> =>
   options.credential === undefined || options.credential === ""
+    // The bypass is safe only because `listenOptions` refuses any bind but
+    // loopback when no credential is configured, so nothing off this machine
+    // can reach the RPC mount that runs as the local operator. Changing that
+    // bind rule without changing this branch reopens the control plane.
+    // eslint-disable-next-line no-restricted-syntax -- loopback-only bind, see above
     ? ControlRpcs.layerNoopAuth({ id: "local", kind: "operator", stampedAt: 0 })
     : ControlRpcs.layerBearerAuth({
       token: options.credential,
       principal: { id: "gateway", kind: "bearer" }
     })
+
+/** Authenticates protected HTTP paths before any request body is read. */
+const ingressOptions = (options: ServerOptions): GatewayServer.IngressOptions => {
+  const maxRequestBodyBytes = options.maxRequestBodyBytes
+  if (options.credential === undefined || options.credential === "") {
+    return maxRequestBodyBytes === undefined ? {} : { maxRequestBodyBytes }
+  }
+  const authenticator = ControlRpcs.bearerAuthenticator({
+    token: options.credential,
+    principal: { id: "gateway", kind: "bearer" }
+  })
+  return {
+    ...(maxRequestBodyBytes === undefined ? {} : { maxRequestBodyBytes }),
+    authorize: (headers) =>
+      authenticator.authenticate(headers).pipe(
+        Effect.match({ onFailure: () => false, onSuccess: () => true })
+      )
+  }
+}
 
 /**
  * Hosts the assembled gateway on a Node HTTP server.
@@ -125,7 +151,7 @@ export const layer = (
   options: ServerOptions = defaultServerOptions
 ) =>
   HttpRouter.serve(
-    GatewayServer.layer(health, options.heartbeatMillis).pipe(
+    GatewayServer.layer(health, options.heartbeatMillis, ingressOptions(options)).pipe(
       Layer.provide(layerAuth(options)),
       Layer.provide(RpcSerialization.layerNdjson)
     ),

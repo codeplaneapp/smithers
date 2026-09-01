@@ -1,6 +1,8 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { execFileSync } from "node:child_process"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join, relative, resolve } from "node:path"
-import { describe, expect, it } from "vitest"
+import { afterAll, describe, expect, it } from "vitest"
 
 /**
  * Every package's coverage thresholds are its primary regression gate, so the
@@ -155,12 +157,10 @@ describe("vitest coverage isolation conformance", () => {
   const coverageFloorDeferred = new Set([
     "cli",
     "control",
-    "core",
     "evals",
     "fs",
     "memory",
     "model",
-    "patterns",
     "registry",
     "scorers",
     "std",
@@ -482,18 +482,81 @@ describe("vitest coverage isolation conformance", () => {
     // contract target is the only thing that proves it, so CI has to run it
     // (REVIEW.md blocker 7).
     expect(workflow("ci-browser")).toMatch(/^\s*(?:- )?run: pnpm exec smithers-build '\/\/scripts:browserContract'$/m)
-    // The fault matrix. The typecheck is required through `//e2e:check` inside
-    // `//:gates`, and the matrix itself is the advisory `ci-faults` lane,
-    // because two gates in it are red by design and owned elsewhere (case 22's
-    // redaction requirement, and the durable park).
-    expect(workflow("ci-faults")).toMatch(/^\s*(?:- )?run: pnpm exec smithers-build '\/\/e2e:faults'$/m)
+    // The fault matrix. Until Phase 7 blocker B6 it ran under no gate at all:
+    // the package pattern did not reach `e2e/`, `e2e` was not a workspace
+    // member, and `//e2e:faults` failed in 262 ms with `Command "vitest" not
+    // found`. The typecheck is required through `//e2e:check`, which `//e2e:ci`
+    // holds and `//:gates` therefore reaches, and the matrix itself is the
+    // `ci-faults` lane.
+    const faults = workflow("ci-faults")
+    expect(faults).toMatch(/^\s*(?:- )?run: pnpm exec smithers-build '\/\/e2e:faults'$/m)
+    // And it gates. `continue-on-error: true` is the single line that makes a
+    // lane advisory, so a matrix that runs but cannot fail the pipeline would
+    // read as green from every other pin in this file. It is required now that
+    // the section 5.2 redaction deliverable landed: case 22's terminal-log half
+    // was the one gate red by design, the redacting logger closed it, and the
+    // matrix is 67 of 67. Slice the job out by its own key rather than
+    // searching the whole document, so a line added to a neighbouring job
+    // cannot satisfy this cell.
+    const faultsJob = faults.slice(faults.indexOf("\n  e2e-faults:") + 1).split(/\n {2}(?=\S)/)[0]!
+    expect(faultsJob).toContain("//e2e:faults")
+    expect(faultsJob).not.toContain("continue-on-error")
     expect(workflow("ci-rust")).toMatch(/^\s*(?:- )?run: pnpm exec smithers-build '\/\/crates\/flows-jj:rust'$/m)
     expect(workflow("ci-wasm")).toMatch(/^\s*(?:- )?run: pnpm exec smithers-build '\/\/crates\/flows-jj:wasm'$/m)
     // The setup action the workspace declaration renders installs the runtime
     // and the package manager for every lane, so its own file is pinned rather
-    // than the install step it used to inline.
+    // than the install step it used to inline. The jj install the real-binary
+    // host suite needs (issue #163) has no package-mode spelling yet: it was a
+    // per-job toolchain step in the retired ci.yml, `Github.Setup` carries the
+    // two cache secrets only, and the gap is recorded in the root PACKAGE.ts
+    // beside the workflow declarations. The pin comes back here when the attr
+    // does.
     const setup = readFileSync(join(packagesDir, "..", "actions", "setup", "action.yml"), "utf8")
     expect(setup).toMatch(/pnpm/)
+  })
+
+  it("runs the package suites on every platform, from one roster, with no advisory bit", () => {
+    // The package suites were once a required ubuntu job plus two copy-pasted
+    // jobs, `node-macos` and `node-windows`, free to drift into running
+    // different steps, and both excused by `continue-on-error`. Package mode
+    // renders all three from the single `packageCi` roster in the root
+    // PACKAGE.ts: ubuntu reaches it through `//:gates` in ci-test.yml, and the
+    // same roster is rendered verbatim into ci-node-macos.yml and
+    // ci-node-windows.yml. This cell pins what the matrix shape used to pin,
+    // read off the files the generator actually writes: the platform list, no
+    // drift between platforms, and no advisory bit.
+    //
+    // Package mode has no `continueOnError` attr, so no lane can be advisory:
+    // every platform is required. Reintroducing the attr for a platform means
+    // widening this cell in review, not editing a workflow.
+    const workflowsDir = join(packagesDir, "..", ".github", "workflows")
+    const laneTargets = (name: string, host: string): Array<string> => {
+      const contents = readFileSync(join(workflowsDir, `${name}.yml`), "utf8")
+      // Each platform is its own workflow, so a red platform cannot cancel the
+      // platforms still running. That is what the single matrix needed
+      // `fail-fast: false` for, and it is structural here.
+      expect(contents, name).toMatch(new RegExp(`^name: ${name}$`, "m"))
+      // Every job in the lane runs on the platform the lane is named for. A job
+      // that quietly moved back to ubuntu would report a platform green that
+      // never ran.
+      const hosts = new Set([...contents.matchAll(/^ {4}runs-on: (.+)$/gm)].map((match) => match[1]!))
+      expect([...hosts], name).toEqual([host])
+      // `continue-on-error: true` is the single line that makes a lane
+      // advisory; a lane that runs but cannot fail the pipeline would read as
+      // green from every other pin in this file.
+      expect(contents, name).not.toContain("continue-on-error")
+      return [...contents.matchAll(/run: pnpm exec smithers-build '\/\/packages\/([^:]+):ci'$/gm)]
+        .map((match) => match[1]!)
+        .sort()
+    }
+    const macos = laneTargets("ci-node-macos", "macos-latest")
+    const windows = laneTargets("ci-node-windows", "windows-latest")
+    // One roster, rendered twice: the two platforms cannot drift into running
+    // different steps.
+    expect(macos).toEqual(windows)
+    // And the roster is this suite's own package universe, so a new package
+    // joins every platform or fails here rather than shipping ubuntu-only.
+    expect(macos).toEqual([...packages].sort())
   })
 
   it("keeps every CI step a target invocation, never a hand-written command", () => {
@@ -606,18 +669,28 @@ describe("vitest coverage isolation conformance", () => {
       // `JSON.stringify` throw arm is unreachable; it exists so a future
       // cause shape reports the failure it carries instead of a TypeError.
       "agent/src/AgentAction.ts": 1,
+      // `findMissing` accepts at most 1,000 strict 64-byte digests, so its
+      // serialized request cannot reach the 256 KiB protocol ceiling. The
+      // assertion remains beside serialization to fail closed if either
+      // invariant changes.
+      "artifacts/src/RemoteArtifacts.ts": 1,
       // The agent package's former hints (FlowEngineLike's canonicalization
       // mappers and AgentSession's process-loss fallbacks) were removed with
       // the code that needed them in 81b218ce7; the entries leave with them.
       // Canonical capture rejects accessor properties before recursively
       // freezing the captured object graph, so the descriptor walk only sees
       // data properties in both identity implementations.
+      // Graph's four guards defend invariants established by the same build:
+      // every node has key material, recorded dependency targets exist, and
+      // reachability suppresses duplicate dependencies before conflict edges
+      // are added. They remain hard failures if a future pass breaks those
+      // invariants.
+      "core/src/Graph.ts": 4,
       "core/src/internal/node.ts": 1,
-      // The Node runtime merges `engineRules` under a program's configured
-      // ruleset only after returning for the empty case, so the first
-      // ruleset it reads back is always there; the fallback exists to
-      // discharge the optional an index read carries.
-      "flows/src/NodeRuntime.ts": 1,
+      // The YAML parser always attaches a position to parser issues and a
+      // mapping always converts to a non-null object. Both guards keep the
+      // redacted diagnostic path total across future parser upgrades.
+      "core/src/internal/skillFrontmatter.ts": 2,
       // Three unreachable-by-construction branches in the plan scheduler: the
       // ready-set can never be empty while work is pending (the compiler
       // rejects cycles), the dispatch key is built from strings so
@@ -685,18 +758,20 @@ describe("vitest coverage isolation conformance", () => {
       // `Result` has no way to carry that proof. Its twin left with the
       // transcript-replacement branch a `continue` used to take.
       "harness/src/Transcript.ts": 1,
-      "journal/src/SqlJournal.ts": 1,
+      // Published journal values come from acyclic decoded JSON; synchronous
+      // queue size/take cannot disagree while admission is open; and bytes
+      // just emitted by the JSON encoder decode immediately. The three guards
+      // keep those boundaries fail-closed if an implementation changes.
+      "journal/src/SqlJournal.ts": 3,
+      // A successful optimizer loop has run at least one body, so `attempts`
+      // is non-empty; the fallback exists only because Loop's generic result
+      // does not encode that postcondition.
+      "patterns/src/Optimizer.ts": 1,
       // `FileSet.Entry` is a closed two-member union, so the final
       // comparison arm's `else` and the fallthrough after every pair
       // returned are both unreachable by construction.
       "plan/src/FileSet.ts": 2,
       "plan/src/internal/node.ts": 1,
-      // Two unreachable-by-construction fallbacks in the plan compiler. Plan
-      // order closes every dependency before its dependent, so the
-      // transitive-closure fallback is unreachable; and the reader-after-writer
-      // pass walks an edge map keyed by every node of the plan, whose values
-      // hold node ids only, so its `edges.get(current)` lookup always hits.
-      "plan/src/Plan.ts": 2,
       // Every `flows_plans` column carries a CHECK constraint, so a row that
       // fails the row decode cannot be written.
       "plan/src/PlanStore.ts": 1,
@@ -706,6 +781,17 @@ describe("vitest coverage isolation conformance", () => {
       "plan/src/Planned.ts": 1,
       "run-store/src/AttemptStore.ts": 1,
       "run-store/src/RunStore.ts": 1,
+      // Provider processes can only originate from each provider's `spawn`,
+      // which records the opaque handle before returning it. These guards
+      // turn a future provenance violation into a typed unknown-process error.
+      "sandbox/src/AwsSandbox/make.ts": 1,
+      "sandbox/src/ContainerSandbox/make.ts": 1,
+      // Session paths are absolute beneath an absolute root, so parent
+      // creation is skipped only for the filesystem root. The second guard is
+      // the same opaque-process provenance check as the remote providers.
+      "sandbox/src/DirectorySandbox/make.ts": 2,
+      "sandbox/src/JustBashSandbox/make.ts": 1,
+      "sandbox/src/KubernetesSandbox/make.ts": 1,
       // `spawn` is the only source of a `RemoteProcess`, and it records every
       // one it returns, so the scripted provider's kill lookup cannot miss.
       "sandbox/src/RemoteChildProcessSpawner/TestRemote.ts": 1,
@@ -713,6 +799,9 @@ describe("vitest coverage isolation conformance", () => {
       // `Effect.sync`, so supervision's fallback for a failing `isRunning`
       // only discharges the error channel the handle type declares.
       "sandbox/src/SandboxSupervision/make.ts": 1,
+      // Splitting any string yields a first field; the nullish arm only
+      // discharges noUncheckedIndexedAccess before the type lookup.
+      "sandbox/src/Sandbox/fileSystem.ts": 1,
       "step-cache/src/CacheStore.ts": 1
     }
     const sourceFiles = (directory: string): Array<string> => {
@@ -754,5 +843,126 @@ describe("vitest coverage isolation conformance", () => {
       }
     }
     expect(found).toEqual(allowlist)
+  })
+})
+
+/**
+ * `known-files.d.ts` is generated, and it is one TypeScript union with 4,681
+ * members across 11,458 lines. A syntax-aware merge driver walks that file's
+ * whole AST recursively, and mergiraf 0.16.1 overflows its stack on it:
+ *
+ * ```
+ * thread 'main' has overflowed its stack
+ * fatal runtime error: stack overflow, aborting
+ * error: mergiraf merge --git ... died of signal 6
+ * error: failed to execute internal merge for known-files.d.ts
+ * Merge with strategy ort failed.
+ * ```
+ *
+ * The driver aborts instead of falling back to a line merge, so the whole
+ * `git merge` fails (upstream: https://codeberg.org/mergiraf/mergiraf).
+ * Developers enable it globally with `* merge=mergiraf` in git's global
+ * attributes file (`core.attributesFile`, `~/.config/git/attributes` by
+ * default), so every lander who has it configured hits the crash and
+ * substitutes `git merge-file` by hand on this one path.
+ *
+ * `.gitattributes` in the working tree outranks that global file, so one
+ * line there routes exactly this file to git's built-in text driver and leaves
+ * every other path on whatever driver the developer configured. This pins that
+ * line and proves it with a real three-way merge whose configured driver
+ * always fails, standing in for the crash.
+ */
+describe("known-files.d.ts merge-driver exclusion", () => {
+  const repoRoot = resolve(import.meta.dirname, "..", "..", "..")
+  const scratchDirectories: Array<string> = []
+
+  afterAll(() => {
+    for (const directory of scratchDirectories) {
+      rmSync(directory, { force: true, recursive: true })
+    }
+  })
+
+  it("routes the generated union to the text driver in .gitattributes", () => {
+    const attributes = readFileSync(join(repoRoot, ".gitattributes"), "utf8")
+    expect(
+      attributes,
+      ".gitattributes must exclude known-files.d.ts from a syntax-aware merge driver"
+    ).toMatch(/^\/known-files\.d\.ts merge=text$/m)
+  })
+
+  it("text-merges known-files.d.ts and leaves every other path on the configured driver", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "known-files-merge-"))
+    scratchDirectories.push(scratch)
+    const repository = join(scratch, "repository")
+    mkdirSync(repository)
+
+    // A driver that always fails stands in for the crashing one: the contract
+    // under test is which paths git hands to the configured driver at all.
+    const attributesFile = join(scratch, "global-attributes")
+    writeFileSync(attributesFile, "* merge=always-fails\n")
+
+    const git = (...args: Array<string>) =>
+      execFileSync("git", args, {
+        cwd: repository,
+        encoding: "utf8",
+        // The developer's real global and system configuration would decide
+        // the driver and the attributes file, which is the thing being pinned.
+        env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+        stdio: ["ignore", "pipe", "pipe"]
+      })
+
+    git("init", "--quiet", "--initial-branch=main", ".")
+    git("config", "user.name", "lane")
+    git("config", "user.email", "lane@local")
+    git("config", "core.attributesFile", attributesFile)
+    git("config", "merge.always-fails.name", "always fails")
+    git("config", "merge.always-fails.driver", "false")
+
+    // The two sides add their member at different positions, twenty filler
+    // members apart, so a text merge takes both and the merge exercises the
+    // driver rather than a textual conflict.
+    const filler = Array.from({ length: 20 }, (_, index) => `      | "filler-${index}.ts"`)
+    const union = (ours: string, theirs: string) =>
+      [
+        "declare module \"known\" {",
+        "  export type KnownFile =",
+        ...(ours === "" ? [] : [ours]),
+        ...filler,
+        ...(theirs === "" ? [] : [theirs]),
+        "      | \"z.ts\"",
+        "}",
+        ""
+      ].join("\n")
+
+    writeFileSync(join(repository, ".gitattributes"), readFileSync(join(repoRoot, ".gitattributes")))
+    writeFileSync(join(repository, "known-files.d.ts"), union("", ""))
+    writeFileSync(join(repository, "sibling.ts"), union("", ""))
+    git("add", "--all")
+    git("commit", "--quiet", "--message", "base")
+
+    git("checkout", "--quiet", "-b", "theirs")
+    writeFileSync(join(repository, "known-files.d.ts"), union("", "      | \"theirs.ts\""))
+    writeFileSync(join(repository, "sibling.ts"), union("", "      | \"theirs.ts\""))
+    git("commit", "--quiet", "--all", "--message", "theirs")
+
+    git("checkout", "--quiet", "main")
+    writeFileSync(join(repository, "known-files.d.ts"), union("      | \"ours.ts\"", ""))
+    git("commit", "--quiet", "--all", "--message", "ours")
+
+    // The excluded path merges: git used its built-in text driver, and both
+    // sides survive.
+    git("merge", "--no-edit", "theirs")
+    const merged = readFileSync(join(repository, "known-files.d.ts"), "utf8")
+    expect(merged).toContain("| \"ours.ts\"")
+    expect(merged).toContain("| \"theirs.ts\"")
+    expect(merged).not.toContain("<<<<<<<")
+
+    // Every other path still goes to the configured driver, so the exclusion
+    // is one file wide and not a repository-wide opt-out.
+    git("checkout", "--quiet", "-b", "sibling-ours", "main~1")
+    writeFileSync(join(repository, "sibling.ts"), union("      | \"ours.ts\"", ""))
+    git("commit", "--quiet", "--all", "--message", "sibling ours")
+    expect(() => git("merge", "--no-edit", "theirs")).toThrow()
+    expect(git("status", "--porcelain", "sibling.ts")).toMatch(/^(?:UU|AA) /)
   })
 })

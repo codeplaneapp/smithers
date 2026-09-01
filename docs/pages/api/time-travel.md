@@ -7,15 +7,23 @@ description: "Frame-addressed history behind one injectable service: inspect, fo
 Frame-addressed history behind ONE injectable service: inspect, fork, rewind. It reads and writes through public journal, cache, host, and time-travel store contracts.
 
 ```ts
+import { Engine } from "@smthrs/flows"
 import { TimeTravel } from "@smthrs/time-travel"
 import * as Effect from "effect/Effect"
 
 const program = Effect.gen(function*() {
   const timeTravel = yield* TimeTravel
-  const position = { runId: "build-42", frame: { lineageId: "build-42/root", seq: 17 } }
+  const lineageId = Engine.FlowEngine.Lineage.root("build-42")
+  const position = { runId: "build-42", frame: { lineageId, seq: 17 } }
   return yield* timeTravel.inspect(position, { initial: 0, reduce: (state) => state + 1 })
 })
 ```
+
+A lineage id is minted, never spelled. `FlowEngine.Lineage` is the one
+constructor for it, and the engine stamps its result on every record a run
+writes. This package only stores and compares the value, so it takes no
+dependency on the engine; the example reaches the constructor through
+`@smthrs/flows`, the barrel a caller already installs.
 
 ## Entry point
 
@@ -62,7 +70,9 @@ const program = Effect.gen(function*() {
 | --- | --- | --- |
 | `TimeTravel` | service key | tag `@smthrs/time-travel/TimeTravel`; `yield* TimeTravel` is the whole surface |
 | `TimeTravel.layer` | layer | needs only `TimeTravelStore`, `Journal`, `RunStore`, `CacheStore`, and `Jj` |
-| `make` | constructor | the scoped effect `layer` is built from |
+| `TimeTravel.layerWith`, `layerWith` | layers | the same wiring under an explicit `Options`; the module-level function and the static are the same layer |
+| `make`, `makeWith` | constructors | the scoped effects the layers are built from; `makeWith` takes an `Options` |
+| `Options` | interface | `isAlive`, the only knob |
 | `Position` | schema + type | `runId` plus a `Frame`; an address, never a snapshot |
 | `Projection`, `ForkOptions`, `RewindOptions`, `ForkResult`, `RewindResult` | types | operation inputs and outputs |
 
@@ -73,8 +83,29 @@ const program = Effect.gen(function*() {
 | `rewind(position, options?)` | the fenced, audited suffix-removal protocol. The ownership claim and audit id are minted inside; `options.detachedChildren` (`"block"` by default, or `"cancel"`) and `options.pageSize` are the only knobs |
 
 Recovery is not an operation. Building `TimeTravel.layer` finishes or rolls
-back every interrupted rewind audit before the service accepts work, so a
-crashed rewind never needs a call the caller has to remember.
+back every interrupted rewind audit before the service accepts work, except one
+whose run a live process still holds, so a crashed rewind never needs a call the
+caller has to remember.
+
+That exception is the point of the liveness seam. A rewind a living process
+still owns must not be stolen, so recovery declines it: the audit stays
+`in_progress`, stays in `pendingAudits`, and nothing is written, which leaves
+the next build free to finish it. `Options.isAlive` is an
+[`Ownership.LivenessCheck`](/api/run-store) and decides what "still live" means.
+It defaults to `Ownership.leaseLiveness()`, the same check the engine's run
+driver already applies to those rows: the owner is alive while its persisted
+heartbeat is younger than `Ownership.heartbeatStaleAfter`. A deployment that
+knows more supplies its own and refuses the takeover for longer; a supplied
+check can only refuse a takeover, never widen one, because the evidence
+recovery hands `RunStore.steal` is always `lease-expired` and `steal`
+re-verifies that claim inside the same write.
+
+```ts
+import { TimeTravel } from "@smthrs/time-travel"
+import * as Ownership from "@smthrs/run-store/Ownership"
+
+const layer = TimeTravel.layerWith({ isAlive: Ownership.leaseLiveness() })
+```
 
 `Replay`, `Fork`, `Rewind`, `Retry`, `Recovery`, `Compensation`, and
 `EffectHandlerRegistry` are internal machinery under
@@ -166,9 +197,19 @@ a `Position`, a run ID plus a `Frame`:
 
 `TimeTravel.layer` requires `TimeTravelStore`, `Journal`, `RunStore`,
 `CacheStore`, and `Jj`, and nothing else. Building it completes or rolls back
-interrupted rewind audits, so recovery is never a call. `Replay`, `Fork`,
-`Rewind`, `Retry`, `Recovery`, `Compensation`, and `EffectHandlerRegistry` are
-internal machinery under `src/internal/`.
+interrupted rewind audits, except one whose run a live process still holds, so
+recovery is never a call. `make`/`layer` use the default policy;
+`makeWith(options)` and `layerWith(options)` take an `Options`:
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `isAlive` | `Ownership.leaseLiveness()` | Whether the owner recorded on a run is still working, asked before startup recovery takes an interrupted rewind's run over. Answering `true` refuses the takeover and leaves the audit pending. |
+
+`TimeTravel.layerWith` is the same layer as the module-level `layerWith`,
+carried as a static so the umbrella barrel can export the service key without
+losing the way to provide it. `Replay`, `Fork`, `Rewind`, `Retry`, `Recovery`,
+`Compensation`, and `EffectHandlerRegistry` are internal machinery under
+`src/internal/`.
 
 `ForkOptions` carries only `workspaceRoot`; the workspace name is
 `smithers-fork-` followed by the child run id the fork mints, sanitized, capped
@@ -180,6 +221,18 @@ returns audit, archive, assessments, warnings, and cancelled children.
 Cancelling a detached child under `detachedChildren: "cancel"` is terminal and happens *before* the archive commit point, so it is the one rewind mutation rollback cannot undo. Each cancellation is written to the audit detail as it happens, and a rewind that later rolls back keeps the full `cancelledChildren` list and names the surviving cancellations in `detail.failure`. A `rolled_back` audit therefore never understates what the attempt left behind.
 
 Startup recovery uses archive evidence, not the engine-store replay classifier. An audit at `archive_committed` or `completed` is completed. Otherwise recovery requires the recorded suffix tail to be absent from the live journal and present in the archive. Missing or partial suffix evidence, or missing archive evidence, rolls back the compensation and restores the run's original state; it does not declare the rewind complete.
+
+An audit whose run another process still holds is a different outcome from a
+failure. Recovery reports it `Busy` and writes nothing: the audit keeps its
+`in_progress` status, stays in `pendingAudits`, and keeps whatever phase its
+live owner is still advancing, so a later pass retries it. Recording it
+`failed` closed it terminally and removed it from `pendingAudits` forever, so a
+rewind interrupted after its compensation but before its archive commit could
+never be rolled back by any pass, and the engine's stale-heartbeat steal then
+resumed the run against a workspace the rewind had already rewound.
+`Options.isAlive` is what turns "held by a process that died" back into
+progress: a run still `running` under a foreign owner the check calls alive is
+always refused.
 
 ### External-effect records
 

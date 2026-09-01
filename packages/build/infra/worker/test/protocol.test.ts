@@ -9,7 +9,9 @@ import {
 } from "../protocol.ts"
 
 const token = "test-token-with-sufficient-entropy-for-unit-tests"
-const tokenHash = createHash("sha256").update(token, "utf8").digest("hex")
+/** These cases exercise routes, not the credential split, so `token` publishes. */
+const writeTokenHash = createHash("sha256").update(token, "utf8").digest("hex")
+const readTokenHash = createHash("sha256").update("a-reader-that-never-publishes", "utf8").digest("hex")
 
 interface StoredEntry {
   readonly publication: ActionCachePublication
@@ -78,7 +80,8 @@ const makeHandler = (contentStore = new MemoryContentStore()) =>
   createHandler({
     actionCache: new MemoryActionCache(),
     contentStore,
-    tokenHash
+    readTokenHash,
+    writeTokenHash
   })
 
 const authorizedRequest = (path: string, init: RequestInit = {}): Request => {

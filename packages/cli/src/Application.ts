@@ -149,6 +149,11 @@ const rpcUrl = (remote: string): string => {
  */
 export const layer = (
   config: Config,
+  // Discovery, not safety: the empty registry is the transport-neutral default
+  // this module can build, and `NodeControl.layerRegistry` is the production
+  // one every Node composition passes. A command that finds no flows says so;
+  // it does not run anything with a guard removed.
+  // eslint-disable-next-line no-restricted-syntax -- registry is discovery, see above
   registry: Layer.Layer<Registry.Registry> = Registry.layerNoop(),
   engine: Engine = engineMemory,
   executor?:

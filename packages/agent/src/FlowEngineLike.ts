@@ -226,7 +226,7 @@ export const callMaterial = (
   call: Cell.Call,
   layers: ReadonlyArray<string> = []
 ): KeyMaterial.KeyMaterial => ({
-  version: "flows/key-material/v1",
+  version: "flows/key-material/v2",
   kind: call.effects.tier,
   body: {
     _tag: "CellCall",
@@ -267,7 +267,7 @@ const childMaterial = (
   child: Plan.Child,
   scope: { readonly layers: ReadonlyArray<string>; readonly run: string }
 ): KeyMaterial.KeyMaterial => ({
-  version: "flows/key-material/v1",
+  version: "flows/key-material/v2",
   kind: child.effects.tier,
   body: {
     _tag: "FlowChild",
@@ -777,7 +777,7 @@ export const recordModelStep = (
   policy: Schedule.Schedule<unknown, Model.ModelFailure>,
   budgetMillis?: number | undefined,
   correction?: number | undefined
-): Effect.Effect<typeof RecordedModelStep.Type, Exclude<Model.ModelFailure, ModelError.ModelError>> => {
+): Effect.Effect<typeof RecordedModelStep.Type, Model.ModelFailure> => {
   const retries: Array<ModelEvent.ModelEvent> = []
   let attempt = 0
   /** How many attempts this step has already had cut off at the budget. */
@@ -870,13 +870,33 @@ export const recordModelStep = (
     Effect.map((events) => ({ ...ladder, events: [...retries, ...events] })),
     Effect.catchIf(
       (error): error is ModelError.ModelError => error instanceof ModelError.ModelError,
-      (error) => Effect.succeed({ ...ladder, events: retries, error })
+      (error) =>
+        isCapacityRefusal(error)
+          ? Effect.fail(error)
+          : Effect.succeed({ ...ladder, events: retries, error })
     )
   )
 }
 
 /**
- * Refuses to record a refusal the composition will park on.
+ * Failures that describe provider capacity rather than the request.
+ *
+ * This is the recorder's unconditional floor. Classifier policy may decide
+ * whether the caller parks and retries one of these failures, but no classifier
+ * can turn one into a durable sealed value. `provider_internal` is the model
+ * vocabulary used for provider overload (including Anthropic 529); the status
+ * checks cover transports that retained the wire status under another code.
+ */
+const capacityStatuses: ReadonlySet<number> = new Set([429, 503, 504, 529])
+
+const isCapacityRefusal = (error: ModelError.ModelError): boolean =>
+  error.code === "rate_limited" ||
+  error.code === "quota_exceeded" ||
+  error.code === "provider_internal" ||
+  (error.httpStatus !== undefined && capacityStatuses.has(error.httpStatus))
+
+/**
+ * Applies a composition's additional quota-parking policy.
  *
  * {@link recordModelStep} folds a `ModelError` into the step's recorded VALUE
  * on purpose: a provider's refusal is evidence, and a replay that re-issued it
@@ -886,12 +906,10 @@ export const recordModelStep = (
  * pin "this prompt is refused" into the shared cache and make the wake
  * pointless: the retried call would replay the refusal forever.
  *
- * Failing the sealed action instead records an attempt, not a result. The park
- * retries under a new attempt number, which re-dispatches, and no cache row
- * outlives the window.
- *
- * With the no-op classifier — the default — nothing is classified and this is
- * the identity.
+ * {@link recordModelStep} already fails every normalized capacity refusal
+ * unconditionally. This policy hook may classify additional provider-specific
+ * failures for parking, but it cannot weaken that floor. With
+ * `QuotaPolicy.layerUnclassified` it is the identity for recorded values.
  */
 const unlessParked = (quota: QuotaPolicy.Service) =>
 (
@@ -1168,7 +1186,7 @@ export const make = (
 ): Effect.Effect<
   EngineLike.EngineLike,
   never,
-  Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance
+  Crypto.Crypto | FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance | Budget.Budget | QuotaPolicy.QuotaClassifier
 > =>
   Effect.gen(function*() {
     const instance = yield* FlowRuntime.FlowInstance
@@ -1221,7 +1239,15 @@ export const make = (
           // in the run passes: a step that assembles its own loop cannot evade
           // a budget declared for the whole run. `warn` journals inside the
           // budget itself and falls through here.
-          const verdict = yield* budget.check.pipe(Effect.mapError(accountingFailed))
+          //
+          // The sealed key goes with the question, and it has to: the check
+          // runs BEFORE the activity below replays, so on a resumed run it is
+          // asked about steps whose answers are already journaled and whose
+          // replay pays a provider nothing. Unnamed, it projects prior spend
+          // plus an estimate for a call the ledger already holds, and a run
+          // killed after its last model call resumes straight into
+          // `BudgetExceeded` for a call that costs zero.
+          const verdict = yield* budget.check(key).pipe(Effect.mapError(accountingFailed))
           if (verdict._tag === "refuse") {
             return yield* Effect.fail(
               new HarnessError.HarnessError({
@@ -1422,5 +1448,13 @@ export const layer = (
 ): Layer.Layer<
   EngineLike.EngineLike,
   never,
-  FlowRuntime.FlowRuntime | FlowRuntime.FlowInstance | Crypto.Crypto
+  | FlowRuntime.FlowRuntime
+  | FlowRuntime.FlowInstance
+  | Crypto.Crypto
+  // Carried, not defaulted. The port reads both services outright, so a
+  // composition that provides neither cannot build this layer at all: the
+  // spending ceiling and the quota policy are decisions a host makes, and the
+  // type is what stops one being made by omission.
+  | Budget.Budget
+  | QuotaPolicy.QuotaClassifier
 > => Layer.effect(EngineLike.EngineLike)(make(options))

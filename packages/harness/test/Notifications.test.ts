@@ -136,7 +136,8 @@ describe("harness notification adapter", () => {
       seatChanges: [],
       activatedToolNames: [],
       remaining: Steering.empty(),
-      queued: false
+      queued: false,
+      duplicate: false
     })
   })
 

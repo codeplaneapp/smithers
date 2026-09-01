@@ -2,38 +2,54 @@
  * Capability values, wildcard policy patterns, and effect-tier
  * classification.
  *
- * Governing design:
- * `docs/specs/Concepts/Permission Kernel.md` and
- * `docs/specs/Concepts/Effect Taxonomy.md`.
+ * Governing design: `docs/pages/concepts/hosts-and-capabilities.md`, rendered
+ * at `/concepts/hosts-and-capabilities`.
  *
  * @since 0.1.0
  */
 import { Option, Schema } from "effect"
 
 /**
- * A host operation that can be authorized by the permission kernel.
+ * The maximum UTF-16 length of an exact or patterned capability resource.
+ *
+ * Exact requests and authored patterns share the bound so permission failures,
+ * journal payloads, matching work, and exact-pattern derivation all have one
+ * finite input contract. Adapters must reject or summarize a larger host value
+ * before constructing a capability rather than carrying it into authorization.
  *
  * @since 0.1.0
- * @category models
+ * @category constants
  * @slop
  */
-export type Action =
-  | "fs:read"
-  | "fs:write"
-  | "net:get"
-  | "net:post"
-  | "model:call"
-  | "proc:spawn"
-  | "jj:status"
-  | "jj:diff"
-  | "jj:snapshot"
-  | "jj:restore"
-  | "jj:workspace-add"
-  | "jj:workspace-forget"
-  | "jj:root"
-  | "jj:revert"
+export const maxResourceLength = 4096
 
-const Action = Schema.Literals(
+/**
+ * The maximum pattern-length times resource-length work a match may perform.
+ *
+ * The matcher is O(pattern length times resource length) in the worst case and
+ * {@link matches} returns `false` when the product exceeds this budget.
+ * `Permission.evaluate` returns `deny` for a rule it cannot decide, and
+ * {@link withinMatchBudget} reports whether a pair is decidable. The budget is
+ * the square of {@link maxResourceLength}, so an ordinary short grant such as
+ * `/workspace/**` still matches a resource of well over a million units,
+ * covering every realistic command line and URL, while a maximal 4096-unit
+ * pattern is capped at a 4096-unit resource. A pattern ending in ` *` costs at
+ * most two passes.
+ *
+ * @since 0.1.0
+ * @category constants
+ * @slop
+ */
+export const maxMatchWork = maxResourceLength * maxResourceLength
+
+/**
+ * Schema for host operations that the permission kernel can authorize.
+ *
+ * @since 0.1.0
+ * @category schemas
+ * @slop
+ */
+export const Action = Schema.Literals(
   [
     "fs:read",
     "fs:write",
@@ -52,22 +68,40 @@ const Action = Schema.Literals(
   ] as const
 )
 
-const actions: ReadonlySet<string> = new Set([
-  "fs:read",
-  "fs:write",
-  "net:get",
-  "net:post",
-  "model:call",
-  "proc:spawn",
-  "jj:status",
-  "jj:diff",
-  "jj:snapshot",
-  "jj:restore",
-  "jj:workspace-add",
-  "jj:workspace-forget",
-  "jj:root",
-  "jj:revert"
-])
+/**
+ * A host operation that the permission kernel can authorize.
+ *
+ * @since 0.1.0
+ * @category models
+ * @slop
+ */
+export type Action = typeof Action.Type
+
+/**
+ * Schema for action selectors accepted in capability patterns.
+ *
+ * @since 0.1.0
+ * @category schemas
+ * @slop
+ */
+export const PatternAction = Schema.Literals(
+  [...Action.literals, "fs:*", "net:*", "model:*", "proc:*", "jj:*", "*"] as const
+)
+
+/**
+ * An action selector accepted in a capability pattern.
+ *
+ * @since 0.1.0
+ * @category models
+ * @slop
+ */
+export type PatternAction = typeof PatternAction.Type
+
+const actions: ReadonlySet<string> = new Set(Action.literals)
+const patternActions: ReadonlySet<string> = new Set(PatternAction.literals)
+const isAction = (value: string): value is Action => actions.has(value)
+const isPatternAction = (value: string): value is PatternAction => patternActions.has(value)
+const PatternResource = Schema.String.check(Schema.isMaxLength(maxResourceLength))
 
 /**
  * An exact adapter request subject to authorization.
@@ -78,7 +112,7 @@ const actions: ReadonlySet<string> = new Set([
  */
 export class Capability extends Schema.Class<Capability>("@smthrs/capability/Capability")({
   action: Action,
-  resource: Schema.String
+  resource: PatternResource
 }) {}
 
 /**
@@ -103,14 +137,23 @@ export const make = (action: Action, resource: string): Capability => new Capabi
  * renderer; folding them together is what keeps the bytes identical after the
  * next edit.
  *
+ * The function throws an `Error` that names an invalid action. Runtime
+ * validation prevents invalid structural inputs from colliding with valid
+ * durable identities.
+ *
  * @since 0.1.0
  * @category formatting
  * @slop
  */
 export const format = (capability: {
-  readonly action: string
+  readonly action: Action | PatternAction
   readonly resource: string
-}): string => `${capability.action}:${capability.resource}`
+}): string => {
+  if (!isPatternAction(capability.action)) {
+    throw new Error(`Invalid capability action: ${capability.action}`)
+  }
+  return `${capability.action}:${capability.resource}`
+}
 
 /**
  * Parses an exact capability. The action is the first two colon-separated
@@ -128,54 +171,36 @@ export const parse = (input: string): Option.Option<Capability> => {
     return Option.none()
   }
   const action = `${namespace}:${operation}`
-  return actions.has(action)
-    ? Option.some(make(action as Action, components.slice(2).join(":")))
+  const resource = components.slice(2).join(":")
+  return isAction(action) && resource.length <= maxResourceLength
+    ? Option.some(make(action, resource))
     : Option.none()
 }
 
 /**
- * An action selector accepted in a capability pattern.
- *
- * @since 0.1.0
- * @category models
- * @slop
- */
-export type PatternAction = Action | "fs:*" | "net:*" | "model:*" | "proc:*" | "jj:*" | "*"
-
-const PatternAction = Schema.Literals(
-  [
-    "fs:read",
-    "fs:write",
-    "net:get",
-    "net:post",
-    "model:call",
-    "proc:spawn",
-    "jj:status",
-    "jj:diff",
-    "jj:snapshot",
-    "jj:restore",
-    "jj:workspace-add",
-    "jj:workspace-forget",
-    "jj:root",
-    "jj:revert",
-    "fs:*",
-    "net:*",
-    "model:*",
-    "proc:*",
-    "jj:*",
-    "*"
-  ] as const
-)
-
-/**
  * An action and resource glob used to grant or deny a family of capabilities.
- * Resource globs are slash-normalized and matched against the whole resource.
+ * The matcher compares the pattern against the whole resource byte-exactly
+ * over UTF-16 code units. It performs no path normalization and no case
+ * folding, so `\` is an ordinary character that never matches `/`, and `A:/x`
+ * never matches `a:/X`.
  *
- * `*` compiles to `.*` and therefore crosses path separators, so
- * `fs:read src/*.ts` matches `src/nested/Capability.ts`. {@link subsumes}
- * recognises only `**` as recursive, so a grant written with `*` can never be
- * *proven* to cover anything and an envelope built from `*` patterns re-prompts
- * forever. Write `**` for a grant that has to be provable.
+ * `*` matches any run of UTF-16 code units, including path separators and
+ * newlines. `?` matches exactly one UTF-16 code unit, so an astral character
+ * such as an emoji requires two `?` characters. A trailing ` *` also matches
+ * the bare resource without trailing argument text. This rule makes a
+ * `proc:spawn` command grant such as `npm *` grant bare `npm`.
+ *
+ * {@link subsumes} can prove only the `**` wildcard form. A grant written with
+ * `*` can match a request but cannot be proven to cover it. Use `**` when an
+ * envelope must prove coverage. The grammar has no escape. Callers whose
+ * resources can contain `*` or `?`, including URLs with query strings and
+ * command lines, must not build patterns by string concatenation. Use
+ * {@link patternFromCapability} to derive exact grants safely.
+ *
+ * Matching costs O(pattern length times resource length) in the worst case.
+ * Both resources are limited to {@link maxResourceLength}, and
+ * {@link maxMatchWork} remains a fail-closed guard for unchecked structural
+ * inputs at the host boundary.
  *
  * @since 0.1.0
  * @category models
@@ -183,31 +208,83 @@ const PatternAction = Schema.Literals(
  */
 export class CapabilityPattern extends Schema.Class<CapabilityPattern>("@smthrs/capability/CapabilityPattern")({
   action: PatternAction,
-  resource: Schema.String
+  resource: PatternResource
 }) {}
 
-const normalizeSlashes = (value: string): string => value.replaceAll("\\", "/")
+/**
+ * Parses a formatted capability pattern.
+ *
+ * The wildcard action `*` occupies the first component. Every other action
+ * occupies the first two components. All remaining text belongs to the
+ * resource, including colons and an empty string. Missing components and
+ * unknown actions return `Option.none()`.
+ *
+ * @since 0.1.0
+ * @category parsing
+ * @slop
+ */
+export const parsePattern = (input: string): Option.Option<CapabilityPattern> => {
+  const components = input.split(":")
+  if (components[0] === "*") {
+    if (components.length < 2) {
+      return Option.none()
+    }
+    const resource = components.slice(1).join(":")
+    return resource.length <= maxResourceLength
+      ? Option.some(new CapabilityPattern({ action: "*", resource }))
+      : Option.none()
+  }
+  const namespace = components[0]
+  const operation = components[1]
+  if (namespace === undefined || operation === undefined || components.length < 3) {
+    return Option.none()
+  }
+  const action = `${namespace}:${operation}`
+  const resource = components.slice(2).join(":")
+  return isPatternAction(action) && resource.length <= maxResourceLength
+    ? Option.some(new CapabilityPattern({ action, resource }))
+    : Option.none()
+}
+
+/**
+ * Derives an exact pattern from a capability when the glob grammar can
+ * represent the resource exactly.
+ *
+ * The function returns `Option.none()` when the resource is longer than
+ * {@link maxResourceLength} or contains `*` or `?`. The grammar has no escape
+ * for those metacharacters, so returning a pattern would silently widen the
+ * grant. Quotes, newlines, and other literal text are accepted. The derived
+ * pattern matches that resource and nothing else because the matcher neither
+ * normalizes text nor folds case.
+ *
+ * @since 0.1.0
+ * @category constructors
+ * @slop
+ */
+export const patternFromCapability = (capability: Capability): Option.Option<CapabilityPattern> =>
+  capability.resource.length > maxResourceLength ||
+    capability.resource.includes("*") || capability.resource.includes("?")
+    ? Option.none()
+    : Option.some(new CapabilityPattern({ action: capability.action, resource: capability.resource }))
 
 const matchesAction = (pattern: PatternAction, action: Action): boolean =>
   pattern === "*" || pattern === action || (pattern.endsWith(":*") && action.startsWith(pattern.slice(0, -1)))
 
 /**
- * ECMA-262 non-Unicode `i`-flag canonicalization, applied per UTF-16 code
- * unit: uppercase the unit, but keep the original when uppercasing changes
- * its length or maps a non-ASCII unit onto ASCII. Matching the earlier
- * RegExp-based matcher's `i` flag exactly keeps Windows-path matching
- * byte-for-byte compatible with every stored grant.
+ * Reports whether {@link matches} can decide a pattern and exact capability
+ * within {@link maxMatchWork}.
+ *
+ * An action mismatch is decidable without resource matching. When the action
+ * selects the capability, the pattern-length times resource-length product
+ * must fit within the work budget.
+ *
+ * @since 0.1.0
+ * @category predicates
+ * @slop
  */
-const canonicalUnit = (unit: string): string => {
-  const upper = unit.toUpperCase()
-  if (upper.length !== 1) {
-    return unit
-  }
-  return unit.charCodeAt(0) >= 128 && upper.charCodeAt(0) < 128 ? unit : upper
-}
-
-const unitsEqual = (left: string, right: string, foldCase: boolean): boolean =>
-  left === right || (foldCase && canonicalUnit(left) === canonicalUnit(right))
+export const withinMatchBudget = (pattern: CapabilityPattern, capability: Capability): boolean =>
+  !matchesAction(pattern.action, capability.action) ||
+  pattern.resource.length * capability.resource.length <= maxMatchWork
 
 /**
  * Iterative glob matcher over UTF-16 code units: `*` matches any run of
@@ -222,7 +299,7 @@ const unitsEqual = (left: string, right: string, foldCase: boolean): boolean =>
  * whole match at O(pattern × resource) with constant memory — the standard
  * linear-scan wildcard algorithm.
  */
-const matchGlob = (pattern: string, resource: string, foldCase: boolean): boolean => {
+const matchGlob = (pattern: string, resource: string): boolean => {
   let patternIndex = 0
   let resourceIndex = 0
   let starIndex = -1
@@ -233,7 +310,7 @@ const matchGlob = (pattern: string, resource: string, foldCase: boolean): boolea
       starIndex = patternIndex
       starResourceIndex = resourceIndex
       patternIndex += 1
-    } else if (unit !== undefined && (unit === "?" || unitsEqual(unit, resource[resourceIndex]!, foldCase))) {
+    } else if (unit !== undefined && (unit === "?" || unit === resource[resourceIndex])) {
       patternIndex += 1
       resourceIndex += 1
     } else if (starIndex >= 0) {
@@ -251,16 +328,19 @@ const matchGlob = (pattern: string, resource: string, foldCase: boolean): boolea
 }
 
 const matchesResource = (pattern: string, resource: string): boolean => {
-  const normalizedPattern = normalizeSlashes(pattern)
-  const normalizedResource = normalizeSlashes(resource)
-  const foldCase = /^[A-Za-z]:\//.test(normalizedPattern) || /^[A-Za-z]:\//.test(normalizedResource)
+  if (pattern.length * resource.length > maxMatchWork) {
+    // A grant must never widen, so matches remains a total boolean and returns
+    // false. Permission.evaluate fails closed by treating an undecidable rule
+    // as a veto instead of skipping a deny that might otherwise fall through.
+    return false
+  }
   // A pattern ending in ` *` (`proc:spawn` command grants such as `npm *`)
   // additionally matches the bare resource without its trailing argument
   // text, exactly as the old `( .*)?` compilation did.
-  if (normalizedPattern.endsWith(" *") && matchGlob(normalizedPattern.slice(0, -2), normalizedResource, foldCase)) {
+  if (pattern.endsWith(" *") && matchGlob(pattern.slice(0, -2), resource)) {
     return true
   }
-  return matchGlob(normalizedPattern, normalizedResource, foldCase)
+  return matchGlob(pattern, resource)
 }
 
 /**
@@ -281,16 +361,14 @@ const actionSubsumes = (left: PatternAction, right: PatternAction): boolean => {
 }
 
 const resourceSubsumes = (left: string, right: string): boolean => {
-  const normalizedLeft = normalizeSlashes(left)
-  const normalizedRight = normalizeSlashes(right)
-  if (normalizedLeft === normalizedRight || normalizedLeft === "**") {
+  if (left === right || left === "**") {
     return true
   }
-  if (!normalizedLeft.endsWith("/**")) {
+  if (!left.endsWith("/**")) {
     return false
   }
-  const prefix = normalizedLeft.slice(0, -3)
-  return normalizedRight.startsWith(`${prefix}/`)
+  const prefix = left.slice(0, -3)
+  return right.startsWith(`${prefix}/`)
 }
 
 /**
@@ -306,21 +384,28 @@ export const subsumes = (left: CapabilityPattern, right: CapabilityPattern): boo
   actionSubsumes(left.action, right.action) && resourceSubsumes(left.resource, right.resource)
 
 /**
+ * Schema for the durability and retry semantics of an effect.
+ *
+ * @since 0.1.0
+ * @category schemas
+ * @slop
+ */
+export const EffectTier = Schema.Literals(["sealed", "compensable", "irreversible"] as const)
+
+/**
  * The durability and retry semantics of an effect.
  *
  * @since 0.1.0
  * @category models
  * @slop
  */
-export type EffectTier = "sealed" | "compensable" | "irreversible"
+export type EffectTier = typeof EffectTier.Type
 
 const lexicalPath = (path: string): string => {
-  const normalized = normalizeSlashes(path)
-  const drive = /^[A-Za-z]:\//.exec(normalized)?.[0]
-  const absolute = drive !== undefined || normalized.startsWith("/")
-  const prefix = drive ?? (absolute ? "/" : "")
+  const absolute = path.startsWith("/")
+  const prefix = absolute ? "/" : ""
   const segments: Array<string> = []
-  for (const segment of normalized.slice(prefix.length).split("/")) {
+  for (const segment of path.slice(prefix.length).split("/")) {
     if (segment === "" || segment === ".") {
       continue
     }
@@ -337,27 +422,26 @@ const lexicalPath = (path: string): string => {
   return `${prefix}${segments.join("/")}` || "."
 }
 
-const isAbsolutePath = (path: string): boolean => path.startsWith("/") || /^[A-Za-z]:\//.test(path)
+const isAbsolutePath = (path: string): boolean => path.startsWith("/")
 
 const isInsideWorkspace = (resource: string, workspaceRoot: string): boolean => {
   const root = lexicalPath(workspaceRoot)
-  const normalizedResource = normalizeSlashes(resource)
+  if (root === ".") {
+    return false
+  }
   const resolved = lexicalPath(
-    isAbsolutePath(normalizedResource) ? normalizedResource : `${root}/${normalizedResource}`
+    isAbsolutePath(resource) ? resource : `${root}/${resource}`
   )
-  const windowsRoot = /^[A-Za-z]:\//.test(root)
-  const comparableRoot = windowsRoot ? root.toLowerCase() : root
-  const comparableResolved = windowsRoot ? resolved.toLowerCase() : resolved
-  const prefix = comparableRoot.endsWith("/") ? comparableRoot : `${comparableRoot}/`
-  if (comparableResolved === comparableRoot) {
+  const prefix = root.endsWith("/") ? root : `${root}/`
+  if (resolved === root) {
     return true
   }
-  if (!comparableResolved.startsWith(prefix)) {
+  if (!resolved.startsWith(prefix)) {
     return false
   }
   // A relative root keeps its leading `..` segments, so a textual prefix match
   // is not containment: `../../x` starts with `../` yet escapes the root `..`.
-  const remainder = comparableResolved.slice(prefix.length)
+  const remainder = resolved.slice(prefix.length)
   return remainder !== ".." && !remainder.startsWith("../")
 }
 
@@ -369,11 +453,25 @@ const isInsideWorkspace = (resource: string, workspaceRoot: string): boolean => 
  * @slop
  */
 export interface TierOptions {
+  /**
+   * The lexical workspace boundary used to classify file writes.
+   *
+   * A root that normalizes to `.` or the empty string has no lexical boundary
+   * and fails closed to `irreversible`. Pass an absolute workspace root. Using
+   * `.` makes every write irreversible.
+   *
+   * @since 0.1.0
+   * @category models
+   */
   readonly workspaceRoot: string
 }
 
 /**
  * Determines the effect tier for an exact capability.
+ *
+ * Workspace containment is lexical, so symlinks are invisible. A caller that
+ * materializes workspace snapshots must resolve real paths before classifying
+ * a write.
  *
  * @since 0.1.0
  * @category predicates

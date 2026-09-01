@@ -531,7 +531,7 @@ describe("the download policy at the dispatch seam", () => {
       // The first read that actually wants the bytes gets them, from the shared
       // tier, one GET. `minimal` serves without writing back, so a host that
       // must not accumulate other machines' artifacts still does not.
-      const combined = CombinedArtifacts.make({
+      const combined = yield* CombinedArtifacts.make({
         local: consumer,
         remote: remote.service,
         downloadPolicy: "minimal"

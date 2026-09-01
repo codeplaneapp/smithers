@@ -901,6 +901,9 @@ importers:
       tsx:
         specifier: 4.23.12
         version: 4.23.12
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
     devDependencies:
       '@effect/language-service':
         specifier: 0.87.1
@@ -935,9 +938,6 @@ importers:
       madge:
         specifier: 8.0.0
         version: 8.0.0(supports-color@10.2.2)(typescript@6.0.3)
-      typescript:
-        specifier: 6.0.3
-        version: 6.0.3
       typescript-eslint:
         specifier: 8.65.0
         version: 8.65.0(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3)
@@ -1170,6 +1170,9 @@ importers:
       '@smthrs/agent':
         specifier: 1.0.0-rc.0
         version: link:../agent
+      '@smthrs/capability':
+        specifier: 1.0.0-rc.0
+        version: link:../capability
       '@smthrs/control':
         specifier: 1.0.0-rc.0
         version: link:../control
@@ -1838,9 +1841,6 @@ importers:
       '@effect/language-service':
         specifier: 0.87.1
         version: 0.87.1
-      '@effect/vitest':
-        specifier: 4.0.0-rc.108
-        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(vitest@4.1.9)
       '@eslint/js':
         specifier: 9.39.1
         version: 9.39.1
@@ -1853,9 +1853,6 @@ importers:
       dprint:
         specifier: 0.55.2
         version: 0.55.2
-      effect:
-        specifier: 4.0.0-rc.108
-        version: 4.0.0-rc.108
       esbuild:
         specifier: 0.28.1
         version: 0.28.1
@@ -2087,12 +2084,27 @@ importers:
       '@effect/language-service':
         specifier: 0.87.1
         version: 0.87.1
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1(supports-color@10.2.2))
       '@effect/vitest':
         specifier: 4.0.0-rc.108
         version: 4.0.0-rc.108(effect@4.0.0-rc.108)(vitest@4.1.9)
       '@eslint/js':
         specifier: 9.39.1
         version: 9.39.1
+      '@smthrs/agent':
+        specifier: 1.0.0-rc.0
+        version: link:../agent
+      '@smthrs/cli':
+        specifier: 1.0.0-rc.0
+        version: link:../cli
+      '@smthrs/control':
+        specifier: 1.0.0-rc.0
+        version: link:../control
+      '@smthrs/model':
+        specifier: 1.0.0-rc.0
+        version: link:../model
       '@types/node':
         specifier: 25.9.5
         version: 25.9.5
@@ -3225,6 +3237,9 @@ importers:
 
   packages/plan:
     dependencies:
+      '@smthrs/crypto':
+        specifier: 1.0.0-rc.0
+        version: link:../crypto
       '@smthrs/database':
         specifier: 1.0.0-rc.0
         version: link:../database
@@ -3707,6 +3722,9 @@ importers:
       '@effect/language-service':
         specifier: 0.87.1
         version: 0.87.1
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.108
+        version: 4.0.0-rc.108(effect@4.0.0-rc.108)(ioredis@5.11.1(supports-color@10.2.2))
       '@effect/vitest':
         specifier: 4.0.0-rc.108
         version: 4.0.0-rc.108(effect@4.0.0-rc.108)(vitest@4.1.9)
@@ -3743,6 +3761,9 @@ importers:
       madge:
         specifier: 8.0.0
         version: 8.0.0(supports-color@10.2.2)(typescript@6.0.3)
+      microsandbox:
+        specifier: 0.6.16
+        version: 0.6.16
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -4305,9 +4326,6 @@ importers:
       '@smthrs/control':
         specifier: 1.0.0-rc.0
         version: link:../control
-      '@smthrs/core':
-        specifier: 1.0.0-rc.0
-        version: link:../core
       '@smthrs/database':
         specifier: 1.0.0-rc.0
         version: link:../database
@@ -8124,6 +8142,38 @@ packages:
 
   '@stitches/core@1.2.8':
     resolution: {integrity: sha512-Gfkvwk9o9kE9r9XNBmJRfV8zONvXThnm1tcuojL04Uy5uRyqg93DC83lDebl0rocZCfKSjUv+fWYtMQmEDJldg==}
+
+  '@superradcompany/microsandbox-darwin-arm64@0.6.16':
+    resolution: {integrity: sha512-ZfiOPxBEPh+ihOFmK5hYWzCe+SmDdiiYMO760duRRVz/YhGiarGkQKbBZhofGIZdxw7549dTZyZ/IvE43Vzwzg==}
+    engines: {node: '>= 22'}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@superradcompany/microsandbox-linux-arm64-gnu@0.6.16':
+    resolution: {integrity: sha512-I3vYp+hZ0CsE5l+9JRNlnl94X7M3yLkQAHMKcOkLOvhzqsOL/ON/OlFuqOmq6jC4rIx+wA46fgHI5W1jlcx6mg==}
+    engines: {node: '>= 22'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@superradcompany/microsandbox-linux-x64-gnu@0.6.16':
+    resolution: {integrity: sha512-OkJCYv3kP1rS7mOmvZJtPCVouc3fzbeDlhBI8icum4EJX2dZ+xCHA0Tm+PUApYkMg3bSZSV+BHC9lnFwSA3CGg==}
+    engines: {node: '>= 22'}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@superradcompany/microsandbox-win32-arm64-msvc@0.6.16':
+    resolution: {integrity: sha512-FQNbLJQ5DE8hhw+N8hS8BeFZe9ONySfRHM0wKbN6gnwofbnMEdre+BvR8UZCKACdHNvoPpBstrMXk3LmsUJ+Pg==}
+    engines: {node: '>= 22'}
+    cpu: [arm64]
+    os: [win32]
+
+  '@superradcompany/microsandbox-win32-x64-msvc@0.6.16':
+    resolution: {integrity: sha512-8vJnOkywYbrYURR3bSt21SHqo5YfyA+96jmExxlOfTlH5wRwbiBt8stnGNlbBd1BFoaPV7WxdINOiHTxuf+sHQ==}
+    engines: {node: '>= 22'}
+    cpu: [x64]
+    os: [win32]
 
   '@svgr/babel-plugin-add-jsx-attribute@8.0.0':
     resolution: {integrity: sha512-b9MIk7yhdS1pMCZM8VeNfUlSKVRhsHZNMl5O9SfaX0l0t5wjdgu4IDzGB8bpnGBBOjGST3rRFVsaaEtI4W6f7g==}
@@ -12014,6 +12064,11 @@ packages:
   micromatch@4.0.8:
     resolution: {integrity: sha512-PXwfBhYu0hBCPw8Dn0E+WDYb7af3dSLVWKi3HGv84IdF4TyFoC0ysxFd0Goxw7nSv4T/PzEJQxsYsEiFCKo2BA==}
     engines: {node: '>=8.6'}
+
+  microsandbox@0.6.16:
+    resolution: {integrity: sha512-D2BKR1CDXWiHkzRA9IwaJnSHpk25kY5/Il5POf08T8wo3q5jBGMQJ/bGTHB4Qr+W49DxD7HEOGMsXwa1plNAKg==}
+    engines: {node: '>= 22'}
+    hasBin: true
 
   mime-db@1.54.0:
     resolution: {integrity: sha512-aU5EJuIN2WDemCcAp2vFBfp/m4EAhWJnUNSSw0ixs7/kXbd6Pg64EmwJkNdFhB8aWt1sH2CTXrLxo/iAGV3oPQ==}
@@ -18276,6 +18331,21 @@ snapshots:
 
   '@stitches/core@1.2.8': {}
 
+  '@superradcompany/microsandbox-darwin-arm64@0.6.16':
+    optional: true
+
+  '@superradcompany/microsandbox-linux-arm64-gnu@0.6.16':
+    optional: true
+
+  '@superradcompany/microsandbox-linux-x64-gnu@0.6.16':
+    optional: true
+
+  '@superradcompany/microsandbox-win32-arm64-msvc@0.6.16':
+    optional: true
+
+  '@superradcompany/microsandbox-win32-x64-msvc@0.6.16':
+    optional: true
+
   '@svgr/babel-plugin-add-jsx-attribute@8.0.0(@babel/core@7.29.7(supports-color@10.2.2))':
     dependencies:
       '@babel/core': 7.29.7(supports-color@10.2.2)
@@ -22731,6 +22801,14 @@ snapshots:
     dependencies:
       braces: 3.0.3
       picomatch: 2.3.2
+
+  microsandbox@0.6.16:
+    optionalDependencies:
+      '@superradcompany/microsandbox-darwin-arm64': 0.6.16
+      '@superradcompany/microsandbox-linux-arm64-gnu': 0.6.16
+      '@superradcompany/microsandbox-linux-x64-gnu': 0.6.16
+      '@superradcompany/microsandbox-win32-arm64-msvc': 0.6.16
+      '@superradcompany/microsandbox-win32-x64-msvc': 0.6.16
 
   mime-db@1.54.0: {}
 

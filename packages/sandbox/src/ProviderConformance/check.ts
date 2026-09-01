@@ -31,7 +31,8 @@ const writesItsOutput = (provider: Provider, commands: Commands): Effect.Effect<
   Effect.map(
     inSession(
       provider,
-      Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.string(ChildProcess.make(commands.writes)))
+      Effect.flatMap(ChildProcessSpawner, (spawner) =>
+        spawner.string(ChildProcess.make(commands.writes, { shell: commands.shell ?? false })))
     ),
     (exit) =>
       Exit.isSuccess(exit) && exit.value === commands.output ? undefined : {
@@ -45,7 +46,10 @@ const reportsANonzeroExit = (provider: Provider, commands: Commands): Effect.Eff
   Effect.map(
     inSession(
       provider,
-      Effect.flatMap(ChildProcessSpawner, (spawner) => spawner.exitCode(ChildProcess.make(commands.fails)))
+      Effect.flatMap(
+        ChildProcessSpawner,
+        (spawner) => spawner.exitCode(ChildProcess.make(commands.fails, { shell: commands.shell ?? false }))
+      )
     ),
     (exit) =>
       Exit.isSuccess(exit) && exit.value === commands.failureCode ? undefined : {
@@ -72,7 +76,7 @@ const signalsARunningCommand = (provider: Provider, commands: Commands): Effect.
       provider,
       Effect.scoped(Effect.gen(function*() {
         const spawner = yield* ChildProcessSpawner
-        const handle = yield* spawner.spawn(ChildProcess.make(commands.runs))
+        const handle = yield* spawner.spawn(ChildProcess.make(commands.runs, { shell: commands.shell ?? false }))
         yield* handle.kill()
         // A `kill` that RETURNS is not a `kill` that happened. An adapter whose
         // signal goes nowhere satisfies the type and leaves every cancelled
@@ -83,18 +87,28 @@ const signalsARunningCommand = (provider: Provider, commands: Commands): Effect.
         // HOW it stopped is not the subject. A provider that reports a
         // signalled process as a failed `exitCode` is as conforming as one that
         // reports a status, so the exit is captured rather than awaited.
-        return yield* Effect.timeoutOption(
+        const stopped = yield* Effect.timeoutOption(
           Effect.exit(handle.exitCode),
           commands.stopsWithin ?? defaultStopsWithin
         )
+        if (Option.isNone(stopped) || commands.survivor === undefined) return { stopped, survived: false }
+        // The handle is the wrapper shell, and a shell that dies while its
+        // child lives on satisfies everything above. The second look asks the
+        // machine itself whether the command's work is still there.
+        const survivor = yield* spawner.exitCode(
+          ChildProcess.make(commands.survivor, { shell: commands.shell ?? false })
+        )
+        return { stopped, survived: survivor === 0 }
       }))
     ),
     (exit) =>
-      Exit.isSuccess(exit) && Option.isSome(exit.value) ? undefined : {
+      Exit.isSuccess(exit) && Option.isSome(exit.value.stopped) && !exit.value.survived ? undefined : {
         check: "signals-a-running-command",
-        expected: "a declared `kill` stops a live process",
-        actual: Exit.isSuccess(exit) && Option.isNone(exit.value)
+        expected: "a declared `kill` stops a live process and everything it started",
+        actual: Exit.isSuccess(exit) && Option.isNone(exit.value.stopped)
           ? "the command was still running after the signal"
+          : Exit.isSuccess(exit) && exit.value.survived
+          ? "the command's work was still running after its handle reported it stopped"
           : shown(exit)
       }
   )

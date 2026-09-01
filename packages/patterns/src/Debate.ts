@@ -13,7 +13,6 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Turn {
   readonly proponent: unknown
@@ -21,11 +20,12 @@ export interface Turn {
 }
 
 /**
- * One typed contribution produced by {@link run}.
+ * One typed contribution produced by {@link run}. The turn wrapper is frozen,
+ * while its proponent and opponent payloads remain opaque caller-owned
+ * references and are not recursively frozen.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeTurn<Proponent, Opponent> {
   readonly proponent: Proponent
@@ -37,7 +37,6 @@ export interface RuntimeTurn<Proponent, Opponent> {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions<I, Proponent, Opponent, Judge, E, R, E2, R2, E3, R3> {
   readonly rounds: number
@@ -67,7 +66,6 @@ export interface RuntimeOptions<I, Proponent, Opponent, Judge, E, R, E2, R2, E3,
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly proponent: Flow.Any
@@ -89,10 +87,10 @@ const invalidRounds = (rounds: number): never => {
 /**
  * Builds the conservative fixed-round participant topology. Use {@link run}
  * when participant outputs must accumulate into a runtime transcript.
+ * A very large `rounds` value builds a very large graph before anything runs.
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   if (!Number.isSafeInteger(options.rounds) || options.rounds < 1) invalidRounds(options.rounds)
@@ -131,7 +129,6 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <I, Proponent, Opponent, Judge, E, R, E2, R2, E3, R3>(
   input: I,
@@ -147,11 +144,12 @@ export const run = <I, Proponent, Opponent, Judge, E, R, E2, R2, E3, R3>(
   }
   return Effect.gen(function*() {
     const transcript: Array<RuntimeTurn<Proponent, Opponent>> = []
+    const snapshot = (): ReadonlyArray<RuntimeTurn<Proponent, Opponent>> => Object.freeze([...transcript])
     for (let round = 1; round <= options.rounds; round++) {
-      const proponent = yield* options.proponent({ input, transcript, round })
-      const opponent = yield* options.opponent({ input, transcript, proponent, round })
-      transcript.push({ proponent, opponent })
+      const proponent = yield* options.proponent({ input, transcript: snapshot(), round })
+      const opponent = yield* options.opponent({ input, transcript: snapshot(), proponent, round })
+      transcript.push(Object.freeze({ proponent, opponent }))
     }
-    return yield* options.judge({ input, transcript })
+    return yield* options.judge({ input, transcript: snapshot() })
   })
 }

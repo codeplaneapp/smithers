@@ -22,6 +22,7 @@
  */
 import { Context, Effect, Layer } from "effect"
 import { IntegrationError } from "../core/IntegrationError.ts"
+import * as Environment from "../Environment.ts"
 import { type LinearConfig, resolve } from "./Config.ts"
 
 /**
@@ -248,7 +249,7 @@ interface NamedNode {
  */
 export const make = (
   config: LinearConfig = {},
-  env: Readonly<Record<string, string | undefined>> = process.env
+  env: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
 ): LinearClient => {
   const { apiBaseUrl, apiKey } = resolve(config, env)
 
@@ -561,5 +562,5 @@ export const make = (
  */
 export const layer = (
   config: LinearConfig = {},
-  env: Readonly<Record<string, string | undefined>> = process.env
+  env: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
 ): Layer.Layer<LinearClient> => Layer.sync(LinearClient, () => make(config, env))

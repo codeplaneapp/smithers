@@ -41,10 +41,12 @@ import { TestClock } from "effect/testing"
 import { describe, expect, it } from "vitest"
 import * as Agent from "../src/Agent.ts"
 import * as AgentAction from "../src/AgentAction.ts"
+import * as Budget from "../src/Budget.ts"
 import * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as QuotaPolicy from "../src/QuotaPolicy.ts"
 import * as Seat from "../src/Seat.ts"
 import * as SeatResolver from "../src/SeatResolver.ts"
+import * as Safety from "./Safety.ts"
 
 const prepared: Route.PreparedRequest = {
   routeId: "route-a",
@@ -250,6 +252,9 @@ const memory = <ROut, RIn>(
     Layer.provideMerge(AgentAction.layerHost(composition)),
     Layer.provideMerge(seats(model)),
     Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+    // Stated rather than inherited: a correction ladder is not the place to
+    // discover which ceiling a run is under.
+    Layer.provideMerge(Safety.layer),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),
     Layer.provideMerge(NodeCrypto.layer)
@@ -452,7 +457,7 @@ const incarnation = (
   hostId: string,
   composition: AgentAction.Host,
   model: Model.Model,
-  classifier: Layer.Layer<QuotaPolicy.QuotaClassifier> = QuotaPolicy.layerNoop()
+  classifier: Layer.Layer<QuotaPolicy.QuotaClassifier> = QuotaPolicy.layerUnclassified()
 ) =>
   Effect.gen(function*() {
     const engine = yield* EngineStore.make({
@@ -462,9 +467,10 @@ const incarnation = (
     })
     return Layer.mergeAll(Inheriting.layer, Interpreter.layer(InheritingFlow)).pipe(
       Layer.provideMerge(AgentAction.layerHost(composition)),
-      Layer.provideMerge(classifier),
       Layer.provideMerge(seats(model)),
       Layer.provideMerge(Layer.merge(Agent.layer, Agent.layerDefaults)),
+      Layer.provideMerge(classifier),
+      Layer.provideMerge(Budget.layerUnbounded()),
       Layer.provideMerge(Action.layerImplementations),
       Layer.provideMerge(Layer.succeed(FlowRuntime.FlowRuntime)(engine))
     )

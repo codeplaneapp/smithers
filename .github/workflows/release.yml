@@ -51,7 +51,7 @@ jobs:
       - name: Validate GitHub Actions workflows
         uses: docker://rhysd/actionlint:1.7.11
         with:
-          args: .github/workflows/apps-deploy.yml .github/workflows/canary.yml .github/workflows/ci-apps-e2e.yml .github/workflows/ci-browser.yml .github/workflows/ci-bun.yml .github/workflows/ci-examples.yml .github/workflows/ci-faults.yml .github/workflows/ci-node-macos.yml .github/workflows/ci-node-windows.yml .github/workflows/ci-rust.yml .github/workflows/ci-test.yml .github/workflows/ci-wasm.yml .github/workflows/docs-deploy.yml .github/workflows/pr-review.yml .github/workflows/release.yml
+          args: .github/workflows/apps-deploy.yml .github/workflows/canary.yml .github/workflows/ci-apps-e2e.yml .github/workflows/ci-browser.yml .github/workflows/ci-bun.yml .github/workflows/ci-examples.yml .github/workflows/ci-faults.yml .github/workflows/ci-node-macos.yml .github/workflows/ci-node-ubuntu.yml .github/workflows/ci-node-windows.yml .github/workflows/ci-rust.yml .github/workflows/ci-test.yml .github/workflows/ci-wasm.yml .github/workflows/docs-deploy.yml .github/workflows/pr-review.yml .github/workflows/release.yml
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:

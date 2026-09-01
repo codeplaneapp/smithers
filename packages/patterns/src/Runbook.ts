@@ -57,6 +57,10 @@ export interface Step {
  */
 export interface MakeOptions {
   readonly steps: ReadonlyArray<Step>
+  /**
+   * Called with `{ input, reason, scope }`; its declared input must be that
+   * struct or `Schema.Unknown`; `scope` is currently the string `"run"`.
+   */
   readonly approval: Flow.Any
   readonly onDeny: OnDeny
   readonly reason?: string | undefined
@@ -93,6 +97,8 @@ export interface RuntimeStep<I, Out, E, R> {
  *
  * `approve` must produce the literal `"approved"`; anything else is a denial
  * and fails the typed schema decode.
+ * `run` snapshots `steps` at entry; later array mutations do not alter that
+ * run.
  *
  * @category models
  * @since 0.1.0
@@ -239,18 +245,19 @@ export const run = <I, Out, E = never, R = never, E2 = never, R2 = never>(
   input: I,
   options: RuntimeOptions<I, Out, E, R, E2, R2>
 ): Effect.Effect<Result<Out>, E | E2 | PatternError | Schema.SchemaError, R | R2> => {
-  if (options.steps.length === 0) {
+  const steps = [...options.steps]
+  if (steps.length === 0) {
     return Effect.fail(new PatternError({ code: "invalid_decorator", message: "Runbook requires at least one step" }))
   }
-  if (!identities(options.steps.map((step) => step.id))) {
+  if (!identities(steps.map((step) => step.id))) {
     return Effect.fail(new PatternError({ code: "invalid_decorator", message: "Runbook step ids must be unique" }))
   }
   return Effect.gen(function*() {
-    const outputs: Record<string, Out> = {}
+    const outputs = new Map<string, Out>()
     const ran: Array<string> = []
     const skipped: Array<string> = []
     let previous: Out | undefined = undefined
-    for (const step of options.steps) {
+    for (const step of steps) {
       const request: Request<I, Out> = {
         step: step.id,
         risk: step.risk,
@@ -269,10 +276,10 @@ export const run = <I, Out, E = never, R = never, E2 = never, R2 = never>(
         }
       }
       const output = yield* step.run(request)
-      outputs[step.id] = output
+      outputs.set(step.id, output)
       ran.push(step.id)
       previous = output
     }
-    return { outputs, ran, skipped }
+    return { outputs: Object.fromEntries(outputs), ran, skipped }
   })
 }

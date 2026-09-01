@@ -79,7 +79,7 @@ describe("the scaffold", () => {
   it("writes flows/<name>/flow.mdx and ignores .flows/", () => {
     const root = directory(".git")
 
-    const result = Init.scaffold(root, "review")
+    const result = Init.scaffold(root, "review", {})
 
     expect(result).toMatchObject({ name: "review", created: true, gitignore: "created" })
     expect(result.flowFile).toBe(join(root, "flows", "review", "flow.mdx"))
@@ -90,10 +90,10 @@ describe("the scaffold", () => {
 
   it("never overwrites an existing flow", () => {
     const root = directory(".git")
-    Init.scaffold(root, "review")
+    Init.scaffold(root, "review", {})
     writeFileSync(join(root, "flows", "review", "flow.mdx"), "mine\n", "utf8")
 
-    const second = Init.scaffold(root, "review")
+    const second = Init.scaffold(root, "review", {})
 
     expect(second.created).toBe(false)
     expect(readFileSync(second.flowFile, "utf8")).toBe("mine\n")
@@ -101,7 +101,7 @@ describe("the scaffold", () => {
 
   it("leaves behind the .flows/ anchor, so every subdirectory resolves one root", () => {
     const root = directory()
-    const result = Init.scaffold(root, "review")
+    const result = Init.scaffold(root, "review", {})
     const nested = join(root, "src", "deep")
     mkdirSync(nested, { recursive: true })
 

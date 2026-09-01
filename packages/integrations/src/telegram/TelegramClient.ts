@@ -360,7 +360,14 @@ export const make = (config: TelegramConfig): TelegramClient => {
           chat_id: chatId,
           action: "typing",
           ...(options.messageThreadId == null ? {} : { message_thread_id: options.messageThreadId })
-        }).pipe(Effect.catch(() => Effect.void))
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.annotateLogs(
+              Effect.logWarning("Telegram typing action failed"),
+              { chatId: String(chatId), error }
+            )
+          )
+        )
       }
       const messageIds: Array<number> = []
       let usedPlainTextFallback = false

@@ -55,6 +55,7 @@ import * as AgentSession from "../src/AgentSession.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as Seat from "../src/Seat.ts"
 import * as SeatResolver from "../src/SeatResolver.ts"
+import * as Safety from "./Safety.ts"
 
 const prepared: Route.PreparedRequest = {
   routeId: "route-a",
@@ -167,6 +168,8 @@ const controlStores = (filename: string) =>
  */
 const host = (root: string, owner: Ownership.OwnerId, engineHost = "approval-resume-host") => {
   const registration = AgentSession.layer({
+    quotaPolicy: Safety.quotaPolicy,
+    budget: Safety.budget,
     flows: [
       FlowBinding.source("test/notes", [
         FlowBinding.make({
@@ -177,7 +180,13 @@ const host = (root: string, owner: Ownership.OwnerId, engineHost = "approval-res
     ],
     limits: { memoryBytes: 64 * 1024 * 1024, steps: 5_000_000 },
     maxFrames: 4
-  }).pipe(Layer.provide(Layer.merge(Agent.layer, SeatResolver.layer({ resolve: seat }))))
+  }).pipe(
+    Layer.provide(
+      Layer.merge(Agent.layer, SeatResolver.layer({ resolve: seat })).pipe(
+        Layer.provide(Safety.layer)
+      )
+    )
+  )
   const engine = NodeRuntime.layer(
     {
       filename: join(root, "engine.db"),

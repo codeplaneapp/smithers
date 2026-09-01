@@ -11,6 +11,12 @@ import { ControlPrincipal, ControlRpcs } from "./ControlRpcs.ts"
 /**
  * Control RPC handlers delegating to the transport-independent service.
  *
+ * Every mutation that records who asked reads `ControlPrincipal` and stamps
+ * it, rather than forwarding whatever the client sent. The identity the
+ * middleware authenticated is the only one the server can stand behind, and it
+ * is what reaches the journal, `RunSummary.cancellation`, and a steer's
+ * notification provenance.
+ *
  * @category layers
  * @since 0.1.0
  * @slop
@@ -33,10 +39,31 @@ export const layer = ControlRpcs.toLayer(
           return yield* control.deny({ ...input, principal })
         })
       ),
-      Steer: Effect.fn("Control.steer")((input) => control.steer(input)),
+      Steer: Effect.fn("Control.steer")((input) =>
+        Effect.gen(function*() {
+          const principal = yield* ControlPrincipal
+          // A steer carries a principal on the wire because an in-process
+          // caller names one that is not an operator: `agent/send` attributes
+          // a child's steer to the parent flow. A remote client may not, so
+          // the authenticated identity replaces whatever arrived. It reaches
+          // the notification's `sourceActor` and the run transcript, which is
+          // exactly where a spoofed name would be read as truth.
+          return yield* control.steer({ ...input, message: { ...input.message, principal } })
+        })
+      ),
       Signal: Effect.fn("Control.signal")((input) => control.signal(input)),
-      Cancel: Effect.fn("Control.cancel")((input) => control.cancel(input)),
-      Resume: Effect.fn("Control.resume")((input) => control.resume(input)),
+      Cancel: Effect.fn("Control.cancel")((input) =>
+        Effect.gen(function*() {
+          const principal = yield* ControlPrincipal
+          return yield* control.cancel({ ...input, principal })
+        })
+      ),
+      Resume: Effect.fn("Control.resume")((input) =>
+        Effect.gen(function*() {
+          const principal = yield* ControlPrincipal
+          return yield* control.resume({ ...input, principal })
+        })
+      ),
       List: Effect.fn("Control.list")((input) => control.list(input)),
       Watch: (input) => control.watch(input)
     })

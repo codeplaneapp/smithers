@@ -5,10 +5,8 @@
  * evaluates pure `andThen` builders against symbolic values to reveal static
  * topology; it never executes a flow node, an Effect, or a value mapper.
  *
- * Governing contracts:
- * `docs/specs/Concepts/Flow Builder Brief.md`,
- * `docs/specs/Concepts/Schema Shaped Builder.md`, and
- * `docs/specs/Concepts/Build Phases.md`.
+ * Governing contract: `packages/core/docs/api.md`, published as
+ * https://smithers.sh/api/core.
  *
  * @since 0.0.0
  */
@@ -118,7 +116,7 @@ export type Error<N> = N extends Node<infer _A, infer E> ? E : never
  */
 export interface DynamicOptions {
   readonly model?: string | undefined
-  readonly flows?: ReadonlyArray<unknown> | undefined
+  readonly flows?: ReadonlyArray<string | { readonly "~flows/core/Flow": object }> | undefined
   readonly output?: unknown
   readonly prompt?: string | undefined
   readonly effects?: Effects.Declaration | undefined
@@ -134,7 +132,8 @@ export interface DynamicOptions {
 export const NodeBuildErrorCode = Schema.Literals([
   "invalid_all_member",
   "invalid_continuation",
-  "invalid_priority"
+  "invalid_priority",
+  "unrepresentable_value"
 ])
 
 /**
@@ -171,6 +170,10 @@ export const isNode = (value: unknown): value is Any => Predicate.hasProperty(va
 /**
  * Constructs a node that succeeds with a constant value.
  *
+ * The value is retained by reference and read when {@link Graph.build} runs.
+ * Mutating it between node construction and graph construction therefore
+ * changes the recorded identity.
+ *
  * @category constructors
  * @since 0.0.0
  * @slop
@@ -184,6 +187,10 @@ export const succeed = <A>(value: A): Node<A> => internal.makeNode<A>(internal.s
  * arm cleans up and hands the failure back rather than absorbing it. The error
  * enters key material, so two failures carrying different data are two
  * declarations.
+ *
+ * The error is retained by reference and read when {@link Graph.build} runs.
+ * Mutating it between node construction and graph construction therefore
+ * changes the recorded identity.
  *
  * @category constructors
  * @since 0.1.0
@@ -205,7 +212,7 @@ export const all = <const R extends Readonly<Record<string, Any>>>(
   Types.Simplify<{ readonly [K in keyof R]: Success<R[K]> }>,
   Error<R[keyof R]>
 > => {
-  const asts: Record<string, Ast> = {}
+  const asts = Object.create(null) as Record<string, Ast>
   for (const [member, node] of Object.entries(nodes)) {
     if (!isNode(node)) {
       throw new NodeBuildError({
@@ -214,7 +221,19 @@ export const all = <const R extends Readonly<Record<string, Any>>>(
         message: `Node.all expected a Node at member "${member}"`
       })
     }
-    asts[member] = node.ast
+    Object.defineProperty(asts, member, {
+      configurable: false,
+      enumerable: true,
+      value: node.ast,
+      writable: false
+    })
+  }
+  if (Object.keys(asts).length !== Object.keys(nodes).length) {
+    throw new NodeBuildError({
+      code: "invalid_all_member",
+      member: "*",
+      message: "Node.all could not retain every member"
+    })
   }
   return internal.makeNode(internal.all(asts, Annotations.empty))
 }
@@ -272,6 +291,16 @@ export const map: {
  * a symbolic value so the downstream topology and its input references are
  * known before execution.
  *
+ * The symbolic value is a placeholder, not the eventual result, and the
+ * builder is typed against the success type only so member access reads
+ * naturally. Reading a member records an input reference and is the intended
+ * use. Computing on the placeholder is not: arithmetic and string
+ * interpolation coerce it to the literal text `[planned:<path>]`, and a
+ * conditional on it always takes the truthy branch, so only that branch is
+ * planned. Either result is baked into the plan's identity with no diagnostic.
+ * Decide with real values inside the step that produces them, and use the
+ * placeholder only to name what a later step reads.
+ *
  * @category sequencing
  * @since 0.0.0
  * @slop
@@ -319,6 +348,9 @@ export interface CatchOptions<E, B, E2, Handled = E> {
  * the protected node, so the recovery topology is visible before anything
  * runs. With no schema the whole typed error channel is handled; with one, the
  * remainder stays in the error type.
+ *
+ * The symbolic error carries the same placeholder caveat as {@link andThen}:
+ * read members from it, never compute on it or branch on it.
  *
  * @category sequencing
  * @since 0.1.0
@@ -443,6 +475,11 @@ export const lane: {
 /**
  * Adds an effect declaration annotation to a node without changing the
  * original.
+ *
+ * On a non-work node, the declaration narrows the envelope inherited by its
+ * children and enters that container node's identity. Only `Dynamic` work
+ * nodes participate in {@link Graph.conflicts}; containers are not counted a
+ * second time against their own children.
  *
  * @category annotations
  * @since 0.0.0

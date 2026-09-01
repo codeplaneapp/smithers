@@ -8,6 +8,7 @@
 import { Flow, Node } from "@smthrs/core"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as Compose from "./internal/Compose.ts"
 import { PatternError } from "./PatternError.ts"
 
 /**
@@ -19,7 +20,6 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly produce: Flow.Any
@@ -33,7 +33,6 @@ export interface MakeOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions<I, A, Review, E, R, E2, R2, E3, R3> {
   readonly produce: (input: I) => Effect.Effect<A, E, R>
@@ -51,7 +50,6 @@ export interface RuntimeOptions<I, A, Review, E, R, E2, R2, E3, R3> {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Exhausted<A, Review> {
   readonly output: A
@@ -63,23 +61,22 @@ export interface Exhausted<A, Review> {
 const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
   (flow as unknown as (input: unknown) => Node.Node<unknown, unknown>)(input)
 
-const approved = (value: unknown): boolean =>
-  value === true ||
-  value === "approved" ||
-  (
-    typeof value === "object" &&
-    value !== null &&
-    "approved" in value &&
-    value.approved === true
-  )
+/**
+ * Reads an accepted decision: `true`, `"approved"`, `{ approved: true }`, or
+ * `{ accepted: true }`.
+ *
+ * @category predicates
+ * @since 0.1.0
+ */
+export const accepted = Compose.accepted
 
 /**
  * Builds the conservative topology for every declared review round. Use
  * {@link run} for runtime approval and short-circuiting.
+ * A very large `maxRounds` builds a very large graph before anything runs.
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   if (!Number.isSafeInteger(options.maxRounds) || options.maxRounds < 1) {
@@ -102,7 +99,7 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
               Node.andThen(
                 call(options.review, output),
                 Node.capture({ maxRounds: options.maxRounds, round }, (review) => {
-                  if (approved(review)) return Node.succeed(output)
+                  if (accepted(review)) return Node.succeed(output)
                   if (round >= options.maxRounds) {
                     return Node.succeed({ output, review, approved: false, exhausted: true })
                   }
@@ -128,7 +125,6 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <I, A, Review, E, R, E2, R2, E3, R3>(
   input: I,
@@ -144,16 +140,15 @@ export const run = <I, A, Review, E, R, E2, R2, E3, R3>(
   }
   return Effect.gen(function*() {
     let output = yield* options.produce(input)
-    for (let round = 1; round <= options.maxRounds; round++) {
+    let round = 1
+    while (true) {
       const review = yield* options.review(output, round)
-      if (approved(review)) return output
+      if (accepted(review)) return output
       if (round === options.maxRounds) {
         return { output, review, approved: false, exhausted: true }
       }
       output = yield* options.revise({ output, review, round })
+      round += 1
     }
-    return yield* Effect.fail(
-      new PatternError({ code: "exhausted", message: "ReviewLoop exhausted without a terminal result" })
-    )
   })
 }

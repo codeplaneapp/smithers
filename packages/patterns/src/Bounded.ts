@@ -15,6 +15,7 @@
 import { Annotations, Node } from "@smthrs/core"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Compose from "./internal/Compose.ts"
 import { PatternError } from "./PatternError.ts"
 
 /**
@@ -25,7 +26,6 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface AllOptions {
   readonly concurrency: number
@@ -40,7 +40,6 @@ export interface AllOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions {
   readonly concurrency: number
@@ -104,23 +103,32 @@ const ranked = <Member>(
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const all = (
   members: Readonly<Record<string, Node.Any>>,
   options: AllOptions
 ): Node.Node<Readonly<Record<string, unknown>>, unknown> => {
   width(options.concurrency)
-  nonEmpty(Object.keys(members))
-  const order = ranked(members, (_name, member) => declaredPriority(member) ?? options.priority ?? 0)
+  const names = Object.keys(members)
+  nonEmpty(names)
+  const priorities = new Map<string, number>()
+  for (const name of names) {
+    const value = declaredPriority(members[name]!) ?? options.priority ?? 0
+    const refusal = Compose.safeIntegerPriorityRefusal("Bounded", name, value)
+    if (refusal !== undefined) throw refusal
+    priorities.set(name, value)
+  }
+  const order = ranked(members, (name) => priorities.get(name)!)
   let joined: Node.Node<Readonly<Record<string, unknown>>, unknown> = Node.succeed({})
   for (let offset = 0; offset < order.length; offset += options.concurrency) {
-    const batch: Record<string, Node.Any> = {}
-    for (const entry of order.slice(offset, offset + options.concurrency)) {
-      batch[entry.name] = options.priority === undefined || declaredPriority(entry.member) !== undefined
-        ? entry.member
-        : Node.priority(entry.member, options.priority)
-    }
+    const batch = Object.fromEntries(
+      order.slice(offset, offset + options.concurrency).map((entry) => [
+        entry.name,
+        options.priority === undefined || declaredPriority(entry.member) !== undefined
+          ? entry.member
+          : Node.priority(entry.member, options.priority)
+      ])
+    ) as Record<string, Node.Any>
     joined = Node.andThen(
       joined,
       Node.capture({ offset }, (previous) =>
@@ -143,7 +151,6 @@ export const all = (
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <A, E, R>(
   members: Readonly<Record<string, Effect.Effect<A, E, R>>>,
@@ -152,7 +159,26 @@ export const run = <A, E, R>(
   Effect.suspend((): Effect.Effect<Readonly<Record<string, A>>, E | PatternError, R> => {
     const refusal = widthRefusal(options.concurrency) ?? nonEmptyRefusal(Object.keys(members))
     if (refusal !== undefined) return Effect.fail(refusal)
-    const order = ranked(members, (name) => options.priorities?.[name] ?? options.priority ?? 0)
+    for (const name of Object.keys(options.priorities ?? {})) {
+      if (!Object.hasOwn(members, name)) {
+        return Effect.fail(
+          new PatternError({
+            code: "invalid_decorator",
+            message: `Bounded declares a priority for the unknown member "${name}"`
+          })
+        )
+      }
+    }
+    const priorities = new Map<string, number>()
+    for (const name of Object.keys(members)) {
+      const value: unknown = options.priorities !== undefined && Object.hasOwn(options.priorities, name)
+        ? options.priorities[name]
+        : options.priority ?? 0
+      const invalid = Compose.safeIntegerPriorityRefusal("Bounded", name, value)
+      if (invalid !== undefined) return Effect.fail(invalid)
+      priorities.set(name, value as number)
+    }
+    const order = ranked(members, (name) => priorities.get(name)!)
     return Effect.map(
       Effect.forEach(
         order,

@@ -156,6 +156,45 @@ describe("one project, from init to gc", processBudget, () => {
     expect(smithers("ps", "--status", "sleeping").status).toBe(2)
   })
 
+  /**
+   * The park is the contract; being unreadable was the defect.
+   *
+   * `up` on a module flow leaves a durable run at `accepted` that only
+   * `smithers cancel` ends, because the CLI's agent host runs prompt flows and
+   * a module flow's behaviour is registered in code by the host program that
+   * declares its delegates (`examples/src/16-fan-out-fan-in.ts`,
+   * `examples/src/24-control-plane-and-gateway.ts`). That is a real wait for a
+   * real external executor, so the run stays. What an operator got instead of
+   * an explanation was the bare word `pending` from `status`, no marker at all
+   * from `ps`, and a launch sentence that blamed a missing provider key and
+   * sent them to `smithers doctor` — the one place with nothing to say about
+   * it, and a diagnosis `smithers init`'s seatless-prompt refusal already
+   * owns.
+   */
+  it("says what the pending run waits for and how to proceed", () => {
+    const run = json("ps").items.find((entry: { readonly runId: string }) => entry.runId === runId)
+
+    // `ps` labels it, in the field that already names what a waiting run holds
+    // on: this one holds on an executor.
+    expect(run.status).toBe("accepted")
+    expect(run.waitingReason).toBe("executor")
+
+    // `status` says it, and says the one command that ends it.
+    const card = smithers("status", runId)
+
+    expect(card.status).toBe(0)
+    expect(card.stdout).toContain("no executor took the run")
+    expect(card.stdout).toContain(`smithers cancel ${runId}`)
+
+    // And the launch that produced it said the same thing, in the log the
+    // detached child wrote.
+    const log = readFileSync(join(project, ".flows", "logs", `${runId}.log`), "utf8")
+
+    expect(log).toContain("no executor took it")
+    expect(log).toContain("registers its delegates")
+    expect(log).not.toContain("smithers doctor")
+  })
+
   it("streams the run's own control events", () => {
     const events = json("logs", runId)
 

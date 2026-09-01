@@ -6,7 +6,7 @@
   "smthrs": {
     "group": "agent"
   },
-  "description": "Browser-safe higher-order flow patterns and decorators for flows",
+  "description": "Higher-order flow patterns and decorators for flows. It composes @smthrs/core alone and imports no Node built-ins.",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",

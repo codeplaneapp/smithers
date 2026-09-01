@@ -2,11 +2,10 @@
  * The persisted plan: a keyed action graph, its append-only store, its diff,
  * and the step-key compiler that gives every node its identity.
  *
- * `docs/specs/Specs/Object Model.md` calls a `Plan` "a `Node` graph with every
- * key computed, produced by the plan phase and inert until run". This package
- * is that value made durable — and nothing more: it performs no I/O beyond the
- * database and never executes anything. Driving a plan is
- * `@smthrs/engine-store`'s `PlanScheduler`.
+ * A plan is a `Node` graph with every key computed, produced by the plan phase
+ * and inert until run. This package is that value made durable and nothing
+ * more: it performs no I/O beyond the database and never executes anything.
+ * Driving a plan is `@smthrs/engine-store`'s `PlanScheduler`.
  *
  * Above the persisted form sits the authoring AST: `Node` describes a plan as
  * pure data, and `Planned` is the placeholder a body sees where a step result

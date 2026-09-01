@@ -92,6 +92,10 @@ const expected = [
 ].sort()
 
 describe("barrel", () => {
+  it("ships no unsupported Cloudflare durable-runtime subpath", () => {
+    expect(isFile(join(packagesDir, "flows", "src", "CloudflareRuntime.ts"))).toBe(false)
+  })
+
   it("derives a non-trivial universe from the barrel manifest", () => {
     // Guard the derivation itself: an empty or near-empty universe would make
     // every assertion below vacuously green.

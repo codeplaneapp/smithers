@@ -1,9 +1,12 @@
+import { describe, expect, it } from "@effect/vitest"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { describe, expect, it } from "vitest"
 import { GraphBuildError } from "../src/GraphBuildError.ts"
 import * as internal from "../src/internal/node.ts"
 import * as Node from "../src/Node.ts"
 import * as Planned from "../src/Planned.ts"
+import * as StepKey from "../src/StepKey.ts"
+import { withCrypto } from "./Crypto.ts"
 
 const tagged = <T extends internal.NodeAst["_tag"]>(
   ast: Node.Ast,
@@ -12,6 +15,8 @@ const tagged = <T extends internal.NodeAst["_tag"]>(
   expect(ast._tag).toBe(tag)
   return ast as Extract<internal.NodeAst, { readonly _tag: T }>
 }
+
+const contentKey = (body: unknown) => StepKey.content({ body, inputs: {}, layers: [], capabilities: {} })
 
 describe("Node", () => {
   it("records a constant", () => {
@@ -215,7 +220,13 @@ describe("Node", () => {
   })
 
   it("keeps the AST closure-free and JSON serializable", () => {
-    const node = Node.succeed({ path: "counter.txt" }).pipe(
+    const payload = {
+      path: "counter.txt",
+      ignored: () => 1
+    }
+    const payloadNode = Node.succeed(payload)
+    const functionOnly = Node.succeed({ ignored: () => 1 })
+    const node = payloadNode.pipe(
       Node.map((value) => value.path),
       Node.andThen(Node.all({ count: Node.succeed(1) })),
       Node.branch({
@@ -224,10 +235,122 @@ describe("Node", () => {
         else: () => Node.succeed("again")
       })
     )
+    expect(tagged(payloadNode.ast, "Succeed").value).toEqual({ path: "counter.txt" })
+    expect(tagged(functionOnly.ast, "Succeed").value).toEqual({})
     const json = JSON.stringify(node.ast)
     expect(json).not.toContain("=>")
     expect(json).not.toContain("function")
     expect(JSON.parse(json)).toEqual(node.ast)
+    expect(JSON.parse(JSON.stringify(functionOnly.ast))).toEqual(functionOnly.ast)
+  })
+
+  it.effect("keeps distinct Date payloads and the empty object in distinct content identities", () =>
+    Effect.gen(function*() {
+      const epoch = tagged(Node.succeed(new Date(0)).ast, "Succeed")
+      const nextDay = tagged(Node.succeed(new Date(86_400_000)).ast, "Succeed")
+      const empty = tagged(Node.succeed({}).ast, "Succeed")
+      expect(epoch).not.toEqual(nextDay)
+
+      const epochKey = yield* withCrypto(contentKey(epoch.value))
+      const nextDayKey = yield* withCrypto(contentKey(nextDay.value))
+      const emptyKey = yield* withCrypto(contentKey(empty.value))
+      expect(new Set([epochKey, nextDayKey, emptyKey]).size).toBe(3)
+    }))
+
+  it.effect("keys a URL payload apart from the empty object", () =>
+    Effect.gen(function*() {
+      const url = tagged(Node.succeed(new URL("https://x.test/a")).ast, "Succeed").value
+      const empty = tagged(Node.succeed({}).ast, "Succeed").value
+      expect(yield* withCrypto(contentKey(url))).not.toBe(yield* withCrypto(contentKey(empty)))
+    }))
+
+  it.effect("mirrors canonical payload serialization across representative values", () =>
+    Effect.gen(function*() {
+      const callable = Object.assign(() => 1, { toJSON: () => new Date(0) })
+      const corpus: ReadonlyArray<unknown> = [
+        new Date(0),
+        new URL("https://x.test/a"),
+        { a: 1 },
+        [1, "x", true, null],
+        { outer: { inner: [1, { value: "leaf" }] } },
+        { u: undefined },
+        { f: () => 1 },
+        [() => 1],
+        callable,
+        { toJSON: 1 }
+      ]
+
+      for (const input of corpus) {
+        const cloned = tagged(Node.succeed(input).ast, "Succeed").value
+        expect(yield* withCrypto(contentKey(cloned))).toBe(yield* withCrypto(contentKey(input)))
+      }
+    }))
+
+  it("drops values without a JSON representation and nulls array positions", () => {
+    expect(tagged(Node.succeed({ value: undefined, symbol: Symbol("value") }).ast, "Succeed").value).toEqual({})
+    expect(tagged(Node.succeed([() => 1, undefined, Symbol("value")]).ast, "Succeed").value).toEqual([
+      null,
+      null,
+      null
+    ])
+    expect(tagged(Node.succeed(() => 1).ast, "Succeed").value).toBeUndefined()
+    expect(tagged(Node.succeed(Symbol("value")).ast, "Succeed").value).toBeUndefined()
+    // eslint-disable-next-line no-sparse-arrays
+    expect(tagged(Node.succeed([, 1]).ast, "Succeed").value).toEqual([null, 1])
+  })
+
+  it("refuses unsupported prototypes instead of collapsing them onto an empty object", () => {
+    class Example {
+      readonly count: number
+      constructor(count: number) {
+        this.count = count
+      }
+    }
+    for (const payload of [new Map([["a", 1]]), new Set([1]), /abc/g, new Example(1)]) {
+      expect(() => Node.succeed(payload)).toThrowError(expect.objectContaining({
+        code: "invalid_payload",
+        path: []
+      }))
+    }
+  })
+
+  it("refuses payload accessors without invoking them", () => {
+    let calls = 0
+    const member = Object.defineProperty({}, "credential", {
+      enumerable: true,
+      get: () => {
+        calls++
+        return "secret"
+      }
+    })
+    const toJSON = Object.defineProperty({}, "toJSON", {
+      get: () => {
+        calls++
+        return () => ({})
+      }
+    })
+    const array = new Array<unknown>(1)
+    Object.defineProperty(array, "0", {
+      enumerable: true,
+      get: () => {
+        calls++
+        return "secret"
+      }
+    })
+
+    expect(() => Node.succeed({ nested: member })).toThrowError(expect.objectContaining({
+      code: "invalid_payload",
+      path: ["nested", "credential"]
+    }))
+    expect(() => Node.succeed(toJSON)).toThrowError(expect.objectContaining({
+      code: "invalid_payload",
+      path: []
+    }))
+    expect(() => Node.succeed(array)).toThrowError(expect.objectContaining({
+      code: "invalid_payload",
+      path: ["0"]
+    }))
+    expect(calls).toBe(0)
   })
 
   it("keeps raw function identity stable per object and fail-closed across objects", () => {
@@ -310,6 +433,11 @@ describe("internal/node call factories", () => {
         shared: [{ literal: true }, { literal: true }]
       }
     })
+    const encoded = tagged(flow.ast, "FlowCall").payload as {
+      readonly path: internal.PlannedReference
+    }
+    expect(Node.plannedReference(encoded.path)).toBe(encoded.path)
+    expect(Node.plannedReference({ ...encoded.path })).toBeUndefined()
     expect(internal.declaration(tagged(flow.ast, "FlowCall"))).toBe(declaration)
     expect(internal.declaration(tagged(action.ast, "ActionCall"))).toBe(declaration)
     expect(JSON.parse(JSON.stringify({ flow: flow.ast, action: action.ast }))).toEqual({
@@ -350,6 +478,21 @@ describe("internal/node call factories", () => {
     expect(cloned.twice[0]).toEqual({ leaf: true })
     expect(cloned.twice[0]).not.toBe(shared)
     expect(cloned.twice[1]).toBe(cloned.twice[0])
+
+    const jsonCycle: { readonly toJSON: () => unknown } = {
+      toJSON() {
+        return { self: jsonCycle }
+      }
+    }
+    const clonedJsonCycle = tagged(Node.succeed(jsonCycle).ast, "Succeed").value as { readonly self: unknown }
+    expect(clonedJsonCycle.self).toBe(clonedJsonCycle)
+
+    const directCycle: { readonly toJSON: () => unknown } = {
+      toJSON() {
+        return directCycle
+      }
+    }
+    expect(tagged(Node.succeed(directCycle).ast, "Succeed").value).toBeUndefined()
   })
 
   it("preserves an own __proto__ payload field without changing the clone prototype", () => {
@@ -410,7 +553,7 @@ describe("internal/node call factories", () => {
     const two = make(2)
 
     expect(one(2)).toBe(3)
-    expect(Node.functionIdentity(one)).toMatchObject({ algorithm: "sha256-source-captures/v3" })
+    expect(Node.functionIdentity(one)).toMatchObject({ algorithm: "sha256-source-captures/v4" })
     expect(Node.functionIdentity(one)).not.toEqual(Node.functionIdentity(two))
     expect(Node.functionIdentity(make(1))).toEqual(Node.functionIdentity(one))
 
@@ -462,6 +605,45 @@ describe("internal/node call factories", () => {
     const arraySymbol: Array<unknown> = []
     Object.defineProperty(arraySymbol, Symbol("extra"), { value: 1 })
     expect(() => Node.capture({ arraySymbol }, () => undefined)).toThrow(/unsupported array key Symbol\(extra\)/)
+  })
+
+  const nestedCapture = (depth: number): Record<string, unknown> => {
+    let nested: unknown = "leaf"
+    for (let index = 0; index < depth; index++) nested = { next: nested }
+    return nested as Record<string, unknown>
+  }
+
+  const captureFailure = (captures: Readonly<Record<string, unknown>>): unknown => {
+    try {
+      Node.capture(captures, () => undefined)
+      return undefined
+    } catch (error) {
+      return error
+    }
+  }
+
+  it("accepts capture data nested exactly through the 256-level limit", () => {
+    expect(Node.capture(nestedCapture(256), () => "ok")()).toBe("ok")
+  })
+
+  it("refuses capture data one level beyond the depth limit with an exact typed message", () => {
+    const error = captureFailure(nestedCapture(257))
+    expect(error).toBeInstanceOf(TypeError)
+    expect(error).not.toBeInstanceOf(RangeError)
+    expect((error as TypeError).message).toBe(
+      `Node.capture: capture at $${".next".repeat(257)} exceeds maximum depth 256; ` +
+        "captures must be finite, inert data"
+    )
+  })
+
+  it("refuses a 2,000-level capture with the bounded typed error", () => {
+    const error = captureFailure(nestedCapture(2_000))
+    expect(error).toBeInstanceOf(TypeError)
+    expect(error).not.toBeInstanceOf(RangeError)
+    expect((error as TypeError).message).toBe(
+      `Node.capture: capture at $${".next".repeat(257)} exceeds maximum depth 256; ` +
+        "captures must be finite, inert data"
+    )
   })
   it("records a scheduling priority on the node it annotates and leaves the original alone", () => {
     const plain = Node.succeed(1)

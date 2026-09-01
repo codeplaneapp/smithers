@@ -41,7 +41,7 @@ Every module is browser-bundleable; the root barrel is one of the entry points `
 | `BrowserFileSystem.ZenFsPromisesLike` | interface | the structural slice of a ZenFS `fs.promises`; Node's own `node:fs/promises` satisfies it |
 | `BrowserFileSystem.ZenFsFileHandleLike`, `ZenFsStatsLike` | interfaces | the bounded-read handle and the `Stats` subset `stat` needs |
 | `BrowserFileSystem.make`, `BrowserFileSystem.layer` | constructor + layer | effect's `FileSystem` over that slice |
-| `BrowserChildProcessSpawner.JustBashLike` | interface | the structural slice of a just-bash interpreter: one `run(command, { cwd, env })` |
+| `BrowserChildProcessSpawner.JustBashLike` | interface | the structural slice of a just-bash interpreter: one `exec(commandLine, { cwd, env })`, matching the real `Bash.exec` |
 | `BrowserChildProcessSpawner.layer` | layer | effect's `ChildProcessSpawner` over that interpreter; requires `FileSystem` and `Path` |
 | `BrowserServices.BrowserServices` | type | `ChildProcessSpawner \| FileSystem \| Path` |
 | `BrowserServices.layer` | layer | the aggregate, mirroring `NodeServices.layer`; a function, because the page owns both backends |
@@ -168,10 +168,11 @@ module and covered by a test:
 | `stdout`/`stderr` dispositions | kept at their Node meaning: `"inherit"` and `"ignore"` yield an empty stream, a `Sink` is transduced through, even though the interpreter captured the text either way |
 
 Runs are serialized behind a semaphore and executed inside an uninterruptible
-boundary because just-bash cannot abort an in-flight call. Interruption is still
-scope closure and fiber interruption, never an `AbortSignal`; it simply cannot
-take effect until the interpreter returns, and a caller never observes
-completion while hidden mutation of the virtual filesystem is still running.
+boundary: the adapter does not use the abort signal `exec` accepts, so an
+in-flight call runs to completion. Interruption is still scope closure and
+fiber interruption, never an `AbortSignal`; it simply cannot take effect until
+the interpreter returns, and a caller never observes completion while hidden
+mutation of the virtual filesystem is still running.
 
 A `StandardCommand` is rendered to a command line before it reaches the
 interpreter. Without `shell`, the command and its arguments are POSIX

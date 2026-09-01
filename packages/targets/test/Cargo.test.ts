@@ -17,8 +17,13 @@ const srcs = [Input.glob("//crates/flows-jj/**/*.rs")]
 const attrsOf = <A>(target: unknown): A => Target.metadata(target as never).attrs as A
 
 describe("RustToolchain", () => {
-  it("declares the pin the install reads, not the version the install resolves", () => {
-    expect(toolchain).toEqual({ name: "pinned", pin: "rust-toolchain.toml", rustup: "rustup", cargo: "cargo" })
+  it("declares the pin file the install reads, not a separately resolved version", () => {
+    expect(toolchain).toEqual({
+      name: "pinned",
+      pin: { _tag: "File", path: "//rust-toolchain.toml" },
+      rustup: "rustup",
+      cargo: "cargo"
+    })
     // A bare install reads the pin, so the components and targets the pin names
     // come with it and nothing restates them.
     expect(RustToolchain.install(toolchain)).toEqual(["rustup", "toolchain", "install"])
@@ -85,15 +90,15 @@ describe("CargoTest", () => {
       Cargo.CargoTest({
         toolchain,
         check: Cargo.Test(),
-        srcs: [...srcs, Input.file("//rust-toolchain.toml")],
+        srcs,
         deps: []
       }) as never
     )
     expect(metadata.inputs.map((input) => (input as { readonly path?: string; readonly pattern?: string })))
-      .toEqual([{ _tag: "Glob", pattern: "//crates/flows-jj/**/*.rs", exclude: [] }, {
+      .toEqual([{
         _tag: "File",
         path: "//rust-toolchain.toml"
-      }])
+      }, { _tag: "Glob", pattern: "//crates/flows-jj/**/*.rs", exclude: [] }])
     expect(metadata.cacheable).toBe(false)
   })
 })

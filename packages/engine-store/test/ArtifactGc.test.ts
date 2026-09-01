@@ -132,7 +132,7 @@ const harness = (host: Host, options?: {
     TestStores.database
   )
   const sweep = Layer.succeed(ArtifactSweep.ArtifactSweep)(
-    options?.sweep ?? ArtifactSweep.makeFileSystem(host.fs)
+    options?.sweep ?? ArtifactSweep.makeFileSystem(host.fs, { coordination: "process" })
   )
   const policy = options?.policy === undefined
     ? Layer.empty
@@ -144,7 +144,10 @@ const harness = (host: Host, options?: {
     collector,
     durable,
     Layer.succeed(ArtifactStore.ArtifactStore)(
-      ArtifactStore.makeFileSystem(host.fs, { durability: "best-effort" })
+      ArtifactStore.makeFileSystem(host.fs, {
+        durability: "best-effort",
+        coordination: "process"
+      })
     )
   )
 }
@@ -208,6 +211,51 @@ const gc = (options?: ArtifactGc.GcOptions) =>
     const collector = yield* ArtifactGc.ArtifactGc
     return yield* collector.gc(options)
   })
+
+describe("option bounds", () => {
+  const invalidPositive = [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]
+  const invalidNonNegative = [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]
+
+  it.live("rejects an invalid page size before scanning any durable roots", () =>
+    Effect.gen(function*() {
+      for (const pageSize of invalidPositive) {
+        const host = memoryFs()
+        const garbage = host.seedBlob(`invalid-page-${String(pageSize)}`, 100 * dayMs)
+        const failure = yield* withCrypto(
+          gc().pipe(Effect.flip, Effect.provide(harness(host, { pageSize })))
+        )
+        expect(failure).toMatchObject({
+          code: "invalid_options",
+          message: "artifact GC pageSize must be a positive safe integer"
+        })
+        expect(host.hasBlob(garbage)).toBe(true)
+      }
+    }))
+
+  it.live("rejects invalid call and policy grace bounds before inventory or deletion", () =>
+    Effect.gen(function*() {
+      for (const graceMs of invalidNonNegative) {
+        const directHost = memoryFs()
+        const directGarbage = directHost.seedBlob(`invalid-direct-${String(graceMs)}`, 100 * dayMs)
+        const direct = yield* withCrypto(
+          gc({ graceMs }).pipe(Effect.flip, Effect.provide(harness(directHost)))
+        )
+        expect(direct).toMatchObject({
+          code: "invalid_options",
+          message: "artifact GC graceMs must be a non-negative safe integer"
+        })
+        expect(directHost.hasBlob(directGarbage)).toBe(true)
+
+        const policyHost = memoryFs()
+        const policyGarbage = policyHost.seedBlob(`invalid-policy-${String(graceMs)}`, 100 * dayMs)
+        const policy = yield* withCrypto(
+          gc().pipe(Effect.flip, Effect.provide(harness(policyHost, { policy: { graceMs } })))
+        )
+        expect(policy.code).toBe("invalid_options")
+        expect(policyHost.hasBlob(policyGarbage)).toBe(true)
+      }
+    }))
+})
 
 describe("mark: durable roots keep their referenced blobs", () => {
   it.live("never collects a blob referenced by a run's attempt row or a cache entry", () =>
@@ -335,6 +383,37 @@ describe("mark: durable roots keep their referenced blobs", () => {
       expect(host.hasBlob(garbage)).toBe(true)
     }))
 
+  it.live("fails the collection when an attempt checkpoint is not valid JSON", () =>
+    Effect.gen(function*() {
+      const host = memoryFs()
+      const garbage = host.seedBlob("protected-by-checkpoint-refusal", 100 * dayMs)
+      const roots = Layer.succeed(SqlClient.SqlClient)(
+        ((strings: TemplateStringsArray) =>
+          strings.join("?").includes("flows_attempts")
+            ? Effect.succeed([{
+              run_id: "run-corrupt-checkpoint",
+              step_key_digest: "step-corrupt-checkpoint",
+              attempt: 1,
+              checkpoint_json: "{",
+              meta_json: "{}"
+            }])
+            : Effect.succeed([])) as never
+      )
+      const collector = ArtifactGc.layer().pipe(
+        Layer.provide(Layer.mergeAll(
+          roots,
+          Layer.succeed(ArtifactSweep.ArtifactSweep)(
+            ArtifactSweep.makeFileSystem(host.fs, { coordination: "process" })
+          )
+        ))
+      )
+      const failure = yield* withCrypto(
+        gc().pipe(Effect.flip, Effect.provide(collector))
+      )
+      expect(failure.code).toBe("mark_failed")
+      expect(host.hasBlob(garbage)).toBe(true)
+    }))
+
   it.live("fails the collection when a root table cannot be scanned", () =>
     Effect.gen(function*() {
       // A stub client that refuses the named table's scan and returns no rows
@@ -353,7 +432,9 @@ describe("mark: durable roots keep their referenced blobs", () => {
         ArtifactGc.layer().pipe(
           Layer.provide(Layer.mergeAll(
             refusing(table),
-            Layer.succeed(ArtifactSweep.ArtifactSweep)(ArtifactSweep.makeFileSystem(host.fs))
+            Layer.succeed(ArtifactSweep.ArtifactSweep)(
+              ArtifactSweep.makeFileSystem(host.fs, { coordination: "process" })
+            )
           ))
         )
       const cacheFailure = yield* withCrypto(
@@ -451,7 +532,10 @@ describe("sweep: liveness under concurrency and crashes", () => {
       const freshened = host.seedBlob("re-referenced-output", 100 * dayMs)
       const fresh = "written-during-sweep"
       const freshDigest = sha256(bytes(fresh))
-      const store = ArtifactStore.makeFileSystem(host.fs, { durability: "best-effort" })
+      const store = ArtifactStore.makeFileSystem(host.fs, {
+        durability: "best-effort",
+        coordination: "process"
+      })
       host.hooks.beforeRemove = () =>
         // A concurrent writer publishes a brand-new blob and re-publishes the
         // bytes of an old unreferenced one — the dedupe path that freshens the

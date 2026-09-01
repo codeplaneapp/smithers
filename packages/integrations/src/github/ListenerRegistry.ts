@@ -301,7 +301,7 @@ export const parseRegistry = (input: unknown, source: string = DEFAULT_REGISTRY_
  * @category constructors
  * @since 1.0.0
  */
-export const readRegistry = (workspaceRoot: string = process.cwd()): Registry => {
+export const readRegistry = (workspaceRoot: string): Registry => {
   const path = resolvePath(workspaceRoot, DEFAULT_REGISTRY_PATH)
   if (!existsSync(path)) throw configError(`Listener registry not found at ${path}.`, { path })
   return parseRegistry(readFileSync(path, "utf8"), path)

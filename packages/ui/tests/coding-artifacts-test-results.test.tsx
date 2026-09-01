@@ -85,6 +85,31 @@ describe("TestResults (model mode)", () => {
     expect(container!.querySelectorAll('[data-slot="test-row"]').length).toBe(3);
   });
 
+  test("opens a streaming suite when its first failure arrives unless the user already toggled it", async () => {
+    const running: TestSuiteModel = {
+      id: "streaming",
+      name: "streaming",
+      tests: [{ id: "case", name: "streams", status: "running" }],
+    };
+    const failed: TestSuiteModel = {
+      ...running,
+      tests: [{ id: "case", name: "streams", status: "failed", errorText: "late failure" }],
+    };
+
+    await render(<TestResults suites={[running]} running />);
+    const suite = container!.querySelector('[data-slot="test-suite"]')!;
+    expect(suite.getAttribute("data-state")).toBe("closed");
+    await act(async () => root!.render(<TestResults suites={[failed]} />));
+    expect(suite.getAttribute("data-state")).toBe("open");
+    expect(container!.textContent).toContain("late failure");
+
+    await act(async () => root!.render(<TestResults suites={[running]} running />));
+    const trigger = container!.querySelector('[data-slot="test-suite-trigger"]') as HTMLButtonElement;
+    await act(async () => trigger.click());
+    await act(async () => root!.render(<TestResults suites={[failed]} />));
+    expect(suite.getAttribute("data-state")).toBe("closed");
+  });
+
   test("failed rows nest error text and a stack trace", async () => {
     const withStack: readonly TestSuiteModel[] = [
       {
@@ -130,6 +155,7 @@ describe("TestResults (model mode)", () => {
     expect(summary.textContent).toContain("1 skipped");
     expect(summary.textContent).toContain("1 todo");
     expect(container!.querySelector('[data-slot="test-results-duration"]')!.textContent).toBe("2.4s");
+    expect(container!.querySelectorAll('[data-slot="test-suite"]')).toHaveLength(suites.length);
   });
 
   test("progress is indeterminate while running", async () => {

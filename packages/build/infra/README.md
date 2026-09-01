@@ -9,6 +9,10 @@ The hosted service and the self-hosted service under [`../terraform/`](../terraf
 serve the same HTTP protocol. A client can switch between them by changing the
 endpoint and bearer token; cache keys and payloads do not change.
 
+The service has two credentials: one that may read and one that may publish.
+[`CACHE-TRUST.md`](./CACHE-TRUST.md) states the trust model, which secret
+belongs in which CI job, and the order to roll the two out in.
+
 ## Before you begin
 
 Use Node.js 22 or later and install the pinned dependencies without running
@@ -21,10 +25,12 @@ npm ci --ignore-scripts
 
 Provide these credentials in the deploying shell:
 
-- `SMITHERS_CACHE_TOKEN`: The bearer token used to derive the Worker's
-  Cloudflare `secret_text` verifier. Use at least 32 random bytes. The Worker
-  receives only its SHA-256 digest; do not put the bearer value in an `.env`
-  file or source control.
+- `SMITHERS_CACHE_READ_TOKEN` and `SMITHERS_CACHE_WRITE_TOKEN`: The two bearer
+  tokens used to derive the Worker's Cloudflare `secret_text` verifiers. Use at
+  least 32 random bytes each. The Worker receives only their SHA-256 digests;
+  do not put a bearer value in an `.env` file or source control. Both are
+  required, and a deployment that has not separated its credentials yet sets
+  both to the same value.
 - Cloudflare authentication: Set `CLOUDFLARE_API_TOKEN` and
   `CLOUDFLARE_ACCOUNT_ID` for non-interactive deployments, or authenticate
   interactively with Cloudflare OAuth. You can use `wrangler whoami` to check
@@ -32,10 +38,11 @@ Provide these credentials in the deploying shell:
   profile, so run `npx alchemy login --configure` and choose OAuth on the first
   Alchemy deployment if you do not set an API token.
 
-Generate a bearer token in the current shell without writing it to disk:
+Generate the bearer tokens in the current shell without writing them to disk:
 
 ```sh
-export SMITHERS_CACHE_TOKEN="$(openssl rand -hex 32)"
+export SMITHERS_CACHE_READ_TOKEN="$(openssl rand -hex 32)"
+export SMITHERS_CACHE_WRITE_TOKEN="$(openssl rand -hex 32)"
 ```
 
 The Cloudflare account must already contain the `smithers.sh` zone. The API
@@ -70,7 +77,7 @@ The `CI=1` prefix is for the environment-token path. Omit it when you use an
 interactive Alchemy OAuth profile.
 
 Alchemy creates a stage-specific D1 database and R2 bucket, applies every SQL
-file in `worker/migrations/` in order, deploys the Worker with the three
+file in `worker/migrations/` in order, deploys the Worker with the four
 bindings, and attaches `build.smithers.sh` as its custom domain. Migration
 `0001_initial.sql` creates the table; `0002_bound_cache_rows.sql` constrains
 existing and future body/discriminator sizes. The
@@ -97,7 +104,10 @@ return no cache state, and coalesce successful probes for one second:
 curl --fail-with-body https://build.smithers.sh/healthz
 ```
 
-Every `/ac` and `/cas` request requires the bearer token.
+Every `/ac` and `/cas` request requires a bearer token. `GET`, `HEAD`, and
+`POST /cas/findMissing` accept either credential. `PUT` and `DELETE` require the
+write credential and answer `403` to the read one, before the request body is
+read.
 
 Run the unit tests and TypeScript check locally:
 

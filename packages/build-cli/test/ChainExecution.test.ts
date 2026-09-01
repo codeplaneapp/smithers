@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import { existsSync } from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as NodeNet from "node:net"
 import * as Os from "node:os"
@@ -15,6 +16,32 @@ afterAll(async () => {
   await Promise.all(temporaryDirectories.map((directory) => Fs.rm(directory, { recursive: true, force: true })))
 })
 
+/**
+ * Runs `body` with every PATH directory holding `binary` removed.
+ *
+ * A case that asserts a host-binary refusal has to ARRANGE the absence. The
+ * Mise case below inherited it from whatever PATH the suite happened to run
+ * with, so it asserted a refusal a developer machine with mise installed never
+ * produces: on this macOS host the plan resolved
+ * `argv[2]: /opt/homebrew/bin/mise,"--version"` and the case failed. Every PATH
+ * directory that holds the binary is removed, not just its own entry, so a
+ * fixture needing another host tool from the same directory would break; this
+ * one declares a mise tool alone.
+ */
+const withoutOnPath = async <A>(binary: string, body: () => Promise<A>): Promise<A> => {
+  const original = process.env["PATH"] ?? ""
+  const holdsBinary = (directory: string): boolean =>
+    directory !== "" &&
+    [binary, `${binary}.exe`, `${binary}.cmd`].some((name) => existsSync(NodePath.join(directory, name)))
+  process.env["PATH"] = original.split(NodePath.delimiter).filter((directory) => !holdsBinary(directory))
+    .join(NodePath.delimiter)
+  try {
+    return await body()
+  } finally {
+    process.env["PATH"] = original
+  }
+}
+
 const workspace = async (): Promise<string> => {
   const root = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-chain-exec-")))
   temporaryDirectories.push(root)
@@ -24,7 +51,8 @@ const workspace = async (): Promise<string> => {
 
 const serve = async (
   root: string,
-  args: ReadonlyArray<string>
+  args: ReadonlyArray<string>,
+  environment?: Readonly<Record<string, string | undefined>>
 ): Promise<{ readonly exitCode: number; readonly output: string; readonly logs: string }> => {
   let exitCode = 0
   let output = ""
@@ -35,7 +63,7 @@ const serve = async (
     return true
   }) as typeof process.stderr.write
   try {
-    await makeCli({}).serve([...normalizeArgv(args), "--workspace", root], {
+    await makeCli({ environment }).serve([...normalizeArgv(args), "--workspace", root], {
       exit: (code) => {
         exitCode = code
       },
@@ -224,7 +252,7 @@ describe("Docker service spec", () => {
   })
 })
 
-describe("host refusals and Anvil secret resolution", () => {
+describe("host refusals and Anvil secret boundaries", () => {
   it("plans a typed Mise refusal from the declared config when mise is absent", async () => {
     const root = await workspace()
     await Fs.writeFile(NodePath.join(root, "mise.toml"), "[tools]\nmockery = \"2.53.6\"\n", "utf8")
@@ -248,19 +276,10 @@ export const Package = S.Package({ targets: { tool } })
 `,
       "utf8"
     )
-    // The refusal this pins happens only when `mise` is absent from PATH, and
-    // a developer machine that installs mise resolved it instead and failed
-    // the assertion. An empty PATH for the duration makes the premise hold on
-    // every host.
-    const path = process.env["PATH"]
-    process.env["PATH"] = ""
-    let result
-    try {
-      result = await serve(root, ["//:tool", "--plan"])
-    } finally {
-      if (path === undefined) delete process.env["PATH"]
-      else process.env["PATH"] = path
-    }
+    // The refusal this pins holds only when `mise` is absent, so the case has
+    // to arrange that absence: `withoutOnPath` clears it from the suite's own
+    // PATH and the empty PATH in the CLI environment clears it for the plan.
+    const result = await withoutOnPath("mise", () => serve(root, ["//:tool", "--plan"], { ...process.env, PATH: "" }))
     expect(result.exitCode).toBe(0)
     expect(result.output).toContain("host binary")
     expect(result.output).toContain("mise")
@@ -268,38 +287,27 @@ export const Package = S.Package({ targets: { tool } })
     expect(result.output).toContain("2.53.6")
   })
 
-  it("refuses a fork at spawn when its RPC secret has no value", async () => {
+  it("keeps the RPC URL out of Anvil argv and resolves it only at egress", async () => {
     const port = await freePort()
+    const secretUrl = "https://secret.example.invalid/rpc-token"
+    process.env["CHAIN_TEST_RPC"] = secretUrl
     const result = await AnvilExec.serviceSpec({
       label: "//:fork",
       cwd: process.cwd(),
       attrs: {
-        forkUrl: { _tag: "Secret", env: "CHAIN_TEST_RPC_ABSENT" },
+        forkUrl: { _tag: "Secret", env: "CHAIN_TEST_RPC" },
         forkBlockNumber: "latest",
         port
-      },
-      environment: {}
+      }
     })
-    expect(result).toEqual({
-      error: "missing secret: environment variable CHAIN_TEST_RPC_ABSENT is not set for Anvil.Fork //:fork"
-    })
-
-    const secretUrl = "https://secret.example.invalid/rpc-token"
-    const resolved = await AnvilExec.serviceSpec({
-      label: "//:fork",
-      cwd: process.cwd(),
-      attrs: {
-        forkUrl: { _tag: "Secret", env: "CHAIN_TEST_RPC" },
-        forkBlockNumber: 1,
-        port
-      },
-      environment: { CHAIN_TEST_RPC: secretUrl }
-    })
-    expect("error" in resolved).toBe(false)
-    if (!("error" in resolved)) {
-      expect(resolved.argv).toContain(secretUrl)
-      expect(JSON.stringify(resolved.canonicalArgv)).not.toContain(secretUrl)
-      expect(JSON.stringify(resolved.canonicalArgv)).toContain("CHAIN_TEST_RPC")
+    delete process.env["CHAIN_TEST_RPC"]
+    expect("error" in result).toBe(false)
+    if (!("error" in result)) {
+      expect(JSON.stringify(result.argv)).not.toContain(secretUrl)
+      expect(result.argv).toContain("{secret-url:CHAIN_TEST_RPC}")
+      expect(result.secretUrls).toEqual([
+        { index: 6, secret: { _tag: "Secret", env: "CHAIN_TEST_RPC" } }
+      ])
     }
   })
 

@@ -13,6 +13,7 @@ import * as Option from "effect/Option"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as Migrations from "./migrations/index.ts"
 import * as Overlap from "./Overlap.ts"
+import * as Schedule from "./Schedule.ts"
 import { TriggerError } from "./TriggerError.ts"
 import { type Registered, type Service, TriggerStore } from "./TriggerStore.ts"
 
@@ -102,10 +103,15 @@ export const make: Effect.Effect<
     )
   return {
     register: (trigger) =>
-      Effect.try({
-        try: () => JSON.stringify(trigger.input),
-        catch: (cause) => storeError("trigger input is not JSON-serializable", cause)
-      }).pipe(
+      // Registration is the last point where an unsatisfiable expression can
+      // still be refused: once the row exists, every tick that reads it has to
+      // handle a search that never terminates in a match.
+      Schedule.validate(trigger).pipe(
+        Effect.andThen(Effect.try({
+          try: () => JSON.stringify(trigger.input),
+          catch: (cause) => storeError("trigger input is not JSON-serializable", cause)
+        }))
+      ).pipe(
         Effect.flatMap((input) =>
           write(sql`
         INSERT INTO flows_triggers (trigger_id, flow_id, input_json, cron, timezone, overlap, catch_up, max_catch_up, enabled, revision)

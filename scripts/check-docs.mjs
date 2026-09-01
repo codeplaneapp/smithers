@@ -26,8 +26,9 @@
  *  15. the browser-support tables and every stated browser entry-point count
  *      match the contract `pnpm run browser` executes
  *
- * The two normalizers run in `--check` mode first, so their rules stay one
- * implementation rather than a detector and a fixer that can disagree.
+ * The normalizers and every package-owned docs generator run in `--check`
+ * mode, so their rules stay one implementation rather than a detector and a
+ * fixer that can disagree.
  *
  * Run: node scripts/check-docs.mjs
  */
@@ -263,13 +264,19 @@ const deferred = new Set(deferredRoutes.map((entry) => entry.route))
 }
 
 // -----------------------------------------------------------------------------
-// 8 and 9. Generated pages, the two normalizers, and the route plan
+// 8 and 9. Generated pages, normalizers, and the route plan
 // -----------------------------------------------------------------------------
+
+const packageDocGenerators = readdirSync(join(repoRoot, "packages"))
+  .map((name) => `packages/${name}/scripts/docs.mjs`)
+  .filter((path) => existsSync(join(repoRoot, path)))
+  .map((path) => [`the ${path.split("/")[1]} package documentation is current`, [path, "--check"]])
 
 for (const [title, argv] of [
   ["the CLI invocations are the 1.0 command", ["scripts/normalize-bunx.ts", "--check"]],
   ["the argument placeholders are normalized", ["scripts/normalize-placeholders.ts", "--check"]],
-  ["the generated pages are current", ["scripts/generate-docs-pages.mjs", "--check"]]
+  ["the generated pages are current", ["scripts/generate-docs-pages.mjs", "--check"]],
+  ...packageDocGenerators
 ]) {
   const result = spawnSync(process.execPath, argv.map((entry) => (entry.startsWith("-") ? entry : join(repoRoot, entry))), {
     cwd: repoRoot,

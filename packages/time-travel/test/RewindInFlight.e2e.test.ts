@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { FlowEngine } from "@smthrs/engine"
 import { RunStore } from "@smthrs/run-store"
 import { heartbeatStaleAfter } from "@smthrs/run-store/Ownership"
 import * as Duration from "effect/Duration"
@@ -170,9 +171,13 @@ describe.skipIf(!jjInstalled)("rewind versus a genuinely in-flight engine", () =
                   (SELECT COUNT(*) FROM flows_time_travel_receipts) AS receipt_count
               `
                   const timeTravel = yield* TimeTravel
+                  // The frame's lineage comes from the constructor that mints it. Re-derived on
+                  // 2026-09-01: `FlowEngine.Lineage` moved the root address from `<runId>/root`
+                  // to a versioned encoded tuple, so the old literal named a lineage the engine
+                  // no longer writes.
                   const refusal = yield* Effect.flip(timeTravel.rewind({
                     runId,
-                    frame: { lineageId: `${runId}/root`, seq: 0 }
+                    frame: { lineageId: FlowEngine.Lineage.root(runId), seq: 0 }
                   }))
                   const after = yield* sql<{
                     readonly archive_count: number
@@ -221,7 +226,7 @@ describe.skipIf(!jjInstalled)("rewind versus a genuinely in-flight engine", () =
                   const timeTravel = yield* TimeTravel
                   const rewind = yield* timeTravel.rewind({
                     runId,
-                    frame: { lineageId: `${runId}/root`, seq: 0 }
+                    frame: { lineageId: FlowEngine.Lineage.root(runId), seq: 0 }
                   })
                   const sql = yield* Effect.service(SqlClient.SqlClient)
                   const live = yield* sql<{ readonly seq: number }>`

@@ -4,9 +4,8 @@
  * Calling a flow constructs a `FlowCall` node. It never evaluates the flow
  * body; graph construction evaluates pure bodies at plan time.
  *
- * Governing contracts:
- * `docs/specs/Concepts/Flow Builder Brief.md` and
- * `docs/specs/Concepts/Schema Shaped Builder.md`.
+ * Governing contract: `packages/core/docs/api.md`, published as
+ * https://smithers.sh/api/core.
  *
  * @since 0.0.0
  */
@@ -67,6 +66,24 @@ export interface Flow<
   readonly description?: string | undefined
   readonly capabilities: ReadonlyArray<string>
   readonly effects: Effects.Declaration | undefined
+  /**
+   * Advisory model seat metadata recorded on the flow.
+   *
+   * @since 0.1.0
+   */
+  readonly model?: Seat | undefined
+  /**
+   * Advisory collaborator metadata recorded on the flow.
+   *
+   * @since 0.1.0
+   */
+  readonly flows?: ReadonlyArray<Reference> | undefined
+  /**
+   * Advisory prompt metadata recorded on the flow.
+   *
+   * @since 0.1.0
+   */
+  readonly prompt?: string | undefined
   readonly annotations: Context.Context<never>
   readonly body: ((input: I["Type"]) => Node.Node<O["Type"], E>) | undefined
   readonly implementation: Implementation | undefined
@@ -116,6 +133,27 @@ export type Reference = Any | string
 export type Seat = string & {}
 
 /**
+ * The seat, collaborator, and prompt declaration a body-backed flow records.
+ *
+ * A body-less flow turns the same three fields into its `Dynamic`
+ * implementation. A flow with a body keeps its body digest as identity and
+ * carries the declaration alongside it, so a decorator that changes the
+ * declared seat or collaborators changes the flow's key material instead of
+ * disappearing from it. Fields the author omitted are absent, so a flow that
+ * declares none of them records no declaration and keys exactly as it did
+ * before the field existed.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export interface BodyDeclaration {
+  readonly model?: Seat | undefined
+  readonly flows?: ReadonlyArray<Reference> | undefined
+  readonly prompt?: string | undefined
+}
+
+/**
  * Implementation identity included when a flow is used as a dynamic flow.
  *
  * The exact source is hashed with SHA-256. Unannotated bodies receive
@@ -130,8 +168,9 @@ export type Seat = string & {}
 export type Implementation =
   | {
     readonly _tag: "Body"
-    readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v3"
+    readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v4"
     readonly digest: string
+    readonly declaration?: BodyDeclaration | undefined
   }
   | {
     readonly _tag: "Dynamic"
@@ -197,7 +236,15 @@ export class FlowError extends Schema.TaggedError<FlowError>()("flows/core/FlowE
   message: Schema.String
 }) {}
 
-interface MakeOptions<
+/**
+ * Configures schemas, metadata, effects, and implementation for {@link make}
+ * and {@link agent}.
+ *
+ * @category models
+ * @since 0.0.0
+ * @slop
+ */
+export interface MakeOptions<
   Input extends Schema.Top,
   Output extends Schema.Top,
   E
@@ -227,6 +274,9 @@ interface FlowOptions<
   readonly output: Output
   readonly capabilities: ReadonlyArray<string>
   readonly effects: Effects.Declaration | undefined
+  readonly model: Seat | undefined
+  readonly flows: ReadonlyArray<Reference> | undefined
+  readonly prompt: string | undefined
   readonly annotations: Context.Context<never>
   readonly body: ((input: Input["Type"]) => Node.Node<Output["Type"], E>) | undefined
   readonly implementation: Implementation | undefined
@@ -237,7 +287,7 @@ const makeFlow = <
   Output extends Schema.Top,
   E
 >(options: FlowOptions<Input, Output, E>): Flow<Input, Output, E> => {
-  const fn = (input: Input["Type"]): Node.Node<Output["Type"], E> => {
+  const fn = (() => (input: Input["Type"]): Node.Node<Output["Type"], E> => {
     if (options.body === undefined) {
       throw new FlowError({
         code: "missing_body",
@@ -247,12 +297,14 @@ const makeFlow = <
       })
     }
     return makeNode(flowCall(self, { _tag: "FlowReference", name: options.name }, input, Annotations.empty))
+  })()
+  if (options.name !== undefined) {
+    Object.defineProperty(fn, "name", {
+      value: options.name,
+      enumerable: false,
+      configurable: true
+    })
   }
-  Object.defineProperty(fn, "name", {
-    value: options.name,
-    enumerable: true,
-    configurable: true
-  })
   const self = Object.assign(fn, {
     [TypeId]: {
       _Input: identity,
@@ -264,6 +316,9 @@ const makeFlow = <
     output: options.output,
     capabilities: options.capabilities,
     effects: options.effects,
+    model: options.model,
+    flows: options.flows,
+    prompt: options.prompt,
     annotations: options.annotations,
     body: options.body,
     implementation: options.implementation,
@@ -274,6 +329,21 @@ const makeFlow = <
   }) as Flow<Input, Output, E>
   return self
 }
+
+/**
+ * Builds the declaration recorded beside a body digest, or `undefined` when the
+ * author declared no seat, collaborators, or prompt.
+ */
+const bodyDeclaration = (
+  model: Seat | undefined,
+  flows: ReadonlyArray<Reference> | undefined,
+  prompt: string | undefined
+): BodyDeclaration | undefined =>
+  model === undefined && flows === undefined && prompt === undefined ? undefined : {
+    ...(model === undefined ? {} : { model }),
+    ...(flows === undefined ? {} : { flows: [...flows] }),
+    ...(prompt === undefined ? {} : { prompt })
+  }
 
 const optionsFromFlow = <
   Input extends Schema.Top,
@@ -286,6 +356,9 @@ const optionsFromFlow = <
   output: self.output,
   capabilities: self.capabilities,
   effects: self.effects,
+  model: self.model,
+  flows: self.flows,
+  prompt: self.prompt,
   annotations: self.annotations,
   body: self.body,
   implementation: self.implementation
@@ -303,9 +376,15 @@ export const isFlow = (value: unknown): value is Any => Predicate.hasProperty(va
 /**
  * Creates a callable flow from one schema-first options object.
  *
- * When `body` is omitted but `model` or `flows` is present, the body defaults
- * to one dynamic node. With neither, the flow remains declaration-only and
- * throws `FlowError` with code `missing_body` when called.
+ * `model`, `flows`, and `prompt` are always recorded on the flow. On a flow
+ * with a body they also form the `Body` implementation's
+ * {@link BodyDeclaration}, so two flows sharing one body but declaring
+ * different seats or collaborators are different steps; the body digest still
+ * identifies the code that runs. When `body` is omitted and `model` or `flows`
+ * is present, the same fields form the `Dynamic` implementation identity
+ * instead and the body defaults to one dynamic node. With neither `model` nor
+ * `flows`, the flow remains declaration-only and throws `FlowError` with code
+ * `missing_body` when called.
  *
  * @category constructors
  * @since 0.0.0
@@ -318,27 +397,30 @@ export const make = <
 >(config: MakeOptions<Input, Output, E>): Flow<Input, Output, E> => {
   const input = (config.input ?? Schema.Void) as Input
   const output = (config.output ?? Schema.Unknown) as Output
+  const flows = config.flows === undefined ? undefined : [...config.flows]
   let body = config.body
   const bodyIdentity = body === undefined ? undefined : functionIdentity(body)
+  const declaration = bodyDeclaration(config.model, flows, config.prompt)
   let implementation: Implementation | undefined = bodyIdentity === undefined
     ? undefined
     : {
       _tag: "Body",
       algorithm: bodyIdentity.algorithm,
-      digest: bodyIdentity.digest
+      digest: bodyIdentity.digest,
+      ...(declaration === undefined ? {} : { declaration })
     }
-  if (body === undefined && (config.model !== undefined || config.flows !== undefined)) {
+  if (body === undefined && (config.model !== undefined || flows !== undefined)) {
     body = () =>
       Node.dynamic({
         ...(config.model === undefined ? {} : { model: config.model }),
-        ...(config.flows === undefined ? {} : { flows: config.flows }),
+        ...(flows === undefined ? {} : { flows }),
         output,
         ...(config.prompt === undefined ? {} : { prompt: config.prompt })
       })
     implementation = {
       _tag: "Dynamic",
       model: config.model,
-      flows: config.flows ?? [],
+      flows: flows ?? [],
       prompt: config.prompt
     }
   }
@@ -347,8 +429,11 @@ export const make = <
     description: config.description,
     input,
     output,
-    capabilities: config.capabilities ?? [],
+    capabilities: [...new Set(config.capabilities ?? [])].sort(),
     effects: config.effects,
+    model: config.model,
+    flows,
+    prompt: config.prompt,
     annotations: Annotations.empty,
     body,
     implementation
@@ -452,13 +537,17 @@ export const annotate: {
   }))
 
 /**
- * Replaces the collaborators a dynamic flow declares, returning a fresh flow.
+ * Replaces the collaborators a flow declares, returning a fresh flow.
  *
  * Everything else the flow carries comes across unchanged: its name, schemas,
  * capabilities, effects, and annotations. That is what lets a decorator rewrite
  * a flow tree without dropping the metadata a host reads back, such as a
- * placement or a lane. A flow with a body reaches its collaborators by calling
- * them rather than declaring them, so one is returned untouched.
+ * placement or a lane. For a body-backed flow the body is untouched, so the
+ * body digest still identifies the code that runs, and the new collaborators
+ * replace the `Body` implementation's {@link BodyDeclaration}, so the change is
+ * visible in key material. For a body-less dynamic flow, collaborators enter
+ * identity through the `Dynamic` implementation, so both its default body and
+ * implementation are rebuilt.
  *
  * @category combinators
  * @since 0.1.0
@@ -477,18 +566,33 @@ export const withFlows: {
   self: Flow<Input, Output, E>,
   flows: ReadonlyArray<Reference>
 ): Flow<Input, Output, E> => {
+  const nextFlows = [...flows]
   const implementation = self.implementation
-  if (implementation === undefined || implementation._tag !== "Dynamic") return self
+  if (implementation === undefined || implementation._tag !== "Dynamic") {
+    return makeFlow({
+      ...optionsFromFlow(self),
+      flows: nextFlows,
+      implementation: implementation === undefined
+        ? undefined
+        : { ...implementation, declaration: bodyDeclaration(self.model, nextFlows, self.prompt) }
+    })
+  }
   return makeFlow({
     ...optionsFromFlow(self),
+    flows: nextFlows,
     body: () =>
       Node.dynamic({
         ...(implementation.model === undefined ? {} : { model: implementation.model }),
-        flows,
+        flows: nextFlows,
         output: self.output,
         ...(implementation.prompt === undefined ? {} : { prompt: implementation.prompt })
       }) as Node.Node<Output["Type"], E>,
-    implementation: { _tag: "Dynamic", model: implementation.model, flows, prompt: implementation.prompt }
+    implementation: {
+      _tag: "Dynamic",
+      model: implementation.model,
+      flows: nextFlows,
+      prompt: implementation.prompt
+    }
   })
 })
 

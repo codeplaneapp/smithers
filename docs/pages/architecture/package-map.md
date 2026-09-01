@@ -45,6 +45,7 @@ flowchart TD
   Keys --> Crypto
   P["@smthrs/plan"] --> Keys
   P --> D
+  P --> Crypto
   E["@smthrs/engine-store"] --> W
   E --> F
   E --> Crypto
@@ -67,7 +68,7 @@ flowchart TD
 | Package | Responsibility | Important boundary |
 | --- | --- | --- |
 | [`@smthrs/canonical`](/api/canonical) | RFC 8785 canonical JSON as an Effect Schema | Wraps the standards-focused `canonicalize` library |
-| [`@smthrs/crypto`](/api/crypto) | Injected cryptographic schema transformations | Platform implementation is supplied through Effect Crypto |
+| [`@smthrs/crypto`](/api/crypto) | Strict injected and synchronous SHA-256 | Effect Crypto supplies the injected path; the package owns the synchronous path |
 | [`@smthrs/keys`](/api/keys) | Canonical flow keys | Composes `canonical` and `crypto` |
 | [`@smthrs/database`](/api/database) | `SqlClient` access plus transactional SQLite write retry | Owns no domain tables |
 | `@smthrs/platform-node`, `@smthrs/platform-bun` | The Node and Bun Host bundles: Effect's own platform services, filesystem, path, spawner, `HttpClient`, composed with the `Jj` adapter | Raw effects; no permission decisions. Bun composes `@effect/platform-bun` directly and does not depend on `@smthrs/platform-browser` |

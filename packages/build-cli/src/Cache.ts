@@ -1001,7 +1001,19 @@ export interface OpenCacheOptions {
   readonly workspaceRoot: string
   readonly cacheDirectory?: string | undefined
   readonly endpoint?: string | undefined
-  readonly token?: string | undefined
+  /** Reads the bearer token at the instant an outbound request is built. */
+  readonly readToken?: (() => string | undefined) | undefined
+  /**
+   * Reads the bearer token publications authenticate with. Omitted means the
+   * deployment has one credential, and `readToken` serves both directions,
+   * which is what every caller did before the credential split existed.
+   */
+  readonly writeToken?: (() => string | undefined) | undefined
+  /**
+   * The trust domain this process publishes into. Omitted means the trusted
+   * one, whose keys are exactly the content keys the planner computes.
+   */
+  readonly publishNamespace?: string | undefined
   readonly fetch?: typeof globalThis.fetch | undefined
   readonly warn?: ((line: string) => void) | undefined
   readonly timeouts?: { readonly get: number; readonly put: number } | undefined
@@ -1012,7 +1024,9 @@ interface NormalizedOpenCacheOptions {
   readonly workspaceRoot: string
   readonly cacheDirectory: string
   readonly endpoint: string | undefined
-  readonly token: string | undefined
+  readonly readToken: () => string | undefined
+  readonly writeToken: () => string | undefined
+  readonly publishNamespace: string | undefined
   readonly fetch: typeof globalThis.fetch
   readonly warn: (line: string) => void
   readonly timeouts: { readonly get: number; readonly put: number }
@@ -1087,16 +1101,58 @@ const normalizeCacheIo = (value: unknown): CacheIo => {
   })
 }
 
+const namespaceName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+
+/**
+ * Validates the trust domain a process publishes into.
+ *
+ * The published key is `<namespace>/<key>` and a content key is bare hex, so a
+ * namespace that cannot contain a separator cannot name a key any trusted
+ * build computes. An unusable value fails the command: a job that meant to
+ * publish somewhere untrusted must not silently publish to trunk instead.
+ *
+ * @category validation
+ * @since 0.1.0
+ * @slop
+ */
+export const normalizePublishNamespace = (
+  value: unknown,
+  what = "remote cache publishNamespace"
+): string | undefined => {
+  if (value === undefined) return undefined
+  if (typeof value !== "string" || !namespaceName.test(value)) {
+    throw new TypeError(
+      `${what} must be 1 to 64 characters of letters, digits, dots, underscores, and dashes, ` +
+        "starting with a letter or digit"
+    )
+  }
+  return value
+}
+
 const normalizeOpenCacheOptions = (value: OpenCacheOptions): NormalizedOpenCacheOptions => {
   const record = plainDataRecord(value, "cache options")
   exactDataKeys(
     record,
-    new Set(["workspaceRoot", "cacheDirectory", "endpoint", "token", "fetch", "warn", "timeouts", "io"]),
+    new Set([
+      "workspaceRoot",
+      "cacheDirectory",
+      "endpoint",
+      "readToken",
+      "writeToken",
+      "publishNamespace",
+      "fetch",
+      "warn",
+      "timeouts",
+      "io"
+    ]),
     "cache options"
   )
   const workspaceRoot = dataMember(record, "workspaceRoot", "cache options")
   const cacheDirectory = dataMember(record, "cacheDirectory", "cache options")
-  const token = dataMember(record, "token", "cache options")
+  const readToken = dataMember(record, "readToken", "cache options") ?? (() => undefined)
+  // One declared credential keeps serving both directions, so a deployment
+  // that has not split its secrets behaves exactly as it did before.
+  const writeToken = dataMember(record, "writeToken", "cache options") ?? readToken
   const fetch = dataMember(record, "fetch", "cache options") ?? globalThis.fetch
   const warn = dataMember(record, "warn", "cache options") ?? ((line: string) => process.stderr.write(`${line}\n`))
   if (
@@ -1114,21 +1170,17 @@ const normalizeOpenCacheOptions = (value: OpenCacheOptions): NormalizedOpenCache
     typeof cacheDirectory === "string" &&
     (cacheDirectory.length > 32 * 1024 || !isWellFormedText(cacheDirectory) || cacheDirectory.includes("\0"))
   ) throw new TypeError("cache cacheDirectory must be bounded usable text")
-  if (
-    token !== undefined &&
-    (typeof token !== "string" ||
-      token.length > 4_096 ||
-      !isWellFormedText(token) ||
-      /[\u0000-\u001f\u007f]/.test(token) ||
-      Buffer.byteLength(token, "utf8") > 4_096)
-  ) throw new TypeError("remote cache token must be bounded control-free text")
+  if (typeof readToken !== "function") throw new TypeError("remote cache readToken must be a function")
+  if (typeof writeToken !== "function") throw new TypeError("remote cache writeToken must be a function")
   if (typeof fetch !== "function") throw new TypeError("remote cache fetch must be a function")
   if (typeof warn !== "function") throw new TypeError("remote cache warn must be a function")
   return Object.freeze({
     workspaceRoot,
     cacheDirectory: Config.normalizeCacheDirectory(cacheDirectory ?? Config.defaultCacheDirectory),
     endpoint: normalizeEndpoint(dataMember(record, "endpoint", "cache options")),
-    token,
+    readToken: readToken as () => string | undefined,
+    writeToken: writeToken as () => string | undefined,
+    publishNamespace: normalizePublishNamespace(dataMember(record, "publishNamespace", "cache options")),
     fetch: fetch as typeof globalThis.fetch,
     warn: warn as (line: string) => void,
     timeouts: validateTimeouts(dataMember(record, "timeouts", "cache options")),
@@ -1144,25 +1196,46 @@ type Fetched =
 
 class RemoteStore {
   private readonly endpoint: string
-  private readonly token: string | undefined
+  private readonly readToken: () => string | undefined
+  private readonly writeToken: () => string | undefined
+  private readonly publishNamespace: string | undefined
   private readonly fetch: typeof globalThis.fetch
   private readonly warn: (line: string) => void
   private readonly timeouts: { readonly get: number; readonly put: number }
   private degraded = false
+  private publishDenied = false
   private conflictWarned = false
 
   constructor(options: {
     readonly endpoint: string
-    readonly token?: string | undefined
+    readonly readToken: () => string | undefined
+    readonly writeToken: () => string | undefined
+    readonly publishNamespace: string | undefined
     readonly fetch: typeof globalThis.fetch
     readonly warn: (line: string) => void
     readonly timeouts: { readonly get: number; readonly put: number }
   }) {
     this.endpoint = options.endpoint.replace(/\/+$/, "")
-    this.token = options.token
+    this.readToken = options.readToken
+    this.writeToken = options.writeToken
+    this.publishNamespace = options.publishNamespace
     this.fetch = options.fetch
     this.warn = options.warn
     this.timeouts = options.timeouts
+  }
+
+  /**
+   * The key one result is published under.
+   *
+   * Reads always use the bare content key, so an untrusted job still gets
+   * every trusted hit. Only publication is namespaced, because publication is
+   * the direction that can put a wrong answer where a trusted build will read
+   * it. A job that names an untrusted domain therefore publishes into a
+   * keyspace nothing trusted ever looks in, which holds even where the
+   * credential split does not: a shared credential, or one that leaked.
+   */
+  private publishedKey(key: string): string {
+    return this.publishNamespace === undefined ? key : `${this.publishNamespace}/${key}`
   }
 
   private degrade(operation: "GET" | "PUT", status?: number | undefined): void {
@@ -1174,14 +1247,36 @@ class RemoteStore {
     )
   }
 
+  /**
+   * Records that this credential may read but not publish.
+   *
+   * A refused publication is the read-only posture working, not a broken
+   * remote: an untrusted job is meant to pull everything and publish nothing.
+   * Degrading the whole store on it would cost that job every later cache hit
+   * in the run, so only publication stops.
+   */
+  private denyPublication(): void {
+    if (this.publishDenied) return
+    this.publishDenied = true
+    this.warn("smthrs: remote cache publication refused; this credential may only read")
+  }
+
   private url(key: string): string {
     return `${this.endpoint}/ac/${encodeURIComponent(key)}`
   }
 
-  private headers(): Headers {
+  private headers(direction: "read" | "write"): Headers {
     const headers = new Headers({ "content-type": "application/json" })
-    if (this.token !== undefined && this.token !== "") {
-      headers.set("authorization", `Bearer ${this.token}`)
+    const token = direction === "write" ? this.writeToken() : this.readToken()
+    if (
+      token !== undefined &&
+      (typeof token !== "string" || token.length > 4_096 || !isWellFormedText(token) ||
+        /[\u0000-\u001f\u007f]/.test(token) || Buffer.byteLength(token, "utf8") > 4_096)
+    ) {
+      throw new TypeError("remote cache token must be bounded control-free text")
+    }
+    if (token !== undefined && token !== "") {
+      headers.set("authorization", `Bearer ${token}`)
     }
     return headers
   }
@@ -1199,7 +1294,7 @@ class RemoteStore {
         async (signal): Promise<Fetched> => {
           const response = await this.fetch(this.url(key), {
             method: "GET",
-            headers: this.headers(),
+            headers: this.headers("read"),
             redirect: "error",
             signal
           })
@@ -1239,10 +1334,14 @@ class RemoteStore {
   }
 
   async put(key: string, result: CachedResult): Promise<void> {
-    if (this.degraded || !remoteKeySupported(key)) return
+    const published = this.publishedKey(key)
+    if (this.degraded || this.publishDenied || !remoteKeySupported(published)) return
     try {
+      // The envelope names the key it is filed under, which is the namespaced
+      // one. The result inside keeps the content key it was produced for, so
+      // the entry a trusted build reads is byte-identical whoever publishes it.
       const body = JSON.stringify({
-        keyDigest: key,
+        keyDigest: published,
         result,
         meta: { target: result.target, label: result.label, exitOk: result.exitOk },
         createdAtMs: Date.parse(result.storedAt),
@@ -1253,9 +1352,9 @@ class RemoteStore {
         throw new RangeError(`remote cache request exceeds its ${remoteEntryLimit}-byte limit`)
       }
       const status = await withDeadline("put", this.timeouts.put, async (signal) => {
-        const response = await this.fetch(this.url(key), {
+        const response = await this.fetch(this.url(published), {
           method: "PUT",
-          headers: this.headers(),
+          headers: this.headers("write"),
           body,
           redirect: "error",
           signal
@@ -1266,6 +1365,7 @@ class RemoteStore {
         return response.status
       })
       if (status === 200 || status === 201) return
+      if (status === 401 || status === 403) return this.denyPublication()
       if (status === 409) {
         if (!this.conflictWarned) {
           this.conflictWarned = true
@@ -1314,7 +1414,9 @@ export const openCache = async (opts: OpenCacheOptions): Promise<CacheStore> => 
     ? null
     : new RemoteStore({
       endpoint: options.endpoint,
-      token: options.token,
+      readToken: options.readToken,
+      writeToken: options.writeToken,
+      publishNamespace: options.publishNamespace,
       fetch: options.fetch,
       warn: options.warn,
       timeouts: options.timeouts

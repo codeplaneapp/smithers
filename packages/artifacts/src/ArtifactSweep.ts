@@ -13,10 +13,10 @@
  * The *policy* — which digests are live, how old a dead blob must be before it
  * goes — belongs to the engine composition, which is the only place the
  * durable roots (attempt rows, cache entries) are visible. This module ships
- * mechanics alone, mirroring the store/boundary split
- * (`docs/specs/Concepts/Remote Cache.md`).
+ * mechanics alone; `@smthrs/engine-store` owns the mark policy and grace
+ * period.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -24,6 +24,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as PlatformError from "effect/PlatformError"
+import * as ArtifactBackupLease from "./ArtifactBackupLease.ts"
 import * as ArtifactStore from "./ArtifactStore.ts"
 import * as ArtifactLocks from "./internal/ArtifactLocks.ts"
 
@@ -36,7 +37,7 @@ import * as ArtifactLocks from "./internal/ArtifactLocks.ts"
  * the one timestamp a filesystem maintains without any bookkeeping of ours.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface BlobStat {
@@ -49,7 +50,7 @@ export interface BlobStat {
  * Fencing predicate for a sweep deletion.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface RemoveOptions {
@@ -67,7 +68,7 @@ export interface RemoveOptions {
  * Host-local blob enumeration and fenced deletion.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface Service {
@@ -95,7 +96,7 @@ export interface Service {
  * that a new identity is the defining module path.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export class ArtifactSweep extends Context.Service<ArtifactSweep, Service>()("@smthrs/artifacts/ArtifactSweep") {}
@@ -128,7 +129,7 @@ const defaultDirectory = ".flows/objects"
  * likewise skipped.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const makeFileSystem = (
@@ -136,6 +137,7 @@ export const makeFileSystem = (
   options: ArtifactStore.FileSystemOptions = {}
 ): Service => {
   const directory = options.directory ?? defaultDirectory
+  const coordination = options.coordination ?? "required"
   const blobPath = (digest: string): string => `${directory}/${digest.slice(0, 2)}/${digest}`
 
   const inventory: Service["inventory"] = Effect.gen(function*() {
@@ -175,13 +177,24 @@ export const makeFileSystem = (
 
   const remove: Service["remove"] = Effect.fn("ArtifactSweep.remove")((digest, removeOptions) =>
     Effect.gen(function*() {
-      yield* Effect.annotateCurrentSpan({ digest })
-      yield* ArtifactStore.validateDigest(digest)
+      const validated = yield* ArtifactStore.validateDigest(digest)
+      yield* Effect.annotateCurrentSpan({ digest: validated })
       return yield* ArtifactLocks.withDigest(
         fs,
-        digest,
-        Effect.gen(function*() {
-          const path = blobPath(digest)
+        directory,
+        validated,
+        coordination === "process"
+          ? removeBlob()
+          : ArtifactBackupLease.unlessActive(fs, directory, removeBlob(), hostFailure).pipe(
+            Effect.map(Option.getOrElse(() => false))
+          ),
+        hostFailure,
+        coordination
+      )
+
+      function removeBlob(): Effect.Effect<boolean, ArtifactStore.ArtifactStoreError> {
+        return Effect.gen(function*() {
+          const path = blobPath(validated)
           const bound = removeOptions?.ifUnmodifiedSinceMs
           if (bound !== undefined) {
             const info = yield* fs.stat(path).pipe(Effect.option)
@@ -203,7 +216,7 @@ export const makeFileSystem = (
             )
           )
         })
-      )
+      }
     })
   )
 
@@ -214,7 +227,7 @@ export const makeFileSystem = (
  * Provides the filesystem-backed sweep surface.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layerFileSystem = (
@@ -227,7 +240,7 @@ export const layerFileSystem = (
  * per-method overrides.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const makeNoop = (overrides: Partial<Service> = {}): Service => ({
@@ -240,7 +253,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service => ({
  * Provides a no-op sweep surface.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const layerNoop = (overrides: Partial<Service> = {}): Layer.Layer<ArtifactSweep> =>

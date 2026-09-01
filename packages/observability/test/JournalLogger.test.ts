@@ -1,6 +1,6 @@
 import { Journal, JournalEvent } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
-import { Effect, Layer, Logger } from "effect"
+import { Deferred, Effect, Layer, Logger } from "effect"
 import { describe, expect, it } from "vitest"
 import { layerJournalForwarding } from "../src/JournalLogger.ts"
 
@@ -43,6 +43,25 @@ describe("JournalLogger", () => {
       )
     )
     expect(result).toBe("ok")
+  })
+
+  it("preserves scope interruption while a journal write is in flight", async () => {
+    const entered = Deferred.makeUnsafe<void>()
+    await run(
+      Effect.gen(function*() {
+        yield* Effect.logInfo("closing")
+        yield* Deferred.await(entered)
+      }).pipe(
+        Effect.provide(
+          Layer.provide(
+            layerJournalForwarding({ runId: "interrupt-run" }),
+            Journal.layerNoop({
+              emitLossy: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never))
+            })
+          )
+        )
+      )
+    )
   })
 
   it("keeps the ambient loggers when asked to merge with them", async () => {

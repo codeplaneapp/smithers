@@ -18,6 +18,12 @@
 export * as FlowEngineLike from "./FlowEngineLike.ts"
 
 /**
+ * @category layers
+ * @since 0.1.0
+ */
+export * as MemorySnapshotRecorder from "./MemorySnapshotRecorder.ts"
+
+/**
  * @category services
  * @since 0.1.0
  */

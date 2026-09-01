@@ -1,7 +1,7 @@
 /**
  * Initial durable journal event schema.
  *
- * Schema boundary: `docs/specs/Research/Smithers Deviations 2026-07-28.md`.
+ * Schema boundary: `docs/pages/concepts/durable-execution-model.md`.
  *
  * @since 0.1.0
  */
@@ -13,7 +13,6 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  *
  * @category migrations
  * @since 0.1.0
- * @slop
  */
 const initial: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient

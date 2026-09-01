@@ -16,6 +16,7 @@ import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
+import * as Environment from "./Environment.ts"
 
 const posix = (value: string): string => value.split(NodePath.sep).join("/")
 
@@ -56,8 +57,11 @@ export const digestFileBytes = async (path: string): Promise<string> => {
  * @category tools
  * @since 0.1.0
  */
-export const findOnPath = (name: string): string | undefined => {
-  return findAllOnPath(name)[0]
+export const findOnPath = (
+  name: string,
+  environment: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
+): string | undefined => {
+  return findAllOnPath(name, environment)[0]
 }
 
 /**
@@ -66,9 +70,12 @@ export const findOnPath = (name: string): string | undefined => {
  * @category tools
  * @since 0.1.0
  */
-export const findAllOnPath = (name: string): ReadonlyArray<string> => {
+export const findAllOnPath = (
+  name: string,
+  environment: Readonly<Record<string, string | undefined>> = Environment.ambientEnvironment()
+): ReadonlyArray<string> => {
   const found: Array<string> = []
-  const environmentPath = process.env["PATH"] ?? ""
+  const environmentPath = environment["PATH"] ?? ""
   for (const entry of environmentPath.split(NodePath.delimiter)) {
     if (entry === "") continue
     const candidate = NodePath.join(entry, name)
@@ -112,9 +119,16 @@ const probeOutputLimit = 2 * 1024
  */
 export const probeVersion = (
   path: string,
-  options?: { readonly cwd?: string | undefined; readonly args?: ReadonlyArray<string> | undefined }
+  options?: {
+    readonly cwd?: string | undefined
+    readonly args?: ReadonlyArray<string> | undefined
+    readonly environment?: Readonly<Record<string, string | undefined>> | undefined
+  }
 ): Promise<Probe> =>
-  probeCommand(path, options?.args ?? ["--version"], options?.cwd === undefined ? undefined : { cwd: options.cwd })
+  probeCommand(path, options?.args ?? ["--version"], {
+    ...(options?.cwd === undefined ? {} : { cwd: options.cwd }),
+    ...(options?.environment === undefined ? {} : { environment: options.environment })
+  })
 
 /**
  * Runs one bounded tool identity/readiness command.
@@ -125,13 +139,21 @@ export const probeVersion = (
 export const probeCommand = (
   path: string,
   args: ReadonlyArray<string>,
-  options?: { readonly cwd?: string | undefined }
+  options?: {
+    readonly cwd?: string | undefined
+    readonly environment?: Readonly<Record<string, string | undefined>> | undefined
+  }
 ): Promise<Probe> =>
   new Promise((resolve) => {
     NodeChildProcess.execFile(
       path,
       [...args],
-      { timeout: 10_000, maxBuffer: 1 << 20, ...(options?.cwd === undefined ? {} : { cwd: options.cwd }) },
+      {
+        timeout: 10_000,
+        maxBuffer: 1 << 20,
+        ...(options?.cwd === undefined ? {} : { cwd: options.cwd }),
+        ...(options?.environment === undefined ? {} : { env: { ...options.environment } })
+      },
       (error, stdout, stderr) => {
         const exitCode = error === null
           ? 0
@@ -147,6 +169,15 @@ export const probeCommand = (
 /**
  * Runs git in a workspace and returns stdout, throwing on a non-zero exit.
  *
+ * Output is captured as bytes and decoded fatally, exactly as `Workspace`
+ * decodes its own git output. A path is bytes on POSIX, and git prints those
+ * bytes verbatim under `-z`. Decoding them leniently substitutes U+FFFD for
+ * every byte that is not valid UTF-8, which silently renames the path: the
+ * write-set guard then judges a name no file has, reports it out of set, and
+ * "reverts" it with a removal that cannot fail because it targets nothing.
+ * The real write stays in the tree while the node fails claiming otherwise.
+ * A path this decoder cannot read is a loud failure instead.
+ *
  * @category git
  * @since 0.1.0
  */
@@ -155,10 +186,17 @@ export const runGit = (root: string, args: ReadonlyArray<string>): Promise<strin
     NodeChildProcess.execFile(
       "git",
       ["-C", root, ...args],
-      { maxBuffer: 256 * 1024 * 1024 },
+      { encoding: "buffer", maxBuffer: 256 * 1024 * 1024 },
       (error, stdout) => {
-        if (error !== null) reject(new Error(`git ${args[0]} failed: ${error.message}`))
-        else resolve(stdout)
+        if (error !== null) {
+          reject(new Error(`git ${args[0]} failed: ${error.message}`))
+          return
+        }
+        try {
+          resolve(new TextDecoder("utf-8", { fatal: true }).decode(stdout))
+        } catch {
+          reject(new Error(`git ${args[0]} returned stdout that is not valid UTF-8`))
+        }
       }
     )
   })
@@ -421,7 +459,14 @@ export interface IgnoredSnapshot {
 }
 
 const listIgnored = async (root: string, cacheDirectory: string): Promise<Map<string, IgnoredEntry>> => {
-  const raw = await runGit(root, ["status", "--porcelain", "-z", "--untracked-files=all", "--ignored"]).catch(() => "")
+  // The failure propagates instead of reading as an empty census. This runs
+  // once before the body and once after: swallowing a failure after leaves the
+  // guard silently blind to out-of-set writes to gitignored paths, and
+  // swallowing one before makes every gitignored path read as newly created
+  // after, sending each one outside the write-set to `revertIgnored`, which
+  // removes it recursively. Either way a guard that cannot measure must fail
+  // its target, not report that it found nothing.
+  const raw = await runGit(root, ["status", "--porcelain", "-z", "--untracked-files=all", "--ignored"])
   const entries = new Map<string, IgnoredEntry>()
   for (const status of parseStatusZ(raw)) {
     if (!status.status.startsWith("!!")) continue
@@ -556,7 +601,9 @@ const walkPortalTarget = async (realTarget: string): Promise<Map<string, PathSta
 }
 
 const listTrackedSymlinks = async (root: string): Promise<Array<string>> => {
-  const raw = await runGit(root, ["ls-files", "-s", "-z"]).catch(() => "")
+  // Same rule as the ignored census: an unmeasured portal set is a disarmed
+  // guard, so the failure reaches the target rather than reading as no links.
+  const raw = await runGit(root, ["ls-files", "-s", "-z"])
   const paths: Array<string> = []
   for (const part of raw.split("\0")) {
     if (part === "") continue
@@ -588,9 +635,7 @@ export const snapshotPortals = async (
 ): Promise<PortalSnapshot> => {
   const realRoot = await Fs.realpath(root)
   const candidates = new Set<string>(await listTrackedSymlinks(root))
-  const statusRaw = await runGit(root, ["status", "--porcelain", "-z", "--untracked-files=all", "--ignored"]).catch(
-    () => ""
-  )
+  const statusRaw = await runGit(root, ["status", "--porcelain", "-z", "--untracked-files=all", "--ignored"])
   for (const entry of parseStatusZ(statusRaw)) {
     const path = entry.path.endsWith("/") ? entry.path.slice(0, -1) : entry.path
     if (path !== "") candidates.add(path)

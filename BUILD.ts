@@ -7,6 +7,7 @@ export const rootPackageJson = Smithers.file("//package.json")
 export const rootTsconfig = Smithers.file("//tsconfig.base.json")
 export const workspaceTsconfig = Smithers.file("//tsconfig.json")
 export const rootJSDocConfig = Smithers.file("//eslint.jsdoc.js")
+export const rootInvariantsConfig = Smithers.file("//eslint.invariants.js")
 const workspace = Smithers.pnpmWorkspace("//pnpm-workspace.yaml")
 
 export const knownFiles = Smithers.Generate({
@@ -83,7 +84,7 @@ export const ci = Smithers.GithubCiGen({
     { name: "documentation parity", verb: Smithers.Verb.Docs, pattern: "//packages/...", job: "test" },
     { name: "browser contract", verb: Smithers.Verb.Test, pattern: "//scripts:browserContract" }
   ],
-  requiredJobs: ["test", "apps-e2e", "rust", "wasm-repro", "bun", "browser", "node-macos", "node-windows"],
+  requiredJobs: ["test", "apps-e2e", "rust", "wasm-repro", "bun", "browser", "e2e-faults", "packages"],
   jobs: [
     {
       id: "test",
@@ -211,23 +212,25 @@ export const ci = Smithers.GithubCiGen({
       // `e2e` was not a workspace member, so the target failed in 262 ms with
       // `Command "vitest" not found`.
       //
-      // Advisory, and dated. Two known-red gates live in the matrix by design,
-      // both owned elsewhere: `case22 ... redacts the credential out of the
-      // operator's terminal` (rc-contract R-12; rc.0 ships no redacting
-      // logger, and `scripts/repo-contract/fault-skips.test.mjs` refuses every
-      // way of making it green), and the durable-park cases that the Phase 7
-      // smoke gate records. A required job would be red on every commit for a
-      // defect no commit introduced. It becomes required — drop
-      // `continueOnError` and add `e2e-faults` to `requiredJobs` — when the
-      // Phase 5 redaction deliverable lands and the park defect closes.
+      // Required. It was advisory while `case22 ... redacts the credential out
+      // of the operator's terminal` was red by design (rc-contract R-12): rc.0
+      // shipped no redacting logger, so a required job would have been red on
+      // every commit for a defect no commit introduced. The section 5.2
+      // redaction deliverable landed that logger (`@smthrs/journal`
+      // `RedactedLogger`, installed by `packages/cli/src/bin.ts` and
+      // `packages/flows/src/NodeRuntime.ts`), the case is green in both
+      // halves, and the matrix is 67 of 67. The durable-park defect the old
+      // comment also named is a COVERAGE gap, not a red case: no case in this
+      // directory reaches it (`e2e/fault-gaps.md`, the `03, 05, 31` row), so
+      // nothing here fails for it and it cannot make this job red. A gate that
+      // is green is a gate that can hold the line.
       //
       // `jj` is a real requirement here, not a convenience: cases 12 and 21
       // drive a real Jujutsu workspace and are written to throw rather than
       // skip on CI.
       id: "e2e-faults",
-      name: "fault-injection matrix (advisory)",
+      name: "fault-injection matrix",
       runsOn: ubuntu,
-      continueOnError: true,
       timeoutMinutes: 30,
       toolchain: Smithers.CiToolchain.Needs({ runtimes: [node], jj }),
       steps: [{ name: "Fault matrix", verb: Smithers.Verb.Test, pattern: "//e2e:faults" }]
@@ -249,19 +252,41 @@ export const ci = Smithers.GithubCiGen({
       steps: [{ name: "Browser bundle guard", verb: Smithers.Verb.Test, pattern: "//scripts:browserContract" }]
     },
     {
-      id: "node-macos",
-      name: "package suites (macOS, advisory)",
-      runsOn: "macos-latest",
-      continueOnError: true,
-      timeoutMinutes: 60,
-      toolchain: Smithers.CiToolchain.Needs({ runtimes: [node, bun], jj }),
-      steps: [{ name: "Package test targets", verb: Smithers.Verb.Test, pattern: "//packages/..." }]
-    },
-    {
-      id: "node-windows",
-      name: "package suites (Windows, advisory)",
-      runsOn: "windows-latest",
-      continueOnError: true,
+      // One matrix over the three platforms, replacing the two copy-pasted
+      // advisory jobs `node-macos` and `node-windows` and adding a required
+      // ubuntu row. The steps, the toolchain, and the timeout are declared
+      // once, so a platform can never drift into running a different suite
+      // than its neighbours.
+      //
+      // The ubuntu row re-runs package test targets the required `test` job
+      // already covers: that job runs `ci '//packages/...'`, and the `ci` verb
+      // aggregates Build, Test, Lint, and Docs. The two jobs run concurrently,
+      // so the remote cache does not dedupe them, and ubuntu pays the package
+      // suites twice per run. That cost buys a truthful `requiredJobs`: with no
+      // required row, `packages` could be deleted or turned all-advisory and
+      // nothing would fail. Drop the ubuntu row only together with `packages`
+      // in `requiredJobs`.
+      //
+      // The advisory bit is per row, and it is data: `continue-on-error` reads
+      // `matrix.advisory` out of the `include:` rows below, because this
+      // generator emits no `if:` key and a job-level `continue-on-error: true`
+      // would excuse ubuntu along with the rest. ubuntu is required. macOS and
+      // Windows are advisory ONLY until the matrix proves them green; promoting
+      // one is flipping its boolean to `false`, and `requiredJobs` already
+      // names `packages`, so at least one row must stay required.
+      //
+      // Windows red today (run 33441825323, job 99651619667) was the build tool
+      // itself: `packageManagerEnvironment` held `process.env` to the POSIX
+      // name rule, and `windows-latest` sets `ProgramFiles(x86)`, so every
+      // target died in 13 s with "environment source contains a non-portable
+      // name" before a single suite ran.
+      id: "packages",
+      name: "package suites (${{ matrix.os }})",
+      matrix: [
+        { os: ubuntu, advisory: false },
+        { os: "macos-latest", advisory: true },
+        { os: "windows-latest", advisory: true }
+      ],
       timeoutMinutes: 60,
       toolchain: Smithers.CiToolchain.Needs({ runtimes: [node, bun], jj }),
       steps: [{ name: "Package test targets", verb: Smithers.Verb.Test, pattern: "//packages/..." }]

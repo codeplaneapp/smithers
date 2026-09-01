@@ -38,7 +38,6 @@ const Capabilities = Schema.Record(Schema.String, Schema.Array(Schema.NonEmptySt
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type CacheEnvironment = typeof CacheEnvironment.Type
 
@@ -47,7 +46,6 @@ export type CacheEnvironment = typeof CacheEnvironment.Type
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const CacheEnvironment = Schema.Struct({
   /** Ordered semantic runtime layers, including versions and configuration. */

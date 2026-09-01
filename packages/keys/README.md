@@ -1,33 +1,42 @@
-# @smthrs/keys
+# `@smthrs/keys`
 
-`@smthrs/keys` turns structured values into stable, content-addressed flow
-keys. `Key` first encodes a value with the repository's canonical JSON rules,
-hashes those exact bytes with the injected SHA-256 service, and prefixes the
-lowercase digest with `key1_`. The prefix versions the wire format; changing
-the canonical encoding, digest algorithm, or prefix is a compatibility change
-rather than an implementation detail.
+Derive canonical flow keys and validate keys read from storage without
+accidentally hashing them again.
 
-The result is deterministic for canonically equal values and contains no
-machine path, locale, object insertion order, or process-local state. This
-package owns the key format, [`@smthrs/canonical`](../canonical/README.md)
-owns canonical serialization, and [`@smthrs/crypto`](../crypto/README.md)
-owns the injected hashing operation. Consumers should treat keys as opaque
-identifiers and should not attempt to recover the input from them.
-
-```sh
-pnpm add @smthrs/keys
-```
-
-```ts
+```typescript
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
-import { Key } from "@smthrs/keys"
+import { deriveKey, StoredKey } from "@smthrs/keys"
 import { Effect, Schema } from "effect"
 
-const key = Effect.runSync(
-  Schema.decodeUnknownEffect(Key)({ operation: "compile", version: 1 })
-    .pipe(Effect.provide(NodeCrypto.layer))
+const derived = await Effect.runPromise(
+  deriveKey({ domain: "example/compile", version: 1, source: "main.ts" }).pipe(
+    Effect.provide(NodeCrypto.layer)
+  )
 )
-// "key1_<64 lowercase hex>"
+
+const parsed = Schema.decodeUnknownSync(StoredKey)(derived)
+// parsed === derived
 ```
 
-See the [keys reference](../../docs/pages/api/keys.md).
+`deriveKey` serializes input through
+[`@smthrs/canonical`](https://smithers.sh/api/canonical), hashes the exact
+canonical UTF-8 document through injected SHA-256 from
+[`@smthrs/crypto`](https://smithers.sh/api/crypto), and produces
+`key1_<64 lowercase hex>`.
+
+`KeyV1` validates that exact stored representation. `StoredKey` validates every
+format this release supports, currently only `KeyV1`. Unknown versions such as
+`key2_` are rejected until their complete format and derivation are implemented.
+
+`Key` remains the compatibility schema for one-way derivation. Decoding
+key-shaped text through `Key` hashes that text into a new key; it does not parse
+the stored key. Prefer `deriveKey` for typed `KeyDerivationError` failures and
+`StoredKey` at persistence, RPC, journal, and external-input boundaries.
+
+Treat keys as opaque. Include a stable domain and material-schema version in
+each protocol's structured input. Derivation inherits `Canonical` semantics,
+is one-shot, and imposes no size or depth limit of its own, so external callers
+must bound untrusted input before canonicalization.
+
+Full documentation is at
+[smithers.sh/api/keys](https://smithers.sh/api/keys).

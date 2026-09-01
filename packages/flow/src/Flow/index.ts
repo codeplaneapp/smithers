@@ -3,7 +3,7 @@
 /**
  * Typed durable flow definitions, results, and runtime helpers.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 export * from "./Annotations.ts"
 export * from "./ExecutionIdRequired.ts"

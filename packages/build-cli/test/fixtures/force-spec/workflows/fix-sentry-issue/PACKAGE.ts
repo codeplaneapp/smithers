@@ -14,7 +14,7 @@ const fixSentryIssue = S.Agent.Diff({
   data: [src.srcs],
   changes: ["src/**"],
   gates: [src.typeCheck, src.test, src.lint],
-  secrets: [S.Secret("GITHUB_TOKEN")],
+  secrets: [S.HttpSecret(S.Secret("GITHUB_TOKEN"), ["https://api.github.com"])],
   sandbox: { network: true },
   approval: "required",
   maxRounds: 3,

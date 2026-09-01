@@ -118,6 +118,7 @@ const UNSAFE_CSS_VALUE = /[;{}]|<\/style/i;
 function ChartStyle({ id, config }: { id: string; config: ChartConfig }) {
   const theme = useResolvedTheme();
   const css = useMemo(() => {
+    if (!CSS_IDENTIFIER.test(id)) return "";
     const lines = Object.entries(config)
       .map(([key, entry]) => {
         const color = configColor(entry, theme);

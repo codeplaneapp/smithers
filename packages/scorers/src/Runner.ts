@@ -5,6 +5,7 @@
  *
  * @since 0.1.0
  */
+import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -88,6 +89,10 @@ export const layerNoop: Layer.Layer<Runner> = Layer.succeed(Runner)(makeNoop())
 /**
  * Converts a scorer failure into a typed inconclusive observation.
  *
+ * The reason names the cause. It is the only field that reaches a report, so a
+ * fixed sentence made a scorer that threw a `TypeError`, which is a bug to fix,
+ * indistinguishable from an unreachable judge, which is an outage to wait out.
+ *
  * @category converting
  * @since 0.1.0
  */
@@ -100,7 +105,7 @@ export const inconclusive = (job: Job, cause: unknown): Observation => {
   return {
     ...job.observation,
     kind: "inconclusive",
-    reason: failure.message,
+    reason: `${failure.message}: ${String(Cause.isCause(cause) ? Cause.squash(cause) : cause)}`,
     at: job.at
   }
 }

@@ -12,14 +12,18 @@
  */
 import { DatabaseError, DurableWriter } from "@smthrs/database/DurableWriter"
 import type { OwnerId } from "@smthrs/run-store/Ownership"
+import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as Semaphore from "effect/Semaphore"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as EngineStateSchema from "./internal/EngineStateSchema.ts"
+import { compareText } from "./internal/Ordering.ts"
 
 /** JSON text carrying an arbitrary decoded value. */
 const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown)
@@ -680,12 +684,54 @@ const decodeJson = (value: string, field: string): Effect.Effect<unknown> =>
     Effect.orDie
   )
 
+/**
+ * Rehydrates Effect's JSON representation after a storage round-trip.
+ *
+ * `Exit` and `Cause` deliberately serialize as plain JSON objects. Leaving a
+ * failure in that form is unsafe: the success branch happens to be rebuilt by
+ * `Exit.map`, while a plain failure is not an Exit and the deferred's schema
+ * rejects it after restart. Unknown non-Exit payloads remain untouched for
+ * the generic durable-state contract.
+ */
+const restoreJsonExit = (value: unknown): unknown => {
+  if (typeof value !== "object" || value === null) return value
+  const record = value as Record<string, unknown>
+  if (record["_id"] !== "Exit") return value
+  if (record["_tag"] === "Success") return Exit.succeed(record["value"])
+  if (record["_tag"] !== "Failure") return value
+  const cause = record["cause"]
+  if (typeof cause !== "object" || cause === null) return value
+  const failures = (cause as Record<string, unknown>)["failures"]
+  if (!Array.isArray(failures)) return value
+  const reasons: Array<Cause.Reason<unknown>> = []
+  for (const failure of failures) {
+    if (typeof failure !== "object" || failure === null) return value
+    const reason = failure as Record<string, unknown>
+    switch (reason["_tag"]) {
+      case "Fail":
+        reasons.push(Cause.makeFailReason(reason["error"]))
+        break
+      case "Die":
+        reasons.push(Cause.makeDieReason(reason["defect"]))
+        break
+      case "Interrupt":
+        reasons.push(Cause.makeInterruptReason(
+          typeof reason["fiberId"] === "number" ? reason["fiberId"] : undefined
+        ))
+        break
+      default:
+        return value
+    }
+  }
+  return Exit.failCause(Cause.fromReasons(reasons))
+}
+
 const decodeDeferredRow = (input: unknown): Effect.Effect<DeferredRow> =>
   Schema.decodeUnknownEffect(DeferredDatabaseRow)(input).pipe(
     Effect.orDie,
     Effect.flatMap((row) =>
       Effect.all({
-        exit: decodeJson(row.exitJson, "exit_json"),
+        exit: decodeJson(row.exitJson, "exit_json").pipe(Effect.map(restoreJsonExit)),
         metadata: row.metadataJson === null
           ? Effect.succeed(undefined)
           : decodeJson(row.metadataJson, "metadata_json")
@@ -1017,6 +1063,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       FROM flows_clock_deadlines
       WHERE completed_at_ms IS NULL
         AND execution_id = ${scope.executionId}
+        AND (${scope.flowName ?? null} IS NULL OR flow_name = ${scope.flowName ?? null})
         AND EXISTS (
           SELECT 1 FROM flows_runs
           WHERE flows_runs.run_id = flows_clock_deadlines.execution_id
@@ -1547,6 +1594,38 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
   const parentEdges = new Map<string, Map<string, number>>()
   let parentSeq = 0
 
+  const snapshotDeferred = (row: DeferredRow): Effect.Effect<DeferredRow> =>
+    Schema.decodeUnknownEffect(DeferredRow)(row).pipe(
+      Effect.orDie,
+      Effect.flatMap((decoded) =>
+        Effect.all({
+          exitJson: encodeJson(decoded.exit, "exit"),
+          metadataJson: decoded.metadata === undefined
+            ? Effect.succeed(null)
+            : encodeJson(decoded.metadata, "metadata")
+        }).pipe(
+          Effect.flatMap(({ exitJson, metadataJson }) =>
+            decodeDeferredRow({
+              flowName: decoded.flowName,
+              executionId: decoded.executionId,
+              deferredName: decoded.deferredName,
+              exitJson,
+              metadataJson,
+              completedAtMs: decoded.completedAtMs
+            })
+          )
+        )
+      )
+    )
+
+  const snapshotClock = (row: ClockRow): Effect.Effect<ClockRow> =>
+    Schema.decodeUnknownEffect(ClockRow)(row).pipe(
+      Effect.orDie,
+      Effect.map((decoded) => ({ ...decoded }))
+    )
+
+  const snapshotWaiting = (row: WaitingRow): WaitingRow => ({ ...row })
+
   /** The synchronous twin of `findCyclePath` over the in-memory edge map. */
   const findCyclePathSync = (
     childId: string,
@@ -1606,41 +1685,49 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
       view.value.status === "suspended"
   }
 
-  return DurableEngineState.of({
+  const unguarded: Omit<Service, "transaction"> = {
     deferred: Effect.fn("DurableEngineState.deferred")((address) =>
-      Effect.sync(() => Option.fromNullishOr(deferreds.get(deferredKey(address))))
+      Effect.gen(function*() {
+        const row = deferreds.get(deferredKey(address))
+        return row === undefined ? Option.none() : Option.some(yield* snapshotDeferred(row))
+      })
     ),
     completeDeferred: Effect.fn("DurableEngineState.completeDeferred")((row) =>
-      Effect.sync(() => {
-        const key = deferredKey(row)
+      Effect.gen(function*() {
+        const stored = yield* snapshotDeferred(row)
+        const key = deferredKey(stored)
         const existing = deferreds.get(key)
         if (existing !== undefined) {
-          return { _tag: "Existing" as const, row: existing }
+          return { _tag: "Existing" as const, row: yield* snapshotDeferred(existing) }
         }
-        deferreds.set(key, row)
-        return { _tag: "Completed" as const, row }
+        deferreds.set(key, stored)
+        return { _tag: "Completed" as const, row: yield* snapshotDeferred(stored) }
       })
     ),
     clock: Effect.fn("DurableEngineState.clock")((address) =>
-      Effect.sync(() => Option.fromNullishOr(clocks.get(clockKey(address))))
+      Effect.gen(function*() {
+        const row = clocks.get(clockKey(address))
+        return row === undefined ? Option.none() : Option.some(yield* snapshotClock(row))
+      })
     ),
     scheduleClock: Effect.fn("DurableEngineState.scheduleClock")((row, owner) =>
-      Effect.suspend((): Effect.Effect<ScheduleClockOutcome> => {
+      Effect.gen(function*(): Generator<Effect.Effect<unknown>, ScheduleClockOutcome, never> {
         // Mirrors the SQL fence: creation requires the presented owner to
         // currently run the execution; a lost fence surfaces as
         // self-interruption, an existing row wins regardless.
-        if (owner === undefined) return Effect.interrupt
-        const key = clockKey(row)
+        if (owner === undefined) return yield* Effect.interrupt
+        const stored = yield* snapshotClock(row)
+        const key = clockKey(stored)
         const existing = clocks.get(key)
         if (existing !== undefined) {
-          return Effect.succeed({ _tag: "Existing" as const, row: existing })
+          return { _tag: "Existing" as const, row: yield* snapshotClock(existing) }
         }
-        const view = runView(row.executionId, owner)
+        const view = runView(stored.executionId, owner)
         if (!view.exists || !view.running || !view.owned) {
-          return Effect.interrupt
+          return yield* Effect.interrupt
         }
-        clocks.set(key, row)
-        return Effect.succeed({ _tag: "Scheduled" as const, row })
+        clocks.set(key, stored)
+        return { _tag: "Scheduled" as const, row: yield* snapshotClock(stored) }
       })
     ),
     completeClock: Effect.fn("DurableEngineState.completeClock")((address, completedAtMs) =>
@@ -1651,22 +1738,23 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
           return { _tag: "NotFound" as const }
         }
         if (existing.completedAtMs !== null) {
-          return { _tag: "AlreadyCompleted" as const, row: existing }
+          return { _tag: "AlreadyCompleted" as const, row: { ...existing } }
         }
         const row = { ...existing, completedAtMs }
         clocks.set(key, row)
-        return { _tag: "Completed" as const, row }
+        return { _tag: "Completed" as const, row: { ...row } }
       })
     ),
     dueClocks: Effect.fn("DurableEngineState.dueClocks")((nowMs) =>
-      Effect.sync(() =>
+      Effect.forEach(
         Array.from(clocks.values())
           .filter((row) => row.completedAtMs === null && row.dueAtMs <= nowMs)
           .sort((left, right) =>
             left.dueAtMs - right.dueAtMs ||
-            left.executionId.localeCompare(right.executionId) ||
-            left.clockName.localeCompare(right.clockName)
-          )
+            compareText(left.executionId, right.executionId) ||
+            compareText(left.clockName, right.clockName)
+          ),
+        snapshotClock
       )
     ),
     completeRunClocks: Effect.fn("DurableEngineState.completeRunClocks")((executionId, completedAtMs) =>
@@ -1678,19 +1766,22 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
       })
     ),
     pendingClocks: Effect.fn("DurableEngineState.pendingClocks")((scope) =>
-      Effect.sync(() =>
-        Array.from(clocks.values())
-          .filter((row) =>
-            row.completedAtMs === null &&
-            isLive(row.executionId) &&
-            (scope.executionId === undefined || row.executionId === scope.executionId) &&
-            (scope.flowName === undefined || row.flowName === scope.flowName)
-          )
-          .sort((left, right) =>
-            left.dueAtMs - right.dueAtMs ||
-            left.executionId.localeCompare(right.executionId) ||
-            left.clockName.localeCompare(right.clockName)
-          )
+      Effect.flatMap(
+        Effect.sync(() =>
+          Array.from(clocks.values())
+            .filter((row) =>
+              row.completedAtMs === null &&
+              isLive(row.executionId) &&
+              (scope.executionId === undefined || row.executionId === scope.executionId) &&
+              (scope.flowName === undefined || row.flowName === scope.flowName)
+            )
+            .sort((left, right) =>
+              left.dueAtMs - right.dueAtMs ||
+              compareText(left.executionId, right.executionId) ||
+              compareText(left.clockName, right.clockName)
+            )
+        ),
+        (rows) => Effect.forEach(rows, snapshotClock)
       )
     ),
     completedDeferreds: Effect.fn("DurableEngineState.completedDeferreds")((flowName) =>
@@ -1703,8 +1794,8 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
             deferredName
           }))
           .sort((left, right) =>
-            left.executionId.localeCompare(right.executionId) ||
-            left.deferredName.localeCompare(right.deferredName)
+            compareText(left.executionId, right.executionId) ||
+            compareText(left.deferredName, right.deferredName)
           )
       )
     ),
@@ -1724,7 +1815,7 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
           token: waitingPayload.token ?? null
         }
         waitingRows.set(runId, row)
-        return { _tag: "Parked" as const, row }
+        return { _tag: "Parked" as const, row: snapshotWaiting(row) }
       })
     ),
     wake: Effect.fn("DurableEngineState.wake")((runId) =>
@@ -1738,11 +1829,14 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
             : { _tag: "NotFound" as const }
         }
         waitingRows.delete(runId)
-        return { _tag: "Woken" as const, row }
+        return { _tag: "Woken" as const, row: snapshotWaiting(row) }
       })
     ),
     waiting: Effect.fn("DurableEngineState.waiting")((runId) =>
-      Effect.sync(() => Option.fromNullishOr(waitingRows.get(runId)))
+      Effect.sync(() => {
+        const row = waitingRows.get(runId)
+        return row === undefined ? Option.none() : Option.some(snapshotWaiting(row))
+      })
     ),
     waitingRuns: Effect.fn("DurableEngineState.waitingRuns")((filter) =>
       Effect.sync(() =>
@@ -1775,8 +1869,9 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
           })
           .sort((left, right) =>
             (left.wakeAt ?? Number.MAX_SAFE_INTEGER) - (right.wakeAt ?? Number.MAX_SAFE_INTEGER) ||
-            left.runId.localeCompare(right.runId)
+            compareText(left.runId, right.runId)
           )
+          .map(snapshotWaiting)
       )
     ),
     staleRunningRuns: Effect.fn("DurableEngineState.staleRunningRuns")((staleBeforeMs, limit) =>
@@ -1798,7 +1893,7 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
         const ordered = stale
           .sort((left, right) =>
             left.heartbeatAtMs - right.heartbeatAtMs ||
-            left.runId.localeCompare(right.runId)
+            compareText(left.runId, right.runId)
           )
           .map((row) => row.runId)
         // Mirrors the SQL LIMIT: oldest heartbeats first, capped per sweep
@@ -1857,11 +1952,78 @@ export const makeMemory = (options: MemoryOptions = {}): Service => {
         }
         return edges.sort((left, right) => left.seq - right.seq)
       })
-    ),
-    // The in-memory twin has no crash windows between writes, so the
-    // atomicity `transaction` exists to provide (issue #80) holds trivially;
-    // the effect runs directly and nothing is rolled back.
-    transaction: (effect) => effect
+    )
+  }
+
+  const gate = Semaphore.makeUnsafe(1)
+  const transactionDepth = new Map<number, number>()
+  const guard = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    Effect.flatMap(
+      Effect.fiberId,
+      (fiberId) => (transactionDepth.get(fiberId) ?? 0) > 0 ? effect : gate.withPermit(effect)
+    )
+
+  const restoreMap = <K, V>(target: Map<K, V>, source: ReadonlyMap<K, V>): void => {
+    target.clear()
+    for (const [key, value] of source) target.set(key, value)
+  }
+
+  const transaction: Service["transaction"] = <A, E, R>(
+    effect: Effect.Effect<A, E, R>
+  ): Effect.Effect<A, E, R> =>
+    Effect.flatMap(Effect.fiberId, (fiberId) => {
+      const run = Effect.uninterruptibleMask((restore) =>
+        Effect.suspend(() => {
+          const before = {
+            deferreds: new Map(deferreds),
+            clocks: new Map(clocks),
+            waitingRows: new Map(waitingRows),
+            parentEdges: new Map([...parentEdges].map(([child, parents]) => [child, new Map(parents)])),
+            parentSeq
+          }
+          transactionDepth.set(fiberId, (transactionDepth.get(fiberId) ?? 0) + 1)
+          return restore(effect).pipe(
+            Effect.catchCause((cause) =>
+              Effect.sync(() => {
+                restoreMap(deferreds, before.deferreds)
+                restoreMap(clocks, before.clocks)
+                restoreMap(waitingRows, before.waitingRows)
+                restoreMap(parentEdges, before.parentEdges)
+                parentSeq = before.parentSeq
+              }).pipe(Effect.andThen(Effect.failCause(cause)))
+            ),
+            Effect.ensuring(Effect.sync(() => {
+              const depth = transactionDepth.get(fiberId)! - 1
+              if (depth === 0) transactionDepth.delete(fiberId)
+              else transactionDepth.set(fiberId, depth)
+            }))
+          )
+        })
+      )
+      return (transactionDepth.get(fiberId) ?? 0) > 0 ? run : gate.withPermit(run)
+    })
+
+  return DurableEngineState.of({
+    deferred: (address) => guard(unguarded.deferred(address)),
+    completeDeferred: (row) => guard(unguarded.completeDeferred(row)),
+    clock: (address) => guard(unguarded.clock(address)),
+    scheduleClock: (row, owner) => guard(unguarded.scheduleClock(row, owner)),
+    completeClock: (address, completedAtMs) => guard(unguarded.completeClock(address, completedAtMs)),
+    dueClocks: (nowMs) => guard(unguarded.dueClocks(nowMs)),
+    completeRunClocks: (executionId, completedAtMs) => guard(unguarded.completeRunClocks(executionId, completedAtMs)),
+    pendingClocks: (scope) => guard(unguarded.pendingClocks(scope)),
+    completedDeferreds: (flowName) => guard(unguarded.completedDeferreds(flowName)),
+    park: (runId, waiting, owner) => guard(unguarded.park(runId, waiting, owner)),
+    wake: (runId) => guard(unguarded.wake(runId)),
+    waiting: (runId) => guard(unguarded.waiting(runId)),
+    waitingRuns: (filter) => guard(unguarded.waitingRuns(filter)),
+    staleRunningRuns: (staleBeforeMs, limit) => guard(unguarded.staleRunningRuns(staleBeforeMs, limit)),
+    attemptSurvivors: undefined,
+    recordRunParent: (childId, parentId) => guard(unguarded.recordRunParent(childId, parentId)),
+    removeRunParentsForRun: (runId) => guard(unguarded.removeRunParentsForRun(runId)),
+    runParents: (childId) => guard(unguarded.runParents(childId)),
+    runChildren: (parentId) => guard(unguarded.runChildren(parentId)),
+    transaction
   })
 }
 

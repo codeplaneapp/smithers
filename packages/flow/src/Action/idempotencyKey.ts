@@ -3,7 +3,7 @@
 /**
  * Derives run-local keys for internal durable operations.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
@@ -17,8 +17,7 @@ import * as StepIdentity from "./StepIdentity.ts"
  * The caller name separates durable declarations that share a parent scope.
  *
  * @category idempotency
- * @since 4.0.0
- * @slop
+ * @since 0.1.0
  */
 export const idempotencyKey: (
   name: string,

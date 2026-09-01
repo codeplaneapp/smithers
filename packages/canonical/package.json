@@ -6,7 +6,7 @@
   "smthrs": {
     "group": "engine"
   },
-  "description": "Effect wrapper for RFC 8785 JSON canonicalization",
+  "description": "RFC 8785 canonical JSON as an Effect Schema",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
@@ -20,7 +20,9 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts"
+    "./*": "./src/*.ts",
+    "./internal/*": null,
+    "./*/index": null
   },
   "files": [
     "src/**/*.ts",
@@ -43,7 +45,9 @@
         "types": "./dist/esm/*.d.ts",
         "import": "./dist/esm/*.js",
         "require": "./dist/cjs/*.js"
-      }
+      },
+      "./internal/*": null,
+      "./*/index": null
     }
   },
   "scripts": {
@@ -52,7 +56,9 @@
     "build": "node scripts/build.mjs",
     "check": "tsc -b tsconfig.json && tsc -p tsconfig.test.json --noEmit",
     "circular": "node scripts/circular.mjs",
+    "pretest": "pnpm run test:dist",
     "test": "vitest",
+    "test:dist": "pnpm run build && node --test test/dist-smoke.mjs",
     "coverage": "vitest --coverage"
   },
   "dependencies": {

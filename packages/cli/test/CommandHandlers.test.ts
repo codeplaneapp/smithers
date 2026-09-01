@@ -583,8 +583,10 @@ describe("owned-run settlement", () => {
       const kind = settlements[index]!
       if (kind === "control.run.pending") {
         expect(Exit.isFailure(exit)).toBe(true)
+        // Restated 2026-08-31: the refusal used to read "the executor did not
+        // take it"; it now names the cause and both ways forward.
         expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : "")).toContain(
-          "the executor did not take it"
+          "no executor took it"
         )
         continue
       }
@@ -642,7 +644,9 @@ describe("`gc` over a database it cannot open", () => {
         Effect.exit(runCommand(["gc", "--dry-run", "--json"])).pipe(
           Effect.provide(testControl),
           Effect.provide(services),
-          Effect.provide(Project.layer(root)),
+          // The migration root defaults the way `NodeControl` defaults it when a
+          // configuration names none, so this drives the layer the CLI builds.
+          Effect.provide(Project.layer(root, Project.legacyRoot(undefined, root))),
           Effect.provide(NodeServices.layer)
         )
       )

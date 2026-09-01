@@ -18,6 +18,7 @@
  * `Action.CurrentCacheEnvironment`; with no declaration the engine scopes
  * the key to the execution that produced it, and the fork would re-execute.
  */
+import { FlowEngine } from "@smthrs/engine"
 import { EngineStore } from "@smthrs/engine-store"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
 import { Journal } from "@smthrs/journal"
@@ -113,7 +114,11 @@ export const main = (filename: string): Effect.Effect<Summary> =>
         const timeTravel = yield* TimeTravel
         const fork = yield* timeTravel.fork({
           runId: "analyse-1",
-          frame: { lineageId: "analyse-1/root", seq }
+          // A frame is addressed by the lineage the ENGINE minted for the run,
+          // and `FlowEngine.Lineage` is where that id is minted. It is an opaque
+          // versioned encoding, so build it with the constructor rather than
+          // spelling one out.
+          frame: { lineageId: FlowEngine.Lineage.root("analyse-1"), seq }
         })
 
         return { parentResult, forkRunId: fork.runId, parentEntryCount: page.entries.length }

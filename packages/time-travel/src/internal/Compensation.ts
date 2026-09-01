@@ -272,8 +272,16 @@ export const compensate = (
 
 /**
  * Snapshots the current jj state and restores the target pointer after tier-3
- * compensation. Failure restores the pre-rewind pointer and rolls back all
- * handler receipts before returning.
+ * compensation.
+ *
+ * The caller hands ownership of `handlerReceipts` over with the call: EVERY
+ * failure path here rolls them back before the failure escapes, so the caller
+ * must not roll them back again. Nothing requires a handler's `rollback` to be
+ * idempotent, so a second pass would re-perform the side effect the revert
+ * undid. The two refusals that never touch jj — a plan that is not executable,
+ * and a plan that needs a restore with no pointer resolved — are covered by
+ * that rule too, so it is one invariant rather than a list of exceptions the
+ * caller has to track.
  *
  * @since 0.1.0
  * @category compensation
@@ -283,12 +291,19 @@ export const restoreWorkspace = (
   handlerReceipts: ReadonlyArray<RollbackReceipt>
 ): Effect.Effect<Result, TimeTravelError, EffectHandlerRegistry | Jj> =>
   Effect.gen(function*() {
-    yield* assertExecutable(plan)
     const registry = yield* EffectHandlerRegistry
+    // A cleanup failure on these two paths is logged rather than folded into
+    // the refusal: both mean the plan itself was malformed before any jj work
+    // started, and that is what the caller has to be told about.
+    const cleanUp = rollbackHandlers(registry, handlerReceipts).pipe(
+      Effect.catchCause((cause) => Effect.logError("time-travel: rollback after a refused restore failed", cause))
+    )
+    yield* assertExecutable(plan).pipe(Effect.tapError(() => cleanUp))
     const jj = yield* Jj
     const needsRestore = plan.effects.some((effect) => effect.tier === "compensable")
     if (!needsRestore) return { handlerReceipts }
     if (plan.targetChangeId === undefined) {
+      yield* cleanUp
       return yield* Effect.fail(error("compensation_failed", "target jj pointer was not resolved during preflight"))
     }
 

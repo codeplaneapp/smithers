@@ -647,7 +647,7 @@ export const Package = S.Package({ targets: { gate, redGate, commit, agentCommit
 
 describe("Github.Pr dispatch", () => {
   it(
-    "refuses without the token secret, without a token value, and without approval; NotImplemented past the gate",
+    "refuses without the token declaration and without approval; values stay lazy until HTTP egress",
     async () => {
       const root = await temporaryWorkspace()
       await write(root, "WORKSPACE.ts", workspaceModule())
@@ -657,8 +657,9 @@ describe("Github.Pr dispatch", () => {
         `import { Smithers as S } from "@smthrs/targets"
 const gate = S.Shell.Test({ command: "true" })
 const prNoToken = S.Github.Pr({ gates: [gate] })
-const pr = S.Github.Pr({ gates: [gate], secrets: [S.Secret("GITHUB_TOKEN")] })
-const prApproval = S.Github.Pr({ gates: [gate], secrets: [S.Secret("GITHUB_TOKEN")], approval: "required" })
+const github = S.HttpSecret(S.Secret("GITHUB_TOKEN"), ["https://api.github.com"])
+const pr = S.Github.Pr({ gates: [gate], secrets: [github] })
+const prApproval = S.Github.Pr({ gates: [gate], secrets: [github], approval: "required" })
 export const Package = S.Package({ targets: { gate, prNoToken, pr, prApproval } })
 `
       )
@@ -669,12 +670,14 @@ export const Package = S.Package({ targets: { gate, prNoToken, pr, prApproval } 
       const undeclared = await serve(root, ["//:prNoToken"], { environment: withoutToken })
       expect(undeclared.exitCode).toBe(1)
       expect(undeclared.logs).toContain(
-        "refused: missing_token_secret: Github.Pr declares no S.Secret(\"GITHUB_TOKEN\")"
+        "refused: missing_token_secret: Github.Pr declares no " +
+          "S.HttpSecret(S.Secret(\"GITHUB_TOKEN\"), [...]) in secrets"
       )
 
       const noValue = await serve(root, ["//:pr"], { environment: withoutToken })
       expect(noValue.exitCode).toBe(1)
-      expect(noValue.logs).toContain("the declared GITHUB_TOKEN secret has no value in the invoking environment")
+      expect(noValue.logs).toMatch(/\/\/:gate {2}(ran|hit)/)
+      expect(noValue.logs).toContain("NotImplemented: Github.Pr passed its refusal gate")
 
       const approval = await serve(root, ["//:prApproval"], {
         environment: { ...process.env, GITHUB_TOKEN: "ghp_secret" }

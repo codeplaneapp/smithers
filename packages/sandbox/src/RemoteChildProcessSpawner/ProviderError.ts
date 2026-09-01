@@ -15,6 +15,11 @@ import * as Schema from "effect/Schema"
  * packages may add SDK details to `cause`, but cannot create new Host-visible
  * failure kinds.
  *
+ * `not_found` entered the set with the `Sandbox` session contract: a session
+ * that can read files back needs an honest answer for a path that holds
+ * nothing, and overloading `unknown` would make "absent" indistinguishable
+ * from "broken" at the one seam whose job is to keep them apart.
+ *
  * @category models
  * @since 0.1.0
  */
@@ -22,6 +27,7 @@ export const ProviderErrorCode = Schema.Literals([
   "aborted",
   "timeout",
   "unavailable",
+  "not_found",
   "spawn_error",
   "unknown"
 ])

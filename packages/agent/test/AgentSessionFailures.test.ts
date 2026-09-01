@@ -42,6 +42,7 @@ import * as AgentSession from "../src/AgentSession.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as Seat from "../src/Seat.ts"
 import * as SeatResolver from "../src/SeatResolver.ts"
+import * as Safety from "./Safety.ts"
 
 const route: FlowEngineLike.RouteResolver = {
   prepare: () =>
@@ -298,7 +299,12 @@ const withExecutor = <A>(
   scenario: (executor: ControlExecutor.Service) => Effect.Effect<A, unknown>
 ): Promise<A> =>
   Effect.gen(function*() {
-    const executor = yield* AgentSession.make({ limits: { calls: 4 }, maxFrames: 2 })
+    const executor = yield* AgentSession.make({
+      limits: { calls: 4 },
+      maxFrames: 2,
+      quotaPolicy: Safety.quotaPolicy,
+      budget: Safety.budget
+    })
     return yield* scenario(executor)
   }).pipe(
     Effect.provide(
@@ -1270,5 +1276,68 @@ describe("the executor's engine ports", () => {
     // request for whichever executor eventually drives the run.
     expect(observed.cancel).toBe("unknown")
     expect(observed.signal).toBe("unknown")
+  })
+})
+
+describe("the settlement a failure is persisted as", () => {
+  /**
+   * `agent/run` declares `error: Schema.Unknown`, which `Schema.toCodecJson`
+   * reads as "any JSON value". Every real agent failure is an `Error`
+   * instance, so the codec rejected every one, `engine-store` degraded the
+   * settlement into a projection, and it announced that in a second WARN stack
+   * beside the run's own `An agent run failed` (Phase 7 smoke observation N1).
+   * Rendering the error to the text the operator already reads is what makes
+   * the settlement encodable.
+   */
+  it("renders an error to the text `Cause.pretty` gives the operator", () => {
+    const rendered = AgentSession.settlementFailure(
+      new Seat.SeatUnresolved({ seat: "anthropic:test-model", message: "no credits remaining" })
+    )
+
+    expect(typeof rendered).toBe("string")
+    expect(String(rendered)).toContain("no credits remaining")
+  })
+
+  it("renders a class instance that is not an error", () => {
+    class Refusal {
+      readonly reason = "billing"
+    }
+
+    expect(typeof AgentSession.settlementFailure(new Refusal())).toBe("string")
+  })
+
+  it("renders a value the JSON codec cannot take", () => {
+    expect(typeof AgentSession.settlementFailure(Number.POSITIVE_INFINITY)).toBe("string")
+    expect(typeof AgentSession.settlementFailure(() => undefined)).toBe("string")
+    expect(typeof AgentSession.settlementFailure({ nested: { deep: new Error("boom") } })).toBe("string")
+    expect(typeof AgentSession.settlementFailure([1, new Error("boom")])).toBe("string")
+  })
+
+  it("renders a cyclic or very deep value instead of throwing from the mapper", () => {
+    // `settlementFailure` runs inside Effect.mapError on the failure channel:
+    // a walk that throws turns a clean failure into a defect from the mapper.
+    const cyclic: Record<string, unknown> = { flowId: "agents/notes" }
+    cyclic["self"] = cyclic
+    expect(typeof AgentSession.settlementFailure(cyclic)).toBe("string")
+
+    let deep: Record<string, unknown> = {}
+    for (let level = 0; level < 20_000; level++) deep = { deep }
+    expect(typeof AgentSession.settlementFailure(deep)).toBe("string")
+
+    // A value that repeats a child without a cycle is still JSON.
+    const shared = { id: 1 }
+    const repeated = { a: shared, b: shared }
+    expect(AgentSession.settlementFailure(repeated)).toBe(repeated)
+  })
+
+  it("passes a JSON value through untouched", () => {
+    const json = { flowId: "agents/notes", attempts: 2, ok: false, tags: ["a", "b"], note: null }
+
+    expect(AgentSession.settlementFailure(json)).toBe(json)
+    expect(AgentSession.settlementFailure("plain")).toBe("plain")
+    expect(AgentSession.settlementFailure(7)).toBe(7)
+    expect(AgentSession.settlementFailure(true)).toBe(true)
+    expect(AgentSession.settlementFailure(null)).toBe(null)
+    expect(AgentSession.settlementFailure(Object.create(null) as Record<string, unknown>)).toEqual({})
   })
 })

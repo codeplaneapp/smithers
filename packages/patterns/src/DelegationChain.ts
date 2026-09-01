@@ -51,7 +51,8 @@ export type DelegationErrorCode = typeof DelegationErrorCode.Type
  * A refused chain declaration or a leaf no tier could settle.
  *
  * `path` names the plan path the failure belongs to, or `root` for a failure
- * of the chain itself.
+ * of the chain itself. `cause` carries the reported error or per-tier
+ * outcomes. It never carries the input that produced them.
  *
  * @category errors
  * @since 0.1.0
@@ -59,7 +60,8 @@ export type DelegationErrorCode = typeof DelegationErrorCode.Type
 export class DelegationError extends Schema.TaggedError<DelegationError>()("flows/patterns/DelegationError", {
   code: DelegationErrorCode,
   path: Schema.String,
-  message: Schema.String
+  message: Schema.String,
+  cause: Schema.optional(Schema.Unknown)
 }) {}
 
 /**
@@ -219,9 +221,18 @@ const exhaustedRound = (value: unknown): { readonly output: unknown } | undefine
     ? { output: value.output }
     : undefined
 
-const checkBounds = (bounds: Bounds, tiers: ReadonlyArray<string>): DelegationError | undefined => {
+const checkBounds = (
+  bounds: Bounds & { readonly concurrency?: number | undefined },
+  tiers: ReadonlyArray<string>
+): DelegationError | undefined => {
   if (!positive(bounds.maxDepth) || !positive(bounds.maxDeriskRounds) || !positive(bounds.maxAttempts)) {
     return refuse("invalid_bounds", "maxDepth, maxDeriskRounds, and maxAttempts must be positive safe integers")
+  }
+  if (bounds.concurrency !== undefined && !positive(bounds.concurrency)) {
+    return refuse(
+      "invalid_bounds",
+      `Delegation concurrency must be a positive safe integer, received ${bounds.concurrency}`
+    )
   }
   if (bounds.tierOrder.length === 0) {
     return refuse("invalid_bounds", "tierOrder must name at least one tier, weakest first")
@@ -240,17 +251,7 @@ const checkBounds = (bounds: Bounds, tiers: ReadonlyArray<string>): DelegationEr
  * @category predicates
  * @since 0.1.0
  */
-export const accepted = (value: unknown): boolean =>
-  value === true ||
-  value === "approved" ||
-  (
-    typeof value === "object" &&
-    value !== null &&
-    (
-      ("approved" in value && value.approved === true) ||
-      ("accepted" in value && value.accepted === true)
-    )
-  )
+export const accepted = Compose.accepted
 
 /**
  * The number of flow calls {@link make} declares, counting only the calls the
@@ -348,7 +349,8 @@ const ladder = (
  * yet will be. Each declared call carries the payload {@link run} sends, with
  * the authored plan standing in for the leaf goals nothing knows yet.
  *
- * Use {@link run} to execute the real chain.
+ * Use {@link run} to execute the real chain. Very large depth and derisk-round
+ * bounds build a very large graph before anything runs.
  *
  * @category constructors
  * @since 0.1.0
@@ -409,11 +411,25 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
   })
 }
 
-interface Attempt {
-  readonly tier: string
-  readonly output: unknown
-  readonly failed: boolean
-}
+type Attempt =
+  | {
+    readonly tier: string
+    readonly failed: true
+    readonly error: unknown
+  }
+  | {
+    readonly tier: string
+    readonly failed: false
+    readonly output: unknown
+    readonly rejected: boolean
+  }
+
+const attemptCause = (attempts: ReadonlyArray<Attempt>): ReadonlyArray<Readonly<Record<string, unknown>>> =>
+  attempts.map((attempt) =>
+    attempt.failed
+      ? { tier: attempt.tier, error: attempt.error }
+      : { tier: attempt.tier, rejected: attempt.rejected }
+  )
 
 /**
  * Runs the chain: refine the prompt into a goal, plan and derisk it, execute
@@ -471,29 +487,33 @@ export const run = <Settled, E1, R1, E2, R2, E3, R3, E4, R4, E5, R5, E6, R6>(
     const outputs = new Map<string, unknown>()
     yield* Trellis.execute(plan, {
       concurrency: options.concurrency ?? options.maxDepth,
-      leaf: (leaf) =>
-        Escalation.run<Trellis.Leaf, Attempt, never, R4, E5, R5>(leaf, {
+      leaf: (leaf) => {
+        const attempts: Array<Attempt> = []
+        return Escalation.run<Trellis.Leaf, Attempt, E5, R4 | R5, never, never>(leaf, {
           rungs: options.tierOrder.map((tier) => (work: Trellis.Leaf) =>
-            WithRetry.retryEffect(
-              (options.execute[tier] as (work: Work) => Effect.Effect<unknown, E4, R4>)({
-                leaf: work,
-                tier,
-                goal,
-                ...(options.budget === undefined ? {} : { budget: options.budget })
-              }),
-              { attempts: options.maxAttempts }
+            Effect.matchEffect(
+              WithRetry.retryEffect(
+                (options.execute[tier] as (work: Work) => Effect.Effect<unknown, E4, R4>)({
+                  leaf: work,
+                  tier,
+                  goal,
+                  ...(options.budget === undefined ? {} : { budget: options.budget })
+                }),
+                { attempts: options.maxAttempts }
+              ),
+              {
+                onFailure: (error) => Effect.succeed<Attempt>({ tier, failed: true, error }),
+                onSuccess: (output) =>
+                  Effect.map(
+                    options.review({ stage: "leaf", leaf, tier, output }),
+                    (decision): Attempt => ({ tier, failed: false, output, rejected: !accepted(decision) })
+                  )
+              }
             ).pipe(
-              Effect.map((output): Attempt => ({ tier, output, failed: false })),
-              Effect.catch(() => Effect.succeed<Attempt>({ tier, output: undefined, failed: true }))
+              Effect.tap((attempt) => Effect.sync(() => attempts.push(attempt)))
             )
           ),
-          accept: (attempt) =>
-            attempt.failed
-              ? Effect.succeed(false)
-              : Effect.map(
-                options.review({ stage: "leaf", leaf, tier: attempt.tier, output: attempt.output }),
-                accepted
-              )
+          accept: (attempt) => Effect.succeed(!attempt.failed && !attempt.rejected)
         }).pipe(
           Effect.flatMap((reached) =>
             "accepted" in reached && reached.accepted === false
@@ -501,24 +521,33 @@ export const run = <Settled, E1, R1, E2, R2, E3, R3, E4, R4, E5, R5, E6, R6>(
                 new DelegationError({
                   code: "leaf_failed",
                   path: leaf.path,
-                  message: `No tier settled the leaf at ${leaf.path} within ${options.maxAttempts} attempts each`
+                  message: `No tier settled the leaf at ${leaf.path} within ${options.maxAttempts} attempts each`,
+                  cause: attemptCause(attempts)
                 })
               )
               : Effect.succeed(reached.result)
           ),
-          Effect.tap((attempt) => Effect.sync(() => outputs.set(leaf.path, attempt.output))),
+          // The preceding acceptance predicate admits exactly the successful,
+          // non-rejected member of `Attempt`. Escalation's generic predicate
+          // cannot carry that refinement into its result type, so retain the
+          // proven branch here instead of pretending a failed attempt can pass.
+          Effect.tap((attempt) =>
+            Effect.sync(() => outputs.set(leaf.path, (attempt as Extract<Attempt, { readonly failed: false }>).output))
+          ),
           Effect.catchTag(
             "flows/patterns/PatternError",
-            () =>
+            (error) =>
               Effect.fail(
                 new DelegationError({
                   code: "leaf_failed",
                   path: leaf.path,
-                  message: `No tier settled the leaf at ${leaf.path} within ${options.maxAttempts} attempts each`
+                  message: `No tier settled the leaf at ${leaf.path} within ${options.maxAttempts} attempts each`,
+                  cause: error
                 })
               )
           )
         )
+      }
     })
     const leaves = Trellis.leaves(plan).map((leaf) => outputs.get(leaf.path))
     const review = yield* options.review({ stage: "chain", goal, plan, leaves })

@@ -27,13 +27,16 @@ describe("Debate", () => {
     expect(Graph.nodes(graph).filter((node) => node.kind === "FlowCall")).toHaveLength(5)
     expect(debate.implementation?._tag).toBe("Body")
     if (debate.implementation?._tag === "Body") {
-      expect(debate.implementation.algorithm).toBe("sha256-source-captures/v3")
+      expect(debate.implementation.algorithm).toBe("sha256-source-captures/v4")
     }
   })
 
   it("rejects an unbounded round count", () => {
     expect(() => Debate.make({ proponent: participant, opponent: participant, judge: participant, rounds: 0 })).toThrow(
-      PatternError
+      expect.objectContaining({
+        code: "invalid_decorator",
+        message: "Debate rounds must be a positive safe integer, received 0"
+      })
     )
   })
 
@@ -68,6 +71,78 @@ describe("Debate", () => {
       })
     }))
 
+  it.effect("hands every callback a frozen transcript copy", () =>
+    Effect.gen(function*() {
+      const retained: Array<ReadonlyArray<Debate.RuntimeTurn<unknown, unknown>>> = []
+      const tryForge = (transcript: ReadonlyArray<Debate.RuntimeTurn<unknown, unknown>>) => {
+        retained.push(transcript)
+        try {
+          ;(transcript as Array<Debate.RuntimeTurn<unknown, unknown>>).push({
+            proponent: "forged",
+            opponent: "forged"
+          })
+        } catch {
+          // A frozen transcript refuses the forged turn.
+        }
+      }
+      const result = yield* Debate.run("topic", {
+        rounds: 2,
+        proponent: ({ round, transcript }) => {
+          tryForge(transcript)
+          return Effect.succeed(`p${round}`)
+        },
+        opponent: ({ round, transcript }) => {
+          tryForge(transcript)
+          return Effect.succeed(`o${round}`)
+        },
+        judge: ({ transcript }) => {
+          tryForge(transcript)
+          return Effect.succeed(transcript)
+        }
+      })
+
+      expect(retained.every(Object.isFrozen)).toBe(true)
+      expect(retained.map((transcript) => transcript.length)).toEqual([0, 0, 1, 1, 2])
+      expect(result).toEqual([
+        { proponent: "p1", opponent: "o1" },
+        { proponent: "p2", opponent: "o2" }
+      ])
+    }))
+
+  it.effect("freezes turn wrappers so a participant cannot rewrite history", () =>
+    Effect.gen(function*() {
+      let reassignment: unknown
+      let deletion: unknown
+      const result = yield* Debate.run("topic", {
+        rounds: 2,
+        proponent: ({ round, transcript }) => {
+          if (round === 2) {
+            const first = transcript[0] as { proponent?: string; opponent?: string }
+            try {
+              first.proponent = "forged"
+            } catch (error) {
+              reassignment = error
+            }
+            try {
+              delete first.opponent
+            } catch (error) {
+              deletion = error
+            }
+          }
+          return Effect.succeed(`p${round}`)
+        },
+        opponent: ({ round }) => Effect.succeed(`o${round}`),
+        judge: ({ transcript }) => Effect.succeed(transcript)
+      })
+
+      expect(reassignment).toBeInstanceOf(TypeError)
+      expect(deletion).toBeInstanceOf(TypeError)
+      expect(result).toEqual([
+        { proponent: "p1", opponent: "o1" },
+        { proponent: "p2", opponent: "o2" }
+      ])
+    }))
+
   it.effect("rejects an invalid runtime round count", () =>
     Effect.gen(function*() {
       const failure = yield* Debate.run("topic", {
@@ -78,5 +153,7 @@ describe("Debate", () => {
       }).pipe(Effect.flip)
 
       expect(failure).toBeInstanceOf(PatternError)
+      expect(failure.code).toBe("invalid_decorator")
+      expect(failure.message).toBe("Debate rounds must be a positive safe integer, received 0")
     }))
 })

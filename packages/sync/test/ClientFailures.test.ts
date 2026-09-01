@@ -383,6 +383,91 @@ describe("SyncClient failure paths", () => {
       expect(readsBeforeTimeAdvanced).toBe(1)
     }))
 
+  // A whole-workspace subscription merges every covered run, so one compacted
+  // run used to take the whole subscription down: the refusal was untyped, the
+  // client retried only `transport_failed`, and every resubscribe carried the
+  // same cursors and earned the same refusal.
+  it.effect("resyncs a compacted run from its checkpoint instead of losing the workspace subscription", () =>
+    Effect.gen(function*() {
+      const compacted = runId("compacted")
+      const requested: Array<SyncProtocol.WorkspaceCursor> = []
+      const client = stubClient({
+        read: (request) => {
+          requested.push(request.cursors)
+          const covered = request.cursors.find((cursor) => cursor.runId === compacted)?.afterSeq ?? -1
+          return covered < 12
+            ? Effect.fail(
+              new SyncError({
+                code: "compacted",
+                message: "run compacted is compacted through sequence 12",
+                resync: { runId: compacted, checkpointSeq: seq(12) }
+              })
+            )
+            : Effect.succeed({
+              entries: [entry("compacted", 13), entry("healthy", 0)],
+              cursors: [],
+              done: true
+            })
+        }
+      })
+
+      const entries = yield* (
+        client.subscribe({ scope: { _tag: "Workspace" }, cursors: [] }).pipe(
+          Stream.take(2),
+          Stream.runCollect
+        )
+      )
+
+      expect(Array.from(entries).map((value) => `${value.runId}:${value.seq}`)).toEqual([
+        "compacted:13",
+        "healthy:0"
+      ])
+      expect(requested).toEqual([[], [{ runId: compacted, afterSeq: 12 }]])
+    }))
+
+  // A resync that cannot move the cursor forward would re-read the same
+  // refusal forever, so it stays a typed failure the caller can see.
+  it.effect("does not spin on a compacted refusal that names no reachable checkpoint", () =>
+    Effect.gen(function*() {
+      const scenarios = [
+        {
+          name: "no checkpoint at all",
+          cursors: [] as SyncProtocol.WorkspaceCursor,
+          failure: new SyncError({ code: "compacted", message: "compacted with no floor" })
+        },
+        {
+          name: "a checkpoint the subscription already covers",
+          cursors: [{ runId: id, afterSeq: seq(12) }],
+          failure: new SyncError({
+            code: "compacted",
+            message: "compacted through sequence 12",
+            resync: { runId: id, checkpointSeq: seq(12) }
+          })
+        }
+      ]
+
+      for (const scenario of scenarios) {
+        let reads = 0
+        const client = stubClient({
+          read: () => {
+            reads += 1
+            return Effect.fail(scenario.failure)
+          }
+        })
+
+        const exit = yield* Effect.exit(
+          client.subscribe({ scope, cursors: scenario.cursors }).pipe(Stream.take(1), Stream.runCollect)
+        )
+
+        expect(Exit.isFailure(exit), scenario.name).toBe(true)
+        expect(reads, scenario.name).toBe(1)
+        if (Exit.isFailure(exit)) {
+          const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail")?.error
+          expect(failure).toMatchObject({ code: "compacted" })
+        }
+      }
+    }))
+
   it.effect("makeNoop fails every subscription and reports no cursors", () =>
     Effect.gen(function*() {
       const noop = SyncClient.makeNoop()

@@ -1,8 +1,10 @@
 import { describe, it } from "@effect/vitest"
 import { Graph, Node } from "@smthrs/core"
+import * as TestRuntime from "@smthrs/core/TestRuntime"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { expect } from "vitest"
 import { PatternError } from "../src/PatternError.ts"
@@ -21,6 +23,7 @@ describe("Quarantine", () => {
     const graph = Graph.build(Quarantine.all(members, { policy: "quarantine" }))
 
     expect(Graph.nodes(graph).filter((node) => node.kind === "Catch")).toHaveLength(3)
+    expect(Graph.nodes(graph).filter((node) => node.kind === "Map")).toHaveLength(3)
     expect(Graph.nodes(graph).filter((node) => node.kind === "All")).toHaveLength(1)
     expect(Graph.nodes(graph).find((node) => node.id === "root.all.alpha.recover")?.keyMaterial.body).toEqual({
       _tag: "Succeed",
@@ -36,7 +39,9 @@ describe("Quarantine", () => {
   })
 
   it("rejects an empty member record", () => {
-    expect(() => Quarantine.all({}, { policy: "quarantine" })).toThrow(PatternError)
+    expect(() => Quarantine.all({}, { policy: "quarantine" })).toThrow(
+      expect.objectContaining({ code: "invalid_decorator", message: "Quarantine requires at least one member" })
+    )
   })
 
   it.effect("isolates a failing member and lets its siblings finish", () =>
@@ -55,14 +60,29 @@ describe("Quarantine", () => {
         gamma: settle("gamma", 1)
       }, { policy: "quarantine" })
 
-      expect(result.alpha).toBe("alpha-done")
-      expect(result.gamma).toBe("gamma-done")
+      expect(result.alpha).toEqual({ _tag: "Succeeded", member: "alpha", value: "alpha-done" })
+      expect(result.gamma).toEqual({ _tag: "Succeeded", member: "gamma", value: "gamma-done" })
       expect(result.beta).toEqual({
         _tag: "Quarantined",
         member: "beta",
         error: new Boom({ member: "beta" })
       })
       expect([...finished].sort()).toEqual(["alpha", "gamma"])
+    }))
+
+  it.effect("returns own data properties for prototype-shaped member names", () =>
+    Effect.gen(function*() {
+      const names = ["__proto__", "constructor", "toString", "normal"]
+      const result = yield* Quarantine.run(
+        Object.fromEntries(names.map((name) => [name, Effect.succeed(`${name}-value`)])),
+        { policy: "quarantine" }
+      )
+
+      expect(Object.getPrototypeOf(result)).toBe(Object.prototype)
+      for (const name of names) {
+        expect(Object.hasOwn(result, name)).toBe(true)
+        expect(result[name]).toEqual({ _tag: "Succeeded", member: name, value: `${name}-value` })
+      }
     }))
 
   it.effect("interrupts siblings on the first failure under the halt policy", () =>
@@ -80,6 +100,17 @@ describe("Quarantine", () => {
 
       expect(exit._tag).toBe("Failure")
       expect(finished).toEqual([])
+    }))
+
+  it.effect("returns every member's value under the halt policy when none fails", () =>
+    Effect.gen(function*() {
+      const result = yield* Quarantine.run(
+        { alpha: Effect.succeed("alpha-value"), beta: Effect.succeed("beta-value") },
+        { policy: "halt" }
+      )
+
+      expect(result).toEqual({ alpha: "alpha-value", beta: "beta-value" })
+      expect(Object.keys(result).sort()).toEqual(["alpha", "beta"])
     }))
 
   it.effect("bounds how many members run at once", () =>
@@ -116,17 +147,22 @@ describe("Quarantine", () => {
       const values = yield* Fiber.join(fiber)
 
       expect(peak).toBe(2)
-      expect(values).toEqual({ a: "done", b: "done", c: "done", d: "done" })
+      expect(values).toEqual(Object.fromEntries(
+        ["a", "b", "c", "d"].map((member) => [member, { _tag: "Succeeded", member, value: "done" }])
+      ))
     }))
 
   it.effect("settles a clean result and fails on quarantined members", () =>
     Effect.gen(function*() {
-      const clean = yield* Quarantine.settle({ a: 1, b: 2 })
+      const clean = yield* Quarantine.settle({
+        a: { _tag: "Succeeded", member: "a", value: 1 },
+        b: { _tag: "Succeeded", member: "b", value: 2 }
+      })
       expect(clean).toEqual({ a: 1, b: 2 })
 
       const error = yield* Effect.flip(
         Quarantine.settle({
-          a: 1,
+          a: { _tag: "Succeeded", member: "a", value: 1 } as const,
           b: { _tag: "Quarantined", member: "b", error: new Boom({ member: "b" }) } as const,
           c: { _tag: "Quarantined", member: "c", error: new Boom({ member: "c" }) } as const
         })
@@ -134,7 +170,11 @@ describe("Quarantine", () => {
 
       expect(error).toBeInstanceOf(PatternError)
       expect(error.code).toBe("quarantined")
-      expect(error.message).toContain("b, c")
+      expect(error.message).toBe("Quarantined members: b, c")
+      expect(error.cause).toEqual([
+        { member: "b", error: new Boom({ member: "b" }) },
+        { member: "c", error: new Boom({ member: "c" }) }
+      ])
     }))
 
   // `run` refuses with a TYPED failure, not a defect, for the same reason
@@ -149,13 +189,92 @@ describe("Quarantine", () => {
 
       expect(empty).toBeInstanceOf(PatternError)
       expect(empty.code).toBe("invalid_decorator")
+      expect(empty.message).toBe("Quarantine requires at least one member")
       expect(width).toBeInstanceOf(PatternError)
       expect(width.code).toBe("invalid_decorator")
+      expect(width.message).toBe("Quarantine concurrency must be a positive safe integer, received 0")
     }))
 
-  it("recognises a quarantined member", () => {
+  it("recognises only the full structural quarantined marker", () => {
     expect(Quarantine.isQuarantined({ _tag: "Quarantined", member: "a", error: 1 })).toBe(true)
+    expect(Quarantine.isQuarantined({ _tag: "Quarantined" })).toBe(false)
+    expect(Quarantine.isQuarantined({ _tag: "Quarantined", member: 1, error: "e" })).toBe(false)
+    expect(Quarantine.isQuarantined({ _tag: "Quarantined", error: "e" })).toBe(false)
+    expect(Quarantine.isQuarantined({ _tag: "quarantined", member: "a", error: "e" })).toBe(false)
     expect(Quarantine.isQuarantined({ _tag: "Settled" })).toBe(false)
     expect(Quarantine.isQuarantined(undefined)).toBe(false)
+  })
+
+  it("recognises only the full structural success envelope", () => {
+    expect(Quarantine.isSucceeded({ _tag: "Succeeded", member: "a", value: 1 })).toBe(true)
+    expect(Quarantine.isSucceeded({ _tag: "Succeeded", member: "a" })).toBe(false)
+    expect(Quarantine.isSucceeded({ _tag: "Succeeded", member: 1, value: 1 })).toBe(false)
+    expect(Quarantine.isSucceeded({ _tag: "Succeeded", member: "a", value: 1, extra: true })).toBe(false)
+    expect(Quarantine.isSucceeded(null)).toBe(false)
+  })
+
+  it.effect("nests a full marker-shaped success without mistaking it for a failure", () =>
+    Effect.gen(function*() {
+      const value = { _tag: "Quarantined", member: "legitimate", error: "ordinary data" } as const
+      const outcomes = yield* Quarantine.run({ a: Effect.succeed(value) }, { policy: "quarantine" })
+      const settled = yield* Quarantine.settle(outcomes)
+
+      expect(settled).toEqual({ a: value })
+    }))
+
+  it("executes declaration envelopes through the core test runtime", () => {
+    const value = { _tag: "Quarantined", member: "legitimate", error: "ordinary data" } as const
+    const result = TestRuntime.evaluate(
+      Quarantine.all({ a: Node.succeed(value), b: Node.fail("failed") }, { policy: "quarantine" })
+    )
+    if (Result.isFailure(result)) throw result.failure
+
+    expect(result.success).toEqual({
+      a: { _tag: "Succeeded", member: "a", value },
+      b: { _tag: "Quarantined", member: "b", error: "failed" }
+    })
+  })
+
+  it.effect("refuses malformed settlement envelopes", () =>
+    Effect.gen(function*() {
+      const failure = yield* Quarantine.settle({
+        b: 2,
+        a: { _tag: "Succeeded", member: "a", value: 1, extra: true }
+      } as never).pipe(Effect.flip)
+
+      expect(failure).toMatchObject({
+        code: "invalid_decorator",
+        message: "Invalid quarantine outcomes: a, b"
+      })
+    }))
+
+  it("never invokes accessors while checking an outcome", () => {
+    let calls = 0
+    const accessor = Object.defineProperty({ member: "a", error: "e" }, "_tag", {
+      enumerable: true,
+      get: () => {
+        calls += 1
+        return "Quarantined"
+      }
+    })
+    const proxy = new Proxy({}, {
+      ownKeys: () => {
+        throw new Error("hostile")
+      }
+    })
+    let descriptors = 0
+    const descriptorProxy = new Proxy({}, {
+      ownKeys: () => ["_tag", "member", "error"],
+      getOwnPropertyDescriptor: (_target, key) => {
+        descriptors += 1
+        if (descriptors > 3) throw new Error("hostile descriptor")
+        return { configurable: true, enumerable: true, value: key === "_tag" ? "Quarantined" : "value" }
+      }
+    })
+
+    expect(Quarantine.isQuarantined(accessor)).toBe(false)
+    expect(Quarantine.isSucceeded(proxy)).toBe(false)
+    expect(Quarantine.isQuarantined(descriptorProxy)).toBe(false)
+    expect(calls).toBe(0)
   })
 })

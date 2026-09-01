@@ -5,7 +5,7 @@
  * interrupt the rest, which is right when the members are one unit of work and
  * wrong when they are independent errands. {@link all} isolates a failing
  * member instead: its siblings run to completion and the join returns a record
- * of settled values and {@link Quarantined} markers.
+ * of explicit {@link Succeeded} and {@link Quarantined} outcomes.
  *
  * @see docs/pages/concepts/concurrency.md
  *
@@ -23,16 +23,18 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Policy = "quarantine" | "halt"
 
 /**
  * A member that failed and was isolated from its siblings.
  *
+ * This is one arm of the structural wire envelope used for durable replay.
+ * Successful member values are always nested in {@link Succeeded}, so user
+ * values can never collide with this protocol tag.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Quarantined<E> {
   readonly _tag: "Quarantined"
@@ -41,11 +43,34 @@ export interface Quarantined<E> {
 }
 
 /**
+ * A member that completed successfully.
+ *
+ * The value is nested so a legitimate user value can have any shape,
+ * including the complete `Quarantined` wire shape, without being mistaken for
+ * protocol metadata.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface Succeeded<A> {
+  readonly _tag: "Succeeded"
+  readonly member: string
+  readonly value: A
+}
+
+/**
+ * One unambiguous member outcome under the quarantine policy.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type Settled<A, E> = Succeeded<A> | Quarantined<E>
+
+/**
  * Configuration for {@link all}.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface AllOptions {
   readonly policy: Policy
@@ -59,7 +84,6 @@ export interface AllOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions {
   readonly policy: Policy
@@ -69,15 +93,49 @@ export interface RuntimeOptions {
 /**
  * Tests whether a joined member was quarantined.
  *
+ * The check reads the complete structural wire envelope without invoking
+ * accessors. Successful user values are nested in {@link Succeeded}, so their
+ * own shape is never interpreted as protocol metadata.
+ *
  * @category refinements
  * @since 0.1.0
- * @slop
  */
-export const isQuarantined = (value: unknown): value is Quarantined<unknown> =>
-  typeof value === "object" &&
-  value !== null &&
-  "_tag" in value &&
-  (value as { readonly _tag: unknown })._tag === "Quarantined"
+export const isQuarantined = (value: unknown): value is Quarantined<unknown> => outcome(value, "Quarantined", "error")
+
+/**
+ * Tests whether a joined member completed successfully.
+ *
+ * @category refinements
+ * @since 1.0.0
+ */
+export const isSucceeded = (value: unknown): value is Succeeded<unknown> => outcome(value, "Succeeded", "value")
+
+const data = (value: object, key: string): PropertyDescriptor | undefined => {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    return descriptor !== undefined && descriptor.enumerable && "value" in descriptor ? descriptor : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const outcome = (value: unknown, tag: "Succeeded" | "Quarantined", payload: "value" | "error"): boolean => {
+  if (typeof value !== "object" || value === null) return false
+  let keys: ReadonlyArray<string>
+  try {
+    keys = Object.keys(value)
+  } catch {
+    return false
+  }
+  if (keys.length !== 3 || !keys.includes("_tag") || !keys.includes("member") || !keys.includes(payload)) return false
+  return data(value, "_tag")?.value === tag && typeof data(value, "member")?.value === "string" &&
+    data(value, payload) !== undefined
+}
+
+const succeeded = <A>(member: string, value: A): Succeeded<A> => Object.freeze({ _tag: "Succeeded", member, value })
+
+const quarantined = <E>(member: string, error: E): Quarantined<E> =>
+  Object.freeze({ _tag: "Quarantined", member, error })
 
 // Every refusal is minted once, as a value. `all` throws it, because a
 // declaration is built eagerly and a broken one is a programming error. `run`
@@ -105,31 +163,47 @@ const nonEmpty = (names: ReadonlyArray<string>): void => {
 /**
  * Joins a record of members under the declared failure policy.
  *
- * Under `quarantine` each member gains a recovery arm that succeeds with a
- * {@link Quarantined} marker, so the declaration shows one `Catch` per member
- * and the join can no longer fail on a member's behalf. Under `halt` the join
- * is a plain `Node.all`.
+ * Under `quarantine` every member settles as an explicit {@link Settled}
+ * envelope: success becomes {@link Succeeded} and failure becomes
+ * {@link Quarantined}. The declaration shows one `Catch` per member and the
+ * join can no longer fail on a member's behalf. Under `halt` the join is a
+ * plain `Node.all` and preserves raw successful values.
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
-export const all = (
+export function all(
+  members: Readonly<Record<string, Node.Any>>,
+  options: AllOptions & { readonly policy: "quarantine" }
+): Node.Node<Readonly<Record<string, Settled<unknown, unknown>>>>
+export function all(
+  members: Readonly<Record<string, Node.Any>>,
+  options: AllOptions & { readonly policy: "halt" }
+): Node.Node<Readonly<Record<string, unknown>>, unknown>
+export function all(
   members: Readonly<Record<string, Node.Any>>,
   options: AllOptions
-): Node.Node<Readonly<Record<string, unknown>>, unknown> => {
+): Node.Node<Readonly<Record<string, unknown | Settled<unknown, unknown>>>, unknown> {
   const names = Object.keys(members)
   nonEmpty(names)
   if (options.policy === "halt") return Node.all(members)
-  const isolated: Record<string, Node.Any> = {}
-  for (const member of names) {
-    isolated[member] = Node.catch(members[member]!, {
-      onFailure: Node.capture(
-        { member },
-        (error: unknown) => Node.succeed({ _tag: "Quarantined", member, error })
+  const isolated = Object.fromEntries(
+    names.map((member) => [
+      member,
+      Node.catch(
+        Node.map(
+          members[member]!,
+          Node.capture({ member, outcome: "Succeeded" }, (value: unknown) => succeeded(member, value))
+        ),
+        {
+          onFailure: Node.capture(
+            { member, outcome: "Quarantined" },
+            (error: unknown) => Node.succeed(quarantined(member, error))
+          )
+        }
       )
-    })
-  }
+    ])
+  ) as Record<string, Node.Any>
   return Node.all(isolated)
 }
 
@@ -144,13 +218,20 @@ export const all = (
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
-export const run = <A, E, R>(
+export function run<A, E, R>(
+  members: Readonly<Record<string, Effect.Effect<A, E, R>>>,
+  options: RuntimeOptions & { readonly policy: "quarantine" }
+): Effect.Effect<Readonly<Record<string, Settled<A, E>>>, PatternError, R>
+export function run<A, E, R>(
+  members: Readonly<Record<string, Effect.Effect<A, E, R>>>,
+  options: RuntimeOptions & { readonly policy: "halt" }
+): Effect.Effect<Readonly<Record<string, A>>, E | PatternError, R>
+export function run<A, E, R>(
   members: Readonly<Record<string, Effect.Effect<A, E, R>>>,
   options: RuntimeOptions
-): Effect.Effect<Readonly<Record<string, A | Quarantined<E>>>, E | PatternError, R> =>
-  Effect.suspend((): Effect.Effect<Readonly<Record<string, A | Quarantined<E>>>, E | PatternError, R> => {
+): Effect.Effect<Readonly<Record<string, A | Settled<A, E>>>, E | PatternError, R> {
+  return Effect.suspend((): Effect.Effect<Readonly<Record<string, A | Settled<A, E>>>, E | PatternError, R> => {
     const names = Object.keys(members)
     const concurrency = options.concurrency ?? "unbounded"
     const refusal = nonEmptyRefusal(names) ?? widthRefusal(concurrency)
@@ -158,21 +239,19 @@ export const run = <A, E, R>(
     return Effect.map(
       Effect.forEach(
         names,
-        (member) =>
+        (member): Effect.Effect<readonly [string, A | Settled<A, E>], E, R> =>
           options.policy === "halt"
             ? Effect.map(members[member]!, (value) => [member, value] as const)
             : Effect.match(members[member]!, {
-              onFailure: (error): readonly [string, A | Quarantined<E>] => [
-                member,
-                { _tag: "Quarantined", member, error }
-              ],
-              onSuccess: (value): readonly [string, A | Quarantined<E>] => [member, value]
+              onFailure: (error): readonly [string, Settled<A, E>] => [member, quarantined(member, error)],
+              onSuccess: (value): readonly [string, Settled<A, E>] => [member, succeeded(member, value)]
             }),
         { concurrency }
       ),
-      (pairs) => Object.fromEntries(pairs) as Readonly<Record<string, A | Quarantined<E>>>
+      (pairs) => Object.fromEntries(pairs) as Readonly<Record<string, A | Settled<A, E>>>
     )
   })
+}
 
 /**
  * Turns a joined result into values, failing when any member was quarantined.
@@ -180,21 +259,40 @@ export const run = <A, E, R>(
  * Use it when the caller wants halt-after-join: every member got its chance to
  * run, and one failure still fails the step.
  *
+ * The marker is a structural tag on the wire. A successful member value with
+ * exactly that shape is indistinguishable, so callers whose values can carry a
+ * `_tag` should wrap them before settling the record.
+ *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const settle = <A, E>(
-  result: Readonly<Record<string, A | Quarantined<E>>>
+  result: Readonly<Record<string, Settled<A, E>>>
 ): Effect.Effect<Readonly<Record<string, A>>, PatternError> => {
-  const quarantined = Object.keys(result).filter((member) => isQuarantined(result[member])).sort()
-  if (quarantined.length > 0) {
+  const names = Object.keys(result)
+  const invalid = names.filter((member) => !isQuarantined(result[member]) && !isSucceeded(result[member]))
+  if (invalid.length > 0) {
     return Effect.fail(
       new PatternError({
-        code: "quarantined",
-        message: `Quarantined members: ${quarantined.join(", ")}`
+        code: "invalid_decorator",
+        message: `Invalid quarantine outcomes: ${invalid.sort().join(", ")}`
       })
     )
   }
-  return Effect.succeed(result as Readonly<Record<string, A>>)
+  const failures = names.filter((member) => isQuarantined(result[member])).sort()
+  if (failures.length > 0) {
+    return Effect.fail(
+      new PatternError({
+        code: "quarantined",
+        message: `Quarantined members: ${failures.join(", ")}`,
+        cause: failures.map((member) => {
+          const entry = result[member] as Quarantined<E>
+          return { member, error: entry.error }
+        })
+      })
+    )
+  }
+  return Effect.succeed(
+    Object.fromEntries(names.map((member) => [member, (result[member] as Succeeded<A>).value]))
+  )
 }

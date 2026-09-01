@@ -126,6 +126,21 @@ describe("Verify.run", () => {
       expect(result.discovery?.stdoutTail).toContain("does not exist")
     }).pipe(Effect.provide(platform)))
 
+  it.live("records an instant spawn failure as such, not as a full timeout", () =>
+    Effect.gen(function*() {
+      const missingRoot = join(scratch("spawn-failure"), "does-not-exist")
+      const budget = 60_000
+
+      const result = yield* Verify.run({
+        root: missingRoot,
+        commands: { typecheck: [nodeCommand("process.exit(0)")], flowsDir: "flows" }
+      }, { command: budget })
+
+      expect(result.typecheck[0]?.exitCode).toBe(127)
+      expect(result.typecheck[0]?.durationMs).toBeLessThan(budget)
+      expect(result.typecheck[0]?.stderrTail).not.toContain(`exceeded ${budget}ms`)
+    }).pipe(Effect.provide(platform)))
+
   it.live("cuts a command off at its budget and reports it as a failure", () =>
     Effect.gen(function*() {
       const root = projectWithFlow("timeout", discoverable)

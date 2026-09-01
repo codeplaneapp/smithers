@@ -58,7 +58,7 @@ const rootedSyncFs = (hostRoot: string): SyncFsLike => {
 }
 
 const bashFor = (hostRoot: string): BrowserChildProcessSpawner.JustBashLike => ({
-  run: async (command, options) => {
+  exec: async (command, options) => {
     if (command !== "read-shared") return { stdout: "", stderr: "unsupported command", exitCode: 127 }
     const cwd = options?.cwd ?? "/"
     return {

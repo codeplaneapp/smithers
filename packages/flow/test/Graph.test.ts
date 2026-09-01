@@ -70,6 +70,18 @@ const detached = <A, E = never, R = never>(built: Node.Node<A, E, R>): Node.Node
     ast: JSON.parse(JSON.stringify(built.ast)) as Node.Ast
   })
 
+const buildWithPlacements = (enclosing: unknown, callee: unknown): Graph.Graph => {
+  const Callee = Flow.make("placement/comparison/callee", {
+    payload: {},
+    body: () => Node.succeed(undefined)
+  }).annotate(Flow.Placement, callee)
+  const Caller = Flow.make("placement/comparison/caller", {
+    payload: {},
+    body: () => Callee.call({})
+  }).annotate(Flow.Placement, enclosing)
+  return Graph.build(Caller, {})
+}
+
 describe("Graph.build topology", () => {
   it("expands every node variant, entering the flow as a call to itself", () => {
     const graph = Graph.build(Parent, { path: "counter.txt" })
@@ -474,7 +486,7 @@ describe("Graph.build composition", () => {
     }
     const one = digestOf(({ path }) => Write.call({ path, value: 1 }))
 
-    expect(one).toMatchObject({ _tag: "FunctionIdentity", algorithm: "sha256-source-captures/v3" })
+    expect(one).toMatchObject({ _tag: "FunctionIdentity", algorithm: "sha256-source-captures/v4" })
     expect(digestOf(({ path }) => Write.call({ path, value: 1 }))).toEqual(one)
     expect(digestOf(({ path }) => Write.call({ path, value: 2 }))).not.toEqual(one)
 
@@ -578,6 +590,179 @@ describe("Graph.build diagnostics", () => {
       declaration: undefined
     })
   })
+
+  it("refuses duplicate structural addresses before returning a graph", () => {
+    expect(() =>
+      Graph.build(Node.all({
+        "x.all.y": Node.succeed("outer"),
+        x: Node.all({ y: Node.succeed("nested") })
+      }))
+    ).toThrowError(expect.objectContaining({
+      code: "duplicate_node",
+      node: "root.all.x.all.y",
+      path: [],
+      message: expect.stringContaining("durable dispatch identity")
+    }))
+  })
+
+  it("accepts dotted All member names whose structural addresses remain distinct", () => {
+    const graph = Graph.build(Node.all({
+      "x.all.z": Node.succeed("outer"),
+      x: Node.all({ y: Node.succeed("nested") })
+    }))
+
+    expect(Graph.diagnostics(graph)).toEqual([])
+    expect(new Set(Graph.nodes(graph).map((current) => current.id)).size).toBe(Graph.nodes(graph).length)
+  })
+})
+
+describe("Graph.build placement identity", () => {
+  const conflict = (enclosing: unknown, callee: unknown): void => {
+    expect(() => buildWithPlacements(enclosing, callee)).toThrowError(expect.objectContaining({
+      _tag: "@smthrs/plan/GraphBuildError",
+      code: "placement_requires_boundary"
+    }))
+  }
+
+  it("distinguishes an undefined-valued own key from a missing key", () => {
+    conflict({ x: undefined }, {})
+  })
+
+  it("distinguishes NaN from null but treats NaN as identical to itself", () => {
+    conflict({ x: Number.NaN }, { x: null })
+    expect(() => buildWithPlacements({ x: Number.NaN }, { x: Number.NaN })).not.toThrow()
+  })
+
+  it("compares bigint directives without serialization", () => {
+    expect(() => buildWithPlacements({ x: 1n }, { x: 1n })).not.toThrow()
+    conflict({ x: 1n }, { x: 2n })
+  })
+
+  it("ignores object key order", () => {
+    expect(() =>
+      buildWithPlacements(
+        { host: "sandbox", pool: "a" },
+        { pool: "a", host: "sandbox" }
+      )
+    ).not.toThrow()
+  })
+
+  it("compares arrays, enumerable keys, symbols, null, and signed zero structurally", () => {
+    const sharedSymbol = Symbol("shared")
+    expect(() => buildWithPlacements({ x: [1, sharedSymbol] }, { x: [1, sharedSymbol] })).not.toThrow()
+
+    conflict({ x: [1] }, { x: [1, 2] })
+    conflict({ x: [1] }, { x: { 0: 1, length: 1 } })
+    conflict({ x: { same: 1 } }, { x: { other: 1 } })
+    conflict({ x: {} }, { x: null })
+    conflict({ x: null }, { x: {} })
+    conflict({ x: Symbol("left") }, { x: Symbol("left") })
+    conflict({ x: -0 }, { x: 0 })
+  })
+
+  it("terminates on structurally equal cyclic directives", () => {
+    const enclosing: { self?: unknown } = {}
+    const callee: { self?: unknown } = {}
+    enclosing.self = enclosing
+    callee.self = callee
+
+    expect(() => buildWithPlacements(enclosing, callee)).not.toThrow()
+  })
+
+  it("refuses to prove identity for values it cannot read inertly", () => {
+    // The comparison replaced JSON.stringify, which distinguished these by
+    // their serialized form. Own enumerable keys alone would call every pair
+    // below identical, because each side carries none, and admit an inline
+    // call against a placement nobody compared. Refusing is the safe verdict:
+    // it pushes the call to an explicit .child() boundary.
+    conflict({ at: new Date(0) }, { at: new Date(9_000_000_000_000) })
+    conflict({ at: new Date(0) }, { at: new Date(0) })
+    conflict({ run: () => 1 }, { run: () => 2 })
+    conflict({ pool: new Map([["a", 1]]) }, { pool: new Map([["b", 2]]) })
+    conflict({ pool: new Set([1]) }, { pool: new Set([2]) })
+    conflict({ match: /a/ }, { match: /b/ })
+    conflict({ at: new Date(0) }, { at: {} })
+    conflict({ at: {} }, { at: new Date(0) })
+
+    // The same value by reference is still identical, and a null-prototype
+    // object is as plain as a literal.
+    const shared = new Date(0)
+    expect(() => buildWithPlacements({ at: shared }, { at: shared })).not.toThrow()
+    expect(() =>
+      buildWithPlacements(
+        Object.assign(Object.create(null) as object, { host: "sandbox" }),
+        Object.assign(Object.create(null) as object, { host: "sandbox" })
+      )
+    ).not.toThrow()
+  })
+
+  it("never runs an accessor on a placement while comparing it", () => {
+    let reads = 0
+    const withGetter = () => ({
+      get host() {
+        reads++
+        return "sandbox"
+      }
+    })
+
+    conflict(withGetter(), { host: "sandbox" })
+    conflict({ host: "sandbox" }, withGetter())
+    conflict(withGetter(), withGetter())
+    expect(reads).toBe(0)
+  })
+
+  it("names both placements in the refusal, bounded and inert", () => {
+    const message = (enclosing: unknown, callee: unknown): string => {
+      try {
+        buildWithPlacements(enclosing, callee)
+      } catch (thrown) {
+        return (thrown as { message: string }).message
+      }
+      throw new Error("the build did not refuse")
+    }
+
+    // An author cannot act on "they differ" alone, so both directives are in
+    // the message, rendered independent of key order.
+    const rendered = message({ host: "sandbox", pool: "a" }, { host: "vm" })
+    expect(rendered).toContain(`{host:"vm"}`)
+    expect(rendered).toContain(`{host:"sandbox",pool:"a"}`)
+    expect(rendered).toContain(".child(payload)")
+
+    // Every kind renders inertly: no accessor runs, no cycle recurses, no
+    // exotic object is walked, and nothing is serialized.
+    const cyclic: { self?: unknown } = {}
+    cyclic.self = cyclic
+    const exotic = message({
+      n: 1,
+      big: 2n,
+      nothing: null,
+      missing: undefined,
+      flag: false,
+      tag: Symbol.for("tag"),
+      list: [1, "two"],
+      when: new Date(0),
+      get lazy() {
+        return "never read"
+      },
+      cyclic,
+      deep: { a: { b: { c: { d: 1 } } } }
+    }, { host: "vm" })
+    expect(exotic).toContain("big:2n")
+    expect(exotic).toContain("nothing:null")
+    expect(exotic).toContain("missing:undefined")
+    expect(exotic).toContain("flag:false")
+    expect(exotic).toContain("tag:Symbol(tag)")
+    expect(exotic).toContain(`list:[1,"two"]`)
+    expect(exotic).toContain("when:[object Date]")
+    expect(exotic).toContain("lazy:<accessor>")
+    expect(exotic).toContain("self:<cycle>")
+    expect(exotic).toContain("<elided>")
+
+    // A large directive is truncated rather than becoming the whole message.
+    const large = message({ host: "x".repeat(400) }, { host: "vm" })
+    expect(large).toContain("characters dropped]")
+    expect(large).not.toContain("x".repeat(400))
+  })
 })
 
 describe("Graph.build into a plan", () => {
@@ -619,6 +804,74 @@ describe("Graph.build into a plan", () => {
     }))
   })
 
+  it("keeps a PlannedReference-shaped payload as data and never invokes payload accessors", () => {
+    let reads = 0
+    const shaped = { _tag: "PlannedReference", node: "ghost", path: [] }
+    const payload = Object.defineProperty({ shaped }, "active", {
+      enumerable: true,
+      get: () => {
+        reads += 1
+        return true
+      }
+    })
+
+    expect(() => Graph.build(Node.succeed(payload))).toThrowError(expect.objectContaining({
+      code: "invalid_payload",
+      message: expect.stringContaining("accessor")
+    }))
+    expect(reads).toBe(0)
+
+    const graph = Graph.build(Node.succeed(shaped))
+    expect(Graph.drafts(graph)[0]?.material.inputs).toEqual([
+      { _tag: "Literal", value: shaped }
+    ])
+  })
+
+  it("refuses hostile payload containers and inert accessor-backed members", () => {
+    const hostilePrototype = new Proxy({}, {
+      getPrototypeOf() {
+        throw new Error("prototype trap")
+      }
+    })
+    const hostileDescriptors = new Proxy({}, {
+      getPrototypeOf: () => Object.prototype,
+      ownKeys() {
+        throw new Error("descriptor trap")
+      }
+    })
+    const arrayAccessor: Array<unknown> = []
+    Object.defineProperty(arrayAccessor, "0", { get: () => 1, enumerable: true })
+    const objectAccessor = Object.defineProperty({}, "value", { get: () => 1, enumerable: true })
+    const nodeWith = (payload: unknown) => {
+      const node = Node.succeed<unknown>(null)
+      ;(node.ast as { value: unknown }).value = payload
+      return node
+    }
+
+    for (const payload of [hostilePrototype, hostileDescriptors, arrayAccessor, objectAccessor]) {
+      expect(() => Graph.build(nodeWith(payload))).toThrowError(expect.objectContaining({
+        code: "invalid_payload"
+      }))
+    }
+    expect(Graph.nodes(Graph.build(nodeWith(new Array(1))))[0]?.payload).toEqual([undefined])
+  })
+
+  it("fails closed when an authored outcome loses its branded payload", () => {
+    const done = Flow.done(1)
+    ;(done.ast as { value: unknown }).value = 1
+    expect(() => Graph.build(done)).toThrowError(expect.objectContaining({
+      code: "invalid_payload",
+      message: expect.stringContaining("lost its Done payload")
+    }))
+
+    const unrecognized = Flow.done(1)
+    const marker = Reflect.ownKeys(unrecognized.ast).find((key) => typeof key === "symbol")!
+    const cloned = { ...unrecognized.ast }
+    Object.defineProperty(cloned, marker, { value: "Other" })
+    ;(unrecognized as { ast: Node.Ast }).ast = cloned as Node.Ast
+    expect(Graph.build(unrecognized).diagnostics).toEqual([])
+  })
+
   it("rejects a very deep unknown payload with a typed error instead of overflowing the stack", () => {
     let payload: Record<string, unknown> = { value: "leaf" }
     for (let index = 0; index < 20_000; index++) payload = { next: payload }
@@ -630,25 +883,6 @@ describe("Graph.build into a plan", () => {
       message: expect.stringContaining("Flatten the payload")
     }))
   })
-
-  it.effect("rejects colliding structural ids before producing a partial plan", () =>
-    Effect.gen(function*() {
-      const step = Node.succeed("value")
-      const graph = Graph.build(Node.all({
-        "a.all.b": step,
-        a: Node.all({ b: step })
-      }))
-
-      const error = yield* withCrypto(Effect.flip(
-        Plan.compile({ planId: "plan-structural-collision", flow: "collision", nodes: Graph.drafts(graph) })
-      ))
-
-      expect(error).toMatchObject({
-        _tag: "@smthrs/plan/PlanError",
-        code: "duplicate_node",
-        message: expect.stringContaining("root.all.a.all.b")
-      })
-    }))
 
   it.effect("rejects self-referential and dangling authored refs as typed PlanErrors", () =>
     Effect.gen(function*() {

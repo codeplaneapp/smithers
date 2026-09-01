@@ -38,10 +38,20 @@
  * @since 0.1.0
  */
 import { Flow } from "@smthrs/flow"
-import * as Cause from "effect/Cause"
+import type * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
+import * as HostReflection from "./HostReflection.ts"
+
+/**
+ * Proxy and native-error detection, taken from the host that can answer them.
+ *
+ * `./HostReflection.ts` states why these are host predicates rather than a
+ * `node:util/types` import: the module has to bundle for a browser, and only
+ * some hosts can name a proxy at all.
+ */
+const { isNativeError, isProxy } = HostReflection.host
 
 /**
  * The `_tag` every projection carries, so a reader of `state_json` can tell a
@@ -83,6 +93,22 @@ export const maxStackLines = 4
  * @slop
  */
 export const maxTextLength = 1024
+
+/**
+ * Maximum cause reasons retained by the terminal fallback.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const maxReasonCount = 32
+
+/**
+ * Maximum serialized bytes retained by one fallback projection.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const maxProjectionBytes = 64 * 1024
 
 /**
  * A JSON-safe summary of one unencodable value.
@@ -159,19 +185,38 @@ const truncate = (value: string, limit: number): string => value.length <= limit
  * path that must never fail.
  */
 const text = (value: unknown): string => {
-  try {
-    const json = JSON.stringify(value)
-    return json === undefined ? `[${typeof value}]` : json
-  } catch {
-    return "[unrepresentable]"
+  switch (typeof value) {
+    case "string":
+      return JSON.stringify(value)
+    case "number":
+      return Number.isFinite(value) ? `${value}` : `[number]`
+    case "boolean":
+      return value ? "true" : "false"
+    case "bigint":
+      return `[bigint]`
+    case "undefined":
+    case "symbol":
+    case "function":
+      return `[${typeof value}]`
+    case "object":
+      return value === null ? "null" : Array.isArray(value) ? "[array]" : "[object]"
   }
 }
 
-/** The constructor name of an object, or `object` when it has none. */
-const typeName = (value: object): string => {
-  const name = (value as { readonly constructor?: { readonly name?: unknown } }).constructor?.name
-  return typeof name === "string" && name.length > 0 ? name : "object"
+const minimalValue = (): ValueProjection => ({ type: "object", message: "[unrepresentable]" })
+
+/** Reads only an own data property; accessors are deliberately inert. */
+const ownData = (value: object, name: PropertyKey): unknown => {
+  const descriptor = Object.getOwnPropertyDescriptor(value, name)
+  return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined
 }
+
+// Effect exits store their value/cause in one own data slot. Pinning the two
+// library prototypes lets projection read that slot without invoking the
+// public `value` / `cause` accessors or trusting a lookalike object.
+const successExitPrototype = Object.getPrototypeOf(Exit.succeed(undefined))
+const failureExitPrototype = Object.getPrototypeOf(Exit.fail(undefined))
+const exitArguments = "~effect/Effect/args"
 
 /**
  * Projects one value — a typed error, a defect, a success value, a handoff
@@ -181,40 +226,67 @@ const typeName = (value: object): string => {
  * @category conversions
  * @slop
  */
-export const projectValue = (value: unknown, depth = 0): ValueProjection => {
+export const projectValue = (value: unknown, depth = 0, seen = new WeakSet<object>()): ValueProjection => {
   if (value === null || typeof value !== "object") {
     return {
       type: value === null ? "null" : typeof value,
       message: truncate(text(value), maxTextLength)
     }
   }
-  const record = value as Record<string, unknown>
-  const projection: {
-    type: string
-    message: string
-    tag?: string
-    code?: string
-    stack?: string
-    cause?: ValueProjection
-  } = {
-    type: typeName(value),
-    message: truncate(typeof record["message"] === "string" ? record["message"] : text(value), maxTextLength)
+  // Generic Proxy introspection is observable user code. A host that can name
+  // a proxy from its internal slot rejects it without invoking a trap.
+  if (isProxy(value) || seen.has(value)) return minimalValue()
+  seen.add(value)
+  try {
+    const message = ownData(value, "message")
+    const tag = ownData(value, "_tag")
+    const code = ownData(value, "code")
+    const stack = ownData(value, "stack")
+    const cause = ownData(value, "cause")
+    const projection: {
+      type: string
+      message: string
+      tag?: string
+      code?: string
+      stack?: string
+      cause?: ValueProjection
+    } = {
+      type: typeof tag === "string" && tag.length > 0
+        ? truncate(tag, maxTextLength)
+        : isNativeError(value)
+        ? "Error"
+        : Array.isArray(value)
+        ? "Array"
+        : "object",
+      message: truncate(typeof message === "string" ? message : text(value), maxTextLength)
+    }
+    if (typeof tag === "string") projection.tag = truncate(tag, maxTextLength)
+    if (typeof code === "string") projection.code = truncate(code, maxTextLength)
+    // Native Error stacks are commonly accessors. They remain deliberately
+    // unread; only an already-materialized own data string is retained.
+    if (typeof stack === "string") {
+      projection.stack = truncate(stack.split("\n").slice(0, maxStackLines).join("\n"), maxTextLength)
+    }
+    if (cause !== undefined && depth < maxCauseDepth) {
+      projection.cause = projectValue(cause, depth + 1, seen)
+    }
+    return projection
+  } catch {
+    return minimalValue()
   }
-  if (typeof record["_tag"] === "string") projection.tag = record["_tag"]
-  if (typeof record["code"] === "string") projection.code = record["code"]
-  if (typeof record["stack"] === "string") {
-    projection.stack = truncate(record["stack"].split("\n").slice(0, maxStackLines).join("\n"), maxTextLength)
-  }
-  if (record["cause"] !== undefined && depth < maxCauseDepth) {
-    projection.cause = projectValue(record["cause"], depth + 1)
-  }
-  return projection
 }
 
 const projectReason = (reason: Cause.Reason<unknown>): ReasonProjection => {
-  if (Cause.isFailReason(reason)) return { _tag: "Fail", error: projectValue(reason.error) }
-  if (Cause.isDieReason(reason)) return { _tag: "Die", error: projectValue(reason.defect) }
-  return reason.fiberId === undefined ? { _tag: "Interrupt" } : { _tag: "Interrupt", fiberId: reason.fiberId }
+  if (isProxy(reason)) return { _tag: "Die", error: minimalValue() }
+  try {
+    const tag = ownData(reason, "_tag")
+    if (tag === "Fail") return { _tag: "Fail", error: projectValue(ownData(reason, "error")) }
+    if (tag === "Die") return { _tag: "Die", error: projectValue(ownData(reason, "defect")) }
+    const fiberId = ownData(reason, "fiberId")
+    return typeof fiberId === "number" ? { _tag: "Interrupt", fiberId } : { _tag: "Interrupt" }
+  } catch {
+    return { _tag: "Die", error: minimalValue() }
+  }
 }
 
 /**
@@ -227,7 +299,44 @@ const projectReason = (reason: Cause.Reason<unknown>): ReasonProjection => {
  */
 export const projectCause = (
   cause: Cause.Cause<unknown> | undefined
-): ReadonlyArray<ReasonProjection> => cause === undefined ? [] : cause.reasons.map(projectReason)
+): ReadonlyArray<ReasonProjection> => {
+  if (cause === undefined) return []
+  if (isProxy(cause)) return [{ _tag: "Die", error: minimalValue() }]
+  try {
+    const reasons = ownData(cause, "reasons")
+    if (!Array.isArray(reasons) || isProxy(reasons)) {
+      return [{ _tag: "Die", error: minimalValue() }]
+    }
+    const projected = reasons.slice(0, maxReasonCount).map(projectReason)
+    if (reasons.length > maxReasonCount) {
+      projected.push({
+        _tag: "Die",
+        error: { type: "truncated", message: `[${reasons.length - maxReasonCount} reasons omitted]` }
+      })
+    }
+    return projected
+  } catch {
+    return [{ _tag: "Die", error: minimalValue() }]
+  }
+}
+
+const minimalResult = (note: string): ResultProjection => ({
+  _tag: projectionTag,
+  result: "Complete",
+  note,
+  reasons: [{ _tag: "Die", error: minimalValue() }],
+  value: null
+})
+
+const withinBudget = (projection: ResultProjection): ResultProjection => {
+  try {
+    return new TextEncoder().encode(JSON.stringify(projection)).length <= maxProjectionBytes
+      ? projection
+      : minimalResult("the rejected settlement exceeded the diagnostic projection bound")
+  } catch {
+    return minimalResult("the rejected settlement could not be projected")
+  }
+}
 
 /**
  * Projects a settlement the flow's codec rejected.
@@ -240,15 +349,53 @@ export const projectResult = (
   result: Flow.Result<unknown, unknown>,
   note: string
 ): ResultProjection => {
-  if (result._tag === "Suspended") {
-    return { _tag: projectionTag, result: "Suspended", note, reasons: projectCause(result.cause), value: null }
+  note = truncate(note, maxTextLength)
+  if (isProxy(result)) return minimalResult(note)
+  try {
+    const tag = ownData(result, "_tag")
+    if (tag === "Suspended") {
+      return withinBudget({
+        _tag: projectionTag,
+        result: "Suspended",
+        note,
+        reasons: projectCause(ownData(result, "cause") as Cause.Cause<unknown> | undefined),
+        value: null
+      })
+    }
+    if (tag === "Handoff") {
+      return withinBudget({
+        _tag: projectionTag,
+        result: "Handoff",
+        note,
+        reasons: [],
+        value: projectValue(ownData(result, "payload"))
+      })
+    }
+    const exit = ownData(result, "exit")
+    if (typeof exit !== "object" || exit === null || isProxy(exit)) return minimalResult(note)
+    const prototype = Object.getPrototypeOf(exit)
+    const argument = ownData(exit, exitArguments)
+    if (prototype !== successExitPrototype && prototype !== failureExitPrototype) return minimalResult(note)
+    return withinBudget(
+      prototype === successExitPrototype
+        ? {
+          _tag: projectionTag,
+          result: "Complete",
+          note,
+          reasons: [],
+          value: projectValue(argument)
+        }
+        : {
+          _tag: projectionTag,
+          result: "Complete",
+          note,
+          reasons: projectCause(argument as Cause.Cause<unknown> | undefined),
+          value: null
+        }
+    )
+  } catch {
+    return minimalResult(note)
   }
-  if (result._tag === "Handoff") {
-    return { _tag: projectionTag, result: "Handoff", note, reasons: [], value: projectValue(result.payload) }
-  }
-  return Exit.isSuccess(result.exit)
-    ? { _tag: projectionTag, result: "Complete", note, reasons: [], value: projectValue(result.exit.value) }
-    : { _tag: projectionTag, result: "Complete", note, reasons: projectCause(result.exit.cause), value: null }
 }
 
 /**
@@ -260,10 +407,17 @@ export const projectResult = (
  * is not resumable and not answerable, so the only honest durable record is
  * that the round failed, with the projection as its defect.
  */
-const degrade = (result: Flow.Result<unknown, unknown>, projection: ResultProjection): unknown =>
-  result._tag === "Handoff"
-    ? { _tag: "Handoff", flow: result.flow, payload: projection }
-    : { _tag: "Complete", exit: { _tag: "Failure", cause: [{ _tag: "Die", defect: projection }] } }
+const degrade = (result: Flow.Result<unknown, unknown>, projection: ResultProjection): unknown => {
+  try {
+    if (!isProxy(result) && ownData(result, "_tag") === "Handoff") {
+      const flow = ownData(result, "flow")
+      if (typeof flow === "string") return { _tag: "Handoff", flow, payload: projection }
+    }
+  } catch {
+    // The terminal Complete below is the fail-closed representation.
+  }
+  return { _tag: "Complete", exit: { _tag: "Failure", cause: [{ _tag: "Die", defect: projection }] } }
+}
 
 /**
  * Encodes a round's settlement through the flow's own codec, and — when that
@@ -287,12 +441,11 @@ export const encode = (
     }))
   )(result).pipe(
     Effect.map((encoded): EncodedResult => ({ encoded, note: undefined })),
-    Effect.catchCause((cause) => {
-      const note = truncate(Cause.pretty(cause), maxTextLength)
+    Effect.catchCause((_cause) => {
+      const note = "the flow result codec rejected the settlement"
       return Effect.as(
         Effect.logWarning(
-          `engine-store: the settlement of ${flow._tag} could not be encoded through its own codec; persisting a JSON projection so the run still settles`,
-          cause
+          `engine-store: the settlement of ${flow._tag} could not be encoded through its own codec; persisting a JSON projection so the run still settles`
         ),
         { encoded: degrade(result, projectResult(result, note)), note } satisfies EncodedResult
       )

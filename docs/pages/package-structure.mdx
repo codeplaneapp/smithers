@@ -23,8 +23,8 @@ Twenty-three pnpm workspaces make up the engine group under `packages/`, one clo
 | `@smthrs/capability` | `packages/capability` | yes | no tables; the capability vocabulary and typed permission failures, with their journaled schema ids |
 | `@smthrs/kernel` | `packages/kernel` | yes | the closed host service list, capability sets, grants, and their journal records |
 | `@smthrs/canonical` | `packages/canonical` | yes | no tables; RFC 8785 canonical JSON |
-| `@smthrs/crypto` | `packages/crypto` | yes | no tables; injected cryptographic operations |
-| `@smthrs/keys` | `packages/keys` | yes | no tables; canonical flow keys |
+| [`@smthrs/crypto`](/api/crypto) | `packages/crypto` | yes | no tables; injected and synchronous SHA-256 operations |
+| [`@smthrs/keys`](/api/keys) | `packages/keys` | yes | no tables; canonical flow keys |
 | `@smthrs/plan` | `packages/plan` | yes | `flows_plans`, `flows_plan_nodes`, `flows_plan_edges` |
 | `@smthrs/artifacts` | `packages/artifacts` | yes | no tables; bytes addressed by their own SHA-256 digest |
 | `@smthrs/flow` | `packages/flow` | yes | no tables; flow, action, and durable-primitive definitions plus the runtime port |
@@ -132,6 +132,7 @@ flowchart LR
   KEYS --> CRYPTO
   PLAN --> DB
   PLAN --> KEYS
+  PLAN --> CRYPTO
   ART --> CRYPTO
   ES --> FLOW
   ES --> ENGINE
@@ -158,7 +159,7 @@ flowchart LR
 | Package | Depends on | Depended on by |
 | --- | --- | --- |
 | `@smthrs/canonical` | nothing in the workspace | `keys`, `step-cache`, `flows` |
-| `@smthrs/crypto` | nothing in the workspace | `artifacts`, `keys`, `flow`, `engine-store`, `flows` |
+| `@smthrs/crypto` | nothing in the workspace | `artifacts`, `keys`, `plan`, `flow`, `engine-store`, `flows` |
 | `@smthrs/keys` | `canonical`, `crypto` | `plan`, `flow`, `engine`, `engine-store`, `flows` |
 | `@smthrs/capability` | nothing in the workspace | `jj`, `kernel`, `flows` |
 | `@smthrs/jj` | `capability` | `kernel`, `platform-*`, `time-travel`, `flows` |
@@ -205,7 +206,7 @@ A package root exports contracts. A platform implementation lives under a subpat
 | `@smthrs/capability` | yes | yes | capability vocabulary and typed permission failures |
 | `@smthrs/kernel` | yes | yes | capabilities, grants, decorated services |
 | `@smthrs/canonical` | yes | yes | RFC 8785 canonical JSON schema |
-| `@smthrs/crypto` | yes | yes | injected cryptographic schemas |
+| `@smthrs/crypto` | yes | yes | strict injected and synchronous SHA-256 APIs |
 | `@smthrs/keys` | yes | yes | canonical flow-key schema |
 | `@smthrs/plan` | yes | yes | plan compilation, the authoring AST, the diff, and the plan store over the `DurableWriter` contract |
 | `@smthrs/artifacts` | yes | yes | the content-addressed artifact store, local and remote |

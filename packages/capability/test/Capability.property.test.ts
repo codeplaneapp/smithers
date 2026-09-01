@@ -34,11 +34,12 @@ const exactActions = [
 ] as const satisfies ReadonlyArray<Capability.Action>
 
 const actionArb = FastCheck.constantFrom<Capability.Action>(...exactActions)
+const patternActionArb = FastCheck.constantFrom<Capability.PatternAction>(...Capability.PatternAction.literals)
 
 const digitArb = FastCheck.constantFrom("0", "1", "2", "3", "4", "5", "6", "7", "8", "9")
 
 // Every character class matchesResource treats specially, except the glob
-// metacharacters `*` and `?`: regex metacharacters, slashes (normalized),
+// metacharacters `*` and `?`: regex metacharacters, both distinct slash units,
 // colons, spaces, and non-ASCII text.
 const literalUnit = FastCheck.constantFrom(
   "a",
@@ -74,6 +75,11 @@ const globFreePattern = FastCheck.oneof(
   FastCheck.string({ unit: "binary", minLength: 1, maxLength: 24 }).map((text) => text.replaceAll(/[*?]/g, ""))
 ).filter((text) => text.length > 0)
 
+const hostileResource = FastCheck.oneof(
+  FastCheck.string({ unit: literalUnit, maxLength: 64 }),
+  FastCheck.string({ unit: "binary", maxLength: 64 })
+)
+
 describe("Capability properties", () => {
   it("a glob-free pattern matches exactly its own literal resource and nothing one character away", () => {
     FastCheck.assert(
@@ -87,8 +93,7 @@ describe("Capability properties", () => {
           expect(Capability.matches(selectedPattern, capability(action, resource))).toBe(true)
 
           const index = rawIndex % resource.length
-          // Digits are case-stable, so the Windows-path `i` flag cannot make a
-          // digit substitution compare equal to the original code unit.
+          // A digit substitution is always a distinct UTF-16 code unit.
           const replacement = resource[index] === digit ? (digit === "0" ? "1" : "0") : digit
           const mutated = resource.slice(0, index) + replacement + resource.slice(index + 1)
           expect(Capability.matches(selectedPattern, capability(action, mutated))).toBe(false)
@@ -148,25 +153,40 @@ describe("Capability properties", () => {
     )
   })
 
-  it("agrees with the retired RegExp compilation on non-adversarial patterns", () => {
-    // The retired matcher, verbatim: grant patterns compiled to an anchored
-    // RegExp with `*` as `.*`, `?` as `.`, an optional trailing ` .*`, and
-    // Windows-path case folding. It is the semantic oracle for the iterative
-    // glob matcher; the generator keeps star counts small so the oracle
-    // itself cannot backtrack catastrophically.
+  it("terminates on the worst legal shape a long literal suffix can build", () => {
+    // `*` followed by a long literal that the resource never completes forces
+    // the matcher to re-anchor the star at every position, which is its
+    // O(pattern x resource) worst case. The old `.*`-compiled RegExp was
+    // exponential on this shape and would never return.
+    //
+    // The budget is deliberately an order of magnitude above the cost: this
+    // shape was measured at roughly one second under v8 coverage
+    // instrumentation on a loaded development machine, and the package's
+    // vitest config records that correct suites run 6-12x slower under
+    // coverage across parallel workers. A wall-clock assertion near the
+    // measured cost is a load sensor, not a regression detector.
+    const selectedPattern = pattern("fs:read", `*${"a".repeat(Capability.maxResourceLength / 2)}b`)
+    const resource = capability("fs:read", "a".repeat(Capability.maxResourceLength))
+    const startedAt = performance.now()
+
+    expect(Capability.matches(selectedPattern, resource)).toBe(false)
+    expect(performance.now() - startedAt).toBeLessThan(10_000)
+  })
+
+  it("agrees with the byte-exact RegExp oracle on non-adversarial patterns", () => {
+    // The semantic oracle compiles the raw pattern into an anchored RegExp
+    // with `*` as `.*`, `?` as `.`, and an optional trailing ` .*`. It does no
+    // slash normalization or case folding. The generator keeps star counts
+    // small so the oracle itself cannot backtrack catastrophically.
     const oracle = (patternResource: string, resource: string): boolean => {
-      const normalize = (value: string) => value.replaceAll("\\", "/")
-      const normalizedPattern = normalize(patternResource)
-      const normalizedResource = normalize(resource)
-      let expression = normalizedPattern
+      let expression = patternResource
         .replace(/[.+^${}()|[\]\\]/g, "\\$&")
         .replaceAll("*", ".*")
         .replaceAll("?", ".")
       if (expression.endsWith(" .*")) {
         expression = `${expression.slice(0, -3)}( .*)?`
       }
-      const windowsPath = /^[A-Za-z]:\//.test(normalizedPattern) || /^[A-Za-z]:\//.test(normalizedResource)
-      return new RegExp(`^${expression}$`, windowsPath ? "is" : "s").test(normalizedResource)
+      return new RegExp(`^${expression}$`, "s").test(resource)
     }
 
     const fragmentUnit = FastCheck.oneof(
@@ -176,8 +196,8 @@ describe("Capability properties", () => {
     const fragment = FastCheck.string({ unit: fragmentUnit, maxLength: 8 })
     // At most two `*`s and one optional ` *` tail, splicing fragments so the
     // pattern and the resource share text often enough to exercise both
-    // accepting and rejecting paths, plus Windows drive prefixes for the
-    // case-folding branch.
+    // accepting and rejecting paths, while retaining drive-shaped prefixes as
+    // ordinary raw text in the property corpus.
     const drive = FastCheck.constantFrom("", "C:/", "c:/")
     const caseArb = FastCheck.tuple(
       drive,
@@ -274,15 +294,6 @@ describe("Capability properties", () => {
         ? text[0]!
         : expanded
 
-    const patternActionArb = FastCheck.constantFrom<Capability.PatternAction>(
-      ...exactActions,
-      "fs:*",
-      "net:*",
-      "model:*",
-      "proc:*",
-      "jj:*",
-      "*"
-    )
     const familyOf = (action: Capability.PatternAction): Capability.PatternAction =>
       action === "*" ? "*" : `${action.slice(0, action.indexOf(":"))}:*` as Capability.PatternAction
     const concreteAction = (action: Capability.PatternAction, pick: number): Capability.Action => {
@@ -353,6 +364,31 @@ describe("Capability properties", () => {
         } else {
           // Rejection is the typed Option.none, never a throw.
           expect(Option.isNone(parsed)).toBe(true)
+        }
+      }),
+      params
+    )
+  })
+
+  it("round trips every pattern action across hostile resource text", () => {
+    for (const action of Capability.PatternAction.literals) {
+      FastCheck.assert(
+        FastCheck.property(hostileResource, (resource) => {
+          const value = pattern(action, resource)
+          expect(Option.getOrNull(Capability.parsePattern(Capability.format(value)))).toEqual(value)
+        }),
+        params
+      )
+    }
+  })
+
+  it("keeps durable formatting injective over every accepted action", () => {
+    const record = FastCheck.record({ action: patternActionArb, resource: hostileResource })
+    FastCheck.assert(
+      FastCheck.property(record, record, (left, right) => {
+        if (Capability.format(left) === Capability.format(right)) {
+          expect(left.action).toBe(right.action)
+          expect(left.resource).toBe(right.resource)
         }
       }),
       params

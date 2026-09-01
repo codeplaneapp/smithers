@@ -1,7 +1,9 @@
 import { describe, it } from "@effect/vitest"
 import { Flow, Graph, Node } from "@smthrs/core"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { expect } from "vitest"
 import { PatternError } from "../src/PatternError.ts"
@@ -96,7 +98,9 @@ describe("Saga", () => {
   })
 
   it("rejects an empty saga", () => {
-    expect(() => Saga.make({ steps: [], onFailure: "compensate" })).toThrow(PatternError)
+    expect(() => Saga.make({ steps: [], onFailure: "compensate" })).toThrow(
+      expect.objectContaining({ code: "invalid_decorator", message: "Saga requires at least one step" })
+    )
   })
 
   it.effect("runs every step and no compensation when the saga succeeds", () =>
@@ -109,6 +113,36 @@ describe("Saga", () => {
 
       expect(trace).toEqual(["do-one", "do-two"])
       expect(result).toEqual({ one: "one-done", two: "two-done" })
+    }))
+
+  it.effect("copies and returns own completed values for prototype-shaped step ids", () =>
+    Effect.gen(function*() {
+      const ids = ["__proto__", "constructor", "toString", "normal"]
+      const seen: Array<Readonly<Record<string, string>>> = []
+      const result = yield* Saga.run<string, string, never, never, never, never>("order", {
+        onFailure: "fail",
+        steps: ids.map((id) => ({
+          id,
+          action: ({ completed }) => Effect.sync(() => (seen.push(completed), `${id}-value`)),
+          compensation: () => Effect.void
+        }))
+      })
+
+      for (const [index, completed] of seen.entries()) {
+        expect(Object.getPrototypeOf(completed)).toBe(Object.prototype)
+        expect(Object.keys(completed)).toEqual(ids.slice(0, index))
+        for (const id of ids.slice(0, index)) {
+          expect(Object.hasOwn(completed, id)).toBe(true)
+          expect(completed[id]).toBe(`${id}-value`)
+        }
+      }
+      expect("compensated" in result).toBe(false)
+      const completed = result as Readonly<Record<string, string>>
+      expect(Object.getPrototypeOf(completed)).toBe(Object.prototype)
+      for (const id of ids) {
+        expect(Object.hasOwn(completed, id)).toBe(true)
+        expect(completed[id]).toBe(`${id}-value`)
+      }
     }))
 
   it.effect("compensates completed steps in reverse and settles under compensate", () =>
@@ -168,7 +202,101 @@ describe("Saga", () => {
       expect(trace).toEqual(["do-one", "do-two", "do-three", "undo-two", "undo-one"])
       expect(error).toBeInstanceOf(PatternError)
       expect((error as PatternError).code).toBe("compensation_failed")
-      expect((error as PatternError).message).toContain("two")
+      expect((error as PatternError).message).toBe("Saga compensation failed for: two")
+      expect((error as PatternError).cause).toEqual({
+        failure: new Boom({ step: "three" }),
+        residue: [{ id: "two", error: new Boom({ step: "undo-two" }) }]
+      })
+    }))
+
+  it.effect("sorts every failed compensation in the refusal", () =>
+    Effect.gen(function*() {
+      const trace: Array<string> = []
+      const error = yield* Effect.flip(
+        Saga.run("order", {
+          steps: [
+            scripted(trace, "two", { compensationFails: true }),
+            scripted(trace, "one", { compensationFails: true }),
+            scripted(trace, "three", { fails: true })
+          ],
+          onFailure: "compensate"
+        })
+      )
+
+      expect(error).toBeInstanceOf(PatternError)
+      expect((error as PatternError).code).toBe("compensation_failed")
+      expect((error as PatternError).message).toBe("Saga compensation failed for: one, two")
+      expect((error as PatternError).cause).toEqual({
+        failure: new Boom({ step: "three" }),
+        residue: [
+          { id: "one", error: new Boom({ step: "undo-one" }) },
+          { id: "two", error: new Boom({ step: "undo-two" }) }
+        ]
+      })
+    }))
+
+  it.effect("reports compensation residue without inventing a typed failure for a defect", () =>
+    Effect.gen(function*() {
+      const error = yield* Effect.flip(
+        Saga.run("order", {
+          steps: [
+            scripted([], "one", { compensationFails: true }),
+            {
+              id: "two",
+              action: () => Effect.die(new Error("forward defect")),
+              compensation: () => Effect.void
+            }
+          ],
+          onFailure: "compensate"
+        })
+      )
+
+      expect(error).toBeInstanceOf(PatternError)
+      expect((error as PatternError).code).toBe("compensation_failed")
+      expect((error as PatternError).message).toBe("Saga compensation failed for: one")
+      expect((error as PatternError).cause).toEqual({
+        residue: [{ id: "one", error: new Boom({ step: "undo-one" }) }]
+      })
+    }))
+
+  it.effect("propagates a forward defect when every compensation succeeds", () =>
+    Effect.gen(function*() {
+      const defect = new Error("forward defect")
+      const exit = yield* Effect.exit(
+        Saga.run("order", {
+          steps: [{ id: "one", action: () => Effect.die(defect), compensation: () => Effect.void }],
+          onFailure: "compensate"
+        })
+      )
+
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") {
+        // The forward defect reaches the caller unwrapped: `compensate` turns a
+        // typed failure into `Compensated`, and a defect is not a typed failure.
+        expect(Cause.hasDies(exit.cause)).toBe(true)
+        expect(Result.getOrThrow(Cause.findDefect(exit.cause))).toBe(defect)
+      }
+    }))
+
+  it.effect("does not admit a step appended while the run is in flight", () =>
+    Effect.gen(function*() {
+      const trace: Array<string> = []
+      const steps: Array<Saga.RuntimeStep<string, string, never, never, never, never>> = []
+      const late: Saga.RuntimeStep<string, string, never, never, never, never> = {
+        id: "late",
+        action: () => Effect.sync(() => (trace.push("late"), "late-done")),
+        compensation: () => Effect.void
+      }
+      steps.push({
+        id: "one",
+        action: () => Effect.sync(() => (trace.push("one"), steps.push(late), "one-done")),
+        compensation: () => Effect.void
+      })
+
+      const result = yield* Saga.run("order", { steps, onFailure: "fail" })
+
+      expect(trace).toEqual(["one"])
+      expect(result).toEqual({ one: "one-done" })
     }))
 
   it.effect("compensates completed steps when the forward chain is interrupted", () =>
@@ -213,8 +341,10 @@ describe("Saga", () => {
 
       expect(empty).toBeInstanceOf(PatternError)
       expect(empty.code).toBe("invalid_decorator")
+      expect(empty.message).toBe("Saga requires at least one step")
       expect(duplicate).toBeInstanceOf(PatternError)
       expect(duplicate.code).toBe("invalid_decorator")
+      expect(duplicate.message).toBe("Saga step ids must be unique")
     }))
   it("defaults an omitted policy to compensate in the declaration", () => {
     const graph = Graph.build(Saga.make({ steps: declared }), "order")
@@ -234,10 +364,13 @@ describe("Saga", () => {
     const notAFlow = (() => Node.succeed(1)) as unknown as Flow.Any
 
     for (
-      const step of [
-        { id: "one", action: notAFlow, compensation: named("undo-one") },
-        { id: "one", action: named("do-one"), compensation: notAFlow }
-      ]
+      const [step, message] of [
+        [{ id: "one", action: notAFlow, compensation: named("undo-one") }, "Saga step \"one\" action must be a flow"],
+        [
+          { id: "one", action: named("do-one"), compensation: notAFlow },
+          "Saga step \"one\" compensation must be a flow"
+        ]
+      ] as const
     ) {
       let refusal: unknown
       try {
@@ -247,6 +380,7 @@ describe("Saga", () => {
       }
       expect(refusal).toBeInstanceOf(PatternError)
       expect((refusal as PatternError).code).toBe("invalid_decorator")
+      expect((refusal as PatternError).message).toBe(message)
     }
   })
 
@@ -281,6 +415,6 @@ describe("Saga", () => {
       expect(trace).toEqual(["do-one", "do-two", "do-three", "undo-two", "undo-one"])
       expect(error).toBeInstanceOf(PatternError)
       expect((error as PatternError).code).toBe("compensation_failed")
-      expect((error as PatternError).message).toContain("two")
+      expect((error as PatternError).message).toBe("Saga compensation failed for: two")
     }))
 })

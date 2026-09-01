@@ -13,6 +13,75 @@ import { withCrypto } from "./Crypto.ts"
 const some = (value: number) => Option.some(value)
 const none = Option.none()
 
+describe("make", () => {
+  const base = { initialMs: 100, factor: 2, maxMs: 1_000 }
+
+  it("rejects invalid bounds with a RangeError that names the field", () => {
+    const cases: ReadonlyArray<{
+      readonly field: string
+      readonly options: Parameters<typeof RetryPolicy.make>[0]
+    }> = [
+      { field: "initialMs", options: { ...base, initialMs: -1 } },
+      { field: "initialMs", options: { ...base, initialMs: Number.POSITIVE_INFINITY } },
+      { field: "factor", options: { ...base, factor: 0 } },
+      { field: "factor", options: { ...base, factor: -1 } },
+      { field: "factor", options: { ...base, factor: Number.POSITIVE_INFINITY } },
+      { field: "maxMs", options: { ...base, maxMs: 99 } },
+      { field: "maxMs", options: { ...base, maxMs: Number.POSITIVE_INFINITY } },
+      { field: "maxAttempts", options: { ...base, maxAttempts: 0 } },
+      { field: "maxAttempts", options: { ...base, maxAttempts: 1.5 } },
+      { field: "maxAttempts", options: { ...base, maxAttempts: Number.NaN } },
+      { field: "expirationMs", options: { ...base, expirationMs: 0 } },
+      { field: "expirationMs", options: { ...base, expirationMs: Number.NaN } },
+      { field: "expirationMs", options: { ...base, expirationMs: Number.POSITIVE_INFINITY } },
+      { field: "jitterRatio", options: { ...base, jitterRatio: -1 } },
+      { field: "jitterRatio", options: { ...base, jitterRatio: 1.0001 } },
+      { field: "jitterRatio", options: { ...base, jitterRatio: Number.NaN } }
+    ]
+
+    for (const testCase of cases) {
+      expect(() => RetryPolicy.make(testCase.options)).toThrow(RangeError)
+      expect(() => RetryPolicy.make(testCase.options)).toThrow(`"${testCase.field}"`)
+    }
+  })
+
+  it("accepts every inclusive boundary", () => {
+    expect(
+      RetryPolicy.make({
+        initialMs: 0,
+        factor: 1,
+        maxMs: 0,
+        maxAttempts: 1,
+        expirationMs: 1,
+        jitterRatio: 0
+      })
+    ).toMatchObject({ initialMs: 0, maxMs: 0, maxAttempts: 1, jitterRatio: 0 })
+    expect(RetryPolicy.make({ ...base, maxMs: 100, jitterRatio: 1 })).toMatchObject({
+      initialMs: 100,
+      maxMs: 100,
+      jitterRatio: 1
+    })
+  })
+
+  it("copies and freezes the nonRetryable list", () => {
+    const nonRetryable = ["Fatal"]
+    const policy = RetryPolicy.make({ ...base, nonRetryable })
+
+    nonRetryable.push("AddedLater")
+
+    expect(policy.nonRetryable).toEqual(["Fatal"])
+    expect(Object.isFrozen(policy.nonRetryable)).toBe(true)
+  })
+
+  it("enforces the constructor contract when decoding persisted policies", () => {
+    const decode = Schema.decodeUnknownSync(RetryPolicy.RetryPolicy)
+    expect(() => decode({ ...base, maxMs: 99 })).toThrow(/maxMs/)
+    expect(() => decode({ ...base, maxAttempts: 1.5 })).toThrow(/maxAttempts/)
+    expect(() => decode({ ...base, jitterRatio: 2 })).toThrow(/jitterRatio/)
+    expect(decode({ ...base, maxAttempts: 3 })).toMatchObject({ maxAttempts: 3 })
+  })
+})
+
 describe("nextDelay", () => {
   const policy = RetryPolicy.make({ initialMs: 100, factor: 2, maxMs: 1000 })
 
@@ -43,13 +112,79 @@ describe("nextDelay", () => {
   it("gives up on a non-positive computed interval", () => {
     const zero = RetryPolicy.make({ initialMs: 0, factor: 2, maxMs: 1000 })
     expect(RetryPolicy.nextDelay(zero, 1)).toEqual(none)
-    const negative = RetryPolicy.make({ initialMs: -5, factor: 2, maxMs: 1000 })
+    const negative: RetryPolicy.RetryPolicy = { initialMs: -5, factor: 2, maxMs: 1000 }
     expect(RetryPolicy.nextDelay(negative, 1)).toEqual(none)
   })
 
   it("gives up when the cap falls below the initial interval", () => {
-    const inverted = RetryPolicy.make({ initialMs: 500, factor: 2, maxMs: 100 })
+    const inverted: RetryPolicy.RetryPolicy = { initialMs: 500, factor: 2, maxMs: 100 }
     expect(RetryPolicy.nextDelay(inverted, 1)).toEqual(none)
+  })
+
+  it("gives up on non-finite persisted inputs that bypassed make", () => {
+    const unbounded: RetryPolicy.RetryPolicy = { initialMs: 100, factor: 2, maxMs: 1_000 }
+    expect(RetryPolicy.nextDelay(unbounded, Number.NaN)).toEqual(none)
+    expect(RetryPolicy.nextDelay(unbounded, 1, { elapsedMs: Number.POSITIVE_INFINITY })).toEqual(none)
+
+    const corruptAttempts = [Number.NaN, Number.POSITIVE_INFINITY].map(
+      (maxAttempts): RetryPolicy.RetryPolicy => ({ ...unbounded, maxAttempts })
+    )
+    for (const corrupt of corruptAttempts) {
+      expect(RetryPolicy.nextDelay(corrupt, 1)).toEqual(none)
+      expect(RetryPolicy.decide(corrupt, { attempt: 1, error: "e" })).toEqual(
+        RetryPolicy.giveUp("exhausted")
+      )
+    }
+
+    const corruptExpiration: RetryPolicy.RetryPolicy = { ...unbounded, expirationMs: Number.NaN }
+    expect(RetryPolicy.nextDelay(corruptExpiration, 1, { elapsedMs: 0 })).toEqual(none)
+    expect(RetryPolicy.decide(corruptExpiration, { attempt: 1, error: "e", elapsedMs: 0 })).toEqual(
+      RetryPolicy.giveUp("exhausted")
+    )
+  })
+
+  it("never returns a bad delay from malformed persisted jitter", () => {
+    const malformed: RetryPolicy.RetryPolicy = {
+      initialMs: 1_000,
+      factor: 1,
+      maxMs: 10_000,
+      jitterRatio: 2
+    }
+    const delay = RetryPolicy.nextDelay(malformed, 1, { random: 0 })
+    expect(delay).toEqual(none)
+    expect(RetryPolicy.decide(malformed, { attempt: 1, error: "e", random: 0 })).toEqual(
+      RetryPolicy.giveUp("exhausted")
+    )
+
+    const ordinary = RetryPolicy.make({ initialMs: 100, factor: 2, maxMs: 1_000, jitterRatio: 0.5 })
+    expect(RetryPolicy.nextDelay(ordinary, 1, { random: Number.NaN })).toEqual(none)
+    // `random` is a public option, so an out-of-range sample is a caller
+    // mistake that must not produce a delay outside the declared window.
+    expect(RetryPolicy.nextDelay(ordinary, 1, { random: -0.5 })).toEqual(none)
+    expect(RetryPolicy.nextDelay(ordinary, 1, { random: 1.5 })).toEqual(none)
+
+    // An uncapped policy whose growth overflows to Infinity is corrupt in the
+    // same way, and is refused before the jitter step rather than after it.
+    const uncapped: RetryPolicy.RetryPolicy = {
+      initialMs: 100,
+      factor: 2,
+      maxMs: Number.POSITIVE_INFINITY,
+      jitterRatio: 0.5
+    }
+    expect(RetryPolicy.nextDelay(uncapped, 2_000, { random: 0.5 })).toEqual(none)
+  })
+
+  it("retries immediately when full jitter samples zero", () => {
+    // Regression: guarding `delay > 0` AFTER the jitter step turned the
+    // legitimate zero-delay sample of full jitter into an exhausted sequence.
+    // `make` accepts `jitterRatio: 1`, and `random` is a public option, so a
+    // deterministic caller reaches this directly.
+    const full = RetryPolicy.make({ initialMs: 1_000, factor: 1, maxMs: 10_000, jitterRatio: 1 })
+    expect(RetryPolicy.nextDelay(full, 1, { random: 0 })).toEqual(some(0))
+    expect(RetryPolicy.decide(full, { attempt: 1, error: "e", random: 0 })).toEqual(
+      RetryPolicy.retryAfter(0)
+    )
+    expect(RetryPolicy.nextDelay(full, 1, { random: 1 })).toEqual(some(1_000))
   })
 
   it("applies jitter from the supplied random sample", () => {
@@ -238,6 +373,25 @@ describe("decide", () => {
     ).toEqual(RetryPolicy.giveUp("nonRetryable"))
   })
 
+  it("never invokes accessors or proxy traps while classifying an error", () => {
+    let getters = 0
+    const accessor = Object.defineProperty({}, "_tag", {
+      get() {
+        getters += 1
+        return "FatalError"
+      }
+    })
+    const hostile = new Proxy({}, {
+      getOwnPropertyDescriptor() {
+        throw new Error("trap")
+      }
+    })
+
+    expect(RetryPolicy.errorTag(accessor)).toBeUndefined()
+    expect(RetryPolicy.errorTag(hostile)).toBeUndefined()
+    expect(getters).toBe(0)
+  })
+
   it("returns exhausted when the policy runs out of attempts", () => {
     const policy = RetryPolicy.make({
       initialMs: 100,
@@ -359,7 +513,25 @@ describe("nextDelay numeric boundaries", () => {
 
   it("errorTag reads _tag, then Error name, and is otherwise undefined", () => {
     expect(RetryPolicy.errorTag({ _tag: "Tagged" })).toBe("Tagged")
-    expect(RetryPolicy.errorTag(new RangeError("x"))).toBe("RangeError")
+    const named = new Error("x")
+    Object.defineProperty(named, "name", { value: "NamedError" })
+    expect(RetryPolicy.errorTag(named)).toBe("NamedError")
+    for (
+      const [error, name] of [
+        [new EvalError("x"), "EvalError"],
+        [new RangeError("x"), "RangeError"],
+        [new ReferenceError("x"), "ReferenceError"],
+        [new SyntaxError("x"), "SyntaxError"],
+        [new TypeError("x"), "TypeError"],
+        [new URIError("x"), "URIError"],
+        [new AggregateError([], "x"), "AggregateError"],
+        [new Error("x"), "Error"]
+      ] as const
+    ) {
+      expect(RetryPolicy.errorTag(error)).toBe(name)
+    }
+    expect(RetryPolicy.errorTag(Object.defineProperty({}, "name", { get: () => "hidden" }))).toBeUndefined()
+    expect(RetryPolicy.errorTag(Object.defineProperty({}, "name", { value: 7 }))).toBeUndefined()
     expect(RetryPolicy.errorTag({ _tag: 7 })).toBe(undefined)
     expect(RetryPolicy.errorTag("string")).toBe(undefined)
     expect(RetryPolicy.errorTag(null)).toBe(undefined)
@@ -460,6 +632,7 @@ describe("nextDelay numeric boundaries", () => {
 
 describe("defaultRetryPolicy", () => {
   it("mirrors the historical exponential(200, 1.5) / spaced(30000) envelope", () => {
+    expect(Object.isFrozen(RetryPolicy.defaultRetryPolicy)).toBe(true)
     expect(RetryPolicy.nextDelay(RetryPolicy.defaultRetryPolicy, 1)).toEqual(some(200))
     expect(RetryPolicy.nextDelay(RetryPolicy.defaultRetryPolicy, 2)).toEqual(some(300))
     expect(RetryPolicy.nextDelay(RetryPolicy.defaultRetryPolicy, 3)).toEqual(some(450))

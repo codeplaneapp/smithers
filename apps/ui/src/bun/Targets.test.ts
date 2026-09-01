@@ -1,10 +1,18 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { delimiter, join } from "node:path"
 import type { TargetRunFrame } from "smithers-shared/LocalApp"
 import type { SandboxHost } from "./Sandbox"
-import { createTargetRunner, mapTargets, queryTargets, resolveBuildCli, runTopic, sandboxPathsFor } from "./Targets"
+import {
+  buildCliNodePath,
+  createTargetRunner,
+  mapTargets,
+  queryTargets,
+  resolveBuildCli,
+  runTopic,
+  sandboxPathsFor
+} from "./Targets"
 
 /*
  * Target JSON mapping and the loader/run seams (LOCAL-APP.md "Targets: load
@@ -64,6 +72,9 @@ describe("mapTargets", () => {
 describe("resolveBuildCli and sandbox paths", () => {
   test("SMITHERS_BUILD_CLI wins, else packages/build-cli/src/main.js from the checkout", () => {
     expect(resolveBuildCli({ SMITHERS_BUILD_CLI: "/x/main.js" }, "/ignored")).toBe("/x/main.js")
+    const packaged = "/Applications/Smithers.app/Contents/Resources/app/build-cli/launcher.mjs"
+    expect(resolveBuildCli({}, "/Applications/Smithers.app/Contents/Resources/app/bun", (path) => path === packaged))
+      .toBe(packaged)
     expect(resolveBuildCli({}, "/repo/apps/ui/src/bun", () => false)).toBe("/repo/packages/build-cli/src/main.js")
   })
 
@@ -79,6 +90,16 @@ describe("resolveBuildCli and sandbox paths", () => {
     expect(paths.repo).toBe("/work/force")
     expect(paths.home).not.toBe("")
     expect(paths.tmpdir.startsWith("/")).toBe(true)
+  })
+
+  test("a packaged CLI exposes its shipped authoring packages as a final Node fallback", () => {
+    const cli = "/Applications/Smithers.app/Contents/Resources/app/build-cli/launcher.mjs"
+    const nodeModules = "/Applications/Smithers.app/Contents/Resources/app/build-cli/node_modules"
+    const manifest = `${nodeModules}/@smthrs/targets/package.json`
+    expect(buildCliNodePath(cli, undefined, (path) => path === manifest)).toBe(nodeModules)
+    expect(buildCliNodePath(cli, "/workspace/node_modules", (path) => path === manifest))
+      .toBe(`${nodeModules}${delimiter}/workspace/node_modules`)
+    expect(buildCliNodePath(cli, "/workspace/node_modules", () => false)).toBe("/workspace/node_modules")
   })
 })
 

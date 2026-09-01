@@ -309,13 +309,17 @@ const prGate = S.Suite({
 // package's directory, with workflowDirectory taken from the `changes` entry
 // ending in "workflows", which is `.github/workflows` here.
 //
-// Three attrs the ci.yml jobs use have no package-mode spelling yet, so the
+// Five attrs the ci.yml jobs use have no package-mode spelling yet, so the
 // generated files differ from the hand-owned ci.yml until they land upstream:
-// `timeoutMinutes`, `continueOnError` (which is what makes the macOS, Windows,
-// and fault-matrix jobs advisory), and a per-job toolchain declaration
-// (submodules plus a rust toolchain for ci-rust and ci-wasm). Github.Setup
-// carries only the two cache secrets, and the generated setup action installs
-// the workspace runtime and package manager, not `cargo` or submodules.
+// `timeoutMinutes`; `continueOnError`, which is what makes the macOS and
+// Windows package rows advisory; `strategy.matrix`, which is what lets one job
+// carry those rows plus ubuntu (WorkflowAttrs takes a single `runsOn` string,
+// and the only matrix GithubRender.ts emits is the shard matrix it derives from
+// a sharded target); `requiredJobs`, the assertion that a rendered job is still
+// in the required set; and a per-job toolchain declaration (submodules plus a
+// rust toolchain for ci-rust and ci-wasm). Github.Setup carries only the two
+// cache secrets, and the generated setup action installs the workspace runtime
+// and package manager, not `cargo` or submodules.
 const githubSetup = S.Github.Setup({ cacheUrl, cacheToken })
 
 const on = { pullRequest: true, push: { branches: ["main"] } } as const
@@ -407,11 +411,29 @@ const ciExamples = S.Github.Workflow({
   run: [examples.ci]
 })
 
-// Port of ci.yml `e2e-faults`. The matrix is advisory there because two of its
-// gates are red by design and owned elsewhere (case 22's redaction requirement
-// and the durable park). `continueOnError` has no attr in package mode, so the
-// lane is a separate workflow whose failure is read rather than enforced; the
-// required typecheck reaches the matrix through `//e2e:check` inside `gates`.
+// Port of ci.yml `e2e-faults`, which is a REQUIRED gate. The lane was advisory
+// while case 22's terminal-log half was red by design; v1/rc0-migration landed
+// the section 5.2 redaction deliverable (@smthrs/journal RedactedLogger),
+// dropped `continue-on-error` from the job, renamed it from "fault-injection
+// matrix (advisory)" to "fault-injection matrix", and put `e2e-faults` in the
+// generator's `requiredJobs` (rc-contract R-12). The durable park the old
+// wording also named is a coverage gap rather than a red case (e2e/fault-gaps.md).
+//
+// Package mode carries that intent by having nothing say otherwise: there is no
+// `continueOnError` attr, so this lane's job has always rendered as an ordinary
+// check, and there is no `requiredJobs` attr to assert it stays one. What made
+// the lane advisory here was this comment and the rc-contract row, and both now
+// say required.
+//
+// The matrix stays in its own lane rather than joining `//e2e:ci` or `gates`.
+// It kills process groups, binds ephemeral ports, and reads the machine's
+// process table (e2e/PACKAGE.ts declares `sandbox: "none"` and no coverage for
+// exactly that reason), so folding it into the deterministic suite would put a
+// machine-global, uncacheable 30-minute run inside every preCommit, prePush,
+// and prGate. ci.yml makes the same split: the required `test` job typechecks
+// the matrix through `//e2e:check` and the required `e2e-faults` job runs it.
+// `//:ci`, the whole-repository gate, lists `//e2e:faults` directly so the
+// repository's own total gate covers what CI enforces.
 const ciFaults = S.Github.Workflow({
   name: "ci-faults",
   on,
@@ -419,10 +441,31 @@ const ciFaults = S.Github.Workflow({
   run: [e2e.faults]
 })
 
-// Ports of ci.yml `node-macos` and `node-windows`, which run the whole package
-// graph on both hosts. They stay in the workflow list at their ci.yml scope;
-// they are advisory there and cannot say so here until `continueOnError`
-// lands upstream.
+// The three rows of ci.yml's `packages` job. v1/rc0-migration replaced the
+// separate `node-macos` and `node-windows` jobs with one matrix job over
+// ubuntu-latest, macos-latest, and windows-latest, reading `continue-on-error`
+// per row from `matrix.advisory`: ubuntu required, macOS and Windows advisory
+// until the matrix proves them green.
+//
+// `S.Github.Workflow` takes one `runsOn` string and has no `strategy` or
+// `matrix` attr, so the matrix is written out one lane per host. The ubuntu row
+// is `ciNodeUbuntu`: ci.yml's ubuntu row re-runs package targets the `test`
+// job's `ci` verb already covers, and it kept that duplication deliberately so
+// the `packages` job stayed meaningful in `requiredJobs`. The same duplication
+// holds here against `ci-test`, and the shared remote cache turns the second
+// ubuntu pass into a lookup per package rather than a rerun.
+//
+// The per-row advisory flag has no spelling either. All three lanes render as
+// ordinary checks, so macOS and Windows are advisory only by what the
+// repository's branch protection requires. SMITHERS-NOTES.md records both gaps.
+const ciNodeUbuntu = S.Github.Workflow({
+  name: "ci-node-ubuntu",
+  on,
+  runsOn: "ubuntu-latest",
+  setup: githubSetup,
+  run: [...packageCi]
+})
+
 const ciNodeMacos = S.Github.Workflow({
   name: "ci-node-macos",
   on,
@@ -449,6 +492,7 @@ const githubCi = S.Github.CiGen({
     ciAppsE2e,
     ciExamples,
     ciFaults,
+    ciNodeUbuntu,
     ciNodeMacos,
     ciNodeWindows
   ],
@@ -465,10 +509,12 @@ const githubCi = S.Github.CiGen({
   changes: [".github/workflows/**", "actions/setup/action.yml"]
 })
 
-// The whole repository gate: deterministic gates, agent lints, and drift
-// checks over the generated surfaces.
+// The whole repository gate: deterministic gates, the required fault matrix,
+// agent lints, and drift checks over the generated surfaces. `//e2e:faults` is
+// listed here rather than inside `gates` so the cheap suites stay cheap; see
+// the ciFaults comment for why the matrix cannot share a job with them.
 const ci = S.Suite({
-  tests: [gates, agentLints, githubCi]
+  tests: [gates, e2e.faults, agentLints, githubCi]
 })
 
 // --- agent lanes --------------------------------------------------------
@@ -495,9 +541,14 @@ const commit = S.Git.Commit({
   message: S.Agents.luna
 })
 
+// v1/rc0-migration bound a declared secret to the origins allowed to receive it
+// (targets commit f9a297717d): an exec target's `secrets` attr now takes
+// `Attr.Secrets`, an array of `Secret.HttpCredential`, so a bare
+// `S.Secret("GITHUB_TOKEN")` no longer validates. `GithubTarget.refusePr` looks
+// for exactly this shape and names it in its refusal message.
 const pr = S.Git.Pr({
   gates: [prePush],
-  secrets: [S.Secret("GITHUB_TOKEN")],
+  secrets: [S.HttpSecret(S.Secret("GITHUB_TOKEN"), ["https://api.github.com"])],
   sandbox: { network: true },
   approval: "required"
 })
@@ -526,6 +577,7 @@ export const Package = S.Package({
     ciAppsE2e,
     ciExamples,
     ciFaults,
+    ciNodeUbuntu,
     ciNodeMacos,
     ciNodeWindows,
     githubCi,

@@ -13,9 +13,11 @@ import { PatternError } from "./PatternError.ts"
 /**
  * Empty-input policy for {@link make}.
  *
+ * `"fail"` deliberately reports `exhausted`: the caller explicitly chose a
+ * spent-bound style failure for an input with no shards.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type OnEmpty = "reduce" | "succeed" | "fail"
 
@@ -28,7 +30,6 @@ export type OnEmpty = "reduce" | "succeed" | "fail"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly map: Flow.Any
@@ -42,7 +43,6 @@ export interface MakeOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions<I, Shard, Mapped, Reduced, E, R, E2, R2> {
   readonly map: (input: {
@@ -71,7 +71,6 @@ const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   if (!Number.isSafeInteger(options.concurrency) || options.concurrency < 1) {
@@ -144,7 +143,6 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <
   I extends { readonly shards: ReadonlyArray<unknown> },
@@ -172,7 +170,7 @@ export const run = <
     }
     return options.onEmpty === "succeed"
       ? Effect.succeed([])
-      : options.reduce({ input, mapped: [] })
+      : Effect.suspend(() => options.reduce({ input, mapped: [] }))
   }
   return Effect.flatMap(
     Effect.forEach(

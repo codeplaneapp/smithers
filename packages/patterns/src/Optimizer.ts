@@ -27,7 +27,6 @@ import { PatternError } from "./PatternError.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type OnMaxReached = Loop.OnMaxReached
 
@@ -36,7 +35,6 @@ export type OnMaxReached = Loop.OnMaxReached
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Attempt<C> {
   readonly candidate: C
@@ -48,12 +46,14 @@ export interface Attempt<C> {
 /**
  * What an evaluator returns for one candidate.
  *
+ * `score` must be a finite number. A non-finite evaluator answer is a broken
+ * evaluation, not an exhausted search, and {@link run} refuses it immediately.
+ *
  * `feedback` is opaque to the pattern and is handed back to the next
  * generation unchanged.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Evaluation {
   readonly score: number
@@ -72,7 +72,6 @@ export interface Evaluation {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface MakeOptions {
   readonly generate: Flow.Any
@@ -87,7 +86,6 @@ export interface MakeOptions {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface RuntimeOptions<I, C, E, R, E2, R2> {
   readonly generate: (input: {
@@ -113,7 +111,6 @@ export interface RuntimeOptions<I, C, E, R, E2, R2> {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Result<C> {
   readonly best: Attempt<C>
@@ -165,7 +162,6 @@ const call = (flow: Flow.Any, input: unknown): Node.Node<unknown, unknown> =>
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typeof Schema.Unknown, unknown> => {
   const invalid = validate(options)
@@ -220,7 +216,6 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  *
  * @category combinators
  * @since 0.1.0
- * @slop
  */
 export const run = <I, C, E, R, E2, R2>(
   input: I,
@@ -231,13 +226,22 @@ export const run = <I, C, E, R, E2, R2>(
   const targetScore = options.targetScore
   return Effect.gen(function*() {
     const attempts: Array<Attempt<C>> = []
-    const loop = yield* Loop.run<I, Attempt<C>, E | E2, R | R2, never, never>(input, {
+    const loop = yield* Loop.run<I, Attempt<C>, E | E2 | PatternError, R | R2, never, never>(input, {
       maxIterations: options.maxIterations,
       onMaxReached: "return-last",
       body: ({ input, iteration, previous }) =>
         Effect.gen(function*() {
           const candidate = yield* options.generate({ input, previous, iteration })
           const evaluation = yield* options.evaluate({ value: candidate, iteration })
+          if (!Number.isFinite(evaluation.score)) {
+            return yield* Effect.fail(
+              new PatternError({
+                code: "invalid_decorator",
+                message:
+                  `Optimizer evaluation score at iteration ${iteration} must be a finite number, received ${evaluation.score}`
+              })
+            )
+          }
           const attempt: Attempt<C> = {
             candidate,
             score: evaluation.score,
@@ -253,7 +257,11 @@ export const run = <I, C, E, R, E2, R2>(
     // beats the standing best, so equal scores keep the earliest attempt
     // wherever the tie falls. A successful loop always ran one body, so
     // `attempts` is never empty and `loop.value` is only a type-level fallback.
-    const best = attempts.reduce((left, right) => right.score > left.score ? right : left, attempts[0] ?? loop.value)
+    const best = attempts.reduce(
+      (left, right) => right.score > left.score ? right : left,
+      /* v8 ignore next -- `loop.value` is a type-level fallback: a successful Loop.run always ran one body, so `attempts` always holds at least the first one. It becomes reachable only if Loop.run gains a zero-iteration success. */
+      attempts[0] ?? loop.value
+    )
     const converged = targetScore !== undefined && best.score >= targetScore
     if (!converged && options.onMaxReached === "fail") {
       return yield* Effect.fail(

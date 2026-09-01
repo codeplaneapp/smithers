@@ -6,9 +6,9 @@
  * `docs/specs/Concepts/Permission Kernel.md`,
  * `docs/specs/Concepts/Step Keys.md`, and `docs/specs/Specs/Plan.md`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-import { type Capability, type CapabilityPattern, matches } from "@smthrs/capability/Capability"
+import { type Capability, CapabilityPattern, matches } from "@smthrs/capability/Capability"
 import { Context, Effect } from "effect"
 
 const CapabilitySetTypeId: unique symbol = Symbol.for("@smthrs/kernel/CapabilitySet")
@@ -20,7 +20,7 @@ const CapabilitySetTypeId: unique symbol = Symbol.for("@smthrs/kernel/Capability
  * every capability.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export interface CapabilitySet {
@@ -56,7 +56,14 @@ const compareGroup = (
 const normalizeGroup = (
   patterns: ReadonlyArray<CapabilityPattern>
 ): ReadonlyArray<CapabilityPattern> => {
-  const sorted = patterns.slice().sort(comparePattern)
+  const sorted = patterns.map((pattern) =>
+    Object.freeze(
+      new CapabilityPattern({
+        action: pattern.action,
+        resource: pattern.resource
+      })
+    )
+  ).sort(comparePattern)
   const normalized: Array<CapabilityPattern> = []
   for (const pattern of sorted) {
     const previous = normalized.at(-1)
@@ -99,7 +106,7 @@ const make = (
  * Creates authority described by one any-of group.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const fromPatterns = (
@@ -112,7 +119,7 @@ const unrestricted: CapabilitySet = make([])
  * Empty authority. Its single empty any-of group rejects every capability.
  *
  * @category defaults
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const none: CapabilitySet = make([[]])
@@ -121,7 +128,7 @@ export const none: CapabilitySet = make([[]])
  * Tests whether every group contains a pattern matching the capability.
  *
  * @category predicates
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const allows = (
@@ -133,7 +140,7 @@ export const allows = (
  * Intersects two authorities without synthesizing or simplifying globs.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const intersect = (
@@ -145,7 +152,7 @@ export const intersect = (
  * Tests structural equality between normalized capability sets.
  *
  * @category equivalence
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const equals = (
@@ -195,7 +202,7 @@ const CurrentCapabilities: Context.Reference<CapabilitySet> = Context.Reference<
  * with a wider set.
  *
  * @category accessors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const current: Effect.Effect<CapabilitySet> = CurrentCapabilities
@@ -204,7 +211,7 @@ export const current: Effect.Effect<CapabilitySet> = CurrentCapabilities
  * Runs an effect with authority intersected with one additional any-of group.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @slop
  */
 export const attenuate = (

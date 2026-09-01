@@ -10,7 +10,6 @@ import * as Schema from "effect/Schema"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const PatternErrorCode = Schema.Literals([
   "missing_slot",
@@ -28,18 +27,20 @@ export const PatternErrorCode = Schema.Literals([
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type PatternErrorCode = typeof PatternErrorCode.Type
 
 /**
  * A typed pattern declaration or execution failure.
  *
+ * `cause` carries the error or errors this failure reports on. It never carries
+ * the input that produced them.
+ *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class PatternError extends Schema.TaggedError<PatternError>()("flows/patterns/PatternError", {
   code: PatternErrorCode,
-  message: Schema.String
+  message: Schema.String,
+  cause: Schema.optional(Schema.Unknown)
 }) {}

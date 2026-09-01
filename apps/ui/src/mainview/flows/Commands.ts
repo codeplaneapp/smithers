@@ -263,6 +263,21 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
      */
     const parsed = payloadFor(nameOf(target), args)
     if ("error" in parsed) return { status: "failed", error: parsed.error }
+    /*
+     * A `confirm` flow asked for by the MODEL: consequential acts (land a
+     * PR, remove a credential) are invocable by the agent — every listed
+     * flow is — but never performed by it. The invocation posts a
+     * confirmation message whose button runs the flow as the user.
+     */
+    if (invoker === "agent" && target.metadata.confirm !== undefined) {
+      actions.requestFlowConfirmation(nameOf(target), args ?? null, target.metadata.confirm)
+      trace(invoker, name, args, startedAt, "confirm-requested", target.metadata.confirm)
+      return {
+        status: "executed",
+        value:
+          `asked the user to confirm "/${nameOf(target)}${args === undefined ? "" : ` ${args}`}" — it runs only when they confirm, and nothing has happened yet`
+      }
+    }
     const outcome = await invoke(target, parsed.payload)
     // A successful, user-invoked, LISTED flow feeds the slash menu's recency
     // ranking; hidden id-scoped acts never rank.

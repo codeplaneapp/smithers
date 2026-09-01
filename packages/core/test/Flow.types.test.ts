@@ -1,6 +1,6 @@
+import * as Flow from "@smthrs/core/Flow"
 import * as Schema from "effect/Schema"
 import { describe, expectTypeOf, it } from "vitest"
-import * as Flow from "../src/Flow.ts"
 import * as Node from "../src/Node.ts"
 
 interface BodyError {
@@ -8,6 +8,19 @@ interface BodyError {
 }
 
 describe("Flow types", () => {
+  it("exports consumer-nameable make options from the public Flow module", () => {
+    const options: Flow.MakeOptions<typeof Schema.String, typeof Schema.Number, BodyError> = {
+      input: Schema.String,
+      output: Schema.Number,
+      body: (input) => Node.succeed(input.length) as Node.Node<number, BodyError>
+    }
+    const flow = Flow.make(options)
+
+    expectTypeOf(flow).toEqualTypeOf<
+      Flow.Flow<typeof Schema.String, typeof Schema.Number, BodyError>
+    >()
+  })
+
   it("infers body input from the sibling input schema and returns the declared output", () => {
     const Input = Schema.Struct({
       id: Schema.String,

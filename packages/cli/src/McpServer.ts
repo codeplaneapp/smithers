@@ -310,7 +310,11 @@ export const supportedTools: ReadonlyArray<Tool> = [
     inputSchema: object({
       approval: { description: "The serialized approval payload from list_pending_approvals." },
       decision: { type: "string", enum: ["approve", "deny"], description: "What to do." },
-      scope: { type: "string", enum: ["once", "run", "remembered"], description: "How long the grant lasts." }
+      scope: {
+        type: "string",
+        enum: ["once", "run", "remembered"],
+        description: "How long the grant lasts. Omitted means `once`."
+      }
     }, ["approval", "decision"]),
     call: (args) => {
       const payload = decodeApproval(args["approval"])
@@ -319,15 +323,20 @@ export const supportedTools: ReadonlyArray<Tool> = [
       if (decision !== "approve" && decision !== "deny") {
         return Effect.succeed(failed("INVALID_INPUT", "decision must be \"approve\" or \"deny\""))
       }
-      const scope = text(args["scope"])
+      // A scope decides how long the capability grant outlives the ask, so a
+      // value this server cannot read is refused exactly as `decision` is, and
+      // silence means the narrowest grant. Coercing both to "run" handed an
+      // MCP client the whole run's capabilities for an argument it never sent
+      // and for a typo it would never see reported.
+      const scope = args["scope"] === undefined ? "once" : text(args["scope"])
+      if (scope !== "once" && scope !== "run" && scope !== "remembered") {
+        return Effect.succeed(failed("INVALID_INPUT", "scope must be \"once\", \"run\", or \"remembered\""))
+      }
       return envelope(
-        Effect.flatMap(ControlService.Control, (control) =>
-          decision === "approve"
-            ? control.approve({
-              ...payload,
-              scope: scope === "once" || scope === "run" || scope === "remembered" ? scope : "run"
-            })
-            : control.deny(payload)),
+        Effect.flatMap(
+          ControlService.Control,
+          (control) => decision === "approve" ? control.approve({ ...payload, scope }) : control.deny(payload)
+        ),
         (receipt) => succeeded(receipt)
       )
     }

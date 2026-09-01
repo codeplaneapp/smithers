@@ -77,6 +77,8 @@ import { Ownership, RunStore } from "@smthrs/run-store"
 import type { Crypto } from "effect"
 import { Cause, Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } from "effect"
 import { Agent } from "./Agent.ts"
+import type * as Budget from "./Budget.ts"
+import type * as QuotaPolicy from "./QuotaPolicy.ts"
 import * as Seat from "./Seat.ts"
 import { SeatResolver } from "./SeatResolver.ts"
 import * as StandardFlows from "./StandardFlows.ts"
@@ -98,6 +100,10 @@ export interface Options {
   readonly flows?: ReadonlyArray<FlowBinding.Source> | undefined
   /** The explicit sandbox budget every cell runs under. Never unlimited. */
   readonly limits: Sandbox.Limits
+  /** Required quota park/retry policy for every model call in the run. */
+  readonly quotaPolicy: Layer.Layer<QuotaPolicy.QuotaClassifier>
+  /** Builds the run-local spending policy from the plan that was approved. */
+  readonly budget: (envelope: Envelope) => Layer.Layer<Budget.Budget>
   /** Stable system teaching placed ahead of the cell contract. */
   readonly system?: ReadonlyArray<string> | undefined
   readonly maxFrames?: number | undefined
@@ -161,6 +167,76 @@ export interface Options {
 }
 
 const sourceId = JournalEvent.SourceId.make("/control/executor")
+
+/**
+ * The agent trail's own producer, separate from the executor's lifecycle
+ * events.
+ *
+ * The trail supplies its own producer sequences ({@link traceIdentity}) while
+ * `control.run.*` and `control.approval.requested` allocate theirs from the
+ * journal's floor. Sharing one producer would mix the two schemes in one
+ * sequence space: the floor is `MAX(source_seq) + 1`, so it would jump to a
+ * derived identity plus one, and a later derived identity could name a
+ * sequence a lifecycle event had already taken. Two producers keep each
+ * scheme's numbers to itself.
+ */
+const trailSourceId = JournalEvent.SourceId.make("/control/executor/trail")
+
+/**
+ * Payload fields a replayed event does not reproduce.
+ *
+ * `at` is stamped when the executor recorded the event, and `durationMillis`
+ * is measured around a step the engine serves from its record on the way back,
+ * so both differ between the attempt that first produced an event and the
+ * attempt that replays it. They describe the observation rather than the
+ * event, so the identity below is derived without them and the first
+ * attempt's values are the ones that stand.
+ */
+const observationOnly = new Set(["at", "durationMillis"])
+
+/**
+ * The producer identity of one journaled agent event.
+ *
+ * A resumed attempt replays its whole prefix and re-publishes every event in
+ * it, so without an identity of their own those events were journaled again:
+ * the auto-allocated sequence never collided, the dedup index never fired, and
+ * a projection summing `control.agent.model-settled` usage over-counted a
+ * run's tokens once per park. This is the identity that lets
+ * `UNIQUE (run_id, source_id, source_seq)` answer, and it has to hold for a
+ * resumed attempt that DIVERGES rather than only for one that repeats.
+ *
+ * The material is where the event sits and what it says: the frame, its
+ * ordinal within that frame, the cell that frame produced, the event type, and
+ * the event's own payload minus {@link observationOnly}. A replayed event
+ * regenerates all five, so it regenerates the identity and the index refuses
+ * it. An event produced after divergence differs in at least one of them, so
+ * it derives a different identity and is admitted normally: the approved
+ * `ask` writes `cell-call-settled` where the parked attempt wrote
+ * `permission-required`, at the same ordinal of the same frame, and the two
+ * do not collide. A running count across the incarnation cannot make that
+ * distinction, which is why one was tried and rejected.
+ *
+ * Truncation is to 48 bits, comfortably inside the safe-integer range the
+ * journal allocates in, and the birthday bound over a run's thousands of
+ * events is around 1e-9. The failure it bounds is a dropped duplicate, never a
+ * rewritten row: the first observation of an identity is the one that stands.
+ *
+ * @category projections
+ * @since 0.1.0
+ */
+export const traceIdentity = (
+  frame: number,
+  ordinal: number,
+  cell: string,
+  eventType: string,
+  payload: Readonly<Record<string, unknown>>
+): JournalEvent.SourceSeq => {
+  const material = Object.fromEntries(
+    Object.entries(payload).filter(([key]) => !observationOnly.has(key))
+  )
+  const digest = Digest.digest(CanonicalJson.stringify({ cell, eventType, frame, material, ordinal }))
+  return JournalEvent.SourceSeq.make(Number.parseInt(digest.slice(0, 12), 16))
+}
 
 /**
  * How long a resume delegation must stand unanswered before a composition
@@ -546,6 +622,77 @@ const prompt = (text: string, input: unknown): string => {
 }
 
 /**
+ * Whether a value is a JSON value, the way `Schema.toCodecJson` means it.
+ *
+ * A class instance is not one, however plain its fields look, so this walks
+ * the structure rather than trusting `JSON.stringify`, which turns an `Error`
+ * into `{}` and reports success.
+ */
+const jsonDepthLimit = 200
+
+/**
+ * Whether the codec would take this value as JSON.
+ *
+ * The walk runs inside `Effect.mapError` on the failure channel, so it must
+ * never throw: a self-referencing failure value or one nested past the stack
+ * would turn a clean failure into a defect thrown by the mapper. A cycle and
+ * a depth past {@link jsonDepthLimit} both answer "not JSON", which sends the
+ * value down the rendering path, where `Cause.pretty` prints it safely.
+ */
+const isJsonValue = (value: unknown, ancestors: WeakSet<object> = new WeakSet(), depth = 0): boolean => {
+  if (value === null) return true
+  const kind = typeof value
+  if (kind === "string" || kind === "boolean") return true
+  if (kind === "number") return Number.isFinite(value)
+  if (kind !== "object") return false
+  if (depth >= jsonDepthLimit) return false
+  const object = value as object
+  if (ancestors.has(object)) return false
+  ancestors.add(object)
+  try {
+    if (Array.isArray(value)) return value.every((item) => isJsonValue(item, ancestors, depth + 1))
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) return false
+    return Object.values(value as Record<string, unknown>).every((member) => isJsonValue(member, ancestors, depth + 1))
+  } finally {
+    // A value repeated in sibling positions is not a cycle, so it leaves the
+    // ancestor set with its own subtree.
+    ancestors.delete(object)
+  }
+}
+
+/**
+ * The failure the engine persists as this flow's settlement.
+ *
+ * `agent/run` declares `error: Schema.Unknown`, and `Schema.toCodecJson`
+ * reads that as "any JSON value". Every real agent failure is an `Error`
+ * instance instead — a `HarnessError` wrapping a `ModelError`, a
+ * `SeatUnresolved` — so the codec rejected every one of them, `engine-store`
+ * degraded the settlement into a projection, and it said so in a second WARN
+ * stack beside the run's own `An agent run failed` (Phase 7 smoke observation
+ * N1: two stack traces for one billing refusal). Rendering the error to the
+ * same text `Cause.pretty` gives the operator makes the settlement encodable,
+ * so the durable record carries the real refusal rather than a projection of
+ * it and the duplicate warning has nothing to report. A value that already is
+ * a JSON value is passed through untouched, and a defect stays a defect: this
+ * maps the failure channel only.
+ *
+ * @category conversions
+ * @since 1.0.0
+ */
+export const settlementFailure = (error: unknown): unknown => {
+  if (isJsonValue(error)) return error
+  try {
+    return Cause.pretty(Cause.fail(error))
+  } catch {
+    // The renderer walks the value too, and a value deep enough to overflow it
+    // must still not throw from the mapper: the settlement is the last thing
+    // standing between a failed run and a row that never reaches terminal.
+    return `A failure of type ${typeof error} that could not be rendered.`
+  }
+}
+
+/**
  * The one durable flow every agent run executes. Its plan-time body is inert;
  * the behaviour is the `execute` registered by {@link make}, and the
  * execution id is the control run id.
@@ -617,6 +764,19 @@ export const waitForParked = (
     return result.value._tag === "Suspended"
   })
 
+const recoverCause = <A>(
+  cause: Cause.Cause<unknown>,
+  message: string,
+  fallback: A,
+  annotations: Readonly<Record<string, unknown>>
+): Effect.Effect<A> =>
+  Cause.hasInterruptsOnly(cause)
+    ? Effect.interrupt
+    : Effect.annotateLogs(
+      Effect.logWarning(message).pipe(Effect.as(fallback)),
+      { ...annotations, cause: Cause.pretty(cause) }
+    )
+
 /**
  * Keeps a control cancellation durable even when its engine interrupt fails.
  *
@@ -625,7 +785,10 @@ export const waitForParked = (
  */
 export const preserveDriverInterrupt = <R>(
   interrupt: () => Effect.Effect<void, unknown, R>
-): Effect.Effect<void, never, R> => interrupt().pipe(Effect.catchCause(() => Effect.void))
+): Effect.Effect<void, never, R> =>
+  interrupt().pipe(
+    Effect.catchCause((cause) => recoverCause(cause, "The engine interrupt could not be delivered", undefined, {}))
+  )
 
 /**
  * Translates a failed driver registration into the executor's launch error.
@@ -887,7 +1050,8 @@ export const make = (
       )
 
     /**
-     * Emits one agent-trace event on the journal's lossy channel.
+     * Emits one agent-trace event on the journal's lossy channel, under the
+     * identity {@link traceIdentity} derived for it.
      *
      * The channel matters more than it looks. A trace event is telemetry, not
      * lifecycle state, and the executor emits it from inside the harness
@@ -897,16 +1061,28 @@ export const make = (
      * consumer accepts the event. Runs stalled silently at 0% CPU a few frames
      * in. `emitLossy` queues instead of joining the transaction, which is the
      * documented channel for exactly this.
+     *
+     * The explicit sequence rides the same channel. It used to send the emit
+     * through a preflight SELECT before admission, which reintroduced that
+     * deadlock from the other side, and `emitLossy` now settles an explicit
+     * identity from memory or admits it optimistically, leaving the unique
+     * index to refuse the duplicate at the insert. `dedupe: "identity"` is
+     * this producer saying the sequence is derived from the event: the
+     * observation metadata that differs between a first attempt and a replay
+     * must not be read as two different events.
      */
     const trail = (
       runId: string,
+      sourceSeq: JournalEvent.SourceSeq,
       eventType: string,
       payload: unknown
     ): Effect.Effect<void, unknown> =>
       journal.emitLossy(
         new JournalEvent.Input({
           runId: JournalEvent.RunId.make(runId),
-          sourceId,
+          sourceId: trailSourceId,
+          sourceSeq,
+          dedupe: "identity",
           eventType,
           payload: JSON.parse(JSON.stringify(payload))
         })
@@ -1151,30 +1327,57 @@ export const make = (
         // channel because its queue drains through the same writer. Pushing
         // onto an array cannot block, so the frame always proceeds; the pump
         // below writes whatever has accumulated once the writer is free again.
-        const pending: Array<{ readonly eventType: string; readonly payload: unknown }> = []
+        const pending: Array<
+          { readonly sourceSeq: JournalEvent.SourceSeq; readonly eventType: string; readonly payload: unknown }
+        > = []
         const flush = Effect.suspend(() =>
           Effect.forEach(
             pending.splice(0, pending.length),
-            (entry) => trail(payload.runId, entry.eventType, entry.payload),
+            // Contained per entry rather than per batch: one refused event must
+            // not take the rest of the batch down with it.
+            (entry) => Effect.ignore(trail(payload.runId, entry.sourceSeq, entry.eventType, entry.payload)),
             { discard: true }
           )
-        ).pipe(Effect.ignore)
+        )
         // Journaling is best-effort on purpose: a full or rejecting journal
         // must not fail an agent run that is otherwise making progress.
         // Occurrence time is stamped into the payload because the pump
         // flushes in batches: `emitted_at_ms` is admission time, so every
         // event in one flush shares a millisecond and per-call timing is
         // unrecoverable from the row alone.
+        //
+        // Where the run is, as the stream reports it, which is what
+        // `traceIdentity` derives an event's identity from. A resumed attempt
+        // republishes its whole prefix from frame zero, so counting frames and
+        // the events inside them reproduces the same coordinates for the same
+        // events, and only for them. Non-journaled events (the model deltas)
+        // are not counted: they carry no row, and leaving them out keeps the
+        // ordinal a position in the trail rather than in the stream.
+        let frame = -1
+        let ordinal = 0
+        let cell = ""
         const record = (event: AgentEvent.AgentEvent): Effect.Effect<void> =>
           Effect.flatMap(Clock.currentTimeMillis, (at) =>
             Effect.sync(() => {
               tags.push(event._tag)
+              if (event._tag === "turn-opened") {
+                frame += 1
+                ordinal = 0
+                cell = ""
+              }
+              if (event._tag === "cell-produced") cell = event.cell.digest
               const projected = trace(event)
               if (projected !== undefined) {
-                pending.push({
-                  eventType: projected.eventType,
-                  payload: { ...(projected.payload as Record<string, unknown>), at }
-                })
+                // Normalized once, here, so the identity is derived from the
+                // same bytes the journal stores. A projection carries optional
+                // fields as `undefined`, which JSON drops and canonical JSON
+                // refuses outright, so deriving straight from the projection
+                // threw on the first `cell-call-settled` that answered without
+                // a message.
+                const material = JSON.parse(JSON.stringify(projected.payload)) as Record<string, unknown>
+                const sourceSeq = traceIdentity(frame, ordinal, cell, projected.eventType, material)
+                ordinal += 1
+                pending.push({ sourceSeq, eventType: projected.eventType, payload: { ...material, at } })
               }
             }))
         const pump = yield* Effect.forkChild(
@@ -1213,6 +1416,8 @@ export const make = (
           approvalChannel: options.approvalChannel ?? false
         }).pipe(
           Stream.runForEach(record),
+          Effect.provide(options.budget(card.envelope)),
+          Effect.provide(options.quotaPolicy),
           Effect.provide(QuickJSSandbox.layer),
           Effect.provideService(Steering.Source, steering),
           // The pump is interrupted before the final flush so the two never
@@ -1349,7 +1554,9 @@ export const make = (
      * leaves the run to the host that has some.
      */
     const parkedHere = (runId: string, attempts: number): Effect.Effect<boolean> =>
-      awaitParked(runId, attempts).pipe(Effect.catchCause(() => Effect.succeed(false)))
+      awaitParked(runId, attempts).pipe(
+        Effect.catchCause((cause) => recoverCause(cause, "The engine park state could not be read", false, { runId }))
+      )
 
     const awaitParked = (runId: string, attempts: number): Effect.Effect<boolean, unknown> =>
       waitForParked(
@@ -1458,7 +1665,9 @@ export const make = (
         if (uptake._tag === "claimed") return true
         const parkedBy = yield* runtime.getRun(runId).pipe(
           Effect.map((run) => run.parkedBy),
-          Effect.catchCause(() => Effect.succeed(undefined))
+          Effect.catchCause((cause) =>
+            recoverCause(cause, "The parked run host could not be read", undefined, { runId })
+          )
         )
         if (parkedBy === undefined) return true
         if (parkFences.get(runId) === parkedBy) return true
@@ -1502,7 +1711,9 @@ export const make = (
           // A lost claim is a live peer holding the run, and the delegation
           // stays standing for it. Answering "resuming" here would clear a
           // delegation this executor is not going to honour.
-          Effect.catchCause(() => Effect.succeed(false))
+          Effect.catchCause((cause) =>
+            recoverCause(cause, "The parked run could not be claimed for resume", false, { runId })
+          )
         )
         if (!claimed) return "unknown" as const
         yield* drive(runId)
@@ -1552,7 +1763,9 @@ export const make = (
     const settledAlready = (runId: string): Effect.Effect<boolean> =>
       runtime.getRun(runId).pipe(
         Effect.map((run) => run.status === "completed" || run.status === "failed" || run.status === "cancelled"),
-        Effect.catchCause(() => Effect.succeed(false))
+        Effect.catchCause((cause) =>
+          recoverCause(cause, "The control run settlement could not be read", false, { runId })
+        )
       )
 
     yield* engine.register(agentFlow, (payload) =>
@@ -1590,7 +1803,11 @@ export const make = (
         )
         activeBodies.set(payload.runId, fiber)
         return yield* Fiber.join(fiber).pipe(
-          Effect.ensuring(Effect.sync(() => activeBodies.delete(payload.runId)))
+          Effect.ensuring(Effect.sync(() => activeBodies.delete(payload.runId))),
+          // `settle` above already read the true exit, so the operator's line
+          // and the control plane's recorded cause are unchanged. This is
+          // only the shape the engine has to persist.
+          Effect.mapError(settlementFailure)
         )
       })).pipe(Scope.provide(scope))
 

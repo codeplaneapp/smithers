@@ -1,14 +1,12 @@
 /**
  * Pure graph introspection for flow declarations.
  *
- * Governing contracts:
- * `docs/specs/Concepts/Flow Builder Brief.md`,
- * `docs/specs/Concepts/Step Keys.md`, and
- * `docs/specs/Concepts/Vendored Flow Engine.md`.
+ * Governing contract: `packages/core/docs/api.md`, published as
+ * https://smithers.sh/api/core.
  *
  * @since 0.0.0
  */
-import { Context, Option, Result, Schema } from "effect"
+import { Chunk, Context, Option, Result, Schema } from "effect"
 import * as Annotations from "./Annotations.ts"
 import * as Effects from "./Effects.ts"
 import * as Flow from "./Flow.ts"
@@ -28,7 +26,17 @@ interface FlowDetails extends Flow.Any {
   readonly implementation: Flow.Implementation | undefined
 }
 
-type EdgeReason = "value" | "continuation" | "conflict" | "lane-merge"
+/**
+ * Why one node depends on another.
+ *
+ * `value` is a structural dependency, `continuation` is a statically planned
+ * `andThen` or `catch` arm, `conflict` is an ordering edge the write-conflict
+ * pass added, and `lane-merge` joins two laned writers to their merge node.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type EdgeReason = "value" | "continuation" | "conflict" | "lane-merge"
 
 interface InternalEdge {
   readonly from: string
@@ -192,7 +200,12 @@ export const GraphBuildErrorCode = Schema.Literals([
   "effect_mode_widening",
   "effect_tier_widening",
   "missing_key_material",
-  "write_conflict"
+  "write_conflict",
+  "capability_outside_grant",
+  "duplicate_node_id",
+  "plan_too_deep",
+  "payload_too_deep",
+  "invalid_node"
 ])
 
 /**
@@ -205,8 +218,15 @@ export const GraphBuildErrorCode = Schema.Literals([
 export type GraphBuildErrorCode = typeof GraphBuildErrorCode.Type
 
 /**
- * A graph-build diagnostic. Graph construction records these values instead of
- * throwing, so inspection remains possible for invalid declarations.
+ * A graph-build diagnostic. Declaration diagnostics are recorded so the graph
+ * remains inspectable; malformed nodes and depth-limit failures throw during
+ * construction. Fatal diagnostics block {@link keyMaterial}, while
+ * `capability_outside_grant` is advisory.
+ *
+ * `nodeId` is populated for the three effect-envelope codes,
+ * `missing_key_material`, `duplicate_node_id`, `plan_too_deep`,
+ * `payload_too_deep`, `capability_outside_grant`, and `invalid_node`.
+ * `nodes` is populated for `write_conflict`.
  *
  * @category errors
  * @since 0.0.0
@@ -219,10 +239,55 @@ export class GraphBuildError extends Schema.TaggedError<GraphBuildError>()("flow
   nodes: Schema.optional(Schema.Tuple([Schema.String, Schema.String]))
 }) {}
 
+const fatalGraphBuildErrorCodes: ReadonlySet<GraphBuildErrorCode> = Object.freeze(
+  new Set<GraphBuildErrorCode>([
+    "effect_outside_envelope",
+    "effect_mode_widening",
+    "effect_tier_widening",
+    "write_conflict",
+    "missing_key_material",
+    "duplicate_node_id",
+    "plan_too_deep",
+    "payload_too_deep",
+    "invalid_node"
+  ])
+)
+
 /**
- * @since 0.0.0
- * @private
+ * Reports whether a diagnostic blocks {@link keyMaterial}.
+ *
+ * A fatal diagnostic means the graph describes something the package cannot
+ * turn into a step key. Every other code is advisory: it reports a narrowing a
+ * reader should know about, and the graph still compiles. `invalid_node`,
+ * `plan_too_deep`, and `payload_too_deep` are thrown by {@link build} rather
+ * than recorded, so they never reach this predicate in practice; they are
+ * listed as fatal so a future caller that records one cannot compile it.
+ *
+ * @category predicates
+ * @since 0.1.0
+ * @slop
  */
+export const isFatalDiagnostic = (diagnostic: GraphBuildError): boolean =>
+  fatalGraphBuildErrorCodes.has(diagnostic.code)
+
+/**
+ * Maximum structural nesting accepted by {@link build}.
+ *
+ * @category limits
+ * @since 0.1.0
+ * @slop
+ */
+export const maximumGraphDepth = 512
+
+/**
+ * Maximum nesting accepted while projecting a plan value into identity.
+ *
+ * @category limits
+ * @since 0.1.0
+ * @slop
+ */
+export const maximumPayloadDepth = 128
+
 interface GraphImpl {
   readonly nodes: ReadonlyArray<InternalNode>
   readonly edges: ReadonlyArray<InternalEdge>
@@ -233,6 +298,13 @@ interface GraphImpl {
 /**
  * An immutable, observation-only flow graph.
  *
+ * {@link build} deep-freezes everything it constructs, so the getters below
+ * hand back the graph's own values rather than copies and an observer cannot
+ * edit the plan it is reading. Read a graph through {@link nodes},
+ * {@link edges}, {@link effects}, {@link placements}, {@link conflicts},
+ * {@link diagnostics}, and {@link keyMaterial}; the storage fields behind those
+ * getters are not part of the published shape.
+ *
  * @category models
  * @since 0.0.0
  * @slop
@@ -242,10 +314,27 @@ export type Graph = GraphImpl
 const option = <I, S>(context: Context.Context<never>, key: Context.Key<I, S>): S | undefined =>
   Option.getOrUndefined(Annotations.getOption(context, key))
 
+const snapshotEffects = (declaration: Effects.Declaration | undefined): Effects.Declaration | undefined =>
+  declaration === undefined
+    ? undefined
+    : {
+      reads: [...declaration.reads],
+      writes: [...declaration.writes],
+      mode: declaration.mode,
+      onConflict: declaration.onConflict,
+      ...(declaration.tier === undefined ? {} : { tier: declaration.tier })
+    }
+
+const snapshotPlacement = (placement: Placement.Placement | undefined): Placement.Placement | undefined =>
+  placement === undefined ? undefined : { ...placement }
+
+const snapshotLane = (lane: Annotations.LaneOptions | undefined): Annotations.LaneOptions | undefined =>
+  lane === undefined ? undefined : { ...lane }
+
 const annotationProjection = (context: Context.Context<never>): AnnotationsProjection => ({
-  placement: option(context, Annotations.Placement),
-  effects: option(context, Annotations.Effects),
-  lane: option(context, Annotations.Lane),
+  placement: snapshotPlacement(option(context, Annotations.Placement)),
+  effects: snapshotEffects(option(context, Annotations.Effects)),
+  lane: snapshotLane(option(context, Annotations.Lane)),
   priority: option(context, Annotations.Priority)
 })
 
@@ -254,18 +343,271 @@ const withoutEffects = (context: Context.Context<never>): Context.Context<never>
 
 const tier = (effects: Effects.Declaration | undefined): KeyMaterial.KeyMaterial["kind"] => effects?.tier ?? "sealed"
 
-const schemaIdentity = (schema: Schema.Top): unknown => {
-  try {
-    return {
-      _tag: "Schema",
-      document: Schema.toJsonSchemaDocument(schema)
+const reflectionTags: ReadonlySet<string> = Object.freeze(
+  new Set([
+    "PlannedInput",
+    "Undefined",
+    "Number",
+    "CyclicAnnotations",
+    "BigInt",
+    "Symbol",
+    "Function",
+    "Flow",
+    "CircularFlow",
+    "Circular",
+    "Schema",
+    "Accessor",
+    "Array",
+    "Hole",
+    "Date",
+    "RegExp",
+    "Error",
+    "Map",
+    "Set",
+    "Option",
+    "Result",
+    "Chunk",
+    "URL",
+    "Bytes",
+    "Escaped"
+  ])
+)
+
+const optionNonePrototype = Object.getPrototypeOf(Option.none())
+const optionSomePrototype = Object.getPrototypeOf(Option.some(undefined))
+const resultSuccessPrototype = Object.getPrototypeOf(Result.succeed(undefined))
+const resultFailurePrototype = Object.getPrototypeOf(Result.fail(undefined))
+const chunkPrototype = Object.getPrototypeOf(Chunk.empty())
+
+const symbolIdentities = new WeakMap<object, string>() as unknown as {
+  readonly get: (key: symbol) => string | undefined
+  readonly set: (key: symbol, value: string) => unknown
+}
+let symbolOrdinal = 0
+
+interface SymbolIdentity {
+  readonly scope: "registered" | "well-known" | "process-local"
+  readonly id: string
+}
+
+let wellKnownSymbolNames: ReadonlyMap<symbol, string> | undefined
+
+const wellKnownSymbols = (): ReadonlyMap<symbol, string> => {
+  if (wellKnownSymbolNames === undefined) {
+    const names = new Map<symbol, string>()
+    for (const key of Object.getOwnPropertyNames(Symbol)) {
+      const descriptor = Object.getOwnPropertyDescriptor(Symbol, key)
+      if (descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "symbol") {
+        names.set(descriptor.value, key)
+      }
     }
-  } catch {
-    return {
-      _tag: "Schema",
-      ast: schema.ast._tag
+    wellKnownSymbolNames = names
+  }
+  return wellKnownSymbolNames
+}
+
+/**
+ * Identifies a symbol as precisely as the host allows.
+ *
+ * A registered or well-known symbol has a name every process agrees on. An
+ * unregistered symbol has no cross-process identity at all, so it receives the
+ * same process-local treatment as an unannotated function: a nonce-seeded
+ * ordinal that is stable within one process and deliberately different in the
+ * next, reported through the encoding's `scope` field.
+ */
+const symbolIdentity = (value: symbol): SymbolIdentity => {
+  const key = Symbol.keyFor(value)
+  if (key !== undefined) return { scope: "registered", id: `global:${key}` }
+  const wellKnown = wellKnownSymbols().get(value)
+  if (wellKnown !== undefined) return { scope: "well-known", id: `well-known:${wellKnown}` }
+  let id = symbolIdentities.get(value)
+  if (id === undefined) {
+    id = `${internal.processNonce()}:${symbolOrdinal++}`
+    symbolIdentities.set(value, id)
+  }
+  return { scope: "process-local", id }
+}
+
+const payloadDepthError = (nodeId: string): GraphBuildError =>
+  new GraphBuildError({ code: "payload_too_deep", paths: [], nodeId })
+
+class CyclicAnnotationsSignal extends Error {}
+
+const propertyPath = (path: string, key: string): string => `${path}.${key}`
+
+const compareJsonText = (left: unknown, right: unknown): number => {
+  const leftText = String(JSON.stringify(left))
+  const rightText = String(JSON.stringify(right))
+  return leftText < rightText ? -1 : leftText > rightText ? 1 : 0
+}
+
+/**
+ * Names a value for a refusal message.
+ *
+ * The immediate prototype is not enough: an `Option`, an `Either`, and most
+ * other Effect data types carry no own `constructor`, so reading one level
+ * reports `Unknown` for exactly the values authors are most likely to place in
+ * a plan. The chain is walked first, then the structural labels those values do
+ * carry.
+ */
+const constructorName = (value: object): string => {
+  for (
+    let current = Object.getPrototypeOf(value) as object | null;
+    current !== null && current !== Object.prototype;
+    current = Object.getPrototypeOf(current) as object | null
+  ) {
+    const constructor = Object.getOwnPropertyDescriptor(current, "constructor")
+    if (constructor === undefined || !("value" in constructor) || typeof constructor.value !== "function") continue
+    const name = Object.getOwnPropertyDescriptor(constructor.value, "name")
+    if (name !== undefined && "value" in name && typeof name.value === "string" && name.value.length > 0) {
+      return name.value
     }
   }
+  for (const key of [Symbol.toStringTag, "_tag"]) {
+    const label = dataProperty(value, key)
+    if (typeof label === "string" && label.length > 0) return label
+  }
+  return "Unknown"
+}
+
+const unrepresentableInstance = (value: object, path: string): Node.NodeBuildError =>
+  new Node.NodeBuildError({
+    code: "unrepresentable_value",
+    member: path,
+    message: `Graph.build cannot derive identity for a "${
+      constructorName(value)
+    }" instance at ${path}; plan values must be plain data`
+  })
+
+const nonFiniteNumber = (path: string): Node.NodeBuildError =>
+  new Node.NodeBuildError({
+    code: "unrepresentable_value",
+    member: path,
+    message:
+      `Graph.build cannot derive identity for a number at ${path} because it is not finite; plan values must be plain data`
+  })
+
+const symbolKeyedProperty = (key: symbol, path: string): Node.NodeBuildError =>
+  new Node.NodeBuildError({
+    code: "unrepresentable_value",
+    member: path,
+    message: `Graph.build cannot derive identity for the symbol-keyed property ${
+      String(key)
+    } at ${path}; plan values must use string keys`
+  })
+
+const dataProperty = (value: object, key: PropertyKey): unknown => {
+  let current: object | null = value
+  while (current !== null) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, key)
+    if (descriptor !== undefined) return "value" in descriptor ? descriptor.value : undefined
+    current = Object.getPrototypeOf(current) as object | null
+  }
+  return undefined
+}
+
+const regexpSource = (value: RegExp): string => {
+  const descriptor = Object.getOwnPropertyDescriptor(RegExp.prototype, "source")
+  return descriptor !== undefined && descriptor.get !== undefined
+    ? descriptor.get.call(value) as string
+    : ""
+}
+
+const regexpFlags = (value: RegExp): string => {
+  const flags: ReadonlyArray<readonly [string, string]> = [
+    ["d", "hasIndices"],
+    ["g", "global"],
+    ["i", "ignoreCase"],
+    ["m", "multiline"],
+    ["s", "dotAll"],
+    ["u", "unicode"],
+    ["v", "unicodeSets"],
+    ["y", "sticky"]
+  ]
+  return flags.flatMap(([flag, property]) => {
+    const descriptor = Object.getOwnPropertyDescriptor(RegExp.prototype, property)
+    return descriptor !== undefined && descriptor.get !== undefined && descriptor.get.call(value) ? [flag] : []
+  }).join("")
+}
+
+const opaqueSchema = (path: string): Node.NodeBuildError =>
+  new Node.NodeBuildError({
+    code: "unrepresentable_value",
+    member: path,
+    message: `Graph.build cannot derive identity for the declared schema at ${path} because its guard is opaque; ` +
+      "annotate it, for example with an identifier, so distinct declarations key differently"
+  })
+
+const emptyRecord = (value: unknown): boolean =>
+  typeof value !== "object" || value === null || Reflect.ownKeys(value).length === 0
+
+/**
+ * Projects the type parameters a declared schema was built from, so
+ * `Schema.Option(Schema.String)` and `Schema.Option(Schema.Number)` key
+ * differently even though both render an opaque JSON Schema.
+ */
+const schemaTypeParameters = (
+  ast: Schema.Top["ast"],
+  nodeId: string,
+  depth: number,
+  path: string
+): ReadonlyArray<unknown> => {
+  const parameters = (ast as { readonly typeParameters?: unknown }).typeParameters
+  if (!Array.isArray(parameters)) return []
+  return parameters.map((parameter, index) =>
+    schemaIdentity(
+      Schema.make(parameter as Parameters<typeof Schema.make>[0]),
+      nodeId,
+      depth + 1,
+      `${path}.typeParameters[${index}]`
+    )
+  )
+}
+
+/**
+ * Renders schema document, type-parameter, and structural annotation identity.
+ *
+ * An undecorated `Schema.declare` guard is inherently indistinguishable: the
+ * guard is a closure the host cannot inspect, it takes no type parameters, and
+ * JSON Schema renders it as the empty document, so every such schema would key
+ * identically. That is refused rather than collapsed; annotating the
+ * declaration, for example with an `identifier`, restores identity.
+ */
+function schemaIdentity(schema: Schema.Top, nodeId: string, depth: number, path: string): unknown {
+  if (depth > maximumPayloadDepth) throw payloadDepthError(nodeId)
+  // Read the AST exactly once: a schema is caller-supplied, so every extra read
+  // is another chance for a hostile or lazily failing accessor to observe a
+  // different value halfway through one projection.
+  const source = schema.ast
+  let annotations: unknown = null
+  try {
+    if (source.annotations !== undefined) {
+      annotations = reflection(source.annotations, nodeId, new Set(), depth + 1, `${path}.ast.annotations`, true)
+    }
+  } catch (cause) {
+    if (cause instanceof CyclicAnnotationsSignal) {
+      annotations = { _tag: "CyclicAnnotations" }
+    } else {
+      throw cause
+    }
+  }
+  const typeParameters = schemaTypeParameters(source, nodeId, depth, path)
+  const ast = { tag: source._tag, annotations, typeParameters }
+  let document: { readonly schema: unknown } | undefined
+  try {
+    document = Schema.toJsonSchemaDocument(schema)
+  } catch {
+    document = undefined
+  }
+  if (
+    source._tag === "Declaration" &&
+    typeParameters.length === 0 &&
+    emptyRecord(annotations) &&
+    (document === undefined || emptyRecord(document.schema))
+  ) {
+    throw opaqueSchema(path)
+  }
+  return document === undefined ? { _tag: "Schema", ast } : { _tag: "Schema", document, ast }
 }
 
 const plannedDescriptor = (value: unknown): PlannedValueDescriptor | undefined => {
@@ -274,7 +616,7 @@ const plannedDescriptor = (value: unknown): PlannedValueDescriptor | undefined =
 }
 
 const plannedValue = (from: string, path: ReadonlyArray<string> = []): unknown => {
-  const target = (): undefined => undefined
+  const target = Function.prototype
   return new Proxy(target, {
     get: (_target, key) => {
       if (key === PlannedValueTypeId) return { from, path }
@@ -286,10 +628,15 @@ const plannedValue = (from: string, path: ReadonlyArray<string> = []): unknown =
   })
 }
 
+type PlannedInputRef = Extract<KeyMaterial.InputRef, { readonly _tag: "Ref" }>
+
 const plannedInputRefs = (
   value: unknown,
-  seen: Set<object> = new Set()
-): ReadonlyArray<KeyMaterial.InputRef> => {
+  nodeId: string,
+  seen: Set<object> = new Set(),
+  depth = 0
+): ReadonlyArray<PlannedInputRef> => {
+  if (depth > maximumPayloadDepth) throw payloadDepthError(nodeId)
   const descriptor = plannedDescriptor(value)
   if (descriptor !== undefined) {
     return [{ _tag: "Ref", from: descriptor.from, path: descriptor.path }]
@@ -297,19 +644,72 @@ const plannedInputRefs = (
   if (value === null || (typeof value !== "object" && typeof value !== "function")) return []
   if (seen.has(value)) return []
   seen.add(value)
-  const refs: Array<KeyMaterial.InputRef> = []
+  const refs: Array<PlannedInputRef> = []
   if (Array.isArray(value)) {
-    for (const item of value) refs.push(...plannedInputRefs(item, seen))
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    for (let index = 0; index < value.length; index++) {
+      const member = descriptors[String(index)]
+      if (member !== undefined && member.enumerable && "value" in member) {
+        refs.push(...plannedInputRefs(member.value, nodeId, seen, depth + 1))
+      }
+    }
   } else {
-    for (const key of Object.keys(value).sort()) {
-      refs.push(...plannedInputRefs(value[key as keyof typeof value], seen))
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    for (const key of Reflect.ownKeys(descriptors).filter((key): key is string => typeof key === "string").sort()) {
+      const member = descriptors[key]!
+      if (member.enumerable && "value" in member) {
+        refs.push(...plannedInputRefs(member.value, nodeId, seen, depth + 1))
+      }
     }
   }
   seen.delete(value)
   return refs
 }
 
-const reflection = (value: unknown, seen: Set<object> = new Set()): unknown => {
+const define = (target: object, key: string, value: unknown): void => {
+  Object.defineProperty(target, key, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true
+  })
+}
+
+const isArrayIndex = (key: string, length: number): boolean => /^(?:0|[1-9]\d*)$/.test(key) && Number(key) < length
+
+/**
+ * Projects one own property, describing an accessor instead of invoking it.
+ */
+const reflectedMember = (
+  member: PropertyDescriptor,
+  nodeId: string,
+  seen: Set<object>,
+  depth: number,
+  path: string,
+  rejectCycles: boolean
+): unknown =>
+  "value" in member
+    ? reflection(member.value, nodeId, seen, depth + 1, path, rejectCycles)
+    : {
+      _tag: "Accessor",
+      get: member.get === undefined ? null : internal.functionIdentity(member.get),
+      set: member.set === undefined ? null : internal.functionIdentity(member.set)
+    }
+
+/**
+ * Projects plan values into canonical-JSON-compatible identity. Own
+ * properties are read through descriptors; symbol-keyed properties are
+ * refused because canonical JSON cannot represent their keys.
+ */
+function reflection(
+  value: unknown,
+  nodeId: string,
+  seen: Set<object> = new Set(),
+  depth = 0,
+  path = "$",
+  rejectCycles = false
+): unknown {
+  if (depth > maximumPayloadDepth) throw payloadDepthError(nodeId)
   const descriptor = plannedDescriptor(value)
   if (descriptor !== undefined) {
     return {
@@ -317,77 +717,253 @@ const reflection = (value: unknown, seen: Set<object> = new Set()): unknown => {
       path: descriptor.path
     }
   }
+  if (value === undefined) return depth > 0 ? { _tag: "Undefined" } : value
   if (
-    value === undefined ||
     value === null ||
     typeof value === "boolean" ||
-    typeof value === "number" ||
     typeof value === "string"
   ) {
     return value
   }
+  if (typeof value === "number") {
+    if (Object.is(value, -0)) return { _tag: "Number", value: "-0" }
+    if (!Number.isFinite(value)) throw nonFiniteNumber(path)
+    return value
+  }
   if (typeof value === "bigint") return { _tag: "BigInt", value: String(value) }
-  if (typeof value === "symbol") return { _tag: "Symbol", value: value.description }
+  if (typeof value === "symbol") {
+    const identity = symbolIdentity(value)
+    return {
+      _tag: "Symbol",
+      key: Symbol.keyFor(value) ?? null,
+      description: value.description ?? null,
+      scope: identity.scope,
+      id: identity.id
+    }
+  }
   if (Flow.isFlow(value)) {
-    if (seen.has(value)) return { _tag: "CircularFlow" }
+    if (seen.has(value)) {
+      if (rejectCycles) throw new CyclicAnnotationsSignal()
+      return { _tag: "CircularFlow" }
+    }
     seen.add(value)
     const flow = value as FlowDetails
     const result = {
       _tag: "Flow",
-      input: schemaIdentity(flow.input),
-      output: schemaIdentity(flow.output),
+      input: schemaIdentity(flow.input, nodeId, depth + 1, `${path}.input`),
+      output: schemaIdentity(flow.output, nodeId, depth + 1, `${path}.output`),
       capabilities: [...new Set(flow.capabilities)].sort(),
-      effects: flow.effects,
-      implementation: reflection(flow.implementation, seen)
+      effects: snapshotEffects(flow.effects),
+      implementation: reflection(flow.implementation, nodeId, seen, depth + 1, `${path}.implementation`, rejectCycles)
     }
     seen.delete(value)
     return result
   }
-  if (Schema.isSchema(value)) return schemaIdentity(value)
-  if (typeof value === "function") return { _tag: "Function" }
-  if (seen.has(value)) return { _tag: "Circular" }
+  if (Schema.isSchema(value)) return schemaIdentity(value, nodeId, depth, path)
+  if (typeof value === "function") return { _tag: "Function", identity: internal.functionIdentity(value) }
+  if (seen.has(value)) {
+    if (rejectCycles) throw new CyclicAnnotationsSignal()
+    return { _tag: "Circular" }
+  }
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype === optionNonePrototype || prototype === optionSomePrototype) {
+    seen.add(value)
+    try {
+      if (prototype === optionNonePrototype) return { _tag: "Option", value: { _tag: "None" } }
+      const member = Object.getOwnPropertyDescriptor(value, "value")
+      if (member === undefined || !("value" in member)) throw unrepresentableInstance(value, path)
+      return {
+        _tag: "Option",
+        value: {
+          _tag: "Some",
+          value: reflection(member.value, nodeId, seen, depth + 1, `${path}.value`, rejectCycles)
+        }
+      }
+    } finally {
+      seen.delete(value)
+    }
+  }
+  if (prototype === resultSuccessPrototype || prototype === resultFailurePrototype) {
+    seen.add(value)
+    try {
+      const key = prototype === resultSuccessPrototype ? "success" : "failure"
+      const member = Object.getOwnPropertyDescriptor(value, key)
+      if (member === undefined || !("value" in member)) throw unrepresentableInstance(value, path)
+      return {
+        _tag: "Result",
+        value: prototype === resultSuccessPrototype
+          ? {
+            _tag: "Success",
+            value: reflection(member.value, nodeId, seen, depth + 1, `${path}.success`, rejectCycles)
+          }
+          : {
+            _tag: "Failure",
+            error: reflection(member.value, nodeId, seen, depth + 1, `${path}.failure`, rejectCycles)
+          }
+      }
+    } finally {
+      seen.delete(value)
+    }
+  }
+  if (prototype === chunkPrototype) {
+    seen.add(value)
+    try {
+      return {
+        _tag: "Chunk",
+        values: Chunk.toReadonlyArray(value as Chunk.Chunk<unknown>).map((member, index) =>
+          reflection(member, nodeId, seen, depth + 1, `${path}.values[${index}]`, rejectCycles)
+        )
+      }
+    } finally {
+      seen.delete(value)
+    }
+  }
+  if (prototype === URL.prototype) {
+    return { _tag: "URL", href: URL.prototype.toString.call(value) }
+  }
+  if (value instanceof Date) {
+    const epochMilliseconds = Date.prototype.getTime.call(value)
+    return { _tag: "Date", epochMilliseconds: Number.isNaN(epochMilliseconds) ? null : epochMilliseconds }
+  }
+  if (value instanceof RegExp) {
+    return { _tag: "RegExp", source: regexpSource(value), flags: regexpFlags(value) }
+  }
+  if (value instanceof Error) {
+    const name = dataProperty(value, "name")
+    const message = dataProperty(value, "message")
+    return {
+      _tag: "Error",
+      name: typeof name === "string" ? name : "Error",
+      message: typeof message === "string" ? message : ""
+    }
+  }
+  const sharedArrayBuffer = typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer
+  if (value instanceof ArrayBuffer || sharedArrayBuffer) {
+    return {
+      _tag: "Bytes",
+      kind: constructorName(value),
+      bytes: [...new Uint8Array(value)]
+    }
+  }
+  if (ArrayBuffer.isView(value)) {
+    return {
+      _tag: "Bytes",
+      kind: constructorName(value),
+      bytes: [...new Uint8Array(value.buffer, value.byteOffset, value.byteLength)]
+    }
+  }
   seen.add(value)
+  if (value instanceof Map) {
+    try {
+      const entries = [...Map.prototype.entries.call(value)].map(([key, member], index) => [
+        reflection(key, nodeId, seen, depth + 1, `${path}.entries[${index}][0]`, rejectCycles),
+        reflection(member, nodeId, seen, depth + 1, `${path}.entries[${index}][1]`, rejectCycles)
+      ])
+      entries.sort(compareJsonText)
+      return { _tag: "Map", entries }
+    } finally {
+      seen.delete(value)
+    }
+  }
+  if (value instanceof Set) {
+    try {
+      const values = [...Set.prototype.values.call(value)].map((member, index) =>
+        reflection(member, nodeId, seen, depth + 1, `${path}.values[${index}]`, rejectCycles)
+      )
+      values.sort(compareJsonText)
+      return { _tag: "Set", values }
+    } finally {
+      seen.delete(value)
+    }
+  }
   if (Array.isArray(value)) {
-    const result = value.map((item) => reflection(item, seen))
+    try {
+      const descriptors = Object.getOwnPropertyDescriptors(value)
+      const symbol = Reflect.ownKeys(descriptors).find((key): key is symbol => typeof key === "symbol")
+      if (symbol !== undefined) throw symbolKeyedProperty(symbol, path)
+      const items = new Array<unknown>(value.length)
+      for (let index = 0; index < value.length; index++) {
+        const member = descriptors[String(index)]
+        define(
+          items,
+          String(index),
+          member === undefined
+            ? { _tag: "Hole" }
+            : reflectedMember(member, nodeId, seen, depth, `${path}[${index}]`, rejectCycles)
+        )
+      }
+      const extraKeys = Reflect.ownKeys(descriptors)
+        .filter((key): key is string => typeof key === "string" && key !== "length" && !isArrayIndex(key, value.length))
+        .sort()
+      if (extraKeys.length === 0) return items
+      const extra = Object.create(null) as Record<string, unknown>
+      for (const key of extraKeys) {
+        define(
+          extra,
+          key,
+          reflectedMember(descriptors[key]!, nodeId, seen, depth, propertyPath(path, key), rejectCycles)
+        )
+      }
+      return { _tag: "Array", items, extra }
+    } finally {
+      seen.delete(value)
+    }
+  }
+  if (prototype !== Object.prototype && prototype !== null) {
     seen.delete(value)
-    return result
+    throw unrepresentableInstance(value, path)
   }
-  const result: Record<string, unknown> = {}
-  for (const key of Object.keys(value).sort()) {
-    result[key] = reflection(value[key as keyof typeof value], seen)
+  try {
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    const symbol = Reflect.ownKeys(descriptors).find((key): key is symbol => typeof key === "symbol")
+    if (symbol !== undefined) throw symbolKeyedProperty(symbol, path)
+    const keys = Reflect.ownKeys(descriptors).filter((key): key is string => typeof key === "string").sort()
+    const result = Object.create(null) as Record<string, unknown>
+    for (const key of keys) {
+      define(
+        result,
+        key,
+        reflectedMember(descriptors[key]!, nodeId, seen, depth, propertyPath(path, key), rejectCycles)
+      )
+    }
+    const tag = descriptors._tag
+    return tag !== undefined && "value" in tag && typeof tag.value === "string" && reflectionTags.has(tag.value)
+      ? { _tag: "Escaped", value: result }
+      : result
+  } finally {
+    seen.delete(value)
   }
-  seen.delete(value)
-  return result
 }
 
 const declarationBody = (
   ast: NodeAst,
-  flow: FlowDetails | undefined
+  flow: FlowDetails | undefined,
+  nodeId: string
 ): unknown => {
   switch (ast._tag) {
     case "Succeed":
-      return { _tag: ast._tag, value: reflection(ast.value) }
+      return { _tag: ast._tag, value: reflection(ast.value, nodeId) }
     case "Fail":
-      return { _tag: ast._tag, error: reflection(ast.error) }
+      return { _tag: ast._tag, error: reflection(ast.error, nodeId) }
     case "All":
-      return { _tag: ast._tag, keys: Object.keys(ast.nodes) }
+      return { _tag: ast._tag, keys: Object.keys(ast.nodes).sort() }
     case "Dynamic":
       return {
         _tag: ast._tag,
         model: ast.model,
-        flows: reflection(ast.flows),
-        output: reflection(ast.output),
+        flows: reflection(ast.flows, nodeId, new Set(), 0, "$.flows"),
+        output: reflection(ast.output, nodeId, new Set(), 0, "$.output"),
         prompt: ast.prompt,
-        effects: ast.effects
+        effects: snapshotEffects(ast.effects)
       }
     case "FlowCall":
       return {
         _tag: ast._tag,
-        input: flow === undefined ? undefined : schemaIdentity(flow.input),
-        output: flow === undefined ? undefined : schemaIdentity(flow.output),
+        input: flow === undefined ? undefined : schemaIdentity(flow.input, nodeId, 0, "$.input"),
+        output: flow === undefined ? undefined : schemaIdentity(flow.output, nodeId, 0, "$.output"),
         capabilities: flow?.capabilities === undefined ? undefined : [...new Set(flow.capabilities)].sort(),
-        effects: flow?.effects,
-        implementation: reflection(flow?.implementation)
+        effects: snapshotEffects(flow?.effects),
+        implementation: reflection(flow?.implementation, nodeId, new Set(), 0, "$.implementation")
       }
     case "Map":
       return { _tag: ast._tag, mapper: ast.mapper }
@@ -397,7 +973,7 @@ const declarationBody = (
       return {
         _tag: ast._tag,
         handler: ast.handler,
-        error: ast.error === undefined ? undefined : schemaIdentity(ast.error as Schema.Top)
+        error: ast.error === undefined ? undefined : schemaIdentity(ast.error as Schema.Top, nodeId, 0, "$.error")
       }
   }
 }
@@ -408,11 +984,171 @@ const strategy = (left: Effects.Declaration, right: Effects.Declaration): Confli
   return "serialize"
 }
 
+const supportedNodeTags: ReadonlySet<NodeAst["_tag"]> = Object.freeze(
+  new Set<NodeAst["_tag"]>([
+    "Succeed",
+    "Fail",
+    "All",
+    "Dynamic",
+    "AndThen",
+    "Map",
+    "FlowCall",
+    "Catch"
+  ])
+)
+
+const invalidNode = (nodeId: string, cause?: unknown): GraphBuildError => {
+  const error = new GraphBuildError({ code: "invalid_node", paths: [], nodeId })
+  Object.defineProperty(error, "message", {
+    configurable: true,
+    enumerable: false,
+    value: `Graph.build expected a supported Node AST at "${nodeId}"`,
+    writable: true
+  })
+  if (cause !== undefined) {
+    Object.defineProperty(error, "cause", {
+      configurable: true,
+      enumerable: false,
+      value: cause,
+      writable: false
+    })
+  }
+  return error
+}
+
+const validateNodeAst = (value: unknown, nodeId: string): NodeAst => {
+  try {
+    if (typeof value !== "object" || value === null) throw invalidNode(nodeId)
+    const descriptors = Object.getOwnPropertyDescriptors(value)
+    const tag = descriptors._tag
+    const annotations = descriptors.annotations
+    if (
+      tag === undefined ||
+      !("value" in tag) ||
+      !supportedNodeTags.has(tag.value as NodeAst["_tag"]) ||
+      annotations === undefined ||
+      !("value" in annotations) ||
+      !Context.isContext(annotations.value)
+    ) {
+      throw invalidNode(nodeId)
+    }
+    const field = (key: string): unknown => {
+      const descriptor = descriptors[key]
+      if (descriptor === undefined || !("value" in descriptor)) throw invalidNode(nodeId)
+      return descriptor.value
+    }
+    switch (tag.value as NodeAst["_tag"]) {
+      case "Succeed":
+        field("value")
+        break
+      case "Fail":
+        field("error")
+        break
+      case "All": {
+        const nodes = field("nodes")
+        if (nodes === null || typeof nodes !== "object") throw invalidNode(nodeId)
+        break
+      }
+      case "Dynamic":
+        if (!Array.isArray(field("flows"))) throw invalidNode(nodeId)
+        break
+      case "AndThen":
+      case "Map":
+      case "Catch": {
+        const first = field("first")
+        if (first === null || typeof first !== "object") throw invalidNode(nodeId)
+        if (tag.value === "Catch") {
+          const error = field("error")
+          if (error !== undefined && !Schema.isSchema(error)) throw invalidNode(nodeId)
+        }
+        break
+      }
+      case "FlowCall":
+        field("input")
+        break
+    }
+    return value as NodeAst
+  } catch (cause) {
+    if (cause instanceof GraphBuildError) throw cause
+    throw invalidNode(nodeId, cause)
+  }
+}
+
+const nodeAst = (value: unknown, nodeId: string): NodeAst => {
+  try {
+    return validateNodeAst((value as { readonly ast?: unknown } | null)?.ast, nodeId)
+  } catch (cause) {
+    if (cause instanceof GraphBuildError) throw cause
+    throw invalidNode(nodeId, cause)
+  }
+}
+
+const freezeDeep = (value: unknown, seen: WeakSet<object> = new WeakSet()): void => {
+  if (typeof value !== "object" || value === null || seen.has(value)) return
+  seen.add(value)
+  for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
+    if ("value" in descriptor) freezeDeep(descriptor.value, seen)
+  }
+  Object.freeze(value)
+}
+
+const freezeKeyMaterial = (material: KeyMaterial.KeyMaterial): void => {
+  freezeDeep(material.body)
+  for (const input of material.inputs) {
+    if (input._tag === "Ref") freezeDeep(input.path)
+    // A Literal payload is this module's own projection of the plan value, not
+    // the caller's object, so freezing it closes the last writable path into
+    // recorded key material.
+    if (input._tag === "Literal") freezeDeep(input.value)
+    Object.freeze(input)
+  }
+  freezeDeep(material.inputs)
+  freezeDeep(material.layers)
+  freezeDeep(material.capabilities)
+  freezeDeep(material.effects)
+  freezeDeep(material.placement)
+  Object.freeze(material)
+}
+
+const freezeGraph = (
+  graph: {
+    readonly nodes: Array<InternalNode>
+    readonly edges: Array<InternalEdge>
+    readonly diagnostics: Array<GraphBuildError>
+    readonly conflicts: Array<Conflict>
+  }
+): Graph => {
+  for (const node of graph.nodes) {
+    freezeDeep(node.dependencies)
+    freezeDeep(node.declaredEffects)
+    freezeDeep(node.effectiveEffects)
+    freezeDeep(node.placement)
+    freezeDeep(node.lane)
+    freezeDeep(node.capabilities)
+    freezeDeep(node.annotations)
+    /* v8 ignore else -- `build` gives every node key material before freezing; the guard keeps the field optional for readers that construct a graph by hand */
+    if (node.keyMaterial !== undefined) freezeKeyMaterial(node.keyMaterial)
+    Object.freeze(node)
+  }
+  for (const edge of graph.edges) freezeDeep(edge)
+  for (const conflict of graph.conflicts) freezeDeep(conflict)
+  for (const diagnostic of graph.diagnostics) freezeDeep(diagnostic)
+  freezeDeep(graph.nodes)
+  freezeDeep(graph.edges)
+  freezeDeep(graph.conflicts)
+  freezeDeep(graph.diagnostics)
+  return Object.freeze(graph)
+}
+
 /**
  * Builds a graph by evaluating declared flow bodies and pure `Node.andThen`
  * builders exactly once against symbolic predecessor values. This reveals the
  * complete static topology without running a node, an Effect, a `Node.map`
  * value transformation, or a dynamic elaboration.
+ *
+ * Values supplied to `Node.succeed`, `Node.fail`, and flow calls are retained
+ * by reference and read here. Mutating one before this function runs changes
+ * its recorded identity.
  *
  * @category constructors
  * @since 0.0.0
@@ -435,25 +1171,33 @@ export const build = (
     ast: NodeAst,
     id: string,
     parentAnnotations: Context.Context<never>,
-    capabilities: ReadonlyArray<string>,
+    capabilities: ReadonlyArray<string> | undefined,
     envelope: Effects.Declaration | undefined,
+    depth = 0,
     callInput: unknown | typeof noInput = noInput,
     prerequisites: ReadonlyArray<{ readonly from: string; readonly reason: EdgeReason }> = []
   ): VisitResult => {
+    if (depth > maximumGraphDepth) {
+      throw new GraphBuildError({ code: "plan_too_deep", paths: [], nodeId: id })
+    }
+    ast = validateNodeAst(ast, id)
     const annotations = Annotations.merge(parentAnnotations, ast.annotations)
     const projection = annotationProjection(annotations)
     const targetFlow = ast._tag === "FlowCall" ? internal.flow(ast) : undefined
     const flow = Flow.isFlow(targetFlow)
       ? targetFlow as FlowDetails
       : undefined
-    const declaredEffects = projection.effects ?? (ast._tag === "Dynamic" ? ast.effects : undefined) ??
-      (ast._tag === "FlowCall" ? flow?.effects : undefined)
+    const declaredEffects = projection.effects ??
+      (ast._tag === "Dynamic" ? snapshotEffects(ast.effects) : undefined) ??
+      (ast._tag === "FlowCall" ? snapshotEffects(flow?.effects) : undefined)
     const work = ast._tag === "Dynamic"
-    const effectiveEffects = work ? declaredEffects ?? envelope : undefined
+    const effectiveEffects = work ? declaredEffects ?? snapshotEffects(envelope) : undefined
+    const identityEffects = work ? effectiveEffects : projection.effects
     const dependencies: Array<string> = []
     const continuationDependencies = new Set<string>()
     const effectiveCallInput = ast._tag === "FlowCall" ? ast.input : callInput
-    const normalizedCapabilities = [...new Set(capabilities)].sort()
+    const normalizedGrant = capabilities === undefined ? undefined : [...new Set(capabilities)].sort()
+    const recordedCapabilities = normalizedGrant ?? []
     const current: InternalNode = {
       id,
       kind: ast._tag,
@@ -463,7 +1207,7 @@ export const build = (
       placement: projection.placement,
       lane: projection.lane,
       priority: projection.priority,
-      capabilities: normalizedCapabilities,
+      capabilities: recordedCapabilities,
       annotations: projection,
       keyMaterial: undefined
     }
@@ -486,13 +1230,14 @@ export const build = (
       case "Fail":
         break
       case "All": {
-        for (const key of Object.keys(ast.nodes)) {
+        for (const key of Object.keys(ast.nodes).sort()) {
           const child = visit(
             ast.nodes[key]!,
             `${id}.all.${key}`,
             childAnnotations,
-            normalizedCapabilities,
-            narrowedEnvelope
+            normalizedGrant,
+            narrowedEnvelope,
+            depth + 1
           )
           depend(child.id, "value")
         }
@@ -503,8 +1248,9 @@ export const build = (
           ast.first,
           `${id}.map`,
           childAnnotations,
-          normalizedCapabilities,
-          narrowedEnvelope
+          normalizedGrant,
+          narrowedEnvelope,
+          depth + 1
         )
         depend(first.id, "value")
         break
@@ -514,8 +1260,9 @@ export const build = (
           ast.first,
           `${id}.andThen`,
           childAnnotations,
-          normalizedCapabilities,
-          narrowedEnvelope
+          normalizedGrant,
+          narrowedEnvelope,
+          depth + 1
         )
         const next = ast.next ?? (() => {
           const continuation = internal.operation(ast)
@@ -534,15 +1281,16 @@ export const build = (
               message: `Node.andThen at "${id}" must return a Node`
             })
           }
-          return result.ast
+          return nodeAst(result, `${id}.then`)
         })()
         {
           const continuation = visit(
             next,
             `${id}.then`,
             childAnnotations,
-            normalizedCapabilities,
+            normalizedGrant,
             narrowedEnvelope,
+            depth + 1,
             noInput,
             [{ from: first.id, reason: "continuation" }]
           )
@@ -555,8 +1303,9 @@ export const build = (
           ast.first,
           `${id}.catch`,
           childAnnotations,
-          normalizedCapabilities,
-          narrowedEnvelope
+          normalizedGrant,
+          narrowedEnvelope,
+          depth + 1
         )
         depend(first.id, "value")
         const handler = internal.operation(ast)
@@ -576,11 +1325,12 @@ export const build = (
           })
         }
         const recovery = visit(
-          arm.ast,
+          nodeAst(arm, `${id}.recover`),
           `${id}.recover`,
           childAnnotations,
-          normalizedCapabilities,
+          normalizedGrant,
           narrowedEnvelope,
+          depth + 1,
           noInput,
           [{ from: first.id, reason: "continuation" }]
         )
@@ -588,15 +1338,31 @@ export const build = (
         break
       }
       case "FlowCall": {
+        const flowCapabilities = flow === undefined ? [] : [...new Set(flow.capabilities)].sort()
+        const dropped = normalizedGrant === undefined
+          ? []
+          : flowCapabilities.filter((capability) => !normalizedGrant.includes(capability))
+        if (dropped.length > 0) {
+          observedDiagnostics.push(
+            new GraphBuildError({
+              code: "capability_outside_grant",
+              paths: dropped,
+              nodeId: id
+            })
+          )
+        }
         if (flow?.body !== undefined) {
           const body = flow.body(ast.input)
           const flowAnnotations = withoutEffects(Annotations.merge(childAnnotations, flow.annotations))
           const child = visit(
-            body.ast,
+            nodeAst(body, `${id}.flow`),
             `${id}.flow`,
             flowAnnotations,
-            normalizedCapabilities.filter((capability) => flow.capabilities.includes(capability)),
-            flow.effects ?? narrowedEnvelope,
+            normalizedGrant === undefined
+              ? flowCapabilities
+              : normalizedGrant.filter((capability) => flowCapabilities.includes(capability)),
+            snapshotEffects(flow.effects) ?? narrowedEnvelope,
+            depth + 1,
             ast.input
           )
           depend(child.id, "value")
@@ -608,16 +1374,15 @@ export const build = (
     if (envelope !== undefined && declaredEffects !== undefined) {
       const narrowed = Effects.narrow(envelope, declaredEffects)
       if (!narrowed.ok) {
-        observedDiagnostics.push(new GraphBuildError({ code: narrowed.code, paths: [...narrowed.paths] }))
+        observedDiagnostics.push(new GraphBuildError({ code: narrowed.code, paths: [...narrowed.paths], nodeId: id }))
       }
     }
 
     const inputs: Array<KeyMaterial.InputRef> = []
     if (effectiveCallInput !== noInput) {
-      inputs.push({ _tag: "Literal", value: reflection(effectiveCallInput) })
+      inputs.push({ _tag: "Literal", value: reflection(effectiveCallInput, id) })
       const seenRefs = new Set<string>()
-      for (const ref of plannedInputRefs(effectiveCallInput)) {
-        if (ref._tag !== "Ref") continue
+      for (const ref of plannedInputRefs(effectiveCallInput, id)) {
         const identity = `${ref.from}\u0000${ref.path.join("\u0000")}`
         if (seenRefs.has(identity)) continue
         seenRefs.add(identity)
@@ -632,20 +1397,20 @@ export const build = (
       )
     }
     current.keyMaterial = {
-      version: "flows/key-material/v1",
-      kind: tier(effectiveEffects),
-      body: declarationBody(ast, flow),
+      version: "flows/key-material/v2",
+      kind: tier(identityEffects),
+      body: declarationBody(ast, flow, id),
       inputs,
       layers: resolveLayers({
         nodeId: id,
         kind: ast._tag,
         model: ast._tag === "Dynamic" ? ast.model : undefined,
-        capabilities: normalizedCapabilities,
-        effects: effectiveEffects,
+        capabilities: recordedCapabilities,
+        effects: identityEffects,
         placement: projection.placement
       }),
-      capabilities: normalizedCapabilities,
-      effects: effectiveEffects,
+      capabilities: recordedCapabilities,
+      effects: identityEffects,
       placement: projection.placement
     }
     return { id }
@@ -661,16 +1426,36 @@ export const build = (
           : `Cannot build flow "${flow.name}" without a body`
       })
     }
-    visit(flow.body(input).ast, "root", flow.annotations, flow.capabilities, flow.effects, input)
+    visit(
+      nodeAst(flow.body(input), "root"),
+      "root",
+      flow.annotations,
+      flow.capabilities,
+      snapshotEffects(flow.effects),
+      0,
+      input
+    )
   } else {
-    visit(flowOrNode.ast, "root", Annotations.empty, [], undefined)
+    visit(nodeAst(flowOrNode, "root"), "root", Annotations.empty, undefined, undefined)
+  }
+
+  const visitedNodeIds = new Set<string>()
+  const duplicateNodeIds = new Set<string>()
+  for (const node of observed) {
+    if (visitedNodeIds.has(node.id) && !duplicateNodeIds.has(node.id)) {
+      duplicateNodeIds.add(node.id)
+      observedDiagnostics.push(new GraphBuildError({ code: "duplicate_node_id", paths: [], nodeId: node.id }))
+    }
+    visitedNodeIds.add(node.id)
   }
 
   const nodeById = new Map(observed.map((node) => [node.id, node]))
   const addDependency = (to: InternalNode, from: string, reason: EdgeReason): void => {
+    /* v8 ignore next -- the conflict pass skips a pair once an edge makes one reachable from the other, so a repeat arrives only from a caller added later */
     if (to.dependencies.includes(from)) return
     to.dependencies.push(from)
     observedEdges.push({ from, to: to.id, reason })
+    /* v8 ignore next 6 -- every visited node and every lane merge is given key material before this pass runs; the guard records the invariant instead of silently dropping the edge from identity if that ever changes */
     if (to.keyMaterial === undefined) {
       observedDiagnostics.push(
         new GraphBuildError({ code: "missing_key_material", paths: [], nodeId: to.id })
@@ -681,9 +1466,7 @@ export const build = (
       ...to.keyMaterial,
       inputs: [
         ...to.keyMaterial.inputs,
-        reason === "continuation"
-          ? { _tag: "Pending", from }
-          : { _tag: "Ref", from, path: [] }
+        { _tag: "Ref", from, path: [] }
       ]
     }
   }
@@ -709,14 +1492,16 @@ export const build = (
     readonly right: InternalNode
     readonly paths: ReadonlyArray<string>
   }> = []
-  const work = observed.filter((node) => workNodes.has(node) && node.effectiveEffects !== undefined)
+  const work = observed.filter(
+    (node): node is InternalNode & { effectiveEffects: Effects.Declaration } =>
+      workNodes.has(node) && node.effectiveEffects !== undefined
+  )
   for (let left = 0; left < work.length; left++) {
     const a = work[left]!
     for (let right = left + 1; right < work.length; right++) {
       const b = work[right]!
       const aEffects = a.effectiveEffects
       const bEffects = b.effectiveEffects
-      if (aEffects === undefined || bEffects === undefined) continue
       if (reachable(a.id, b.id) || reachable(b.id, a.id)) continue
       const paths = Effects.overlaps(aEffects, bEffects)
       if (paths.length === 0) continue
@@ -768,8 +1553,8 @@ export const build = (
       onConflict: "serialize",
       tier: "compensable"
     })
-    const leftPlacement = reflection(laneConflict.left.placement)
-    const rightPlacement = reflection(laneConflict.right.placement)
+    const leftPlacement = reflection(laneConflict.left.placement, mergeId)
+    const rightPlacement = reflection(laneConflict.right.placement, mergeId)
     const placement = JSON.stringify(leftPlacement) === JSON.stringify(rightPlacement)
       ? laneConflict.left.placement
       : undefined
@@ -790,7 +1575,7 @@ export const build = (
         priority: undefined
       },
       keyMaterial: {
-        version: "flows/key-material/v1",
+        version: "flows/key-material/v2",
         kind: "compensable",
         body: { _tag: "LaneMerge", paths: laneConflict.paths },
         inputs: [
@@ -818,6 +1603,7 @@ export const build = (
     )
     for (const consumerId of consumers) {
       const consumer = nodeById.get(consumerId)
+      /* v8 ignore else -- every edge target is a node this build recorded, so the lookup only misses if a later pass invents an edge */
       if (consumer !== undefined) addDependency(consumer, mergeId, "lane-merge")
     }
     conflicts[laneConflict.conflictIndex] = {
@@ -826,7 +1612,7 @@ export const build = (
     }
   }
 
-  return { nodes: observed, edges: observedEdges, diagnostics: observedDiagnostics, conflicts }
+  return freezeGraph({ nodes: observed, edges: observedEdges, diagnostics: observedDiagnostics, conflicts })
 }
 
 /**
@@ -903,6 +1689,9 @@ export const diagnostics = (graph: Graph): ReadonlyArray<GraphBuildError> => gra
 export const keyMaterial = (
   graph: Graph
 ): Result.Result<ReadonlyArray<KeyMaterial.Entry>, GraphBuildError> => {
+  for (const diagnostic of graph.diagnostics) {
+    if (isFatalDiagnostic(diagnostic)) return Result.fail(diagnostic)
+  }
   const ordered: Array<KeyMaterial.Entry> = []
   const visited = new Set<string>()
   const byId = new Map(graph.nodes.map((node) => [node.id, node]))

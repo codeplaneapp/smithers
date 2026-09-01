@@ -88,16 +88,93 @@ describe("DurableDeferred", () => {
       expect(DurableDeferred.TokenParsed.encode(parsed)).toBe(token)
     }))
 
-  effect("malformed completion tokens fail on the typed channel", () =>
+  effect("the public parser returns a typed failure for untrusted strings", () =>
     Effect.gen(function*() {
-      const failure = yield* DurableDeferred.succeed(Gate, {
-        token: "not-a-token" as DurableDeferred.Token,
-        value: "ignored"
+      const token = new DurableDeferred.TokenParsed({
+        flowName: "Some/Flow",
+        executionId: "exec-1",
+        deferredName: "Gate"
+      }).asToken
+      expect(yield* DurableDeferred.TokenParsed.parse(token)).toMatchObject({
+        flowName: "Some/Flow",
+        executionId: "exec-1",
+        deferredName: "Gate"
+      })
+      const failure = yield* DurableDeferred.TokenParsed.parse("not-a-token").pipe(Effect.flip)
+      expect(failure).toBeInstanceOf(DurableDeferred.TokenInvalid)
+    }))
+
+  effect("freezes the token wire format as base64url of a three-string tuple", () =>
+    Effect.sync(() => {
+      // External approvers, persisted waiting rows, and `HumanTask.answer` all
+      // hold this string across versions, so the encoding and the tuple order
+      // are pinned by literal rather than by round-trip. A change to either is
+      // a red test instead of a silent wire break.
+      const golden = "WyJTb21lL0Zsb3ciLCJleGVjLTEiLCJHYXRlIl0"
+      expect(
+        new DurableDeferred.TokenParsed({
+          flowName: "Some/Flow",
+          executionId: "exec-1",
+          deferredName: "Gate"
+        }).asToken
+      ).toBe(golden)
+
+      const parsed = DurableDeferred.TokenParsed.fromString(golden as DurableDeferred.Token)
+      expect([parsed.flowName, parsed.executionId, parsed.deferredName]).toEqual([
+        "Some/Flow",
+        "exec-1",
+        "Gate"
+      ])
+    }))
+
+  effect("malformed completion tokens preserve the parse issue and a bounded excerpt", () =>
+    Effect.gen(function*() {
+      const malformed = "*".repeat(100) as DurableDeferred.Token
+      const failure = yield* DurableDeferred.done(Gate, {
+        token: malformed,
+        exit: Exit.succeed("ignored")
       }).pipe(Effect.flip)
 
       expect(failure).toBeInstanceOf(DurableDeferred.TokenInvalid)
       expect(failure.code).toBe("malformed_token")
+      expect(failure.message).toContain("Base64Url")
+      expect(failure.message).toContain("*".repeat(64))
+      expect(failure.message).toContain("36 characters dropped")
+      expect(failure.message).not.toContain(malformed)
     }).pipe(Effect.provide(layerWired(Layer.empty))))
+
+  effect("completion tokens are bound to the deferred they name", () => {
+    const A = DurableDeferred.make("DurableDeferred/Bound/A", {
+      success: Schema.String,
+      error: Schema.String
+    })
+    const B = DurableDeferred.make("DurableDeferred/Bound/B", {
+      success: Schema.String,
+      error: Schema.String
+    })
+    const token = new DurableDeferred.TokenParsed({
+      flowName: "DurableDeferred/Bound/Flow",
+      executionId: "bound",
+      deferredName: A.name
+    }).asToken
+    const mismatch = <R>(effect: Effect.Effect<void, DurableDeferred.TokenInvalid, R>) =>
+      Effect.gen(function*() {
+        const failure = yield* Effect.flip(effect)
+        expect(failure).toBeInstanceOf(DurableDeferred.TokenInvalid)
+        expect(failure.code).toBe("deferred_mismatch")
+        expect(failure.message).toContain(A.name)
+        expect(failure.message).toContain(B.name)
+      })
+
+    return Effect.gen(function*() {
+      yield* mismatch(DurableDeferred.done(B, { token, exit: Exit.succeed("done") }))
+      // succeed, fail, and failCause delegate to done, so each inherits the
+      // same deferred-name binding.
+      yield* mismatch(DurableDeferred.succeed(B, { token, value: "done" }))
+      yield* mismatch(DurableDeferred.fail(B, { token, error: "failed" }))
+      yield* mismatch(DurableDeferred.failCause(B, { token, cause: Cause.fail("caused") }))
+    }).pipe(Effect.provide(layerWired(Layer.empty)))
+  })
 
   effect("registers an awaited deferred before reading its result", () => {
     const flow = Flow.make("DurableDeferred/registration", {
@@ -242,6 +319,37 @@ describe("DurableDeferred", () => {
 
       // an interrupt-only cause must terminate the run; if it were mistaken for
       // an external suspension interrupt the run would spin in suspended-retry
+      const result = yield* pollComplete(flow.poll(executionId))
+      expect(Option.isSome(result) && result.value._tag).toBe("Complete")
+      if (Option.isSome(result) && result.value._tag === "Complete") {
+        expect(Exit.isFailure(result.value.exit)).toBe(true)
+        if (Exit.isFailure(result.value.exit)) {
+          expect(Cause.hasInterruptsOnly(result.value.exit.cause)).toBe(true)
+        }
+      }
+    }).pipe(Effect.provide(layer))
+  })
+
+  effect("a recorded interruption reached through raceAll is a terminal outcome", () => {
+    const Raced = DurableDeferred.make("DurableDeferred/RacedInterrupt", {
+      success: Schema.String,
+      error: Schema.String
+    })
+    const { flow, layer } = makeFlow(
+      "DurableDeferred/raced-interrupt",
+      DurableDeferred.raceAll({
+        name: "recorded-interrupt",
+        success: Schema.String,
+        error: Schema.String,
+        effects: [DurableDeferred.await(Raced)]
+      })
+    )
+    return Effect.gen(function*() {
+      const executionId = yield* flow.execute({ id: "raced-int" }, { discard: true })
+      yield* Effect.yieldNow
+      const token = yield* completeToken(Raced, flow, executionId)
+      yield* DurableDeferred.failCause(Raced, { token, cause: Cause.interrupt(2) })
+
       const result = yield* pollComplete(flow.poll(executionId))
       expect(Option.isSome(result) && result.value._tag).toBe("Complete")
       if (Option.isSome(result) && result.value._tag === "Complete") {

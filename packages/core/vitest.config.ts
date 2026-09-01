@@ -18,10 +18,10 @@ export default defineConfig({
       reportsDirectory: join(tmpdir(), `flows-core-coverage-${process.pid}`),
       include: ["src/**"],
       thresholds: {
-        branches: 85,
-        functions: 97,
-        lines: 95,
-        statements: 92
+        branches: 100,
+        functions: 100,
+        lines: 100,
+        statements: 100
       }
     }
   }

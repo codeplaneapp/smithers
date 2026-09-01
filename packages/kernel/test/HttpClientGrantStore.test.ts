@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { PermissionRequired } from "@smthrs/capability/Permission"
-import { Effect, Fiber, Option } from "effect"
+import { Deferred, Effect, Fiber, Option } from "effect"
 import * as EffectHttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
@@ -102,6 +102,54 @@ describe("HttpClient with a real GrantStore lifecycle", () => {
           raw,
           store
         )
+      })
+    ))
+
+  itEffect("sends the exact request snapshot approved before an attended wait", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const checks: Array<unknown> = []
+        const calls: Array<readonly [string, string, string | undefined]> = []
+        const store = GrantStore.GrantStore.of({
+          check: (capability) => {
+            checks.push(capability)
+            return Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+          },
+          reply: () => Effect.die("not used by request snapshot test"),
+          list: Effect.succeed([]),
+          grantEnvelope: () => Effect.void
+        })
+        const raw = EffectHttpClient.make((request) =>
+          Effect.sync(() => {
+            calls.push([request.method, request.url, request.headers["x-mode"]])
+            return { status: 204, headers: {}, request } as HttpClientResponse.HttpClientResponse
+          })
+        )
+        const source = HttpClientRequest.post("https://safe.example.test/path").pipe(
+          HttpClientRequest.setHeader("x-mode", "safe")
+        )
+
+        yield* provide(
+          Effect.gen(function*() {
+            const client = yield* EffectHttpClient.HttpClient
+            const running = yield* client.execute(source).pipe(
+              Effect.forkChild({ startImmediately: true })
+            )
+            yield* Deferred.await(entered)
+            ;(source as { method: string }).method = "DELETE"
+            ;(source as { url: string }).url = "https://unsafe.example.test/other"
+            ;(source.headers as Record<string, string>)["x-mode"] = "unsafe"
+            yield* Deferred.succeed(release, undefined)
+            expect((yield* Fiber.join(running)).status).toBe(204)
+          }),
+          raw,
+          store
+        )
+
+        expect(checks).toEqual([{ action: "net:post", resource: "safe.example.test" }])
+        expect(calls).toEqual([["POST", "https://safe.example.test/path", "safe"]])
       })
     ))
 

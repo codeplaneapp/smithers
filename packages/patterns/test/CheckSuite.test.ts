@@ -60,6 +60,16 @@ describe("CheckSuite", () => {
     expect(CheckSuite.rows("not a record", ["lint"])).toEqual([{ id: "lint", passed: false }])
   })
 
+  it("treats inherited prototype-shaped rows as missing", () => {
+    const ids = ["__proto__", "constructor", "toString", "normal"]
+
+    expect(CheckSuite.rows({}, ids)).toEqual(ids.map((id) => ({ id, passed: false })))
+
+    const values = Object.fromEntries(ids.map((id) => [id, { ok: true }]))
+    expect(Object.getPrototypeOf(values)).toBe(Object.prototype)
+    expect(CheckSuite.rows(values, ids)).toEqual(ids.map((id) => ({ id, passed: true })))
+  })
+
   it("declares one call per check plus the verdict map", () => {
     const suite = CheckSuite.make({ checks, strategy: "all-pass", concurrency: 3, continueOnFail: false })
 
@@ -85,16 +95,15 @@ describe("CheckSuite", () => {
   })
 
   it("reads a quarantined check as failed, whatever the check failed with", () => {
-    // The tolerant join settles a failed check as a Quarantined marker. The
-    // marker is the check's absence, not its answer. A marker is read by its
-    // tag rather than by its payload, because a check may fail with a falsy
-    // error and `{ error: null }` alone would otherwise read as a pass.
+    // A tolerant join returns an explicit outcome envelope. Interpreting that
+    // protocol is opt-in, so an arbitrary check row cannot impersonate it.
     const boom = { _tag: "Quarantined", member: "test", error: new Error("boom") }
     const falsy = { _tag: "Quarantined", member: "test", error: null }
+    const lint = { _tag: "Succeeded", member: "lint", value: { ok: true } }
 
     expect(CheckSuite.passed(boom)).toBe(false)
-    expect(CheckSuite.passed(falsy)).toBe(false)
-    expect(CheckSuite.rows({ lint: { ok: true }, test: falsy }, ["lint", "test"])).toEqual([
+    expect(CheckSuite.passed(falsy)).toBe(true)
+    expect(CheckSuite.rows({ lint, test: falsy }, ["lint", "test"], true)).toEqual([
       { id: "lint", passed: true },
       { id: "test", passed: false }
     ])
@@ -114,11 +123,20 @@ describe("CheckSuite", () => {
 
   it("rejects an empty suite, an empty id, and an invalid concurrency", () => {
     expect(() => CheckSuite.make({ checks: {}, strategy: "all-pass", concurrency: 1, continueOnFail: false }))
-      .toThrow(PatternError)
+      .toThrow(expect.objectContaining({
+        code: "invalid_decorator",
+        message: "CheckSuite requires at least one check"
+      }))
     expect(() => CheckSuite.make({ checks, strategy: "all-pass", concurrency: 0, continueOnFail: false }))
-      .toThrow(PatternError)
+      .toThrow(expect.objectContaining({
+        code: "invalid_decorator",
+        message: "CheckSuite concurrency must be a positive safe integer"
+      }))
     expect(() => CheckSuite.make({ checks: { "": step }, strategy: "all-pass", concurrency: 1, continueOnFail: false }))
-      .toThrow(PatternError)
+      .toThrow(expect.objectContaining({
+        code: "invalid_decorator",
+        message: "CheckSuite check ids must not be empty"
+      }))
   })
 
   it("names one graph member per check id", () => {
@@ -135,7 +153,7 @@ describe("CheckSuite", () => {
           : undefined
       })
 
-    expect(named).toEqual(["lint", "typecheck", "test"])
+    expect(named.sort()).toEqual(["lint", "test", "typecheck"])
   })
 
   it.effect("stops at the first failing check when continueOnFail is false", () =>
@@ -215,6 +233,8 @@ describe("CheckSuite", () => {
       }).pipe(Effect.flip)
 
       expect(failure).toBeInstanceOf(PatternError)
+      expect(failure.code).toBe("invalid_decorator")
+      expect(failure.message).toBe("CheckSuite concurrency must be a positive safe integer")
     }))
 
   it.effect("rejects an empty runtime suite and an empty runtime id before a check runs", () =>
@@ -234,6 +254,8 @@ describe("CheckSuite", () => {
       }).pipe(Effect.flip)
 
       expect(empty).toBeInstanceOf(PatternError)
+      expect(empty.code).toBe("invalid_decorator")
+      expect(empty.message).toBe("CheckSuite requires at least one check")
 
       const unnamed = yield* CheckSuite.run<string, { readonly ok: boolean }, never, never>("head", {
         strategy: "all-pass",
@@ -243,6 +265,8 @@ describe("CheckSuite", () => {
       }).pipe(Effect.flip)
 
       expect(unnamed).toBeInstanceOf(PatternError)
+      expect(unnamed.code).toBe("invalid_decorator")
+      expect(unnamed.message).toBe("CheckSuite check ids must not be empty")
       expect(ran).toBe(0)
     }))
 

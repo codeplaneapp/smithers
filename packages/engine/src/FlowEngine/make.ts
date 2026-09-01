@@ -4,7 +4,7 @@
  * Adapts a low-level `Encoded` implementation into the typed `FlowRuntime`
  * port `@smthrs/flow` declares.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import {
   Action,
@@ -48,16 +48,105 @@ const ActionOrdinalScope = Context.Service<never, string>(
  *
  * @private
  */
-const stringifyError = (error: unknown): string => {
+const diagnosticTextLimit = 512
+
+const sanitizeDiagnosticText = (value: string): string =>
+  value.slice(0, diagnosticTextLimit)
+    .replace(/(bearer\s+)[^\s,;]+/gi, "$1[REDACTED]")
+    .replace(/((?:token|secret|password|api[-_]?key)\s*[=:]\s*)[^\s,;]+/gi, "$1[REDACTED]")
+
+const primitiveDiagnostic = (value: unknown): unknown => {
+  switch (typeof value) {
+    case "string":
+      return sanitizeDiagnosticText(value)
+    case "number":
+      return Number.isFinite(value) ? value : `[${value > 0 ? "+" : "-"}non-finite number]`
+    case "boolean":
+      return value
+    case "undefined":
+      return "[undefined]"
+    case "bigint":
+      return `[bigint:${value.toString().slice(0, 64)}]`
+    case "symbol":
+      return "[symbol]"
+    case "function":
+      return "[function]"
+    case "object":
+      return value === null ? null : undefined
+  }
+}
+
+const diagnosticKeys = [
+  "_tag",
+  "code",
+  "name",
+  "message",
+  "value",
+  "error",
+  "cause",
+  "failures",
+  "reasons",
+  "token",
+  "secret",
+  "password",
+  "apiKey",
+  "~effect/Effect/args"
+] as const
+
+const projectDiagnostic = (
+  value: unknown,
+  depth: number,
+  seen: WeakSet<object>,
+  field?: string
+): unknown => {
+  const primitive = primitiveDiagnostic(value)
+  if (primitive !== undefined || value === undefined) {
+    return field !== undefined && /token|secret|password|api[-_]?key/i.test(field)
+      ? "[REDACTED]"
+      : primitive
+  }
+  if (depth === 0) return "[object]"
+  const object = value as object
+  if (seen.has(object)) return "[circular]"
+  seen.add(object)
+  if (Array.isArray(object)) {
+    // Every Array exotic has one non-configurable numeric length data property;
+    // reading its descriptor does not invoke a Proxy `get` trap or user code.
+    const length = Object.getOwnPropertyDescriptor(object, "length")!.value as number
+    const output: Array<unknown> = []
+    const limit = Math.min(length, 8)
+    for (let index = 0; index < limit; index++) {
+      const descriptor = Object.getOwnPropertyDescriptor(object, String(index))
+      output.push(
+        descriptor !== undefined && "value" in descriptor
+          ? projectDiagnostic(descriptor.value, depth - 1, seen)
+          : "[missing]"
+      )
+    }
+    if (length > limit) output.push(`[${length - limit} more]`)
+    return output
+  }
+  const output: Record<string, unknown> = {}
+  for (const key of diagnosticKeys) {
+    const descriptor = Object.getOwnPropertyDescriptor(object, key)
+    if (descriptor === undefined || !("value" in descriptor)) continue
+    output[key] = projectDiagnostic(descriptor.value, depth - 1, seen, key)
+  }
+  return Object.keys(output).length === 0 ? "[object]" : output
+}
+
+/**
+ * Renders only a fixed diagnostic vocabulary from inert own data properties.
+ * It never enumerates an arbitrary object, invokes an accessor, calls a user
+ * coercion hook, or retains an unbounded value. A hostile proxy can at most
+ * make the renderer return the constant fallback.
+ */
+const renderDiagnostic = (value: unknown): string => {
   try {
-    // `String` rather than the JSON alone: `JSON.stringify` answers
-    // `undefined` for a value it does not encode, and a log line reading
-    // "undefined" is still a line.
-    return String(JSON.stringify(error)).slice(0, 4096)
+    const projected = projectDiagnostic(value, 5, new WeakSet())
+    return (typeof projected === "string" ? projected : JSON.stringify(projected)).slice(0, 4096)
   } catch {
-    // A circular value: rendering it must not replace the defect under
-    // diagnosis with a defect about the diagnosis.
-    return String(error).slice(0, 4096)
+    return "[unrenderable]"
   }
 }
 
@@ -75,7 +164,7 @@ const stringifyError = (error: unknown): string => {
  * The implementation must correctly persist, resume, and encode flow state.
  *
  * @category constructors
- * @since 4.0.0
+ * @since 0.1.0
  * @slop
  */
 export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"] => {
@@ -124,7 +213,7 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
                   Effect.andThen(
                     Effect.annotateLogs(
                       Effect.logError("A flow body failed with an error outside its declared error schema"),
-                      { flow: flow._tag, error: stringifyError(error) }
+                      { flow: flow._tag, error: renderDiagnostic(error) }
                     ),
                     Effect.die(error)
                   ),
@@ -561,7 +650,7 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
             Effect.tapError(() =>
               Effect.annotateLogs(
                 Effect.logError("A recorded action outcome does not match the action's declared schemas"),
-                { action: action.name, exit: JSON.stringify(toJsonExit(result.exit)).slice(0, 4096) }
+                { action: action.name, exit: renderDiagnostic(toJsonExit(result.exit)) }
               )
             )
           )
@@ -678,6 +767,38 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
         "FlowEngine.deferredDone",
         (_, { deferredName, executionId }) => ({
           attributes: { name: deferredName, executionId }
+        }),
+        { captureStackTrace: false }
+      )
+    ),
+    deferredDoneIfWaiting: Effect.fnUntraced(
+      function*<Success extends Schema.Constraint, Error extends Schema.Constraint>(
+        deferred: DurableDeferred.DurableDeferred<Success, Error>,
+        opts: {
+          readonly flowName: string
+          readonly executionId: string
+          readonly deferredName: string
+          readonly reason: string
+          readonly token: string
+          readonly exit: Exit.Exit<Success["Type"], Error["Type"]>
+        }
+      ) {
+        if (options.deferredDoneIfWaiting === undefined) return "NotWaiting" as const
+        return yield* options.deferredDoneIfWaiting({
+          flowName: opts.flowName,
+          executionId: opts.executionId,
+          deferredName: opts.deferredName,
+          reason: opts.reason,
+          token: opts.token,
+          exit: yield* Schema.encodeEffect(deferred.exitSchema)(opts.exit) as Effect.Effect<
+            Exit.Exit<unknown, unknown>
+          >
+        })
+      },
+      Effect.withSpan(
+        "FlowEngine.deferredDoneIfWaiting",
+        (_, { deferredName, executionId, reason }) => ({
+          attributes: { name: deferredName, executionId, reason }
         }),
         { captureStackTrace: false }
       )

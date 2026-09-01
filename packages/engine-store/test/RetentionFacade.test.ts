@@ -118,6 +118,28 @@ describe("Retention.collect", () => {
       expect(yield* count("flows_journal_events")).toBe(0)
     })))
 
+  it.effect("bounds the host-facing default pass to one thousand runs", () =>
+    migrated(Effect.gen(function*() {
+      const sql = yield* SqlClient.SqlClient
+      for (let offset = 0; offset < 1_001; offset += 200) {
+        const rows = Array.from({ length: Math.min(200, 1_001 - offset) }, (_, index) => ({
+          run_id: `aged-${String(offset + index).padStart(4, "0")}`,
+          status: "completed",
+          created_at_ms: 1,
+          started_at_ms: 1,
+          finished_at_ms: offset + index + 1,
+          state_json: "{}"
+        }))
+        yield* sql`INSERT INTO flows_runs ${sql.insert(rows)}`
+      }
+
+      const first = yield* Retention.collect({ olderThanMs: 2_000 })
+      expect(first.runs).toHaveLength(1_000)
+      expect(yield* count("flows_runs")).toBe(1)
+      expect((yield* Retention.collect({ olderThanMs: 2_000 })).runs).toEqual(["aged-1000"])
+      expect(yield* count("flows_runs")).toBe(0)
+    })))
+
   it.effect("keeps a run that has not finished, whatever its age", () =>
     migrated(Effect.gen(function*() {
       yield* insertRun("live", "running", null)
@@ -183,6 +205,67 @@ describe("Retention.collect", () => {
       expect(yield* count("flows_runs")).toBe(0)
     })))
 
+  it.effect("keeps a terminal parent whose terminal child is younger than the threshold", () =>
+    migrated(Effect.gen(function*() {
+      // No lineage filter holds this parent back: the child is terminal, so it
+      // is neither live nor under a live run. It is simply inside the
+      // retention window, and its row still names the parent, so deleting the
+      // parent breaks the foreign key. It becomes collectable with the child.
+      yield* insertRun("parent", "completed", 100)
+      yield* insertRun("child", "completed", 900, "parent")
+
+      const report = yield* Retention.collect({ olderThanMs: 500 })
+
+      expect(report.runs).toEqual([])
+      expect(yield* count("flows_runs")).toBe(2)
+    })))
+
+  it.effect("names the runs a pass would collect without touching them", () =>
+    migrated(Effect.gen(function*() {
+      yield* insertRun("old", "completed", 100)
+      yield* insertRun("recent", "completed", 900)
+
+      expect(yield* Retention.eligible(500)).toEqual(["old"])
+      expect(yield* count("flows_runs")).toBe(2)
+    })))
+
+  it.effect("sweeps a table beyond the engine ladder that this database does have", () =>
+    migrated(Effect.gen(function*() {
+      const sql = yield* SqlClient.SqlClient
+      yield* insertRun("old", "completed", 100)
+      yield* sql`CREATE TABLE control_run_messages (run_id TEXT NOT NULL)`
+      yield* sql`INSERT INTO control_run_messages ${sql.insert({ run_id: "old" })}`
+
+      const report = yield* Retention.collect({ olderThanMs: 500 })
+
+      expect(report.deleted["control_run_messages"]).toBe(1)
+      expect(yield* count("control_run_messages")).toBe(0)
+    })))
+
+  it.effect("rolls back rather than half-deleting when a table refuses", () =>
+    migrated(Effect.gen(function*() {
+      const sql = yield* SqlClient.SqlClient
+      yield* insertRun("old", "completed", 100)
+      yield* insertAttempt("old")
+      yield* insertEvent("old", 0)
+      // A table of the inventory this database does have, whose delete cannot
+      // succeed. The attempts and the journal are swept before it, so without
+      // one transaction around the pass a refusal here destroyed history it
+      // could not put back, and left the workspace refusing the same way on
+      // every later sweep.
+      yield* sql`CREATE TABLE control_runs (run_id TEXT NOT NULL)`
+      yield* sql`INSERT INTO control_runs ${sql.insert({ run_id: "old" })}`
+      yield* sql`CREATE TRIGGER control_runs_refuse BEFORE DELETE ON control_runs
+        BEGIN SELECT RAISE(ABORT, 'refused'); END`
+
+      const exit = yield* Effect.exit(Retention.collect({ olderThanMs: 500 }))
+
+      expect(exit._tag).toBe("Failure")
+      expect(yield* count("flows_runs")).toBe(1)
+      expect(yield* count("flows_attempts")).toBe(1)
+      expect(yield* count("flows_journal_events")).toBe(1)
+    })))
+
   it.effect("falls back to the creation time when a terminal run recorded no finish", () =>
     migrated(Effect.gen(function*() {
       yield* insertRun("unfinished", "failed", null)
@@ -233,6 +316,31 @@ describe("Retention.collect", () => {
       expect(yield* count("flows_runs")).toBe(0)
     })))
 
+  it.effect("collects a handoff lineage that spans a chunk boundary", () =>
+    migrated(Effect.gen(function*() {
+      // `flows_runs` carries a self-referential foreign key on `parent_run_id`,
+      // and SQLite checks it per row rather than at commit. A handoff parent
+      // always sorts before its successor, so a lineage straddling a chunk
+      // boundary puts the parent in the chunk that is deleted first. A pass
+      // that deleted run rows in age order refused there, AFTER it had already
+      // removed the attempts and journal of every eligible run, and every
+      // later pass refused the same way.
+      const runIds = Array.from({ length: 501 }, (_, index) => `run-${index}`)
+      yield* Effect.forEach(runIds, (runId, index) =>
+        // Distinct finish times: age is what orders the pass, so the pair below
+        // straddles the boundary only if the order is not a tie.
+        insertRun(runId, "completed", index + 1, index === 500 ? "run-499" : undefined), { discard: true })
+      yield* insertAttempt("run-499")
+      yield* insertAttempt("run-500")
+
+      const report = yield* Retention.collect({ olderThanMs: 5000 })
+
+      expect(report.runs).toHaveLength(501)
+      expect(report.deleted["flows_runs"]).toBe(501)
+      expect(yield* count("flows_runs")).toBe(0)
+      expect(yield* count("flows_attempts")).toBe(0)
+    })))
+
   it.effect("reports nothing on a database with no run table at all", () =>
     Effect.gen(function*() {
       const report = yield* Retention.collect({ olderThanMs: 500 }).pipe(Effect.provide(TestDatabase.layer))
@@ -241,9 +349,53 @@ describe("Retention.collect", () => {
       expect(report.deleted).toEqual({})
     }))
 
+  it.effect("turns invalid host-facing limits into empty, non-mutating passes", () =>
+    migrated(Effect.gen(function*() {
+      yield* insertRun("old", "completed", 100)
+
+      expect(yield* Retention.eligible(500, -1)).toEqual([])
+      const report = yield* Retention.collect({ olderThanMs: 500, limit: Number.NaN })
+      expect(report.runs).toEqual([])
+      expect(report.deleted).toEqual({})
+      expect(yield* count("flows_runs")).toBe(1)
+    })))
+
   it("names the terminal statuses the contract lists", () => {
     expect(Retention.terminalStatuses).toEqual(["completed", "failed", "cancelled"])
-    expect(Retention.runScopedTables.map(([table]) => table)).toContain("flows_time_travel_archive")
+  })
+
+  it("carries one table inventory for both passes", () => {
+    // The drift this closes: `collect` swept the time-travel and control
+    // tables and `retain` did not, so an engine workspace that only ever ran
+    // `retain` kept every step-cache and time-travel row of every run it
+    // deleted. Both passes read this list now, so a table can only be missed
+    // by both at once.
+    const tables = Retention.runScopedTables.map((entry) => entry.table)
+    expect(tables).toEqual([
+      "flows_deferred_completions",
+      "flows_clock_deadlines",
+      "flows_attempts",
+      "flows_journal_events",
+      "flows_journal_checkpoints",
+      "flows_step_cache_recorded",
+      "flows_time_travel_archive",
+      "flows_time_travel_snapshots",
+      "flows_time_travel_audits",
+      "flows_time_travel_edges",
+      "control_run_messages",
+      "control_runs"
+    ])
+    // `ladder` is the one thing the two passes read differently: a table the
+    // engine's own migrations install is required of an engine database, and
+    // everything else is skipped where the host did not compose it.
+    expect(Retention.runScopedTables.filter((entry) => entry.ladder).map((entry) => entry.table)).toEqual([
+      "flows_deferred_completions",
+      "flows_clock_deadlines",
+      "flows_attempts",
+      "flows_journal_events",
+      "flows_journal_checkpoints",
+      "flows_step_cache_recorded"
+    ])
   })
 
   it("re-exports the operation rather than owning a second one", () => {

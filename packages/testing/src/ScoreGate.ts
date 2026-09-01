@@ -10,10 +10,14 @@
  * reporter split). The case-runner is caller-supplied until the flow runtime
  * lands; scorer samples flow through it unchanged.
  *
+ * INCONCLUSIVE grades an environment fault, never a measurement. A gate the
+ * scores actually missed is a finding and grades `Failed`, so a suite cannot
+ * report an undecidable harness on evidence it did decide.
+ *
  * @since 0.0.0
  */
 import { Effect } from "effect"
-import { ScoreGateError } from "./TestingError.ts"
+import { type ScoreGateCode, ScoreGateError } from "./TestingError.ts"
 
 /**
  * A score observation collected for one fixed test case and step key.
@@ -35,14 +39,24 @@ export type ScoreSample =
 /**
  * The non-error result of grading a fixed suite.
  *
+ * The two kinds of bad news are separate members, because they answer
+ * different questions. `Failed` is a finding: the scores a run produced did
+ * not meet a gate, which is a measurement and a red. `Inconclusive` is an
+ * environment fault: nothing could be measured, which is a broken harness to
+ * repair rather than a result to read. A fault observed beside a decidable
+ * gate travels in `inconclusive` alongside the verdict, never instead of it.
+ *
  * @category models
  * @since 0.0.0
  */
 export type Verdict =
-  | { readonly _tag: "Passed" }
+  | { readonly _tag: "Passed"; readonly inconclusive: ReadonlyArray<string> }
+  | {
+    readonly _tag: "Failed"
+    readonly reasons: ReadonlyArray<string>
+    readonly inconclusive: ReadonlyArray<string>
+  }
   | { readonly _tag: "Inconclusive"; readonly reasons: ReadonlyArray<string> }
-
-const passed: Verdict = { _tag: "Passed" }
 
 const invalidThreshold = (threshold: number): Effect.Effect<never, ScoreGateError> =>
   Effect.fail(new ScoreGateError({ code: "invalid_threshold", threshold, actual: threshold }))
@@ -61,16 +75,98 @@ const validateScores = (samples: ReadonlyArray<ScoreSample>): Effect.Effect<void
   return Effect.void
 }
 
-const inconclusive = (samples: ReadonlyArray<ScoreSample>, extra: ReadonlyArray<string> = []): Verdict | undefined => {
-  const reasons = [
-    ...samples.flatMap((sample) => sample.kind === "inconclusive" ? [sample.reason] : []),
-    ...extra
-  ]
-  return reasons.length === 0 ? undefined : { _tag: "Inconclusive", reasons }
-}
+const unique = (reasons: ReadonlyArray<string>): ReadonlyArray<string> => [...new Set(reasons)]
+
+const faults = (samples: ReadonlyArray<ScoreSample>): ReadonlyArray<string> =>
+  samples.flatMap((sample) => sample.kind === "inconclusive" ? [sample.reason] : [])
+
+/**
+ * Renders one breach with the stable code the error channel uses for misuse,
+ * so a reason line names the gate, its threshold, and what the run scored.
+ * Binary noise is trimmed: a mean of `0.8500000000000001` reads as `0.85`.
+ */
+const breach = (code: ScoreGateCode, threshold: number, actual: number): string =>
+  `${code}: threshold ${Number(threshold.toPrecision(6))}, actual ${Number(actual.toPrecision(6))}`
+
+const passed = (samples: ReadonlyArray<ScoreSample>): Extract<Verdict, { readonly _tag: "Passed" }> => ({
+  _tag: "Passed",
+  inconclusive: unique(faults(samples))
+})
+
+const failed = (
+  samples: ReadonlyArray<ScoreSample>,
+  reasons: ReadonlyArray<string>
+): Extract<Verdict, { readonly _tag: "Failed" }> => ({
+  _tag: "Failed",
+  reasons,
+  inconclusive: unique(faults(samples))
+})
+
+const undecidable = (samples: ReadonlyArray<ScoreSample>, extra: ReadonlyArray<string>): Verdict => ({
+  _tag: "Inconclusive",
+  reasons: unique([...faults(samples), ...extra])
+})
 
 const scoreValues = (samples: ReadonlyArray<ScoreSample>): ReadonlyArray<number> =>
   samples.flatMap((sample) => sample.kind === "score" ? [sample.value] : [])
+
+/**
+ * Reduces the verdicts of several gates, plus the environment faults observed
+ * outside them, to one verdict.
+ *
+ * Precedence is findings first: a gate a run measurably missed is a red even
+ * when another observation went missing, because the failing measurement
+ * happened. A gate that could not be evaluated at all keeps the run
+ * inconclusive, and faults that decided nothing travel alongside a pass.
+ *
+ * @category grading
+ * @since 0.0.0
+ */
+export const combine = (
+  verdicts: ReadonlyArray<Verdict>,
+  environmentFaults: ReadonlyArray<string> = []
+): Verdict => {
+  const reasons = unique(verdicts.flatMap((verdict) => verdict._tag === "Failed" ? verdict.reasons : []))
+  const undecided = unique(verdicts.flatMap((verdict) => verdict._tag === "Inconclusive" ? verdict.reasons : []))
+  const observed = unique([
+    ...environmentFaults,
+    ...verdicts.flatMap((verdict) => verdict._tag === "Inconclusive" ? [] : verdict.inconclusive)
+  ])
+  if (reasons.length > 0) return { _tag: "Failed", reasons, inconclusive: unique([...observed, ...undecided]) }
+  if (undecided.length > 0) return { _tag: "Inconclusive", reasons: unique([...undecided, ...observed]) }
+  if (verdicts.length === 0 && observed.length > 0) return { _tag: "Inconclusive", reasons: observed }
+  return { _tag: "Passed", inconclusive: observed }
+}
+
+/**
+ * Maps a verdict to the shared CI convention: a finding exits 1, an
+ * undecidable run exits 5, and a clean pass exits 0. A pass that carries
+ * unresolved observations exits 5 as well: the gates it met were met over
+ * fewer observations than the suite declared.
+ *
+ * @category grading
+ * @since 0.0.0
+ */
+export const grade = (verdict: Verdict): { readonly exitCode: 0 | 1 | 5; readonly summary: string } => {
+  switch (verdict._tag) {
+    case "Failed":
+      return {
+        exitCode: 1,
+        summary: `failed: ${
+          [
+            ...verdict.reasons,
+            ...(verdict.inconclusive.length === 0 ? [] : [`unresolved: ${verdict.inconclusive.join("; ")}`])
+          ].join("; ")
+        }`
+      }
+    case "Inconclusive":
+      return { exitCode: 5, summary: `inconclusive: ${verdict.reasons.join("; ")}` }
+    case "Passed":
+      return verdict.inconclusive.length === 0
+        ? { exitCode: 0, summary: "passed" }
+        : { exitCode: 5, summary: `passed every gate with unresolved: ${verdict.inconclusive.join("; ")}` }
+  }
+}
 
 /**
  * A fixed-suite score-gate builder.
@@ -88,59 +184,67 @@ export interface ScoreExpectation {
 }
 
 /**
- * Builds gates over a fixed sample set. Inconclusive observations represent an
- * environment fault or unavailable judge and grade the suite Inconclusive,
- * never as a failed score gate.
+ * Builds gates over a fixed sample set.
+ *
+ * A gate is evaluated over the score observations that exist. An inconclusive
+ * observation is an environment fault or an unavailable judge: it is reported
+ * beside the verdict, and it withholds a decision only when it leaves the gate
+ * nothing to measure. A gate the surviving scores miss is `Failed`, not
+ * inconclusive. The error channel is reserved for misuse of the gate itself, a
+ * threshold or a score outside `[0, 1]`.
  *
  * @since 0.0.0
  * @category constructors
  */
 export const expectScores = (samples: ReadonlyArray<ScoreSample>): ScoreExpectation => {
   const validate = validateScores(samples)
-  const noScores = (label: string): Verdict | undefined =>
-    scoreValues(samples).length === 0 ? inconclusive(samples, [`No score samples for ${label}`]) : inconclusive(samples)
 
   return {
     mean: (threshold) =>
       Effect.gen(function*() {
         yield* validateThreshold(threshold)
         yield* validate
-        const verdict = noScores("mean gate")
-        if (verdict !== undefined) return verdict
         const values = scoreValues(samples)
+        if (values.length === 0) return undecidable(samples, ["No score samples for mean gate"])
         const actual = values.reduce((total, value) => total + value, 0) / values.length
-        if (actual < threshold) {
-          return yield* Effect.fail(new ScoreGateError({ code: "mean_below_threshold", threshold, actual }))
-        }
-        return passed
+        return actual < threshold
+          ? failed(samples, [breach("mean_below_threshold", threshold, actual)])
+          : passed(samples)
       }),
     min: (threshold) =>
       Effect.gen(function*() {
         yield* validateThreshold(threshold)
         yield* validate
-        const verdict = noScores("min gate")
-        if (verdict !== undefined) return verdict
-        const actual = Math.min(...scoreValues(samples))
-        if (actual < threshold) {
-          return yield* Effect.fail(new ScoreGateError({ code: "min_below_threshold", threshold, actual }))
-        }
-        return passed
+        const values = scoreValues(samples)
+        if (values.length === 0) return undecidable(samples, ["No score samples for min gate"])
+        const actual = Math.min(...values)
+        return actual < threshold
+          ? failed(samples, [breach("min_below_threshold", threshold, actual)])
+          : passed(samples)
       }),
     perCase: (thresholds) =>
       Effect.gen(function*() {
         for (const threshold of Object.values(thresholds)) yield* validateThreshold(threshold)
         yield* validate
-        const inconclusiveSamples = inconclusive(samples)
-        if (inconclusiveSamples !== undefined) return inconclusiveSamples
-        for (const [caseName, threshold] of Object.entries(thresholds)) {
+        const named = Object.entries(thresholds)
+        if (named.length === 0) return passed(samples)
+        const breaches: Array<string> = []
+        const unmeasured: Array<string> = []
+        for (const [caseName, threshold] of named) {
           const values = scoreValues(samples.filter((sample) => sample.case === caseName))
-          if (values.length === 0) return { _tag: "Inconclusive", reasons: [`No score samples for case ${caseName}`] }
-          const actual = Math.min(...values)
-          if (actual < threshold) {
-            return yield* Effect.fail(new ScoreGateError({ code: "case_below_threshold", threshold, actual }))
+          if (values.length === 0) {
+            unmeasured.push(`No score samples for case ${caseName}`)
+            continue
           }
+          const actual = Math.min(...values)
+          if (actual < threshold) breaches.push(breach("case_below_threshold", threshold, actual))
         }
-        return passed
+        // Every named case went unmeasured, so this gate decided nothing. One
+        // unmeasured case among measured ones is reported alongside the
+        // verdict the others earned.
+        if (unmeasured.length === named.length) return undecidable(samples, unmeasured)
+        const verdict = breaches.length === 0 ? passed(samples) : failed(samples, breaches)
+        return { ...verdict, inconclusive: unique([...verdict.inconclusive, ...unmeasured]) }
       })
   }
 }
@@ -222,10 +326,13 @@ export interface SuiteOptions<I> {
 
 /**
  * Runs a fixed suite through its case-runner, collects every score sample,
- * applies the declared gates, and grades the whole run.
+ * applies the declared gates over the samples that exist, and grades the whole
+ * run.
  *
- * A gate miss fails with `ScoreGateError`. Environment faults grade
- * `Inconclusive`, never failed.
+ * A case that hit an environment fault contributes no samples and its reason
+ * to the verdict's `inconclusive` list; it no longer cancels the gates the
+ * finished cases can still be judged by. A gate those cases miss is `Failed`,
+ * which {@link ciGrade} exits 1 on.
  *
  * @since 0.0.0
  * @category constructors
@@ -249,43 +356,35 @@ export const suite = <I>(options: SuiteOptions<I>): Effect.Effect<SuiteReport, S
       }
     }
     const samples = reports.flatMap((report) => report.samples)
-    const inconclusiveReasons = reports.flatMap((report) =>
+    const environmentFaults = reports.flatMap((report) =>
       report.verdict._tag === "Inconclusive" ? report.verdict.reasons : []
     )
-    if (inconclusiveReasons.length > 0) {
-      return { cases: reports, samples, verdict: { _tag: "Inconclusive", reasons: inconclusiveReasons } }
-    }
     const expectation = expectScores(samples)
-    let verdict: Verdict = { _tag: "Passed" }
-    const merge = (next: Verdict): void => {
-      if (next._tag === "Inconclusive") {
-        verdict = verdict._tag === "Inconclusive"
-          ? { _tag: "Inconclusive", reasons: [...verdict.reasons, ...next.reasons] }
-          : next
-      }
-    }
     const gates = options.gates ?? {}
-    if (gates.mean !== undefined) merge(yield* expectation.mean(gates.mean))
-    if (gates.min !== undefined) merge(yield* expectation.min(gates.min))
+    const verdicts: Array<Verdict> = []
+    if (gates.mean !== undefined) verdicts.push(yield* expectation.mean(gates.mean))
+    if (gates.min !== undefined) verdicts.push(yield* expectation.min(gates.min))
     const perCase = Object.fromEntries(
       options.cases.flatMap((suiteCase) =>
         suiteCase.minScore === undefined ? [] : [[suiteCase.name, suiteCase.minScore]]
       )
     )
-    if (Object.keys(perCase).length > 0) merge(yield* expectation.perCase(perCase))
-    return { cases: reports, samples, verdict }
+    if (Object.keys(perCase).length > 0) verdicts.push(yield* expectation.perCase(perCase))
+    return { cases: reports, samples, verdict: combine(verdicts, environmentFaults) }
   })
 
 /**
- * The CI grading of a suite report: pass exits 0, an inconclusive run exits 5
- * (never a red), mirroring the smithers `eval` CLI contract the conversion
- * note inherits. Gate misses never reach this function — they fail `suite`
- * with `ScoreGateError` and CI reports the typed error.
+ * The CI grading of a suite report, through {@link grade}: a clean pass exits
+ * 0, a gate the run missed exits 1, and a run that could not be decided exits 5
+ * (never a red), mirroring the smithers `eval` CLI contract the conversion note
+ * inherits.
  *
  * @since 0.0.0
  * @category grading
  */
-export const ciGrade = (report: SuiteReport): { readonly exitCode: 0 | 5; readonly summary: string } =>
-  report.verdict._tag === "Passed"
+export const ciGrade = (report: SuiteReport): { readonly exitCode: 0 | 1 | 5; readonly summary: string } => {
+  const graded = grade(report.verdict)
+  return graded.exitCode === 0
     ? { exitCode: 0, summary: `passed: ${report.cases.length} case(s), ${report.samples.length} sample(s)` }
-    : { exitCode: 5, summary: `inconclusive: ${report.verdict.reasons.join("; ")}` }
+    : graded
+}

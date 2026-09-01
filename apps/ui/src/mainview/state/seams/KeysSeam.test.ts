@@ -285,11 +285,17 @@ describe("keys.remove — delete upstream, then state the new truth", () => {
     }
   })
 
-  test("keys.remove is the human's act alone: the agent path refuses and deletes nothing", async () => {
+  // Re-pinned 2026-09-01. The agent path refused outright until 1e18cb3339
+  // narrowed the user-only set to USER_ONLY_VISIBLE and gave keys.remove a
+  // `confirm` instead, so the flow the slash menu lists is also a tool call.
+  // The property that mattered is unchanged and is what this asserts: the
+  // agent's call deletes nothing on its own. It only asks the human.
+  test("keys.remove is the human's act alone: the agent path asks and deletes nothing", async () => {
     const backend = keysBackend(hostileRows)
     const { controller } = await freshController(backend.services)
     const outcome = await controller.commands.runForAgent("keys.remove", "anthropic")
-    expect(outcome.status).toBe("failed")
+    expect(outcome.status).toBe("executed")
+    expect(outcome.status === "executed" && outcome.value).toContain("asked the user to confirm")
     expect(backend.requests.filter((request) => request.method === "DELETE")).toHaveLength(0)
   })
 })

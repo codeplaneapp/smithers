@@ -321,6 +321,33 @@ const makeRuntime = (durable: MemoryState) =>
           deferredResults.set(id, encoded)
           yield* drive(options.executionId)
         })) as any,
+      deferredDoneIfWaiting: ((deferred: any, options: any) =>
+        Effect.gen(function*() {
+          const execution = executions.get(options.executionId)
+          const ambient = yield* Effect.serviceOption(FlowRuntime.FlowInstance)
+          const instance = execution?.instance ?? Option.getOrUndefined(ambient)
+          const waiting = instance?.waiting
+          if (
+            instance === undefined ||
+            instance.executionId !== options.executionId ||
+            instance.flow._tag !== options.flowName ||
+            waiting === undefined ||
+            waiting.reason !== options.reason ||
+            waiting.token !== options.token
+          ) {
+            return "NotWaiting" as const
+          }
+          const encoded = yield* Schema.encodeEffect(deferred.exitSchema)(options.exit) as Effect.Effect<
+            Exit.Exit<unknown, unknown>
+          >
+          const id = `${options.executionId}/${options.deferredName}`
+          const outcome = deferredResults.has(id) ? "Existing" as const : "Completed" as const
+          if (outcome === "Completed") deferredResults.set(id, encoded)
+          instance.waiting = undefined
+          instance.suspended = false
+          if (execution !== undefined) yield* drive(options.executionId)
+          return outcome
+        })) as any,
       scheduleClock: (flow, options) =>
         runtime.deferredDone(options.clock.deferred as any, {
           flowName: flow._tag,

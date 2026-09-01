@@ -1,0 +1,261 @@
+/**
+ * The read/write credential split, asserted by effect rather than by shape.
+ *
+ * The cache had one bearer token. Every job that could read the cache could
+ * also publish to it, so any job holding the token could publish a green
+ * result that a later trunk build consumed. The split only means something if
+ * the server refuses: a credential that reads must not be able to mutate, and
+ * the refusal must land before the request body is read, so a rejected
+ * publication costs the service nothing.
+ */
+import { createHash } from "node:crypto"
+import { describe, expect, it } from "vitest"
+import {
+  type ActionCache,
+  type ActionCachePublication,
+  type ContentStore,
+  createHandler,
+  type DeleteFence
+} from "../protocol.ts"
+
+const readCredential = "read-credential-with-sufficient-entropy-for-tests"
+const writeCredential = "write-credential-with-sufficient-entropy-for-tests"
+const hashOf = (value: string): string => createHash("sha256").update(value, "utf8").digest("hex")
+const keyDigest = "a".repeat(64)
+
+class MemoryActionCache implements ActionCache {
+  readonly entries = new Map<string, ActionCachePublication>()
+
+  async get(key: string): Promise<string | null> {
+    return this.entries.get(key)?.body ?? null
+  }
+
+  async put(key: string, publication: ActionCachePublication): Promise<"conflict" | "identical" | "inserted"> {
+    const stored = this.entries.get(key)
+    if (stored === undefined) {
+      this.entries.set(key, publication)
+      return "inserted"
+    }
+    return stored.resultJson === publication.resultJson ? "identical" : "conflict"
+  }
+
+  async delete(key: string, fence: DeleteFence | null): Promise<boolean> {
+    const stored = this.entries.get(key)
+    if (stored === undefined) return false
+    if (fence !== null && (stored.recordedRunId !== fence.runId || stored.recordedEventSeq !== fence.eventSeq)) {
+      return false
+    }
+    return this.entries.delete(key)
+  }
+}
+
+class MemoryContentStore implements ContentStore {
+  readonly objects = new Map<string, Uint8Array<ArrayBuffer>>()
+
+  async get(digest: string): Promise<{ readonly body: BodyInit } | null> {
+    const bytes = this.objects.get(digest)
+    return bytes === undefined ? null : { body: bytes }
+  }
+
+  async has(digest: string): Promise<boolean> {
+    return this.objects.has(digest)
+  }
+
+  async put(digest: string, bytes: Uint8Array<ArrayBuffer>): Promise<"inserted" | "present"> {
+    if (this.objects.has(digest)) return "present"
+    this.objects.set(digest, new Uint8Array(bytes))
+    return "inserted"
+  }
+
+  async presentDigests(digests: ReadonlyArray<string>): Promise<ReadonlySet<string>> {
+    return new Set(digests.filter((digest) => this.objects.has(digest)))
+  }
+}
+
+interface Deployment {
+  readonly handler: (request: Request) => Promise<Response>
+  readonly actionCache: MemoryActionCache
+  readonly contentStore: MemoryContentStore
+}
+
+const deploy = (options: { readonly read?: string; readonly write?: string } = {}): Deployment => {
+  const actionCache = new MemoryActionCache()
+  const contentStore = new MemoryContentStore()
+  return {
+    actionCache,
+    contentStore,
+    handler: createHandler({
+      actionCache,
+      contentStore,
+      readTokenHash: hashOf(options.read ?? readCredential),
+      writeTokenHash: hashOf(options.write ?? writeCredential)
+    })
+  }
+}
+
+const as = (credential: string, path: string, init: RequestInit = {}): Request => {
+  const headers = new Headers(init.headers)
+  headers.set("authorization", `Bearer ${credential}`)
+  return new Request(`https://cache.test${path}`, { ...init, headers })
+}
+
+const publication = (key: string): RequestInit => ({
+  method: "PUT",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    keyDigest: key,
+    result: { key, target: "Test", label: "//:test", exitOk: true, output: {}, storedAt: "2026-08-31T00:00:00.000Z" }
+  })
+})
+
+const artifact = (): { readonly digest: string; readonly init: RequestInit } => {
+  const bytes = "artifact bytes"
+  return {
+    digest: createHash("sha256").update(bytes, "utf8").digest("hex"),
+    init: { method: "PUT", headers: { "content-type": "application/octet-stream" }, body: bytes }
+  }
+}
+
+describe("the read credential cannot mutate the cache", () => {
+  it("refuses an action-cache publication with 403 and stores nothing", async () => {
+    const { actionCache, handler } = deploy()
+
+    const refused = await handler(as(readCredential, `/ac/${keyDigest}`, publication(keyDigest)))
+
+    expect(refused.status).toBe(403)
+    expect(actionCache.entries.size).toBe(0)
+  })
+
+  it("refuses an artifact publication with 403 and stores nothing", async () => {
+    const { contentStore, handler } = deploy()
+    const { digest, init } = artifact()
+
+    const refused = await handler(as(readCredential, `/cas/${digest}`, init))
+
+    expect(refused.status).toBe(403)
+    expect(contentStore.objects.size).toBe(0)
+  })
+
+  it("refuses a deletion with 403 and keeps the entry", async () => {
+    const { actionCache, handler } = deploy()
+    await handler(as(writeCredential, `/ac/${keyDigest}`, publication(keyDigest)))
+
+    const refused = await handler(as(readCredential, `/ac/${keyDigest}`, { method: "DELETE" }))
+
+    expect(refused.status).toBe(403)
+    expect(actionCache.entries.size).toBe(1)
+  })
+
+  /**
+   * A refusal that reads the body first still pays for the upload it refuses.
+   * The instrumented body records every interaction: cancellation is the only
+   * one a refused publication may cause.
+   */
+  it("refuses before the request body is read", async () => {
+    const { handler } = deploy()
+    const log: Array<string> = []
+    const body = {
+      async cancel(): Promise<void> {
+        log.push("cancel")
+      },
+      getReader() {
+        log.push("read")
+        return {
+          async read(): Promise<{ readonly done: boolean; readonly value: unknown }> {
+            return { done: true, value: undefined }
+          },
+          async cancel(): Promise<void> {
+            log.push("cancel")
+          },
+          releaseLock(): void {}
+        }
+      }
+    }
+    const request = {
+      url: `https://cache.test/ac/${keyDigest}`,
+      method: "PUT",
+      headers: new Headers({
+        authorization: `Bearer ${readCredential}`,
+        "content-type": "application/json"
+      }),
+      body
+    } as unknown as Request
+
+    const refused = await handler(request)
+
+    expect(refused.status).toBe(403)
+    expect(log).not.toContain("read")
+  })
+})
+
+describe("both credentials read, and only the write credential publishes", () => {
+  it("serves a hit to either credential", async () => {
+    const { handler } = deploy()
+    expect((await handler(as(writeCredential, `/ac/${keyDigest}`, publication(keyDigest)))).status).toBe(201)
+
+    const byWriter = await handler(as(writeCredential, `/ac/${keyDigest}`))
+    const byReader = await handler(as(readCredential, `/ac/${keyDigest}`))
+
+    expect(byWriter.status).toBe(200)
+    expect(byReader.status).toBe(200)
+    expect(await byReader.text()).toBe(await byWriter.text())
+  })
+
+  it("publishes an action-cache entry and an artifact for the write credential", async () => {
+    const { handler } = deploy()
+    const { digest, init } = artifact()
+
+    expect((await handler(as(writeCredential, `/ac/${keyDigest}`, publication(keyDigest)))).status).toBe(201)
+    expect((await handler(as(writeCredential, `/cas/${digest}`, init))).status).toBe(201)
+    expect((await handler(as(readCredential, `/cas/${digest}`, { method: "HEAD" }))).status).toBe(200)
+  })
+
+  /** `findMissing` mutates nothing, so a reader may probe with it. */
+  it("admits the read credential to findMissing", async () => {
+    const { handler } = deploy()
+
+    const probed = await handler(
+      as(readCredential, "/cas/findMissing", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ digests: ["b".repeat(64)] })
+      })
+    )
+
+    expect(probed.status).toBe(200)
+    await expect(probed.json()).resolves.toEqual({ missing: ["b".repeat(64)] })
+  })
+
+  it("still answers 401 for an unknown credential and keeps readiness public", async () => {
+    const { handler } = deploy()
+
+    expect((await handler(as("neither-credential", `/ac/${keyDigest}`))).status).toBe(401)
+    expect((await handler(as("neither-credential", `/ac/${keyDigest}`, publication(keyDigest)))).status).toBe(401)
+    expect((await handler(new Request("https://cache.test/healthz"))).status).toBe(200)
+  })
+
+  /**
+   * A deployment that has not split its credentials yet configures the same
+   * secret twice. The more capable classification wins, so publication keeps
+   * working while the operator rolls the second secret out.
+   */
+  it("publishes when one secret is configured for both directions", async () => {
+    const { handler } = deploy({ read: writeCredential, write: writeCredential })
+
+    expect((await handler(as(writeCredential, `/ac/${keyDigest}`, publication(keyDigest)))).status).toBe(201)
+    expect((await handler(as(writeCredential, `/ac/${keyDigest}`))).status).toBe(200)
+  })
+
+  it("refuses a deployment configured with anything but two digests", () => {
+    const dependencies = {
+      actionCache: new MemoryActionCache(),
+      contentStore: new MemoryContentStore(),
+      readTokenHash: hashOf(readCredential),
+      writeTokenHash: hashOf(writeCredential)
+    }
+    expect(() => createHandler({ ...dependencies, readTokenHash: "not-a-digest" })).toThrow("readTokenHash")
+    expect(() => createHandler({ ...dependencies, writeTokenHash: "not-a-digest" })).toThrow("writeTokenHash")
+    expect(() => createHandler({ ...dependencies, readTokenHash: undefined as never })).toThrow("readTokenHash")
+    expect(() => createHandler({ ...dependencies, writeTokenHash: undefined as never })).toThrow("writeTokenHash")
+  })
+})

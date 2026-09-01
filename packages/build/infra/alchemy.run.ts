@@ -16,23 +16,32 @@ const cacheBucket = Cloudflare.R2.Bucket("CacheBucket")
 
 const maxCacheTokenBytes = 4096
 
-const cacheTokenVerifier = Config.redacted("SMITHERS_CACHE_TOKEN").pipe(
-  Config.mapOrFail((token) => {
-    const value = Redacted.value(token)
-    if (value.length < 16 || value.length > maxCacheTokenBytes || !/^[!-~]+$/.test(value)) {
-      return Effect.fail(
-        new Config.ConfigError(
-          new Schema.SchemaError(
-            new SchemaIssue.InvalidValue({
-              message: `SMITHERS_CACHE_TOKEN must be 16-${maxCacheTokenBytes} printable ASCII bytes with no spaces`
-            })
+/**
+ * Verifies one cache credential and hands the Worker its digest.
+ *
+ * Both credentials are required at deploy time. A Worker that received only
+ * one of them would answer every request from whichever half was configured,
+ * which is the single-credential posture this split exists to end, so a
+ * missing secret fails the deployment instead.
+ */
+const cacheTokenVerifier = (name: "SMITHERS_CACHE_READ_TOKEN" | "SMITHERS_CACHE_WRITE_TOKEN") =>
+  Config.redacted(name).pipe(
+    Config.mapOrFail((token) => {
+      const value = Redacted.value(token)
+      if (value.length < 16 || value.length > maxCacheTokenBytes || !/^[!-~]+$/.test(value)) {
+        return Effect.fail(
+          new Config.ConfigError(
+            new Schema.SchemaError(
+              new SchemaIssue.InvalidValue({
+                message: `${name} must be 16-${maxCacheTokenBytes} printable ASCII bytes with no spaces`
+              })
+            )
           )
         )
-      )
-    }
-    return Effect.succeed(Redacted.make(createHash("sha256").update(value, "utf8").digest("hex")))
-  })
-)
+      }
+      return Effect.succeed(Redacted.make(createHash("sha256").update(value, "utf8").digest("hex")))
+    })
+  )
 
 const cacheWorker = Cloudflare.Worker(
   "CacheWorker",
@@ -42,7 +51,8 @@ const cacheWorker = Cloudflare.Worker(
     env: {
       CACHE_DATABASE: cacheDatabase,
       CACHE_BUCKET: cacheBucket,
-      CACHE_TOKEN: cacheTokenVerifier
+      CACHE_READ_TOKEN: cacheTokenVerifier("SMITHERS_CACHE_READ_TOKEN"),
+      CACHE_WRITE_TOKEN: cacheTokenVerifier("SMITHERS_CACHE_WRITE_TOKEN")
     },
     ...(stack.stage === "prod"
       ? { domain: "build.smithers.sh", workersDev: false }

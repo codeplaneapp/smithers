@@ -1,11 +1,10 @@
 /**
  * Logical journal contract with durable lifecycle and lossy telemetry channels.
  *
- * Governing design: `docs/specs/Concepts/Journal Queue.md`.
+ * Governing design: `docs/pages/concepts/journal.md`.
  *
- * The ownership fence and the lossless `emitDurable` / lossy `emitLossy` split are
- * recorded in [[Engine Hardening Round 1]]
- * (`docs/specs/Concepts/Engine Hardening Round 1.md`), section 1.
+ * The ownership fence and the lossless `emitDurable` / lossy `emitLossy` split
+ * are recorded in `docs/pages/concepts/concurrency.md`.
  *
  * @since 0.1.0
  */
@@ -25,9 +24,12 @@ import type { Projection } from "./Projection.ts"
 /**
  * Stable error codes returned by journal operations.
  *
+ * `read_failed` identifies a database failure on a durable read path. Callers
+ * can distinguish that retryable storage condition from an unclassified
+ * `unknown` journal defect.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const JournalErrorCode = Schema.Literals([
   "invalid_event",
@@ -37,6 +39,7 @@ export const JournalErrorCode = Schema.Literals([
   "queue_overflow",
   "journal_closed",
   "sink_failed",
+  "read_failed",
   "decode_failed",
   "projection_failed",
   "checkpoint_invalid",
@@ -50,7 +53,6 @@ export const JournalErrorCode = Schema.Literals([
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type JournalErrorCode = typeof JournalErrorCode.Type
 
@@ -58,13 +60,12 @@ export type JournalErrorCode = typeof JournalErrorCode.Type
  * Error raised by journal admission, persistence, replay, or projection.
  *
  * `checkpointSeq` is set on the compaction-aware codes: on `compacted` it is
- * the run's compaction floor — the checkpoint sequence a reader must resync
- * from — and on `reader_behind` it is the checkpoint a compaction refused to
+ * the run's compaction floor, the checkpoint sequence a reader must resync
+ * from, and on `reader_behind` it is the checkpoint a compaction refused to
  * truncate below.
  *
  * @category errors
  * @since 0.1.0
- * @slop
  */
 export class JournalError extends Schema.TaggedError<JournalError>()("@smthrs/journal/JournalError", {
   code: JournalErrorCode,
@@ -78,7 +79,6 @@ export class JournalError extends Schema.TaggedError<JournalError>()("@smthrs/jo
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const OverflowPolicy = Schema.Literals(["reject", "drop-newest", "drop-oldest"])
 
@@ -87,7 +87,6 @@ export const OverflowPolicy = Schema.Literals(["reject", "drop-newest", "drop-ol
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type OverflowPolicy = typeof OverflowPolicy.Type
 
@@ -101,7 +100,6 @@ export type OverflowPolicy = typeof OverflowPolicy.Type
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const Accepted = Schema.TaggedStruct("Accepted", {
   seq: Seq,
@@ -117,7 +115,6 @@ export const Accepted = Schema.TaggedStruct("Accepted", {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Accepted = typeof Accepted.Type
 
@@ -130,7 +127,6 @@ export type Accepted = typeof Accepted.Type
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const Duplicate = Schema.TaggedStruct("Duplicate", {
   seq: Seq,
@@ -143,7 +139,6 @@ export const Duplicate = Schema.TaggedStruct("Duplicate", {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Duplicate = typeof Duplicate.Type
 
@@ -155,7 +150,6 @@ export type Duplicate = typeof Duplicate.Type
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const Dropped = Schema.TaggedStruct("Dropped", {
   seq: Seq,
@@ -168,7 +162,6 @@ export const Dropped = Schema.TaggedStruct("Dropped", {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Dropped = typeof Dropped.Type
 
@@ -177,7 +170,6 @@ export type Dropped = typeof Dropped.Type
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const EmitReceipt = Schema.Union([Accepted, Duplicate, Dropped])
 
@@ -186,7 +178,6 @@ export const EmitReceipt = Schema.Union([Accepted, Duplicate, Dropped])
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type EmitReceipt = typeof EmitReceipt.Type
 
@@ -198,7 +189,6 @@ export type EmitReceipt = typeof EmitReceipt.Type
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const DurableReceipt = Schema.Union([Accepted, Duplicate])
 
@@ -207,7 +197,6 @@ export const DurableReceipt = Schema.Union([Accepted, Duplicate])
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type DurableReceipt = typeof DurableReceipt.Type
 
@@ -216,7 +205,6 @@ export type DurableReceipt = typeof DurableReceipt.Type
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const StreamOptions = Schema.Struct({
   runId: RunId,
@@ -228,7 +216,6 @@ export const StreamOptions = Schema.Struct({
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type StreamOptions = typeof StreamOptions.Type
 
@@ -237,7 +224,6 @@ export type StreamOptions = typeof StreamOptions.Type
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const EntriesOptions = Schema.Struct({
   runId: RunId,
@@ -250,7 +236,6 @@ export const EntriesOptions = Schema.Struct({
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type EntriesOptions = typeof EntriesOptions.Type
 
@@ -259,7 +244,6 @@ export type EntriesOptions = typeof EntriesOptions.Type
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const EntriesPage = Schema.Struct({
   entries: Schema.Array(Entry),
@@ -271,7 +255,6 @@ export const EntriesPage = Schema.Struct({
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type EntriesPage = typeof EntriesPage.Type
 
@@ -279,7 +262,7 @@ export type EntriesPage = typeof EntriesPage.Type
  * A durable checkpoint: the caller-captured state that replays a run from
  * `seq` without the entries before it.
  *
- * `state` is the caller's own replay snapshot and round-trips verbatim — the
+ * `state` is the caller's own replay snapshot and round-trips verbatim: the
  * journal never interprets it, and redaction deliberately does not apply,
  * exactly as it does not apply to executable state. A checkpoint at `seq`
  * must subsume every entry with a sequence at or below `seq`: replay is
@@ -289,14 +272,13 @@ export type EntriesPage = typeof EntriesPage.Type
  * strictly below `seq`. The largest compacted `seq` for a run is its
  * compaction floor.
  *
- * Prior art: Temporal's mutable state — a durable snapshot pinned to a
+ * Prior art: Temporal's mutable state, a durable snapshot pinned to a
  * history offset, with history below it never replayed
  * (`reference/temporal/common/persistence/data_interfaces.go`,
  * `WorkflowSnapshot`).
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export class Checkpoint extends Schema.Class<Checkpoint>("@smthrs/journal/Journal/Checkpoint")({
   runId: RunId,
@@ -316,7 +298,6 @@ export class Checkpoint extends Schema.Class<Checkpoint>("@smthrs/journal/Journa
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const CheckpointOptions = Schema.Struct({
   runId: RunId,
@@ -329,7 +310,6 @@ export const CheckpointOptions = Schema.Struct({
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type CheckpointOptions = typeof CheckpointOptions.Type
 
@@ -341,7 +321,6 @@ export type CheckpointOptions = typeof CheckpointOptions.Type
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const CompactOptions = Schema.Struct({
   runId: RunId,
@@ -353,19 +332,17 @@ export const CompactOptions = Schema.Struct({
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type CompactOptions = typeof CompactOptions.Type
 
 /**
  * Receipt for a completed compaction.
  *
- * `deleted` is `0` when the checkpoint was already the compaction floor — a
+ * `deleted` is `0` when the checkpoint was already the compaction floor, a
  * retried compaction is idempotent.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const Compacted = Schema.Struct({
   runId: RunId,
@@ -378,7 +355,6 @@ export const Compacted = Schema.Struct({
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Compacted = typeof Compacted.Type
 
@@ -389,12 +365,23 @@ export type Compacted = typeof Compacted.Type
  *
  * - `seq` is assigned synchronously by the selected channel per run. It is the
  *   canonical durable order used by replay, paging, streams, and projections.
- * - `sourceSeq` is assigned synchronously per `(runId, sourceId)` and is the
- *   idempotency key for producer retries.
+ * - `sourceSeq` is assigned synchronously per `(runId, sourceId)`, or supplied
+ *   by the producer, and is the idempotency key for producer retries.
  *
  * Rejected or dropped admissions consume both allocations, so gaps are valid.
- * Exact retries return `Duplicate` with the original canonical `seq` and do
- * not consume either allocation.
+ * A retry the in-process index still holds returns `Duplicate` with the
+ * original canonical `seq` and consumes neither allocation.
+ *
+ * A retry it no longer holds is admitted optimistically and settled by
+ * `UNIQUE (run_id, source_id, source_seq)` at the insert: admission issues no
+ * dedup read, so the receipt is `Accepted`, the entry collapses onto the
+ * committed row instead of doubling it, and a reused identity carrying
+ * different bytes surfaces its `idempotency_conflict` through `flush` rather
+ * than through the emit. The read is deliberately absent. `emitLossy` exists
+ * to be callable from inside somebody else's open write transaction, and a
+ * SELECT there waits on the writer that is waiting on the caller: the agent
+ * executor's exit flush deadlocked exactly so. What a producer keeps in
+ * exchange is the choice of what a collision means, through `Input.dedupe`.
  *
  * This table is Smithers' logical (domain) write-ahead log and is intended to
  * become the authoritative state history. The storage engine's own WAL
@@ -407,7 +394,7 @@ export type Compacted = typeof Compacted.Type
  * `emitDurable` allocates `seq` inside the writer's SQL transaction, so the
  * returned sequence is already committed and independent writers never fork
  * the per-run clock
- * (`docs/specs/Concepts/Journal Queue.md`, "The durable path").
+ * (`docs/pages/concepts/journal.md`, "The durable path").
  *
  * Caveat on scope: the stores above this log (`RunStore`, `AttemptStore`,
  * `CacheStore`, and engine-store's `DurableEngineState`) hold the executable
@@ -419,24 +406,23 @@ export type Compacted = typeof Compacted.Type
  *
  * The surface is split into two channels:
  *
- * - The lifecycle channel — `emitDurable` — returns `DurableReceipt`, so a
+ * - The lifecycle channel, `emitDurable`, returns `DurableReceipt`, so a
  *   dropped lifecycle event is unrepresentable: the write commits, dedupes, or
  *   fails with a typed error.
- * - The lossy channel — `emitLossy` — keeps the optimistic queue and its
+ * - The lossy channel, `emitLossy`, keeps the optimistic queue and its
  *   overflow policies for telemetry, where `Dropped` receipts and
  *   `drop-oldest` evictions are acceptable.
  *
  * `emitDurable` is fenced on the run's persisted ownership: the caller hands
  * over its `OwnerId`, the durable insert only commits while `flows_runs`
  * still records that owner, and a reclaimed run fails the write with a
- * `fence_lost` error. The fence is mandatory on the lifecycle channel — a
+ * `fence_lost` error. The fence is mandatory on the lifecycle channel: a
  * lifecycle write is what advances a run, and a zombie owner must not advance
  * anything. The one escape is {@link Service.emitDurableUnfenced}, for the
  * rare admission that is genuinely ownerless.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Service {
   readonly emitLossy: (input: Input) => Effect.Effect<EmitReceipt, JournalError>
@@ -445,7 +431,7 @@ export interface Service {
    * The unfenced durable write: same durability and receipt contract as
    * {@link Service.emitDurable}, with no ownership fence.
    *
-   * This exists ONLY for admissions that are genuinely ownerless — writes
+   * This exists ONLY for admissions that are genuinely ownerless: writes
    * whose correctness does not depend on who currently owns the run because
    * they are first-writer-wins by design. The canonical case is the
    * external-trigger admission: a deferred completion or clock-schedule
@@ -456,8 +442,8 @@ export interface Service {
    */
   readonly emitDurableUnfenced: (input: Input) => Effect.Effect<DurableReceipt, JournalError>
   /**
-   * Runs `effect` — a state projection plus the `emitDurable` calls describing
-   * it — inside ONE write transaction.
+   * Runs `effect`, a state projection plus the `emitDurable` calls describing
+   * it, inside ONE write transaction.
    *
    * This is the seam that makes the logical WAL crash-consistent with
    * executable state. The stores above the journal (`RunStore`,
@@ -481,12 +467,45 @@ export interface Service {
    * - Everything inside runs while a write transaction is open. Keep it to
    *   storage work: no flow bodies, no host calls, no waits.
    *
-   * Nesting is safe — an inner `transact` becomes a savepoint of the outer
+   * Nesting is safe: an inner `transact` becomes a savepoint of the outer
    * one and defers its publication to the outermost commit.
    */
   readonly transact: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | JournalError, R>
+  /**
+   * Replays the run's durable history from `afterSequence`, then follows it.
+   *
+   * This is the lossless follower. It pages the history rather than
+   * materializing it, so the first entry arrives after one page rather than
+   * after the whole run; it reports a sink loss that happens while it is
+   * following; and a cursor below the run's compaction floor fails with
+   * `compacted` and the sequence to resync from, never a silently shortened
+   * history.
+   */
   readonly stream: (options: StreamOptions) => Stream.Stream<Entry, JournalError>
+  /**
+   * Reads one page of the run's durable history in sequence order.
+   *
+   * `hasMore` reports whether another page follows. A cursor below the run's
+   * compaction floor fails with `compacted`, exactly as `stream` does, so a
+   * poller and a follower cannot disagree about what history exists.
+   */
   readonly entries: (options: EntriesOptions) => Effect.Effect<EntriesPage, JournalError>
+  /**
+   * Subscribes to entries this process commits, across every run.
+   *
+   * This is a bounded SLIDING buffer sized by the layer's `capacity`: a slow
+   * consumer silently loses entries, with no error and no gap signal. Use it
+   * for a local tail or a UI feed, and use `stream` wherever a missing entry
+   * would be a correctness bug, because that is the lossless path and the one
+   * that reports sink losses.
+   *
+   * Only this process's commits arrive here. Another writer on the same
+   * database publishes into its own buffer, which is the second reason
+   * `stream` exists: it rechecks the durable tail.
+   *
+   * Published entries are deeply frozen, so one subscriber cannot mutate the
+   * value another subscriber is about to read.
+   */
   readonly changes: Effect.Effect<PubSub.Subscription<Entry>, never, Scope.Scope>
   readonly project: <S, E, R>(
     projection: Projection<S, E, R>,
@@ -501,11 +520,11 @@ export interface Service {
    * transaction as a savepoint and rolls back with it. `options.seq` must
    * name a committed entry and must lie above the run's compaction floor;
    * otherwise the write fails with `checkpoint_invalid`. Re-checkpointing an
-   * uncompacted `seq` replaces its state — last writer wins.
+   * uncompacted `seq` replaces its state: last writer wins.
    *
    * The write is fenced on the run's persisted ownership, exactly as
    * `emitDurable` is: a reclaimed run fails with `fence_lost`. The fence is
-   * mandatory — a zombie owner must not replace replay state behind a live
+   * mandatory: a zombie owner must not replace replay state behind a live
    * successor.
    */
   readonly checkpoint: (options: CheckpointOptions, owner: OwnerId) => Effect.Effect<Checkpoint, JournalError>
@@ -524,11 +543,10 @@ export interface Service {
    * Refusals are typed: `checkpoint_invalid` when the run has no checkpoint
    * to truncate below, `reader_behind` when a live in-process stream still
    * needs a sequence the truncation would delete, and `fence_lost` when the
-   * supplied `owner` no longer holds the run — the fence is mandatory, so a
+   * supplied `owner` no longer holds the run. The fence is mandatory, so a
    * zombie owner can never truncate history behind a live successor. Readers
-   * this process cannot
-   * see — pollers of `entries` and followers in other processes — are
-   * protected by the read-side guard instead: any read whose cursor starts
+   * this process cannot see (pollers of `entries` and followers in other
+   * processes) are protected by the read-side guard instead: any read whose cursor starts
    * below the floor fails with `compacted` and the floor to resync from,
    * never a silently shortened history.
    */
@@ -540,7 +558,6 @@ export interface Service {
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export class Journal extends Context.Service<Journal, Service>()("@smthrs/journal/Journal") {}
 
@@ -549,7 +566,6 @@ export class Journal extends Context.Service<Journal, Service>()("@smthrs/journa
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (implementation: Service): Service => Journal.of(implementation)
 
@@ -564,7 +580,6 @@ const unavailable = (method: string): JournalError =>
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const makeNoop = (overrides: Partial<Service> = {}): Service => {
   const service: Service = {
@@ -575,7 +590,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service => {
     ),
     /**
      * The closed stub has no sink and therefore no transaction to open, so it
-     * runs the effect directly — the same posture as
+     * runs the effect directly, the same posture as
      * `DurableEngineState`'s in-memory twin, whose `transaction` has no crash
      * window to close. A test double that models rollback overrides it.
      */
@@ -611,7 +626,6 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service => {
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerNoop = (overrides: Partial<Service> = {}): Layer.Layer<Journal> =>
   Layer.succeed(Journal)(makeNoop(overrides))

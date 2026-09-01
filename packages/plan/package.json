@@ -98,6 +98,7 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
+    "@smthrs/crypto": "1.0.0-rc.0",
     "@smthrs/database": "1.0.0-rc.0",
     "@smthrs/keys": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108"

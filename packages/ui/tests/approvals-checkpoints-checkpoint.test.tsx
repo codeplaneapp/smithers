@@ -101,6 +101,11 @@ describe("CheckpointTrigger", () => {
     expect(button.className).toContain("sui-button-sm");
     expect(button.textContent).toContain("Checkpoint");
   });
+
+  test("self-provides tooltip context when tooltip content is requested", async () => {
+    await render(<CheckpointTrigger tooltip="Restore this checkpoint" />);
+    expect(container!.querySelector("[data-slot='checkpoint-trigger']")).not.toBeNull();
+  });
 });
 
 describe("CheckpointActions", () => {

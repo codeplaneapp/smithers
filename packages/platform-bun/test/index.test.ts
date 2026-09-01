@@ -24,14 +24,17 @@ describe("@smthrs/platform-bun barrel", () => {
     expect(Object.keys(Index).sort()).toEqual(["BunFileSystem", "BunHost"])
     expect(Index.BunFileSystem.layer).toBe(BunFileSystem.layer)
     expect(Index.BunHost.layer).toBe(BunHost.layer)
+    expect(Index.BunHost.layerAt(process.cwd()).pipe).toBeTypeOf("function")
     expect(Index.BunHost.layerContained).toBe(BunHost.layerContained)
+    expect(Index.BunHost.layerContained().pipe).toBeTypeOf("function")
+    expect(Index.BunHost.layerContainedAt).toBe(BunHost.layerContainedAt)
   })
 
   it("contains the processes it spawns and reaps what a dead incarnation left", async () => {
     const ledger = await Effect.runPromise(
       ProcessLedger.makeMemory({ hostId: "bun-host", ownerPid: process.pid })
     )
-    const host = BunHost.layerContained({ graceMs: 250 }).pipe(
+    const host = BunHost.layerContainedAt(process.cwd(), { graceMs: 250 }).pipe(
       Layer.provide(Layer.succeed(ProcessLedger.ProcessLedger)(ledger))
     )
 

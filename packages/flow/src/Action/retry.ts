@@ -3,7 +3,7 @@
 /**
  * Retries effects while preserving durable action identity.
  *
- * @since 4.0.0
+ * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
 import { dual } from "effect/Function"
@@ -15,8 +15,7 @@ import { CurrentAttempt, CurrentOrdinal, type OrdinalSlot } from "./Context.ts"
  * each attempt.
  *
  * @category error handling
- * @since 4.0.0
- * @slop
+ * @since 0.1.0
  */
 export const retry: {
   <E, O extends Types.NoExcessProperties<Omit<Effect.Retry.Options<E>, "schedule">, O>>(

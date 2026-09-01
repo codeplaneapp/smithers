@@ -14,54 +14,44 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: "0"
       - uses: ./.github/actions/setup
         with:
           cache-url: "${{ secrets.SMITHERS_CACHE_URL }}"
           cache-token: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
-      - run: "yarn exec smithers-build '//:prePush' --affected-base \"$(git merge-base HEAD \"origin/${GITHUB_BASE_REF:-main}\")\""
+      - run: yarn exec smithers-build '//:prePush'
   src-deadCode:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: "0"
       - uses: ./.github/actions/setup
         with:
           cache-url: "${{ secrets.SMITHERS_CACHE_URL }}"
           cache-token: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
-      - run: "yarn exec smithers-build '//src:deadCode' --affected-base \"$(git merge-base HEAD \"origin/${GITHUB_BASE_REF:-main}\")\""
+      - run: yarn exec smithers-build '//src:deadCode'
   src-unreachableCode:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: "0"
       - uses: ./.github/actions/setup
         with:
           cache-url: "${{ secrets.SMITHERS_CACHE_URL }}"
           cache-token: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
-      - run: "yarn exec smithers-build '//src:unreachableCode' --affected-base \"$(git merge-base HEAD \"origin/${GITHUB_BASE_REF:-main}\")\""
+      - run: yarn exec smithers-build '//src:unreachableCode'
   src-routesGen:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: "0"
       - uses: ./.github/actions/setup
         with:
           cache-url: "${{ secrets.SMITHERS_CACHE_URL }}"
           cache-token: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
-      - run: "yarn exec smithers-build '//src:routesGen' --affected-base \"$(git merge-base HEAD \"origin/${GITHUB_BASE_REF:-main}\")\""
+      - run: yarn exec smithers-build '//src:routesGen'
   playwright-smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: "0"
       - uses: ./.github/actions/setup
         with:
           cache-url: "${{ secrets.SMITHERS_CACHE_URL }}"
           cache-token: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
-      - run: "yarn exec smithers-build '//playwright:smoke' --affected-base \"$(git merge-base HEAD \"origin/${GITHUB_BASE_REF:-main}\")\""
+      - run: yarn exec smithers-build '//playwright:smoke'

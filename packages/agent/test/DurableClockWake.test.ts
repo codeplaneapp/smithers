@@ -26,6 +26,7 @@ import * as Agent from "../src/Agent.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as Seat from "../src/Seat.ts"
 import * as StandardFlows from "../src/StandardFlows.ts"
+import * as Safety from "./Safety.ts"
 
 const prepared: Route.PreparedRequest = {
   routeId: "route-a",
@@ -137,7 +138,7 @@ describe("a durable wait nested inside a cell action", () => {
           Effect.provide(Agent.layerDefaults)
         )
         return collected
-      }).pipe(Effect.provide(Agent.layer))
+      }).pipe(Effect.provide(Agent.layer), Effect.provide(Safety.layer))
     )
     expect(outcome._tag, outcome._tag === "failed" ? String(outcome.error) : undefined).toBe("completed")
     if (outcome._tag !== "completed") return

@@ -145,5 +145,16 @@ The root `test:e2e` command packages the stable macOS app with Electrobun's
 native renderer, launches the actual bundle, and drives it through a loopback
 bridge that exists only when `SMITHERS_E2E_BRIDGE=1` and requires a random
 bearer token. The runner redirects application state to a temporary home,
-keeps the local origin fixed across relaunch, and preserves failure artifacts
-under `apps/ui/test-results/electrobun-packaged/`.
+keeps the local origin fixed across relaunch, fetches the pinned public
+`codeplanesmithers/canary-sandbox` fixture into an isolated clone, and
+preserves failure artifacts under `apps/ui/test-results/electrobun-packaged/`.
+It covers the stable renderer, bridge security, native repository picker and
+authorization, repository failure recovery, real target execution, chat and
+repository persistence, card tabs, and a real PTY/WebSocket lifecycle.
+
+The runner holds an atomic lease plus a per-test cleanup marker. If a prior
+process died before cleanup, the next run removes its isolated state, writes a
+stale-fixture report, and fails before launching a test. Rerun normally after
+inspection; `SMITHERS_E2E_RECOVER_STALE=1 bun run test:e2e` explicitly repairs
+and continues in a single invocation. The packaged lane is macOS-only and the
+GitHub fixture scenario requires network access.

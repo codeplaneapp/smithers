@@ -227,7 +227,18 @@ export interface ContentStore {
 export interface ProtocolDependencies {
   readonly actionCache: ActionCache
   readonly contentStore: ContentStore
-  readonly tokenHash: string
+  /**
+   * SHA-256 of the credential that may read the cache. A reader is an
+   * untrusted context: every job that pulls, including one building an
+   * unreviewed branch, holds this one.
+   */
+  readonly readTokenHash: string
+  /**
+   * SHA-256 of the credential that may publish to it. Only a context whose
+   * inputs were reviewed holds this one. A deployment that has not split its
+   * credentials yet configures the same digest twice.
+   */
+  readonly writeTokenHash: string
   readonly health?: () => Promise<void>
   readonly maxArtifactBytes?: number
 }
@@ -256,6 +267,12 @@ const unauthorized = (): Response =>
   new Response(null, {
     status: 401,
     headers: { "www-authenticate": "Bearer realm=\"smithers-build-cache\"" }
+  })
+
+const forbidden = (): Response =>
+  new Response(JSON.stringify({ error: "this credential may read the cache but not publish to it" }), {
+    status: 403,
+    headers: { "content-type": "application/json" }
   })
 
 const busy = (message: string): Response =>
@@ -636,18 +653,41 @@ const sha256Hex = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> => {
 
 const bearerScheme = /^Bearer +/i
 
-const authorized = async (request: Request, expected: Uint8Array<ArrayBuffer>): Promise<boolean> => {
+/** What the credential a request presented is allowed to do. */
+type Presented = "write" | "read" | "none"
+
+const matches = (supplied: Uint8Array<ArrayBuffer>, expected: Uint8Array<ArrayBuffer>): boolean => {
+  let difference = 0
+  for (let index = 0; index < expected.byteLength; index += 1) {
+    difference |= (supplied[index] ?? 0) ^ (expected[index] ?? 0)
+  }
+  return difference === 0
+}
+
+/**
+ * Classifies the presented bearer token against both credential digests.
+ *
+ * Both comparisons always run and neither short circuits, so the answer costs
+ * the same work whichever credential was presented and whichever byte first
+ * differs. A deployment that configures one secret for both directions matches
+ * both, and the more capable classification wins so publication keeps working.
+ */
+const presentedCredential = async (
+  request: Request,
+  expectedWrite: Uint8Array<ArrayBuffer>,
+  expectedRead: Uint8Array<ArrayBuffer>
+): Promise<Presented> => {
   const authorization = request.headers.get("authorization") ?? ""
   const scheme = bearerScheme.exec(authorization)
   const bearer = scheme !== null
   const suppliedToken = bearer ? authorization.slice(scheme[0].length) : ""
   const suppliedDigest = await crypto.subtle.digest("SHA-256", textEncoder.encode(suppliedToken))
   const supplied = new Uint8Array(suppliedDigest)
-  let difference = 0
-  for (let index = 0; index < expected.byteLength; index += 1) {
-    difference |= (supplied[index] ?? 0) ^ (expected[index] ?? 0)
-  }
-  return bearer && difference === 0
+  const isWrite = matches(supplied, expectedWrite)
+  const isRead = matches(supplied, expectedRead)
+  if (!bearer) return "none"
+  if (isWrite) return "write"
+  return isRead ? "read" : "none"
 }
 
 const handleActionCache = async (
@@ -858,7 +898,8 @@ interface NormalizedProtocolDependencies {
   readonly contentStore: ContentStore
   readonly health: () => Promise<void>
   readonly maxArtifactBytes: number
-  readonly tokenHash: string
+  readonly readTokenHash: string
+  readonly writeTokenHash: string
 }
 
 const serviceMethod = <Args extends ReadonlyArray<unknown>, Result>(
@@ -908,7 +949,14 @@ const normalizeDependencies = (value: ProtocolDependencies): NormalizedProtocolD
   if (prototype !== Object.prototype && prototype !== null) {
     throw new TypeError("protocol dependencies must be a plain object")
   }
-  const allowed = new Set(["actionCache", "contentStore", "health", "maxArtifactBytes", "tokenHash"])
+  const allowed = new Set([
+    "actionCache",
+    "contentStore",
+    "health",
+    "maxArtifactBytes",
+    "readTokenHash",
+    "writeTokenHash"
+  ])
   for (const key of keys) {
     if (typeof key !== "string" || !allowed.has(key)) {
       throw new TypeError(`protocol dependencies contain an unknown property: ${String(key)}`)
@@ -932,9 +980,13 @@ const normalizeDependencies = (value: ProtocolDependencies): NormalizedProtocolD
   const configuredHealth = read("health")
   const health = configuredHealth ?? (async (): Promise<void> => undefined)
   if (typeof health !== "function") throw new TypeError("health must be a function")
-  const tokenHash = read("tokenHash")
-  if (typeof tokenHash !== "string" || !hexDigest.test(tokenHash)) {
-    throw new TypeError("tokenHash must be a lowercase SHA-256 digest")
+  const readTokenHash = read("readTokenHash")
+  if (typeof readTokenHash !== "string" || !hexDigest.test(readTokenHash)) {
+    throw new TypeError("readTokenHash must be a lowercase SHA-256 digest")
+  }
+  const writeTokenHash = read("writeTokenHash")
+  if (typeof writeTokenHash !== "string" || !hexDigest.test(writeTokenHash)) {
+    throw new TypeError("writeTokenHash must be a lowercase SHA-256 digest")
   }
   const configuredMaximum = read("maxArtifactBytes")
   const maxArtifactBytes = configuredMaximum ?? maxArtifactBodyBytes
@@ -970,7 +1022,8 @@ const normalizeDependencies = (value: ProtocolDependencies): NormalizedProtocolD
     }),
     health: health as () => Promise<void>,
     maxArtifactBytes: maxArtifactBytes as number,
-    tokenHash
+    readTokenHash,
+    writeTokenHash
   })
 }
 
@@ -985,11 +1038,11 @@ const normalizeDependencies = (value: ProtocolDependencies): NormalizedProtocolD
  */
 export const createHandler = (dependencies: ProtocolDependencies) => {
   const normalized = normalizeDependencies(dependencies)
-  const { actionCache, contentStore, health, maxArtifactBytes, tokenHash } = normalized
-  const expectedTokenHash = Uint8Array.from(
-    tokenHash.match(/.{2}/g) ?? [],
-    (pair) => Number.parseInt(pair, 16)
-  )
+  const { actionCache, contentStore, health, maxArtifactBytes, readTokenHash, writeTokenHash } = normalized
+  const digestBytes = (digest: string): Uint8Array<ArrayBuffer> =>
+    Uint8Array.from(digest.match(/.{2}/g) ?? [], (pair) => Number.parseInt(pair, 16))
+  const expectedReadTokenHash = digestBytes(readTokenHash)
+  const expectedWriteTokenHash = digestBytes(writeTokenHash)
 
   let activeCacheRequests = 0
   let activeActionCachePublications = 0
@@ -1033,9 +1086,19 @@ export const createHandler = (dependencies: ProtocolDependencies) => {
           await ready()
           return request.method === "HEAD" ? empty(200) : json(200, { ok: true })
         }
-        if (!(await authorized(request, expectedTokenHash))) {
+        const credential = await presentedCredential(request, expectedWriteTokenHash, expectedReadTokenHash)
+        if (credential === "none") {
           await discardBody(request.body)
           return unauthorized()
+        }
+        // Authorization is decided by method before the route is even parsed,
+        // so a publication presented on the read credential is refused without
+        // reading its body. Every route below this line either reads state or
+        // probes it; `findMissing` is a POST that mutates nothing, so it is not
+        // in the mutating set.
+        if ((request.method === "PUT" || request.method === "DELETE") && credential !== "write") {
+          await discardBody(request.body)
+          return forbidden()
         }
         const segments = url.pathname.split("/")
         if (segments.length === 3 && segments[0] === "" && segments[1] === "cas" && segments[2] === "findMissing") {

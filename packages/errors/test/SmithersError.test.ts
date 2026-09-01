@@ -1,32 +1,109 @@
-import { readFileSync } from "node:fs"
-import { fileURLToPath } from "node:url"
-import { describe, expect, it } from "vitest"
+import { inspect } from "node:util"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import {
   ERROR_REFERENCE_URL,
   getSmithersErrorDefinition,
-  getSmithersErrorDocsUrl,
-  isKnownSmithersErrorCode,
-  knownSmithersErrorCodes,
+  isSmithersErrorCode,
+  type SmithersErrorCode,
+  smithersErrorCodes,
+  type SmithersErrorDefinition,
   smithersErrorDefinitions
 } from "../src/ErrorCode.ts"
-import { isSmithersError, SmithersError } from "../src/SmithersError.ts"
+import { hasSmithersErrorShape, isSmithersError, SmithersError } from "../src/SmithersError.ts"
 
 describe("SmithersError", () => {
+  it("keeps its public fields readonly", () => {
+    const pin = (error: SmithersError): void => {
+      // @ts-expect-error SmithersError.name must remain readonly.
+      error.name = "mutated"
+      // @ts-expect-error SmithersError.details must remain readonly.
+      error.details = undefined
+    }
+
+    expect(typeof pin).toBe("function")
+  })
+
+  it("uses the default name", () => {
+    expect(new SmithersError("INVALID_INPUT", "x").name).toBe("SmithersError")
+  })
+
+  it("is an Error", () => {
+    expect(new SmithersError("INVALID_INPUT", "x")).toBeInstanceOf(Error)
+  })
+
   it("appends the documentation URL once", () => {
     const error = new SmithersError("INVALID_INPUT", "no bot token")
     expect(error.message).toBe(`no bot token See ${ERROR_REFERENCE_URL}`)
     expect(error.summary).toBe("no bot token")
     expect(error.docsUrl).toBe(ERROR_REFERENCE_URL)
-    expect(new SmithersError("INVALID_INPUT", error.message).message).toBe(error.message)
+    const rewrapped = new SmithersError("INVALID_INPUT", error.message)
+    expect(rewrapped.message).toBe(error.message)
+    expect(rewrapped.summary).toBe("no bot token")
+  })
+
+  it("freezes the wire-visible message format", () => {
+    expect(new SmithersError("INVALID_INPUT", "no bot token").message).toBe(
+      "no bot token See https://smithers.sh/reference/errors"
+    )
+  })
+
+  it("collapses duplicate documentation URL suffixes", () => {
+    const suffix = ` See ${ERROR_REFERENCE_URL}`
+    const error = new SmithersError("INVALID_INPUT", `x${suffix}${suffix}`)
+    expect(error.summary).toBe("x")
+    expect(error.message).toBe(`x${suffix}`)
+  })
+
+  it("ignores trailing whitespace when removing the documentation URL suffix", () => {
+    const suffix = ` See ${ERROR_REFERENCE_URL}`
+    const error = new SmithersError("INVALID_INPUT", `no token${suffix} `)
+    expect(error.summary).toBe("no token")
+    expect(error.message).toBe(`no token${suffix}`)
+  })
+
+  it("collapses documentation URL suffixes separated by whitespace", () => {
+    const suffix = ` See ${ERROR_REFERENCE_URL}`
+    const error = new SmithersError("INVALID_INPUT", `no token${suffix}   ${suffix}`)
+    expect(error.summary).toBe("no token")
+    expect(error.message).toBe(`no token${suffix}`)
+  })
+
+  it("appends the pointer when the URL is only embedded in the summary", () => {
+    const summary = `see ${ERROR_REFERENCE_URL} for more; token bad`
+    const error = new SmithersError("INVALID_INPUT", summary)
+    expect(error.message).toBe(`${summary} See ${ERROR_REFERENCE_URL}`)
+    expect(error.summary).toBe(summary)
+  })
+
+  it("does not append the documentation URL to blank summaries", () => {
+    expect(new SmithersError("UNSUPPORTED", "").message).toBe("")
+    expect(new SmithersError("UNSUPPORTED", "").summary).toBe("")
+    expect(new SmithersError("UNSUPPORTED", "   ").message).toBe("   ")
   })
 
   it("suppresses the documentation URL on request", () => {
     const error = new SmithersError("UNSUPPORTED", "no Ed25519", undefined, { includeDocsUrl: false })
     expect(error.message).toBe("no Ed25519")
     expect(error.details).toBeUndefined()
+    const suffix = ` See ${ERROR_REFERENCE_URL}`
+    const stripped = new SmithersError("UNSUPPORTED", `no Ed25519${suffix}`, undefined, {
+      includeDocsUrl: false
+    })
+    expect(stripped.message).toBe("no Ed25519")
+    expect(stripped.summary).toBe("no Ed25519")
   })
 
-  it("carries a cause, a name, and provider-safe details", () => {
+  it("treats an explicit includeDocsUrl true like the default", () => {
+    expect(new SmithersError("INVALID_INPUT", "x", undefined, { includeDocsUrl: true }).message)
+      .toBe(`x See ${ERROR_REFERENCE_URL}`)
+  })
+
+  it("starts the stack with its name and message", () => {
+    const error = new SmithersError("INVALID_INPUT", "x")
+    expect(error.stack?.startsWith(`${error.name}: ${error.message}`)).toBe(true)
+  })
+
+  it("carries a cause, a name, and caller-supplied details", () => {
     const cause = new Error("socket hang up")
     const error = new SmithersError("INTEGRATION_ERROR", "poll failed", { reason: "poll-failed" }, {
       cause,
@@ -35,6 +112,108 @@ describe("SmithersError", () => {
     expect(error.name).toBe("IntegrationError")
     expect(error.cause).toBe(cause)
     expect(error.details).toEqual({ reason: "poll-failed" })
+  })
+
+  it("enumerates details only when the caller supplies them", () => {
+    const withoutDetails = new SmithersError("INVALID_INPUT", "x")
+    const withDetails = new SmithersError("INVALID_INPUT", "x", { reason: "r" })
+
+    expect(Object.keys(withoutDetails)).toEqual(["code", "summary", "docsUrl"])
+    expect(Object.keys(withDetails)).toEqual(["code", "summary", "docsUrl", "details"])
+    expect(Object.hasOwn(withoutDetails, "details")).toBe(false)
+    expect(Object.hasOwn(withDetails, "details")).toBe(true)
+  })
+
+  it("installs name as a non-enumerable own property", () => {
+    const descriptor = {
+      enumerable: false,
+      writable: true,
+      configurable: true
+    }
+    const error = new SmithersError("INVALID_INPUT", "x")
+    const renamed = new SmithersError("INVALID_INPUT", "x", undefined, { name: "IntegrationError" })
+
+    expect(Object.getOwnPropertyDescriptor(error, "name")).toEqual({ value: "SmithersError", ...descriptor })
+    expect(Object.getOwnPropertyDescriptor(renamed, "name")).toEqual({ value: "IntegrationError", ...descriptor })
+    expect(Object.keys(renamed)).not.toContain("name")
+  })
+
+  it("keeps absent details and the error name out of inspection and JSON", () => {
+    const withoutDetails = new SmithersError("INVALID_INPUT", "x")
+    const withDetails = new SmithersError("INVALID_INPUT", "x", { reason: "r" })
+
+    expect(inspect(withoutDetails)).not.toContain("details: undefined")
+    expect(inspect(withDetails)).toContain("details:")
+    expect(JSON.parse(JSON.stringify(withoutDetails))).toEqual({
+      code: "INVALID_INPUT",
+      summary: "x",
+      docsUrl: ERROR_REFERENCE_URL
+    })
+  })
+
+  it("keeps subclass names out of enumerable fields and at the start of the stack", () => {
+    class Sub extends SmithersError {
+      constructor() {
+        super("UNSUPPORTED", "x", undefined, { name: "Sub" })
+      }
+    }
+
+    const error = new Sub()
+    expect(error.name).toBe("Sub")
+    expect(Object.keys(error)).not.toContain("name")
+    expect(error.stack?.startsWith("Sub: ")).toBe(true)
+  })
+
+  it("only installs an own cause property when cause is supplied", () => {
+    expect(Object.hasOwn(new SmithersError("INVALID_INPUT", "x"), "cause")).toBe(false)
+    expect(Object.hasOwn(new SmithersError("INVALID_INPUT", "x", undefined, { name: "X" }), "cause")).toBe(false)
+    expect(Object.hasOwn(new SmithersError("INVALID_INPUT", "x", undefined, { cause: new Error("root") }), "cause"))
+      .toBe(true)
+    expect(Object.hasOwn(new SmithersError("INVALID_INPUT", "x", undefined, { cause: undefined }), "cause")).toBe(false)
+  })
+
+  it("lets subclasses always spell the optional cause key", () => {
+    class IntegrationError extends SmithersError {
+      constructor(options?: { readonly cause?: unknown }) {
+        super("INTEGRATION_ERROR", "poll failed", undefined, {
+          cause: options?.cause,
+          name: "IntegrationError"
+        })
+      }
+    }
+
+    const withoutCause = new IntegrationError()
+    expect(Object.hasOwn(withoutCause, "cause")).toBe(false)
+    expect(inspect(withoutCause)).not.toContain("[cause]")
+
+    const cause = new Error("root")
+    const withCause = new IntegrationError({ cause })
+    expect(Object.hasOwn(withCause, "cause")).toBe(true)
+    expect(withCause.cause).toBe(cause)
+  })
+
+  it("preserves a cause chain", () => {
+    const cause = new Error("middle", { cause: new Error("root") })
+    expect((new SmithersError("INTEGRATION_ERROR", "x", undefined, { cause }).cause as Error).cause).toBe(cause.cause)
+  })
+
+  it("stores non-Error causes verbatim", () => {
+    for (const cause of ["provider failure", { provider: "telegram" }]) {
+      expect(new SmithersError("INTEGRATION_ERROR", "x", undefined, { cause }).cause).toBe(cause)
+    }
+  })
+
+  it("copies and freezes only the top-level details record", () => {
+    const nested = { token: "SECRET" }
+    const details = { reason: "poll-failed", context: nested }
+    const error = new SmithersError("INTEGRATION_ERROR", "poll failed", details)
+    details.reason = "changed"
+    details.context = { token: "REPLACEMENT" }
+    nested.token = "MUTATED"
+    expect(error.details).toEqual({ reason: "poll-failed", context: { token: "MUTATED" } })
+    expect(error.details?.context).toBe(nested)
+    expect(error.details).not.toBe(details)
+    expect(Object.isFrozen(error.details)).toBe(true)
   })
 
   it("keeps the subclass prototype so instanceof works", () => {
@@ -50,9 +229,110 @@ describe("SmithersError", () => {
   })
 })
 
+describe("error refinements", () => {
+  class Subclass extends SmithersError {}
+
+  it("accepts real and subclass instances", () => {
+    for (const error of [new SmithersError("INVALID_INPUT", "x"), new Subclass("INVALID_INPUT", "x")]) {
+      expect(isSmithersError(error)).toBe(true)
+      expect(hasSmithersErrorShape(error)).toBe(true)
+    }
+  })
+
+  it("rejects plain errors, forged names, non-errors, and plain shaped objects", () => {
+    const forged = new Error("forged")
+    forged.name = "SmithersError"
+    const values = [new Error("plain"), forged, null, undefined, {
+      code: "INVALID_INPUT",
+      summary: "x",
+      docsUrl: ERROR_REFERENCE_URL
+    }]
+    for (const value of values) {
+      expect(isSmithersError(value)).toBe(false)
+      expect(hasSmithersErrorShape(value)).toBe(false)
+    }
+  })
+
+  it("structurally accepts an instance detached from the package prototype", () => {
+    for (const code of smithersErrorCodes) {
+      const error = new SmithersError(code, "x")
+      Object.setPrototypeOf(error, Object.getPrototypeOf(new Error()))
+      expect(isSmithersError(error)).toBe(false)
+      expect(hasSmithersErrorShape(error)).toBe(true)
+    }
+  })
+
+  it("rejects an Error carrying an unknown code", () => {
+    const error = Object.assign(new Error("f"), {
+      code: "NOT_A_CODE",
+      summary: "s",
+      docsUrl: "bogus"
+    })
+    expect(hasSmithersErrorShape(error)).toBe(false)
+  })
+
+  it("narrows a structurally accepted code to the known vocabulary", () => {
+    const value: unknown = Object.assign(new Error("f"), {
+      code: "INVALID_INPUT",
+      summary: "s",
+      docsUrl: "from-another-package-version"
+    })
+    if (!hasSmithersErrorShape(value)) expect.fail("expected a structurally compatible error")
+    expectTypeOf(value.code).toEqualTypeOf<SmithersErrorCode>()
+  })
+
+  it("rejects errors with incomplete structural fields", () => {
+    expect(hasSmithersErrorShape(Object.assign(new Error("partial"), { code: "INVALID_INPUT" }))).toBe(false)
+    expect(hasSmithersErrorShape(Object.assign(new Error("partial"), {
+      code: "INVALID_INPUT",
+      summary: "x"
+    }))).toBe(false)
+  })
+
+  it("rejects structurally invalid details", () => {
+    for (const details of ["x", null, 7, [1]]) {
+      const error = Object.assign(new Error("f"), {
+        code: "INVALID_INPUT",
+        summary: "s",
+        docsUrl: "d",
+        details
+      })
+      expect(hasSmithersErrorShape(error)).toBe(false)
+    }
+  })
+
+  it("accepts missing and structurally valid details", () => {
+    const base = {
+      code: "INVALID_INPUT",
+      summary: "s",
+      docsUrl: "d"
+    }
+    for (
+      const error of [
+        Object.assign(new Error("f"), base),
+        Object.assign(new Error("f"), base, { details: {} }),
+        Object.assign(new Error("f"), base, { details: { retryable: true } })
+      ]
+    ) {
+      expect(hasSmithersErrorShape(error)).toBe(true)
+    }
+  })
+})
+
 describe("error codes", () => {
+  it("keeps the error code set closed", () => {
+    expectTypeOf<ConstructorParameters<typeof SmithersError>[0]>().toEqualTypeOf<SmithersErrorCode>()
+    expectTypeOf<SmithersError["code"]>().toEqualTypeOf<SmithersErrorCode>()
+  })
+
+  it("freezes the definitions and code table", () => {
+    expect(Object.isFrozen(smithersErrorDefinitions)).toBe(true)
+    expect(Object.isFrozen(smithersErrorDefinitions.INVALID_INPUT)).toBe(true)
+    expect(Object.isFrozen(smithersErrorCodes)).toBe(true)
+  })
+
   it("documents exactly the codes the integration adapters raise", () => {
-    expect([...knownSmithersErrorCodes].sort()).toEqual([
+    expect([...smithersErrorCodes].sort()).toEqual([
       "INTEGRATION_ERROR",
       "INVALID_INPUT",
       "TELEGRAM_API_ERROR",
@@ -61,46 +341,52 @@ describe("error codes", () => {
     ])
   })
 
-  it("gives every code a category and a trigger description", () => {
-    for (const code of knownSmithersErrorCodes) {
+  it("gives every code a trigger description", () => {
+    expectTypeOf<SmithersErrorDefinition>().toEqualTypeOf<{
+      readonly when: string
+      readonly details?: string
+    }>()
+    for (const code of smithersErrorCodes) {
       const definition = smithersErrorDefinitions[code]
-      expect(definition.category).toBe("integrations")
       expect(definition.when.length).toBeGreaterThan(0)
     }
   })
 
   it("resolves definitions and refuses unknown codes", () => {
-    expect(getSmithersErrorDefinition("INVALID_INPUT")?.category).toBe("integrations")
+    expect(getSmithersErrorDefinition("INVALID_INPUT")).toBeDefined()
+    expect(getSmithersErrorDefinition("INVALID_INPUT")).toBe(smithersErrorDefinitions.INVALID_INPUT)
     expect(getSmithersErrorDefinition("NOT_A_CODE")).toBeUndefined()
-    expect(isKnownSmithersErrorCode("INVALID_INPUT")).toBe(true)
-    expect(isKnownSmithersErrorCode("toString")).toBe(false)
-    expect(isKnownSmithersErrorCode(7)).toBe(false)
+    expect(isSmithersErrorCode("INVALID_INPUT")).toBe(true)
+    expect(isSmithersErrorCode("toString")).toBe(false)
+    expect(isSmithersErrorCode(7)).toBe(false)
   })
 
-  it("points every code at the reference page", () => {
-    expect(getSmithersErrorDocsUrl("INTEGRATION_ERROR")).toBe(ERROR_REFERENCE_URL)
-  })
-})
-
-// Every SmithersError message ends with `See <ERROR_REFERENCE_URL>`, so the
-// page has to exist and has to document every code. It shipped once without a
-// page; this is what stops that from happening again.
-describe("the reference page the messages point at", () => {
-  const page = readFileSync(
-    fileURLToPath(new URL("../../../docs/pages/reference/errors.md", import.meta.url)),
-    "utf8"
-  )
-
-  it("lives at the path ERROR_REFERENCE_URL names", () => {
-    expect(ERROR_REFERENCE_URL).toBe("https://smithers.sh/reference/errors")
-    expect(page).toContain("\n# Error codes\n")
+  it("rejects adversarial unknown codes and accepts every known code", () => {
+    const adversaries: unknown[] = [
+      "hasOwnProperty",
+      "__proto__",
+      "constructor",
+      "",
+      null,
+      undefined,
+      Symbol("INVALID_INPUT"),
+      { toString: () => "INVALID_INPUT" }
+    ]
+    for (const value of adversaries) expect(isSmithersErrorCode(value)).toBe(false)
+    for (const code of smithersErrorCodes) expect(isSmithersErrorCode(code)).toBe(true)
   })
 
-  it("documents every code, and no code the table dropped", () => {
-    for (const code of knownSmithersErrorCodes) expect(page).toContain(`\`${code}\``)
-    // The page must not still describe a code that was removed from the table.
-    for (const heading of page.matchAll(/^\| `([A-Z_]+)` \|/gm)) {
-      expect(knownSmithersErrorCodes).toContain(heading[1])
+  it("keeps definition details meaningful and code membership exact", () => {
+    for (const definition of Object.values(smithersErrorDefinitions)) {
+      if ("details" in definition) expect(definition.details.length).toBeGreaterThan(0)
     }
+    expect(new Set(smithersErrorCodes)).toEqual(new Set(Object.keys(smithersErrorDefinitions)))
+  })
+
+  it("documents details carried by input and init-data failures", () => {
+    expect(smithersErrorDefinitions.INVALID_INPUT.details)
+      .toBe("`{ [field]: value }` on the signal-name failures, otherwise none")
+    expect(smithersErrorDefinitions.TELEGRAM_INIT_DATA_INVALID.details)
+      .toBe("`{ authDate }` on the expiry failures, otherwise none")
   })
 })

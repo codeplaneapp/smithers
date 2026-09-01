@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto"
+import { isAbsolute } from "node:path"
 import { deflateSync } from "node:zlib"
 
 const MAX_BODY_BYTES = 1024 * 1024
@@ -8,6 +9,7 @@ export interface PackagedE2EBridgeOptions {
   readonly env?: Readonly<Record<string, string | undefined>>
   readonly state: () => unknown | Promise<unknown>
   readonly evaluate: (script: string) => unknown | Promise<unknown>
+  readonly queueRepositorySelection: (path: string | null) => void | Promise<void>
   readonly screenshot: () => Uint8Array | null | Promise<Uint8Array | null>
   readonly quit: () => void | Promise<void>
 }
@@ -39,7 +41,7 @@ const authorized = (request: Request, token: string): boolean => {
   return suppliedBytes.byteLength === expectedBytes.byteLength && timingSafeEqual(suppliedBytes, expectedBytes)
 }
 
-const readEvalScript = async (request: Request): Promise<string> => {
+const readJsonBody = async (request: Request): Promise<unknown> => {
   const declaredLength = Number(request.headers.get("content-length") ?? "0")
   if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
     throw new BridgeRequestError(413, "body_too_large", "Request body is too large.")
@@ -48,12 +50,15 @@ const readEvalScript = async (request: Request): Promise<string> => {
   if (bytes.byteLength > MAX_BODY_BYTES) {
     throw new BridgeRequestError(413, "body_too_large", "Request body is too large.")
   }
-  let body: unknown
   try {
-    body = JSON.parse(new TextDecoder().decode(bytes))
+    return JSON.parse(new TextDecoder().decode(bytes))
   } catch {
     throw new BridgeRequestError(400, "invalid_json", "Request body must be JSON.")
   }
+}
+
+const readEvalScript = async (request: Request): Promise<string> => {
+  const body = await readJsonBody(request)
   const script = typeof body === "object" && body !== null && "script" in body
     ? (body as { readonly script?: unknown }).script
     : undefined
@@ -61,6 +66,20 @@ const readEvalScript = async (request: Request): Promise<string> => {
     throw new BridgeRequestError(400, "invalid_request", "Body must be { script: string }.")
   }
   return script
+}
+
+const readRepositorySelection = async (request: Request): Promise<string | null> => {
+  const body = await readJsonBody(request)
+  if (typeof body !== "object" || body === null || Array.isArray(body) ||
+      Object.keys(body).length !== 1 || !("path" in body)) {
+    throw new BridgeRequestError(400, "invalid_request", "Body must be exactly { path: absolutePath | null }.")
+  }
+  const path = (body as { readonly path?: unknown }).path
+  if (path === null) return null
+  if (typeof path !== "string" || path.trim() === "" || path.length > 32_768 || !isAbsolute(path)) {
+    throw new BridgeRequestError(400, "invalid_request", "Repository path must be null or a non-empty absolute path.")
+  }
+  return path
 }
 
 class BridgeRequestError extends Error {
@@ -112,6 +131,10 @@ export const startPackagedE2EBridge = (
           const result = await options.evaluate(await readEvalScript(request))
           return json(200, result === undefined ? { result: null, valueUndefined: true } : { result })
         }
+        if (url.pathname === "/window/repository-picker" && request.method === "POST") {
+          await options.queueRepositorySelection(await readRepositorySelection(request))
+          return json(202, { ok: true })
+        }
         if (url.pathname === "/window/screenshot" && request.method === "GET") {
           const screenshot = await options.screenshot()
           if (screenshot === null) {
@@ -136,7 +159,8 @@ export const startPackagedE2EBridge = (
         const allowed = url.pathname === "/health" || url.pathname === "/state" ||
             url.pathname === "/window/screenshot" ?
           "GET" :
-          url.pathname === "/window/eval" || url.pathname === "/app/quit"
+          url.pathname === "/window/eval" || url.pathname === "/window/repository-picker" ||
+              url.pathname === "/app/quit"
           ? "POST"
           : undefined
         return allowed === undefined
@@ -187,7 +211,7 @@ const pngChunk = (type: string, data: Uint8Array): Uint8Array => {
   return chunk
 }
 
-/** Encodes Electrobun Screen.captureRegion RGBA bytes without another dependency. */
+/** Encodes Electrobun Screen.captureRegion's bottom-up RGBA bytes without another dependency. */
 export const encodeRgbaPng = (width: number, height: number, pixels: Uint8Array): Uint8Array => {
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1) {
     throw new Error("PNG dimensions must be positive integers.")
@@ -204,8 +228,9 @@ export const encodeRgbaPng = (width: number, height: number, pixels: Uint8Array)
   const scanlines = new Uint8Array((stride + 1) * height)
   for (let row = 0; row < height; row += 1) {
     const target = row * (stride + 1)
+    const source = (height - row - 1) * stride
     scanlines[target] = 0
-    scanlines.set(pixels.subarray(row * stride, (row + 1) * stride), target + 1)
+    scanlines.set(pixels.subarray(source, source + stride), target + 1)
   }
 
   const signature = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])

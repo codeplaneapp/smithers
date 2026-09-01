@@ -4,15 +4,15 @@
  * Revived from the module deleted at `f5f3dda` (then
  * `packages/keys/src/StepKey.ts`). Two deliberate deviations from the original:
  *
- * 1. **It lives here, not in `@smthrs/keys`.** That package was reduced to the
- *    single `Key` transformation on purpose; a compiler that understands plan
+ * 1. **It lives here, not in `@smthrs/keys`.** That package owns generic
+ *    derivation and stored-key validation; a compiler that understands plan
  *    material belongs above it.
  * 2. **It produces `@smthrs/keys` `Key` values, not a second `sk1_` digest
  *    format.** The original minted its own prefix over a private `Digest`
  *    module. The engine dispatches under `Key` (`FlowEngine/ActionKey.ts`),
  *    so a plan whose node keys were a *different* string format could never be
- *    the thing the cache is consulted against — and that is the whole point of
- *    `docs/specs/Specs/Object Model.md`'s `Plan`. One key format, one hashing
+ *    the thing the cache is consulted against, and that is the whole point of
+ *    a `Plan`. One key format, one hashing
  *    chokepoint (canonical JSON + injected `Crypto`), one namespace field
  *    (`kind`) distinguishing content keys from ordinal ones.
  *
@@ -21,11 +21,13 @@
  * normalization, the separate environment namespace, per-variant tagging of
  * resolved references, and the hashed `version`.
  *
- * Governing contract: `docs/specs/Concepts/Step Keys.md`.
+ * Governing contract: the step-key rules at
+ * https://smithers.sh/concepts/step-keys.
  *
  * @since 0.1.0
  */
 import { Key } from "@smthrs/keys"
+import * as Cause from "effect/Cause"
 import type * as Crypto from "effect/Crypto"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -134,18 +136,26 @@ export const isDigestInput = (value: unknown): value is DigestInput =>
  *
  * `runScope` is set only when `declared` is `false`: it pins the key to one
  * run, so a step whose environment identity is unknown can never serve a
- * cross-run hit.
+ * cross-run hit. The union enforces this for typed callers; both
+ * {@link content} and {@link dispatchIdentity} validate it at run time.
  *
  * @since 0.1.0
  * @category models
  * @slop
  */
-export interface EnvironmentIdentity {
-  readonly declared: boolean
-  readonly layers: ReadonlyArray<string>
-  readonly capabilities: Readonly<Record<string, ReadonlyArray<string>>>
-  readonly runScope?: string | undefined
-}
+export type EnvironmentIdentity =
+  | {
+    readonly declared: true
+    readonly layers: ReadonlyArray<string>
+    readonly capabilities: Readonly<Record<string, ReadonlyArray<string>>>
+    readonly runScope?: undefined
+  }
+  | {
+    readonly declared: false
+    readonly layers: ReadonlyArray<string>
+    readonly capabilities: Readonly<Record<string, ReadonlyArray<string>>>
+    readonly runScope: string
+  }
 
 /**
  * Caller-owned memoization context for projected dependency-value digests.
@@ -178,26 +188,32 @@ export interface DigestMemo {
  */
 export const makeDigestMemo = (): DigestMemo => {
   const entries = new Map<string, Deferred.Deferred<StepKey, Schema.SchemaError>>()
-  return {
-    digest: (from, path, compute) =>
-      Effect.suspend(() => {
-        const address = JSON.stringify([from, path])
-        const existing = entries.get(address)
-        if (existing !== undefined) return Deferred.await(existing)
-        const pending = Deferred.makeUnsafe<StepKey, Schema.SchemaError>()
-        entries.set(address, pending)
-        return compute.pipe(
-          Effect.onExit((exit) =>
-            Effect.gen(function*() {
-              if (Exit.isFailure(exit) && entries.get(address) === pending) {
-                entries.delete(address)
-              }
-              yield* Deferred.done(pending, exit)
-            })
-          )
+  const digest: DigestMemo["digest"] = (from, path, compute) =>
+    Effect.suspend(() => {
+      const address = JSON.stringify([from, path])
+      const existing = entries.get(address)
+      if (existing !== undefined) {
+        return Effect.flatMap(Effect.exit(Deferred.await(existing)), (exit) => {
+          if (Exit.isSuccess(exit)) return Effect.succeed(exit.value)
+          // A waiter did not request the leader's cancellation. It competes to
+          // become the replacement leader instead of inheriting that interrupt.
+          return Cause.hasInterrupts(exit.cause) ? digest(from, path, compute) : Effect.failCause(exit.cause)
+        })
+      }
+      const pending = Deferred.makeUnsafe<StepKey, Schema.SchemaError>()
+      entries.set(address, pending)
+      return compute.pipe(
+        Effect.onExit((exit) =>
+          Effect.gen(function*() {
+            if (Exit.isFailure(exit) && entries.get(address) === pending) {
+              entries.delete(address)
+            }
+            yield* Deferred.done(pending, exit)
+          })
         )
-      })
-  }
+      )
+    })
+  return { digest }
 }
 
 /**
@@ -243,9 +259,34 @@ export interface OrdinalIdentity {
  * @slop
  */
 export class KeyMaterialError extends Schema.TaggedError<KeyMaterialError>()("@smthrs/plan/KeyMaterialError", {
-  code: Schema.Literals(["missing_dependency", "non_content_material"]),
+  code: Schema.Literals(["invalid_environment", "missing_dependency", "non_content_material"]),
   message: Schema.String
 }) {}
+
+const validateEnvironment = (environment: EnvironmentIdentity): KeyMaterialError | undefined => {
+  const candidate = environment as { readonly declared?: unknown; readonly runScope?: unknown }
+  if (candidate.declared === false) {
+    if (typeof candidate.runScope !== "string" || candidate.runScope.length === 0) {
+      return new KeyMaterialError({
+        code: "invalid_environment",
+        message: "Undeclared environment identity requires a non-empty runScope"
+      })
+    }
+    return undefined
+  }
+  if (candidate.declared === true) {
+    return candidate.runScope === undefined
+      ? undefined
+      : new KeyMaterialError({
+        code: "invalid_environment",
+        message: "Declared environment identity must not include runScope"
+      })
+  }
+  return new KeyMaterialError({
+    code: "invalid_environment",
+    message: "Environment identity requires a boolean declared field"
+  })
+}
 
 const sortStrings = (values: ReadonlyArray<string>): Array<string> =>
   [...new Set(values.map((value) => value.normalize("NFC")))].sort()
@@ -336,15 +377,21 @@ const decodeKey = Schema.decodeUnknownEffect(Key)
  */
 export const content = (
   identity: ContentIdentity
-): Effect.Effect<StepKey, Schema.SchemaError, Crypto.Crypto> =>
-  decodeKey({
-    kind: "content",
-    body: identity.body,
-    inputs: normalizeInputs(identity.inputs),
-    layers: sortStrings(identity.layers),
-    capabilities: normalizeCapabilities(identity.capabilities),
-    ...(identity.environment === undefined ? {} : { environment: normalizeEnvironment(identity.environment) }),
-    ...(identity.hermetic === undefined ? {} : { hermetic: normalizeHermetic(identity.hermetic) })
+): Effect.Effect<StepKey, KeyMaterialError | Schema.SchemaError, Crypto.Crypto> =>
+  Effect.gen(function*() {
+    if (identity.environment !== undefined) {
+      const invalid = validateEnvironment(identity.environment)
+      if (invalid !== undefined) return yield* invalid
+    }
+    return yield* decodeKey({
+      kind: "content",
+      body: identity.body,
+      inputs: normalizeInputs(identity.inputs),
+      layers: sortStrings(identity.layers),
+      capabilities: normalizeCapabilities(identity.capabilities),
+      ...(identity.environment === undefined ? {} : { environment: normalizeEnvironment(identity.environment) }),
+      ...(identity.hermetic === undefined ? {} : { hermetic: normalizeHermetic(identity.hermetic) })
+    })
   })
 
 /**
@@ -395,12 +442,29 @@ export const fromKeyMaterial = (
       inputs[String(index)] = input.value
       continue
     }
-    const digest = dependencyDigests[input.from]
-    if (digest === undefined) {
+    const descriptor = Object.getOwnPropertyDescriptor(dependencyDigests, input.from)
+    if (descriptor === undefined) {
       return Effect.fail(
         new KeyMaterialError({
           code: "missing_dependency",
           message: `Missing digest for graph dependency ${input.from}`
+        })
+      )
+    }
+    if (!("value" in descriptor)) {
+      return Effect.fail(
+        new KeyMaterialError({
+          code: "missing_dependency",
+          message: `Digest for graph dependency ${input.from} must be a data property`
+        })
+      )
+    }
+    const digest: unknown = descriptor.value
+    if (typeof digest !== "string") {
+      return Effect.fail(
+        new KeyMaterialError({
+          code: "missing_dependency",
+          message: `Digest for graph dependency ${input.from} must be a string`
         })
       )
     }
@@ -445,8 +509,9 @@ const materialBody = (material: KeyMaterial.KeyMaterial) => ({
 const orderingOnly = "ordering-only"
 
 /**
- * Projects a settled result along a `Ref` path. A segment that does not exist
- * yields `undefined`, which is a stable, distinct value — a projection that
+ * Projects a settled result along a `Ref` path. Only own data properties
+ * resolve, so a missing, inherited, or accessor segment yields `undefined`
+ * without invoking a getter. This is a stable, distinct value: a projection that
  * walks off the end of a result is a fact about the graph, not a failure.
  * `undefined` drops out of the canonical form, so it hashes distinctly from
  * every JSON value including `null`.
@@ -465,7 +530,9 @@ export const project = (value: unknown, path: ReadonlyArray<string>): unknown =>
   let current = value
   for (const segment of path) {
     if (typeof current !== "object" || current === null) return undefined
-    current = (current as Record<string, unknown>)[segment]
+    const descriptor = Object.getOwnPropertyDescriptor(current, segment)
+    if (descriptor === undefined || !("value" in descriptor)) return undefined
+    current = descriptor.value
   }
   return current
 }
@@ -514,6 +581,10 @@ export const dispatchIdentity = (options: {
         message: `Cannot create a dispatch key for ${material.kind} material`
       })
     }
+    if (options.environment !== undefined) {
+      const invalid = validateEnvironment(options.environment)
+      if (invalid !== undefined) return yield* invalid
+    }
     const inputs: Record<string, unknown> = {}
     for (let index = 0; index < material.inputs.length; index++) {
       const input = material.inputs[index]!
@@ -525,13 +596,20 @@ export const dispatchIdentity = (options: {
         inputs[String(index)] = digestInput(orderingOnly, { reference: "pending" })
         continue
       }
-      if (!Object.hasOwn(options.results, input.from)) {
+      const descriptor = Object.getOwnPropertyDescriptor(options.results, input.from)
+      if (descriptor === undefined) {
         return yield* new KeyMaterialError({
           code: "missing_dependency",
           message: `Missing settled result for graph dependency ${input.from}`
         })
       }
-      const compute = decodeKey({ kind: "input-value", value: project(options.results[input.from], input.path) })
+      if (!("value" in descriptor)) {
+        return yield* new KeyMaterialError({
+          code: "missing_dependency",
+          message: `Settled result for graph dependency ${input.from} must be a data property`
+        })
+      }
+      const compute = decodeKey({ kind: "input-value", value: project(descriptor.value, input.path) })
       const digest = yield* (
         options.digestMemo === undefined ? compute : options.digestMemo.digest(input.from, input.path, compute)
       )
