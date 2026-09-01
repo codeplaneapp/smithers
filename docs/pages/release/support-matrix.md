@@ -22,7 +22,7 @@ which is frozen for this candidate. A row here and a row there are the same row.
 | Browser | Bundleable entry points only. No durable execution. | Bundles under esbuild `--platform=browser` as proven by `scripts/browser-check.mjs`. |
 | Linux x64 | Supported; the required CI lanes run here. | Ubuntu runner. |
 | macOS | Supported for development and the Phase 7 manual smoke; the `packages` CI matrix runs the package suites on `macos-latest` as an advisory row. | arm64 and x64. |
-| Windows | Unsupported. | none |
+| Windows | Unsupported. The `packages` CI matrix runs the package suites on `windows-latest` as an advisory row. | none |
 
 ## Databases
 
