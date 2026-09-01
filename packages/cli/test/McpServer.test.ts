@@ -6,7 +6,7 @@
  * by the code that consumes them rather than by a reimplementation.
  */
 import { NodeServices } from "@effect/platform-node"
-import { Control as ControlService } from "@smthrs/control"
+import { Control as ControlService, ControlRuntime } from "@smthrs/control"
 import * as TestControl from "@smthrs/control/test/TestControl"
 import * as McpClient from "@smthrs/mcp/McpClient"
 import { Effect, Layer } from "effect"
@@ -134,6 +134,51 @@ describe("the envelope", () => {
     })
 
     expect(result).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } })
+  })
+
+  /**
+   * The scope decides how long a capability grant outlives the ask, so an
+   * unreadable one may never be resolved by guessing. `run` is the widest
+   * scope a single call can install, and coercing silence into it hands an
+   * MCP client the whole run's capabilities for an argument it never sent.
+   */
+  const approveWithScope = (scope: Record<string, unknown>) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const service = yield* ControlService.Control
+        const runtime = yield* ControlRuntime.ControlRuntime
+        const card = yield* service.plan({ flowId: "system/test", input: {} })
+        const result = yield* find("resolve_approval").call({
+          approval: { ...card.approval, idempotencyKey: "mcp:scope" },
+          decision: "approve",
+          ...scope
+        })
+        const grants = yield* runtime.grants
+        return { result, scopes: grants.map((grant) => grant.scope) }
+      }).pipe(Effect.provide(control), Effect.orDie)
+    )
+
+  it("grants an omitted approval scope once, never for the whole run", async () => {
+    const observed = await approveWithScope({})
+
+    expect(observed.result).toMatchObject({ ok: true })
+    expect(observed.scopes).toEqual(["once"])
+  })
+
+  it("keeps an explicit approval scope", async () => {
+    expect((await approveWithScope({ scope: "remembered" })).scopes).toEqual(["remembered"])
+  })
+
+  it("refuses an approval scope it does not recognise instead of widening it", async () => {
+    for (const scope of ["onceX", "forever", "", 7, null]) {
+      const observed = await approveWithScope({ scope })
+
+      expect([scope, observed.result]).toEqual([scope, {
+        ok: false,
+        error: { code: "INVALID_INPUT", message: "scope must be \"once\", \"run\", or \"remembered\"" }
+      }])
+      expect([scope, observed.scopes]).toEqual([scope, []])
+    }
   })
 
   it("reports a run the control plane does not know", async () => {

@@ -7,11 +7,15 @@ import { NodeCrypto, NodeHttpClient, NodeHttpServer, NodeServices, NodeSocket } 
 import type * as Undici from "@effect/platform-node/Undici"
 import * as Agent from "@smthrs/agent/Agent"
 import * as AgentSession from "@smthrs/agent/AgentSession"
+import * as Budget from "@smthrs/agent/Budget"
 import * as FlowEngineLike from "@smthrs/agent/FlowEngineLike"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import * as StandardFlows from "@smthrs/agent/StandardFlows"
 import * as WorkspaceObservation from "@smthrs/agent/WorkspaceObservation"
+import { CapabilityPattern } from "@smthrs/capability/Capability"
+import { Rule } from "@smthrs/capability/Permission"
 import {
   ControlExecutor,
   ControlRpcs,
@@ -49,7 +53,7 @@ import * as RequestExecutor from "@smthrs/model/RequestExecutor"
 import * as Route from "@smthrs/model/Route"
 import type { NotificationQueue } from "@smthrs/notifications"
 import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
-import type * as Descriptor from "@smthrs/registry/Descriptor"
+import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Discovery from "@smthrs/registry/Discovery"
 import * as Registry from "@smthrs/registry/Registry"
 import { Migrations as RunStoreMigrations, Ownership, RunStore } from "@smthrs/run-store"
@@ -261,15 +265,40 @@ export const projectSources = (root: string): ReadonlyArray<Descriptor.Source> =
 export const layerHostPlatform = Layer.provideMerge(AtomicFileSystem.layer, NodeServices.layer)
 
 /**
+ * The local CLI's real permission store.
+ *
+ * Its configured rule preserves the operator-owned CLI's allow policy, while
+ * the real store still enforces the fiber's capability ceiling. This is
+ * intentionally distinct from `GrantStore.layerNoop`, which skips both policy
+ * evaluation and ceiling enforcement and is suitable only as an explicit test
+ * input.
+ *
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerGrantStore = (root: string): Layer.Layer<GrantStore.GrantStore> =>
+  GrantStore.layer({
+    attended: false,
+    rules: [
+      new Rule({
+        effect: "allow",
+        pattern: new CapabilityPattern({ action: "*", resource: "*" })
+      })
+    ]
+  }).pipe(
+    Layer.provide(Workspace.layer(resolve(root))),
+    Layer.orDie
+  )
+
+/**
  * The kernel-guarded platform over one workspace root: every filesystem
  * operation resolved, authorized, re-resolved, and executed relative to a
  * pinned root descriptor.
  *
  * `grants` is the store the kernel asks before it authorizes an operation, and
  * it is a parameter rather than a constant so that one composition cannot end
- * up asking two different stores. The default is the allow-all one because the
- * local CLI is the operator's own process; a hosted composition supplies a real
- * `GrantStore`, and must supply the same one it gives
+ * up asking two different stores. The default is the local CLI's real store;
+ * a hosted composition may supply a stricter `GrantStore`, and must supply the same one it gives
  * `KernelChildProcessSpawner` — a filesystem pinned to the allow-all store
  * beside a shell pinned to a real one is a fail-open the types would not catch.
  *
@@ -287,7 +316,7 @@ export const layerHostPlatform = Layer.provideMerge(AtomicFileSystem.layer, Node
  */
 export const layerGuardedPlatform = (
   root: string,
-  grants: Layer.Layer<GrantStore.GrantStore> = GrantStore.layerNoop
+  grants: Layer.Layer<GrantStore.GrantStore> = layerGrantStore(root)
 ) =>
   Layer.orDie(KernelFileSystem.layer).pipe(
     Layer.provide([Workspace.layer(root), grants]),
@@ -376,18 +405,34 @@ export const executionDatabasePath = (root: string): string => join(root, ".flow
  * @slop
  */
 export interface EngineDurable extends Application.Engine {
-  readonly stores: Layer.Layer<DurableWriter.DurableWriter | SqlClient>
+  readonly stores: Layer.Layer<DurableWriter.DurableWriter | SqlClient | RunStore.RunStore>
 }
 
-/** The reserved system catalog in the durable runtime's flow shape. */
+/**
+ * The reserved system catalog in the durable runtime's flow shape.
+ *
+ * The reserved verbs make no model calls of their own, so there is nothing for
+ * a ceiling to bound and `Descriptor.budgetUnbounded` says so by name rather
+ * than by an unlabelled `{}`.
+ */
 const systemFlows: ReadonlyArray<ControlRuntime.MemoryFlow> = SystemFlows.catalog.map((entry) => ({
   flowId: entry.flowId,
   description: `Reserved ${entry.verb} system flow`,
   deployClass: entry.deployClass,
-  envelope: { capabilities: [], flows: [], budget: {} }
+  envelope: { capabilities: [], flows: [], budget: Descriptor.budgetUnbounded }
 }))
 
-/** Projects one discovered flow into the durable runtime's flow shape. */
+/**
+ * Projects one discovered flow into the durable runtime's flow shape.
+ *
+ * The budget travels with the capabilities because it is enforced the same way
+ * they are: `layerExecutor` hands `Budget.layerFromEnvelope` to `AgentSession`,
+ * which builds one budget per run out of the approved card's envelope. A
+ * hardcoded `{}` here made that enforcement bind nothing on the shipped CLI,
+ * however carefully a flow declared its ceilings. `Descriptor.budgetOf` answers
+ * the undeclared case with `budgetUnbounded`, so a flow that names no ceiling
+ * still runs and a flow that names one is held to it.
+ */
 const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.MemoryFlow => ({
   flowId: descriptor.name,
   description: descriptor.description,
@@ -395,7 +440,7 @@ const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.Memo
   envelope: {
     capabilities: descriptor.capabilities,
     flows: descriptor.flows,
-    budget: {}
+    budget: Descriptor.budgetOf(descriptor)
   }
 })
 
@@ -766,6 +811,12 @@ const rebuildableUndici: Effect.Effect<RequestExecutor.RequestExecutor, never, S
   RequestExecutor.makeWith
 )
 
+/** The production model transport, replaceable only at the composition boundary. */
+const layerRequestExecutor: Layer.Layer<RequestExecutor.RequestExecutor> = Layer.effect(
+  RequestExecutor.RequestExecutor,
+  rebuildableUndici
+)
+
 /**
  * Provides the production run executor: the `@smthrs/agent` composition root
  * over the durable control stores, the local flow registry, and the standard
@@ -795,14 +846,16 @@ export const layerExecutor = (
    * shell, and memory below. Empty by default: a host that names none behaves
    * exactly as it always has.
    */
-  mcpServers: ReadonlyArray<McpClient.ConnectOptions> = []
+  mcpServers: ReadonlyArray<McpClient.ConnectOptions> = [],
+  grants: Layer.Layer<GrantStore.GrantStore> = layerGrantStore(root),
+  requestExecutor: Layer.Layer<RequestExecutor.RequestExecutor> = layerRequestExecutor,
+  quotaPolicy: Layer.Layer<QuotaPolicy.QuotaClassifier> = QuotaPolicy.layerDefault()
 ): Layer.Layer<
   ControlExecutor.ControlExecutor,
   never,
   ControlRuntime.ControlRuntime | Journal.Journal | NotificationQueue.NotificationQueue | Registry.Registry
 > => {
   const workspaceRoot = resolve(root)
-  const grants = GrantStore.layerNoop
   // The same guarded platform the registry discovers under: kernel FileSystem
   // over descriptor-relative atomic access, with the Node service bundle
   // (Path, raw spawner, crypto) merged through. `grants` is passed rather than
@@ -825,7 +878,6 @@ export const layerExecutor = (
   // `makeDispatcher` acquires a fresh one, so the honest rebuild here is a new
   // agent in a scope of its own — the previous one is closed as soon as the new
   // one is in hand, so a run that rebuilds many times still holds one pool.
-  const dispatcher = Layer.effect(RequestExecutor.RequestExecutor)(rebuildableUndici)
   const registration = Layer.effect(ControlExecutor.ControlExecutor)(
     Effect.gen(function*() {
       const filesystemServices = yield* Effect.context<FileSystem.FileSystem | Path.Path>()
@@ -852,7 +904,9 @@ export const layerExecutor = (
           ...testFlows(shellServices, container, runner),
           ...mcp
         ],
-        limits: cellLimits
+        limits: cellLimits,
+        quotaPolicy,
+        budget: Budget.layerFromEnvelope
       })
     })
   ).pipe(
@@ -874,7 +928,7 @@ export const layerExecutor = (
       // between a run that can prove fails-before without reverting its own
       // work and one that cannot.
       Checkpoints.layerGit(checkpointStore(environment, root)),
-      layerSeatResolver(environment).pipe(Layer.provide(dispatcher))
+      layerSeatResolver(environment).pipe(Layer.provide(requestExecutor))
     ])
   )
   return NodeFlowsRuntime.layer(
