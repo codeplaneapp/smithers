@@ -1,10 +1,12 @@
 /**
- * @since 0.1.0
- *
- * `/model` — the provider Model layer.
+ * The provider Model layer: provider-neutral requests and streaming events on
+ * one side, protocol, endpoint, authentication and transport on the other.
  *
  * Modules are re-exported as namespaces, following `effect`'s index style,
- * so provider contracts and their constructors remain unambiguous.
+ * so provider contracts and their constructors remain unambiguous. Every
+ * namespace is also importable on its own subpath, `@smthrs/model/Route`.
+ *
+ * @since 0.1.0
  */
 
 /**

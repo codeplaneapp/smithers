@@ -1,29 +1,36 @@
-# /model
+# @smthrs/model
 
-## [Unreleased]
-
-### Added
-
-- Added `RequestExecutor.Transport`, `RequestExecutor.fixed`, `RequestExecutor.makeWith` and `RequestExecutor.rebuildAfter`: the executor may now replace the HTTP client it runs on after three consecutive transport failures. A retry ladder repairs a failure by waiting, and an HTTP/2 session the peer has destroyed is the failure waiting does not repair — every attempt that reuses the pool holding it fails identically. Three is exactly what one `execute` spends when every attempt fails on the transport — the first attempt plus this executor's own two retries — so no attempt inside a request ever runs on a client that request discarded, and any response of any kind resets the count because a 429 arrived over a connection that worked. `make` keeps a fixed transport, which is the honest answer in a browser where there is no pool to replace.
-
-### Changed
-
-- Endpoint and built-in route constructors now return `Result`, making
-  validation failures explicit instead of throwing. Request lowering and
-  protocol state-machine failures now remain in typed Effect failure channels.
+## [1.0.0-rc.0] - 2026-09-01
 
 ### Added
 
 - Added Schema-first Anthropic Messages and OpenAI Responses protocols, deterministic route composition, deferred tool loading, typed streaming events, and a redacting request executor.
-- Added `ToolChoice` and the optional `ModelRequest.toolChoice` field, so a
-  frame that declares no tools can say so in the schema rather than have the
-  value attached to the request afterwards.
-- Added the `context_overflow` `ModelErrorCode` and `ModelError.isContextOverflow`,
-  so a request that did not fit the model's context window is a typed code
-  rather than a phrase a consumer has to re-parse. The Anthropic Messages and
-  OpenAI Responses protocols and the shared request executor now classify their
-  own overflow vocabulary ahead of the generic `invalid_request` branch.
+- Added the OpenAI Chat Completions protocol (`OpenAIChatCompletions`), the wire shape Ollama, Gemini's compatibility layer, Cerebras and most other self-hosted or third-party "OpenAI-compatible" servers actually serve, and exported it from the root barrel.
+- Added the native-structured-output toggle: `OpenAIChatCompletions.protocolWith({ structuredOutput })` and the `structuredOutput` option on the Chat Completions route constructor send `response_format` so the provider enforces the schema. A request that also declares tools fails locally as `invalid_request`, because the provider refuses both together.
+- Added the ChatGPT-subscription Responses route (`OpenAIChatGPT.make`, `OpenAIResponses.chatgptProtocol`, `OpenAIResponses.ChatGPTBody`). That backend rejects `max_output_tokens`, so the route omits `params.maxTokens` by design.
+- Added `Route.openaiResponsesCompatible` and `Route.openaiChatCompatible`. Both take the provider origin and append `/v1/responses` or `/v1/chat/completions` themselves, so one origin cannot yield two different URLs. `Route.openaiCompatible` and `OpenAICompatible.make` keep their current behaviour and are deprecated.
+- Added `RequestExecutor.Transport`, `RequestExecutor.fixed`, `RequestExecutor.makeWith` and `RequestExecutor.rebuildAfter`: the executor may now replace the HTTP client it runs on after three consecutive transport failures. A retry ladder repairs a failure by waiting, and an HTTP/2 session the peer has destroyed is the failure waiting does not repair, because every attempt that reuses the pool holding it fails identically. Three is exactly what one `execute` spends when every attempt fails on the transport, so no attempt inside a request ever runs on a client that request discarded, and any response of any kind resets the count because a 429 arrived over a connection that worked. `make` keeps a fixed transport, which is the honest answer in a browser where there is no pool to replace.
+- Added `ToolChoice` and the optional `ModelRequest.toolChoice` field, so a frame that declares no tools can say so in the schema rather than have the value attached to the request afterwards. Every built-in encoder now omits `tools` when it is `"none"`.
+- Added the `context_overflow` `ModelErrorCode` and `ModelError.isContextOverflow`, so a request that did not fit the model's context window is a typed code rather than a phrase a consumer has to re-parse. The protocols and the shared request executor classify their own overflow vocabulary ahead of the generic `invalid_request` branch.
+- Added `ModelError.isQuotaExhausted` and `ModelError.path`. The refinement gives an exhausted account one typed code across every provider; the path names the offending request member on a preparation failure and never carries its value.
+- Added `Framing.ndjson` for newline-delimited JSON transports.
+- Added package-owned documentation: `docs/`, `Package.ts` and `scripts/docs.mjs` generate `docs/pages/api/model.md` and the public-API table in this README from package sources.
+
+### Changed
+
+- Endpoint and built-in route constructors now return `Result`, making validation failures explicit instead of throwing. Request lowering and protocol state-machine failures now remain in typed Effect failure channels.
+- `Endpoint.make` accepts only `http` and `https` URLs, rejects relative path segments, and no longer echoes the raw URL in its parse failure.
+- The credential-name matcher no longer treats `max_tokens`, `budget_tokens` or `max_output_tokens` as secrets, so provider diagnostics quoting those numbers stay readable, and an endpoint may carry them as query parameters.
+- `RequestExecutor` classifies 401 and 403 before it looks for content-policy vocabulary, and reads that vocabulary from the parsed provider error rather than from the whole body.
 
 ### Fixed
 
+- Anthropic credit exhaustion, OpenAI's spaced "credit balance" phrasing and a bare HTTP 402 now classify as `quota_exceeded`, so an exhausted seat parks durably instead of terminating the run as a malformed request.
+- A `Retry-After` header no longer escapes the 60 second retry budget. It is bounded by the per-wait cap, and a value larger than the budget surfaces immediately with its reset metadata instead of parking the fiber for the header's full value.
+- Anthropic `redacted_thinking` blocks stream and replay instead of being dropped, so a turn whose reasoning was safety-redacted can still be sent back with its tool calls.
+- Inline Chat Completions stream errors are classified by the protocol's own vocabulary instead of always reporting `provider_internal`, so a gateway that reports a rate limit or an exhausted quota inside an HTTP 200 stream is handled as that failure.
+- An Anthropic `tool_use` block missing its id or name now fails with `invalid_provider_output` instead of fabricating an id and an empty tool name.
+- `response.incomplete` reads `incomplete_details.reason`, so a filtered OpenAI Responses answer settles as `content-filter` rather than `length`.
+- Canonical JSON encodes an own `__proto__` member instead of silently dropping it, so the sealed-step key always describes the body that was sent.
+- Provider diagnostics redact nested and escaped credential values structurally, and a failed response body is bounded before it is parsed, walked or redacted.
 - Preserved OpenAI reasoning item references across tool-call continuations and honored initially deferred tool declarations in native and fallback lowering.
