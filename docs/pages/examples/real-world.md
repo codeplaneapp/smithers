@@ -11,9 +11,9 @@ These examples are small enough to understand in one sitting, but model jobs tha
 Use an `Action` for one unit of work and a `Flow` for the graph that calls it. The implementation lives in a layer, so tests and deployments can provide different implementations without changing the flow.
 
 ```ts
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
-import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
@@ -30,9 +30,7 @@ const ChargeCustomer = Flow.make("billing/ChargeCustomer", {
 })
 
 const AppLayer = Layer.mergeAll(
-  SendReceipt.toLayer(({ customer, amount }) =>
-    Effect.succeed(`Sent $${amount} receipt to ${customer}`)
-  ),
+  SendReceipt.toLayer(({ customer, amount }) => Effect.succeed(`Sent $${amount} receipt to ${customer}`)),
   Interpreter.layer(ChargeCustomer)
 ).pipe(
   Layer.provideMerge(Action.layerImplementations),
@@ -69,7 +67,7 @@ const Release = Flow.make("deploy/ReleaseFlow", {
 })
 
 const deploy = ({ version }: { version: string }) =>
-  Effect.gen(function* () {
+  Effect.gen(function*() {
     const artifact = yield* BuildArtifact // sealed and cached
     const decision = yield* DurableDeferred.await(Approval)
     return `${version}:${artifact}:${decision}`
@@ -93,10 +91,10 @@ const suspend = Release.execute(
   { executionId: "release-2.4.0", discard: true }
 ).pipe(Effect.provide(WorkerALayer))
 
-yield* suspend
+yield * suspend
 
 // Later, worker B uses the same database and resumes the run.
-const resume = Effect.gen(function* () {
+const resume = Effect.gen(function*() {
   const runtime = yield* FlowRuntime.FlowRuntime
   yield* runtime.deferredDone(Approval, {
     flowName: Release._tag,
@@ -111,7 +109,7 @@ const resume = Effect.gen(function* () {
   )
 }).pipe(Effect.provide(WorkerBLayer))
 
-const result = yield* resume
+const result = yield * resume
 ```
 
 The full example creates two engine layers over one real SQLite file and asserts that work before the suspension dispatches only once. See [`03-crash-and-resume.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/03-crash-and-resume.ts).
@@ -134,7 +132,7 @@ const Upload = Action.make({
   success: Schema.String,
   error: TemporaryFailure,
   tier: "sealed",
-  execute: Effect.gen(function* () {
+  execute: Effect.gen(function*() {
     const attempt = yield* Action.CurrentAttempt
     if (attempt < 3) {
       return yield* Effect.fail(
@@ -145,7 +143,7 @@ const Upload = Action.make({
   })
 })
 
-const result = yield* Action.retry(Upload, { times: 3 })
+const result = yield * Action.retry(Upload, { times: 3 })
 ```
 
 The tested program also inspects the backoff ladder and proves that a non-retryable error short-circuits it. See [`04-retry-policy.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/04-retry-policy.ts).
@@ -176,8 +174,7 @@ const Write = AgentAction.make("content/Write", {
   output: Schema.Struct({ article: Schema.String }),
   seat: "anthropic:claude-sonnet-4-5",
   system: ["Write concise technical articles."],
-  prompt: ({ summary, keyPoints }) =>
-    `Summary: ${summary}\nPoints:\n${keyPoints.map((x) => `- ${x}`).join("\n")}`
+  prompt: ({ summary, keyPoints }) => `Summary: ${summary}\nPoints:\n${keyPoints.map((x) => `- ${x}`).join("\n")}`
 })
 
 const PublishArticle = Flow.make("content/PublishArticle", {
@@ -201,6 +198,8 @@ Use two typed agent actions and a trampoline handoff. The implementer receives t
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as Agent from "@smthrs/agent/Agent"
 import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Budget from "@smthrs/agent/Budget"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
@@ -231,7 +230,8 @@ const Implement = AgentAction.make("coding/Implement", {
     "Implement the requested change completely.",
     "When revising, address every reviewer comment. Return only the implementation."
   ],
-  prompt: ({ prompt, previousDraft, feedback }) => `
+  prompt: ({ prompt, previousDraft, feedback }) =>
+    `
 Task:
 ${prompt}
 
@@ -255,7 +255,8 @@ const ReviewImplementation = AgentAction.make("coding/Review", {
     "Return lgtm only when the implementation is ready to ship.",
     "Otherwise return changes_requested with specific, actionable feedback."
   ],
-  prompt: ({ prompt, implementation }) => `
+  prompt: ({ prompt, implementation }) =>
+    `
 Original task:
 ${prompt}
 
@@ -306,8 +307,7 @@ const ImplementUntilLgtm: ImplementUntilLgtmFlow = Flow.make(
         ),
         Node.branch({
           if: ({ review }) => review.verdict === "lgtm",
-          then: ({ implementation, round }) =>
-            Flow.done({ implementation, rounds: round }),
+          then: ({ implementation, round }) => Flow.done({ implementation, rounds: round }),
           else: ({ implementation, review, nextRound }) =>
             ImplementUntilLgtm.to({
               prompt,
@@ -326,6 +326,9 @@ const AppLayer = Layer.mergeAll(
   Interpreter.layer(ImplementUntilLgtm)
 ).pipe(
   Layer.provideMerge(Layer.mergeAll(agentHostLayer, seatResolverLayer, Agent.layer)),
+  // These are real model calls, so reset-bearing refusals park. This example
+  // has no approved plan envelope from which to derive a spend ceiling.
+  Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())),
   Layer.provideMerge(Agent.layerDefaults),
   Layer.provideMerge(Action.layerImplementations),
   Layer.provideMerge(FlowEngine.layerMemory),
