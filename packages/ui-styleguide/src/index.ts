@@ -1,11 +1,33 @@
+/**
+ * The Smithers house stylesheets: theme tokens for eight palettes in two modes,
+ * plus the base element and component rules that consume them.
+ *
+ * `docs/api.md` and `docs/theming.md` in this package own the prose contract.
+ *
+ * @since 1.0.0-rc.0
+ */
 import { reducedMotionCss } from "./standaloneThemeCss.ts";
-import { paletteThemeCss } from "./paletteThemeCss.ts";
+import { paletteThemeCss, type PaletteThemeCssOptions } from "./paletteThemeCss.ts";
+
+/**
+ * Just the theme token rules: the default palette plus one three-rule override
+ * block per selected palette, in the source order the cascade depends on.
+ *
+ * A host that pins a single palette can emit a subset instead of paying for
+ * all eight (roughly 2.4 KB of CSS each). `workflowUiThemeCss` is this with the
+ * primitive element and component rules appended.
+ *
+ * @throws {RangeError} when `palettes` names an unregistered key.
+ */
+export function themeCss(options: PaletteThemeCssOptions = {}): string {
+  return paletteThemeCss("'", options).join("\n");
+}
 
 export const workflowUiThemeCss = [
-  ...paletteThemeCss("'"),
+  themeCss(),
   "* { box-sizing:border-box; }",
   "body { min-width:320px; min-height:100vh; margin:0; background:var(--bg); color:var(--text); font-size:var(--fs-3); line-height:var(--lh-body); font-synthesis:none; text-rendering:optimizeLegibility; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }",
-  "::selection { background:color-mix(in srgb, var(--brand) 24%, transparent); }",
+  "::selection { background:var(--selection-bg); }",
   "button,input,textarea,select { font:inherit; }",
   "button { color:inherit; cursor:pointer; }",
   "button:disabled { cursor:not-allowed; }",
@@ -26,11 +48,16 @@ export const workflowUiThemeCss = [
   ".button:focus-visible,.primary:focus-visible,.secondary:focus-visible,.icon-button:focus-visible,.tab:focus-visible,.run-row:focus-visible,.doc-link:focus-visible,.segmented:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible { outline:none; border-color:var(--ring-border); box-shadow:0 0 0 3px var(--ring); }",
   ".button:disabled,.primary:disabled,.secondary:disabled { cursor:not-allowed; opacity:.45; }",
   ".button.primary,.primary { border-color:var(--brand-border); background:var(--brand-soft); color:var(--brand); font-weight:650; }",
-  ".button.primary:hover,.primary:hover { background:var(--brand-soft-strong); }",
-  ".button.primary:active:not(:disabled),.primary:active:not(:disabled) { background:color-mix(in srgb, var(--brand) 22%, var(--surface)); }",
+  // Hover and press on a tinted button move the border and the elevation, never
+  // the fill: the fill already carries brand-colored 13px text at the audited
+  // 10% tint, and every deeper tint drops that pair below WCAG AA in most
+  // palettes. `tests/themeRegistry.test.ts` enumerates the pairs this sheet
+  // paints, so a fill added here has to clear 4.5:1 to land.
+  ".button.primary:hover,.primary:hover { border-color:var(--brand-border-strong); box-shadow:var(--shadow-2); }",
+  ".button.primary:active:not(:disabled),.primary:active:not(:disabled) { border-color:var(--brand-border-strong); box-shadow:inset 0 1px 2px rgb(var(--shadow-rgb) / 0.20); }",
   ".button.danger,.danger { border-color:var(--danger-border); color:var(--danger); }",
   ".button.danger:hover,.danger:hover { background:var(--danger-soft); }",
-  ".button.danger:active:not(:disabled),.danger:active:not(:disabled) { background:color-mix(in srgb, var(--danger) 16%, var(--surface)); }",
+  ".button.danger:active:not(:disabled),.danger:active:not(:disabled) { background:var(--danger-soft); border-color:var(--danger-border-strong); box-shadow:inset 0 1px 2px rgb(var(--shadow-rgb) / 0.20); }",
   ".input,.textarea,.prompt,textarea.prompt,input[type='text'],input[type='search'],input[type='number'],select { min-width:0; border:1px solid var(--line); border-radius:var(--r-1); background:var(--panel); color:var(--text); outline:none; }",
   ".input,.prompt,input[type='text'],input[type='search'],input[type='number'],select { min-height:var(--ctl-h); padding:0 10px; }",
   ".textarea,textarea.prompt,textarea.input,textarea { padding:10px var(--sp-3); min-height:88px; resize:vertical; line-height:1.45; }",
@@ -95,10 +122,15 @@ export const workflowUiLayoutCss = [
 
 export const workflowUiStyles = [workflowUiThemeCss, workflowUiLayoutCss].join("\n");
 export { reducedMotionCss, standaloneThemeCss } from "./standaloneThemeCss.ts";
-export { DEFAULT_THEME_KEY, themeRegistry } from "./themeRegistry.ts";
+export { DEFAULT_THEME_KEY, findTheme, themeRegistry } from "./themeRegistry.ts";
+export type { ThemeKey } from "./themeRegistry.ts";
 export { serializeThemeVariant } from "./serializeThemeVariant.ts";
-export { contrastRatio } from "./contrastRatio.ts";
-export { mixColors } from "./mixColors.ts";
+export type { SerializeThemeVariantOptions } from "./serializeThemeVariant.ts";
+export { contrastRatio, contrastRatioOf, type Rgb } from "./contrastRatio.ts";
+export { mixChannels, mixColors } from "./mixColors.ts";
+export { SELECTION_TINT_AMOUNT, SOFT_TINT_AMOUNT, STRONG_TINT_AMOUNT } from "./themeTokens.ts";
+export type { PaletteThemeCssOptions } from "./paletteThemeCss.ts";
+export type { DeepReadonly } from "./themeRegistry.ts";
 export type { SmithersTheme } from "./SmithersTheme.ts";
 export type { TerminalPalette } from "./TerminalPalette.ts";
 export type { ThemeSyntaxId } from "./ThemeSyntaxId.ts";

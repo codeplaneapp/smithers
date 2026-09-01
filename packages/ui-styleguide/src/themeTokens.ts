@@ -1,9 +1,30 @@
-import { serializeThemeVariant } from "./serializeThemeVariant.ts";
-import { DEFAULT_THEME_KEY, themeRegistry } from "./themeRegistry.ts";
+/**
+ * The one audited tint percentage for a semantic fill that carries text in its
+ * own semantic color.
+ *
+ * 10% is the ceiling, not a taste call: the darkest shipped seeds sit near
+ * 4.6:1 on a plain `--surface`, so 11px badge text on an 11% tint already
+ * misses WCAG AA in at least one palette. `tests/themeRegistry.test.ts` reads
+ * this constant, so the recipes and their proof cannot drift apart.
+ */
+export const SOFT_TINT_AMOUNT = 0.1;
 
-export const lightTokens = serializeThemeVariant(themeRegistry[DEFAULT_THEME_KEY].light);
+/**
+ * The tint percentage for a fill that carries NO text in the tinted color.
+ * Stronger than {@link SOFT_TINT_AMOUNT} and therefore only legal under
+ * neutral (`--text`) or inverse foregrounds.
+ */
+export const STRONG_TINT_AMOUNT = 0.16;
 
-export const darkTokens = serializeThemeVariant(themeRegistry[DEFAULT_THEME_KEY].dark);
+/**
+ * The `::selection` tint. Selected text keeps its own color, so this is capped
+ * at the level that keeps `--text` above 4.5:1 over both `--bg` and `--surface`
+ * in every palette the generator can seed.
+ */
+export const SELECTION_TINT_AMOUNT = 0.14;
+
+const softTint = (semantic: string) =>
+  `--${semantic}-soft:color-mix(in srgb, var(--${semantic}) ${SOFT_TINT_AMOUNT * 100}%, var(--surface))`;
 
 // Theme-invariant tokens: aliases, soft tints (self-adapting color-mix over
 // the semantic colors, correct in both themes), geometry, and type scale.
@@ -36,17 +57,27 @@ export const sharedTokens = [
   "--ink:var(--inverse-bg)",
   // Soft tints + tint borders for the semantic colors. Use these instead of
   // hand-rolling color-mix percentages so every tinted surface matches.
-  "--brand-soft:color-mix(in srgb, var(--brand) 10%, var(--surface))",
-  "--brand-soft-strong:color-mix(in srgb, var(--brand) 16%, var(--surface))",
+  softTint("brand"),
+  // NOT a text background. Brand text on a 16% brand tint measures below 4.5:1
+  // in 10 of the 16 shipped variants, so the interactive states below express
+  // hover and press through the border and elevation instead. Kept because the
+  // shadcn bridge in `@smthrs/ui` names it for non-text fills.
+  `--brand-soft-strong:color-mix(in srgb, var(--brand) ${STRONG_TINT_AMOUNT * 100}%, var(--surface))`,
   "--brand-border:color-mix(in srgb, var(--brand) 40%, transparent)",
-  "--success-soft:color-mix(in srgb, var(--success) 12%, var(--surface))",
+  "--brand-border-strong:color-mix(in srgb, var(--brand) 65%, transparent)",
+  softTint("success"),
   "--success-border:color-mix(in srgb, var(--success) 40%, transparent)",
-  "--danger-soft:color-mix(in srgb, var(--danger) 10%, var(--surface))",
+  softTint("danger"),
   "--danger-border:color-mix(in srgb, var(--danger) 40%, transparent)",
-  "--warning-soft:color-mix(in srgb, var(--warning) 12%, var(--surface))",
+  "--danger-border-strong:color-mix(in srgb, var(--danger) 65%, transparent)",
+  softTint("warning"),
   "--warning-border:color-mix(in srgb, var(--warning) 40%, transparent)",
-  "--info-soft:color-mix(in srgb, var(--info) 10%, var(--surface))",
+  softTint("info"),
   "--info-border:color-mix(in srgb, var(--info) 40%, transparent)",
+  // Selection keeps the page's own text color, so the tint is capped at the
+  // level that keeps `--text` above 4.5:1 on it over both `--bg` and
+  // `--surface`. 24% (the 0.x value) dropped `one` dark to 3.86:1.
+  `--selection-bg:color-mix(in srgb, var(--brand) ${SELECTION_TINT_AMOUNT * 100}%, transparent)`,
   "--ring:color-mix(in srgb, var(--brand) 22%, transparent)",
   "--ring-border:color-mix(in srgb, var(--brand) 50%, transparent)",
   // Geometry: spacing, type scale, radii, and shared control heights.

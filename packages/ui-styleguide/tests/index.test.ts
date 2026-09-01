@@ -2,11 +2,14 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_THEME_KEY,
   reducedMotionCss,
+  themeCss,
   themeRegistry,
   workflowUiLayoutCss,
   workflowUiStyles,
   workflowUiThemeCss,
-} from "../src/index";
+} from "../src/index.ts";
+
+const nonDefaultKeys = Object.keys(themeRegistry).filter((key) => key !== DEFAULT_THEME_KEY);
 
 describe("ui styleguide", () => {
   test("exports the combined theme and layout styles", () => {
@@ -17,11 +20,22 @@ describe("ui styleguide", () => {
 
   test("defines and consumes one shared soft-tint recipe per semantic", () => {
     for (const semantic of ["brand", "success", "danger", "warning", "info"]) {
-      expect(workflowUiThemeCss).toContain(`--${semantic}-soft:color-mix(in srgb, var(--${semantic})`);
+      expect(workflowUiThemeCss).toContain(`--${semantic}-soft:color-mix(in srgb, var(--${semantic}) 10%`);
       expect(workflowUiThemeCss).toContain(`--${semantic}-border:color-mix(in srgb, var(--${semantic})`);
     }
     expect(workflowUiThemeCss).toContain("--me:var(--brand-soft)");
     expect(workflowUiThemeCss).toContain(".pill { border-color:var(--brand-border); background:var(--brand-soft);");
+  });
+
+  test("routes every tinted fill through a named recipe, never an inline color-mix", () => {
+    // The two states that used to hard-code `color-mix(in srgb, var(--brand)
+    // 22%, ...)` and `var(--danger) 16%` bypassed the audited recipe list and
+    // put semantic text on tints that miss AA in most palettes.
+    const rules = workflowUiThemeCss.split("\n").filter((rule) => !rule.startsWith(":root") && !rule.startsWith("@media"));
+    for (const rule of rules) {
+      const fills = rule.match(/background(?:-color)?:\s*color-mix\([^)]*var\(--(?:brand|success|danger|warning|info)\)[^;}]*/g);
+      expect(fills, rule).toBeNull();
+    }
   });
 
   test("ships one global reduced-motion policy after primitive transitions", () => {
@@ -30,13 +44,64 @@ describe("ui styleguide", () => {
     expect(workflowUiThemeCss.indexOf(".run-row {")).toBeLessThan(workflowUiThemeCss.indexOf(reducedMotionCss));
   });
 
+  test("declares the theme-invariant font block exactly once", () => {
+    // Every palette's light variant reports `colorScheme: "light"`, so keying
+    // the font block off that field emitted it in all eight `:root` rules. The
+    // palette rules are (0,2,0), which beat a consumer's own bare `:root`
+    // overrides -- `@smthrs/create-app`'s template writes exactly those.
+    expect(workflowUiThemeCss.match(/--font-sans:Inter/g)).toHaveLength(1);
+    expect(workflowUiThemeCss.match(/font-family:var\(--font-sans\)/g)).toHaveLength(1);
+    expect(workflowUiThemeCss.match(/--font-mono:ui-monospace/g)).toHaveLength(1);
+    for (const key of nonDefaultKeys) {
+      const rule = workflowUiThemeCss.split("\n").find((line) => line.startsWith(`:root[data-palette='${key}'] {`));
+      expect(rule, key).toBeDefined();
+      expect(rule).not.toContain("--font-sans");
+      expect(rule).not.toContain("font-family");
+    }
+  });
+
   test("emits three selection states for every non-default palette", () => {
-    for (const key of Object.keys(themeRegistry)) {
-      if (key === DEFAULT_THEME_KEY) continue;
+    for (const key of nonDefaultKeys) {
       expect(workflowUiThemeCss).toContain(`:root[data-palette='${key}'] {`);
       expect(workflowUiThemeCss).toContain(`:root[data-palette='${key}']:not([data-theme='light'])`);
       expect(workflowUiThemeCss).toContain(`:root[data-palette='${key}'][data-theme='dark']`);
     }
     expect(workflowUiThemeCss.split("\n")[0]).toStartWith(":root { color-scheme:light;");
+  });
+
+  test("puts every palette override after the equally specific default dark rules", () => {
+    // `:root[data-palette='<key>']` and `:root[data-theme='dark']` both compute
+    // to (0,2,0), so only source order stops the default's dark tokens from
+    // overriding a selected palette's light tokens.
+    const defaultDark = workflowUiThemeCss.indexOf(":root[data-theme='dark']");
+    const defaultMedia = workflowUiThemeCss.indexOf("@media (prefers-color-scheme: dark) { :root:not(");
+    expect(defaultDark).toBeGreaterThan(-1);
+    expect(defaultMedia).toBeGreaterThan(-1);
+    for (const key of nonDefaultKeys) {
+      const palette = workflowUiThemeCss.indexOf(`:root[data-palette='${key}'] {`);
+      expect(palette, key).toBeGreaterThan(defaultDark);
+      expect(palette, key).toBeGreaterThan(defaultMedia);
+    }
+  });
+});
+
+describe("themeCss", () => {
+  test("defaults to the whole registry and opens workflowUiThemeCss", () => {
+    expect(workflowUiThemeCss.startsWith(`${themeCss()}\n`)).toBe(true);
+    expect(themeCss()).toBe(themeCss({ palettes: Object.keys(themeRegistry) }));
+  });
+
+  test("emits a subset for a host that pins one palette", () => {
+    const subset = themeCss({ palettes: ["one"] });
+    expect(subset).toContain(":root[data-palette='one'] {");
+    for (const key of nonDefaultKeys.filter((k) => k !== "one")) {
+      expect(subset).not.toContain(`:root[data-palette='${key}']`);
+    }
+    expect(subset).toContain(":root { color-scheme:light;");
+    expect(subset.length).toBeLessThan(themeCss().length / 2);
+  });
+
+  test("names an unregistered palette instead of emitting nothing", () => {
+    expect(() => themeCss({ palettes: ["dracula"] })).toThrow(/unknown palette "dracula"/);
   });
 });

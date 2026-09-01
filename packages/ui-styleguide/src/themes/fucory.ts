@@ -3,13 +3,31 @@ import type { SmithersTheme } from "../SmithersTheme.ts";
 /**
  * Fucory: the original Smithers house palette (zinc neutrals, violet brand).
  *
- * Hand-encoded, never generated. Every value below is the pre-registry
- * `lightTokens`/`darkTokens` value, byte-for-byte, including the deliberate
- * dark code blocks in light mode. The terminal palettes are the pre-registry
- * `DARK_THEME`/`LIGHT_THEME` constants from the terminal adapter.
+ * Hand-encoded, never generated. Values below are the pre-registry
+ * `lightTokens`/`darkTokens` values except where accessibility forced a change.
+ * The terminal palettes are the pre-registry `DARK_THEME`/`LIGHT_THEME`
+ * constants from the terminal adapter.
  *
  * Light semantic values are darkened so 11px badge text stays >= 4.5:1 on the
  * matching `*-soft` tint, not just on white.
+ *
+ * Three departures from the pre-registry constants, each closing a WCAG AA
+ * failure that `tests/themeRegistry.test.ts` now enumerates:
+ *
+ * 1. Light `textPlaceholder` `#8a8a93` -> `#6f6f78`. `input::placeholder`
+ *    paints it at 13px and the original measured 3.11:1 on `--surface-2`.
+ * 2. Dark `textPlaceholder` `#75757e` -> `#8a8a93`, which measured 3.42:1 on
+ *    `--surface-3`. Both replacements clear 4.5:1 on all four surfaces while
+ *    staying strictly fainter than `textFaint`.
+ * 3. The light code block is light (`codeBg` `#18181b` -> `#f4f4f5`, `codeText`
+ *    `#f4f4f5` -> `#18181b`), matching every other palette. The inherited dark
+ *    block put `.livelog-event` (`--brand`, 3.35:1) and `.livelog-node`
+ *    (`--warning`, 3.27:1) on a surface their light-mode semantic colors cannot
+ *    reach; the token vocabulary has no code-surface-relative semantic ramp.
+ *    `--inverse-bg`/`--inverse-text` keep the dark pairing for inverted chrome.
+ * 4. Dark `brand` `#8b78e6` -> `#8e7ce8`, which measured 4.41:1 on
+ *    `--surface-3`, the overlay elevation `.badge.running` and `.pill` can sit
+ *    on.
  */
 export const fucory: SmithersTheme = {
   key: "fucory",
@@ -20,7 +38,7 @@ export const fucory: SmithersTheme = {
     text: "#18181b",
     textMuted: "#52525b",
     textFaint: "#6d6d75",
-    textPlaceholder: "#8a8a93",
+    textPlaceholder: "#6f6f78",
     surface: "#ffffff",
     surface2: "#f4f4f5",
     surface3: "#ffffff",
@@ -33,8 +51,8 @@ export const fucory: SmithersTheme = {
     hoverSubtle: "rgba(24,24,27,0.04)",
     inverseBg: "#18181b",
     inverseText: "#fafafa",
-    codeBg: "#18181b",
-    codeText: "#f4f4f5",
+    codeBg: "#f4f4f5",
+    codeText: "#18181b",
     inlineCodeBg: "rgba(24,24,27,0.06)",
     brand: "#6d56d8",
     success: "#087461",
@@ -52,7 +70,7 @@ export const fucory: SmithersTheme = {
     text: "#f4f4f5",
     textMuted: "#a1a1aa",
     textFaint: "#8c8c95",
-    textPlaceholder: "#75757e",
+    textPlaceholder: "#8a8a93",
     surface: "#141417",
     surface2: "#1b1b20",
     surface3: "#232329",
@@ -68,7 +86,7 @@ export const fucory: SmithersTheme = {
     codeBg: "#0c0c0e",
     codeText: "#e4e4e7",
     inlineCodeBg: "rgba(255,255,255,0.08)",
-    brand: "#8b78e6",
+    brand: "#8e7ce8",
     success: "#2ec9a8",
     danger: "#f2555a",
     warning: "#e0a23a",

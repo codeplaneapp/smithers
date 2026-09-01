@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { standaloneThemeCss, workflowUiThemeCss } from "../src/index";
+import { standaloneThemeCss, workflowUiThemeCss } from "../src/index.ts";
 
 type Rgb = readonly [number, number, number];
 type ThemeName = "light" | "dark";
