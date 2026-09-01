@@ -18,6 +18,7 @@ import * as Option from "effect/Option"
 import type * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
 import * as ActionPersistence from "../src/internal/ActionPersistence.ts"
+import * as EffectRecords from "../src/internal/EffectRecords.ts"
 import * as StepBoundary from "../src/StepBoundary.ts"
 import * as TestStores from "../src/test/TestStores.ts"
 import { sha256, withCrypto } from "./Sha256.ts"
@@ -120,18 +121,23 @@ const makeExecutor = (options: {
   readonly key: string
   readonly result: unknown
   readonly body?: Effect.Effect<void>
+  /** Defaults to the sealed tier the interstitial cases were written against. */
+  readonly tier?: ActionPersistence.ActionInput["tier"]
+  readonly idempotencyKey?: string
 }): Executor => {
   let dispatches = 0
   const executor = ActionPersistence.make({
     runId: options.runId,
     owner: options.owner,
     sourceId: `fault-matrix-${options.owner.nonce}`,
+    ...(options.idempotencyKey === undefined ? {} : { idempotencyKey: options.idempotencyKey }),
     execute: () =>
       Effect.suspend(() => {
         dispatches++
         return (options.body ?? Effect.void).pipe(Effect.as(options.result))
       })
   })
+  const tier = options.tier ?? "sealed"
   return {
     dispatches: () => dispatches,
     execute: (attempt) =>
@@ -139,8 +145,11 @@ const makeExecutor = (options: {
         action: {},
         attempt,
         key: options.key,
-        tier: "sealed",
-        metadata: boundary
+        tier,
+        // A boundary descriptor is sealed-only machinery: declaring one for an
+        // irreversible dispatch would route it through the isolated-execution
+        // lane these cases are not about.
+        ...(tier === "sealed" ? { metadata: boundary } : {})
       })
   }
 }
@@ -276,6 +285,83 @@ describe("FaultMatrix", () => {
         expect(result.dispatches).toBe(2)
       }))
 
+    it.effect(
+      "crash between the succeeded effect boundary and attempts.finish: the irreversible body crosses exactly once",
+      () =>
+        Effect.gen(function*() {
+          const key = "fault/crossing-then-finish"
+          const result = yield* run(Effect.gen(function*() {
+            yield* activate("crash-after-crossing", ownerA)
+            const attempts = yield* AttemptStore.AttemptStore
+            const first = makeExecutor({
+              runId: "crash-after-crossing",
+              owner: ownerA,
+              key,
+              result: "receipt-1",
+              tier: "irreversible"
+            })
+            // The charge left the machine and its terminal boundary is durable;
+            // the process dies before the attempt row settles. The row stays
+            // `running`, which is the same shape a SIGKILL mid-body leaves —
+            // and the difference between the two is exactly what the recorded
+            // crossing has to answer.
+            const crashed = yield* first.execute(1).pipe(
+              Effect.provideService(
+                AttemptStore.AttemptStore,
+                Notifying.wrap(attempts, crashAt("finish", "before", succeededFinish))
+              ),
+              Effect.exit
+            )
+
+            const runs = yield* RunStore.RunStore
+            const restarted: Ownership.OwnerId = { ...ownerA, nonce: "fault-owner-a-crossed" }
+            yield* takeover(runs, "crash-after-crossing", restarted)
+            const second = makeExecutor({
+              runId: "crash-after-crossing",
+              owner: restarted,
+              key,
+              // A different value: reaching it at all would prove the body ran
+              // a second time.
+              result: "receipt-2",
+              tier: "irreversible"
+            })
+            const recovered = yield* second.execute(1)
+            const row = yield* attempts.get({
+              runId: "crash-after-crossing",
+              stepKeyDigest: sha256(key),
+              attempt: 1
+            })
+            const journal = yield* Journal.Journal
+            yield* journal.flush
+            const entries = yield* journal.entries({ runId: "crash-after-crossing" as never, limit: 50 })
+            return {
+              crashed,
+              recovered,
+              firstDispatches: first.dispatches(),
+              secondDispatches: second.dispatches(),
+              row,
+              boundaries: entries.entries
+                .filter((entry) => entry.eventType === EffectRecords.eventType)
+                .map((entry) => (entry.payload as { readonly effect: { readonly status: string } }).effect.status),
+              finished: entries.entries.filter((entry) => entry.eventType === "flows.engine.attempt-finished")
+            }
+          }))
+
+          expect(isCrash(result.crashed)).toBe(true)
+          expect(result.firstDispatches).toBe(1)
+          // The whole point: the recorded crossing settles the adopted row, so
+          // the charge is never sent a second time.
+          expect(result.secondDispatches).toBe(0)
+          expect(result.recovered).toBe("receipt-1")
+          expect(Option.getOrThrow(result.row).state).toBe("succeeded")
+          expect(Option.getOrThrow(result.row).outcome).toBe("receipt-1")
+          // One crossing in the journal, and the terminal attempt record the
+          // dead incarnation never got to write.
+          expect(result.boundaries).toEqual(["intended", "succeeded"])
+          expect(result.finished).toHaveLength(1)
+        })
+    )
+
     it.effect("crash between journal.emit and cache.put: completion survives, no divergent cache row is recorded", () =>
       Effect.gen(function*() {
         const key = "fault/emit-then-cache"
@@ -317,6 +403,191 @@ describe("FaultMatrix", () => {
         expect(cached.recordedRunId).toBe("crash-after-emit")
         expect(Number.isSafeInteger(cached.recordedEventSeq)).toBe(true)
         expect(result.eventTypes).not.toContain("flows.engine.cache-conflict")
+      }))
+  })
+
+  /**
+   * An irreversible crossing is recorded in the attempt row, in the same
+   * transaction as the boundary record, because the row is the only copy
+   * recovery may re-enter: the journal redacts payloads on write, so its
+   * recorded output is observability rather than executable state.
+   */
+  describe("recorded effect crossings", () => {
+    /** Kills the process after the body ran and before the attempt settles. */
+    const killedMidCharge = (options: {
+      readonly runId: string
+      readonly key: string
+      readonly idempotencyKey?: string
+    }) =>
+      Effect.gen(function*() {
+        yield* activate(options.runId, ownerA)
+        const attempts = yield* AttemptStore.AttemptStore
+        const charging = makeExecutor({
+          runId: options.runId,
+          owner: ownerA,
+          key: options.key,
+          result: "unreachable",
+          tier: "irreversible",
+          // The body never returns an answer, so nothing terminal is recorded:
+          // the crossing stays `intended` and no durable evidence can say
+          // whether the charge reached the provider.
+          body: Effect.die(new Error("the process died mid-charge")),
+          ...(options.idempotencyKey === undefined ? {} : { idempotencyKey: options.idempotencyKey })
+        })
+        const crashed = yield* charging.execute(1).pipe(
+          Effect.provideService(
+            AttemptStore.AttemptStore,
+            Notifying.wrap(attempts, crashAt("finish", "before"))
+          ),
+          Effect.exit
+        )
+        const runs = yield* RunStore.RunStore
+        const restarted: Ownership.OwnerId = { ...ownerA, nonce: `${options.runId}-restarted` }
+        yield* takeover(runs, options.runId, restarted)
+        return { crashed, charging, attempts, restarted }
+      })
+
+    it.effect("an unresolved crossing with no idempotency key refuses rather than charging a second time", () =>
+      Effect.gen(function*() {
+        const key = "fault/crossing-unresolved"
+        const result = yield* run(Effect.gen(function*() {
+          const { attempts, charging, crashed, restarted } = yield* killedMidCharge({
+            runId: "crossing-unresolved",
+            key
+          })
+          const resumed = makeExecutor({
+            runId: "crossing-unresolved",
+            owner: restarted,
+            key,
+            result: "charged-again",
+            tier: "irreversible"
+          })
+          const refused = yield* resumed.execute(1).pipe(Effect.result)
+          const row = yield* attempts.get({
+            runId: "crossing-unresolved",
+            stepKeyDigest: sha256(key),
+            attempt: 1
+          })
+          return { crashed, refused, row, dispatches: charging.dispatches() + resumed.dispatches() }
+        }))
+
+        expect(isCrash(result.crashed)).toBe(true)
+        // One dispatch, from the incarnation that died. The resumed drive
+        // surfaces the ambiguity instead of resolving it by charging.
+        expect(result.dispatches).toBe(1)
+        expect(result.refused).toMatchObject({
+          _tag: "Failure",
+          failure: { _tag: "@smthrs/engine-store/IrreversibleRetryRequiresIdempotencyKey" }
+        })
+        const row = Option.getOrThrow(result.row)
+        expect(row.state).toBe("running")
+        expect((row.meta as { readonly effectCrossing?: string }).effectCrossing).toBe("intended")
+      }))
+
+    it.effect("an unresolved crossing re-executes when an idempotency key makes the repeat safe", () =>
+      Effect.gen(function*() {
+        const key = "fault/crossing-keyed"
+        const result = yield* run(Effect.gen(function*() {
+          const { attempts, charging, restarted } = yield* killedMidCharge({
+            runId: "crossing-keyed",
+            key,
+            idempotencyKey: "charge-request-1"
+          })
+          const resumed = makeExecutor({
+            runId: "crossing-keyed",
+            owner: restarted,
+            key,
+            result: "charged-once",
+            tier: "irreversible",
+            idempotencyKey: "charge-request-1"
+          })
+          const recovered = yield* resumed.execute(1)
+          const row = yield* attempts.get({ runId: "crossing-keyed", stepKeyDigest: sha256(key), attempt: 1 })
+          return { recovered, row, dispatches: charging.dispatches() + resumed.dispatches() }
+        }))
+
+        expect(result.recovered).toBe("charged-once")
+        // The provider deduplicates the repeat, which is exactly what the key
+        // is for, so the resumed drive re-enters the body.
+        expect(result.dispatches).toBe(2)
+        expect(Option.getOrThrow(result.row).state).toBe("succeeded")
+      }))
+
+    it.effect("a crossing that cannot be recorded interrupts before the body runs", () =>
+      Effect.gen(function*() {
+        const key = "fault/crossing-unrecordable"
+        const result = yield* run(Effect.gen(function*() {
+          yield* activate("crossing-unrecordable", ownerA)
+          const attempts = yield* AttemptStore.AttemptStore
+          const executor = makeExecutor({
+            runId: "crossing-unrecordable",
+            owner: ownerA,
+            key,
+            result: "must-not-charge",
+            tier: "irreversible"
+          })
+          // The row moved under this dispatch between admission and the
+          // crossing. Dispatching anyway would send an effect whose evidence
+          // has nowhere to land.
+          const exit = yield* awaitExit(
+            executor.execute(1).pipe(
+              Effect.provideService(AttemptStore.AttemptStore, {
+                ...attempts,
+                patch: () => Effect.succeed({ _tag: "NotFound" } as const)
+              })
+            )
+          )
+          return { exit, dispatches: executor.dispatches() }
+        }))
+
+        expect(Exit.isFailure(result.exit) && Cause.hasInterruptsOnly(result.exit.cause)).toBe(true)
+        expect(result.dispatches).toBe(0)
+      }))
+
+    it.effect("a recorded crossing whose settlement loses the fence self-interrupts, never re-dispatching", () =>
+      Effect.gen(function*() {
+        const key = "fault/crossing-fence-lost"
+        const result = yield* run(Effect.gen(function*() {
+          yield* activate("crossing-fence", ownerA)
+          const runs = yield* RunStore.RunStore
+          const attempts = yield* AttemptStore.AttemptStore
+          // The durable state a SIGKILL between the crossing and the
+          // settlement leaves behind.
+          yield* attempts.put({
+            runId: "crossing-fence",
+            stepKeyDigest: sha256(key),
+            attempt: 1,
+            state: "running",
+            startedAtMs: 0,
+            outcome: "receipt",
+            meta: { tier: "irreversible", admittedBy: ownerA, effectCrossing: "succeeded" }
+          }, ownerA)
+          const steal: Notifying.Hook = (op, order) =>
+            op === "finish" && order === "before"
+              ? takeover(runs, "crossing-fence", ownerB).pipe(Effect.orDie)
+              : Effect.void
+
+          const executor = makeExecutor({
+            runId: "crossing-fence",
+            owner: ownerA,
+            key,
+            result: "must-not-charge",
+            tier: "irreversible"
+          })
+          const exit = yield* awaitExit(
+            executor.execute(1).pipe(
+              Effect.provideService(AttemptStore.AttemptStore, Notifying.wrap(attempts, steal))
+            )
+          )
+          const row = yield* attempts.get({ runId: "crossing-fence", stepKeyDigest: sha256(key), attempt: 1 })
+          return { exit, row, dispatches: executor.dispatches() }
+        }))
+
+        expect(Exit.isFailure(result.exit) && Cause.hasInterruptsOnly(result.exit.cause)).toBe(true)
+        // The crossing survives for the new owner to settle from; losing the
+        // fence never turns into a second charge.
+        expect(result.dispatches).toBe(0)
+        expect(Option.getOrThrow(result.row).state).toBe("running")
       }))
   })
 

@@ -121,6 +121,51 @@ describe("engine-store action tiers", () => {
       expect(Option.isNone(result.cached)).toBe(true)
     }))
 
+  it.effect("takes the compensable pre-image through the injected engine authority, never the ambient service", () =>
+    Effect.gen(function*() {
+      // `EngineStore` hands the dispatcher its own `EngineJj`, which is how
+      // engine bookkeeping stays off the public `Jj` service a flow body may
+      // hold. The ambient layer below is deliberately the WRONG one: reaching
+      // it would name its change id in the recorded pre-image.
+      const engineSnapshots: Array<string> = []
+      const ambientSnapshots: Array<string> = []
+      const program = Effect.gen(function*() {
+        yield* activate("compensable-engine-jj")
+        yield* ActionPersistence.make({
+          runId: "compensable-engine-jj",
+          owner,
+          sourceId: "tier-test",
+          engineJj: Jj.make({
+            snapshot: () =>
+              Effect.sync(() => {
+                engineSnapshots.push("engine")
+                return { changeId: "engine-snapshot" as never }
+              }),
+            restore: () => Effect.void,
+            diff: () => Effect.succeed(""),
+            workspaceAdd: () => Effect.void,
+            workspaceForget: () => Effect.void,
+            status: () => Effect.succeed("")
+          }),
+          execute: () => Effect.succeed("compensated")
+        })({ action: {}, attempt: 1, key: "caller-key/engine-jj", tier: "compensable" })
+        const attempts = yield* AttemptStore.AttemptStore
+        return yield* attempts.get({
+          runId: "compensable-engine-jj",
+          stepKeyDigest: sha256("caller-key/engine-jj"),
+          attempt: 1
+        })
+      }).pipe(
+        Effect.provide(Layer.mergeAll(TestStores.layer(), StepBoundary.layerTest(), jjLayer(ambientSnapshots, []))),
+        Effect.scoped
+      )
+
+      const row = yield* withCrypto(program)
+      expect(engineSnapshots).toEqual(["engine"])
+      expect(ambientSnapshots).toEqual([])
+      expect(Option.getOrThrow(row).meta).toMatchObject({ snapshotId: "engine-snapshot", tier: "compensable" })
+    }))
+
   it.effect("requires an idempotency key before retrying an irreversible action", () =>
     Effect.gen(function*() {
       const program = Effect.gen(function*() {

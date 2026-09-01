@@ -381,7 +381,27 @@ const AttemptMeta = Schema.Struct({
   // permit, which distinguishes a dead fiber from a live dispatch in a way
   // the recorded incarnation cannot — but the field is kept as durable
   // forensic evidence of which incarnation last drove the attempt.
-  admittedBy: Schema.optional(Ownership.OwnerId)
+  admittedBy: Schema.optional(Ownership.OwnerId),
+  /**
+   * How far this attempt's effect boundary got, in EXECUTABLE state.
+   *
+   * The journal's boundary records already say this, and adoption cannot use
+   * them: `@smthrs/journal` puts every payload it writes through redaction,
+   * deliberately, so a recorded `output` may never be re-entered as a flow's
+   * result (issue #72), and the journal offers no read addressed by producer
+   * identity — only a full scan of the run. So the same fact is written here,
+   * where the attempt's `outcome` column is already replayed verbatim, in the
+   * SAME transaction as the record that describes it.
+   *
+   * - `intended`: the body was dispatched and its outcome is not durably
+   *   known. Whether the effect reached the outside world is genuinely
+   *   unanswerable from durable state.
+   * - `parked`: the body reached a durable wait and suspended, so it never
+   *   finished and nothing crossed. Recorded explicitly because a park leaves
+   *   the same `running` row a crash does.
+   * - `succeeded`: the body completed and the row carries its result.
+   */
+  effectCrossing: Schema.optional(Schema.Literals(["intended", "parked", "succeeded"]))
 })
 
 type AttemptMeta = typeof AttemptMeta.Type
@@ -1414,6 +1434,64 @@ export const make = (deps: Dependencies) => {
             ? existing.value
             : undefined
           const runningMeta = runningRow === undefined ? undefined : decodeMeta(runningRow.meta)
+          /**
+           * ADOPTION READS THE CROSSING BACK. A `running` row is crash
+           * evidence, but "the attempt did not settle" is not "the body did
+           * not run": an effect whose terminal boundary is already durable was
+           * still re-dispatched here, because the row alone cannot say so and
+           * nothing ever read the boundary record back. That made a keyless
+           * irreversible action charge twice on a SIGKILL landing in the
+           * millisecond between the `succeeded` boundary and `attempts.finish`
+           * — the exact window the boundary record exists to close.
+           *
+           * A recorded `succeeded` crossing settles the adopted attempt from
+           * the outcome the crossing wrote, in this attempt's own number, and
+           * the body never runs again. The outcome comes from the ROW, not
+           * from the journal record: journal payloads go through redaction on
+           * write, so the record's `output` is observability and the row's
+           * `outcome` is the executable copy (see `AttemptMeta.effectCrossing`).
+           */
+          if (runningRow !== undefined && runningMeta?.effectCrossing === "succeeded") {
+            const finishedAtMs = yield* Clock.currentTimeMillis
+            // `outcome` and `meta` are deliberately omitted: `FinishAttempt`
+            // leaves an omitted field as recorded, so the terminal transition
+            // is the crossing's own result being sealed rather than a value
+            // this incarnation invented.
+            const finished = yield* settleAttempt(
+              { ...attemptId, state: "succeeded", finishedAtMs },
+              [JournalRecords.attemptFinished(attemptSource("finished"), { ...attemptId, state: "succeeded" })]
+            )
+            if (!finished) return yield* Effect.interrupt
+            return runningRow.outcome
+          }
+          /**
+           * AN UNRESOLVED CROSSING IS NOT SILENTLY RE-DISPATCHED. `intended`
+           * without a terminal crossing means the body was dispatched and
+           * nothing durable says how it ended: the charge may have gone
+           * through, and no record can settle the question. An idempotency key
+           * is the one thing that makes the repeat safe, so with a key the
+           * attempt re-executes exactly as before, and without one this
+           * refuses under the same error a numbered retry refuses under. The
+           * run stops with a typed, durable "we cannot tell whether this
+           * happened" for an operator, which is the honest outcome; charging a
+           * second time to keep the run moving is not.
+           *
+           * Only tier 3 refuses. A compensable body is re-executed on a
+           * restored pre-image (issue #87), which is what makes its repeat
+           * safe by construction.
+           */
+          if (
+            input.tier === "irreversible" &&
+            runningMeta?.effectCrossing === "intended" &&
+            deps.idempotencyKey === undefined
+          ) {
+            return yield* Effect.fail(
+              new IrreversibleRetryRequiresIdempotencyKey({
+                code: "irreversible_retry_requires_idempotency_key",
+                key: input.key
+              })
+            )
+          }
           const adopted = runningRow !== undefined
           // The admission row and its announcement commit as one unit: an
           // `attemptStarted` never describes a row that rolled back, and an
@@ -1663,24 +1741,79 @@ export const make = (deps: Dependencies) => {
               Effect.serviceOption(FlowRuntime.FlowInstance),
               (instance) => Option.getOrUndefined(instance)?.suspended === true && Cause.hasInterruptsOnly(cause)
             )
+          /**
+           * The row's meta as this dispatch last wrote it. The crossing writes
+           * below patch `meta` wholesale, so everything the attempt already
+           * carries — the adopted incarnation's fields, the tier declaration,
+           * the compensable pre-image — has to be carried across with it.
+           */
+          const dispatchMeta = {
+            ...runningMeta,
+            ...declarationMeta,
+            admittedBy: deps.owner,
+            ...(snapshotId === undefined ? {} : { snapshotId })
+          } satisfies AttemptMeta
+          /**
+           * Commits a crossing into the attempt row, with the boundary record
+           * that describes it when there is one, as ONE transaction.
+           *
+           * The row is what recovery reads (see `AttemptMeta.effectCrossing`),
+           * so a crash must never leave the two disagreeing: a record without
+           * the row would re-dispatch a crossed effect, and a row without the
+           * record would settle a run from evidence the audit cannot show. A
+           * refused patch is a lost fence, surfaced as self-interruption like
+           * every other fence outcome here, and reported from OUTSIDE the
+           * transaction so the transaction's own failures stay storage
+           * failures.
+           */
+          const recordCrossing = (
+            crossing: NonNullable<AttemptMeta["effectCrossing"]>,
+            patch: AttemptStore.AttemptPatch,
+            record?: JournalEvent.Input
+          ) =>
+            Effect.flatMap(
+              atomically(Effect.gen(function*() {
+                if (record !== undefined) yield* emitLifecycle(record)
+                const patched = yield* attempts.patch(
+                  attemptId,
+                  { ...patch, meta: { ...dispatchMeta, effectCrossing: crossing } satisfies AttemptMeta },
+                  deps.owner
+                )
+                return patched._tag === "Patched"
+              })),
+              (recorded) => recorded ? Effect.void : Effect.interrupt
+            )
           const dispatch = effect === undefined
             ? deps.execute(input)
             : Effect.uninterruptibleMask((restore) =>
               Effect.gen(function*() {
-                yield* emitLifecycle(EffectRecords.boundary(effect, "intended"))
+                yield* recordCrossing("intended", {}, EffectRecords.boundary(effect, "intended"))
                 const exit = yield* Effect.exit(restore(deps.execute(input)))
                 yield* Exit.isSuccess(exit)
-                  ? emitLifecycle(EffectRecords.boundary(effect, "succeeded", exit.value))
+                  ? recordCrossing(
+                    "succeeded",
+                    { outcome: exit.value },
+                    EffectRecords.boundary(effect, "succeeded", exit.value)
+                  )
                   // A park leaves the boundary OPEN. The terminal record says
                   // the effect finished and nobody can testify to how; a parked
                   // dispatch has not finished, and the next drive re-enters the
                   // SAME attempt. Writing it here made a routine park and
                   // resume read `intended, unknown, intended, succeeded` in the
                   // journal a rewind classifies a doomed suffix from.
+                  //
+                  // The park is still recorded in the ROW, with no record to
+                  // pair it with: a park and a SIGKILL mid-body leave the same
+                  // `running` row and the same open boundary, and only this
+                  // says which one happened. Without it the resumed wait looked
+                  // like an unresolved crossing and the refusal above made every
+                  // keyless irreversible wait unresumable.
                   : Effect.flatMap(
                     parked(exit.cause),
                     (isPark) =>
-                      isPark ? Effect.void : Effect.ignore(emitLifecycle(EffectRecords.boundary(effect, "unknown")))
+                      isPark
+                        ? recordCrossing("parked", {})
+                        : Effect.ignore(emitLifecycle(EffectRecords.boundary(effect, "unknown")))
                   )
                 return yield* exit
               })
