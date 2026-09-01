@@ -352,7 +352,7 @@ describe("execution identity", () => {
     Effect.scoped(
       Effect.gen(function*() {
         const engine = yield* FlowRuntime.FlowRuntime
-        const conflict = <F extends Flow.Any>(
+        const conflict = <F extends Flow.Flow<any, any, any, any, any>>(
           flow: F,
           first: object,
           second: object,
@@ -370,7 +370,7 @@ describe("execution identity", () => {
             const defect = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isDieReason)?.defect : undefined
             expect(defect).toMatchObject({ field: "payload" })
           })
-        const join = <F extends Flow.Any>(
+        const join = <F extends Flow.Flow<any, any, any, any, any>>(
           flow: F,
           first: object,
           second: object,

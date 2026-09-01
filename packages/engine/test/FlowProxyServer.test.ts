@@ -129,6 +129,7 @@ describe("FlowProxyServer.layerRpcHandlers", () => {
 
     return Effect.gen(function*() {
       yield* callAsTenant("tenant-a", 2)
+      expect(calls()).toBe(1)
       yield* callAsTenant("tenant-b", 1)
 
       expect(calls()).toBe(2)

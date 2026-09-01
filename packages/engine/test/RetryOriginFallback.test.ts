@@ -184,25 +184,31 @@ describe("retry origin fallback when the durable hook yields none", () => {
       expect(String(warnings[0]?.message)).toContain("1000")
     }))
 
-  effect("replaces a non-finite durable origin with the local clock and logs the corrupt value", () =>
-    Effect.gen(function*() {
-      const outcome = yield* runWithOrigin("RetryOriginFallback/non-finite", Number.NaN, { advanceMs: 1 })
-      expect(outcome.attempts).toEqual([1, 2])
-      const warnings = outcome.logs.filter((entry) => entry.logLevel === "Warn")
-      expect(warnings.length).toBe(1)
-      expect(String(warnings[0]?.message)).toContain("RetryOriginFallback/non-finite")
-      expect(String(warnings[0]?.message)).toContain("NaN")
-      expect(String(warnings[0]?.message)).toContain("1000")
-    }))
+  effect(
+    "replaces a non-finite durable origin with the local clock and logs the corrupt value",
+    () =>
+      Effect.gen(function*() {
+        const outcome = yield* runWithOrigin("RetryOriginFallback/non-finite", Number.NaN, { advanceMs: 1 })
+        expect(outcome.attempts).toEqual([1, 2])
+        const warnings = outcome.logs.filter((entry) => entry.logLevel === "Warn")
+        expect(warnings.length).toBe(1)
+        expect(String(warnings[0]?.message)).toContain("RetryOriginFallback/non-finite")
+        expect(String(warnings[0]?.message)).toContain("NaN")
+        expect(String(warnings[0]?.message)).toContain("1000")
+      })
+  )
 
-  effect("keeps a valid past durable origin as consumed expiration budget without a warning", () =>
-    Effect.gen(function*() {
-      const outcome = yield* runWithOrigin("RetryOriginFallback/past", 990)
-      expect(outcome.attempts).toEqual([1])
-      expect(outcome.logs.filter((entry) => entry.logLevel === "Warn")).toEqual([])
-      expect(outcome.result._tag).toBe("Complete")
-      if (outcome.result._tag === "Complete" && Exit.isFailure(outcome.result.exit)) {
-        expect(Cause.squash(outcome.result.exit.cause)).toBeInstanceOf(RetryPolicy.RetryPolicyExpired)
-      }
-    }))
+  effect(
+    "keeps a valid past durable origin as consumed expiration budget without a warning",
+    () =>
+      Effect.gen(function*() {
+        const outcome = yield* runWithOrigin("RetryOriginFallback/past", 990)
+        expect(outcome.attempts).toEqual([1])
+        expect(outcome.logs.filter((entry) => entry.logLevel === "Warn")).toEqual([])
+        expect(outcome.result._tag).toBe("Complete")
+        if (outcome.result._tag === "Complete" && Exit.isFailure(outcome.result.exit)) {
+          expect(Cause.squash(outcome.result.exit.cause)).toBeInstanceOf(RetryPolicy.RetryPolicyExpired)
+        }
+      })
+  )
 })

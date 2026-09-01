@@ -361,7 +361,8 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
             return yield* Effect.die(
               new FlowNotRegistered({
                 flowName: wrapped.flow,
-                message: `${roundFlow._tag} handed off to flow ${wrapped.flow}, which is not registered with this engine`
+                message:
+                  `${roundFlow._tag} handed off to flow ${wrapped.flow}, which is not registered with this engine`
               })
             )
           }

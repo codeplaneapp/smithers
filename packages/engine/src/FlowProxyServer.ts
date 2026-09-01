@@ -59,10 +59,21 @@ export interface ExecutionIdScope {
   }): string | undefined
 }
 
-const scopeExecutionId = (
+function scopeExecutionId(
+  scope: ExecutionIdScope | undefined,
+  input: Parameters<ExecutionIdScope>[0] & {
+    readonly operation: "resume"
+    readonly clientValue: string
+  }
+): string
+function scopeExecutionId(
   scope: ExecutionIdScope | undefined,
   input: Parameters<ExecutionIdScope>[0]
-): string | undefined => {
+): string | undefined
+function scopeExecutionId(
+  scope: ExecutionIdScope | undefined,
+  input: Parameters<ExecutionIdScope>[0]
+): string | undefined {
   if (scope === undefined) {
     return input.clientValue
   }
@@ -154,13 +165,13 @@ export const layerHttpApi = <
           )
           .handle(
             operation.resume,
-            ({ payload }: { payload: any }) =>
+            ({ payload }: { payload: { readonly executionId: string } }) =>
               flow.resume(scopeExecutionId(options?.executionId, {
                 flow,
                 operation: "resume",
                 clientValue: payload.executionId,
                 payload: undefined
-              }) as string).pipe(
+              })).pipe(
                 Effect.tapDefect(Effect.logError),
                 Effect.annotateLogs({
                   module: "FlowProxyServer",
@@ -245,13 +256,13 @@ export const layerRpcHandlers = <
       handlers.set(keyResume, {
         context,
         tag: tagResume,
-        handler: (payload: any) =>
+        handler: (payload: { readonly executionId: string }) =>
           flow.resume(scopeExecutionId(options?.executionId, {
             flow,
             operation: "resume",
             clientValue: payload.executionId,
             payload: undefined
-          }) as string).pipe(
+          })).pipe(
             Effect.tapDefect(Effect.logError),
             Effect.annotateLogs({ module: "FlowProxyServer", method: tagResume })
           ) as any

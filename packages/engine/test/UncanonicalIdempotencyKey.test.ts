@@ -15,8 +15,8 @@ import { describe, expect, it } from "@effect/vitest"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
 import * as StepIdentity from "@smthrs/flow/StepIdentity"
 import { Cause, Effect, Exit, Layer, Schema, SchemaIssue } from "effect"
-import { FlowEngine } from "../src/index.ts"
 import { schemaErrorPath } from "../src/FlowEngine/ActionKey.ts"
+import { FlowEngine } from "../src/index.ts"
 import { invocationKey, runSync, withCrypto } from "./Crypto.ts"
 
 const effect = (name: string, body: () => Effect.Effect<void, unknown, Crypto.Crypto>) =>
@@ -76,14 +76,17 @@ describe("rejected declaration material surfaces typed, not as fiber death (issu
       expect(outcome.executions).toBe(0)
     }))
 
-  effect("compensable identity rejection uses the same typed path before the action runs", () =>
-    Effect.gen(function*() {
-      const outcome = yield* runRejected("compensable", { count: 1n })
-      const defect = dieOf(outcome.exit)
-      expect(defect).toBeInstanceOf(Action.UncanonicalIdempotencyKey)
-      expect(defect).toMatchObject({ path: "$", reason: "canonicalize_failed" })
-      expect(outcome.executions).toBe(0)
-    }))
+  effect(
+    "compensable identity rejection uses the same typed path before the action runs",
+    () =>
+      Effect.gen(function*() {
+        const outcome = yield* runRejected("compensable", { count: 1n })
+        const defect = dieOf(outcome.exit)
+        expect(defect).toBeInstanceOf(Action.UncanonicalIdempotencyKey)
+        expect(defect).toMatchObject({ path: "$", reason: "canonicalize_failed" })
+        expect(outcome.executions).toBe(0)
+      })
+  )
 
   it("walks the first schema-issue leaf and renders accumulated pointer segments", () => {
     const leaf = new SchemaIssue.InvalidValue()

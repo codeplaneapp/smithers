@@ -161,11 +161,13 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
         if (leftKeys.length !== rightKeys.length) return false
         for (const key of leftKeys) {
           if (!Object.hasOwn(right, key)) return false
-          if (!samePayload(
-            (left as Record<string, unknown>)[key],
-            (right as Record<string, unknown>)[key],
-            depth - 1
-          )) return false
+          if (
+            !samePayload(
+              (left as Record<string, unknown>)[key],
+              (right as Record<string, unknown>)[key],
+              depth - 1
+            )
+          ) return false
         }
         return true
       } catch {
