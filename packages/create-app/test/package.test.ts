@@ -99,13 +99,29 @@ describe("targets", () => {
       readonly args: ReadonlyArray<string>
       readonly approval: string
       readonly gates: ReadonlyArray<unknown>
-      readonly secrets: ReadonlyArray<{ readonly env: string }>
+      readonly secrets: ReadonlyArray<{
+        readonly secret: { readonly env: string }
+        readonly audiences: ReadonlyArray<string>
+      }>
     }
     // No `--config`: wrangler follows the vite plugin's deploy redirect only
     // when the flag is absent.
     expect(attrs.args).toEqual(["deploy"])
     expect(attrs.approval).toBe("required")
     expect(attrs.gates).toHaveLength(1)
-    expect(attrs.secrets.map((secret) => secret.env)).toEqual(["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID"])
+    // Re-pinned 2026-09-01. Until 74a8ad64ca the scaffold declared both
+    // credentials as bare `S.Secret` sources and this read `secret.env`
+    // directly. That commit bound each one to the Cloudflare API origin with
+    // `S.HttpSecret`, which nests the source under `secret` and adds
+    // `audiences`, so the assertion reads the new shape and pins the binding
+    // the commit added rather than only the names it kept.
+    expect(attrs.secrets.map((credential) => credential.secret.env)).toEqual([
+      "CLOUDFLARE_API_TOKEN",
+      "CLOUDFLARE_ACCOUNT_ID"
+    ])
+    expect(attrs.secrets.map((credential) => credential.audiences)).toEqual([
+      ["https://api.cloudflare.com"],
+      ["https://api.cloudflare.com"]
+    ])
   })
 })

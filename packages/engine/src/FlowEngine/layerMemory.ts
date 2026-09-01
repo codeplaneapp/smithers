@@ -13,7 +13,6 @@ import * as Fiber from "effect/Fiber"
 import * as FiberMap from "effect/FiberMap"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import { makeInstance } from "./FlowInstance.ts"
 import { makeUnsafe } from "./make.ts"
@@ -110,6 +109,28 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
     }
     const actions = new Map<string, ActionState>()
 
+    /**
+     * Rebuilds one payload through the flow's own payload schema.
+     *
+     * The engine stores a rebuilt copy and rebuilds again for every drive, so
+     * neither the caller that submitted the payload nor a handler that mutated
+     * the value it received can reach the value a later drive runs on. The
+     * schema constructor is the copier because it is the only description of
+     * the payload the engine has: it rebuilds each struct, array, and record
+     * it declares, and it hands back by reference the values it declares
+     * opaque, such as a `Schema.declare` reference to a live object. Copying
+     * through `Schema.toCodecJson` instead, as this did until 2026-09-01,
+     * demanded a JSON representation of every member and so refused any
+     * payload holding a declared reference, including every `smithers-build`
+     * target that names a dependency. The constructor also belongs to the
+     * schema object itself, so a flow authored against a second `effect`
+     * instance is rebuilt by the instance that owns it.
+     */
+    const snapshot = (
+      flow: Flow.Any,
+      value: unknown
+    ): Effect.Effect<unknown> => Effect.orDie(flow.payloadSchema.makeEffect(value as never))
+
     // Untraced because resume recursively drives suspended executions.
     const resume = Effect.fnUntraced(function*(executionId: string): Effect.fn.Return<void> {
       const state = executions.get(executionId)
@@ -135,9 +156,7 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
       const instance = makeInstance(state.instance.flow, state.instance.executionId)
       instance.interrupted = state.instance.interrupted
       state.instance = instance
-      const payload = yield* Schema.decodeUnknownEffect(
-        Schema.toCodecJson(state.instance.flow.payloadSchema)
-      )(structuredClone(state.payload)).pipe(Effect.orDie) as Effect.Effect<object>
+      const payload = yield* snapshot(state.instance.flow, state.payload) as Effect.Effect<object>
       state.fiber = yield* entry.execute(payload, state.instance.executionId).pipe(
         // Runs as the forked body fiber's first instruction: it hands
         // `interrupt` the fiber the body runs in, and it answers a
@@ -220,14 +239,12 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
           yield* recordParent(options.executionId, options.parent.executionId)
         }
         if (!state) {
-          const encodedPayload = yield* (Schema.encodeEffect(
-            Schema.toCodecJson(flow.payloadSchema)
-          )(options.payload).pipe(Effect.orDie) as Effect.Effect<unknown>)
+          const storedPayload = yield* snapshot(flow, options.payload)
           state = {
-            // The stored representation never crosses into user code. Every
-            // drive decodes a fresh clone, so caller and handler mutation
-            // cannot alter a replay.
-            payload: structuredClone(encodedPayload),
+            // The stored value never crosses into user code. Every drive
+            // rebuilds its own copy, so caller and handler mutation cannot
+            // alter a replay.
+            payload: storedPayload,
             instance: makeInstance(flow, options.executionId),
             fiber: undefined,
             bodyFiber: undefined,
