@@ -80,7 +80,7 @@ describe("a `Fail` cause carrying a typed error the codec rejects", () => {
   it("still answers bytes, and projects the tag, code, message, and nested cause", async () => {
     const encoded = await encode(new Flow.Complete({ exit: Exit.fail(wrapped) }))
 
-    expect(encoded.note).toContain("Expected JSON value")
+    expect(encoded.note).toBe("the flow result codec rejected the settlement")
     const projected = projection(encoded.encoded)
     expect(projected._tag).toBe(ExitEncoding.projectionTag)
     expect(projected.result).toBe("Complete")
@@ -135,7 +135,7 @@ describe("a cause mixing a typed failure, a defect, and an interrupt", () => {
     expect(projected.reasons.map((reason) => reason._tag)).toEqual(["Fail", "Die", "Interrupt"])
     expect(projected.reasons[1]?.error?.type).toBe("Error")
     expect(projected.reasons[1]?.error?.message).toBe("defect text")
-    expect(projected.reasons[1]?.error?.stack).toContain("Error: defect text")
+    expect(projected.reasons[1]?.error?.stack).toBeUndefined()
     expect(projected.reasons[2]?.fiberId).toBe(42)
   })
 
@@ -187,7 +187,7 @@ describe("a handoff whose payload the codec rejects", () => {
   it("keeps the handoff shape so the lineage stays readable", async () => {
     const encoded = await encode(new Flow.Handoff({ flow: "test/next", payload: wrapped }))
 
-    expect(encoded.note).toContain("Expected JSON value")
+    expect(encoded.note).toBe("the flow result codec rejected the settlement")
     expect(encoded.encoded).toMatchObject({
       _tag: "Handoff",
       flow: "test/next",
@@ -203,6 +203,21 @@ describe("value projection", () => {
     expect(ExitEncoding.projectValue(null)).toEqual({ type: "null", message: "null" })
   })
 
+  it("renders every remaining primitive and container shape", () => {
+    expect(ExitEncoding.projectValue(Number.POSITIVE_INFINITY)).toEqual({
+      type: "number",
+      message: "[number]"
+    })
+    expect(ExitEncoding.projectValue(true)).toEqual({ type: "boolean", message: "true" })
+    expect(ExitEncoding.projectValue(false)).toEqual({ type: "boolean", message: "false" })
+    expect(ExitEncoding.projectValue(1n)).toEqual({ type: "bigint", message: "[bigint]" })
+    expect(ExitEncoding.projectValue(() => undefined)).toEqual({
+      type: "function",
+      message: "[function]"
+    })
+    expect(ExitEncoding.projectValue([])).toEqual({ type: "Array", message: "[array]" })
+  })
+
   it("renders a value `JSON.stringify` drops by its shape", () => {
     expect(ExitEncoding.projectValue(undefined)).toEqual({ type: "undefined", message: "[undefined]" })
     expect(ExitEncoding.projectValue(Symbol("s"))).toEqual({ type: "symbol", message: "[symbol]" })
@@ -212,14 +227,14 @@ describe("value projection", () => {
     const circular: Record<string, unknown> = {}
     circular["self"] = circular
 
-    expect(ExitEncoding.projectValue(circular)).toEqual({ type: "Object", message: "[unrepresentable]" })
+    expect(ExitEncoding.projectValue(circular)).toEqual({ type: "object", message: "[object]" })
   })
 
   it("names an object with no constructor `object`", () => {
     const bare = Object.create(null) as Record<string, unknown>
     bare["field"] = 1
 
-    expect(ExitEncoding.projectValue(bare)).toEqual({ type: "object", message: "{\"field\":1}" })
+    expect(ExitEncoding.projectValue(bare)).toEqual({ type: "object", message: "[object]" })
   })
 
   it("stops following `cause` links at the depth bound", () => {
@@ -240,7 +255,10 @@ describe("value projection", () => {
 
   it("keeps only the leading stack lines", () => {
     const error = new Error("trimmed")
-    error.stack = ["Error: trimmed", "a", "b", "c", "d", "e"].join("\n")
+    Object.defineProperty(error, "stack", {
+      value: ["Error: trimmed", "a", "b", "c", "d", "e"].join("\n"),
+      enumerable: false
+    })
 
     expect(ExitEncoding.projectValue(error).stack).toBe(["Error: trimmed", "a", "b", "c"].join("\n"))
   })
@@ -252,11 +270,175 @@ describe("value projection", () => {
 
     expect(projected.message).toBe(`${"x".repeat(ExitEncoding.maxTextLength)}…`)
   })
+
+  it("never invokes accessors, proxies, or toJSON while projecting", () => {
+    let calls = 0
+    const getter = Object.defineProperties({}, {
+      message: { get: () => ++calls, enumerable: true },
+      toJSON: { value: () => ++calls, enumerable: true }
+    })
+    const proxy = new Proxy({}, {
+      get: () => {
+        calls++
+        throw new Error("proxy trap ran")
+      },
+      ownKeys: () => {
+        calls++
+        throw new Error("proxy trap ran")
+      }
+    })
+
+    expect(ExitEncoding.projectValue(getter)).toEqual({ type: "object", message: "[object]" })
+    expect(ExitEncoding.projectValue(proxy)).toEqual({ type: "object", message: "[unrepresentable]" })
+    expect(calls).toBe(0)
+  })
+
+  it("fails closed if descriptor introspection itself refuses", () => {
+    const target = {}
+    const descriptor = Object.getOwnPropertyDescriptor
+    Object.getOwnPropertyDescriptor = ((value: object, key: PropertyKey) => {
+      if (value === target) throw new Error("descriptor host refused")
+      return descriptor(value, key)
+    }) as typeof Object.getOwnPropertyDescriptor
+    try {
+      expect(ExitEncoding.projectValue(target)).toEqual({
+        type: "object",
+        message: "[unrepresentable]"
+      })
+    } finally {
+      Object.getOwnPropertyDescriptor = descriptor
+    }
+  })
 })
 
 describe("cause projection", () => {
   it("answers no reasons for an absent cause", () => {
     expect(ExitEncoding.projectCause(undefined)).toEqual([])
+  })
+
+  it("bounds oversized causes and records the omission", () => {
+    const cause = Cause.fromReasons(
+      Array.from({ length: ExitEncoding.maxReasonCount + 10 }, (_, index) => Cause.makeFailReason(index))
+    )
+    const projected = ExitEncoding.projectCause(cause)
+    expect(projected).toHaveLength(ExitEncoding.maxReasonCount + 1)
+    expect(projected.at(-1)).toMatchObject({ _tag: "Die", error: { type: "truncated" } })
+  })
+
+  it("fails closed for proxy causes, proxy reasons, and malformed reason arrays", () => {
+    const proxy = new Proxy({}, {})
+    expect(ExitEncoding.projectCause(proxy as never)).toEqual([{
+      _tag: "Die",
+      error: { type: "object", message: "[unrepresentable]" }
+    }])
+    expect(ExitEncoding.projectCause({ reasons: proxy } as never)).toEqual([{
+      _tag: "Die",
+      error: { type: "object", message: "[unrepresentable]" }
+    }])
+    expect(ExitEncoding.projectCause(Cause.fromReasons([proxy as never]))).toEqual([{
+      _tag: "Die",
+      error: { type: "object", message: "[unrepresentable]" }
+    }])
+  })
+
+  it("fails closed if cause or reason descriptor inspection refuses", () => {
+    const reason = Cause.makeFailReason("typed")
+    const cause = Cause.fromReasons([reason])
+    const descriptor = Object.getOwnPropertyDescriptor
+    Object.getOwnPropertyDescriptor = ((value: object, key: PropertyKey) => {
+      if (value === reason) throw new Error("reason descriptor refused")
+      return descriptor(value, key)
+    }) as typeof Object.getOwnPropertyDescriptor
+    try {
+      expect(ExitEncoding.projectCause(cause)).toEqual([{
+        _tag: "Die",
+        error: { type: "object", message: "[unrepresentable]" }
+      }])
+    } finally {
+      Object.getOwnPropertyDescriptor = descriptor
+    }
+
+    Object.getOwnPropertyDescriptor = ((value: object, key: PropertyKey) => {
+      if (value === cause) throw new Error("cause descriptor refused")
+      return descriptor(value, key)
+    }) as typeof Object.getOwnPropertyDescriptor
+    try {
+      expect(ExitEncoding.projectCause(cause)).toEqual([{
+        _tag: "Die",
+        error: { type: "object", message: "[unrepresentable]" }
+      }])
+    } finally {
+      Object.getOwnPropertyDescriptor = descriptor
+    }
+  })
+})
+
+describe("result projection failure boundaries", () => {
+  it("fails closed for proxy, missing, and forged Exit values", () => {
+    expect(ExitEncoding.projectResult(new Proxy({}, {}) as never, "proxy")).toMatchObject({
+      result: "Complete",
+      note: "proxy"
+    })
+    expect(ExitEncoding.projectResult({ _tag: "Complete", exit: null } as never, "missing")).toMatchObject({
+      result: "Complete",
+      note: "missing"
+    })
+    expect(ExitEncoding.projectResult({ _tag: "Complete", exit: {} } as never, "forged")).toMatchObject({
+      result: "Complete",
+      note: "forged"
+    })
+  })
+
+  it("bounds an oversized diagnostic projection", () => {
+    const long = "x".repeat(ExitEncoding.maxTextLength)
+    const cause = Cause.fromReasons(
+      Array.from(
+        { length: ExitEncoding.maxReasonCount },
+        () => Cause.makeFailReason({ _tag: long, code: long, message: long, stack: long })
+      )
+    )
+    const projected = ExitEncoding.projectResult(
+      new Flow.Complete({ exit: Exit.failCause(cause) }),
+      "oversized"
+    )
+    expect(projected.note).toContain("exceeded the diagnostic projection bound")
+  })
+
+  it("fails closed when JSON serialization or Exit prototype inspection refuses", () => {
+    const stringify = JSON.stringify
+    JSON.stringify = (() => {
+      throw new Error("serializer refused")
+    }) as typeof JSON.stringify
+    try {
+      expect(
+        ExitEncoding.projectResult(
+          new Flow.Handoff({ flow: "next", payload: {} }),
+          "serialize"
+        ).note
+      ).toContain("could not be projected")
+    } finally {
+      JSON.stringify = stringify
+    }
+
+    const exit = Exit.succeed("value")
+    const getPrototypeOf = Object.getPrototypeOf
+    Object.getPrototypeOf = ((value: object) => {
+      if (value === exit) throw new Error("prototype host refused")
+      return getPrototypeOf(value)
+    }) as typeof Object.getPrototypeOf
+    try {
+      expect(ExitEncoding.projectResult(
+        { _tag: "Complete", exit } as never,
+        "prototype"
+      )).toMatchObject({ result: "Complete", note: "prototype" })
+    } finally {
+      Object.getPrototypeOf = getPrototypeOf
+    }
+  })
+
+  it("degrades a malformed handoff without inventing a flow name", async () => {
+    const encoded = await encode({ _tag: "Handoff", flow: 1, payload: wrapped } as never)
+    expect(encoded.encoded).toMatchObject({ _tag: "Complete" })
   })
 })
 
