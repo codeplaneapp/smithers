@@ -12,7 +12,7 @@ import * as Input from "../src/Input.ts"
 import * as RustToolchain from "../src/RustToolchain.ts"
 
 const pinnedKeyMaterial = (pinContents: string): unknown => {
-  const declaration = RustToolchain.Pinned({})
+  const declaration = RustToolchain.Pinned({ pin: Input.file("//rust-toolchain.toml") })
   const inputDigests = new Map<Input.Declared, string>()
   if (Input.isDeclared(declaration.pin)) {
     inputDigests.set(declaration.pin, Input.digestText(pinContents))
@@ -97,7 +97,7 @@ describe("Rust.Toolchain", () => {
     expect(RustToolchain.Pinned({}))
       .toEqual({
         name: "pinned",
-        pin: { _tag: "File", path: "rust-toolchain.toml" },
+        pin: { _tag: "File", path: "//rust-toolchain.toml" },
         rustup: "rustup",
         cargo: "cargo"
       })

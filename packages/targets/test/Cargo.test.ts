@@ -20,7 +20,7 @@ describe("RustToolchain", () => {
   it("declares the pin file the install reads, not a separately resolved version", () => {
     expect(toolchain).toEqual({
       name: "pinned",
-      pin: { _tag: "File", path: "rust-toolchain.toml" },
+      pin: { _tag: "File", path: "//rust-toolchain.toml" },
       rustup: "rustup",
       cargo: "cargo"
     })
@@ -97,7 +97,7 @@ describe("CargoTest", () => {
     expect(metadata.inputs.map((input) => (input as { readonly path?: string; readonly pattern?: string })))
       .toEqual([{
         _tag: "File",
-        path: "rust-toolchain.toml"
+        path: "//rust-toolchain.toml"
       }, { _tag: "Glob", pattern: "//crates/flows-jj/**/*.rs", exclude: [] }])
     expect(metadata.cacheable).toBe(false)
   })

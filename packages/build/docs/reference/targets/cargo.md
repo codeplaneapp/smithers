@@ -62,9 +62,9 @@ from the previous compiler.
 
 | Name     | Type         | Default                       | Description                                                        |
 | -------- | ------------ | ----------------------------- | ------------------------------------------------------------------ |
-| `pin`    | `Input.File` | `file("rust-toolchain.toml")` | The file `rustup` reads. Its content digest is key material.       |
-| `rustup` | `string`     | `"rustup"`                    | The installer executable.                                          |
-| `cargo`  | `string`     | `"cargo"`                     | The build-tool executable.                                         |
+| `pin`    | `Input.File` | `file("//rust-toolchain.toml")` | The file `rustup` reads. Its content digest is key material.       |
+| `rustup` | `string`     | `"rustup"`                      | The installer executable.                                          |
+| `cargo`  | `string`     | `"cargo"`                       | The build-tool executable.                                         |
 
 The declaration is inert data. `RustToolchain.install(toolchain)` renders
 `rustup toolchain install`, which is what [GithubCiGen](github-ci-gen.md)

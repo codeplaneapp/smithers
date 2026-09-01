@@ -168,7 +168,7 @@ declaration names one and no BUILD-era call ever passes one, so
 from `BUILD.ts` to `PACKAGE.ts` does not rename its cargo gates.
 
 The BUILD-era `RustToolchain.Pinned` declaration follows the same content rule:
-`pin` defaults to `S.file("rust-toolchain.toml")`, and Cargo targets digest it
+`pin` defaults to `S.file("//rust-toolchain.toml")`, and Cargo targets digest it
 without callers also listing it in `srcs`.
 
 A build target may be a tool edge. `S.Shell.Build({ bin: sdk.buildCli })` and

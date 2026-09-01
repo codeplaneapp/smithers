@@ -43,7 +43,7 @@ export const Name = Schema.Literals(["pinned"])
 export type Name = typeof Name.Type
 
 /**
- * Maximum length of a declared executable or pin path.
+ * Maximum length of a declared executable or text channel.
  *
  * @category constants
  * @since 0.1.0
@@ -104,7 +104,7 @@ export type RustToolchain = typeof RustToolchain.Type
  * @since 0.1.0
  */
 export interface PinnedOptions {
-  /** @default Input.file("rust-toolchain.toml") */
+  /** @default Input.file("//rust-toolchain.toml") */
   readonly pin?: Input.File | undefined
   /** @default "rustup" */
   readonly rustup?: string | undefined
@@ -158,8 +158,10 @@ const declaredFile = (value: unknown, what: string): Input.File => {
 export const Pinned = (options: PinnedOptions = {}): PinnedRustToolchain =>
   PinnedRustToolchain.make({
     name: "pinned",
+    // Cargo targets may live below the workspace root. Anchoring keeps the
+    // imported declaration from digesting a package-local file instead.
     pin: options.pin === undefined
-      ? Input.file("rust-toolchain.toml")
+      ? Input.file("//rust-toolchain.toml")
       : declaredFile(options.pin, "rust toolchain pin"),
     rustup: options.rustup === undefined ? "rustup" : usable(options.rustup, "rustup executable"),
     cargo: options.cargo === undefined ? "cargo" : usable(options.cargo, "cargo executable")
