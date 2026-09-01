@@ -115,7 +115,18 @@ describe("Output.exitCode", () => {
     expect(render(receipt, "human").exitCode).toBe(3)
   })
 
-  it("provides an explicit caller-value wrapper that always exits successfully", () => {
+  it.each([
+    { _tag: "Error" },
+    { status: "waiting-approval" },
+    { signal: "SIGINT" }
+  ])("keeps receipt-like memory data successful: %j", (value) => {
+    const rendered = render(Output.renderValue(value), "json")
+
+    expect(JSON.parse(rendered.text)).toEqual(value)
+    expect(rendered.exitCode).toBe(0)
+  })
+
+  it("keeps even a complete control-receipt shape successful when it is caller data", () => {
     const receipt = { _tag: "Terminal", runId: "run-1", status: "failed" }
     const rendered = render(Output.renderValue(receipt), "json")
 

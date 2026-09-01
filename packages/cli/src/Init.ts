@@ -3,8 +3,8 @@
  *
  * rc.0 scaffolds one thing, a markdown flow at `flows/<name>/flow.mdx`, and
  * makes one edit, adding `.flows/` to the repository's ignore file. The 0.x
- * ceremony — interactive agent selection, a workflow pack, a global
- * `~/.smithers` install, skill installation as a side effect — is gone: seats
+ * ceremony, interactive agent selection, a workflow pack, a global
+ * `~/.smithers` install, and skill installation as a side effect, is gone: seats
  * resolve from environment keys, and every side effect a command performs
  * without being asked is a side effect an operator has to undo.
  *
@@ -22,7 +22,7 @@
  * @since 1.0.0
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { isAbsolute, join } from "node:path"
 import * as Environment from "./Environment.ts"
 
 /**
@@ -40,6 +40,43 @@ export const ignoreRule = ".flows/"
  * @since 1.0.0
  */
 export type IgnoreStatus = "created" | "updated" | "unchanged" | "skipped"
+
+/**
+ * Explains why a proposed flow name cannot be used by `init`.
+ *
+ * Reach for this before presenting a usage error. It accepts one portable path
+ * segment from the documented character set and otherwise returns a sentence
+ * safe to show to the operator without creating any project state.
+ *
+ * @category validation
+ * @since 1.0.0-rc.0
+ */
+export const nameProblem = (name: string): string | undefined => {
+  const reason = (): string =>
+    `a flow name is one path segment of letters, digits, '-' and '_'; got ${JSON.stringify(name)}`
+  if (
+    name === "" ||
+    isAbsolute(name) ||
+    name === "." ||
+    name === ".." ||
+    name.includes("/") ||
+    name.includes("\\") ||
+    /[\u0000-\u001f\u007f-\u009f]/.test(name) ||
+    !/^[A-Za-z0-9_-]+$/.test(name)
+  ) return reason()
+  return undefined
+}
+
+/**
+ * Whether a scaffold name passes {@link nameProblem}.
+ *
+ * Use this predicate when only a boolean is needed. Invalid input returns
+ * `false`; callers that need the refusal sentence should use `nameProblem`.
+ *
+ * @category predicates
+ * @since 1.0.0-rc.0
+ */
+export const isValidName = (name: string): boolean => nameProblem(name) === undefined
 
 /**
  * Whether a directory is the root of a repository whose ignore file is worth
@@ -169,7 +206,7 @@ const seatNote = (seat: Seat): string =>
  */
 export const template = (name: string, seat: Seat): string =>
   `---
-name: ${name}
+name: ${JSON.stringify(name)}
 description: A starter Smithers flow.
 ${seatNote(seat)}
 model: ${seat.seat}
@@ -225,6 +262,8 @@ export const scaffold = (
   name: string,
   environment: Environment.Source
 ): Scaffolded => {
+  const problem = nameProblem(name)
+  if (problem !== undefined) throw new Error(problem)
   const directory = join(root, "flows", name)
   const flowFile = join(directory, "flow.mdx")
   const seat = defaultSeat(environment)

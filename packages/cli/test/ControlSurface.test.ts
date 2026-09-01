@@ -67,7 +67,13 @@ const scenario = (shared: ReadonlyArray<string> = []) =>
     const runId = (run.value as { readonly runId?: unknown }).runId
     if (typeof runId !== "string") return yield* Effect.fail(new Error("run did not emit its identifier"))
     const status = yield* invoke(["--json", ...shared, "status", runId])
-    const missingStatus = yield* invoke(["--json", ...shared, "status", `missing-${runId}`])
+    const missingStatusError = yield* Effect.flip(
+      invoke(["--json", ...shared, "status", `missing-${runId}`])
+    )
+    const missingStatus = {
+      message: missingStatusError instanceof Error ? missingStatusError.message : String(missingStatusError),
+      exitCode: missingStatusError instanceof CliError.UsageError ? CliError.exitCode(missingStatusError) : 1
+    }
     const logs = yield* invoke(["--json", ...shared, "logs", runId]).pipe(Effect.timeout("2 seconds"))
 
     return { plan, parked, approve, run, runId, status, missingStatus, logs }
@@ -284,7 +290,9 @@ describe("Control surface", () => {
     if (Exit.isFailure(exit)) {
       const error = Cause.squash(exit.cause)
       expect(error).toBeInstanceOf(CliError.UsageError)
-      expect((error as CliError.UsageError).message).toBe("approval must match the expected payload schema")
+      expect((error as CliError.UsageError).message).toContain("approval must match the expected payload schema")
+      expect((error as CliError.UsageError).message).toContain("target")
+      expect((error as CliError.UsageError).message).not.toContain("{}")
       expect(CliError.exitCode(error as CliError.UsageError)).toBe(2)
     }
   })
@@ -647,7 +655,7 @@ describe("Control surface", () => {
     expect(local.parked.exitCode).toBe(3)
     expect(remote.result.parked.exitCode).toBe(3)
     expect(local.status.value).toMatchObject({ _tag: "runs", items: [{ runId: local.runId }] })
-    expect(local.missingStatus.value).toEqual({ _tag: "runs", items: [] })
+    expect(local.missingStatus).toEqual({ message: `Run not found: "missing-${local.runId}"`, exitCode: 2 })
     expect(Array.isArray(local.logs.value)).toBe(true)
     expect((local.logs.value as ReadonlyArray<unknown>).length).toBeGreaterThan(0)
     expect(remote.hostname).toBe("127.0.0.1")

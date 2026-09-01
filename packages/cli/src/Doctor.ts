@@ -118,9 +118,46 @@ const ladder = (file: string): Check => {
   }
 }
 
-/** Every flow directory discovery would walk, and whether it will find anything. */
-const registry = (root: string): Check => {
+interface DiscoveredFlow {
+  readonly flowId: string
+  readonly description: string
+}
+
+const discoveredOnDisk = (directory: string): { readonly flows: number; readonly skipped: number } => {
+  let flows = 0
+  let skipped = 0
+  const visit = (parent: string): void => {
+    for (const entry of readdirSync(parent, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const child = `${parent}/${entry.name}`
+      if (
+        existsSync(`${child}/flow.ts`) ||
+        existsSync(`${child}/flow.mdx`) ||
+        existsSync(`${child}/SKILL.md`)
+      ) {
+        flows += 1
+      } else {
+        skipped += 1
+      }
+      visit(child)
+    }
+  }
+  visit(directory)
+  return { flows, skipped }
+}
+
+/** Every flow real discovery found, with a recursive filesystem fallback. */
+const registry = (root: string, discoveredFlows: ReadonlyArray<DiscoveredFlow> | undefined): Check => {
   const directory = Project.flowsDirectory(root)
+  if (discoveredFlows !== undefined) {
+    return discoveredFlows.length === 0
+      ? {
+        name: "registry",
+        level: "warn",
+        detail: `${directory} yielded no discovered flows; discovery finds nothing`
+      }
+      : { name: "registry", level: "ok", detail: `${discoveredFlows.length} flows discovered` }
+  }
   if (!existsSync(directory)) {
     return {
       name: "registry",
@@ -128,24 +165,20 @@ const registry = (root: string): Check => {
       detail: `no ${directory}; run \`smithers init\` to scaffold one`
     }
   }
-  const entries = readdirSync(directory, { withFileTypes: true }).filter((entry) => entry.isDirectory())
-  const withBody = entries.filter((entry) =>
-    existsSync(`${directory}/${entry.name}/flow.mdx`) || existsSync(`${directory}/${entry.name}/flow.ts`)
-  )
-  if (withBody.length === 0) {
+  const found = discoveredOnDisk(directory)
+  if (found.flows === 0) {
     return {
       name: "registry",
       level: "warn",
-      detail: `${directory} holds no flow.ts or flow.mdx; discovery finds nothing`
+      detail: `${directory} holds no flow.ts, flow.mdx, or SKILL.md; discovery finds nothing`
     }
   }
-  const empty = entries.length - withBody.length
   return {
     name: "registry",
     level: "ok",
-    detail: empty === 0
-      ? `${withBody.length} flows discovered`
-      : `${withBody.length} flows discovered, ${empty} directories skipped with no flow body`
+    detail: found.skipped === 0
+      ? `${found.flows} flows discovered`
+      : `${found.flows} flows discovered, ${found.skipped} directories skipped with no flow body`
   }
 }
 
@@ -179,6 +212,12 @@ const providers = (environment: Environment.Source): Check => {
  */
 export interface Options {
   readonly root: string
+  /**
+   * The descriptors returned by the same control listing as `smithers ls`.
+   * When present, including as an empty list, this authoritative discovery
+   * result replaces the filesystem fallback.
+   */
+  readonly discoveredFlows?: ReadonlyArray<DiscoveredFlow> | undefined
   readonly environment?: Environment.Source | undefined
   readonly nodeVersion?: string | undefined
   readonly jj?: { readonly path: string; readonly executable: boolean; readonly hint?: string | undefined } | undefined
@@ -200,7 +239,7 @@ export interface Options {
 export const inspect = (options: Options): Report => {
   const environment = options.environment ?? process.env
   const nodeVersion = options.nodeVersion ?? process.versions.node
-  const checks: Array<Check> = [registry(options.root)]
+  const checks: Array<Check> = [registry(options.root, options.discoveredFlows)]
 
   checks.push({
     name: "state",

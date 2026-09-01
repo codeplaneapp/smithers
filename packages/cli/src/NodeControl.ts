@@ -17,6 +17,7 @@ import * as WorkspaceObservation from "@smthrs/agent/WorkspaceObservation"
 import { CapabilityPattern } from "@smthrs/capability/Capability"
 import { Rule } from "@smthrs/capability/Permission"
 import {
+  Control,
   ControlExecutor,
   ControlRpcs,
   ControlRuntime,
@@ -36,7 +37,7 @@ import type * as FlowBinding from "@smthrs/harness/FlowBinding"
 import type * as Sandbox from "@smthrs/harness/Sandbox"
 import * as NodeJj from "@smthrs/jj/node/NodeJj"
 import { Migrations, SqlJournal } from "@smthrs/journal"
-import type * as Journal from "@smthrs/journal/Journal"
+import * as Journal from "@smthrs/journal/Journal"
 import * as KernelChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
 import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
 import * as GrantStore from "@smthrs/kernel/GrantStore"
@@ -66,7 +67,7 @@ import * as SyncAuth from "@smthrs/sync/SyncAuth"
 import * as SyncServer from "@smthrs/sync/SyncServer"
 import * as WorkspaceShare from "@smthrs/sync/WorkspaceShare"
 import type { FileSystem, Path, Result } from "effect"
-import { Context, Effect, Exit, Layer, Redacted, Scope } from "effect"
+import { Context, Effect, Exit, Layer, Redacted, Scope, Semaphore } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
 import { Socket } from "effect/unstable/socket"
@@ -78,10 +79,12 @@ import type { ListenOptions } from "node:net"
 import { hostname } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import * as Application from "./Application.ts"
+import * as CliError from "./CliError.ts"
 import * as CodexAuth from "./CodexAuth.ts"
 import * as Environment_ from "./Environment.ts"
 import * as Output from "./Output.ts"
 import * as Project from "./Project.ts"
+import * as Serve from "./Serve.ts"
 
 /**
  * The environment subset consulted while resolving Node application
@@ -92,7 +95,6 @@ import * as Project from "./Project.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Environment = Environment_.Source
 
@@ -101,7 +103,6 @@ export type Environment = Environment_.Source
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type ServerOptions = ListenOptions & {
   readonly disablePreemptiveShutdown?: boolean | undefined
@@ -158,11 +159,27 @@ const mcpServersFromArguments = (
 ): ReadonlyArray<McpClient.ConnectOptions> | undefined => {
   const path = valueFromArguments(args, "mcp-config") ?? Environment_.read(environment, "SMITHERS_MCP_CONFIG")
   if (path === undefined) return undefined
-  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))
+  if (!existsSync(path)) {
+    throw new CliError.UsageError({ message: `--mcp-config ${path}: file not found` })
+  }
+  let source: string
+  try {
+    source = readFileSync(path, "utf8")
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause)
+    throw new CliError.UsageError({ message: `--mcp-config ${path} could not be read: ${reason}` })
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(source)
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause)
+    throw new CliError.UsageError({ message: `--mcp-config ${path} is not valid JSON: ${reason}` })
+  }
   if (!Array.isArray(parsed) || !parsed.every(isMcpServerEntry)) {
-    throw new Error(
-      `--mcp-config ${path} contains an invalid MCP server entry`
-    )
+    throw new CliError.UsageError({
+      message: `--mcp-config ${path} must contain a JSON array of MCP server entries`
+    })
   }
   return parsed
 }
@@ -173,38 +190,60 @@ const mcpServersFromArguments = (
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const makeConfig = (
   args: ReadonlyArray<string>,
   environment: Environment,
   cwd: string
-): Application.Config => ({
-  remote: valueFromArguments(args, "remote") ?? Environment_.read(environment, "SMITHERS_REMOTE"),
-  // New in Phase 4: at the import reference `--credential` had no environment
-  // fallback, so a hosted gateway had to spell the token on every command
-  // line (rc-contract section 4).
-  credential: valueFromArguments(args, "credential") ?? Environment_.read(environment, "SMITHERS_API_KEY"),
-  mcpServers: mcpServersFromArguments(args, environment),
-  // `--root` is resolved here rather than in a handler because the durable
-  // layers are built from it, and they are built before any flag is parsed.
-  root: Project.root(valueFromArguments(args, "root"), cwd),
-  // `migrate` converts a 0.x project, which by definition has no `.flows/`
-  // for the root walk to anchor on. Resolved from the same `--root`, and
-  // otherwise from the 0.x state beside the invocation directory.
-  migrationRoot: Project.legacyRoot(valueFromArguments(args, "root"), cwd)
-})
+): Application.Config => {
+  const remote = valueFromArguments(args, "remote") ?? Environment_.read(environment, "SMITHERS_REMOTE")
+  if (remote !== undefined) {
+    let parsed: URL
+    try {
+      parsed = new URL(remote)
+    } catch {
+      throw new CliError.UsageError({
+        message: `--remote must be an http:// or https:// URL; got ${JSON.stringify(remote)}`
+      })
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new CliError.UsageError({
+        message: `--remote must be an http:// or https:// URL; got ${JSON.stringify(remote)}`
+      })
+    }
+  }
+  return {
+    remote,
+    // New in Phase 4: at the import reference `--credential` had no environment
+    // fallback, so a hosted gateway had to spell the token on every command
+    // line (rc-contract section 4).
+    credential: valueFromArguments(args, "credential") ?? Environment_.read(environment, "SMITHERS_API_KEY"),
+    mcpServers: mcpServersFromArguments(args, environment),
+    // `--root` is resolved here rather than in a handler because the durable
+    // layers are built from it, and they are built before any flag is parsed.
+    root: Project.root(valueFromArguments(args, "root"), cwd),
+    // `migrate` converts a 0.x project, which by definition has no `.flows/`
+    // for the root walk to anchor on. Resolved from the same `--root`, and
+    // otherwise from the 0.x state beside the invocation directory.
+    migrationRoot: Project.legacyRoot(valueFromArguments(args, "root"), cwd)
+  }
+}
 
 /**
  * Resolves configuration for the current Node process.
  *
  * @category configuration
  * @since 0.1.0
- * @slop
  */
-export const config: Effect.Effect<Application.Config> = Effect.sync(() =>
-  makeConfig(process.argv.slice(2), process.env, process.cwd())
-)
+export const config: Effect.Effect<Application.Config, CliError.UsageError> = Effect.try({
+  try: () => makeConfig(process.argv.slice(2), process.env, process.cwd()),
+  catch: (cause) =>
+    cause instanceof CliError.UsageError
+      ? cause
+      : new CliError.UsageError({
+        message: cause instanceof Error ? cause.message : "Smithers configuration could not be read"
+      })
+})
 
 const websocketUrl = (remote: string): string => {
   const url = new URL(remote)
@@ -238,7 +277,6 @@ const websocketLayer = (remote: string, credential: string | undefined) => {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const projectSources = (root: string): ReadonlyArray<Descriptor.Source> => [
   { source: "project", root: join(root, "flows"), naming: "path" }
@@ -264,7 +302,6 @@ export const projectSources = (root: string): ReadonlyArray<Descriptor.Source> =
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerHostPlatform = Layer.provideMerge(AtomicFileSystem.layer, NodeServices.layer)
 
@@ -316,7 +353,6 @@ export const layerGrantStore = (root: string): Layer.Layer<GrantStore.GrantStore
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerGuardedPlatform = (
   root: string,
@@ -343,7 +379,6 @@ export const layerGuardedPlatform = (
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerObserver = (root: string): Layer.Layer<WorkspaceObservation.Observer> =>
   WorkspaceObservation.layer(root).pipe(Layer.provide(layerHostPlatform))
@@ -360,7 +395,6 @@ export const layerObserver = (root: string): Layer.Layer<WorkspaceObservation.Ob
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerRegistry = (root: string): Layer.Layer<Registry.Registry> => {
   const platform = layerGuardedPlatform(root)
@@ -383,7 +417,6 @@ export const layerRegistry = (root: string): Layer.Layer<Registry.Registry> => {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const databasePath = (root: string): string => join(root, ".flows", "control.db")
 
@@ -395,18 +428,16 @@ export const databasePath = (root: string): string => join(root, ".flows", "cont
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const executionDatabasePath = (root: string): string => join(root, ".flows", "engine.db")
 
 /**
  * `Application.Engine` plus the shared database seam the Node composition
- * hangs additional stores off — the memory store reuses the same connection
+ * hangs additional stores off; the memory store reuses the same connection
  * the runtime and journal commit against.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface EngineDurable extends Application.Engine {
   readonly stores: Layer.Layer<DurableWriter.DurableWriter | SqlClient | RunStore.RunStore>
@@ -464,13 +495,15 @@ const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.Memo
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const engineDurable = (
   root: string,
   registry?: Layer.Layer<Registry.Registry> | undefined
 ): EngineDurable => {
   const file = databasePath(root)
+  // Every process gets a distinct, probeable fence. Cross-process cancellation
+  // is carried by RunStore.requestCancel; ControlLive treats ClaimLost from the
+  // non-owning caller as an accepted durable request for the owner to observe.
   const owner = Object.freeze({ hostId: hostname(), pid: process.pid, nonce: randomUUID() })
   // Suspended so a `--remote` invocation, which never builds this layer, does
   // not leave an empty `.flows/` behind. SQLite opens a file but will not
@@ -526,7 +559,7 @@ const openaiAuthVariable = "SMITHERS_OPENAI_AUTH"
 
 /**
  * The Node seat resolver: it turns a `provider:modelId` seat into a live model
- * route, with the API key read from the given environment — usually
+ * route, with the API key read from the given environment, usually
  * `process.env`, passed in as a value so nothing below this composition touches
  * the process directly.
  *
@@ -691,7 +724,6 @@ const cellLimits: Sandbox.Limits = {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const testRunner = (
   environment: Readonly<Record<string, string | undefined>>,
@@ -750,7 +782,6 @@ export const checkpointStore = (
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const testFlows = (
   services: Context.Context<KernelChildProcessSpawner.ChildProcessSpawner | Path.Path>,
@@ -795,8 +826,9 @@ export const rebuildableTransport = (
 ): Effect.Effect<RequestExecutor.Transport, never, Scope.Scope> =>
   Effect.gen(function*() {
     const scope = yield* Scope.Scope
+    const gate = yield* Semaphore.make(1)
     let held: Scope.Closeable | undefined = undefined
-    const rebuild = Effect.gen(function*() {
+    const rebuild = gate.withPermit(Effect.gen(function*() {
       const owned = yield* Scope.fork(scope)
       const client = yield* NodeHttpClient.makeUndici.pipe(
         Effect.provideServiceEffect(NodeHttpClient.Dispatcher, acquire),
@@ -806,7 +838,7 @@ export const rebuildableTransport = (
       held = owned
       if (previous !== undefined) yield* Scope.close(previous, Exit.void)
       return client
-    })
+    }))
     return { client: yield* rebuild, rebuild }
   })
 
@@ -825,7 +857,7 @@ const layerRequestExecutor: Layer.Layer<RequestExecutor.RequestExecutor> = Layer
 /**
  * Provides the production run executor: the `@smthrs/agent` composition root
  * over the durable control stores, the local flow registry, and the standard
- * host capabilities — filesystem and shell through the kernel's guarded
+ * host capabilities: filesystem and shell through the kernel's guarded
  * layers, durable memory over the control database, approval and steering
  * wired back into the control plane by the session itself.
  *
@@ -838,7 +870,6 @@ const layerRequestExecutor: Layer.Layer<RequestExecutor.RequestExecutor> = Layer
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerExecutor = (
   registry: Layer.Layer<Registry.Registry>,
@@ -950,7 +981,7 @@ export const layerExecutor = (
     {
       filename: executionDatabasePath(root),
       workspaceRoot,
-      owner: { hostId: hostname() },
+      owner: { hostId: "flows-cli" },
       // Two terminals over one project are two engine processes over one
       // `.flows/engine.db`, so "one engine process at a time" was never true
       // and a stub answering `false` let each steal the other's running rows
@@ -978,13 +1009,16 @@ export const layerExecutor = (
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
-export const layerControl = (applicationConfig: Application.Config) => {
+export const layerControl = (
+  applicationConfig: Application.Config,
+  suppliedRegistry?: Layer.Layer<Registry.Registry> | undefined,
+  suppliedEngine?: EngineDurable | undefined
+) => {
   const remote = applicationConfig.remote ?? "http://127.0.0.1"
   const root = applicationConfig.root ?? process.cwd()
-  const registry = layerRegistry(root)
-  const engine = engineDurable(root, registry)
+  const registry = suppliedRegistry ?? layerRegistry(root)
+  const engine = suppliedEngine ?? engineDurable(root, registry)
   const executor = applicationConfig.remote === undefined
     ? layerExecutor(registry, engine, root, process.env, applicationConfig.mcpServers ?? [])
     : undefined
@@ -1005,7 +1039,6 @@ const output = Output.make()
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerOutput = Layer.succeed(
   Output.Output,
@@ -1027,12 +1060,51 @@ export const layerOutput = Layer.succeed(
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer = (applicationConfig: Application.Config) => {
   const root = applicationConfig.root ?? process.cwd()
+  const registry = layerRegistry(root)
+  const engine = engineDurable(root, registry)
+  const control = layerControl(applicationConfig, registry, engine)
+  const gatewayHost = applicationConfig.remote === undefined
+    ? Layer.effect(
+      Serve.GatewayHost,
+      Effect.gen(function*() {
+        const controlService = yield* Control.Control
+        const journalService = yield* Journal.Journal
+        return Serve.GatewayHost.of({
+          launch: (health, options, gatewayRoot) =>
+            Layer.launch(
+              layerGateway(
+                health,
+                options,
+                gatewayRoot,
+                engine,
+                Layer.succeed(Journal.Journal, journalService)
+              )
+            ).pipe(
+              Effect.provideService(Control.Control, controlService),
+              Effect.provide(NodeServices.layer),
+              Effect.orDie
+            )
+        })
+      })
+    ).pipe(Layer.provide([control, engine.journal]))
+    : Layer.effect(
+      Serve.GatewayHost,
+      Effect.map(Control.Control, (controlService) =>
+        Serve.GatewayHost.of({
+          launch: (health, options, gatewayRoot) =>
+            Layer.launch(layerGateway(health, options, gatewayRoot, engine)).pipe(
+              Effect.provideService(Control.Control, controlService),
+              Effect.provide(NodeServices.layer),
+              Effect.orDie
+            )
+        }))
+    ).pipe(Layer.provide(control))
   return Layer.mergeAll(
-    layerControl(applicationConfig),
+    control,
+    gatewayHost,
     layerOutput,
     NodeServices.layer,
     Project.layer(root, applicationConfig.migrationRoot ?? Project.legacyRoot(undefined, root)),
@@ -1041,7 +1113,7 @@ export const layer = (applicationConfig: Application.Config) => {
     // connection would be a second writer to one SQLite file. A remote
     // invocation has no local database to be that store, so it gets the
     // refusal instead of silently writing where nothing reads.
-    applicationConfig.remote === undefined ? layerMemory(root) : layerMemoryRemote
+    applicationConfig.remote === undefined ? layerMemory(root, engine) : layerMemoryRemote
   )
 }
 
@@ -1116,22 +1188,22 @@ const remoteMemory = (verb: string): Effect.Effect<never, MemoryError.MemoryErro
  *
  * @category layers
  * @since 1.0.0
- * @slop
  */
-export const layerMemory = (root: string): Layer.Layer<MemoryStore.MemoryStore> =>
+export const layerMemory = (
+  root: string,
+  engine: EngineDurable = engineDurable(root)
+): Layer.Layer<MemoryStore.MemoryStore> =>
   MemoryStore.layer.pipe(
-    Layer.provide([engineDurable(root).stores, NodeCrypto.layer]),
+    Layer.provide([engine.stores, NodeCrypto.layer]),
     Layer.orDie
   )
 
 const defaultServerOptions: ServerOptions = { host: "127.0.0.1", port: 3000 }
 
-const isLoopbackHost = (host: string): boolean => host === "127.0.0.1" || host === "::1"
-
 const listenOptions = (options: ServerOptions): ListenOptions => {
   const { listen, ...nodeOptions } = options
   const host = nodeOptions.host ?? "127.0.0.1"
-  if (!isLoopbackHost(host) && listen !== true) {
+  if (!Serve.isLoopback(host) && listen !== true) {
     throw new Error(`Refusing non-loopback control bind ${host} without an explicit --listen opt-in`)
   }
   return { ...nodeOptions, host }
@@ -1144,7 +1216,6 @@ const listenOptions = (options: ServerOptions): ListenOptions => {
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerServer = (
   auth: Layer.Layer<ControlRpcs.ControlAuth>,
@@ -1187,16 +1258,26 @@ export const layerServer = (
 export const layerGateway = (
   health: GatewayServer.Health,
   options: NodeGateway.ServerOptions = { host: "127.0.0.1", port: defaultServerOptions.port },
-  root: string
+  root: string,
+  engine: EngineDurable = engineDurable(root),
+  journal: Layer.Layer<Journal.Journal> = engine.journal
 ) => {
-  const journal = engineDurable(root).journal
-  return NodeGateway.layer(health, options).pipe(
+  const host = options.host ?? "127.0.0.1"
+  if (!Serve.isLoopback(host) && options.listen !== true) {
+    throw new Error(`Refusing non-loopback gateway bind ${host} without an explicit --listen opt-in`)
+  }
+  const gateway = NodeGateway.layer(health, options).pipe(
     Layer.provide([
       GatewayProjections.layer,
       SyncServer.layer.pipe(Layer.provide([journal, RunCatalog.layerNoop])),
       SyncAuth.layer.pipe(Layer.provide(WorkspaceShare.layerNoop))
     ])
   )
+  // Those three supplied layers discharge every gateway input except Control.
+  // Some upstream layer combinators currently widen that input to `any`, which
+  // would make every caller look incomplete even though the runtime graph is
+  // closed. Preserve the exact boundary this composition actually exposes.
+  return gateway as Layer.Layer<Layer.Success<typeof gateway>, Layer.Error<typeof gateway>, Control.Control>
 }
 
 /**
@@ -1204,7 +1285,6 @@ export const layerGateway = (
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerServerBearerAuth = (
   auth: ControlRpcs.BearerAuthOptions,
@@ -1218,14 +1298,13 @@ export const layerServerBearerAuth = (
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerServerNoopAuth = (options: ServerOptions = defaultServerOptions) => {
   const host = options.host ?? "127.0.0.1"
-  if (!isLoopbackHost(host)) {
+  if (!Serve.isLoopback(host)) {
     throw new Error(`Refusing non-loopback control bind ${host} with permissive authentication`)
   }
-  // The `isLoopbackHost` refusal three lines up is the whole guard: this
+  // The loopback refusal three lines up is the whole guard: this
   // composition cannot be built for a bind anything off this machine can
   // reach. `listen: false` keeps it in-process on top of that.
   // eslint-disable-next-line no-restricted-syntax -- guarded by the refusal above

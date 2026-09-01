@@ -167,6 +167,34 @@ describe("smithers executable", processBudget, () => {
     expect(result.status).toBe(2)
   })
 
+  it("reports invalid pre-parse configuration as flag-specific usage errors", () => {
+    inEmptyDirectory((cwd) => {
+      const missing = join(cwd, "missing.json")
+      const malformed = join(cwd, "malformed.json")
+      writeFileSync(malformed, "{")
+
+      const remoteResult = runIn(cwd, ["--remote", "nota", "ps"])
+      const missingResult = runIn(cwd, ["--mcp-config", missing, "ps"])
+      const malformedResult = runIn(cwd, ["--mcp-config", malformed, "ps"])
+
+      expect(remoteResult.status).toBe(2)
+      expect(remoteResult.stderr).toContain('--remote must be an http:// or https:// URL; got "nota"')
+      expect(missingResult.status).toBe(2)
+      expect(missingResult.stderr).toContain(`--mcp-config ${missing}: file not found`)
+      expect(malformedResult.status).toBe(2)
+      expect(malformedResult.stderr).toContain(`--mcp-config ${malformed} is not valid JSON:`)
+      for (const output of [
+        remoteResult.stderr,
+        missingResult.stderr,
+        malformedResult.stderr
+      ]) {
+        expect(output).not.toContain("TypeError")
+        expect(output).not.toContain("ENOENT")
+        expect(output).not.toContain("SyntaxError")
+      }
+    })
+  })
+
   it("exits with usage status for a flag no command declares", () => {
     const result = run(["ls", "--filter", "review"])
 

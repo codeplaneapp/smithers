@@ -5,8 +5,10 @@
  * laptop's LAN address can launch agents with the operator's credentials, and
  * nothing about the running server says so.
  */
+import { ControlRpcs } from "@smthrs/control"
 import { describe, expect, it } from "vitest"
 import * as CliError from "../src/CliError.ts"
+import * as NodeControl from "../src/NodeControl.ts"
 import * as Serve from "../src/Serve.ts"
 
 const bind = (overrides: Partial<Serve.Bind> = {}): Serve.Bind => ({
@@ -46,6 +48,29 @@ describe("the bind rule", () => {
   it("allows a non-loopback bind that opted in and carries a token", () => {
     expect(Serve.refuse(bind({ host: "10.0.0.4", listen: true, credential: "secret" }))).toBeUndefined()
     expect(Serve.isLoopback("10.0.0.4")).toBe(false)
+  })
+
+  it.each([
+    ["127.0.0.1", true],
+    ["::1", true],
+    ["localhost", true],
+    ["0.0.0.0", false],
+    ["192.0.2.1", false]
+  ] as const)("keeps every Node bind boundary in parity for %s", (host, expected) => {
+    const auth = { token: "alpha-secret", principal: { id: "alpha", kind: "bearer" as const } }
+    const options = { host, port: 0 }
+    const boundaries = [
+      () => NodeControl.layerServer(ControlRpcs.layerBearerAuth(auth), options),
+      () => NodeControl.layerServerBearerAuth(auth, options),
+      () => NodeControl.layerServerNoopAuth(options),
+      () => NodeControl.layerGateway(Serve.health("/tmp/project"), options, "/tmp/project")
+    ]
+
+    expect(Serve.isLoopback(host)).toBe(expected)
+    for (const boundary of boundaries) {
+      if (expected) expect(boundary).not.toThrow()
+      else expect(boundary).toThrow()
+    }
   })
 })
 

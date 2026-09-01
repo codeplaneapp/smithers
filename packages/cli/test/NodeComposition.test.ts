@@ -5,6 +5,7 @@
  * binds that must stay confined to loopback.
  */
 import { NodeServices } from "@effect/platform-node"
+import type * as Undici from "@effect/platform-node/Undici"
 import * as WorkspaceObservation from "@smthrs/agent/WorkspaceObservation"
 import { Control as ControlService } from "@smthrs/control"
 import * as TestControl from "@smthrs/control/test/TestControl"
@@ -15,9 +16,9 @@ import * as Workspace from "@smthrs/kernel/Workspace"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import { Registry } from "@smthrs/registry"
 import * as Container from "@smthrs/std/Container"
-import { Cause, Effect, Exit, FileSystem, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Option } from "effect"
 import { HttpServer } from "effect/unstable/http"
-import { existsSync } from "node:fs"
+import { existsSync, fstatSync, readdirSync, statSync } from "node:fs"
 import { link, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -28,6 +29,23 @@ import * as NodeControl from "../src/NodeControl.ts"
 import * as Output from "../src/Output.ts"
 
 let root = ""
+
+const descriptorDirectory = process.platform === "linux" ? "/proc/self/fd" : "/dev/fd"
+
+const openHandles = (filename: string): number => {
+  const target = statSync(filename)
+  let open = 0
+  for (const entry of readdirSync(descriptorDirectory)) {
+    try {
+      const descriptor = fstatSync(Number(entry))
+      if (descriptor.dev === target.dev && descriptor.ino === target.ino) open += 1
+    } catch {
+      // The descriptor listing can include its own already-closed handle.
+      // A handle gone before inspection cannot hold this database open.
+    }
+  }
+  return open
+}
 
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "flows-cli-composition-"))
@@ -89,14 +107,11 @@ describe("NodeControl.makeConfig", () => {
     })
   })
 
-  it("keeps an explicitly empty `--remote=` instead of falling back", () => {
-    // `??` only falls back on absence, and an empty inline value is a present
-    // empty string.
-    expect(configuration(["--remote="], { SMITHERS_REMOTE: "https://env.example.test" })).toEqual({
-      remote: "",
-      credential: undefined,
-      mcpServers: undefined
-    })
+  it("refuses an explicitly empty or relative remote before building transports", () => {
+    expect(() => configuration(["--remote="], { SMITHERS_REMOTE: "https://env.example.test" }))
+      .toThrow('--remote must be an http:// or https:// URL; got ""')
+    expect(() => configuration(["--remote", "nota"], {}))
+      .toThrow('--remote must be an http:// or https:// URL; got "nota"')
   })
 
   it("takes the first occurrence when a flag is repeated", () => {
@@ -104,15 +119,9 @@ describe("NodeControl.makeConfig", () => {
       .toEqual({ remote: "https://first.test", credential: undefined, mcpServers: undefined })
   })
 
-  it("does not guess that a following flag is a missing value", () => {
-    // Positional reading is deliberate and each flag is scanned on its own:
-    // the token after `--remote` is its value whatever it looks like, and
-    // `--credential` is still found where it stands.
-    expect(configuration(["--remote", "--credential", "secret"], {})).toEqual({
-      remote: "--credential",
-      credential: "secret",
-      mcpServers: undefined
-    })
+  it("refuses a following flag as an invalid remote before opening any layer", () => {
+    expect(() => configuration(["--remote", "--credential", "secret"], {}))
+      .toThrow('--remote must be an http:// or https:// URL; got "--credential"')
   })
 
   it("resolves a credential with no remote at all", () => {
@@ -160,7 +169,9 @@ describe("NodeControl.makeConfig", () => {
       const malformed = join(directory, "malformed.json")
       await writeFile(malformed, JSON.stringify([{ server: "docs" }]))
       expect(() => NodeControl.makeConfig(["--mcp-config", malformed], {}, "/work")).toThrow(malformed)
-      expect(() => NodeControl.makeConfig(["--mcp-config", join(directory, "absent.json")], {}, "/work")).toThrow()
+      const absent = join(directory, "absent.json")
+      expect(() => NodeControl.makeConfig(["--mcp-config", absent], {}, "/work"))
+        .toThrow(`--mcp-config ${absent}: file not found`)
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
@@ -468,7 +479,12 @@ describe("NodeControl.layerOutput", () => {
       const codes = await Effect.runPromise(
         Effect.gen(function*() {
           const output = yield* Output.Output
-          const parked = yield* output.render({ _tag: "Parked" }, "json")
+          const parked = yield* output.render({
+            _tag: "Parked",
+            receiptId: "receipt-1",
+            planId: "plan-1",
+            status: "waiting-approval"
+          }, "json")
           const parkedCode = process.exitCode
           const accepted = yield* output.render({ _tag: "Accepted" }, "human")
           return { parked, parkedCode, accepted, acceptedCode: process.exitCode }
@@ -477,13 +493,61 @@ describe("NodeControl.layerOutput", () => {
 
       // The rendered text is unchanged by the transfer, and the last render
       // wins the process status.
-      expect(codes.parked.text).toBe("{\"_tag\":\"Parked\"}")
+      expect(codes.parked.text).toBe(
+        "{\"_tag\":\"Parked\",\"planId\":\"plan-1\",\"receiptId\":\"receipt-1\",\"status\":\"waiting-approval\"}"
+      )
       expect(codes.parkedCode).toBe(3)
       expect(codes.accepted.text).toBe("{\n  \"_tag\": \"Accepted\"\n}")
       expect(codes.acceptedCode).toBe(0)
     } finally {
       process.exitCode = previous
     }
+  })
+})
+
+describe("NodeControl.rebuildableTransport", () => {
+  it("serializes concurrent replacement and closes a client only after its successor is acquired", async () => {
+    const observed = await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const secondEntered = yield* Deferred.make<void>()
+        const releaseSecond = yield* Deferred.make<void>()
+        const thirdEntered = yield* Deferred.make<void>()
+        const releaseThird = yield* Deferred.make<void>()
+        const closed: Array<number> = []
+        let acquired = 0
+        const acquire = Effect.gen(function*() {
+          const id = ++acquired
+          yield* Effect.addFinalizer(() => Effect.sync(() => closed.push(id)))
+          if (id === 2) {
+            yield* Deferred.succeed(secondEntered, undefined)
+            yield* Deferred.await(releaseSecond)
+          }
+          if (id === 3) {
+            yield* Deferred.succeed(thirdEntered, undefined)
+            yield* Deferred.await(releaseThird)
+          }
+          return { request: () => Promise.reject(new Error("unused dispatcher")) } as unknown as Undici.Dispatcher
+        })
+        const transport = yield* NodeControl.rebuildableTransport(acquire)
+        const first = yield* Effect.forkChild(transport.rebuild, { startImmediately: true })
+        yield* Deferred.await(secondEntered)
+        const second = yield* Effect.forkChild(transport.rebuild, { startImmediately: true })
+
+        expect(Option.isSome(yield* Deferred.poll(thirdEntered))).toBe(false)
+        expect(closed).toEqual([])
+
+        yield* Deferred.succeed(releaseSecond, undefined)
+        yield* Fiber.join(first)
+        yield* Deferred.await(thirdEntered)
+        expect(closed).toEqual([1])
+
+        yield* Deferred.succeed(releaseThird, undefined)
+        yield* Fiber.join(second)
+        return { acquired, closed: [...closed] }
+      }))
+    )
+
+    expect(observed).toEqual({ acquired: 3, closed: [1, 2] })
   })
 })
 
@@ -560,6 +624,29 @@ describe("NodeControl.layer", () => {
     } finally {
       process.chdir(previousCwd)
       process.exitCode = previousExit
+    }
+  }, 60_000)
+
+  it("opens one control database connection for the complete local layer", async () => {
+    const project = await mkdtemp(join(tmpdir(), "flows-cli-single-control-db-"))
+    try {
+      const handles = await Effect.runPromise(
+        Effect.gen(function*() {
+          yield* ControlService.Control
+          yield* MemoryStore.MemoryStore
+          return openHandles(NodeControl.databasePath(project))
+        }).pipe(
+          Effect.provide(NodeControl.layer({ root: project })),
+          Effect.scoped,
+          Effect.orDie
+        )
+      )
+
+      // A descriptor on the main SQLite file is a live connection. The WAL
+      // and SHM descriptors are separate inodes and are intentionally absent.
+      expect(handles).toBe(1)
+    } finally {
+      await rm(project, { recursive: true, force: true })
     }
   }, 60_000)
 

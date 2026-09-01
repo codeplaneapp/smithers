@@ -9,7 +9,7 @@
  *
  * The tool *names* are the 0.x names. An MCP client's tool allowlists, prompts,
  * and habits are written against names, and renaming them would break every
- * caller for no gain — the 0.x names are already the vocabulary.
+ * caller for no gain: the 0.x names are already the vocabulary.
  *
  * The ten tools rc.0 does not implement keep their names too, and answer
  * `{ ok: false, error: { code: "unsupported" } }`. Removing them would make an
@@ -23,7 +23,8 @@
  * @since 1.0.0
  */
 import { Control as ControlService, ControlSchema } from "@smthrs/control"
-import { Cause, Effect, Queue, Schema, Stream } from "effect"
+import * as Redaction from "@smthrs/journal/Redaction"
+import { Effect, Queue, Schema, Stream } from "effect"
 import { createInterface } from "node:readline"
 import * as Forensics from "./Forensics.ts"
 import * as NodeOutput from "./NodeOutput.ts"
@@ -72,7 +73,10 @@ export const succeeded = (data: unknown): Envelope => ({ ok: true, data })
  * @category constructors
  * @since 1.0.0
  */
-export const failed = (code: string, message: string): Envelope => ({ ok: false, error: { code, message } })
+export const failed = (code: string, message: string): Envelope => ({
+  ok: false,
+  error: { code, message: String(Redaction.redact(message)) }
+})
 
 /**
  * One tool this server exposes.
@@ -84,16 +88,73 @@ export interface Tool {
   readonly name: string
   readonly description: string
   readonly readOnly: boolean
+  readonly schema: Schema.Codec<unknown, unknown>
   readonly inputSchema: Record<string, unknown>
   readonly call: (args: Record<string, unknown>) => Effect.Effect<Envelope, never, ControlService.Control>
 }
 
-const object = (
-  properties: Record<string, unknown>,
-  required: ReadonlyArray<string> = []
-): Record<string, unknown> => ({ type: "object", properties, required: [...required], additionalProperties: false })
+const inputSchemaOf = (schema: Schema.Codec<unknown, unknown>): Record<string, unknown> => {
+  const document = Schema.toJsonSchemaDocument(schema)
+  const root = document.schema as Record<string, unknown>
+  return Object.keys(document.definitions).length === 0
+    ? root
+    : { ...root, $defs: document.definitions }
+}
 
-const stringProperty = (description: string) => ({ type: "string", description })
+const makeTool = (definition: Omit<Tool, "inputSchema">): Tool => ({
+  ...definition,
+  inputSchema: inputSchemaOf(definition.schema)
+})
+
+const emptyArguments = Schema.Record(Schema.String, Schema.Never)
+
+const describedString = (description: string) => Schema.String.annotate({ description })
+
+const runIdArguments = Schema.Struct({
+  runId: describedString("The run to read.")
+})
+
+const runWorkflowArguments = Schema.Struct({
+  flowId: describedString("The flow to run, as `smithers ls` names it."),
+  input: Schema.optionalKey(
+    Schema.Record(Schema.String, Schema.Unknown).annotate({ description: "The flow's input." })
+  )
+})
+
+const listRunsArguments = Schema.Struct({
+  flowId: Schema.optionalKey(describedString("Only runs of this flow.")),
+  status: Schema.optionalKey(ControlSchema.RunStatus.annotate({ description: "Only runs in this status." }))
+})
+
+const watchRunArguments = Schema.Struct({
+  runId: describedString("The run to watch."),
+  afterSequence: Schema.optionalKey(
+    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).annotate({
+      description: "Only events after this sequence."
+    })
+  )
+})
+
+const pendingApprovalArguments = Schema.Struct({
+  runId: Schema.optionalKey(describedString("Only this run."))
+})
+
+const resolveApprovalArguments = Schema.Struct({
+  approval: Schema.Union([Schema.String, ControlSchema.ApprovalPayload]).annotate({
+    description: "The serialized approval payload from list_pending_approvals."
+  }),
+  decision: Schema.Literals(["approve", "deny"]).annotate({ description: "What to do." }),
+  scope: Schema.optionalKey(
+    Schema.Literals(["once", "run", "remembered"]).annotate({
+      description: "How long the grant lasts. Omitted means `once`."
+    })
+  )
+})
+
+const nodeDetailArguments = Schema.Struct({
+  runId: describedString("The run to read."),
+  nodeId: describedString("The node, as `smithers output <run-id>` lists it.")
+})
 
 const text = (value: unknown): string | undefined => typeof value === "string" ? value : undefined
 
@@ -119,14 +180,33 @@ const missingRun = (runId: string): Envelope => failed("RUN_NOT_FOUND", `Run not
 
 const missingArgument = (name: string): Envelope => failed("INVALID_INPUT", `${name} is required and must be a string`)
 
-/** Wraps a control-plane failure in the envelope instead of dying. */
+const taggedName = (failure: unknown): string | undefined => {
+  if (typeof failure !== "object" || failure === null) return undefined
+  const tag = (failure as { readonly _tag?: unknown })._tag
+  if (typeof tag !== "string" || tag.length === 0) return undefined
+  return tag.slice(tag.lastIndexOf("/") + 1)
+}
+
+const safeFailure = (failure: unknown): Envelope => {
+  const name = taggedName(failure)
+  if (name === undefined) return failed("CONTROL_ERROR", "The control operation failed")
+  const code = name === "Unauthorized"
+    ? "UNAUTHORIZED"
+    : name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/[^A-Za-z0-9]+/g, "_").toUpperCase()
+  const message = failure instanceof Error && failure.message !== ""
+    ? failure.message
+    : `${name} refused the control operation`
+  return failed(code, message)
+}
+
+/** Wraps typed control failures while preserving defects and interruption. */
 const envelope = <A>(
   effect: Effect.Effect<A, unknown, ControlService.Control>,
   onSuccess: (value: A) => Envelope
 ): Effect.Effect<Envelope, never, ControlService.Control> =>
   effect.pipe(
     Effect.map(onSuccess),
-    Effect.catchCause((cause) => Effect.succeed(failed("CONTROL_ERROR", String(Cause.squash(cause)))))
+    Effect.catch((failure) => Effect.succeed(safeFailure(failure)))
   )
 
 const decodeApproval = (value: unknown): ControlService.ApprovalInput | undefined => {
@@ -146,11 +226,11 @@ const decodeApproval = (value: unknown): ControlService.ApprovalInput | undefine
  * @since 1.0.0
  */
 export const supportedTools: ReadonlyArray<Tool> = [
-  {
+  makeTool({
     name: "list_workflows",
     description: "List the flows discovered under this project.",
     readOnly: true,
-    inputSchema: object({}),
+    schema: emptyArguments,
     call: () =>
       envelope(
         Effect.flatMap(ControlService.Control, (control) => control.list({ _tag: "flows" })),
@@ -161,24 +241,18 @@ export const supportedTools: ReadonlyArray<Tool> = [
               : []
           )
       )
-  },
-  {
+  }),
+  makeTool({
     name: "run_workflow",
     description: "Plan a flow, approve it for this run, and launch it. Returns the run id.",
     readOnly: false,
-    inputSchema: object(
-      {
-        flowId: stringProperty("The flow to run, as `smithers ls` names it."),
-        input: { type: "object", description: "The flow's input.", additionalProperties: true }
-      },
-      ["flowId"]
-    ),
+    schema: runWorkflowArguments,
     call: (args) => {
       const flowId = text(args["flowId"])
       if (flowId === undefined) return Effect.succeed(missingArgument("flowId"))
       if (Unsupported.isReservedFlow(flowId)) {
         return Effect.succeed(
-          failed("INVALID_INPUT", Unsupported.reservedFlowError("up", flowId).message)
+          failed("unsupported", Unsupported.reservedFlowError("up", flowId).message)
         )
       }
       const input = args["input"] ?? {}
@@ -198,15 +272,12 @@ export const supportedTools: ReadonlyArray<Tool> = [
         (receipt) => succeeded(receipt)
       )
     }
-  },
-  {
+  }),
+  makeTool({
     name: "list_runs",
     description: "List durable runs, optionally filtered by flow or status.",
     readOnly: true,
-    inputSchema: object({
-      flowId: stringProperty("Only runs of this flow."),
-      status: stringProperty("Only runs in this status.")
-    }),
+    schema: listRunsArguments,
     call: (args) =>
       envelope(
         Effect.flatMap(ControlService.Control, (control) =>
@@ -221,26 +292,23 @@ export const supportedTools: ReadonlyArray<Tool> = [
           })),
         (listed) => succeeded(listed._tag === "runs" ? listed.items : [])
       )
-  },
-  {
+  }),
+  makeTool({
     name: "get_run",
     description: "Read one run's summary.",
     readOnly: true,
-    inputSchema: object({ runId: stringProperty("The run to read.") }, ["runId"]),
+    schema: runIdArguments,
     call: (args) => {
       const runId = requireRunId(args)
       if (runId === undefined) return Effect.succeed(missingArgument("runId"))
       return envelope(summaryOf(runId), (run) => run === undefined ? missingRun(runId) : succeeded(run))
     }
-  },
-  {
+  }),
+  makeTool({
     name: "watch_run",
     description: "Read the events of one run after a sequence. Returns immediately; poll to follow.",
     readOnly: true,
-    inputSchema: object({
-      runId: stringProperty("The run to watch."),
-      afterSequence: { type: "number", description: "Only events after this sequence." }
-    }, ["runId"]),
+    schema: watchRunArguments,
     call: (args) => {
       const runId = requireRunId(args)
       if (runId === undefined) return Effect.succeed(missingArgument("runId"))
@@ -256,23 +324,23 @@ export const supportedTools: ReadonlyArray<Tool> = [
           })
       )
     }
-  },
-  {
+  }),
+  makeTool({
     name: "get_run_events",
     description: "Read every recorded event of one run.",
     readOnly: true,
-    inputSchema: object({ runId: stringProperty("The run to read.") }, ["runId"]),
+    schema: runIdArguments,
     call: (args) => {
       const runId = requireRunId(args)
       if (runId === undefined) return Effect.succeed(missingArgument("runId"))
       return envelope(eventsOf(runId), (events) => succeeded(events))
     }
-  },
-  {
+  }),
+  makeTool({
     name: "explain_run",
     description: "Explain what happened in one run: status, cause, turns, calls, refusals, and cost.",
     readOnly: true,
-    inputSchema: object({ runId: stringProperty("The run to explain.") }, ["runId"]),
+    schema: runIdArguments,
     call: (args) => {
       const runId = requireRunId(args)
       if (runId === undefined) return Effect.succeed(missingArgument("runId"))
@@ -284,12 +352,12 @@ export const supportedTools: ReadonlyArray<Tool> = [
         }
       )
     }
-  },
-  {
+  }),
+  makeTool({
     name: "list_pending_approvals",
     description: "List runs parked on an approval, with the payload that releases each one.",
     readOnly: true,
-    inputSchema: object({ runId: stringProperty("Only this run.") }),
+    schema: pendingApprovalArguments,
     call: (args) =>
       envelope(
         Effect.gen(function*() {
@@ -313,20 +381,12 @@ export const supportedTools: ReadonlyArray<Tool> = [
         }),
         (approvals) => succeeded(approvals)
       )
-  },
-  {
+  }),
+  makeTool({
     name: "resolve_approval",
     description: "Approve or deny a parked run with its serialized approval payload.",
     readOnly: false,
-    inputSchema: object({
-      approval: { description: "The serialized approval payload from list_pending_approvals." },
-      decision: { type: "string", enum: ["approve", "deny"], description: "What to do." },
-      scope: {
-        type: "string",
-        enum: ["once", "run", "remembered"],
-        description: "How long the grant lasts. Omitted means `once`."
-      }
-    }, ["approval", "decision"]),
+    schema: resolveApprovalArguments,
     call: (args) => {
       const payload = decodeApproval(args["approval"])
       if (payload === undefined) return Effect.succeed(missingArgument("approval"))
@@ -351,15 +411,12 @@ export const supportedTools: ReadonlyArray<Tool> = [
         (receipt) => succeeded(receipt)
       )
     }
-  },
-  {
+  }),
+  makeTool({
     name: "get_node_detail",
     description: "Read one node's recorded output from a run.",
     readOnly: true,
-    inputSchema: object({
-      runId: stringProperty("The run to read."),
-      nodeId: stringProperty("The node, as `smithers output <run-id>` lists it.")
-    }, ["runId", "nodeId"]),
+    schema: nodeDetailArguments,
     call: (args) => {
       const runId = requireRunId(args)
       if (runId === undefined) return Effect.succeed(missingArgument("runId"))
@@ -373,18 +430,18 @@ export const supportedTools: ReadonlyArray<Tool> = [
           : succeeded(node)
       })
     }
-  },
-  {
+  }),
+  makeTool({
     name: "get_chat_transcript",
     description: "Read one run's turn-by-turn transcript.",
     readOnly: true,
-    inputSchema: object({ runId: stringProperty("The run to read.") }, ["runId"]),
+    schema: runIdArguments,
     call: (args) => {
       const runId = requireRunId(args)
       if (runId === undefined) return Effect.succeed(missingArgument("runId"))
       return envelope(eventsOf(runId), (events) => succeeded({ runId, transcript: Forensics.renderTranscript(events) }))
     }
-  }
+  })
 ]
 
 /**
@@ -414,16 +471,21 @@ export const unsupportedReasons: ReadonlyArray<readonly [name: string, reason: s
  * @category constants
  * @since 1.0.0
  */
-export const unsupportedTools: ReadonlyArray<Tool> = unsupportedReasons.map(([name, reason]) => ({
-  name,
-  description: `Not available in 1.0.0-rc.0: ${reason}.`,
-  readOnly: true,
-  inputSchema: object({}),
-  call: () =>
-    Effect.succeed(
-      failed("unsupported", `${name} is not available in 1.0.0-rc.0: ${reason}. See https://smithers.sh/migration/1.0`)
-    )
-}))
+export const unsupportedTools: ReadonlyArray<Tool> = unsupportedReasons.map(([name, reason]) =>
+  makeTool({
+    name,
+    description: `Not available in 1.0.0-rc.0: ${reason}.`,
+    readOnly: true,
+    schema: emptyArguments,
+    call: () =>
+      Effect.succeed(
+        failed(
+          "unsupported",
+          `${name} is not available in 1.0.0-rc.0: ${reason}. See https://smithers.sh/migration/1.0`
+        )
+      )
+  })
+)
 
 /**
  * The raw surface: one tool per shipped CLI verb, describing how to reach it.
@@ -440,20 +502,22 @@ export const unsupportedTools: ReadonlyArray<Tool> = unsupportedReasons.map(([na
 export const rawTools = (
   verbs: ReadonlyArray<{ readonly name: string; readonly help: string }>
 ): ReadonlyArray<Tool> =>
-  verbs.map((verb) => ({
-    name: `cli_${verb.name.replaceAll("-", "_")}`,
-    description: `${verb.help}. Run it as \`smithers ${verb.name}\`.`,
-    readOnly: true,
-    inputSchema: object({}),
-    call: () =>
-      Effect.succeed(
-        succeeded({
-          command: `smithers ${verb.name}`,
-          description: verb.help,
-          note: "Run this from a shell; the semantic tools perform the control-plane operations directly."
-        })
-      )
-  }))
+  verbs.map((verb) =>
+    makeTool({
+      name: `cli_${verb.name.replaceAll("-", "_")}`,
+      description: `${verb.help}. Run it as \`smithers ${verb.name}\`.`,
+      readOnly: true,
+      schema: emptyArguments,
+      call: () =>
+        Effect.succeed(
+          succeeded({
+            command: `smithers ${verb.name}`,
+            description: verb.help,
+            note: "Run this from a shell; the semantic tools perform the control-plane operations directly."
+          })
+        )
+    })
+  )
 
 /**
  * How one session's tool list is scoped.
@@ -592,10 +656,17 @@ export const respond = (
         if (tool === undefined) {
           return reply(toolResult(failed("unknown_tool", `No tool named ${name} is exposed by this session`)))
         }
-        const args = typeof params["arguments"] === "object" && params["arguments"] !== null
-          ? params["arguments"] as Record<string, unknown>
-          : {}
-        return reply(toolResult(yield* tool.call(args)))
+        const rawArguments = params["arguments"] === undefined ? {} : params["arguments"]
+        const decoded = yield* Schema.decodeUnknownEffect(tool.schema, { onExcessProperty: "error" })(
+          rawArguments
+        ).pipe(
+          Effect.map((args) => ({ _tag: "Valid" as const, args })),
+          Effect.catch((error) => Effect.succeed({ _tag: "Invalid" as const, error }))
+        )
+        if (decoded._tag === "Invalid") {
+          return reply(toolResult(failed("INVALID_INPUT", String(decoded.error))))
+        }
+        return reply(toolResult(yield* tool.call(decoded.args as Record<string, unknown>)))
       }
       default:
         return {

@@ -12,8 +12,8 @@
  *
  * @since 1.0.0
  */
+import { RunState } from "@smthrs/migrate"
 import { existsSync } from "node:fs"
-import { DatabaseSync } from "node:sqlite"
 
 /**
  * 0.x run statuses that mean the run is over.
@@ -24,7 +24,7 @@ import { DatabaseSync } from "node:sqlite"
  * @category constants
  * @since 1.0.0
  */
-export const terminalStatuses: ReadonlyArray<string> = ["finished", "failed", "cancelled", "continued"]
+export const terminalStatuses: ReadonlyArray<string> = RunState.terminalStatuses
 
 /**
  * One 0.x run that has not reached a terminal status.
@@ -54,8 +54,6 @@ export interface Database {
   readonly reason?: string | undefined
 }
 
-const asString = (value: unknown): string => typeof value === "string" ? value : String(value ?? "")
-
 /**
  * Lists the non-terminal runs in one 0.x database, read-only.
  *
@@ -67,41 +65,20 @@ const asString = (value: unknown): string => typeof value === "string" ? value :
  */
 export const read = (path: string): Database => {
   if (!existsSync(path)) return { path, readable: true, runs: [] }
-  let database: DatabaseSync | undefined
-  try {
-    database = new DatabaseSync(path, { readOnly: true })
-    const tables = database
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_smithers_runs'")
-      .all()
-    if (tables.length === 0) return { path, readable: true, runs: [] }
-    const placeholders = terminalStatuses.map(() => "?").join(", ")
-    const rows = database
-      .prepare(
-        `SELECT run_id, workflow_name, status FROM _smithers_runs
-         WHERE status NOT IN (${placeholders}) ORDER BY run_id`
-      )
-      .all(...terminalStatuses)
-    return {
-      path,
-      readable: true,
-      runs: rows.map((row) => {
-        const record = row as Record<string, unknown>
-        return {
-          runId: asString(record["run_id"]),
-          workflowName: asString(record["workflow_name"]),
-          status: asString(record["status"])
-        }
-      })
-    }
-  } catch (error) {
-    return {
-      path,
-      readable: false,
-      runs: [],
-      reason: error instanceof Error ? error.message : String(error)
-    }
-  } finally {
-    database?.close()
+  const finding = RunState.readDatabase(
+    path,
+    path,
+    [],
+    Date.now(),
+    RunState.defaultLiveWindowMs
+  )
+  return {
+    path,
+    readable: finding.readable,
+    runs: [...finding.live, ...finding.parked]
+      .sort((left, right) => left.runId < right.runId ? -1 : left.runId > right.runId ? 1 : 0)
+      .map(({ runId, workflowName, status }) => ({ runId, workflowName, status })),
+    ...(finding.unreadableReason === undefined ? {} : { reason: finding.unreadableReason })
   }
 }
 

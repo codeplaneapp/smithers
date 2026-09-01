@@ -70,6 +70,34 @@ describe("the report", () => {
     expect(registry?.detail).toContain("1 directories skipped")
   })
 
+  it.each([
+    ["a nested flow.ts", ["review", "read-pr", "flow.ts"]],
+    ["a nested SKILL.md", ["x", "SKILL.md"]]
+  ] as const)("recognizes %s using the real discovery file forms", (_label, segments) => {
+    const root = project()
+    const file = join(root, "flows", ...segments)
+    mkdirSync(join(file, ".."), { recursive: true })
+    writeFileSync(file, "export default {}\n")
+
+    const registry = check(Doctor.inspect({ root, environment: {}, nodeVersion: "24.0.0" }), "registry")
+
+    expect(registry).toMatchObject({ level: "ok" })
+    expect(registry?.detail).toContain("1 flows discovered")
+    expect(registry?.detail).not.toContain("discovery finds nothing")
+  })
+
+  it("uses the control plane's discovery result when the handler supplies it", () => {
+    const root = project()
+    const registry = check(Doctor.inspect({
+      root,
+      environment: {},
+      nodeVersion: "24.0.0",
+      discoveredFlows: [{ flowId: "review/read-pr", description: "Review a pull request" }]
+    }), "registry")
+
+    expect(registry).toMatchObject({ level: "ok", detail: "1 flows discovered" })
+  })
+
   it("reports a database that has not been created and one that has", () => {
     const root = project()
     mkdirSync(join(root, ".flows"), { recursive: true })

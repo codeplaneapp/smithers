@@ -84,7 +84,7 @@ describe("the scaffold", () => {
     expect(result).toMatchObject({ name: "review", created: true, gitignore: "created" })
     expect(result.flowFile).toBe(join(root, "flows", "review", "flow.mdx"))
     const body = readFileSync(result.flowFile, "utf8")
-    expect(body).toContain("name: review")
+    expect(body).toContain("name: \"review\"")
     expect(body).toContain("# review")
   })
 
@@ -115,6 +115,33 @@ describe("the scaffold", () => {
     expect(Init.defaultName("/work/api-server/")).toBe("api-server")
     expect(Init.defaultName("/")).toBe("flow")
     expect(Init.defaultName("/work/___")).toBe("flow")
+  })
+
+  it.each([
+    ["traversal", "../outside"],
+    ["absolute path", "/absolute"],
+    ["slash separator", "a/b"],
+    ["backslash separator", "a\\b"],
+    ["YAML metacharacter", "a: b"],
+    ["newline", "name\nmodel: evil"],
+    ["empty name", ""],
+    ["dot segment", "."]
+  ])("refuses a %s before creating state", (_label, name) => {
+    const root = directory(".git")
+    const reason = `a flow name is one path segment of letters, digits, '-' and '_'; got ${JSON.stringify(name)}`
+
+    expect(Init.nameProblem(name)).toBe(reason)
+    expect(() => Init.scaffold(root, name, {})).toThrow(reason)
+    expect(Init.isValidName(name)).toBe(false)
+    expect(existsSync(join(root, "flows"))).toBe(false)
+    expect(existsSync(join(root, "outside"))).toBe(false)
+    expect(existsSync(join(root, ".flows"))).toBe(false)
+    expect(existsSync(join(root, ".gitignore"))).toBe(false)
+  })
+
+  it("accepts one segment made from the documented character set", () => {
+    expect(Init.nameProblem("review_2-final")).toBeUndefined()
+    expect(Init.isValidName("review_2-final")).toBe(true)
   })
 })
 
@@ -180,6 +207,15 @@ describe("the seat the scaffold writes", () => {
     const frontmatter = body.split("---")[1] ?? ""
     expect(frontmatter).toContain("# ")
     expect(body.slice(body.indexOf("# review"))).not.toContain("doctor")
+  })
+
+  it("round-trips the frontmatter name as a quoted YAML scalar", () => {
+    const name = "review_2-final"
+    const line = Init.template(name, Init.defaultSeat({})).split("\n")
+      .find((candidate) => candidate.startsWith("name: "))
+
+    expect(line).toBe(`name: ${JSON.stringify(name)}`)
+    expect(JSON.parse(line!.slice("name: ".length))).toBe(name)
   })
 
   it("scaffolds the flow the environment can launch", () => {

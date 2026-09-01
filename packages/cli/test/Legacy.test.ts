@@ -2,10 +2,11 @@
  * Reading a Smithers 0.x database without adopting it.
  *
  * rc-contract section 6: rc.0 never loads, resumes, or migrates 0.x run state.
- * The one read it performs is this listing, and it must be read-only — the
+ * The one read it performs is this listing, and it must be read-only: the
  * refusal exists so an operator does not lose a run they could still finish on
  * 0.x.
  */
+import { RunState } from "@smthrs/migrate"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -38,7 +39,7 @@ const legacyDatabase = (runs: ReadonlyArray<readonly [string, string]>): string 
   )`)
   for (const [runId, status] of runs) {
     database.prepare("INSERT INTO _smithers_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(runId, "review", undefined, status, undefined, undefined, undefined, undefined, undefined)
+      .run(runId, "review", null, status, null, null, null, null, null)
   }
   database.close()
   return file
@@ -48,47 +49,9 @@ afterEach(() => {
   while (staged.length > 0) rmSync(staged.pop()!, { recursive: true, force: true })
 })
 
-describe("reading a 0.x database", () => {
-  it("lists only the runs that have not reached a terminal status", () => {
-    const file = legacyDatabase([
-      ["run-1", "running"],
-      ["run-2", "finished"],
-      ["run-3", "waiting-approval"],
-      ["run-4", "cancelled"],
-      ["run-5", "continued"]
-    ])
-
-    const database = Legacy.read(file)
-
-    // `continued` is a 0.x terminal status with no rc.0 counterpart; it still
-    // means the run is over.
-    expect(database.readable).toBe(true)
-    expect(database.runs.map((run) => run.runId)).toEqual(["run-1", "run-3"])
-    expect(database.runs[0]).toEqual({ runId: "run-1", workflowName: "review", status: "running" })
+describe("the migration reader", () => {
+  it("uses the migration package's terminal-status contract", () => {
     expect(Legacy.terminalStatuses).toBe(RunState.terminalStatuses)
-  })
-
-  it("reports nothing for a file that is not there", () => {
-    expect(Legacy.read(join(directory(), "absent.db"))).toMatchObject({ readable: true, runs: [] })
-  })
-
-  it("reports nothing for a database that never ran anything", () => {
-    const file = join(directory(), "smithers.db")
-    new DatabaseSync(file).close()
-
-    expect(Legacy.read(file)).toMatchObject({ readable: true, runs: [] })
-  })
-
-  it("reports an unreadable file as unreadable, never as empty", () => {
-    // A locked or corrupt database holds unknown contents, and "no runs" would
-    // be a licence to migrate over them.
-    const file = join(directory(), "smithers.db")
-    writeFileSync(file, "not a database")
-
-    const database = Legacy.read(file)
-
-    expect(database.readable).toBe(false)
-    expect(database.reason).toBeDefined()
   })
 })
 
@@ -115,4 +78,3 @@ describe("the migration refusal", () => {
     expect(Legacy.refusal([Legacy.read(file)])).toContain("unreadable")
   })
 })
-import { RunState } from "@smthrs/migrate"

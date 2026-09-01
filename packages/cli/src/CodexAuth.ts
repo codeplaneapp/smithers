@@ -29,7 +29,8 @@ import { ModelError } from "@smthrs/model/ModelError"
 import type * as RequestExecutor from "@smthrs/model/RequestExecutor"
 import { Clock, Effect, Semaphore } from "effect"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { randomUUID } from "node:crypto"
+import { closeSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
@@ -61,6 +62,15 @@ export const clientId = "app_EMoamEEZ73f0CkXaXp7hrann"
 
 /** How long before JWT `exp` a token is treated as already stale. */
 const EXPIRY_MARGIN_MS = 5 * 60_000
+
+/** Maximum time one refresh waits for another Smithers process. */
+const LOCK_WAIT_MS = 30_000
+
+/** Age after which a lock left by a dead process is recoverable. */
+const STALE_LOCK_MS = 5 * 60_000
+
+/** Poll interval while another live process owns the refresh lock. */
+const LOCK_POLL_MS = 25
 
 /**
  * Where the auth store lives for a given environment: `$CODEX_HOME/auth.json`,
@@ -171,11 +181,11 @@ const lastRefreshInstant = (now: number): string => new Date(now).toISOString().
  * file, and renames it into place, so a crash cannot leave a truncated
  * session behind.
  *
- * Known residual race: the codex CLI shares this file and can rotate the
- * refresh token between this store's re-read and its call to the endpoint. The
- * loser of that race sees its session invalidated and the operator has to log
- * in again. The re-read narrows the window; closing it needs a lock file
- * keyed by `auth.json` that codex also honors.
+ * A token-owned `O_EXCL` lock serializes this sequence across Smithers
+ * processes and recovers a lock left by a dead process after five minutes.
+ * The codex CLI also shares this file but does not yet honor that lock, so it
+ * can still rotate the refresh token during the endpoint call. The re-read
+ * narrows that external window without claiming coordination codex lacks.
  *
  * @category constructors
  * @since 0.1.0
@@ -183,6 +193,68 @@ const lastRefreshInstant = (now: number): string => new Date(now).toISOString().
 export const make = (options: MakeOptions): Store => {
   const { executor, file } = options
   const gate = Semaphore.makeUnsafe(1)
+  const lockFile = `${file}.refresh.lock`
+
+  const lockError = (): ModelError =>
+    authenticationError(`ChatGPT credentials at ${file} are busy refreshing; retry the request`)
+
+  const errorCode = (error: unknown): string | undefined =>
+    typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+      ? error.code
+      : undefined
+
+  /** Creates the cross-process lock, waiting only for a bounded live owner. */
+  const acquireLock: Effect.Effect<string, ModelError> = Effect.gen(function*() {
+    const token = `${process.pid}:${randomUUID()}`
+    const startedAt = yield* Clock.currentTimeMillis
+    for (;;) {
+      let descriptor: number | undefined
+      try {
+        descriptor = openSync(lockFile, "wx", 0o600)
+        writeFileSync(descriptor, token, "utf8")
+        closeSync(descriptor)
+        return token
+      } catch (error) {
+        if (descriptor !== undefined) {
+          try {
+            closeSync(descriptor)
+          } catch {
+            // The failed write may already have closed it.
+          }
+          try {
+            rmSync(lockFile, { force: true })
+          } catch {
+            // The acquisition error below is the actionable failure.
+          }
+        }
+        if (errorCode(error) !== "EEXIST") return yield* Effect.fail(lockError())
+      }
+
+      const now = yield* Clock.currentTimeMillis
+      try {
+        if (now - statSync(lockFile).mtimeMs >= STALE_LOCK_MS) {
+          rmSync(lockFile, { force: true })
+          continue
+        }
+      } catch (error) {
+        if (errorCode(error) === "ENOENT") continue
+        return yield* Effect.fail(lockError())
+      }
+      if (now - startedAt >= LOCK_WAIT_MS) return yield* Effect.fail(lockError())
+      yield* Effect.sleep(`${LOCK_POLL_MS} millis`)
+    }
+  })
+
+  /** Removes only the lock this acquisition created, never a replacement. */
+  const releaseLock = (token: string): Effect.Effect<void> =>
+    Effect.sync(() => {
+      try {
+        if (readFileSync(lockFile, "utf8") === token) rmSync(lockFile, { force: true })
+      } catch {
+        // Finalization is best effort: a stale-lock recovery may have replaced
+        // this token, and deleting that new owner's lock would reopen the race.
+      }
+    })
 
   const read: Effect.Effect<FileState, ModelError> = Effect.suspend(() => {
     let text: string
@@ -310,13 +382,14 @@ export const make = (options: MakeOptions): Store => {
   // is read again: a different, fresh token means codex or a concurrent fiber
   // already refreshed and the refresh token must not be spent twice.
   const refreshStale = (stale: string, modelId: string): Effect.Effect<Tokens, ModelError> =>
-    gate.withPermits(1)(Effect.gen(function*() {
+    gate.withPermits(1)(Effect.scoped(Effect.gen(function*() {
+      yield* Effect.acquireRelease(acquireLock, releaseLock)
       const state = yield* read
       const now = yield* Clock.currentTimeMillis
       if (state.tokens.access !== stale && isFresh(state.tokens.access, now)) return state.tokens
       const answer = yield* requestRefresh(state, modelId)
       return yield* adoptRefresh(state, answer)
-    }))
+    })))
 
   const auth = (authOptions: { readonly modelId: string }): Auth.Auth => ({
     sign: Effect.fn("Auth.sign")((headers) =>

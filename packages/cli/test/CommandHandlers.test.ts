@@ -10,15 +10,16 @@
 import { NodeServices } from "@effect/platform-node"
 import { Control as ControlService, type ControlSchema } from "@smthrs/control"
 import * as TestControl from "@smthrs/control/test/TestControl"
+import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import { Cause, Effect, Exit, Layer, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { Command } from "effect/unstable/cli"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import * as CliError from "../src/CliError.ts"
-import { cli } from "../src/Command.ts"
+import { cli, latestSequence } from "../src/Command.ts"
 import * as ExecutorOwnership from "../src/ExecutorOwnership.ts"
 import * as NodeControl from "../src/NodeControl.ts"
 import * as Output from "../src/Output.ts"
@@ -95,7 +96,23 @@ const historyControl = (events: ReadonlyArray<ControlSchema.ControlEvent>) =>
     ControlService.Control,
     Effect.gen(function*() {
       const control = yield* ControlService.Control
-      return ControlService.make({ ...control, watch: () => Stream.fromIterable(events) })
+      return ControlService.make({
+        ...control,
+        list: (request) =>
+          request._tag === "runs" && request.filters?.runId === "run-1"
+            ? Effect.succeed({
+              _tag: "runs",
+              items: [{
+                runId: "run-1",
+                flowId: "demo/ship",
+                status: "running",
+                createdAt: 0,
+                updatedAt: 0
+              }]
+            })
+            : control.list(request),
+        watch: () => Stream.fromIterable(events)
+      })
     })
   ).pipe(Layer.provide(testControl))
 
@@ -109,6 +126,14 @@ const event = (
   runId: "run-1",
   occurredAt: sequence,
   payload: payload as ControlSchema.ControlEvent["payload"]
+})
+
+describe("journal sequence folding", () => {
+  it("finds the latest sequence beyond the spread-argument boundary", async () => {
+    const events = Array.from({ length: 200_000 }, (_, index) => ({ sequence: index + 1 }))
+
+    expect(await Effect.runPromise(latestSequence(Stream.fromIterable(events)))).toBe(200_000)
+  })
 })
 
 describe("input decoding", () => {
@@ -198,6 +223,79 @@ describe("presentation flags", () => {
 
     expect(result.quiet).toBe("")
     expect(JSON.parse(result.loud)).toMatchObject({ flowId: "demo/ship" })
+  })
+
+  it("refuses a non-positive monitor limit before reading the journal", async () => {
+    const error = await run(
+      Effect.flip(runCommand(["claude", "monitor", "--limit", "0"])),
+      testControl
+    )
+
+    expect(error).toBeInstanceOf(CliError.UsageError)
+    expect((error as CliError.UsageError).message).toBe('--limit must be a positive integer; got "0"')
+  })
+})
+
+describe("memory namespace parsing", () => {
+  it.each([
+    ["unknown kind", "team:alpha"],
+    ["empty id", "user:"],
+    ["missing separator", "alpha"]
+  ])("refuses an %s instead of silently changing its identity", async (_label, namespace) => {
+    const error = await run(
+      Effect.flip(runCommand(["memory", "list", "--namespace", namespace])),
+      testControl
+    )
+
+    expect(error).toBeInstanceOf(CliError.UsageError)
+    expect((error as CliError.UsageError).message).toBe(
+      `--namespace must be flow:<id>, agent:<id>, user:<id>, or global:<id>; got ${JSON.stringify(namespace)}`
+    )
+    expect(CliError.exitCode(error as CliError.UsageError)).toBe(2)
+  })
+
+  it("never lets an unknown kind address a valid user's record", async () => {
+    const facts = new Map<string, MemoryStore.Fact>()
+    let reads = 0
+    const keyOf = (input: MemoryStore.GetFactInput) =>
+      `${input.namespace.kind}:${input.namespace.id}:${input.key}`
+    const memory = MemoryStore.layerNoop({
+      putFact: (input) =>
+        Effect.sync(() => {
+          facts.set(keyOf(input), {
+            namespace: input.namespace,
+            key: input.key,
+            value: input.value,
+            provenance: input.provenance,
+            createdAtMs: 0,
+            updatedAtMs: 0
+          })
+        }),
+      getFact: (input) =>
+        Effect.sync(() => {
+          reads += 1
+          return facts.get(keyOf(input))
+        })
+    })
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        yield* json(["--json", "memory", "set", "--namespace", "user:alpha", "key", "value"])
+        const valid = yield* json(["--json", "memory", "get", "--namespace", "user:alpha", "key"])
+        const refused = yield* Effect.flip(
+          runCommand(["memory", "get", "--namespace", "team:alpha", "key"])
+        )
+        return { valid, refused }
+      }).pipe(
+        Effect.provide(testControl),
+        Effect.provide(Layer.mergeAll(TestConsole.layer, Output.layer, memory)),
+        Effect.provide(NodeServices.layer)
+      )
+    )
+
+    expect(result.valid).toBe("value")
+    expect(result.refused).toBeInstanceOf(CliError.UsageError)
+    expect((result.refused as CliError.UsageError).message).toContain('"team:alpha"')
+    expect(reads).toBe(1)
   })
 })
 
@@ -322,7 +420,9 @@ describe("lifecycle verbs", () => {
     )
 
     expect(error).toBeInstanceOf(CliError.UsageError)
-    expect((error as CliError.UsageError).message).toBe("signal-json must match the expected payload schema")
+    expect((error as CliError.UsageError).message).toContain("signal-json must match the expected payload schema")
+    expect((error as CliError.UsageError).message).toContain("payload")
+    expect((error as CliError.UsageError).message).not.toContain('{"name":"proceed"}')
   })
 
   it("denies a complete approval payload", async () => {
@@ -374,6 +474,70 @@ describe("up", () => {
     expect(card).toMatchObject({ flowId: "demo/ship" })
     expect((card as { readonly inputSummary: string }).inputSummary).toBe(JSON.stringify({ topic: "flows" }))
   })
+
+  it("hands the detached child the parent's MCP config and explicit root", async () => {
+    const root = mkdtempSync(join(tmpdir(), "smithers-detached-argv-"))
+    const originalArgv = process.argv
+    const previousMarker = process.env["SMITHERS_TEST_DETACHED_ARGV"]
+    try {
+      const marker = join(root, "argv.json")
+      const entry = join(root, "child.mjs")
+      const mcpConfig = join(root, "servers.json")
+      writeFileSync(mcpConfig, "[]")
+      writeFileSync(
+        entry,
+        [
+          'import { writeFileSync } from "node:fs"',
+          'writeFileSync(process.env.SMITHERS_TEST_DETACHED_ARGV, JSON.stringify(process.argv.slice(2)))',
+          'const nonce = process.env.SMITHERS_INTERNAL_DETACHED_ADMISSION',
+          'process.stderr.write("SMITHERS_DETACHED_ADMISSION=run:" + nonce + " runId=run-detached-test\\n")'
+        ].join("\n")
+      )
+      process.argv = [process.execPath, entry]
+      process.env["SMITHERS_TEST_DETACHED_ARGV"] = marker
+
+      await run(
+        json([
+          "--json",
+          "--mcp-config",
+          mcpConfig,
+          "--root",
+          root,
+          "up",
+          "demo/ship",
+          "-d"
+        ]).pipe(Effect.provide(Project.layer(root, Project.legacyRoot(undefined, root)))),
+        testControl
+      )
+
+      const argv = JSON.parse(readFileSync(marker, "utf8")) as ReadonlyArray<string>
+      expect(argv[0]).toBe("run")
+      expect(argv.slice(2)).toEqual(["--mcp-config", mcpConfig, "--root", root])
+    } finally {
+      process.argv = originalArgv
+      if (previousMarker === undefined) delete process.env["SMITHERS_TEST_DETACHED_ARGV"]
+      else process.env["SMITHERS_TEST_DETACHED_ARGV"] = previousMarker
+      rmSync(root, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  it("refuses a detached executor against --remote before any network call", async () => {
+    const error = await run(
+      Effect.flip(runCommand([
+        "--remote",
+        "http://127.0.0.1:9999",
+        "up",
+        "demo/ship",
+        "-d"
+      ])),
+      testControl
+    )
+
+    expect(error).toBeInstanceOf(CliError.UnsupportedError)
+    expect((error as CliError.UnsupportedError).message).toBe(
+      "up -d spawns a local executor; run `smithers up` attached against --remote"
+    )
+  })
 })
 
 describe("forensic projections", () => {
@@ -412,7 +576,7 @@ describe("forensic projections", () => {
     expect(result.raw).toMatchObject({ _tag: "runs" })
   })
 
-  it("diagnoses without a summary when the listing answers with the wrong shape", async () => {
+  it("refuses a run query when the listing answers with the wrong shape", async () => {
     const mismatched = Layer.effect(
       ControlService.Control,
       Effect.gen(function*() {
@@ -423,22 +587,23 @@ describe("forensic projections", () => {
         })
       })
     ).pipe(Layer.provide(testControl))
-    const card = await run(text(["status", "run-1"]), mismatched)
+    const error = await run(Effect.flip(runCommand(["status", "run-1"])), mismatched)
 
-    // A control plane that answers a run query with a flow listing has no
-    // summary to project, so the card degrades instead of throwing.
-    expect(card).toContain("Verdict   unlaunched")
-    expect(card).toContain("Run       ? · 0s")
+    expect(error).toBeInstanceOf(CliError.UsageError)
+    expect((error as CliError.UsageError).message).toContain('"run-1"')
   })
 
-  it("renders a run that does not exist as an empty diagnosis rather than failing", async () => {
-    const card = await run(text(["status", "run-missing"]), testControl)
+  it.each([
+    ["status", ["status", "run-missing"]],
+    ["why", ["why", "run-missing"]],
+    ["logs", ["logs", "run-missing"]],
+    ["output", ["output", "run-missing"]]
+  ] as const)("refuses a missing run in %s", async (_verb, args) => {
+    const error = await run(Effect.flip(runCommand(args)), testControl)
 
-    // Nothing matched the listing, so the card has no summary to name and
-    // falls back to `?` instead of inventing the requested identifier.
-    expect(card).toContain("Verdict   unlaunched")
-    expect(card).toContain("Run       ? · 0s")
-    expect(card).toContain("Activity  0 turns · 0 calls (0 refused, 0 duplicate) · edits 0/0")
+    expect(error).toBeInstanceOf(CliError.UsageError)
+    expect((error as CliError.UsageError).message).toBe('Run not found: "run-missing"')
+    expect(CliError.exitCode(error as CliError.UsageError)).toBe(2)
   })
 
   it("projects a finite history as a transcript for humans and as raw events under --json", async () => {
@@ -495,47 +660,56 @@ describe("forensic projections", () => {
 })
 
 describe("owned-run settlement", () => {
-  const failingWatch = Layer.effect(
-    ControlService.Control,
-    Effect.gen(function*() {
-      const control = yield* ControlService.Control
-      return ControlService.make({
-        ...control,
-        resume: (input) => Effect.succeed({ _tag: "Accepted", receiptId: input.idempotencyKey, runId: "run-1" }),
-        watch: () => Stream.fail(new Error("transport gone") as never)
+  const watchControl = (resumes: { count: number }, failHistory: boolean) =>
+    Layer.effect(
+      ControlService.Control,
+      Effect.gen(function*() {
+        const control = yield* ControlService.Control
+        return ControlService.make({
+          ...control,
+          resume: (input) => {
+            resumes.count += 1
+            return Effect.succeed({ _tag: "Accepted", receiptId: input.idempotencyKey, runId: "run-1" })
+          },
+          watch: (filter) =>
+            failHistory || filter.follow !== false
+              ? Stream.fail(new Error("transport gone") as never)
+              : Stream.empty
+        })
       })
-    })
-  ).pipe(Layer.provide(testControl))
+    ).pipe(Layer.provide(testControl))
 
-  it("keys a resume to the run alone when no park was ever committed", async () => {
-    const receipt = await Effect.runPromise(
-      json(["--json", "run", "run-1", "--resume"]).pipe(
+  it("fails a resume before mutation when the latest-park lookup fails", async () => {
+    const resumes = { count: 0 }
+    const exit = await Effect.runPromise(
+      Effect.exit(json(["--json", "run", "run-1", "--resume"])).pipe(
         Effect.timeout("5 seconds"),
         Effect.provide(ExecutorOwnership.layer(true)),
-        Effect.provide(failingWatch),
+        Effect.provide(watchControl(resumes, true)),
         Effect.provide(services),
         Effect.provide(NodeServices.layer)
       )
     )
 
-    // A failed history read is not a failed resume: the park lookup degrades
-    // to "no park", the key drops its sequence suffix, and the settlement wait
-    // closes instead of hanging the process.
-    expect(receipt).toMatchObject({ _tag: "Accepted", receiptId: "cli:resume:run-1" })
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : "")).toContain("transport gone")
+    expect(resumes.count).toBe(0)
   })
 
   it("does not wait on settlement when this process does not own the executor", async () => {
+    const resumes = { count: 0 }
     const receipt = await Effect.runPromise(
       json(["--json", "run", "run-1", "--resume"]).pipe(
         Effect.timeout("5 seconds"),
         Effect.provide(ExecutorOwnership.layer(false)),
-        Effect.provide(failingWatch),
+        Effect.provide(watchControl(resumes, false)),
         Effect.provide(services),
         Effect.provide(NodeServices.layer)
       )
     )
 
     expect(receipt).toMatchObject({ _tag: "Accepted" })
+    expect(resumes.count).toBe(1)
   })
 
   it("stops the settlement wait at the first settling event kind", async () => {

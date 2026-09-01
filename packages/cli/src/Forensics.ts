@@ -4,7 +4,7 @@
  * The vault's Forensics concept fixes the CLI surface at exactly two
  * projections: `smithers logs` projects journal queries and `smithers status`
  * projects the run summary and its gating cause. This module is the rendering
- * half of both — pure functions from the `ControlEvent` deltas that
+ * half of both: pure functions from the `ControlEvent` deltas that
  * `Control.watch` already serves, to a turn-by-turn transcript, a one-line
  * follow view, and the status card's diagnosis. Nothing here opens a
  * database; the control plane stays the only read path, so `--remote` renders
@@ -12,20 +12,22 @@
  *
  * The need is concrete: the first SWE-bench benchmark of the built-in harness
  * was diagnosed with ad-hoc SQLite scripts because a settled run's journal
- * had no readable projection. Every question those scripts answered — where
+ * had no readable projection. Every question those scripts answered, where
  * the turns went, which calls were refused and why, whether an edit was ever
- * attempted, what the run died of — is computed here from the events alone.
+ * attempted, and what the run died of, is computed here from the events alone.
  *
  * @since 0.1.0
  */
 import type { ControlSchema } from "@smthrs/control"
 
 /**
- * One refused flow call, aggregated by its refusal message.
+ * One refused flow call, aggregated by its refusal message. Reach for this in
+ * diagnosis renderers that need the reason and its frequency together. The
+ * digest normalizes malformed source events before constructing this shape, so
+ * consumers do not handle a separate parse failure.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Refusal {
   readonly message: string
@@ -33,11 +35,13 @@ export interface Refusal {
 }
 
 /**
- * Everything the diagnosis computes from one run's events.
+ * Everything the diagnosis computes from one run's events. Reach for this
+ * projection when a status card or transcript needs one consistent account of
+ * activity, cost, gating, and outcome. Missing or malformed event fields become
+ * optional or zero values rather than making construction fail.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Digest {
   /** The last `control.run.*` transition seen, or undefined before launch. */
@@ -96,7 +100,9 @@ const compact = (value: unknown, width: number): string => {
 }
 
 /**
- * Computes the diagnosis for one run from its ordered events.
+ * Computes the diagnosis for one run from its ordered events. Reach for this
+ * before rendering status or transcript output so both views share the same
+ * counts and final state.
  *
  * Total on purpose: payloads are wire `Json`, so every field read tolerates
  * absence and the digest of a malformed journal is a sparse digest, never a
@@ -104,7 +110,6 @@ const compact = (value: unknown, width: number): string => {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const digest = (events: ReadonlyArray<ControlSchema.ControlEvent>): Digest => {
   let status: string | undefined
@@ -225,25 +230,25 @@ const verdict = (d: Digest): string => {
   const status = d.status ?? "unlaunched"
   if (status === "failed") {
     return d.cause === undefined
-      ? "failed — no cause recorded in the journal"
-      : `failed — ${clip(firstLine(d.cause), 100)}`
+      ? "failed: no cause recorded in the journal"
+      : `failed: ${clip(firstLine(d.cause), 100)}`
   }
   // `control.run.pending` is the executor declining the launch. The run row is
   // durable and stays `accepted` with nothing driving it, which the bare word
   // `pending` told an operator nothing about.
   if (status === "pending") {
-    return "pending — accepted, and no executor took the run; nothing is driving it"
+    return "pending: accepted, and no executor took the run; nothing is driving it"
   }
   if (status === "waiting-approval") {
     return d.parkedQuestion === undefined
-      ? "waiting-approval — a permission gate is pending"
-      : `waiting-approval — asks: ${clip(d.parkedQuestion, 90)}`
+      ? "waiting-approval: a permission gate is pending"
+      : `waiting-approval: asks: ${clip(d.parkedQuestion, 90)}`
   }
   if (status === "completed" && d.calls > 0 && d.editsAttempted === 0) {
-    return `completed — but 0 of ${d.calls} calls attempted an edit; the run only read`
+    return `completed: but 0 of ${d.calls} calls attempted an edit; the run only read`
   }
   if (status === "completed" && d.finalOutput !== undefined && d.finalOutput.length > 0) {
-    return `completed — ${clip(firstLine(d.finalOutput), 100)}`
+    return `completed: ${clip(firstLine(d.finalOutput), 100)}`
   }
   return status
 }
@@ -251,12 +256,25 @@ const verdict = (d: Digest): string => {
 const label = (name: string): string => name.padEnd(10)
 
 /**
+ * Quotes one argv element as exactly one POSIX shell word. Reach for this for
+ * every caller-controlled value in a copy-paste command. It preserves all
+ * bytes, including newlines, and performs no semantic validation.
+ *
+ * @category conversions
+ * @since 0.1.0
+ */
+export const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
+
+const shellCommand = (...arguments_: ReadonlyArray<string>): string => arguments_.map(shellQuote).join(" ")
+
+/**
  * Renders the status card for one run: verdict, gating cause, activity
- * evidence, and the exact next commands.
+ * evidence, and the exact next commands. Reach for this in `smithers status` or
+ * another read-only projection. Missing summaries render as unknown values,
+ * and long evidence is clipped instead of throwing.
  *
  * @category rendering
  * @since 0.1.0
- * @slop
  */
 export const renderDiagnosis = (
   run: { readonly runId?: string; readonly flowId?: string } | undefined,
@@ -289,17 +307,21 @@ export const renderDiagnosis = (
   }
   if (d.parkedApproval !== undefined) {
     lines.push(
-      `${label("Unblock")}smithers approve '${d.parkedApproval}' --scope run && smithers run --resume ${runId}`
+      `${label("Unblock")}${shellCommand("smithers", "approve", d.parkedApproval, "--scope", "run")} && ${
+        shellCommand("smithers", "run", "--resume", runId)
+      }`
     )
   }
   if (d.status === "pending") {
     // The two ways out, in the order an operator reaches for them: the host
     // that drives the flow takes the run, or the run ends.
     lines.push(
-      `${label("Unblock")}smithers cancel ${runId}    # or run the flow from the host program that registers it`
+      `${label("Unblock")}${
+        shellCommand("smithers", "cancel", runId)
+      }    # or run the flow from the host program that registers it`
     )
   }
-  lines.push(`${label("Next")}smithers logs ${runId}    # turn-by-turn transcript`)
+  lines.push(`${label("Next")}${shellCommand("smithers", "logs", runId)}    # turn-by-turn transcript`)
   return lines.join("\n")
 }
 
@@ -309,11 +331,12 @@ const offset = (at: number, start: number): string => {
 }
 
 /**
- * Renders one event as a single follow-mode line.
+ * Renders one event as a single follow-mode line. Reach for this while polling
+ * a live run. Unknown event kinds fall back to their compact payload, and
+ * missing fields render as empty or question-mark values rather than failing.
  *
  * @category rendering
  * @since 0.1.0
- * @slop
  */
 export const eventLine = (event: ControlSchema.ControlEvent): string => {
   const payload = asRecord(event.payload)
@@ -381,7 +404,8 @@ export const eventLine = (event: ControlSchema.ControlEvent): string => {
 }
 
 /**
- * Renders the whole run as a turn-by-turn transcript.
+ * Renders the whole run as a turn-by-turn transcript. Reach for this when the
+ * operator needs event order and model-turn boundaries rather than raw JSON.
  *
  * One `=== turn N ===` header per model turn; one line per event under it,
  * offset-stamped from the run's first event. Refusals and errors keep their
@@ -391,7 +415,6 @@ export const eventLine = (event: ControlSchema.ControlEvent): string => {
  *
  * @category rendering
  * @since 0.1.0
- * @slop
  */
 export const renderTranscript = (events: ReadonlyArray<ControlSchema.ControlEvent>): string => {
   if (events.length === 0) return "No events."

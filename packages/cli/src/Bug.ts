@@ -3,13 +3,13 @@
  * into a browser.
  *
  * The value of the command is that it collects the context a maintainer always
- * asks for — versions, platform, the runs in this project, and one run's event
- * digest — and that it scrubs the collected text before it leaves the machine.
- * The scrubbing rules are ported verbatim from 0.x, where each one was added
- * after a real report arrived carrying a credential.
+ * asks for: versions, platform, the runs in this project, and one run's event
+ * digest. The collected value takes the journal's shared redaction rules before
+ * it leaves the machine.
  *
  * @since 1.0.0
  */
+import * as Redaction from "@smthrs/journal/Redaction"
 
 /**
  * Where reports are posted when the environment names no other endpoint.
@@ -19,50 +19,106 @@
  */
 export const defaultEndpoint = "https://bug.smithers.sh/api/bugs"
 
-/** Object keys whose values are redacted wholesale, whatever they hold. */
-const secretKey = /(?:api[-_]?key|[-_]key$|^key$|token|secret|password|credential|authorization|dsn|connection)/i
+/** The two 0.x structural names not historically covered by journal text rules. */
+const reportOnlySecretKey = /(?:dsn|connection)/i
+
+const refusal = (reason: string): Error => new Error(`Bug report refused: ${reason}`)
+
+const binarySize = (value: object): number | undefined => {
+  if (value instanceof ArrayBuffer) return value.byteLength
+  if (ArrayBuffer.isView(value)) return value.byteLength
+  return undefined
+}
+
+const assertRenderable = (value: unknown): void => {
+  let walked = 0
+  const ancestors = new WeakSet<object>()
+
+  const walk = (node: unknown, depth: number): void => {
+    walked += 1
+    if (walked > Redaction.binaryWalkLimit) {
+      throw refusal(`the value exceeds the ${Redaction.binaryWalkLimit} member walk limit`)
+    }
+    if (depth > Redaction.maxDepth) {
+      throw refusal(`the value exceeds the ${Redaction.maxDepth} container depth limit`)
+    }
+    if ((typeof node !== "object" && typeof node !== "function") || node === null) return
+    if (typeof node === "function") return
+    if (ancestors.has(node)) return
+
+    const size = binarySize(node)
+    if (size !== undefined && size > Redaction.binaryWalkLimit) {
+      throw refusal(`a binary value exceeds the ${Redaction.binaryWalkLimit} byte walk limit`)
+    }
+    if ("toJSON" in node) {
+      throw refusal("a value defines toJSON, which could run code while the report is rendered")
+    }
+
+    ancestors.add(node)
+    try {
+      const descriptors = Object.getOwnPropertyDescriptors(node)
+      for (const descriptor of Object.values(descriptors)) {
+        if (descriptor.enumerable !== true) continue
+        if (descriptor.get !== undefined || descriptor.set !== undefined) {
+          throw refusal("a value contains an accessor, which could run code while the report is rendered")
+        }
+        walk(descriptor.value, depth + 1)
+      }
+    } finally {
+      ancestors.delete(node)
+    }
+  }
+
+  walk(value, 0)
+}
+
+const applyReportOnlyKeys = (value: unknown): unknown => {
+  let walked = 0
+
+  const walk = (node: unknown, depth: number): unknown => {
+    walked += 1
+    if (walked > Redaction.binaryWalkLimit) {
+      throw refusal(`the redacted value exceeds the ${Redaction.binaryWalkLimit} member walk limit`)
+    }
+    if (depth > Redaction.maxDepth) {
+      throw refusal(`the redacted value exceeds the ${Redaction.maxDepth} container depth limit`)
+    }
+    if (Array.isArray(node)) return node.map((entry) => walk(entry, depth + 1))
+    if (typeof node !== "object" || node === null) return node
+    return Object.fromEntries(
+      Object.entries(node).map(([key, entry]) => [
+        key,
+        reportOnlySecretKey.test(key) ? Redaction.placeholder : walk(entry, depth + 1)
+      ])
+    )
+  }
+
+  return walk(value, 0)
+}
 
 /**
  * Redacts secret-looking material inside free text.
  *
- * Each rule answers a way a credential has actually reached a report: inline
- * credentials in a connection string, a bearer header copied out of a log, the
- * provider token formats that carry no `KEY=` context, and `KEY=value` pairs.
+ * Reach for this when report prose must take the exact journal rule set. It is
+ * total for strings and returns the shared journal markers for matched text.
  *
  * @category conversions
  * @since 1.0.0
  */
-export const scrubText = (text: string): string =>
-  text
-    .replace(/([a-z][a-z0-9+.-]*:\/\/[^\s:@/]+):[^\s:@/]+@/gi, "$1:[REDACTED]@")
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{4,}/gi, "Bearer [REDACTED]")
-    .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, "[REDACTED]")
-    .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}/g, "[REDACTED]")
-    .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}/g, "[REDACTED]")
-    .replace(/\bAKIA[0-9A-Z]{16}\b/g, "[REDACTED]")
-    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}/g, "[REDACTED]")
-    .replace(/\bAIza[0-9A-Za-z_-]{35,}/g, "[REDACTED]")
-    .replace(/\b([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)S?)=("[^"]*"|'[^']*'|\S+)/g, "$1=[REDACTED]")
-    .replace(
-      /"([A-Za-z0-9_-]*(?:key|token|secret|password|credential)[A-Za-z0-9_-]*)"(\s*:\s*)"(?:[^"\\]|\\.)*"/gi,
-      "\"$1\"$2\"[REDACTED]\""
-    )
+export const scrubText = (text: string): string => Redaction.redact(text) as string
 
 /**
- * Recursively scrubs a JSON-safe value.
+ * Recursively scrubs a JSON-safe value with the journal rules and the retained
+ * report-only `dsn` and `connection` key coverage. It refuses accessors,
+ * executable `toJSON` hooks, excessive depth, and excessive walk size before
+ * redaction so no partial report can be posted.
  *
  * @category conversions
  * @since 1.0.0
  */
 export const scrub = (value: unknown): unknown => {
-  if (typeof value === "string") return scrubText(value)
-  if (Array.isArray(value)) return value.map(scrub)
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [key, secretKey.test(key) ? "[REDACTED]" : scrub(entry)])
-    )
-  }
-  return value
+  assertRenderable(value)
+  return applyReportOnlyKeys(Redaction.redact(value))
 }
 
 /**
@@ -81,7 +137,9 @@ export interface Report {
 }
 
 /**
- * Assembles a scrubbed report.
+ * Assembles a scrubbed report for the bug endpoint. It throws before returning
+ * when the value cannot be walked safely within the journal's bounds, which
+ * prevents the caller from posting a partially inspected body.
  *
  * @category constructors
  * @since 1.0.0

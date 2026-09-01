@@ -13,8 +13,8 @@
  *
  * @since 1.0.0
  */
-import { Control as ControlService, ControlSchema } from "@smthrs/control"
 import * as Canonical from "@smthrs/canonical/Canonical"
+import { Control as ControlService, ControlSchema } from "@smthrs/control"
 import * as Sha256 from "@smthrs/crypto/Sha256"
 import * as UnsupportedBackend from "@smthrs/database/UnsupportedBackend"
 import * as ResolveJj from "@smthrs/jj/node/resolveJjBinary"
@@ -22,10 +22,11 @@ import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import type * as Namespace from "@smthrs/memory/Namespace"
 import * as MigrateCommand from "@smthrs/migrate/flow/Command"
 import { Ownership } from "@smthrs/run-store"
-import { Clock, Console, Effect, Option, Schema, Stream } from "effect"
+import { Clock, Console, Effect, Option, Schema, SchemaIssue, Stream } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { randomUUID } from "node:crypto"
 import { hostname } from "node:os"
+import { resolve } from "node:path"
 import * as Agents from "./Agents.ts"
 import * as Bug from "./Bug.ts"
 import * as ClaudeMirror from "./ClaudeMirror.ts"
@@ -40,7 +41,7 @@ import * as Gc from "./Gc.ts"
 import * as Init from "./Init.ts"
 import * as Legacy from "./Legacy.ts"
 import * as NodeOutput from "./NodeOutput.ts"
-import { Output } from "./Output.ts"
+import { Output, renderValue } from "./Output.ts"
 import * as Project from "./Project.ts"
 import * as Serve from "./Serve.ts"
 import * as Unsupported from "./Unsupported.ts"
@@ -140,23 +141,31 @@ const guardGlobals = Effect.gen(function*() {
 const malformedJson = (label: string): CliError.UsageError =>
   new CliError.UsageError({ message: `${label} must be valid JSON` })
 
-const schemaMismatch = (label: string): CliError.UsageError =>
-  new CliError.UsageError({ message: `${label} must match the expected payload schema` })
+const formatSchemaIssue = SchemaIssue.makeFormatterDefault()
+
+const schemaMismatch = (label: string, issue: SchemaIssue.Issue): CliError.UsageError => {
+  // Approval payloads can carry capability material. Input reporting stays
+  // disabled at the decoder, and this bounded formatter keeps only the path
+  // and expectation an operator needs to repair one field.
+  const detail = formatSchemaIssue(issue).split("\n").slice(0, 4).join("\n").slice(0, 800)
+  return new CliError.UsageError({
+    message: `${label} must match the expected payload schema:\n${detail}`
+  })
+}
 
 const decodeJson = <A>(
   label: string,
   serialized: string,
-  decode: (value: unknown) => A
+  decode: (value: unknown) => Effect.Effect<A, Schema.SchemaError>
 ): Effect.Effect<A, CliError.UsageError> =>
   Effect.try({
     try: () => JSON.parse(serialized) as unknown,
     catch: () => malformedJson(label)
   }).pipe(
     Effect.flatMap((decoded) =>
-      Effect.try({
-        try: () => decode(decoded),
-        catch: () => schemaMismatch(label)
-      })
+      decode(decoded).pipe(
+        Effect.mapError((error) => schemaMismatch(label, error.issue))
+      )
     )
   )
 
@@ -169,21 +178,31 @@ const decodeInput = (
     return separator < 1 ? [entry, true] : [entry.slice(0, separator), entry.slice(separator + 1)]
   }))
   if (Option.isNone(raw)) return Effect.succeed(pairs)
-  return decodeJson(
-    "--data",
-    raw.value,
-    (decoded) =>
+  return Effect.try({
+    try: () => JSON.parse(raw.value) as unknown,
+    catch: () => malformedJson("--data")
+  }).pipe(
+    Effect.map((decoded) =>
       decoded !== null && typeof decoded === "object" && !Array.isArray(decoded)
         ? { ...pairs, ...(decoded as Record<string, unknown>) }
         : { ...pairs, data: decoded }
+    )
   )
 }
 
 const approval = (serialized: string): Effect.Effect<ControlService.ApprovalInput, CliError.UsageError> =>
-  decodeJson("approval", serialized, Schema.decodeUnknownSync(ControlSchema.ApprovalPayload))
+  decodeJson(
+    "approval",
+    serialized,
+    Schema.decodeUnknownEffect(ControlSchema.ApprovalPayload, { reportInput: false })
+  )
 
 const signal = (serialized: string): Effect.Effect<ControlSchema.SignalPayload, CliError.UsageError> =>
-  decodeJson("signal-json", serialized, Schema.decodeUnknownSync(ControlSchema.SignalPayload))
+  decodeJson(
+    "signal-json",
+    serialized,
+    Schema.decodeUnknownEffect(ControlSchema.SignalPayload, { reportInput: false })
+  )
 
 const render = (value: unknown) =>
   Effect.gen(function*() {
@@ -250,16 +269,35 @@ const awaitRun = (
  * second park is a fresh mutation instead of a replay of the first resume's
  * recorded receipt, and it scopes the settlement wait.
  */
-const latestPark = (
-  control: ControlService.Service,
-  runId: string
-): Effect.Effect<number | undefined, never> =>
-  control.watch({ runId, follow: false }).pipe(
-    Stream.filter((event) => event.kind === "control.run.waiting-approval"),
-    Stream.runCollect,
-    Effect.map((events) => events.length === 0 ? undefined : Math.max(...events.map((event) => event.sequence))),
-    Effect.catch((error) =>
-      recoverWatch(error, runId, "The control watch failed while finding the run's latest approval park", undefined)
+/**
+ * Finds the greatest sequence in a stream without retaining its history.
+ *
+ * Use this for journal cursors whose histories can exceed the JavaScript
+ * argument limit. Stream failures are preserved so a caller never substitutes
+ * a weaker cursor after a failed read.
+ *
+ * @category getters
+ * @since 1.0.0-rc.0
+ */
+export const latestSequence = <E, R>(
+  events: Stream.Stream<{ readonly sequence: number }, E, R>
+): Effect.Effect<number | undefined, E, R> =>
+  Stream.runFold(
+    events,
+    () => undefined as number | undefined,
+    (latest, event) => latest === undefined || event.sequence > latest ? event.sequence : latest
+  )
+
+const latestPark = (control: ControlService.Service, runId: string) =>
+  latestSequence(
+    control.watch({ runId, follow: false }).pipe(
+      Stream.filter((event) => event.kind === "control.run.waiting-approval")
+    )
+  ).pipe(
+    // A failed park lookup cannot safely mint the run-only resume key. Report
+    // the transport failure, then preserve it so no mutation is attempted.
+    Effect.tapError((error) =>
+      Console.error(`The control watch failed while finding the run's latest approval park (${runId})`, error)
     )
   )
 
@@ -296,8 +334,7 @@ const awaitOwnedRun = (
 const decisionPark = (
   control: ControlService.Service,
   target: ControlSchema.ApprovalTarget
-): Effect.Effect<number | undefined, never> =>
-  target._tag === "Node" ? latestPark(control, target.runId) : Effect.succeed(undefined)
+) => target._tag === "Node" ? latestPark(control, target.runId) : Effect.succeed(undefined)
 
 /**
  * Renders what the control plane knows about a declined launch, and returns
@@ -392,6 +429,15 @@ const summaryOf = (control: ControlService.Service, runId: string) =>
   Effect.map(
     control.list({ _tag: "runs", filters: { runId } }),
     (listed) => listed._tag === "runs" ? listed.items.find((item) => item.runId === runId) : undefined
+  )
+
+const missingRun = (runId: string): CliError.UsageError =>
+  new CliError.UsageError({ message: `Run not found: ${JSON.stringify(runId)}` })
+
+/** One run's summary, failing before a reader projects an empty history. */
+const requireRun = (control: ControlService.Service, runId: string) =>
+  summaryOf(control, runId).pipe(
+    Effect.flatMap((run) => run === undefined ? Effect.fail(missingRun(runId)) : Effect.succeed(run))
   )
 
 /** A digest of one 0.x notice, printed once per invocation. */
@@ -525,6 +571,15 @@ const up = Command.make("up", upFlags, (config) =>
       "resume-restore-heartbeat": config["resume-restore-heartbeat"],
       "max-concurrency": config["max-concurrency"]
     })
+    const globals = yield* rootCommand
+    const remote = Option.getOrUndefined(globals.remote) ?? Environment.read(process.env, "SMITHERS_REMOTE")
+    if (config.detached && remote !== undefined) {
+      return yield* Effect.fail(
+        new CliError.UnsupportedError({
+          message: "up -d spawns a local executor; run `smithers up` attached against --remote"
+        })
+      )
+    }
     if (Unsupported.isReservedFlow(config.flow)) {
       return yield* Effect.fail(Unsupported.reservedFlowError("up", config.flow))
     }
@@ -538,10 +593,19 @@ const up = Command.make("up", upFlags, (config) =>
 
     const projectRoot = yield* Project.ProjectRoot
     const timeoutMs = Environment.readInteger(process.env, "SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS")
+    const passthrough = [
+      // The child runs with the project root as its cwd. An absolute MCP path
+      // preserves the file the parent parsed when the flag was relative.
+      ...(Option.isNone(globals.mcpConfig)
+        ? []
+        : ["--mcp-config", resolve(process.cwd(), globals.mcpConfig.value)]),
+      ...(Option.isNone(globals.root) ? [] : ["--root", projectRoot])
+    ]
     const launched = yield* Effect.promise(() =>
       Detached.launch({
         root: projectRoot,
         payload: JSON.stringify({ ...card.approval, scope: "run" }),
+        passthrough,
         ...(timeoutMs === undefined ? {} : { timeoutMs })
       })
     )
@@ -560,6 +624,9 @@ const up = Command.make("up", upFlags, (config) =>
 
 const approve = Command.make("approve", {
   approval: Argument.string("approval"),
+  // The interactive CLI is an operator affirming the whole launch, matching
+  // `up`. MCP defaults to `once` because an omitted tool argument must not
+  // widen a client's capabilities for the rest of the run.
   scope: Flag.choice("scope", ["once", "run", "remembered"] as const).pipe(Flag.withDefault("run"))
 }, (config) =>
   Effect.gen(function*() {
@@ -773,8 +840,10 @@ const unclaimed = (run: ControlSchema.RunSummary, now: number): Effect.Effect<bo
 const labelled = (listed: ControlSchema.ListResponse, now: number): Effect.Effect<ControlSchema.ListResponse> =>
   listed._tag === "runs"
     ? Effect.map(
-      Effect.forEach(listed.items, (run) =>
-        Effect.map(unclaimed(run, now), (missing) => missing ? { ...run, waitingReason: "executor" } : run)),
+      Effect.forEach(
+        listed.items,
+        (run) => Effect.map(unclaimed(run, now), (missing) => missing ? { ...run, waitingReason: "executor" } : run)
+      ),
       (items) => ({ ...listed, items })
     )
     : Effect.succeed(listed)
@@ -788,9 +857,11 @@ const statusOf = (runId: Option.Option<string>) =>
     const root = yield* rootCommand
     // `--json` keeps the stable listing shape untouched; a human reader with a
     // run id gets the diagnosis card computed from that run's own events.
-    if (root.json || Option.isNone(runId)) return yield* render(listed)
-    const events = yield* eventsOf(control, runId.value)
+    if (Option.isNone(runId)) return yield* render(listed)
     const run = listed._tag === "runs" ? listed.items.find((item) => item.runId === runId.value) : undefined
+    if (run === undefined) return yield* Effect.fail(missingRun(runId.value))
+    if (root.json) return yield* render(listed)
+    const events = yield* eventsOf(control, runId.value)
     yield* render(Forensics.renderDiagnosis(run, Forensics.digest(events)))
   })
 
@@ -811,6 +882,7 @@ const readLogs = (runId: Option.Option<string>, follow: boolean, forceJson: bool
     const control = yield* ControlService.Control
     const root = yield* rootCommand
     const json = forceJson || root.json
+    if (Option.isSome(runId)) yield* requireRun(control, runId.value)
     const events = control.watch({
       runId: Option.getOrUndefined(runId),
       follow
@@ -851,10 +923,11 @@ const output = Command.make("output", {
   Effect.gen(function*() {
     yield* guardGlobals
     const control = yield* ControlService.Control
+    yield* requireRun(control, config.runId)
     const collected = yield* eventsOf(control, config.runId)
     const nodes = NodeOutput.project(collected)
     const requested = Option.getOrUndefined(config.nodeId)
-    if (requested === undefined) return yield* render(nodes)
+    if (requested === undefined) return yield* render(renderValue(nodes))
     const node = nodes.find((candidate) => candidate.nodeId === requested)
     if (node === undefined) {
       return yield* Effect.fail(
@@ -862,7 +935,7 @@ const output = Command.make("output", {
       )
     }
     const root = yield* rootCommand
-    yield* render(root.json ? node : NodeOutput.render(node))
+    yield* render(renderValue(root.json ? node : NodeOutput.render(node)))
   })).pipe(Command.withDescription(Verb.find("output")!.help))
 
 const down = Command.make("down", {}, () =>
@@ -892,6 +965,12 @@ const init = Command.make("init", {
     yield* refuseRemoved("init", { global: config.global })
     const projectRoot = yield* Project.ProjectRoot
     const name = Option.getOrElse(config.name, () => Init.defaultName(projectRoot))
+    const nameProblem = Init.nameProblem(name)
+    if (nameProblem !== undefined) {
+      return yield* Effect.fail(
+        new CliError.UsageError({ message: nameProblem })
+      )
+    }
     yield* render(yield* Effect.sync(() => Init.scaffold(projectRoot, name, process.env)))
   })).pipe(Command.withDescription(Verb.find("init")!.help))
 
@@ -1050,13 +1129,23 @@ const migrate = Command.make("migrate", {
     })
   })).pipe(Command.withDescription(Verb.find("migrate")!.help))
 
-const memoryNamespace = (raw: Option.Option<string>): Namespace.Namespace => {
-  const value = Option.getOrElse(raw, () => "user:cli")
+const memoryNamespace = (
+  raw: Option.Option<string>
+): Effect.Effect<Namespace.Namespace, CliError.UsageError> => {
+  if (Option.isNone(raw)) return Effect.succeed({ kind: "user", id: "cli" })
+  const value = raw.value
   const separator = value.indexOf(":")
-  const kind = separator < 0 ? "user" : value.slice(0, separator)
-  const id = separator < 0 ? value : value.slice(separator + 1)
+  const kind = separator < 0 ? "" : value.slice(0, separator)
+  const id = separator < 0 ? "" : value.slice(separator + 1)
   const known = kind === "flow" || kind === "agent" || kind === "user" || kind === "global"
-  return { kind: known ? kind : "user", id: id === "" ? "cli" : id }
+  if (!known || id.length === 0) {
+    return Effect.fail(
+      new CliError.UsageError({
+        message: `--namespace must be flow:<id>, agent:<id>, user:<id>, or global:<id>; got ${JSON.stringify(value)}`
+      })
+    )
+  }
+  return Effect.succeed({ kind, id })
 }
 
 const memoryFlags = { namespace: Flag.string("namespace").pipe(Flag.optional) }
@@ -1066,9 +1155,10 @@ const memoryList = Command.make("list", { ...memoryFlags, prefix: Flag.string("p
 ) =>
   Effect.gen(function*() {
     yield* guardGlobals
+    const namespace = yield* memoryNamespace(config.namespace)
     const store = yield* MemoryStore.MemoryStore
     const facts = yield* store.listFacts({
-      namespace: memoryNamespace(config.namespace),
+      namespace,
       ...(Option.isNone(config.prefix) ? {} : { prefix: config.prefix.value })
     })
     yield* render(facts.map((fact) => ({ key: fact.key, value: fact.value, updatedAtMs: fact.updatedAtMs })))
@@ -1080,12 +1170,13 @@ const memoryGet = Command.make(
   (config) =>
     Effect.gen(function*() {
       yield* guardGlobals
+      const namespace = yield* memoryNamespace(config.namespace)
       const store = yield* MemoryStore.MemoryStore
-      const fact = yield* store.getFact({ namespace: memoryNamespace(config.namespace), key: config.key })
+      const fact = yield* store.getFact({ namespace, key: config.key })
       if (fact === undefined) {
         return yield* Effect.fail(new CliError.UsageError({ message: `No fact ${config.key} in this namespace` }))
       }
-      yield* render(fact.value)
+      yield* render(renderValue(fact.value))
     })
 ).pipe(Command.withDescription("Read one fact"))
 
@@ -1096,6 +1187,7 @@ const memorySet = Command.make("set", {
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
+    const namespace = yield* memoryNamespace(config.namespace)
     const store = yield* MemoryStore.MemoryStore
     // A value that parses as JSON is stored as JSON; anything else is the
     // string as typed. An operator writing `{"a":1}` means the object.
@@ -1106,7 +1198,7 @@ const memorySet = Command.make("set", {
       parsed = config.value
     }
     yield* store.putFact({
-      namespace: memoryNamespace(config.namespace),
+      namespace,
       key: config.key,
       value: parsed,
       provenance: {}
@@ -1120,8 +1212,9 @@ const memoryRm = Command.make(
   (config) =>
     Effect.gen(function*() {
       yield* guardGlobals
+      const namespace = yield* memoryNamespace(config.namespace)
       const store = yield* MemoryStore.MemoryStore
-      const removed = yield* store.deleteFact({ namespace: memoryNamespace(config.namespace), key: config.key })
+      const removed = yield* store.deleteFact({ namespace, key: config.key })
       yield* render({ key: config.key, removed })
     })
 ).pipe(Command.withDescription("Delete one fact"))
@@ -1167,9 +1260,20 @@ const claudeNodeWait = Command.make("node-wait", {
   Effect.gen(function*() {
     yield* guardGlobals
     const control = yield* ControlService.Control
+    yield* requireRun(control, config.runId)
     const deadline = Date.now() + config.timeout
+    const collected: Array<ControlSchema.ControlEvent> = []
+    let afterSequence: number | undefined
     for (;;) {
-      const collected = yield* eventsOf(control, config.runId)
+      const fresh = yield* Stream.runCollect(control.watch({
+        runId: config.runId,
+        follow: false,
+        ...(afterSequence === undefined ? {} : { afterSequence })
+      }))
+      for (const event of fresh) {
+        collected.push(event)
+        if (afterSequence === undefined || event.sequence > afterSequence) afterSequence = event.sequence
+      }
       const node = NodeOutput.find(collected, config.nodeId)
       if (node !== undefined && node.outcome !== "pending") return yield* renderJson({ ...node, timedOut: false })
       const run = yield* summaryOf(control, config.runId)
@@ -1190,6 +1294,13 @@ const claudeMonitor = Command.make("monitor", {
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
+    if (!Number.isSafeInteger(config.limit) || config.limit <= 0) {
+      return yield* Effect.fail(
+        new CliError.UsageError({
+          message: `--limit must be a positive integer; got ${JSON.stringify(String(config.limit))}`
+        })
+      )
+    }
     const control = yield* ControlService.Control
     const projectRoot = yield* Project.ProjectRoot
     const followed = config.allRuns
@@ -1199,16 +1310,24 @@ const claudeMonitor = Command.make("monitor", {
           .filter((entry) => entry.sessionId === sessionId(config.session))
           .map((entry) => entry.runId)
       )
-    const collected = globalThis.Array.from(yield* Stream.runCollect(control.watch({ follow: false })))
-    const lines = collected
-      .flatMap((event) => {
+    type Transition = NonNullable<ReturnType<typeof ClaudeMirror.transition>>
+    const ring = yield* Stream.runFold(
+      control.watch({ follow: false }),
+      () => ({ values: [] as Array<Transition | undefined>, next: 0, count: 0 }),
+      (state, event) => {
         const line = ClaudeMirror.transition(event)
-        if (line === undefined) return []
-        if (followed !== undefined && !followed.has(line.runId)) return []
-        return [line]
-      })
-      .slice(-config.limit)
-    for (const line of lines) yield* Console.log(JSON.stringify(line))
+        if (line === undefined || (followed !== undefined && !followed.has(line.runId))) return state
+        state.values[state.next] = line
+        state.next = (state.next + 1) % config.limit
+        state.count = Math.min(config.limit, state.count + 1)
+        return state
+      }
+    )
+    for (let offset = 0; offset < ring.count; offset++) {
+      const index = (ring.next - ring.count + offset + config.limit) % config.limit
+      const line = ring.values[index]
+      if (line !== undefined) yield* Console.log(JSON.stringify(line))
+    }
   })).pipe(Command.withDescription("Print notable run transitions as NDJSON"))
 
 const claudeSubscribe = Command.make("subscribe", {
@@ -1377,8 +1496,17 @@ const doctor = Command.make("doctor", {}, () =>
   Effect.gen(function*() {
     yield* guardGlobals
     const projectRoot = yield* Project.ProjectRoot
+    const control = yield* ControlService.Control
+    const listed = yield* control.list({ _tag: "flows" })
     const jj = ResolveJj.resolveJjBinary()
-    const report = Doctor.inspect({ root: projectRoot, jj, legacyPaths: yield* Project.LegacyState })
+    const report = Doctor.inspect({
+      root: projectRoot,
+      jj,
+      legacyPaths: yield* Project.LegacyState,
+      discoveredFlows: listed._tag === "flows"
+        ? listed.items.filter((item) => !Unsupported.isReservedFlow(item.flowId))
+        : undefined
+    })
     const root = yield* rootCommand
     yield* render(root.json ? report : Doctor.render(report))
     if (Doctor.failed(report)) {
@@ -1483,7 +1611,6 @@ const removedCommands = Unsupported.removedVerbs
  *
  * @category constructors
  * @since 1.0.0
- * @slop
  */
 export const cli = rootCommand.pipe(
   Command.withDescription("Plan, approve, and run durable flows"),

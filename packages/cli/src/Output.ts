@@ -3,14 +3,14 @@
  *
  * @since 0.1.0
  */
-import { Context, Effect, Layer, Redacted } from "effect"
+import { ControlSchema } from "@smthrs/control"
+import { Context, Effect, Layer, Redacted, Schema } from "effect"
 
 /**
  * A CLI output format.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Format = "human" | "json"
 
@@ -19,7 +19,6 @@ export type Format = "human" | "json"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Rendered {
   readonly text: string
@@ -31,7 +30,6 @@ export interface Rendered {
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export interface Service {
   readonly render: (value: unknown, format: Format) => Effect.Effect<Rendered>
@@ -42,24 +40,57 @@ export interface Service {
  *
  * @category services
  * @since 0.1.0
- * @slop
  */
 export class Output extends Context.Service<Output, Service>()("/cli/Output") {}
 
-const normalize = (value: unknown): unknown => {
+const RenderValueTypeId: unique symbol = Symbol("@smthrs/cli/Output/RenderValue")
+
+interface RenderValue {
+  readonly [RenderValueTypeId]: true
+  readonly value: unknown
+}
+
+/**
+ * Marks caller-controlled data as output, never as a control receipt.
+ *
+ * @category constructors
+ * @since 1.0.0-rc.0
+ */
+export const renderValue = (value: unknown): RenderValue => ({ [RenderValueTypeId]: true, value })
+
+const isRenderValue = (value: unknown): value is RenderValue =>
+  typeof value === "object" && value !== null && RenderValueTypeId in value
+
+const maximumDepth = 256
+
+const compareCodeUnits = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
+
+const normalize = (value: unknown, seen = new WeakSet<object>(), depth = 0): unknown => {
   if (Redacted.isRedacted(value)) return "<redacted>"
-  if (Array.isArray(value)) return value.map(normalize)
+  if (value === undefined) return "[Undefined]"
+  if (typeof value === "bigint") return `${value}n`
+  if (typeof value === "symbol") return String(value)
+  if (typeof value === "function") return "[Function]"
   if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).sort(([left], [right]) => left.localeCompare(right)).map((
-        [key, item]
-      ) => [key, normalize(item)])
-    )
+    if (depth >= maximumDepth) return "[Deep]"
+    if (seen.has(value)) return "[Circular]"
+    seen.add(value)
+    try {
+      if (Array.isArray(value)) {
+        return Array.from({ length: value.length }, (_, index) => normalize(value[index], seen, depth + 1))
+      }
+      const entries = Object.entries(value).sort(([left], [right]) => compareCodeUnits(left, right))
+      return Object.fromEntries(entries.map(([key, item]) => [key, normalize(item, seen, depth + 1)]))
+    } catch {
+      return "[Unrenderable]"
+    } finally {
+      seen.delete(value)
+    }
   }
   return value
 }
 
-const json = (value: unknown): string => JSON.stringify(normalize(value))
+const json = (value: unknown): string => JSON.stringify(normalize(value)) ?? "\"[Undefined]\""
 
 const human = (value: unknown): string => {
   const normalized = normalize(value)
@@ -72,12 +103,12 @@ const human = (value: unknown): string => {
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const make = (): Service => ({
-  render: Effect.fn("Output.render")((value, format) =>
-    Effect.succeed({ text: format === "json" ? json(value) : human(value), exitCode: exitCode(value) })
-  )
+  render: Effect.fn("Output.render")((input, format) => {
+    const value = isRenderValue(input) ? input.value : input
+    return Effect.succeed({ text: format === "json" ? json(value) : human(value), exitCode: exitCode(input) })
+  })
 })
 
 /**
@@ -85,7 +116,6 @@ export const make = (): Service => ({
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer = Layer.succeed(Output, make())
 
@@ -94,15 +124,15 @@ export const layer = Layer.succeed(Output, make())
  *
  * @category getters
  * @since 0.1.0
- * @slop
  */
 export const exitCode = (value: unknown): number => {
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>
-    if (record._tag === "Parked" || record.status === "waiting-approval") return 3
-    if (record._tag === "Interrupted" || record.signal === "SIGINT") return 130
-    if (record.signal === "SIGTERM") return 143
-    if (record._tag === "Error" || record._tag === "Conflict") return 1
+  if (isRenderValue(value)) return 0
+  if (!Schema.is(ControlSchema.Receipt)(value)) return 0
+  if (value._tag === "Parked") return 3
+  if (value._tag === "Terminal") {
+    if (value.status === "cancelled") return 130
+    if (value.status === "failed") return 1
   }
+  if (value._tag === "Conflict") return 1
   return 0
 }

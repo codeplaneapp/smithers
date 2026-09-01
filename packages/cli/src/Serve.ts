@@ -21,11 +21,12 @@
  * @since 1.0.0
  */
 import type * as GatewayServer from "@smthrs/gateway/GatewayServer"
-import { Effect, Layer } from "effect"
+import type * as NodeGateway from "@smthrs/gateway/node/NodeGateway"
+import { Context, Effect, Option } from "effect"
+import type { ServeError } from "effect/unstable/http/HttpServerError"
 import { createHash } from "node:crypto"
 import { resolve } from "node:path"
 import * as CliError from "./CliError.ts"
-import * as NodeControl from "./NodeControl.ts"
 import { packageVersion } from "./Version.ts"
 
 /**
@@ -99,6 +100,35 @@ export interface Bind {
   readonly listen: boolean
   readonly credential: string | undefined
 }
+
+/**
+ * The already-composed Node gateway host used by the `serve` handler.
+ *
+ * Platform composition supplies this service so serving can reuse the control
+ * database connection already open for the command. Launch failures remain in
+ * the host effect instead of being hidden behind a second database build.
+ *
+ * @category services
+ * @since 1.0.0-rc.0
+ */
+export interface GatewayHostService {
+  readonly launch: (
+    health: GatewayServer.Health,
+    options: NodeGateway.ServerOptions,
+    root: string
+  ) => Effect.Effect<never, ServeError>
+}
+
+/**
+ * Service key for the Node gateway assembled beside the command control plane.
+ *
+ * Reach for it only from {@link host}; other callers should compose their own
+ * platform host. A missing service is a composition defect reported by Effect.
+ *
+ * @category services
+ * @since 1.0.0-rc.0
+ */
+export class GatewayHost extends Context.Service<GatewayHost, GatewayHostService>()("/cli/Serve/GatewayHost") {}
 
 /**
  * The refusal for a bind that is not allowed, or `undefined` when it is.
@@ -180,12 +210,14 @@ export const host = (bind: Bind, root: string) =>
   Effect.gen(function*() {
     const refusal = refuse(bind)
     if (refusal !== undefined) return yield* Effect.fail(refusal)
-    yield* Layer.launch(
-      NodeControl.layerGateway(health(root), {
-        host: bind.host,
-        port: bind.port,
-        listen: bind.listen,
-        ...(bind.credential === undefined || bind.credential === "" ? {} : { credential: bind.credential })
-      }, root)
-    )
+    const gateway = yield* Effect.serviceOption(GatewayHost)
+    if (Option.isNone(gateway)) {
+      return yield* Effect.die(new Error("The Node gateway host is missing from the CLI composition"))
+    }
+    yield* gateway.value.launch(health(root), {
+      host: bind.host,
+      port: bind.port,
+      listen: bind.listen,
+      ...(bind.credential === undefined || bind.credential === "" ? {} : { credential: bind.credential })
+    }, root)
   })

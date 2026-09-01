@@ -7,7 +7,7 @@
  * ever appears.
  */
 import * as RequestExecutor from "@smthrs/model/RequestExecutor"
-import { Effect } from "effect"
+import { Deferred, Effect, Fiber } from "effect"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
@@ -247,6 +247,45 @@ describe("CodexAuth refresh", () => {
     expect(seen).toHaveLength(1)
     expect(first).toEqual({ Authorization: `Bearer ${rotated}` })
     expect(second).toEqual(first)
+  })
+
+  it("serializes refreshes across distinct stores through the auth-file lock", async () => {
+    const rotated = freshJwt()
+    const file = storeFile(authJson({ access_token: expiredJwt(), refresh_token: "fake-refresh-0" }))
+
+    const observed = await Effect.runPromise(Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      let calls = 0
+      const executor = RequestExecutor.RequestExecutor.of({
+        execute: (request) =>
+          Effect.gen(function*() {
+            calls += 1
+            yield* Deferred.succeed(started, undefined)
+            yield* Deferred.await(release)
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response(JSON.stringify({ access_token: rotated }), { status: 200 })
+            )
+          })
+      })
+      const first = CodexAuth.make({ file, executor }).auth({ modelId: "gpt-5.6-sol" })
+      const second = CodexAuth.make({ file, executor }).auth({ modelId: "gpt-5.6-sol" })
+      const firstFiber = yield* Effect.forkChild(first.sign({}), { startImmediately: true })
+      yield* Deferred.await(started)
+      const secondFiber = yield* Effect.forkChild(second.sign({}), { startImmediately: true })
+      yield* Effect.sleep("50 millis")
+      yield* Deferred.succeed(release, undefined)
+      const headers = yield* Effect.all([Fiber.join(firstFiber), Fiber.join(secondFiber)])
+      return { calls, headers }
+    }))
+
+    expect(observed.calls).toBe(1)
+    expect(observed.headers).toEqual([
+      { Authorization: `Bearer ${rotated}` },
+      { Authorization: `Bearer ${rotated}` }
+    ])
+    expect(readdirSync(join(file, ".."))).toEqual(["auth.json"])
   })
 
   it("refreshes reactively even when the token still looks fresh: a 401 outranks the expiry claim", async () => {

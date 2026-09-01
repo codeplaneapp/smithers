@@ -1,6 +1,51 @@
 import type { ControlSchema } from "@smthrs/control"
-import { describe, expect, it } from "vitest"
+import { execFileSync } from "node:child_process"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, describe, expect, it } from "vitest"
 import * as Forensics from "../src/Forensics.ts"
+
+const staged: Array<string> = []
+
+afterEach(() => {
+  while (staged.length > 0) rmSync(staged.pop()!, { recursive: true, force: true })
+})
+
+const unblockCommand = (card: string): string => {
+  const prefix = "Unblock   "
+  const start = card.indexOf(prefix)
+  const end = card.indexOf("\nNext      ", start)
+  if (start < 0 || end < 0) throw new Error("diagnosis did not contain an unblock command")
+  return card.slice(start + prefix.length, end)
+}
+
+const recordArguments = (command: string): ReadonlyArray<ReadonlyArray<string>> => {
+  const root = mkdtempSync(join(tmpdir(), "smithers-forensics-"))
+  staged.push(root)
+  const executable = join(root, "smithers")
+  const record = join(root, "argv.jsonl")
+  writeFileSync(
+    executable,
+    `#!/usr/bin/env node
+const { appendFileSync } = require("node:fs")
+appendFileSync(process.env.SMITHERS_ARGV_RECORD, JSON.stringify(process.argv.slice(2)) + "\\n")
+`,
+    { encoding: "utf8", mode: 0o755 }
+  )
+  writeFileSync(record, "", "utf8")
+
+  execFileSync("/bin/sh", ["-c", command], {
+    env: {
+      ...process.env,
+      PATH: `${root}:${process.env.PATH ?? ""}`,
+      SMITHERS_ARGV_RECORD: record
+    }
+  })
+
+  return readFileSync(record, "utf8").trim().split("\n").filter((line) => line !== "")
+    .map((line) => JSON.parse(line) as ReadonlyArray<string>)
+}
 
 /** Builds one watch delta with the fields the projections read. */
 const event = (
@@ -105,9 +150,9 @@ describe("Forensics.renderDiagnosis", () => {
       event("control.run.failed", { runId: "run-1", status: "failed", cause: "TransportError: gone" }, 1)
     ])
     const card = Forensics.renderDiagnosis({ runId: "run-1", flowId: "fix" }, d)
-    expect(card).toContain("Verdict   failed — TransportError: gone")
+    expect(card).toContain("Verdict   failed: TransportError: gone")
     expect(card).toContain("run-1 · fix")
-    expect(card).toContain("Next      smithers logs run-1")
+    expect(card).toContain("Next      'smithers' 'logs' 'run-1'")
   })
 
   it("calls out a completed run that never attempted an edit", () => {
@@ -118,7 +163,7 @@ describe("Forensics.renderDiagnosis", () => {
       event("control.run.completed", { runId: "run-1", status: "completed" }, 3)
     ])
     expect(Forensics.renderDiagnosis({ runId: "run-1" }, d))
-      .toContain("completed — but 0 of 1 calls attempted an edit")
+      .toContain("completed: but 0 of 1 calls attempted an edit")
   })
 
   it("prints the exact unblock command for a parked run", () => {
@@ -127,8 +172,41 @@ describe("Forensics.renderDiagnosis", () => {
       event("control.run.waiting-approval", { runId: "run-1", status: "waiting-approval" }, 2)
     ])
     const card = Forensics.renderDiagnosis({ runId: "run-1" }, d)
-    expect(card).toContain("waiting-approval — asks: Q")
-    expect(card).toContain(`Unblock   smithers approve '{"k":1}' --scope run && smithers run --resume run-1`)
+    expect(card).toContain("waiting-approval: asks: Q")
+    expect(card).toContain(
+      `Unblock   'smithers' 'approve' '{"k":1}' '--scope' 'run' && 'smithers' 'run' '--resume' 'run-1'`
+    )
+  })
+
+  it("passes hostile approval text and run ids as their exact argv elements", () => {
+    const approval = "apostrophe '\n$(printf substituted)\n`printf substituted`"
+    const runId = "run-'id\n$(printf changed)\n`printf changed`"
+    const d: Forensics.Digest = {
+      ...Forensics.digest([]),
+      status: "waiting-approval",
+      parkedApproval: approval
+    }
+
+    const recorded = recordArguments(unblockCommand(Forensics.renderDiagnosis({ runId }, d)))
+
+    expect(recorded).toEqual([
+      ["approve", approval, "--scope", "run"],
+      ["run", "--resume", runId]
+    ])
+  })
+
+  it("passes a pending run id as one exact cancel argument", () => {
+    const runId = "run-'id\n$(printf changed)\n`printf changed`"
+    const d: Forensics.Digest = { ...Forensics.digest([]), status: "pending" }
+
+    const recorded = recordArguments(unblockCommand(Forensics.renderDiagnosis({ runId }, d)))
+
+    expect(recorded).toEqual([["cancel", runId]])
+  })
+
+  it("quotes one POSIX shell word with the standard apostrophe escape", () => {
+    expect(Forensics.shellQuote("")).toBe("''")
+    expect(Forensics.shellQuote("a'b\n$(x)`y`")).toBe("'a'\\''b\n$(x)`y`'")
   })
 
   it("lists the top refusals with counts, largest first", () => {
@@ -399,13 +477,13 @@ describe("Forensics.renderDiagnosis boundaries", () => {
   it("reports a failure with no recorded cause as exactly that", () => {
     const d = Forensics.digest([event("control.run.failed", { runId: "run-1" }, 1)])
     expect(Forensics.renderDiagnosis({ runId: "run-1" }, d))
-      .toContain("Verdict   failed — no cause recorded in the journal")
+      .toContain("Verdict   failed: no cause recorded in the journal")
   })
 
   it("reports a park with no recorded question as a pending gate", () => {
     const d = Forensics.digest([event("control.run.waiting-approval", { runId: "run-1" }, 1)])
     expect(Forensics.renderDiagnosis({ runId: "run-1" }, d))
-      .toContain("Verdict   waiting-approval — a permission gate is pending")
+      .toContain("Verdict   waiting-approval: a permission gate is pending")
   })
 
   it("quotes the resolved output when the run both edited and completed", () => {
@@ -416,7 +494,7 @@ describe("Forensics.renderDiagnosis boundaries", () => {
       event("control.run.completed", { runId: "run-1" }, 4)
     ])
     const card = Forensics.renderDiagnosis({ runId: "run-1", flowId: "fix" }, d)
-    expect(card).toContain("Verdict   completed — patched a")
+    expect(card).toContain("Verdict   completed: patched a")
     expect(card).toContain("Output    patched a")
   })
 

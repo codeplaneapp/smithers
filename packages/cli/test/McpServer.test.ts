@@ -27,17 +27,16 @@ afterEach(() => {
 
 const control = TestControl.layer({ now: () => 0 })
 
-const call = (tool: McpServer.Tool, args: Record<string, unknown> = {}) =>
-  Effect.runPromise(tool.call(args).pipe(Effect.provide(control)) as Effect.Effect<McpServer.Envelope>)
-
-const callWith = (
-  provided: Layer.Layer<ControlService.Control>,
+const callWith = <E>(
+  provided: Layer.Layer<ControlService.Control, E>,
   tool: McpServer.Tool,
   args: Record<string, unknown> = {}
-) => Effect.runPromise(tool.call(args).pipe(Effect.provide(provided)) as Effect.Effect<McpServer.Envelope>)
+) => Effect.runPromise(tool.call(args).pipe(Effect.provide(provided)))
 
-const rpcCallWith = async (
-  provided: Layer.Layer<ControlService.Control>,
+const call = (tool: McpServer.Tool, args: Record<string, unknown> = {}) => callWith(control, tool, args)
+
+const rpcCallWith = async <E>(
+  provided: Layer.Layer<ControlService.Control, E>,
   name: string,
   args: Record<string, unknown> = {}
 ): Promise<McpServer.Envelope> => {
@@ -46,7 +45,7 @@ const rpcCallWith = async (
       { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } } as never,
       McpServer.tools(),
       "1.0.0-rc.0"
-    ).pipe(Effect.provide(provided)) as Effect.Effect<Record<string, unknown>>
+    ).pipe(Effect.provide(provided))
   ) as { readonly result: { readonly structuredContent: McpServer.Envelope } }
   return reply.result.structuredContent
 }
@@ -146,9 +145,12 @@ describe("the envelope", () => {
   })
 
   it("omits reserved system flows from the workflow catalog", async () => {
-    const result = await call(find("list_workflows")) as { readonly ok: true; readonly data: ReadonlyArray<{
-      readonly flowId: string
-    }> }
+    const result = await call(find("list_workflows")) as {
+      readonly ok: true
+      readonly data: ReadonlyArray<{
+        readonly flowId: string
+      }>
+    }
 
     expect(result.data.map((flow) => flow.flowId)).not.toContain("system/test")
     expect(result.data.map((flow) => flow.flowId)).not.toContain("system/release")
@@ -182,15 +184,17 @@ describe("the envelope", () => {
     expect(refused).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } })
     const message = (refused as { readonly error: { readonly message: string } }).error.message
     expect(message).toContain("status")
-    for (const status of [
-      "accepted",
-      "running",
-      "parked",
-      "waiting-approval",
-      "cancelled",
-      "completed",
-      "failed"
-    ]) expect(message).toContain(status)
+    for (
+      const status of [
+        "accepted",
+        "running",
+        "parked",
+        "waiting-approval",
+        "cancelled",
+        "completed",
+        "failed"
+      ]
+    ) expect(message).toContain(status)
 
     expect(await rpcCall("list_runs", { status: "running" })).toMatchObject({ ok: true })
   })
