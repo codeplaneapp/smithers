@@ -250,6 +250,40 @@ describe("FlowEngine.layerMemory durable waits", () => {
       }).pipe(Effect.provide(FlowEngine.layerMemory))
     ))
 
+  effect("keeps a payload member the schema declares opaque", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const engine = yield* FlowRuntime.FlowRuntime
+        // A declared member has no JSON form. Snapshotting the payload through
+        // `Schema.toCodecJson` refused every such payload until 2026-09-01,
+        // which took out every `smithers-build` target that names a
+        // dependency, so the reference reaching the body is pinned here.
+        const reference = { open: () => "opened" }
+        const Reference = Schema.declare<typeof reference>(
+          (value): value is typeof reference =>
+            typeof value === "object" && value !== null && typeof (value as typeof reference).open === "function",
+          { identifier: "test/OpaqueReference" }
+        )
+        const Opaque = Flow.make("Memory/OpaquePayload", {
+          payload: { refs: Schema.Array(Reference), label: Schema.String },
+          success: Schema.String,
+          body: () => {
+            throw new Error("not executed")
+          }
+        })
+        yield* engine.register(Opaque, (payload) => Effect.succeed(`${payload.label}:${payload.refs[0]!.open()}`))
+        const started = yield* engine.execute(Opaque, {
+          executionId: "opaque-payload",
+          payload: { refs: [reference], label: "held" },
+          discard: true
+        })
+        const settled = yield* pollComplete(engine.poll(Opaque, started))
+        expect(Option.isSome(settled) && settled.value._tag === "Complete" && settled.value.exit).toEqual(
+          Exit.succeed("held:opened")
+        )
+      }).pipe(Effect.provide(FlowEngine.layerMemory))
+    ))
+
   effect("refuses a deferred completion addressed to another flow", () =>
     Effect.scoped(
       Effect.gen(function*() {
