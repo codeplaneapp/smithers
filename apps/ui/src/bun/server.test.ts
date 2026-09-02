@@ -77,6 +77,14 @@ describe("the local origin", () => {
     expect(logs).toContain(`SMITHERS_LOCAL_ORIGIN=${server.origin}`)
   })
 
+  test("the request trail elides the Linear setup key from its path", async () => {
+    /* Sync review finding 8: the one-time setup key rode the trail line on every connect. */
+    const response = await apiFetch("/api/cloud/api/linear/setup/sk-secret-123")
+    await response.text()
+    expect(logs.some((line) => line.includes("GET /api/cloud/api/linear/setup/<setup-key> ->"))).toBe(true)
+    expect(logs.some((line) => line.includes("sk-secret-123"))).toBe(false)
+  })
+
   test("GET /api/health reports node and sandbox", async () => {
     const response = await fetch(`${server.origin}/api/health`)
     expect(response.status).toBe(200)

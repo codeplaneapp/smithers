@@ -311,6 +311,14 @@ const PRODUCT_PROXY_PREFIXES: ReadonlyArray<string> = [
 ]
 
 /** The stub's stand-in for the identity seam: signed out, nothing else configured. */
+/*
+ * The request trail names paths, never secrets: the Linear setup lookup
+ * carries its one-time setup key in the path (`/api/cloud/api/linear/setup/
+ * <key>`), so the key is elided before the line is written (sync review
+ * finding 8 — the cloud token never reaches a trail line; neither may this).
+ */
+export const trailPath = (pathname: string): string => pathname.replace(/(\/linear\/setup\/)[^/?#]+/, "$1<setup-key>")
+
 const stubIdentity = (pathname: string): Response =>
   pathname === AUTH_SESSION_PATH
     ? json({ status: "signed-out" })
@@ -897,7 +905,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       const response = await handle(request, bunServer)
       const { pathname } = new URL(request.url)
       if (response !== undefined && (pathname === "/" || pathname.startsWith("/api/"))) {
-        log(`${request.method} ${pathname} -> ${response.status} in ${Math.round(performance.now() - started)}ms`)
+        log(`${request.method} ${trailPath(pathname)} -> ${response.status} in ${Math.round(performance.now() - started)}ms`)
       }
       return response
     },
