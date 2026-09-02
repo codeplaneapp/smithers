@@ -180,6 +180,20 @@ const sensitiveKeySuffixes = [
  */
 const trailingKeyWord = /(?:^|[^A-Za-z0-9])key$/i
 
+const canonicalKey = (key: string): string => key.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/s$/, "")
+
+/** Numeric accounting fields that contain counts, never bearer material. */
+const tokenCounterKeys: ReadonlySet<string> = new Set([
+  "inputtoken",
+  "outputtoken",
+  "cachedinputtoken",
+  "reasoningtoken",
+  "totaltoken"
+])
+
+const isTokenCount = (key: string, value: unknown): boolean =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && tokenCounterKeys.has(canonicalKey(key))
+
 /**
  * Whether a field name names a credential.
  *
@@ -200,9 +214,15 @@ const trailingKeyWord = /(?:^|[^A-Za-z0-9])key$/i
  */
 export const isSensitiveKey = (key: string): boolean => {
   if (trailingKeyWord.test(key)) return true
-  const canonical = key.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/s$/, "")
+  const canonical = canonicalKey(key)
   return sensitiveKeySuffixes.some((suffix) => canonical.endsWith(suffix))
 }
+
+const redactMember = (
+  key: string,
+  value: unknown,
+  walk: (value: unknown) => unknown
+): unknown => isSensitiveKey(key) && !isTokenCount(key, value) ? placeholder : walk(value)
 
 /**
  * A field name with a credential in it replaced outright, not rewritten in place.
@@ -444,7 +464,10 @@ export const redact = (value: unknown, options?: Options): unknown => {
         // scans over its name and a walk of its value.
         if (walked >= binaryWalkLimit) break
         walked++
-        entries.push([redactKey(key, rules), isSensitiveKey(key) ? placeholder : walk(field, ancestors, depth + 1)])
+        entries.push([
+          redactKey(key, rules),
+          redactMember(key, field, (value) => walk(value, ancestors, depth + 1))
+        ])
       }
     }
     // `Object.fromEntries`, not `named[key] = …`, for the reason the object
@@ -492,7 +515,7 @@ export const redact = (value: unknown, options?: Options): unknown => {
           // a log annotation key reach the operator, since Effect renders an
           // annotation as `key=value`, and become an OTLP span attribute name.
           redactKey(key, rules),
-          isSensitiveKey(key) ? placeholder : walk(field, ancestors, depth + 1)
+          redactMember(key, field, (value) => walk(value, ancestors, depth + 1))
         ])
       )
     } finally {

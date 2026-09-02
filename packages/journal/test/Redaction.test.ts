@@ -303,6 +303,28 @@ describe("Redaction", () => {
     })
   })
 
+  it("preserves bounded numeric token accounting without admitting token strings", () => {
+    expect(Redaction.redact({
+      inputTokens: 120,
+      outputTokens: 34,
+      cachedInputTokens: 8,
+      reasoningTokens: 5,
+      totalTokens: 167,
+      token: "secret",
+      inputToken: "also-secret",
+      outputTokensText: "ordinary"
+    })).toEqual({
+      inputTokens: 120,
+      outputTokens: 34,
+      cachedInputTokens: 8,
+      reasoningTokens: 5,
+      totalTokens: 167,
+      token: Redaction.placeholder,
+      inputToken: Redaction.placeholder,
+      outputTokensText: "ordinary"
+    })
+  })
+
   it("keeps every built-in textual rule global", () => {
     expect(Redaction.defaultRules.every((rule) => rule.pattern.flags.includes("g"))).toBe(true)
   })
