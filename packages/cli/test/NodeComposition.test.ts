@@ -109,9 +109,9 @@ describe("NodeControl.makeConfig", () => {
 
   it("refuses an explicitly empty or relative remote before building transports", () => {
     expect(() => configuration(["--remote="], { SMITHERS_REMOTE: "https://env.example.test" }))
-      .toThrow('--remote must be an http:// or https:// URL; got ""')
+      .toThrow("--remote must be an http:// or https:// URL; got \"\"")
     expect(() => configuration(["--remote", "nota"], {}))
-      .toThrow('--remote must be an http:// or https:// URL; got "nota"')
+      .toThrow("--remote must be an http:// or https:// URL; got \"nota\"")
   })
 
   it("takes the first occurrence when a flag is repeated", () => {
@@ -121,7 +121,7 @@ describe("NodeControl.makeConfig", () => {
 
   it("refuses a following flag as an invalid remote before opening any layer", () => {
     expect(() => configuration(["--remote", "--credential", "secret"], {}))
-      .toThrow('--remote must be an http:// or https:// URL; got "--credential"')
+      .toThrow("--remote must be an http:// or https:// URL; got \"--credential\"")
   })
 
   it("resolves a credential with no remote at all", () => {
@@ -209,7 +209,7 @@ describe("NodeControl.checkpointStore", () => {
   it("pins on the workspace, under both the names a container gives it", () => {
     // One directory, two names. The host checks a checkpoint out under the
     // workspace and the container reaches the same directory through the mount
-    // it already has — which is why the scratch lives inside the workspace at
+    // it already has, which is why the scratch lives inside the workspace at
     // all, and why the store needs both paths.
     expect(NodeControl.checkpointStore({ SMITHERS_TEST_CWD: "/testbed" }, "/work/repo")).toEqual({
       root: "/work/repo",
@@ -276,7 +276,7 @@ describe("NodeControl.testRunner", () => {
     // The r91 finding about this flow is not that it was wrong, it is that no
     // composition offered it: 45 graded runs, zero `test` calls, while the cell
     // contract's doctrine assumed the call existed. Everything else about the
-    // flow was already covered, so this is the assertion that was missing —
+    // flow was already covered, so this is the assertion that was missing:
     // the declaration decides, and what it decides is what `ctx.flows` lists.
     const names = await Effect.runPromise(
       Effect.gen(function*() {
@@ -373,7 +373,7 @@ describe("NodeControl.layerObserver", () => {
       await writeFile(join(observed, "a.py"), "one")
       // A hard link is the discriminator: the kernel refuses a hard-linked
       // regular file outright, so a guarded observer measures neither name.
-      // The measurement wants both — an edit through either moves the tree —
+      // The measurement wants both: an edit through either moves the tree,
       // and the walk that gets them is the one that never opens a file, never
       // follows a link, and never leaves the root it was given.
       await link(join(observed, "a.py"), join(observed, "b.py"))
@@ -418,7 +418,7 @@ describe("NodeControl.layerObserver", () => {
       // that context. The observer runs on the host platform, so this is the
       // question the seam turns on: does the host `FileSystem` it was built
       // from escape into the context the agent-reachable flows resolve from?
-      // It must not — that would unguard every tool that opens a file. The hard
+      // It must not. That would unguard every tool that opens a file. The hard
       // link is the discriminator again, in the opposite direction.
       const beside = Layer.mergeAll(
         NodeControl.layerGuardedPlatform(observed),
@@ -612,7 +612,7 @@ describe("NodeControl.layer", () => {
         )
       )
 
-      // A local composition owns its executor — that fact is what makes the
+      // A local composition owns its executor. That fact is what makes the
       // command wait for a run it started to settle.
       expect(result.flowId).toBe("system/test")
       expect(result.ownsExecutor).toBe(true)

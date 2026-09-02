@@ -115,8 +115,8 @@ const addressUrl = (server: HttpServer.HttpServer["Service"]): string => {
 /**
  * The project flow these cases plan, approve, and run.
  *
- * A reserved `system/*` id would be simpler to reach — `TestControl` falls
- * back to the whole reserved catalog — but the CLI refuses to plan one, since
+ * A reserved `system/*` id would be simpler to reach. `TestControl` falls
+ * back to the whole reserved catalog, but the CLI refuses to plan one, since
  * a reserved id has no body and a launch would park forever
  * (`Unsupported.reservedFlowError`). So the fixture registers a flow of its
  * own, which is also what an operator's project looks like.
@@ -148,8 +148,8 @@ const streamingControl = Layer.effect(
 /**
  * A control plane whose runs settle with one named lifecycle event.
  *
- * The launch spine is the real one — `TestControl` plans, decides, and
- * launches — and only the run's own settlement is scripted, because reaching
+ * The launch spine is the real one: `TestControl` plans, decides, and
+ * launches. Only the run's own settlement is scripted, because reaching
  * a terminal status for real needs a live model seat. `Bin.test.ts` proves the
  * `failed` half of the same mapping through a real process against real
  * SQLite; every settlement a provider-free host cannot reach is pinned here.
@@ -570,6 +570,10 @@ describe("Control surface", () => {
         const run = yield* invoke(["--json", "run", approval])
         const runId = (run.value as { readonly runId?: unknown }).runId
         if (typeof runId !== "string") return yield* Effect.fail(new Error("run did not emit its identifier"))
+        // The scenario's noop executor declines the launch, which now spends
+        // the launcher fence. Claim it before arranging the executor's first
+        // real park.
+        yield* runtime.resume(runId)
 
         // One park is one fenced status write plus its journal record,
         // exactly as the production executor publishes it.

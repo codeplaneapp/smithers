@@ -85,6 +85,11 @@ describe("the projection", () => {
 
   it("names a call with no flow name rather than dropping it", () => {
     expect(NodeOutput.project([started(undefined as unknown as string)])[0]?.nodeId).toBe("?#1")
+    expect(NodeOutput.project([event("control.agent.cell-call-started", [])])[0]?.nodeId).toBe("?#1")
+  })
+
+  it("ignores unrelated event kinds after checking the final-output boundary", () => {
+    expect(NodeOutput.project([event("control.unrelated", {})])).toEqual([])
   })
 
   it("finds one node by id", () => {
@@ -113,5 +118,6 @@ describe("the reader-facing messages", () => {
 
     expect(NodeOutput.render(failure!)).toBe("write#1 failure\ndenied")
     expect(NodeOutput.render(success!)).toBe("read#1 success\n{\n  \"rows\": 2\n}")
+    expect(NodeOutput.render({ nodeId: "empty", flowName: "read", outcome: "success" })).toBe("empty success")
   })
 })

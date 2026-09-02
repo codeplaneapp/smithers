@@ -12,8 +12,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync
@@ -145,6 +145,21 @@ describe("registering the MCP server", () => {
     expect(statSync(path).mode & 0o777).toBe(0o640)
     expect(JSON.parse(readFileSync(path, "utf8"))).toMatchObject({ theme: "dark" })
     expect(readdirSync(directory).filter((entry) => entry.includes(".tmp"))).toEqual([])
+  })
+
+  it("leaves a configuration byte-for-byte unchanged while another writer owns it", () => {
+    const directory = home()
+    const path = join(directory, ".claude.json")
+    const original = "{\"theme\":\"operator-edit\"}\n"
+    writeFileSync(path, original)
+    writeFileSync(`${path}.smithers.lock`, "another writer")
+
+    const wired = Agents.addMcp(Agents.find("claude")!, directory)
+
+    expect(wired.status).toBe("failed")
+    expect(wired.reason).toMatch(/another Smithers process/)
+    expect(readFileSync(path, "utf8")).toBe(original)
+    expect(readdirSync(directory).filter((entry) => entry.endsWith(".tmp"))).toEqual([])
   })
 
   it("reports a configuration it cannot write", () => {

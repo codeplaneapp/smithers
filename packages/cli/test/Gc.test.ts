@@ -118,6 +118,15 @@ describe("the retention window", () => {
   it("keeps a month by default", () => {
     expect(Gc.defaultRetention).toBe("30d")
   })
+
+  it("renders singular and plural database failures", () => {
+    expect(Gc.failureMessage([{ database: "control.db", reason: "locked" }]))
+      .toContain("1 database, so nothing was collected from it")
+    expect(Gc.failureMessage([
+      { database: "control.db", reason: "locked" },
+      { database: "engine.db", reason: "corrupt" }
+    ])).toContain("2 databases, so nothing was collected from them")
+  })
 })
 
 describe("the sweep", () => {

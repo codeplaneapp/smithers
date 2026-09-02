@@ -6,13 +6,18 @@
  * working. Every token in these fixtures is fabricated; no real credential
  * ever appears.
  */
+import { ModelError } from "@smthrs/model/ModelError"
 import * as RequestExecutor from "@smthrs/model/RequestExecutor"
-import { Deferred, Effect, Fiber } from "effect"
+import { Deferred, Effect, Exit, Fiber } from "effect"
+import { TestClock } from "effect/testing"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { spawn } from "node:child_process"
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
+import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, it } from "vitest"
 import * as CodexAuth from "../src/CodexAuth.ts"
 
@@ -88,6 +93,33 @@ const sign = (file: string, executor: RequestExecutor.RequestExecutor, modelId =
 const signError = (file: string, executor: RequestExecutor.RequestExecutor) =>
   Effect.runPromise(Effect.flip(CodexAuth.make({ file, executor }).auth({ modelId: "gpt-5.6-sol" }).sign({})))
 
+const refreshChild = fileURLToPath(new URL("./fixtures/codex-auth-refresh-child.ts", import.meta.url))
+
+const childSign = (file: string, endpoint: string): Promise<Record<string, string>> =>
+  new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ["--no-warnings", "--experimental-strip-types", refreshChild, file, endpoint],
+      { cwd: join(fileURLToPath(new URL("../../..", import.meta.url))) }
+    )
+    let stdout = ""
+    let stderr = ""
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      stdout += chunk
+    })
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr += chunk
+    })
+    child.once("error", reject)
+    child.once("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`refresh child exited ${code}: ${stderr}`))
+        return
+      }
+      resolve(JSON.parse(stdout))
+    })
+  })
+
 describe("CodexAuth.locate", () => {
   it("resolves $CODEX_HOME/auth.json, defaulting to ~/.codex exactly as codex does", () => {
     expect(CodexAuth.locate({ CODEX_HOME: "/lane/codex-home" })).toBe("/lane/codex-home/auth.json")
@@ -132,6 +164,9 @@ describe("CodexAuth sign", () => {
     const headers = await sign(file, unusedExecutor)
 
     expect(headers).toEqual({ Authorization: "Bearer opaque-not-a-jwt" })
+
+    const malformedJwt = storeFile(authJson({ access_token: "header.!!!!.signature", refresh_token: "refresh" }))
+    expect(await sign(malformedJwt, unusedExecutor)).toEqual({ Authorization: "Bearer header.!!!!.signature" })
   })
 
   it("refuses a missing store by naming the file and the login command", async () => {
@@ -161,6 +196,11 @@ describe("CodexAuth sign", () => {
     expect(error).toMatchObject({ code: "authentication" })
     expect(error.message).toContain("API-key logins cannot serve this mode")
     expect(error.message).not.toContain("sk-fake")
+
+    for (const body of [[], { tokens: [] }, { tokens: { access_token: "", refresh_token: "refresh" } }]) {
+      const malformed = storeFile(`${JSON.stringify(body)}\n`)
+      expect(await signError(malformed, unusedExecutor)).toMatchObject({ code: "authentication" })
+    }
   })
 })
 
@@ -286,6 +326,137 @@ describe("CodexAuth refresh", () => {
       { Authorization: `Bearer ${rotated}` }
     ])
     expect(readdirSync(join(file, ".."))).toEqual(["auth.json"])
+  })
+
+  it("spends a one-use refresh token once across two real processes", async () => {
+    const rotated = freshJwt()
+    const file = storeFile(authJson({ access_token: expiredJwt(), refresh_token: "one-use-refresh" }))
+    let calls = 0
+    const server = createServer((request, response) => {
+      let body = ""
+      request.setEncoding("utf8")
+      request.on("data", (chunk: string) => {
+        body += chunk
+      })
+      request.on("end", () => {
+        calls += 1
+        const submitted = JSON.parse(body) as { readonly refresh_token?: unknown }
+        if (calls !== 1 || submitted.refresh_token !== "one-use-refresh") {
+          response.writeHead(409, { "content-type": "application/json" })
+          response.end(JSON.stringify({ error: "refresh token already spent" }))
+          return
+        }
+        setTimeout(() => {
+          response.writeHead(200, { "content-type": "application/json" })
+          response.end(JSON.stringify({ access_token: rotated, refresh_token: "rotated-refresh" }))
+        }, 100)
+      })
+    })
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    const address = server.address()
+    if (address === null || typeof address === "string") throw new Error("refresh server did not bind TCP")
+    try {
+      const endpoint = `http://127.0.0.1:${address.port}/token`
+      const headers = await Promise.all([childSign(file, endpoint), childSign(file, endpoint)])
+      expect(calls).toBe(1)
+      expect(headers).toEqual([
+        { Authorization: `Bearer ${rotated}` },
+        { Authorization: `Bearer ${rotated}` }
+      ])
+      expect(JSON.parse(readFileSync(file, "utf8")).tokens).toMatchObject({
+        access_token: rotated,
+        refresh_token: "rotated-refresh"
+      })
+      expect(readdirSync(join(file, ".."))).toEqual(["auth.json"])
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => error === undefined ? resolve() : reject(error))
+      )
+    }
+  })
+
+  it("recovers only an old lock whose owner token is not live", async () => {
+    const rotated = freshJwt()
+    const file = storeFile(authJson({ access_token: expiredJwt(), refresh_token: "fake-refresh-0" }))
+    const lock = `${file}.refresh.lock`
+    writeFileSync(lock, "2147483647", { mode: 0o600 })
+    utimesSync(lock, 0, 0)
+    const { executor, seen } = respondingExecutor(() =>
+      new Response(JSON.stringify({ access_token: rotated }), { status: 200 })
+    )
+
+    await sign(file, executor)
+
+    expect(seen).toHaveLength(1)
+    expect(readdirSync(join(file, ".."))).toEqual(["auth.json"])
+  })
+
+  it("does not recover a stale lock while its recorded process is alive", async () => {
+    const file = storeFile(authJson({ access_token: jwt(0), refresh_token: "fake-refresh-0" }))
+    const lock = `${file}.refresh.lock`
+    writeFileSync(lock, `${process.pid}:live`, { mode: 0o600 })
+    utimesSync(lock, 0, 0)
+
+    const exit = await Effect.runPromise(
+      Effect.gen(function*() {
+        yield* TestClock.setTime(10 * 60_000)
+        const fiber = yield* Effect.forkChild(
+          CodexAuth.make({ file, executor: unusedExecutor }).auth({ modelId: "gpt-5.6-sol" }).sign({}),
+          { startImmediately: true }
+        )
+        yield* Effect.yieldNow
+        yield* TestClock.adjust("31 seconds")
+        return yield* Effect.exit(Fiber.join(fiber))
+      }).pipe(Effect.provide(TestClock.layer()))
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+  })
+
+  it("treats a non-positive stale-lock pid as dead without probing it", async () => {
+    const rotated = freshJwt()
+    const file = storeFile(authJson({ access_token: expiredJwt(), refresh_token: "fake-refresh-0" }))
+    const lock = `${file}.refresh.lock`
+    writeFileSync(lock, "0:invalid", { mode: 0o600 })
+    utimesSync(lock, 0, 0)
+    const { executor } = respondingExecutor(() =>
+      new Response(JSON.stringify({ access_token: rotated }), { status: 200 })
+    )
+
+    expect(await sign(file, executor)).toEqual({ Authorization: `Bearer ${rotated}` })
+  })
+
+  it("sanitizes host refusal and preserves an already typed model failure", async () => {
+    const requestFailure = async (failure: unknown) => {
+      const file = storeFile(authJson({ access_token: expiredJwt(), refresh_token: "fake-refresh-0" }))
+      const executor = RequestExecutor.RequestExecutor.of({
+        execute: () => Effect.fail(failure as never)
+      })
+      return await signError(file, executor)
+    }
+
+    const untyped = await requestFailure(new Error("host secret"))
+    expect(untyped).toMatchObject({ code: "authentication" })
+    expect(untyped.message).not.toContain("host secret")
+
+    const typed = new ModelError({ code: "transport", message: "safe typed failure" })
+    expect(await requestFailure(typed)).toBe(typed)
+  })
+
+  it("maps an unreadable token response body to a transport failure", async () => {
+    const file = storeFile(authJson({ access_token: expiredJwt(), refresh_token: "fake-refresh-0" }))
+    const body = new ReadableStream({
+      pull(controller) {
+        controller.error(new Error("body secret"))
+      }
+    })
+    const executor = RequestExecutor.RequestExecutor.of({
+      execute: (request) => Effect.succeed(HttpClientResponse.fromWeb(request, new Response(body)))
+    })
+
+    const error = await signError(file, executor)
+    expect(error).toMatchObject({ code: "transport" })
+    expect(error.message).not.toContain("body secret")
   })
 
   it("refreshes reactively even when the token still looks fresh: a 401 outranks the expiry claim", async () => {

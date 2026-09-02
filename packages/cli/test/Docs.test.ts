@@ -1,12 +1,12 @@
 /**
  * `smithers docs`, which prints what shipped rather than what is online.
  */
+import { buildSync } from "esbuild"
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { buildSync } from "esbuild"
 import { afterEach, describe, expect, it } from "vitest"
 import * as Docs from "../src/Docs.ts"
 

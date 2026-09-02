@@ -88,7 +88,9 @@ describe("the report", () => {
         })
 
         expect(posted.summary).toBe(oracle)
-        expect(JSON.stringify(posted)).not.toContain(text)
+        const body = JSON.stringify(posted)
+        expect(body).not.toContain(text)
+        expect(body).not.toContain(secret)
       }),
       { numRuns: 50 }
     )
@@ -134,6 +136,24 @@ describe("the report", () => {
     expect(reads).toBe(0)
   })
 
+  it("refuses live and revoked proxies without invoking a trap", () => {
+    let traps = 0
+    const live = new Proxy({}, {
+      ownKeys: () => {
+        traps += 1
+        return []
+      }
+    })
+    expect(() => Bug.report({ summary: "failed", version: "1", platform: "test", node: "test", runs: live }))
+      .toThrow(/^Bug report refused: .*proxy/)
+    expect(traps).toBe(0)
+
+    const revoked = Proxy.revocable({}, {})
+    revoked.revoke()
+    expect(() => Bug.report({ summary: "failed", version: "1", platform: "test", node: "test", runs: revoked.proxy }))
+      .toThrow(/^Bug report refused: .*proxy/)
+  })
+
   it("collapses a cycle instead of recursing forever", () => {
     const run: Record<string, unknown> = { runId: "run-1" }
     run["self"] = run
@@ -165,6 +185,33 @@ describe("the report", () => {
         runs: new Uint8Array(Redaction.binaryWalkLimit + 1)
       })
     ).toThrow(/byte walk limit/)
+
+    const oversized = Object.fromEntries(
+      Array.from({ length: Redaction.binaryWalkLimit + 1 }, (_, index) => [`member-${index}`, index])
+    )
+    expect(() => Bug.report({ summary: "failed", version: "1", platform: "test", node: "test", runs: oversized }))
+      .toThrow(/member walk limit/)
+  })
+
+  it("refuses executable JSON hooks and callable members", () => {
+    expect(() =>
+      Bug.report({ summary: "failed", version: "1", platform: "test", node: "test", runs: { task: () => 1 } })
+    ).toThrow(/callable/)
+    expect(() =>
+      Bug.report({ summary: "failed", version: "1", platform: "test", node: "test", runs: { toJSON: () => ({}) } })
+    ).toThrow(/toJSON/)
+  })
+
+  it("bounds both ArrayBuffer and typed-array payloads", () => {
+    for (
+      const runs of [
+        new ArrayBuffer(Redaction.binaryWalkLimit + 1),
+        new Uint8Array(Redaction.binaryWalkLimit + 1)
+      ]
+    ) {
+      expect(() => Bug.report({ summary: "failed", version: "1", platform: "test", node: "test", runs }))
+        .toThrow(/byte walk limit/)
+    }
   })
 
   it("names the default endpoint and a finite timeout", () => {

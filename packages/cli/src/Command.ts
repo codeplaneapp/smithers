@@ -14,12 +14,13 @@
  * @since 1.0.0
  */
 import * as Canonical from "@smthrs/canonical/Canonical"
-import { Control as ControlService, ControlSchema } from "@smthrs/control"
+import { Control as ControlService, ControlError, ControlSchema } from "@smthrs/control"
+import type { Service as ControlServiceShape } from "@smthrs/control/Control"
 import * as Sha256 from "@smthrs/crypto/Sha256"
 import * as UnsupportedBackend from "@smthrs/database/UnsupportedBackend"
 import * as ResolveJj from "@smthrs/jj/node/resolveJjBinary"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
-import type * as Namespace from "@smthrs/memory/Namespace"
+import * as Namespace from "@smthrs/memory/Namespace"
 import * as MigrateCommand from "@smthrs/migrate/flow/Command"
 import { Ownership } from "@smthrs/run-store"
 import { Clock, Console, Effect, Option, Schema, SchemaIssue, Stream } from "effect"
@@ -39,6 +40,7 @@ import * as ExecutorOwnership from "./ExecutorOwnership.ts"
 import * as Forensics from "./Forensics.ts"
 import * as Gc from "./Gc.ts"
 import * as Init from "./Init.ts"
+import * as History from "./internal/History.ts"
 import * as Legacy from "./Legacy.ts"
 import * as NodeOutput from "./NodeOutput.ts"
 import { Output, renderValue } from "./Output.ts"
@@ -50,15 +52,33 @@ import * as Verb from "./Verb.ts"
 import { packageVersion } from "./Version.ts"
 
 const global = {
-  credential: Flag.string("credential").pipe(Flag.optional),
-  json: Flag.boolean("json"),
-  remote: Flag.string("remote").pipe(Flag.optional),
-  quiet: Flag.boolean("quiet"),
+  credential: Flag.string("credential").pipe(
+    Flag.optional,
+    Flag.withDescription("Bearer token for the remote control plane; falls back to SMITHERS_API_KEY")
+  ),
+  json: Flag.boolean("json").pipe(
+    Flag.withDescription("Print the machine-readable document instead of the human rendering")
+  ),
+  remote: Flag.string("remote").pipe(
+    Flag.optional,
+    Flag.withDescription("http(s) URL of the control plane to act on; falls back to SMITHERS_REMOTE")
+  ),
+  quiet: Flag.boolean("quiet").pipe(
+    Flag.withDescription("Drop the banners and notices commands write to stderr")
+  ),
   // Declared here so the CLI's own flag validation accepts them; the values
   // are read from raw argv by `NodeControl.makeConfig`, which runs before the
   // durable layers are built.
-  mcpConfig: Flag.string("mcp-config").pipe(Flag.optional),
-  root: Flag.string("root").pipe(Flag.optional),
+  mcpConfig: Flag.string("mcp-config").pipe(
+    Flag.optional,
+    Flag.withDescription(
+      "Path to the JSON array of MCP servers the local executor projects into a run's flow catalog"
+    )
+  ),
+  root: Flag.string("root").pipe(
+    Flag.optional,
+    Flag.withDescription("Project root to act on, instead of walking up from the working directory")
+  ),
   // Hidden, and the one removed flag with a supported value: `sqlite` names
   // the backend rc.0 has, so it is a no-op rather than a refusal.
   backend: Flag.string("backend").pipe(Flag.optional, Flag.withHidden)
@@ -114,6 +134,12 @@ const refuseRemoved = (
  * a 0.x project, because the first invocation writes `.flows/` and the sample
  * treats that as proof the project has moved on.
  */
+const noticeIgnoredBackends = Effect.sync(() => {
+  for (const name of UnsupportedBackend.ignoredNames(process.env)) {
+    process.stderr.write(`${UnsupportedBackend.ignoredNotice(name)}\n`)
+  }
+})
+
 const guardGlobals = Effect.gen(function*() {
   const root = yield* rootCommand
   // A 0.x PostgreSQL or PGlite project still exports its connection strings.
@@ -123,9 +149,7 @@ const guardGlobals = Effect.gen(function*() {
   // exit code and the command's result do not move (rc-contract section 2; the
   // names and the sentence are @smthrs/database's, pinned per name in
   // packages/database/test/UnsupportedBackend.test.ts).
-  for (const name of UnsupportedBackend.ignoredNames(process.env)) {
-    process.stderr.write(`${UnsupportedBackend.ignoredNotice(name)}\n`)
-  }
+  yield* noticeIgnoredBackends
   const backend = Option.getOrUndefined(root.backend)
   const refusal = Environment.unsupportedBackend(backend)
   if (refusal !== undefined) return yield* Effect.fail(new CliError.UnsupportedError({ message: refusal }))
@@ -235,12 +259,16 @@ const settled = (kind: string): boolean =>
   kind === "control.run.failed" ||
   kind === "control.run.cancelled"
 
-const recoverWatch = <A>(
+const watchFailure = (
   error: unknown,
   runId: string,
-  message: string,
-  fallback: A
-): Effect.Effect<A> => Console.error(`${message} (${runId})`, error).pipe(Effect.as(fallback))
+  operation: string
+): ControlError.TransportError =>
+  new ControlError.TransportError({
+    message: `Control watch failed during ${operation} for run ${JSON.stringify(runId)}. Retry the command.`,
+    retryable: error instanceof ControlError.TransportError ? error.retryable : true,
+    cause: error
+  })
 
 /**
  * Waits for the run to settle and reports the event kind that settled it, or
@@ -250,25 +278,15 @@ const awaitRun = (
   control: ControlService.Service,
   runId: string,
   afterSequence: number | undefined
-): Effect.Effect<string | undefined, never> =>
+): Effect.Effect<string | undefined, ControlError.TransportError> =>
   control.watch(afterSequence === undefined ? { runId } : { runId, afterSequence }).pipe(
     Stream.filter((event) => settled(event.kind)),
     Stream.take(1),
     Stream.runCollect,
     Effect.map((events) => globalThis.Array.from(events)[0]?.kind),
-    // A transport failure still lets the process close normally; remote CLI
-    // ownership belongs to the server, and the receipt was already durable.
-    Effect.catch((error) =>
-      recoverWatch(error, runId, "The control watch failed while waiting for the run to settle", undefined)
-    )
+    Effect.mapError((error) => watchFailure(error, runId, "settlement"))
   )
 
-/**
- * The sequence of the latest committed `control.run.waiting-approval` event:
- * the park a resume applies to. It keys the resume mutation, so resuming a
- * second park is a fresh mutation instead of a replay of the first resume's
- * recorded receipt, and it scopes the settlement wait.
- */
 /**
  * Finds the greatest sequence in a stream without retaining its history.
  *
@@ -288,24 +306,28 @@ export const latestSequence = <E, R>(
     (latest, event) => latest === undefined || event.sequence > latest ? event.sequence : latest
   )
 
+/**
+ * The sequence of the latest committed `control.run.waiting-approval` event:
+ * the park a resume applies to. It keys the resume mutation, so resuming a
+ * second park is a fresh mutation instead of a replay of the first resume's
+ * recorded receipt, and it scopes the settlement wait.
+ */
 const latestPark = (control: ControlService.Service, runId: string) =>
   latestSequence(
     control.watch({ runId, follow: false }).pipe(
       Stream.filter((event) => event.kind === "control.run.waiting-approval")
     )
   ).pipe(
-    // A failed park lookup cannot safely mint the run-only resume key. Report
-    // the transport failure, then preserve it so no mutation is attempted.
-    Effect.tapError((error) =>
-      Console.error(`The control watch failed while finding the run's latest approval park (${runId})`, error)
-    )
+    // A failed park lookup cannot safely mint the run-only resume key. Keep it
+    // in the error channel so no mutation is attempted with a weaker key.
+    Effect.mapError((error) => watchFailure(error, runId, "approval-park lookup"))
   )
 
 const awaitOwnedRun = (
   control: ControlService.Service,
   receipt: ControlSchema.Receipt,
   afterSequence: number | undefined
-): Effect.Effect<string | undefined, never> =>
+): Effect.Effect<string | undefined, ControlError.TransportError> =>
   Effect.gen(function*() {
     // A run that had already settled when the verb reached it has no
     // settlement event left to wait for, and the receipt carries the answer.
@@ -326,7 +348,7 @@ const awaitOwnedRun = (
  * the deciding call (rc-contract section 5.1). The driver that picks that
  * resume up is this process's own executor, so a command that printed its
  * receipt and returned took the driver down with it and left the run it had
- * just restarted exactly where it stood — still needing `run --resume`, which
+ * just restarted exactly where it stood, still needing `run --resume`, which
  * is the second call the contract says a decision replaces.
  *
  * A plan-level decision has no run yet, and the settlement wait needs one.
@@ -412,15 +434,12 @@ const reportSettlement = (settlement: string | undefined) =>
 
 /** Every event of one run, oldest first. */
 const eventsOf = (control: ControlService.Service, runId: string) =>
-  Stream.runCollect(control.watch({ runId, follow: false })).pipe(
-    Effect.map((events) => globalThis.Array.from(events)),
-    Effect.catch((error) =>
-      recoverWatch(
-        error,
-        runId,
-        "The control watch failed while reading the run's event history",
-        [] as ReadonlyArray<ControlSchema.ControlEvent>
-      )
+  History.collect(control.watch({ runId, follow: false }), {
+    operation: "event-history read",
+    subject: `run ${JSON.stringify(runId)}`
+  }).pipe(
+    Effect.mapError((error) =>
+      error instanceof CliError.ResourceLimitError ? error : watchFailure(error, runId, "event-history read")
     )
   )
 
@@ -627,7 +646,14 @@ const approve = Command.make("approve", {
   // The interactive CLI is an operator affirming the whole launch, matching
   // `up`. MCP defaults to `once` because an omitted tool argument must not
   // widen a client's capabilities for the rest of the run.
-  scope: Flag.choice("scope", ["once", "run", "remembered"] as const).pipe(Flag.withDefault("run"))
+  scope: Flag.choice("scope", ["once", "run", "remembered"] as const).pipe(
+    Flag.withDefault("run"),
+    Flag.withDescription(
+      "How far the grant reaches: this ask only, the whole run (the default, matching `up`), or every later run. " +
+        "The MCP resolve_approval tool defaults to `once` instead, because an argument a client never sent must " +
+        "not widen what it may do"
+    )
+  )
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -724,18 +750,73 @@ const steer = Command.make("steer", {
     )
   })).pipe(Command.withDescription(Verb.find("steer")!.help))
 
+type FlowPage = Extract<ControlSchema.ListResponse, { readonly _tag: "flows" }>
+
+const flowCatalog = (control: ControlServiceShape) =>
+  Effect.gen(function*() {
+    const items: Array<FlowPage["items"][number]> = []
+    const warnings: Array<NonNullable<FlowPage["warnings"]>[number]> = []
+    const warningKeys = new Set<string>()
+    const cursors = new Set<string>()
+    let bytes = 0
+    let cursor: string | undefined
+    for (;;) {
+      const listed = yield* control.list({
+        _tag: "flows",
+        limit: ControlSchema.maxPageSize,
+        ...(cursor === undefined ? {} : { cursor })
+      })
+      if (listed._tag !== "flows") {
+        return yield* Effect.fail(
+          new CliError.UnsupportedError({ message: "the control plane returned a run page for a flow listing" })
+        )
+      }
+      for (const item of listed.items) {
+        bytes += History.encodedBytes(item)
+        if (items.length >= History.maximumEvents || bytes > History.maximumBytes) {
+          return yield* Effect.fail(
+            new CliError.ResourceLimitError({
+              operation: "flow listing",
+              subject: "the discovered registry",
+              limit: bytes > History.maximumBytes ? History.maximumBytes : History.maximumEvents,
+              unit: bytes > History.maximumBytes ? "bytes" : "events"
+            })
+          )
+        }
+        items.push(item)
+      }
+      for (const warning of listed.warnings ?? []) {
+        const key = `${warning.code}\0${warning.path}\0${warning.message}`
+        if (!warningKeys.has(key)) {
+          warningKeys.add(key)
+          warnings.push(warning)
+        }
+      }
+      if (listed.nextCursor === undefined) break
+      if (cursors.has(listed.nextCursor)) {
+        return yield* Effect.fail(
+          new CliError.UnsupportedError({ message: "the control plane repeated a flow-listing cursor" })
+        )
+      }
+      cursors.add(listed.nextCursor)
+      cursor = listed.nextCursor
+    }
+    return { items, warnings }
+  })
+
 const listFlows = Effect.gen(function*() {
   yield* guardGlobals
   const control = yield* ControlService.Control
-  const listed = yield* control.list({ _tag: "flows" })
+  const catalog = yield* flowCatalog(control)
   // The reserved catalog is the control plane's projection surface, not this
   // project's flows. Listing it invited `up system/release`, which planned,
-  // launched, and then sat at `accepted` with nothing to run.
-  yield* render(
-    listed._tag === "flows"
-      ? { ...listed, items: listed.items.filter((item) => !Unsupported.isReservedFlow(item.flowId)) }
-      : listed
-  )
+  // launched, and then sat at `accepted` with nothing to run. Discovery
+  // warnings belong to `doctor`, so the stable `ls` document remains a plain
+  // flow page even though both commands read the same paged catalog.
+  yield* render({
+    _tag: "flows",
+    items: catalog.items.filter((item) => !Unsupported.isReservedFlow(item.flowId))
+  })
 })
 
 const ls = Command.make("ls", {}, () => listFlows).pipe(Command.withDescription(Verb.find("ls")!.help))
@@ -835,7 +916,7 @@ const unclaimed = (run: ControlSchema.RunSummary, now: number): Effect.Effect<bo
  *
  * `RunSummary.waitingReason` is "what a parked run is holding on". This one
  * holds on an executor, and before the label a listing showed it as an
- * ordinary `accepted` run — indistinguishable from one a live peer owns.
+ * ordinary `accepted` run, indistinguishable from one a live peer owns.
  */
 const labelled = (listed: ControlSchema.ListResponse, now: number): Effect.Effect<ControlSchema.ListResponse> =>
   listed._tag === "runs"
@@ -883,20 +964,39 @@ const readLogs = (runId: Option.Option<string>, follow: boolean, forceJson: bool
     const root = yield* rootCommand
     const json = forceJson || root.json
     if (Option.isSome(runId)) yield* requireRun(control, runId.value)
+    const watchedRunId = Option.getOrElse(runId, () => "*")
     const events = control.watch({
       runId: Option.getOrUndefined(runId),
       follow
-    })
+    }).pipe(
+      Stream.mapError((error) => watchFailure(error, watchedRunId, follow ? "log follow" : "event-history read"))
+    )
     // Human output is the transcript projection; `--json` remains the raw
     // event stream, byte-stable for scripts. Follow mode renders one line per
     // event as it lands, because a transcript needs the whole run.
     if (follow) {
       return yield* Stream.runForEach(
         events,
-        (event) => json ? renderJson(event) : render(Forensics.eventLine(event))
+        (event) =>
+          Effect.gen(function*() {
+            if (History.encodedBytes(event) > History.maximumEventBytes) {
+              return yield* Effect.fail(
+                new CliError.ResourceLimitError({
+                  operation: "log follow",
+                  subject: `run ${JSON.stringify(watchedRunId)}`,
+                  limit: History.maximumEventBytes,
+                  unit: "bytes"
+                })
+              )
+            }
+            yield* (json ? renderJson(event) : render(Forensics.eventLine(event)))
+          })
       )
     }
-    const collected = globalThis.Array.from(yield* Stream.runCollect(events))
+    const collected = yield* History.collect(events, {
+      operation: "event-history read",
+      subject: `run ${JSON.stringify(watchedRunId)}`
+    })
     if (json) return yield* renderJson(collected)
     yield* render(Forensics.renderTranscript(collected))
   })
@@ -1064,7 +1164,7 @@ const migrate = Command.make("migrate", {
     yield* refuseRemoved("migrate", { to: config.to })
     // The 0.x project, not the rc.0 one. `Project.ProjectRoot` anchors its
     // walk on `.flows/`, which a 0.x project does not have, so a project
-    // nested under an rc.0 one was scanned — and with `--apply`, rewritten —
+    // nested under an rc.0 one was scanned and, with `--apply`, rewritten,
     // at the ancestor instead of itself.
     const migrationRoot = yield* Project.MigrationRoot
     const target = Option.getOrElse(config.path, () => migrationRoot)
@@ -1137,15 +1237,13 @@ const memoryNamespace = (
   const separator = value.indexOf(":")
   const kind = separator < 0 ? "" : value.slice(0, separator)
   const id = separator < 0 ? "" : value.slice(separator + 1)
-  const known = kind === "flow" || kind === "agent" || kind === "user" || kind === "global"
-  if (!known || id.length === 0) {
-    return Effect.fail(
-      new CliError.UsageError({
-        message: `--namespace must be flow:<id>, agent:<id>, user:<id>, or global:<id>; got ${JSON.stringify(value)}`
-      })
-    )
-  }
-  return Effect.succeed({ kind, id })
+  const invalid = new CliError.UsageError({
+    message: `--namespace must be flow:<id>, agent:<id>, user:<id>, or global:<id>; got ${JSON.stringify(value)}`
+  })
+  if (/[\p{Cc}]/u.test(id)) return Effect.fail(invalid)
+  return Schema.decodeUnknownEffect(Namespace.Namespace, { reportInput: false })({ kind, id }).pipe(
+    Effect.mapError(() => invalid)
+  )
 }
 
 const memoryFlags = { namespace: Flag.string("namespace").pipe(Flag.optional) }
@@ -1262,19 +1360,28 @@ const claudeNodeWait = Command.make("node-wait", {
     const control = yield* ControlService.Control
     yield* requireRun(control, config.runId)
     const deadline = Date.now() + config.timeout
-    const collected: Array<ControlSchema.ControlEvent> = []
+    const history = History.empty<ControlSchema.ControlEvent>()
     let afterSequence: number | undefined
     for (;;) {
-      const fresh = yield* Stream.runCollect(control.watch({
-        runId: config.runId,
-        follow: false,
-        ...(afterSequence === undefined ? {} : { afterSequence })
-      }))
-      for (const event of fresh) {
-        collected.push(event)
+      const previousLength = history.values.length
+      yield* History.collectInto(
+        control.watch({
+          runId: config.runId,
+          follow: false,
+          ...(afterSequence === undefined ? {} : { afterSequence })
+        }),
+        history,
+        { operation: "node wait", subject: `run ${JSON.stringify(config.runId)}` }
+      ).pipe(
+        Effect.mapError((error) =>
+          error instanceof CliError.ResourceLimitError ? error : watchFailure(error, config.runId, "node wait")
+        )
+      )
+      for (let index = previousLength; index < history.values.length; index++) {
+        const event = history.values[index]!
         if (afterSequence === undefined || event.sequence > afterSequence) afterSequence = event.sequence
       }
-      const node = NodeOutput.find(collected, config.nodeId)
+      const node = NodeOutput.find(history.values, config.nodeId)
       if (node !== undefined && node.outcome !== "pending") return yield* renderJson({ ...node, timedOut: false })
       const run = yield* summaryOf(control, config.runId)
       if (run !== undefined && ClaudeMirror.isTerminal(run.status)) {
@@ -1494,20 +1601,27 @@ const bug = Command.make("bug", {
 
 const doctor = Command.make("doctor", {}, () =>
   Effect.gen(function*() {
-    yield* guardGlobals
+    // Doctor owns the unsupported-backend check. The shared guard would fail
+    // before the report exists, so this handler keeps its notices and lets
+    // `Doctor.failed` decide the command status from the complete report.
+    yield* noticeIgnoredBackends
+    yield* noticeLegacyState
+    const root = yield* rootCommand
     const projectRoot = yield* Project.ProjectRoot
     const control = yield* ControlService.Control
-    const listed = yield* control.list({ _tag: "flows" })
+    const catalog = yield* flowCatalog(control)
     const jj = ResolveJj.resolveJjBinary()
+    const configuredBackend = Option.getOrUndefined(root.backend)
     const report = Doctor.inspect({
       root: projectRoot,
+      environment: configuredBackend === undefined
+        ? process.env
+        : { ...process.env, SMITHERS_BACKEND: configuredBackend },
       jj,
       legacyPaths: yield* Project.LegacyState,
-      discoveredFlows: listed._tag === "flows"
-        ? listed.items.filter((item) => !Unsupported.isReservedFlow(item.flowId))
-        : undefined
+      discoveredFlows: catalog.items.filter((item) => !Unsupported.isReservedFlow(item.flowId)),
+      discoveryWarnings: catalog.warnings
     })
-    const root = yield* rootCommand
     yield* render(root.json ? report : Doctor.render(report))
     if (Doctor.failed(report)) {
       yield* Effect.fail(new CliError.UnsupportedError({ message: "doctor found a blocking problem" }))
@@ -1608,6 +1722,11 @@ const removedCommands = Unsupported.removedVerbs
 /**
  * The composed root command. Application composition supplies Control and
  * Output layers; this module contains no transport selection.
+ *
+ * Reach for this value from the executable or parser-level tests. Individual
+ * handlers fail with the package's typed CLI errors, while a missing service
+ * is left visible as a composition defect rather than hidden by the command
+ * tree.
  *
  * @category constructors
  * @since 1.0.0

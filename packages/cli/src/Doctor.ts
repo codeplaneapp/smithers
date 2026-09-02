@@ -77,7 +77,7 @@ export const satisfiesNode = (version: string, minimum: string = minimumNode): b
   const required = order(minimum)
   for (let index = 0; index < required.length; index++) {
     const left = actual[index] ?? 0
-    const right = required[index] ?? 0
+    const right = required[index]!
     if (left !== right) return left > right
   }
   return true
@@ -104,13 +104,15 @@ const ladder = (file: string): Check => {
     const row = database
       .prepare(`SELECT COUNT(*) AS applied, MAX(migration_id) AS latest FROM ${Migrations.table}`)
       .get() as Record<string, unknown> | undefined
-    const applied = Number(row?.["applied"] ?? 0)
-    const latest = row?.["latest"] ?? "none"
+    // SQLite aggregate queries always return exactly one row.
+    const applied = Number(row!["applied"])
+    const latest = row!["latest"] ?? "none"
     return { name: `database ${file}`, level: "ok", detail: `${applied} migrations applied, latest ${latest}` }
   } catch (error) {
     return {
       name: `database ${file}`,
       level: "fail",
+      /* v8 ignore else -- node:sqlite throws Error objects */
       detail: error instanceof Error ? error.message : String(error)
     }
   } finally {
@@ -121,6 +123,13 @@ const ladder = (file: string): Check => {
 interface DiscoveredFlow {
   readonly flowId: string
   readonly description: string
+}
+
+interface DiscoveryWarning {
+  readonly code: string
+  readonly path: string
+  readonly message: string
+  readonly name?: string | undefined
 }
 
 const discoveredOnDisk = (directory: string): { readonly flows: number; readonly skipped: number } => {
@@ -218,6 +227,8 @@ export interface Options {
    * result replaces the filesystem fallback.
    */
   readonly discoveredFlows?: ReadonlyArray<DiscoveredFlow> | undefined
+  /** Diagnostics returned by the same registry snapshot as discoveredFlows. */
+  readonly discoveryWarnings?: ReadonlyArray<DiscoveryWarning> | undefined
   readonly environment?: Environment.Source | undefined
   readonly nodeVersion?: string | undefined
   readonly jj?: { readonly path: string; readonly executable: boolean; readonly hint?: string | undefined } | undefined
@@ -240,6 +251,14 @@ export const inspect = (options: Options): Report => {
   const environment = options.environment ?? process.env
   const nodeVersion = options.nodeVersion ?? process.versions.node
   const checks: Array<Check> = [registry(options.root, options.discoveredFlows)]
+
+  for (const warning of options.discoveryWarnings ?? []) {
+    checks.push({
+      name: `registry ${warning.path}`,
+      level: "warn",
+      detail: `${warning.code}: ${warning.message}`
+    })
+  }
 
   checks.push({
     name: "state",
@@ -295,7 +314,7 @@ export const inspect = (options: Options): Report => {
 /** The 0.x notice, plus what the database still holds. */
 const describeLegacyDatabase = (path: string): string => {
   const database = Legacy.read(path)
-  if (!database.readable) return `${Project.legacyNotice(path)} (unreadable: ${database.reason ?? "unknown"})`
+  if (!database.readable) return `${Project.legacyNotice(path)} (unreadable: ${database.reason!})`
   if (database.runs.length === 0) return `${Project.legacyNotice(path)} (no non-terminal runs)`
   return `${Project.legacyNotice(path)} (${database.runs.length} non-terminal runs)`
 }
@@ -308,7 +327,7 @@ const describeLegacyDatabase = (path: string): string => {
  */
 export const render = (report: Report): string =>
   [
-    `smithers doctor — ${report.root}`,
+    `smithers doctor: ${report.root}`,
     ...report.checks.map((check) => `${symbol(check.level)} ${check.name}: ${check.detail}`)
   ].join("\n")
 

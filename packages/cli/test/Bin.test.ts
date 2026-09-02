@@ -4,8 +4,8 @@
  * Everything here is a real process: the help surface, the exit-code contract,
  * the `--json` stdout contract, and every removed verb and flag from
  * rc-contract section 4.2. Those refusals only mean anything at the process
- * boundary — the promise is "exit 1 with a migration message", not "the
- * handler returns a typed error" — so they are asserted there.
+ * boundary. The promise is "exit 1 with a migration message", not "the
+ * handler returns a typed error", so they are asserted there.
  */
 import { spawn, spawnSync } from "node:child_process"
 import {
@@ -52,6 +52,18 @@ const temporaryDirectoryPrefix = join(tmpdir(), "smithers-cli-bin-")
  * The budget stays finite: a genuine hang still fails the run.
  */
 const processBudget = { timeout: 240_000 }
+
+/**
+ * Blocks this thread for a real wall-clock interval.
+ *
+ * A retention window is compared against the host clock inside a spawned
+ * process, so a case that sweeps a run it just settled has to let the window
+ * actually elapse. These cases drive `spawnSync`, so the wait is synchronous
+ * too.
+ */
+const waitOut = (milliseconds: number): void => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds)
+}
 
 const run = (args: ReadonlyArray<string>, environment: Readonly<Record<string, string>> = {}) => {
   const cwd = mkdtempSync(temporaryDirectoryPrefix)
@@ -178,16 +190,18 @@ describe("smithers executable", processBudget, () => {
       const malformedResult = runIn(cwd, ["--mcp-config", malformed, "ps"])
 
       expect(remoteResult.status).toBe(2)
-      expect(remoteResult.stderr).toContain('--remote must be an http:// or https:// URL; got "nota"')
+      expect(remoteResult.stderr).toContain("--remote must be an http:// or https:// URL; got \"nota\"")
       expect(missingResult.status).toBe(2)
       expect(missingResult.stderr).toContain(`--mcp-config ${missing}: file not found`)
       expect(malformedResult.status).toBe(2)
       expect(malformedResult.stderr).toContain(`--mcp-config ${malformed} is not valid JSON:`)
-      for (const output of [
-        remoteResult.stderr,
-        missingResult.stderr,
-        malformedResult.stderr
-      ]) {
+      for (
+        const output of [
+          remoteResult.stderr,
+          missingResult.stderr,
+          malformedResult.stderr
+        ]
+      ) {
         expect(output).not.toContain("TypeError")
         expect(output).not.toContain("ENOENT")
         expect(output).not.toContain("SyntaxError")
@@ -271,7 +285,7 @@ describe("removed verbs and flags at the process boundary", processBudget, () =>
     // Section 4.2 keeps bare `gateway` as the `serve` alias and removes the
     // two subcommands. Leaving them unregistered made the parser reject them
     // as stray positional arguments: exit 2, serve's help, and no migration
-    // message — the same defect the plural `workflows` had.
+    // message, the same defect the plural `workflows` had.
     const status = run(["gateway", "status"])
     const stop = run(["gateway", "stop"])
 
@@ -698,7 +712,7 @@ describe("the smithers bin shim", processBudget, () => {
   it("runs the built entry when dist is present, and leaves src alone", () => {
     // The packaged install: a tarball ships `dist/esm/bin.js` beside `src`,
     // and the shim must run the build. Staging the build here rather than
-    // gating on `existsSync(dist)` is the point — `dist` is gitignored, so the
+    // gating on `existsSync(dist)` is the point. `dist` is gitignored, so the
     // gated form skipped in every fresh clone and in this worktree, which is
     // no pin at all. The marker proves which entry ran, where asserting
     // `--version` could not: both entries print the same version.
@@ -810,17 +824,24 @@ describe("Smithers 0.x detection", processBudget, () => {
     mkdirSync(join(cwd, ".smithers", "workflows"), { recursive: true })
     writeFileSync(join(cwd, ".smithers", "workflows", "ship.tsx"), "export default null\n")
     writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "legacy" }))
-    // The real 0.x table and column names (`packages/db/src/sql-message-storage.js`
-    // in the 0.x tree), because the point of the check is that it reads a
-    // database the old CLI wrote.
+    // The real 0.x table and column names, because the point of the check is
+    // that it reads a database the old CLI wrote. The columns are the ones
+    // `@smthrs/migrate`'s run-state scan selects, and every one of them is in
+    // the original 16 that `packages/migrate/test/fixtures/persisted-db/old-schema.sql`
+    // records verbatim from a live 0.x database. A narrower stand-in made the
+    // scan report every project as one it could not read, which reads as a
+    // defect in the project rather than in the fixture.
     const database = new DatabaseSync(join(cwd, "smithers.db"))
     database.exec(
       `CREATE TABLE _smithers_runs (
-         run_id TEXT PRIMARY KEY, workflow_name TEXT NOT NULL, status TEXT NOT NULL
+         run_id TEXT PRIMARY KEY, workflow_name TEXT NOT NULL, workflow_path TEXT, status TEXT NOT NULL,
+         heartbeat_at_ms INTEGER, runtime_owner_id TEXT, parent_run_id TEXT,
+         pause_requested_at_ms INTEGER, cancel_requested_at_ms INTEGER
        )`
     )
     database.exec(
-      "INSERT INTO _smithers_runs VALUES ('run-old-1','ship','running'),('run-old-2','ship','finished')"
+      "INSERT INTO _smithers_runs (run_id, workflow_name, status) " +
+        "VALUES ('run-old-1','ship','running'),('run-old-2','ship','finished')"
     )
     database.close()
     return cwd
@@ -921,10 +942,16 @@ describe("Smithers 0.x detection", processBudget, () => {
       writeFileSync(join(cwd, ".smithers", "workflows", "ship.tsx"), "export default null\n")
       writeFileSync(join(cwd, "package.json"), JSON.stringify({ name: "legacy" }))
       const database = new DatabaseSync(join(cwd, "smithers.db"))
-      database.exec("CREATE TABLE _smithers_runs (run_id TEXT PRIMARY KEY, workflow_name TEXT, status TEXT)")
+      database.exec(
+        `CREATE TABLE _smithers_runs (
+           run_id TEXT PRIMARY KEY, workflow_name TEXT NOT NULL, workflow_path TEXT, status TEXT NOT NULL,
+           heartbeat_at_ms INTEGER, runtime_owner_id TEXT, parent_run_id TEXT,
+           pause_requested_at_ms INTEGER, cancel_requested_at_ms INTEGER
+         )`
+      )
       // Terminal only: the section 6 refusal has nothing to hold, so the verb
       // gets as far as the tool.
-      database.exec("INSERT INTO _smithers_runs VALUES ('run-old-1','ship','finished')")
+      database.exec("INSERT INTO _smithers_runs (run_id, workflow_name, status) VALUES ('run-old-1','ship','finished')")
       database.close()
 
       const result = inProject(cwd, ["migrate"])
@@ -1056,8 +1083,8 @@ describe("the migrate verb's option surface", processBudget, () => {
  * Which project `smithers migrate` converts.
  *
  * The verb's default target used to be the rc.0 project root, whose walk
- * anchors on `.flows/`. A 0.x project has none — that is what makes it a 0.x
- * project — so a project without a `.git`/`.jj` marker of its own resolved to
+ * anchors on `.flows/`. A 0.x project has none, which is what makes it a 0.x
+ * project, so a project without a `.git`/`.jj` marker of its own resolved to
  * whatever rc.0 project sat above it, and `--apply` rewrote the ancestor's
  * tree. Only a real process shows it: the resolution happens while the layers
  * are built, before any handler runs.
@@ -1083,7 +1110,7 @@ describe("the migrate verb's target", processBudget, () => {
       expect(report.root).toBe(project)
       // The fixture's own units, and only those: its `package.json`, the one
       // workflow under `.smithers/workflows`, and the project itself. The scan
-      // walks down, so these three appear from the ancestor too — `root` is
+      // walks down, so these three appear from the ancestor too. `root` is
       // what separates the two answers, and `root` is what `--apply` writes
       // against.
       expect(report.units.map((unit) => unit.id)).toEqual(["dependencies", "workflow:ship", "project"])
@@ -1123,8 +1150,8 @@ describe("the migrate verb's target", processBudget, () => {
  *
  * Both cases run against an installation staged in a temp directory rather
  * than against this checkout. The two places the verb looks belong to other
- * lanes — `packages/cli/docs/SKILL.md` is the docs lane's generated copy and
- * `skills/smithers/SKILL.md` is the pack lane's source — so a case that
+ * lanes: `packages/cli/docs/SKILL.md` is the docs lane's generated copy and
+ * `skills/smithers/SKILL.md` is the pack lane's source. A case that
  * asserted this tree's state went red the day either lane landed, and a case
  * that wrote `packages/cli/docs/SKILL.md` overwrote and then deleted the real
  * generated file on every run.
@@ -1216,15 +1243,15 @@ describe("smithers skills add", processBudget, () => {
  * rc-contract section 4's `up` row and section 10 both promise "exit code
  * follows the terminal status", and that promise only exists at the process
  * boundary: a script, a `pipeline-*.yml` step, or a sandbox `run-workflow.sh`
- * reads `$?`, not a receipt. The Phase 7 Plue cutover measured the opposite —
+ * reads `$?`, not a receipt. The Phase 7 Plue cutover measured the opposite:
  * `smithers up ci-fast --json` returned 0 in three seconds while `smithers ps`
  * reported `failed` (plue-cutover finding S1).
  *
  * The run below fails for real, with no provider and no network. The flow
  * declares an `openai` seat, `SMITHERS_OPENAI_AUTH=chatgpt` routes that seat
  * to the codex CLI's credential store, and the store this project points at
- * holds a file with no token set. The seat resolves — the file exists, so the
- * launch is accepted and the driver starts — and the turn then fails locally
+ * holds a file with no token set. The seat resolves because the file exists,
+ * so the launch is accepted and the driver starts. The turn then fails locally
  * reading it. That is a real `control.run.failed` settlement, written by the
  * real agent session into the project's own `.flows/control.db`.
  */
@@ -1486,8 +1513,8 @@ describe("an attached launch's exit status", processBudget, () => {
  * The project `smithers init` scaffolds, launched exactly as it was written.
  *
  * The Phase 7 verdict at cd14388ed7 ran the two commands the scaffold's own
- * doc comment promises — `smithers init hello`, then `smithers up hello` in
- * that directory — and got exit 1 with `Run run-1 was accepted but the
+ * doc comment promises: `smithers init hello`, then `smithers up hello` in
+ * that directory. It got exit 1 with `Run run-1 was accepted but the
  * executor did not take it`, a `control.db` row still `accepted` under
  * `ownerId {pid: 0}`, an `engine.db` with no row at all, and
  * `smithers status run-1` answering forever. Only `smithers cancel` ended it.
@@ -1631,7 +1658,14 @@ describe("the smithers init scaffold, launched as written", processBudget, () =>
       const status = smithers(cwd, ["status", runId], environment)
       expect(status.status).toBe(0)
       expect(status.stdout).toContain("failed")
-      const swept = smithers(cwd, ["gc", "--older-than", "0s", "--dry-run", "--json"], environment)
+      // `--older-than 0s` is refused, because "delete everything" wearing the
+      // spelling of a retention policy is the flag's most destructive value.
+      // A sweep therefore has to name a real window and wait it out.
+      const refused = smithers(cwd, ["gc", "--older-than", "0s", "--dry-run", "--json"], environment)
+      expect(refused.status).toBe(2)
+      expect(refused.stderr).toContain("--older-than must be a duration")
+      waitOut(1_100)
+      const swept = smithers(cwd, ["gc", "--older-than", "1s", "--dry-run", "--json"], environment)
       expect(swept.status).toBe(0)
       expect(swept.stdout).toContain(runId)
     } finally {
@@ -1671,8 +1705,8 @@ describe("the smithers init scaffold, launched as written", processBudget, () =>
 /**
  * The same two commands against a funded seat.
  *
- * This is the claim `smithers init`'s own doc comment makes — "`smithers up
- * <name>` works in the directory `init` just created" — and the only way to
+ * This is the claim `smithers init`'s own doc comment makes: "`smithers up
+ * <name>` works in the directory `init` just created". The only way to
  * hold it is to run the scaffolded prompt on a real provider. It costs a real
  * agent run of three to four minutes, so it runs only where the ChatGPT seat
  * the CLI suite already stages is actually signed in: export
@@ -1760,11 +1794,15 @@ describe("smithers signal against a run parked on something else", processBudget
     const control = new DatabaseSync(join(cwd, ".flows", "control.db"))
     try {
       // The control run's status lives in the summary document, which is what
-      // `SqlControlRuntime.getRun` parses.
+      // `SqlControlRuntime.getRun` parses, and the two spellings differ: the
+      // column carries the run store's `suspended`, the document carries the
+      // control status `parked` that store status maps to (SqlControlRuntime's
+      // status table). Writing `suspended` into the document produced a
+      // summary the control runtime refuses to decode.
       control.prepare(
         `UPDATE flows_runs SET status = 'suspended', waiting_reason = 'timer', waiting_wake_at_ms = ?,
            finished_at_ms = NULL, owner_host_id = NULL, owner_pid = NULL, owner_nonce = NULL,
-           heartbeat_at_ms = NULL, state_json = json_set(state_json, '$.status', 'suspended')
+           heartbeat_at_ms = NULL, state_json = json_set(state_json, '$.status', 'parked')
          WHERE run_id = ?`
       ).run(wakeAtMs, runId)
     } finally {

@@ -6,11 +6,13 @@
  * observable contract for scripts.
  */
 import { Effect, Redacted } from "effect"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import * as CliError from "../src/CliError.ts"
 import * as Output from "../src/Output.ts"
 
 const render = (value: unknown, format: Output.Format) => Effect.runSync(Output.make().render(value, format))
+const refusal = (value: unknown, format: Output.Format = "json") =>
+  Effect.runSync(Effect.flip(Output.make().render(value, format)))
 
 describe("Output.make human rendering", () => {
   it("prints a string value verbatim rather than quoting it", () => {
@@ -50,30 +52,144 @@ describe("Output.make human rendering", () => {
     expect(render({ a: 1, Z: 2 }, "json").text).toBe("{\"Z\":2,\"a\":1}")
   })
 
-  it("marks a cycle instead of overflowing the stack", () => {
+  it("refuses a cycle with the repeated path", () => {
     const value: { self?: unknown } = {}
     value.self = value
 
-    expect(render(value, "json").text).toBe("{\"self\":\"[Circular]\"}")
+    expect(refusal(value)).toMatchObject({ code: "cycle", path: "$[\"self\"]" })
   })
 
-  it("marks values nested past the deterministic depth limit", () => {
-    const root: { child?: unknown } = {}
-    let cursor = root
-    for (let depth = 0; depth < 258; depth++) {
-      const child: { child?: unknown } = {}
-      cursor.child = child
-      cursor = child
+  it("accepts the exact depth limit and refuses the next value", () => {
+    const nested = (depth: number): unknown => {
+      let value: unknown = "leaf"
+      for (let index = 0; index < depth; index++) value = { child: value }
+      return value
     }
 
-    expect(render(root, "json").text).toContain("[Deep]")
+    expect(render(nested(Output.maximumDepth), "json").text).toContain("leaf")
+    expect(refusal(nested(Output.maximumDepth + 1))).toMatchObject({ code: "depth_limit" })
   })
 
-  it("renders BigInt and undefined in both formats", () => {
+  it("defines every non-JSON scalar representation", () => {
     expect(render(17n, "human").text).toBe("17n")
     expect(render(17n, "json").text).toBe("\"17n\"")
     expect(render(undefined, "human").text).toBe("[Undefined]")
     expect(render(undefined, "json").text).toBe("\"[Undefined]\"")
+    expect(render(Number.NaN, "json").text).toBe("\"[NaN]\"")
+    expect(render(Number.POSITIVE_INFINITY, "json").text).toBe("\"[Infinity]\"")
+    expect(render(Number.NEGATIVE_INFINITY, "json").text).toBe("\"[-Infinity]\"")
+    expect(render(-0, "json").text).toBe("\"-0\"")
+    expect(render(Symbol("named"), "json").text).toBe("\"Symbol(named)\"")
+  })
+
+  it("never invokes getters or proxy traps", () => {
+    let getterReads = 0
+    const withGetter: Record<string, unknown> = {}
+    Object.defineProperty(withGetter, "secret", {
+      enumerable: true,
+      get: () => {
+        getterReads += 1
+        return "must-not-run"
+      }
+    })
+    expect(refusal(withGetter)).toMatchObject({ code: "accessor", path: "$[\"secret\"]" })
+    expect(getterReads).toBe(0)
+
+    let traps = 0
+    const proxy = new Proxy({}, {
+      ownKeys: () => {
+        traps += 1
+        return []
+      }
+    })
+    expect(refusal(proxy)).toMatchObject({ code: "proxy", path: "$" })
+    expect(traps).toBe(0)
+
+    const revoked = Proxy.revocable({}, {})
+    revoked.revoke()
+    expect(refusal(revoked.proxy)).toMatchObject({ code: "proxy", path: "$" })
+  })
+
+  it.each(
+    [
+      ["a function", () => undefined, "callable"],
+      ["a toJSON member", { toJSON: () => ({}) }, "to_json"],
+      ["a Date", new Date(0), "unsupported"],
+      ["a Map", new Map(), "unsupported"]
+    ] as const
+  )("refuses %s as executable or host-owned data", (_label, value, code) => {
+    expect(refusal(value)).toMatchObject({ code })
+  })
+
+  it("enforces the exact aggregate member boundary", () => {
+    const exact = Object.fromEntries(
+      Array.from({ length: Output.maximumMembers }, (_, index) => [`k${index}`, index])
+    )
+    expect(JSON.parse(render(exact, "json").text)).toHaveProperty("k9999", 9999)
+    expect(refusal({ ...exact, overflow: true })).toMatchObject({ code: "member_limit", path: "$" })
+  })
+
+  it("enforces the exact UTF-8 output boundary", () => {
+    expect(Buffer.byteLength(render("x".repeat(Output.maximumOutputBytes - 2), "json").text)).toBe(
+      Output.maximumOutputBytes
+    )
+    expect(refusal("x".repeat(Output.maximumOutputBytes - 1))).toMatchObject({
+      code: "byte_limit",
+      path: "$"
+    })
+    expect(Buffer.byteLength(render("é".repeat(Output.maximumOutputBytes / 2), "human").text)).toBe(
+      Output.maximumOutputBytes
+    )
+    expect(refusal("é".repeat(Output.maximumOutputBytes / 2 + 1))).toMatchObject({
+      code: "byte_limit",
+      path: "$"
+    })
+  })
+
+  it("refuses non-data array and object members", () => {
+    const extra = [1] as Array<unknown> & { extra?: unknown }
+    extra.extra = 2
+    expect(refusal(extra)).toMatchObject({ code: "unsupported", path: "$" })
+
+    const sparse = Array<unknown>(1)
+    expect(refusal(sparse)).toMatchObject({ code: "unsupported", path: "$[0]" })
+
+    const hiddenIndex = [1]
+    Object.defineProperty(hiddenIndex, "0", { value: 1, enumerable: false })
+    expect(refusal(hiddenIndex)).toMatchObject({ code: "unsupported", path: "$[0]" })
+
+    expect(refusal({ [Symbol("hidden")]: true })).toMatchObject({ code: "unsupported", path: "$" })
+
+    const hiddenObject = Object.defineProperty({}, "hidden", { value: true, enumerable: false })
+    expect(refusal(hiddenObject)).toMatchObject({ code: "unsupported", path: "$[\"hidden\"]" })
+  })
+
+  it("clips an executable member's path without reading the member", () => {
+    const key = "k".repeat(200)
+    const value: Record<string, unknown> = {}
+    Object.defineProperty(value, key, { enumerable: true, get: () => "must not run" })
+
+    const error = refusal(value)
+    expect(error).toMatchObject({ code: "accessor" })
+    expect(error.path).toHaveLength(134)
+    expect(error.path.endsWith("…\"]")).toBe(true)
+  })
+
+  it("turns an unexpected inspection failure into a stable rendering error", () => {
+    const byteLength = vi.spyOn(Buffer, "byteLength").mockImplementationOnce(() => {
+      throw new Error("host failure")
+    })
+    try {
+      expect(refusal("value")).toMatchObject({ code: "unreadable", path: "$" })
+    } finally {
+      byteLength.mockRestore()
+    }
+  })
+
+  it("uses fixed Unicode code-unit ordering without locale APIs", () => {
+    expect(render({ "\ue000": 4, "𐀀": 3, "é": 2, e: 1 }, "json").text).toBe(
+      "{\"e\":1,\"é\":2,\"𐀀\":3,\"\":4}"
+    )
   })
 })
 
@@ -87,6 +203,7 @@ describe("Output.exitCode", () => {
       ],
       ["a cancelled terminal receipt", { _tag: "Terminal", runId: "run-1", status: "cancelled" }, 130],
       ["a failed terminal receipt", { _tag: "Terminal", runId: "run-1", status: "failed" }, 1],
+      ["a conflicting receipt", { _tag: "Conflict", message: "changed" }, 1],
       ["an accepted receipt", { _tag: "Accepted", receiptId: "receipt-1", runId: "run-1" }, 0],
       ["caller data tagged Parked", { _tag: "Parked" }, 0],
       ["caller data waiting for approval", { status: "waiting-approval" }, 0],
@@ -132,6 +249,17 @@ describe("Output.exitCode", () => {
 
     expect(rendered.text).toBe("{\"_tag\":\"Terminal\",\"runId\":\"run-1\",\"status\":\"failed\"}")
     expect(rendered.exitCode).toBe(0)
+    expect(Output.exitCode(Output.renderValue(receipt))).toBe(0)
+  })
+
+  it("treats a schema value that throws while inspected as ordinary data", () => {
+    const hostile = new Proxy({}, {
+      get: () => {
+        throw new Error("must stay inside exitCode")
+      }
+    })
+
+    expect(Output.exitCode(hostile)).toBe(0)
   })
 })
 
@@ -139,6 +267,17 @@ describe("CliError.exitCode", () => {
   it("separates a malformed invocation from an unsupported one", () => {
     expect(CliError.exitCode(new CliError.UsageError({ message: "bad" }))).toBe(2)
     expect(CliError.exitCode(new CliError.UnsupportedError({ message: "no" }))).toBe(1)
+    expect(CliError.exitCode(
+      new CliError.ResourceLimitError({
+        operation: "read",
+        subject: "run r",
+        limit: 1,
+        unit: "events"
+      })
+    )).toBe(1)
+    expect(CliError.exitCode(
+      new CliError.RenderingError({ code: "proxy", path: "$", message: "cannot render" })
+    )).toBe(1)
   })
 
   it("keeps the tag each failure is matched on", () => {

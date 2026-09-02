@@ -6,10 +6,56 @@
  * nothing about the running server says so.
  */
 import { ControlRpcs } from "@smthrs/control"
-import { describe, expect, it } from "vitest"
+import { Cause, Effect, Exit, Fiber, Layer } from "effect"
+import { Command } from "effect/unstable/cli"
+import { mkdtempSync, rmSync } from "node:fs"
+import { createServer } from "node:net"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { afterEach, describe, expect, it } from "vitest"
 import * as CliError from "../src/CliError.ts"
+import { cli } from "../src/Command.ts"
 import * as NodeControl from "../src/NodeControl.ts"
 import * as Serve from "../src/Serve.ts"
+import { packageVersion } from "../src/Version.ts"
+
+const staged: Array<string> = []
+const runCommand = Command.runWith(cli, { version: packageVersion })
+
+afterEach(() => {
+  while (staged.length > 0) rmSync(staged.pop()!, { recursive: true, force: true })
+})
+
+const freePort = (): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const server = createServer()
+    server.once("error", reject)
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address()
+      if (address === null || typeof address === "string") {
+        server.close()
+        reject(new Error("expected a TCP test server"))
+        return
+      }
+      server.close((error) => error === undefined ? resolve(address.port) : reject(error))
+    })
+  })
+
+const waitForHealth = async (port: number): Promise<Response> => {
+  const deadline = Date.now() + 20_000
+  let lastFailure: unknown
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/health`)
+      if (response.ok) return response
+      lastFailure = new Error(`GET /health returned ${response.status}`)
+    } catch (cause) {
+      lastFailure = cause
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  throw lastFailure instanceof Error ? lastFailure : new Error("GET /health did not become ready")
+}
 
 const bind = (overrides: Partial<Serve.Bind> = {}): Serve.Bind => ({
   host: "127.0.0.1",
@@ -50,13 +96,15 @@ describe("the bind rule", () => {
     expect(Serve.isLoopback("10.0.0.4")).toBe(false)
   })
 
-  it.each([
-    ["127.0.0.1", true],
-    ["::1", true],
-    ["localhost", true],
-    ["0.0.0.0", false],
-    ["192.0.2.1", false]
-  ] as const)("keeps every Node bind boundary in parity for %s", (host, expected) => {
+  it.each(
+    [
+      ["127.0.0.1", true],
+      ["::1", true],
+      ["localhost", true],
+      ["0.0.0.0", false],
+      ["192.0.2.1", false]
+    ] as const
+  )("keeps every Node bind boundary in parity for %s", (host, expected) => {
     const auth = { token: "alpha-secret", principal: { id: "alpha", kind: "bearer" as const } }
     const options = { host, port: 0 }
     const boundaries = [
@@ -106,6 +154,51 @@ describe("the mounts", () => {
     expect(identity.workspaceHash).not.toContain("project-one")
     expect(identity.protocolVersion).toBe("1")
   })
+})
+
+describe("the serve command", () => {
+  it("fails before composition for a refused bind and defects without a gateway host", async () => {
+    const refused = await Effect.runPromiseExit(
+      Serve.host(bind({ host: "0.0.0.0", listen: false }), "/work")
+    )
+    expect(Exit.isFailure(refused) && Cause.squash(refused.cause)).toBeInstanceOf(CliError.UnsupportedError)
+
+    const missing = await Effect.runPromiseExit(Serve.host(bind(), "/work"))
+    expect(Exit.isFailure(missing) && String(Cause.squash(missing.cause))).toContain("gateway host is missing")
+  })
+
+  it("omits an empty bearer credential from the gateway options", async () => {
+    let options: unknown
+    const gateway = Layer.succeed(Serve.GatewayHost, {
+      launch: (_health, input) =>
+        Effect.sync(() => {
+          options = input
+        }) as Effect.Effect<never>
+    })
+
+    await Effect.runPromise(Serve.host(bind({ credential: "" }), "/work").pipe(Effect.provide(gateway)))
+    expect(options).not.toHaveProperty("credential")
+  })
+
+  it("hosts GET /health until the command fiber is interrupted", async () => {
+    const root = mkdtempSync(join(tmpdir(), "smithers-serve-"))
+    staged.push(root)
+    const port = await freePort()
+    const fiber = Effect.runFork(
+      runCommand(["--root", root, "serve", "--host", "127.0.0.1", "--port", String(port)]).pipe(
+        Effect.provide(NodeControl.layer({ root, migrationRoot: root }))
+      )
+    )
+
+    try {
+      const response = await waitForHealth(port)
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual(Serve.health(root))
+    } finally {
+      await Effect.runPromise(Fiber.interrupt(fiber))
+    }
+  }, 60_000)
 })
 
 describe("the banner", () => {

@@ -152,7 +152,7 @@ describe("Forensics.renderDiagnosis", () => {
     const card = Forensics.renderDiagnosis({ runId: "run-1", flowId: "fix" }, d)
     expect(card).toContain("Verdict   failed: TransportError: gone")
     expect(card).toContain("run-1 · fix")
-    expect(card).toContain("Next      'smithers' 'logs' 'run-1'")
+    expect(card).toContain("Next      smithers logs run-1")
   })
 
   it("calls out a completed run that never attempted an edit", () => {
@@ -173,8 +173,10 @@ describe("Forensics.renderDiagnosis", () => {
     ])
     const card = Forensics.renderDiagnosis({ runId: "run-1" }, d)
     expect(card).toContain("waiting-approval: asks: Q")
+    // The payload is quoted because it carries braces and quotes; the verbs,
+    // the flag, and the run id are not, because a shell reads nothing in them.
     expect(card).toContain(
-      `Unblock   'smithers' 'approve' '{"k":1}' '--scope' 'run' && 'smithers' 'run' '--resume' 'run-1'`
+      `Unblock   smithers approve '{"k":1}' --scope run && smithers run --resume run-1`
     )
   })
 
@@ -207,6 +209,25 @@ describe("Forensics.renderDiagnosis", () => {
   it("quotes one POSIX shell word with the standard apostrophe escape", () => {
     expect(Forensics.shellQuote("")).toBe("''")
     expect(Forensics.shellQuote("a'b\n$(x)`y`")).toBe("'a'\\''b\n$(x)`y`'")
+  })
+
+  it("leaves a word no shell interprets unquoted", () => {
+    // The card is copied by hand, and quoting `'smithers' 'cancel' 'run-1'`
+    // makes an operator wonder what the quotes mean. Ordinary run ids, verbs,
+    // flags, and paths carry nothing a shell reads, so they render as typed.
+    for (const inert of ["smithers", "cancel", "run-1", "--scope", "flows/hello", "a.b_c@d%e+f=g:h,i"]) {
+      expect(Forensics.shellQuote(inert)).toBe(inert)
+    }
+    // Anything outside that set is still one quoted word, including a space.
+    for (const quoted of ["", "a b", "a;b", "a|b", "$x", "a\tb", "a\nb", "*", "~", "#c", "(x)"]) {
+      expect(Forensics.shellQuote(quoted)).toBe(`'${quoted.replaceAll("'", "'\\''")}'`)
+    }
+  })
+
+  it("advertises the cancel line an operator would have typed", () => {
+    const d: Forensics.Digest = { ...Forensics.digest([]), status: "pending" }
+
+    expect(Forensics.renderDiagnosis({ runId: "run-1" }, d)).toContain("smithers cancel run-1")
   })
 
   it("lists the top refusals with counts, largest first", () => {

@@ -8,7 +8,7 @@
  * failed launch with its output attached, and a child that is alive but silent
  * past the grace window is terminated rather than left running.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -33,6 +33,25 @@ const child = (body: string): string => {
   const file = join(root, "child.mjs")
   writeFileSync(file, body, "utf8")
   return file
+}
+
+const processGone = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    if ((error as { readonly code?: string } | null)?.code === "ESRCH") return true
+    throw error
+  }
+}
+
+const until = async (predicate: () => boolean, timeoutMs: number): Promise<boolean> => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) return true
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  return predicate()
 }
 
 afterEach(() => {
@@ -138,6 +157,47 @@ describe("launching", () => {
     expect(notices[0]).toContain("still booting")
   }, 30_000)
 
+  it.skipIf(process.platform === "win32")("kills a SIGTERM-trapping child and its descendant", async () => {
+    const root = project()
+    const entry = child(
+      `import { spawn } from "node:child_process"
+       process.on("SIGTERM", () => {})
+       const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" })
+       process.stderr.write("parent=" + process.pid + " descendant=" + descendant.pid + "\\n")
+       setInterval(() => {}, 1000)`
+    )
+
+    const result = await Detached.launch({
+      root,
+      payload: "{}",
+      entry,
+      timeoutMs: 500,
+      intervalMs: 10,
+      terminationGraceMs: 150
+    })
+
+    expect(Detached.isLaunched(result)).toBe(false)
+    const rejected = result as Detached.Rejected
+    expect(rejected.reason).toContain("was terminated")
+    expect(rejected.reason).not.toContain("could not be confirmed terminated")
+
+    const tail = Detached.logTail(rejected.logFile)
+    const pids = /parent=(\d+) descendant=(\d+)/.exec(tail)
+    expect(pids).not.toBeNull()
+    if (pids === null) throw new Error(`detached log did not contain both pids: ${tail}`)
+    const parentPid = Number(pids[1])
+    const descendantPid = Number(pids[2])
+
+    const [parentGone, descendantGone, groupGone] = await Promise.all([
+      until(() => processGone(parentPid), 2_000),
+      until(() => processGone(descendantPid), 2_000),
+      until(() => processGone(-parentPid), 2_000)
+    ])
+    expect(parentGone).toBe(true)
+    expect(descendantGone).toBe(true)
+    expect(groupGone).toBe(true)
+  }, 30_000)
+
   it("passes the operator's extra arguments through to the child", async () => {
     const root = project()
     const entry = child(
@@ -155,6 +215,24 @@ describe("launching", () => {
 
     const launched = result as Detached.Launched
     expect(readFileSync(launched.logFile, "utf8")).toContain("run {\"plan\":1} --remote https://control.test")
+  }, 30_000)
+
+  it("overwrites a previous run's log when the run id collides", async () => {
+    const root = project()
+    const previous = Project.logFile(root, "run-collision")
+    mkdirSync(Project.logDirectory(root), { recursive: true })
+    writeFileSync(previous, "previous run output\n", "utf8")
+    const entry = child(
+      `process.stderr.write("new run output\\n")
+       process.stderr.write("SMITHERS_DETACHED_ADMISSION=run:" + process.env.SMITHERS_INTERNAL_DETACHED_ADMISSION + " runId=run-collision\\n")`
+    )
+
+    const result = await Detached.launch({ root, payload: "{}", entry, intervalMs: 10 })
+
+    expect(Detached.isLaunched(result)).toBe(true)
+    const log = readFileSync(previous, "utf8")
+    expect(log).toContain("new run output")
+    expect(log).not.toContain("previous run output")
   }, 30_000)
 
   it("defaults the admission window to thirty seconds", () => {

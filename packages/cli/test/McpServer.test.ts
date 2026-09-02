@@ -1,5 +1,5 @@
 /**
- * The `smithers --mcp` tool surface, and one real stdio round trip.
+ * The `smithers --mcp` tool surface, its serve loop, and one real stdio round trip.
  *
  * The round trip runs `@smthrs/mcp`'s own client against a spawned
  * `smithers --mcp`, so the framing, the handshake, and the envelope are proven
@@ -9,10 +9,11 @@ import { NodeServices } from "@effect/platform-node"
 import { Control as ControlService, ControlError, ControlRuntime } from "@smthrs/control"
 import * as TestControl from "@smthrs/control/test/TestControl"
 import * as McpClient from "@smthrs/mcp/McpClient"
-import { Effect, Layer } from "effect"
+import { Cause, Effect, Exit, Layer, Schema, Stream } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { PassThrough } from "node:stream"
 import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, it } from "vitest"
 import * as McpServer from "../src/McpServer.ts"
@@ -199,7 +200,7 @@ describe("the envelope", () => {
     expect(await rpcCall("list_runs", { status: "running" })).toMatchObject({ ok: true })
   })
 
-  it.each([-1, 1.5])("refuses the watch cursor %s", async (afterSequence) => {
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("refuses the watch cursor %s", async (afterSequence) => {
     const result = await rpcCall("watch_run", { runId: "run-1", afterSequence })
 
     expect(result).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } })
@@ -301,7 +302,7 @@ describe("the envelope", () => {
       .toMatchObject({ ok: false, error: { code: "FLOW_NOT_FOUND" } })
   })
 
-  it("redacts a credential from a tagged failure message", async () => {
+  it("does not echo a credential from a tagged failure message", async () => {
     const credential = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
     const refusingControl = Layer.effect(
       ControlService.Control,
@@ -316,8 +317,52 @@ describe("the envelope", () => {
     const error = (result as { readonly error: { readonly code: string; readonly message: string } }).error
 
     expect(error.code).toBe("UNAUTHORIZED")
-    expect(error.message).toContain("[REDACTED_TOKEN]")
+    expect(error.message).toBe("The control operation was not authorized")
     expect(error.message).not.toContain(credential)
+  })
+
+  it("maps every typed control failure to a stable public category", async () => {
+    const secret = "Bearer ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
+    const cases = [
+      [new ControlError.RunNotFound({ runId: "run" }), "RUN_NOT_FOUND"],
+      [new ControlError.PlanNotFound({ planId: "plan" }), "PLAN_NOT_FOUND"],
+      [new ControlError.PlanDenied({ planId: "plan" }), "PLAN_DENIED"],
+      [new ControlError.FlowNotFound({ flowId: "flow" }), "FLOW_NOT_FOUND"],
+      [
+        new ControlError.PlanDigestMismatch({ planId: "plan", expected: secret, actual: secret }),
+        "PLAN_DIGEST_MISMATCH"
+      ],
+      [new ControlError.EnvelopeMismatch({ planId: "plan", expected: secret, actual: secret }), "ENVELOPE_MISMATCH"],
+      [new ControlError.ClaimLost({ runId: "run" }), "CLAIM_LOST"],
+      [new ControlError.AlreadyResolved({ requestId: "request" }), "ALREADY_RESOLVED"],
+      [new ControlError.InvalidInput({ issue: `input.path: ${secret}` }), "INVALID_INPUT"],
+      [new ControlError.Unauthorized({ message: secret }), "UNAUTHORIZED"],
+      [new ControlError.Unavailable({ feature: "watch", ticket: "T-1" }), "UNAVAILABLE"],
+      [new ControlError.TransportError({ message: secret, retryable: true }), "TRANSPORT_ERROR"],
+      [new ControlError.PersistenceError({ operation: "list", message: secret }), "PERSISTENCE_ERROR"],
+      [new ControlError.LaunchFailed({ runId: "run", message: secret }), "LAUNCH_FAILED"],
+      [new ControlError.NoMatchingWait({ runId: "run", waitName: "wake" }), "NO_MATCHING_WAIT"],
+      [
+        new ControlError.CredentialConflict({ id: "credential", expectedVersion: 1, actualVersion: 2 }),
+        "CREDENTIAL_CONFLICT"
+      ]
+    ] as const
+
+    for (const [failure, code] of cases) {
+      const refusingControl = Layer.effect(
+        ControlService.Control,
+        Effect.map(
+          ControlService.Control,
+          (service) => ControlService.make({ ...service, list: () => Effect.fail(failure) })
+        )
+      ).pipe(Layer.provide(control))
+      const result = await rpcCallWith(refusingControl, "list_runs")
+      const error = (result as { readonly error: { readonly code: string; readonly message: string } }).error
+
+      expect(error.code).toBe(code)
+      expect(error.message).not.toContain(secret)
+      expect([...error.message].length).toBeLessThanOrEqual(1024)
+    }
   })
 
   it("propagates a control defect out of respond", async () => {
@@ -331,6 +376,48 @@ describe("the envelope", () => {
     ).pipe(Layer.provide(control))
 
     await expect(rpcCallWith(defectiveControl, "list_runs")).rejects.toThrow("list invariant failed")
+  })
+
+  it("preserves interruption instead of turning shutdown into a tool response", async () => {
+    const interruptedControl = Layer.effect(
+      ControlService.Control,
+      Effect.map(ControlService.Control, (service) => ControlService.make({ ...service, list: () => Effect.interrupt }))
+    ).pipe(Layer.provide(control))
+    const exit = await Effect.runPromiseExit(
+      McpServer.respond(
+        {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "list_runs", arguments: {} }
+        } as never,
+        McpServer.tools(),
+        "1.0.0-rc.0"
+      ).pipe(Effect.provide(interruptedControl))
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+  })
+
+  it("refuses an MCP history that crosses its encoded resource budget", async () => {
+    const oversized = {
+      sequence: 1,
+      kind: "control.agent.resolved",
+      occurredAt: 0,
+      runId: "run-1",
+      payload: { text: "x".repeat(McpServer.maximumHistoryBytes) }
+    }
+    const largeControl = Layer.effect(
+      ControlService.Control,
+      Effect.map(
+        ControlService.Control,
+        (service) => ControlService.make({ ...service, watch: () => Stream.make(oversized) })
+      )
+    ).pipe(Layer.provide(control))
+
+    expect(await rpcCallWith(largeControl, "get_run_events", { runId: "run-1" }))
+      .toMatchObject({ ok: false, error: { code: "RESOURCE_LIMIT" } })
   })
 
   it("answers the raw surface with the command to run", async () => {
@@ -395,6 +482,149 @@ describe("the JSON-RPC surface", () => {
     expect(await respond({ jsonrpc: "2.0", id: 6, method: "resources/list" }))
       .toMatchObject({ error: { code: -32601 } })
     expect(await respond({ jsonrpc: "2.0", method: "notifications/initialized" })).toBeUndefined()
+  })
+
+  it("accepts the exact request-frame boundary and refuses the next byte", async () => {
+    const request = (filler: string) => ({
+      jsonrpc: "2.0",
+      id: "bounded",
+      method: "tools/call",
+      params: { name: "list_runs", arguments: { unexpected: filler } }
+    })
+    const fixedBytes = Buffer.byteLength(JSON.stringify(request("")), "utf8")
+    const exact = request("x".repeat(McpServer.maximumFrameBytes - fixedBytes))
+    expect(Buffer.byteLength(JSON.stringify(exact), "utf8")).toBe(McpServer.maximumFrameBytes)
+
+    const accepted = await respond(exact) as {
+      readonly result: { readonly structuredContent: McpServer.Envelope }
+    }
+    expect(accepted.result.structuredContent).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_INPUT" }
+    })
+
+    const refused = await respond(request(`${"x".repeat(McpServer.maximumFrameBytes - fixedBytes)}x`)) as {
+      readonly result: { readonly structuredContent: McpServer.Envelope }
+    }
+    expect(refused.result.structuredContent).toEqual({
+      ok: false,
+      error: {
+        code: "RESOURCE_LIMIT",
+        message: `MCP request or response exceeds the ${McpServer.maximumFrameBytes}-byte frame limit`
+      }
+    })
+  })
+
+  it("replaces an oversized tool response before it reaches the wire", async () => {
+    const huge: McpServer.Tool = {
+      name: "huge",
+      description: "bounded response fixture",
+      readOnly: true,
+      schema: Schema.Struct({}),
+      inputSchema: { type: "object" },
+      call: () => Effect.succeed(McpServer.succeeded("x".repeat(McpServer.maximumFrameBytes)))
+    }
+    const reply = await Effect.runPromise(
+      McpServer.respond(
+        { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "huge", arguments: {} } } as never,
+        [huge],
+        "1.0.0-rc.0"
+      ).pipe(Effect.provide(control))
+    ) as { readonly result: { readonly structuredContent: McpServer.Envelope } }
+
+    expect(reply.result.structuredContent).toMatchObject({ ok: false, error: { code: "RESOURCE_LIMIT" } })
+    expect(Buffer.byteLength(JSON.stringify(reply), "utf8")).toBeLessThanOrEqual(McpServer.maximumFrameBytes)
+  })
+
+  it("bounds schema issue text for a large invalid argument", async () => {
+    const reply = await respond({
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: {
+        name: "watch_run",
+        arguments: { runId: "run-1", afterSequence: "x".repeat(32_000) }
+      }
+    }) as { readonly result: { readonly structuredContent: McpServer.Envelope } }
+    const error = (reply.result.structuredContent as Extract<McpServer.Envelope, { readonly ok: false }>).error
+
+    expect(error.code).toBe("INVALID_INPUT")
+    expect([...error.message].length).toBeLessThanOrEqual(1024)
+  })
+})
+
+describe("the in-process stdio loop", () => {
+  it("answers complete frames after malformed input and ends when input closes", async () => {
+    const input = new PassThrough()
+    const output = new PassThrough()
+    let captured = ""
+    output.setEncoding("utf8")
+    output.on("data", (chunk: string) => {
+      captured += chunk
+    })
+
+    const serving = Effect.runPromise(
+      McpServer.serve({ version: "1.0.0-rc.0", input, output }).pipe(Effect.provide(control))
+    )
+    input.end(
+      [
+        JSON.stringify({ jsonrpc: "2.0", id: "initialize", method: "initialize" }),
+        "this is not json",
+        JSON.stringify({ jsonrpc: "2.0", id: "list", method: "tools/list" }),
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: "call",
+          method: "tools/call",
+          params: { name: "list_workflows", arguments: {} }
+        })
+      ].join("\n") + "\n"
+    )
+
+    await serving
+
+    const frames = captured.trim().split("\n").map((line) =>
+      JSON.parse(line) as {
+        readonly id: string
+        readonly result: Record<string, unknown>
+      }
+    )
+    expect(frames).toHaveLength(3)
+    const replies = new Map(frames.map((frame) => [frame.id, frame.result]))
+    expect(replies.get("initialize")).toMatchObject({ protocolVersion: McpServer.protocolVersion })
+    expect((replies.get("list") as { readonly tools: ReadonlyArray<{ readonly name: string }> }).tools
+      .map((tool) => tool.name)).toEqual(McpServer.tools().map((tool) => tool.name))
+    expect(replies.get("call")).toMatchObject({ structuredContent: { ok: true } })
+  })
+
+  it("discards a chunked oversized line and resumes at the next frame", async () => {
+    const input = new PassThrough()
+    const output = new PassThrough()
+    let captured = ""
+    output.setEncoding("utf8")
+    output.on("data", (chunk: string) => {
+      captured += chunk
+    })
+
+    const serving = Effect.runPromise(
+      McpServer.serve({ version: "1.0.0-rc.0", input, output }).pipe(Effect.provide(control))
+    )
+    input.write("x".repeat(Math.floor(McpServer.maximumFrameBytes / 2)))
+    input.write("x".repeat(Math.ceil(McpServer.maximumFrameBytes / 2) + 1))
+    input.end(`\n${JSON.stringify({ jsonrpc: "2.0", id: "after-limit", method: "ping" })}\n`)
+
+    await serving
+
+    const frames = captured.trim().split("\n").map((line) => JSON.parse(line))
+    expect(frames).toHaveLength(2)
+    expect(frames[0]).toEqual({
+      jsonrpc: "2.0",
+      id: null,
+      error: {
+        code: -32001,
+        message: `MCP request or response exceeds the ${McpServer.maximumFrameBytes}-byte frame limit`
+      }
+    })
+    expect(frames[1]).toMatchObject({ id: "after-limit", result: {} })
   })
 })
 

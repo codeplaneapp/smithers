@@ -290,7 +290,10 @@ describe("one project, from init to gc", processBudget, () => {
   })
 
   it("cancels the run durably", () => {
-    expect(json("cancel", runId)).toMatchObject({ _tag: "Terminal", runId, status: "cancelled" })
+    const cancelled = smithers("cancel", runId, "--json")
+    expect(cancelled.status).toBe(130)
+    expect(cancelled.stderr).toBe("")
+    expect(JSON.parse(cancelled.stdout)).toMatchObject({ _tag: "Terminal", runId, status: "cancelled" })
     expect(json("ps").items.find((entry: { readonly runId: string }) => entry.runId === runId).status)
       .toBe("cancelled")
   })
@@ -310,7 +313,15 @@ describe("one project, from init to gc", processBudget, () => {
   })
 
   it("reports what gc would delete, then deletes it", () => {
-    const planned = json("gc", "--older-than", "0s", "--dry-run")
+    // `--older-than 0s` is refused: "delete everything" is not a retention
+    // policy, and it is the easiest value to type by accident. A real sweep
+    // names a window and waits it out.
+    const refused = smithers("gc", "--older-than", "0s", "--dry-run", "--json")
+    expect(refused.status).toBe(2)
+    expect(refused.stderr).toContain("--older-than must be a duration")
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_100)
+
+    const planned = json("gc", "--older-than", "1s", "--dry-run")
 
     expect(planned.dryRun).toBe(true)
     expect(planned.reports.map((report: { readonly database: string }) => report.database)).toEqual([
@@ -322,7 +333,7 @@ describe("one project, from init to gc", processBudget, () => {
     // A dry run deletes nothing, which is the whole point of the flag.
     expect(json("ps").items.map((entry: { readonly runId: string }) => entry.runId)).toContain(runId)
 
-    json("gc", "--older-than", "0s")
+    json("gc", "--older-than", "1s")
     expect(json("ps").items).toEqual([])
   })
 })

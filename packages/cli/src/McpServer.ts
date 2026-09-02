@@ -22,11 +22,12 @@
  *
  * @since 1.0.0
  */
-import { Control as ControlService, ControlSchema } from "@smthrs/control"
+import { Control as ControlService, ControlError, ControlSchema } from "@smthrs/control"
 import * as Redaction from "@smthrs/journal/Redaction"
 import { Effect, Queue, Schema, Stream } from "effect"
-import { createInterface } from "node:readline"
+import * as CliError from "./CliError.ts"
 import * as Forensics from "./Forensics.ts"
+import * as History from "./internal/History.ts"
 import * as NodeOutput from "./NodeOutput.ts"
 import * as Unsupported from "./Unsupported.ts"
 
@@ -37,6 +38,30 @@ import * as Unsupported from "./Unsupported.ts"
  * @since 1.0.0
  */
 export const protocolVersion = "2025-06-18"
+
+/**
+ * Largest request or response frame accepted by the stdio server.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const maximumFrameBytes = 4 * 1024 * 1024
+
+/**
+ * Largest event count returned by one MCP history tool.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const maximumHistoryEvents = 10_000
+
+/**
+ * Largest encoded event history returned by one MCP tool.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const maximumHistoryBytes = 1024 * 1024
 
 /**
  * Which tool families a session exposes.
@@ -164,8 +189,15 @@ const requireRunId = (args: Record<string, unknown>): string | undefined => text
 const eventsOf = (runId: string) =>
   Effect.gen(function*() {
     const control = yield* ControlService.Control
-    const collected = yield* Stream.runCollect(control.watch({ runId, follow: false }))
-    return globalThis.Array.from(collected)
+    return yield* History.collect(
+      control.watch({ runId, follow: false }),
+      { operation: "MCP event-history read", subject: `run ${JSON.stringify(runId)}` },
+      {
+        maxEvents: maximumHistoryEvents,
+        maxBytes: maximumHistoryBytes,
+        maxEventBytes: History.maximumEventBytes
+      }
+    )
   })
 
 /** One run's summary, or undefined when the control plane has no such run. */
@@ -180,23 +212,51 @@ const missingRun = (runId: string): Envelope => failed("RUN_NOT_FOUND", `Run not
 
 const missingArgument = (name: string): Envelope => failed("INVALID_INPUT", `${name} is required and must be a string`)
 
-const taggedName = (failure: unknown): string | undefined => {
-  if (typeof failure !== "object" || failure === null) return undefined
-  const tag = (failure as { readonly _tag?: unknown })._tag
-  if (typeof tag !== "string" || tag.length === 0) return undefined
-  return tag.slice(tag.lastIndexOf("/") + 1)
-}
+const safeText = (value: string, maximum = 512): string =>
+  [...String(Redaction.redact(value))].slice(0, maximum).join("")
 
-const safeFailure = (failure: unknown): Envelope => {
-  const name = taggedName(failure)
-  if (name === undefined) return failed("CONTROL_ERROR", "The control operation failed")
-  const code = name === "Unauthorized"
-    ? "UNAUTHORIZED"
-    : name.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/[^A-Za-z0-9]+/g, "_").toUpperCase()
-  const message = failure instanceof Error && failure.message !== ""
-    ? failure.message
-    : `${name} refused the control operation`
-  return failed(code, message)
+const safeFailure = (failure: ControlError.ControlError | CliError.ResourceLimitError): Envelope => {
+  if (failure instanceof CliError.ResourceLimitError) return failed("RESOURCE_LIMIT", failure.message)
+  switch (failure._tag) {
+    case "/control/RunNotFound":
+      return failed("RUN_NOT_FOUND", `Run not found: ${safeText(failure.runId)}`)
+    case "/control/PlanNotFound":
+      return failed("PLAN_NOT_FOUND", `Plan ${safeText(failure.planId)} was not found`)
+    case "/control/PlanDenied":
+      return failed("PLAN_DENIED", `Plan ${safeText(failure.planId)} was denied`)
+    case "/control/FlowNotFound":
+      return failed("FLOW_NOT_FOUND", `Flow not found: ${safeText(failure.flowId)}`)
+    case "/control/PlanDigestMismatch":
+      return failed("PLAN_DIGEST_MISMATCH", "The submitted plan digest does not match its payload")
+    case "/control/EnvelopeMismatch":
+      return failed("ENVELOPE_MISMATCH", "The submitted plan effect envelope does not match its payload")
+    case "/control/ClaimLost":
+      return failed("CLAIM_LOST", `Ownership of run ${safeText(failure.runId)} changed`)
+    case "/control/AlreadyResolved":
+      return failed("ALREADY_RESOLVED", `Approval request ${safeText(failure.requestId)} was already resolved`)
+    case "/control/InvalidInput":
+      return failed("INVALID_INPUT", safeText(failure.issue, 1024))
+    case "/control/Unauthorized":
+      return failed("UNAUTHORIZED", "The control operation was not authorized")
+    case "/control/Unavailable":
+      return failed(
+        "UNAVAILABLE",
+        `Control feature ${safeText(failure.feature)} is unavailable (${safeText(failure.ticket)})`
+      )
+    case "/control/TransportError":
+      return failed("TRANSPORT_ERROR", "The control transport failed")
+    case "/control/PersistenceError":
+      return failed("PERSISTENCE_ERROR", `Control persistence failed during ${safeText(failure.operation)}`)
+    case "/control/LaunchFailed":
+      return failed("LAUNCH_FAILED", `Run ${safeText(failure.runId)} could not be launched`)
+    case "/control/NoMatchingWait":
+      return failed(
+        "NO_MATCHING_WAIT",
+        `Run ${safeText(failure.runId)} has no wait named ${safeText(failure.waitName)}`
+      )
+    case "/control/CredentialConflict":
+      return failed("CREDENTIAL_CONFLICT", `Credential ${safeText(failure.id)} changed before this write committed`)
+  }
 }
 
 /** Wraps typed control failures while preserving defects and interruption. */
@@ -206,7 +266,11 @@ const envelope = <A>(
 ): Effect.Effect<Envelope, never, ControlService.Control> =>
   effect.pipe(
     Effect.map(onSuccess),
-    Effect.catch((failure) => Effect.succeed(safeFailure(failure)))
+    Effect.catch((failure) =>
+      failure instanceof CliError.ResourceLimitError || Schema.is(ControlError.ControlErrorSchema)(failure)
+        ? Effect.succeed(safeFailure(failure))
+        : Effect.die(failure)
+    )
   )
 
 const decodeApproval = (value: unknown): ControlService.ApprovalInput | undefined => {
@@ -615,6 +679,15 @@ const toolResult = (result: Envelope): Record<string, unknown> => ({
   isError: !result.ok
 })
 
+const frameBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), "utf8")
+
+const resourceLimitMessage = `MCP request or response exceeds the ${maximumFrameBytes}-byte frame limit`
+
+const resourceLimit = (): Extract<Envelope, { readonly ok: false }> => ({
+  ok: false,
+  error: { code: "RESOURCE_LIMIT", message: resourceLimitMessage }
+})
+
 /**
  * Answers one request, or `undefined` for a notification that needs no reply.
  *
@@ -629,17 +702,22 @@ export const respond = (
   Effect.gen(function*() {
     if (request.id === undefined) return undefined
     const reply = (result: unknown) => ({ jsonrpc: "2.0", id: request.id, result })
+    const boundedReply = (result: unknown): Record<string, unknown> => {
+      const candidate = reply(result)
+      return frameBytes(candidate) <= maximumFrameBytes ? candidate : reply(toolResult(resourceLimit()))
+    }
+    if (frameBytes(request) > maximumFrameBytes) return boundedReply(toolResult(resourceLimit()))
     switch (request.method) {
       case "initialize":
-        return reply({
+        return boundedReply({
           protocolVersion,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: "smithers", version }
         })
       case "ping":
-        return reply({})
+        return boundedReply({})
       case "tools/list":
-        return reply({
+        return boundedReply({
           tools: session.map((tool) => ({
             name: tool.name,
             description: tool.description,
@@ -654,7 +732,7 @@ export const respond = (
         const name = text(params["name"]) ?? ""
         const tool = session.find((candidate) => candidate.name === name)
         if (tool === undefined) {
-          return reply(toolResult(failed("unknown_tool", `No tool named ${name} is exposed by this session`)))
+          return boundedReply(toolResult(failed("unknown_tool", `No tool named ${name} is exposed by this session`)))
         }
         const rawArguments = params["arguments"] === undefined ? {} : params["arguments"]
         const decoded = yield* Schema.decodeUnknownEffect(tool.schema, { onExcessProperty: "error" })(
@@ -664,18 +742,94 @@ export const respond = (
           Effect.catch((error) => Effect.succeed({ _tag: "Invalid" as const, error }))
         )
         if (decoded._tag === "Invalid") {
-          return reply(toolResult(failed("INVALID_INPUT", String(decoded.error))))
+          return boundedReply(toolResult(failed("INVALID_INPUT", safeText(String(decoded.error), 1024))))
         }
-        return reply(toolResult(yield* tool.call(decoded.args as Record<string, unknown>)))
+        return boundedReply(toolResult(yield* tool.call(decoded.args as Record<string, unknown>)))
       }
-      default:
-        return {
+      default: {
+        const result = {
           jsonrpc: "2.0",
           id: request.id,
           error: { code: -32601, message: `Method not found: ${request.method ?? "?"}` }
         }
+        return frameBytes(result) <= maximumFrameBytes ? result : boundedReply(toolResult(resourceLimit()))
+      }
     }
   })
+
+type InputFrame =
+  | { readonly _tag: "Line"; readonly line: string }
+  | { readonly _tag: "Oversized" }
+
+const inputFrames = (input: NodeJS.ReadableStream): Stream.Stream<InputFrame> =>
+  Stream.callback<InputFrame>((queue) =>
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        let chunks: Array<Buffer> = []
+        let bytes = 0
+        let oversized = false
+        let closed = false
+
+        const append = (chunk: Buffer): void => {
+          if (chunk.length === 0 || oversized) return
+          if (bytes + chunk.length > maximumFrameBytes) {
+            chunks = []
+            bytes = 0
+            oversized = true
+            return
+          }
+          chunks.push(chunk)
+          bytes += chunk.length
+        }
+
+        const finish = (): void => {
+          Queue.offerUnsafe(
+            queue,
+            oversized
+              ? { _tag: "Oversized" }
+              : { _tag: "Line", line: Buffer.concat(chunks, bytes).toString("utf8") }
+          )
+          chunks = []
+          bytes = 0
+          oversized = false
+        }
+
+        const onData = (value: unknown): void => {
+          const chunk = Buffer.isBuffer(value)
+            ? value
+            : value instanceof Uint8Array
+            ? Buffer.from(value)
+            : Buffer.from(String(value), "utf8")
+          let start = 0
+          for (let index = 0; index < chunk.length; index++) {
+            if (chunk[index] !== 0x0a) continue
+            append(chunk.subarray(start, index))
+            finish()
+            start = index + 1
+          }
+          append(chunk.subarray(start))
+        }
+
+        const onClose = (): void => {
+          if (closed) return
+          closed = true
+          if (bytes > 0 || oversized) finish()
+          Queue.endUnsafe(queue)
+        }
+
+        input.on("data", onData)
+        input.on("end", onClose)
+        input.on("close", onClose)
+        return { onData, onClose }
+      }),
+      ({ onClose, onData }) =>
+        Effect.sync(() => {
+          input.removeListener("data", onData)
+          input.removeListener("end", onClose)
+          input.removeListener("close", onClose)
+        })
+    )
+  )
 
 /**
  * Serves the MCP session over stdio until standard input closes.
@@ -699,20 +853,22 @@ export const serve = (
     // and an MCP client correlates replies by id rather than by arrival, so
     // serializing costs nothing an agent can observe.
     yield* Stream.runForEach(
-      Stream.callback<string>((queue) =>
-        Effect.sync(() => {
-          const lines = createInterface({ input })
-          lines.on("line", (line) => {
-            Queue.offerUnsafe(queue, line)
-          })
-          lines.on("close", () => {
-            Queue.endUnsafe(queue)
-          })
-        })
-      ),
-      (line) =>
+      inputFrames(input),
+      (frame) =>
         Effect.gen(function*() {
-          const request = parse(line)
+          if (frame._tag === "Oversized") {
+            yield* Effect.sync(() =>
+              output.write(`${
+                JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: null,
+                  error: { code: -32001, message: resourceLimit().error?.message }
+                })
+              }\n`)
+            )
+            return
+          }
+          const request = parse(frame.line)
           if (request === undefined) return
           const reply = yield* respond(request, session, options.version)
           if (reply !== undefined) yield* Effect.sync(() => output.write(`${JSON.stringify(reply)}\n`))

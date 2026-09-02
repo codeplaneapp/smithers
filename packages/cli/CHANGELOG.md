@@ -77,6 +77,15 @@
 - Validate the `smithers init` flow name, which could otherwise scaffold
   outside `flows/`.
 
+- Bound CLI and MCP history reads, MCP protocol frames, and rendered output;
+  refuse executable object shapes with typed code-and-path rendering errors.
+
+- Serialize Codex token refresh across processes with a liveness-aware lock,
+  a unique fsynced temporary, and one post-lock credential re-read.
+
+- Validate every memory namespace through the public schema and reject control
+  characters without changing Unicode identities.
+
 ### Changed
 
 - `sideEffects` now names the entry points that execute at import instead of

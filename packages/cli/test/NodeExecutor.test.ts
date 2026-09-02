@@ -110,7 +110,7 @@ describe("NodeControl.seatResolver", () => {
       "    try { msg = JSON.parse(line) } catch { continue }",
       "    if (msg.id === undefined) continue",
       "    let result",
-      "    if (msg.method === 'initialize') result = { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 'test', version: '0' } }",
+      "    if (msg.method === 'initialize') result = { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'test', version: '0' } }",
       "    else if (msg.method === 'tools/list') result = { tools: [{ name: 'ping', description: 'Replies pong', inputSchema: { type: 'object' } }] }",
       "    else continue",
       "    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }) + '\\n')",

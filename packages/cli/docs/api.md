@@ -24,9 +24,17 @@ explicit listen opt-in and a bearer credential. The exact routes are listed by
 
 ## Process results
 
-`Output` renders keys in code-unit order and bounds recursive input. Exit codes
-come only from complete control receipts; use `Output.renderValue` for arbitrary
-stored or provider data so a caller-controlled `_tag` cannot imitate a receipt.
+`Output` renders keys in code-unit order after snapshotting inert plain data.
+It refuses proxies, accessors, callables, cycles, host objects, and values past
+its 128-level, 10,000-member, or 4 MiB output bounds with a typed code and path.
+Exit codes come only from complete control receipts; use `Output.renderValue`
+for arbitrary stored or provider data so a caller-controlled `_tag` cannot
+imitate a receipt.
+
+Finite CLI history reads retain at most 50,000 events and 16 MiB, with a 1 MiB
+per-event cap. MCP narrows that to 10,000 events and 1 MiB and admits request
+and response frames no larger than 4 MiB. Crossing a boundary returns a typed
+resource-limit failure rather than partial output.
 
 The stable process statuses are 0 for success, 1 for a failed operation or run,
 2 for usage, 3 for a run waiting on approval, 130 for cancellation, and 143 for

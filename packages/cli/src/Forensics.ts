@@ -256,14 +256,28 @@ const verdict = (d: Digest): string => {
 const label = (name: string): string => name.padEnd(10)
 
 /**
+ * Characters a POSIX shell passes through unchanged in an unquoted word.
+ *
+ * Everything else, including the empty string, is quoted. The set is
+ * deliberately narrow: a value is quoted unless it is provably inert.
+ */
+const inertWord = /^[A-Za-z0-9_@%+=:,./-]+$/
+
+/**
  * Quotes one argv element as exactly one POSIX shell word. Reach for this for
  * every caller-controlled value in a copy-paste command. It preserves all
  * bytes, including newlines, and performs no semantic validation.
  *
+ * A value made only of characters no shell interprets is returned unchanged,
+ * so the advertised command reads as the one an operator would have typed.
+ * Anything else, including the empty string, is wrapped in single quotes with
+ * embedded quotes escaped as `'\''`.
+ *
  * @category conversions
  * @since 0.1.0
  */
-export const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
+export const shellQuote = (value: string): string =>
+  inertWord.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`
 
 const shellCommand = (...arguments_: ReadonlyArray<string>): string => arguments_.map(shellQuote).join(" ")
 

@@ -14,7 +14,21 @@
  *
  * @since 1.0.0
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs"
+import { randomUUID } from "node:crypto"
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  fstatSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync
+} from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -99,8 +113,18 @@ interface Unusable {
   readonly reason: string
 }
 
-const isUnusable = (value: Record<string, unknown> | Unusable): value is Unusable =>
-  typeof (value as Unusable).reason === "string"
+interface Configuration {
+  readonly document: Record<string, unknown>
+  readonly source: Buffer | undefined
+  readonly mode: number | undefined
+}
+
+const isUnusable = (value: Configuration | Unusable): value is Unusable => "reason" in value
+
+const errorCode = (error: unknown): string | undefined =>
+  typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+    ? error.code
+    : undefined
 
 /**
  * Reads an agent's configuration, or says why it must not be written over.
@@ -111,17 +135,27 @@ const isUnusable = (value: Record<string, unknown> | Unusable): value is Unusabl
  * turned the whole file into a document holding nothing but the Smithers
  * server entry, with no copy of what was there before.
  */
-const readJson = (path: string): Record<string, unknown> | Unusable => {
-  if (!existsSync(path)) return {}
-  let text: string
+const readJson = (path: string): Configuration | Unusable => {
+  let descriptor: number
   try {
-    text = readFileSync(path, "utf8")
+    descriptor = openSync(path, "r")
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return { document: {}, source: undefined, mode: undefined }
+    return { reason: `${path} could not be read: ${error instanceof Error ? error.message : String(error)}` }
+  }
+  let source: Buffer
+  let mode: number
+  try {
+    source = readFileSync(descriptor)
+    mode = fstatSync(descriptor).mode & 0o777
   } catch (error) {
     return { reason: `${path} could not be read: ${error instanceof Error ? error.message : String(error)}` }
+  } finally {
+    closeSync(descriptor)
   }
   let parsed: unknown
   try {
-    parsed = JSON.parse(text)
+    parsed = JSON.parse(source.toString("utf8"))
   } catch (error) {
     return {
       reason: `${path} is not valid JSON (${
@@ -132,7 +166,25 @@ const readJson = (path: string): Record<string, unknown> | Unusable => {
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { reason: `${path} has a root that is not a JSON object. Fix the file, then run this again.` }
   }
-  return parsed as Record<string, unknown>
+  return { document: parsed as Record<string, unknown>, source, mode }
+}
+
+const sourceStillMatches = (path: string, source: Buffer | undefined, mode: number | undefined): boolean => {
+  try {
+    const current = readFileSync(path)
+    return source !== undefined && current.equals(source) && (statSync(path).mode & 0o777) === mode
+  } catch (error) {
+    return source === undefined && errorCode(error) === "ENOENT"
+  }
+}
+
+const syncPath = (path: string): void => {
+  const descriptor = openSync(path, "r")
+  try {
+    fsyncSync(descriptor)
+  } finally {
+    closeSync(descriptor)
+  }
 }
 
 /**
@@ -144,9 +196,16 @@ const readJson = (path: string): Record<string, unknown> | Unusable => {
 export const addMcp = (agent: Agent, home: string = homedir()): Wired => {
   const path = join(home, ...agent.mcpConfig)
   const entry = launchCommand()
+  const lockPath = `${path}.smithers.lock`
+  let lock: number | undefined
   try {
-    const document = readJson(path)
-    if (isUnusable(document)) return { agent: agent.id, path, status: "failed", reason: document.reason }
+    mkdirSync(dirname(path), { recursive: true })
+    lock = openSync(lockPath, "wx", 0o600)
+    const configuration = readJson(path)
+    if (isUnusable(configuration)) {
+      return { agent: agent.id, path, status: "failed", reason: configuration.reason }
+    }
+    const { document, mode, source } = configuration
     const existing = document["mcpServers"]
     if (existing !== undefined && (existing === null || typeof existing !== "object" || Array.isArray(existing))) {
       return {
@@ -162,15 +221,28 @@ export const addMcp = (agent: Agent, home: string = homedir()): Wired => {
       return { agent: agent.id, path, status: "unchanged" }
     }
     servers[serverName] = desired
-    mkdirSync(dirname(path), { recursive: true })
     // Temp-plus-rename, mode preserved: a crash between truncation and the
     // last byte would otherwise leave the operator with a half-written
     // configuration and no copy of the original.
-    const temporary = `${path}.smithers-${process.pid}.tmp`
-    writeFileSync(temporary, `${JSON.stringify({ ...document, mcpServers: servers }, null, 2)}\n`, "utf8")
+    const temporary = `${path}.smithers-${process.pid}-${randomUUID()}.tmp`
+    writeFileSync(temporary, `${JSON.stringify({ ...document, mcpServers: servers }, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: mode ?? 0o600
+    })
     try {
-      if (existsSync(path)) chmodSync(temporary, statSync(path).mode & 0o777)
+      if (mode !== undefined) chmodSync(temporary, mode)
+      syncPath(temporary)
+      if (!sourceStillMatches(path, source, mode)) {
+        return {
+          agent: agent.id,
+          path,
+          status: "failed",
+          reason: `${path} changed while Smithers was preparing the update. No change was written; run this again.`
+        }
+      }
       renameSync(temporary, path)
+      syncPath(dirname(path))
     } catch (error) {
       try {
         unlinkSync(temporary)
@@ -185,7 +257,16 @@ export const addMcp = (agent: Agent, home: string = homedir()): Wired => {
       agent: agent.id,
       path,
       status: "failed",
-      reason: error instanceof Error ? error.message : String(error)
+      reason: errorCode(error) === "EEXIST" && lock === undefined
+        ? `${path} is being updated by another Smithers process. No change was written; run this again.`
+        : error instanceof Error
+        ? error.message
+        : String(error)
+    }
+  } finally {
+    if (lock !== undefined) {
+      closeSync(lock)
+      unlinkSync(lockPath)
     }
   }
 }

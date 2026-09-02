@@ -121,6 +121,11 @@ describe("the refusal `bin.ts` answers before the control plane boots", () => {
 })
 
 describe("every removed flag", () => {
+  it("renders a removed root flag without an empty command segment", () => {
+    expect(Unsupported.flagMessage({ parent: "", flag: "legacy", reason: "gone", anchor: "legacy" }))
+      .toContain("smithers --legacy was removed")
+  })
+
   /** How each removed flag is spelled on its surviving parent command. */
   const invocation = (flag: Unsupported.RemovedFlag): ReadonlyArray<string> => {
     if (flag.parent === "") return ["--backend", "postgres", "ls"]

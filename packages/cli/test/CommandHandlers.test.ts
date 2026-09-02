@@ -2,13 +2,13 @@
  * Every command handler in the tree, driven through the real parser.
  *
  * `ControlSurface.test.ts` covers the plan/approve/run spine and the remote
- * transports. These cases cover the rest of the surface — the listing,
- * lifecycle, and projection verbs — plus the argument decoding that every verb
+ * transports. These cases cover the rest of the surface: the listing,
+ * lifecycle, and projection verbs, plus the argument decoding that every verb
  * shares: bare keys, `key=value` pairs, `--data` merged over them, and the
  * `--json`/`--quiet` presentation flags that change what the other flags mean.
  */
 import { NodeServices } from "@effect/platform-node"
-import { Control as ControlService, type ControlSchema } from "@smthrs/control"
+import { Control as ControlService, ControlError, type ControlSchema } from "@smthrs/control"
 import * as TestControl from "@smthrs/control/test/TestControl"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import { Cause, Effect, Exit, Layer, Stream } from "effect"
@@ -48,8 +48,8 @@ const json = Effect.fnUntraced(function*(args: ReadonlyArray<string>) {
 /**
  * The project flow these cases plan, approve, and run.
  *
- * A reserved `system/*` id would be simpler to reach — `TestControl` falls
- * back to the whole reserved catalog — but the CLI refuses to plan one, since
+ * A reserved `system/*` id would be simpler to reach. `TestControl` falls
+ * back to the whole reserved catalog, but the CLI refuses to plan one, since
  * a reserved id has no body and a launch would park forever
  * (`Unsupported.reservedFlowError`). So the fixture registers a flow of its
  * own, which is also what an operator's project looks like.
@@ -91,7 +91,7 @@ const launch = Effect.fnUntraced(function*() {
 })
 
 /** A control whose `watch` serves a fixed, finite history. */
-const historyControl = (events: ReadonlyArray<ControlSchema.ControlEvent>) =>
+const historyControl = (events: ReadonlyArray<ControlSchema.ControlEvent>, fail = false) =>
   Layer.effect(
     ControlService.Control,
     Effect.gen(function*() {
@@ -111,7 +111,10 @@ const historyControl = (events: ReadonlyArray<ControlSchema.ControlEvent>) =>
               }]
             })
             : control.list(request),
-        watch: () => Stream.fromIterable(events)
+        watch: () =>
+          fail
+            ? Stream.fail(new ControlError.Unavailable({ feature: "watch", ticket: "test" }))
+            : Stream.fromIterable(events)
       })
     })
   ).pipe(Layer.provide(testControl))
@@ -232,33 +235,67 @@ describe("presentation flags", () => {
     )
 
     expect(error).toBeInstanceOf(CliError.UsageError)
-    expect((error as CliError.UsageError).message).toBe('--limit must be a positive integer; got "0"')
+    expect((error as CliError.UsageError).message).toBe("--limit must be a positive integer; got \"0\"")
   })
 })
 
 describe("memory namespace parsing", () => {
-  it.each([
-    ["unknown kind", "team:alpha"],
-    ["empty id", "user:"],
-    ["missing separator", "alpha"]
-  ])("refuses an %s instead of silently changing its identity", async (_label, namespace) => {
-    const error = await run(
-      Effect.flip(runCommand(["memory", "list", "--namespace", namespace])),
-      testControl
-    )
+  const verb = (name: "list" | "get" | "set" | "rm", namespace: string): ReadonlyArray<string> => {
+    const prefix = ["memory", name, "--namespace", namespace]
+    if (name === "list") return prefix
+    if (name === "set") return [...prefix, "key", "value"]
+    return [...prefix, "key"]
+  }
 
-    expect(error).toBeInstanceOf(CliError.UsageError)
-    expect((error as CliError.UsageError).message).toBe(
-      `--namespace must be flow:<id>, agent:<id>, user:<id>, or global:<id>; got ${JSON.stringify(namespace)}`
+  it.each(["list", "get", "set", "rm"] as const)(
+    "refuses every invalid namespace identity before memory %s",
+    async (name) => {
+      for (const namespace of ["team:alpha", "user:", "alpha", "user:alpha\0tail"]) {
+        const error = await run(Effect.flip(runCommand(verb(name, namespace))), testControl)
+        expect(error).toBeInstanceOf(CliError.UsageError)
+        expect((error as CliError.UsageError).message).toBe(
+          `--namespace must be flow:<id>, agent:<id>, user:<id>, or global:<id>; got ${JSON.stringify(namespace)}`
+        )
+        expect(CliError.exitCode(error as CliError.UsageError)).toBe(2)
+      }
+    }
+  )
+
+  it("preserves one Unicode namespace identity across all four verbs", async () => {
+    const seen: Array<MemoryStore.NamespaceInput> = []
+    const namespace = { kind: "user" as const, id: "álîçé-用户-😀" }
+    const memory = MemoryStore.layerNoop({
+      listFacts: (input) => Effect.sync(() => (seen.push(input.namespace), [])),
+      getFact: (input) =>
+        Effect.sync(() => {
+          seen.push(input.namespace)
+          return {
+            namespace: input.namespace,
+            key: input.key,
+            value: "found",
+            provenance: {},
+            createdAtMs: 0,
+            updatedAtMs: 0
+          }
+        }),
+      putFact: (input) => Effect.sync(() => void seen.push(input.namespace)),
+      deleteFact: (input) => Effect.sync(() => (seen.push(input.namespace), true))
+    })
+    await Effect.runPromise(
+      Effect.forEach(["list", "get", "set", "rm"] as const, (name) => runCommand(verb(name, `user:${namespace.id}`)))
+        .pipe(
+          Effect.provide(testControl),
+          Effect.provide(Layer.mergeAll(TestConsole.layer, Output.layer, memory)),
+          Effect.provide(NodeServices.layer)
+        )
     )
-    expect(CliError.exitCode(error as CliError.UsageError)).toBe(2)
+    expect(seen).toEqual([namespace, namespace, namespace, namespace])
   })
 
   it("never lets an unknown kind address a valid user's record", async () => {
     const facts = new Map<string, MemoryStore.Fact>()
     let reads = 0
-    const keyOf = (input: MemoryStore.GetFactInput) =>
-      `${input.namespace.kind}:${input.namespace.id}:${input.key}`
+    const keyOf = (input: MemoryStore.GetFactInput) => `${input.namespace.kind}:${input.namespace.id}:${input.key}`
     const memory = MemoryStore.layerNoop({
       putFact: (input) =>
         Effect.sync(() => {
@@ -294,9 +331,17 @@ describe("memory namespace parsing", () => {
 
     expect(result.valid).toBe("value")
     expect(result.refused).toBeInstanceOf(CliError.UsageError)
-    expect((result.refused as CliError.UsageError).message).toContain('"team:alpha"')
+    expect((result.refused as CliError.UsageError).message).toContain("\"team:alpha\"")
     expect(reads).toBe(1)
   })
+})
+
+it("preserves an event-history watch failure with its run and operation", async () => {
+  const error = await run(Effect.flip(runCommand(["logs", "run-1"])), historyControl([], true))
+
+  expect(error).toBeInstanceOf(ControlError.TransportError)
+  expect((error as ControlError.TransportError).message).toContain("event-history read")
+  expect((error as ControlError.TransportError).message).toContain("run-1")
 })
 
 describe("listing verbs", () => {
@@ -360,7 +405,7 @@ describe("lifecycle verbs", () => {
     // Retargeted: the key is derived from the run id alone, so a repeated
     // cancel used to replay the first one's receipt as `AlreadyApplied`. That
     // is the right answer only while the receipt is still true, and a cancel
-    // that finished nothing leaves a non-terminal run behind — the Phase 7
+    // that finished nothing leaves a non-terminal run behind. The Phase 7
     // smoke's `cancel` and `down` both replayed against two runs no command
     // could reach. `cancel` reads the run first now, so a settled run answers
     // `Terminal` every time and a live one is asked again.
@@ -422,7 +467,7 @@ describe("lifecycle verbs", () => {
     expect(error).toBeInstanceOf(CliError.UsageError)
     expect((error as CliError.UsageError).message).toContain("signal-json must match the expected payload schema")
     expect((error as CliError.UsageError).message).toContain("payload")
-    expect((error as CliError.UsageError).message).not.toContain('{"name":"proceed"}')
+    expect((error as CliError.UsageError).message).not.toContain("{\"name\":\"proceed\"}")
   })
 
   it("denies a complete approval payload", async () => {
@@ -487,10 +532,10 @@ describe("up", () => {
       writeFileSync(
         entry,
         [
-          'import { writeFileSync } from "node:fs"',
-          'writeFileSync(process.env.SMITHERS_TEST_DETACHED_ARGV, JSON.stringify(process.argv.slice(2)))',
-          'const nonce = process.env.SMITHERS_INTERNAL_DETACHED_ADMISSION',
-          'process.stderr.write("SMITHERS_DETACHED_ADMISSION=run:" + nonce + " runId=run-detached-test\\n")'
+          "import { writeFileSync } from \"node:fs\"",
+          "writeFileSync(process.env.SMITHERS_TEST_DETACHED_ARGV, JSON.stringify(process.argv.slice(2)))",
+          "const nonce = process.env.SMITHERS_INTERNAL_DETACHED_ADMISSION",
+          "process.stderr.write(\"SMITHERS_DETACHED_ADMISSION=run:\" + nonce + \" runId=run-detached-test\\n\")"
         ].join("\n")
       )
       process.argv = [process.execPath, entry]
@@ -590,19 +635,21 @@ describe("forensic projections", () => {
     const error = await run(Effect.flip(runCommand(["status", "run-1"])), mismatched)
 
     expect(error).toBeInstanceOf(CliError.UsageError)
-    expect((error as CliError.UsageError).message).toContain('"run-1"')
+    expect((error as CliError.UsageError).message).toContain("\"run-1\"")
   })
 
-  it.each([
-    ["status", ["status", "run-missing"]],
-    ["why", ["why", "run-missing"]],
-    ["logs", ["logs", "run-missing"]],
-    ["output", ["output", "run-missing"]]
-  ] as const)("refuses a missing run in %s", async (_verb, args) => {
+  it.each(
+    [
+      ["status", ["status", "run-missing"]],
+      ["why", ["why", "run-missing"]],
+      ["logs", ["logs", "run-missing"]],
+      ["output", ["output", "run-missing"]]
+    ] as const
+  )("refuses a missing run in %s", async (_verb, args) => {
     const error = await run(Effect.flip(runCommand(args)), testControl)
 
     expect(error).toBeInstanceOf(CliError.UsageError)
-    expect((error as CliError.UsageError).message).toBe('Run not found: "run-missing"')
+    expect((error as CliError.UsageError).message).toBe("Run not found: \"run-missing\"")
     expect(CliError.exitCode(error as CliError.UsageError)).toBe(2)
   })
 
@@ -642,7 +689,7 @@ describe("forensic projections", () => {
     )
 
     // Follow mode renders per event, so two events are two rendered lines in
-    // both formats — never the whole-run transcript.
+    // both formats, never the whole-run transcript.
     expect(result.human.split("\n")).toEqual([
       "cell    return 1",
       "control.run.completed {\"runId\":\"run-1\",\"status\":\"completed\"}"
@@ -692,8 +739,31 @@ describe("owned-run settlement", () => {
     )
 
     expect(Exit.isFailure(exit)).toBe(true)
-    expect(String(Exit.isFailure(exit) ? Cause.squash(exit.cause) : "")).toContain("transport gone")
+    const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+    expect(error).toBeInstanceOf(ControlError.TransportError)
+    expect((error as ControlError.TransportError).message).toContain("approval-park lookup")
+    expect((error as ControlError.TransportError).message).toContain("run-1")
     expect(resumes.count).toBe(0)
+  })
+
+  it("fails after admission when a locally owned settlement watch fails", async () => {
+    const resumes = { count: 0 }
+    const exit = await Effect.runPromise(
+      Effect.exit(json(["--json", "run", "run-1", "--resume"])).pipe(
+        Effect.timeout("5 seconds"),
+        Effect.provide(ExecutorOwnership.layer(true)),
+        Effect.provide(watchControl(resumes, false)),
+        Effect.provide(services),
+        Effect.provide(NodeServices.layer)
+      )
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+    expect(error).toBeInstanceOf(ControlError.TransportError)
+    expect((error as ControlError.TransportError).message).toContain("settlement")
+    expect((error as ControlError.TransportError).message).toContain("run-1")
+    expect(resumes.count).toBe(1)
   })
 
   it("does not wait on settlement when this process does not own the executor", async () => {

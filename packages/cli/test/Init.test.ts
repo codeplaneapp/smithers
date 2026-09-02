@@ -123,6 +123,8 @@ describe("the scaffold", () => {
     ["slash separator", "a/b"],
     ["backslash separator", "a\\b"],
     ["YAML metacharacter", "a: b"],
+    ["quote", "review\"evil"],
+    ["Unicode outside the portable set", "réview"],
     ["newline", "name\nmodel: evil"],
     ["empty name", ""],
     ["dot segment", "."]

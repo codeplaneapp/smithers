@@ -44,6 +44,52 @@ export class UnsupportedError extends Schema.TaggedError<UnsupportedError>()("/c
 }) {}
 
 /**
+ * A correctly spelled read would exceed a published in-memory or wire bound.
+ *
+ * Exits 1. The operation and subject are inert labels chosen by the CLI, never
+ * caller-rendered values, so this failure remains safe to print over MCP too.
+ *
+ * @category errors
+ * @since 1.0.0-rc.0
+ */
+export class ResourceLimitError extends Schema.TaggedError<ResourceLimitError>()("/cli/ResourceLimitError", {
+  operation: Schema.String,
+  subject: Schema.String,
+  limit: Schema.Number,
+  unit: Schema.Literals(["events", "bytes"])
+}) {
+  override get message(): string {
+    return `${this.operation} for ${this.subject} exceeds the ${this.limit}-${this.unit} resource limit`
+  }
+}
+
+/**
+ * Caller-controlled output was not inert bounded data.
+ *
+ * The code is stable for scripts and the path identifies the first refusing
+ * member without retaining its value. Rendering failures exit 1.
+ *
+ * @category errors
+ * @since 1.0.0-rc.0
+ */
+export class RenderingError extends Schema.TaggedError<RenderingError>()("/cli/RenderingError", {
+  code: Schema.Literals([
+    "accessor",
+    "byte_limit",
+    "callable",
+    "cycle",
+    "depth_limit",
+    "member_limit",
+    "proxy",
+    "to_json",
+    "unsupported",
+    "unreadable"
+  ]),
+  path: Schema.String,
+  message: Schema.String
+}) {}
+
+/**
  * Every failure the command-line projection adds on top of the control
  * plane's own.
  *
@@ -53,7 +99,7 @@ export class UnsupportedError extends Schema.TaggedError<UnsupportedError>()("/c
  * @category models
  * @since 0.1.0
  */
-export type CliError = UsageError | UnsupportedError
+export type CliError = UsageError | UnsupportedError | ResourceLimitError | RenderingError
 
 /**
  * The process exit status one CLI failure ends on.

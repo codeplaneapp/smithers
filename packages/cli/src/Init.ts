@@ -61,7 +61,7 @@ export const nameProblem = (name: string): string | undefined => {
     name === ".." ||
     name.includes("/") ||
     name.includes("\\") ||
-    /[\u0000-\u001f\u007f-\u009f]/.test(name) ||
+    /\p{Cc}/u.test(name) ||
     !/^[A-Za-z0-9_-]+$/.test(name)
   ) return reason()
   return undefined

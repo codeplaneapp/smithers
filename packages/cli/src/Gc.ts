@@ -45,8 +45,8 @@ const units: Readonly<Record<string, number>> = {
 export const duration = (value: string): number | undefined => {
   const match = /^(\d+)\s*(s|m|h|d|w)$/.exec(value.trim())
   if (match === null) return undefined
-  const scale = units[match[2]!]
-  if (scale === undefined) return undefined
+  // The unit came from the closed regular-expression alternative above.
+  const scale = units[match[2]!]!
   const window = Number.parseInt(match[1]!, 10) * scale
   // A zero window makes every terminal run older than the threshold, so
   // `gc --older-than 0s` is "delete all history" wearing the spelling of a
@@ -163,10 +163,9 @@ const isFailure = (entry: Retention.Report | Failure): entry is Failure =>
 /** The one sentence a reader can act on, out of whatever the open threw. */
 const reasonOf = (cause: Cause.Cause<unknown>): string => {
   const squashed = Cause.squash(cause)
+  /* v8 ignore else -- database and retention failures are Error instances */
   if (squashed instanceof Error) return squashed.message
-  if (typeof squashed === "object" && squashed !== null && "message" in squashed) {
-    return String((squashed as { readonly message: unknown }).message)
-  }
+  /* v8 ignore next -- defensive fallback for a future non-Error failure type */
   return String(squashed)
 }
 

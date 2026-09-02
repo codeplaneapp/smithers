@@ -10,6 +10,7 @@
  * @since 1.0.0
  */
 import * as Redaction from "@smthrs/journal/Redaction"
+import { isProxy } from "node:util/types"
 
 /**
  * Where reports are posted when the environment names no other endpoint.
@@ -43,7 +44,12 @@ const assertRenderable = (value: unknown): void => {
       throw refusal(`the value exceeds the ${Redaction.maxDepth} container depth limit`)
     }
     if ((typeof node !== "object" && typeof node !== "function") || node === null) return
-    if (typeof node === "function") return
+    if (typeof node === "function") {
+      throw refusal("the value contains a callable member")
+    }
+    if (isProxy(node)) {
+      throw refusal("the value contains a proxy, which could run code while the report is inspected")
+    }
     if (ancestors.has(node)) return
 
     const size = binarySize(node)
@@ -73,16 +79,9 @@ const assertRenderable = (value: unknown): void => {
 }
 
 const applyReportOnlyKeys = (value: unknown): unknown => {
-  let walked = 0
-
   const walk = (node: unknown, depth: number): unknown => {
-    walked += 1
-    if (walked > Redaction.binaryWalkLimit) {
-      throw refusal(`the redacted value exceeds the ${Redaction.binaryWalkLimit} member walk limit`)
-    }
-    if (depth > Redaction.maxDepth) {
-      throw refusal(`the redacted value exceeds the ${Redaction.maxDepth} container depth limit`)
-    }
+    // `assertRenderable` has already admitted the exact tree against both
+    // bounds, and redaction cannot add members or nesting.
     if (Array.isArray(node)) return node.map((entry) => walk(entry, depth + 1))
     if (typeof node !== "object" || node === null) return node
     return Object.fromEntries(

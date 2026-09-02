@@ -56,7 +56,10 @@ const errorName = (error: Error): string => {
  * written here instead.
  */
 const report = (error: unknown): void => {
-  const message = error instanceof CliError.UsageError || error instanceof CliError.UnsupportedError
+  const message = error instanceof CliError.UsageError ||
+      error instanceof CliError.UnsupportedError ||
+      error instanceof CliError.ResourceLimitError ||
+      error instanceof CliError.RenderingError
     ? error.message
     // A refused database open is a defect by design: `NodeDatabase.layer` keeps
     // the `never` error channel eleven packages compose against, so the refusal
@@ -100,7 +103,12 @@ const teardown: Runtime.Teardown = (exit, onExit) => {
     return
   }
   report(error)
-  if (error instanceof CliError.UsageError || error instanceof CliError.UnsupportedError) {
+  if (
+    error instanceof CliError.UsageError ||
+    error instanceof CliError.UnsupportedError ||
+    error instanceof CliError.ResourceLimitError ||
+    error instanceof CliError.RenderingError
+  ) {
     onExit(CliError.exitCode(error))
     return
   }

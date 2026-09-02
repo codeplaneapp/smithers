@@ -30,9 +30,9 @@ import type * as RequestExecutor from "@smthrs/model/RequestExecutor"
 import { Clock, Effect, Semaphore } from "effect"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import { randomUUID } from "node:crypto"
-import { closeSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { closeSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 /**
  * The OAuth token endpoint the refresh grant is sent to. This is the auth
@@ -177,7 +177,7 @@ const lastRefreshInstant = (now: number): string => new Date(now).toISOString().
  * The returned store hands each seat an `Auth` that reuses the recorded access
  * token until it is within five minutes of its JWT expiry, then refreshes
  * once for every waiter. A refresh re-reads `auth.json` immediately before
- * spending the refresh token, writes the result to a per-process temporary
+ * spending the refresh token, writes the result to a unique fsynced temporary
  * file, and renames it into place, so a crash cannot leave a truncated
  * session behind.
  *
@@ -203,6 +203,19 @@ export const make = (options: MakeOptions): Store => {
       ? error.code
       : undefined
 
+  /** A lock is recoverable only when its recorded process is provably gone. */
+  const lockOwnerAlive = (token: string): boolean => {
+    const separator = token.indexOf(":")
+    const pid = Number(token.slice(0, separator < 0 ? token.length : separator))
+    if (!Number.isSafeInteger(pid) || pid <= 0) return false
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch (error) {
+      return errorCode(error) !== "ESRCH"
+    }
+  }
+
   /** Creates the cross-process lock, waiting only for a bounded live owner. */
   const acquireLock: Effect.Effect<string, ModelError> = Effect.gen(function*() {
     const token = `${process.pid}:${randomUUID()}`
@@ -212,6 +225,7 @@ export const make = (options: MakeOptions): Store => {
       try {
         descriptor = openSync(lockFile, "wx", 0o600)
         writeFileSync(descriptor, token, "utf8")
+        fsyncSync(descriptor)
         closeSync(descriptor)
         return token
       } catch (error) {
@@ -232,9 +246,14 @@ export const make = (options: MakeOptions): Store => {
 
       const now = yield* Clock.currentTimeMillis
       try {
-        if (now - statSync(lockFile).mtimeMs >= STALE_LOCK_MS) {
-          rmSync(lockFile, { force: true })
-          continue
+        const observed = readFileSync(lockFile, "utf8")
+        if (now - statSync(lockFile).mtimeMs >= STALE_LOCK_MS && !lockOwnerAlive(observed)) {
+          // Recheck the ownership token immediately before removal so an old
+          // observation never intentionally deletes a replacement lock.
+          if (readFileSync(lockFile, "utf8") === observed) {
+            rmSync(lockFile, { force: true })
+            continue
+          }
         }
       } catch (error) {
         if (errorCode(error) === "ENOENT") continue
@@ -307,12 +326,36 @@ export const make = (options: MakeOptions): Store => {
         },
         last_refresh: lastRefreshInstant(now)
       }
-      const temporary = `${file}.tmp-${process.pid}`
+      const temporary = `${file}.tmp-${process.pid}-${randomUUID()}`
+      let descriptor: number | undefined
       try {
-        writeFileSync(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
+        descriptor = openSync(temporary, "wx", 0o600)
+        writeFileSync(descriptor, `${JSON.stringify(next, null, 2)}\n`, "utf8")
+        fsyncSync(descriptor)
+        closeSync(descriptor)
+        descriptor = undefined
         renameSync(temporary, file)
+        // Persist the directory entry on filesystems that expose directory
+        // descriptors. Windows may refuse to open one; the atomic rename is
+        // still the strongest primitive available there.
+        let directoryDescriptor: number | undefined
+        try {
+          directoryDescriptor = openSync(dirname(file), "r")
+          fsyncSync(directoryDescriptor)
+        } catch {
+          // Best effort only on platforms without directory fsync.
+        } finally {
+          if (directoryDescriptor !== undefined) closeSync(directoryDescriptor)
+        }
         return Effect.void
       } catch {
+        if (descriptor !== undefined) {
+          try {
+            closeSync(descriptor)
+          } catch {
+            // The failed write may already have closed it.
+          }
+        }
         try {
           rmSync(temporary, { force: true })
         } catch {
@@ -361,16 +404,17 @@ export const make = (options: MakeOptions): Store => {
       } catch {
         parsed = undefined
       }
-      const access = isRecord(parsed) ? nonEmptyString(parsed.access_token) : undefined
-      if (parsed === undefined || access === undefined) {
+      const response = isRecord(parsed) ? parsed : undefined
+      const access = response === undefined ? undefined : nonEmptyString(response.access_token)
+      if (response === undefined || access === undefined) {
         return yield* Effect.fail(
           authenticationError(`The ChatGPT token endpoint at ${refreshUrl} answered without an access token`)
         )
       }
       const refreshed = {
         access,
-        refresh: isRecord(parsed) ? nonEmptyString(parsed.refresh_token) : undefined,
-        id: isRecord(parsed) ? nonEmptyString(parsed.id_token) : undefined
+        refresh: nonEmptyString(response.refresh_token),
+        id: nonEmptyString(response.id_token)
       }
       const now = yield* Clock.currentTimeMillis
       yield* write(state, refreshed, now)

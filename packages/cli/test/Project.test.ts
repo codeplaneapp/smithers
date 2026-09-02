@@ -7,6 +7,7 @@
  * directories of one project must resolve the same root, or they write to two
  * different databases and disagree about what exists.
  */
+import { Effect } from "effect"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -123,6 +124,11 @@ describe("the project root", () => {
     expect(Project.logDirectory("/work")).toBe(join("/work", ".flows", "logs"))
     expect(Project.logFile("/work", "run-1")).toBe(join("/work", ".flows", "logs", "run-1.log"))
     expect(Project.flowsDirectory("/work")).toBe(join("/work", "flows"))
+  })
+
+  it("supplies ambient defaults when no project layer is installed", () => {
+    expect(Effect.runSync(Project.ProjectRoot)).toBe(process.cwd())
+    expect(Effect.runSync(Project.MigrationRoot)).toBe(Project.legacyRoot(undefined, process.cwd()))
   })
 })
 

@@ -8,6 +8,11 @@
  * carries is named in that row. Types are not checked — they are erased before
  * a namespace object exists — so a row may name more than this file can see,
  * never less.
+ *
+ * The README's TypeScript example is checked the same way, against
+ * `fixtures/readme-example.ts`. The fixture is inside `tsconfig.test.json`, so
+ * the package typecheck compiles the published example and this file proves the
+ * two have not drifted apart.
  */
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
@@ -44,4 +49,25 @@ describe("the README public-export table", () => {
       expect(missing).toEqual([])
     })
   }
+})
+
+/** The `ts` fenced blocks in the README, in order. */
+const snippets = [...readme.matchAll(/```ts\n([\s\S]*?)```/g)].map((match) => match[1] ?? "")
+
+/**
+ * The compiled fixture, with its explanatory header and the export that keeps
+ * `main` from being an unused local removed, so what remains is the example.
+ */
+const compiled = readFileSync(fileURLToPath(new URL("./fixtures/readme-example.ts", import.meta.url)), "utf8")
+  .replace(/^\/\*\*[\s\S]*?\*\/\n/, "")
+  .replace(/\n\nexport \{ main \}\n$/, "\n")
+
+describe("the README example", () => {
+  it("is the one the package typecheck compiles", () => {
+    // A README example nothing compiles rots silently: this one called
+    // `makeConfig` with one argument for as long as it took the signature to
+    // grow two more parameters.
+    expect(snippets).toHaveLength(1)
+    expect(snippets[0]).toBe(compiled)
+  })
 })

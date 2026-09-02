@@ -93,6 +93,8 @@ describe("subscriptions", () => {
     expect(ClaudeMirror.readSubscriptions(root)).toEqual([])
     writeFileSync(ClaudeMirror.subscriptionsPath(root), JSON.stringify([{ runId: 1 }, "x", {}]), "utf8")
     expect(ClaudeMirror.readSubscriptions(root)).toEqual([])
+    writeFileSync(ClaudeMirror.subscriptionsPath(root), JSON.stringify({ runId: "not-an-array" }), "utf8")
+    expect(ClaudeMirror.readSubscriptions(root)).toEqual([])
   })
 
   it("keeps the registry beside the project's other run state", () => {
@@ -141,6 +143,17 @@ describe("one mirror frame", () => {
     expect(frame.changed).toEqual(["bash#1"])
     // A node that is still running has produced nothing to carry.
     expect(frame.outputs).toEqual({})
+  })
+
+  it("reports failed nodes and an absent JSON value without inventing output", () => {
+    const failed = [
+      event("control.agent.cell-call-started", { flowName: "write", input: {} }),
+      event("control.agent.cell-call-settled", { flowName: "write", outcome: "failure", value: undefined })
+    ]
+    const frame = ClaudeMirror.frame("run-1", run("failed"), failed)
+
+    expect(frame.nodes[0]?.state).toBe("failed")
+    expect(frame.outputs).toEqual({ "write#1": "" })
   })
 
   it("keeps run-wide ordinals when a repeated flow call straddles the cursor", () => {

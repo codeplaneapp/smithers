@@ -8,12 +8,13 @@
  * is no longer a demo" actually has to mean.
  */
 import { Control } from "@smthrs/control"
+import { ControlRuntime } from "@smthrs/control/ControlRuntime"
 import type { PlanCard } from "@smthrs/control/ControlSchema"
 import { Registry } from "@smthrs/registry"
 import { Effect, Layer } from "effect"
 import { existsSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { hostname, tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import * as Application from "../src/Application.ts"
@@ -50,6 +51,33 @@ const withEngine = <A, E>(
   )
 
 describe("NodeControl.engineDurable", () => {
+  it("stamps launch fences with the real process identity", async () => {
+    const isolated = await mkdtemp(join(tmpdir(), "flows-cli-owner-"))
+    try {
+      const run = await Effect.runPromise(
+        Effect.gen(function*() {
+          const runtime = yield* ControlRuntime
+          const { card } = yield* runtime.plan({ flowId: "system/test", input: { owner: true } })
+          const token = yield* runtime.lookupApproval(card.approval.target)
+          yield* runtime.resolveApproval(token, "approved", { id: "test", kind: "test", stampedAt: 0 })
+          const launched = yield* runtime.launch(card.planId, card.digest, card.envelope)
+          if (launched._tag !== "Started") return yield* Effect.die("expected a started run")
+          return launched.run
+        }).pipe(Effect.provide(NodeControl.engineDurable(isolated).runtime), Effect.scoped, Effect.orDie)
+      )
+      const owner = JSON.parse(run.ownerId ?? "null") as {
+        readonly hostId?: unknown
+        readonly pid?: unknown
+        readonly nonce?: unknown
+      } | null
+
+      expect(owner).toMatchObject({ hostId: hostname(), pid: process.pid, nonce: expect.any(String) })
+      expect(process.pid).toBeGreaterThan(0)
+    } finally {
+      await rm(isolated, { recursive: true, force: true })
+    }
+  })
+
   it("keeps a plan, its approval, and its run across two independent engines", async () => {
     const first = await withEngine((control) =>
       Effect.gen(function*() {

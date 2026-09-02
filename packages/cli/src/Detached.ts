@@ -46,7 +46,12 @@ export const admissionVariable = "SMITHERS_INTERNAL_DETACHED_ADMISSION"
  */
 export const defaultTimeoutMs = 30_000
 
-/** Grace given to each of SIGTERM and SIGKILL during failed-launch cleanup. */
+/**
+ * Grace given to each of SIGTERM and SIGKILL during failed-launch cleanup.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
 export const defaultTerminationGraceMs = 2_000
 
 /** The extra multiple of the timeout a still-running child is granted. */

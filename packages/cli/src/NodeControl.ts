@@ -71,7 +71,7 @@ import { Context, Effect, Exit, Layer, Redacted, Scope, Semaphore } from "effect
 import { HttpRouter } from "effect/unstable/http"
 import { RpcSerialization } from "effect/unstable/rpc"
 import { Socket } from "effect/unstable/socket"
-import type { SqlClient } from "effect/unstable/sql/SqlClient"
+import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { randomUUID } from "node:crypto"
 import { existsSync, mkdirSync, readFileSync } from "node:fs"
 import { createServer } from "node:http"
@@ -91,7 +91,9 @@ import * as Serve from "./Serve.ts"
  * configuration.
  *
  * Names are read through `Environment.read`, so each canonical `SMITHERS_*`
- * spelling also accepts its rc.0 `FLOWS_*` alias.
+ * spelling also accepts its rc.0 `FLOWS_*` alias. Pass a captured source to
+ * configuration helpers so tests and alternate hosts do not read ambient
+ * process state; invalid values fail through the helper that consumes them.
  *
  * @category models
  * @since 0.1.0
@@ -100,6 +102,9 @@ export type Environment = Environment_.Source
 
 /**
  * Node HTTP listen options accepted by the control server.
+ *
+ * Use these at a Node bind boundary. A non-loopback host without the required
+ * opt-in is rejected synchronously before the server layer is built.
  *
  * @category models
  * @since 0.1.0
@@ -144,11 +149,11 @@ const isMcpServerEntry = (value: unknown): value is McpClient.ConnectOptions => 
  * Reads and validates the MCP servers named by `--mcp-config`/`FLOWS_MCP_CONFIG`.
  *
  * The file is a JSON array of `{server, command, args, cwd?, env?,
- * handshakeTimeoutMs?, requestTimeoutMs?, queueCapacity?, maxFrameBytes?}` entries —
- * exactly `McpClient.ConnectOptions`. A missing path is not configured (no
- * MCP servers, the same as omitting the flag); a present but malformed file
- * is a startup defect, thrown here rather than silently ignored, since a
- * typo'd config should not look like "no MCP servers configured."
+ * handshakeTimeoutMs?, requestTimeoutMs?, queueCapacity?, maxFrameBytes?}`
+ * entries, exactly `McpClient.ConnectOptions`. Omitting the setting configures
+ * no MCP servers. A named path that is missing, unreadable, malformed, or has
+ * the wrong shape raises a flag-specific usage error rather than silently
+ * changing the executor's tool catalog.
  *
  * @category constructors
  * @since 0.1.0
@@ -187,6 +192,10 @@ const mcpServersFromArguments = (
 /**
  * Resolves application configuration from command arguments with an
  * environment fallback.
+ *
+ * Use this before constructing any durable layer. Invalid `--remote` and
+ * `--mcp-config` values raise `CliError.UsageError`, naming the offending flag
+ * before a transport or database can surface a lower-level exception.
  *
  * @category constructors
  * @since 0.1.0
@@ -232,6 +241,10 @@ export const makeConfig = (
 /**
  * Resolves configuration for the current Node process.
  *
+ * The executable reaches for this effect before parsing the command tree. It
+ * preserves configuration usage errors so the top-level reporter exits with
+ * status 2 and never leaks a host exception.
+ *
  * @category configuration
  * @since 0.1.0
  */
@@ -275,6 +288,9 @@ const websocketLayer = (remote: string, credential: string | undefined) => {
  * per-directory layout is the convention in
  * `docs/specs/Specs/Flow Directory.md`.
  *
+ * Use this when building a project registry. It is pure and cannot fail; the
+ * discovery layer reports unreadable or malformed sources later.
+ *
  * @category constructors
  * @since 0.1.0
  */
@@ -285,20 +301,21 @@ export const projectSources = (root: string): ReadonlyArray<Descriptor.Source> =
 /**
  * The raw host platform: Node's own services plus the descriptor-relative,
  * no-follow filesystem the kernel needs underneath it. `NodeServices` alone is
- * not enough — the kernel's guarded `FileSystem` refuses every operation unless
+ * not enough: the kernel's guarded `FileSystem` refuses every operation unless
  * the host provides descriptor-relative, no-follow access, which is what
  * `AtomicFileSystem` adds on Node.
  *
  * This is the *unguarded* half of the composition. It is what
  * {@link layerGuardedPlatform} is built on, and it is what host equipment that
- * carries its own confinement argument runs on — today only the workspace
+ * carries its own confinement argument runs on, today only the workspace
  * observer, whose module documents why (`@smthrs/agent/WorkspaceObservation`).
  * Agent-reachable equipment never gets this layer: a flow, a tool, or anything
  * a model can steer takes {@link layerGuardedPlatform} so the kernel decides
  * what it may touch.
  *
  * One `const`, not a function, so every consumer in one composition shares a
- * single memoized build.
+ * single memoized build. Host acquisition failures remain startup failures in
+ * the layers that consume it.
  *
  * @category layers
  * @since 0.1.0
@@ -340,12 +357,12 @@ export const layerGrantStore = (root: string): Layer.Layer<GrantStore.GrantStore
  * it is a parameter rather than a constant so that one composition cannot end
  * up asking two different stores. The default is the local CLI's real store;
  * a hosted composition may supply a stricter `GrantStore`, and must supply the same one it gives
- * `KernelChildProcessSpawner` — a filesystem pinned to the allow-all store
+ * `KernelChildProcessSpawner`: a filesystem pinned to the allow-all store
  * beside a shell pinned to a real one is a fail-open the types would not catch.
  *
- * The confinement the kernel still enforces here is structural — canonical
+ * The confinement the kernel still enforces here is structural: canonical
  * resolution, the hard-link refusal, and descriptor-relative execution from a
- * pinned root — and that is what costs: on Node one authorized operation is one
+ * pinned root. That is what costs: on Node one authorized operation is one
  * helper process, so a caller that performs one operation per file in a
  * checkout pays for the whole checkout. That is a cost to spend on
  * agent-reachable equipment and to refuse for a whole-tree walk; see
@@ -369,8 +386,8 @@ export const layerGuardedPlatform = (
  * frame.
  *
  * On {@link layerHostPlatform}, deliberately, and never on
- * {@link layerGuardedPlatform}. The observer is host equipment — the root is
- * this composition's, not a model's — and it carries its own confinement
+ * {@link layerGuardedPlatform}. The observer is host equipment: the root is
+ * this composition's, not a model's. It carries its own confinement
  * argument: it stats, it never opens, it follows no symlink, and every path it
  * builds is an entry name under the root. `@smthrs/agent/WorkspaceObservation`
  * states that argument in full. Guarding it decides nothing and costs one
@@ -390,7 +407,7 @@ export const layerObserver = (root: string): Layer.Layer<WorkspaceObservation.Ob
  * no flows at all. Discovery runs under an allow-all grant store because the
  * local CLI is the operator's own process; a hosted composition supplies a real
  * `GrantStore`. A source root that does not exist scans empty, so this is not a
- * startup failure — an unreadable one is, and dies rather than silently
+ * startup failure. An unreadable one is, and dies rather than silently
  * discovering nothing.
  *
  * @category layers
@@ -402,7 +419,7 @@ export const layerRegistry = (root: string): Layer.Layer<Registry.Registry> => {
   return Registry.layer({ sources: projectSources(root) }).pipe(
     Layer.provide([discovery, platform]),
     // A project with no `flows/` directory simply has no flows. Every other
-    // discovery failure — an unreadable root, a malformed entry — is a startup
+    // discovery failure, such as an unreadable root or malformed entry, is a startup
     // defect rather than a silent empty catalog.
     Layer.catch((error) =>
       error.code === "root_missing"
@@ -415,6 +432,9 @@ export const layerRegistry = (root: string): Layer.Layer<Registry.Registry> => {
 /**
  * Where a local CLI keeps its control-plane database.
  *
+ * Use this instead of assembling `.flows` paths at call sites. It is a pure
+ * path projection and cannot fail; opening the returned file can.
+ *
  * @category constructors
  * @since 0.1.0
  */
@@ -425,6 +445,8 @@ export const databasePath = (root: string): string => join(root, ".flows", "cont
  * and wake state. The control plane has a separate connection and schema in
  * {@link databasePath}; keeping the files separate makes each composition's
  * migration ownership explicit.
+ * This is a pure path projection; engine startup reports creation or migration
+ * failures when it opens the file.
  *
  * @category constructors
  * @since 0.1.0
@@ -436,12 +458,42 @@ export const executionDatabasePath = (root: string): string => join(root, ".flow
  * hangs additional stores off; the memory store reuses the same connection
  * the runtime and journal commit against.
  *
+ * Pass the same value to every local consumer. Building its component layers
+ * independently can open multiple writers; the complete composition
+ * materializes them once and reuses the captured services.
+ *
  * @category models
  * @since 0.1.0
  */
 export interface EngineDurable extends Application.Engine {
   readonly stores: Layer.Layer<DurableWriter.DurableWriter | SqlClient | RunStore.RunStore>
 }
+
+/**
+ * Acquires one durable graph and projects its live services back into layers.
+ *
+ * Nested `Layer.provide` calls build with independent memo maps, so merely
+ * passing the same layer value to the runtime, journal, executor, and memory
+ * store still opened one SQLite connection per consumer. Building the merged
+ * graph in the caller's scope first gives every consumer the same live service
+ * values, and closing that scope closes the sole connection.
+ */
+const materializeEngine = (engine: EngineDurable): Effect.Effect<EngineDurable, never, Scope.Scope> =>
+  Effect.map(
+    Layer.build(Layer.mergeAll(engine.runtime, engine.journal, engine.stores)),
+    (services) => ({
+      runtime: Layer.succeed(
+        ControlRuntime.ControlRuntime,
+        Context.get(services, ControlRuntime.ControlRuntime)
+      ),
+      journal: Layer.succeed(Journal.Journal, Context.get(services, Journal.Journal)),
+      stores: Layer.mergeAll(
+        Layer.succeed(DurableWriter.DurableWriter, Context.get(services, DurableWriter.DurableWriter)),
+        Layer.succeed(SqlClient, Context.get(services, SqlClient)),
+        Layer.succeed(RunStore.RunStore, Context.get(services, RunStore.RunStore))
+      )
+    })
+  )
 
 /**
  * The reserved system catalog in the durable runtime's flow shape.
@@ -484,7 +536,7 @@ const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.Memo
  * SQL journal, both over one SQLite file under the project root.
  *
  * The previous local composition was `ControlRuntime.layerMemory()` over
- * `TestJournal` — an in-memory database — so no plan, approval, run, or journal
+ * `TestJournal`, an in-memory database, so no plan, approval, run, or journal
  * entry survived the process. Sharing one connection between the runtime and
  * the journal is deliberate: the fenced run transitions and the events that
  * describe them then commit against the same database.
@@ -492,6 +544,10 @@ const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.Memo
  * With a `registry`, the runtime knows every discovered flow as well as the
  * reserved system catalog, so `smithers plan <flow>` plans a project flow
  * instead of failing `FlowNotFound`.
+ *
+ * Reach for this value at a Node composition root and reuse it. Database open,
+ * migration, and journal startup failures are promoted to defects because no
+ * local command can proceed honestly without the store.
  *
  * @category layers
  * @since 0.1.0
@@ -501,9 +557,9 @@ export const engineDurable = (
   registry?: Layer.Layer<Registry.Registry> | undefined
 ): EngineDurable => {
   const file = databasePath(root)
-  // Every process gets a distinct, probeable fence. Cross-process cancellation
-  // is carried by RunStore.requestCancel; ControlLive treats ClaimLost from the
-  // non-owning caller as an accepted durable request for the owner to observe.
+  // One real process identity per local control plane. A constant pid made two
+  // CLIs on one host appear to own the same fence and allowed the loser to
+  // re-drive work claimed by the winner.
   const owner = Object.freeze({ hostId: hostname(), pid: process.pid, nonce: randomUUID() })
   // Suspended so a `--remote` invocation, which never builds this layer, does
   // not leave an empty `.flows/` behind. SQLite opens a file but will not
@@ -552,7 +608,7 @@ const apiKeyVariable: Readonly<Record<string, string>> = {
  * How the `openai` provider authenticates. `api-key` is the default and the
  * only mode the other providers have. `chatgpt` routes the same seat strings
  * to the ChatGPT-subscription backend on the codex CLI's OAuth session, so a
- * lane opts in through the environment without respelling any seat — the
+ * lane opts in through the environment without respelling any seat: the
  * journaled seat, its context window, and its committed price stay identical.
  */
 const openaiAuthVariable = "SMITHERS_OPENAI_AUTH"
@@ -711,14 +767,14 @@ const cellLimits: Sandbox.Limits = {
  * `TestRun` is a declaration flow: a caller selects *which* tests, never *how*
  * to run them, so the composition has to supply the how. This host reads it off
  * the environment, which is the same place it reads a seat's credentials, and
- * the only field that decides anything is the command — the rest describe where
+ * the only field that decides anything is the command. The rest describe where
  * that command runs.
  *
  * `undefined` means this host knows of no runner, and then the `test` flow is
  * not bound at all. That is the rule the r91 wave broke in the other direction:
  * `StandardFlows.tests` existed, the cell contract's doctrine assumed it, and
  * no composition offered it, so all 45 graded runs saw zero `test` calls. A
- * flow no composition offers is a flow that does not exist — and a flow bound
+ * flow no composition offers is a flow that does not exist, and a flow bound
  * over a declaration that can only refuse is worse, because the catalog then
  * advertises a call whose every answer is "not configured".
  *
@@ -754,7 +810,7 @@ export const testRunner = (
  * checkpoint is materialized as a directory under the repository, and a
  * container reaches that directory through the mount it already has.
  * `SMITHERS_TEST_CWD` is the container's name for the repository when there is
- * one, and the workspace root is the host's — so a host that declares neither
+ * one, and the workspace root is the host's. A host that declares neither
  * still pins, and pins on one path under both names.
  *
  * @category constructors
@@ -801,8 +857,8 @@ export const testFlows = (
 /**
  * A replaceable HTTP transport over Undici, given a way to acquire a dispatcher.
  *
- * `RequestExecutor` asks a host for two things — the client to use now, and an
- * effect that builds another — because a retry ladder repairs a failure by
+ * `RequestExecutor` asks a host for two things: the client to use now, and an
+ * effect that builds another. A retry ladder repairs a failure by
  * waiting and a destroyed HTTP/2 session is the failure waiting does not
  * repair. Undici's dispatcher *is* the connection pool, so on Node the
  * replacement is a new one.
@@ -878,7 +934,7 @@ export const layerExecutor = (
   environment: Readonly<Record<string, string | undefined>>,
   /**
    * MCP servers to connect at startup, each projected into the run's flow
-   * catalog by `@smthrs/mcp/McpFlows` — one more source alongside filesystem,
+   * catalog by `@smthrs/mcp/McpFlows`, one more source alongside filesystem,
    * shell, and memory below. Empty by default: a host that names none behaves
    * exactly as it always has.
    */
@@ -922,7 +978,7 @@ export const layerExecutor = (
   // r92 of the SWE-bench full benchmark spent ten `transport` retries and $0.85
   // proving it on two instances. Undici's `Agent` *is* the pool, and
   // `makeDispatcher` acquires a fresh one, so the honest rebuild here is a new
-  // agent in a scope of its own — the previous one is closed as soon as the new
+  // agent in a scope of its own. The previous one is closed as soon as the new
   // one is in hand, so a run that rebuilds many times still holds one pool.
   const registration = Layer.effect(ControlExecutor.ControlExecutor)(
     Effect.gen(function*() {
@@ -969,8 +1025,8 @@ export const layerExecutor = (
       // states.
       layerObserver(root),
       // Where a run's checkpoints live. Without it `ctx.checkpoint()` and
-      // `ctx.base` answer `checkpoint_unavailable` — honestly, and the run
-      // takes its readings on the live tree — so this is the difference
+      // `ctx.base` answer `checkpoint_unavailable`, honestly, and the run
+      // takes its readings on the live tree. This is the difference
       // between a run that can prove fails-before without reverting its own
       // work and one that cannot.
       Checkpoints.layerGit(checkpointStore(environment, root)),
@@ -1010,15 +1066,13 @@ export const layerExecutor = (
  * @category layers
  * @since 0.1.0
  */
-export const layerControl = (
+const layerControlFromEngine = (
   applicationConfig: Application.Config,
-  suppliedRegistry?: Layer.Layer<Registry.Registry> | undefined,
-  suppliedEngine?: EngineDurable | undefined
+  registry: Layer.Layer<Registry.Registry>,
+  engine: EngineDurable
 ) => {
   const remote = applicationConfig.remote ?? "http://127.0.0.1"
   const root = applicationConfig.root ?? process.cwd()
-  const registry = suppliedRegistry ?? layerRegistry(root)
-  const engine = suppliedEngine ?? engineDurable(root, registry)
   const executor = applicationConfig.remote === undefined
     ? layerExecutor(registry, engine, root, process.env, applicationConfig.mcpServers ?? [])
     : undefined
@@ -1031,11 +1085,46 @@ export const layerControl = (
   )
 }
 
+/**
+ * Provides the application-selected Control service over Node transports.
+ *
+ * Use the optional registry and engine when embedding the CLI in an existing
+ * composition. A local engine is materialized once before its runtime,
+ * journal, executor, and memory consumers are assembled; startup failures die
+ * with the layer. A remote configuration opens no local database and reports
+ * transport failures through the control client.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerControl = (
+  applicationConfig: Application.Config,
+  suppliedRegistry?: Layer.Layer<Registry.Registry> | undefined,
+  suppliedEngine?: EngineDurable | undefined
+) => {
+  const root = applicationConfig.root ?? process.cwd()
+  const registry = suppliedRegistry ?? layerRegistry(root)
+  const engine = suppliedEngine ?? engineDurable(root, registry)
+  if (applicationConfig.remote !== undefined) {
+    return layerControlFromEngine(applicationConfig, registry, engine)
+  }
+  return Layer.unwrap(
+    Effect.map(
+      materializeEngine(engine),
+      (materialized) => layerControlFromEngine(applicationConfig, registry, materialized)
+    )
+  )
+}
+
 const output = Output.make()
 
 /**
  * Provides deterministic rendering and transfers rendered statuses to the
  * Node process exit code.
+ *
+ * Reach for this layer only at the Node executable boundary. Rendering admits
+ * only bounded inert data, and only validated control receipts can set a
+ * nonzero process status; a missing service is a composition defect.
  *
  * @category layers
  * @since 0.1.0
@@ -1058,63 +1147,80 @@ export const layerOutput = Layer.succeed(
 /**
  * Provides the complete Node command-handler environment.
  *
+ * This is the production layer for `smithers`. Local composition acquires one
+ * durable engine and shares it across control, execution, memory, and serving;
+ * open or migration failures terminate startup. Remote composition builds the
+ * RPC client without opening a local control database.
+ *
  * @category layers
  * @since 0.1.0
  */
 export const layer = (applicationConfig: Application.Config) => {
   const root = applicationConfig.root ?? process.cwd()
   const registry = layerRegistry(root)
-  const engine = engineDurable(root, registry)
-  const control = layerControl(applicationConfig, registry, engine)
-  const gatewayHost = applicationConfig.remote === undefined
-    ? Layer.effect(
-      Serve.GatewayHost,
-      Effect.gen(function*() {
-        const controlService = yield* Control.Control
-        const journalService = yield* Journal.Journal
-        return Serve.GatewayHost.of({
-          launch: (health, options, gatewayRoot) =>
-            Layer.launch(
-              layerGateway(
-                health,
-                options,
-                gatewayRoot,
-                engine,
-                Layer.succeed(Journal.Journal, journalService)
+  const durable = engineDurable(root, registry)
+  // Sampled here, before anything opens the control database. `Project.layer`
+  // reads the 0.x markers eagerly when it is called, and opening the control
+  // database writes `<root>/.flows`, which is the very absence rc-contract
+  // section 6 gates the notice on. Building this inside `compose` therefore
+  // sampled a directory the same invocation had already created, and the
+  // notice stopped printing on exactly the 0.x projects it exists for.
+  const project = Project.layer(root, applicationConfig.migrationRoot ?? Project.legacyRoot(undefined, root))
+  const compose = (engine: EngineDurable) => {
+    const control = layerControlFromEngine(applicationConfig, registry, engine)
+    const gatewayHost = applicationConfig.remote === undefined
+      ? Layer.effect(
+        Serve.GatewayHost,
+        Effect.gen(function*() {
+          const controlService = yield* Control.Control
+          const journalService = yield* Journal.Journal
+          return Serve.GatewayHost.of({
+            launch: (health, options, gatewayRoot) =>
+              Layer.launch(
+                layerGateway(
+                  health,
+                  options,
+                  gatewayRoot,
+                  engine,
+                  Layer.succeed(Journal.Journal, journalService)
+                )
+              ).pipe(
+                Effect.provideService(Control.Control, controlService),
+                Effect.provide(NodeServices.layer),
+                Effect.orDie
               )
-            ).pipe(
-              Effect.provideService(Control.Control, controlService),
-              Effect.provide(NodeServices.layer),
-              Effect.orDie
-            )
+          })
         })
-      })
-    ).pipe(Layer.provide([control, engine.journal]))
-    : Layer.effect(
-      Serve.GatewayHost,
-      Effect.map(Control.Control, (controlService) =>
-        Serve.GatewayHost.of({
-          launch: (health, options, gatewayRoot) =>
-            Layer.launch(layerGateway(health, options, gatewayRoot, engine)).pipe(
-              Effect.provideService(Control.Control, controlService),
-              Effect.provide(NodeServices.layer),
-              Effect.orDie
-            )
-        }))
-    ).pipe(Layer.provide(control))
-  return Layer.mergeAll(
-    control,
-    gatewayHost,
-    layerOutput,
-    NodeServices.layer,
-    Project.layer(root, applicationConfig.migrationRoot ?? Project.legacyRoot(undefined, root)),
-    // `smithers memory` reads and writes the same durable store a run's
-    // `memory` flow does, over the same control database. A separate
-    // connection would be a second writer to one SQLite file. A remote
-    // invocation has no local database to be that store, so it gets the
-    // refusal instead of silently writing where nothing reads.
-    applicationConfig.remote === undefined ? layerMemory(root, engine) : layerMemoryRemote
-  )
+      ).pipe(Layer.provide([control, engine.journal]))
+      : Layer.effect(
+        Serve.GatewayHost,
+        Effect.map(Control.Control, (controlService) =>
+          Serve.GatewayHost.of({
+            launch: (health, options, gatewayRoot) =>
+              Layer.launch(layerGateway(health, options, gatewayRoot, engine)).pipe(
+                Effect.provideService(Control.Control, controlService),
+                Effect.provide(NodeServices.layer),
+                Effect.orDie
+              )
+          }))
+      ).pipe(Layer.provide(control))
+    return Layer.mergeAll(
+      control,
+      gatewayHost,
+      layerOutput,
+      NodeServices.layer,
+      project,
+      // `smithers memory` reads and writes the same durable store a run's
+      // `memory` flow does, over the same control database. A separate
+      // connection would be a second writer to one SQLite file. A remote
+      // invocation has no local database to be that store, so it gets the
+      // refusal instead of silently writing where nothing reads.
+      applicationConfig.remote === undefined ? layerMemory(root, engine) : layerMemoryRemote
+    )
+  }
+  return applicationConfig.remote === undefined
+    ? Layer.unwrap(Effect.map(materializeEngine(durable), compose))
+    : compose(durable)
 }
 
 /** Refuses a composition root that still owes a service. */
@@ -1185,6 +1291,8 @@ const remoteMemory = (verb: string): Effect.Effect<never, MemoryError.MemoryErro
  * A remote composition has no local database, so the store is the unavailable
  * one there: `smithers --remote ... memory set` must say the control plane
  * owns memory rather than write a fact into a file the server never reads.
+ * Local open and migration failures are startup defects, consistent with the
+ * control runtime using the same store.
  *
  * @category layers
  * @since 1.0.0
@@ -1213,6 +1321,10 @@ const listenOptions = (options: ServerOptions): ListenOptions => {
  * Hosts the abstract Control HTTP/WebSocket router on a scoped Node HTTP
  * server. The returned layer retains the concrete HttpServer service so
  * callers can inspect an ephemeral address.
+ *
+ * Use this with an explicit authentication layer. Non-loopback hosts without
+ * `listen: true` are rejected synchronously, and socket failures remain in the
+ * returned server layer.
  *
  * @category layers
  * @since 0.1.0
@@ -1244,9 +1356,9 @@ export const layerServer = (
  * a requirement, so the verb hosts the same control plane its own commands
  * talk to rather than opening a second one.
  *
- * The sync read path reads the journal over its own connection to the control
- * database. SQLite in WAL mode is built for that, and the alternative — a
- * second `ControlLive` — would be a second writer.
+ * The sync read path receives the already-open journal when this is composed
+ * by {@link layer}. Standalone callers may omit it and let one durable engine
+ * provide the journal. A second `ControlLive` is never constructed.
  *
  * `RunCatalog` and `WorkspaceShare` are the no-op implementations: a local
  * gateway shares nothing and publishes no catalog, and the relay
@@ -1277,11 +1389,14 @@ export const layerGateway = (
   // Some upstream layer combinators currently widen that input to `any`, which
   // would make every caller look incomplete even though the runtime graph is
   // closed. Preserve the exact boundary this composition actually exposes.
-  return gateway as Layer.Layer<Layer.Success<typeof gateway>, Layer.Error<typeof gateway>, Control.Control>
+  return gateway
 }
 
 /**
  * Hosts Control using the alpha's single shared bearer token.
+ *
+ * Use this at an authenticated bind boundary. It inherits {@link layerServer}
+ * failures, including the refusal of a non-loopback host without `listen`.
  *
  * @category layers
  * @since 0.1.0
@@ -1295,6 +1410,9 @@ export const layerServerBearerAuth = (
  * Hosts Control with permissive authentication for trusted local and test use.
  * Production hosts must call `layerServer` with an explicit authentication
  * layer.
+ *
+ * Any non-loopback host is rejected synchronously, even when `listen` is true;
+ * loopback socket failures remain in the returned server layer.
  *
  * @category layers
  * @since 0.1.0

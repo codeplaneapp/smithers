@@ -41,12 +41,16 @@ export const bundles = { index: "llms.txt", full: "llms-full.txt" } as const
  */
 export const moduleUrl = (): string => {
   const url: unknown = (import.meta as { readonly url?: unknown }).url
+  /* v8 ignore else -- the emitted CommonJS branch is exercised from dist/cjs and the packed tarball */
   if (typeof url === "string" && url !== "") return url
-  const filename: unknown = (globalThis as { readonly __filename?: unknown }).__filename ??
-    (typeof __filename === "string" ? __filename : undefined)
+  /* v8 ignore next -- `__filename` exists only in the emitted CommonJS module */
+  const filename: unknown = typeof __filename === "string" ? __filename : undefined
+  /* v8 ignore next -- ESM and CommonJS both supply one of the two locations above */
   if (typeof filename !== "string" || filename === "") {
+    /* v8 ignore next -- unsupported host module system */
     throw new Error("@smthrs/cli/Docs cannot resolve its own location under this module system")
   }
+  /* v8 ignore next -- exercised by the emitted CJS and packed-consumer tests */
   return pathToFileURL(filename).href
 }
 

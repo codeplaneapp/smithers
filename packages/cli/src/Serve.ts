@@ -11,9 +11,9 @@
  *
  * The bind rule is the rc contract's (section 4.1): loopback needs nothing,
  * anything else needs both an explicit `--listen` and a bearer token. It is
- * spelled out here, as data, because the failure mode it prevents —
+ * spelled out here, as data, because the failure mode it prevents,
  * an unauthenticated control plane on a laptop's LAN address, able to launch
- * agents with the operator's credentials — is silent when it happens.
+ * agents with the operator's credentials, is silent when it happens.
  *
  * The banner is derived from {@link mounts}, the same list the composition is
  * built from, so it cannot advertise a route that answers 404.
