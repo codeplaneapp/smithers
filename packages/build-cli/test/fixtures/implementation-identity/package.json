@@ -1,4 +1,5 @@
 {
   "name": "implementation-identity-fixture",
-  "private": true
+  "private": true,
+  "type": "module"
 }
