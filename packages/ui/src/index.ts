@@ -54,6 +54,8 @@ export {
   composeSmithersUiStyles,
   smithersUiCss,
   standaloneThemeCss,
+  DEFAULT_THEME_KEY,
+  themeRegistry,
   SMITHERS_UI_STYLE_ATTR,
   REDUCED_MOTION_MEDIA_QUERY,
   prefersReducedMotion,
