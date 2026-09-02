@@ -351,6 +351,30 @@ export const keyOf = (material: KeyMaterial): string =>
   createHash("sha256").update(encodeKeyMaterial(material), "utf8").digest("hex")
 
 /**
+ * Builds the persistent body identity for one target.
+ *
+ * `Target.Metadata.implementationDigest` is deliberately absent. It contains
+ * process-local entropy for ordinary closures, so persisting it makes equal
+ * declarations miss across processes. The ambient implementation fingerprint
+ * covers the shipped source bytes that implement every catalog target.
+ *
+ * @category keys
+ * @since 0.1.0
+ * @slop
+ */
+export const targetKeyBody = (
+  target: Target.AnyTarget,
+  metadata: Target.Metadata,
+  outputs: Target.DeclaredOutputs | undefined
+): unknown => ({
+  flow: target._tag,
+  target: metadata.target,
+  schemas: metadata.schemaIdentity,
+  outputs: outputs === undefined ? null : { cwd: outputs.cwd, paths: [...outputs.paths] },
+  executionFormat: EXECUTION_FORMAT
+})
+
+/**
  * One source tree that contributes to the implementation fingerprint.
  *
  * `name` is the logical prefix recorded in the digest. `directory` is the host
@@ -724,9 +748,9 @@ const loadedModuleRoot = (name: string, specifier: string): SourceRoot => ({
 })
 
 /**
- * The three source trees whose bytes decide what an execution actually does:
- * the CLI that schedules and admits, the target catalog that implements targets,
- * and the runtime package both load.
+ * The source trees whose bytes decide what an execution actually does: the CLI
+ * that schedules and admits, the target catalog, the execution libraries, and
+ * the pinned runtime dependencies they load.
  *
  * @category keys
  * @since 0.1.0
@@ -755,14 +779,13 @@ let fingerprint: string | undefined
 /**
  * The memoized fingerprint of the loaded implementation sources.
  *
- * `Target.Metadata.implementationDigest` covers only the text of the functions a
- * target declaration passes to `Target.make`. Every helper those functions call,
- * every action layer that implements the nodes they plan, and the executor's
- * own admission logic are invisible to it, so editing `measureOutput` or the
- * cache admission path used to leave every stored entry addressable by an
- * unchanged key. This fingerprint closes that gap automatically: it changes
- * whenever any byte of the shipped implementation changes, with no salt to
- * remember to bump.
+ * `Target.Metadata.implementationDigest` distinguishes callback identity within
+ * one process and includes process-local entropy for ordinary closures, so it
+ * cannot be a persistent cache identity. It is also blind to every helper those
+ * functions call, every action layer that implements their nodes, and the
+ * executor's own admission logic. This fingerprint is the persistent identity:
+ * it changes whenever any byte of the shipped implementation changes, with no
+ * salt to remember to bump.
  *
  * @category keys
  * @since 0.1.0
@@ -929,11 +952,11 @@ const capabilities = (target: string): ReadonlyArray<string> => {
 /**
  * Constructs an inert dependency graph with real content keys.
  *
- * A target's key material is its target and implementation identity, its
- * declared output roots, the global execution format, its canonicalized attrs
- * with target references replaced by dependency keys and declared inputs
- * replaced by content digests, its expanded declared inputs, its dependency
- * labels and keys, and ambient Node, platform, architecture, lockfile, and
+ * A target's key material is its target and schema identity, its declared output
+ * roots, the global execution format, its canonicalized attrs with target
+ * references replaced by dependency keys and declared inputs replaced by
+ * content digests, its expanded declared inputs, its dependency labels and
+ * keys, and ambient Node, platform, architecture, lockfile, and
  * {@link implementationFingerprint} identity. The sha256 of that material is
  * `keyPreview`. No cache store is connected during planning, so every selected
  * target is reported as `wouldRun: true` with `cacheLookup: not-wired`.
@@ -1098,14 +1121,7 @@ export const make = async (
     const environment = await environmentOf(label)
     if (environment !== undefined) await assertToolchain(environment, view.attrs)
     const keyMaterial: KeyMaterial = {
-      body: {
-        flow: target._tag,
-        target: metadata.target,
-        implementation: metadata.implementationDigest,
-        schemas: metadata.schemaIdentity,
-        outputs: view.outputs === undefined ? null : { cwd: view.outputs.cwd, paths: [...view.outputs.paths] },
-        executionFormat: EXECUTION_FORMAT
-      },
+      body: targetKeyBody(target, metadata, view.outputs),
       inputs: {
         ambient,
         attrs: attrsValue(view.attrs, depKeys, inputDigests),
