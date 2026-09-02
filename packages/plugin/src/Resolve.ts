@@ -1,29 +1,86 @@
 /**
- * Plugin resolution: flatten, filter, validate, order — once, at construction.
+ * Bounded plugin resolution: admit, filter, validate, order, and snapshot.
  *
- * Governing contract: D11 in `docs/pages/design-decisions.md`. Runtime
- * dispatch is an array walk over the frozen, host-supplied catalog this module
- * produces; there is no lookup, late registration, or durable-engine lifecycle
- * registry after startup.
+ * The resulting catalog owns every record it exposes. Dispatch never reads a
+ * caller-owned map, plugin record, hook object, config value, or cache identity.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { Action } from "@smthrs/flow"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 import type { FlowsConfig } from "./Config.ts"
-import type { HookKind } from "./Hooks.ts"
+import * as Config from "./Config.ts"
+import type { HookKind, HookObject } from "./Hooks.ts"
 import { engineHooks, handlerOf, orderOf } from "./Hooks.ts"
 import type { FlowsHooks } from "./index.ts"
-import type { FlowsPlugin, PluginInput } from "./Plugin.ts"
-import { PluginError } from "./PluginError.ts"
+import * as Boundary from "./internal/Boundary.ts"
+import * as ImmutableMap from "./internal/ReadonlyMap.ts"
+import type { Apply, FlowsPlugin, PluginInput } from "./Plugin.ts"
+import { PluginError, type PluginErrorCode } from "./PluginError.ts"
 
 /**
- * One resolved handler, tagged with the plugin that contributed it so failures
- * and telemetry can attribute it.
+ * Maximum nested preset-array depth accepted at startup.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumPluginDepth = 64
+
+/**
+ * Maximum plugins accepted by one kernel.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumPlugins = 256
+
+/**
+ * Maximum aggregate hook handlers accepted by one kernel.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumHandlers = 1_024
+
+/**
+ * Maximum input nodes, including arrays and omitted entries.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumPluginInputNodes = 4_096
+
+/**
+ * Maximum UTF-16 length of one plugin or hook name.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumPluginNameLength = 256
+
+/**
+ * Default fiber bound for parallel observers.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const defaultParallelConcurrency = 16
+
+/**
+ * Maximum configurable parallel-observer bound.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumParallelConcurrency = 256
+
+/**
+ * One resolved handler with immutable attribution.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface HandlerRecord {
   readonly plugin: string
@@ -32,147 +89,447 @@ export interface HandlerRecord {
 }
 
 /**
- * The frozen output of resolution.
+ * The immutable output of plugin resolution.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Resolved<H = FlowsHooks> {
   readonly plugins: ReadonlyArray<FlowsPlugin<H>>
   readonly handlers: ReadonlyMap<string, ReadonlyArray<HandlerRecord>>
+  readonly parallelConcurrency: number
+  readonly cacheEnvironment?: Action.CacheEnvironment | undefined
 }
 
 /**
  * Options for {@link resolve}.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Options {
-  /** Pre-resolution config that `apply` predicates are tested against. */
+  /** Pre-resolution config tested by `apply` predicates. */
   readonly config?: FlowsConfig | undefined
-  /** Which plugin-kernel host is resolving; D11's shipped cell host uses `harness`. */
+  /** Host whose literal `apply` selectors are active. Defaults to `"engine"`. */
   readonly target?: "engine" | "harness" | undefined
-  /** Hook names recognized by this host. Defaults to the shared config catalog. */
+  /** Hook names recognized by this host. */
   readonly hooks?: Readonly<Record<string, HookKind>> | undefined
-  /**
-   * Complete composition identity for sealed activity keys.
-   *
-   * Resolved plugin names are prepended to `layers`. The caller still includes
-   * semantic versions and configuration identities when those affect plugin
-   * behavior. Omitting this value leaves capabilities unknown and therefore
-   * keeps sealed keys run-local.
-   */
+  /** Complete composition identity for sealed activity keys. Requires every selected plugin to have a version. */
   readonly cacheEnvironment?: Action.CacheEnvironment | undefined
+  /** Maximum observers run at once. Defaults to 16 and cannot exceed 256. */
+  readonly parallelConcurrency?: number | undefined
 }
 
-const flatten = <H>(input: PluginInput<H>, into: Array<FlowsPlugin<H>>): Array<FlowsPlugin<H>> => {
-  if (!input) return into
-  if (Array.isArray(input)) {
-    for (const entry of input as ReadonlyArray<PluginInput<H>>) flatten(entry, into)
-    return into
+interface RawOptions {
+  readonly config: unknown
+  readonly target: unknown
+  readonly hooks: unknown
+  readonly cacheEnvironment: unknown
+  readonly parallelConcurrency: unknown
+}
+
+const failure = (
+  code: PluginErrorCode,
+  message: string,
+  path: string,
+  fields: { readonly plugin?: string; readonly hook?: string } = {}
+): PluginError => new PluginError({ code, message, path, ...fields })
+
+const invalidPlugin = (
+  path: string,
+  complaint: string,
+  fields: { readonly plugin?: string; readonly hook?: string } = {}
+): PluginError => failure("invalid_plugin", `plugin input ${complaint}`, path, fields)
+
+const ownData = (
+  input: unknown,
+  path: string,
+  allowed?: ReadonlySet<string>
+): Readonly<Record<string, unknown>> => {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw invalidPlugin(path, "must be an ordinary record")
   }
-  into.push(input as FlowsPlugin<H>)
-  return into
+  const prototype = Object.getPrototypeOf(input)
+  if (prototype !== Object.prototype && prototype !== null) throw invalidPlugin(path, "must be an ordinary record")
+  const output: Record<string, unknown> = {}
+  for (const key of Reflect.ownKeys(input)) {
+    if (typeof key !== "string") throw invalidPlugin(path, "must not contain symbol keys")
+    if (allowed !== undefined && !allowed.has(key)) {
+      throw invalidPlugin(`${path}.${key}`, "contains an unknown property")
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(input, key)
+    if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+      throw invalidPlugin(`${path}.${key}`, "must be an enumerable data property")
+    }
+    Object.defineProperty(output, key, { value: descriptor.value, enumerable: true })
+  }
+  return output
 }
 
-const included = <H>(plugin: FlowsPlugin<H>, options: Options): boolean => {
+const snapshotOptions = (input: unknown): RawOptions => {
+  const values = ownData(
+    input,
+    "$options",
+    new Set(["config", "target", "hooks", "cacheEnvironment", "parallelConcurrency"])
+  )
+  return {
+    config: values.config,
+    target: values.target,
+    hooks: values.hooks,
+    cacheEnvironment: values.cacheEnvironment,
+    parallelConcurrency: values.parallelConcurrency
+  }
+}
+
+const validName = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= maximumPluginNameLength &&
+  Boundary.isWellFormedText(value) && !/\p{Cc}/u.test(value)
+
+const snapshotCatalog = (input: unknown): Readonly<Record<string, HookKind>> => {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw invalidPlugin("$options.hooks", "must be an ordinary hook catalog")
+  }
+  const prototype = Object.getPrototypeOf(input)
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw invalidPlugin("$options.hooks", "must be an ordinary hook catalog")
+  }
+  const output: Record<string, HookKind> = {}
+  for (const key of Reflect.ownKeys(input)) {
+    if (typeof key !== "string" || !validName(key)) {
+      throw invalidPlugin("$options.hooks", "contains an invalid hook name")
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(input, key)
+    if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+      throw invalidPlugin(`$options.hooks.${key}`, "must be an enumerable data property")
+    }
+    if (!(["sequential", "parallel", "first", "waterfall"] as ReadonlyArray<unknown>).includes(descriptor.value)) {
+      throw invalidPlugin(`$options.hooks.${key}`, "contains an invalid hook kind")
+    }
+    Object.defineProperty(output, key, { value: descriptor.value, enumerable: true })
+  }
+  return Object.freeze(output)
+}
+
+const snapshotHook = (
+  entry: unknown,
+  path: string,
+  plugin: string,
+  hook: string
+): ((...args: Array<any>) => unknown) | HookObject<(...args: Array<any>) => unknown> => {
+  if (typeof entry === "function") return entry as (...args: Array<any>) => unknown
+  const values = ownData(entry, path, new Set(["order", "handler"]))
+  if (typeof values.handler !== "function") {
+    throw invalidPlugin(`${path}.handler`, "must be a function", { plugin, hook })
+  }
+  if (values.order !== undefined && values.order !== "pre" && values.order !== "post") {
+    throw invalidPlugin(`${path}.order`, "must be pre or post", { plugin, hook })
+  }
+  return Object.freeze({
+    ...(values.order === undefined ? {} : { order: values.order }),
+    handler: values.handler
+  }) as HookObject<(...args: Array<any>) => unknown>
+}
+
+const snapshotPlugin = <H>(
+  input: unknown,
+  path: string,
+  known: Readonly<Record<string, HookKind>>,
+  handlerBudget: { count: number }
+): FlowsPlugin<H> => {
+  const values = ownData(input, path, new Set(["name", "version", "enforce", "apply", "layer", "hooks"]))
+  if (!validName(values.name)) throw invalidPlugin(`${path}.name`, "requires a bounded non-empty name")
+  const name = values.name
+  if (values.version !== undefined && !validName(values.version)) {
+    throw invalidPlugin(`${path}.version`, "requires a bounded non-empty version", { plugin: name })
+  }
+  if (values.enforce !== undefined && values.enforce !== "pre" && values.enforce !== "post") {
+    throw invalidPlugin(`${path}.enforce`, "must be pre or post", { plugin: name })
+  }
+  if (
+    values.apply !== undefined && values.apply !== "engine" && values.apply !== "harness" &&
+    typeof values.apply !== "function"
+  ) throw invalidPlugin(`${path}.apply`, "must be engine, harness, or a predicate", { plugin: name })
+  if (values.layer !== undefined && !Layer.isLayer(values.layer)) {
+    throw invalidPlugin(`${path}.layer`, "must be an Effect Layer", { plugin: name })
+  }
+
+  let hooks: Readonly<Record<string, unknown>> | undefined
+  if (values.hooks !== undefined) {
+    const rawHooks = ownData(values.hooks, `${path}.hooks`)
+    const snapshot: Record<string, unknown> = Object.create(null)
+    for (const hook of Object.keys(rawHooks)) {
+      if (!Object.hasOwn(known, hook)) {
+        throw failure(
+          "unknown_hook",
+          `plugin "${name}" declares unknown hook "${hook}"`,
+          `${path}.hooks.${hook}`,
+          { plugin: name, hook }
+        )
+      }
+      const entry = rawHooks[hook]
+      if (entry === undefined) continue
+      handlerBudget.count += 1
+      if (handlerBudget.count > maximumHandlers) {
+        throw failure(
+          "resource_limit",
+          `plugin handlers exceed the limit of ${maximumHandlers}`,
+          `${path}.hooks.${hook}`
+        )
+      }
+      Object.defineProperty(snapshot, hook, {
+        value: snapshotHook(entry, `${path}.hooks.${hook}`, name, hook),
+        enumerable: true
+      })
+    }
+    hooks = Object.freeze(snapshot)
+  }
+
+  return Object.freeze({
+    name,
+    ...(values.version === undefined ? {} : { version: values.version }),
+    ...(values.enforce === undefined ? {} : { enforce: values.enforce }),
+    ...(values.apply === undefined ? {} : { apply: values.apply as Apply }),
+    ...(values.layer === undefined ? {} : { layer: values.layer as Layer.Layer<never, any, any> }),
+    ...(hooks === undefined ? {} : { hooks: hooks as Partial<H> })
+  })
+}
+
+const flatten = <H>(
+  input: unknown,
+  known: Readonly<Record<string, HookKind>>
+): ReadonlyArray<FlowsPlugin<H>> => {
+  const output: Array<FlowsPlugin<H>> = []
+  const arrays = new WeakSet<object>()
+  const handlers = { count: 0 }
+  const stack: Array<{ readonly value: unknown; readonly path: string; readonly depth: number }> = [
+    { value: input, path: "$", depth: 0 }
+  ]
+  let nodes = 0
+  while (stack.length > 0) {
+    const current = stack.pop()!
+    nodes += 1
+    if (nodes > maximumPluginInputNodes) {
+      throw failure("resource_limit", `plugin input exceeds the ${maximumPluginInputNodes}-node limit`, current.path)
+    }
+    if (current.value === false || current.value === null || current.value === undefined) continue
+    if (Array.isArray(current.value)) {
+      if (current.depth >= maximumPluginDepth) {
+        throw failure("resource_limit", `plugin input exceeds the depth limit of ${maximumPluginDepth}`, current.path)
+      }
+      if (arrays.has(current.value)) throw invalidPlugin(current.path, "contains a cycle or repeated preset array")
+      arrays.add(current.value)
+      const keys = Reflect.ownKeys(current.value)
+      if (keys.length !== current.value.length + 1 || !keys.includes("length")) {
+        throw invalidPlugin(current.path, "must be a dense preset array with no extra properties")
+      }
+      for (let index = current.value.length - 1; index >= 0; index--) {
+        const descriptor = Object.getOwnPropertyDescriptor(current.value, String(index))
+        if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+          throw invalidPlugin(`${current.path}[${index}]`, "must be an enumerable data property")
+        }
+        stack.push({ value: descriptor.value, path: `${current.path}[${index}]`, depth: current.depth + 1 })
+      }
+      continue
+    }
+    output.push(snapshotPlugin<H>(current.value, current.path, known, handlers))
+    if (output.length > maximumPlugins) {
+      throw failure("resource_limit", `plugin input exceeds the ${maximumPlugins}-plugin limit`, current.path)
+    }
+  }
+  return output
+}
+
+const included = <H>(
+  plugin: FlowsPlugin<H>,
+  config: FlowsConfig,
+  target: "engine" | "harness"
+): Effect.Effect<boolean, PluginError> => {
   const apply = plugin.apply
-  if (apply === undefined) return true
-  if (typeof apply === "function") return apply(options.config ?? {})
-  return apply === (options.target ?? "engine")
+  if (apply === undefined) return Effect.succeed(true)
+  if (typeof apply !== "function") return Effect.succeed(apply === target)
+  return Effect.try({
+    try: () => apply(config),
+    catch: () =>
+      failure("apply_failed", `plugin "${plugin.name}" apply predicate failed`, "$.apply", {
+        plugin: plugin.name
+      })
+  }).pipe(
+    Effect.flatMap((result) =>
+      typeof result === "boolean"
+        ? Effect.succeed(result)
+        : Effect.fail(invalidPlugin("$.apply", "predicate must return a boolean", { plugin: plugin.name }))
+    )
+  )
 }
 
 const rank = (enforce: "pre" | "post" | undefined): number => (enforce === "pre" ? 0 : enforce === "post" ? 2 : 1)
 
+const snapshotCacheEnvironment = <H>(
+  input: unknown,
+  plugins: ReadonlyArray<FlowsPlugin<H>>
+): Effect.Effect<Action.CacheEnvironment | undefined, PluginError> => {
+  if (input === undefined) return Effect.succeed(undefined)
+  const pluginIdentities: Array<string> = []
+  for (const plugin of plugins) {
+    if (plugin.version === undefined) {
+      return Effect.fail(failure(
+        "cache_environment_invalid",
+        `cache environment requires a version for plugin "${plugin.name}"`,
+        "$.version",
+        { plugin: plugin.name }
+      ))
+    }
+    pluginIdentities.push(`${plugin.name}@${plugin.version}`)
+  }
+  const admitted = Boundary.record(input)
+  if (!admitted.ok) {
+    return Effect.fail(failure(
+      "cache_environment_invalid",
+      `cache environment ${admitted.complaint}`,
+      `$options.cacheEnvironment${admitted.path.slice(1)}`
+    ))
+  }
+  return Schema.decodeUnknownEffect(Action.CacheEnvironment)(admitted.value).pipe(
+    Effect.mapError(() =>
+      failure(
+        "cache_environment_invalid",
+        "cache environment does not match the complete cache identity schema",
+        "$options.cacheEnvironment"
+      )
+    ),
+    Effect.map((environment) => {
+      const capabilities: Record<string, ReadonlyArray<string>> = {}
+      for (const name of Object.keys(environment.capabilities)) {
+        Object.defineProperty(capabilities, name, {
+          value: Object.freeze([...environment.capabilities[name]!]),
+          enumerable: true
+        })
+      }
+      return Object.freeze({
+        layers: Object.freeze([...pluginIdentities, ...environment.layers]),
+        capabilities: Object.freeze(capabilities)
+      })
+    })
+  )
+}
+
 /**
- * Flattens, filters, validates, and orders a plugin list.
- *
- * Fails with `duplicate_name` when two plugins share a name (never last-wins)
- * and with `unknown_hook` when a dynamically built plugin carries a hook key
- * this host does not declare.
+ * Resolves a plugin preset into an immutable, resource-bounded catalog.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const resolve = <H = FlowsHooks>(
   input: PluginInput<NoInfer<H>>,
-  options: Options = {}
+  options: Options = {},
+  configOverride?: FlowsConfig
 ): Effect.Effect<Resolved<H>, PluginError> =>
-  Effect.suspend(() => {
-    const known = options.hooks ?? engineHooks
-    const flat = flatten<H>(input, []).filter((plugin) => included(plugin, options))
+  Effect.gen(function*() {
+    const raw = yield* Effect.try({
+      try: () => snapshotOptions(options),
+      catch: (cause) =>
+        cause instanceof PluginError
+          ? cause
+          : invalidPlugin("$options", "could not be inspected without executing user code")
+    })
+    if (raw.target !== undefined && raw.target !== "engine" && raw.target !== "harness") {
+      return yield* Effect.fail(invalidPlugin("$options.target", "must be engine or harness"))
+    }
+    if (
+      raw.parallelConcurrency !== undefined &&
+      (typeof raw.parallelConcurrency !== "number" || !Number.isSafeInteger(raw.parallelConcurrency) ||
+        raw.parallelConcurrency <= 0 ||
+        raw.parallelConcurrency > maximumParallelConcurrency)
+    ) {
+      return yield* Effect.fail(failure(
+        "resource_limit",
+        `parallel concurrency must be between 1 and ${maximumParallelConcurrency}`,
+        "$options.parallelConcurrency"
+      ))
+    }
+    const parallelConcurrency = raw.parallelConcurrency === undefined
+      ? defaultParallelConcurrency
+      : raw.parallelConcurrency
+    const config = yield* Config.snapshot(configOverride ?? raw.config ?? {})
+    const known = yield* Effect.try({
+      try: () => snapshotCatalog(raw.hooks ?? engineHooks),
+      catch: (cause) =>
+        cause instanceof PluginError
+          ? cause
+          : invalidPlugin("$options.hooks", "could not be inspected without executing user code")
+    })
+    const admitted = yield* Effect.try({
+      try: () => flatten<H>(input, known),
+      catch: (cause) =>
+        cause instanceof PluginError
+          ? cause
+          : invalidPlugin("$", "could not be inspected without executing user code")
+    })
+    const target = raw.target ?? "engine"
+    const selected = yield* Effect.filter(admitted, (plugin) => included(plugin, config, target))
 
     const seen = new Set<string>()
-    for (const plugin of flat) {
+    for (const plugin of selected) {
       if (seen.has(plugin.name)) {
-        return Effect.fail(
-          new PluginError({
-            code: "duplicate_name",
-            message: `duplicate plugin name "${plugin.name}"`,
-            plugin: plugin.name
-          })
-        )
+        return yield* Effect.fail(failure(
+          "duplicate_name",
+          `duplicate plugin name "${plugin.name}"`,
+          "$.name",
+          { plugin: plugin.name }
+        ))
       }
       seen.add(plugin.name)
-      for (const hook of Object.keys(plugin.hooks ?? {})) {
-        if (!(hook in known)) {
-          return Effect.fail(
-            new PluginError({
-              code: "unknown_hook",
-              message: `plugin "${plugin.name}" declares unknown hook "${hook}"`,
-              plugin: plugin.name,
-              hook
-            })
-          )
-        }
-      }
     }
 
-    // Stable partition by `enforce`: pre, normal, post.
-    const plugins = flat
-      .map((plugin, index) => ({ plugin, index }))
-      .sort((left, right) => rank(left.plugin.enforce) - rank(right.plugin.enforce) || left.index - right.index)
-      .map(({ plugin }) => plugin)
-
-    const handlers = new Map<string, ReadonlyArray<HandlerRecord>>()
-    for (const hook of Object.keys(known)) {
-      const buckets: [Array<HandlerRecord>, Array<HandlerRecord>, Array<HandlerRecord>] = [[], [], []]
-      for (const plugin of plugins) {
-        const entry = (plugin.hooks as Record<string, unknown> | undefined)?.[hook]
-        if (entry === undefined || entry === null) continue
-        const bucket = rank(orderOf(entry))
-        ;(bucket === 0 ? buckets[0] : bucket === 2 ? buckets[2] : buckets[1]).push({
-          plugin: plugin.name,
-          hook,
-          handler: handlerOf(entry)
-        })
-      }
-      const flatBucket = [...buckets[0], ...buckets[1], ...buckets[2]]
-      if (flatBucket.length > 0) handlers.set(hook, Object.freeze(flatBucket))
-    }
-
-    return Effect.succeed(
-      Object.freeze({ plugins: Object.freeze(plugins), handlers })
+    const plugins = Object.freeze(
+      selected
+        .map((plugin, index) => ({ plugin, index }))
+        .sort((left, right) => rank(left.plugin.enforce) - rank(right.plugin.enforce) || left.index - right.index)
+        .map(({ plugin }) => plugin)
     )
+    const entries: Array<readonly [string, ReadonlyArray<HandlerRecord>]> = []
+    for (const hook of Object.keys(known)) {
+      const records: Array<{
+        readonly record: HandlerRecord
+        readonly enforceRank: number
+        readonly orderRank: number
+        readonly index: number
+      }> = []
+      for (const [index, plugin] of plugins.entries()) {
+        const pluginHooks = plugin.hooks as Readonly<Record<string, unknown>> | undefined
+        if (pluginHooks === undefined || !Object.hasOwn(pluginHooks, hook)) continue
+        const entry = pluginHooks[hook]
+        const record = Object.freeze({ plugin: plugin.name, hook, handler: handlerOf(entry) })
+        records.push({ record, enforceRank: rank(plugin.enforce), orderRank: rank(orderOf(entry)), index })
+      }
+      // Vite's rule, verbatim: the per-hook `order` is the outer partition and
+      // the enforce-sorted plugin list supplies the stable order inside it, so a
+      // hook marked `order: "pre"` runs ahead of every normal-order handler even
+      // when its plugin is `enforce: "post"`.
+      const ordered = records
+        .sort((left, right) =>
+          left.orderRank - right.orderRank || left.enforceRank - right.enforceRank || left.index - right.index
+        )
+        .map(({ record }) => record)
+      if (ordered.length > 0) entries.push([hook, Object.freeze(ordered)])
+    }
+    const cacheEnvironment = yield* snapshotCacheEnvironment(raw.cacheEnvironment, plugins)
+    return Object.freeze({
+      plugins,
+      handlers: ImmutableMap.make(entries),
+      parallelConcurrency,
+      ...(cacheEnvironment === undefined ? {} : { cacheEnvironment })
+    })
   })
 
 /**
- * Merges every resolved plugin's `layer` left-to-right with
- * `Layer.provideMerge`, so a `pre` plugin's services are visible to the layers
- * that follow it.
- *
- * A complete `cacheEnvironment` declares
- * `Action.CurrentCacheEnvironment`. When omitted, that context remains
- * absent and sealed keys stay local to their run.
+ * Merges every resolved plugin layer left-to-right and supplies the detached
+ * cache environment captured during resolution.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const layer = <H>(
-  resolved: Resolved<H>,
-  cacheEnvironment?: Options["cacheEnvironment"]
-): Layer.Layer<any, PluginError, any> => {
+export const layer = <H>(resolved: Resolved<H>): Layer.Layer<any, PluginError, any> => {
   const layers = resolved.plugins.flatMap((plugin) =>
     plugin.layer
       ? [
@@ -193,13 +550,11 @@ export const layer = <H>(
   const plugins = (layers.length === 0
     ? Layer.empty
     : layers.reduce((accumulated, next) => Layer.provideMerge(next, accumulated))) as Layer.Layer<any, PluginError, any>
-  if (cacheEnvironment === undefined) return plugins
-  const environment = Action.layerCacheEnvironment({
-    layers: [
-      ...resolved.plugins.map((plugin) => plugin.name),
-      ...cacheEnvironment.layers
-    ],
-    capabilities: cacheEnvironment.capabilities
-  }) as unknown as Layer.Layer<any, PluginError, any>
+  if (resolved.cacheEnvironment === undefined) return plugins
+  const environment = Action.layerCacheEnvironment(resolved.cacheEnvironment) as unknown as Layer.Layer<
+    any,
+    PluginError,
+    any
+  >
   return Layer.provideMerge(plugins, environment)
 }

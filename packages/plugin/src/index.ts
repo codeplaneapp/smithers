@@ -2,12 +2,13 @@
  * The bounded cell-host plugin kernel: typed hooks, resolution and ordering,
  * and the config pipeline.
  *
- * Governing contract: D11 in `docs/pages/design-decisions.md`, with the
- * shipped host catalog in `packages/agent/src/CellPlugin.ts`. Durable
+ * The public package contract is documented at
+ * {@link https://smithers.sh/api/plugin}, with the shipped host catalog in
+ * `packages/agent/src/CellPlugin.ts`. Durable
  * engine extension remains dependency injection; this package does not expose
  * an engine-wide lifecycle registry.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 
 import type * as Effect from "effect/Effect"
@@ -18,7 +19,7 @@ import type { ParallelHook, WaterfallHook } from "./Hooks.ts"
  * The shared kernel's base hook catalog.
  *
  * Declared here, in the package entry point, so that the documented
- * augmentation specifier works — an interface can only be augmented in the
+ * augmentation specifier works: an interface can only be augmented in the
  * module that declares it:
  *
  * ```ts
@@ -34,7 +35,7 @@ import type { ParallelHook, WaterfallHook } from "./Hooks.ts"
  * the same augmented interface.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface FlowsHooks {
   readonly config: WaterfallHook<(config: FlowsConfig) => Effect.Effect<Partial<FlowsConfig> | void, any, any>>
@@ -42,43 +43,43 @@ export interface FlowsHooks {
 }
 
 /**
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category config
  */
 export * as Config from "./Config.ts"
 
 /**
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category hooks
  */
 export * from "./Hooks.ts"
 
 /**
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category startup
  */
 export * as Kernel from "./Kernel.ts"
 
 /**
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category models
  */
 export * from "./Plugin.ts"
 
 /**
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category errors
  */
 export * from "./PluginError.ts"
 
 /**
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category dispatch
  */
 export * as Plugins from "./Plugins.ts"
 
 /**
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @category resolution
  */
 export * as Resolve from "./Resolve.ts"

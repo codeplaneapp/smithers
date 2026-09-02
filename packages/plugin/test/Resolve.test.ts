@@ -60,7 +60,7 @@ describe("Resolve.resolve", () => {
     expect(namesFor(resolved, "config")).toEqual(["a", "b", "c"])
   })
 
-  it("keeps enforce dominant over per-hook order", async () => {
+  it("lets per-hook order re-partition across enforce groups, as Vite does", async () => {
     const nothing = () => Effect.void
     const resolved = await run(Resolve.resolve([
       {
@@ -74,8 +74,9 @@ describe("Resolve.resolve", () => {
         hooks: { configResolved: { order: "post", handler: nothing } }
       }
     ]))
-    // enforce partitions the plugin list first; per-hook order only re-partitions
-    // the already-resolved order within this hook.
+    // `enforce` sorts the plugin list once; the per-hook `order` then re-partitions
+    // that list for this hook alone, so a `pre` hook on a `post` plugin still runs
+    // first. This mirrors Vite's getSortedPluginsByHook and is the published rule.
     expect(namesFor(resolved, "configResolved")).toEqual(["post-plugin-pre-hook", "pre-plugin-post-hook"])
   })
 
@@ -116,22 +117,29 @@ describe("Resolve.resolve", () => {
 
   it("filters by predicate apply against the pre-resolution config", async () => {
     const list = [
-      observer("fast", [], { apply: (config) => (config.engine?.maxConcurrency ?? 0) > 4 }),
-      observer("slow", [], { apply: (config) => (config.engine?.maxConcurrency ?? 0) <= 4 })
+      observer("fast", [], { apply: (config) => config["mode"] === "fast" }),
+      observer("slow", [], { apply: (config) => config["mode"] !== "fast" })
     ]
-    const wide = await run(Resolve.resolve(list, { config: { engine: { maxConcurrency: 8 } } }))
+    const wide = await run(Resolve.resolve(list, { config: { mode: "fast" } }))
     expect(wide.plugins.map((plugin) => plugin.name)).toEqual(["fast"])
     const narrow = await run(Resolve.resolve(list))
     expect(narrow.plugins.map((plugin) => plugin.name)).toEqual(["slow"])
   })
 
-  it("skips null and undefined hook entries", async () => {
+  it("skips undefined hook entries and refuses malformed null entries", async () => {
     const sparse = {
       name: "sparse",
-      hooks: { config: undefined, configResolved: null }
+      hooks: { config: undefined }
     } as unknown as FlowsPlugin
     const resolved = await run(Resolve.resolve([sparse]))
     expect(resolved.handlers.size).toBe(0)
+    const error = await run(
+      Resolve.resolve([{
+        name: "null-hook",
+        hooks: { configResolved: null }
+      } as unknown as FlowsPlugin]).pipe(Effect.flip)
+    )
+    expect(error).toMatchObject({ code: "invalid_plugin", path: "$[0].hooks.configResolved" })
   })
 
   it("freezes the resolved plugin list and each hook's handler list", async () => {
@@ -179,6 +187,21 @@ describe("Resolve.layer", () => {
     expect(value).toBe("alpha")
   })
 
+  it("uses the later resolved plugin when two layers provide the same service tag", async () => {
+    const resolved = await run(Resolve.resolve([
+      { name: "first", layer: Layer.succeed(Alpha)({ value: "first" }) },
+      { name: "second", layer: Layer.succeed(Alpha)({ value: "second" }) }
+    ]))
+    const value = await run(
+      Alpha.pipe(
+        Effect.map((alpha) => alpha.value),
+        Effect.provide(Resolve.layer(resolved) as unknown as Layer.Layer<Alpha>)
+      ) as Effect.Effect<string>
+    )
+    // This pins the current layer-collision decision for plugin authors.
+    expect(value).toBe("second")
+  })
+
   it("wraps a failing layer as layer_failed", async () => {
     const broken = Layer.effectDiscard(Effect.fail("boom" as const))
     const resolved = await run(Resolve.resolve([{ name: "broken", layer: broken }]))
@@ -207,8 +230,21 @@ describe("Hooks entry helpers", () => {
   })
 
   it("declares every catalogued hook exactly once", () => {
+    const kind: "waterfall" = Hooks.engineHooks.config
     expect(Object.isFrozen(Hooks.engineHooks)).toBe(true)
+    expect(kind).toBe("waterfall")
     expect(Hooks.engineHooks).toEqual({ config: "waterfall", configResolved: "parallel" })
+  })
+
+  it("keeps the base hook names in a host catalog built by spreading it", () => {
+    // Reproduces how `@smthrs/agent` builds its catalog. A widened annotation on
+    // `engineHooks` would drop `config` and `configResolved` from this type, so
+    // the two literal reads below are the assertion that matters.
+    const hostCatalog = Object.freeze({ ...Hooks.engineHooks, cellRegistry: "waterfall" } as const)
+    const config: "waterfall" = hostCatalog.config
+    const configResolved: "parallel" = hostCatalog.configResolved
+    expect([config, configResolved]).toEqual(["waterfall", "parallel"])
+    expect(Object.keys(hostCatalog)).toEqual(["config", "configResolved", "cellRegistry"])
   })
 })
 
@@ -217,6 +253,6 @@ describe("Plugins.makeNoop", () => {
     const dispatcher = Plugins.makeNoop()
     expect(dispatcher.handlers("configResolved")).toEqual([])
     expect(await run(dispatcher.parallel("configResolved", Config.defaults))).toEqual([])
-    expect(await run(dispatcher.waterfall("config", {}, (previous, next) => ({ ...previous, ...next })))).toEqual({})
+    expect(await run(dispatcher.waterfall("config", {}, Config.merge))).toEqual({})
   })
 })

@@ -55,7 +55,7 @@ describe("the kernel declares the cache environment (issue #88)", () => {
 
   it("accepts a complete capability and non-plugin layer identity", async () => {
     const kernel = await run(Kernel.make(
-      [Plugin.make({ name: "flows-plugin-model-sonnet" })],
+      [Plugin.make({ name: "flows-plugin-model-sonnet", version: "1.4.0" })],
       {},
       {
         cacheEnvironment: {
@@ -70,21 +70,54 @@ describe("the kernel declares the cache environment (issue #88)", () => {
       }).pipe(Effect.provide(kernel.layer))
     )
     expect(environment).toEqual({
-      layers: ["flows-plugin-model-sonnet", "Host=node"],
+      layers: ["flows-plugin-model-sonnet@1.4.0", "Host=node"],
       capabilities: { fs: ["/workspace/**"] }
     })
   })
 
   it("uses plugin identities when the additional layer list is empty", async () => {
     const kernel = await run(Kernel.make(
-      [Plugin.make({ name: "flows-plugin-model-sonnet" })],
+      [Plugin.make({ name: "flows-plugin-model-sonnet", version: "1.4.0" })],
       {},
       { cacheEnvironment: { layers: [], capabilities: {} } }
     ))
     const environment = await run(Action.CurrentCacheEnvironment.pipe(Effect.provide(kernel.layer)))
     expect(environment).toEqual({
-      layers: ["flows-plugin-model-sonnet"],
+      layers: ["flows-plugin-model-sonnet@1.4.0"],
       capabilities: {}
     })
+  })
+
+  it("changes the declared layers when only a selected plugin version changes", async () => {
+    const resolveLayers = async (version: string) => {
+      const kernel = await run(Kernel.make(
+        [Plugin.make({ name: "flows-plugin-model-sonnet", version })],
+        {},
+        { cacheEnvironment: { layers: ["Host=node"], capabilities: {} } }
+      ))
+      return kernel.plugins.resolved.cacheEnvironment?.layers
+    }
+
+    const versionOne = await resolveLayers("1.4.0")
+    const versionTwo = await resolveLayers("2.0.0")
+    expect(versionOne).toEqual(["flows-plugin-model-sonnet@1.4.0", "Host=node"])
+    expect(versionTwo).toEqual(["flows-plugin-model-sonnet@2.0.0", "Host=node"])
+    expect(versionOne).not.toEqual(versionTwo)
+  })
+
+  it("refuses to declare a cache environment for a versionless selected plugin", async () => {
+    const error = await run(
+      Kernel.make(
+        [Plugin.make({ name: "flows-plugin-model-sonnet" })],
+        {},
+        { cacheEnvironment: { layers: [], capabilities: {} } }
+      ).pipe(Effect.flip)
+    )
+    expect(error).toMatchObject({
+      code: "cache_environment_invalid",
+      plugin: "flows-plugin-model-sonnet",
+      path: "$.version"
+    })
+    expect(error.message).toContain("flows-plugin-model-sonnet")
   })
 })

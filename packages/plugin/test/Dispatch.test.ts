@@ -1,5 +1,6 @@
-import { Effect, Option } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Option } from "effect"
 import { describe, expect, it } from "vitest"
+import * as Config from "../src/Config.ts"
 import type { FirstHook, ParallelHook, SequentialHook } from "../src/Hooks.ts"
 import * as Hooks from "../src/Hooks.ts"
 import type { FlowsHooks, FlowsPlugin } from "../src/index.ts"
@@ -7,6 +8,10 @@ import * as Plugins from "../src/Plugins.ts"
 import * as Resolve from "../src/Resolve.ts"
 
 type Decision = "transient" | "permanent" | { readonly shareable: true }
+
+interface StandaloneHooks {
+  readonly isolated: SequentialHook<(value: number) => Effect.Effect<number>>
+}
 
 declare module "../src/index.ts" {
   interface FlowsHooks {
@@ -41,6 +46,15 @@ describe("Plugins layers", () => {
     expect(seen).toEqual(["a"])
     expect(await run(program.pipe(Effect.provide(Plugins.layerNoop)))).toEqual([])
     expect(seen).toEqual(["a"])
+  })
+
+  it("holds a dispatcher for a standalone hook interface directly", async () => {
+    const resolved = await run(Resolve.resolve<StandaloneHooks>(
+      { name: "standalone", hooks: { isolated: (value) => Effect.succeed(value * 2) } },
+      { hooks: { isolated: "sequential" } }
+    ))
+    const dispatcher = Plugins.make<StandaloneHooks>(resolved)
+    expect(await run(dispatcher.sequential("isolated", 21))).toEqual([42])
   })
 })
 
@@ -110,6 +124,38 @@ describe("sequential dispatch", () => {
     )
     expect(error.code).toBe("hook_failed")
   })
+
+  it("interrupts a suspended handler, runs its finalizer, and skips later handlers", async () => {
+    const seen: Array<string> = []
+    await run(Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const dispatcher = yield* Effect.promise(() =>
+        dispatcherFor([
+          {
+            name: "active",
+            hooks: {
+              testSequential: () =>
+                Effect.gen(function*() {
+                  seen.push("active")
+                  yield* Deferred.succeed(entered, undefined)
+                  yield* Effect.never
+                }).pipe(Effect.onInterrupt(() => Effect.sync(() => void seen.push("finalized"))))
+            }
+          },
+          { name: "later", hooks: { testSequential: () => Effect.sync(() => void seen.push("later")) } }
+        ])
+      )
+      const fiber = yield* dispatcher.sequential("testSequential", "value").pipe(
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* Deferred.await(entered)
+      yield* Fiber.interrupt(fiber)
+      const exit = yield* Fiber.await(fiber)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(exit.cause.reasons.some(Cause.isInterruptReason)).toBe(true)
+    }))
+    expect(seen).toEqual(["active", "finalized"])
+  })
 })
 
 describe("parallel dispatch", () => {
@@ -134,6 +180,58 @@ describe("parallel dispatch", () => {
     ])
     const errors = await run(dispatcher.parallel("testParallel", "value"))
     expect(errors.map((error) => error.plugin).sort()).toEqual(["a", "b"])
+  })
+
+  it("honors the configured concurrency bound while preserving error order", async () => {
+    let active = 0
+    let maximum = 0
+    const plugins = Array.from({ length: 6 }, (_, index): FlowsPlugin<FlowsHooks> => ({
+      name: `observer-${index}`,
+      hooks: {
+        testParallel: () =>
+          Effect.gen(function*() {
+            active += 1
+            maximum = Math.max(maximum, active)
+            yield* Effect.sleep("5 millis")
+            active -= 1
+            if (index % 2 === 0) return yield* Effect.fail(index)
+          })
+      }
+    }))
+    const resolved = await run(Resolve.resolve(plugins, { hooks: dispatchHooks, parallelConcurrency: 2 }))
+    const errors = await run(Plugins.make(resolved).parallel("testParallel", "value"))
+    expect(maximum).toBe(2)
+    expect(errors.map((error) => error.plugin)).toEqual(["observer-0", "observer-2", "observer-4"])
+  })
+
+  it("interrupts bounded parallel work, runs its finalizer, and skips queued handlers", async () => {
+    const seen: Array<string> = []
+    await run(Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const resolved = yield* Resolve.resolve([
+        {
+          name: "active",
+          hooks: {
+            testParallel: () =>
+              Effect.gen(function*() {
+                seen.push("active")
+                yield* Deferred.succeed(entered, undefined)
+                yield* Effect.never
+              }).pipe(Effect.onInterrupt(() => Effect.sync(() => void seen.push("finalized"))))
+          }
+        },
+        { name: "later", hooks: { testParallel: () => Effect.sync(() => void seen.push("later")) } }
+      ], { hooks: dispatchHooks, parallelConcurrency: 1 })
+      const fiber = yield* Plugins.make(resolved).parallel("testParallel", "value").pipe(
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* Deferred.await(entered)
+      yield* Fiber.interrupt(fiber)
+      const exit = yield* Fiber.await(fiber)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(exit.cause.reasons.some(Cause.isInterruptReason)).toBe(true)
+    }))
+    expect(seen).toEqual(["active", "finalized"])
   })
 })
 
@@ -193,13 +291,13 @@ describe("first dispatch", () => {
     expect(seen).toEqual(["override"])
   })
 
-  it("ignores a non-Option answer rather than short-circuiting on it", async () => {
+  it("refuses a non-Option answer with handler attribution", async () => {
     const dispatcher = await dispatcherFor([
       { name: "rogue", hooks: { testFirst: () => Effect.succeed("nonsense" as never) } },
       { name: "sane", hooks: { testFirst: () => Effect.succeed(Option.some({ shareable: true } as const)) } }
     ])
-    const result = await run(dispatcher.first("testFirst", "value"))
-    expect(result).toEqual(Option.some({ shareable: true }))
+    const error = await run(dispatcher.first("testFirst", "value").pipe(Effect.flip))
+    expect(error).toMatchObject({ code: "invalid_hook_result", plugin: "rogue", hook: "testFirst" })
   })
 
   it("fails with hook_failed when a first handler fails", async () => {
@@ -210,5 +308,27 @@ describe("first dispatch", () => {
       dispatcher.first("testFirst", "value").pipe(Effect.flip)
     )
     expect(error.code).toBe("hook_failed")
+  })
+})
+
+describe("waterfall dispatch", () => {
+  it("attributes an invalid patch to the handler that returned it", async () => {
+    const dispatcher = await dispatcherFor([
+      { name: "invalid-patch", hooks: { config: () => Effect.succeed({ value: new Date() } as never) } }
+    ])
+    const error = await run(dispatcher.waterfall("config", {}, Config.merge).pipe(Effect.flip))
+    expect(error).toMatchObject({ code: "config_invalid", plugin: "invalid-patch", hook: "config" })
+  })
+
+  it("wraps a merge callback that throws an untyped exception", async () => {
+    const dispatcher = await dispatcherFor([
+      { name: "merge-throw", hooks: { config: () => Effect.succeed({ value: 1 }) } }
+    ])
+    const error = await run(
+      dispatcher.waterfall("config", {}, () => {
+        throw new Error("merge failed")
+      }).pipe(Effect.flip)
+    )
+    expect(error).toMatchObject({ code: "config_invalid", plugin: "merge-throw", hook: "config" })
   })
 })

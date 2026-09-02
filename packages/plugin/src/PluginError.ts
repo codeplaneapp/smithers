@@ -1,11 +1,11 @@
 /**
  * The single typed failure of the plugin kernel.
  *
- * Governing contract: D11 in `docs/pages/design-decisions.md`. These
- * failures cover bounded plugin resolution, configuration, layer composition,
- * and host-owned hook dispatch; they are not durable-engine lifecycle errors.
+ * The public package contract is documented at
+ * {@link https://smithers.sh/api/plugin}; D14 in
+ * `docs/pages/design-decisions.md` bounds it to host-owned cell hooks.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Schema from "effect/Schema"
 
@@ -13,12 +13,17 @@ import * as Schema from "effect/Schema"
  * Closed set of plugin-system failure codes.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const PluginErrorCode = Schema.Literals([
   "duplicate_name",
   "unknown_hook",
+  "invalid_plugin",
+  "apply_failed",
   "config_invalid",
+  "cache_environment_invalid",
+  "invalid_hook_result",
+  "resource_limit",
   "hook_failed",
   "layer_failed"
 ])
@@ -27,7 +32,7 @@ export const PluginErrorCode = Schema.Literals([
  * Closed set of plugin-system failure codes.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type PluginErrorCode = typeof PluginErrorCode.Type
 
@@ -40,12 +45,13 @@ export type PluginErrorCode = typeof PluginErrorCode.Type
  * lossy telemetry channel.
  *
  * @category errors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export class PluginError extends Schema.TaggedError<PluginError>()("flows/plugin/PluginError", {
   code: PluginErrorCode,
   message: Schema.String,
   plugin: Schema.optional(Schema.String),
   hook: Schema.optional(Schema.String),
+  path: Schema.optional(Schema.String),
   cause: Schema.optional(Schema.Unknown)
 }) {}

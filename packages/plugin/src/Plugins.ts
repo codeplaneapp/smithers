@@ -2,16 +2,17 @@
  * The dispatcher: a plain service over a resolved plugin list, generic over the
  * hook interface.
  *
- * Governing contract: D11 in `docs/pages/design-decisions.md`. Each
- * host holds an instance over its augmented `FlowsHooks` and may dispatch only
- * the runtime catalog it supplied. The shipped cell host owns the three
+ * The public package contract is documented at
+ * {@link https://smithers.sh/api/plugin}. Each host holds an instance over its
+ * augmented `FlowsHooks` and may dispatch only the runtime catalog it supplied.
+ * The shipped cell host owns the three
  * waterfalls declared in `packages/agent/src/CellPlugin.ts`; there is
  * no engine-wide lifecycle dispatcher.
  *
  * Cancellation is fiber interruption via scope closure; nothing here threads an
  * `AbortSignal`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -19,8 +20,9 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import type { ArgsOf, ContextOf, KeysOfKind, SuccessOf } from "./Hooks.ts"
 import type { FlowsHooks } from "./index.ts"
+import * as ImmutableMap from "./internal/ReadonlyMap.ts"
 import { PluginError } from "./PluginError.ts"
-import type { HandlerRecord, Resolved } from "./Resolve.ts"
+import { defaultParallelConcurrency, type HandlerRecord, type Resolved } from "./Resolve.ts"
 
 const empty: ReadonlyArray<HandlerRecord> = Object.freeze([])
 
@@ -46,7 +48,7 @@ const runHandler = (
  * The dispatch surface.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Service<H = FlowsHooks> {
   /** The resolved list this dispatcher walks. */
@@ -83,7 +85,7 @@ export interface Service<H = FlowsHooks> {
  * Builds a dispatcher over an already resolved plugin list.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const make = <H = FlowsHooks>(resolved: Resolved<H>): Service<H> => {
   const handlers = (hook: string): ReadonlyArray<HandlerRecord> => resolved.handlers.get(hook) ?? empty
@@ -104,14 +106,24 @@ export const make = <H = FlowsHooks>(resolved: Resolved<H>): Service<H> => {
         runHandler(record, args).pipe(
           Effect.match({ onFailure: (error) => [error], onSuccess: () => [] as Array<PluginError> })
         ),
-      { concurrency: "unbounded" }
+      { concurrency: resolved.parallelConcurrency }
     ).pipe(Effect.map((chunks) => chunks.flat()))) as Service<H>["parallel"]
 
   const first = ((hook: string, ...args: Array<unknown>) =>
     Effect.gen(function*() {
       for (const record of handlers(hook)) {
         const result = yield* runHandler(record, args)
-        if (Option.isOption(result) && Option.isSome(result)) return result
+        if (!Option.isOption(result)) {
+          return yield* Effect.fail(
+            new PluginError({
+              code: "invalid_hook_result",
+              message: `first hook "${record.hook}" in plugin "${record.plugin}" did not return an Option`,
+              plugin: record.plugin,
+              hook: record.hook
+            })
+          )
+        }
+        if (Option.isSome(result)) return result
       }
       return Option.none()
     })) as unknown as Service<H>["first"]
@@ -122,45 +134,78 @@ export const make = <H = FlowsHooks>(resolved: Resolved<H>): Service<H> => {
         let value = initial
         for (const record of handlers(hook)) {
           const patch = yield* runHandler(record, [value])
-          if (patch !== undefined && patch !== null) value = merge(value, patch)
+          if (patch !== undefined) {
+            value = yield* Effect.try({
+              try: () => merge(value, patch),
+              catch: (cause) =>
+                cause instanceof PluginError
+                  ? new PluginError({
+                    code: cause.code,
+                    message: cause.message,
+                    plugin: record.plugin,
+                    hook: record.hook,
+                    path: cause.path
+                  })
+                  : new PluginError({
+                    code: "config_invalid",
+                    message: `waterfall hook "${record.hook}" in plugin "${record.plugin}" returned an invalid patch`,
+                    plugin: record.plugin,
+                    hook: record.hook
+                  })
+            })
+          }
         }
         return value
       })) as Service<H>["waterfall"]
 
-  return { resolved, handlers, sequential, parallel, first, waterfall }
+  return Object.freeze({ resolved, handlers, sequential, parallel, first, waterfall })
 }
 
 /**
  * A dispatcher with no plugins at all.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const makeNoop = <H = FlowsHooks>(): Service<H> => make<H>({ plugins: Object.freeze([]), handlers: new Map() })
+export const makeNoop = <H = FlowsHooks>(): Service<H> =>
+  make<H>(Object.freeze({
+    plugins: Object.freeze([]),
+    handlers: ImmutableMap.make<string, ReadonlyArray<HandlerRecord>>(),
+    parallelConcurrency: defaultParallelConcurrency
+  }))
 
 /**
  * The shared dispatcher, as a service tag.
  *
- * A host that augments `FlowsHooks` shares this tag; augmentation affects the
- * type surface while the runtime catalog still bounds what can resolve.
+ * This tag holds one dispatcher over the process-wide augmented `FlowsHooks`.
+ * `declare module "@smthrs/plugin"` augmentation is the supported extension
+ * mechanism for values placed in the tag. A host typed against a separate hook
+ * interface holds its `Service<H>` directly, as `@smthrs/agent` does, and does
+ * not use this tag or its layers.
  *
  * @category context
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export class Plugins extends Context.Service<Plugins, Service>()("flows/plugin/Plugins") {}
 
 /**
  * Layer providing a dispatcher over an already resolved plugin list.
  *
+ * This layer targets the shared augmented `FlowsHooks` catalog only. A host
+ * with a separate hook interface holds its `Service<H>` directly.
+ *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layer = (resolved: Resolved): Layer.Layer<Plugins> => Layer.succeed(Plugins)(make(resolved))
 
 /**
  * Layer providing a dispatcher with no plugins.
  *
+ * This layer targets the shared augmented `FlowsHooks` catalog only. A host
+ * with a separate hook interface holds its `Service<H>` directly.
+ *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layerNoop: Layer.Layer<Plugins> = Layer.succeed(Plugins)(makeNoop())

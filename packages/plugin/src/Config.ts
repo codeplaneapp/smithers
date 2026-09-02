@@ -1,182 +1,204 @@
 /**
- * Configuration shapes consumed and produced by the plugin kernel.
+ * Bounded JSON configuration consumed and produced by the plugin kernel.
  *
- * Governing contract: D11 in `docs/pages/design-decisions.md`. These
- * schemas are the bounded configuration lifecycle owned by the shared plugin
- * kernel and consumed by the assembled cell host in `@smthrs/agent`.
- * They are not placeholders for later durable-engine wiring: engine policy
- * remains on its Effect service and constructor-option seams.
+ * Configuration is an extension namespace, not an engine-policy surface.
+ * Durable retry, concurrency, and storage policy stay on their owning Effect
+ * services and constructor options. Every accepted value is copied before any
+ * plugin observes it, then frozen recursively.
  *
- * A `FlowsConfig` is threaded through the `config` waterfall, decoded,
- * defaulted, and frozen into the `ResolvedConfig` for that host composition.
- *
- * `plugins` is typed `unknown` on purpose. The plugin list lives on the config
- * the application assembles, but typing it as `PluginInput` here would make
- * `Config` depend on `Plugin`, which depends on `Hooks`, which depends on
- * `Config`. The kernel never reads `plugins` off a config value.
- *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as Boundary from "./internal/Boundary.ts"
 import { PluginError } from "./PluginError.ts"
 
 /**
- * Retry-shaped defaults carried through the shared plugin config pipeline.
+ * Maximum encoded bytes accepted for one plugin configuration.
  *
- * @category models
- * @since 0.1.0
+ * @category limits
+ * @since 1.0.0-rc.0
  */
-export const RetryConfig = Schema.Struct({
-  maxAttempts: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
-  initialDelayMs: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
-  backoffCoefficient: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThan(0))),
-  maxDelayMs: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)))
-})
-/**
- * The decoded form of {@link RetryConfig}.
- *
- * @category models
- * @since 0.1.0
- */
-export type RetryConfig = typeof RetryConfig.Type
+export const maximumConfigBytes = Boundary.defaultLimits.maxBytes
 
 /**
- * Engine-level knobs.
+ * Maximum nesting accepted for one plugin configuration.
  *
- * @category models
- * @since 0.1.0
+ * @category limits
+ * @since 1.0.0-rc.0
  */
-export const EngineConfig = Schema.Struct({
-  maxConcurrency: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0)))
-})
+export const maximumConfigDepth = Boundary.defaultLimits.maxDepth
+
 /**
- * The decoded form of {@link EngineConfig}.
+ * Maximum aggregate members accepted for one plugin configuration.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumConfigMembers = Boundary.defaultLimits.maxMembers
+
+/**
+ * Maximum aggregate values accepted for one plugin configuration.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumConfigNodes = Boundary.defaultLimits.maxNodes
+
+/**
+ * One value accepted in a plugin-owned configuration namespace.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export type EngineConfig = typeof EngineConfig.Type
+export const ConfigValue = Schema.Json
+
+/**
+ * One value accepted in a plugin-owned configuration namespace.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type ConfigValue = typeof ConfigValue.Type
 
 /**
  * The pre-resolution configuration an application assembles.
  *
+ * Keys name plugin-owned namespaces. `engine`, `retry`, `store`, and
+ * `plugins` are refused because accepting those names would imply policy the
+ * plugin kernel does not own or apply.
+ *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const FlowsConfig = Schema.StructWithRest(
-  Schema.Struct({
-    plugins: Schema.optionalKey(Schema.Unknown),
-    retry: Schema.optionalKey(RetryConfig),
-    engine: Schema.optionalKey(EngineConfig),
-    store: Schema.optionalKey(Schema.Struct({ url: Schema.optionalKey(Schema.String) }))
-  }),
-  [Schema.Record(Schema.String, Schema.Unknown)]
-)
+export const FlowsConfig = Schema.Record(Schema.String, ConfigValue)
+
 /**
  * The decoded form of {@link FlowsConfig}.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type FlowsConfig = typeof FlowsConfig.Type
 
 /**
- * The frozen configuration handed to `configResolved` and to the engine.
+ * The detached, recursively frozen configuration handed to plugins.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const ResolvedConfig = Schema.StructWithRest(
-  Schema.Struct({
-    retry: Schema.Struct({
-      maxAttempts: Schema.Int.check(Schema.isGreaterThan(0)),
-      initialDelayMs: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
-      backoffCoefficient: Schema.Finite.check(Schema.isGreaterThan(0)),
-      maxDelayMs: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
-    }),
-    engine: Schema.Struct({ maxConcurrency: Schema.Int.check(Schema.isGreaterThan(0)) }),
-    store: Schema.Struct({ url: Schema.optionalKey(Schema.String) })
-  }),
-  [Schema.Record(Schema.String, Schema.Unknown)]
-)
+export const ResolvedConfig = Schema.Record(Schema.String, ConfigValue)
+
 /**
  * The decoded form of {@link ResolvedConfig}.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type ResolvedConfig = typeof ResolvedConfig.Type
 
 /**
- * Defaults applied after the `config` waterfall and before freezing.
- *
- * @category models
- * @since 0.1.0
- */
-export const defaults: ResolvedConfig = Object.freeze({
-  retry: Object.freeze({
-    maxAttempts: 3,
-    initialDelayMs: 1_000,
-    backoffCoefficient: 2,
-    maxDelayMs: 60_000
-  }),
-  engine: Object.freeze({ maxConcurrency: 16 }),
-  store: Object.freeze({})
-})
-
-/** @private */
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-
-/**
- * Deep-merges a partial configuration patch over a base configuration.
- *
- * Plain objects merge key-by-key; every other value (including arrays)
- * replaces wholesale. `undefined` never clobbers a present value.
- *
- * @category combinators
- * @since 0.1.0
- */
-export const merge = <A>(base: A, patch: unknown): A => {
-  if (patch === undefined) return base
-  if (!isPlainObject(base) || !isPlainObject(patch)) return patch as A
-  const result: Record<string, unknown> = { ...base }
-  for (const key of Object.keys(patch)) {
-    const next = patch[key]
-    if (next === undefined) continue
-    result[key] = isPlainObject(result[key]) && isPlainObject(next) ? merge(result[key], next) : next
-  }
-  return result as A
-}
-
-/**
- * Decodes a post-waterfall configuration, applies defaults, and deep-freezes
- * the result.
+ * Empty defaults. Engine policy is deliberately not defaulted here.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const resolve = (config: FlowsConfig): Effect.Effect<ResolvedConfig, PluginError> =>
-  Schema.decodeUnknownEffect(FlowsConfig)(config).pipe(
-    Effect.mapError((cause) =>
-      new PluginError({ code: "config_invalid", message: "post-waterfall config failed decoding", cause })
-    ),
-    Effect.map((decoded) => {
-      const { plugins: _, ...resolved } = decoded
-      return deepFreeze(merge(defaults, resolved))
-    })
-  )
+export const defaults: ResolvedConfig = Object.freeze({})
+
+const reservedRootKeys = new Set(["engine", "retry", "store", "plugins"])
+
+const invalid = (path: string, complaint: string): PluginError =>
+  new PluginError({
+    code: "config_invalid",
+    message: `plugin configuration ${complaint}`,
+    path
+  })
+
+const snapshotRecord = (input: unknown): ResolvedConfig => {
+  const admitted = Boundary.record(input)
+  if (!admitted.ok) throw invalid(admitted.path, admitted.complaint)
+  const record = admitted.value as Readonly<Record<string, ConfigValue>>
+  for (const key of Object.keys(record)) {
+    if (reservedRootKeys.has(key)) {
+      throw invalid(`$.${key}`, "uses a runtime-policy key that the plugin kernel does not own")
+    }
+  }
+  return record
+}
+
+const isRecord = (value: ConfigValue): value is Readonly<Record<string, ConfigValue>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const define = (target: Record<string, ConfigValue>, key: string, value: ConfigValue): void => {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true
+  })
+}
+
+const mergeRecords = (
+  base: Readonly<Record<string, ConfigValue>>,
+  patch: Readonly<Record<string, ConfigValue>>
+): Readonly<Record<string, ConfigValue>> => {
+  const result: Record<string, ConfigValue> = {}
+  for (const key of Object.keys(base)) define(result, key, base[key]!)
+  for (const key of Object.keys(patch)) {
+    const previous = result[key]
+    const next = patch[key]!
+    define(
+      result,
+      key,
+      previous !== undefined && isRecord(previous) && isRecord(next) ? mergeRecords(previous, next) : next
+    )
+  }
+  return Object.freeze(result)
+}
 
 /**
- * Recursively freezes a value's own enumerable object properties.
+ * Copies and deep-merges a configuration patch over a base configuration.
+ *
+ * Records merge key-by-key and every other JSON value replaces wholesale.
+ * Both operands are admitted before the merge, so unsafe property names,
+ * accessors, cycles, exotic prototypes, and values outside the resource
+ * limits fail with `config_invalid`.
+ *
+ * @category combinators
+ * @since 1.0.0-rc.0
+ */
+export const merge = (base: FlowsConfig, patch: unknown): FlowsConfig => {
+  const safeBase = snapshotRecord(base)
+  if (patch === undefined) return safeBase
+  const safePatch = snapshotRecord(patch)
+  return mergeRecords(safeBase, safePatch)
+}
+
+/**
+ * Copies and freezes one JSON value without retaining caller-owned objects.
  *
  * @category utils
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const deepFreeze = <A>(value: A): A => {
-  if (isPlainObject(value)) {
-    for (const key of Object.keys(value)) deepFreeze(value[key])
-  }
-  return typeof value === "object" && value !== null ? Object.freeze(value) : value
+export const deepFreeze = <A extends ConfigValue>(value: A): A => {
+  const admitted = Boundary.admit(value)
+  if (!admitted.ok) throw invalid(admitted.path, admitted.complaint)
+  return admitted.value as A
 }
+
+/**
+ * Admits a raw pre-resolution configuration as an immutable snapshot.
+ *
+ * @category constructors
+ * @since 1.0.0-rc.0
+ */
+export const snapshot = (config: unknown): Effect.Effect<FlowsConfig, PluginError> =>
+  Effect.try({ try: () => snapshotRecord(config), catch: (cause) => cause as PluginError })
+
+/**
+ * Decodes the post-waterfall configuration into its final immutable form.
+ *
+ * @category constructors
+ * @since 1.0.0-rc.0
+ */
+export const resolve = (config: unknown): Effect.Effect<ResolvedConfig, PluginError> => snapshot(config)

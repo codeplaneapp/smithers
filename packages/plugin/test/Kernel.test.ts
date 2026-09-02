@@ -8,17 +8,23 @@ import * as Kernel from "../src/Kernel.ts"
 const run = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.runPromise(effect as Effect.Effect<A, E>)
 
 describe("Config.merge", () => {
-  it("deep-merges plain objects and replaces everything else", () => {
+  it("deep-merges JSON records and replaces arrays and scalars", () => {
     expect(Config.merge({ a: { b: 1, c: 2 } }, { a: { c: 3, d: 4 } })).toEqual({ a: { b: 1, c: 3, d: 4 } })
     expect(Config.merge({ a: [1] }, { a: [2] })).toEqual({ a: [2] })
     expect(Config.merge({ a: 1 }, undefined)).toEqual({ a: 1 })
-    expect(Config.merge({ a: 1 }, { a: undefined })).toEqual({ a: 1 })
     expect(Config.merge({ a: { b: 1 } }, { a: 5 })).toEqual({ a: 5 })
-    expect(Config.merge(1, { a: 1 })).toEqual({ a: 1 })
   })
 })
 
 describe("Kernel.make", () => {
+  it("accepts pre-resolution config only through the positional argument", async () => {
+    // @ts-expect-error Kernel options must not accept a second config source.
+    void Kernel.make([], {}, { config: {} })
+    expect((await run(Kernel.make([], { plugin: { enabled: true } }))).config).toEqual({
+      plugin: { enabled: true }
+    })
+  })
+
   it("threads the config waterfall, freezes the result, then notifies observers", async () => {
     const captured: Array<ResolvedConfig> = []
     const seen: Array<unknown> = []
@@ -28,8 +34,8 @@ describe("Kernel.make", () => {
           name: "widen",
           hooks: {
             config: (config) => {
-              seen.push(config.engine?.maxConcurrency)
-              return Effect.succeed({ engine: { maxConcurrency: 32 } })
+              seen.push(config["cell"])
+              return Effect.succeed({ cell: { maxConcurrency: 32 } })
             }
           }
         },
@@ -37,25 +43,23 @@ describe("Kernel.make", () => {
           name: "retry-tweak",
           hooks: {
             config: (config) => {
-              seen.push(config.engine?.maxConcurrency)
-              return Effect.succeed({ retry: { maxAttempts: 9 } })
+              seen.push(config["cell"])
+              return Effect.succeed({ model: { maxAttempts: 9 } })
             },
             configResolved: (config) => Effect.sync(() => void captured.push(config))
           }
         },
         { name: "silent", hooks: { config: () => Effect.void } }
       ],
-      { engine: { maxConcurrency: 2 } }
+      { cell: { maxConcurrency: 2 } }
     ))
 
     // each handler saw the previous handler's output
-    expect(seen).toEqual([2, 32])
-    expect(kernel.config.engine.maxConcurrency).toBe(32)
-    expect(kernel.config.retry.maxAttempts).toBe(9)
-    // defaults filled in
-    expect(kernel.config.retry.backoffCoefficient).toBe(2)
+    expect(seen).toEqual([{ maxConcurrency: 2 }, { maxConcurrency: 32 }])
+    expect(kernel.config["cell"]).toEqual({ maxConcurrency: 32 })
+    expect(kernel.config["model"]).toEqual({ maxAttempts: 9 })
     expect(Object.isFrozen(kernel.config)).toBe(true)
-    expect(Object.isFrozen(kernel.config.retry)).toBe(true)
+    expect(Object.isFrozen(kernel.config["cell"])).toBe(true)
     expect(captured).toEqual([kernel.config])
     expect(kernel.observerErrors).toEqual([])
   })
@@ -70,7 +74,7 @@ describe("Kernel.make", () => {
   it("fails with config_invalid when the post-waterfall config does not decode", async () => {
     const bad: FlowsPlugin = {
       name: "bad-config",
-      hooks: { config: () => Effect.succeed({ retry: { maxAttempts: "many" } } as never) }
+      hooks: { config: () => Effect.succeed({ bad: new Date() } as never) }
     }
     const error = await run(Kernel.make([bad]).pipe(Effect.flip))
     expect(error.code).toBe("config_invalid")
@@ -92,10 +96,10 @@ describe("Kernel.make", () => {
   it("filters plugins by apply against the raw config it was given", async () => {
     const kernel = await run(Kernel.make(
       [
-        { name: "only-wide", apply: (config) => (config.engine?.maxConcurrency ?? 0) > 4 },
+        { name: "only-wide", apply: (config) => config["mode"] === "wide" },
         { name: "always" }
       ],
-      { engine: { maxConcurrency: 1 } }
+      { mode: "narrow" }
     ))
     expect(kernel.plugins.resolved.plugins.map((plugin) => plugin.name)).toEqual(["always"])
   })
@@ -121,28 +125,27 @@ describe("Kernel.make", () => {
           }
         }
       ],
-      { engine: { maxConcurrency: 2 }, otherNamespace: { flag: true } }
+      { cellPolicy: { maxConcurrency: 2 }, otherNamespace: { flag: true } }
     ))
     expect(kernel.config["myPlugin"]).toEqual({ endpoint: "https://example.test" })
     expect(kernel.config["otherNamespace"]).toEqual({ flag: true })
     expect(Object.isFrozen(kernel.config["myPlugin"])).toBe(true)
     expect(captured[0]?.["myPlugin"]).toEqual({ endpoint: "https://example.test" })
-    // known namespaces still decode and default
-    expect(kernel.config.engine.maxConcurrency).toBe(2)
-    expect(kernel.config.retry.maxAttempts).toBe(3)
+    expect(kernel.config["cellPolicy"]).toEqual({ maxConcurrency: 2 })
   })
 
-  it("still rejects invalid known namespaces while keeping unknown ones", async () => {
+  it("rejects values outside strict JSON", async () => {
     const error = await run(
-      Config.resolve({ retry: { maxAttempts: "many" }, myPlugin: { a: 1 } } as never).pipe(Effect.flip)
+      Config.resolve({ myPlugin: { invalid: new Map() } } as never).pipe(Effect.flip)
     )
     expect(error.code).toBe("config_invalid")
   })
 
-  it("drops the plugins field from the resolved config", async () => {
-    const kernel = await run(Kernel.make([], { plugins: ["not-a-plugin"], store: { url: "sqlite://x" } }))
-    expect("plugins" in kernel.config).toBe(false)
-    expect(kernel.config.store.url).toBe("sqlite://x")
+  it("refuses runtime-policy keys the plugin kernel does not apply", async () => {
+    for (const key of ["engine", "retry", "store", "plugins"] as const) {
+      const error = await run(Kernel.make([], { [key]: {} }).pipe(Effect.flip))
+      expect(error).toMatchObject({ code: "config_invalid", path: `$.${key}` })
+    }
   })
 })
 
