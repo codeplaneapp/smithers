@@ -217,9 +217,6 @@ export const createRunsController = (
     if (card === undefined) {
       return `Open the run first (runs.open ${runId}) — rerunning needs the card that knows the flow and its launch input.`
     }
-    if (!["completed", "failed", "cancelled", "no-capacity"].includes(card.payload.phase)) {
-      return `Run ${runId} is not settled (${card.payload.phase}); stop it first or wait for it to finish.`
-    }
     if (card.payload.input === undefined) {
       return `This run's launch input isn't recorded on this client, so there's nothing faithful to rerun — start the flow fresh with flow.run ${card.payload.workflow}.`
     }
