@@ -1,4 +1,5 @@
 import { Effect, Layer } from "effect"
+import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 import * as LanguageServer from "../src/LanguageServer.ts"
 import * as Lsp from "../src/Lsp.ts"
@@ -56,5 +57,17 @@ describe("Lsp", () => {
     expect(failure).toMatchObject({
       code: "invalid_input"
     })
+  })
+  it("describes every model-facing input field", () => {
+    // The annotations are what a model reads when it decides how to call the
+    // flow, and this was the one flow schema that carried none. `Output.result`
+    // is `Schema.Unknown`, which JSON Schema renders as `{}`: its description
+    // lives in the source annotation and cannot appear here.
+    const document = Schema.toJsonSchemaDocument(Lsp.Input).schema as {
+      readonly properties: Readonly<Record<string, unknown>>
+    }
+    const fields = Object.values(document.properties)
+    expect(fields).toHaveLength(5)
+    expect(fields.every((field) => JSON.stringify(field).includes("\"description\""))).toBe(true)
   })
 })

@@ -15,11 +15,64 @@ import * as Walk from "./internal/Walk.ts"
 import * as Search from "./Search.ts"
 import * as StdError from "./StdError.ts"
 
+/**
+ * Maximum bytes captured from either stream of one `rg` invocation.
+ *
+ * Native search refuses an overflow instead of truncating because a partial
+ * ripgrep stream could make it disagree with the portable peer. The 64 MiB
+ * bound is well above real repository listings: 400,000 paths occupy roughly
+ * 16 MiB in a typical `rg --files` stream.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const MAX_CAPTURE_BYTES = 67_108_864
+
 interface RgResult {
   readonly stdout: string
   readonly stderr: string
   readonly exitCode: number
 }
+
+interface Capture {
+  readonly text: string
+  readonly overflowed: boolean
+}
+
+interface CaptureState {
+  chunks: Array<Uint8Array>
+  bytes: number
+  overflowed: boolean
+}
+
+const decodeCapture = (state: CaptureState): Capture => {
+  if (state.overflowed) return { text: "", overflowed: true }
+  const bytes = new Uint8Array(state.bytes)
+  let offset = 0
+  for (const chunk of state.chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return { text: new TextDecoder().decode(bytes), overflowed: false }
+}
+
+const capture = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.Effect<Capture, E> =>
+  Stream.runFold(
+    stream,
+    (): CaptureState => ({ chunks: [], bytes: 0, overflowed: false }),
+    (state, chunk) => {
+      if (state.overflowed || chunk.byteLength === 0) return state
+      if (state.bytes + chunk.byteLength > MAX_CAPTURE_BYTES) {
+        state.chunks = []
+        state.bytes = 0
+        state.overflowed = true
+        return state
+      }
+      state.chunks.push(chunk)
+      state.bytes += chunk.byteLength
+      return state
+    }
+  ).pipe(Effect.map(decodeCapture))
 
 const execute = (
   cwd: string,
@@ -29,18 +82,32 @@ const execute = (
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const handle = yield* spawner.spawn(ChildProcess.make("rg", [...args], { cwd }))
     const [stdout, stderr, exitCode] = yield* Effect.all([
-      Stream.mkString(Stream.decodeText(handle.stdout)),
-      Stream.mkString(Stream.decodeText(handle.stderr)),
+      capture(handle.stdout),
+      capture(handle.stderr),
       handle.exitCode
     ], { concurrency: "unbounded" })
-    return { stdout, stderr, exitCode }
+    const overflowed = [stdout.overflowed ? "stdout" : undefined, stderr.overflowed ? "stderr" : undefined]
+      .filter((stream): stream is string => stream !== undefined)
+    if (overflowed.length > 0) {
+      return yield* Effect.fail(
+        new StdError.StdError({
+          code: "command_failed",
+          message: `rg ${
+            overflowed.join(" and ")
+          } exceeded the ${MAX_CAPTURE_BYTES}-byte capture cap; the native search peer refuses partial output instead of returning an answer that could drift from the portable peer`
+        })
+      )
+    }
+    return { stdout: stdout.text, stderr: stderr.text, exitCode }
   }).pipe(
     Effect.scoped,
-    Effect.mapError(() =>
-      new StdError.StdError({
-        code: "provider_unavailable",
-        message: "The native ripgrep implementation could not start rg"
-      })
+    Effect.mapError((error) =>
+      error instanceof StdError.StdError
+        ? error
+        : new StdError.StdError({
+          code: "provider_unavailable",
+          message: "The native ripgrep implementation could not start rg"
+        })
     )
   )
 
@@ -114,6 +181,32 @@ const resolveRoot = (
 const pathOrder = (left: Search.GrepLine, right: Search.GrepLine): number =>
   left.file < right.file ? -1 : left.file > right.file ? 1 : left.line - right.line
 
+/**
+ * Holds `maxCount` to the per-file match budget the contract states.
+ *
+ * `rg` labels an after-context line as a `match` when that line matches too,
+ * so `--max-count 2 --after-context 1` over three consecutive matching lines
+ * prints three `match` rows — measured against ripgrep 14.1.1. The in-process
+ * peer stops counting at the budget and carries the surplus line as context,
+ * and the generated conformance run found the two peers answering that call
+ * differently on four seeds. The surplus rows are demoted rather than dropped,
+ * because the caller asked for that context and `rg` did print it. Rows arrive
+ * sorted by file and line, so counting in order is counting per file.
+ */
+const capMatches = (
+  lines: ReadonlyArray<Search.GrepLine>,
+  maxCount: number | undefined
+): ReadonlyArray<Search.GrepLine> => {
+  if (maxCount === undefined) return lines
+  const counted = new Map<string, number>()
+  return lines.map((line) => {
+    if (line.kind !== "match") return line
+    const seen = counted.get(line.file) ?? 0
+    counted.set(line.file, seen + 1)
+    return seen < maxCount ? line : { ...line, kind: "context" as const }
+  })
+}
+
 const grep = (
   input: Search.GrepInput
 ): Effect.Effect<
@@ -137,8 +230,15 @@ const grep = (
     ]
     if (input.hidden) args.push("--hidden")
     if (input.fixedStrings) args.push("--fixed-strings")
+    // `rg` documents `--smart-case` as overriding `--ignore-case`, so passing
+    // both makes an uppercase pattern case-SENSITIVE. The in-process peer reads
+    // the pair the other way round — `ignoreCase || (smartCase && no uppercase)`
+    // — because an explicit request beats a heuristic. `Grep.run` refuses the
+    // combination outright, but a host binding `Search` directly never reaches
+    // that check, and the generated conformance run found the two peers
+    // answering seven seeds differently through it.
     if (input.ignoreCase) args.push("--ignore-case")
-    if (input.smartCase) args.push("--smart-case")
+    else if (input.smartCase) args.push("--smart-case")
     if (input.beforeContext > 0) args.push("--before-context", String(input.beforeContext))
     if (input.afterContext > 0) args.push("--after-context", String(input.afterContext))
     if (input.maxCount !== undefined) args.push("--max-count", String(input.maxCount))
@@ -230,7 +330,10 @@ const grep = (
     }
     if (!sawSummary) return yield* Effect.fail(malformedJson())
     for (const file of binaryFiles) files.delete(file)
-    const visibleLines = lines.filter((line) => !binaryFiles.has(line.file)).sort(pathOrder)
+    const visibleLines = capMatches(
+      lines.filter((line) => !binaryFiles.has(line.file)).sort(pathOrder),
+      input.maxCount
+    )
     const grouped = input.filesWithMatches ? [] : Grouping.group(visibleLines)
     const entries = input.filesWithMatches ? [...files].sort() : grouped
     const truncated = entries.length > input.limit

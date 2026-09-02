@@ -129,6 +129,32 @@ export const run = Effect.fn("ApplyPatch.run")(function*(
     )
   }
 
+  // Every update hunk is derived from the file as it is on disk, so two
+  // sections naming one path both start from the same original and the second
+  // write erases the first — while the summary reports two modifications.
+  // The preflight cannot honestly validate the second section against a file
+  // the first has not written yet, so the patch is refused whole rather than
+  // applied by halves. A file needing several edits carries several `@@`
+  // chunks inside one section, which is the shape the parser already accepts.
+  const touched = new Set<string>()
+  for (const hunk of parsed.hunks) {
+    const destination = hunk.kind === "update" && hunk.movePath !== undefined && hunk.movePath !== hunk.path
+      ? [hunk.movePath]
+      : []
+    for (const claimed of [hunk.path, ...destination]) {
+      if (touched.has(claimed)) {
+        return yield* Effect.fail(
+          new StdError.StdError({
+            code: "invalid_input",
+            message: `The patch names ${claimed} in more than one section; give one section per path`,
+            path: claimed
+          })
+        )
+      }
+      touched.add(claimed)
+    }
+  }
+
   const added: Array<string> = []
   const modified: Array<string> = []
   const deleted: Array<string> = []

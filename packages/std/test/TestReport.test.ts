@@ -23,7 +23,7 @@ describe("TestReport", () => {
     })
   })
 
-  it("reads a verbose pytest run whose tally was cut off", () => {
+  it("keeps observed pytest outcomes but rejects a verbose capture without a tally", () => {
     const output = [
       "tests/test_a.py::test_one PASSED",
       "tests/test_a.py::test_two PASSED",
@@ -32,8 +32,35 @@ describe("TestReport", () => {
     expect(TestReport.parse(output)).toEqual({
       passed: 2,
       failed: ["tests/test_a.py::test_three"],
-      reportedFailed: 1,
-      parsed: true
+      reportedFailed: undefined,
+      parsed: false
+    })
+  })
+
+  it("suppresses attribution between unrelated verbose-only pytest tails", () => {
+    const base = TestReport.parse("test_a.py::test_x FAILED\n")
+    const current = TestReport.parse("test_a.py::test_y PASSED\n")
+
+    expect(TestReport.attribute(current, base)).toBeUndefined()
+  })
+
+  it("attributes complete pytest captures whose tallies agree with their ids", () => {
+    const base = TestReport.parse([
+      "test_a.py::test_x FAILED",
+      "FAILED test_a.py::test_x - AssertionError",
+      "========================= 1 failed in 0.10s ========================="
+    ].join("\n"))
+    const current = TestReport.parse([
+      "test_a.py::test_x PASSED",
+      "========================= 1 passed in 0.10s ========================="
+    ].join("\n"))
+
+    expect(base.parsed).toBe(true)
+    expect(current.parsed).toBe(true)
+    expect(TestReport.attribute(current, base)).toEqual({
+      introduced: [],
+      preexisting: [],
+      fixed: ["test_a.py::test_x"]
     })
   })
 
@@ -59,6 +86,25 @@ describe("TestReport", () => {
   it("reads TAP", () => {
     const output = ["TAP version 13", "1..2", "ok 1 - widens", "not ok 2 - narrows"].join("\n")
     expect(TestReport.parse(output)).toEqual({ passed: 1, failed: ["narrows"], reportedFailed: 1, parsed: true })
+  })
+
+  it("rejects TAP outcomes without a plan", () => {
+    expect(TestReport.parse("not ok 1 - narrows\n")).toEqual({
+      passed: 0,
+      failed: ["narrows"],
+      reportedFailed: 1,
+      parsed: false
+    })
+  })
+
+  it("rejects TAP when the plan exceeds the observed outcome count", () => {
+    const output = ["TAP version 13", "1..3", "ok 1 - widens", "not ok 2 - narrows"].join("\n")
+    expect(TestReport.parse(output)).toEqual({
+      passed: 1,
+      failed: ["narrows"],
+      reportedFailed: 1,
+      parsed: false
+    })
   })
 
   it("does not claim a complete pytest reading from a summary alone", () => {

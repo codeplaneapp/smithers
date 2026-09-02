@@ -12,6 +12,8 @@ import * as Glob from "../src/Glob.ts"
 import * as Grep from "../src/Grep.ts"
 import * as NativeSearch from "../src/NativeSearch.ts"
 import * as PortableSearch from "../src/PortableSearch.ts"
+import * as Search from "../src/Search.ts"
+import * as SearchConformance from "../src/SearchConformance.ts"
 
 const root = mkdtempSync(join(tmpdir(), "flows-search-conformance-"))
 const linkedRoot = join(root, "linked-root")
@@ -686,4 +688,48 @@ it("the native peer keeps what rg produced when it only skipped what it could no
   expect(tolerated).toMatchObject({ matches: [], files: [] })
   expect(listed.paths).toEqual([join(root, "src/a.ts")])
   expect(failure(rejected)).toEqual({ code: "invalid_pattern", message: "rg: error parsing glob" })
+})
+
+// The table above pins the divergences somebody already found: `?` under
+// fixedStrings, a newline in a filename, a symlinked root. Each of those was
+// invisible until a person thought of it. This is the other half of std-20 —
+// a generated tree and a generated batch of calls, run through both peers,
+// asserting they answered byte for byte alike. The generator stays inside the
+// ground both peers claim to share (no symlinks, no CRLF, no unreadable
+// directories, no NUL bytes), because outside it a difference is a documented
+// choice rather than a drift.
+//
+// Seeds are fixed rather than random: a suite that fails on a different input
+// every run cannot be bisected, and a seed that ever finds something belongs
+// in the list permanently.
+describe("Search conformance (generated)", () => {
+  // Seeds 1, 2, 21 and 34 caught `rg` reporting more matches than `maxCount`
+  // when an after-context line matched too; seeds 4, 40, 51, 103 and 118
+  // caught `--smart-case` overriding `--ignore-case` in the native peer only.
+  // Both were fixed in `NativeSearch`; the seeds stay so neither can return.
+  // A 120-seed sweep over the same generator is clean, and takes two and a
+  // half minutes, which is why twelve of them live here instead.
+  const seeds = [1, 2, 4, 21, 34, 40, 51, 89, 103, 118, 144, 233]
+  const generatedRoot = mkdtempSync(join(tmpdir(), "flows-search-generated-"))
+
+  afterAll(() => {
+    rmSync(generatedRoot, { recursive: true, force: true })
+  })
+
+  it.each(seeds)("answers every generated call alike on both peers (seed %i)", async (seed) => {
+    const treeRoot = join(generatedRoot, `seed-${seed}`)
+    const plan = SearchConformance.plan({ seed, root: treeRoot })
+
+    const divergences = await Effect.runPromise(
+      Effect.gen(function*() {
+        yield* SearchConformance.materialize(plan)
+        const portable = yield* Effect.provide(Search.Search, PortableSearch.layer)
+        const native = yield* Effect.provide(Search.Search, NativeSearch.layer)
+        return yield* SearchConformance.compare({ plan, subject: native, reference: portable })
+      }).pipe(Effect.provide(NodeServices.layer))
+    )
+
+    expect(SearchConformance.report(divergences)).toBe("")
+    expect(divergences).toEqual([])
+  })
 })

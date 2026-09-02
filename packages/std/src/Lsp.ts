@@ -43,11 +43,22 @@ export const Input = Schema.Struct({
     "callHierarchyIncoming",
     "callHierarchyOutgoing",
     "diagnostics"
-  ]),
-  path: Schema.optional(Schema.String),
-  line: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
-  character: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
-  query: Schema.optional(Schema.String)
+  ]).annotate({
+    description:
+      "The query to run; workspaceSymbols takes query, documentSymbols and diagnostics take path, the rest take path with line and character"
+  }),
+  path: Schema.optional(Schema.String).annotate({
+    description: "Absolute path of the file to query; required by every operation except workspaceSymbols"
+  }),
+  line: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))).annotate({
+    description: "1-based line of the position to query, as read and grep report it"
+  }),
+  character: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))).annotate({
+    description: "1-based character offset within the line"
+  }),
+  query: Schema.optional(Schema.String).annotate({
+    description: "Symbol text to search the workspace for; workspaceSymbols only"
+  })
 })
 /**
  * What the `lsp` flow returns.
@@ -55,7 +66,11 @@ export const Input = Schema.Struct({
  * @category schemas
  * @since 0.1.0
  */
-export const Output = Schema.Struct({ result: Schema.Unknown })
+export const Output = Schema.Struct({
+  result: Schema.Unknown.annotate({
+    description: "The language server's answer for this operation, passed through in the server's own shape"
+  })
+})
 /**
  * The declared effect envelope of the `lsp` flow, before any input is known.
  *
@@ -104,42 +119,41 @@ const isAbsolutePath = (path: string): boolean => path.startsWith("/") || /^[A-Z
  * @category handlers
  * @since 0.1.0
  */
-export const run = (
+export const run = Effect.fn("Lsp.run")(function*(
   input: typeof Input.Type
-): Effect.Effect<typeof Output.Type, StdError.StdError, LanguageServer.LanguageServer> =>
-  Effect.gen(function*() {
-    const server = yield* LanguageServer.LanguageServer
-    const path = input.path
-    const position = path === undefined || input.line === undefined || input.character === undefined
-      ? undefined
-      : { path, line: input.line - 1, character: input.character - 1 }
-    if ((input.operation === "workspaceSymbols")) return { result: yield* server.workspaceSymbols(input.query ?? "") }
-    if (path === undefined || !isAbsolutePath(path)) {
-      return yield* Effect.fail(
-        new StdError.StdError({ code: "invalid_input", message: "A normalized absolute path is required" })
-      )
-    }
-    if (input.operation === "documentSymbols") return { result: yield* server.documentSymbols(path) }
-    if (input.operation === "diagnostics") return { result: yield* server.diagnostics(path) }
-    if (position === undefined) {
-      return yield* Effect.fail(
-        new StdError.StdError({ code: "invalid_input", message: "1-based line and character are required" })
-      )
-    }
-    switch (input.operation) {
-      case "hover":
-        return { result: yield* server.hover(position) }
-      case "definition":
-        return { result: yield* server.definition(position) }
-      case "references":
-        return { result: yield* server.references(position) }
-      case "implementation":
-        return { result: yield* server.implementation(position) }
-      case "prepareCallHierarchy":
-        return { result: yield* server.prepareCallHierarchy(position) }
-      case "callHierarchyIncoming":
-        return { result: yield* server.callHierarchyIncoming(position) }
-      case "callHierarchyOutgoing":
-        return { result: yield* server.callHierarchyOutgoing(position) }
-    }
-  })
+): Effect.fn.Return<typeof Output.Type, StdError.StdError, LanguageServer.LanguageServer> {
+  const server = yield* LanguageServer.LanguageServer
+  const path = input.path
+  const position = path === undefined || input.line === undefined || input.character === undefined
+    ? undefined
+    : { path, line: input.line - 1, character: input.character - 1 }
+  if ((input.operation === "workspaceSymbols")) return { result: yield* server.workspaceSymbols(input.query ?? "") }
+  if (path === undefined || !isAbsolutePath(path)) {
+    return yield* Effect.fail(
+      new StdError.StdError({ code: "invalid_input", message: "A normalized absolute path is required" })
+    )
+  }
+  if (input.operation === "documentSymbols") return { result: yield* server.documentSymbols(path) }
+  if (input.operation === "diagnostics") return { result: yield* server.diagnostics(path) }
+  if (position === undefined) {
+    return yield* Effect.fail(
+      new StdError.StdError({ code: "invalid_input", message: "1-based line and character are required" })
+    )
+  }
+  switch (input.operation) {
+    case "hover":
+      return { result: yield* server.hover(position) }
+    case "definition":
+      return { result: yield* server.definition(position) }
+    case "references":
+      return { result: yield* server.references(position) }
+    case "implementation":
+      return { result: yield* server.implementation(position) }
+    case "prepareCallHierarchy":
+      return { result: yield* server.prepareCallHierarchy(position) }
+    case "callHierarchyIncoming":
+      return { result: yield* server.callHierarchyIncoming(position) }
+    case "callHierarchyOutgoing":
+      return { result: yield* server.callHierarchyOutgoing(position) }
+  }
+})

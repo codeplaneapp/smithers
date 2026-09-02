@@ -19,6 +19,30 @@ import * as LanguageServer from "./LanguageServer.ts"
 import * as StdError from "./StdError.ts"
 
 /**
+ * Maximum frames buffered for a language server's standard input.
+ *
+ * Bounded offers apply backpressure, and each offer uses the request timeout
+ * so a server that stops reading produces a typed timeout instead of an
+ * unbounded queue or a new hang.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const MAX_QUEUED_FRAMES = 256
+
+/**
+ * Maximum concurrent JSON-RPC requests awaiting a response.
+ *
+ * Every entry already has a timeout, and process exit or stdout closure fails
+ * all entries. This cap is the last-resort bound for a host that fans out
+ * requests without limit.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const MAX_PENDING_REQUESTS = 512
+
+/**
  * One host language-server process.
  *
  * Response headers may contain at most 8 KiB, and response bodies may contain
@@ -275,9 +299,10 @@ export const make = (
 > =>
   Effect.gen(function*() {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const timeoutMs = config.timeoutMs ?? 30_000
     // The process's stdin is fed from this queue for the client's lifetime, so
     // each request is one offered frame and the pipe never closes between them.
-    const input = yield* Queue.unbounded<Uint8Array>()
+    const input = yield* Queue.bounded<Uint8Array>(MAX_QUEUED_FRAMES)
     const handle = yield* spawner.spawn(
       ChildProcess.make(config.command, config.args ?? [], {
         cwd: config.cwd,
@@ -367,7 +392,18 @@ export const make = (
     const send = (message: unknown): Effect.Effect<void, StdError.StdError> =>
       Effect.suspend(() =>
         terminalError === undefined
-          ? Queue.offer(input, frame(message)).pipe(Effect.asVoid)
+          ? Queue.offer(input, frame(message)).pipe(
+            Effect.asVoid,
+            Effect.timeout(timeoutMs),
+            Effect.mapError((cause) =>
+              cause instanceof StdError.StdError
+                ? cause
+                : failure(
+                  "timeout",
+                  `Language server stdin is not being drained; frame offer exceeded ${timeoutMs}ms`
+                )
+            )
+          )
           : Effect.fail(terminalError)
       )
 
@@ -376,22 +412,32 @@ export const make = (
       params: unknown
     ): Effect.Effect<unknown, StdError.StdError> =>
       Effect.gen(function*() {
-        const id = nextId++
         const deferred = yield* Deferred.make<unknown, StdError.StdError>()
-        const closed = yield* Effect.sync(() => {
+        const registered = yield* Effect.sync((): number | StdError.StdError => {
           if (terminalError !== undefined) return terminalError
+          if (pending.size >= MAX_PENDING_REQUESTS) {
+            return failure(
+              "request_failed",
+              `Language server reached the ${MAX_PENDING_REQUESTS} pending-request cap`
+            )
+          }
+          const id = nextId++
           pending.set(id, deferred)
-          return undefined
+          return id
         })
-        if (closed !== undefined) return yield* Effect.fail(closed)
-        yield* send({ jsonrpc: "2.0", id, method, params })
-        return yield* Deferred.await(deferred).pipe(
-          Effect.timeout(config.timeoutMs ?? 30_000),
-          Effect.mapError((cause) =>
-            cause instanceof StdError.StdError
-              ? cause
-              : failure("timeout", `Language server request timed out: ${method}`)
-          ),
+        if (registered instanceof StdError.StdError) return yield* Effect.fail(registered)
+        const id = registered
+        return yield* Effect.gen(function*() {
+          yield* send({ jsonrpc: "2.0", id, method, params })
+          return yield* Deferred.await(deferred).pipe(
+            Effect.timeout(timeoutMs),
+            Effect.mapError((cause) =>
+              cause instanceof StdError.StdError
+                ? cause
+                : failure("timeout", `Language server request timed out: ${method}`)
+            )
+          )
+        }).pipe(
           Effect.ensuring(
             Effect.sync(() => {
               pending.delete(id)

@@ -47,6 +47,19 @@ export const description = "Runs a shell command and returns its output.\n" +
 export const DEFAULT_TIMEOUT_MS = 10_000
 
 /**
+ * Maximum bytes retained from each stream while a shell command executes.
+ *
+ * This is far above the 10,000-token model budget because
+ * `formatExecOutputForModel` keeps the head and tail while the capture bound
+ * keeps only the tail. Commands below this bound therefore render byte for
+ * byte as before, while larger output costs the bound instead of its full size.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const MAX_CAPTURE_BYTES = 8_000_000
+
+/**
  * Default output token budget, matching Codex.
  *
  * @category constants
@@ -146,7 +159,8 @@ export const run = Effect.fn("ShellCommand.run")(function*(
   const startedAt = Date.now()
   const result = yield* Exec.exec(input.command, {
     ...(input.workdir === undefined ? {} : { cwd: input.workdir }),
-    timeoutMs
+    timeoutMs,
+    maxCaptureBytes: MAX_CAPTURE_BYTES
   }).pipe(
     Effect.map((value) => ({ timedOut: false, value })),
     Effect.catch((error) =>

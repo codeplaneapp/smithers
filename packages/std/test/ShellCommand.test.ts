@@ -89,4 +89,18 @@ describe("ShellCommand", () => {
     expect(result.output).toContain("Exit code: 7")
     expect(result.output).toContain("bad")
   })
+
+  it("bounds capture while retaining the tail of very large output", async () => {
+    const head = "HEAD-WOULD-SURVIVE-UNBOUNDED-CAPTURE\n"
+    const tail = "\nRETAINED-TAIL"
+    const stdout = `${head}${"x".repeat(ShellCommand.MAX_CAPTURE_BYTES * 2)}${tail}`
+    const result = await execute(Effect.provide(
+      ShellCommand.run({ command: "very-large" }),
+      layer({ commands: { "very-large": { stdout } } })
+    ))
+
+    expect(result.output).not.toContain(head.trim())
+    expect(result.output).toContain(tail.trim())
+    expect(new TextEncoder().encode(result.output).byteLength).toBeLessThan(ShellCommand.MAX_CAPTURE_BYTES)
+  })
 })

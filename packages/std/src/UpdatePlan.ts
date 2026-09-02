@@ -11,7 +11,7 @@ import * as Flow from "@smthrs/core/Flow"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { envelope } from "./internal/Declaration.ts"
-import type * as StdError from "./StdError.ts"
+import * as StdError from "./StdError.ts"
 
 /**
  * Registry name for the update_plan flow. Matches the Codex CLI tool name.
@@ -29,7 +29,8 @@ export const name = "update_plan"
  * @since 0.1.0
  */
 export const description = "Updates the task plan.\n" +
-  "Provide an optional explanation and a list of plan items, each with a step and status.\n"
+  "Provide an optional explanation and a list of plan items, each with a step and status.\n" +
+  "At most one step can be in_progress at a time.\n"
 
 /**
  * Status of one plan step, matching Codex.
@@ -39,6 +40,38 @@ export const description = "Updates the task plan.\n" +
  */
 export const StepStatus = Schema.Literals(["pending", "in_progress", "completed"])
 
+const Step = Schema.Struct({
+  step: Schema.String.annotate({ description: "Task step text." }),
+  status: StepStatus.annotate({ description: "Step status." })
+})
+
+/** How many steps of a plan claim to be running right now. */
+const inProgressCount = (plan: ReadonlyArray<typeof Step.Type>): number =>
+  plan.reduce((total, item) => item.status === "in_progress" ? total + 1 : total, 0)
+
+/**
+ * The plan itself: steps, at most one of them `in_progress`.
+ *
+ * The single-in-progress rule is the last line of the Codex description a
+ * model reads every frame, so it is enforced here rather than left as prose a
+ * decode ignores. A plan naming two running steps is a decode failure at the
+ * `plan` path, not a silent acknowledgement.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const Plan = Schema.Array(Step).pipe(
+  Schema.check(
+    Schema.makeFilter(
+      (plan) =>
+        inProgressCount(plan) <= 1
+          ? undefined
+          : "invalid_input: at most one plan step can be in_progress at a time",
+      { identifier: "invalid_input" }
+    )
+  )
+).annotate({ description: "The list of steps" })
+
 /**
  * Input schema for the update_plan flow.
  *
@@ -47,12 +80,7 @@ export const StepStatus = Schema.Literals(["pending", "in_progress", "completed"
  */
 export const Input = Schema.Struct({
   explanation: Schema.optional(Schema.String.annotate({ description: "Optional explanation for this plan update." })),
-  plan: Schema.Array(
-    Schema.Struct({
-      step: Schema.String.annotate({ description: "Task step text." }),
-      status: StepStatus.annotate({ description: "Step status." })
-    })
-  ).annotate({ description: "The list of steps" })
+  plan: Plan
 })
 
 /**
@@ -103,11 +131,25 @@ export const flow = Flow.make({ name, description, input: Input, output: Output,
 /**
  * Acknowledges a plan update with Codex's exact response text.
  *
+ * The single-in-progress rule is checked again here. `Plan` refuses it at
+ * decode time, but a host that calls this handler directly never decodes, and
+ * an invariant enforced in only one of the two entrances is enforced in
+ * neither.
+ *
  * @category handlers
  * @since 0.1.0
  */
 export const run = Effect.fn("UpdatePlan.run")(function*(
-  _input: typeof Input.Type
+  input: typeof Input.Type
 ): Effect.fn.Return<typeof Output.Type, StdError.StdError> {
-  return yield* Effect.succeed({ output: "Plan updated" })
+  const running = inProgressCount(input.plan)
+  if (running > 1) {
+    return yield* Effect.fail(
+      new StdError.StdError({
+        code: "invalid_input",
+        message: `At most one step can be in_progress at a time; the plan named ${running}`
+      })
+    )
+  }
+  return { output: "Plan updated" }
 })

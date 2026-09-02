@@ -88,7 +88,13 @@ export const layer = (
               )
             )
             const retryAfter = header(response.headers, "retry-after")
-            if (response.status === 429 || retryAfter !== undefined) {
+            // `Retry-After` is pacing advice, not an outcome: a CDN or proxy
+            // may attach it to a perfectly good 200, and reading it alone
+            // discarded a decoded result set as a `timeout`. It only tells us
+            // the request was refused when the status already says so, so the
+            // header is consulted for its wording and the status decides.
+            const refused = response.status < 200 || response.status >= 300
+            if (response.status === 429 || (refused && retryAfter !== undefined)) {
               return yield* Effect.fail(
                 failure(
                   "timeout",

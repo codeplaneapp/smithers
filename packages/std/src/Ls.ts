@@ -153,29 +153,41 @@ export const run = Effect.fn("Ls.run")(function*(
     )
   }
   const limit = Math.min(input.limit ?? DEFAULT_READ_LIMIT, MAX_ENTRIES)
-  const selectedNames = sortedNames.slice(offset - 1, offset - 1 + limit)
+  // Every entry is described before the page is cut, because the order the
+  // description promises is directories first and a kind is a stat away.
+  // Statting only the page and ordering inside it made the order local to the
+  // page: a directory `zdir/` beside a file `a.txt` came back as
+  // `[zdir/, a.txt]` unpaged and as `[a.txt]` then `[zdir/]` at `limit: 1`, so
+  // `offset` addressed a different listing at every page size and an agent
+  // paging a large directory could see one entry twice and another never.
+  //
   // A per-entry stat can fail on a name the directory legitimately
   // contains — a dangling symlink, or a file the guarded filesystem refuses
   // to describe. The name is still real (readDirectory returned it), so the
   // listing reports it as a plain entry instead of dying: one broken link in
   // a repository root used to fail the whole `ls` and cost the agent a frame
   // per attempt.
-  const entries = yield* Effect.forEach(selectedNames, (entry) =>
-    fileSystem.stat(path.join(input.path, entry)).pipe(
-      Effect.map((entryInfo) => ({
-        name: entryInfo.type === "Directory" ? `${entry}/` : entry,
-        kind: entryInfo.type === "Directory" ? "directory" as const : "file" as const
-      })),
-      Effect.catch(() => Effect.succeed({ name: entry, kind: "file" as const }))
-    ))
-  const selected = entries.sort((left, right) =>
+  const described = yield* Effect.forEach(
+    sortedNames,
+    (entry) =>
+      fileSystem.stat(path.join(input.path, entry)).pipe(
+        Effect.map((entryInfo) => ({
+          name: entryInfo.type === "Directory" ? `${entry}/` : entry,
+          kind: entryInfo.type === "Directory" ? "directory" as const : "file" as const
+        })),
+        Effect.catch(() => Effect.succeed({ name: entry, kind: "file" as const }))
+      ),
+    { concurrency: 16 }
+  )
+  const ordered = [...described].sort((left, right) =>
     left.kind === right.kind ? byText(left.name, right.name) : left.kind === "directory" ? -1 : 1
   )
-  const truncated = offset - 1 + selected.length < sortedNames.length
+  const selected = ordered.slice(offset - 1, offset - 1 + limit)
+  const truncated = offset - 1 + selected.length < ordered.length
   return {
     entries: selected,
-    total: sortedNames.length,
+    total: ordered.length,
     truncated,
-    ...(truncated ? { notice: notice("entries", selected.length, sortedNames.length) } : {})
+    ...(truncated ? { notice: notice("entries", selected.length, ordered.length) } : {})
   }
 })

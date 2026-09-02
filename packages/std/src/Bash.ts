@@ -262,8 +262,16 @@ const prefixWrappers = new Set(["env", "nice", "time", "sudo", "nohup", "xargs",
 
 // Shell spaces may disappear, but a physical line ends one command. Retaining
 // LF prevents a command on line one from classifying every later line's paths.
+//
+// A word is one or more runs of bare characters and quoted sections, not a
+// bare run alone: `FOO="a b" rm /work/target` used to tokenize as `FOO="a`,
+// `b"`, `rm`, `/work/target`, and since only the first token carried an `=`
+// the command was read as `b"` rather than `rm` — so the delete was
+// classified as a read and a hermetic call with `writes: []` spawned. The
+// quoted alternatives come first inside the group so a quoted span is taken
+// whole; the bare class excludes quotes so the branches cannot overlap.
 const tokenize = (command: string): ReadonlyArray<string> =>
-  command.match(/\n|"(?:\\.|[^"\\])*"|'[^']*'|>>|<<|&&|\|\||[<>;|&]|[^\s<>;|&]+/g) ?? []
+  command.match(/\n|>>|<<|&&|\|\||[<>;|&]|(?:"(?:\\.|[^"\\])*"|'[^']*'|[^\s<>;|&"']+)+/g) ?? []
 
 const unquote = (token: string): string => {
   const first = token[0]

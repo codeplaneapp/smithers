@@ -587,6 +587,49 @@ describe("ApplyPatch.run", () => {
     expect(JSON.stringify(exit)).toContain("Failed to find expected lines in /a.txt")
   })
 
+  // Two sections for one path both derive from the same on-disk original, so
+  // the second write erased the first while the summary claimed two
+  // modifications. The patch is refused whole, before anything is written.
+  it("refuses a patch that names one path in two sections", async () => {
+    const patch = wrap(
+      "*** Update File: /a.txt\n@@\n-one\n+ONE\n*** Update File: /a.txt\n@@\n-two\n+TWO"
+    )
+    const result = await execute(Effect.provide(
+      Effect.gen(function*() {
+        const exit = yield* Effect.exit(ApplyPatch.run({ input: patch }))
+        const fileSystem = yield* FileSystem.FileSystem
+        return { exit, contents: yield* fileSystem.readFileString("/a.txt") }
+      }),
+      layer({ files: { "/a.txt": "one\ntwo\n" } })
+    ))
+    const failure = Exit.isFailure(result.exit)
+      ? Option.getOrUndefined(Cause.findErrorOption(result.exit.cause))
+      : undefined
+
+    expect(failure).toMatchObject({ code: "invalid_input", path: "/a.txt" })
+    expect(result.contents).toBe("one\ntwo\n")
+  })
+
+  it("refuses a patch whose move destination is another section's path", async () => {
+    const patch = wrap(
+      "*** Update File: /a.txt\n*** Move to: /b.txt\n@@\n-one\n+ONE\n*** Add File: /b.txt\n+other"
+    )
+    const result = await execute(Effect.provide(
+      Effect.gen(function*() {
+        const exit = yield* Effect.exit(ApplyPatch.run({ input: patch }))
+        const fileSystem = yield* FileSystem.FileSystem
+        return { exit, moved: yield* fileSystem.exists("/b.txt") }
+      }),
+      layer({ files: { "/a.txt": "one\n" } })
+    ))
+    const failure = Exit.isFailure(result.exit)
+      ? Option.getOrUndefined(Cause.findErrorOption(result.exit.cause))
+      : undefined
+
+    expect(failure).toMatchObject({ code: "invalid_input", path: "/b.txt" })
+    expect(result.moved).toBe(false)
+  })
+
   it("fails with the Codex read message for a missing update target", async () => {
     const patch = wrap("*** Update File: /nope.txt\n@@\n-a\n+b")
     const exit = await executeExit(Effect.provide(ApplyPatch.run({ input: patch }), layer()))

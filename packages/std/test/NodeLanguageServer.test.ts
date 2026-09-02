@@ -1,5 +1,5 @@
 import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
-import { Cause, Deferred, Effect, Exit, Queue, Sink, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Queue, Sink, Stream } from "effect"
 import type * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ExitCode, makeHandle, ProcessId } from "effect/unstable/process/ChildProcessSpawner"
 import { describe, expect, it } from "vitest"
@@ -279,5 +279,86 @@ describe("NodeLanguageServer", () => {
       ], { concurrency: "unbounded" })
     })))
     expect(exits.map((exit) => failure(exit)?.code)).toEqual(["request_failed", "request_failed"])
+  })
+
+  it("times out a frame offer when the server stops draining stdin", async () => {
+    const exits = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const stopped = yield* Deferred.make<void>()
+      const spawner = scriptedSpawner((request, output) => {
+        if (request.method === "initialize") {
+          return respond(output, { jsonrpc: "2.0", id: request.id, result: { capabilities: {} } })
+        }
+        return Deferred.succeed(stopped, undefined).pipe(
+          Effect.andThen(Effect.never)
+        )
+      })
+      const server = yield* NodeLanguageServer.make({
+        command: "language-server",
+        cwd: "/workspace",
+        timeoutMs: 50
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
+      yield* Deferred.await(stopped)
+      const position = { path: "/workspace/a.ts", line: 0, character: 0 }
+      return yield* Effect.all(
+        Array.from({ length: 257 }, () => Effect.exit(server.hover(position))),
+        { concurrency: "unbounded" }
+      )
+    })))
+
+    expect(NodeLanguageServer.MAX_QUEUED_FRAMES).toBe(256)
+    expect(exits.map(failure).every((error) => error?.code === "timeout")).toBe(true)
+    expect(exits.map(failure)).toContainEqual({
+      code: "timeout",
+      message: expect.stringContaining("stdin is not being drained")
+    })
+  })
+
+  it("refuses a request beyond the pending cap without disturbing in-flight requests", async () => {
+    const result = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      const saturated = yield* Deferred.make<void>()
+      const requestIds: Array<number> = []
+      let responseQueue: Queue.Queue<Uint8Array, Cause.Done> | undefined
+      const spawner = scriptedSpawner((request, output) => {
+        if (request.method === "initialize") {
+          return respond(output, { jsonrpc: "2.0", id: request.id, result: { capabilities: {} } })
+        }
+        if (request.method === "initialized" || typeof request.id !== "number") return Effect.void
+        responseQueue = output
+        requestIds.push(request.id)
+        return requestIds.length === 512
+          ? Deferred.succeed(saturated, undefined).pipe(Effect.asVoid)
+          : Effect.void
+      })
+      const server = yield* NodeLanguageServer.make({
+        command: "language-server",
+        cwd: "/workspace",
+        timeoutMs: 10_000
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
+      const position = { path: "/workspace/a.ts", line: 0, character: 0 }
+      const inFlight = yield* Effect.all(
+        Array.from({ length: 512 }, () => server.hover(position)),
+        { concurrency: "unbounded" }
+      ).pipe(Effect.forkScoped({ startImmediately: true }))
+      yield* Deferred.await(saturated).pipe(Effect.timeout(5_000))
+      const extra = yield* Effect.exit(server.definition(position).pipe(Effect.timeout(500)))
+      if (responseQueue === undefined) return yield* Effect.die("Scripted server did not receive the requests")
+      // Bound to a const: the closure below outlives the narrowing of a `let`
+      // the scripted spawner also writes to.
+      const answers = responseQueue
+      yield* Effect.forEach(
+        [...requestIds],
+        (id) => respond(answers, { jsonrpc: "2.0", id, result: { id } }),
+        { discard: true }
+      )
+      const completed = yield* Fiber.join(inFlight).pipe(Effect.timeout(5_000))
+      return { completed, extra }
+    })))
+
+    expect(NodeLanguageServer.MAX_PENDING_REQUESTS).toBe(512)
+    expect(failure(result.extra)).toEqual({
+      code: "request_failed",
+      message: expect.stringContaining("512")
+    })
+    expect(result.completed).toHaveLength(512)
   })
 })

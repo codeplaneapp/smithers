@@ -16,18 +16,21 @@
  */
 import type * as Search from "../Search.ts"
 import * as Symbols from "./Symbols.ts"
+import * as Text from "./Text.ts"
 
 /**
  * A file's text as the numbered lines both peers count.
  *
+ * This is `Text.sourceLines` under the name the search peers reach for, not a
+ * second copy of it. There used to be two byte-identical definitions of the
+ * rule, one here and one in `internal/Text.ts`, and a divergence between them
+ * is exactly how `read` came to report one more line than `grep` for every
+ * file ending in a newline. One definition cannot drift from itself.
+ *
  * @category search
  * @since 0.1.0
  */
-export const sourceLines = (content: string): ReadonlyArray<string> => {
-  const lines = content.length === 0 ? [] : content.split(/\r?\n/)
-  if (content.endsWith("\n")) lines.pop()
-  return lines
-}
+export const sourceLines: (content: string) => ReadonlyArray<string> = Text.sourceLines
 
 /** Every context line belongs to exactly one match: the nearest, earliest on a tie. */
 const owner = (matches: ReadonlyArray<number>, line: number): number => {

@@ -19,14 +19,14 @@ export default defineConfig({
       include: ["src/**"],
       // A floor below what the suite already measures is not a ratchet: it
       // lets a regression that deletes a covered branch land green. These sit
-      // just under the measured run (93.07 / 83.73 / 87.89 / 95.00) and are
+      // just under the measured run (93.38 / 84.45 / 88.73 / 95.13) and are
       // raised with every suite added, toward the repository's 100% baseline.
       // What still keeps them off 100 is named per file: Lsp and WebFetch
       // error branches, ShellCommand's Codex-parity output shaping, and the
       // NodeLanguageServer paths that need a real language server to reach.
       thresholds: {
-        branches: 83,
-        functions: 87,
+        branches: 84,
+        functions: 88,
         lines: 94,
         statements: 93
       }

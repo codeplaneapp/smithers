@@ -70,7 +70,11 @@ describe("effect tiers", () => {
       .toBe(Lsp.effects)
   })
 
-  it("keeps Codex-clone descriptions at the approved wording", () => {
+  // Verified byte for byte against the vendor binary at
+  // @openai/codex-darwin-arm64 vendor/aarch64-apple-darwin/bin/codex: each
+  // string below is the exact run of bytes that binary carries. A clone that
+  // paraphrases its original is a different tool wearing its name.
+  it("keeps Codex-clone descriptions byte-identical to the Codex CLI", () => {
     expect(Manifest.flows.shell_command.description).toBe(
       "Runs a shell command and returns its output.\n- Always set the `workdir` param when using the shell_command function. Do not use `cd` unless absolutely necessary."
     )
@@ -78,7 +82,7 @@ describe("effect tiers", () => {
       "The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON."
     )
     expect(Manifest.flows.update_plan.description).toBe(
-      "Updates the task plan.\nProvide an optional explanation and a list of plan items, each with a step and status.\n"
+      "Updates the task plan.\nProvide an optional explanation and a list of plan items, each with a step and status.\nAt most one step can be in_progress at a time.\n"
     )
   })
 

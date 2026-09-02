@@ -41,13 +41,21 @@ capped result says so in its own output: `truncated`, `<stream>Truncated`, or a
 | `TestRun.DEFAULT_TIMEOUT_MS`      | 600,000     | one `test` call with no `timeoutMs`                          |
 | `TestRun.MAX_CAPTURE_BYTES`       | 8,000,000   | the runner output one `test` call holds in memory            |
 | `ShellCommand.DEFAULT_TIMEOUT_MS` | 10,000      | one `shell_command` call with no `timeout`                   |
+| `ShellCommand.MAX_CAPTURE_BYTES`  | 8,000,000   | the command output one `shell_command` call holds in memory  |
+| `NativeSearch.MAX_CAPTURE_BYTES`  | 64 MiB      | one `rg` invocation's captured output, refused past the cap  |
 | HTTP response bytes               | 5 MiB       | `fetch`, `http-post` and `webfetch`, refused past the cap    |
 | `webfetch` request timeout        | 120 s cap   | the request and the body read                                |
 | Language-server frame             | 8 MiB       | one JSON-RPC frame, with an 8 KiB header bound               |
+| `MAX_QUEUED_FRAMES`               | 256         | frames buffered for one language server's stdin              |
+| `MAX_PENDING_REQUESTS`            | 512         | concurrent in-flight JSON-RPC requests to one server         |
 
 Shell capture is bounded where it is read, not after: a command that prints
 gigabytes costs the bound rather than the whole of what it printed, and the
-`<stream>DroppedBytes` fields count what the process actually produced. Those
+`<stream>DroppedBytes` fields count what the process actually produced. Every
+caller-supplied command — `bash`, `test`, `shell_command` — passes a bound. The
+internal `git` plumbing calls behind `Checkpoints` and `TestRun`'s baseline do
+not, because a listing read for its content is useless with its head missing.
+Those
 fields and the `<stream>Truncated` flags beside them are a wire convention
 `@smthrs/harness/TruncatedOutput` reads to refuse a later write of those exact
 bytes; renaming one disarms that guard silently.
@@ -99,7 +107,11 @@ frames it takes to notice.
 
 `NativeSearch` and `PortableSearch` are two implementations of one contract,
 and `SearchContract` exports the matcher both build on so a third peer cannot
-drift on what a pattern means.
+drift on what a pattern means. `SearchConformance` is how a peer proves it:
+it generates a tree and a batch of calls from a seed, runs them through two
+implementations, and reports every answer that differs. It found two drifts
+between the peers shipped here, one in how `maxCount` interacts with context
+lines and one in how `ignoreCase` and `smartCase` combine.
 
 ## Hermetic mode is a pre-check, not a sandbox
 

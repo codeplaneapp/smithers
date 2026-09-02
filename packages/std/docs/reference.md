@@ -47,13 +47,21 @@ capped result says so in its own output: `truncated`, `<stream>Truncated`, or a
 | `TestRun.DEFAULT_TIMEOUT_MS`      | 600,000     | one `test` call with no `timeoutMs`                          |
 | `TestRun.MAX_CAPTURE_BYTES`       | 8,000,000   | the runner output one `test` call holds in memory            |
 | `ShellCommand.DEFAULT_TIMEOUT_MS` | 10,000      | one `shell_command` call with no `timeout`                   |
+| `ShellCommand.MAX_CAPTURE_BYTES`  | 8,000,000   | the command output one `shell_command` call holds in memory  |
+| `NativeSearch.MAX_CAPTURE_BYTES`  | 64 MiB      | one `rg` invocation's captured output, refused past the cap  |
 | HTTP response bytes               | 5 MiB       | `fetch`, `http-post` and `webfetch`, refused past the cap    |
 | `webfetch` request timeout        | 120 s cap   | the request and the body read                                |
 | Language-server frame             | 8 MiB       | one JSON-RPC frame, with an 8 KiB header bound               |
+| `MAX_QUEUED_FRAMES`               | 256         | frames buffered for one language server's stdin              |
+| `MAX_PENDING_REQUESTS`            | 512         | concurrent in-flight JSON-RPC requests to one server         |
 
 Shell capture is bounded where it is read, not after: a command that prints
 gigabytes costs the bound rather than the whole of what it printed, and the
-`<stream>DroppedBytes` fields count what the process actually produced. Those
+`<stream>DroppedBytes` fields count what the process actually produced. Every
+caller-supplied command — `bash`, `test`, `shell_command` — passes a bound. The
+internal `git` plumbing calls behind `Checkpoints` and `TestRun`'s baseline do
+not, because a listing read for its content is useless with its head missing.
+Those
 fields and the `<stream>Truncated` flags beside them are a wire convention
 `@smthrs/harness/TruncatedOutput` reads to refuse a later write of those exact
 bytes; renaming one disarms that guard silently.
@@ -105,7 +113,11 @@ frames it takes to notice.
 
 `NativeSearch` and `PortableSearch` are two implementations of one contract,
 and `SearchContract` exports the matcher both build on so a third peer cannot
-drift on what a pattern means.
+drift on what a pattern means. `SearchConformance` is how a peer proves it:
+it generates a tree and a batch of calls from a seed, runs them through two
+implementations, and reports every answer that differs. It found two drifts
+between the peers shipped here, one in how `maxCount` interacts with context
+lines and one in how `ignoreCase` and `smartCase` combine.
 
 ## Hermetic mode is a pre-check, not a sandbox
 
@@ -128,7 +140,7 @@ nested `*/index` subpaths are not exported and carry no promise.
 
 ## Reference
 
-30 public modules, 244 documented exports.
+31 public modules, 256 documented exports.
 
 | Module | Public exports | Description |
 | --- | --- | --- |
@@ -140,8 +152,9 @@ nested `*/index` subpaths are not exported and carry no promise.
 | `Grep` | `name`, `description`, `Input`, `ContextLine`, `Symbol`, `Match`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run` | The `grep` flow and its Smithers Ripgrep Subset v1 contract. |
 | `Search` | `GrepInput`, `GrepLine`, `ContextLine`, `Symbol`, `GrepMatch`, `GrepOutput`, `GlobInput`, `GlobOutput`, `Search`, `make`, `makeNoop`, `layerNoop` | The implementation seam for the ripgrep search contract. |
 | `SearchContract` | `validatePattern`, `validateGlob`, `canonicalGlob`, `matchesGlob`, `includedByGlobs`, `expression`, `unsatisfiableNotice` | Public validation and matching rules for Search implementations. |
+| `SearchConformance` | `GeneratedFile`, `Plan`, `Divergence`, `plan`, `materialize`, `compare`, `report` | A differential conformance kit for `Search` implementations. |
 | `PortableSearch` | `make`, `layer` | The in-process implementation of the ripgrep search contract. |
-| `NativeSearch` | `make`, `layer` | The `rg`-process implementation of the ripgrep search contract. |
+| `NativeSearch` | `MAX_CAPTURE_BYTES`, `make`, `layer` | The `rg`-process implementation of the ripgrep search contract. |
 | `Bash` | `name`, `description`, `DEFAULT_TIMEOUT_MS`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run` | Bash flow declaration and portable handler. |
 | `Container` | `Request`, `Plan`, `Container`, `make`, `unavailable`, `makeNoop`, `layerNoop`, `makeCommand`, `layerCommand` | The host's route into a named container, as an injected transport. |
 | `Checkpoints` | `baseId`, `scratchDirectory`, `configSection`, `Snapshot`, `Materialized`, `Checkpoints`, `make`, `unavailable`, `makeNoop`, `layerNoop`, `GitOptions`, `makeGit`, `layerGit`, `Relocation`, `relocate` | Pinned trees, and the scratch checkouts a call runs against. |
@@ -149,8 +162,8 @@ nested `*/index` subpaths are not exported and carry no promise.
 | `TestRunner` | `captureBase`, `Runner`, `TestRunner`, `make`, `makeNoop`, `layer`, `layerNoop` | The repository's own test invocation, declared once by the host. |
 | `Probe` | `key`, `Reason`, `InvalidProbe`, `classify` | Telling an invalid probe from a failing check. |
 | `ApplyPatch` | `name`, `description`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run` | apply_patch flow declaration and portable handler. |
-| `ShellCommand` | `name`, `description`, `DEFAULT_TIMEOUT_MS`, `DEFAULT_MAX_OUTPUT_TOKENS`, `TIMEOUT_EXIT_CODE`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run` | shell_command flow declaration and portable handler. |
-| `UpdatePlan` | `name`, `description`, `StepStatus`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run` | update_plan flow declaration and portable handler. |
+| `ShellCommand` | `name`, `description`, `DEFAULT_TIMEOUT_MS`, `MAX_CAPTURE_BYTES`, `DEFAULT_MAX_OUTPUT_TOKENS`, `TIMEOUT_EXIT_CODE`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run` | shell_command flow declaration and portable handler. |
+| `UpdatePlan` | `name`, `description`, `StepStatus`, `Plan`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run` | update_plan flow declaration and portable handler. |
 | `Fetch` | `name`, `description`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run` | HTTP GET flow declaration and portable handler. |
 | `HttpPost` | `name`, `description`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run` | HTTP POST flow declaration and portable handler. |
 | `Explore` | `name`, `description`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `make`, `flow` | Read-only workspace reconnaissance as a dynamic flow. |
@@ -158,7 +171,7 @@ nested `*/index` subpaths are not exported and carry no promise.
 | `WebSearch` | `name`, `description`, `Input`, `Result`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `WebSearch`, `make`, `makeNoop`, `layerNoop`, `run` | Governing plan: |
 | `ExaWebSearch` | `layer` | Governing plan: |
 | `LanguageServer` | `Position`, `LanguageServer`, `make`, `makeNoop`, `layerNoop` | Governing plan: |
-| `NodeLanguageServer` | `Config`, `make`, `layer` | Host-backed Language Server Protocol client over the permission-checked process spawner. |
+| `NodeLanguageServer` | `MAX_QUEUED_FRAMES`, `MAX_PENDING_REQUESTS`, `Config`, `make`, `layer` | Host-backed Language Server Protocol client over the permission-checked process spawner. |
 | `Lsp` | `name`, `description`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run` | Governing plan: |
 | `Manifest` | `flows`, `handlers`, `effectsFor`, `names`, `readOnly` | Built-in flow declarations and their separately supplied handlers. |
 | `StdError` | `Code`, `StdError` | The single typed error returned by every standard flow handler. |
@@ -349,6 +362,28 @@ External peers use this module to share the same regex and glob semantics as the
 | `expression` | const | matching | Compiles one validated search pattern with shared peer semantics. |
 | `unsatisfiableNotice` | const | diagnostics | Explains positive globs that no file under a search root can match. |
 
+### SearchConformance
+
+`import { SearchConformance } from "@smthrs/std"` or `import * as SearchConformance from "@smthrs/std/SearchConformance"`
+
+A differential conformance kit for `Search` implementations.
+
+`Search` is a public extension seam: a host binds its own implementation and every `grep` and `glob` call in the package goes through it. Two peers ship here, and the contract they are held to used to live only in `test/SearchConformance.test.ts` — a file `package.json` does not publish, so a third-party peer had the seam and no way to prove it filled it. Worse, the cases there are hand-picked: they pin the divergences somebody already found. A literal `?` matched `fo` in one peer and `foo?` in the other for as long as nobody thought to write that case down.
+
+This module is the other half. It generates a tree and a batch of calls from a seed, runs them through two implementations, and reports every answer that differs. Nothing here knows which peer is right: a divergence is the finding, and the reference peer to compare against is the caller's choice — `PortableSearch` is the obvious one, because it needs no external binary.
+
+The generator deliberately stays inside the ground both peers claim to share: no symlinks, no unreadable directories, no CRLF, no NUL bytes, no filename a shell would have to quote. Those are the cases the hand-written table pins one by one, with an expected value that says which behaviour is intended. A generator cannot say that; it can only say the two disagree.
+
+| Export | Kind | Category | Summary |
+| --- | --- | --- | --- |
+| `GeneratedFile` | interface | models | One file the generated tree contains. |
+| `Plan` | interface | models | A generated tree plus the calls to make against it. |
+| `Divergence` | interface | models | One call two implementations answered differently. |
+| `plan` | const | generators | Builds a reproducible tree and call batch from a seed. |
+| `materialize` | const | generators | Writes a plan's tree under its root. |
+| `compare` | const | conformance | Runs every call in a plan through two implementations and reports the answers that differ. |
+| `report` | const | conformance | Renders divergences as the report a failing conformance run should print. |
+
 ### PortableSearch
 
 `import { PortableSearch } from "@smthrs/std"` or `import * as PortableSearch from "@smthrs/std/PortableSearch"`
@@ -368,6 +403,7 @@ The `rg`-process implementation of the ripgrep search contract.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
+| `MAX_CAPTURE_BYTES` | const | constants | Maximum bytes captured from either stream of one `rg` invocation. |
 | `make` | const | constructors | Captures filesystem, path and process services in the native peer. |
 | `layer` | const | layers | Provides the `rg`-driven peer. |
 
@@ -568,6 +604,7 @@ Codex's `sandbox_permissions` / `justification` / `prefix_rule` approval paramet
 | `name` | const | identifiers | Registry name for the shell_command flow. |
 | `description` | const | descriptions | Model-facing description of the shell_command flow. |
 | `DEFAULT_TIMEOUT_MS` | const | constants | Default command timeout in milliseconds, matching Codex. |
+| `MAX_CAPTURE_BYTES` | const | constants | Maximum bytes retained from each stream while a shell command executes. |
 | `DEFAULT_MAX_OUTPUT_TOKENS` | const | constants | Default output token budget, matching Codex. |
 | `TIMEOUT_EXIT_CODE` | const | constants | Timeout exit code reported to the model, matching Codex exec. |
 | `Input` | const | schemas | Input schema for the shell_command flow. |
@@ -591,6 +628,7 @@ A Codex CLI clone of the `update_plan` tool: an optional explanation and a list 
 | `name` | const | identifiers | Registry name for the update_plan flow. |
 | `description` | const | descriptions | Model-facing description of the update_plan flow. |
 | `StepStatus` | const | schemas | Status of one plan step, matching Codex. |
+| `Plan` | const | schemas | The plan itself: |
 | `Input` | const | schemas | Input schema for the update_plan flow. |
 | `Output` | const | schemas | Output schema for the update_plan flow. |
 | `effects` | const | effects | Static effect envelope for the update_plan flow: |
@@ -730,6 +768,8 @@ Governing plan: `docs/specs/Research/Agent Ecosystem Plan 2026-07-28.md`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
+| `MAX_QUEUED_FRAMES` | const | constants | Maximum frames buffered for a language server's standard input. |
+| `MAX_PENDING_REQUESTS` | const | constants | Maximum concurrent JSON-RPC requests awaiting a response. |
 | `Config` | interface | models | One host language-server process. |
 | `make` | const | constructors | Constructs one scoped host language-server client. |
 | `layer` | const | layers | Provides a scoped host language-server implementation. |

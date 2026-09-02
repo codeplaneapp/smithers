@@ -408,6 +408,47 @@ describe("Bash", () => {
     expect(spawns).toEqual([])
   })
 
+  // `FOO="a b" rm /work/target` used to tokenize as `FOO="a`, `b"`, `rm`,
+  // `/work/target`. Only the first token carried an `=`, so the command was
+  // read as `b"`, the delete was classified as a read, and the call spawned
+  // with `writes: []`.
+  it.each([
+    { name: "a double-quoted assignment value", command: `FOO="a b" rm /work/target` },
+    { name: "a single-quoted assignment value", command: `FOO='a b' rm /work/target` },
+    { name: "two quoted assignments", command: `FOO="a b" BAR='c d' rm /work/target` }
+  ])("selects the command behind $name whose value holds whitespace", async ({ command }) => {
+    const spawns: Array<Spawned> = []
+    const exit = await execute(Effect.provide(
+      Effect.exit(Bash.run({ mode: "hermetic", command, reads: ["/work/**"], writes: [] })),
+      recorder(spawns)
+    ))
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(Option.getOrUndefined(Cause.findErrorOption(exit.cause))).toMatchObject({
+        code: "outside_declared_writes",
+        path: "/work/target"
+      })
+    }
+    expect(spawns).toEqual([])
+  })
+
+  it("keeps a quoted path holding whitespace as one declared reference", async () => {
+    const spawns: Array<Spawned> = []
+    const exit = await execute(Effect.provide(
+      Effect.exit(Bash.run({
+        mode: "hermetic",
+        command: `cat "/work/a b.txt"`,
+        reads: ["/work/**"],
+        writes: []
+      })),
+      recorder(spawns)
+    ))
+
+    expect(Exit.isFailure(exit)).toBe(false)
+    expect(spawns).toHaveLength(1)
+  })
+
   it("spawns a multi-line hermetic script when every line is declared", async () => {
     const spawns: Array<Spawned> = []
     const script = "cat /work/input\nrm /work/target\nmv /work/a /work/b\ntee /work/out\n"

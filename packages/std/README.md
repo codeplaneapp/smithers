@@ -33,6 +33,7 @@ The root entry point exports these namespaces; each is also importable from `@sm
 | `Probe`              | `key`, `Reason`, `InvalidProbe`, `classify`                                                                                                                                                             | Classifies an exit code that describes the command, not the code under test.   |
 | `Read`               | `name`, `description`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run`                                                                                                        | Declares and runs bounded file reads.                                          |
 | `Search`             | `GrepInput`, `GrepLine`, `ContextLine`, `Symbol`, `GrepMatch`, `GrepOutput`, `GlobInput`, `GlobOutput`, `Search`, `make`, `makeNoop`, `layerNoop`                                                       | Defines the search service both peers implement.                               |
+| `SearchConformance`  | `GeneratedFile`, `Plan`, `Divergence`, `plan`, `materialize`, `compare`, `report`                                                                                                                       | Generates a tree and calls, then reports where two Search peers disagree.      |
 | `SearchContract`     | `validatePattern`, `validateGlob`, `canonicalGlob`, `matchesGlob`, `includedByGlobs`, `expression`, `unsatisfiableNotice`                                                                               | The shared matcher an external Search peer must build on.                      |
 | `ShellCommand`       | `name`, `description`, `DEFAULT_TIMEOUT_MS`, `DEFAULT_MAX_OUTPUT_TOKENS`, `TIMEOUT_EXIT_CODE`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run`                                | Declares and runs a Codex-shaped shell command.                                |
 | `StdError`           | `Code`, `StdError`                                                                                                                                                                                      | Defines typed standard-tool failures.                                          |
@@ -73,11 +74,15 @@ Every limit is a display budget disclosed to the caller, never a silent cut. A c
 | `TestRun.DEFAULT_TIMEOUT_MS`      | 600,000     | one `test` call with no `timeoutMs`                          |
 | `TestRun.MAX_CAPTURE_BYTES`       | 8,000,000   | the runner output one `test` call holds in memory            |
 | `ShellCommand.DEFAULT_TIMEOUT_MS` | 10,000      | one `shell_command` call with no `timeout`                   |
+| `ShellCommand.MAX_CAPTURE_BYTES`  | 8,000,000   | the command output one `shell_command` call holds in memory  |
+| `NativeSearch.MAX_CAPTURE_BYTES`  | 64 MiB      | one `rg` invocation's captured output, refused past the cap  |
 | HTTP response bytes               | 5 MiB       | `fetch`, `http-post` and `webfetch`, refused past the cap    |
 | `webfetch` request timeout        | 120 s cap   | the request and the body read                                |
 | Language-server frame             | 8 MiB       | one JSON-RPC frame, with an 8 KiB header bound               |
+| `MAX_QUEUED_FRAMES`               | 256         | frames buffered for one language server's stdin              |
+| `MAX_PENDING_REQUESTS`            | 512         | concurrent in-flight JSON-RPC requests to one server         |
 
-Shell capture is bounded where it is read rather than after: a command that prints gigabytes costs the bound, not the whole of what it printed, and the `<stream>DroppedBytes` fields count what the process actually produced. Those fields and the `<stream>Truncated` flags beside them are a wire convention `@smthrs/harness/TruncatedOutput` reads to refuse a later write of those exact bytes; renaming one disarms that guard silently.
+Shell capture is bounded where it is read rather than after: a command that prints gigabytes costs the bound, not the whole of what it printed, and the `<stream>DroppedBytes` fields count what the process actually produced. Every caller-supplied command — `bash`, `test`, `shell_command` — passes a bound. The internal `git` plumbing calls behind `Checkpoints` and `TestRun`'s baseline do not, because a listing read for its content is useless with its head missing. Those fields and the `<stream>Truncated` flags beside them are a wire convention `@smthrs/harness/TruncatedOutput` reads to refuse a later write of those exact bytes; renaming one disarms that guard silently.
 
 ## Failures
 
@@ -107,7 +112,7 @@ Handlers keep ordinary outcomes in the success channel: a non-zero exit code, an
 
 Six services are injected, and a flow whose service a host has not bound gets a `makeNoop` refusal rather than a silent success: `Search` for `grep` and `glob`, `Container` for a containerised `bash` or `test`, `TestRunner` for `test`, `Checkpoints` for agent-side pinning, `WebSearch` for `websearch`, and `LanguageServer` for `lsp`. Refusing loudly is the contract, because a flow that appears to work while doing nothing costs a model the frames it takes to notice.
 
-`NativeSearch` and `PortableSearch` are two implementations of one contract. `SearchContract` exports the matcher both build on, so an external peer binding its own `Search` cannot drift on what a pattern means.
+`NativeSearch` and `PortableSearch` are two implementations of one contract. `SearchContract` exports the matcher both build on, so an external peer binding its own `Search` cannot drift on what a pattern means. `SearchConformance` is how a peer proves it: it generates a tree and a batch of calls from a seed, runs them through two implementations, and reports every answer that differs. It found two drifts between the peers shipped here, one in how `maxCount` interacts with context lines and one in how `ignoreCase` and `smartCase` combine.
 
 ## Hermetic mode is a pre-check, not a sandbox
 

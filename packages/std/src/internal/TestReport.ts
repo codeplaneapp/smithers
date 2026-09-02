@@ -9,11 +9,13 @@
  * output all along.
  *
  * The parsers below recognise the report shapes the standard runners print.
- * Precision is the design constraint, exactly as in `Probe`: a parser claims a
- * reading only when the output carries its own shape — a tally line, or an
- * outcome line — and otherwise reports nothing parsed, which leaves the caller
- * the raw tail it would have had anyway. A wrong failure set is worse than no
- * failure set, because attribution is built on it.
+ * Precision is the design constraint, exactly as in `Probe`: a reader claims a
+ * complete report only when the runner printed an authoritative completion
+ * statement and the observed outcomes agree with it. Pytest requires a tally,
+ * TAP requires a plan with every planned outcome, and unittest requires its
+ * `Ran` line plus an `OK` or `FAILED` summary. Incomplete captures still return
+ * the outcomes they contain with `parsed: false`. A wrong failure set is worse
+ * than no failure set, because attribution is built on it.
  *
  * @since 0.1.0
  */
@@ -52,8 +54,8 @@ const count = (text: string, pattern: RegExp): number | undefined => {
  *
  * The short summary (`-rA`, and the default on failure) prints one
  * `FAILED path::id - reason` line per failure, and the tally line prints the
- * counts. Verbose mode prints `path::id PASSED`, which is what makes a
- * passed-count available when the tally was cut off by a capture limit.
+ * authoritative counts. Verbose outcome lines preserve observations from an
+ * incomplete capture but cannot establish that the run completed.
  */
 const pytest = (text: string): Report | undefined => {
   const summaryFailed = collect(text, /^(?:FAILED|ERROR)[ \t]+(.+?)(?:[ \t]+-[ \t]+.*)?$/gm)
@@ -65,17 +67,13 @@ const pytest = (text: string): Report | undefined => {
   const failures = count(text, /\b(\d+) failed\b/)
   const errors = count(text, /\b(\d+) errors?\b/)
   const hasTally = tally !== undefined || failures !== undefined || errors !== undefined
-  const reportedFailed = hasTally
-    ? (failures ?? 0) + (errors ?? 0)
-    : outcomes.length > 0
-    ? unique(verboseFailed).length
-    : undefined
+  const reportedFailed = hasTally ? (failures ?? 0) + (errors ?? 0) : undefined
   if (!hasTally && outcomes.length === 0 && summaryFailed.length === 0) return undefined
   return {
     passed: tally ?? verbosePassed,
     failed,
     reportedFailed,
-    parsed: reportedFailed !== undefined && failed.length === reportedFailed
+    parsed: hasTally && reportedFailed !== undefined && failed.length === reportedFailed
   }
 }
 
@@ -109,8 +107,15 @@ const unittest = (text: string): Report | undefined => {
 const tap = (text: string): Report | undefined => {
   const failed = unique(collect(text, /^not ok\b[ \t]*\d*[ \t]*-?[ \t]*(.*\S)?/gm))
   const passed = collect(text, /^ok\b[ \t]*\d*[ \t]*-?[ \t]*(.*)$/gm).length
+  const planned = count(text, /^1\.\.(\d+)\b/m)
   if (passed === 0 && failed.length === 0) return undefined
-  return { passed, failed, reportedFailed: failed.length, parsed: true }
+  const reportedFailed = failed.length
+  return {
+    passed,
+    failed,
+    reportedFailed,
+    parsed: planned !== undefined && passed + failed.length === planned && failed.length === reportedFailed
+  }
 }
 
 /**

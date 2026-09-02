@@ -161,6 +161,42 @@ describe("WebSearch", () => {
     }
   })
 
+  // A CDN, a proxy, or a provider pacing a healthy caller can attach
+  // `Retry-After` to a 200. Reading the header without the status threw the
+  // decoded results away as a `timeout`, which is a refusal the provider never
+  // made.
+  it("keeps a successful response whose headers carry Retry-After", async () => {
+    const client = responseClient(
+      JSON.stringify({ results: [{ url: "https://example.com/paced", title: "Paced", text: "Body" }] }),
+      { status: 200, headers: { "content-type": "application/json", "retry-after": "17" } }
+    )
+    const output = await Effect.runPromise(
+      WebSearch.run({ query: "paced" }).pipe(Effect.provide(providerLayer(client.http)))
+    )
+
+    expect(output.results).toEqual([{
+      title: "Paced",
+      url: "https://example.com/paced",
+      snippet: "Body"
+    }])
+  })
+
+  it("still reports a refusal that carries Retry-After as throttling", async () => {
+    for (const status of [429, 503] as const) {
+      const client = responseClient(JSON.stringify({ message: "slow down" }), {
+        status,
+        headers: { "content-type": "application/json", "retry-after": "17" }
+      })
+      const exit = await Effect.runPromise(
+        Effect.exit(WebSearch.run({ query: "throttled" }).pipe(Effect.provide(providerLayer(client.http))))
+      )
+      expect(failureOf(exit), String(status)).toMatchObject({
+        code: "timeout",
+        message: "Exa search was throttled; retry after 17"
+      })
+    }
+  })
+
   it("fails typed on non-JSON and schema-invalid success bodies", async () => {
     for (const body of ["not json", JSON.stringify({})]) {
       const client = responseClient(body)
