@@ -10,6 +10,8 @@
  *    must agree on the key, or they cannot share a cache.
  */
 import * as SafeFs from "@smthrs/targets/SafeFs"
+import * as Target from "@smthrs/targets/Target"
+import { Schema } from "effect"
 import { createHash } from "node:crypto"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
@@ -24,7 +26,8 @@ import {
   KeyMaterialError,
   keyOf,
   maximumSourceFileBytes,
-  productionSourceRoots
+  productionSourceRoots,
+  targetKeyBody
 } from "../src/Planner.ts"
 
 const material = (body: unknown): KeyMaterial => ({ body, inputs: null, layers: [], capabilities: [] })
@@ -454,5 +457,25 @@ describe("implementationFingerprint", () => {
     await expect(fingerprintSources([{ name: "x", directory: await scratch() }], {
       signal: controller.signal
     })).rejects.toThrow("fingerprint cancelled")
+  })
+})
+
+describe("targetKeyBody", () => {
+  it("omits the process-local Target.make implementation digest", () => {
+    const definition = () =>
+      Target.make("PlannerImplementationIdentity", {
+        attrs: Schema.Struct({}),
+        kinds: ["build"],
+        implementation: () => Target.notImplemented("PlannerImplementationIdentity")
+      })
+    const first = definition()({})
+    const second = definition()({})
+    const firstMetadata = Target.metadata(first)
+    const secondMetadata = Target.metadata(second)
+
+    expect(firstMetadata.implementationDigest).not.toBe(secondMetadata.implementationDigest)
+    expect(targetKeyBody(first, firstMetadata, undefined))
+      .toEqual(targetKeyBody(second, secondMetadata, undefined))
+    expect(targetKeyBody(first, firstMetadata, undefined)).not.toHaveProperty("implementation")
   })
 })
