@@ -117,12 +117,12 @@ frame boundary.
 
 ## Reference
 
-27 public modules, 336 documented exports.
+27 public modules, 337 documented exports.
 
 | Module | Public exports | Description |
 | --- | --- | --- |
 | `HarnessError` | `HarnessErrorCode`, `HarnessError` | Stable failures reported at the harness translation boundary. |
-| `AgentEvent` | `DisciplineArmed`, `TurnOpened`, `ModelDelta`, `ModelRetried`, `ModelSettled`, `CellProduced`, `CellRejectedInFrame`, `CellCallStarted`, `CellCallSettled`, `CellPrinted`, `CellSettled`, `TransitionApplied`, `ReadOnlyDemanded`, `RepeatDemanded`, `NarrowedDemanded`, `UnmovedDemanded`, `UnresolvedDemanded`, `NarrowOnlyDemanded`, `SufficiencyObserved`, `VacuousVerificationObserved`, `MutationObserved`, `CheckpointMinted`, `Suspended`, `CompactionSettled`, `SteeringDrained`, `TurnClosed`, `PermissionRequired`, `Aborted`, `Resolved`, `AgentEvent`, `eventType` | Serializable events emitted by harness adapters. |
+| `AgentEvent` | `DisciplineArmed`, `TurnOpened`, `ModelDelta`, `ModelRetried`, `ModelSettled`, `CellProduced`, `CellRejectedInFrame`, `CellCallStarted`, `CellCallSettled`, `CellPrinted`, `CellSettled`, `TransitionApplied`, `ReadOnlyDemandIssued`, `ReadOnlyDemanded`, `RepeatDemanded`, `NarrowedDemanded`, `UnmovedDemanded`, `UnresolvedDemanded`, `NarrowOnlyDemanded`, `SufficiencyObserved`, `VacuousVerificationObserved`, `MutationObserved`, `CheckpointMinted`, `Suspended`, `CompactionSettled`, `SteeringDrained`, `TurnClosed`, `PermissionRequired`, `Aborted`, `Resolved`, `AgentEvent`, `eventType` | Serializable events emitted by harness adapters. |
 | `Plan` | `Child`, `Batch`, `ChildResult`, `ChildProgress`, `ChildSettled`, `SpliceEvent` | Local structural plan nodes used at the harness-to-engine boundary. |
 | `EngineLike` | `SuspendReasonCode`, `SuspendReason`, `SealedModelStep`, `BoundaryIdentity`, `DurableSchema`, `RecordBoundary`, `Observation`, `Snapshot`, `CaptureRequest`, `EngineLike`, `make`, `layer`, `makeNoop`, `layerNoop` | Narrow engine port consumed by the built-in harness. |
 | `Tokens` | `Count`, `Segment`, `Accounting`, `Estimator`, `estimate`, `count`, `combine` | Deterministic token accounting for context windows. |
@@ -180,6 +180,7 @@ Serializable events emitted by harness adapters.
 | `CellPrinted` | class | events | What one REPL cell printed, as the next model turn will read it. |
 | `CellSettled` | class | events | The outcome of executing one cell, whether it settled, threw, or was rejected before it ran. |
 | `TransitionApplied` | class | events | The durable transition the controller applied after a cell settled. |
+| `ReadOnlyDemandIssued` | class | events | The controller issuing a read-cap intervention to the next frame. |
 | `ReadOnlyDemanded` | class | events | The outcome of the frame immediately following a read-cap intervention. |
 | `RepeatDemanded` | class | events | The controller telling a run it has stopped learning anything. |
 | `NarrowedDemanded` | class | events | The controller refusing one completion whose evidence was narrowed. |
