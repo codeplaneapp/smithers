@@ -3418,12 +3418,12 @@ any `CompensationHandlers` its adapters own.
 
 Time travel is a library API in this release, and only a library API.
 
-| Surface                                | 1.0.0-rc.0                                                                                                                                                     |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TimeTravel.inspect`, `fork`, `rewind` | available from `@smthrs/time-travel`. `inspect` is the replay entry point; there is no separate `replay` operation                                             |
-| CLI verbs                              | none. The Smithers 0.x time-travel verbs exit 1 with a migration message; migrating from 0.x lists them                     |
-| MCP tools                              | none. `replay_run`, `fork_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, and `time_travel` answer with the `unsupported` envelope |
-| Composition                            | not composed into `NodeControl`, and the CLI does not install migration block 5000                                                                             |
+| Surface                                          | 1.0.0-rc.0                                                                                                                                                     |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TimeTravel.replay`, `inspect`, `fork`, `rewind` | available from `@smthrs/time-travel`. `replay` is the fold verb with its read knobs; `inspect` is the same fold under the service defaults                     |
+| CLI verbs                                        | none. The Smithers 0.x time-travel verbs exit 1 with a migration message; migrating from 0.x lists them                     |
+| MCP tools                                        | none. `replay_run`, `fork_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, and `time_travel` answer with the `unsupported` envelope |
+| Composition                                      | not composed into `NodeControl`, and the CLI does not install migration block 5000                                                                             |
 
 A program that wants time travel provides `TimeTravelStore` and calls the
 service itself. Nothing in the command line reaches it.
@@ -7255,16 +7255,59 @@ called invalid can never become a durable step key.
 ### Limits
 
 `Graph.build` walks author-controlled and agent-generated structure, so it
-enforces documented bounds instead of failing with a host stack overflow.
-`Graph.maximumGraphDepth` bounds nested node structure and
-`Graph.maximumPayloadDepth` bounds a reflected plan value. Both refuse with a
-coded `GraphBuildError` naming the offending node. Plan width is deliberately
-unbounded: node count and reflected payload size are the caller's resource
-budget.
+enforces documented bounds instead of failing with a host stack overflow or
+exhausting memory. `Graph.maximumGraphDepth` bounds nested node structure and
+`Graph.maximumPayloadDepth` bounds a reflected plan value; both refuse with
+`plan_too_deep` or `payload_too_deep` naming the offending node.
+`Graph.maximumGraphNodes`, `Graph.maximumGraphEdges`, and
+`Graph.maximumGraphConflicts` bound plan width, counting synthesized lane
+merges and the edges the write-conflict pass adds, and refuse with
+`plan_too_large` naming the node whose admission crossed the limit.
+`Graph.maximumPayloadMembers` bounds the members one plan value expands to
+across every level (object keys, array items and holes, map entries, set and
+chunk values, and bytes) and refuses with `payload_too_large` naming the
+offending value path. A flow call's input and a declaration body are budgeted
+separately, and the effect paths of a flow placed inside a plan value count as
+its members.
 
-The write-conflict pass compares every pair of work nodes and tests
-reachability between them, so its cost grows quadratically with the number of
-nodes that declare effects.
+`Graph.maximumEffectPaths` bounds the read and write paths, summed, of one
+effect declaration. Every declaration the graph carries obeys it: an
+annotation, a dynamic node's own envelope, a called flow's envelope, and a
+synthesized lane merge, whose reads and writes both name the overlap it
+merges. `Graph.maximumPlanEffectPaths` bounds the paths admitted across the
+plan, counting a declaration where it is declared and again at every work
+node that inherits it as its effective envelope, because each such node is a
+writer the conflict pass compares. Both refuse with `plan_too_large` naming
+the node that declared or inherited the paths, before a path is copied:
+declared and inherited envelopes are admitted while the plan is visited,
+before the write-conflict pass runs, and a lane merge as it is synthesized.
+
+Every limit is checked before the structure it guards is allocated. An
+array-backed declaration is refused by its lengths without reading a member;
+a caller-assembled iterable, which has no length to refuse by, is copied one
+path at a time and refused as soon as it exceeds the limit.
+
+The write-conflict pass buckets literal writers by path, so disjoint literal
+writers cost linear time. A writer whose path ends in `*` is compared against
+every later writer, so its cost grows with the number of nodes that declare
+effects. `Effects.overlaps` and `Effects.narrow` index exact paths in a set
+and find the paths a glob covers by binary search over the sorted
+declaration, so comparing two declarations costs their combined length plus
+the matches rather than their product.
+
+### Agent Skills validation
+
+`Markdown.parseSkill` parses frontmatter with the failsafe YAML schema and then
+enforces the intrinsic rules of the Agent Skills specification: a `name` of 1
+to 64 lowercase ASCII letters, digits, or single hyphens that does not start or
+end with a hyphen, a `description` of 1 to 1024 characters counted in code
+points, a scalar space-separated `allowed-tools`, a scalar `license`, a
+`compatibility` of 1 to 500 characters, and `metadata` mapping string keys to
+scalar values. Each field reports its own stable `MarkdownError` code, and an
+invalid value is never echoed into the message.
+`Markdown.validateSkillFrontmatter` applies the same rules to already-parsed
+frontmatter. The one rule that needs the file system, that `name` equals the
+skill directory name, stays with `@smthrs/registry`.
 
 ### Mutability
 
@@ -7394,8 +7437,14 @@ Pure graph introspection for flow declarations.
 | `isFatalDiagnostic` (const) | predicates | Reports whether a diagnostic blocks `keyMaterial`. |
 | `keyMaterial` (const) | getters | Returns node-associated, digest-free key material in topological dependency order. |
 | `LayerRequest` (interface) | models | Information supplied to the planner's pure per-node layer resolver. |
+| `maximumEffectPaths` (const) | limits | Maximum number of read and write paths, summed, one effect declaration may list before `build` refuses the plan with `plan_too_large`. |
+| `maximumGraphConflicts` (const) | limits | Maximum number of write conflicts `build` records before it refuses the plan. |
 | `maximumGraphDepth` (const) | limits | Maximum structural nesting accepted by `build`. |
+| `maximumGraphEdges` (const) | limits | Maximum number of dependency edges, including the conflict and lane-merge edges the write-conflict pass adds, accepted by `build`. |
+| `maximumGraphNodes` (const) | limits | Maximum number of nodes, including synthesized lane merges, accepted by `build`. |
 | `maximumPayloadDepth` (const) | limits | Maximum nesting accepted while projecting a plan value into identity. |
+| `maximumPayloadMembers` (const) | limits | Maximum number of members one plan value may expand to while it is projected into identity: object keys, array items and holes, map entries, set and chunk values, and bytes, summed across every level of that value. |
+| `maximumPlanEffectPaths` (const) | limits | Maximum number of effect paths `build` admits across one plan before it refuses with `plan_too_large`. |
 | `nodes` (const) | getters | Returns graph nodes in structural preorder. |
 | `PlacementEntry` (interface) | models | Resolved placement for one graph node. |
 | `placements` (const) | getters | Returns resolved placement data in structural preorder. |
@@ -7416,7 +7465,7 @@ Graph-local ids may occur only inside dependency references. The key compiler re
 
 Parses Agent Skills documents and lowers markdown prompts into ordinary flows.
 
-General markdown discovery belongs to `/registry`. Agent Skills frontmatter is parsed with the complete failsafe YAML schema before this module lowers the document to the ordinary flow shape.
+General markdown discovery belongs to `/registry`. Agent Skills frontmatter is parsed with the complete failsafe YAML schema, then checked against the intrinsic rules of the Agent Skills specification (https://agentskills.io/specification), before this module lowers the document to the ordinary flow shape. The one rule that needs the file system, that `name` equals the skill directory name, stays with the registry.
 
 | Export | Kind | Summary |
 | --- | --- | --- |
@@ -7426,8 +7475,10 @@ General markdown discovery belongs to `/registry`. Agent Skills frontmatter is p
 | `MarkdownErrorCode` (const) | models | Stable code emitted by markdown loader failures. |
 | `MarkdownErrorCode` (type) | models | Stable code emitted by markdown loader failures. |
 | `MarkdownFrontmatter` (interface) | models | Already-parsed metadata accepted by the markdown flow loader. |
-| `parseSkill` (const) | constructors | Parses an Agent Skills document with failsafe-schema YAML semantics. |
+| `parseSkill` (const) | constructors | Parses an Agent Skills document with failsafe-schema YAML semantics and validates its frontmatter with `validateSkillFrontmatter`. |
 | `SkillDocument` (interface) | models | Parsed Agent Skills document. |
+| `SkillFrontmatter` (interface) | models | Agent Skills frontmatter that passed `validateSkillFrontmatter`. |
+| `validateSkillFrontmatter` (const) | validation | Checks already-parsed Agent Skills frontmatter against the specification's intrinsic rules and lowers the fields this package reads. |
 
 #### Node
 
@@ -11739,11 +11790,11 @@ Observability for flows: the default OTLP export wiring plus the Effect-native l
 
 The store packages define and update their own metric handles (`JournalMetrics`, `RunStoreMetrics`, `CacheStoreMetrics`, `ArtifactStoreMetrics`, `DatabaseMetrics`) and open spans through Effect's tracer; this package is the exporter they deliberately leave out. `Otlp` only composes what `effect` already ships, so it is browser-bundleable. The remaining modules are the fuller stack folded in from the agent workspace: a structured `Logger`, a `JournalLogger` that mirrors log events into the run journal, `Metric` helpers, the `Resource` descriptor, and the `Otel` layer the OpenTelemetry SDK wiring installs behind.
 
-`NodeOtel` and `BrowserOtel` are deliberately NOT re-exported here. Each resolves a host-specific OpenTelemetry SDK. `NodeOtel` reaches Node built-ins through `@effect/opentelemetry/NodeSdk`, so re-exporting either would put a `node:` import in the root entry and break the browser bundle this package guarantees. Import them by subpath instead: `@smthrs/observability/NodeOtel`.
+`NodeOtel` and `BrowserOtel` are deliberately NOT re-exported here. Each resolves a host-specific OpenTelemetry SDK. `NodeOtel` reaches Node-only host modules through `@effect/opentelemetry/NodeSdk` and `@opentelemetry/sdk-trace-node`, including the bare `async_hooks` specifier `@opentelemetry/context-async-hooks` imports, so re-exporting it would put a module a browser bundler cannot resolve in the root entry and break the browser bundle this package guarantees. Import them by subpath instead: `@smthrs/observability/NodeOtel`.
 
 ### Runtime and platform contract
 
-The package is tested with `effect@4.0.0-rc.108`. `Otlp`, `Logger`,
+The package is tested with `effect@4.0.0-rc.108`. `Otlp`, `Endpoint`, `Logger`,
 `JournalLogger`, `Metric`, `Otel`, and `Resource` are reachable from the root
 barrel. `Otlp.layerFetch` uses Effect's HTTP exporter and the host's global
 `fetch`, so that subpath is browser-safe and does not require an OpenTelemetry
@@ -11751,9 +11802,11 @@ SDK.
 
 The package as a whole is not Effect-only. `Otel` and `Resource` bridge the
 OpenTelemetry API, while `NodeOtel` and `BrowserOtel` use the SDK packages
-declared in this package's manifest. `NodeOtel` reaches Node-specific SDK code
-and must not enter a browser graph. `BrowserOtel` accepts processors and
-readers created by the application and contains no Node built-in.
+declared in this package's manifest. `NodeOtel` resolves Node-only host modules,
+including the bare `async_hooks` specifier that `@opentelemetry/sdk-trace-node`
+reaches through `@opentelemetry/context-async-hooks`, so it does not bundle for
+a browser and must not enter a browser graph. `BrowserOtel` accepts processors
+and readers created by the application and contains no Node module.
 
 ### Resource validation
 
@@ -11771,6 +11824,30 @@ values are not retained in the error.
 - NUL and unpaired UTF-16 surrogates are refused. Valid astral Unicode is
   preserved.
 
+### Collector endpoints
+
+`Otlp.layer`, `Otlp.layerFetch`, and `NodeOtel.layerOtel` decode their collector
+endpoint the same way they decode a resource. It must be an absolute `http:` or
+`https:` URL of at most 2,048 characters carrying no userinfo. Anything else
+fails layer acquisition with `Endpoint.InvalidExporterEndpoint`, code
+`invalid_exporter_endpoint`, and the name of the option it arrived on:
+`baseUrl` for `Otlp`, `endpoint` for `NodeOtel`. The rejected value is not
+retained in the error.
+
+Acquisition is the only place this can be reported. Export failure is absorbed
+by design, so a layer built against an unusable endpoint would otherwise look
+exactly like a working one and simply never deliver.
+
+Repeated trailing separators are normalized away, so `http://host//` and
+`http://host` both post to `http://host/v1/traces`.
+
+A value carrying a space or any C0 control is refused rather than repaired.
+`new URL` strips leading and trailing padding and removes tab, newline, and
+carriage return from anywhere in its input, so an endpoint read from a file
+with a trailing newline, or pasted with a leading space, parses cleanly while
+the untrimmed original is what the exporter would post to. Trim the value
+before handing it to a builder.
+
 ### Journal forwarding
 
 `JournalLogger.layerJournalForwarding` snapshots, bounds, and redacts a log
@@ -11784,23 +11861,50 @@ The queue defaults to 256 records and accepts a configured capacity from 1
 through 65,536. A snapshot accepts at most 1 MiB of encoded data, 4,096
 container members, and 64 container edges. Unreadable values become
 `[Unrenderable]`; values past a ceiling become `[Truncated]`; deep values become
-`[Deep]`. The same journal redaction rules used for durable events run before
-queue admission.
+`[Deep]`. Container-shaped fields keep their shape: annotations whose snapshot
+spent the budget arrive as `{ "[Truncated]": "[Truncated]" }` rather than as a
+scalar. A projection that still fails `TelemetryLog` degrades to a total record
+with an empty cause, so every durable `telemetry.log` row decodes with the
+exported schema. Text is bounded in one pass that never cuts a surrogate pair.
+The same journal redaction rules used for durable events run before queue
+admission.
 
-The callback never blocks. A full queue drops the new record. Journal delivery
-failure is absorbed because reporting it through the same logger would recurse.
-Closing the layer interrupts the worker and can drop records queued behind an
-in-flight write. Invalid run ids or capacities fail layer acquisition with
-`InvalidJournalLoggerOptions`; they are never routed through the lossy worker.
+The callback never blocks. A full queue drops the new record. A journal
+delivery failure is reported as a warning annotated with the run id, and a
+defect raised by a journal implementation is reported the same way and the
+worker keeps draining; interruption still ends it. Each of those three losses
+advances `Metric.droppedLogRecords`. Reporting is safe because the worker is
+forked before the logger it feeds is installed, so its ambient logger set never
+contains that logger. Closing the layer interrupts the worker and can drop
+records queued behind an in-flight write. Invalid run ids or capacities fail
+layer acquisition with `InvalidJournalLoggerOptions`; they are never routed
+through the lossy worker.
+
+The layer replaces the ambient logger set unless `mergeWithExisting` is `true`.
+It provides `References.MinimumLogLevel` only when `minimumLogLevel` is given,
+so an application that chose a level elsewhere keeps it and Effect's own `Info`
+default applies otherwise.
+
+### Logger layers
+
+`Logger.layerPrettyDev`, `Logger.layerStructuredJson`, and `Logger.layer` follow
+the same two rules. `mergeWithExisting` defaults to `false`, matching Effect's
+own `Logger.layer`, so installing one of them replaces the ambient logger set.
+`minimumLogLevel` is applied only when the caller names it. `Logger.layerNoop`
+is the exception: silencing is its purpose, so it pins `None` unless the caller
+names another level.
 
 ### Runtime metrics
 
-`Metric` exports three cross-package runtime signals. `runThroughput` advances
-only after `RunStore.transitionOwned` commits a terminal transition.
-`activeSeats` is a gauge held for the lifetime of a production `Agent.run`
-stream and released on success, failure, or interruption. `quotaParks`
-advances when the sealed quota decision is first executed, not when that
-decision is replayed after a wake or process restart.
+`Metric` exports three cross-package runtime signals and one of its own.
+`runThroughput` advances only after `RunStore.transitionOwned` commits a
+terminal transition. `activeSeats` is a gauge held for the lifetime of a
+production `Agent.run` stream and released on success, failure, or
+interruption. `quotaParks` advances when the sealed quota decision is first
+executed, not when that decision is replayed after a wake or process restart.
+`droppedLogRecords` counts operational log records lost before durable
+delivery, one per queue overflow, per journal delivery failure, and per defect
+the forwarding worker recovers from.
 
 Step-cache lookup and write counters remain owned by `@smthrs/step-cache`.
 This package does not duplicate those handles.
@@ -11834,6 +11938,19 @@ modules are subpath-only so the browser-safe root never resolves Node code.
 | `layer` (const) | layers | Creates the OTLP logs, metrics, and traces layer with flows resource defaults, JSON-serialized. |
 | `layerFetch` (const) | layers | Provides `layer` over the host's global `fetch`, the default wiring for a Node host, and browser-safe by construction because it never touches a `node:` built-in. |
 | `layerNoop` (const) | layers | Exports nothing. |
+
+#### Endpoint
+
+`@smthrs/observability/Endpoint`, [src/Endpoint.ts](https://github.com/smithersai/smithers/blob/main/packages/observability/src/Endpoint.ts).
+
+| Export | Kind | Summary |
+| --- | --- | --- |
+| `maximumEndpointLength` (const) | constants | Largest collector endpoint accepted by a builder. |
+| `Endpoint` (const) | schemas | Runtime schema for an absolute `http:` or `https:` collector endpoint that carries no credentials, no spaces, and no control characters. |
+| `InvalidExporterEndpoint` (class) | errors | Stable exporter-endpoint refusal shared by every OTLP builder. |
+| `normalize` (const) | conversions | Removes the repeated trailing separators that would otherwise produce a double slash in a signal URL. |
+| `decode` (const) | decoding | Decodes one collector endpoint into its normalized form without retaining the rejected value. |
+| `signalUrl` (const) | conversions | Builds the OTLP/HTTP URL one signal is posted to below a decoded endpoint. |
 
 #### JournalLogger
 
@@ -11881,6 +11998,7 @@ modules are subpath-only so the browser-safe root never resolves Node code.
 | `runThroughput` (const) | metrics | Counts flow runs that reached a terminal state. |
 | `activeSeats` (const) | metrics | The number of execution seats currently held. |
 | `quotaParks` (const) | metrics | Counts runs parked because a quota was exhausted. |
+| `droppedLogRecords` (const) | metrics | Counts operational log records lost before durable delivery. |
 | `registry` (const) | registry | All metrics declared by this package. |
 
 #### Otel
@@ -11974,11 +12092,77 @@ Declaration-time misuse raises `PatternError` from `make`: an empty ladder, a
 fractional concurrency, a compensation that is not a flow. The same condition
 inside `run` becomes a typed failure rather than a throw.
 
-### `PatternError`
+### Identity and ownership
 
-`PatternError` is the package's single tagged error, carrying a `code` from
-`PatternErrorCode`, a message, and an optional `cause` with the reported error
-or errors.
+Every pattern that names things by string compares those strings the way
+JavaScript does, and every pattern copies what it interprets out of the
+options it is handed. This section is the contract for both.
+
+#### String identity
+
+Item ids, member names, column names, check ids, task ids, step ids, tier
+names, panelist names, and worker types are compared by exact string
+equality, through `Set`, `Map`, and record keys. The comparison is
+case-sensitive, trims nothing, and applies no Unicode normalization: `"é"`
+as one code point and as `e` followed by a combining acute accent are two
+different ids, and so are `"a"` and `"a "`. Normalize before you declare. A
+record of members is read by its own enumerable string keys in the order
+JavaScript reports them, which places an integer-like key such as `"10"`
+ahead of the rest.
+
+#### Snapshot timing
+
+`make` snapshots its options when it is called, before the `Flow` is
+returned. The deferred body that core runs when the graph builds reads that
+snapshot and never the caller's option object again. `run` snapshots its
+options when it is called, before the `Effect` is returned, so an edit
+between the call and the execution does not reach the effect. The decorator
+factories `WithRetry.make`, `WithCache.make`, and `WithApproval.make`
+snapshot when `make` is called, not when the decorator is applied, and
+`WithRetry.retryEffect` snapshots when it is called. `Pattern.slot` returns a
+frozen copy of its declaration, which is what `Pattern.bind` reads.
+
+#### What is copied
+
+Copies are shallow and field by field. A pattern copies every array it
+interprets and the interpreted fields of every record in it: an id, a name, a
+priority, a risk, a flow, a callback. Nested bounds are copied the same way:
+`WithRetry` `backoff`, `Trellis` `envelope`, `DelegationChain` `budget`. A
+record of flows or callbacks (`Panel` `panelists`, `CheckSuite` `checks`,
+`Supervisor` `workers`, `DelegationChain` `execute`, and the members handed
+to `Bounded` and `Quarantine`) is copied as its own entries, so a
+prototype-shaped name such as `"constructor"` stays a data property.
+`Trellis.execute` copies the plan it is handed, and `Supervisor.run` copies
+the tasks of the plan its `plan` callback returns when it validates them.
+
+The package never freezes a caller's object and never copies below the fields
+it interprets. Flows, callbacks, and schemas are references. A value the
+package carries without reading stays the caller's: the flow input, the
+`baseline` of `DriftDetector`, the values inside `Loop` `captures`, the
+`Item` record `Kanban` hands a column, and every value a callback returns.
+`Kanban` reads an item's `id` once at the call, keys the board by it, and
+hands the column the caller's own record. `DriftDetector.run` reads
+`baseline` once at the call and hands every callback that same reference.
+
+Three results are frozen because they are protocol values rather than caller
+data: the slot `Pattern.slot` returns, the `Succeeded` and `Quarantined`
+envelopes `Quarantine` produces, and the turns in a `Debate.run` transcript.
+Every other result is a fresh plain object the caller may keep or edit.
+
+### Errors
+
+The package raises three tagged errors. `PatternError` is the shared one:
+every module except `Trellis` and `DelegationChain` reports its refusals and
+exhaustions through it. Those two own their own errors because every
+rejection they report carries a plan path, and a path is what an author has
+to read to repair a plan. All three carry a `code` from a stable literal
+schema, a `message`, and an optional `cause`, and none of them carries the
+input that produced the failure.
+
+#### `PatternError`
+
+`PatternError` carries a `code` from `PatternErrorCode`, a message, and an
+optional `cause` with the reported error or errors.
 
 | Code                  | Raised when                                                                                                         |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------- |
@@ -11990,6 +12174,41 @@ or errors.
 | `finalizer_failed`    | A `TryCatchFinally` finalizer failed after the protected body settled                                               |
 | `compensation_failed` | One or more `Saga` compensations failed while unwinding                                                             |
 | `quarantined`         | `Quarantine.settle` was called on a result holding quarantined members                                              |
+
+#### `TrellisError`
+
+`TrellisError` carries a `code` from `TrellisErrorCode`, the plan `path` the
+fault was found at (`root`, or a path such as `root.parallel[1].sequence[0]`),
+a message, and an optional `cause`. `Trellis.validate` returns every refusal
+it finds as an array and attaches no cause. `Trellis.make` throws one, and
+`Trellis.execute` and `Trellis.run` fail with one; a refusal `run` reports
+carries `{ rounds, remaining }` as its cause, the rounds already executed and
+the fuel left. `DelegationChain.run` fails with the same error when the
+derisked plan does not fit its envelope.
+
+| Code               | Path          | Raised when                                                                                                                                                                      |
+| ------------------ | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid_envelope` | `root`        | A `fuel`, `depth`, or `fanout` bound, or a `concurrency`, is not a positive safe integer                                                                                         |
+| `invalid_plan`     | the node      | A node is not exactly one of `agent`, `sequence`, or `parallel`, an agent has no non-empty string `goal` or carries a non-string `seat`, or a container is not a non-empty array |
+| `depth_exceeded`   | the node      | A node nests deeper than the envelope `depth`                                                                                                                                    |
+| `fanout_exceeded`  | the container | A container holds more members than the envelope `fanout`                                                                                                                        |
+| `fuel_exhausted`   | `root`        | A plan needs more leaf calls than the envelope `fuel`, or than the fuel left after earlier rounds                                                                                |
+
+#### `DelegationError`
+
+`DelegationError` carries a `code` from `DelegationErrorCode`, a `path`
+(`root` for the chain itself, or the leaf's plan path), a message, and an
+optional `cause`. `DelegationChain.make` throws one and `DelegationChain.run`
+fails with one. See
+Delegation patterns for how the
+chain climbs its tier ladder and what a repair looks like.
+
+| Code             | Path     | Cause                                                                                                     | Raised when                                                                                                                                  |
+| ---------------- | -------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid_bounds` | `root`   | none                                                                                                      | `maxDepth`, `maxDeriskRounds`, or `maxAttempts` is not a positive safe integer, `concurrency` is set and is not one, or `tierOrder` is empty |
+| `missing_tier`   | `root`   | none                                                                                                      | `tierOrder` names a tier that `execute` has no flow or callback for                                                                          |
+| `derisk_failed`  | `root`   | none                                                                                                      | A `PatternError` was raised inside the derisk loop; the message is that error's                                                              |
+| `leaf_failed`    | the leaf | The per-tier attempts, `{ tier, error }` or `{ tier, rejected }`, or the `PatternError` the ladder raised | No tier settled the leaf within `maxAttempts` attempts each                                                                                  |
 
 ### Modules
 
@@ -13091,13 +13310,13 @@ A member without its own priority gets `MergeQueue.DefaultPriority`, which is `1
 
 #### Declaration
 
-`concurrency` defaults to 1: a merge queue serializes landings unless a caller widens it deliberately. At concurrency 1 the queue is a plain `Node.andThen` chain with no `Node.all` at all, so the declared plan admits exactly one landing at a time. Above 1, members are batched into `Node.all` groups of `concurrency` and the batches are sequenced.
+`concurrency` defaults to 1: a merge queue serializes landings unless a caller widens it deliberately. At concurrency 1 the queue is a plain `Node.andThen` chain with no `Node.all` at all, so the declared plan admits exactly one landing at a time. Above 1, members are batched into `Node.all` groups of `concurrency` and the batches are sequenced. Only a `quarantine` queue may widen it: `halt` promises that no member behind a failure lands, and a batch starts its members before any of them has failed, so `make` and `run` refuse `halt` above concurrency 1 with a `PatternError`.
 
 Each call carries `{ id, position, input }`, so a built graph names each member's place in the queue. A member's effective priority reaches the plan as a `Node.priority` annotation, which is what lets the scheduler start the higher-priority ready landing first. Priority stays out of key material, so raising a member's number without changing the resulting order re-uses the same steps rather than re-landing the queue. Under the quarantine policy, a failed declaration settles to MergeQueue's structural wire marker `{ _tag: "Quarantined", id, error }`, the same shape as the runtime `Quarantined` result, and MergeQueue keeps landed and quarantined results in separate arrays so the marker never classifies an arbitrary successful value.
 
-`failurePolicy` picks the topology and is captured as well. Under `quarantine` every landing carries a recovery arm settling it as MergeQueue's `Quarantined` result, so a failing member neither breaks the serial chain nor interrupts its batch: the queue `run` lands. Under `halt` the chain has no continuation past a failed member, and a batch join fails on the first failing member and interrupts the rest.
+`failurePolicy` picks the topology and is captured as well. Under `quarantine` every landing carries a recovery arm settling it as MergeQueue's `Quarantined` result, so a failing member neither breaks the serial chain nor interrupts its batch: the queue `run` lands. Under `halt` the chain has no continuation past a failed member, and it is always the serial chain, because a halting queue is refused above concurrency 1.
 
-`make` throws a `PatternError` when there are no members, when two members share an id, when `concurrency` is not a positive safe integer, or when `priority` is not a safe integer.
+`make` throws a `PatternError` when there are no members, when two members share an id, when `concurrency` is not a positive safe integer, when `failurePolicy` is `halt` and `concurrency` is above 1, or when `priority` is not a safe integer.
 
 #### Execution
 
@@ -13105,7 +13324,7 @@ Each call carries `{ id, position, input }`, so a built graph names each member'
 
 | `failurePolicy` | A failing member                                                                 |
 | --------------- | -------------------------------------------------------------------------------- |
-| `"halt"`        | Fails the queue. No member behind it lands                                       |
+| `"halt"`        | Fails the queue. No member behind it has started, so none lands                  |
 | `"quarantine"`  | Is recorded in `quarantined` and does not land. The members behind it still land |
 
 ### Worked example
@@ -13214,7 +13433,7 @@ A `DigestMemo` shares one in-flight projected-value digest between concurrent ca
 
 `compile` puts drafts in topological order, substitutes dependency digests, annotates write-set overlaps, and derives the plan digest. `append` adds a pre-keyed subgraph at the next generation, and `generationNodes` reads back the nodes the newest generation added.
 
-`PlanNode.kind` is `step`, `agent`, or `merge`. `dependsOn` is the edge set: material references, any ordering edge a `serialize` verdict added, and the reader-after-writer edges that put a node behind whoever produces the paths it reads. Ordering edges are deliberately not key material, so a node serialized behind another keeps its cache hit. `NodeEffects` carries `reads`, `writes`, an optional `removes`, and a `boundaryMode` of `hard` or `expected`; a removal mutates the world exactly as a write does, so both plan passes treat the two as one set.
+`PlanNode.kind` is `step`, `agent`, or `merge`. `dependsOn` is the edge set: material references, any ordering edge a `serialize` verdict added, and the reader-after-writer edges that put a node behind whoever produces the paths it reads. Ordering edges are deliberately not key material, so a node serialized behind another keeps its cache hit. A reader-after-writer edge that would close a cycle, because a declared dependency or a `serialize` edge already orders the producer behind its reader, is refused as `cycle` rather than dropped; the message names the reader, the producer, the overlapping paths, and the dependency chain. `NodeEffects` carries `reads`, `writes`, an optional `removes`, and a `boundaryMode` of `hard` or `expected`; a removal mutates the world exactly as a write does, so both plan passes treat the two as one set.
 
 Planning performs no I/O. Declared effects carry read and write _paths_, never digests, because measuring a path is run-time work. A node's key is a function of what it consumes, so an edited declaration re-keys that node and its dependent cone and nothing else. That is the entire invalidation mechanism: there is no reverse-dependency index and no invalidating node visitor, because content addressing subsumes both.
 
@@ -13228,7 +13447,7 @@ A compiled plan is a deep-frozen snapshot of the drafts it was given. Material i
 
 | `code`               | Meaning                                                                                                                                                                                                                                            |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cycle`              | material dependencies close a cycle                                                                                                                                                                                                                |
+| `cycle`              | material dependencies close a cycle, or a reader-after-writer edge would close one                                                                                                                                                                 |
 | `unknown_dependency` | a `Ref` or `Pending` names a node that is neither in the drafts nor already in the plan                                                                                                                                                            |
 | `duplicate_node`     | a draft reuses an id the plan already holds                                                                                                                                                                                                        |
 | `overlap_forbidden`  | a `fail` pair genuinely overlaps and no dependency path orders it                                                                                                                                                                                  |
@@ -13259,6 +13478,8 @@ The pure, pipeable authoring AST. Building a node records an inspectable, closur
 Map transforms; branch decides. Both branch arms are evaluated once, symbolically, so the exit condition and the handoff site are visible topology before anything runs. A plan is always a DAG, so there is no loop node: repetition lives one level up, in what a flow settles with.
 
 A payload is stored as its inert JSON mirror. A data-valued callable `toJSON` is honoured, so a `Date` or a `URL` keys as the value it serializes to rather than as an empty object; a function or symbol member is dropped from an object and becomes `null` in an array; shared references and cycles clone as they were written. Accessors and unsupported prototypes without `toJSON` fail as `invalid_payload`, and a `toJSON` that returns its own receiver fails as `cyclic_payload` rather than collapsing to an empty object the way it once did. The clone and the input therefore key identically or refuse together.
+
+`isNode` recognizes a node this package built by registration at construction, and a rehydrated node, an object sharing the node prototype whose own `ast` is a well-formed AST, by that shape, because `@smthrs/flow` hands an AST that crossed a serialization boundary back as a node. The `TypeId` marker is a public string any object can carry and counts for nothing on its own. Every combinator that admits a node reads its `ast` as trusted topology, so an object carrying the marker on any other prototype, one inheriting it from a node, and one whose `ast` is missing, malformed, or cyclic are all refused with the same `GraphBuildError` as any other non-node. A proxy is judged by the shape it forwards.
 
 The functions an author writes, a mapper, a continuation, a branch predicate, live in `WeakMap`s keyed by the AST node they belong to, and the AST keeps only a `FunctionIdentity` digest of the function's exact source. Exact source matters, because whitespace inside a string literal is behavior. A function whose inert captures were declared with `capture` digests those captures; every other function additionally carries process-local, per-function entropy, so indistinguishable closure sources fail closed instead of sharing a cache key. `capture` refuses a capture record nested past 256 levels with a path-bearing error rather than overflowing the native stack.
 
@@ -13333,6 +13554,8 @@ Every failure is a `PlanStoreError` whose `code` is one of `invalid_plan`, `cons
 [src/Migrations.ts](https://github.com/smithersai/smithers/blob/main/packages/plan/src/Migrations.ts)
 
 The namespaced set owns `flows_plans`, `flows_plan_nodes`, and `flows_plan_edges` in id block `4000`. Block `4000` is the next free block after the journal (`0`), the run store (`1000`), the step cache (`2000`), and the engine store (`3000`). `@smthrs/engine-store`'s `Migrations.sets` composes this set last, because `Migrator` decides what to run from a single high-water mark and a set whose ids sit below an already-applied one would be assumed done.
+
+The ordered steps live under `src/internal/migrations`, which the export map blocks, so `set` is the only way to reach them; a step imported on its own would run outside the namespaced ordering `Migrator` relies on.
 
 Append-only is enforced in SQL rather than by convention. `0001_initial` creates the tables, the `flows_plan_nodes_order` index, and triggers that raise on any UPDATE or DELETE of `flows_plan_nodes` and `flows_plan_edges` and on any backward move of a `flows_plans` row. `0002_append_only_hardening` forbids deleting a plan row, extends the forward-only trigger to pin `flow` and `created_at_ms`, and makes `(plan_id, ordinal)` unique so recorded node order is deterministic.
 
@@ -14976,9 +15199,17 @@ persist. Lifecycle stamps read the Effect `Clock`: `create` writes
 the same reading.
 
 Every `nowMs` and `LivenessEvidence.checkedAtMs` is validated as a non-negative
-safe integer, then trusted: the store cannot distinguish a slow clock from a
-lie. That is correct for an in-process library over a local SQLite file whose
-caller can issue raw SQL itself, and it must not cross a trust boundary.
+safe integer. The lease operations (`claim`, `claimAndOwn`, `steal`,
+`heartbeat`, and `recoverClaim`) also refuse a `nowMs` that runs ahead of the
+store's `Clock` by more than `heartbeatSkewAllowance` with `invalid_run`, so a
+runaway caller clock can neither steal a fresh owner nor pin a lease past the
+cutoff. A reading behind the clock is admitted; it only makes staleness
+judgments more conservative. `requestCancel` keeps its literal reading, which
+is request data rather than a lease predicate, and `claimedAtMs` fence tokens
+are compared against the row rather than bounded. Inside the allowance the
+reading is trusted: the store cannot distinguish a slow clock from a lie. That
+is correct for an in-process library over a local SQLite file whose caller can
+issue raw SQL itself, and it must not cross a trust boundary.
 Evidence binds to one instant by exact equality, so a probe taken at T is
 refused by a call made at T+1. Heartbeats are monotonic, so a pulse delayed
 past a newer one reports `Updated` without moving the lease backwards.
@@ -17142,7 +17373,7 @@ Route: /api/time-travel
 
 ## @smthrs/time-travel
 
-Time travel over the journal: inspect, fork, rewind.
+Time travel over the journal: replay, inspect, fork, rewind.
 
 The verbs are reached through ONE injectable service. `Replay`, `Fork`, `Rewind`, `Retry`, `Recovery`, `Compensation`, and the effect-handler registry are machinery under `src/internal/`, the same way every other package here hides the modules a caller should never name, and the package blocks `@smthrs/time-travel/internal/*` at its `exports` map.
 
@@ -17192,19 +17423,27 @@ names.
 
 ### Operations
 
-`TimeTravel` is one injectable service with three operations, each addressed by
+`TimeTravel` is one injectable service with four operations, each addressed by
 a `Position`: a run id plus a `Frame`.
 
-| Operation                       | What it does                                                                                                                                                                                                                                                                                                                                |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `inspect(position, projection)` | folds the committed journal prefix up to the frame through a pure projection. It has no dispatcher, so a replay can never re-execute a model call or a child flow, and that is what separates it from an engine resume. `inspect` is the replay entry point; there is no separate `replay` operation.                                       |
-| `fork(position, options?)`      | mints a child run, copies the journal prefix, the frame's anchors, and only the attempts that prefix can explain, records the lineage edge, and provisions the child's jj workspace pinned at the frame's recorded pointer. The parent is never mutated. `options.workspaceRoot` only moves which lane the derived workspace name lands in. |
-| `rewind(position, options?)`    | the fenced, audited suffix-removal protocol. The ownership claim and the audit id are minted inside. `options.detachedChildren` (`"block"` by default, or `"cancel"`) and `options.pageSize` are the only knobs.                                                                                                                            |
+| Operation                                | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `replay(position, projection, options?)` | folds the committed journal prefix up to the frame through a pure projection. It has no dispatcher, so a replay can never re-execute a model call or a child flow, and that is what separates it from an engine resume. The fold streams and stops reading at the frame. `options.pageSize` is a throughput knob; `options.maxHistoryEntries` caps the entries the fold reads for this call.                                                                                                                 |
+| `inspect(position, projection)`          | the same fold as `replay`, under the service defaults. It exists for the caller that never tunes a read.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `fork(position, options?)`               | mints and reserves a child run id, provisions the child's jj workspace pinned at the frame's recorded pointer, then copies the journal prefix, the frame's anchors, and only the attempts that prefix can explain, and records the lineage edge. The parent is never mutated, and the fork refuses `live_parent` while the parent or any ancestor is live. `options.workspaceRoot` only moves which lane the derived workspace name lands in; `options.maxHistoryEntries` caps the suffix the fork assesses. |
+| `rewind(position, options?)`             | the fenced, audited suffix-removal protocol. The ownership claim and the audit id are minted inside. `options.detachedChildren` (`"block"` by default, or `"cancel"`), `options.pageSize`, and `options.maxHistoryEntries` are the only knobs.                                                                                                                                                                                                                                                               |
 
 The workspace a fork lands in is named after the child run id the fork mints,
 never supplied: `smithers-fork-` plus the sanitized id capped at 64 characters
 plus a short digest of the raw id. A frame forked twice therefore gets two
 lanes, and the lane is forgotten when the service scope is released.
+
+The mint is a durable reservation. A process that dies after provisioning the
+lane and before the store commits the fork leaves a registered lane and a
+reservation behind; the next build of `TimeTravel.layer` forgets the lane of
+every reservation older than five minutes whose fork never committed, and the
+reserved ordinal is never handed out again, so a retry lands under a fresh
+lane name rather than asking jj for the one the leftover on disk still holds.
 
 #### Rewind order of operations
 
@@ -17263,19 +17502,20 @@ so a caller's branch stays exhaustive. This table is checked against
 `TimeTravelErrorCode` by the page generator: a code that exists in one and not
 the other fails the build.
 
-| Code                  | Raised by              | Means                                                                                                                                                    |
-| --------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `busy`                | `rewind`, recovery     | another owner holds the run, or this operation lost its claim before it could finish. Retryable.                                                         |
-| `live_parent`         | `fork`                 | the parent run, or an ancestor of it, is running, claimed, or owned, so it has no settled prefix to copy.                                                |
-| `live_child`          | `rewind`               | a descendant the truncation would cut history out from under is still executing, and the policy is `"block"`.                                            |
-| `not_found`           | all three              | the run, the frame, or the audit does not address anything: a coordinate past the journal tail, a lineage this run is not on, or a run row that is gone. |
-| `invalid`             | all three              | a caller-supplied option is malformed, or a durable payload does not decode. Refused before the operation touches anything.                              |
-| `already_crossed`     | `EffectBoundary.guard` | the effect already recorded a durable `intended` boundary, so executing it a second time was refused.                                                    |
-| `rate_limited`        | `rewind`               | the supplied rate limiter rejected the attempt. The audit row records the decision.                                                                      |
-| `compensation_failed` | `rewind`, recovery     | a rollback handler or the workspace restore failed, so the rewind stopped rather than leave the world half reverted.                                     |
-| `irreversible`        | `rewind`               | an effect in the truncated range cannot be undone at all: no handler, or a sealed result whose cache entry is gone.                                      |
-| `fence_lost`          | `rewind`               | the caller's ownership of the run was superseded before a mutation committed, so the mutation was refused rather than written behind the live owner.     |
-| `unknown`             | all three              | the store, the journal, or an unmapped host failure. The original cause is attached.                                                                     |
+| Code                  | Raised by              | Means                                                                                                                                                                                         |
+| --------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `busy`                | `rewind`, recovery     | another owner holds the run, or this operation lost its claim before it could finish. Retryable.                                                                                              |
+| `live_parent`         | `fork`                 | the parent run, or an ancestor of it, is running, claimed, or owned, so it has no settled prefix to copy.                                                                                     |
+| `live_child`          | `rewind`               | a descendant the truncation would cut history out from under is still executing, and the policy is `"block"`.                                                                                 |
+| `not_found`           | all verbs              | the run, the frame, or the audit does not address anything: a coordinate past the journal tail, a lineage this run is not on, or a run row that is gone.                                      |
+| `invalid`             | all verbs              | a caller-supplied option is malformed, or a durable payload does not decode. Refused before the operation touches anything.                                                                   |
+| `already_crossed`     | `EffectBoundary.guard` | the effect already recorded a durable `intended` boundary, so executing it a second time was refused.                                                                                         |
+| `rate_limited`        | `rewind`               | the supplied rate limiter rejected the attempt. The audit row records the decision.                                                                                                           |
+| `compensation_failed` | `rewind`, recovery     | a rollback handler or the workspace restore failed, so the rewind stopped rather than leave the world half reverted.                                                                          |
+| `irreversible`        | `rewind`               | an effect in the truncated range cannot be undone at all: no handler, or a sealed result whose cache entry is gone.                                                                           |
+| `fence_lost`          | `rewind`               | the caller's ownership of the run was superseded before a mutation committed, so the mutation was refused rather than written behind the live owner.                                          |
+| `limit_exceeded`      | all verbs              | the operation would read more journal entries than `maxHistoryEntries` allows: the prefix a replay folds, or the suffix a fork or rewind assesses. A rewind refuses before it claims the run. |
+| `unknown`             | all verbs              | the store, the journal, or an unmapped host failure. The original cause is attached.                                                                                                          |
 
 An error's `cause` is encoded with the error, so the package never attaches a
 whole effect record or a whole parse issue to one: a blocking assessment travels
@@ -17289,9 +17529,14 @@ as its identity and classification, never as the effect's `input` or `output`.
   PostgreSQL and PGlite are unsupported.
 - Journal reads page at 100 entries by default. `pageSize` is a throughput knob
   and never changes a derived answer.
-- A rewind materializes the suffix after the frame in memory, a fork the suffix
-  it carries past, and a replay the prefix it folds. There is no configured
-  maximum, so a very long history is bounded by process memory.
+- Every read is capped by `maxHistoryEntries`. The default is 100,000 entries
+  (`TimeTravel.defaultMaxHistoryEntries`); `TimeTravel.layerWith({ maxHistoryEntries })`
+  sets the service default and each verb's options override it per call, and a
+  value that is not a positive integer is refused `invalid`. A replay streams
+  its fold and stops at the frame, so it retains nothing below it; a fork or
+  rewind retains only the effect-boundary records of the suffix it assesses.
+  Validation still scans a run's journal to its tail to find the frame, without
+  retaining it.
 - `Projection.reduce` receives store entries by reference. Treat them as
   read-only: mutating one rewrites the evidence the fold is reading.
 - The memory store is a behavioural peer of the SQL store for the answers both
@@ -17324,6 +17569,15 @@ With no `CompensationHandlers` provided, a crossed record that is not sealed
 resolves to no handler, classifies as `blocking`, and the rewind fails
 `irreversible`. That is the safe default.
 
+A handler is held to what the evidence recorded. An effect that recorded a
+`compensation` descriptor resolves only to the handler declaring the same
+one, so an adapter swapped in after a restart never compensates evidence
+another implementation left behind; an effect that recorded none resolves by
+`kind`. A handler with `requiresIdempotencyKey` blocks and never reverts an
+effect that recorded no key, a custom `assess` result is decoded against
+`Assessment` and assesses `blocking` when it does not decode, and a rollback
+refuses a receipt whose tier or descriptor the handler does not match.
+
 ### Exports
 
 Each row names the export as a consumer writes it: the module prefix is the
@@ -17332,6 +17586,8 @@ one export the barrel also re-exports flat.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
+| `CompensationHandlers.Classification` | const + type | models | A handler's preflight verdict on one crossed effect: `revertible` means the rewind compensates it, `warning` means it stands and the rewind discloses it, `blocking` means the rewind is refused. |
+| `CompensationHandlers.Assessment` | const + type | models | A handler's preflight result: the `Classification`, why, and the operator-facing `residue` that remains outside the journal if the boundary is crossed. |
 | `CompensationHandlers.Handler` | interface | models | One adapter's compensation for the effects it performs. |
 | `CompensationHandlers.CompensationHandlers` | class | services | The handlers a composition contributes to time travel. |
 | `CompensationHandlers.layer` | const | layers | Provides a set of handlers. |
@@ -17344,7 +17600,8 @@ one export the barrel also re-exports flat.
 | `EffectBoundary.guard` | const | combinators | Runs an action between durable `intended` and terminal boundary records. |
 | `EffectBoundary.fromEntry` | const | decoders | Decodes one boundary record from a journal entry. |
 | `EffectBoundary.decodeEntry` | const | decoders | Decodes a known boundary event, failing closed when its durable payload is corrupt. |
-| `EffectBoundary.fromEntries` | const | projections | Folds boundary entries to the latest monotonic status for each effect while retaining the sequence of the effect's last boundary record. |
+| `EffectBoundary.fromRecords` | const | projections | Folds decoded boundary records to one record per effect, refusing evidence that does not describe one monotonic crossing. |
+| `EffectBoundary.fromEntries` | const | projections | Decodes boundary entries and folds them with `fromRecords`: one record per effect, at the effect's latest legal status, ordered by `seq`. |
 | `Frame.Frame` | const + type | schemas | A point in one lineage's history: the journal sequence number `seq` within lineage `lineageId`. |
 | `Frame.LineageEdgeKind` | const + type | schemas | Why a child lineage exists, and therefore what its parent may still assume about it. |
 | `Frame.LineageEdge` | const + type | schemas | One parent→child link in the lineage tree, anchored at the parent frame the child branched from. |
@@ -17363,12 +17620,14 @@ one export the barrel also re-exports flat.
 | `SqlTimeTravelStore.make` | const | constructors | Builds the SQL-backed store, running `migrate` first so a fresh database is usable without a separate setup step. |
 | `SqlTimeTravelStore.layer` | const | layers | Provides `make` as the `TimeTravelStore` service. |
 | `TimeTravel.Position` | const + type | schemas | Where in history an operation acts: a run, and a frame inside it. |
-| `TimeTravel.Projection` | type | models | A pure fold over durable journal evidence, handed to `Service.inspect`. |
+| `TimeTravel.Projection` | type | models | A pure fold over durable journal evidence, handed to `Service.replay` and `Service.inspect`. |
+| `TimeTravel.ReplayOptions` | interface | models | How a replay reads. |
+| `TimeTravel.defaultMaxHistoryEntries` | const | constants | The cap on journal entries one operation reads when neither the service nor the call names one. |
 | `TimeTravel.ForkResult` | type | models | The successful shape of `Service.fork`: the child run and its lineage edge back to the parent frame. |
 | `TimeTravel.RewindResult` | type | models | The successful shape of `Service.rewind`: the audit row, the archived suffix, and everything the boundary disclosed. |
-| `TimeTravel.ForkOptions` | interface | models | How a fork chooses its workspace. |
-| `TimeTravel.RewindOptions` | interface | models | How a rewind treats what it crosses. |
-| `TimeTravel.Service` | interface | models | Inspect, fork, and rewind over a journal. |
+| `TimeTravel.ForkOptions` | interface | models | How a fork chooses its workspace, and how much history it may assess. |
+| `TimeTravel.RewindOptions` | interface | models | How a rewind treats what it crosses, and how much of it it may cross. |
+| `TimeTravel.Service` | interface | models | Replay, inspect, fork, and rewind over a journal. |
 | `TimeTravel.Options` | interface | models | How the service is composed. |
 | `TimeTravel.makeWith` | const | constructors | Builds the service over the ambient contracts under an explicit policy, recovering first. |
 | `TimeTravel.make` | const | constructors | Builds the service over the ambient contracts under the default policy, recovering first. |
@@ -17389,6 +17648,7 @@ one export the barrel also re-exports flat.
 | `TimeTravelStore.Receipt` | const + type | schemas | Proof that one side effect was compensated during a rewind. |
 | `TimeTravelStore.ArchiveResult` | const + type | schemas | What a truncation actually did: how many journal records it archived, and which lineage edges it left pointing at history that no longer exists. |
 | `TimeTravelStore.Fork` | const + type | models | A fork's outcome: the child run, its lineage edge, and everything the boundary assessment disclosed. |
+| `TimeTravelStore.ForkIntent` | const + type | schemas | A fork id that has been minted and durably reserved, whose fork has not committed yet. |
 | `TimeTravelStore.Service` | interface | services | The operations a time-travel state store must provide. |
 | `TimeTravelStore.TimeTravelStore` | class | services | The service key for a `Service`. |
 | `TimeTravelStore.make` | const | constructors | Brands a `Service` implementation as a `TimeTravelStore`, so a new backend is written against the interface and checked at its definition site rather than at the layer. |
@@ -18263,7 +18523,7 @@ Support means durable engine execution. A package that bundles for a platform is
 | Crash consistency (WAL/state atomicity) | **Every lifecycle entry commits in the same write transaction as the executable state transition it describes.** `Journal.transact` opens that transaction; `RunStore`, `AttemptStore`, `CacheStore`, and `DurableEngineState` write through the same `DurableWriter`, so their writes join it as savepoints and either both halves are durable or neither is, the local analogue of Temporal submitting mutable state and its event batches as one persistence request. The pairs closed are: attempt admission + `attemptStarted`, the pre-image patch + `snapshotIdentified`, `attempts.finish` + `hardViolation`/`expectedSetDeviation`/`attemptFinished`, the cache provenance append + `CacheStore.put`, the run-row CAS + its `transitioned`/`quarantined`/`interrupt-released`/`claimed-and-activated` decision, the cancel transition + waiting-row clear + `interrupted`, the deferred completion row + `deferredCompleted`, and the clock row + `clockScheduled`. Publication is deferred with it: an entry reaches `changes`/`stream` and the in-process producer index only after COMMIT, so a subscriber never observes a rolled-back entry and a rolled-back producer identity stays re-emittable. Consequences: a crash before COMMIT loses the whole unit, so an attempt that had already executed re-executes on adoption (the same trade Temporal makes), and nothing that is not storage work, flow bodies, Jj snapshots, boundary prepare/settle, the lossy `flush`, may run inside the transaction. Closing this does not remove the need for idempotency keys, fencing, or compensation on external effects: no local WAL makes a remote effect atomic. The replay-convergence emits stay, because a fork's row copy and a pre-invariant database can still present a terminal row without its record |
 | Fault harness                           | `Notifying.wrap` / `layer` (`@smthrs/journal/test/Notifying`) for interstitial crash and fence-loss injection around any Effect service; `packages/engine-store/test/WalAtomicity.test.ts` drives it at every closed state/event interstitial and asserts journal/state equivalence after the restart                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Public error contract                   | `EngineStore.Errors` barrel-exports `FlowCycleDetected`, `CacheConflictDetected`, and `AttemptAdmissionRejected`; every one carries a stable `code` literal                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Time travel utilities                   | Replay projections, memory/SQL time-travel stores, fork, rewind, compensation, recovery, and tier-aware retry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Time travel utilities                   | Replay projections, memory/SQL time-travel stores, fork, rewind, compensation, and recovery                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Isolated (sandboxed) action execution   | `EngineStore.WorkspaceSandbox` runs a sealed action's body inside a **workspace transaction**: the base is a copy-in of exactly the declared read set (Bazel's strategy, and `docs/specs/Concepts/Effect Taxonomy.md`'s strong tier, an undeclared file is not there to read), the body's writes accumulate in a path-keyed map served through both the `Workspace` tag and a re-rooted Effect `FileSystem`, and settlement is a whole-map diff. The host is untouched until `materialize`, a compare-and-set on every `beforeDigest` that applies whole or not at all; `ActionPersistence` rebases a bounded number of times on a `MaterializationConflict`. One transaction implementation serves an in-memory host (conformance, browser) and a filesystem host that retains oversized products in `@smthrs/artifacts` by digest. Queued effects are never dispatched inside the transaction, a dispatch stage runs after copy-back settles, deduplicated by idempotency key, and the journal gains `diff-bundle-captured` and `copy-back-settled`. **It is a deterministic transaction model, not a security boundary**: a body reaching the host through a service the transaction does not seed (a spawned native process) is outside it, and denying that ambient access is the VM/`SandboxProvider` story in `docs/specs/Concepts/Agent Adapters.md`                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Whole-tree write verification           | An isolated execution makes it structural: the transaction _is_ the tree, so a write outside the declared set is a map comparison rather than an inference. `ActionPersistence` therefore sets `wholeTreeWritesVerified` on the boundary evidence: and, when the diff shows a deviation, records the deviation instead, with the whole-tree paths `StepBoundary.settle`'s declared-read scan could never have seen. **A sealed action with a hard boundary, run under the production filesystem composition, is now admitted to the shared step cache**; `packages/engine-store/test/SandboxedAction.test.ts` is the proof, and `examples/src/durable-layer.ts` is the composition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
@@ -20784,13 +21044,8 @@ The package is not a compatibility library. It never recreates the JSX runtime, 
 This page is the public API reference for the **Smithers 0.x to 1.0 migration
 tool**: the scanners that read a JSX-era project, the mapping that says what
 each construct becomes, the checks that enforce the migration contract, and the
-report that records all of it.
-
-The package is not a compatibility library. It rewrites application source to
-`Flow`, `Action`, and Effect, archives the old sources, and leaves an auditable
-report. It never recreates the JSX runtime, never embeds a scheduler in
-application code, never hides an untranslatable construct behind `any`, and
-never rewrites or resumes 0.x run state.
+report that records all of it. `apply` rewrites application source to `Flow`,
+`Action`, and Effect, archives the old sources, and writes that report.
 
 Everything on this page is deterministic. The report's Markdown is a pure
 function of its JSON, and every list in the JSON is sorted, so two reads of
@@ -21668,6 +21923,14 @@ mapping decisions, units, verification, manual follow-ups, and the commands
 that restore each checkpoint, and every list inside them is sorted, so two
 runs of the same scan diff cleanly.
 
+Each verification command's last 12 KB of stdout and stderr is captured into
+`report.json` exactly as the command printed it, and nothing redacts it. A
+failing install or test suite in a 0.x project prints whatever it prints, a
+registry token or a value read from `.env` included, and this tool cannot tell
+a secret from a stack frame. The Verification section says so beside the
+commands whenever any output was captured, because the README tells the
+operator to commit the report.
+
 ### Scan
 
 `Scan.scan(root, options?)` composes every module above into one `ScanResult`:
@@ -22073,8 +22336,10 @@ modules are reached by subpath only, so importing the package never loads the
 | `Layers.configuredProvider`          | const        | combinators  | `@smthrs/migrate/flow/Layers`                        | The seat the operator's environment can actually pay for, when they named none.                                                                                                                                                                                              |
 | `Layers.seatResolver`                | const        | constructors | `@smthrs/migrate/flow/Layers`                        | The Node seat resolver: it maps the migration's one declared seat onto the `provider:modelId` the operator chose, and reads that provider's key from the environment it was given rather than from the process.                                                              |
 | `Layers.verificationCommands`        | const        | combinators  | `@smthrs/migrate/flow/Layers`                        | Every command line a unit is allowed to spawn: this project's own install, format, typecheck, and test commands, in the order a verification runs them.                                                                                                                      |
+| `Layers.MigrationRoot`               | type         | models       | `@smthrs/migrate/flow/Layers`                        | A migration root proven absolute.                                                                                                                                                                                                                                            |
+| `Layers.migrationRoot`               | const        | constructors | `@smthrs/migrate/flow/Layers`                        | Proves a root absolute, in this package's own error channel.                                                                                                                                                                                                                 |
 | `Layers.rules`                       | const        | combinators  | `@smthrs/migrate/flow/Layers`                        | The permission rules one migration runs under: the project tree, the commands that verify it, the model calls that rewrite it, and a denial of every filesystem action on every 0.x run-state path.                                                                          |
-| `Layers.layerSnapshotBoundary`       | const        | layers       | `@smthrs/migrate/flow/Layers`                        | `),     ...verificationCommands(options.commands).map((command) => allow("proc:spawn", command)),     allow("net:*", "**"),     allow("model:*", "**"),     // Every filesystem action, not only writes.                                                                     |
+| `Layers.layerSnapshotBoundary`       | const        | layers       | `@smthrs/migrate/flow/Layers`                        | The snapshot boundary compensable actions run against.                                                                                                                                                                                                                       |
 | `Layers.NodeConfig`                  | interface    | models       | `@smthrs/migrate/flow/Layers`                        | What a Node host needs told.                                                                                                                                                                                                                                                 |
 | `Layers.layerNode`                   | const        | layers       | `@smthrs/migrate/flow/Layers`                        | Everything a migration needs on Node, including the credentialed half.                                                                                                                                                                                                       |
 | `Layers.ScannedConfig`               | interface    | models       | `@smthrs/migrate/flow/Layers`                        | What a Node host needs told when it derives the rest from the project.                                                                                                                                                                                                       |
@@ -22137,7 +22402,7 @@ modules are reached by subpath only, so importing the package never loads the
 | `Transform.action`                   | const        | actions      | `@smthrs/migrate/flow/Transform`                     | The transform step: one unit in, one `UnitResult` out.                                                                                                                                                                                                                       |
 | `Transform.layer`                    | const        | layers       | `@smthrs/migrate/flow/Transform`                     | The transform step's implementation.                                                                                                                                                                                                                                         |
 | `Transform.envelope`                 | const        | combinators  | `@smthrs/migrate/flow/Transform`                     | The capability envelope one unit runs under.                                                                                                                                                                                                                                 |
-| `Transform.mappingFlow`              | const        | flows        | `@smthrs/migrate/flow/Transform`                     | ",   "fs:write:/**",   "proc:spawn:*" ]                                                                                                                                                                                                                                      |
+| `Transform.mappingFlow`              | const        | flows        | `@smthrs/migrate/flow/Transform`                     | The mapping lookup, as one ordinary flow.                                                                                                                                                                                                                                    |
 | `Transform.verifyFlow`               | const        | flows        | `@smthrs/migrate/flow/Transform`                     | The verification run, as one ordinary flow.                                                                                                                                                                                                                                  |
 | `Transform.bindings`                 | const        | constructors | `@smthrs/migrate/flow/Transform`                     | The two flows this package binds into the agent's catalog: the mapping table it may consult for a construct, and the verification it may run before it answers.                                                                                                              |
 | `Transform.hostLayer`                | const        | layers       | `@smthrs/migrate/flow/Transform`                     | The host every model-backed migration step shares: the standard filesystem and shell flows over the services the caller guarded, this package's own two flows, the capability envelope, and the sandbox budget.                                                              |
@@ -23519,7 +23784,7 @@ The honest positioning is an embeddable, Effect-native durable-execution toolkit
 | WAL atomicity | every lifecycle entry commits in the same write transaction as the state transition it describes |
 | Fault injection | `Notifying.wrap` and `layer` for interstitial crash and fence-loss injection, driven at every closed interstitial by `WalAtomicity.test.ts` |
 | Public error contract | `EngineStore.Errors` with stable `code` literals |
-| Time travel | replay projections, memory and SQL stores, fork, rewind, compensation, recovery, tier-aware retry |
+| Time travel | replay projections, memory and SQL stores, fork, rewind, compensation, recovery |
 | Journal compaction | `Journal.checkpoint` captures replay state at a committed sequence; `Journal.compact` truncates below it atomically with the floor advance, refuses live in-process readers behind the boundary, and reads below the floor fail with a typed `compacted` resync signal; opt-in entry-count policy on `SqlJournal.layer` |
 | Artifact GC | explicit `ArtifactGc.gc()` marking roots from cache entries, attempt boundary evidence, attempt checkpoints, and pins, with grace-period and dry-run policy over the fenced host-local `ArtifactSweep` |
 | Disaster recovery | `DisasterRecovery` backup, verify, restore, `restoreAndFence`, and fence over `SqlClient`/`FileSystem`/`Crypto`, plus the `scripts/flows-backup.mjs` operator script and runbook |

@@ -1365,7 +1365,7 @@ The honest positioning is an embeddable, Effect-native durable-execution toolkit
 | WAL atomicity | every lifecycle entry commits in the same write transaction as the state transition it describes |
 | Fault injection | `Notifying.wrap` and `layer` for interstitial crash and fence-loss injection, driven at every closed interstitial by `WalAtomicity.test.ts` |
 | Public error contract | `EngineStore.Errors` with stable `code` literals |
-| Time travel | replay projections, memory and SQL stores, fork, rewind, compensation, recovery, tier-aware retry |
+| Time travel | replay projections, memory and SQL stores, fork, rewind, compensation, recovery |
 | Journal compaction | `Journal.checkpoint` captures replay state at a committed sequence; `Journal.compact` truncates below it atomically with the floor advance, refuses live in-process readers behind the boundary, and reads below the floor fail with a typed `compacted` resync signal; opt-in entry-count policy on `SqlJournal.layer` |
 | Artifact GC | explicit `ArtifactGc.gc()` marking roots from cache entries, attempt boundary evidence, attempt checkpoints, and pins, with grace-period and dry-run policy over the fenced host-local `ArtifactSweep` |
 | Disaster recovery | `DisasterRecovery` backup, verify, restore, `restoreAndFence`, and fence over `SqlClient`/`FileSystem`/`Crypto`, plus the `scripts/flows-backup.mjs` operator script and runbook |
