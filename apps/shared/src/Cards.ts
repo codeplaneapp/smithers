@@ -108,6 +108,21 @@ const cardBaseShape = {
   tabId: z.string().optional()
 }
 
+/*
+ * Lane sync (ADR 0005 "Rate limits"): a GitHub-proxied call's rate-limit
+ * facts, carried on the card that made the refused call (or whose status
+ * read reports them). `resetAt` is the wire's reset timestamp; null when
+ * the wire names none. The line renders only from these fields — a plain
+ * 429 with no structured body (plue#472's shape is not deployed) reads as
+ * the verbatim error, never an invented reset.
+ */
+export const GitHubRateLimitSchema = z.object({
+  limit: z.number().int().nonnegative(),
+  remaining: z.number().int().nonnegative(),
+  resetAt: z.string().nullable()
+})
+export type GitHubRateLimit = z.infer<typeof GitHubRateLimitSchema>
+
 export const CardSchema = z.discriminatedUnion("kind", [
   z.object({
     ...cardBaseShape,
@@ -454,6 +469,13 @@ export const CardSchema = z.discriminatedUnion("kind", [
       author: z.string().nullable(),
       issueBody: z.string(),
       labels: z.array(z.string()),
+      /*
+       * Lane sync (ADR 0005 "Link an issue to Linear"): the Linear mapping
+       * when the issue DTO carries one (`Linear ENG-482`); absent until
+       * plue#473, and absent-vs-null is not distinguished — no mapping line
+       * renders without the DTO field. Optional so older cards parse.
+       */
+      linear: z.object({ identifier: z.string(), url: z.string() }).nullable().optional(),
       comments: z.array(
         z.object({
           author: z.string().nullable(),
@@ -535,6 +557,12 @@ export const CardSchema = z.discriminatedUnion("kind", [
       secretNames: z.array(z.string())
     })
   }),
+  /*
+   * Lane sync (ADR 0005): the import becomes a job card. `stage`, `counts`,
+   * `error`, `repository`, and `workspaceId` are the progress fields of
+   * plue#471 — all optional, parsed only when the wire carries them, never
+   * invented (today's answer carries stage and error only).
+   */
   z.object({
     ...cardBaseShape,
     kind: z.literal("repo-import"),
@@ -542,7 +570,142 @@ export const CardSchema = z.discriminatedUnion("kind", [
       repo: z.string(),
       jobId: z.string().nullable(),
       phase: z.enum(["starting", "running", "done", "failed"]),
-      detail: z.string().nullable()
+      detail: z.string().nullable(),
+      /** The job's raw stage word (`provisioning_workspace`); optional — older answers carry none. */
+      stage: z.string().nullable().optional(),
+      /** Progress counts (`refs 214 of 214 · objects … · issues …`); absent until plue#471's wire fields. */
+      counts: z.object({
+        refs: z.object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() }),
+        objects: z.object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() }),
+        issues: z.object({ done: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
+      }).optional(),
+      /** The job's error verbatim; the failed phase renders it with Retry. */
+      error: z.string().nullable().optional(),
+      /** The imported repository, when the job's answer names it (the done state links it). */
+      repository: z.object({ owner: z.string(), name: z.string() }).nullable().optional(),
+      /** The workspace the import created, when it created one (the done state links its card). */
+      workspaceId: z.string().nullable().optional(),
+      /** A refused GitHub call's rate-limit line (lane sync; GitHubRateLimitSchema below). */
+      rateLimit: GitHubRateLimitSchema.optional()
+    })
+  }),
+  /*
+   * Lane sync (ADR 0005): the connector-setup card — one kind serves both
+   * handoffs. The steps are the wizard (`linear`: authorize → team →
+   * repository → confirm; `github`: install → reconcile), rendered as rows
+   * that fill in; a failed step reads the server error verbatim on its own
+   * line. On confirm the SAME card turns into the connected state (`phase:
+   * "connected"`), which for Linear carries the integration and for GitHub
+   * the installation. The setup key is the OAuth callback's opaque one-time
+   * handle (plue#469's team pick; expires in minutes — an expired one reads
+   * `authorization expired · Open Linear again`, never a silent retry).
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("connector-setup"),
+    payload: z.object({
+      connector: z.enum(["linear", "github"]),
+      /** `org/repo` — the repository being connected. */
+      repo: z.string(),
+      phase: z.enum(["setup", "connected"]),
+      steps: z.array(
+        z.object({
+          id: z.string(),
+          label: z.string(),
+          state: z.enum(["pending", "active", "done", "error"]),
+          /** The row's filled-in value (`authorized as <actor>`, `ENG · Engineering`); null while unset. */
+          detail: z.string().nullable(),
+          /** The server error verbatim, under the step that failed. */
+          error: z.string().optional()
+        })
+      ),
+      /** The OAuth callback's setup handle (Linear only); the team pick and the create consume it. */
+      setupKey: z.string().optional(),
+      setupExpiresAt: z.string().optional(),
+      /** `authorized as <actor>` — only when the setup answer names the viewer; never invented. */
+      actor: z.string().nullable().optional(),
+      /** The teams the setup key can see (Linear step 2). */
+      teams: z.array(z.object({ id: z.string(), name: z.string(), key: z.string() })).optional(),
+      /** The picked team (Linear step 2's one click). */
+      teamId: z.string().optional(),
+      /** The connected Linear integration (the connected state's header and last-sync line). */
+      integration: z.object({
+        id: z.number().int(),
+        teamKey: z.string(),
+        teamName: z.string(),
+        active: z.boolean(),
+        lastSyncAt: z.string().nullable()
+      }).optional(),
+      /** The GitHub App installation (the connected state's `installation <id> · configured`). */
+      installationId: z.number().int().nullable().optional(),
+      configured: z.boolean().optional(),
+      /** The trusted install URL (https://github.com only) step 1 opens. */
+      installUrl: z.string().optional(),
+      /** The rate-limit line: below 20% remaining, and always on a card whose call was refused. */
+      rateLimit: GitHubRateLimitSchema.optional(),
+      /** The last act's honest refusal, kept on the card. */
+      error: z.string().optional()
+    })
+  }),
+  /*
+   * Lane sync (ADR 0005): the sync-ops card — one kind serves Linear syncs
+   * and GitHub mirror syncs. Rows are the durable ops, newest first, a
+   * failed row carrying the server's error verbatim with a Retry act
+   * (`sync.retry <opId>`); failures are never filtered out. The header's
+   * run state and counts stay live while ops arrive once sync runs exist
+   * (plue#468 Linear, plue#470 mirror); until then `runState` is null, the
+   * ops list is empty, and `opsNote` renders the ADR's degraded wording —
+   * the feed is never faked.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("sync-ops"),
+    payload: z.object({
+      /** The header subject: `Linear ENG ↔ org/repo` or `Mirror · org/repo`. */
+      subject: z.string(),
+      source: z.enum(["linear", "github-mirror"]),
+      /** The Linear integration id the run belongs to (Linear only). */
+      integrationId: z.string().optional(),
+      /** `org/repo` (the mirror's repository). */
+      repo: z.string().optional(),
+      /** The run's state from the sync-run DTO; null until plue#468/#470 — no state word is faked. */
+      runState: z.enum(["running", "done", "failed"]).nullable(),
+      /** The header counts from the run DTO; absent with it. */
+      counts: z.object({
+        total: z.number().int().nonnegative(),
+        done: z.number().int().nonnegative(),
+        failed: z.number().int().nonnegative()
+      }).nullable().optional(),
+      /** The one fact the trigger answered (`sync started`, `already running`, `synced`); null when it said nothing. */
+      trigger: z.string().nullable().optional(),
+      /** The ops, newest first; empty while the ops feed doesn't exist (plue#468/#470). */
+      ops: z.array(
+        z.object({
+          id: z.string(),
+          source: z.string(),
+          target: z.string(),
+          entity: z.string(),
+          entityId: z.string().nullable(),
+          action: z.string(),
+          status: z.enum(["done", "failed", "running", "pending"]),
+          /** The server error verbatim, on its own line. */
+          error: z.string().optional(),
+          retryable: z.boolean(),
+          at: z.string().nullable()
+        })
+      ),
+      /** Why the ops list is empty (the ADR's degraded wording); absent when the feed answered. */
+      opsNote: z.string().optional(),
+      /** The activity window this card was cut at (`24h`), when it is the activity view. */
+      window: z.string().optional(),
+      /** `show more` revealed the whole cut; the first N rows show by default. */
+      expanded: z.boolean().optional(),
+      /** Older ops exist beyond this cut (`load older` pages the feed). */
+      hasOlder: z.boolean().optional(),
+      /** The rate-limit line when a GitHub call behind this card was refused. */
+      rateLimit: GitHubRateLimitSchema.optional(),
+      /** The last act's honest refusal, kept on the card. */
+      error: z.string().optional()
     })
   }),
   /* Wave 2 of the multi parity: bookmarks (jj branches) and repo file reads. */
