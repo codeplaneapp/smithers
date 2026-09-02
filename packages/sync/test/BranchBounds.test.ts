@@ -147,12 +147,72 @@ describe("BranchCommands identity and bounds", () => {
       expect(conflicting.seq).toBe(first.seq)
     }))
 
+  // Hydration is the one full history read that sat on the WRITE path: the
+  // first submission a process made to a branch paged that branch's whole log
+  // inside the branch's admission permit before attempting its own append. The
+  // budget bounds it, and what the walk does not reach is answered by the
+  // journal's durable dedup rather than by the ledger.
+  it.effect("stops first-touch hydration on its budget and lets the journal answer the rest", () =>
+    Effect.gen(function*() {
+      const [original, bounded, full] = yield* durable(
+        Effect.gen(function*() {
+          const journal = yield* Journal.Journal
+          const capability = yield* capabilityFor(branchId)
+          const submit = (commands: BranchCommands.Service, id: string) =>
+            commands.submit({
+              capability,
+              submission: BranchCommands.submission({
+                branchId,
+                commandId: commandId(id),
+                participantId: alice,
+                name: BranchProtocol.SayCommand
+              })
+            })
+          const seeded = yield* BranchCommands.makeLive
+          yield* submit(seeded, "c1")
+          const second = yield* submit(seeded, "c2")
+
+          // A restarted server, over the same durable history, whose hydration
+          // is allowed `hydrationLimit` entries. `appends` is what says which
+          // door answered: the ledger costs no journal write, and a receipt
+          // the budget did not reach costs exactly one.
+          const restart = (hydrationLimit: number) =>
+            Effect.gen(function*() {
+              let appends = 0
+              const counted = Journal.make({
+                ...journal,
+                emitDurableUnfenced: (input) => {
+                  appends += 1
+                  return journal.emitDurableUnfenced(input)
+                }
+              })
+              const commands = yield* BranchCommands.makeLiveWith({ hydrationLimit }).pipe(
+                Effect.provideService(Journal.Journal, counted)
+              )
+              const receipt = yield* submit(commands, "c2")
+              return { appends, receipt }
+            })
+          return [second, yield* restart(1), yield* restart(10)] as const
+        })
+      )
+
+      // One entry of hydration reaches c1 and stops, so c2 is resolved
+      // durably: the same answer, one journal write later.
+      expect(bounded.receipt).toMatchObject({ status: "duplicate", seq: original.seq })
+      expect(bounded.appends).toBe(1)
+      // A budget that covers the history seeds the fast path, and the
+      // resubmission never reaches the journal at all.
+      expect(full.receipt).toMatchObject({ status: "duplicate", seq: original.seq })
+      expect(full.appends).toBe(0)
+    }))
+
   it.effect("refuses a ledger policy that is not a positive safe integer", () =>
     Effect.gen(function*() {
       const refusals = yield* durable(
         Effect.gen(function*() {
           return [
             yield* Effect.flip(BranchCommands.makeLiveWith({ ledgerCapacity: 0 })),
+            yield* Effect.flip(BranchCommands.makeLiveWith({ hydrationLimit: -1 })),
             yield* Effect.flip(BranchCommands.makeLiveWith({ maxCommandBytes: Number.NaN }))
           ] as const
         })

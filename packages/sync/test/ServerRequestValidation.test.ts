@@ -114,6 +114,49 @@ describe("SyncServer request validation", () => {
       ).toMatchObject({ limit: SyncProtocol.maxReadLimit })
     }))
 
+  // `subscribe` has floored `credit` since it was written; `read` only
+  // CLAMPED, and `Math.min(NaN, ceiling)` is `NaN`. Every `entries.length >=
+  // limit` comparison against it answered false, so no loop stopped early and
+  // the value arrived at `journal.entries` as the page size, once per covered
+  // run. Zero and a negative reached it verbatim the same way.
+  it.effect("refuses a read limit that is not a positive safe integer, before touching the journal", () =>
+    Effect.gen(function*() {
+      const receivedLimits: Array<number> = []
+      const refusals = yield* (
+        Effect.gen(function*() {
+          const server = yield* SyncServer.makeLive
+          const refuse = (limit: number) =>
+            Effect.flip(server.read({ scope: { _tag: "Run", runId }, cursors: [], limit }))
+          return [
+            yield* refuse(Number.NaN),
+            yield* refuse(0),
+            yield* refuse(-1),
+            yield* refuse(1.5)
+          ] as const
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              Journal.layerNoop({
+                entries: ({ limit }) => {
+                  receivedLimits.push(limit)
+                  return Effect.succeed({ entries: [entry(0)], hasMore: false })
+                }
+              }),
+              RunCatalog.layerStatic([runId]),
+              SyncPrincipal.layerWorkspace("validation-suite")
+            )
+          )
+        )
+      )
+
+      for (const refusal of refusals) {
+        expect(refusal.code).toBe("invalid_request")
+        expect(refusal.message).toContain("A read's limit")
+      }
+      // The refusal precedes the read, so no page size ever left the boundary.
+      expect(receivedLimits).toEqual([])
+    }))
+
   it.effect("refuses a policy that is not a positive safe integer instead of quietly disabling it", () =>
     Effect.gen(function*() {
       const refusals = yield* (

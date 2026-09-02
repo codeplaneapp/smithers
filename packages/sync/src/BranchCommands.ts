@@ -145,10 +145,41 @@ const pageSize = 256
 export const defaultLedgerCapacity = 4096
 
 /**
+ * Entries one branch's first-touch hydration reads before it stops.
+ *
+ * Hydration is the only full history read that ever sat on the WRITE path: the
+ * first submission a process makes to a branch paged that branch's whole
+ * durable log, 256 entries at a time, while holding the branch's admission
+ * permit, before its own append was attempted. A hundred-thousand-entry branch
+ * therefore charged its next writer four hundred journal reads for a fast path
+ * that keeps four thousand receipts.
+ *
+ * The budget defaults to {@link defaultLedgerCapacity} because hydration
+ * cannot seed more receipts than the ledger holds: everything a longer walk
+ * records displaces something the same walk already recorded. What the extra
+ * reads buy is a FRESHER selection — the tail of history rather than its head
+ * — and the price is an unbounded wait on somebody's write. This trades that
+ * back: the walk stops, the cursor stays where it stopped, and a later replay
+ * continues forward from there.
+ *
+ * A branch longer than the budget starts with a partly cold fast path and
+ * nothing else. Correctness never rested on the ledger: the journal's producer
+ * identity is the durable exactly-once constraint, an exact retry receives a
+ * `Duplicate` receipt carrying the canonical sequence, and an
+ * `idempotency_conflict` is resolved by a read of the whole history that the
+ * ledger's own bound already made necessary.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const defaultHydrationLimit = defaultLedgerCapacity
+
+/**
  * Admission policy.
  *
- * The default caps one encoded command submission at 1 MiB and one branch's
- * in-memory receipt ledger at {@link defaultLedgerCapacity} commands.
+ * The default caps one encoded command submission at 1 MiB, one branch's
+ * in-memory receipt ledger at {@link defaultLedgerCapacity} commands, and one
+ * branch's first-touch hydration at {@link defaultHydrationLimit} entries.
  *
  * @category models
  * @since 0.1.0
@@ -164,11 +195,20 @@ export interface Options {
    * Defaults to {@link defaultLedgerCapacity}.
    */
   readonly ledgerCapacity?: number | undefined
+  /**
+   * Entries one branch's first-touch hydration reads before it stops.
+   * Defaults to {@link defaultHydrationLimit}.
+   */
+  readonly hydrationLimit?: number | undefined
 }
 
 /** The ledger over an already-validated policy. */
 const makeWith = (
-  resolved: { readonly maxCommandBytes: number; readonly ledgerCapacity: number }
+  resolved: {
+    readonly maxCommandBytes: number
+    readonly ledgerCapacity: number
+    readonly hydrationLimit: number
+  }
 ): Effect.Effect<Service, never, Journal.Journal | BranchShare.BranchShare> =>
   Effect.gen(
     function*() {
@@ -191,7 +231,7 @@ const makeWith = (
       const ledger = new Map<BranchId, Map<CommandId, CommandReceipt>>()
       const cursors = new Map<BranchId, JournalEvent.Seq>()
       const hydrated = new Set<BranchId>()
-      const { ledgerCapacity, maxCommandBytes } = resolved
+      const { hydrationLimit, ledgerCapacity, maxCommandBytes } = resolved
 
       const receiptOf = (branchId: BranchId, commandId: CommandId): CommandReceipt | undefined =>
         ledger.get(branchId)?.get(commandId)
@@ -223,25 +263,35 @@ const makeWith = (
 
       /**
        * Pages a branch's journal forward from `from`, handing each entry to
-       * `visit` along with the command identity it carries, if any.
+       * `visit` along with the command identity it carries, if any, and
+       * stopping once it has visited `budget` entries.
+       *
+       * The budget is entries VISITED, not pages read, so a caller names a
+       * bound in the unit its own memory is measured in.
+       * `Number.POSITIVE_INFINITY` is the unbounded walk the recovery reads
+       * take: they answer a question about the whole durable history, and a
+       * bounded answer to that question is a wrong one.
        */
       const walk = (
         branchId: BranchId,
         from: JournalEvent.Seq | undefined,
+        budget: number,
         visit: (entry: JournalEvent.Entry, commandId: CommandId | undefined) => void
       ): Effect.Effect<void, SyncError> =>
         Effect.gen(function*() {
           const runId = branchRunId(branchId)
           let after = from
           let hasMore = true
-          while (hasMore) {
+          let remaining = budget
+          while (hasMore && remaining > 0) {
             const page = yield* journal.entries({
               runId,
               ...(after === undefined ? {} : { after }),
-              limit: pageSize
+              limit: Math.min(pageSize, remaining)
             }).pipe(Effect.mapError(journalFailure))
             for (const entry of page.entries) {
               after = entry.seq
+              remaining -= 1
               const submission = entry.eventType === CommandEvent
                 ? Schema.decodeUnknownOption(CommandIdentity)(entry.payload)
                 : Option.none()
@@ -262,9 +312,13 @@ const makeWith = (
        * mid-collaboration still recognises every command it already admitted,
        * and again after an admission conflict, to read the command another
        * writer admitted after this process last looked.
+       *
+       * The cursor advances entry by entry rather than at the end, so a walk
+       * that stops on its budget leaves the cursor exactly where it stopped
+       * and the next replay resumes there instead of re-reading the prefix.
        */
-      const replay = (branchId: BranchId): Effect.Effect<void, SyncError> =>
-        walk(branchId, cursors.get(branchId), (entry, commandId) => {
+      const replay = (branchId: BranchId, budget: number): Effect.Effect<void, SyncError> =>
+        walk(branchId, cursors.get(branchId), budget, (entry, commandId) => {
           cursors.set(branchId, entry.seq)
           if (commandId === undefined) return
           record(new CommandReceipt({ branchId, commandId, status: "admitted", seq: entry.seq }))
@@ -287,16 +341,28 @@ const makeWith = (
       ): Effect.Effect<JournalEvent.Seq | undefined, SyncError> =>
         Effect.gen(function*() {
           let found: JournalEvent.Seq | undefined
-          yield* walk(branchId, undefined, (entry, admitted) => {
+          yield* walk(branchId, undefined, Number.POSITIVE_INFINITY, (entry, admitted) => {
             if (admitted === commandId) found = entry.seq
           })
           return found
         })
 
+      /**
+       * Seeds the branch's fast path ONCE, from its durable history, within
+       * the configured budget (see {@link defaultHydrationLimit}).
+       *
+       * It runs on the write path, inside the branch's admission permit, so
+       * the budget is what keeps the length of a branch's history out of the
+       * latency of the next submission to it. The branch is marked hydrated
+       * whether or not the walk reached the tail, because the point of the
+       * budget is that no submission pays for the rest: what the walk did not
+       * reach is answered by the journal, and by the unbounded replay
+       * {@link lostRace} runs when the journal reports a conflict.
+       */
       const hydrate = (branchId: BranchId): Effect.Effect<void, SyncError> =>
         Effect.gen(function*() {
           if (hydrated.has(branchId)) return
-          yield* replay(branchId)
+          yield* replay(branchId, hydrationLimit)
           hydrated.add(branchId)
         })
 
@@ -321,7 +387,9 @@ const makeWith = (
         cause: Journal.JournalError
       ): Effect.Effect<CommandReceipt, SyncError> =>
         Effect.gen(function*() {
-          yield* replay(submission.branchId)
+          // Unbounded, unlike hydration: this is the recovery read, and the
+          // sequence it is looking for may sit anywhere in the history.
+          yield* replay(submission.branchId, Number.POSITIVE_INFINITY)
           const known = receiptOf(submission.branchId, submission.commandId)
           if (known !== undefined) return duplicateOf(known)
           // A branch still under the ledger's capacity has never evicted
@@ -426,7 +494,8 @@ const makeWith = (
 
 const defaults = {
   maxCommandBytes: SyncProtocol.defaultMaxFrameBytes,
-  ledgerCapacity: defaultLedgerCapacity
+  ledgerCapacity: defaultLedgerCapacity,
+  hydrationLimit: defaultHydrationLimit
 }
 
 /**
@@ -436,6 +505,11 @@ const defaults = {
  * A submission whose encoded form exceeds the command ceiling is refused with
  * `frame_too_large` before anything is appended, so one oversized `args`
  * cannot enter the branch journal and poison every follower that replays it.
+ *
+ * First-touch hydration reads at most `hydrationLimit` entries, so the length
+ * of a branch's history is not charged to the next writer's latency; see
+ * {@link defaultHydrationLimit} for why the fast path may be seeded partially
+ * without any effect on what the ledger admits.
  *
  * Every option is validated as a positive safe integer at construction: the
  * TypeScript type says `number`, and `NaN` silently disabled the ceiling it
@@ -458,6 +532,11 @@ export const makeLiveWith = (
         "BranchCommands.Options.ledgerCapacity",
         options.ledgerCapacity,
         defaults.ledgerCapacity
+      ),
+      hydrationLimit: positiveInt(
+        "BranchCommands.Options.hydrationLimit",
+        options.hydrationLimit,
+        defaults.hydrationLimit
       )
     }),
     makeWith

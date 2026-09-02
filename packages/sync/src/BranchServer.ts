@@ -61,6 +61,13 @@ const sameRoster = (
  * presence change for the branch AND once per `presence.leaseMs`, emitting
  * only when the roster it read differs from the one it last sent.
  *
+ * All three of those are triggers into ONE sequential reader. The roster is
+ * mutable state behind an effect, so concurrent readers can complete out of
+ * order, and a watcher that receives an older roster after a newer one keeps
+ * the older one: `changesWith` compares against the previous emission, not
+ * against the freshest state. Serializing the reads is what makes the last
+ * value a watcher holds the most recent one that was read.
+ *
  * The periodic re-list is what makes expiry observable. A lapsed lease
  * publishes nothing — the roster drops it the next time somebody lists — so a
  * watch driven by change events alone never saw the LAST participant leave,
@@ -137,11 +144,19 @@ export const layerHandlers: Layer.Layer<
       "Branch.Roster": (payload) => presence.list(payload),
       "Branch.WatchRoster": (payload) =>
         Stream.merge(
-          Stream.fromEffect(presence.list(payload)),
+          // The subscription's own snapshot is a TRIGGER like the other two,
+          // not a fourth reader. Reading it here concurrently with them let
+          // the roster a change produced overtake it: `presence.list` is an
+          // effect against mutable state, three of them ran at once, and the
+          // slowest one won the merge. `changesWith` compares an emission only
+          // against the one before it, so the older roster passed the filter
+          // and the watcher's LAST value said a participant who had already
+          // left was still present, until the next change or lease tick.
+          Stream.succeed(undefined),
           Stream.merge(
             presence.changes.pipe(
               Stream.filter((branchId) => branchId === payload.branchId),
-              Stream.mapEffect(() => presence.list(payload))
+              Stream.map(() => undefined)
             ),
             // A lapsed lease publishes nothing, so a watch driven only by
             // change events never observes the LAST participant leaving, and
@@ -149,15 +164,17 @@ export const layerHandlers: Layer.Layer<
             // watch needed out of the shared feed. Re-listing on the lease
             // cadence bounds both: a departure is visible within one lease of
             // it happening, whether or not anyone reports it.
-            Stream.fromEffectRepeat(
-              Effect.andThen(Effect.sleep(presence.leaseMs), presence.list(payload))
-            )
+            Stream.fromEffectRepeat(Effect.sleep(presence.leaseMs)).pipe(Stream.map(() => undefined))
           )
+        ).pipe(
+          // ONE reader, sequential by default, so a roster is read in the
+          // order its trigger arrived and every emission is at least as fresh
+          // as the one before it.
+          Stream.mapEffect(() => presence.list(payload)),
           // Deduplicated over the WHOLE stream, initial emission included.
           // Applied to the change half alone, its first value always passed,
           // so a change that left the roster identical still sent the watcher
           // a second copy of what it had just been given.
-        ).pipe(
           Stream.changesWith(sameRoster),
           Stream.map((participants) => ({ participants }))
         )

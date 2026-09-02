@@ -17,7 +17,7 @@ import type * as RpcGroup from "effect/unstable/rpc/RpcGroup"
 import { type BranchId, branchOfRunId, type ShareCapability, type ShareClaims } from "./BranchProtocol.ts"
 import * as BranchShare from "./BranchShare.ts"
 import { causeCode, journalErrorCode } from "./internal/causeText.ts"
-import { positiveInt } from "./internal/options.ts"
+import { positiveInt, requestCount } from "./internal/options.ts"
 import * as RunCatalog from "./RunCatalog.ts"
 import { SyncError } from "./SyncError.ts"
 import * as SyncPrincipal from "./SyncPrincipal.ts"
@@ -457,8 +457,15 @@ const makeWith = (
         yield* requireUniqueCursors(request.cursors)
         // The schema bounds `limit` at the wire; this bounds it again for an
         // in-process caller that constructed the request directly, so no path
-        // reaches the journal with an unbounded page size.
-        const limit = Math.min(request.limit, SyncProtocol.maxReadLimit)
+        // reaches the journal with an unbounded page size. BOTH halves of that
+        // bound are re-applied, not just the ceiling: clamping alone let a
+        // `NaN` through — `Math.min` propagates it, `entries.length >= NaN` is
+        // false so no loop ever stopped, and the value arrived at
+        // `journal.entries` as the page size once per covered run — and let a
+        // zero or a negative ask the journal for a page it cannot serve.
+        // `subscribe` has floored `credit` since it was written; this is the
+        // same floor on the same kind of value.
+        const limit = yield* requestCount("A read's limit", request.limit, SyncProtocol.maxReadLimit)
         const { runIds } = yield* runIdsFor(request.scope, request.capability)
         const entries: Array<JournalEvent.Entry> = []
         const cursors = new Map(request.cursors.map((cursor) => [cursor.runId, cursor.afterSeq]))
@@ -798,15 +805,11 @@ const makeWith = (
           yield* requireUniqueCursors(request.cursors)
           // The schema bounds `credit` at the wire; this bounds it again for
           // an in-process caller that constructed the request directly.
-          if (!Number.isSafeInteger(request.credit) || request.credit < 1) {
-            return yield* Effect.fail(
-              new SyncError({
-                code: "invalid_request",
-                message: `A subscription's credit must be a positive safe integer, not ${request.credit}`
-              })
-            )
-          }
-          const credit = Math.min(request.credit, SyncProtocol.maxSubscribeCredit)
+          const credit = yield* requestCount(
+            "A subscription's credit",
+            request.credit,
+            SyncProtocol.maxSubscribeCredit
+          )
           const { expiresAtMs, runIds } = yield* runIdsFor(request.scope, request.capability)
           const frames = request.scope._tag === "Run"
             ? runStream(request.scope.runId, request.cursors)

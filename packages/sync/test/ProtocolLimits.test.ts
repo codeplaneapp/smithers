@@ -86,6 +86,26 @@ describe("SyncError.is", () => {
     expect(SyncError.is(undefined)).toBe(false)
   })
 
+  // The guard takes `unknown`, so ANY property read on the value may be a
+  // throwing getter — the tag included, which is the first one read. It
+  // decides whether a follow reconnects and whether a cursor moves past a
+  // compaction floor, and a question about a value's shape must answer rather
+  // than raise.
+  it("answers false for a value whose own properties throw", () => {
+    const throwing = (property: string) => ({
+      _tag: "@smthrs/sync/SyncError",
+      code: "closed",
+      message: "closed",
+      get [property](): never {
+        throw new Error(`reading ${property} throws`)
+      }
+    })
+    for (const property of ["_tag", "code", "message", "resync"]) {
+      expect(() => SyncError.is(throwing(property))).not.toThrow()
+      expect(SyncError.is(throwing(property))).toBe(false)
+    }
+  })
+
   // `resync` is the recovery instruction the client acts on, and it is only
   // meaningful alongside `compacted`.
   it("refuses a resync that does not belong to a compacted failure, or is malformed", () => {

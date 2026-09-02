@@ -39,6 +39,34 @@ export const positiveInt = (
 }
 
 /**
+ * A count carried by a REQUEST rather than by a policy: floored at one,
+ * ceilinged at what the wire schema allows, and refused otherwise.
+ *
+ * `SyncProtocol` already bounds `limit` and `credit` on both sides, so a
+ * decoded request cannot carry a bad one. An in-process caller that builds the
+ * request value directly never meets that schema, and the TypeScript type it
+ * does meet is `number`: `NaN`, zero, and a negative all satisfy it. Each of
+ * them disables the bound instead of tightening it — `Math.min(NaN, ceiling)`
+ * is `NaN`, every `length >= NaN` comparison answers false, and the value
+ * reaches the journal as a page size — so the floor is checked here, where
+ * both callers share one refusal and one sentence.
+ *
+ * @category validation
+ * @since 1.0.0-rc.0
+ */
+export const requestCount = (
+  name: string,
+  value: number,
+  ceiling: number
+): Effect.Effect<number, SyncError> =>
+  Number.isSafeInteger(value) && value > 0 ? Effect.succeed(Math.min(value, ceiling)) : Effect.fail(
+    new SyncError({
+      code: "invalid_request",
+      message: `${name} must be a positive safe integer, not ${value}`
+    })
+  )
+
+/**
  * {@link positiveInt} plus a ceiling, for a policy the WIRE also bounds.
  *
  * A value the local schema would accept and the wire schema would refuse is

@@ -312,6 +312,66 @@ describe("Branch.WatchRoster lease propagation", () => {
       expect(rosters._tag === "Some" ? rosters.value : []).toEqual([[split], [whole]])
     }))
 
+  // The initial snapshot, the change re-list, and the lease re-list used to be
+  // three CONCURRENT readers of one mutable roster. A change delivered while
+  // the initial `list` was still in flight resolved first, so the watcher was
+  // given the newer roster and then the older one; `changesWith` compares an
+  // emission only against the one before it, so the stale roster passed and
+  // stayed the watcher's last value until the next change or lease tick. Every
+  // read is now a trigger into one sequential reader.
+  it.live("never delivers an older roster after a newer one", () =>
+    Effect.gen(function*() {
+      const branchId = "roster-ordering" as BranchId
+      const leases = yield* Effect.gen(function*() {
+        let lists = 0
+        const presence = BranchPresence.make({
+          ...BranchPresence.makeNoop(),
+          leaseMs: 600_000,
+          // Delivered at once, so it races the subscription's own snapshot.
+          changes: Stream.make(branchId),
+          list: () =>
+            Effect.suspend(() => {
+              lists += 1
+              const call = lists
+              // Each read observes a strictly newer roster, and the FIRST read
+              // is the slow one: that is the interleaving in which concurrent
+              // readers resolve in the opposite order to the state they read.
+              return Effect.as(
+                Effect.sleep(call === 1 ? "200 millis" : "0 millis"),
+                [
+                  new Participant({
+                    branchId,
+                    participantId: alice,
+                    displayName: "Alice",
+                    cursor: null,
+                    leaseExpiresAtMs: call
+                  })
+                ]
+              )
+            })
+        })
+        const pair = yield* TestSocket.makePair()
+        const client = yield* connect(pair, presence)
+        const share = yield* BranchShare.BranchShare
+        const capability = yield* share.mint({
+          branchId,
+          capabilityId: "roster-ordering-capability",
+          access: "write",
+          ttlMs: 600_000
+        })
+        return Array.from(
+          yield* Stream.runCollect(
+            Stream.take(client["Branch.WatchRoster"]({ capability, branchId }), 2)
+          ),
+          (frame) => frame.participants[0]?.leaseExpiresAtMs
+        )
+      }).pipe(Effect.provide(base), Effect.scoped, Effect.timeoutOption("10 seconds"))
+
+      expect(leases._tag).toBe("Some")
+      // Read order, not completion order: the older roster is never last.
+      expect(leases._tag === "Some" ? leases.value : []).toEqual([1, 2])
+    }))
+
   // `changesWith` used to wrap only the change half, so its first value always
   // passed: a change that left the roster identical sent the watcher a second
   // copy of what the initial emission had just given it.

@@ -154,6 +154,29 @@ describe("polling run catalog", () => {
       expect(source.reads).toBe(afterClose)
     }).pipe(Effect.provide(TestClock.layer())))
 
+  // `list` is typed `ReadonlyArray`, which TypeScript enforces and JavaScript
+  // does not. `SyncServer` sorts what it receives and a host may keep it, so a
+  // shared instance let one reader reorder or truncate the authoritative run
+  // set under the poll fiber that owns it, and under every other reader.
+  it.effect("answers each read with a fresh array, in every implementation", () =>
+    Effect.gen(function*() {
+      const source = workspace(["run-a", "run-b"])
+      const polling = yield* RunCatalog.makePolling({ read: source.read, intervalMs })
+      const memory = yield* RunCatalog.makeMemory()
+      yield* memory.register(runId("run-a"))
+      yield* memory.register(runId("run-b"))
+      const statics = yield* Effect.provide(
+        Effect.service(RunCatalog.RunCatalog),
+        RunCatalog.layerStatic([runId("run-a"), runId("run-b")])
+      )
+
+      for (const catalog of [polling, memory.catalog, statics]) {
+        const first = yield* catalog.list
+        ;(first as Array<JournalEvent.RunId>).length = 0
+        expect(yield* catalog.list).toEqual([runId("run-a"), runId("run-b")])
+      }
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer())))
+
   it.effect("provides the catalog as a layer", () => {
     const source = workspace(["run-a"])
     return Effect.gen(function*() {
