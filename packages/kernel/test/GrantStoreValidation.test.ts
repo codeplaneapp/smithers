@@ -82,6 +82,27 @@ const grantCases: ReadonlyArray<GrantCase> = [
     valid: true
   },
   {
+    name: "an allegedly exact star-bearing command",
+    pattern: pattern("proc:spawn", "rm *.tmp"),
+    capability: capability("proc:spawn", "rm *.tmp"),
+    tier: "irreversible",
+    valid: false
+  },
+  {
+    name: "an allegedly exact question-mark-bearing URL",
+    pattern: pattern("net:get", "https://example.test/search?q=1"),
+    capability: capability("net:get", "https://example.test/search?q=1"),
+    tier: "sealed",
+    valid: false
+  },
+  {
+    name: "a deliberately broadened non-filesystem grant",
+    pattern: pattern("proc:spawn", "npm *"),
+    capability: capability("proc:spawn", "npm install"),
+    tier: "irreversible",
+    valid: true
+  },
+  {
     name: "an exact pattern for an irreversible outside write",
     pattern: pattern("fs:write", "/outside/file.txt"),
     capability: outsideWrite,
@@ -252,6 +273,51 @@ describe("GrantStore.reply", () => {
         ])
         // The run rule authorizes the same resource again, but nothing wider.
         yield* store.check(read)
+      })
+    ))
+
+  itEffect("refuses to derive an exact run grant from a metacharacter resource", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const store = yield* make({ planDigest: "plan-1" })
+        const waiter = yield* store.check(capability("proc:spawn", "rm *.tmp")).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+        const [pending] = yield* awaitPending(store, 1)
+
+        const failure = yield* Effect.flip(store.reply(pending!.requestId, "run"))
+        expect(failure).toMatchObject({
+          code: "invalid_resolution",
+          message:
+            "the requested resource contains glob metacharacters; supply an explicit grant pattern or resolve once"
+        })
+        expect(yield* store.list).toHaveLength(1)
+
+        yield* store.reply(pending!.requestId, "once")
+        yield* Fiber.join(waiter)
+      })
+    ))
+
+  itEffect("rejects a supplied pattern that merely restates a metacharacter resource", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const store = yield* make({ planDigest: "plan-1" })
+        const waiter = yield* Effect.flip(store.check(capability("proc:spawn", "rm *.tmp"))).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+        const [pending] = yield* awaitPending(store, 1)
+
+        const failure = yield* Effect.flip(
+          store.reply(pending!.requestId, "remembered", pattern("proc:spawn", "rm *.tmp"))
+        )
+        expect(failure).toMatchObject({
+          code: "invalid_resolution",
+          message: "grant pattern exceeds the requested authority"
+        })
+        expect(yield* store.list).toHaveLength(1)
+
+        yield* store.reply(pending!.requestId, "deny")
+        expect(yield* Fiber.join(waiter)).toMatchObject({ code: "permission_denied" })
       })
     ))
 

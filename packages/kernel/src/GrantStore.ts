@@ -15,6 +15,7 @@ import {
   format,
   matches,
   maxResourceLength,
+  patternFromCapability,
   subsumes,
   tierOf
 } from "@smthrs/capability/Capability"
@@ -27,7 +28,7 @@ import {
   permissionRequired,
   Rule
 } from "@smthrs/capability/Permission"
-import { Context, Deferred, Effect, Layer, type Scope, Semaphore } from "effect"
+import { Context, Deferred, Effect, Layer, Option, type Scope, Semaphore } from "effect"
 import { allows, type CapabilitySet, current } from "./CapabilitySet.ts"
 import { DeniedGrant, EnvelopeGrant, type GrantEvent, OnceGrant, RememberedGrant, RunGrant } from "./GrantEvent.ts"
 import { Workspace } from "./Workspace.ts"
@@ -368,6 +369,10 @@ const prepareEnvelope = (
     return { planDigest: input.planDigest, scope, patterns }
   })
 
+/**
+ * Records the displayed capability for once/deny audit events, which are never
+ * installed or replayed as authority.
+ */
 const exactPattern = (capability: Capability): CapabilityPattern =>
   new CapabilityPattern({
     action: capability.action,
@@ -439,7 +444,9 @@ export const envelopeSignature = (
 
 /**
  * Checks that a request-scoped grant cannot authorize a different action or a
- * more dangerous effect tier than the request displayed to the user.
+ * more dangerous effect tier than the request displayed to the user. A
+ * wildcard-bearing pattern identical to the resource is ambiguous because the
+ * grammar has no escape, so its wildcard reading would silently widen access.
  *
  * @category validation
  * @since 1.0.0-rc.0
@@ -452,6 +459,9 @@ export const isValidGrantPattern = (
   workspaceRoot: string
 ): boolean => {
   if (pattern.action !== capability.action || !matches(pattern, capability)) {
+    return false
+  }
+  if (hasResourceWildcard(pattern.resource) && pattern.resource === capability.resource) {
     return false
   }
   if (tierOf(capability, { workspaceRoot }) !== tier) {
@@ -807,12 +817,19 @@ export const make = (
             if (entry === undefined) {
               return yield* Effect.fail(new GrantStoreError({ code: "request_not_found" }))
             }
-            const pattern = yield* attemptSnapshot("grant pattern", () =>
-              snapshotPattern(
-                resolution === "run" || resolution === "remembered"
-                  ? suppliedPattern ?? exactPattern(entry.capability)
-                  : exactPattern(entry.capability)
-              ))
+            const pattern = yield* attemptSnapshot("grant pattern", () => {
+              if (resolution === "run" || resolution === "remembered") {
+                if (suppliedPattern !== undefined) return snapshotPattern(suppliedPattern)
+                const derived = patternFromCapability(entry.capability)
+                if (Option.isNone(derived)) {
+                  throw invalid(
+                    "the requested resource contains glob metacharacters; supply an explicit grant pattern or resolve once"
+                  )
+                }
+                return snapshotPattern(derived.value)
+              }
+              return snapshotPattern(exactPattern(entry.capability))
+            })
 
             switch (resolution) {
               case "once": {

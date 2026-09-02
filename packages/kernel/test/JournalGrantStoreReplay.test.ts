@@ -208,6 +208,30 @@ describe("JournalGrantStore replay rejection", () => {
       })
     ))
 
+  itEffect("rejects a remembered grant whose stored pattern restates a metacharacter resource", () =>
+    run(
+      Effect.gen(function*() {
+        const capability = new Capability.Capability({ action: "proc:spawn", resource: "rm *.tmp" })
+        const pattern = new Capability.CapabilityPattern({ action: "proc:spawn", resource: "rm *.tmp" })
+        yield* emit(
+          options.policyRunId,
+          new GrantEvent.RememberedGrant({
+            eventType: "flows.kernel.grant.remembered.v1",
+            requestId: "request",
+            runId: options.runId,
+            planDigest: options.planDigest,
+            capability,
+            pattern,
+            scope: "remembered",
+            tier: "irreversible"
+          })
+        )
+        const failure = yield* Effect.flip(JournalGrantStore.make(options))
+        expect(failure.code).toBe("invalid_resolution")
+        expect(failure.message).toContain("unsafe remembered grant event")
+      })
+    ))
+
   itEffect("rejects a remembered envelope whose stored pattern now widens the effect tier", () =>
     run(
       Effect.gen(function*() {
@@ -249,6 +273,30 @@ describe("JournalGrantStore replay rejection", () => {
       Effect.gen(function*() {
         yield* emit(options.runId, runGrant(unsafePattern))
         const failure = yield* Effect.flip(JournalGrantStore.make(options))
+        expect(failure.message).toContain("unsafe run grant event")
+      })
+    ))
+
+  itEffect("rejects a run grant whose stored pattern restates a metacharacter resource", () =>
+    run(
+      Effect.gen(function*() {
+        const capability = new Capability.Capability({ action: "proc:spawn", resource: "rm *.tmp" })
+        const pattern = new Capability.CapabilityPattern({ action: "proc:spawn", resource: "rm *.tmp" })
+        yield* emit(
+          options.runId,
+          new GrantEvent.RunGrant({
+            eventType: "flows.kernel.grant.run.v1",
+            requestId: "request",
+            runId: options.runId,
+            planDigest: options.planDigest,
+            capability,
+            pattern,
+            scope: "run",
+            tier: "irreversible"
+          })
+        )
+        const failure = yield* Effect.flip(JournalGrantStore.make(options))
+        expect(failure.code).toBe("invalid_resolution")
         expect(failure.message).toContain("unsafe run grant event")
       })
     ))
