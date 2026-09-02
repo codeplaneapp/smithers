@@ -75,10 +75,14 @@ export const CLIENT_ERROR_MAX_BODY = 16 * 1024
 /** Long conversations are replayed on every turn, so the cap is generous, not tight. */
 const MAX_BODY_BYTES = 1024 * 1024
 const MAX_WS_FRAME_BYTES = 128 * 1024
+/** plue's terminal route caps a message at 64 KiB; the tunnel refuses larger renderer frames before they reach it. */
+const MAX_CLOUD_WS_FRAME_BYTES = 64 * 1024
 const MAX_WS_SUBSCRIPTIONS = 64
 const MAX_WS_TOPIC_CHARS = 256
 /** Frames a cloud-terminal tunnel queues before its upstream opens. */
 const MAX_CLOUD_WS_PENDING = 256
+/** Renderer→upstream bytes the tunnel may hold before it closes the renderer's socket. */
+const MAX_CLOUD_WS_UPSTREAM_BUFFER = 1024 * 1024
 
 export interface LocalServerOptions {
   /** 0 (the default) picks a free port. */
@@ -639,17 +643,26 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
         return jsonError(501, "not_implemented", "The cloud seam is disabled in this build.")
       }
       const rest = pathname.slice(CLOUD_WS_ROUTE_PREFIX.length)
-      if (!/^repos\/[^/]+\/[^/]+\/workspace\/sessions\/[^/]+\/terminal$/.test(rest)) {
+      // `[^/]+` admits `.` and `..`; a segment-wise check keeps the joined target under /api/repos/ (WHATWG normalizes dot segments).
+      const segments = rest.split("/")
+      if (
+        !/^repos\/[^/]+\/[^/]+\/workspace\/sessions\/[^/]+\/terminal$/.test(rest) ||
+        segments.some((segment) => segment === "." || segment === ".." || segment.includes("%2F") || segment.includes("%2f") || segment.includes("\\"))
+      ) {
         return jsonError(404, "not_found", "The cloud WebSocket tunnel serves only workspace terminal sessions.")
       }
       const upstreamWs = cloudUpstream.startsWith("https:")
         ? `wss:${cloudUpstream.slice("https:".length)}`
         : `ws:${cloudUpstream.slice("http:".length)}`
+      const tunnelTarget = new URL(`/api/${rest}${url.search}`, upstreamWs)
+      if (tunnelTarget.origin !== new URL(upstreamWs).origin || !tunnelTarget.pathname.startsWith("/api/repos/")) {
+        return jsonError(404, "not_found", "The cloud WebSocket tunnel serves only workspace terminal sessions.")
+      }
       const upgraded = bunServer.upgrade(request, {
         data: {
           topics: new Set<string>(),
           cloud: {
-            target: `${upstreamWs}/api/${rest}${url.search}`,
+            target: tunnelTarget.toString(),
             token: cloudAuth?.token(),
             upstream: undefined,
             pending: []
@@ -737,6 +750,8 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
          * the bearer) as headers. Frames that arrived first flush on open.
          */
         const headers: Record<string, string> = { "sec-websocket-protocol": "terminal" }
+        // plue refuses an upgrade with no Origin before it reads auth; a desktop app has no web origin, so it sends the first-party one it is allowed to (SMITHERS_CLOUD_WS_ORIGIN overrides).
+        headers["origin"] = Bun.env.SMITHERS_CLOUD_WS_ORIGIN ?? "https://jjhub.tech"
         if (bridge.token !== undefined) headers["authorization"] = `Bearer ${bridge.token}`
         const upstream = new WebSocket(bridge.target, { headers } as never)
         bridge.upstream = upstream
@@ -768,6 +783,15 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
         if (bridge !== undefined) {
           const upstream = bridge.upstream
           if (upstream !== undefined && upstream.readyState === WebSocket.OPEN) {
+            // A flooding renderer must not grow the upstream client's buffer without bound (the other direction is capped by backpressureLimit).
+            if ((typeof raw === "string" ? Buffer.byteLength(raw) : raw.byteLength) > MAX_CLOUD_WS_FRAME_BYTES) {
+              socket.close(1009, "A terminal frame is larger than the upstream accepts (64 KiB).")
+              return
+            }
+            if (upstream.bufferedAmount > MAX_CLOUD_WS_UPSTREAM_BUFFER) {
+              socket.close(1009, "The terminal input outran the upstream.")
+              return
+            }
             upstream.send(raw)
           } else if (bridge.pending.length < MAX_CLOUD_WS_PENDING) {
             bridge.pending.push(raw)
