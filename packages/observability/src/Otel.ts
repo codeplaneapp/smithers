@@ -10,8 +10,11 @@ import type * as Api from "@opentelemetry/api"
 import type { LoggerProvider } from "@opentelemetry/sdk-logs"
 import type { MetricReader } from "@opentelemetry/sdk-metrics"
 import * as Layer from "effect/Layer"
-import { layer as resourceLayer } from "./Resource.ts"
-import type { Configuration as ResourceConfiguration } from "./Resource.ts"
+import {
+  type Configuration as ResourceConfiguration,
+  type InvalidResourceConfiguration,
+  layer as resourceLayer
+} from "./Resource.ts"
 
 /**
  * Injected providers used by the provider-neutral OTEL layer.
@@ -37,7 +40,7 @@ export interface Options {
  * @since 0.1.0
  * @slop
  */
-export const layerOtel = (options: Options): Layer.Layer<never> => {
+export const layerOtel = (options: Options): Layer.Layer<never, InvalidResourceConfiguration> => {
   const resource = resourceLayer(options.resource)
   const tracer = options.tracerProvider === undefined
     ? Layer.empty

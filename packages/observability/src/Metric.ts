@@ -41,39 +41,6 @@ export const quotaParks = Metric.counter(`${prefix}quota/park`, {
 })
 
 /**
- * Counts step-cache lookups that found a recorded result.
- *
- * @category metrics
- * @since 0.1.0
- * @slop
- */
-export const cacheHits = Metric.counter(`${prefix}cache/hit`, {
-  description: "Cache lookup hits"
-})
-
-/**
- * Counts step-cache lookups that found nothing.
- *
- * @category metrics
- * @since 0.1.0
- * @slop
- */
-export const cacheMisses = Metric.counter(`${prefix}cache/miss`, {
-  description: "Cache lookup misses"
-})
-
-/**
- * The step-cache hit rate, between zero and one.
- *
- * @category metrics
- * @since 0.1.0
- * @slop
- */
-export const cacheHitRate = Metric.gauge(`${prefix}cache/hit-rate`, {
-  description: "Cache hit rate as a value between zero and one"
-})
-
-/**
  * All metrics declared by this package.
  *
  * @category registry
@@ -83,8 +50,5 @@ export const cacheHitRate = Metric.gauge(`${prefix}cache/hit-rate`, {
 export const registry = {
   runThroughput,
   activeSeats,
-  quotaParks,
-  cacheHits,
-  cacheMisses,
-  cacheHitRate
+  quotaParks
 } as const

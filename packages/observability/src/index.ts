@@ -13,15 +13,11 @@
  * layer the OpenTelemetry SDK wiring installs behind.
  *
  * `NodeOtel` and `BrowserOtel` are deliberately NOT re-exported here. Each
- * resolves a host-specific OpenTelemetry SDK — `NodeOtel` reaches Node
- * built-ins through `@effect/opentelemetry/NodeSdk` — so re-exporting either
+ * resolves a host-specific OpenTelemetry SDK. `NodeOtel` reaches Node
+ * built-ins through `@effect/opentelemetry/NodeSdk`, so re-exporting either
  * would put a `node:` import in the root entry and break the browser bundle
  * this package guarantees. Import them by subpath instead:
  * `@smthrs/observability/NodeOtel`.
- *
- * ```ts
- * import * as Otlp from "@smthrs/observability"
- * ```
  *
  * @since 0.1.0
  */

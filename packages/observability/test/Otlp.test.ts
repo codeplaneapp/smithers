@@ -33,9 +33,9 @@ const recordingFetch = (
 }
 
 /** Runs `effect` under the layer with a fresh registry and the recording fetch. */
-const runExporting = <A>(
+const runExporting = <A, E>(
   effect: Effect.Effect<A>,
-  layer: Layer.Layer<never>,
+  layer: Layer.Layer<never, E>,
   fetch: typeof globalThis.fetch
 ) =>
   effect.pipe(
@@ -45,9 +45,9 @@ const runExporting = <A>(
   )
 
 /** The same export harness under a controllable clock, for retry assertions. */
-const runExportingTimed = <A>(
+const runExportingTimed = <A, E>(
   effect: Effect.Effect<A>,
-  layer: Layer.Layer<never>,
+  layer: Layer.Layer<never, E>,
   fetch: typeof globalThis.fetch
 ) =>
   effect.pipe(

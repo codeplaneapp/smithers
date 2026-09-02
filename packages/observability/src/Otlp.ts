@@ -6,23 +6,25 @@
  * ship an exporter. This module is that exporter: one layer that installs
  * Effect's own OTLP logger, metrics exporter, and tracer
  * (`effect/unstable/observability/Otlp`) against a collector endpoint, with
- * the flows service identity filled in. Nothing beyond `effect` is involved —
+ * the flows service identity filled in. Nothing beyond `effect` is involved;
  * no OpenTelemetry SDK dependency.
  *
  * Browser support is met by construction rather than by a no-op variant:
  * export happens over Effect's `HttpClient`, and {@link layerFetch} binds the
  * `fetch` implementation the host already has, so no entry point here ever
- * resolves a `node:` built-in (`Concepts/Tickets Not Exceptions.md` requires
- * a ticket only where a host capability is missing — none is).
+ * resolves a `node:` built-in. See the
+ * {@link https://smithers.sh/api/observability | observability API contract}.
  *
  * @since 0.1.0
  */
 import type * as Duration from "effect/Duration"
+import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import type * as Headers from "effect/unstable/http/Headers"
 import type * as HttpClient from "effect/unstable/http/HttpClient"
 import * as Otlp from "effect/unstable/observability/Otlp"
+import * as Resource from "./Resource.ts"
 
 /**
  * The `service.name` resource attribute installed when the caller supplies
@@ -88,29 +90,46 @@ export interface Options {
  * platform-neutral: a Node host may hand it `@effect/platform-node`'s Undici
  * client (re-exported by `@smthrs/platform-node`), a browser or test
  * hands it something else. Use {@link layerFetch} when the host's global
- * `fetch` is good enough — on Node 22 and every browser it is.
+ * `fetch` is good enough. On Node 22 and every browser it is.
  *
  * @category layers
  * @since 0.1.0
  * @slop
  */
-export const layer = (options: Options): Layer.Layer<never, never, HttpClient.HttpClient> =>
-  Otlp.layerJson({
-    baseUrl: options.baseUrl,
-    resource: {
-      serviceName: options.serviceName ?? defaultServiceName,
-      serviceVersion: options.serviceVersion ?? defaultServiceVersion,
-      ...(options.attributes === undefined ? {} : { attributes: options.attributes })
-    },
-    headers: options.headers,
-    loggerExportInterval: options.exportInterval,
-    metricsExportInterval: options.exportInterval,
-    tracerExportInterval: options.exportInterval,
-    shutdownTimeout: options.shutdownTimeout
-  })
+export const layer = (
+  options: Options
+): Layer.Layer<never, Resource.InvalidResourceConfiguration, HttpClient.HttpClient> =>
+  Layer.unwrap(
+    Effect.map(
+      Resource.decode({
+        serviceName: options.serviceName ?? defaultServiceName,
+        serviceVersion: options.serviceVersion ?? defaultServiceVersion,
+        ...(options.attributes === undefined ? {} : { attributes: options.attributes })
+      }),
+      (decoded) => {
+        const resource = Resource.toOpenTelemetryConfiguration(decoded)
+        return (
+          Otlp.layerJson({
+            baseUrl: options.baseUrl,
+            resource: {
+              serviceName: resource.serviceName,
+              // `serviceVersion` is supplied above before Resource decoding.
+              serviceVersion: resource.serviceVersion!,
+              ...(resource.attributes === undefined ? {} : { attributes: resource.attributes })
+            },
+            headers: options.headers,
+            loggerExportInterval: options.exportInterval,
+            metricsExportInterval: options.exportInterval,
+            tracerExportInterval: options.exportInterval,
+            shutdownTimeout: options.shutdownTimeout
+          })
+        )
+      }
+    )
+  )
 
 /**
- * Provides {@link layer} over the host's global `fetch` — the default wiring
+ * Provides {@link layer} over the host's global `fetch`, the default wiring
  * for a Node host, and browser-safe by construction because it never touches
  * a `node:` built-in.
  *
@@ -126,12 +145,12 @@ export const layer = (options: Options): Layer.Layer<never, never, HttpClient.Ht
  * @since 0.1.0
  * @slop
  */
-export const layerFetch = (options: Options): Layer.Layer<never> =>
+export const layerFetch = (options: Options): Layer.Layer<never, Resource.InvalidResourceConfiguration> =>
   layer(options).pipe(Layer.provide(FetchHttpClient.layer))
 
 /**
- * Exports nothing. The explicit stand-in for hosts with no collector — a
- * development shell, a test, a browser deployment that has not opted in — so
+ * Exports nothing. The explicit stand-in for hosts with no collector, such as
+ * a development shell, a test, or a browser deployment that has not opted in, so
  * wiring code can switch layers rather than branch.
  *
  * @category layers

@@ -7,7 +7,9 @@ import * as WebSdk from "@effect/opentelemetry/WebSdk"
 import type { LogRecordProcessor } from "@opentelemetry/sdk-logs"
 import type { MetricReader } from "@opentelemetry/sdk-metrics"
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base"
-import type * as Layer from "effect/Layer"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Resource from "./Resource.ts"
 import type { Configuration as ResourceConfiguration } from "./Resource.ts"
 
 /**
@@ -33,11 +35,14 @@ export interface Options {
  * @since 0.1.0
  * @slop
  */
-export const layerOtel = (options: Options): Layer.Layer<never> =>
-  WebSdk.layer(() => ({
-    resource: options.resource,
-    spanProcessor: options.spanProcessor,
-    logRecordProcessor: options.logRecordProcessor,
-    metricReader: options.metricReader,
-    loggerMergeWithExisting: options.loggerMergeWithExisting
-  }))
+export const layerOtel = (options: Options): Layer.Layer<never, Resource.InvalidResourceConfiguration> =>
+  Layer.unwrap(
+    Effect.map(Resource.decode(options.resource), (decoded) =>
+      WebSdk.layer(() => ({
+        resource: Resource.toOpenTelemetryConfiguration(decoded),
+        spanProcessor: options.spanProcessor,
+        logRecordProcessor: options.logRecordProcessor,
+        metricReader: options.metricReader,
+        loggerMergeWithExisting: options.loggerMergeWithExisting
+      })))
+  )

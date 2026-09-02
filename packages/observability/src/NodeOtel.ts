@@ -11,7 +11,9 @@ import { BatchLogRecordProcessor } from "@opentelemetry/sdk-logs"
 import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics"
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base"
 import type * as Duration from "effect/Duration"
-import type * as Layer from "effect/Layer"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Resource from "./Resource.ts"
 import type { Configuration as ResourceConfiguration } from "./Resource.ts"
 
 /**
@@ -39,27 +41,30 @@ const endpointFor = (endpoint: string, signal: "traces" | "metrics" | "logs"): s
  * @since 0.1.0
  * @slop
  */
-export const layerOtel = (options: Options): Layer.Layer<never> => {
-  return NodeSdk.layer(() => {
-    const endpoint = options.endpoint
-    const spanProcessor = new BatchSpanProcessor(new OTLPTraceExporter({ url: endpointFor(endpoint, "traces") }))
-    const logRecordProcessor = new BatchLogRecordProcessor({
-      exporter: new OTLPLogExporter({ url: endpointFor(endpoint, "logs") })
-    })
-    const metricReader = options.exportIntervalMillis === undefined
-      ? new PeriodicExportingMetricReader({
-        exporter: new OTLPMetricExporter({ url: endpointFor(endpoint, "metrics") })
-      })
-      : new PeriodicExportingMetricReader({
-        exporter: new OTLPMetricExporter({ url: endpointFor(endpoint, "metrics") }),
-        exportIntervalMillis: options.exportIntervalMillis
-      })
-    return {
-      resource: options.resource,
-      spanProcessor,
-      logRecordProcessor,
-      metricReader,
-      shutdownTimeout: options.shutdownTimeout
-    }
-  })
-}
+export const layerOtel = (options: Options): Layer.Layer<never, Resource.InvalidResourceConfiguration> =>
+  Layer.unwrap(
+    Effect.map(Resource.decode(options.resource), (decoded) =>
+      NodeSdk.layer(() => {
+        const resource = Resource.toOpenTelemetryConfiguration(decoded)
+        const endpoint = options.endpoint
+        const spanProcessor = new BatchSpanProcessor(new OTLPTraceExporter({ url: endpointFor(endpoint, "traces") }))
+        const logRecordProcessor = new BatchLogRecordProcessor({
+          exporter: new OTLPLogExporter({ url: endpointFor(endpoint, "logs") })
+        })
+        const metricReader = options.exportIntervalMillis === undefined
+          ? new PeriodicExportingMetricReader({
+            exporter: new OTLPMetricExporter({ url: endpointFor(endpoint, "metrics") })
+          })
+          : new PeriodicExportingMetricReader({
+            exporter: new OTLPMetricExporter({ url: endpointFor(endpoint, "metrics") }),
+            exportIntervalMillis: options.exportIntervalMillis
+          })
+        return {
+          resource,
+          spanProcessor,
+          logRecordProcessor,
+          metricReader,
+          shutdownTimeout: options.shutdownTimeout
+        }
+      }))
+  )
