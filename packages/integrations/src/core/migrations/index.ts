@@ -13,7 +13,7 @@
  */
 import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import * as Layer from "effect/Layer"
-import initial from "./0001_integration_cursors.ts"
+import { integrationCursors } from "./0001_integration_cursors.ts"
 
 /**
  * The integration cursor set, in migration id block 6000.
@@ -27,7 +27,7 @@ import initial from "./0001_integration_cursors.ts"
 export const set: DatabaseMigrations.MigrationSet = {
   namespace: "integrations",
   idOffset: DatabaseMigrations.idBlock * 6,
-  migrations: { "0001_integration_cursors": initial }
+  migrations: { "0001_integration_cursors": integrationCursors }
 }
 
 /**

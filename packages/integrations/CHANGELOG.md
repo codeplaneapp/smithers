@@ -90,6 +90,13 @@ listed a changelog; this is it.
 
 ### Fixed
 
+- Fixed the CommonJS build of the migration set.
+  `core/migrations/0001_integration_cursors` now exports `integrationCursors`
+  as a named binding and `core/migrations/index` imports it by name, because
+  esbuild's Node interop for a default import of a sibling module resolved to
+  the whole exports object instead of the Effect, so `Core.Migrations.set` in
+  `dist/cjs` held a value with no `pipe` and the migrator failed for every
+  `require` consumer.
 - Fixed the typed-failure channels that died as defects instead: a missing or
   unparseable listener registry, an ownership-state write, a Linear priority
   outside the scale, a caller-supplied webhook verifier that throws, a request
