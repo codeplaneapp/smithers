@@ -78,6 +78,37 @@ describe("parseCloudCredentials", () => {
 })
 
 describe("cloud sign-in", () => {
+  test("only the first callback settles the attempt; a replay or a racing local process is refused", async () => {
+    const upstream = fakeUpstream()
+    const keychain = memoryKeychain()
+    const auth: CloudAuth = await createCloudAuth({ api: upstream.origin, keychain, log: () => {} })
+    try {
+      const started = await auth.start()
+      if (!("url" in started)) throw new Error(started.error)
+      const port = Number(new URL(started.url).searchParams.get("callback_port"))
+      // The double's callback races the fake upstream's own POST; whichever lands second must be refused.
+      const first = await fetch(`http://127.0.0.1:${port}/callback`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...CREDENTIALS, token: "smithers_attacker_token", username: "mallory" })
+      })
+      const second = await fetch(`http://127.0.0.1:${port}/callback`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...CREDENTIALS, token: "smithers_attacker_token_2", username: "mallory2" })
+      }).catch(() => null)
+      expect([200, 409]).toContain(first.status)
+      if (second !== null) expect(second.status).toBe(409)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      // Whichever POST won, exactly one username is the session's, and it is never the loser's.
+      expect(auth.session().username).not.toBe("mallory2")
+      expect(auth.session().state).toBe("signed-in")
+    } finally {
+      await auth.stop()
+      upstream.server.stop(true)
+    }
+  })
+
   test("start answers the CLI login URL; the callback signs in; the session never carries the token", async () => {
     const fake = fakeUpstream()
     upstream = fake.server

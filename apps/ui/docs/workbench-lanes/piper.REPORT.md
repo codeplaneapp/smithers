@@ -122,3 +122,9 @@ skipped outside those eight.
 - `scopes: "degraded"` is exposed on the cloud session row; no
   workspace/agent/approval acts exist yet to render "sign in again to
   enable".
+
+## Review (Kimi K3, read-only, 2026-09-02) and what changed
+
+Fixed in the working tree after the review: (1) CRITICAL `/api/cloud//evil.example/x` was scheme-relative and would have sent the bearer to an arbitrary host — the proxy now refuses a leading-slash or empty rest and asserts the constructed origin is the upstream's; (2) HIGH the identity session cookie was forwarded to the cloud API — `cookie` is stripped; (3) MEDIUM every local file card read "head moved" forever because a working copy's `@` is never the bookmark head — `readAt.source` distinguishes head reads from working-copy reads and the line renders only for the former; (5) MEDIUM the OAuth callback accepted any later POST — the first well-formed callback claims the attempt and later ones answer 409. Each has a test.
+
+Open follow-ups from the same review: (4) `resolveTargetRepo` falls through a legacy selection whose repoId is not `owner/repo` to a single-repo guess; (6) the keychain write passes the secret on `security`'s argv and the entry's ACL is `security`'s default; (7) the 9→10 schema bump resets the whole OPFS store (transcript, world, tabs, pins) — quarantine exists only on the fallback backend; (8) sidebar copy rows read `name · N ahead` where ADR 0001 says `~/path · N ahead`, so two checkouts of one repo are indistinguishable; (9) the jj probe runs on the request path with no timeout; (10) a deleted upstream bookmark never clears a stale head (`head ?? existing.head`).

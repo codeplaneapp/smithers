@@ -211,6 +211,7 @@ export const createCloudAuth = async (options: CloudAuthOptions): Promise<CloudA
       const done = new Promise<void>((resolve) => {
         settle = resolve
       })
+      let claimed = false
       let server: Server<undefined>
       try {
         server = Bun.serve({
@@ -224,6 +225,11 @@ export const createCloudAuth = async (options: CloudAuthOptions): Promise<CloudA
             if (parseCloudCredentials(body) === null) {
               return Response.json({ error: "expected { token, username, email, expiresAt }" }, { status: 400 })
             }
+            // The first well-formed callback settles the attempt; a later one
+            // (a replay, or a local process racing the real callback) can no
+            // longer substitute the token.
+            if (claimed) return Response.json({ error: "this sign-in attempt already received its callback" }, { status: 409 })
+            claimed = true
             void accept(body).finally(settle)
             return Response.json({ ok: true })
           }

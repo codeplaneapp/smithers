@@ -344,6 +344,56 @@ describe("the jjhub cloud seam", () => {
     expect(await session.json()).toEqual({ state: "signed-out", username: null, expiresAt: null })
   })
 
+  test("/api/cloud/* refuses a scheme-relative path and never forwards the identity cookie", async () => {
+    const seen: Array<{ path: string; cookie: string | null }> = []
+    const upstream = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) => {
+        seen.push({ path: new URL(request.url).pathname, cookie: request.headers.get("cookie") })
+        return new Response("{}", { headers: { "content-type": "application/json" } })
+      }
+    })
+    const proxied = await startLocalServer({
+      port: 0,
+      distDir: dist,
+      cloudMode: "hybrid",
+      chatStub: true,
+      cloudApi: `http://127.0.0.1:${upstream.port}`,
+      cloudAuth: {
+        token: () => "smithers_test_token",
+        session: () => ({ state: "signed-in", username: "will", expiresAt: null }),
+        start: async () => ({ error: "already signed in" }),
+        signOut: async () => {},
+        stop: async () => {}
+      },
+      node: { path: "/fake/node", version: "v22.19.0" },
+      home: "/fake/home",
+      harnesses: async () => [],
+      log: () => {}
+    })
+    try {
+      const headers = { [LOCAL_SESSION_HEADER]: proxied.sessionToken, cookie: "smithers_identity=sealed" }
+      // `//evil.example/x` sliced naively is scheme-relative: the bearer would go to evil.example.
+      for (const path of ["/api/cloud//evil.example/x", "/api/cloud/"]) {
+        const refused = await fetch(`${proxied.origin}${path}`, { headers })
+        expect(refused.status).toBe(400)
+        expect(((await refused.json()) as { error: { code: string } }).error.code).toBe("invalid_cloud_path")
+      }
+      expect(seen).toEqual([])
+      const ok = await fetch(`${proxied.origin}/api/cloud/api/user/repos`, { headers })
+      expect(ok.status).toBe(200)
+      expect(seen).toEqual([{ path: "/api/user/repos", cookie: null }])
+      // A percent-encoded backslash stays a path segment on the upstream origin, never a host.
+      const encoded = await fetch(`${proxied.origin}/api/cloud/%5C%5Cevil.example/x`, { headers })
+      expect(encoded.status).toBe(200)
+      expect(seen[1]?.path.startsWith("/%5C%5Cevil.example")).toBe(true)
+    } finally {
+      await proxied.stop()
+      upstream.stop(true)
+    }
+  })
+
   test("/api/cloud/* forwards with the Bun-held bearer, the identity-proxy rewrites, and a trail line", async () => {
     const upstreamHeaders: Array<Headers> = []
     const upstream = Bun.serve({

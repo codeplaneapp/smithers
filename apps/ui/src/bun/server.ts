@@ -280,13 +280,31 @@ const proxyCloud = async (
   upstream: string,
   token: string | undefined
 ): Promise<Response> => {
-  const target = new URL(url.pathname.slice(CLOUD_ROUTE_PREFIX.length - 1) + url.search, upstream)
+  /*
+   * The path after the prefix is joined as a plain path, never as a URL:
+   * `/api/cloud//evil.example/x` sliced naively is scheme-relative and the
+   * WHATWG parser would send the bearer to evil.example. A leading slash
+   * (or an empty rest) is refused, and the constructed origin must be the
+   * upstream's, or the request never leaves this process.
+   */
+  const upstreamOrigin = new URL(upstream).origin
+  const rest = url.pathname.slice(CLOUD_ROUTE_PREFIX.length)
+  if (rest === "" || rest.startsWith("/") || rest.includes("\\")) {
+    return jsonError(400, "invalid_cloud_path", "A cloud path is /api/cloud/<path> with a non-empty, single-slash path.")
+  }
+  const target = new URL(`/${rest}${url.search}`, upstreamOrigin)
+  if (target.origin !== upstreamOrigin) {
+    return jsonError(400, "invalid_cloud_path", "The cloud path resolved outside the cloud API origin.")
+  }
   const headers = new Headers(request.headers)
   headers.set("host", target.host)
-  headers.set("origin", new URL(upstream).origin)
+  headers.set("origin", upstreamOrigin)
   headers.delete("content-length")
   headers.delete(LOCAL_SESSION_HEADER)
   headers.delete("authorization")
+  // The identity seam's session cookie is re-scoped onto this origin, so the
+  // WebView attaches it to every same-origin call; it is not the cloud API's.
+  headers.delete("cookie")
   if (token !== undefined) headers.set("authorization", `Bearer ${token}`)
   let response: Response
   try {
