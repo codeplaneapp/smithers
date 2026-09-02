@@ -12,7 +12,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  * @category migrations
  * @since 0.1.0
  */
-const selectionStore: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
+export const selectionStore: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
 
   yield* sql`CREATE TABLE flows_selection_suspected_edges (
@@ -32,5 +32,3 @@ const selectionStore: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect
     PRIMARY KEY (scope, affects)
   )`
 })
-
-export default selectionStore

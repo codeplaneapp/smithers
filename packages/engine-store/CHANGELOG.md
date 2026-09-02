@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the CommonJS build of the migration set. esbuild compiles a default
+  import of a sibling module under `"type": "module"` to Node-style interop,
+  where `import_x.default` is the sibling's whole exports object rather than
+  the Effect it exported, so `set.migrations["0001_initial"]` and
+  `set.migrations["0002_selection_store"]` had no `pipe` in `dist/cjs` and
+  every `require` consumer failed at schema time. `migrations/0001_initial`
+  now exports the named `initial` binding, `migrations/0002_selection_store`
+  exports the named `selectionStore` binding, neither has a default export,
+  and `Migrations` imports both by name.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 ### Release notes

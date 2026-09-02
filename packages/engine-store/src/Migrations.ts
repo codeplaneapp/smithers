@@ -21,8 +21,8 @@ import * as PlanMigrations from "@smthrs/plan/Migrations"
 import * as RunStoreMigrations from "@smthrs/run-store/Migrations"
 import * as StepCacheMigrations from "@smthrs/step-cache/Migrations"
 import * as Layer from "effect/Layer"
-import initial from "./migrations/0001_initial.ts"
-import selectionStore from "./migrations/0002_selection_store.ts"
+import { initial } from "./migrations/0001_initial.ts"
+import { selectionStore } from "./migrations/0002_selection_store.ts"
 
 /**
  * Engine-store's own namespaced migration set.

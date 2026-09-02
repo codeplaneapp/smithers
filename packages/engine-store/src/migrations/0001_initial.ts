@@ -14,7 +14,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  * @category migrations
  * @since 0.1.0
  */
-const initial: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
+export const initial: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
 
   yield* sql`CREATE TABLE flows_deferred_completions (
@@ -41,5 +41,3 @@ const initial: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(fu
 
   yield* sql`CREATE INDEX flows_clock_deadlines_pending_idx ON flows_clock_deadlines (completed_at_ms, due_at_ms)`
 })
-
-export default initial
