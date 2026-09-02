@@ -28,13 +28,13 @@ catalog, and checked for drift like every other generated file.
 
 ## The declaration
 
-| Key        | Type                                             | Meaning                                                                                                  |
-| ---------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `owners`   | `Array<string>`                                  | Logins and `team:<name>` references. Every one is a required approver for every path in the package.     |
-| `perFile`  | `Record<glob, string \| Array<string>>`          | Owners added for paths matching a glob, relative to the package directory. A bare file glob matches at every depth. |
-| `noparent` | `boolean`                                        | Stop inheriting from the parent package. Requires at least one owner here.                              |
-| `agents`   | policy, or `{ default?, "auto-land"?, "human-approve"?, deny? }` | What an agent-authored change may do; see [Agent policy](#agent-policy).                        |
-| `upstream` | `"none" \| "review" \| "approve" \| { mode, packages? }` | Claim changes to the packages this one depends on; see [Upstream](#upstream).                     |
+| Key        | Type                                                             | Meaning                                                                                                             |
+| ---------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `owners`   | `Array<string>`                                                  | Logins and `team:<name>` references. Every one is a required approver for every path in the package.                |
+| `perFile`  | `Record<glob, string \| Array<string>>`                          | Owners added for paths matching a glob, relative to the package directory. A bare file glob matches at every depth. |
+| `noparent` | `boolean`                                                        | Stop inheriting from the parent package. Requires at least one owner here.                                          |
+| `agents`   | policy, or `{ default?, "auto-land"?, "human-approve"?, deny? }` | What an agent-authored change may do; see [Agent policy](#agent-policy).                                            |
+| `upstream` | `"none" \| "review" \| "approve" \| { mode, packages? }`         | Claim changes to the packages this one depends on; see [Upstream](#upstream).                                       |
 
 Every value is validated when the module evaluates: a login that is not
 GitHub-shaped, a pattern that escapes the package, a policy name that is not
@@ -113,12 +113,12 @@ lists `lib.srcs` in a build target's `data` has `//lib` upstream.
 
 `upstream` on the app's owners declaration claims changes to those packages:
 
-| Value                                 | Effect on a change inside an upstream package                                         |
-| ------------------------------------- | ------------------------------------------------------------------------------------- |
-| `"none"` (default)                    | Nothing.                                                                              |
-| `"review"`                            | The app's owners become suggested reviewers, reason `upstream-of //app`.              |
-| `"approve"`                           | The app's owners become required approvers, reason `upstream-of //app`.               |
-| `{ mode, packages: ["//lib", "//shared/..."] }` | The same, bounded to the named package labels and subtree patterns.        |
+| Value                                           | Effect on a change inside an upstream package                            |
+| ----------------------------------------------- | ------------------------------------------------------------------------ |
+| `"none"` (default)                              | Nothing.                                                                 |
+| `"review"`                                      | The app's owners become suggested reviewers, reason `upstream-of //app`. |
+| `"approve"`                                     | The app's owners become required approvers, reason `upstream-of //app`.  |
+| `{ mode, packages: ["//lib", "//shared/..."] }` | The same, bounded to the named package labels and subtree patterns.      |
 
 "The app's owners" means the app package's own resolved owners: its `owners`,
 what it inherits, or the workspace defaults, without its `perFile` rules. A

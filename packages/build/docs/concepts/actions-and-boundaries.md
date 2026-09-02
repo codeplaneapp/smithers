@@ -161,12 +161,12 @@ output file opens the directory it lives in, because a file cannot be bound
 before it exists and a tool that writes by rename needs the directory. The
 network is closed unless the policy opens it.
 
-| Host    | Mechanism                                                                                                                                                                                                                                                                       |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Host    | Mechanism                                                                                                                                                                                                                                                                              |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Linux   | bubblewrap. The host root is bound read-only, a tmpfs covers the workspace, the declared set is bound on top, the tmpfs is remounted read-only, and the network namespace is unshared. `loopback` shares the host network, because a namespace cannot admit the host's loopback alone. |
-| macOS   | seatbelt. Reads under the workspace are denied except the declared set, writes are denied except the declared set and the private tmp, and the network is denied except what the policy opens. The operating system and toolchain outside the workspace stay readable.               |
-| Docker  | `docker run` with a read-only root, the declared set mounted at its host paths, and `--network none`. Declared with `S.Sandboxes({ default: S.Sandbox.Docker({ image }) })`; the image supplies the toolchain. The only mechanism on Windows.                                  |
-| Windows | Nothing native. A confined target without a Docker declaration fails closed.                                                                                                                                                                                                    |
+| macOS   | seatbelt. Reads under the workspace are denied except the declared set, writes are denied except the declared set and the private tmp, and the network is denied except what the policy opens. The operating system and toolchain outside the workspace stay readable.                 |
+| Docker  | `docker run` with a read-only root, the declared set mounted at its host paths, and `--network none`. Declared with `S.Sandboxes({ default: S.Sandbox.Docker({ image }) })`; the image supplies the toolchain. The only mechanism on Windows.                                          |
+| Windows | Nothing native. A confined target without a Docker declaration fails closed.                                                                                                                                                                                                           |
 
 The mechanism is selected per host: bubblewrap on Linux, seatbelt on macOS,
 Docker where declared. A Linux host without `bwrap`, a Windows host without

@@ -70,11 +70,11 @@ the written reports.
 
 ## Status
 
-|           |                                                              |
-| --------- | ------------------------------------------------------------ |
-| Kinds     | `test`                                                       |
+|           |                                                                                                 |
+| --------- | ----------------------------------------------------------------------------------------------- |
+| Kinds     | `test`                                                                                          |
 | Cacheable | Under a declared Nix environment; never otherwise, the executable toolchain is not key material |
-| Executes  | Yes, through `ExecLive`                                      |
+| Executes  | Yes, through `ExecLive`                                                                         |
 
 ## See also
 

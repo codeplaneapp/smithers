@@ -83,11 +83,11 @@ zero without creating it fails the target.
 
 ## Status
 
-|           |                                                                         |
-| --------- | ----------------------------------------------------------------------- |
-| Kinds     | `build`                                                                 |
+|           |                                                                                                                             |
+| --------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Kinds     | `build`                                                                                                                     |
 | Cacheable | Under a declared Nix environment, the result only; never otherwise, output restoration and toolchain identity are not wired |
-| Executes  | Yes, through `ExecLive`                                                 |
+| Executes  | Yes, through `ExecLive`                                                                                                     |
 
 ## See also
 

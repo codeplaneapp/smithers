@@ -93,11 +93,11 @@ Collected from the attrs: `packageJson`, plus every declaration in `sources`.
 
 ## Status
 
-|           |                                                              |
-| --------- | ------------------------------------------------------------ |
-| Kinds     | `lint`                                                       |
+|           |                                                                                                 |
+| --------- | ----------------------------------------------------------------------------------------------- |
+| Kinds     | `lint`                                                                                          |
 | Cacheable | Under a declared Nix environment; never otherwise, the executable toolchain is not key material |
-| Executes  | Yes, through `ExecLive`                                      |
+| Executes  | Yes, through `ExecLive`                                                                         |
 
 ## See also
 

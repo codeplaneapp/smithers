@@ -21,10 +21,10 @@ smithers-build //:codeowners --write
 
 ## Attributes
 
-| Name   | Type     | Default                   | Description                                                                  |
-| ------ | -------- | ------------------------- | ---------------------------------------------------------------------------- |
-| `org`  | `string` | required                  | GitHub organization teams render under: `team:web` becomes `@<org>/web`.     |
-| `path` | `string` | `"//.github/CODEOWNERS"`  | Output path. Relative to the declaring package; `//` anchors at the root.   |
+| Name   | Type     | Default                  | Description                                                               |
+| ------ | -------- | ------------------------ | ------------------------------------------------------------------------- |
+| `org`  | `string` | required                 | GitHub organization teams render under: `team:web` becomes `@<org>/web`.  |
+| `path` | `string` | `"//.github/CODEOWNERS"` | Output path. Relative to the declaring package; `//` anchors at the root. |
 
 ## Rendering
 
@@ -51,9 +51,9 @@ Team references stay unexpanded.
 
 ## Channels
 
-| Channel | Type                                                                         |
-| ------- | ---------------------------------------------------------------------------- |
-| Success | `void`                                                                       |
+| Channel | Type                                                                                      |
+| ------- | ----------------------------------------------------------------------------------------- |
+| Success | `void`                                                                                    |
 | Error   | drift in check mode: `drift in declared emit outputs (run with --write to apply): <path>` |
 
 ## Verbs and cacheability

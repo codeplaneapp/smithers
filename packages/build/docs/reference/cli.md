@@ -306,23 +306,23 @@ smithers-build owners --diff origin/main
 smithers-build owners --diff HEAD --format json
 ```
 
-| Argument | Description                                              |
-| -------- | -------------------------------------------------------- |
+| Argument | Description                                               |
+| -------- | --------------------------------------------------------- |
 | `paths`  | Zero or more workspace-relative paths; omit with `--diff` |
 
-| Option   | Alias | Type   | Default | Description                                                              |
-| -------- | ----- | ------ | ------- | ------------------------------------------------------------------------ |
+| Option   | Alias | Type   | Default | Description                                                                 |
+| -------- | ----- | ------ | ------- | --------------------------------------------------------------------------- |
 | `--diff` | `-d`  | string |         | Also resolve every path changed since this git base, like `S.gitDiff(base)` |
 
 Plus the [common options](#common-options).
 
 Returns:
 
-| Field                 | Description                                                                                          |
-| --------------------- | ---------------------------------------------------------------------------------------------------- |
+| Field                 | Description                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `touched_paths`       | One `{path, package, owners, agent_policy, packages}` per path; `owners` are `{login \| team, role, reasons}` |
-| `required_approvers`  | Every owner with the `approve` role, deduplicated and sorted                                         |
-| `suggested_reviewers` | Every owner with only the `review` role                                                              |
+| `required_approvers`  | Every owner with the `approve` role, deduplicated and sorted                                                  |
+| `suggested_reviewers` | Every owner with only the `review` role                                                                       |
 
 Failure: error code `owners_failed`, exit code 1, for a workspace without
 `WORKSPACE.ts`, an unknown team, a path outside the workspace, or no paths
@@ -373,8 +373,8 @@ smithers-build query 'rdeps(//packages/flow:lib)'
 smithers-build query 'owners(//packages/flow:lib)'
 ```
 
-| Argument | Description                                                          |
-| -------- | -------------------------------------------------------------------- |
+| Argument | Description                                                           |
+| -------- | --------------------------------------------------------------------- |
 | `expr`   | A label, a pattern, `deps(label)`, `rdeps(label)`, or `owners(label)` |
 
 Options: the [common options](#common-options) only.

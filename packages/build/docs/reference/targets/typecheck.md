@@ -65,11 +65,11 @@ summary.
 
 ## Status
 
-|           |                                                              |
-| --------- | ------------------------------------------------------------ |
-| Kinds     | `build`                                                      |
+|           |                                                                                                 |
+| --------- | ----------------------------------------------------------------------------------------------- |
+| Kinds     | `build`                                                                                         |
 | Cacheable | Under a declared Nix environment; never otherwise, the executable toolchain is not key material |
-| Executes  | Yes, through `ExecLive`                                      |
+| Executes  | Yes, through `ExecLive`                                                                         |
 
 ## Notes
 
