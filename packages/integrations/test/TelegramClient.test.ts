@@ -1,4 +1,6 @@
-import { Effect } from "effect"
+import { ERROR_REFERENCE_URL } from "@smthrs/errors/ErrorCode"
+import { Cause, Effect, Exit } from "effect"
+import type { ServerResponse } from "node:http"
 import { afterEach, describe, expect, it } from "vitest"
 import { fromIntegrationError } from "../src/core/ActionFailure.ts"
 import { type IntegrationError, isIntegrationError, isRetryable } from "../src/core/IntegrationError.ts"
@@ -142,6 +144,27 @@ describe("TelegramClient over a real HTTP server", () => {
     expect(fixture.requests).toHaveLength(2)
   })
 
+  it("waits one second when a 429 carries no numeric retry_after", async () => {
+    let calls = 0
+    fixture = await startFixture((_request, response) => {
+      calls += 1
+      if (calls === 1) {
+        json(response, 429, {
+          ok: false,
+          error_code: 429,
+          description: "Too Many Requests",
+          parameters: { retry_after: "soon" }
+        })
+        return
+      }
+      json(response, 200, ok(true))
+    })
+    const startedAt = Date.now()
+    expect(await Effect.runPromise(client({ maxRateLimitRetries: 1 }).call("getMe"))).toBe(true)
+    expect(calls).toBe(2)
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(900)
+  })
+
   it("does not retry a 400", async () => {
     fixture = await startFixture((_request, response) =>
       json(response, 400, { ok: false, error_code: 400, description: "chat not found" })
@@ -214,6 +237,18 @@ describe("TelegramClient over a real HTTP server", () => {
     )
     const failure = await Effect.runPromise(Effect.flip(client().sendMessageSmart(42, "hi")))
     expect(failure.message).toContain("chat not found")
+  })
+
+  it("does not fall back for a 400 response with no provider description", async () => {
+    fixture = await startFixture((_request, response) => {
+      response.writeHead(400, { "content-type": "text/plain" })
+      response.end("bad request")
+    })
+    const failure = await Effect.runPromise(
+      Effect.flip(client().sendMessageSmart(42, "hi", { typing: false }))
+    )
+    expect(failure.message).toContain("non-JSON")
+    expect(fixture.requests).toHaveLength(1)
   })
 
   it("puts the reply on the first chunk and the keyboard on the last", async () => {
@@ -316,6 +351,18 @@ describe("TelegramClient over a real HTTP server", () => {
       })
     )
     expect(fixture.requests[2]?.body).toContain("bytes")
+
+    await Effect.runPromise(
+      client().sendDocument(
+        42,
+        { filename: "shared.txt", content: "shared fields" },
+        { caption: "a **caption**", replyToMessageId: 7, messageThreadId: 8 }
+      )
+    )
+    expect(fixture.requests[3]?.body).toContain("shared fields")
+    expect(fixture.requests[3]?.body).toContain("a *caption*")
+    expect(fixture.requests[3]?.body).toContain("reply_to_message_id")
+    expect(fixture.requests[3]?.body).toContain("message_thread_id")
   })
 
   it("answers a callback query and a Mini App query", async () => {
@@ -343,6 +390,14 @@ describe("TelegramClient over a real HTTP server", () => {
     expect(exit._tag).toBe("Failure")
     await Effect.runPromise(Effect.sleep("100 millis"))
     expect(closed).toBe(true)
+  })
+
+  it("does not start a request for an already-aborted run signal", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, ok(true)))
+    await expect(
+      Effect.runPromise(client().call("getMe"), { signal: AbortSignal.abort("already stopped") })
+    ).rejects.toThrow()
+    expect(fixture.requests).toHaveLength(0)
   })
 })
 
@@ -394,10 +449,66 @@ describe("a multi-chunk send names what it delivered", () => {
     expect(failure.message).toContain("already delivered")
   })
 
+  it("uses an empty description when a later chunk gets an unreadable error", async () => {
+    let calls = 0
+    fixture = await startFixture((_request, response) => {
+      calls += 1
+      if (calls === 1) {
+        json(response, 200, ok({ message_id: 101 }))
+        return
+      }
+      response.writeHead(502, { "content-type": "text/plain" })
+      response.end("bad gateway")
+    })
+    const failure = await Effect.runPromise(
+      Effect.flip(client().sendMessageSmart(55, long, { typing: false }))
+    )
+    expect(isTelegramApiError(failure)).toBe(true)
+    expect((failure as TelegramApiError).deliveredMessageIds).toEqual([101])
+    expect(failure.details).toMatchObject({ description: "" })
+  })
+
   it("refuses a response that is not a Bot API envelope", async () => {
     fixture = await startFixture((_request, response) => json(response, 200, "just a string"))
     const failure = await Effect.runPromise(Effect.flip(client().call("getMe")))
     expect(failure.message).toContain("not a Bot API envelope")
+  })
+
+  it("uses the HTTP status when optional failure fields have invalid wire types", async () => {
+    fixture = await startFixture((_request, response) =>
+      json(response, 403, {
+        ok: false,
+        error_code: "429",
+        description: 403,
+        parameters: "not an object"
+      })
+    )
+    const failure = await Effect.runPromise(Effect.flip(client().call("getMe")))
+    expect(isTelegramApiError(failure)).toBe(true)
+    expect(failure).toMatchObject({ errorCode: 403, retryAfterSeconds: null })
+    expect((toIntegrationError(failure) as IntegrationError).reason).toBe("permission-denied")
+  })
+
+  it("rejects a non-boolean ok field as a non-envelope", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, { ok: "true", result: true }))
+    const failure = await Effect.runPromise(Effect.flip(client().call("getMe")))
+    expect(failure.message).toContain("not a Bot API envelope")
+    expect((toIntegrationError(failure) as IntegrationError).reason).toBe("decode-failed")
+  })
+
+  it("classifies a non-boolean ok field on an error status by that status", async () => {
+    fixture = await startFixture((_request, response) => json(response, 403, { ok: "false" }))
+    const failure = await Effect.runPromise(Effect.flip(client().call("getMe")))
+    expect(failure.message).toContain("not a Bot API envelope")
+    expect((toIntegrationError(failure) as IntegrationError).reason).toBe("permission-denied")
+  })
+
+  it("fails decode-failed when a success envelope omits result", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, { ok: true }))
+    const exit = await Effect.runPromise(Effect.exit(client().call("getMe")))
+    expect(Exit.isFailure(exit)).toBe(true)
+    const failure = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isFailReason)?.error : undefined
+    expect(toIntegrationError(failure)).toMatchObject({ reason: "decode-failed" })
   })
 })
 
@@ -413,7 +524,8 @@ describe("toIntegrationError", () => {
       [401, "permission-denied", false],
       [403, "permission-denied", false],
       [400, "decode-failed", false],
-      [404, "decode-failed", false]
+      [404, "decode-failed", false],
+      [409, "delivery-failed", false]
     ]
     for (const [errorCode, reason, retryable] of cases) {
       const mapped = toIntegrationError(new TelegramApiError("boom", { method: "sendMessage", errorCode }))
@@ -457,6 +569,20 @@ describe("toIntegrationError", () => {
     }
   })
 
+  it("does not trust a malformed same-module TelegramApiError instance", () => {
+    for (const deliveredMessageIds of [undefined, null, "1,2", [1, "2"]]) {
+      const malformed = new TelegramApiError("boom", { method: "sendMessage", errorCode: 500 }) as {
+        deliveredMessageIds?: unknown
+      }
+      Object.defineProperty(malformed, "deliveredMessageIds", {
+        configurable: true,
+        value: deliveredMessageIds
+      })
+      expect(isTelegramApiError(malformed)).toBe(false)
+      expect(toIntegrationError(malformed)).toBe(malformed)
+    }
+  })
+
   // The same value has to survive the whole path: the action maps a client
   // failure through `toIntegrationError` and then `fromIntegrationError`, so a
   // throw in either becomes a defect the caller's `catchAll` never sees.
@@ -465,6 +591,51 @@ describe("toIntegrationError", () => {
     const failure = fromIntegrationError(toIntegrationError(claimed))
     expect(failure.reason).toBe("delivery-failed")
     expect(failure.retryable).toBe(false)
+  })
+
+  it("leaves Bot API-shaped Error subclasses with throwing getters unclassified", () => {
+    class ThrowingGetterError extends Error {}
+
+    for (const property of ["name", "code", "summary", "details"] as const) {
+      const hostile = Object.assign(new ThrowingGetterError("boom"), {
+        name: "TelegramApiError",
+        code: "TELEGRAM_API_ERROR",
+        summary: "boom",
+        docsUrl: ERROR_REFERENCE_URL,
+        details: { method: "sendMessage" },
+        errorCode: 500,
+        deliveredMessageIds: []
+      })
+      Object.defineProperty(hostile, property, {
+        configurable: true,
+        get: () => {
+          throw new Error(`${property} getter`)
+        }
+      })
+      expect(() => toIntegrationError(hostile), property).not.toThrow()
+      expect(fromIntegrationError(toIntegrationError(hostile)), property).toMatchObject({
+        reason: "delivery-failed",
+        retryable: false
+      })
+    }
+  })
+
+  it("returns a Bot API failure unchanged when a conversion field starts throwing", () => {
+    for (const property of ["details", "reason"] as const) {
+      const hostile = new TelegramApiError("boom", { method: "sendMessage", errorCode: 500 })
+      let reads = 0
+      Object.defineProperty(hostile, property, {
+        configurable: true,
+        get: () => {
+          reads += 1
+          if (property === "details" && reads === 1) return { method: "sendMessage" }
+          throw new Error(`${property} getter`)
+        }
+      })
+      expect(() => toIntegrationError(hostile), property).not.toThrow()
+      const failure = fromIntegrationError(toIntegrationError(hostile))
+      expect(failure).toMatchObject({ reason: "delivery-failed", retryable: false })
+    }
   })
 
   // A `sendMessage` the Bot API answered 200 with an unusable `message_id` did
@@ -485,6 +656,62 @@ describe("toIntegrationError", () => {
     expect(fromIntegrationError(mapped).reason).toBe("decode-failed")
   })
 
+  // A 200 the transport delivered whole is not a delivery failure. What went
+  // wrong is that this module could not read the answer, which is what
+  // `decode-failed` is for; calling it `delivery-failed` sent an operator
+  // looking at the network.
+  it("classifies every unreadable 200 as decode-failed", async () => {
+    const answers: ReadonlyArray<readonly [string, (response: ServerResponse) => void]> = [
+      ["non-JSON", (response) => {
+        response.writeHead(200, { "content-type": "text/html" })
+        response.end("<html>hello</html>")
+      }],
+      ["not an envelope", (response) => json(response, 200, 42)],
+      ["array envelope", (response) => json(response, 200, [])],
+      ["no ok member", (response) => json(response, 200, { result: true })],
+      ["invalid ok member", (response) => json(response, 200, { ok: "yes", result: true })]
+    ]
+    for (const [label, answer] of answers) {
+      fixture = await startFixture((_request, response) => answer(response))
+      const failure = await Effect.runPromise(Effect.flip(client().call("getMe")))
+      const mapped = toIntegrationError(failure) as IntegrationError
+      expect(mapped.reason, label).toBe("decode-failed")
+      expect(mapped.details, label).toMatchObject({ outcomeUnknown: false })
+      await fixture.close()
+      fixture = undefined
+    }
+  })
+
+  // A 5xx whose body is not JSON is still a delivery failure: the transport
+  // answered with a failure, and the unreadable body is a symptom.
+  it("still classifies an unreadable error status by its status", async () => {
+    fixture = await startFixture((_request, response) => {
+      response.writeHead(502, { "content-type": "text/html" })
+      response.end("<html>bad gateway</html>")
+    })
+    const mapped = toIntegrationError(
+      await Effect.runPromise(Effect.flip(client().call("getMe")))
+    ) as IntegrationError
+    expect(mapped.reason).toBe("delivery-failed")
+    expect(isRetryable(mapped)).toBe(true)
+  })
+
+  it("classifies a non-envelope error body by its HTTP status", async () => {
+    fixture = await startFixture((_request, response) => json(response, 500, 42))
+    const failure = await Effect.runPromise(Effect.flip(client().call("getMe")))
+    const mapped = toIntegrationError(failure) as IntegrationError
+    expect(mapped.reason).toBe("delivery-failed")
+    expect(mapped.details).toMatchObject({ errorCode: 500, outcomeUnknown: true })
+  })
+
+  it("uses the HTTP status when an error envelope omits error_code", async () => {
+    fixture = await startFixture((_request, response) => json(response, 409, { ok: false, description: "Conflict" }))
+    const failure = await Effect.runPromise(Effect.flip(client().call("getMe")))
+    expect(isTelegramApiError(failure)).toBe(true)
+    expect((failure as TelegramApiError).errorCode).toBe(409)
+    expect((toIntegrationError(failure) as IntegrationError).reason).toBe("delivery-failed")
+  })
+
   // The refinement admits a `TelegramApiError` from a copy of this module built
   // before `reason` existed, whose `reason` is `undefined` rather than `null`,
   // and one whose `reason` is a string this build cannot encode. Reading either
@@ -494,7 +721,9 @@ describe("toIntegrationError", () => {
     for (const extra of [{}, { reason: undefined }, { reason: "invented-in-a-newer-build" }]) {
       const foreign = Object.assign(new Error("boom"), {
         name: "TelegramApiError",
+        code: "TELEGRAM_API_ERROR",
         summary: "boom",
+        docsUrl: ERROR_REFERENCE_URL,
         errorCode: 429,
         deliveredMessageIds: [],
         ...extra

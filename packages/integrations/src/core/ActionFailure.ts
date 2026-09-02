@@ -11,7 +11,7 @@
  * @since 1.0.0
  */
 import { Schema } from "effect"
-import { IntegrationError, isIntegrationError, isRetryable, reasons } from "./IntegrationError.ts"
+import { IntegrationError, isIntegrationError, isReason, reasons } from "./IntegrationError.ts"
 
 /**
  * The classification, as a schema.
@@ -108,19 +108,36 @@ const capped = (message: string): string =>
   message.length <= MAX_MESSAGE_LENGTH ? message : `${message.slice(0, MAX_MESSAGE_LENGTH - 1)}…`
 
 /**
+ * What a value that cannot describe itself is journaled as.
+ *
+ * `String(value)` is not total: a null-prototype object has no `toString`, and
+ * a `toString` a caller wrote can throw. Neither may take down the conversion.
+ */
+const UNDESCRIBABLE = "an integration failure that cannot be described"
+
+/**
  * The persisted text for a failure that is not an {@link IntegrationError}.
  *
  * `summary` rather than `message`, because `SmithersError` appends its
  * documentation URL to `message` and the other providers journal the summary.
  * Reading the same field everywhere keeps one failed send from looking
  * different depending on which client raised it.
+ *
+ * Every read here runs on a value from outside this package, so every read is
+ * guarded: a `summary` getter is caller code, and stringifying an arbitrary
+ * object runs its `toString`.
  */
 const fallbackMessage = (error: unknown): string => {
-  if (typeof error === "object" && error !== null && "summary" in error) {
-    const summary = (error as { readonly summary?: unknown }).summary
-    if (typeof summary === "string") return summary
+  try {
+    if (typeof error === "object" && error !== null && "summary" in error) {
+      const summary = (error as { readonly summary?: unknown }).summary
+      if (typeof summary === "string") return summary
+    }
+    if (error instanceof Error) return typeof error.message === "string" ? error.message : UNDESCRIBABLE
+    return String(error)
+  } catch {
+    return UNDESCRIBABLE
   }
-  return error instanceof Error ? error.message : String(error)
 }
 
 /**
@@ -129,37 +146,52 @@ const fallbackMessage = (error: unknown): string => {
  * A failure that is not an {@link IntegrationError} came from outside the
  * clients, so it is reported as a non-retryable `delivery-failed` rather than
  * guessed at. The conversion is total: an error that only claims the
- * `IntegrationError` name, or carries a reason this build cannot encode, takes
- * the unclassified branch rather than failing schema validation inside
- * `Effect.mapError`, where the throw would become a defect.
+ * `IntegrationError` name, one that is a real `IntegrationError` but carries a
+ * reason or summary this build cannot encode, and a value that cannot even be
+ * stringified all take the unclassified branch rather than failing schema
+ * validation inside `Effect.mapError`, where the throw would become a defect.
+ * Reads after the refinement are guarded too, because a getter can pass one
+ * read and throw on the next.
  *
  * @category conversions
  * @since 1.0.0
  */
 export const fromIntegrationError = (error: unknown): IntegrationFailure => {
-  if (!isIntegrationError(error)) {
-    return new IntegrationFailure({
+  const unclassified = (): IntegrationFailure =>
+    new IntegrationFailure({
       reason: "delivery-failed",
       message: capped(fallbackMessage(error)),
       retryable: false
     })
+
+  // `instanceof` is not enough on its own. `reason` and `summary` are typed but
+  // never validated, so a real `IntegrationError` built by a JavaScript caller
+  // can carry a reason `Reason` refuses, which `IntegrationFailure` then throws
+  // on at construction.
+  try {
+    if (!isIntegrationError(error)) return unclassified()
+    const reason = error.reason
+    const summary = error.summary
+    const details = error.details
+    if (!isReason(reason) || typeof summary !== "string") return unclassified()
+    const delivered = details?.["deliveredMessageIds"]
+    return new IntegrationFailure({
+      reason,
+      message: capped(summary),
+      retryable: details?.["retryable"] === true,
+      ...(details?.["outcomeUnknown"] === true ? { outcomeUnknown: true } : {}),
+      // Only when there is something to say, and only when every member really
+      // is a message id. An empty list on every failure is noise in a row that
+      // is written on every failed attempt, and `Schema.Number` encodes a
+      // non-finite member as the string "NaN", so a row claiming a message id of
+      // NaN is worse than one claiming none.
+      ...(Array.isArray(delivered) && delivered.length > 0 && delivered.every(isMessageId)
+        ? { deliveredMessageIds: delivered }
+        : {})
+    })
+  } catch {
+    return unclassified()
   }
-  const details = error.details
-  const delivered = details?.["deliveredMessageIds"]
-  return new IntegrationFailure({
-    reason: error.reason,
-    message: capped(error.summary),
-    retryable: isRetryable(error),
-    ...(details?.["outcomeUnknown"] === true ? { outcomeUnknown: true } : {}),
-    // Only when there is something to say, and only when every member really
-    // is a message id. An empty list on every failure is noise in a row that
-    // is written on every failed attempt, and `Schema.Number` encodes a
-    // non-finite member as the string "NaN", so a row claiming a message id of
-    // NaN is worse than one claiming none.
-    ...(Array.isArray(delivered) && delivered.length > 0 && delivered.every(isMessageId)
-      ? { deliveredMessageIds: delivered }
-      : {})
-  })
 }
 
 /**

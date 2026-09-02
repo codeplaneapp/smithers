@@ -171,6 +171,7 @@ export const channel = (options: ChannelOptions): Channel =>
     name: options.name ?? SERVICE,
     credential: options.credential,
     secret: options.secret,
+    fingerprintHeaders: ["x-github-delivery", "x-github-event"],
     verify,
     decode: (raw, payload) => decode(raw, payload),
     route: options.route,

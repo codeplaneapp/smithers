@@ -37,6 +37,19 @@ describe("GitHub config", () => {
   it("ignores a blank value and trims what it keeps", () => {
     expect(resolve({ token: "   " }, { GITHUB_TOKEN: " padded " }).token).toBe("padded")
   })
+
+  it("rejects an unparseable or non-HTTP API base URL as invalid-config", () => {
+    for (const apiBaseUrl of ["not a url", "httpx://nope"]) {
+      let failure: unknown
+      try {
+        make({ apiBaseUrl }, {})
+      } catch (cause) {
+        failure = cause
+      }
+      expect(isIntegrationError(failure), apiBaseUrl).toBe(true)
+      expect(isIntegrationError(failure) && failure.reason, apiBaseUrl).toBe("invalid-config")
+    }
+  })
 })
 
 describe("nextPageUrl", () => {
@@ -170,6 +183,15 @@ describe("GitHubClient over a real HTTP server", () => {
   it("wraps a single object page rather than dropping it", async () => {
     fixture = await startFixture((_request, response) => json(response, 200, { id: 1 }))
     expect((await Effect.runPromise(client().paginate("/x"))).items).toEqual([{ id: 1 }])
+  })
+
+  // A JSON `null` body is the absence of a resource, not a resource. Pushing it
+  // would put a `null` member into a list every caller then dereferences.
+  it("contributes nothing for a page whose body is JSON null", async () => {
+    fixture = await startFixture((_request, response) => json(response, 200, null))
+    const page = await Effect.runPromise(client().paginate("/x"))
+    expect(page.items).toEqual([])
+    expect(page.truncated).toBe(false)
   })
 
   it("retries a 429 that names its own delay, then succeeds", async () => {

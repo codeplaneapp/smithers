@@ -1,3 +1,4 @@
+import { ERROR_REFERENCE_URL } from "@smthrs/errors/ErrorCode"
 import { SmithersError } from "@smthrs/errors/SmithersError"
 import { Effect, Schema } from "effect"
 import { resolve as resolvePath } from "node:path"
@@ -89,7 +90,9 @@ describe("IntegrationError", () => {
   it("recognizes an error that crossed a module boundary by name and shape", () => {
     const foreign = Object.assign(new Error("copy"), {
       name: "IntegrationError",
+      code: "INTEGRATION_ERROR",
       summary: "copy",
+      docsUrl: ERROR_REFERENCE_URL,
       reason: "poll-failed"
     })
     expect(isIntegrationError(foreign)).toBe(true)
@@ -104,8 +107,17 @@ describe("IntegrationError", () => {
     expect(isIntegrationError(Object.assign(new Error("boom"), { name: "IntegrationError" }))).toBe(false)
     expect(isIntegrationError(Object.assign(new Error("boom"), {
       name: "IntegrationError",
+      code: "INTEGRATION_ERROR",
       summary: "boom",
+      docsUrl: ERROR_REFERENCE_URL,
       reason: "invented-in-a-newer-build"
+    }))).toBe(false)
+    expect(isIntegrationError(Object.assign(new Error("boom"), {
+      name: "IntegrationError",
+      code: "INVALID_INPUT",
+      summary: "boom",
+      docsUrl: ERROR_REFERENCE_URL,
+      reason: "poll-failed"
     }))).toBe(false)
   })
 
@@ -139,6 +151,16 @@ describe("SignalName", () => {
     expect(() => SignalName.eventName("git:hub", "push")).toThrow(/must not contain/)
     expect(() => SignalName.eventName("github", "pu:sh")).toThrow(/must not contain/)
     expect(() => SignalName.receivedBy("")).toThrow(/non-empty/)
+  })
+
+  // `eventName` is reachable from JavaScript, where the parameter type is not
+  // enforced. Reading `.trim()` off a number would raise a bare `TypeError`
+  // naming a property, which tells the caller nothing about which argument was
+  // wrong; the documented `INVALID_INPUT` does.
+  it("reports a non-string segment as invalid input rather than a TypeError", () => {
+    expect(() => SignalName.eventName(7 as never, "push")).toThrow(/service must be a non-empty string/)
+    expect(() => SignalName.eventName("github", null as never)).toThrow(/event must be a non-empty string/)
+    expect(() => SignalName.receivedBy(undefined as never)).toThrow(/service must be a non-empty string/)
   })
 
   it("round-trips a name", () => {
@@ -401,6 +423,124 @@ describe("ActionFailure conversion is total", () => {
     // the same shape journals the same way.
     const foreign = Object.assign(new Error("message with a docs URL"), { summary: "just the summary" })
     expect(fromIntegrationError(foreign).message).toBe("just the summary")
+  })
+
+  // Carrying the field is not the same as carrying a string in it. A forged or
+  // drifted error whose `summary` is a number would put that value straight
+  // into a `Schema.String` journal column, so the shape has to be checked
+  // rather than the field's presence.
+  it("falls back to the message when the summary is not a string", () => {
+    const wrongType = Object.assign(new Error("boom"), { summary: 42 })
+    expect(fromIntegrationError(wrongType).message).toBe("boom")
+    expect(fromIntegrationError({ summary: null })).toMatchObject({ message: "[object Object]" })
+  })
+
+  // The name branch rejects a reason this build cannot encode, but `instanceof`
+  // returned early and trusted it. `reason` is only typed, never validated, so
+  // a JavaScript caller or a widened cast produced a real `IntegrationError`
+  // that `IntegrationFailure`'s `Schema.Literals` then refused at construction
+  // — a throw inside `Effect.mapError`, which is a defect the caller's
+  // `catchAll` never sees.
+  it("converts a real IntegrationError carrying an unencodable reason", () => {
+    const invented = new IntegrationError("invented" as never, "boom")
+    expect(isIntegrationError(invented)).toBe(false)
+    expect(fromIntegrationError(invented)).toMatchObject({
+      reason: "delivery-failed",
+      message: "boom",
+      retryable: false
+    })
+  })
+
+  // `String(value)` is not total. A null-prototype object has no `toString`,
+  // and a `summary` getter runs caller code. Either one threw where the
+  // conversion promises it classifies.
+  it("classifies a value that cannot be stringified", () => {
+    expect(() => fromIntegrationError(Object.create(null))).not.toThrow()
+    expect(fromIntegrationError(Object.create(null))).toMatchObject({ reason: "delivery-failed" })
+    const throwingSummary = Object.defineProperty({}, "summary", {
+      get: () => {
+        throw new Error("getter")
+      }
+    })
+    expect(() => fromIntegrationError(throwingSummary)).not.toThrow()
+    expect(fromIntegrationError(throwingSummary).reason).toBe("delivery-failed")
+    const throwingToString = {
+      toString: () => {
+        throw new Error("toString")
+      }
+    }
+    expect(fromIntegrationError(throwingToString).reason).toBe("delivery-failed")
+  })
+
+  it("classifies Error subclasses whose integration-shape getters throw", () => {
+    class ThrowingGetterError extends Error {}
+
+    for (const property of ["name", "code", "summary", "details"] as const) {
+      const hostile = Object.assign(new ThrowingGetterError("boom"), {
+        name: "IntegrationError",
+        code: "INTEGRATION_ERROR",
+        summary: "boom",
+        docsUrl: ERROR_REFERENCE_URL,
+        reason: "delivery-failed",
+        details: { retryable: true }
+      })
+      Object.defineProperty(hostile, property, {
+        configurable: true,
+        get: () => {
+          throw new Error(`${property} getter`)
+        }
+      })
+      expect(() => fromIntegrationError(hostile), property).not.toThrow()
+      expect(fromIntegrationError(hostile), property).toMatchObject({
+        reason: "delivery-failed",
+        retryable: false
+      })
+    }
+  })
+
+  it("takes the unclassified branch when a validated field throws on the conversion read", () => {
+    for (const property of ["summary", "details"] as const) {
+      const hostile = new IntegrationError("delivery-failed", "boom", { retryable: true })
+      let reads = 0
+      Object.defineProperty(hostile, property, {
+        configurable: true,
+        get: () => {
+          reads += 1
+          if (reads === 1) return property === "summary" ? "boom" : { retryable: true }
+          throw new Error(`${property} getter`)
+        }
+      })
+      expect(fromIntegrationError(hostile), property).toMatchObject({
+        reason: "delivery-failed",
+        retryable: false
+      })
+    }
+  })
+
+  it("takes the unclassified branch when a validated summary changes type", () => {
+    const hostile = new IntegrationError("delivery-failed", "boom", { retryable: true })
+    let reads = 0
+    Object.defineProperty(hostile, "summary", {
+      configurable: true,
+      get: () => reads++ === 0 ? "boom" : 42
+    })
+    expect(fromIntegrationError(hostile)).toMatchObject({
+      reason: "delivery-failed",
+      retryable: false
+    })
+  })
+
+  // `Error.message` is writable, so an error built by a JavaScript caller or by
+  // another module instance can carry a non-string in it. Passing that value
+  // through would hand a `Schema.String` journal column something it refuses,
+  // which is the throw inside `Effect.mapError` this conversion exists to
+  // avoid.
+  it("classifies an Error whose message is not a string", () => {
+    const wrongType = Object.assign(new Error("ignored"), { message: 42 })
+    const failure = fromIntegrationError(wrongType)
+    expect(failure.reason).toBe("delivery-failed")
+    expect(typeof failure.message).toBe("string")
+    expect(failure.message).toBe("an integration failure that cannot be described")
   })
 
   it("caps the provider text it persists", () => {

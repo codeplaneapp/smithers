@@ -84,6 +84,23 @@ describe("chunk", () => {
     expect(chunk(`${"a".repeat(60)}    ${"b".repeat(60)}`, 100).every((piece) => piece.trim() === piece)).toBe(true)
     expect(chunk(`${" ".repeat(120)}tail`, 100)).toEqual(["tail"])
   })
+
+  // The tail of the walk is the other end of the same rule: text whose only
+  // remainder is the whitespace the previous cut left behind must produce no
+  // final chunk, rather than a chunk Telegram would reject as empty.
+  it("emits no final chunk when only trimmed whitespace remains", () => {
+    expect(chunk(`${"a".repeat(100)}   `, 100)).toEqual(["a".repeat(100)])
+  })
+
+  // A sentence end is a candidate boundary only when the whole match fits. The
+  // search window is one character wider than the limit, so a terminator whose
+  // trailing space lands past it would otherwise be taken as a split point and
+  // produce a chunk longer than the caller asked for.
+  it("ignores a sentence end whose match does not fit the limit", () => {
+    const pieces = chunk(`${"a".repeat(19)}. ${"b".repeat(30)}`, 20)
+    expect(pieces[0]).toBe(`${"a".repeat(19)}.`)
+    for (const piece of pieces) expect(piece.length).toBeLessThanOrEqual(20)
+  })
 })
 
 describe("markdown", () => {

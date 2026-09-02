@@ -88,13 +88,18 @@ export interface IssueFields {
   readonly priority?: Priority | undefined
   /**
    * Label names, resolved per team and cached. An empty array clears the
-   * issue's labels; omit the field to leave them alone.
+   * issue's labels; omit the field to leave them alone. Supply this or
+   * `labelIds`, not both; supplying both fails `decode-failed`.
    */
   readonly labels?: ReadonlyArray<string> | undefined
-  /** Raw label ids, which skip resolution. */
+  /** Raw label ids, which skip resolution. Supply this or `labels`, not both. */
   readonly labelIds?: ReadonlyArray<string> | undefined
-  /** A workflow-state name such as `In Progress`, resolved per team. */
+  /**
+   * A workflow-state name such as `In Progress`, resolved per team. Supply
+   * this or `stateId`, not both; supplying both fails `decode-failed`.
+   */
   readonly stateName?: string | undefined
+  /** A raw workflow-state id. Supply this or `stateName`, not both. */
   readonly stateId?: string | undefined
   readonly assigneeId?: string | undefined
   readonly projectId?: string | undefined
@@ -611,6 +616,24 @@ export const make = (
     fields: IssueFields
   ): Effect.Effect<Record<string, unknown>, IntegrationError> =>
     Effect.gen(function*() {
+      if (fields.stateId !== undefined && fields.stateName !== undefined) {
+        return yield* Effect.fail(
+          new IntegrationError(
+            "decode-failed",
+            "Linear issue state is over-specified: pass stateId or stateName, not both.",
+            { stateId: fields.stateId, stateName: fields.stateName }
+          )
+        )
+      }
+      if (fields.labelIds !== undefined && fields.labels !== undefined) {
+        return yield* Effect.fail(
+          new IntegrationError(
+            "decode-failed",
+            "Linear issue labels are over-specified: pass labelIds or labels, not both.",
+            { labelIds: fields.labelIds, labels: fields.labels }
+          )
+        )
+      }
       const input: Record<string, unknown> = {}
       if (fields.title !== undefined) input["title"] = fields.title
       if (fields.description !== undefined) input["description"] = fields.description

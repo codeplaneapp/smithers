@@ -35,6 +35,16 @@ listed a changelog; this is it.
   the one rule the Telegram guard, the journal conversion, and the persisted
   schema all read, so a list one accepts and another rejects cannot put a throw
   back into `Effect.mapError` or a `NaN` into a journal row.
+- Added an exclusive workspace lock at `GitHub.ListenerRegistry.DEFAULT_LOCK_PATH`,
+  held for the whole of an applying `reconcile`. Two applying runs in one
+  workspace used to read the same state, plan the same `create`, and each POST
+  it, leaving two hooks on one callback URL with only the second recorded: the
+  first was orphaned, unowned, and doubling every delivery. The pending record
+  converges an interrupted run, not a concurrent one, because both processes
+  write theirs before either POSTs. A holder older than
+  `PENDING_CREATE_MAX_AGE_MS`, and a record that does not parse, are reclaimed,
+  so a crashed run cannot wedge the workspace; a planning run neither takes the
+  lock nor waits for one.
 
 ### Changed
 
@@ -65,8 +75,18 @@ listed a changelog; this is it.
   only the one for a listener with no ownership entry, and plan a `delete` only
   for a hook that is still there, so an interrupted repository move finishes on
   the next run instead of retrying a delete GitHub answers 404.
-- Raise the coverage thresholds and record what the remaining shortfall stands
-  for, behavior by behavior.
+- Raise the default coverage thresholds to the exact figures reached by real
+  HTTP and SQLite tests for listener reconciliation, cursor failures, Linear
+  response and retry paths, and Telegram retries, envelopes, interrupts, and
+  multipart documents. Remove four guards that cannot receive their rejected
+  values through the declared types and package call sites.
+- Refuse a `Telegram.Approval.token` id that is not a non-empty string and a
+  `Telegram.Approval.callbackData` token that is not a string, with
+  `INVALID_INPUT` naming the argument. Both are reachable from JavaScript,
+  where the parameter types are not enforced: an absent id used to raise a bare
+  `TypeError` naming a property, and an empty one hashed to a namespace every
+  miscalled prompt shared. An empty token stays legal, because that is the
+  prompt a spec with no token asks for and it resolves for nobody.
 
 ### Fixed
 
@@ -97,9 +117,9 @@ listed a changelog; this is it.
   into "this team has no key". It now fails `decode-failed` naming the path, the
   rule the other connection readers already followed.
 - Fixed the error contract in `docs/api.md` claiming every failure a caller sees
-  is an `IntegrationError`. That holds for the Effect channel; the plan-time
-  helpers that validate their arguments throw `SmithersError`, and the page now
-  names them.
+  is an `IntegrationError`. GitHub and Linear clients, sources, channels, and
+  durable actions use that vocabulary; the Telegram client maps its
+  `TelegramApiError` at the action boundary, and plan-time helpers throw.
 - Fixed a request body that cannot be serialized being reported as a write
   whose outcome is unknown, a `sendMessage` result with a non-positive
   `message_id` counting as delivered, a `getUpdates` cursor read through
@@ -117,3 +137,43 @@ listed a changelog; this is it.
   classified failure the action's type promises. A list whose members are not
   all message ids is now dropped rather than journaled, since `Schema.Number`
   encodes a non-finite member as the string "NaN".
+- Fixed malformed successful Bot API responses being classified as delivery
+  failures. Non-JSON bodies, non-envelope values, and missing or invalid `ok`
+  members on HTTP 200 now map to `decode-failed` with a known outcome.
+- Fixed `GitHub.ListenerRegistry.parseRegistry` accepting two listeners that
+  declare one repository and one callback URL, which is one GitHub hook. The
+  pair asked reconciliation for a second hook doubling every overlapping
+  delivery, and reached apply as a `conflict` blaming an unowned hook this
+  workspace had created itself. It is now refused at the declaration, naming
+  both listener ids.
+- Fixed `GitHub.ListenerRegistry.reconcile` dying on a malformed client
+  configuration. `GitHub.GitHubClient.make` parsed `apiBaseUrl` with a bare
+  `new URL`, and reconciliation built its default client outside the typed
+  boundary, so an unparseable or non-HTTP base URL escaped an effect declared
+  to fail only with `IntegrationError`. Both now report `invalid-config`.
+- Fixed the hook id in a GitHub create or update answer being coerced rather
+  than decoded. `Number(hook?.id)` read `{"id": true}` as hook 1 and
+  `{"id": "42"}` as 42, so this workspace could record ownership of a hook
+  GitHub never named. Only a positive safe integer is accepted; an absent id
+  still keeps the planned hook id, and anything else fails `decode-failed`
+  without writing ownership.
+- Fixed `Linear.LinearClient` silently discarding a conflicting issue field.
+  Passing both `stateId` and `stateName`, or both `labelIds` and `labels`,
+  dropped the name and filed the caller's other intent on an action whose tier
+  is irreversible. Both now fail `decode-failed` before any mutation is sent,
+  the rule `resolveTeam` already applied to `teamId` and `teamKey`.
+- Fixed the Bot API envelope being read through a cast once its outer shape had
+  been checked. A wire `error_code` of `"429"` landed on `TelegramApiError`'s
+  numeric field, which then failed `isTelegramApiError`, so the failure lost its
+  classification, the plain-text parse-entity fallback stopped firing, and a
+  partial multi-chunk send stopped naming its delivered ids. `ok`,
+  `error_code`, `description`, and `parameters.retry_after` are each decoded by
+  type now, and a success envelope with no `result` is `decode-failed`.
+- Fixed the action-boundary conversions still being able to throw. Their
+  documentation promised a total conversion, but `isIntegrationError`,
+  `Core.ActionFailure.fromIntegrationError`, `isTelegramApiError`, and
+  `Telegram.TelegramClient.toIntegrationError` read `name`, `code`, `summary`,
+  and `details` off a caller-supplied error, and a getter is caller code: one
+  that throws became the defect inside `Effect.mapError` the prose said could
+  not happen. Every such read is guarded, and a value the refinements cannot
+  vouch for takes the unclassified `delivery-failed` branch.

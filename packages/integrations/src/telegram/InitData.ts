@@ -166,7 +166,7 @@ const base64UrlToBytes = (value: string): Uint8Array => {
  * libraries use `===`; this does not.
  */
 const timingSafeEqualHex = (left: string, right: string): boolean => {
-  if (typeof left !== "string" || typeof right !== "string" || left.length !== right.length) return false
+  if (left.length !== right.length) return false
   let difference = 0
   for (let index = 0; index < left.length; index += 1) {
     difference |= left.charCodeAt(index) ^ right.charCodeAt(index)

@@ -81,6 +81,8 @@ export interface Config {
   /** The journal-safe reference to the signing secret. */
   readonly credential: Redacted.Redacted<CredentialRef>
   readonly secret: SecretResolver
+  /** Non-secret headers whose values affect the decoded event. */
+  readonly fingerprintHeaders?: ReadonlyArray<string> | undefined
   /**
    * The provider's signature check over the exact delivered bytes.
    *
@@ -149,6 +151,7 @@ export const make = (config: Config): Channel => {
     name: config.name,
     schema: Schema.Json,
     credential: config.credential,
+    ...(config.fingerprintHeaders === undefined ? {} : { fingerprintHeaders: config.fingerprintHeaders }),
     verify: verifier,
     map: () => Effect.fail(new InvalidInput({ issue: "unreachable: the provider decoder maps the event" })),
     project: config.project ?? noProjection
@@ -156,6 +159,7 @@ export const make = (config: Config): Channel => {
   return {
     name: config.name,
     schema: Schema.Unknown,
+    ...(json.fingerprintHeaders === undefined ? {} : { fingerprintHeaders: json.fingerprintHeaders }),
     verify: json.verify,
     decode: (raw) =>
       json.decode(raw).pipe(

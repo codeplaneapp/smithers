@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Cause, Effect, Exit } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 import type { IntegrationError } from "../src/core/IntegrationError.ts"
 import { DEFAULT_API_BASE_URL, resolve } from "../src/linear/Config.ts"
@@ -111,6 +111,7 @@ describe("retryDelayMs", () => {
     expect(retryDelayMs(new Headers({ "retry-after": "soon" }))).toBeUndefined()
     expect(retryDelayMs(new Headers({ "x-ratelimit-requests-reset": "1005" }), 1000)).toBe(5)
     expect(retryDelayMs(new Headers({ "x-ratelimit-requests-reset": "500" }), 1000)).toBe(0)
+    expect(retryDelayMs(new Headers({ "x-ratelimit-requests-reset": "soon" }), 1000)).toBeUndefined()
     expect(retryDelayMs(new Headers())).toBeUndefined()
   })
 })
@@ -229,6 +230,44 @@ describe("LinearClient over a real HTTP server", () => {
     expect(fixture.requests.map((request) => operation(request.body))).toEqual(["IssueCreate"])
   })
 
+  it("refuses over-specified create fields before sending a mutation", async () => {
+    fixture = await graphql()
+    for (
+      const fields of [
+        { stateId: "state-todo", stateName: "Todo" },
+        { labelIds: ["label-bug"], labels: ["Bug"] }
+      ]
+    ) {
+      const exit = await Effect.runPromise(Effect.exit(
+        client().createIssue({
+          teamId: TEAM.id,
+          title: "t",
+          ...fields
+        })
+      ))
+      expect(Exit.isFailure(exit)).toBe(true)
+      const failure = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isFailReason)?.error : undefined
+      expect(failure).toMatchObject({ reason: "decode-failed" })
+    }
+    expect(fixture.requests.some((request) => operation(request.body) === "IssueCreate")).toBe(false)
+  })
+
+  it("refuses over-specified update fields before sending a mutation", async () => {
+    fixture = await graphql()
+    for (
+      const fields of [
+        { stateId: "state-todo", stateName: "Todo" },
+        { labelIds: ["label-bug"], labels: ["Bug"] }
+      ]
+    ) {
+      const exit = await Effect.runPromise(Effect.exit(client().updateIssue("issue-uuid", fields)))
+      expect(Exit.isFailure(exit)).toBe(true)
+      const failure = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isFailReason)?.error : undefined
+      expect(failure).toMatchObject({ reason: "decode-failed" })
+    }
+    expect(fixture.requests.some((request) => operation(request.body) === "IssueUpdate")).toBe(false)
+  })
+
   it("reports a mutation that did not return an issue", async () => {
     fixture = await graphql({ IssueCreate: { issueCreate: { success: false } } })
     const failure = await Effect.runPromise(Effect.flip(client().createIssue({ teamId: TEAM.id, title: "t" })))
@@ -339,6 +378,22 @@ describe("LinearClient over a real HTTP server", () => {
     expect(calls).toBe(2)
   })
 
+  it("uses exponential backoff when a retryable response names no delay", async () => {
+    let calls = 0
+    fixture = await startFixture((_request, response) => {
+      calls += 1
+      if (calls === 1) {
+        json(response, 503, {})
+        return
+      }
+      json(response, 200, { data: { ok: true } })
+    })
+    const startedAt = Date.now()
+    expect(await Effect.runPromise(client().query("query X { x }"))).toEqual({ ok: true })
+    expect(calls).toBe(2)
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(200)
+  })
+
   it("gives up after five attempts on a persistent 5xx", async () => {
     fixture = await startFixture((_request, response) => json(response, 503, {}, { "retry-after": "0" }))
     const failure = await Effect.runPromise(Effect.flip(client().query("query X { x }")))
@@ -382,6 +437,20 @@ describe("mutations are not repeated on an ambiguous answer", () => {
     }
   })
 
+  it("marks a write's dropped connection as an unknown outcome", async () => {
+    fixture = await startFixture((_request, response) => {
+      response.destroy()
+    })
+    const failure = await Effect.runPromise(
+      Effect.flip(client().createIssue({ teamId: "team-eng-id", title: "t" }))
+    )
+    expect(failure.reason).toBe("delivery-failed")
+    expect(failure.message).toContain("write failed")
+    expect(failure.message).toContain("outcome is unknown")
+    expect(failure.details).toMatchObject({ outcomeUnknown: true })
+    expect(fixture.requests).toHaveLength(1)
+  })
+
   it("still retries a read, where repeating costs nothing", async () => {
     let calls = 0
     fixture = await startFixture((_request, response) => {
@@ -421,6 +490,20 @@ describe("typed failures the client used to raise as defects", () => {
     fixture = await graphql({ IssueLabels: { issueLabels: { nodes: [{ name: "Bug" }] } } })
     const failure = await Effect.runPromise(Effect.flip(client().resolveLabelIds("team-eng-id", ["Bug"])))
     expect(failure.details).toMatchObject({ path: "issueLabels.nodes[0].id" })
+  })
+
+  it("keeps an absent state name as undefined", async () => {
+    fixture = await graphql({ WorkflowStates: { workflowStates: { nodes: [{ id: "state-unnamed" }] } } })
+    const failure = await Effect.runPromise(Effect.flip(client().resolveStateId("team-eng-id", "Todo")))
+    expect(failure.reason).toBe("decode-failed")
+    expect(failure.details).toMatchObject({ known: [undefined] })
+  })
+
+  it("names an issue payload that is not an object", async () => {
+    fixture = await graphql({ Issue: { issue: "ENG-1" } })
+    const failure = await Effect.runPromise(Effect.flip(client().getIssue("ENG-1")))
+    expect(failure.reason).toBe("decode-failed")
+    expect(failure.details).toMatchObject({ path: "issue" })
   })
 
   it("fails decode-failed for a mutation result missing a field it promises", async () => {
@@ -517,6 +600,24 @@ describe("adversarial mutation results", () => {
     fixture = await graphql({ IssueUpdate: { issueUpdate: "nope" } })
     const failure = await Effect.runPromise(Effect.flip(client().updateIssue("issue-uuid", { title: "t" })))
     expect(failure.reason).toBe("delivery-failed")
+  })
+
+  it("reports a comment mutation payload that is not a record", async () => {
+    fixture = await graphql({ CommentCreate: { commentCreate: "nope" } })
+    const failure = await Effect.runPromise(Effect.flip(client().commentOnIssue("issue-uuid", "hi")))
+    expect(failure.reason).toBe("delivery-failed")
+    expect(failure.details).toMatchObject({ success: false, idOrIdentifier: "issue-uuid" })
+  })
+
+  it("preserves absent and null issue links on a returned comment", async () => {
+    for (const issue of [undefined, null]) {
+      const comment = { id: "c", body: "hi", ...(issue === undefined ? {} : { issue }) }
+      fixture = await graphql({ CommentCreate: { commentCreate: { success: true, comment } } })
+      const returned = await Effect.runPromise(client().commentOnIssue("issue-uuid", "hi"))
+      expect(returned.issue).toBe(issue)
+      await fixture.close()
+      fixture = undefined
+    }
   })
 
   it("reports a connection that is not an object", async () => {

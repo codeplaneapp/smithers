@@ -13,7 +13,7 @@
  * @since 1.0.0
  */
 import { InvalidInput, Unauthorized } from "@smthrs/control/ControlError"
-import { SmithersError } from "@smthrs/errors/SmithersError"
+import { hasSmithersErrorShape, SmithersError } from "@smthrs/errors/SmithersError"
 
 /**
  * Every classification an integration failure can carry, in one runtime list.
@@ -43,6 +43,21 @@ export const reasons = [
  * @since 1.0.0
  */
 export type Reason = typeof reasons[number]
+
+/**
+ * Whether `value` is a classification this build can encode.
+ *
+ * `reason` is a type, not a runtime check: the constructor stores whatever it
+ * is given, so a JavaScript caller or a widened cast can put a string outside
+ * {@link reasons} on a real `IntegrationError`. Exported because the refinement
+ * and the action-boundary conversion both have to answer this the same way. A
+ * value one accepts and the other refuses is how a throw gets into
+ * `Effect.mapError`, where it becomes a defect rather than a typed failure.
+ *
+ * @category refinements
+ * @since 1.0.0
+ */
+export const isReason = (value: unknown): value is Reason => reasons.includes(value as Reason)
 
 /**
  * A failure raised by an integration client, webhook source, or listener
@@ -78,16 +93,25 @@ export class IntegrationError extends SmithersError {
  * drifted carries a `reason` this instance cannot encode. So the name branch
  * also requires the shape the conversions read, and anything else falls
  * through to the caller's unclassified path instead of throwing there.
+ * Every structural read is guarded because a property getter on a
+ * caller-supplied error is executable code; one that throws answers `false`.
  *
  * @category refinements
  * @since 1.0.0
  */
 export const isIntegrationError = (error: unknown): error is IntegrationError => {
-  if (error instanceof IntegrationError) return true
-  if (!(error instanceof Error) || error.name !== "IntegrationError") return false
-  const candidate = error as { readonly summary?: unknown; readonly reason?: unknown }
-  return typeof candidate.summary === "string" &&
-    reasons.includes(candidate.reason as Reason)
+  try {
+    if (
+      !(error instanceof Error) ||
+      (!(error instanceof IntegrationError) && error.name !== "IntegrationError") ||
+      !hasSmithersErrorShape(error) ||
+      error.code !== "INTEGRATION_ERROR"
+    ) return false
+    const reason = Object.getOwnPropertyDescriptor(error, "reason")
+    return reason !== undefined && "value" in reason && isReason(reason.value)
+  } catch {
+    return false
+  }
 }
 
 /**

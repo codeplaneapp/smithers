@@ -216,6 +216,7 @@ export const channel = (options: ChannelOptions): Channel => {
     name,
     credential: options.credential,
     secret: options.secret,
+    fingerprintHeaders: ["linear-delivery"],
     verify: (raw, secret) =>
       verify(raw, secret, {
         maxTimestampSkewMs: options.maxTimestampSkewMs,

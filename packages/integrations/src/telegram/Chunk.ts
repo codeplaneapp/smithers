@@ -54,7 +54,7 @@ const findSplitIndex = (text: string, limit: number): number => {
 
 /** Whether cutting `text` at `index` would split a surrogate pair. */
 const splitsSurrogatePair = (text: string, index: number): boolean => {
-  if (index <= 0 || index >= text.length) return false
+  // `chunk` calls this only while `1 <= index < text.length`.
   const before = text.charCodeAt(index - 1)
   const after = text.charCodeAt(index)
   return before >= 0xD800 && before <= 0xDBFF && after >= 0xDC00 && after <= 0xDFFF

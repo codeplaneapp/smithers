@@ -103,3 +103,27 @@ describe("CursorStore (SQLite) durability", () => {
     expect(cursor).toBe("99")
   })
 })
+
+describe("CursorStore (SQLite) failures", () => {
+  // The SQL layer can be built before the package migration is installed. A
+  // missing table must stay in the typed channel and name the operation whose
+  // cursor did not move.
+  it("classifies read and write failures from an unmigrated database", async () => {
+    const unmigrated = Layer.provideMerge(layerSql, TestDatabase.layer)
+    const [read, write] = await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* CursorStore
+        return [
+          yield* Effect.flip(store.get("missing-read")),
+          yield* Effect.flip(store.set("missing-write", "42"))
+        ] as const
+      }).pipe(Effect.provide(unmigrated), Effect.scoped)
+    )
+    expect(read.reason).toBe("delivery-failed")
+    expect(read.message).toContain("source \"missing-read\"")
+    expect(read.details).toMatchObject({ sourceId: "missing-read", operation: "read" })
+    expect(write.reason).toBe("delivery-failed")
+    expect(write.message).toContain("source \"missing-write\"")
+    expect(write.details).toMatchObject({ sourceId: "missing-write", operation: "write" })
+  })
+})

@@ -112,14 +112,23 @@ const byteLength = (value: string): number => new TextEncoder().encode(value).le
  * bits wide, so two ids can collide; the guarantee is a namespace, not a
  * capability.
  *
+ * Raises `INVALID_INPUT` for an id that is not a non-empty string. The
+ * parameter type is not enforced for a JavaScript caller, and both ways of
+ * getting it wrong are worse than a refusal: an absent id read as a property
+ * raises a bare `TypeError` naming `length` rather than the argument, and an
+ * empty one hashes to a value every miscalled prompt shares, which is the
+ * collision this token exists to prevent.
+ *
  * @category constructors
  * @since 1.0.0
  */
 export const token = (id: string): string => {
-  const source = String(id ?? "")
+  if (typeof id !== "string" || id.length === 0) {
+    throw new SmithersError("INVALID_INPUT", "Approval token id must be a non-empty string.")
+  }
   let hash = 5381
-  for (let index = 0; index < source.length; index += 1) {
-    hash = (((hash << 5) + hash) ^ source.charCodeAt(index)) >>> 0
+  for (let index = 0; index < id.length; index += 1) {
+    hash = (((hash << 5) + hash) ^ id.charCodeAt(index)) >>> 0
   }
   return hash.toString(36)
 }
@@ -128,15 +137,25 @@ export const token = (id: string): string => {
  * Encodes a choice as `callback_data`: `sap:<token>:a`, `sap:<token>:d`, or
  * `sap:<token>:s:<key>`.
  *
+ * Raises `INVALID_INPUT` for a token that is not a string, for one containing
+ * the `:` separator, for an empty option key, and for data over Telegram's
+ * 64-byte limit. An empty token is accepted and encodes a prompt that
+ * {@link decision} resolves for nobody, which is what a spec with no token
+ * asks for.
+ *
  * @category constructors
  * @since 1.0.0
  */
 export const callbackData = (choice: Choice, approvalToken: string): string => {
-  const value = approvalToken ?? ""
-  if (value.includes(":")) throw new SmithersError("INVALID_INPUT", "Approval token must not contain a colon.")
+  if (typeof approvalToken !== "string") {
+    throw new SmithersError("INVALID_INPUT", "Approval token must be a string.")
+  }
+  if (approvalToken.includes(":")) {
+    throw new SmithersError("INVALID_INPUT", "Approval token must not contain a colon.")
+  }
   let data: string
-  if (choice.kind === "approve") data = `${PREFIX}:${value}:a`
-  else if (choice.kind === "reject") data = `${PREFIX}:${value}:d`
+  if (choice.kind === "approve") data = `${PREFIX}:${approvalToken}:a`
+  else if (choice.kind === "reject") data = `${PREFIX}:${approvalToken}:d`
   else {
     if (choice.key.length === 0 || choice.key.includes(":")) {
       throw new SmithersError(
@@ -144,7 +163,7 @@ export const callbackData = (choice: Choice, approvalToken: string): string => {
         `Approval option key must be non-empty and contain no ":": ${JSON.stringify(choice.key)}`
       )
     }
-    data = `${PREFIX}:${value}:s:${choice.key}`
+    data = `${PREFIX}:${approvalToken}:s:${choice.key}`
   }
   if (byteLength(data) > CALLBACK_DATA_MAX_BYTES) {
     throw new SmithersError(

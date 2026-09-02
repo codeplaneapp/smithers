@@ -258,7 +258,22 @@ export const make = (
 ): GitHubClient => {
   const resolved = resolve(config, env)
   const baseUrl = resolved.apiBaseUrl.replace(/\/+$/, "")
-  const apiOrigin = new URL(baseUrl).origin
+  if (!URL.canParse(baseUrl)) {
+    throw new IntegrationError(
+      "invalid-config",
+      "GitHub apiBaseUrl must be a valid HTTP or HTTPS URL.",
+      { apiBaseUrl: resolved.apiBaseUrl, retryable: false }
+    )
+  }
+  const parsedBaseUrl = new URL(baseUrl)
+  if (parsedBaseUrl.protocol !== "http:" && parsedBaseUrl.protocol !== "https:") {
+    throw new IntegrationError(
+      "invalid-config",
+      "GitHub apiBaseUrl must be a valid HTTP or HTTPS URL.",
+      { apiBaseUrl: resolved.apiBaseUrl, retryable: false }
+    )
+  }
+  const apiOrigin = parsedBaseUrl.origin
   if (!Number.isSafeInteger(resolved.maxRetries) || resolved.maxRetries < 0 || resolved.maxRetries > 10) {
     throw new IntegrationError(
       "invalid-config",

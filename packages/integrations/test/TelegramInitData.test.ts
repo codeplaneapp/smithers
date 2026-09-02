@@ -118,6 +118,12 @@ describe("verifyWithBotToken", () => {
     await expect(verifyWithBotToken(initData, "999:other", { nowMs: NOW })).rejects.toThrow(/does not match/)
   })
 
+  it("rejects a hash whose length cannot match the computed digest", async () => {
+    const params = new URLSearchParams(await hmacInitData())
+    params.set("hash", "00")
+    await expect(verifyWithBotToken(params.toString(), BOT_TOKEN, { nowMs: NOW })).rejects.toThrow(/does not match/)
+  })
+
   it("rejects empty initData, a missing hash, and a missing bot token", async () => {
     await expect(verifyWithBotToken("", BOT_TOKEN)).rejects.toThrow(/empty/)
     await expect(verifyWithBotToken(query(baseFields()), BOT_TOKEN)).rejects.toThrow(/missing the hash/)

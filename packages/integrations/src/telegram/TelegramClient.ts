@@ -20,7 +20,7 @@
  *
  * @since 1.0.0
  */
-import { SmithersError } from "@smthrs/errors/SmithersError"
+import { hasSmithersErrorShape, SmithersError } from "@smthrs/errors/SmithersError"
 import { Context, Duration, Effect, Layer, Schedule } from "effect"
 import { isMessageId } from "../core/ActionFailure.ts"
 import { IntegrationError, type Reason, reasons } from "../core/IntegrationError.ts"
@@ -90,28 +90,43 @@ export class TelegramApiError extends SmithersError {
 /**
  * Whether `error` is a {@link TelegramApiError}.
  *
+ * Every field read is guarded. A caller-supplied getter that throws is not a
+ * Bot API failure this module can vouch for, so the refinement answers false
+ * and lets the action boundary use its unclassified path.
+ *
  * @category refinements
  * @since 1.0.0
  */
 export const isTelegramApiError = (error: unknown): error is TelegramApiError => {
-  if (error instanceof TelegramApiError) return true
-  if (!(error instanceof Error) || error.name !== "TelegramApiError") return false
-  // A name is forgeable, so every field a reader of this refinement touches has
-  // to be there too, `deliveredMessageIds` included: `toIntegrationError`
-  // spreads it, and spreading a missing array throws a bare `TypeError` inside
-  // `Effect.mapError`, where a throw is a defect rather than a classified
-  // failure. An error that only claims the name — a forgery, or a
-  // `TelegramApiError` from a copy of this module built before the field
-  // existed — falls through to the caller's unclassified path instead.
-  const candidate = error as {
-    readonly summary?: unknown
-    readonly errorCode?: unknown
-    readonly deliveredMessageIds?: unknown
+  try {
+    if (
+      !(error instanceof Error) ||
+      (!(error instanceof TelegramApiError) && error.name !== "TelegramApiError") ||
+      !hasSmithersErrorShape(error) ||
+      error.code !== "TELEGRAM_API_ERROR"
+    ) return false
+    // A name is forgeable, so every field a reader of this refinement touches has
+    // to be there too, `deliveredMessageIds` included: `toIntegrationError`
+    // spreads it, and spreading a missing array throws a bare `TypeError` inside
+    // `Effect.mapError`, where a throw is a defect rather than a classified
+    // failure. An error that only claims the name, whether a forgery or a
+    // `TelegramApiError` from an older copy of this module, falls through to the
+    // caller's unclassified path instead.
+    const candidate = error as {
+      readonly summary?: unknown
+      readonly errorCode?: unknown
+      readonly deliveredMessageIds?: unknown
+    }
+    const summary = candidate.summary
+    const errorCode = candidate.errorCode
+    const deliveredMessageIds = candidate.deliveredMessageIds
+    return typeof summary === "string" &&
+      (errorCode === null || typeof errorCode === "number") &&
+      Array.isArray(deliveredMessageIds) &&
+      deliveredMessageIds.every(isMessageId)
+  } catch {
+    return false
   }
-  return typeof candidate.summary === "string" &&
-    (candidate.errorCode === null || typeof candidate.errorCode === "number") &&
-    Array.isArray(candidate.deliveredMessageIds) &&
-    candidate.deliveredMessageIds.every(isMessageId)
 }
 
 /**
@@ -123,41 +138,51 @@ export const isTelegramApiError = (error: unknown): error is TelegramApiError =>
  * that exhausted its retries looked exactly like a chat that does not exist.
  * This is the mapping that keeps the package's one promise, that every failure
  * carries a machine-readable reason, true for Telegram as well.
+ * A field getter that starts throwing after the refinement leaves the original
+ * value unchanged, so the total action-boundary conversion can classify it.
  *
  * @category conversions
  * @since 1.0.0
  */
 export const toIntegrationError = (error: unknown): unknown => {
   if (!isTelegramApiError(error)) return error
-  const code = error.errorCode
-  // Read as an absent override rather than as a value. The refinement admits a
-  // `TelegramApiError` from a copy of this module built before `reason`
-  // existed, whose `reason` is `undefined` and not `null`, and one whose
-  // `reason` is a string this build cannot encode. Either would otherwise turn
-  // an exhausted rate limit into a non-retryable failure with a known outcome.
-  const override = reasons.includes(error.reason as Reason) ? error.reason as Reason : null
-  const transient = (code === 429 || (typeof code === "number" && code >= 500)) && override === null
-  const reason = override ?? (transient
-    ? "delivery-failed" as const
-    : code === 401 || code === 403
-    ? "permission-denied" as const
-    : code === 400 || code === 404
-    ? "decode-failed" as const
-    : "delivery-failed" as const)
-  return new IntegrationError(reason, error.summary, {
-    method: error.details?.["method"],
-    errorCode: code,
-    // A 429 that outlived its retries is worth another attempt later; a chat
-    // that does not exist is not.
-    retryable: transient,
-    // A transport failure or a 5xx may have delivered the message anyway, and
-    // a multi-chunk send that failed partway through certainly delivered the
-    // chunks it names. Both cross to the journal. An override means the Bot API
-    // answered and this module could not read the answer, which is a known
-    // outcome with an unreadable receipt, not an ambiguous one.
-    outcomeUnknown: override === null && (code === null || (typeof code === "number" && code >= 500)),
-    deliveredMessageIds: [...error.deliveredMessageIds]
-  }, { cause: error })
+  try {
+    const code = error.errorCode
+    const overrideValue = error.reason
+    const summary = error.summary
+    const details = error.details
+    const deliveredMessageIds = error.deliveredMessageIds
+    // Read as an absent override rather than as a value. The refinement admits a
+    // `TelegramApiError` from a copy of this module built before `reason`
+    // existed, whose `reason` is `undefined` and not `null`, and one whose
+    // `reason` is a string this build cannot encode. Either would otherwise turn
+    // an exhausted rate limit into a non-retryable failure with a known outcome.
+    const override = reasons.includes(overrideValue as Reason) ? overrideValue as Reason : null
+    const transient = (code === 429 || (typeof code === "number" && code >= 500)) && override === null
+    const reason = override ?? (transient
+      ? "delivery-failed" as const
+      : code === 401 || code === 403
+      ? "permission-denied" as const
+      : code === 400 || code === 404
+      ? "decode-failed" as const
+      : "delivery-failed" as const)
+    return new IntegrationError(reason, summary, {
+      method: details?.["method"],
+      errorCode: code,
+      // A 429 that outlived its retries is worth another attempt later; a chat
+      // that does not exist is not.
+      retryable: transient,
+      // A transport failure or a 5xx may have delivered the message anyway, and
+      // a multi-chunk send that failed partway through certainly delivered the
+      // chunks it names. Both cross to the journal. An override means the Bot API
+      // answered and this module could not read the answer, which is a known
+      // outcome with an unreadable receipt, not an ambiguous one.
+      outcomeUnknown: override === null && (code === null || (typeof code === "number" && code >= 500)),
+      deliveredMessageIds: [...deliveredMessageIds]
+    }, { cause: error })
+  } catch {
+    return error
+  }
 }
 
 /**
@@ -311,6 +336,9 @@ export const TelegramClient: Context.Service<TelegramClient, TelegramClient> = C
   "@smthrs/integrations/TelegramClient"
 )
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
 const linkInterrupt = (signal: AbortSignal, controller: AbortController): void => {
   if (signal.aborted) {
     controller.abort(signal.reason)
@@ -387,39 +415,61 @@ export const make = (
           catch: () =>
             new TelegramApiError(
               `Telegram API returned a non-JSON response for method "${method}" (status ${response.status}).`,
-              { method, errorCode: response.status }
+              {
+                method,
+                errorCode: response.status,
+                ...(response.ok ? { reason: "decode-failed" as const } : {})
+              }
             )
         })
         // The Bot API envelope is `{ ok, result }` or `{ ok: false, ... }`.
         // Anything else is not a Bot API answer, so it is reported as one
         // rather than read through a cast that happens not to throw.
-        if (payload !== null && typeof payload !== "object") {
+        if (!isRecord(payload)) {
           return yield* Effect.fail(
             new TelegramApiError(
               `Telegram API returned a response that is not a Bot API envelope for method "${method}" (status ${response.status}).`,
-              { method, errorCode: response.status }
+              {
+                method,
+                errorCode: response.status,
+                ...(response.ok ? { reason: "decode-failed" as const } : {})
+              }
             )
           )
         }
-        const body = (payload ?? {}) as {
-          ok?: boolean
-          result?: unknown
-          error_code?: number
-          description?: string
-          parameters?: { retry_after?: number }
+        const ok = payload["ok"]
+        if (typeof ok !== "boolean" || (ok && !Object.hasOwn(payload, "result"))) {
+          return yield* Effect.fail(
+            new TelegramApiError(
+              `Telegram API returned a response that is not a Bot API envelope for method "${method}" (status ${response.status}).`,
+              {
+                method,
+                errorCode: response.status,
+                ...(response.ok ? { reason: "decode-failed" as const } : {})
+              }
+            )
+          )
         }
-        if (body.ok !== true) {
-          const description = redactBotToken(String(body.description ?? `HTTP ${response.status}`), botToken)
+        if (!ok) {
+          const errorCode = typeof payload["error_code"] === "number" ? payload["error_code"] : response.status
+          const description = redactBotToken(
+            typeof payload["description"] === "string" ? payload["description"] : `HTTP ${response.status}`,
+            botToken
+          )
+          const parameters = payload["parameters"]
+          const retryAfterSeconds = isRecord(parameters) && typeof parameters["retry_after"] === "number"
+            ? parameters["retry_after"]
+            : null
           return yield* Effect.fail(
             new TelegramApiError(`Telegram API "${method}" failed: ${description}`, {
               method,
-              errorCode: body.error_code ?? response.status,
+              errorCode,
               description,
-              retryAfterSeconds: body.parameters?.retry_after ?? null
+              retryAfterSeconds
             })
           )
         }
-        return body.result
+        return payload["result"]
       })
     })
 

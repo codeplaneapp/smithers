@@ -27,7 +27,7 @@
  */
 import { Effect } from "effect"
 import { createHash } from "node:crypto"
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, resolve as resolvePath } from "node:path"
 import { IntegrationError, isIntegrationError } from "../core/IntegrationError.ts"
 import * as Environment from "../Environment.ts"
@@ -50,6 +50,14 @@ export const DEFAULT_REGISTRY_PATH = ".smithers/listeners.json"
  * @since 1.0.0
  */
 export const DEFAULT_STATE_PATH = ".smithers/listeners.state.json"
+
+/**
+ * Where an applying reconciliation records its exclusive workspace lock.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const DEFAULT_LOCK_PATH = ".smithers/listeners.lock"
 
 /**
  * The GitHub events a listener may subscribe to.
@@ -330,9 +338,25 @@ export const parseRegistry = (input: unknown, source: string = DEFAULT_REGISTRY_
   }
   const seen = new Set<string>()
   const destinations = new Map<string, string>()
+  // One repository plus one callback URL is one GitHub hook. The per-flow path
+  // rule already keeps two flows off one URL, so the pair can only repeat
+  // within a flow, where it asks for a second hook delivering to the same
+  // endpoint and doubles every overlapping delivery. Reconciliation cannot
+  // report that honestly either: the second listener's preflight finds a hook
+  // this workspace created for the first and has to call it a `conflict` with
+  // an unowned hook. The declaration is the place to say so, because it is the
+  // thing that can be edited.
+  const hookKeys = new Map<string, string>()
   for (const listener of listeners) {
     if (seen.has(listener.id)) issues.push(`duplicate listener id "${listener.id}"`)
     seen.add(listener.id)
+    const hookKey = `${listener.repository} ${listener.callbackUrl}`
+    const firstClaimant = hookKeys.get(hookKey)
+    if (firstClaimant !== undefined && firstClaimant !== listener.id) {
+      issues.push(
+        `listeners "${firstClaimant}" and "${listener.id}" both declare ${listener.callbackUrl} on ${listener.repository}, which is one GitHub hook`
+      )
+    } else hookKeys.set(hookKey, listener.id)
     const destination = `${listener.callbackUrl} ${listener.secretEnv}`
     const existing = destinations.get(listener.flowId)
     if (existing !== undefined && existing !== destination) {
@@ -773,6 +797,77 @@ const attempt = <A>(run: () => A): Effect.Effect<A, IntegrationError> =>
         )
   })
 
+interface WorkspaceLockHolder {
+  readonly pid: number
+  readonly startedAtMs: number
+}
+
+interface WorkspaceLock extends WorkspaceLockHolder {
+  readonly path: string
+  readonly contents: string
+}
+
+const readWorkspaceLockHolder = (path: string): WorkspaceLockHolder | null => {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"))
+    if (!isRecord(parsed)) return null
+    const pid = parsed["pid"]
+    const startedAtMs = parsed["startedAtMs"]
+    if (
+      typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0 ||
+      typeof startedAtMs !== "number" || !Number.isSafeInteger(startedAtMs) || startedAtMs < 0
+    ) return null
+    return { pid, startedAtMs }
+  } catch {
+    // A torn or unreadable record cannot prove there is a live holder. Treating
+    // it as fresh would wedge every future apply, so the acquirer reclaims it.
+    return null
+  }
+}
+
+const acquireWorkspaceLock = (workspaceRoot: string): WorkspaceLock => {
+  const path = resolvePath(workspaceRoot, DEFAULT_LOCK_PATH)
+  mkdirSync(dirname(path), { recursive: true })
+  for (;;) {
+    const holder = { pid: process.pid, startedAtMs: Date.now() }
+    const contents = `${JSON.stringify(holder, null, 2)}\n`
+    let descriptor: number
+    try {
+      descriptor = openSync(path, "wx", 0o600)
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause
+      const existing = readWorkspaceLockHolder(path)
+      // The same bounded age used for pending creates prevents a crashed
+      // process from wedging this workspace indefinitely.
+      if (existing !== null && Date.now() - existing.startedAtMs <= PENDING_CREATE_MAX_AGE_MS) {
+        throw new IntegrationError(
+          "listener-conflict",
+          `GitHub listener apply refused because workspace lock ${path} is held by pid ${existing.pid}.`,
+          { lockPath: path, holderPid: existing.pid, startedAtMs: existing.startedAtMs, retryable: false }
+        )
+      }
+      rmSync(path, { force: true })
+      continue
+    }
+    try {
+      writeFileSync(descriptor, contents)
+    } finally {
+      // A failed write leaves an unreadable record that the next acquirer can
+      // reclaim immediately, while the descriptor itself is always closed.
+      closeSync(descriptor)
+    }
+    return { ...holder, path, contents }
+  }
+}
+
+const releaseWorkspaceLock = (lock: WorkspaceLock): void => {
+  if (!existsSync(lock.path)) return
+  // A lock older than the bound may have been replaced. Only its creator may
+  // remove the current path, or one late finalizer could unlock another run.
+  if (readFileSync(lock.path, "utf8") !== lock.contents) return
+  rmSync(lock.path, { force: true })
+}
+
 /**
  * Plans, and optionally applies, the declaration against GitHub.
  *
@@ -784,9 +879,9 @@ const attempt = <A>(run: () => A): Effect.Effect<A, IntegrationError> =>
  * @category constructors
  * @since 1.0.0
  */
-export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<ReconcileResult, IntegrationError> =>
-  Effect.gen(function*() {
-    const workspaceRoot = resolvePath(options.workspaceRoot ?? Environment.ambientWorkingDirectory())
+export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<ReconcileResult, IntegrationError> => {
+  const workspaceRoot = resolvePath(options.workspaceRoot ?? Environment.ambientWorkingDirectory())
+  const run = Effect.gen(function*() {
     const registryPath = resolvePath(workspaceRoot, DEFAULT_REGISTRY_PATH)
     const statePath = resolvePath(workspaceRoot, DEFAULT_STATE_PATH)
     const registry = options.registry ?? (yield* attempt(() => readRegistry(workspaceRoot)))
@@ -820,7 +915,8 @@ export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<Reconci
       secrets.set(listener.id, secret)
       digests.set(listener.id, secretDigest(secret))
     }
-    const client = options.client ?? makeClient({ token: resolved.token, apiBaseUrl: resolved.apiBaseUrl })
+    const client = options.client ??
+      (yield* attempt(() => makeClient({ token: resolved.token, apiBaseUrl: resolved.apiBaseUrl })))
     const repositories = new Set([
       ...registry.listeners.map((listener) => listener.repository),
       ...state.github.map((owned) => owned.repository)
@@ -941,7 +1037,7 @@ export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<Reconci
           yield* commit()
         }
         const hook = action.action === "create"
-          ? yield* client.request<{ readonly id?: unknown }>("POST", `/repos/${path}/hooks`, body).pipe(
+          ? yield* client.request("POST", `/repos/${path}/hooks`, body).pipe(
             // A refusal is not an unknown outcome: GitHub says it did not
             // create the hook, so the pending record is retired before the
             // failure escapes. Only a lost answer, which the client marks
@@ -953,9 +1049,11 @@ export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<Reconci
               })
             )
           )
-          : yield* client.request<{ readonly id?: unknown }>("PATCH", `/repos/${path}/hooks/${action.hookId}`, body)
-        const hookId = Number(hook?.id ?? action.hookId)
-        if (!Number.isInteger(hookId) || hookId <= 0) {
+          : yield* client.request("PATCH", `/repos/${path}/hooks/${action.hookId}`, body)
+        const hookId = isRecord(hook)
+          ? Object.hasOwn(hook, "id") ? hook["id"] : action.hookId
+          : undefined
+        if (typeof hookId !== "number" || !Number.isSafeInteger(hookId) || hookId <= 0) {
           return yield* Effect.fail(
             new IntegrationError(
               "decode-failed",
@@ -980,3 +1078,10 @@ export const reconcile = (options: ReconcileOptions = {}): Effect.Effect<Reconci
     yield* commit()
     return { ...summary, applied, skipped }
   })
+  if (options.apply !== true) return run
+  return Effect.acquireUseRelease(
+    attempt(() => acquireWorkspaceLock(workspaceRoot)),
+    () => run,
+    (lock) => attempt(() => releaseWorkspaceLock(lock))
+  )
+}

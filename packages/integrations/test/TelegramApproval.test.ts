@@ -24,6 +24,17 @@ describe("token", () => {
   it("separates different approvals", () => {
     expect(token("run-1/a")).not.toBe(token("run-1/b"))
   })
+
+  // Reachable from JavaScript, where the parameter type is not enforced.
+  // Hashing an absent id read `undefined.length` and raised a `TypeError`
+  // naming a property rather than the argument; hashing an empty one handed
+  // every miscalled prompt the same namespace, which is the collision the
+  // token exists to prevent.
+  it("refuses an id that is not a non-empty string", () => {
+    expect(() => token(undefined as never)).toThrow(/must be a non-empty string/)
+    expect(() => token(7 as never)).toThrow(/must be a non-empty string/)
+    expect(() => token("")).toThrow(/must be a non-empty string/)
+  })
 })
 
 describe("callbackData", () => {
@@ -37,6 +48,15 @@ describe("callbackData", () => {
     expect(parseCallbackData("sap:t:a")).toEqual({ token: "t", kind: "approve" })
     expect(parseCallbackData("sap:t:d")).toEqual({ token: "t", kind: "reject" })
     expect(parseCallbackData("sap:t:s:opt")).toEqual({ token: "t", kind: "select", key: "opt" })
+  })
+
+  // An empty token stays legal: it encodes the prompt a spec with no token
+  // asks for, which resolves for nobody. A non-string is a caller error, and
+  // reading `.includes` off one raised a `TypeError` naming a method.
+  it("refuses a token that is not a string and keeps the empty one", () => {
+    expect(() => callbackData({ kind: "approve" }, undefined as never)).toThrow(/must be a string/)
+    expect(() => callbackData({ kind: "approve" }, 7 as never)).toThrow(/must be a string/)
+    expect(callbackData({ kind: "approve" }, "")).toBe("sap::a")
   })
 
   it("refuses a token or key containing the separator", () => {

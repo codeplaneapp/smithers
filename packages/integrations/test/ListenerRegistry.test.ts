@@ -1,10 +1,12 @@
-import { Effect } from "effect"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { Cause, Effect, Exit } from "effect"
+import { createHash } from "node:crypto"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { make as makeClient } from "../src/github/GitHubClient.ts"
 import {
+  DEFAULT_LOCK_PATH,
   DEFAULT_REGISTRY_PATH,
   DEFAULT_STATE_PATH,
   type Listener,
@@ -128,6 +130,20 @@ describe("parseRegistry", () => {
     expect(message).toContain("listeners[0].extra is not a listener field")
   })
 
+  it("uses an empty callback path segment when flowId is not a string", () => {
+    let message = ""
+    try {
+      parseRegistry({
+        version: 1,
+        listeners: [{ ...listener(), flowId: 5, callbackUrl: "https://hooks.example/webhooks/5" }]
+      })
+    } catch (error) {
+      message = (error as Error).message
+    }
+    expect(message).toContain("listeners[0].flowId must be a non-empty string")
+    expect(message).toContain("listeners[0].callbackUrl path must be /webhooks/")
+  })
+
   it("refuses a listeners field that is not an array, and a non-object entry", () => {
     expect(() => parseRegistry({ version: 1, listeners: {} })).toThrow(/listeners must be an array/)
     expect(() => parseRegistry({ version: 1, listeners: ["nope"] })).toThrow(/must be an object/)
@@ -166,6 +182,30 @@ describe("parseRegistry", () => {
         listeners: [listener(), listener({ id: "triage-2", secretEnv: "OTHER_SECRET" })]
       })
     ).toThrow(/must share callbackUrl and secretEnv/)
+  })
+
+  // One repository plus one callback URL is one GitHub hook. Declaring the pair
+  // twice asked reconciliation for a second hook delivering the same events to
+  // the same endpoint, which is the doubled delivery `conflict` exists to
+  // prevent, and it reached apply as a `conflict` blaming an unowned hook that
+  // this workspace had in fact created itself one action earlier. Refusing the
+  // declaration says which two listeners collide, at the file that can be
+  // edited.
+  it("refuses two listeners on one repository and callback URL", () => {
+    expect(() =>
+      parseRegistry({
+        version: 1,
+        listeners: [listener(), listener({ id: "triage-2", events: ["issue_comment"] })]
+      })
+    ).toThrow(/"triage" and "triage-2" both declare/)
+    // The same URL in another repository is the intended shape: one flow fed
+    // by several repositories through one endpoint.
+    expect(
+      parseRegistry({
+        version: 1,
+        listeners: [listener(), listener({ id: "triage-2", repository: "smithersai/other" })]
+      }).listeners
+    ).toHaveLength(2)
   })
 })
 
@@ -361,6 +401,24 @@ describe("reconcile", () => {
     expect(fixture.requests.every((request) => request.method === "GET")).toBe(true)
   })
 
+  it("builds the default client from the reconciliation token and API URL", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    fixture = await startFixture((_request, response) => json(response, 200, []))
+    const result = await Effect.runPromise(reconcile({
+      workspaceRoot: root,
+      token: "fixture-token",
+      apiBaseUrl: fixture.origin,
+      env: { TRIAGE_WEBHOOK_SECRET: "hook-secret" }
+    }))
+    expect(result.changes).toBe(1)
+    expect(fixture.requests).toHaveLength(1)
+    expect(fixture.requests[0]).toMatchObject({
+      method: "GET",
+      url: "/repos/smithersai/smithers/hooks?per_page=100"
+    })
+    expect(fixture.requests[0]?.headers["authorization"]).toBe("Bearer fixture-token")
+  })
+
   it("creates the hook and records ownership when applying", async () => {
     const root = makeWorkspace({ version: 1, listeners: [listener()] })
     fixture = await startFixture((request, response) => {
@@ -489,6 +547,58 @@ describe("reconcile", () => {
     expect(failure.reason).toBe("decode-failed")
   })
 
+  it("does not coerce a boolean or string hook id into ownership", async () => {
+    for (const id of [true, "42", Number.MAX_SAFE_INTEGER + 1]) {
+      const root = makeWorkspace({ version: 1, listeners: [listener()] })
+      fixture = await startFixture((request, response) =>
+        json(response, request.method === "GET" ? 200 : 201, request.method === "GET" ? [] : { id })
+      )
+      const exit = await Effect.runPromise(Effect.exit(reconcile({
+        workspaceRoot: root,
+        apply: true,
+        env: env(),
+        client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+      })))
+      expect(Exit.isFailure(exit), String(id)).toBe(true)
+      const failure = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isFailReason)?.error : undefined
+      expect(failure, String(id)).toMatchObject({ reason: "decode-failed" })
+      expect(readOwnershipState(root).github, String(id)).toEqual([])
+      await fixture.close()
+      fixture = undefined
+      rmSync(root, { recursive: true, force: true })
+      workspace = undefined
+    }
+  })
+
+  it("refuses a hook mutation response that is not an object", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    fixture = await startFixture((request, response) =>
+      json(response, request.method === "GET" ? 200 : 201, request.method === "GET" ? [] : true)
+    )
+    const failure = await Effect.runPromise(Effect.flip(reconcile({
+      workspaceRoot: root,
+      apply: true,
+      env: env(),
+      client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    })))
+    expect(failure.reason).toBe("decode-failed")
+    expect(readOwnershipState(root).github).toEqual([])
+  })
+
+  it("accepts a positive safe integer hook id without coercion", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    fixture = await startFixture((request, response) =>
+      json(response, request.method === "GET" ? 200 : 201, request.method === "GET" ? [] : { id: 42 })
+    )
+    await Effect.runPromise(reconcile({
+      workspaceRoot: root,
+      apply: true,
+      env: env(),
+      client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    }))
+    expect(readOwnershipState(root).github[0]?.hookId).toBe(42)
+  })
+
   it("takes the registry in memory and the credentials from the ambient environment", async () => {
     const root = mkdtempSync(join(tmpdir(), "smithers-listeners-"))
     workspace = root
@@ -526,6 +636,214 @@ describe("reconcile", () => {
     expect(result.applied.map((action) => action.action)).toEqual(["update"])
     expect(fixture.requests.some((request) => request.method === "PATCH")).toBe(true)
   })
+
+  it("keeps the existing hook id when an update response omits it", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] }, owned())
+    fixture = await startFixture((request, response) => {
+      json(response, 200, request.method === "GET" ? [hook({ active: false })] : {})
+    })
+    await Effect.runPromise(reconcile({
+      workspaceRoot: root,
+      apply: true,
+      env: env(),
+      client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    }))
+    expect(readOwnershipState(root).github[0]?.hookId).toBe(100)
+  })
+})
+
+describe("workspace apply lock", () => {
+  const env = { GITHUB_TOKEN: "token", TRIAGE_WEBHOOK_SECRET: "hook-secret" }
+  const lockPath = (root: string) => join(root, DEFAULT_LOCK_PATH)
+
+  it("refuses an apply while a fresh holder owns the workspace lock", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    writeFileSync(lockPath(root), JSON.stringify({ pid: 43_210, startedAtMs: Date.now() }))
+    fixture = await startFixture((request, response) =>
+      json(response, request.method === "GET" ? 200 : 201, request.method === "GET" ? [] : { id: 701 })
+    )
+    const exit = await Effect.runPromise(Effect.exit(reconcile({
+      workspaceRoot: root,
+      apply: true,
+      env,
+      client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    })))
+    expect(Exit.isFailure(exit)).toBe(true)
+    const failure = Exit.isFailure(exit) ? exit.cause.reasons.find(Cause.isFailReason)?.error : undefined
+    expect(failure).toMatchObject({ reason: "listener-conflict" })
+    expect(fixture.requests.some((request) => request.method === "POST")).toBe(false)
+  })
+
+  it("does not take or wait for the workspace lock while only planning", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    writeFileSync(lockPath(root), JSON.stringify({ pid: 43_210, startedAtMs: Date.now() }))
+    fixture = await startFixture((_request, response) => json(response, 200, []))
+    const result = await Effect.runPromise(reconcile({
+      workspaceRoot: root,
+      env,
+      client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    }))
+    expect(result.actions.map((action) => action.action)).toEqual(["create"])
+    expect(existsSync(lockPath(root))).toBe(true)
+  })
+
+  it("reclaims a lock older than the bounded holder age", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    writeFileSync(
+      lockPath(root),
+      JSON.stringify({
+        pid: 43_210,
+        startedAtMs: Date.now() - PENDING_CREATE_MAX_AGE_MS - 1
+      })
+    )
+    fixture = await startFixture((request, response) =>
+      json(response, request.method === "GET" ? 200 : 201, request.method === "GET" ? [] : { id: 702 })
+    )
+    const result = await Effect.runPromise(reconcile({
+      workspaceRoot: root,
+      apply: true,
+      env,
+      client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    }))
+    expect(result.applied.map((action) => action.action)).toEqual(["create"])
+    expect(existsSync(lockPath(root))).toBe(false)
+  })
+
+  it("reclaims a malformed lock record", async () => {
+    const malformed = [
+      "{not json",
+      "null",
+      JSON.stringify({ pid: "43210", startedAtMs: Date.now() }),
+      JSON.stringify({ pid: Number.MAX_SAFE_INTEGER + 1, startedAtMs: Date.now() }),
+      JSON.stringify({ pid: 0, startedAtMs: Date.now() }),
+      JSON.stringify({ pid: 43_210, startedAtMs: "now" }),
+      JSON.stringify({ pid: 43_210, startedAtMs: Number.MAX_SAFE_INTEGER + 1 }),
+      JSON.stringify({ pid: 43_210, startedAtMs: -1 })
+    ]
+    for (const contents of malformed) {
+      const root = makeWorkspace({ version: 1, listeners: [listener()] })
+      writeFileSync(lockPath(root), contents)
+      fixture = await startFixture((request, response) =>
+        json(response, request.method === "GET" ? 200 : 201, request.method === "GET" ? [] : { id: 703 })
+      )
+      await Effect.runPromise(reconcile({
+        workspaceRoot: root,
+        apply: true,
+        env,
+        client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+      }))
+      expect(existsSync(lockPath(root)), contents).toBe(false)
+      await fixture.close()
+      fixture = undefined
+      rmSync(root, { recursive: true, force: true })
+      workspace = undefined
+    }
+  })
+
+  it("reports a real file-system refusal while acquiring the lock", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    fixture = await startFixture((_request, response) => json(response, 200, []))
+    chmodSync(join(root, ".smithers"), 0o500)
+    try {
+      const failure = await Effect.runPromise(Effect.flip(reconcile({
+        workspaceRoot: root,
+        apply: true,
+        env,
+        client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+      })))
+      expect(failure.reason).toBe("invalid-config")
+      expect(fixture.requests).toHaveLength(0)
+    } finally {
+      chmodSync(join(root, ".smithers"), 0o700)
+    }
+  })
+
+  it("reports a lock path that cannot be reclaimed as a file", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    mkdirSync(lockPath(root))
+    fixture = await startFixture((_request, response) => json(response, 200, []))
+    const failure = await Effect.runPromise(Effect.flip(reconcile({
+      workspaceRoot: root,
+      apply: true,
+      env,
+      client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    })))
+    expect(failure.reason).toBe("invalid-config")
+    expect(fixture.requests).toHaveLength(0)
+  })
+
+  it("releases the lock after success so the same workspace can apply again", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    let created = false
+    fixture = await startFixture((request, response) => {
+      if (request.method === "GET") {
+        json(response, 200, created ? [hook({ id: 704 })] : [])
+        return
+      }
+      created = true
+      json(response, 201, { id: 704 })
+    })
+    const client = makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    await Effect.runPromise(reconcile({ workspaceRoot: root, apply: true, env, client }))
+    expect(existsSync(lockPath(root))).toBe(false)
+    await Effect.runPromise(reconcile({ workspaceRoot: root, apply: true, env, client }))
+    expect(existsSync(lockPath(root))).toBe(false)
+    expect(fixture.requests.filter((request) => request.method === "POST")).toHaveLength(1)
+  })
+
+  it("releases the lock after failure so a later apply can succeed", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    let posts = 0
+    fixture = await startFixture((request, response) => {
+      if (request.method === "GET") {
+        json(response, 200, [])
+        return
+      }
+      posts += 1
+      json(response, posts === 1 ? 422 : 201, posts === 1 ? { message: "refused" } : { id: 705 })
+    })
+    const client = makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    await Effect.runPromise(Effect.flip(reconcile({ workspaceRoot: root, apply: true, env, client })))
+    expect(existsSync(lockPath(root))).toBe(false)
+    await Effect.runPromise(reconcile({ workspaceRoot: root, apply: true, env, client }))
+    expect(existsSync(lockPath(root))).toBe(false)
+    expect(posts).toBe(2)
+  })
+
+  it("does not recreate a lock removed before the finalizer", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    fixture = await startFixture((request, response) => {
+      rmSync(lockPath(root), { force: true })
+      json(response, request.method === "GET" ? 200 : 201, request.method === "GET" ? [] : { id: 706 })
+    })
+    await Effect.runPromise(reconcile({
+      workspaceRoot: root,
+      apply: true,
+      env,
+      client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    }))
+    expect(existsSync(lockPath(root))).toBe(false)
+  })
+
+  it("does not remove a replacement lock from a later holder", async () => {
+    const root = makeWorkspace({ version: 1, listeners: [listener()] })
+    const replacement = JSON.stringify({ pid: 98_765, startedAtMs: Date.now() })
+    let replaced = false
+    fixture = await startFixture((request, response) => {
+      if (!replaced) {
+        writeFileSync(lockPath(root), replacement)
+        replaced = true
+      }
+      json(response, request.method === "GET" ? 200 : 201, request.method === "GET" ? [] : { id: 707 })
+    })
+    await Effect.runPromise(reconcile({
+      workspaceRoot: root,
+      apply: true,
+      env,
+      client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    }))
+    expect(readFileSync(lockPath(root), "utf8")).toBe(replacement)
+  })
 })
 
 describe("reconcile failure channel", () => {
@@ -533,6 +851,18 @@ describe("reconcile failure channel", () => {
     GITHUB_TOKEN: "token",
     TRIAGE_WEBHOOK_SECRET: "hook-secret",
     ...extra
+  })
+
+  it("fails invalid-config rather than dying for a malformed API base URL", async () => {
+    const exit = await Effect.runPromise(Effect.exit(reconcile({
+      registry: { version: 1, listeners: [listener()] },
+      apiBaseUrl: "httpx://nope",
+      env: env()
+    })))
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (!Exit.isFailure(exit)) return
+    expect(exit.cause.reasons.some(Cause.isDieReason)).toBe(false)
+    expect(exit.cause.reasons.find(Cause.isFailReason)?.error).toMatchObject({ reason: "invalid-config" })
   })
 
   // `readRegistry` throws, and a throw inside `Effect.gen` is a defect. A
@@ -544,6 +874,31 @@ describe("reconcile failure channel", () => {
     const failure = await Effect.runPromise(Effect.flip(reconcile({ workspaceRoot: root, env: env() })))
     expect(failure.reason).toBe("invalid-config")
     expect(failure.message).toContain("Listener registry not found")
+  })
+
+  it("uses the ambient working directory when no workspace root is supplied", async () => {
+    const root = mkdtempSync(join(tmpdir(), "smithers-listeners-"))
+    workspace = root
+    const previous = process.cwd()
+    process.chdir(root)
+    try {
+      const failure = await Effect.runPromise(Effect.flip(reconcile({ env: env() })))
+      expect(failure.reason).toBe("invalid-config")
+      expect(failure.message).toContain("Listener registry not found")
+      expect(failure.message).toContain(root)
+    } finally {
+      process.chdir(previous)
+    }
+  })
+
+  it("wraps a raw workspace file-system failure as invalid-config", async () => {
+    const root = mkdtempSync(join(tmpdir(), "smithers-listeners-"))
+    workspace = root
+    mkdirSync(join(root, DEFAULT_REGISTRY_PATH), { recursive: true })
+    const failure = await Effect.runPromise(Effect.flip(reconcile({ workspaceRoot: root, env: env() })))
+    expect(failure.reason).toBe("invalid-config")
+    expect(failure.message).toContain("could not read or write its workspace files")
+    expect(failure.message).toMatch(/directory|EISDIR/i)
   })
 
   it("fails invalid-config for an unparseable declaration", async () => {
@@ -815,6 +1170,53 @@ describe("converging after an interrupted create", () => {
       client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
     }))
     expect(readOwnershipState(root).pending).toEqual([])
+  })
+
+  it("preserves another listener's pending create while applying a create and a noop", async () => {
+    const second = listener({
+      id: "secondary",
+      flowId: "secondary",
+      callbackUrl: "https://hooks.example/webhooks/secondary"
+    })
+    const pending = {
+      listenerId: second.id,
+      repository: second.repository,
+      callbackUrl: second.callbackUrl,
+      startedAtMs: Date.now()
+    }
+    const root = makeWorkspace(
+      { version: 1, listeners: [listener(), second] },
+      {
+        version: 1,
+        github: [{
+          listenerId: second.id,
+          repository: second.repository,
+          hookId: 200,
+          callbackUrl: second.callbackUrl,
+          secretDigest: createHash("sha256").update("hook-secret").digest("hex")
+        }],
+        pending: [pending]
+      }
+    )
+    fixture = await startFixture((request, response) => {
+      if (request.method === "GET") {
+        json(response, 200, [hook({
+          id: 200,
+          config: { url: second.callbackUrl, content_type: "json", insecure_ssl: "0" }
+        })])
+        return
+      }
+      json(response, 201, { id: 555 })
+    })
+    const result = await Effect.runPromise(reconcile({
+      workspaceRoot: root,
+      apply: true,
+      env,
+      client: makeClient({ token: "token", apiBaseUrl: fixture.origin })
+    }))
+    expect(result.actions.map((action) => action.action)).toEqual(["create", "noop"])
+    expect(result.applied.map((action) => action.action)).toEqual(["create"])
+    expect(readOwnershipState(root).pending).toEqual([pending])
   })
 
   it("records the pending create before the POST and clears it after", async () => {

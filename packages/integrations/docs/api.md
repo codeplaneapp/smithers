@@ -163,6 +163,13 @@ owned hook it simply did not see.
 against a repository. `plan` is pure and performs no requests; `reconcile`
 plans by default and applies only with `apply: true`.
 
+A declaration is refused when two listeners name one repository and one
+callback URL. That pair is a single GitHub hook, so declaring it twice asks for
+a second hook doubling every overlapping delivery, and reconciliation can only
+report it as a `conflict` against a hook this workspace created itself. The
+same URL in a different repository is the intended shape: one flow fed by
+several repositories through one endpoint.
+
 Ownership is the safety property. A hook is owned only when its numeric GitHub
 id appears in `.smithers/listeners.state.json`; a matching callback URL proves
 nothing, because anyone can point a hook anywhere. So:
@@ -302,10 +309,10 @@ gap.
 
 ## Errors
 
-Every failure that reaches a caller through the Effect channel, from a client,
-a source, a channel, or a durable action, is one `Core.IntegrationError`
-carrying a machine-readable `reason`, so a caller maps it without reading
-message text:
+`Core.IntegrationError` is the normalized provider-error vocabulary. GitHub and
+Linear clients, every source and channel, and durable actions use it directly,
+so callers can branch on a machine-readable `reason` without reading message
+text:
 
 | Reason                | Raised when                                                                                                                                                      |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -318,13 +325,14 @@ message text:
 | `permission-denied`   | The credential lacks the scope the operation needs.                                                                                                              |
 | `listener-conflict`   | An unowned hook holds a declared callback URL.                                                                                                                   |
 
-Two kinds of failure sit outside that channel and outside that vocabulary.
+The Telegram client is the Effect-channel exception. Its calls fail with
+`TelegramApiError`, which carries the Bot API's `error_code` while its retry
+schedule is still operating. `Telegram.TelegramClient.toIntegrationError`
+normalizes that error at the action boundary. The durable action applies the
+mapping, so an exhausted rate limit journals `retryable: true` and a chat that
+does not exist journals something a caller can tell apart from it.
 
-The Telegram client raises its own `TelegramApiError`, which carries the Bot
-API's `error_code`. `Telegram.TelegramClient.toIntegrationError` is the mapping
-onto the vocabulary above, and the durable action applies it, so an exhausted
-rate limit journals `retryable: true` and a chat that does not exist journals
-something a caller can tell apart from it.
+Plan-time validation also sits outside that vocabulary.
 
 The plan-time helpers validate their arguments by throwing, the way an ordinary
 constructor does, rather than by returning an Effect: `Telegram.Config.resolve`,
