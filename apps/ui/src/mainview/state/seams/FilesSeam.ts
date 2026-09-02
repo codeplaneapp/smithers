@@ -99,11 +99,11 @@ const cloudAddressing = (
   store: AppStore,
   repo: string,
   normalized: string
-): { readonly address: string; readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null } } => {
+): { readonly address: string; readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null; readonly source: "head" } } => {
   const head = store.collections.repositories.get(repo)?.head ?? null
   return {
     address: `/${repo}/${normalized}`,
-    ...(head === null ? {} : { readAt: { changeId: head.changeId, commitId: head.commitId } })
+    ...(head === null ? {} : { readAt: { changeId: head.changeId, commitId: head.commitId, source: "head" as const } })
   }
 }
 
@@ -112,11 +112,11 @@ const localAddressing = (
   store: AppStore,
   repo: Repo,
   normalized: string
-): { readonly address?: string; readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null } } => {
+): { readonly address?: string; readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null; readonly source: "working-copy" } } => {
   const repoId = store.collections.workingCopies.get(localCopyIdOf(repo.path))?.repoId ?? repoIdFromRemote(repo.git?.remote)
   return {
     ...(repoId !== null && repoId.includes("/") ? { address: `/${repoId}/${normalized}` } : {}),
-    ...(repo.jj === undefined ? {} : { readAt: { changeId: repo.jj.changeId, commitId: repo.jj.commitId } })
+    ...(repo.jj === undefined ? {} : { readAt: { changeId: repo.jj.changeId, commitId: repo.jj.commitId, source: "working-copy" as const } })
   }
 }
 

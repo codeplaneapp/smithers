@@ -4,7 +4,7 @@ import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import type { Root } from "react-dom/client"
 import type { Card } from "../state/AppState"
-import { contentKey, FileCardBody, isMarkdownPath } from "./FileCards"
+import { contentKey, FileCardAddressLine, FileCardBody, isMarkdownPath } from "./FileCards"
 
 /*
  * The file card's two renderings (will, 2026-09-01): a markdown file goes
@@ -87,5 +87,36 @@ describe("the file card", () => {
     const host = render(fileCard("logo.md", "", { binary: true }))
     expect(host.querySelector("[data-file-markdown]")).toBeNull()
     expect(host.textContent).toContain("binary")
+  })
+})
+
+
+describe("the address line's head-moved rule", () => {
+  const line = (source: "head" | "working-copy" | undefined): string => {
+    const host = document.createElement("div")
+    document.body.appendChild(host)
+    const root = createRoot(host)
+    mounted.push({ root, host })
+    flushSync(() =>
+      root.render(
+        <FileCardAddressLine
+          repo="smithersai/smithers"
+          path="README.md"
+          address="/smithersai/smithers/README.md"
+          readAt={{ changeId: "qupxosqw", commitId: "aaaa1111", ...(source === undefined ? {} : { source }) }}
+          head={{ changeId: "ronvznsk", commitId: "bbbb2222" }}
+          refreshCommand="files.read"
+          onRunCommand={() => {}}
+        />
+      )
+    )
+    return host.textContent ?? ""
+  }
+  test("a read at the head reports head moved when the head commit differs", () => {
+    expect(line("head")).toContain("head moved")
+    expect(line(undefined)).toContain("head moved")
+  })
+  test("a working-copy read never reports head moved: its drift is the origin chip's N ahead", () => {
+    expect(line("working-copy")).not.toContain("head moved")
   })
 })

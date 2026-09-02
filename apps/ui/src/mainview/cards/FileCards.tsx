@@ -60,7 +60,7 @@ const FileCardHeader = (props: {
   readonly repo: string
   readonly path: string
   readonly address?: string | undefined
-  readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null } | undefined
+  readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null; readonly source?: "head" | "working-copy" | undefined } | undefined
   readonly refreshCommand: "files.read" | "files.list"
   readonly onRunCommand: (name: string, args?: string) => void
 }) => {
@@ -69,7 +69,7 @@ const FileCardHeader = (props: {
   return <FileCardHeaderLive {...props} controller={controller} />
 }
 
-const FileCardAddressLine = ({
+export const FileCardAddressLine = ({
   repo,
   path,
   address,
@@ -81,12 +81,14 @@ const FileCardAddressLine = ({
   readonly repo: string
   readonly path: string
   readonly address?: string | undefined
-  readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null } | undefined
+  readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null; readonly source?: "head" | "working-copy" | undefined } | undefined
   readonly head: { readonly changeId: string | null; readonly commitId: string | null } | null
   readonly refreshCommand: "files.read" | "files.list"
   readonly onRunCommand: (name: string, args?: string) => void
 }) => {
-  const moved = head !== null && readAt?.commitId != null && head.commitId != null && head.commitId !== readAt.commitId
+  // A working-copy read is pinned at the checkout's `@`, which is not the head by design: its drift is the origin chip's "N ahead", never "head moved".
+  const moved = readAt?.source !== "working-copy" && head !== null && readAt?.commitId != null && head.commitId != null &&
+    head.commitId !== readAt.commitId
   const refreshArgs = `${path === "" ? "/" : path} ${repo}`
   return (
     <div>
@@ -122,7 +124,7 @@ const FileCardHeaderLive = ({
   readonly repo: string
   readonly path: string
   readonly address?: string | undefined
-  readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null } | undefined
+  readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null; readonly source?: "head" | "working-copy" | undefined } | undefined
   readonly refreshCommand: "files.read" | "files.list"
   readonly onRunCommand: (name: string, args?: string) => void
 }) => {

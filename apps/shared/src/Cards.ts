@@ -556,7 +556,12 @@ export const CardSchema = z.discriminatedUnion("kind", [
       truncated: z.boolean().optional(),
       /** The global path (`/org/repo/path`); absent on cards written before lane piper. */
       address: z.string().optional(),
-      readAt: z.object({ changeId: z.string().nullable(), commitId: z.string().nullable() }).optional()
+      readAt: z.object({
+        changeId: z.string().nullable(),
+        commitId: z.string().nullable(),
+        /** `head` = read at the repository head (head-moved applies); `working-copy` = read at a checkout's `@` (drift is "N ahead", never "head moved"). */
+        source: z.enum(["head", "working-copy"]).optional()
+      }).optional()
     })
   }),
   z.object({
@@ -577,7 +582,11 @@ export const CardSchema = z.discriminatedUnion("kind", [
       binary: z.boolean().optional(),
       /** The global path (`/org/repo/path`); absent on cards written before lane piper. */
       address: z.string().optional(),
-      readAt: z.object({ changeId: z.string().nullable(), commitId: z.string().nullable() }).optional()
+      readAt: z.object({
+        changeId: z.string().nullable(),
+        commitId: z.string().nullable(),
+        source: z.enum(["head", "working-copy"]).optional()
+      }).optional()
     })
   }),
   /*
