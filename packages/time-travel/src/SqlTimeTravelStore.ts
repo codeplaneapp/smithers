@@ -1,12 +1,14 @@
 /**
  * The durable `TimeTravelStore`, backed by SQL.
  *
- * Three tables carry what the journal cannot: `flows_time_travel_audits`
+ * Four tables carry what the journal cannot: `flows_time_travel_audits`
  * (one row per rewind, so a crash leaves something recovery can find),
- * `flows_time_travel_receipts` (proof a side effect was compensated), and
- * `flows_time_travel_snapshots` (the tier-2 anchors at a frame). Lineage edges
- * are read as ONE tree across this package's fork edges and the engine's child
- * spawns, per `docs/specs/Concepts/Subflows.md` §129-131.
+ * `flows_time_travel_receipts` (proof a side effect was compensated),
+ * `flows_time_travel_snapshots` (the tier-2 anchors at a frame), and
+ * `flows_time_travel_fork_intents` (a minted fork id, reserved before its
+ * workspace is provisioned so a crash between the two never blocks a retry).
+ * Lineage edges are read as ONE tree across this package's fork edges and the
+ * engine's child spawns, per `docs/specs/Concepts/Subflows.md` §129-131.
  *
  * The derived reads — state and attempts at a frame — are folds over journal
  * records rather than columns, because the run row holds only the *latest*
@@ -146,6 +148,33 @@ export const migrate: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect
     "flows_time_travel_edges_parent_idx on flows_time_travel_edges",
     sql`CREATE INDEX IF NOT EXISTS flows_time_travel_edges_parent_idx
     ON flows_time_travel_edges (parent_run_id, parent_seq)`
+  )
+  // A minted fork id, reserved before the child's workspace is provisioned
+  // and consumed when the fork commits. A row that outlives its fork is the
+  // durable trace of a process that died between the two; it keeps its
+  // ordinal taken (`reclaimed_at_ms` marks it handed back) so a retry never
+  // asks jj for the lane name the leftover on disk already holds.
+  yield* step(
+    "flows_time_travel_fork_intents",
+    sql`CREATE TABLE IF NOT EXISTS flows_time_travel_fork_intents (
+    child_run_id TEXT PRIMARY KEY CHECK (length(child_run_id) > 0),
+    parent_run_id TEXT NOT NULL CHECK (length(parent_run_id) > 0),
+    parent_seq INTEGER NOT NULL CHECK (
+      typeof(parent_seq) = 'integer' AND parent_seq >= 0 AND parent_seq <= 9007199254740991
+    ),
+    reserved_at_ms INTEGER NOT NULL CHECK (
+      typeof(reserved_at_ms) = 'integer' AND reserved_at_ms >= 0 AND reserved_at_ms <= 9007199254740991
+    ),
+    reclaimed_at_ms INTEGER CHECK (
+      reclaimed_at_ms IS NULL
+      OR (typeof(reclaimed_at_ms) = 'integer' AND reclaimed_at_ms >= 0 AND reclaimed_at_ms <= 9007199254740991)
+    )
+  )`
+  )
+  yield* step(
+    "flows_time_travel_fork_intents_parent_idx on flows_time_travel_fork_intents",
+    sql`CREATE INDEX IF NOT EXISTS flows_time_travel_fork_intents_parent_idx
+    ON flows_time_travel_fork_intents (parent_run_id, parent_seq)`
   )
   yield* step(
     "flows_time_travel_archive",
@@ -326,7 +355,8 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
     )
 
     /**
-     * Every lineage edge, forks and engine child spawns as ONE tree.
+     * The lineage edges under one run, forks and engine child spawns as ONE
+     * tree.
      *
      * `docs/specs/Concepts/Subflows.md` §129-131 asks for one lineage tree with
      * an edge kind; this is that union, expressed where both sources can be
@@ -334,31 +364,51 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
      * trampoline continuation edges are DERIVED from the parent's own journal,
      * which is the only one of the three stores of this tree that carries the
      * `parentSeq` a frame needs.
+     *
+     * The union is scoped to the runs reachable downward from `runId` before
+     * it leaves the database. It used to be the whole tree of every run the
+     * database held, decoded in full and then filtered in memory, so the cost
+     * of answering one run's descendants was the size of the fleet. The
+     * reachable set ignores attachment and frame on purpose: it is a superset
+     * of what the walk in `descendantsFrom` visits, so the fold gives the same
+     * answer over fewer rows.
      */
-    const allEdges = sql<EdgeRow>`
+    const edgesUnder = (runId: string) =>
+      sql<EdgeRow>`
+      WITH RECURSIVE lineage_edges (parent_run_id, parent_seq, child_run_id, kind, attached) AS (
+        SELECT parent_run_id, parent_seq, child_run_id, kind, attached
+        FROM flows_time_travel_edges
+        UNION ALL
+        SELECT run_id AS parent_run_id,
+               seq AS parent_seq,
+               json_extract(payload_json, '$.effect.output.childRunId') AS child_run_id,
+               'child' AS kind,
+               CASE WHEN json_extract(payload_json, '$.effect.output.attached') = 1 THEN 1 ELSE 0 END AS attached
+        FROM flows_journal_events
+        WHERE event_type = 'flows.time-travel.effect-boundary'
+          AND json_extract(payload_json, '$.effect.kind') = ${spawnEffectKind}
+          AND json_extract(payload_json, '$.effect.status') = 'succeeded'
+          AND json_extract(payload_json, '$.effect.output.childRunId') IS NOT NULL
+        UNION ALL
+        SELECT run_id AS parent_run_id,
+               seq AS parent_seq,
+               json_extract(payload_json, '$.nextExecutionId') AS child_run_id,
+               'continuation' AS kind,
+               0 AS attached
+        FROM flows_journal_events
+        WHERE event_type = ${handoffEventType}
+          AND json_extract(payload_json, '$.decision') = 'handed-off'
+          AND json_extract(payload_json, '$.nextExecutionId') IS NOT NULL
+      ),
+      reachable (run_id) AS (
+        SELECT ${runId}
+        UNION
+        SELECT lineage_edges.child_run_id
+        FROM lineage_edges JOIN reachable ON lineage_edges.parent_run_id = reachable.run_id
+      )
       SELECT parent_run_id, parent_seq, child_run_id, kind, attached
-      FROM flows_time_travel_edges
-      UNION ALL
-      SELECT run_id AS parent_run_id,
-             seq AS parent_seq,
-             json_extract(payload_json, '$.effect.output.childRunId') AS child_run_id,
-             'child' AS kind,
-             CASE WHEN json_extract(payload_json, '$.effect.output.attached') = 1 THEN 1 ELSE 0 END AS attached
-      FROM flows_journal_events
-      WHERE event_type = 'flows.time-travel.effect-boundary'
-        AND json_extract(payload_json, '$.effect.kind') = ${spawnEffectKind}
-        AND json_extract(payload_json, '$.effect.status') = 'succeeded'
-        AND json_extract(payload_json, '$.effect.output.childRunId') IS NOT NULL
-      UNION ALL
-      SELECT run_id AS parent_run_id,
-             seq AS parent_seq,
-             json_extract(payload_json, '$.nextExecutionId') AS child_run_id,
-             'continuation' AS kind,
-             0 AS attached
-      FROM flows_journal_events
-      WHERE event_type = ${handoffEventType}
-        AND json_extract(payload_json, '$.decision') = 'handed-off'
-        AND json_extract(payload_json, '$.nextExecutionId') IS NOT NULL
+      FROM lineage_edges
+      WHERE parent_run_id IN (SELECT run_id FROM reachable)
     `.pipe(Effect.flatMap(decodeEdges), Effect.mapError(mapError))
 
     /**
@@ -439,25 +489,100 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
     /**
      * The id the next fork off this frame carries.
      *
-     * The ordinal counts the edges already hanging off `(parent, seq)`, so a
-     * frame forked twice numbers its children 1 and 2 rather than handing both
-     * the same name. It is read here, outside any transaction, so a caller can
-     * mint the id BEFORE it provisions the child's workspace; `createFork`
-     * reads it again inside its own transaction for the caller that mints
-     * nothing, and the run table's primary key is what settles a race between
-     * two mints that were never separated by a commit.
+     * The ordinal counts the edges already hanging off `(parent, seq)` PLUS
+     * the intents still reserved there, so a frame forked twice numbers its
+     * children 1 and 2, and a mint that never committed keeps its number. It
+     * used to count committed edges alone: a process that minted, provisioned
+     * the child's jj workspace, and died before `createFork` retried under the
+     * same id, and jj refused the lane name its own leftover held. `nextForkId`
+     * reads this inside the transaction that reserves the id; `createFork`
+     * reads it inside its own for the caller that minted nothing.
      */
-    const nextForkIdFor = (
+    const mintForkId = (
       parentRunId: string,
       frame: TimeTravelStore.Snapshot["frame"]
     ): Effect.Effect<string, TimeTravelError> =>
       sql<{ readonly count: number }>`
-        SELECT COUNT(*) AS count FROM flows_time_travel_edges
-        WHERE parent_run_id = ${parentRunId} AND parent_seq = ${frame.seq}
+        SELECT (
+          SELECT COUNT(*) FROM flows_time_travel_edges
+          WHERE parent_run_id = ${parentRunId} AND parent_seq = ${frame.seq}
+        ) + (
+          SELECT COUNT(*) FROM flows_time_travel_fork_intents
+          WHERE parent_run_id = ${parentRunId} AND parent_seq = ${frame.seq}
+        ) AS count
       `.pipe(
         Effect.map((rows) => `${parentRunId}:fork:${frame.seq}:${Number(rows[0]!.count) + 1}`),
         Effect.mapError(mapError)
       )
+
+    /**
+     * Whether the engine's spawn-edge table is installed.
+     *
+     * The control-plane database migrates the run store and the journal and
+     * nothing else, so the walk that follows must not name a table that only
+     * the engine ladder creates.
+     */
+    const hasRunParents = sql<{ readonly name: string }>`
+      SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'flows_run_parents'
+    `.pipe(Effect.map((rows) => rows.length > 0))
+
+    /**
+     * Refuses the fork while the parent or ANY ancestor of it is live.
+     *
+     * Ancestry is the union of three relations, walked breadth-first with a
+     * visited set so a cycle terminates: the fork edges this store writes,
+     * the `flows_runs.parent_run_id` column the engine stamps on a spawned
+     * child and on a trampoline continuation, and the `flows_run_parents`
+     * edges a spawned child is recorded under. The walk used to follow the
+     * fork edges alone, so an inactive child spawned by a running engine run
+     * passed as if its whole history were settled.
+     */
+    const refuseLiveAncestry = (parentRunId: string) =>
+      Effect.gen(function*() {
+        const walkRunParents = yield* hasRunParents
+        const queue = [parentRunId]
+        const seen = new Set<string>()
+        while (queue.length > 0) {
+          const currentRunId = queue.shift()!
+          if (seen.has(currentRunId)) continue
+          seen.add(currentRunId)
+          const current = yield* sql<{
+            readonly status: string
+            readonly owner_host_id: string | null
+            readonly claim_host_id: string | null
+            readonly parent_run_id: string | null
+          }>`
+            SELECT status, owner_host_id, claim_host_id, parent_run_id
+            FROM flows_runs WHERE run_id = ${currentRunId}
+          `
+          if (current[0] === undefined) {
+            return yield* Effect.fail(error("not_found", `parent ${currentRunId} was not found`))
+          }
+          if (
+            current[0].status === "running" ||
+            current[0].owner_host_id !== null ||
+            current[0].claim_host_id !== null
+          ) {
+            return yield* Effect.fail(
+              error(
+                "live_parent",
+                currentRunId === parentRunId ? `parent ${currentRunId} is live` : `ancestor run ${currentRunId} is live`
+              )
+            )
+          }
+          if (current[0].parent_run_id !== null) queue.push(current[0].parent_run_id)
+          const forkParents = yield* sql<{ readonly parent_run_id: string }>`
+            SELECT parent_run_id FROM flows_time_travel_edges WHERE child_run_id = ${currentRunId}
+          `
+          for (const row of forkParents) queue.push(row.parent_run_id)
+          if (walkRunParents) {
+            const spawnParents = yield* sql<{ readonly parent_id: string }>`
+              SELECT parent_id FROM flows_run_parents WHERE child_id = ${currentRunId}
+            `
+            for (const row of spawnParents) queue.push(row.parent_id)
+          }
+        }
+      })
 
     return TimeTravelStore.make({
       snapshotAt: Effect.fn("TimeTravelStore.snapshotAt")((runId, frame) =>
@@ -513,7 +638,7 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
       ),
       descendants: Effect.fn("TimeTravelStore.descendants")((runId, frame) =>
         Effect.annotateCurrentSpan({ runId, lineageId: frame.lineageId, seq: frame.seq }).pipe(Effect.andThen(
-          allEdges.pipe(
+          edgesUnder(runId).pipe(
             Effect.map((rows) => {
               const descendants = descendantsFrom(rows, runId, frame)
               return { attached: descendants.attached, detached: descendants.detached }
@@ -631,7 +756,7 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
                     )
                   )
                 }
-                const rows = yield* allEdges
+                const rows = yield* edgesUnder(runId)
                 const descendants = descendantsFrom(rows, runId, frame)
                 // Attached journals are part of this transaction, so every
                 // non-terminal child is fenced here too. Assessment and claims
@@ -764,43 +889,65 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
       ),
       nextForkId: Effect.fn("TimeTravelStore.nextForkId")((parentRunId, frame) =>
         Effect.annotateCurrentSpan({ parentRunId, lineageId: frame.lineageId, seq: frame.seq }).pipe(
-          Effect.andThen(nextForkIdFor(parentRunId, frame))
+          Effect.andThen(
+            // The count and the reservation share one write transaction, so
+            // two mints are serialized by the writer and the second sees the
+            // first's intent; the primary key is the backstop for a mint that
+            // somehow arrives at the same ordinal.
+            writer.write(
+              Effect.gen(function*() {
+                const runId = yield* mintForkId(parentRunId, frame)
+                const nowMs = yield* Clock.currentTimeMillis
+                yield* sql`
+                  INSERT INTO flows_time_travel_fork_intents
+                    (child_run_id, parent_run_id, parent_seq, reserved_at_ms, reclaimed_at_ms)
+                  VALUES (${runId}, ${parentRunId}, ${frame.seq}, ${nowMs}, NULL)
+                `
+                return runId
+              }).pipe(Effect.mapError(mapError))
+            ).pipe(Effect.mapError(mapError))
+          )
         )
+      ),
+      abandonForkIntents: Effect.fn("TimeTravelStore.abandonForkIntents")((staleBeforeMs) =>
+        Effect.annotateCurrentSpan({ staleBeforeMs }).pipe(Effect.andThen(
+          writer.write(
+            Effect.gen(function*() {
+              const rows = yield* sql<{
+                readonly child_run_id: string
+                readonly parent_run_id: string
+                readonly parent_seq: number
+                readonly reserved_at_ms: number
+              }>`
+                SELECT child_run_id, parent_run_id, parent_seq, reserved_at_ms
+                FROM flows_time_travel_fork_intents
+                WHERE reserved_at_ms < ${staleBeforeMs} AND reclaimed_at_ms IS NULL
+                ORDER BY reserved_at_ms ASC, child_run_id ASC
+              `
+              const nowMs = yield* Clock.currentTimeMillis
+              const intents: Array<TimeTravelStore.ForkIntent> = []
+              for (const row of rows) {
+                yield* sql`
+                  UPDATE flows_time_travel_fork_intents SET reclaimed_at_ms = ${nowMs}
+                  WHERE child_run_id = ${row.child_run_id}
+                `
+                intents.push({
+                  childRunId: row.child_run_id,
+                  parentRunId: row.parent_run_id,
+                  parentSeq: Number(row.parent_seq),
+                  reservedAtMs: Number(row.reserved_at_ms)
+                })
+              }
+              return intents
+            }).pipe(Effect.mapError(mapError))
+          ).pipe(Effect.mapError(mapError))
+        ))
       ),
       createFork: Effect.fn("TimeTravelStore.createFork")((parentRunId, frame, childRunId) =>
         Effect.annotateCurrentSpan({ parentRunId, lineageId: frame.lineageId, seq: frame.seq }).pipe(Effect.andThen(
           writer.write(
             Effect.gen(function*() {
-              let currentRunId: string | undefined = parentRunId
-              const seen = new Set<string>()
-              while (currentRunId !== undefined && !seen.has(currentRunId)) {
-                seen.add(currentRunId)
-                const current = yield* sql<{
-                  readonly status: string
-                  readonly owner_host_id: string | null
-                  readonly claim_host_id: string | null
-                }>`
-              SELECT status, owner_host_id, claim_host_id
-              FROM flows_runs WHERE run_id = ${currentRunId}
-            `
-                if (current[0] === undefined) {
-                  return yield* Effect.fail(error("not_found", `parent ${currentRunId} was not found`))
-                }
-                if (
-                  current[0].status === "running" ||
-                  current[0].owner_host_id !== null ||
-                  current[0].claim_host_id !== null
-                ) {
-                  return yield* Effect.fail(error("live_parent", `parent ${currentRunId} is live`))
-                }
-                const parentEdges: ReadonlyArray<{ readonly parent_run_id: string }> = yield* sql<{
-                  readonly parent_run_id: string
-                }>`
-              SELECT parent_run_id FROM flows_time_travel_edges
-              WHERE child_run_id = ${currentRunId}
-            `
-                currentRunId = parentEdges[0]?.parent_run_id
-              }
+              yield* refuseLiveAncestry(parentRunId)
               /**
                * THE FRAME MUST ADDRESS A RECORD.
                *
@@ -830,7 +977,10 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
                   )
                 }
               }
-              const runId = childRunId ?? (yield* nextForkIdFor(parentRunId, frame))
+              const runId = childRunId ?? (yield* mintForkId(parentRunId, frame))
+              // The committed edge takes over the ordinal the reservation
+              // held, so the intent is consumed in the same transaction.
+              yield* sql`DELETE FROM flows_time_travel_fork_intents WHERE child_run_id = ${runId}`
               const nowMs = yield* Clock.currentTimeMillis
               /**
                * THE CHILD'S STATE IS THE STATE **AT** THE FRAME.

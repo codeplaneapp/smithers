@@ -252,6 +252,33 @@ export const Fork = Schema.Struct({
  */
 export type Fork = typeof Fork.Type
 /**
+ * A fork id that has been minted and durably reserved, whose fork has not
+ * committed yet.
+ *
+ * {@link Service.nextForkId} writes one so a caller can provision the child's
+ * jj workspace under the id before any run exists. A fork that commits
+ * consumes its intent. An intent whose fork never commits, because the process
+ * died between provisioning and commit, is what
+ * {@link Service.abandonForkIntents} hands back, so the lane it named can be
+ * forgotten and the ordinal it took is never reused for a fresh lane.
+ *
+ * @since 0.1.0
+ * @category schemas
+ */
+export const ForkIntent = Schema.Struct({
+  childRunId: Schema.NonEmptyString,
+  parentRunId: Schema.NonEmptyString,
+  parentSeq: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  reservedAtMs: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+})
+/**
+ * The value form of {@link ForkIntent}.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type ForkIntent = typeof ForkIntent.Type
+/**
  * The operations a time-travel state store must provide.
  *
  * The reads (`snapshotAt`, `stateAt`, `attemptsAt`, `descendants`) reconstruct
@@ -259,8 +286,10 @@ export type Fork = typeof Fork.Type
  * `pendingAudits`) makes an in-flight rewind recoverable; and
  * `archiveAndTruncate`, `createFork`, and `recordReceipt` are the three
  * mutations that change the lineage tree. `nextForkId` sits beside them as the
- * one mint: it names the child a later `createFork` will write, so a caller
- * can provision that child's workspace before anything durable exists.
+ * one mint: it names and reserves the child a later `createFork` will write,
+ * so a caller can provision that child's workspace before any run exists, and
+ * `abandonForkIntents` returns the reservations whose fork never committed so
+ * startup can forget the lanes they named.
  * Implement it with {@link make}, or stub it with {@link makeNoop}.
  *
  * @since 0.1.0
@@ -337,8 +366,8 @@ export interface Service {
    */
   readonly archivedAt: (runId: string, seq: number) => Effect.Effect<boolean, TimeTravelError>
   /**
-   * Mints the run id the next fork off `(parentRunId, frame)` will carry,
-   * without writing anything.
+   * Mints the run id the next fork off `(parentRunId, frame)` will carry and
+   * durably reserves it as a {@link ForkIntent}, without creating a run.
    *
    * A fork provisions the child's workspace BEFORE it commits the child, and a
    * workspace named after the parent frame alone collides the moment one frame
@@ -346,14 +375,22 @@ export interface Service {
    * lane after the child that will live in it, so the two identities are the
    * same identity.
    *
-   * The contract is only that the id differs from every fork already committed
-   * off that frame. What two mints that are NOT separated by a commit return
-   * is the implementation's own business: `SqlTimeTravelStore.layer` derives
-   * the ordinal from the committed edges, so it repeats the id and lets the
-   * run table's primary key settle the race, while `MemoryTimeTravelStore.make`
-   * advances a private counter and hands out two different ids.
+   * The id differs from every fork already committed off that frame AND from
+   * every id minted before it, committed or not. The reservation is what makes
+   * that true across a crash: a caller that provisioned a lane under one id
+   * and died before committing retries under a fresh id, instead of asking jj
+   * for a lane name its own leftover already holds.
    */
   readonly nextForkId: (parentRunId: string, frame: Frame) => Effect.Effect<string, TimeTravelError>
+  /**
+   * Hands back every {@link ForkIntent} reserved before `staleBeforeMs` whose
+   * fork never committed, marking each so it is handed back exactly once.
+   *
+   * The intents stay counted for minting: the lane each one named may still
+   * exist on disk, so its ordinal must never name a fresh lane. Startup
+   * reclamation forgets the jj workspace each returned intent named.
+   */
+  readonly abandonForkIntents: (staleBeforeMs: number) => Effect.Effect<ReadonlyArray<ForkIntent>, TimeTravelError>
   /**
    * Branches a new run off `parentRunId` at a frame, copying the journal
    * prefix and the attempts that existed there, and recording the `fork`
@@ -421,6 +458,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service =>
     archiveAndTruncate: () => unavailable("archiveAndTruncate"),
     archivedAt: () => unavailable("archivedAt"),
     nextForkId: () => unavailable("nextForkId"),
+    abandonForkIntents: () => unavailable("abandonForkIntents"),
     createFork: () => unavailable("createFork"),
     recordReceipt: () => unavailable("recordReceipt"),
     ...overrides

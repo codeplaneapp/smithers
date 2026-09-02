@@ -467,3 +467,68 @@ describe("TimeTravelStore conformance", () => {
       }))
   }
 })
+
+/**
+ * A fork id is a durable reservation on both stores: consumed by the fork
+ * that commits it, handed back once when abandoned, never reused.
+ */
+describe("TimeTravelStore fork intents", () => {
+  it.effect("reserves, consumes, and reclaims fork intents identically", () =>
+    Effect.gen(function*() {
+      const at = { lineageId: "run/root", seq: 0 } as const
+      const exercise = (store: TimeTravelStore.Service) =>
+        Effect.gen(function*() {
+          const abandoned = yield* store.nextForkId("run", at)
+          const fresh = yield* store.abandonForkIntents(0)
+          const stale = yield* store.abandonForkIntents(1)
+          const again = yield* store.abandonForkIntents(1)
+          const minted = yield* store.nextForkId("run", at)
+          const fork = yield* store.createFork("run", at, minted)
+          const consumed = yield* store.abandonForkIntents(Number.MAX_SAFE_INTEGER)
+          return {
+            distinct: abandoned !== minted,
+            fresh,
+            stale: stale.map((intent) => ({
+              reclaimsAbandoned: intent.childRunId === abandoned,
+              parentRunId: intent.parentRunId,
+              parentSeq: intent.parentSeq,
+              reservedAtMs: intent.reservedAtMs
+            })),
+            again,
+            committed: fork.runId === minted,
+            consumed
+          }
+        })
+
+      const memory = yield* exercise(
+        MemoryTimeTravelStore.make({
+          records: [{ runId: "run", seq: 0, eventId: "run-0", lineageId: "run/root", payload: {} }]
+        })
+      )
+      const sqlite = yield* withSql((store, sql) =>
+        Effect.gen(function*() {
+          yield* sql`
+            INSERT INTO flows_runs (run_id, status, created_at_ms, state_json)
+            VALUES ('run', 'suspended', 0, ${JSON.stringify({ version: 1, flowName: "Demo", payload: {} })})
+          `
+          yield* sql`
+            INSERT INTO flows_journal_events
+              (run_id, seq, event_id, source_id, source_seq, emitted_at_ms,
+               event_type, payload_json, meta_json)
+            VALUES ('run', 0, 'run-0', 'source', 0, 0, 'test', '{}', ${JSON.stringify({ lineageId: "run/root" })})
+          `
+          return yield* exercise(store)
+        })
+      )
+
+      expect(memory).toEqual(sqlite)
+      expect(memory).toEqual({
+        distinct: true,
+        fresh: [],
+        stale: [{ reclaimsAbandoned: true, parentRunId: "run", parentSeq: 0, reservedAtMs: 0 }],
+        again: [],
+        committed: true,
+        consumed: []
+      })
+    }))
+})

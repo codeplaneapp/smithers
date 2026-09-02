@@ -1,5 +1,5 @@
 /**
- * Time travel over the journal: inspect, fork, rewind.
+ * Time travel over the journal: replay, inspect, fork, rewind.
  *
  * The verbs are reached through ONE injectable service. `Replay`, `Fork`,
  * `Rewind`, `Retry`, `Recovery`, `Compensation`, and the effect-handler

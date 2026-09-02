@@ -31,6 +31,9 @@ const crossed = (
   lineageId: "run/root",
   seq: 4,
   input: { to: "person@example.com" },
+  // `guard` refuses an irreversible effect without a key, so real evidence
+  // always carries one; the handler below requires it.
+  idempotencyKey: "send-1",
   residue: "the recipient may retain the message",
   durableBoundary: true,
   providerStream: false
@@ -151,7 +154,7 @@ describe("EffectHandlerRegistry", () => {
     expect(EffectBoundary.fromEntry({ ...valid(), eventType: "other" })).toBeUndefined()
   })
 
-  it("uses durable defaults and folds the latest boundary evidence in sequence order", () => {
+  it("uses durable defaults and folds a legal crossing to its terminal record in sequence order", () => {
     const entry = (seq: number, id: string, status: EffectBoundary.EffectStatus): JournalEvent.Entry => ({
       runId: "run" as JournalEvent.RunId,
       seq: seq as JournalEvent.Seq,
@@ -170,12 +173,15 @@ describe("EffectHandlerRegistry", () => {
       durableBoundary: true,
       providerStream: false
     })
+    // `a` crosses legally: intended, then one terminal. `b` is a terminal a
+    // reader paged without its intended, which is still one crossing. The
+    // conflicting histories live in BoundaryEvidence.test.ts.
     expect(
       Effect.runSync(EffectBoundary.fromEntries([
         { ...entry(1, "ignored", "intended"), eventType: "other" },
-        entry(3, "a", "unknown"),
+        entry(4, "a", "succeeded"),
         entry(2, "b", "succeeded"),
-        entry(4, "a", "succeeded")
+        entry(3, "a", "intended")
       ]))
     )
       .toEqual([
@@ -751,4 +757,130 @@ describe("EffectHandlerRegistry", () => {
       expect(exit._tag).toBe("Failure")
       expect(emitted).toEqual(["intended", "unknown"])
     }))
+})
+
+/**
+ * The handler safety contract, enforced before a rewind acts on a verdict.
+ *
+ * A rewind truncates the evidence of every effect it crosses, so a verdict
+ * that let an effect through unreverted was unrecoverable: the registry now
+ * decodes what a handler returns, resolves by the compensation descriptor the
+ * producer recorded, and refuses the key and tier drifts that a handler swapped
+ * in after a restart would otherwise slip past.
+ */
+describe("EffectHandlerRegistry safety", () => {
+  const withCompensation = (compensation: string | undefined): EffectHandlerRegistry.Handler => ({
+    ...handler(),
+    ...(compensation === undefined ? {} : { compensation })
+  })
+
+  it("blocks a custom assessment that does not decode instead of trusting it", () => {
+    const registry = Effect.runSync(
+      EffectHandlerRegistry.make([{
+        ...handler(),
+        assess: () => Effect.succeed({ classification: "reverted", reason: 1 } as never)
+      }])
+    )
+
+    expect(Effect.runSync(registry.assess(crossed()))).toEqual({
+      classification: "blocking",
+      reason: expect.stringContaining("Handler mail.send returned a malformed assessment"),
+      residue: "the recipient may retain the message"
+    })
+  })
+
+  it("blocks and refuses to revert an effect that recorded no idempotency key the handler requires", () => {
+    const registry = Effect.runSync(EffectHandlerRegistry.make([handler()]))
+    const { idempotencyKey: _, ...keyless } = crossed()
+
+    expect(Effect.runSync(registry.assess(keyless))).toEqual({
+      classification: "blocking",
+      reason: "Effect effect-1 recorded no idempotency key, which handler mail.send requires.",
+      residue: "the recipient may retain the message"
+    })
+    expect(Effect.runSync(Effect.flip(registry.revert(keyless)))).toMatchObject({
+      code: "irreversible",
+      message: "handler mail.send cannot compensate effect-1: Effect effect-1 recorded no idempotency key, " +
+        "which handler mail.send requires."
+    })
+    // The flag off: the same keyless evidence resolves normally.
+    const lenient = Effect.runSync(
+      EffectHandlerRegistry.make([{ ...handler(), requiresIdempotencyKey: false }])
+    )
+    expect(Effect.runSync(lenient.assess(keyless)).classification).toBe("revertible")
+  })
+
+  it("resolves by the recorded compensation descriptor, never by kind alone", () => {
+    const recorded = { ...crossed(), compensation: "mail/refund/v1" }
+    const receipt = { id: "effect-1:rollback", effect: recorded, data: {} }
+
+    // A handler that declares no descriptor does not own evidence that
+    // recorded one: a restart replaced the adapter.
+    const undeclared = Effect.runSync(EffectHandlerRegistry.make([withCompensation(undefined)]))
+    expect(Effect.runSync(undeclared.assess(recorded))).toMatchObject({
+      classification: "blocking",
+      reason: "Effect effect-1 recorded compensation mail/refund/v1, which handler mail.send does not declare."
+    })
+    expect(Effect.runSync(Effect.flip(undeclared.revert(recorded)))).toMatchObject({ code: "irreversible" })
+    expect(Effect.runSync(Effect.flip(undeclared.rollback(receipt)))).toMatchObject({
+      code: "compensation_failed",
+      message: "handler mail.send cannot roll back effect-1: Effect effect-1 recorded compensation " +
+        "mail/refund/v1, which handler mail.send does not declare."
+    })
+
+    // A handler declaring another descriptor is another implementation.
+    const other = Effect.runSync(EffectHandlerRegistry.make([withCompensation("mail/refund/v2")]))
+    expect(Effect.runSync(other.assess(recorded))).toMatchObject({
+      classification: "blocking",
+      reason: "Effect effect-1 recorded compensation mail/refund/v1, but handler mail.send implements mail/refund/v2."
+    })
+    expect(Effect.runSync(Effect.flip(other.rollback(receipt)))).toMatchObject({ code: "compensation_failed" })
+
+    // The declaring handler owns it, and evidence that recorded no descriptor
+    // still resolves by kind, because its producer had nothing more to say.
+    const events: Array<string> = []
+    const owning = Effect.runSync(EffectHandlerRegistry.make([{ ...handler(events), compensation: "mail/refund/v1" }]))
+    expect(Effect.runSync(owning.assess(recorded)).classification).toBe("revertible")
+    expect(Effect.runSync(owning.assess(crossed())).classification).toBe("revertible")
+    Effect.runSync(owning.rollback(Effect.runSync(owning.revert(recorded))))
+    expect(events).toEqual(["revert:effect-1", "rollback:effect-1:message-1"])
+  })
+
+  it("refuses to roll a receipt back through a handler registered for another tier", () => {
+    const registry = Effect.runSync(EffectHandlerRegistry.make([handler()]))
+    const failure = Effect.runSync(
+      Effect.flip(registry.rollback({
+        id: "effect-1:rollback",
+        effect: { ...crossed(), tier: "compensable" },
+        data: {}
+      }))
+    )
+
+    expect(failure).toMatchObject({
+      code: "compensation_failed",
+      message: "handler mail.send cannot roll back effect-1: handler mail.send is registered for irreversible, " +
+        "and the receipt records compensable"
+    })
+  })
+
+  it("refuses a declaration it could not resolve safely, at construction and at registration", () => {
+    const malformed: ReadonlyArray<EffectHandlerRegistry.Handler> = [
+      { ...handler(), kind: "" },
+      { ...handler(), tier: "durable" as never },
+      { ...handler(), requiresIdempotencyKey: "yes" as never },
+      { ...handler(), compensation: "" },
+      { ...handler(), rollback: undefined as never }
+    ]
+
+    for (const declaration of malformed) {
+      expect(Effect.runSync(Effect.flip(EffectHandlerRegistry.make([declaration])))).toMatchObject({
+        code: "invalid"
+      })
+      expect(Effect.runSync(Effect.flip(EffectHandlerRegistry.makeNoop().register(declaration)))).toMatchObject({
+        code: "invalid"
+      })
+    }
+    expect(Effect.runSync(Effect.flip(EffectHandlerRegistry.make([{ ...handler(), rollback: undefined as never }]))))
+      .toMatchObject({ message: "effect handler mail.send has no rollback function" })
+  })
 })

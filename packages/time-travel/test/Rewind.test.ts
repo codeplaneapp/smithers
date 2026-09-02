@@ -179,6 +179,9 @@ const effect = (
   runId: "run",
   lineageId: "run/root",
   ...(tier === "compensable" ? { changeId: "target" } : {}),
+  // `guard` never records an irreversible effect without a key, and the
+  // handlers these cases register require one.
+  ...(tier === "irreversible" ? { idempotencyKey: `${id}-key` } : {}),
   durableBoundary: true,
   providerStream: false
 })

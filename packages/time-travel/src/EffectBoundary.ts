@@ -327,8 +327,103 @@ export const decodeEntry = (
 }
 
 /**
- * Folds boundary entries to the latest monotonic status for each effect while
- * retaining the sequence of the effect's last boundary record.
+ * The fields every record of one effect must agree on.
+ *
+ * `guard` writes the `intended` and the terminal record from one
+ * {@link Description}, so a disagreement here means two different effects
+ * share an id, or a record was rewritten. `input`, `output`, and `residue` are
+ * outside the list on purpose: `output` exists only on the terminal record,
+ * and the other two are disclosure, not identity.
+ */
+const identityFields = [
+  "kind",
+  "tier",
+  "runId",
+  "lineageId",
+  "cacheKey",
+  "changeId",
+  "idempotencyKey",
+  "compensation",
+  "attempt",
+  "nonce",
+  "durableBoundary",
+  "providerStream"
+] as const
+
+const conflict = (id: string, detail: string): TimeTravelError =>
+  error("invalid", `effect ${id} has conflicting boundary evidence: ${detail}`)
+
+/**
+ * Folds decoded boundary records to one record per effect, refusing evidence
+ * that does not describe one monotonic crossing.
+ *
+ * The legal history of one effect id, in `seq` order, is an `intended` record
+ * followed by at most one terminal record, `succeeded` or `unknown`, with
+ * exact duplicates of either tolerated because a reader can page the same
+ * record twice. Everything else fails closed as `invalid`: two terminals, a
+ * terminal followed by `intended`, two records at one `seq` that disagree, or
+ * two records whose identity fields differ. The fold used to keep whichever
+ * record the caller listed last, so a conflicted or reordered journal could
+ * turn an `unknown` outcome, which must block a rewind, into a `succeeded` one
+ * a handler would compensate before its evidence was truncated.
+ *
+ * @since 0.1.0
+ * @category projections
+ */
+export const fromRecords = (
+  records: ReadonlyArray<EffectRecord>
+): Effect.Effect<ReadonlyArray<EffectRecord>, TimeTravelError> =>
+  Effect.gen(function*() {
+    const grouped = new Map<string, Array<EffectRecord>>()
+    for (const record of records) {
+      const group = grouped.get(record.id)
+      if (group === undefined) grouped.set(record.id, [record])
+      else group.push(record)
+    }
+    const folded: Array<EffectRecord> = []
+    for (const [id, group] of grouped) {
+      group.sort((left, right) => left.seq - right.seq)
+      let latest = group[0]!
+      for (const next of group.slice(1)) {
+        for (const field of identityFields) {
+          if (latest[field] !== next[field]) {
+            return yield* Effect.fail(
+              conflict(
+                id,
+                `${field} is ${String(latest[field])} at seq ${latest.seq} and ` +
+                  `${String(next[field])} at seq ${next.seq}`
+              )
+            )
+          }
+        }
+        if (next.seq === latest.seq) {
+          if (next.status !== latest.status) {
+            return yield* Effect.fail(
+              conflict(id, `records at seq ${next.seq} report both ${latest.status} and ${next.status}`)
+            )
+          }
+          continue
+        }
+        if (latest.status !== "intended") {
+          return yield* Effect.fail(
+            conflict(id, `${next.status} at seq ${next.seq} follows terminal ${latest.status} at seq ${latest.seq}`)
+          )
+        }
+        if (next.status === "intended") {
+          return yield* Effect.fail(
+            conflict(id, `intended at seq ${next.seq} repeats intended at seq ${latest.seq}`)
+          )
+        }
+        latest = next
+      }
+      folded.push(latest)
+    }
+    return folded.sort((left, right) => left.seq - right.seq)
+  })
+
+/**
+ * Decodes boundary entries and folds them with {@link fromRecords}: one record
+ * per effect, at the effect's latest legal status, ordered by `seq`.
  *
  * @since 0.1.0
  * @category projections
@@ -337,10 +432,10 @@ export const fromEntries = (
   entries: ReadonlyArray<JournalEvent.Entry>
 ): Effect.Effect<ReadonlyArray<EffectRecord>, TimeTravelError> =>
   Effect.gen(function*() {
-    const effects = new Map<string, EffectRecord>()
+    const records: Array<EffectRecord> = []
     for (const entry of entries) {
       const decoded = yield* decodeEntry(entry)
-      if (decoded !== undefined) effects.set(decoded.id, decoded)
+      if (decoded !== undefined) records.push(decoded)
     }
-    return Array.from(effects.values()).sort((left, right) => left.seq - right.seq)
+    return yield* fromRecords(records)
   })

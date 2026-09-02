@@ -23,6 +23,7 @@ import { error, TimeTravelError, type TimeTravelError as TimeTravelFailure } fro
 import { ArchiveResult, type Audit, TimeTravelStore } from "../TimeTravelStore.ts"
 import * as Compensation from "./Compensation.ts"
 import type { EffectHandlerRegistry } from "./EffectHandlerRegistry.ts"
+import * as HistoryLimit from "./HistoryLimit.ts"
 
 /**
  * The eight fault-injection points pinned by the rewind parity suite.
@@ -172,6 +173,12 @@ export interface Options {
    */
   readonly expectedTail?: { readonly tail: Tail | undefined } | undefined
   readonly pageSize?: number | undefined
+  /**
+   * The most suffix entries the rewind may read while it holds the run before
+   * it refuses with `limit_exceeded`. {@link validate} applies the same cap
+   * before the claim. Defaults to `HistoryLimit.defaultMaxHistoryEntries`.
+   */
+  readonly maxEntries?: number | undefined
   readonly detachedChildPolicy?: DetachedChildPolicy | undefined
   readonly rateLimit?: (options: {
     readonly runId: string
@@ -261,8 +268,11 @@ export interface Tail {
 }
 
 /**
- * Reads a run's whole journal once, returning its tail and whether the frame
- * addresses a record.
+ * Reads a run's whole journal once, returning its tail, whether the frame
+ * addresses a record, and how many records lie above the frame.
+ *
+ * Nothing is retained: the suffix count is what lets {@link validate} refuse
+ * an over-long truncation before the claim, without holding the entries.
  *
  * FAIL CLOSED on a page that claims more and delivers nothing. The destructive
  * paths used to treat an empty continuation as the end of history, so a journal
@@ -274,11 +284,15 @@ const scan = (
   journal: Journal.Service,
   options: { readonly runId: string; readonly frame: Frame; readonly pageSize?: number | undefined },
   label: "validation" | "revalidation"
-): Effect.Effect<{ readonly tail: Tail | undefined; readonly atFrame: boolean }, TimeTravelFailure> =>
+): Effect.Effect<
+  { readonly tail: Tail | undefined; readonly atFrame: boolean; readonly suffixCount: number },
+  TimeTravelFailure
+> =>
   Effect.gen(function*() {
     let after: JournalEvent.Seq | undefined
     let tail: Tail | undefined
     let atFrame = false
+    let suffixCount = 0
     while (true) {
       const page = yield* journal.entries({
         runId: options.runId as JournalEvent.RunId,
@@ -291,12 +305,13 @@ const scan = (
       for (const entry of page.entries) {
         if (pageTail === undefined || entry.seq > pageTail) pageTail = entry.seq
         if (tail === undefined || entry.seq > tail.seq) tail = { seq: entry.seq, lineageId: lineageOf(entry) }
+        if (entry.seq > options.frame.seq) suffixCount += 1
         if (entry.seq === options.frame.seq) {
           const lineage = lineageOf(entry)
           if (lineage === undefined || lineage === options.frame.lineageId) atFrame = true
         }
       }
-      if (!page.hasMore) return { tail, atFrame }
+      if (!page.hasMore) return { tail, atFrame, suffixCount }
       if (page.entries.length === 0) {
         return yield* Effect.fail(
           error("invalid", `journal ${label} returned an empty continuation page for ${options.runId}`)
@@ -337,6 +352,7 @@ export const validate = (options: {
   readonly runId: string
   readonly frame: Frame
   readonly pageSize?: number | undefined
+  readonly maxEntries?: number | undefined
 }): Effect.Effect<Tail | undefined, TimeTravelFailure, Journal.Journal> =>
   Effect.gen(function*() {
     if (options.pageSize !== undefined && (!Number.isSafeInteger(options.pageSize) || options.pageSize < 1)) {
@@ -344,6 +360,7 @@ export const validate = (options: {
         error("invalid", `rewind pageSize must be a positive integer, not ${String(options.pageSize)}`)
       )
     }
+    const maxEntries = options.maxEntries ?? HistoryLimit.defaultMaxHistoryEntries
     const journal = yield* Journal.Journal
     const coordinate = `${options.frame.lineageId}@${options.frame.seq}`
     const scanned = yield* scan(journal, options, "validation").pipe(
@@ -382,17 +399,39 @@ export const validate = (options: {
         )
       )
     }
+    // Refused here, before the claim, so an over-long truncation leaves no
+    // claim and no audit row behind; the owned read below re-checks it.
+    if (scanned.suffixCount > maxEntries) {
+      return yield* Effect.fail(HistoryLimit.exceeded("rewind", options.runId, maxEntries))
+    }
     return tail
   })
+
+/**
+ * The suffix above the frame, reduced to what assessment and the audit need.
+ *
+ * `boundary` holds only the effect-boundary records, because those are the
+ * only ones `EffectBoundary.fromEntries` decodes; `count` and `tailSeq` are
+ * the audit's view of the whole suffix. The suffix used to be retained
+ * entire while the rewind held the run.
+ */
+interface Suffix {
+  readonly boundary: ReadonlyArray<JournalEvent.Entry>
+  readonly count: number
+  readonly tailSeq: number | undefined
+}
 
 const readSuffix = (
   journal: Journal.Service,
   runId: string,
   frame: Frame,
-  pageSize: number
-): Effect.Effect<ReadonlyArray<JournalEvent.Entry>, TimeTravelFailure> =>
+  pageSize: number,
+  maxEntries: number
+): Effect.Effect<Suffix, TimeTravelFailure> =>
   Effect.gen(function*() {
-    const entries: Array<JournalEvent.Entry> = []
+    const boundary: Array<JournalEvent.Entry> = []
+    let count = 0
+    let tailSeq: number | undefined
     let after = frame.seq as JournalEvent.Seq
     while (true) {
       const page = yield* journal.entries({
@@ -402,8 +441,15 @@ const readSuffix = (
       }).pipe(
         Effect.mapError((cause) => error("unknown", `could not read suffix for ${runId}`, cause))
       )
-      entries.push(...page.entries)
-      if (!page.hasMore) return entries
+      for (const entry of page.entries) {
+        count += 1
+        if (count > maxEntries) {
+          return yield* Effect.fail(HistoryLimit.exceeded("rewind", runId, maxEntries))
+        }
+        if (tailSeq === undefined || entry.seq > tailSeq) tailSeq = entry.seq
+        if (entry.eventType === EffectBoundary.eventType) boundary.push(entry)
+      }
+      if (!page.hasMore) return { boundary, count, tailSeq }
       // Fail closed: a page that claims more and delivers nothing would hide
       // part of the suffix from boundary assessment while the archive still
       // deleted all of it.
@@ -800,9 +846,10 @@ export const rewind = (
                     journal,
                     options.runId,
                     options.frame,
-                    options.pageSize ?? 100
+                    options.pageSize ?? 100,
+                    options.maxEntries ?? HistoryLimit.defaultMaxHistoryEntries
                   )
-                  const effects = yield* EffectBoundary.fromEntries(suffix)
+                  const effects = yield* EffectBoundary.fromEntries(suffix.boundary)
                   yield* runHook(options, "load-suffix")
 
                   const childAssessment = yield* assessChildren(
@@ -837,8 +884,8 @@ export const rewind = (
                   detail = {
                     ...detail,
                     phase: "preflight_complete",
-                    suffixCount: suffix.length,
-                    ...(suffix.at(-1) === undefined ? {} : { suffixTailSeq: suffix.at(-1)!.seq }),
+                    suffixCount: suffix.count,
+                    ...(suffix.tailSeq === undefined ? {} : { suffixTailSeq: suffix.tailSeq }),
                     ...(snapshot === undefined ? {} : { targetChangeId: snapshot.changeId }),
                     warnings: childAssessment.warnings
                   }

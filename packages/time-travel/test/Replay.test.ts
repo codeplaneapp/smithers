@@ -342,3 +342,101 @@ describe("Replay", () => {
       }
     }))
 })
+
+/**
+ * The fold streams and stops at the frame, so what it reads is bounded by the
+ * frame and by `maxEntries`, never by the run's whole history.
+ */
+describe("Replay bounds", () => {
+  const fold = {
+    initial: [] as Array<string>,
+    reduce: (acc: Array<string>, current: Entry) => [...acc, String(current.payload)]
+  }
+
+  const pagingJournal = (entries: ReadonlyArray<Entry>, requests: Array<number | undefined>) =>
+    Journal.makeNoop({
+      entries: ({ after, limit }) =>
+        Effect.sync(() => {
+          requests.push(after)
+          const remaining = entries.filter((item) => item.seq > (after ?? -1))
+          const page = remaining.slice(0, limit)
+          return { entries: page, hasMore: remaining.length > page.length }
+        })
+    })
+
+  it.effect("stops reading once the first record past the frame arrives", () =>
+    Effect.gen(function*() {
+      const requests: Array<number | undefined> = []
+      const entries = [entry(0, "a"), entry(1, "b"), entry(2, "c"), entry(3, "d"), entry(4, "e"), entry(5, "f")]
+
+      const state = yield* Replay.rederive({ lineageId: "run/root", seq: 1 }, fold, { runId: "run", pageSize: 2 }).pipe(
+        Effect.provide(Layer.succeed(Journal.Journal, pagingJournal(entries, requests))),
+        Effect.provide(CacheStore.layerNoop())
+      )
+
+      expect(state).toEqual(["a", "b"])
+      // The page holding seq 2 proves the frame is behind; the third page is
+      // never asked for.
+      expect(requests).toEqual([undefined, 1])
+    }))
+
+  it.effect("folds up to maxEntries at or below the frame and refuses one more", () =>
+    Effect.gen(function*() {
+      const entries = [entry(0, "a"), entry(1, "b"), entry(2, "c"), entry(3, "past-the-frame")]
+      const replay = (maxEntries: number) =>
+        Replay.rederive({ lineageId: "run/root", seq: 2 }, fold, { runId: "run", maxEntries }).pipe(
+          Effect.provide(Layer.succeed(Journal.Journal, pagingJournal(entries, []))),
+          Effect.provide(CacheStore.layerNoop())
+        )
+
+      expect(yield* replay(4)).toEqual(["a", "b", "c"])
+      // Exactly at the cap: the record past the frame is not read against it.
+      expect(yield* replay(3)).toEqual(["a", "b", "c"])
+      expect(yield* Effect.flip(replay(2))).toMatchObject({
+        code: "limit_exceeded",
+        message: "replay of run would read more than 2 journal entries; raise maxHistoryEntries to allow it"
+      })
+    }))
+
+  it.effect("skips a record a later page repeats", () =>
+    Effect.gen(function*() {
+      const pages = [
+        { entries: [entry(0, "a"), entry(1, "b")], hasMore: true },
+        { entries: [entry(1, "b"), entry(2, "c")], hasMore: false }
+      ]
+      let served = 0
+      const journal = Journal.makeNoop({ entries: () => Effect.sync(() => pages[served++]!) })
+
+      const state = yield* Replay.rederive({ lineageId: "run/root", seq: 5 }, fold, { runId: "run" }).pipe(
+        Effect.provide(Layer.succeed(Journal.Journal, journal)),
+        Effect.provide(CacheStore.layerNoop())
+      )
+
+      expect(state).toEqual(["a", "b", "c"])
+    }))
+
+  it.effect("refuses a later page that reaches below a coordinate the fold has passed", () =>
+    Effect.gen(function*() {
+      // Sequence order is the journal contract across pages; a page that
+      // introduces seq 1 after seq 2 was folded is corrupt evidence, not a
+      // record to slot in quietly.
+      const pages = [
+        { entries: [entry(0, "a"), entry(2, "c")], hasMore: true },
+        { entries: [entry(1, "b"), entry(3, "d")], hasMore: false }
+      ]
+      let served = 0
+      const journal = Journal.makeNoop({ entries: () => Effect.sync(() => pages[served++]!) })
+
+      const failure = yield* Effect.flip(
+        Replay.rederive({ lineageId: "run/root", seq: 5 }, fold, { runId: "run" }).pipe(
+          Effect.provide(Layer.succeed(Journal.Journal, journal)),
+          Effect.provide(CacheStore.layerNoop())
+        )
+      )
+
+      expect(failure).toMatchObject({
+        code: "invalid",
+        message: "journal replay returned seq 1 after seq 2 for run"
+      })
+    }))
+})

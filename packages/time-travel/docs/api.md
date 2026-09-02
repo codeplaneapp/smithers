@@ -26,19 +26,27 @@ names.
 
 ## Operations
 
-`TimeTravel` is one injectable service with three operations, each addressed by
+`TimeTravel` is one injectable service with four operations, each addressed by
 a `Position`: a run id plus a `Frame`.
 
-| Operation                       | What it does                                                                                                                                                                                                                                                                                                                                |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `inspect(position, projection)` | folds the committed journal prefix up to the frame through a pure projection. It has no dispatcher, so a replay can never re-execute a model call or a child flow, and that is what separates it from an engine resume. `inspect` is the replay entry point; there is no separate `replay` operation.                                       |
-| `fork(position, options?)`      | mints a child run, copies the journal prefix, the frame's anchors, and only the attempts that prefix can explain, records the lineage edge, and provisions the child's jj workspace pinned at the frame's recorded pointer. The parent is never mutated. `options.workspaceRoot` only moves which lane the derived workspace name lands in. |
-| `rewind(position, options?)`    | the fenced, audited suffix-removal protocol. The ownership claim and the audit id are minted inside. `options.detachedChildren` (`"block"` by default, or `"cancel"`) and `options.pageSize` are the only knobs.                                                                                                                            |
+| Operation                                | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `replay(position, projection, options?)` | folds the committed journal prefix up to the frame through a pure projection. It has no dispatcher, so a replay can never re-execute a model call or a child flow, and that is what separates it from an engine resume. The fold streams and stops reading at the frame. `options.pageSize` is a throughput knob; `options.maxHistoryEntries` caps the entries the fold reads for this call.                                                                                                                 |
+| `inspect(position, projection)`          | the same fold as `replay`, under the service defaults. It exists for the caller that never tunes a read.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `fork(position, options?)`               | mints and reserves a child run id, provisions the child's jj workspace pinned at the frame's recorded pointer, then copies the journal prefix, the frame's anchors, and only the attempts that prefix can explain, and records the lineage edge. The parent is never mutated, and the fork refuses `live_parent` while the parent or any ancestor is live. `options.workspaceRoot` only moves which lane the derived workspace name lands in; `options.maxHistoryEntries` caps the suffix the fork assesses. |
+| `rewind(position, options?)`             | the fenced, audited suffix-removal protocol. The ownership claim and the audit id are minted inside. `options.detachedChildren` (`"block"` by default, or `"cancel"`), `options.pageSize`, and `options.maxHistoryEntries` are the only knobs.                                                                                                                                                                                                                                                               |
 
 The workspace a fork lands in is named after the child run id the fork mints,
 never supplied: `smithers-fork-` plus the sanitized id capped at 64 characters
 plus a short digest of the raw id. A frame forked twice therefore gets two
 lanes, and the lane is forgotten when the service scope is released.
+
+The mint is a durable reservation. A process that dies after provisioning the
+lane and before the store commits the fork leaves a registered lane and a
+reservation behind; the next build of `TimeTravel.layer` forgets the lane of
+every reservation older than five minutes whose fork never committed, and the
+reserved ordinal is never handed out again, so a retry lands under a fresh
+lane name rather than asking jj for the one the leftover on disk still holds.
 
 ### Rewind order of operations
 
@@ -97,19 +105,20 @@ so a caller's branch stays exhaustive. This table is checked against
 `TimeTravelErrorCode` by the page generator: a code that exists in one and not
 the other fails the build.
 
-| Code                  | Raised by              | Means                                                                                                                                                    |
-| --------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `busy`                | `rewind`, recovery     | another owner holds the run, or this operation lost its claim before it could finish. Retryable.                                                         |
-| `live_parent`         | `fork`                 | the parent run, or an ancestor of it, is running, claimed, or owned, so it has no settled prefix to copy.                                                |
-| `live_child`          | `rewind`               | a descendant the truncation would cut history out from under is still executing, and the policy is `"block"`.                                            |
-| `not_found`           | all three              | the run, the frame, or the audit does not address anything: a coordinate past the journal tail, a lineage this run is not on, or a run row that is gone. |
-| `invalid`             | all three              | a caller-supplied option is malformed, or a durable payload does not decode. Refused before the operation touches anything.                              |
-| `already_crossed`     | `EffectBoundary.guard` | the effect already recorded a durable `intended` boundary, so executing it a second time was refused.                                                    |
-| `rate_limited`        | `rewind`               | the supplied rate limiter rejected the attempt. The audit row records the decision.                                                                      |
-| `compensation_failed` | `rewind`, recovery     | a rollback handler or the workspace restore failed, so the rewind stopped rather than leave the world half reverted.                                     |
-| `irreversible`        | `rewind`               | an effect in the truncated range cannot be undone at all: no handler, or a sealed result whose cache entry is gone.                                      |
-| `fence_lost`          | `rewind`               | the caller's ownership of the run was superseded before a mutation committed, so the mutation was refused rather than written behind the live owner.     |
-| `unknown`             | all three              | the store, the journal, or an unmapped host failure. The original cause is attached.                                                                     |
+| Code                  | Raised by              | Means                                                                                                                                                                                         |
+| --------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `busy`                | `rewind`, recovery     | another owner holds the run, or this operation lost its claim before it could finish. Retryable.                                                                                              |
+| `live_parent`         | `fork`                 | the parent run, or an ancestor of it, is running, claimed, or owned, so it has no settled prefix to copy.                                                                                     |
+| `live_child`          | `rewind`               | a descendant the truncation would cut history out from under is still executing, and the policy is `"block"`.                                                                                 |
+| `not_found`           | all verbs              | the run, the frame, or the audit does not address anything: a coordinate past the journal tail, a lineage this run is not on, or a run row that is gone.                                      |
+| `invalid`             | all verbs              | a caller-supplied option is malformed, or a durable payload does not decode. Refused before the operation touches anything.                                                                   |
+| `already_crossed`     | `EffectBoundary.guard` | the effect already recorded a durable `intended` boundary, so executing it a second time was refused.                                                                                         |
+| `rate_limited`        | `rewind`               | the supplied rate limiter rejected the attempt. The audit row records the decision.                                                                                                           |
+| `compensation_failed` | `rewind`, recovery     | a rollback handler or the workspace restore failed, so the rewind stopped rather than leave the world half reverted.                                                                          |
+| `irreversible`        | `rewind`               | an effect in the truncated range cannot be undone at all: no handler, or a sealed result whose cache entry is gone.                                                                           |
+| `fence_lost`          | `rewind`               | the caller's ownership of the run was superseded before a mutation committed, so the mutation was refused rather than written behind the live owner.                                          |
+| `limit_exceeded`      | all verbs              | the operation would read more journal entries than `maxHistoryEntries` allows: the prefix a replay folds, or the suffix a fork or rewind assesses. A rewind refuses before it claims the run. |
+| `unknown`             | all verbs              | the store, the journal, or an unmapped host failure. The original cause is attached.                                                                                                          |
 
 An error's `cause` is encoded with the error, so the package never attaches a
 whole effect record or a whole parse issue to one: a blocking assessment travels
@@ -123,9 +132,14 @@ as its identity and classification, never as the effect's `input` or `output`.
   PostgreSQL and PGlite are unsupported.
 - Journal reads page at 100 entries by default. `pageSize` is a throughput knob
   and never changes a derived answer.
-- A rewind materializes the suffix after the frame in memory, a fork the suffix
-  it carries past, and a replay the prefix it folds. There is no configured
-  maximum, so a very long history is bounded by process memory.
+- Every read is capped by `maxHistoryEntries`. The default is 100,000 entries
+  (`TimeTravel.defaultMaxHistoryEntries`); `TimeTravel.layerWith({ maxHistoryEntries })`
+  sets the service default and each verb's options override it per call, and a
+  value that is not a positive integer is refused `invalid`. A replay streams
+  its fold and stops at the frame, so it retains nothing below it; a fork or
+  rewind retains only the effect-boundary records of the suffix it assesses.
+  Validation still scans a run's journal to its tail to find the frame, without
+  retaining it.
 - `Projection.reduce` receives store entries by reference. Treat them as
   read-only: mutating one rewrites the evidence the fold is reading.
 - The memory store is a behavioural peer of the SQL store for the answers both
@@ -157,3 +171,12 @@ owns migration itself.
 With no `CompensationHandlers` provided, a crossed record that is not sealed
 resolves to no handler, classifies as `blocking`, and the rewind fails
 `irreversible`. That is the safe default.
+
+A handler is held to what the evidence recorded. An effect that recorded a
+`compensation` descriptor resolves only to the handler declaring the same
+one, so an adapter swapped in after a restart never compensates evidence
+another implementation left behind; an effect that recorded none resolves by
+`kind`. A handler with `requiresIdempotencyKey` blocks and never reverts an
+effect that recorded no key, a custom `assess` result is decoded against
+`Assessment` and assesses `blocking` when it does not decode, and a rollback
+refuses a receipt whose tier or descriptor the handler does not match.

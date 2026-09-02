@@ -4,10 +4,29 @@
 
 ### Added
 
-- One flat `TimeTravel` service key with `inspect`, `fork`, and `rewind`, plus
-  `layer`, `layerWith`, `make`, and `makeWith`. Building the layer runs startup
-  recovery, so an interrupted rewind is finished or rolled back before the
-  service accepts work.
+- One flat `TimeTravel` service key with `replay`, `inspect`, `fork`, and
+  `rewind`, plus `layer`, `layerWith`, `make`, and `makeWith`. Building the
+  layer runs startup recovery, so an interrupted rewind is finished or rolled
+  back before the service accepts work. `replay` is the fold verb the release
+  contract names, with `ReplayOptions` (`pageSize`, `maxHistoryEntries`);
+  `inspect` is the same fold under the service defaults.
+- `maxHistoryEntries`, on `TimeTravel.Options` and on every verb's options: the
+  cap on journal entries one replay folds or one fork or rewind assesses,
+  defaulting to `TimeTravel.defaultMaxHistoryEntries` (100,000). An operation
+  past it fails with the new `limit_exceeded` code, a rewind before it claims
+  the run. A replay now streams its fold and stops reading at the frame, and a
+  fork or rewind retains only the boundary records of the suffix it assesses,
+  instead of materializing whole histories.
+- `TimeTravelStore.ForkIntent` and `Service.abandonForkIntents`. `nextForkId`
+  durably reserves the id it mints, `createFork` consumes the reservation, and
+  building `TimeTravel.layer` hands back reservations older than five minutes
+  whose fork never committed and forgets the jj lane each one named. A process
+  that died between provisioning a lane and committing its fork used to remint
+  the same id on retry, and jj refused the lane name the leftover held.
+- `CompensationHandlers.Handler.compensation`, the descriptor an effect
+  records on its boundary. A handler owns only the evidence recorded under the
+  descriptor it declares; the `Classification` and `Assessment` schemas moved
+  beside the handler shape, and a custom `assess` is decoded against them.
 - `CompensationHandlers`, the optional door a composition contributes its
   adapters' compensations through. With none provided a crossed record that is
   not sealed classifies `blocking` and the rewind fails `irreversible`.
@@ -72,6 +91,31 @@
 
 ### Fixed
 
+- A fork refuses while ANY ancestor is live. The SQL store's liveness walk
+  followed this package's fork edges alone, so an inactive child a running
+  engine parent had spawned or handed off to, recorded only through
+  `flows_runs.parent_run_id` or `flows_run_parents`, forked as if its history
+  were settled. The walk now covers all three relations, breadth first, and
+  terminates on a cycle; the memory store walks every parent edge of a child
+  rather than the first.
+- The registry enforces the handler safety contract before a rewind acts on a
+  verdict: a custom `assess` result that does not decode assesses `blocking`,
+  an effect that recorded no idempotency key is blocked and never reverted by
+  a handler that requires one, a handler declaring another compensation
+  descriptor, or none, neither assesses, reverts, nor rolls back evidence
+  recorded under a descriptor, a rollback verifies the receipt's tier, and a
+  malformed declaration is refused `invalid` at registration.
+- `EffectBoundary.fromEntries` refuses conflicting boundary evidence instead of
+  keeping whichever record the caller listed last: records fold in `seq`
+  order, identity fields must agree, and only `intended` followed by one
+  terminal record is legal. An `unknown` outcome can no longer be turned into
+  a `succeeded` one by a reordered journal. `fromRecords` exposes the fold.
+- The snapshot projector keeps the jj pointer and the plan digest per lineage,
+  so a `carried` anchor on one lineage never inherits another lineage's
+  pointer when a run's journal interleaves them, and a plan record with no
+  lineage metadata is refused `invalid` like a snapshot record.
+- `SqlTimeTravelStore` scopes its lineage-edge read to the runs reachable from
+  the run in question instead of decoding every edge in the database.
 - A rewind no longer rolls a handler receipt back twice when the workspace
   restore fails: `restoreWorkspace` owns the receipts it is handed and reverses
   them itself, and nothing requires a handler's `rollback` to be idempotent.

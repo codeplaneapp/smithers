@@ -24,6 +24,9 @@ const record = (
   status: "succeeded",
   runId: "run",
   lineageId: "run/root",
+  // The handlers below require a key, and `guard` never records an
+  // irreversible effect without one.
+  idempotencyKey: "compensation-key",
   durableBoundary: true,
   providerStream: false,
   ...overrides

@@ -29,8 +29,18 @@ const row: RunStore.RunRow = {
 }
 
 describe("TimeTravel rewind options", () => {
-  for (const pageSize of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
-    it.effect(`rejects pageSize ${String(pageSize)} before claim, audit, or truncation`, () =>
+  const malformed: ReadonlyArray<{ readonly pageSize?: number; readonly maxHistoryEntries?: number }> = [
+    { pageSize: 0 },
+    { pageSize: -1 },
+    { pageSize: Number.NaN },
+    { pageSize: Number.POSITIVE_INFINITY },
+    { maxHistoryEntries: 0 },
+    { maxHistoryEntries: -1 },
+    { maxHistoryEntries: 1.5 },
+    { maxHistoryEntries: Number.NaN }
+  ]
+  for (const options of malformed) {
+    it.effect(`rejects ${JSON.stringify(options)} before claim, audit, or truncation`, () =>
       Effect.gen(function*() {
         const store = MemoryTimeTravelStore.make({
           records: [
@@ -101,7 +111,7 @@ describe("TimeTravel rewind options", () => {
               return yield* Effect.exit(
                 timeTravel.rewind(
                   { runId: "run", frame: { lineageId: "run/root", seq: 0 } },
-                  { pageSize }
+                  options
                 )
               )
             }).pipe(Effect.provide(layer))
@@ -233,5 +243,85 @@ describe("TimeTravel recovery liveness", () => {
 
       expect(steals).toBe(0)
       expect(audits[0]).toMatchObject({ status: "in_progress" })
+    }))
+})
+
+describe("TimeTravel rewind history cap", () => {
+  it.effect("refuses a suffix longer than maxHistoryEntries before the claim", () =>
+    Effect.gen(function*() {
+      const journalRecord = (seq: number): MemoryTimeTravelStore.JournalRecord => ({
+        runId: "run",
+        seq,
+        eventId: `event-${seq}`,
+        lineageId: "run/root",
+        payload: { eventType: "test", payload: {}, meta: { lineageId: "run/root" } }
+      })
+      const store = MemoryTimeTravelStore.make({ records: [journalRecord(0), journalRecord(1), journalRecord(2)] })
+      const before = store.state()
+      let claims = 0
+      const entries: ReadonlyArray<JournalEvent.Entry> = store.state().records.map((record) => ({
+        runId: record.runId as JournalEvent.RunId,
+        seq: record.seq as JournalEvent.Seq,
+        eventId: record.eventId,
+        sourceId: "options" as JournalEvent.SourceId,
+        sourceSeq: record.seq as JournalEvent.SourceSeq,
+        emittedAtMs: record.seq,
+        eventType: "test",
+        payload: {},
+        meta: { lineageId: record.lineageId }
+      }))
+      const journal = Journal.makeNoop({
+        entries: ({ after, limit }) =>
+          Effect.sync(() => {
+            const remaining = entries.filter((entry) => entry.seq > (after ?? -1))
+            const page = remaining.slice(0, limit)
+            return { entries: page, hasMore: remaining.length > page.length }
+          })
+      })
+      const runs = RunStore.makeNoop({
+        get: () => Effect.succeed(row),
+        claim: (_runId, _expected, _owner, nowMs) =>
+          Effect.sync(() => {
+            claims += 1
+            return { _tag: "Claimed" as const, claimedAtMs: nowMs }
+          }),
+        activate: () => Effect.succeed({ _tag: "Activated" as const }),
+        transitionOwned: () => Effect.succeed({ _tag: "Transitioned" as const })
+      })
+      const layer = TimeTravel.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.succeed(TimeTravelStore)(store),
+            Layer.succeed(RunStore.RunStore)(runs),
+            Layer.succeed(Journal.Journal)(journal),
+            Layer.succeed(Jj.Jj)(Jj.makeNoop({ snapshot: () => Effect.succeed({ changeId: "current" }) })),
+            CacheStore.layerNoop()
+          )
+        )
+      )
+      const outcome = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const timeTravel = yield* TimeTravel
+          const refused = yield* Effect.flip(
+            timeTravel.rewind({ runId: "run", frame: { lineageId: "run/root", seq: 0 } }, { maxHistoryEntries: 1 })
+          )
+          // Exactly at the cap the truncation proceeds.
+          const allowed = yield* timeTravel.rewind(
+            { runId: "run", frame: { lineageId: "run/root", seq: 0 } },
+            { maxHistoryEntries: 2 }
+          )
+          return { refused, allowed }
+        }).pipe(Effect.provide(layer))
+      )
+
+      expect(outcome.refused).toMatchObject({
+        code: "limit_exceeded",
+        message: "rewind of run would read more than 1 journal entries; raise maxHistoryEntries to allow it"
+      })
+      expect(outcome.allowed.archive.archived).toBe(2)
+      // One claim: the refusal took none.
+      expect(claims).toBe(1)
+      expect(store.state().audits.map((audit) => audit.status)).toEqual(["completed"])
+      expect(before.records).toHaveLength(3)
     }))
 })

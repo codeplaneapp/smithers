@@ -144,12 +144,12 @@ any `CompensationHandlers` its adapters own.
 
 Time travel is a library API in this release, and only a library API.
 
-| Surface                                | 1.0.0-rc.0                                                                                                                                                     |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TimeTravel.inspect`, `fork`, `rewind` | available from `@smthrs/time-travel`. `inspect` is the replay entry point; there is no separate `replay` operation                                             |
-| CLI verbs                              | none. The Smithers 0.x time-travel verbs exit 1 with a migration message; [migrating from 0.x](/migration/1.0#removed-commands) lists them                     |
-| MCP tools                              | none. `replay_run`, `fork_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, and `time_travel` answer with the `unsupported` envelope |
-| Composition                            | not composed into `NodeControl`, and the CLI does not install migration block 5000                                                                             |
+| Surface                                          | 1.0.0-rc.0                                                                                                                                                     |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TimeTravel.replay`, `inspect`, `fork`, `rewind` | available from `@smthrs/time-travel`. `replay` is the fold verb with its read knobs; `inspect` is the same fold under the service defaults                     |
+| CLI verbs                                        | none. The Smithers 0.x time-travel verbs exit 1 with a migration message; [migrating from 0.x](/migration/1.0#removed-commands) lists them                     |
+| MCP tools                                        | none. `replay_run`, `fork_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, and `time_travel` answer with the `unsupported` envelope |
+| Composition                                      | not composed into `NodeControl`, and the CLI does not install migration block 5000                                                                             |
 
 A program that wants time travel provides `TimeTravelStore` and calls the
 service itself. Nothing in the command line reaches it.

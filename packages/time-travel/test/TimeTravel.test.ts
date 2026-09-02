@@ -23,11 +23,13 @@ import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import * as Option from "effect/Option"
 import * as Random from "effect/Random"
+import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as CompensationHandlers from "../src/CompensationHandlers.ts"
+import * as EffectBoundary from "../src/EffectBoundary.ts"
 import * as Fork from "../src/internal/Fork.ts"
 import * as MemoryTimeTravelStore from "../src/MemoryTimeTravelStore.ts"
-import { TimeTravel } from "../src/TimeTravel.ts"
+import { layerWith, TimeTravel } from "../src/TimeTravel.ts"
 import type { Audit } from "../src/TimeTravelStore.ts"
 import { TimeTravelStore } from "../src/TimeTravelStore.ts"
 import { jjInstalled, parkSealedFlow, runRealEngine, withRealFixture } from "./RealTimeTravelHarness.ts"
@@ -572,5 +574,274 @@ describe("TimeTravel wiring", () => {
       )
 
       expect(total).toBe(10)
+    }))
+})
+
+/**
+ * `replay` is the frozen contract's fold verb: the same fold as `inspect`,
+ * with the read knobs. Every verb reads under `maxHistoryEntries`, the
+ * service default a call may override, and a rewind refuses an over-long
+ * suffix before it claims anything.
+ */
+describe("TimeTravel replay and history caps", () => {
+  const dependencies = (store: ReturnType<typeof MemoryTimeTravelStore.make>, workspaces?: Array<string>) =>
+    Layer.mergeAll(
+      Layer.succeed(TimeTravelStore)(store),
+      Layer.succeed(RunStore.RunStore)(makeRuns()),
+      Layer.succeed(Journal.Journal)(makeJournal(store)),
+      Layer.succeed(Jj.Jj)(
+        Jj.makeNoop({
+          snapshot: () => Effect.succeed({ changeId: "current" }),
+          workspaceAdd: (name) => Effect.sync(() => void workspaces?.push(name)),
+          workspaceForget: () => Effect.void
+        })
+      ),
+      CacheStore.layerNoop({ get: () => Effect.succeed(Option.none()) })
+    )
+  const sum = {
+    initial: 0,
+    reduce: (state: number, entry: JournalEvent.Entry) =>
+      state + ((entry.payload as { readonly amount?: number } | null)?.amount ?? 0)
+  }
+
+  it.effect("replays a position through the fold inspect uses, under the caller's read knobs", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make({ records: [record(0, 10), record(1, 20), record(2, 30)] })
+      const position = { runId: "run", frame: { lineageId, seq: 1 } }
+
+      const result = yield* run(store, (timeTravel) =>
+        Effect.all({
+          replayed: timeTravel.replay(position, sum, { pageSize: 1, maxHistoryEntries: 2 }),
+          inspected: timeTravel.inspect(position, sum)
+        }))
+
+      expect(result.replayed).toBe(30)
+      expect(result.inspected).toBe(30)
+    }))
+
+  it.effect("refuses malformed replay knobs before reading, and a fold past the cap", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make({ records: [record(0, 10), record(1, 20)] })
+      const position = { runId: "run", frame: { lineageId, seq: 1 } }
+
+      const failures = yield* run(store, (timeTravel) =>
+        Effect.all([
+          Effect.flip(timeTravel.replay(position, sum, { pageSize: 0 })),
+          Effect.flip(timeTravel.replay(position, sum, { maxHistoryEntries: 1.5 })),
+          Effect.flip(timeTravel.replay(position, sum, { maxHistoryEntries: 1 }))
+        ]))
+
+      expect(failures.map((failure) => failure.code)).toEqual(["invalid", "invalid", "limit_exceeded"])
+      expect(failures[0]!.message).toBe("replay pageSize must be a positive integer, not 0")
+      expect(failures[1]!.message).toBe("maxHistoryEntries must be a positive integer, not 1.5")
+    }))
+
+  it.effect("caps the suffix a fork assesses, before it mints or provisions anything", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make({ records: [record(0, 10), record(1, 20), record(2, 30)] })
+      const workspaces: Array<string> = []
+
+      const failures = yield* run(
+        store,
+        (timeTravel) =>
+          Effect.all([
+            Effect.flip(timeTravel.fork({ runId: "run", frame: { lineageId, seq: 0 } }, { maxHistoryEntries: 1 })),
+            Effect.flip(timeTravel.fork({ runId: "run", frame: { lineageId, seq: 0 } }, { maxHistoryEntries: 0 }))
+          ]),
+        workspaces
+      )
+
+      expect(failures.map((failure) => failure.code)).toEqual(["limit_exceeded", "invalid"])
+      expect(workspaces).toEqual([])
+      expect(store.state().forkIntents).toEqual([])
+      expect(store.state().edges).toEqual([])
+    }))
+
+  it.effect("refuses a service-level cap that is not a positive integer at build", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make({ records: [record(0, 10)] })
+      const failure = yield* Effect.flip(
+        Effect.scoped(
+          Effect.provide(Effect.void, layerWith({ maxHistoryEntries: 0 }).pipe(Layer.provide(dependencies(store))))
+        )
+      )
+
+      expect(failure).toMatchObject({ code: "invalid", message: "maxHistoryEntries must be a positive integer, not 0" })
+    }))
+
+  it.effect("applies the service-level cap when a call names none, and lets a call raise it", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make({ records: [record(0, 10), record(1, 20)] })
+      const position = { runId: "run", frame: { lineageId, seq: 1 } }
+
+      const result = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const timeTravel = yield* TimeTravel
+          return {
+            capped: yield* Effect.flip(timeTravel.inspect(position, sum)),
+            raised: yield* timeTravel.replay(position, sum, { maxHistoryEntries: 2 })
+          }
+        }).pipe(Effect.provide(layerWith({ maxHistoryEntries: 1 }).pipe(Layer.provide(dependencies(store)))))
+      )
+
+      expect(result.capped).toMatchObject({ code: "limit_exceeded" })
+      expect(result.raised).toBe(30)
+    }))
+})
+
+/**
+ * A fork reserves its id, provisions the lane, then commits. A process that
+ * dies between the last two steps leaves a registered lane behind; building
+ * the service forgets it, once the reservation is older than the window a
+ * live provisioning could plausibly still be inside.
+ */
+describe("TimeTravel fork lane reclamation", () => {
+  const frame = { lineageId, seq: 0 } as const
+
+  const build = (
+    store: ReturnType<typeof MemoryTimeTravelStore.make>,
+    jj: Partial<Jj.Jj>
+  ) =>
+    Effect.scoped(
+      Effect.provide(
+        Effect.void,
+        TimeTravel.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeed(TimeTravelStore)(store),
+              Layer.succeed(RunStore.RunStore)(makeRuns()),
+              Layer.succeed(Journal.Journal)(makeJournal(store)),
+              Layer.succeed(Jj.Jj)(Jj.makeNoop(jj)),
+              CacheStore.layerNoop()
+            )
+          )
+        )
+      )
+    )
+
+  it.effect("forgets the lane of a fork that reserved an id and never committed, and leaves a fresh one alone", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make({ records: [record(0, 10)] })
+      const abandoned = yield* store.nextForkId("run", frame)
+      yield* TestClock.adjust("6 minutes")
+      const fresh = yield* store.nextForkId("run", frame)
+      const forgotten: Array<string> = []
+
+      yield* build(store, { workspaceForget: (name) => Effect.sync(() => void forgotten.push(name)) })
+
+      expect(forgotten).toEqual([Fork.workspaceNameFor(abandoned)])
+      expect(store.state().forkIntents.map((intent) => intent.childRunId)).toEqual([fresh])
+    }))
+
+  it.effect("reports a lane it cannot forget and still builds", () =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make({ records: [record(0, 10)] })
+      yield* store.nextForkId("run", frame)
+      yield* TestClock.adjust("6 minutes")
+      const logged: Array<string> = []
+
+      yield* build(store, {}).pipe(
+        Effect.provide(Logger.layer([Logger.make<unknown, void>(({ message }) => logged.push(String(message)))]))
+      )
+
+      expect(logged).toContain("time-travel: could not forget an abandoned fork workspace")
+      expect(store.state().forkIntents).toEqual([])
+    }))
+})
+
+/**
+ * The compensation descriptor an adapter records crosses the contribution
+ * door with the handler that implements it. Dropping it there resolved every
+ * handler by kind alone, so an adapter swapped in after a restart compensated
+ * evidence another implementation left behind.
+ */
+describe("TimeTravel compensation descriptors", () => {
+  const boundary = (
+    seq: number,
+    status: "intended" | "succeeded",
+    compensation: string
+  ): MemoryTimeTravelStore.JournalRecord => ({
+    runId: "run",
+    seq,
+    eventId: `event-${seq}`,
+    lineageId,
+    payload: {
+      eventType: EffectBoundary.eventType,
+      payload: {
+        version: 1,
+        effect: {
+          id: "charge-1",
+          kind: "billing/charge",
+          tier: "irreversible",
+          status,
+          runId: "run",
+          lineageId,
+          idempotencyKey: "charge-1",
+          compensation,
+          ...(status === "succeeded" ? { output: { chargeId: "ch_1" } } : {})
+        }
+      },
+      meta: { lineageId }
+    }
+  })
+
+  const rewindWith = (compensation: string) =>
+    Effect.gen(function*() {
+      const store = MemoryTimeTravelStore.make({
+        records: [
+          record(0, 10),
+          boundary(1, "intended", "billing/refund/v1"),
+          boundary(2, "succeeded", "billing/refund/v1")
+        ]
+      })
+      const reverted: Array<string> = []
+      const exit = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const timeTravel = yield* TimeTravel
+          return yield* Effect.exit(timeTravel.rewind({ runId: "run", frame: { lineageId, seq: 0 } }))
+        }).pipe(
+          Effect.provide(
+            TimeTravel.layer.pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  CompensationHandlers.layer([{
+                    kind: "billing/charge",
+                    tier: "irreversible",
+                    requiresIdempotencyKey: true,
+                    compensation,
+                    residue: () => "The charge was refunded, not un-charged.",
+                    revert: (effect) => Effect.sync(() => void reverted.push(effect.id)),
+                    rollback: () => Effect.void
+                  }]),
+                  Layer.succeed(TimeTravelStore)(store),
+                  Layer.succeed(RunStore.RunStore)(makeRuns()),
+                  Layer.succeed(Journal.Journal)(makeJournal(store)),
+                  Layer.succeed(Jj.Jj)(Jj.makeNoop({ snapshot: () => Effect.succeed({ changeId: "current" }) })),
+                  CacheStore.layerNoop({ get: () => Effect.succeed(Option.none()) })
+                )
+              )
+            )
+          )
+        )
+      )
+      return { exit, reverted, records: store.state().records.map((entry) => entry.seq) }
+    })
+
+  it.effect("refuses to compensate evidence recorded under another descriptor", () =>
+    Effect.gen(function*() {
+      const drifted = yield* rewindWith("billing/refund/v2")
+
+      expect(drifted.exit._tag).toBe("Failure")
+      expect(drifted.reverted).toEqual([])
+      expect(drifted.records).toEqual([0, 1, 2])
+    }))
+
+  it.effect("compensates through the handler that declares the recorded descriptor", () =>
+    Effect.gen(function*() {
+      const matched = yield* rewindWith("billing/refund/v1")
+
+      expect(matched.exit._tag).toBe("Success")
+      expect(matched.reverted).toEqual(["charge-1"])
+      expect(matched.records).toEqual([0])
     }))
 })

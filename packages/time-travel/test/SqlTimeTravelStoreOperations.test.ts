@@ -533,6 +533,16 @@ describe("SqlTimeTravelStore persistence fault matrix", () => {
         invoke: (store: TimeTravelStore.Service) => store.createFork("run", audit.frame)
       },
       {
+        method: "nextForkId",
+        table: "flows_time_travel_fork_intents",
+        invoke: (store: TimeTravelStore.Service) => store.nextForkId("run", audit.frame)
+      },
+      {
+        method: "abandonForkIntents",
+        table: "flows_time_travel_fork_intents",
+        invoke: (store: TimeTravelStore.Service) => store.abandonForkIntents(1)
+      },
+      {
         method: "recordReceipt",
         table: "flows_time_travel_receipts",
         invoke: (store: TimeTravelStore.Service) =>
@@ -754,9 +764,10 @@ describe("SqlTimeTravelStore.nextForkId", () => {
     })
 
   // The store operation the fork verb calls before it provisions a workspace.
-  // `TimeTravelStore.Service.nextForkId` documents the repeat below as this
-  // implementation's own semantics, so it is pinned here rather than assumed.
-  it.effect("repeats the id until a fork commits, then advances past it", () =>
+  // A mint is a durable reservation: it used to repeat the id until a fork
+  // committed, so a process that died between provisioning the lane and
+  // committing retried under the same id and jj refused its own leftover.
+  it.effect("advances on every mint, and a committed fork consumes its reservation", () =>
     run((store, sql) =>
       Effect.gen(function*() {
         yield* seedParent(sql)
@@ -765,27 +776,70 @@ describe("SqlTimeTravelStore.nextForkId", () => {
         const again = yield* store.nextForkId("mint", frame)
         const child = yield* store.createFork("mint", frame, first)
         const afterCommit = yield* store.nextForkId("mint", frame)
+        const reserved = yield* sql<{ readonly child_run_id: string }>`
+          SELECT child_run_id FROM flows_time_travel_fork_intents ORDER BY child_run_id
+        `
 
         expect(first).toBe("mint:fork:0:1")
-        expect(again).toBe(first)
+        expect(again).toBe("mint:fork:0:2")
         expect(child.runId).toBe(first)
-        expect(afterCommit).toBe("mint:fork:0:2")
+        expect(afterCommit).toBe("mint:fork:0:3")
+        // The committed fork's reservation became its edge; the other two stand.
+        expect(reserved.map((row) => row.child_run_id)).toEqual(["mint:fork:0:2", "mint:fork:0:3"])
       })
     ))
 
-  it.effect("writes nothing, so an abandoned mint leaves no run and no edge", () =>
+  it.effect("writes only a reservation, so an abandoned mint leaves no run and no edge", () =>
     run((store, sql) =>
       Effect.gen(function*() {
         yield* seedParent(sql)
 
-        yield* store.nextForkId("mint", frame)
+        const minted = yield* store.nextForkId("mint", frame)
 
         const runs = yield* sql<{ readonly run_id: string }>`SELECT run_id FROM flows_runs`
         const edges = yield* sql<
           { readonly child_run_id: string }
         >`SELECT child_run_id FROM flows_time_travel_edges`
+        const intents = yield* sql<{
+          readonly child_run_id: string
+          readonly parent_run_id: string
+          readonly parent_seq: number
+          readonly reclaimed_at_ms: number | null
+        }>`SELECT child_run_id, parent_run_id, parent_seq, reclaimed_at_ms FROM flows_time_travel_fork_intents`
         expect(runs.map((row) => row.run_id)).toEqual(["mint"])
         expect(edges).toEqual([])
+        expect(intents).toEqual([
+          { child_run_id: minted, parent_run_id: "mint", parent_seq: 0, reclaimed_at_ms: null }
+        ])
+      })
+    ))
+
+  it.effect("hands a stale reservation back exactly once and keeps its ordinal taken", () =>
+    run((store, sql) =>
+      Effect.gen(function*() {
+        yield* seedParent(sql)
+        const minted = yield* store.nextForkId("mint", frame)
+
+        // Reserved at the test clock's zero: "before 0" names nothing, and
+        // "before 1" names it.
+        const fresh = yield* store.abandonForkIntents(0)
+        const stale = yield* store.abandonForkIntents(1)
+        const again = yield* store.abandonForkIntents(1)
+        const next = yield* store.nextForkId("mint", frame)
+        const rows = yield* sql<{ readonly child_run_id: string; readonly reclaimed_at_ms: number | null }>`
+          SELECT child_run_id, reclaimed_at_ms FROM flows_time_travel_fork_intents ORDER BY child_run_id
+        `
+
+        expect(fresh).toEqual([])
+        expect(stale).toEqual([{ childRunId: minted, parentRunId: "mint", parentSeq: 0, reservedAtMs: 0 }])
+        expect(again).toEqual([])
+        // The reclaimed lane may still exist on disk, so its number is never
+        // handed to a fresh lane.
+        expect(next).toBe("mint:fork:0:2")
+        expect(rows).toEqual([
+          { child_run_id: "mint:fork:0:1", reclaimed_at_ms: 0 },
+          { child_run_id: "mint:fork:0:2", reclaimed_at_ms: null }
+        ])
       })
     ))
 })
@@ -1005,7 +1059,7 @@ describe("SqlTimeTravelStore.createFork", () => {
         })
       )
 
-      expect(error).toMatchObject({ code: "live_parent", message: "parent grandparent is live" })
+      expect(error).toMatchObject({ code: "live_parent", message: "ancestor run grandparent is live" })
     }))
 
   for (

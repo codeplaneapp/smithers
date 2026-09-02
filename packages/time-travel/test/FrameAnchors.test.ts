@@ -85,7 +85,10 @@ describe("the snapshot projector", () => {
         { seq: 6, eventType: "flows.engine.attempt-finished", payload: {} }
       ])
 
-      expect(result.state).toEqual({ changeId: "change-1", planDigest: "plan-b", anchors: 3 })
+      expect(result.state).toEqual({
+        lineages: { [lineageId]: { changeId: "change-1", planDigest: "plan-b" } },
+        anchors: 3
+      })
       expect(result.snapshots).toEqual([
         { runId: "run", frame: { lineageId, seq: 2 }, changeId: "change-1", planDigest: "plan-a" },
         { runId: "run", frame: { lineageId, seq: 3 }, changeId: "change-1", planDigest: "plan-a" },
@@ -98,10 +101,13 @@ describe("the snapshot projector", () => {
       const unrelated = yield* projectInto([
         { seq: 0, eventType: "another.package.event", payload: { digest: 42 } }
       ])
-      expect(unrelated.state).toEqual({ changeId: undefined, planDigest: undefined, anchors: 0 })
+      expect(unrelated.state).toEqual({ lineages: {}, anchors: 0 })
 
       const malformed = [
         [{ seq: 0, eventType: "flows.engine.snapshot-identified", payload: { snapshotId: "x" }, lineageId: undefined }],
+        // A plan digest is lineage-scoped, so a plan record with no lineage
+        // is corrupt evidence exactly as a snapshot record with none is.
+        [{ seq: 0, eventType: "flows.engine.plan-recorded", payload: { digest: "x" }, lineageId: undefined }],
         [{ seq: 0, eventType: "flows.engine.plan-recorded", payload: { digest: 42 } }],
         [{ seq: 0, eventType: "flows.engine.snapshot-identified", payload: { snapshotId: 7 } }],
         [{ seq: 0, eventType: "flows.engine.plan-recorded", payload: { version: 2, digest: "future" } }]
@@ -111,7 +117,77 @@ describe("the snapshot projector", () => {
         "invalid",
         "invalid",
         "invalid",
+        "invalid",
         "invalid"
+      ])
+      expect((failures[1] as { readonly message: string }).message).toBe(
+        "plan event e0 has corrupt lineage metadata"
+      )
+    }))
+
+  it.effect("resolves a carried anchor from its own lineage when lineages interleave across pages", () =>
+    Effect.gen(function*() {
+      // One run, two lineages, two records per page. Lineage B's first carried
+      // record arrives before B has named any pointer, and every later carried
+      // record on either lineage must resolve to THAT lineage's last explicit
+      // snapshot. The fold used to keep one run-wide pointer, so B@1 recorded
+      // A's change and A@4 recorded B's.
+      const result = yield* projectInto([
+        { seq: 0, eventType: "flows.engine.snapshot-identified", payload: { snapshotId: "change-a" } },
+        { seq: 1, eventType: "flows.engine.snapshot-identified", payload: { carried: true }, lineageId: "run/b" },
+        { seq: 2, eventType: "flows.engine.snapshot-identified", payload: { carried: true } },
+        {
+          seq: 3,
+          eventType: "flows.engine.snapshot-identified",
+          payload: { snapshotId: "change-b" },
+          lineageId: "run/b"
+        },
+        { seq: 4, eventType: "flows.engine.snapshot-identified", payload: { carried: true } },
+        { seq: 5, eventType: "flows.engine.snapshot-identified", payload: { carried: true }, lineageId: "run/b" }
+      ], { pageSize: 2 })
+
+      expect(result.snapshots).toEqual([
+        { runId: "run", frame: { lineageId, seq: 0 }, changeId: "change-a" },
+        { runId: "run", frame: { lineageId, seq: 2 }, changeId: "change-a" },
+        { runId: "run", frame: { lineageId: "run/b", seq: 3 }, changeId: "change-b" },
+        { runId: "run", frame: { lineageId, seq: 4 }, changeId: "change-a" },
+        { runId: "run", frame: { lineageId: "run/b", seq: 5 }, changeId: "change-b" }
+      ])
+      expect(result.state).toEqual({
+        lineages: {
+          [lineageId]: { changeId: "change-a", planDigest: undefined },
+          "run/b": { changeId: "change-b", planDigest: undefined }
+        },
+        anchors: 5
+      })
+    }))
+
+  it.effect("keeps the plan digest in force per lineage", () =>
+    Effect.gen(function*() {
+      const result = yield* projectInto([
+        { seq: 0, eventType: "flows.engine.plan-recorded", payload: { digest: "plan-a" } },
+        { seq: 1, eventType: "flows.engine.plan-recorded", payload: { digest: "plan-b" }, lineageId: "run/b" },
+        { seq: 2, eventType: "flows.engine.snapshot-identified", payload: { snapshotId: "change-a" } },
+        {
+          seq: 3,
+          eventType: "flows.engine.snapshot-identified",
+          payload: { snapshotId: "change-b" },
+          lineageId: "run/b"
+        },
+        // A lineage that recorded no plan anchors without a digest, whatever
+        // the other lineages put in force.
+        {
+          seq: 4,
+          eventType: "flows.engine.snapshot-identified",
+          payload: { snapshotId: "change-c" },
+          lineageId: "run/c"
+        }
+      ])
+
+      expect(result.snapshots).toEqual([
+        { runId: "run", frame: { lineageId, seq: 2 }, changeId: "change-a", planDigest: "plan-a" },
+        { runId: "run", frame: { lineageId: "run/b", seq: 3 }, changeId: "change-b", planDigest: "plan-b" },
+        { runId: "run", frame: { lineageId: "run/c", seq: 4 }, changeId: "change-c" }
       ])
     }))
 

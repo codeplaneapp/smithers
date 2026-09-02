@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
+import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import * as Jj from "@smthrs/jj"
 import * as SqlJournal from "@smthrs/journal/SqlJournal"
 import * as RunStore from "@smthrs/run-store/RunStore"
@@ -188,5 +189,184 @@ describe("fork workspace identity", () => {
       expect(lanes).toHaveLength(2)
       expect(lanes[0]!.name).not.toBe(lanes[1]!.name)
       expect(lanes[0]!.path).not.toBe(lanes[1]!.path)
+    }))
+})
+
+/**
+ * The frozen contract refuses a fork while ANY ancestor is live. The store's
+ * walk used to follow this package's fork edges alone, so an inactive child a
+ * running engine parent had spawned, recorded only through the run table's
+ * `parent_run_id` or the engine's `flows_run_parents` edges, forked as if its
+ * whole history were settled.
+ */
+describe("fork ancestry", () => {
+  const frame = { lineageId: "main", seq: 0 } as const
+
+  const insertRun = (sql: SqlClient.SqlClient, runId: string, parentRunId: string | null = null) =>
+    sql`
+      INSERT INTO flows_runs (run_id, status, created_at_ms, parent_run_id, state_json)
+      VALUES (${runId}, 'suspended', 0, ${parentRunId}, ${
+      JSON.stringify({ version: 1, flowName: "Demo", payload: {} })
+    })
+    `
+
+  const insertLiveRun = (sql: SqlClient.SqlClient, runId: string) =>
+    sql`
+      INSERT INTO flows_runs
+        (run_id, status, created_at_ms, state_json, owner_host_id, owner_pid, owner_nonce, heartbeat_at_ms)
+      VALUES (${runId}, 'running', 0, ${JSON.stringify({ version: 1, flowName: "Demo", payload: {} })},
+              'engine-host', 7, 'engine-nonce', 0)
+    `
+
+  const insertRecord = (sql: SqlClient.SqlClient, runId: string) =>
+    sql`
+      INSERT INTO flows_journal_events
+        (run_id, seq, event_id, source_id, source_seq, emitted_at_ms, event_type, payload_json, meta_json)
+      VALUES (${runId}, 0, ${`${runId}-0`}, 'source', 0, 0, 'test', '{}', ${JSON.stringify({ lineageId: "main" })})
+    `
+
+  /**
+   * The real store and journal, with jj reduced to a recorder of its lanes.
+   * `flows_run_parents` is created by the engine's state layer rather than
+   * the migration ladder, so `engineEdges` decides whether the walk finds it.
+   */
+  const runForks = <A>(
+    body: (timeTravel: TimeTravel.Service, sql: SqlClient.SqlClient) => Effect.Effect<A, unknown, never>,
+    options: { readonly engineEdges: boolean } = { engineEdges: true }
+  ) =>
+    Effect.gen(function*() {
+      const lanes: Array<string> = []
+      const jj = Layer.succeed(
+        Jj.Jj,
+        Jj.makeNoop({
+          workspaceAdd: (name) => Effect.sync(() => void lanes.push(name)),
+          workspaceForget: () => Effect.void
+        })
+      )
+      const migrated = Layer.provideMerge(Migrations.layer, TestDatabase.layer)
+      const persistence = Layer.mergeAll(
+        SqlJournal.layer({ capacity: 64, overflow: "reject" }),
+        RunStore.layer,
+        CacheStore.layer,
+        SqlTimeTravelStore.layer,
+        options.engineEdges ? DurableEngineState.layer : Layer.empty,
+        jj
+      ).pipe(Layer.provideMerge(migrated))
+      const result = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sql = yield* Effect.service(SqlClient.SqlClient)
+          const timeTravel = yield* TimeTravel.TimeTravel
+          return yield* body(timeTravel, sql)
+        }).pipe(Effect.provide(TimeTravel.TimeTravel.layer.pipe(Layer.provideMerge(persistence))))
+      )
+      return { lanes, result }
+    })
+
+  it.effect("refuses an inactive child whose engine parent is live through parent_run_id, before provisioning", () =>
+    Effect.gen(function*() {
+      const { lanes, result } = yield* runForks((timeTravel, sql) =>
+        Effect.gen(function*() {
+          yield* insertLiveRun(sql, "root")
+          yield* insertRun(sql, "child", "root")
+          yield* insertRecord(sql, "child")
+          return yield* Effect.flip(timeTravel.fork({ runId: "child", frame }))
+        })
+      )
+
+      expect(result).toMatchObject({ code: "live_parent", message: "ancestor run root is live" })
+      expect(lanes).toEqual([])
+    }))
+
+  it.effect("refuses an inactive child whose spawning parent is live through flows_run_parents", () =>
+    Effect.gen(function*() {
+      const { lanes, result } = yield* runForks((timeTravel, sql) =>
+        Effect.gen(function*() {
+          yield* insertLiveRun(sql, "root")
+          yield* insertRun(sql, "middle", "root")
+          yield* insertRun(sql, "child")
+          yield* insertRecord(sql, "child")
+          yield* sql`INSERT INTO flows_run_parents (child_id, parent_id, seq) VALUES ('child', 'middle', 1)`
+          return yield* Effect.flip(timeTravel.fork({ runId: "child", frame }))
+        })
+      )
+
+      // Only the store's transactional walk sees the spawn edge, so this one
+      // provisions a lane and forgets it; the refusal is what matters.
+      expect(result).toMatchObject({ code: "live_parent", message: "ancestor run root is live" })
+      expect(lanes).toHaveLength(1)
+    }))
+
+  it.effect("walks fork edges even where the engine's edge table is not installed", () =>
+    Effect.gen(function*() {
+      const { result } = yield* runForks(
+        (timeTravel, sql) =>
+          Effect.gen(function*() {
+            yield* insertLiveRun(sql, "root")
+            yield* insertRun(sql, "child")
+            yield* insertRecord(sql, "child")
+            yield* sql`
+              INSERT INTO flows_time_travel_edges (parent_run_id, parent_seq, child_run_id, kind, attached)
+              VALUES ('root', 0, 'child', 'fork', 0)
+            `
+            return yield* Effect.flip(timeTravel.fork({ runId: "child", frame }))
+          }),
+        { engineEdges: false }
+      )
+
+      expect(result).toMatchObject({ code: "live_parent", message: "ancestor run root is live" })
+    }))
+
+  it.effect("terminates on a cyclic ancestry and forks once every ancestor is settled", () =>
+    Effect.gen(function*() {
+      const { result } = yield* runForks((timeTravel, sql) =>
+        Effect.gen(function*() {
+          yield* insertRun(sql, "a")
+          yield* insertRun(sql, "b", "a")
+          yield* sql`UPDATE flows_runs SET parent_run_id = 'b' WHERE run_id = 'a'`
+          yield* insertRecord(sql, "b")
+          return yield* timeTravel.fork({ runId: "b", frame })
+        })
+      )
+
+      expect(result.runId).toBe("b:fork:0:1")
+    }))
+
+  it.effect("walks every parent of a child recorded under two edges in the memory store", () =>
+    Effect.gen(function*() {
+      const store = Memory.make({
+        records: [{ runId: "child", seq: 0, eventId: "child-0", lineageId: "child", payload: null }],
+        edges: [
+          { parentRunId: "settled", parentSeq: 0, childRunId: "child", kind: "fork", attached: false },
+          { parentRunId: "live", parentSeq: 0, childRunId: "child", kind: "continuation", attached: false }
+        ],
+        liveRuns: new Set(["live"])
+      })
+
+      const failure = yield* Effect.flip(store.createFork("child", { lineageId: "child", seq: 0 }))
+
+      expect(failure).toMatchObject({ code: "live_parent", message: "ancestor run live is live" })
+    }))
+})
+
+describe("fork ancestry in the memory store", () => {
+  it.effect("terminates on a diamond and a cycle, and forks once every ancestor is settled", () =>
+    Effect.gen(function*() {
+      // `child` is reachable through both `left` and `right`, both of which
+      // hang off `root`, and `root` points back at `child`: every run is
+      // enqueued more than once, and the visited set is what ends the walk.
+      const store = Memory.make({
+        records: [{ runId: "child", seq: 0, eventId: "child-0", lineageId: "child", payload: null }],
+        edges: [
+          { parentRunId: "left", parentSeq: 0, childRunId: "child", kind: "fork", attached: false },
+          { parentRunId: "right", parentSeq: 0, childRunId: "child", kind: "continuation", attached: false },
+          { parentRunId: "root", parentSeq: 0, childRunId: "left", kind: "child", attached: true },
+          { parentRunId: "root", parentSeq: 0, childRunId: "right", kind: "child", attached: true },
+          { parentRunId: "child", parentSeq: 0, childRunId: "root", kind: "continuation", attached: false }
+        ]
+      })
+
+      const fork = yield* store.createFork("child", { lineageId: "child", seq: 0 })
+
+      expect(fork.edge).toMatchObject({ parentRunId: "child", parentSeq: 0, kind: "fork" })
     }))
 })

@@ -26,25 +26,43 @@ import { error, type TimeTravelError } from "../TimeTravelError.ts"
 import { TimeTravelStore } from "../TimeTravelStore.ts"
 
 /**
+ * The anchor facts one lineage has put in force.
+ *
+ * `changeId` is the pointer the lineage's last anchor named, which is what a
+ * `carried` record on that lineage resolves to; `planDigest` is the digest
+ * the lineage's last plan record put in force. Both start absent, and an
+ * anchor is written only once a pointer exists: a lineage that has taken no
+ * snapshot has no tier-2 state to restore, and inventing one would be worse
+ * than reporting none.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export interface LineageState {
+  readonly changeId: string | undefined
+  readonly planDigest: string | undefined
+}
+
+/**
  * What the fold carries between entries.
  *
- * `changeId` is the pointer the last anchor named, which is what a `carried`
- * record resolves to; `planDigest` is the digest the last plan record put in
- * force. Both start absent, and an anchor is written only once a pointer
- * exists — a lineage that has taken no snapshot has no tier-2 state to restore,
- * and inventing one would be worse than reporting none.
+ * Facts are keyed BY LINEAGE. A run's journal can interleave lineages, and a
+ * `carried` record asserts "the same pointer as my lineage's previous anchor",
+ * never "the pointer whoever wrote last named". One run-wide pointer resolved
+ * lineage B's carried record to lineage A's snapshot and recorded it under B,
+ * so a later fork or rewind of B restored A's workspace. The plan digest is
+ * scoped the same way: a plan record belongs to the lineage that recorded it.
  *
  * @since 0.1.0
  * @category models
  */
 export interface State {
-  readonly changeId: string | undefined
-  readonly planDigest: string | undefined
+  readonly lineages: Readonly<Record<string, LineageState>>
   readonly anchors: number
 }
 
 /**
- * The fold's starting {@link State}: no pointer, no digest, nothing anchored.
+ * The fold's starting {@link State}: no lineage known, nothing anchored.
  *
  * Because a projection has no durable state of its own, every run of the
  * projector starts here and replays to the same result.
@@ -52,7 +70,9 @@ export interface State {
  * @since 0.1.0
  * @category constants
  */
-export const initial: State = { changeId: undefined, planDigest: undefined, anchors: 0 }
+export const initial: State = { lineages: {}, anchors: 0 }
+
+const emptyLineage: LineageState = { changeId: undefined, planDigest: undefined }
 
 const LineageMeta = Schema.Struct({ lineageId: Schema.NonEmptyString })
 
@@ -80,33 +100,47 @@ export const projection = (
   initial,
   reduce: (state, entry) =>
     Effect.gen(function*() {
-      if (entry.eventType === "flows.engine.plan-recorded" || entry.eventType === "flows.engine.subgraph-appended") {
+      const isPlan = entry.eventType === "flows.engine.plan-recorded" ||
+        entry.eventType === "flows.engine.subgraph-appended"
+      if (!isPlan && entry.eventType !== "flows.engine.snapshot-identified") return state
+      // Both facts are keyed by the lineage the record carries, so a record
+      // that carries none is corrupt evidence for either: the engine stamps
+      // the lineage on every record it writes.
+      const kind = isPlan ? "plan" : "snapshot"
+      const { lineageId } = yield* Schema.decodeUnknownEffect(LineageMeta)(entry.meta).pipe(
+        Effect.mapError((cause) =>
+          error("invalid", `${kind} event ${entry.eventId} has corrupt lineage metadata`, cause)
+        )
+      )
+      const lineage = state.lineages[lineageId] ?? emptyLineage
+      if (isPlan) {
         const plan = yield* Schema.decodeUnknownEffect(PlanPayload)(entry.payload).pipe(
           Effect.mapError((cause) => error("invalid", `plan event ${entry.eventId} is corrupt`, cause))
         )
-        return { ...state, planDigest: plan.digest }
+        return {
+          ...state,
+          lineages: { ...state.lineages, [lineageId]: { ...lineage, planDigest: plan.digest } }
+        }
       }
-      if (entry.eventType !== "flows.engine.snapshot-identified") return state
-      const { lineageId } = yield* Schema.decodeUnknownEffect(LineageMeta)(entry.meta).pipe(
-        Effect.mapError((cause) =>
-          error("invalid", `snapshot event ${entry.eventId} has corrupt lineage metadata`, cause)
-        )
-      )
       const payload = yield* Schema.decodeUnknownEffect(SnapshotPayload)(entry.payload).pipe(
         Effect.mapError((cause) => error("invalid", `snapshot event ${entry.eventId} is corrupt`, cause))
       )
-      // `carried` asserts "the same pointer as the previous anchor" — the cheap
-      // half of the per-frame obligation. Resolving it here is what turns one
-      // journal row into a real tier-2 address.
-      const changeId = payload.snapshotId ?? state.changeId
-      if (changeId === undefined) return { ...state, anchors: state.anchors }
+      // `carried` asserts "the same pointer as this lineage's previous anchor",
+      // the cheap half of the per-frame obligation. Resolving it here, from the
+      // lineage's own state, is what turns one journal row into a real tier-2
+      // address rather than another lineage's.
+      const changeId = payload.snapshotId ?? lineage.changeId
+      if (changeId === undefined) return state
       yield* store.recordSnapshot({
         runId: entry.runId,
         frame: { lineageId, seq: entry.seq },
         changeId,
-        ...(state.planDigest === undefined ? {} : { planDigest: state.planDigest })
+        ...(lineage.planDigest === undefined ? {} : { planDigest: lineage.planDigest })
       })
-      return { changeId, planDigest: state.planDigest, anchors: state.anchors + 1 }
+      return {
+        lineages: { ...state.lineages, [lineageId]: { changeId, planDigest: lineage.planDigest } },
+        anchors: state.anchors + 1
+      }
     })
 })
 

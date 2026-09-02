@@ -1,28 +1,30 @@
 /**
- * The one door into time travel: inspect, fork, rewind.
+ * The one door into time travel: replay, inspect, fork, rewind.
  *
  * `Replay`, `Fork`, `Rewind`, `Retry`, `Recovery`, `Compensation`, and the
  * effect-handler registry are machinery under `src/internal/`; a caller never
- * names them. This service fronts the three verbs of
+ * names them. This service fronts the verbs of
  * `docs/specs/Concepts/Time Travel.md` and owns the wiring they used to make
  * the caller thread: the ownership claim a rewind rides, the jj workspace a
- * fork lands in, the compensation-handler registry, and startup recovery of an
- * interrupted rewind.
+ * fork lands in, the compensation-handler registry, the cap on how much
+ * history one read may materialize, and startup recovery of an interrupted
+ * rewind or fork.
  *
  * Recovery is not an operation. {@link layer} finishes or rolls back every
- * pending rewind audit while it is being built, so the service only ever hands
- * out a store whose interrupted work is already resolved. The one thing it
- * cannot resolve is an audit whose run another live process still holds: that
- * one is declined and left pending for a later build, rather than closed on
- * the strength of a race. {@link Options.isAlive} decides what "still live"
- * means.
+ * pending rewind audit while it is being built, and forgets the jj lane of
+ * every fork that reserved an id and never committed, so the service only
+ * ever hands out a store whose interrupted work is already resolved. The one
+ * thing it cannot resolve is an audit whose run another live process still
+ * holds: that one is declined and left pending for a later build, rather than
+ * closed on the strength of a race. {@link Options.isAlive} decides what
+ * "still live" means.
  *
  * The tag key `@smthrs/time-travel/TimeTravel` is durable identity: step keys
  * digest the resolved service set, so renaming it invalidates recorded runs.
  *
  * @since 0.1.0
  */
-import type { Jj } from "@smthrs/jj"
+import { Jj } from "@smthrs/jj"
 import type * as Journal from "@smthrs/journal/Journal"
 import * as Ownership from "@smthrs/run-store/Ownership"
 import type { OwnerId } from "@smthrs/run-store/Ownership"
@@ -30,6 +32,7 @@ import type * as RunStore from "@smthrs/run-store/RunStore"
 import type * as CacheStore from "@smthrs/step-cache/CacheStore"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -40,12 +43,13 @@ import { CompensationHandlers } from "./CompensationHandlers.ts"
 import { Frame } from "./Frame.ts"
 import * as EffectHandlerRegistry from "./internal/EffectHandlerRegistry.ts"
 import * as ForkOperation from "./internal/Fork.ts"
+import * as HistoryLimit from "./internal/HistoryLimit.ts"
 import * as Recovery from "./internal/Recovery.ts"
 import * as Replay from "./internal/Replay.ts"
 import * as Rewind from "./internal/Rewind.ts"
 import * as SnapshotProjector from "./internal/SnapshotProjector.ts"
 import { error, type TimeTravelError } from "./TimeTravelError.ts"
-import type { Fork as ForkRecord, TimeTravelStore } from "./TimeTravelStore.ts"
+import { type Fork as ForkRecord, TimeTravelStore } from "./TimeTravelStore.ts"
 
 /**
  * Where in history an operation acts: a run, and a frame inside it.
@@ -69,12 +73,39 @@ export const Position = Schema.Struct({
 export type Position = typeof Position.Type
 
 /**
- * A pure fold over durable journal evidence, handed to {@link Service.inspect}.
+ * A pure fold over durable journal evidence, handed to {@link Service.replay}
+ * and {@link Service.inspect}.
  *
  * @since 0.1.0
  * @category models
  */
 export type Projection<S> = Replay.Projection<S>
+
+/**
+ * How a replay reads.
+ *
+ * `pageSize` is a throughput knob only and never changes the derived state.
+ * `maxHistoryEntries` caps the journal entries the fold reads at or below the
+ * frame for this one call, overriding {@link Options.maxHistoryEntries}; a
+ * replay that would read past it fails `limit_exceeded` and folds nothing
+ * further.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export interface ReplayOptions {
+  readonly pageSize?: number | undefined
+  readonly maxHistoryEntries?: number | undefined
+}
+
+/**
+ * The cap on journal entries one operation reads when neither the service
+ * nor the call names one.
+ *
+ * @since 0.1.0
+ * @category constants
+ */
+export const defaultMaxHistoryEntries: number = HistoryLimit.defaultMaxHistoryEntries
 
 /**
  * The successful shape of {@link Service.fork}: the child run and its lineage
@@ -95,24 +126,29 @@ export type ForkResult = ForkRecord
 export type RewindResult = Rewind.Result
 
 /**
- * How a fork chooses its workspace.
+ * How a fork chooses its workspace, and how much history it may assess.
  *
  * The workspace name is derived from the child run id the fork mints, never
  * supplied; `workspaceRoot` only moves which lane that derived name lands in,
- * and defaults to `.flows/forks`.
+ * and defaults to `.flows/forks`. `maxHistoryEntries` caps the suffix the
+ * fork assesses for this one call, overriding {@link Options.maxHistoryEntries}.
  *
  * @since 0.1.0
  * @category models
  */
 export interface ForkOptions {
   readonly workspaceRoot?: string | undefined
+  readonly maxHistoryEntries?: number | undefined
 }
 
 /**
- * How a rewind treats what it crosses.
+ * How a rewind treats what it crosses, and how much of it it may cross.
  *
  * `detachedChildren` defaults to `"block"`: a live detached child refuses the
  * rewind rather than being cancelled behind the operator's back.
+ * `maxHistoryEntries` caps the suffix the rewind may truncate for this one
+ * call, overriding {@link Options.maxHistoryEntries}; a longer suffix is
+ * refused `limit_exceeded` before the run is claimed.
  *
  * @since 0.1.0
  * @category models
@@ -120,15 +156,26 @@ export interface ForkOptions {
 export interface RewindOptions {
   readonly detachedChildren?: "block" | "cancel" | undefined
   readonly pageSize?: number | undefined
+  readonly maxHistoryEntries?: number | undefined
 }
 
 /**
- * Inspect, fork, and rewind over a journal.
+ * Replay, inspect, fork, and rewind over a journal.
+ *
+ * `replay` and `inspect` are one fold: `replay` takes the read knobs and
+ * `inspect` is the same fold under the service defaults, kept so a caller
+ * that never tunes a read has a shorter door. Both fold committed evidence
+ * only and dispatch nothing.
  *
  * @since 0.1.0
  * @category models
  */
 export interface Service {
+  readonly replay: <S>(
+    position: Position,
+    projection: Projection<S>,
+    options?: ReplayOptions
+  ) => Effect.Effect<S, TimeTravelError>
   readonly inspect: <S>(
     position: Position,
     projection: Projection<S>
@@ -198,6 +245,15 @@ export interface Options {
    * can say more supplies its own check and refuses the takeover for longer.
    */
   readonly isAlive?: Ownership.LivenessCheck | undefined
+  /**
+   * The most journal entries one replay, fork, or rewind may read: the prefix
+   * a replay folds, or the suffix a fork or rewind assesses. An operation that
+   * would read past it fails `limit_exceeded`, and a rewind does so before it
+   * claims the run. Defaults to {@link defaultMaxHistoryEntries}; a call may
+   * override it through its own options. Refused `invalid` at build unless it
+   * is a positive integer.
+   */
+  readonly maxHistoryEntries?: number | undefined
 }
 
 /**
@@ -243,18 +299,23 @@ export const makeWith = (
   Effect.gen(function*() {
     const scope = yield* Effect.scope
     const services = yield* Effect.context<Requirements>()
+    const historyLimit = yield* HistoryLimit.resolve(options.maxHistoryEntries, HistoryLimit.defaultMaxHistoryEntries)
     const owner = yield* mintOwner
     // The contribution door (`docs/specs/Concepts/Time Travel Service.md`
     // §"The open gap this leaves"):
     // handlers come from the composition that owns the effect boundary, and the
     // registry itself stays internal. Absent service means no handlers, which is
-    // the pre-existing behaviour — every crossed irreversible effect blocks.
+    // the pre-existing behaviour: every crossed irreversible effect blocks.
+    // Every declared member crosses the door, the descriptor included; a
+    // handler that declared one and lost it here resolved by kind alone, which
+    // is exactly the drift the descriptor exists to refuse.
     const contributed = yield* Effect.serviceOption(CompensationHandlers)
     const registry = yield* EffectHandlerRegistry.make(
       Option.getOrElse(contributed, () => []).map((handler) => ({
         kind: handler.kind,
         tier: handler.tier,
         requiresIdempotencyKey: handler.requiresIdempotencyKey ?? false,
+        ...(handler.compensation === undefined ? {} : { compensation: handler.compensation }),
         residue: handler.residue,
         ...(handler.assess === undefined ? {} : { assess: handler.assess }),
         revert: handler.revert,
@@ -300,6 +361,41 @@ export const makeWith = (
     )
 
     /**
+     * Forgets the jj lanes of forks that never committed.
+     *
+     * A fork reserves its child id, provisions the lane, then commits; a
+     * process that dies between the last two steps leaves a registered lane
+     * behind and a reservation every later mint has already counted past. The
+     * reservation is what says which lanes are abandoned, and the staleness
+     * window is what keeps a fork still in flight elsewhere out of the sweep.
+     * A lane that cannot be forgotten is reported and left: its name is never
+     * handed out again, so it blocks nothing.
+     */
+    const reclaimForkLanes = Effect.gen(function*() {
+      const store = yield* TimeTravelStore
+      const jj = yield* Jj
+      const nowMs = yield* Clock.currentTimeMillis
+      const abandoned = yield* store.abandonForkIntents(
+        nowMs - Duration.toMillis(ForkOperation.intentStaleAfter)
+      )
+      yield* Effect.forEach(
+        abandoned,
+        (intent) => {
+          const workspaceName = ForkOperation.workspaceNameFor(intent.childRunId)
+          return jj.workspaceForget(workspaceName).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("time-travel: could not forget an abandoned fork workspace", cause).pipe(
+                Effect.annotateLogs({ childRunId: intent.childRunId, workspaceName })
+              )
+            )
+          )
+        },
+        { discard: true }
+      )
+    })
+    yield* provided(reclaimForkLanes)
+
+    /**
      * Folds the run's journal into its frame anchors before a verb reads them.
      *
      * BEST EFFORT on purpose. The anchor table is a cache of facts the journal
@@ -319,18 +415,43 @@ export const makeWith = (
         )
       )
 
-    return {
-      inspect: <S>(position: Position, projection: Projection<S>) =>
-        Effect.fn("TimeTravel.inspect")(function*() {
-          yield* Effect.annotateCurrentSpan({
-            runId: position.runId,
-            lineageId: position.frame.lineageId,
-            seq: position.frame.seq
-          })
-          return yield* provided(
-            Replay.rederive(position.frame, projection, { runId: position.runId })
+    /**
+     * The one fold behind `replay` and `inspect`. The read knobs are refused
+     * before the journal is touched, the same way a rewind refuses its page
+     * size: a malformed option is a caller error, not a read failure.
+     */
+    const rederive = <S>(
+      position: Position,
+      projection: Projection<S>,
+      options: ReplayOptions | undefined
+    ): Effect.Effect<S, TimeTravelError> =>
+      Effect.gen(function*() {
+        yield* Effect.annotateCurrentSpan({
+          runId: position.runId,
+          lineageId: position.frame.lineageId,
+          seq: position.frame.seq
+        })
+        const pageSize = options?.pageSize
+        if (pageSize !== undefined && (!Number.isSafeInteger(pageSize) || pageSize < 1)) {
+          return yield* Effect.fail(
+            error("invalid", `replay pageSize must be a positive integer, not ${String(pageSize)}`)
           )
-        })(),
+        }
+        const maxEntries = yield* HistoryLimit.resolve(options?.maxHistoryEntries, historyLimit)
+        return yield* provided(
+          Replay.rederive(position.frame, projection, {
+            runId: position.runId,
+            ...(pageSize === undefined ? {} : { pageSize }),
+            maxEntries
+          })
+        )
+      })
+
+    return {
+      replay: <S>(position: Position, projection: Projection<S>, options?: ReplayOptions) =>
+        Effect.fn("TimeTravel.replay")(() => rederive(position, projection, options))(),
+      inspect: <S>(position: Position, projection: Projection<S>) =>
+        Effect.fn("TimeTravel.inspect")(() => rederive(position, projection, undefined))(),
       fork: (position, options) =>
         Effect.fn("TimeTravel.fork")(function*() {
           yield* Effect.annotateCurrentSpan({
@@ -338,6 +459,7 @@ export const makeWith = (
             lineageId: position.frame.lineageId,
             seq: position.frame.seq
           })
+          const maxEntries = yield* HistoryLimit.resolve(options?.maxHistoryEntries, historyLimit)
           return yield* provided(
             // The anchors a fork restores from are a projection of the engine's
             // own records, folded on demand: an ordinary engine run writes
@@ -345,7 +467,8 @@ export const makeWith = (
             refreshAnchors(position.runId).pipe(Effect.andThen(ForkOperation.fork({
               parentRunId: position.runId,
               frame: position.frame,
-              workspaceRoot: options?.workspaceRoot ?? workspaceRoot
+              workspaceRoot: options?.workspaceRoot ?? workspaceRoot,
+              maxEntries
             })))
           )
         })(),
@@ -356,10 +479,12 @@ export const makeWith = (
             lineageId: position.frame.lineageId,
             seq: position.frame.seq
           })
+          const maxEntries = yield* HistoryLimit.resolve(options?.maxHistoryEntries, historyLimit)
           return yield* provided(
             // The validation phase runs before anything durable: a refused page
-            // size or a frame that is not on this run's lineage leaves no claim,
-            // no audit row, and no refreshed anchor behind.
+            // size, a history past the cap, or a frame that is not on this run's
+            // lineage leaves no claim, no audit row, and no refreshed anchor
+            // behind.
             Schema.decodeUnknownEffect(Rewind.DetachedChildPolicy)(
               options?.detachedChildren ?? "block"
             ).pipe(
@@ -377,6 +502,7 @@ export const makeWith = (
                 Rewind.validate({
                   runId: position.runId,
                   frame: position.frame,
+                  maxEntries,
                   ...(options?.pageSize === undefined ? {} : { pageSize: options.pageSize })
                 }).pipe(
                   Effect.flatMap((expectedTail) =>
@@ -386,6 +512,7 @@ export const makeWith = (
                         frame: position.frame,
                         owner,
                         detachedChildPolicy,
+                        maxEntries,
                         // The tail validation observed, re-checked under the
                         // claim: nothing else binds the refusal to the
                         // truncation it was asked about.

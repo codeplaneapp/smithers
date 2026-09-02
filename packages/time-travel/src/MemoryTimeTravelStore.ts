@@ -16,6 +16,7 @@
  */
 import type { OwnerId } from "@smthrs/journal/OwnerId"
 import { isTerminalRunStatus, type RunStatus } from "@smthrs/run-store/RunStore"
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { forkCreatedEventType, type Frame, type LineageEdge } from "./Frame.ts"
@@ -77,6 +78,8 @@ export interface MemoryState {
   readonly runOwners: ReadonlyMap<string, OwnerId>
   /** The status each seeded run row records; an absent run id models a missing row. */
   readonly runStatuses: ReadonlyMap<string, RunStatus>
+  /** The minted fork ids whose fork has neither committed nor been reclaimed. */
+  readonly forkIntents: ReadonlyArray<TimeTravelStore.ForkIntent>
 }
 /**
  * The history a memory store starts life holding, plus the one knob that makes
@@ -203,6 +206,12 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
   const liveRuns = new Set(options.liveRuns ?? [])
   const runOwners = new Map(options.runOwners ?? [])
   const runStatuses = new Map(options.runStatuses ?? [])
+  /**
+   * Every id `nextForkId` minted, with whether reclamation already handed it
+   * back. A consumed intent is removed; a reclaimed one stays so the mint
+   * count never reuses its ordinal, exactly as the SQL store keeps the row.
+   */
+  let forkIntents: Array<TimeTravelStore.ForkIntent & { readonly reclaimed: boolean }> = []
   let sequence = 0
   const fail = (step: string): void => {
     if (options.failAt === step) throw error("unknown", `injected failure at ${step}`)
@@ -216,7 +225,10 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
     snapshots: [...snapshots],
     liveRuns: new Set(liveRuns),
     runOwners: new Map(runOwners),
-    runStatuses: new Map(runStatuses)
+    runStatuses: new Map(runStatuses),
+    forkIntents: forkIntents
+      .filter((intent) => !intent.reclaimed)
+      .map(({ reclaimed: _, ...intent }) => intent)
   })
   /**
    * The lineage-filtered prefix of one record type, mirroring the SQL store.
@@ -244,6 +256,7 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
       try: () => {
         const before = state()
         const beforeSequence = sequence
+        const beforeIntents = forkIntents.map((intent) => ({ ...intent }))
         try {
           return body()
         } catch (cause) {
@@ -258,6 +271,7 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
           runOwners.clear()
           for (const [runId, runOwner] of before.runOwners) runOwners.set(runId, runOwner)
           sequence = beforeSequence
+          forkIntents = beforeIntents
           throw cause
         }
       },
@@ -422,21 +436,49 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
     ),
     nextForkId: Effect.fn("TimeTravelStore.nextForkId")((parentRunId, frame) =>
       Effect.annotateCurrentSpan({ parentRunId, lineageId: frame.lineageId, seq: frame.seq }).pipe(
-        Effect.andThen(Effect.sync(() => `${parentRunId}:fork:${++sequence}`))
+        Effect.andThen(Clock.currentTimeMillis),
+        Effect.flatMap((nowMs) =>
+          atomic(() => {
+            fail("nextForkId")
+            // The counter never rewinds, so the id differs from every mint
+            // before it whether or not that mint committed; the intent is the
+            // durable half the SQL store keeps in a table.
+            const childRunId = `${parentRunId}:fork:${++sequence}`
+            forkIntents.push({ childRunId, parentRunId, parentSeq: frame.seq, reservedAtMs: nowMs, reclaimed: false })
+            return childRunId
+          })
+        )
+      )
+    ),
+    abandonForkIntents: Effect.fn("TimeTravelStore.abandonForkIntents")((staleBeforeMs) =>
+      Effect.annotateCurrentSpan({ staleBeforeMs }).pipe(
+        Effect.andThen(atomic(() => {
+          fail("abandonForkIntents")
+          const stale = forkIntents.filter((intent) => !intent.reclaimed && intent.reservedAtMs < staleBeforeMs)
+          forkIntents = forkIntents.map((intent) => stale.includes(intent) ? { ...intent, reclaimed: true } : intent)
+          return stale.map(({ reclaimed: _, ...intent }) => intent)
+        }))
       )
     ),
     createFork: Effect.fn("TimeTravelStore.createFork")((parentRunId, frame, childRunId) =>
       Effect.annotateCurrentSpan({ parentRunId, lineageId: frame.lineageId, seq: frame.seq }).pipe(
         Effect.andThen(atomic(() => {
           fail("createFork:start")
-          let currentRunId: string | undefined = parentRunId
+          // Every parent of every ancestor, breadth first, with a visited set
+          // so a cycle terminates. `find` used to follow the first edge only,
+          // so a child recorded under two parents had one of them ignored.
+          const queue = [parentRunId]
           const seen = new Set<string>()
-          while (currentRunId !== undefined && !seen.has(currentRunId)) {
+          while (queue.length > 0) {
+            const currentRunId = queue.shift()!
+            if (seen.has(currentRunId)) continue
             seen.add(currentRunId)
             if (liveRuns.has(currentRunId)) {
               throw error("live_parent", `ancestor run ${currentRunId} is live`)
             }
-            currentRunId = edges.find((edge) => edge.childRunId === currentRunId)?.parentRunId
+            for (const edge of edges) {
+              if (edge.childRunId === currentRunId) queue.push(edge.parentRunId)
+            }
           }
           // The frame must address a record, exactly as the SQL store now
           // re-checks inside its own transaction. Frame zero stays addressable
@@ -453,6 +495,8 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
             throw error("not_found", TimeTravelStore.forkFrameMessage(parentRunId, frame))
           }
           const runId = childRunId ?? `${parentRunId}:fork:${++sequence}`
+          // The committed edge takes over the ordinal the reservation held.
+          forkIntents = forkIntents.filter((intent) => intent.childRunId !== runId)
           const prefix = records.filter((record) => record.runId === parentRunId && record.seq <= frame.seq)
           fail("createFork:copy")
           records.push(...prefix.map((record) => ({ ...record, runId, eventId: `fork:${runId}:${record.seq}` })))

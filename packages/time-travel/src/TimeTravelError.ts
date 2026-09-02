@@ -14,21 +14,23 @@ import * as Schema from "effect/Schema"
 /**
  * Why a time-travel operation was refused.
  *
- * `busy` — another rewind holds the run. `live_parent` / `live_child` — the
- * run or one of its descendants is still executing, so its history is not
- * settled enough to branch from or truncate. `not_found` — the run or frame
- * does not exist. `invalid` — a caller-supplied option is malformed, refused
- * before the operation touches anything. `already_crossed` — the effect already
- * recorded a durable `intended` boundary, so executing it a second time was
- * refused; it is a re-armed effect, never a contended run, which is why it is
- * not `busy`. `rate_limited` — the rewind rate
- * limiter rejected the attempt. `compensation_failed` — a side effect's
- * rollback handler failed, so the rewind stopped rather than leave the world
- * half-reverted. `irreversible` — an effect in the truncated range cannot be
- * undone at all. `fence_lost` — the caller's ownership of the run was
+ * `busy`: another rewind holds the run. `live_parent` and `live_child`: the
+ * run, an ancestor, or one of its descendants is still executing, so its
+ * history is not settled enough to branch from or truncate. `not_found`: the
+ * run or frame does not exist. `invalid`: a caller-supplied option is
+ * malformed, refused before the operation touches anything. `already_crossed`:
+ * the effect already recorded a durable `intended` boundary, so executing it a
+ * second time was refused; it is a re-armed effect, never a contended run,
+ * which is why it is not `busy`. `rate_limited`: the rewind rate limiter
+ * rejected the attempt. `compensation_failed`: a side effect's rollback
+ * handler failed, so the rewind stopped rather than leave the world
+ * half-reverted. `irreversible`: an effect in the truncated range cannot be
+ * undone at all. `fence_lost`: the caller's ownership of the run was
  * superseded before a mutation committed, so the mutation was refused rather
- * than written behind the live owner. `unknown` — the store or an unmapped
- * host failure.
+ * than written behind the live owner. `limit_exceeded`: the history the
+ * operation would have to read is longer than the configured
+ * `maxHistoryEntries`, so it stopped before materializing it. `unknown`: the
+ * store or an unmapped host failure.
  *
  * @since 0.1.0
  * @category schemas
@@ -44,6 +46,7 @@ export const TimeTravelErrorCode = Schema.Literals([
   "compensation_failed",
   "irreversible",
   "fence_lost",
+  "limit_exceeded",
   "unknown"
 ])
 /**

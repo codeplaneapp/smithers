@@ -123,6 +123,7 @@ describe("public time-travel modules", () => {
       "compensation_failed",
       "irreversible",
       "fence_lost",
+      "limit_exceeded",
       "unknown"
     ])
     const failures = codes.map((code) => error(code, code))
@@ -219,6 +220,41 @@ describe("Fork.fork", () => {
 
       expect(addFailure).toMatchObject({ code: "unknown", message: "could not add fork workspace" })
       expect(readFailure).toMatchObject({ code: "unknown", message: "could not read parent" })
+    }))
+
+  it.effect("walks the run table's ancestry before provisioning, mapping a missing or unreadable ancestor", () =>
+    Effect.gen(function*() {
+      let added = false
+      const jj = Jj.makeNoop({ workspaceAdd: () => Effect.sync(() => void (added = true)) })
+      const rows = new Map<string, RunStore.RunRow>([
+        ["parent", row({ parentRunId: "root" })],
+        ["root", row({ runId: "root", status: "running", owner })]
+      ])
+      const runs = (ancestorFailure?: RunStore.RunStoreErrorCode) =>
+        RunStore.makeNoop({
+          get: (runId) => {
+            const found = rows.get(runId)
+            return found !== undefined && (runId === "parent" || ancestorFailure === undefined)
+              ? Effect.succeed(found)
+              : Effect.fail(
+                new RunStore.RunStoreError({
+                  code: ancestorFailure ?? "not_found_row",
+                  method: "get",
+                  message: runId,
+                  cause: runId
+                })
+              )
+          }
+        })
+
+      const live = yield* Effect.flip(runFork(runs(), MemoryTimeTravelStore.make(), jj))
+      const missing = yield* Effect.flip(runFork(runs("not_found_row"), MemoryTimeTravelStore.make(), jj))
+      const unreadable = yield* Effect.flip(runFork(runs("persistence_failed"), MemoryTimeTravelStore.make(), jj))
+
+      expect(live).toMatchObject({ code: "live_parent", message: "ancestor run root is live" })
+      expect(missing).toMatchObject({ code: "not_found", message: "parent root was not found" })
+      expect(unreadable).toMatchObject({ code: "unknown", message: "could not read ancestor root" })
+      expect(added).toBe(false)
     }))
 
   it.effect("rejects every live-parent signal before copying history or adding a workspace", () =>
