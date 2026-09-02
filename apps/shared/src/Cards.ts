@@ -614,6 +614,8 @@ export const CardSchema = z.discriminatedUnion("kind", [
       /** plue's six statuses: pending, starting, running, suspended, stopped, failed. */
       status: z.enum(["pending", "starting", "running", "suspended", "stopped", "failed"]),
       provisioningStage: z.string().nullable(),
+      /** When the workspace last suspended (DTO); optional so older cards parse. */
+      suspendedAt: z.string().nullable().optional(),
       /** The target bookmark's head from the bookmarks call — the BOOKMARK head, never the workspace head. */
       bookmarkHead: z.object({
         changeId: z.string().nullable(),
