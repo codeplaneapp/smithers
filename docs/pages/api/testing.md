@@ -37,7 +37,7 @@ carries a bounded identity rather than the input that produced it: a fixture
 miss reports the model id, the message count, and the tool names, not the
 conversation.
 
-Four codes are shouted rather than `snake_case` — `REPLAY_HARNESS_MISMATCH`,
+Four codes are shouted rather than `snake_case`: `REPLAY_HARNESS_MISMATCH`,
 `EXACTLY_ONCE_UNSUPPORTED`, `TASK_TIMEOUT`, `RALPH_MAX_REACHED`. They are
 inherited verbatim from the 0.x codes consumers already match on. Every new
 code is `snake_case`.
@@ -231,7 +231,7 @@ Governing design: `packages/testing/docs/concepts.md`, "A test harness is a laye
 
 Pure projection and presentation helpers for built plans.
 
-Keys are derived from the graph's digest-free key material through `/keys` — sealed nodes get cross-run content keys, non-sealed nodes get run-local ordinal keys. Plan projection is pure: it never touches Host, Model, or Clock, and is expected to succeed under `TestLayers.poisoned`.
+Keys are derived from the graph's digest-free key material through `/keys`: sealed nodes get cross-run content keys, non-sealed nodes get run-local ordinal keys. Plan projection is pure: it never touches Host, Model, or Clock, and is expected to succeed under `TestLayers.poisoned`.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
@@ -484,4 +484,4 @@ Governing design: `packages/testing/docs/concepts.md`, "The vitest boundary".
 | --- | --- | --- | --- |
 | `it` | const | testing | The Effect-aware `it`, with `scoped` aliased onto `it.effect`. |
 | `TestEffect` | interface | testing | The Effect-aware test registrars, each carrying the requirements `R` a body may use: |
-| `testEffect` | const | testing | Builds a **fresh** environment from the supplied layer for every test case and runs each body in its own Scope, so no state — including the deterministic variant's `TestClock` — is shared between tests and no test can depend on registration order. |
+| `testEffect` | const | testing | Builds a **fresh** environment from the supplied layer for every test case and runs each body in its own Scope, so no state, including the deterministic variant's `TestClock`, is shared between tests and no test can depend on registration order. |

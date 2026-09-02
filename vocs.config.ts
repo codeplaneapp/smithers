@@ -186,7 +186,8 @@ export default defineConfig({
         { text: "@smthrs/observability", link: "/api/observability" },
         { text: "@smthrs/platform-node", link: "/api/platform-node" },
         { text: "@smthrs/platform-bun", link: "/api/platform-bun" },
-        { text: "@smthrs/platform-browser", link: "/api/platform-browser" }
+        { text: "@smthrs/platform-browser", link: "/api/platform-browser" },
+        { text: "@smthrs/testing", link: "/api/testing" }
       ]
     },
     {

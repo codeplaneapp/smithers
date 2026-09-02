@@ -14,7 +14,7 @@ export const Package = {
    */
   api: {
     source: "docs/api.md",
-    target: "packages/testing/docs/reference.md"
+    target: "docs/pages/api/testing.md"
   },
   /**
    * Prose this package owns, projected into a marked region of a page that
@@ -38,16 +38,17 @@ export const Package = {
    */
   subpathModules: ["Vitest"],
   /**
-   * The one surface this package does not yet own.
+   * Pages that must keep pointing a reader at the generated API page rather
+   * than restating what it says.
    *
-   * `@smthrs/testing` is the only name in the release's published set with no
-   * page under `docs/pages/api/`. The page needs a sidebar entry in the
-   * hand-written `vocs.config.ts` before it can exist: `scripts/check-docs.mjs`
-   * fails any published page the sidebar does not list. Until that entry lands,
-   * `docs/reference.md` is the generated reference and lives in the package.
+   * `@smthrs/testing` was the only name in the release's published set with no
+   * page under `docs/pages/api/`, because the page needs a sidebar entry in
+   * the hand-written `vocs.config.ts` before it can exist:
+   * `scripts/check-docs.mjs` fails any published page the sidebar does not
+   * list, and fails any sidebar link no page answers. The entry and the page
+   * land together.
    */
-  site: {
-    target: "docs/pages/api/testing.md",
-    blockedBy: "vocs.config.ts must list the page in its sidebar first"
-  }
+  references: [
+    "docs/pages/guides/testing.md"
+  ]
 } as const

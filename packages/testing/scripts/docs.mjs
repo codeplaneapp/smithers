@@ -2,17 +2,15 @@
 /**
  * Projects package-owned testing documentation into the surfaces it owns.
  *
- * Two outputs. `docs/reference.md` is derived from the barrel's module JSDoc,
- * each module's `@category`-tagged exports, the prose in `docs/api.md`, and the
- * `description` in `package.json`. It replaces the hand-maintained module table
- * in `README.md`, which had drifted: it advertised a `Vitest` surface on the
- * root barrel that the barrel deliberately omits.
+ * Two outputs. `docs/pages/api/testing.md` is derived from the barrel's module
+ * JSDoc, each module's `@category`-tagged exports, the prose in `docs/api.md`,
+ * and the `description` in `package.json`. It replaces the hand-maintained
+ * module table in `README.md`, which had drifted: it advertised a `Vitest`
+ * surface on the root barrel that the barrel deliberately omits.
  *
  * Each `Package.snippets` entry is projected verbatim into a marked region of a
  * page the site owns, so what the published site says about this package is
  * written inside the package.
- *
- * `dprint.json` excludes the output, because this generator owns its formatting.
  *
  * Run from the repository root. `--check` reports drift and exits 1.
  */
@@ -182,8 +180,15 @@ for (const snippet of Package.snippets) {
 // instead of the generated page they must never edit. The package's own
 // reference is not a published page, so it keeps the source's punctuation.
 for (const [path, content] of outputs) {
-  if (path.startsWith("docs/pages/") && content.includes("—")) {
-    throw new Error(`testing docs: ${path} would contain an em-dash`)
+  if (!path.startsWith("docs/pages/")) continue
+  // Naming the offending lines is the difference between a fixable report and
+  // a puzzle: the writer has to find the JSDoc sentence that produced them,
+  // and the generated page they must never edit does not say which one it was.
+  const offenders = content.split("\n").filter((line) => line.includes("—"))
+  if (offenders.length > 0) {
+    throw new Error(
+      `testing docs: ${path} would contain an em-dash, from:\n${offenders.map((line) => `  ${line}`).join("\n")}`
+    )
   }
 }
 

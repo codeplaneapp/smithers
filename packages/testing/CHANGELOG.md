@@ -13,8 +13,9 @@
   are linked and missing runtime contracts are explicit gaps.
 - Added stable `TASK_TIMEOUT` and `RALPH_MAX_REACHED` typed failures.
 - Added package-owned documentation: `docs/api.md`, `docs/concepts.md`, and the
-  generated `docs/reference.md`, which replaces the hand-maintained module
-  table in `README.md`.
+  generated site page `docs/pages/api/testing.md`, which replaces the
+  hand-maintained module table in `README.md`. `@smthrs/testing` was the last
+  published name with no page on the documentation site.
 - Added `docs/guide.md`, projected by the package's generator into the site's
   Testing guide. That guide described the fixtures each package under test
   ships and never named this library, so the published testing package was

@@ -31,7 +31,7 @@ carries a bounded identity rather than the input that produced it: a fixture
 miss reports the model id, the message count, and the tool names, not the
 conversation.
 
-Four codes are shouted rather than `snake_case` — `REPLAY_HARNESS_MISMATCH`,
+Four codes are shouted rather than `snake_case`: `REPLAY_HARNESS_MISMATCH`,
 `EXACTLY_ONCE_UNSUPPORTED`, `TASK_TIMEOUT`, `RALPH_MAX_REACHED`. They are
 inherited verbatim from the 0.x codes consumers already match on. Every new
 code is `snake_case`.

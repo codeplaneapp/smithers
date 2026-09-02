@@ -8,9 +8,9 @@ npm install @smthrs/testing
 
 ## Public API
 
-The generated reference is [`docs/reference.md`](./docs/reference.md): every
-module, every documented export, and the contract of each, derived from the
-source JSDoc so it cannot drift. The table that used to sit here was
+The generated reference is the site's [`/api/testing`](../../docs/pages/api/testing.md)
+page: every module, every documented export, and the contract of each, derived
+from the source JSDoc so it cannot drift. The table that used to sit here was
 hand-maintained and had already drifted -- it advertised a `Vitest` surface on
 the root barrel that the barrel deliberately omits.
 

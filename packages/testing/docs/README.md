@@ -21,19 +21,19 @@ node packages/testing/scripts/docs.mjs --check   # drift-check, exits 1 when sta
 `scripts/check-docs.mjs` discovers every `packages/*/scripts/docs.mjs` and runs
 the `--check` form, so a stale generated region fails the repository docs gate.
 
-It writes one file, `docs/reference.md`: the prose in `docs/api.md`, an index of
-every module and its exports, and one row per documented export of every module
-the barrel re-exports plus every public subpath. `dprint.json` excludes that
-file, because the generator owns its formatting and dprint's table alignment
-would fight it forever.
+It writes the site's API page, `docs/pages/api/testing.md`: the prose in
+`docs/api.md`, an index of every module and its exports, and one row per
+documented export of every module the barrel re-exports plus every public
+subpath. It also projects `docs/guide.md` into the marked region of the site's
+Testing guide.
 
-## The one surface this package does not yet own
+`@smthrs/testing` was the last name in the release's published set with no page
+on the documentation site, because the page cannot land before
+`vocs.config.ts` lists it: `scripts/check-docs.mjs` fails any published page
+the sidebar does not reach, and fails any sidebar link no page answers. That
+file is hand-written editorial order no generator writes, so the entry and the
+page land in the same commit.
 
-`docs/pages/api/testing.md` does not exist. `@smthrs/testing` is the only name
-in the release's published set with no page on the documentation site, and the
-page cannot land before `vocs.config.ts` lists it: `scripts/check-docs.mjs`
-fails any published page the sidebar does not reach, and that file is
-hand-written editorial order no generator writes. `Package.site` records the
-blocked target so the generator can write it the moment the sidebar entry
-lands. Until then `docs/reference.md` is the generated reference and it lives
-here.
+The house style forbids an em-dash on a published page, so the generator
+refuses to write one and names the lines that carry it. The offending prose is
+in a module's JSDoc or in `docs/api.md`, never in the generated page.
