@@ -145,7 +145,8 @@ describe("the workspace card", () => {
     const confirmNow = [...host.querySelectorAll("button")].find((button) => button.textContent?.includes("Delete permanently"))
     expect(confirmNow?.disabled).toBe(false)
     click(host, "Delete permanently")
-    expect(commands[0]).toEqual({ name: "workspace.delete", args: "ws-1" })
+    // The typed name travels with the act: the flow's payload and the seam's gate both see it.
+    expect(commands[0]).toEqual({ name: "workspace.delete", args: "ws-1 review" })
     host.remove()
   })
 

@@ -67,7 +67,8 @@ export interface WorkspaceSeam {
   readonly templateSnapshot: (snapshotId: string, name: string, workspaceId?: string) => Promise<string | void | { readonly value: string }>
   readonly listSessions: (workspaceId?: string) => Promise<string | void | { readonly value: string }>
   readonly destroySession: (sessionId: string, workspaceId?: string) => Promise<string | void | { readonly value: string }>
-  readonly deleteWorkspace: (workspaceId: string) => Promise<string | void | { readonly value: string }>
+  /** `workspace.delete <id> <name>`: the workspace's name typed back is the gate — a mismatch refuses, whoever invoked. */
+  readonly deleteWorkspace: (workspaceId: string, confirmName: string) => Promise<string | void | { readonly value: string }>
   /** The card's body tab; hidden, card-button scoped. */
   readonly setFacet: (workspaceId: string, facet: WorkspaceFacet) => Promise<string | void>
   /** Stop every watch timer. */
@@ -116,11 +117,49 @@ const SESSION_SETTLE_ATTEMPTS = 30
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
 
-/** The list a user-scoped route answers: a bare array, or one under a named key. */
+/** The list a route answers: plue's bare array, its `{ items, next_cursor }` cursor envelope, or one under a named key. */
 const arrayOf = (body: unknown, key: string): ReadonlyArray<unknown> => {
   if (Array.isArray(body)) return body
   if (isRecord(body) && Array.isArray(body[key])) return body[key]
+  if (isRecord(body) && Array.isArray(body.items)) return body.items
   return []
+}
+
+/** Both list routes page at 30 by default and cap at 100 (plue routes/pagination.go, routes/workspace.go). */
+const LIST_PAGE_LIMIT = 100
+/** 100 rows × 50 pages is far past plue's per-user active-workspace cap; the loop never runs unbounded. */
+const MAX_LIST_PAGES = 50
+
+/**
+ * The `rel="next"` target of a Link header, or null on the last page. plue
+ * writes its list links in the legacy `page`/`per_page` form
+ * (setLegacyPaginationHeaders); the per-user route's own parser reads only
+ * `cursor`/`limit`, so a next link is re-issued in cursor form — the offset
+ * `(page - 1) × per_page` — which both list routes accept.
+ */
+const nextPageOf = (link: string | null, path: string): string | null => {
+  if (link === null) return null
+  // The seam's paths omit the `/api` the proxy adds; plue's links carry it.
+  const upstreamPath = `/api${path}`
+  for (const part of link.split(",")) {
+    const match = /<([^>]+)>\s*;\s*rel="?next"?/.exec(part.trim())
+    if (match === null || match[1] === undefined) continue
+    let next: URL
+    try {
+      next = new URL(match[1], "https://cloud.invalid")
+    } catch {
+      return null
+    }
+    // A link that leaves the route it paginates is not followed.
+    if (next.pathname !== upstreamPath) return null
+    const cursor = next.searchParams.get("cursor")
+    if (cursor !== null && cursor !== "") return `${path}?limit=${LIST_PAGE_LIMIT}&cursor=${encodeURIComponent(cursor)}`
+    const page = Number(next.searchParams.get("page"))
+    const perPage = Number(next.searchParams.get("per_page") ?? next.searchParams.get("limit"))
+    if (!Number.isInteger(page) || page < 2 || !Number.isInteger(perPage) || perPage <= 0) return null
+    return `${path}?limit=${LIST_PAGE_LIMIT}&cursor=${(page - 1) * perPage}`
+  }
+  return null
 }
 
 const str = (value: unknown): string | null => (typeof value === "string" && value !== "" ? value : null)
@@ -145,6 +184,32 @@ const parseWorkspaceWire = (value: unknown, fallbackRepo?: string): CloudWorkspa
     status: value.status,
     provisioningStage: textOrNull(value.provisioning_stage),
     suspendedAt: textOrNull(value.suspended_at),
+    createdAt: textOrNull(value.created_at)
+  }
+}
+
+/*
+ * One row of GET /api/user/workspaces: plue's UserWorkspaceRow
+ * (internal/services/workspace.go — workspace_id, repository_owner,
+ * repository_name, workspace_title, state), a switcher row that carries no
+ * bookmark, stage, or suspension time. Those stay whatever the collection
+ * already knows (the caller merges); they are never invented here.
+ */
+const parseUserWorkspaceWire = (value: unknown): CloudWorkspaceInput | null => {
+  if (!isRecord(value)) return null
+  const id = str(value.workspace_id)
+  const owner = str(value.repository_owner)
+  const repoName = str(value.repository_name)
+  const name = str(value.workspace_title)
+  if (id === null || owner === null || repoName === null || name === null || !isWorkspaceStatus(value.state)) return null
+  return {
+    id,
+    repoId: `${owner}/${repoName}`,
+    name,
+    targetBookmark: null,
+    status: value.state,
+    provisioningStage: null,
+    suspendedAt: null,
     createdAt: textOrNull(value.created_at)
   }
 }
@@ -345,14 +410,21 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     const id = cardIdOf(workspace.id)
     const existing = ctx.store.collections.cards.get(id)
     const prior = existing?.kind === "workspace" ? existing.payload : undefined
+    /*
+     * The collection is the authority: every act dispatches its DTO before
+     * it renders, and a settle poll that landed while an act's auxiliaries
+     * were loading has already advanced the row — the card renders THAT,
+     * never the act's older answer, so the card and the tree agree.
+     */
+    const current = ctx.store.collections.cloudWorkspaces.get(workspace.id) ?? workspace
     const payload = {
       workspaceId: workspace.id,
-      repo: workspace.repoId,
-      name: workspace.name,
-      targetBookmark: workspace.targetBookmark,
-      status: workspace.status,
-      provisioningStage: workspace.provisioningStage,
-      suspendedAt: workspace.suspendedAt,
+      repo: current.repoId,
+      name: current.name,
+      targetBookmark: current.targetBookmark,
+      status: current.status,
+      provisioningStage: current.provisioningStage,
+      suspendedAt: current.suspendedAt,
       bookmarkHead: overrides.bookmarkHead !== undefined ? overrides.bookmarkHead : prior?.bookmarkHead ?? null,
       snapshots: overrides.snapshots !== undefined ? [...overrides.snapshots] : prior?.snapshots ?? [],
       sessions: overrides.sessions !== undefined ? [...overrides.sessions] : prior?.sessions ?? [],
@@ -367,7 +439,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     const card: Card = {
       id,
       kind: "workspace",
-      title: `${workspace.name} · ${workspace.repoId}`,
+      title: `${current.name} · ${current.repoId}`,
       status: "active",
       createdAt: existing?.createdAt ?? Date.now(),
       ordinal: existing?.ordinal ?? ctx.nextOrdinal(),
@@ -384,13 +456,76 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
 
   /* ---- the list load (listWorkspaces, delete's aftermath, a 404 mid-watch) ---- */
 
+  /** One page of a list route: its body and the next page's seam path (cursor form), or the honest error. */
+  const getListPage = async (
+    pagePath: string,
+    routePath: string
+  ): Promise<{ readonly body: unknown; readonly next: string | null; readonly total: number | null } | { readonly error: string }> => {
+    let response: Response
+    try {
+      response = await ctx.http(cloud(pagePath))
+    } catch (error) {
+      return { error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}` }
+    }
+    if (!response.ok) return { error: await readErrorMessage(response, `Reading ${routePath} failed (${response.status})`) }
+    const totalHeader = response.headers.get("x-total-count")
+    const total = Number(totalHeader)
+    return {
+      body: await response.json().catch(() => null),
+      next: nextPageOf(response.headers.get("link"), routePath),
+      total: totalHeader !== null && Number.isInteger(total) && total >= 0 ? total : null
+    }
+  }
+
+  /*
+   * The whole list, every page: `?limit=100` and the Link header's next page
+   * until it is exhausted. A body that answered rows Smithers could not read
+   * is an error, never an empty scope replace that would drop every loaded
+   * workspace and its tree row.
+   */
   const loadList = async (repo?: string): Promise<ReadonlyArray<CloudWorkspaceInput> | string> => {
-    const answer = await getJson(repo === undefined ? "/user/workspaces" : repoPath(repo, "/workspaces"))
-    if ("error" in answer) return answer.error
-    const workspaces = arrayOf(answer.body, "workspaces").flatMap((entry) => {
-      const parsed = parseWorkspaceWire(entry, repo)
-      return parsed === null ? [] : [parsed]
+    const path = repo === undefined ? "/user/workspaces" : repoPath(repo, "/workspaces")
+    const raw: Array<unknown> = []
+    let next: string | null = `${path}?limit=${LIST_PAGE_LIMIT}`
+    const seen = new Set<string>()
+    for (let page = 0; next !== null && page < MAX_LIST_PAGES; page += 1) {
+      if (seen.has(next)) break
+      seen.add(next)
+      const answer = await getListPage(next, path)
+      if ("error" in answer) return answer.error
+      const rows = arrayOf(answer.body, "workspaces")
+      raw.push(...rows)
+      if (rows.length === 0 || (answer.total !== null && raw.length >= answer.total)) break
+      next = answer.next
+    }
+    const parsed = raw.flatMap((entry) => {
+      const row = repo === undefined
+        ? parseUserWorkspaceWire(entry) ?? parseWorkspaceWire(entry)
+        : parseWorkspaceWire(entry, repo)
+      return row === null ? [] : [row]
     })
+    if (raw.length > 0 && parsed.length === 0) {
+      return `Smithers Cloud answered ${raw.length} workspace row${raw.length === 1 ? "" : "s"} in a shape Smithers can't read — the loaded workspaces were kept.`
+    }
+    /*
+     * The per-user row is a switcher row: no bookmark, no stage, no
+     * suspension time. What the collection already holds for a workspace
+     * stands where the row is silent; a status that moved on drops the
+     * fields that only made sense in the old one.
+     */
+    const workspaces = repo === undefined
+      ? parsed.map((row) => {
+        const known = ctx.store.collections.cloudWorkspaces.get(row.id)
+        if (known === undefined) return row
+        return {
+          ...row,
+          targetBookmark: known.targetBookmark,
+          provisioningStage: UNSETTLED.has(row.status) ? known.provisioningStage : null,
+          suspendedAt: row.status === "suspended" ? known.suspendedAt : null,
+          createdAt: row.createdAt ?? known.createdAt
+        }
+      })
+      : parsed
     ctx.dispatch({
       type: "workspaces.loaded",
       actor: "system",
@@ -409,8 +544,10 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
    */
   const poll = async (workspaceId: string): Promise<void> => {
     const row = ctx.store.collections.cloudWorkspaces.get(workspaceId)
-    if (row === undefined) {
+    // Gone from the collection, or signed out: nothing to settle, nobody to read for.
+    if (row === undefined || ctx.store.collections.cloudSessions.get("cloud")?.state !== "signed-in") {
       watching.delete(workspaceId)
+      watchPolls.delete(workspaceId)
       return
     }
     // A workspace wedged in pending/starting is not polled for the life of the app: the watch gives up after MAX_WATCH_POLLS and the card keeps the last fact.
@@ -721,35 +858,44 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     )
     if ("error" in destroyed) return destroyed.error
     /*
-     * A card whose terminal pointed at the destroyed session stops pointing:
-     * the facet re-offers to open one rather than claim a dead attachment.
+     * Destroyed is a fact the tab and the card learn together: the terminal
+     * tab attached to the session closes and the card stops pointing at it
+     * in one transaction (the facet re-offers to open one rather than claim
+     * a dead attachment); the session lists refresh after.
      */
+    ctx.dispatch({ type: "workspace.session.destroyed", actor: ctx.actor(), sessionId })
     for (const card of ctx.store.collections.cards.values()) {
       if (card.kind !== "workspace" || card.payload.repo !== resolved.repo) continue
       const row = ctx.store.collections.cloudWorkspaces.get(card.payload.workspaceId)
       if (row === undefined) continue
       const sessions = await loadSessions(resolved.repo, row.id)
-      renderWorkspace(row, {
-        ...(sessions === null ? {} : { sessions }),
-        ...(card.payload.terminalSessionId === sessionId ? { terminalSessionId: null } : {})
-      })
+      renderWorkspace(row, sessions === null ? {} : { sessions })
     }
     return { value: `Session ${sessionId} is destroyed.` }
   }
 
-  const deleteWorkspace: WorkspaceSeam["deleteWorkspace"] = async (workspaceId) => {
+  const deleteWorkspace: WorkspaceSeam["deleteWorkspace"] = async (workspaceId, confirmName) => {
     const refusal = gate()
     if (refusal !== undefined) return refusal
     const resolved = resolveWorkspace(workspaceId)
     if ("error" in resolved) return resolved.error
     const { workspace } = resolved
+    /*
+     * The typed-name gate lives HERE, not only in the card's chrome: a slash,
+     * an agent's confirmed invocation, and the card's button all arrive with
+     * the name the invoker typed, and only the workspace's own name deletes.
+     */
+    if (confirmName.trim() !== workspace.name) {
+      return `Deleting "${workspace.name}" (${workspace.id}) needs its name typed back exactly — /workspace.delete ${workspace.id} ${workspace.name}.`
+    }
     const deleted = await sendJson("DELETE", repoPath(workspace.repoId, `/workspaces/${encodeURIComponent(workspace.id)}`))
     if ("error" in deleted) return failOnCard(workspace, deleted.error)
     /*
-     * Gone is a fact: the card leaves the transcript, the list refresh
-     * removes the collection row and its tree copy.
+     * Gone is a fact: the card, the collection row, its tree copy, and its
+     * terminal tabs leave in one transaction; the list refresh after it
+     * re-reads the repository's truth.
      */
-    ctx.dispatch({ type: "card.removed", actor: ctx.actor(), id: cardIdOf(workspace.id) })
+    ctx.dispatch({ type: "workspace.deleted", actor: ctx.actor(), workspaceId: workspace.id })
     const loaded = await loadList(workspace.repoId)
     if (typeof loaded === "string") return loaded
     return { value: `Workspace "${workspace.name}" (${workspace.id}) is deleted.` }

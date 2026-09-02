@@ -381,13 +381,58 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     if (rest.length > 0) return no("workspace.session.destroy takes a session id and optionally a workspace id")
     return ok(workspaceId === undefined ? { sessionId } : { sessionId, workspaceId })
   },
-  "workspace.delete": (args) => required("workspaceId", args, "workspace.delete needs a workspace id"),
+  "workspace.delete": (args) => {
+    /* `<workspaceId> <name>`: the name typed back is required; the card sends the draft the user typed. */
+    const [workspaceId, ...rest] = tokensOf(args)
+    if (workspaceId === undefined) return no("workspace.delete needs a workspace id and its name typed back: /workspace.delete <workspaceId> <name>")
+    const confirmName = rest.join(" ").trim()
+    if (confirmName === "") return no(`workspace.delete needs the workspace's name typed back: /workspace.delete ${workspaceId} <name>`)
+    return ok({ workspaceId, confirmName })
+  },
   "workspace.facet": (args) => {
     const [workspaceId, facet, ...rest] = tokensOf(args)
     if (workspaceId === undefined || facet === undefined || rest.length > 0) {
       return no("workspace.facet takes a workspace id and a facet")
     }
     return ok({ workspaceId, facet })
+  },
+  /* Lane change: a change id is one token; the pins and the path trail it. */
+  "change.view": (args) => {
+    const [changeId, rev, ...rest] = tokensOf(args)
+    if (changeId === undefined) return no("change.view needs a change id")
+    if (rest.length > 0) return no("change.view takes a change id and optionally a revision number")
+    if (rev === undefined) return ok({ changeId })
+    const seq = Number(rev)
+    if (!Number.isInteger(seq) || seq <= 0) return no("change.view's revision is a positive number")
+    return ok({ changeId, rev: seq })
+  },
+  "change.diff": (args) => {
+    const [changeId, from, to, path, ...rest] = tokensOf(args)
+    if (changeId === undefined) return no("change.diff needs a change id")
+    if (rest.length > 0) return no("change.diff takes a change id, two pins, and optionally a path")
+    return ok({
+      changeId,
+      ...(from === undefined ? {} : { from }),
+      ...(to === undefined ? {} : { to }),
+      ...(path === undefined ? {} : { path })
+    })
+  },
+  "change.land": (args) => required("changeId", args, "change.land needs a change id"),
+  "change.split-ready": (args) => required("changeId", args, "change.split-ready needs a change id"),
+  "change.resolve": (args) => {
+    const [changeId, path, ...rest] = tokensOf(args)
+    if (changeId === undefined || path === undefined || rest.length > 0) {
+      return no("change.resolve takes a change id and the conflicted file's path")
+    }
+    return ok({ changeId, path })
+  },
+  "change.revert": (args) => required("changeId", args, "change.revert needs a change id"),
+  "change.facet": (args) => {
+    const [changeId, facet, ...rest] = tokensOf(args)
+    if (changeId === undefined || facet === undefined || rest.length > 0) {
+      return no("change.facet takes a change id and a facet")
+    }
+    return ok({ changeId, facet })
   },
   "files.list": (args) => {
     const tokens = tokensOf(args)

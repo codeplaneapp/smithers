@@ -240,6 +240,7 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   { id: "approvals", label: "Run approvals", summary: "The workspace's pending gates" },
   { id: "issues", label: "Issues", summary: "GitHub issues" },
   { id: "prs", label: "Pull requests", summary: "GitHub pull requests" },
+  { id: "change", label: "Changes", summary: "Changes and diffs — the change is the unit (ADR 0003)" },
   { id: "files", label: "Files", summary: "Read repository files" },
   { id: "branches", label: "Branches", summary: "Repository branches" },
   { id: "env", label: "Environment", summary: "Workspace environment variables" },

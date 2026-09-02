@@ -734,6 +734,7 @@ function ComposerOrigin() {
   const { data: connectorRows } = useLiveQuery(collections.connectors)
   const { data: repositoryRows } = useLiveQuery(collections.repositories)
   const { data: copyRows } = useLiveQuery(collections.workingCopies)
+  const { data: changeRows } = useLiveQuery(collections.changes)
   const { data: activeRows } = useLiveQuery((q) =>
     q.from({ session: collections.sessions }).select(({ session }) => ({
       id: session.id,
@@ -749,12 +750,46 @@ function ComposerOrigin() {
       const copy = copyRows.find((row) => row.id === selection.copyId)
       if (copy !== undefined) {
         const repository = repositoryRows.find((row) => row.id === copy.repoId)
+        /*
+         * Lane change step 4: the chip carries the checkout's pin (its jj
+         * `readAt`), `changeId#seq` only when the changes collection knows a
+         * sequence — never from a commit comparison alone (plue#450). A
+         * newer revision is named only when BOTH seqs are known.
+         */
+        const pin = copy.readAt ?? null
+        const changeRow = pin?.changeId != null
+          ? changeRows.find((row) => row.repoId === copy.repoId && row.changeId === pin.changeId)
+          : undefined
+        const seq = changeRow?.currentSeq ?? null
+        const newerSeq = seq !== null && changeRow?.revisionCount != null && changeRow.revisionCount > seq
+          ? changeRow.revisionCount
+          : null
         return (
           <span className="composer-origin" data-origin={copy.kind} data-testid="repo-chip" title={copy.path ?? copy.workspaceId ?? copy.id}>
             {copy.kind === "local" ? <Laptop size={14} aria-hidden="true" /> : <Cloud size={14} aria-hidden="true" />}
             <span className="composer-origin-name">
               {copy.kind === "local" && copy.path !== undefined ? abbreviateHomePath(copy.path) : copy.label}
             </span>
+            {pin?.changeId != null ?
+              (
+                <span className="composer-origin-branch">
+                  {` · ${seq !== null ? `${pin.changeId}#${seq}` : pin.changeId}`}
+                  {pin.commitId != null ? ` · ${pin.commitId.length > 12 ? pin.commitId.slice(0, 8) : pin.commitId}` : ""}
+                </span>
+              ) :
+              null}
+            {newerSeq !== null && pin?.changeId != null ?
+              (
+                <button
+                  type="button"
+                  className="composer-origin-branch"
+                  data-flow="change.view"
+                  onClick={() => controller.runCommandArgs("change.view", pin.changeId ?? "")}
+                >
+                  {` · rev ${newerSeq} exists · view`}
+                </button>
+              ) :
+              null}
             {copy.ahead !== undefined && repository?.head !== null && repository?.head !== undefined
               ? <span className="composer-origin-branch">{` · ${copy.ahead} ahead of ${repository.head.bookmark}`}</span>
               : copy.state !== undefined

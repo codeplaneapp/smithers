@@ -19,6 +19,7 @@ import { ArrowLeft, ArrowRight, GitFork, Maximize2, Minimize2, PanelTop } from "
 import { lazy, Suspense, useRef, useState } from "react"
 import type { KeyboardEvent } from "react"
 import { BranchesCardBody } from "./cards/BranchesCard"
+import { ChangeCardBody, DiffCardBody } from "./cards/ChangeCards"
 import { WorkspaceCardBody } from "./cards/WorkspaceCard"
 import { AffectedCardBody } from "./cards/AffectedCard"
 import { CiMatrixCardBody } from "./cards/CiMatrixCard"
@@ -117,6 +118,8 @@ const pillStatus = (card: Card): string => {
     card.kind === "issue" ||
     card.kind === "pr-list" ||
     card.kind === "pr" ||
+    card.kind === "change" ||
+    card.kind === "diff" ||
     card.kind === "keys" ||
     card.kind === "notifications" ||
     card.kind === "env" ||
@@ -1080,6 +1083,8 @@ export function CardView({
           {card.kind === "issue" ? <IssueCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "pr-list" ? <LandingListCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "pr" ? <LandingCardBody card={card} onRunCommand={onRunCommand} /> : null}
+          {card.kind === "change" ? <ChangeCardBody card={card} onRunCommand={onRunCommand} /> : null}
+          {card.kind === "diff" ? <DiffCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "keys" ? <KeysCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "notifications" ? <NotificationsCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "env" ? <EnvCardBody card={card} /> : null}

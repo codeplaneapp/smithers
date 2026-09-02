@@ -59,10 +59,13 @@ const serve = async (
   await page.route("**/api/cloud/api/user/repos", (route) =>
     route.fulfill(json({ repos: [{ owner: "smithersai", name: "smithers", full_name: REPO, default_bookmark: "main" }] })))
   await page.route("**/api/cloud/api/user/orgs", (route) => route.fulfill(json({ orgs: [{ login: "smithersai" }] })))
-  await page.route("**/api/cloud/api/user/workspaces", (route) => route.fulfill(json({ workspaces: [] })))
+  // plue's list routes answer a bare array (the per-user one in UserWorkspaceRow shape); the seam asks `?limit=100`.
+  await page.route(/\/api\/cloud\/api\/user\/workspaces(\?.*)?$/, (route) => route.fulfill(json([])))
+  // Bookmarks come in plue's cursor envelope (routes/pagination.go cursorResponse).
   await page.route(`**/api/cloud/api/repos/${REPO}/bookmarks`, (route) =>
     route.fulfill(json({
-      bookmarks: [{ name: "main", target_change_id: "kxyzqrpv", target_commit_id: "c0ffee123456" }]
+      items: [{ name: "main", target_change_id: "kxyzqrpv", target_commit_id: "c0ffee123456", is_tracking_remote: false }],
+      next_cursor: ""
     })))
 }
 
@@ -80,18 +83,18 @@ test.beforeEach(async ({ page }) => {
 test("T1: /workspace.open renders the card, streams starting→running, and the Snapshots facet lists", async ({ page }) => {
   await serve(page)
   let polls = 0
-  await page.route(`**/api/cloud/api/repos/${REPO}/workspaces`, (route) => {
+  await page.route(new RegExp(`/api/cloud/api/repos/${REPO}/workspaces(\\?.*)?$`), (route) => {
     if (route.request().method() === "POST") return route.fulfill(json(WS("pending", "allocating"), 201))
-    return route.fulfill(json({ workspaces: [WS("running")] }))
+    return route.fulfill(json([WS("running")]))
   })
   await page.route(`**/api/cloud/api/repos/${REPO}/workspaces/ws-1`, (route) => {
     polls += 1
     return route.fulfill(json(polls < 2 ? WS("starting", "boot") : WS("running")))
   })
   await page.route(`**/api/cloud/api/repos/${REPO}/workspace-snapshots`, (route) =>
-    route.fulfill(json({ snapshots: [{ id: "snap-1", name: "golden", workspace_id: "ws-1", created_at: "2026-08-01T00:00:00Z" }] })))
+    route.fulfill(json([{ id: "snap-1", name: "golden", workspace_id: "ws-1", created_at: "2026-08-01T00:00:00Z" }])))
   await page.route(`**/api/cloud/api/repos/${REPO}/workspace/sessions`, (route) =>
-    route.fulfill(json({ sessions: [] })))
+    route.fulfill(json([])))
   await page.goto("/")
 
   await page.getByTestId("composer-input").fill("/workspace.open main smithersai/smithers")
@@ -103,8 +106,10 @@ test("T1: /workspace.open renders the card, streams starting→running, and the 
   await expect(card).toContainText("smithersai/smithers · main")
   await expect(card).toContainText("bookmark main head @ kxyzqrpv")
   await expect(card).not.toContainText("uptime")
-  // The settle watch streams the status: pending → starting → running (the seam polls while unsettled).
-  await expect(card).toContainText("Pending")
+  // The settle watch streams the status: pending → starting → running (the seam polls while unsettled). The card
+  // renders the collection's freshest row, so the first paint is whichever landed last — the create's pending or
+  // the watch's first poll (starting) — never a status the row has already left.
+  await expect(card).toContainText(/Pending|Starting/)
   await expect(card).toContainText("Running", { timeout: 20_000 })
 
   // The Snapshots facet lists what the upstream answered, with its acts.

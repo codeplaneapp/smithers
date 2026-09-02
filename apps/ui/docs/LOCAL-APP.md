@@ -210,6 +210,37 @@ Lane `citc` (ADR 0002) adds the persistent cloud computers:
   act refuses a `degraded` cloud session with the "sign in again to enable"
   wording (ADR 0001's legacy scope set).
 
+Lane `change` (ADR 0003) makes the change the unit of review:
+
+- **`change`** (`/change.view <changeId>`) — one card per change, rendered
+  from plue's change DTO plus its auxiliaries: the per-repo stat, the
+  carrying landing request's stack position (`Landing #42 · position 2 of 2
+  · open → main`), and the changeset when the repository's owner is an org
+  (a `failed` changeset renders its `failure_reason` verbatim and offers
+  Retry land). Five facet tabs switch the body: Diff (the parent → current
+  file rows, each opening its one-file diff), Checks (the newest answer per
+  context), Review (verdicts and threads — no stale/moved tokens, plue#453),
+  Findings and History (the ADR's degraded wording — no findings per
+  revision, plue#454; no revision history, plue#450). The header names
+  `repo · changeId · commit · author`, never `rev N of M`. The footer acts:
+  Land (the carrying landing request — queued, never "merged"; the
+  changeset's own atomic route when one carries the change, a 409 re-reads),
+  Split ready and Resolve (honest refusals until plue#452/#455), Revert
+  (only on a landed change; an honest refusal until plue#456). A `degraded`
+  sign-in reads a change freely; dispatching the resolve agent refuses with
+  the "sign in again to enable" wording.
+- **`diff`** (`/change.diff <changeId> [from] [to] [path]`) — one from → to
+  pair pinned at the change's commit (`pinned at a03f5f11`), conflicted
+  files leading. A hunk inlines up to 400 patch lines; a larger one rides by
+  reference and names its re-read (`/change.diff <changeId> parent current
+  <path>`). Only change-vs-parent has a route today — a rev → rev interdiff
+  refuses with the plue#451 wording.
+
+The composer's origin chip carries the probed checkout's pin: `~/smithers ·
+qupxosqw · a03f5f` (`changeId#seq` only when the changes collection knows a
+sequence — never from a commit comparison alone), beside piper's `N ahead of
+main`. `rev N exists · view` renders only when BOTH seqs are known.
+
 ## Navigation and persistence
 
 Durable routes use `/w/:workspace/b/:branch/f/:frame`. Browser back/forward,

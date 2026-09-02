@@ -62,6 +62,8 @@ import type { NotificationsSeam } from "./seams/NotificationsSeam"
 import { createRepositoriesSeam } from "./seams/RepositoriesSeam"
 import { createWorkspaceSeam } from "./seams/WorkspaceSeam"
 import type { WorkspaceSeam } from "./seams/WorkspaceSeam"
+import { createChangeSeam } from "./seams/ChangeSeam"
+import type { ChangeSeam } from "./seams/ChangeSeam"
 import type { RepositoriesSeam } from "./seams/RepositoriesSeam"
 import { createRepoImportSeam } from "./seams/RepoImportSeam"
 import type { RepoImportSeam } from "./seams/RepoImportSeam"
@@ -332,6 +334,17 @@ export interface AppController {
   readonly destroyWorkspaceSession: WorkspaceSeam["destroySession"]
   readonly deleteWorkspace: WorkspaceSeam["deleteWorkspace"]
   readonly setWorkspaceFacet: WorkspaceSeam["setFacet"]
+  /*
+   * Lane change (ADR 0003): the change is the unit — the change and diff
+   * cards behind the `/api/cloud/*` proxy (state/seams/ChangeSeam.ts).
+   */
+  readonly viewChange: ChangeSeam["viewChange"]
+  readonly diffChange: ChangeSeam["diffChange"]
+  readonly landChange: ChangeSeam["landChange"]
+  readonly splitReadyChange: ChangeSeam["splitReady"]
+  readonly resolveChangeConflict: ChangeSeam["resolveConflict"]
+  readonly revertChange: ChangeSeam["revertChange"]
+  readonly setChangeFacet: ChangeSeam["setFacet"]
   /** Dismiss one toast on the shared corner stack (the toast.dismiss command). */
   readonly dismissToast: (id: string) => void
   /** Refresh the billing record from the billing seam (actor: system). */
@@ -488,6 +501,8 @@ export const createAppController = (
   /* Lane citc: the cloud workspaces; its settle watches die with the controller. */
   const workspaceSeam = createWorkspaceSeam(seamCtx)
   ctx.onDispose(workspaceSeam.dispose)
+  /* Lane change: the change/diff cards and their acts. */
+  const changeSeam = createChangeSeam(seamCtx)
   const reloadRepositoriesWhenSignedIn = (): void => {
     if (store.collections.cloudSessions.get("cloud")?.state === "signed-in") {
       void repositoriesSeam.loadRepositories()
@@ -993,6 +1008,13 @@ export const createAppController = (
     destroyWorkspaceSession: workspaceSeam.destroySession,
     deleteWorkspace: workspaceSeam.deleteWorkspace,
     setWorkspaceFacet: workspaceSeam.setFacet,
+    viewChange: changeSeam.viewChange,
+    diffChange: changeSeam.diffChange,
+    landChange: changeSeam.landChange,
+    splitReadyChange: changeSeam.splitReady,
+    resolveChangeConflict: changeSeam.resolveConflict,
+    revertChange: changeSeam.revertChange,
+    setChangeFacet: changeSeam.setFacet,
     dismissToast,
     refreshBalance,
     showBalance,
@@ -1234,6 +1256,13 @@ export const createAppController = (
     destroyWorkspaceSession: workspaceSeam.destroySession,
     deleteWorkspace: workspaceSeam.deleteWorkspace,
     setWorkspaceFacet: workspaceSeam.setFacet,
+    viewChange: changeSeam.viewChange,
+    diffChange: changeSeam.diffChange,
+    landChange: changeSeam.landChange,
+    splitReadyChange: changeSeam.splitReady,
+    resolveChangeConflict: changeSeam.resolveConflict,
+    revertChange: changeSeam.revertChange,
+    setChangeFacet: changeSeam.setFacet,
     dismissToast,
     refreshBalance,
     showBalance,

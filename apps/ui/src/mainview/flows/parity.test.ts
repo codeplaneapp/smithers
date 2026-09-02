@@ -156,7 +156,8 @@ describe("launch-law parity: every affordance is a command", () => {
        */
       // 15 − the corner balance chip: the balance is one act away (/balance), never main-page chrome.
       "../App.tsx": 13,
-      "../Composer.tsx": 10,
+      /* 11 = 10 + the origin chip's "rev N exists · view" (lane change step 4; renders only when both seqs are known). */
+      "../Composer.tsx": 11,
       // 6 = 5 + the empty state's own import affordance (§11.6): with nothing
       // connected the pane stated a fact and offered no move.
       "../ConnectorsSurface.tsx": 6,
@@ -204,6 +205,8 @@ describe("launch-law parity: every affordance is a command", () => {
       "../cards/RunsCards.tsx": 6,
       "../cards/RunHistoryCard.tsx": 1,
       "../cards/AffectedCard.tsx": 1,
+      /* Lane change (ADR 0003): the change card's facets and acts, the diff card's re-read. */
+      "../cards/ChangeCards.tsx": 8,
       /* Connection, world and browser card interactions. */
       "../cards/ConversationCards.tsx": 4,
       /*

@@ -257,7 +257,7 @@ export const WorkspaceCardBody = ({
               variant="outline"
               data-flow="workspace.delete"
               disabled={deleteDraft !== payload.name}
-              onClick={() => onRunCommand("workspace.delete", payload.workspaceId)}
+              onClick={() => onRunCommand("workspace.delete", `${payload.workspaceId} ${deleteDraft}`)}
             >
               Delete permanently
             </Button>

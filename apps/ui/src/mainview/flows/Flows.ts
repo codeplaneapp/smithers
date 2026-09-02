@@ -1306,10 +1306,11 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     runtime: ["jjhub"],
     hidden: true,
     confirm: "delete the workspace",
-    args: "<workspaceId>",
+    /* The workspace's name typed back is the flow's own input: the seam deletes only when it matches, whoever invoked. */
+    args: "<workspaceId> <name>",
     requires: ["signed-in"],
-    input: Schema.Struct({ workspaceId: Schema.String }),
-    handler: ({ workspaceId }) => actions.deleteWorkspace(workspaceId)
+    input: Schema.Struct({ workspaceId: Schema.String, confirmName: Schema.String }),
+    handler: ({ workspaceId, confirmName }) => actions.deleteWorkspace(workspaceId, confirmName)
   }),
   flow({
     /* The card's body tab — browser mechanics the human clicks. */
@@ -1325,6 +1326,92 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
       facet: Schema.Literals(["terminal", "files", "services", "snapshots"])
     }),
     handler: ({ workspaceId, facet }) => actions.setWorkspaceFacet(workspaceId, facet)
+  }),
+  /*
+   * Lane change (ADR 0003): the change is the unit. `change.view` renders
+   * the change card (one card per change, five facets); `change.diff`
+   * renders the from → to pair; the acts ride the one seam. The acts that
+   * have no route yet (resolve, revert, split-ready) refuse with the ADR's
+   * wording rather than fake a backend. The repo resolves from the changes
+   * collection, else the app's target repo — never a guess.
+   */
+  flow({
+    name: "change.view",
+    summary: "Open a change's card",
+    runtime: ["jjhub"],
+    args: "<changeId> [rev]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String, rev: Schema.optional(Schema.Number) }),
+    handler: ({ changeId, rev }) => actions.viewChange(changeId, rev)
+  }),
+  flow({
+    name: "change.diff",
+    summary: "Open a change's diff at two pins",
+    runtime: ["jjhub"],
+    args: "<changeId> [from] [to] [path]",
+    requires: ["signed-in"],
+    input: Schema.Struct({
+      changeId: Schema.String,
+      from: Schema.optional(Schema.String),
+      to: Schema.optional(Schema.String),
+      path: Schema.optional(Schema.String)
+    }),
+    handler: ({ changeId, from, to, path }) => actions.diffChange(changeId, from, to, path)
+  }),
+  flow({
+    name: "change.land",
+    summary: "Land a change (its landing request, or its changeset atomically)",
+    runtime: ["jjhub"],
+    confirm: "land the change",
+    args: "<changeId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String }),
+    handler: ({ changeId }) => actions.landChange(changeId)
+  }),
+  flow({
+    name: "change.split-ready",
+    summary: "Split a changeset's ready members into a new change",
+    runtime: ["jjhub"],
+    confirm: "split the ready members into a new change",
+    args: "<changeId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String }),
+    handler: ({ changeId }) => actions.splitReadyChange(changeId)
+  }),
+  flow({
+    name: "change.resolve",
+    summary: "Dispatch an agent to resolve a change's conflict",
+    runtime: ["jjhub"],
+    confirm: "dispatch an agent to resolve the conflict",
+    args: "<changeId> <path>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String, path: Schema.String }),
+    handler: ({ changeId, path }) => actions.resolveChangeConflict(changeId, path)
+  }),
+  flow({
+    name: "change.revert",
+    summary: "Revert a landed change",
+    runtime: ["jjhub"],
+    confirm: "revert the landed change",
+    args: "<changeId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ changeId: Schema.String }),
+    handler: ({ changeId }) => actions.revertChange(changeId)
+  }),
+  flow({
+    /* The card's body tab — browser mechanics the human clicks. */
+    name: "change.facet",
+    summary: "Switch a change card's facet",
+    runtime: ["jjhub"],
+    hidden: true,
+    userOnly: true,
+    args: "<changeId> <facet>",
+    requires: ["signed-in"],
+    input: Schema.Struct({
+      changeId: Schema.String,
+      facet: Schema.Literals(["diff", "findings", "checks", "review", "history"])
+    }),
+    handler: ({ changeId, facet }) => actions.setChangeFacet(changeId, facet)
   }),
   flow(RELOAD),
   alias("reload", RELOAD),

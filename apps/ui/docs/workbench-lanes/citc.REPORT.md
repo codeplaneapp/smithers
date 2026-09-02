@@ -126,3 +126,147 @@ the tree are the three pre-existing TargetGraph integration tests plus two
 Fixed in the working tree after the review: (1) the terminal attach: plue confirmed a Bearer PAT alone is accepted (the `?ticket=` exists for browsers), but the upgrade REQUIRES an Origin header — the tunnel now sends `https://jjhub.tech` (`SMITHERS_CLOUD_WS_ORIGIN` overrides) and caps frames at plue's 64 KiB; (2) "Make template" emitted a multi-word snapshot name the parser refused — `workspace.template` accepts `--name <rest of line>` and the button uses it; (3) the settle watch polled a wedged workspace forever — it stops after 120 polls (ten minutes at 5 s) and the card keeps the last fact; (5) the tunnel's path guard admitted `.`/`..` segments — segments are checked and the joined target must stay under the upstream's `/api/repos/`; (8) renderer→upstream frames were unbounded — a 1 MiB upstream buffer closes the renderer's socket; (9) a destroyed session's tab reconnected at 1 Hz forever — the client reconnects only on 1006 and plue's 1001, retries 1011 once, and treats 1008 (`access revoked`) and 1000 as final with the reason shown; (11) the bare workspace-id badge at the card's foot was unbriefed chrome — removed.
 
 Open from the same review: (4) a scope replace drops workspaces whose wire rows fail to parse (and their tree rows); (6) an in-flight poll can reschedule after dispose; (7) the seam test harness never asserts request bodies, so `source_bookmark`, `snapshot_id`, fork `name` are unverified; (10) fork/open acts refuse a malformed answer without refreshing the list, unlike suspend/resume.
+
+## Critique fixes (2026-09-02)
+
+Six adversarially verified findings (scratchpad `citc-critique.json`), fixed in
+order. Every fix has a regression test that was run red against the pre-fix
+file (extracted from `HEAD` into a transient copy) and green against the fix.
+
+1. **Zombie tunnel socket after the last detach** (`CloudTerminalClient.ts`).
+   Fix: `scheduleReconnect` returns when `listeners.size === 0`; the detach
+   nulls the closing socket's `onclose` before `close()` (a CONNECTING socket's
+   abort surfaces as 1006, which used to redial an entry already forgotten);
+   every opened socket sits in a client-wide `sockets` set that `dispose`
+   drains, attached or not. Tests (`CloudTerminalClient.test.ts`): "detaching
+   the last attachment closes the socket for good: no redial, nothing left for
+   dispose", "detaching while the socket is still connecting aborts it and
+   never redials (the abort reads as 1006)" (red before: a live orphan the
+   server still held), "a drop the server forces while nobody listens never
+   redials either", "dispose closes every socket, attached or reconnecting".
+2. **A refused upstream redialed at 1 Hz forever** (tunnel + client + tabs).
+   Tunnel (`src/bun/server.ts`): a close before the upstream handshake
+   completed is a refusal, translated to 4401/4403/4404/4409 (409 and plue's
+   425 "still provisioning")/4429, 1011 only when unknown. Bun 1.4.0's
+   WebSocket client hides the HTTP status of a refused upgrade (every non-101
+   answer closes 1002 "Expected 101 status code"; scratch probe
+   `bun-ws-refusal.ts`), so the tunnel re-reads the same route with one plain
+   GET, same bearer and Origin policy; plue runs every pre-upgrade check
+   (auth, scope, repo permission, open-rate limit, session lookup and state,
+   active cap) before `websocket.Accept`, so the GET answers the status the
+   handshake got, at the cost of one request per refusal. An upstream that
+   drops after the handshake is relayed as its own code, or `terminate()` for
+   1005/1006 (which cannot be sent). Client: 1000/1008/44xx are final with the
+   reason shown; 1011 retries once (the retry is re-earned only after a 30 s
+   healthy open, since plue's 1011 lands right after the 101); 1001/1006
+   reconnect with a 1 s backoff doubling to 30 s, under a client-wide budget
+   of 8 reconnect dials per rolling minute across every session (plue admits
+   20 terminal opens per user per minute). Tabs: new transitions
+   `workspace.session.destroyed` (closes the session's tab and clears the
+   card's `terminalSessionId` in one transaction) and `workspace.deleted`
+   (card, collection row, tree copy, and terminal tabs in one transaction);
+   the `workspaces.loaded` reducer closes the tabs of the workspaces it
+   dropped; `closeTabRows` is the one strip-removal helper `tab.closed` now
+   uses too. Tests: `CloudWsTunnel.test.ts` "an upstream %i closes the
+   renderer with %i after exactly one re-read, never a redial" (401→4401,
+   403→4403, 404→4404, 409→4409, 425→4409, 429→4429, 500→1011; the record
+   shows exactly the upgrade and one bearer-carrying re-read), "an upstream
+   that drops after the handshake ends the renderer's socket";
+   `CloudTerminalClient.test.ts` "close %i is final: no redial, the listener
+   hears why" (seven codes), "1011 retries once, then is final", "1001
+   reconnects with a doubling backoff capped at maxReconnectMs" (17 dials
+   before, ≤ 7 after), "reconnect dials across every session stay under the
+   per-minute budget" (68 before, 4 after); `WorkspaceSeam.test.ts` "a scope
+   replace closes the terminal tabs of the workspaces it dropped", "destroy
+   session detaches the card that pointed at it and closes its tab in the
+   same transaction" (the harness snapshots the store after each dispatch),
+   "delete with the name removes the card, the row, the copy, and the
+   terminal tab together, then refreshes the list".
+3. **Per-user list parsed to zero rows and scope-replaced everything away**
+   (`WorkspaceSeam.ts`). Fix: `parseUserWorkspaceWire` reads plue's
+   `UserWorkspaceRow` (`workspace_id`, `repository_owner`/`repository_name`,
+   `workspace_title`, `state`) beside the DTO parser; a per-user row keeps the
+   bookmark, stage, and suspension time the collection already holds (the
+   switcher row carries none), dropping a stage or suspension time the new
+   status has left behind. Both list routes request `?limit=100` and follow
+   the `Link` header's `rel="next"` until exhausted (`X-Total-Count` is a
+   second stop, 50 pages the ceiling); plue writes those links in the legacy
+   `page`/`per_page` form and the per-user route's own parser reads only
+   `cursor`/`limit` (`routes/workspace.go parseUserWorkspacesPagination`), so
+   the seam re-issues a next page as the offset cursor `(page − 1) × per_page`,
+   which both routes accept — a plue defect worth filing (its per-user
+   pagination links are unfollowable as written). A next link that leaves the
+   route is not followed. A non-empty body that parsed to zero rows is an
+   honest error and the loaded rows stay. `arrayOf` also accepts plue's
+   `{ items, next_cursor }` cursor envelope, which the bookmarks route
+   answers (the bookmark head was silently null against real plue). Doubles
+   rewritten to plue's shapes: `WorkspaceSeam.test.ts` (`USER_ROW`, bare
+   arrays, the cursor envelope, a harness that keys on the path and records
+   the query) and `e2e/playwright/citc.spec.ts` (bare arrays, regex routes
+   that admit `?limit=100`, the bookmarks envelope). Tests: "workspace.list
+   parses plue's per-user rows, asks for 100 a page, syncs the tree copies,
+   and announces", "a per-user row keeps the bookmark the collection already
+   knows; a status that moved on drops its stage", "a non-empty list Smithers
+   cannot read is an error, and the loaded rows stay", "an empty list is a
+   fact: the scope empties", "both list routes follow the Link header's next
+   page until it is exhausted" (130 per-user rows, 101 per-repo rows, two
+   requests each), "a next link that leaves the route is not followed".
+4. **Sign-out left bridges running; a signed-out tunnel dialed plue with no
+   bearer** (`server.ts`, reducer, seam). Fix: the tunnel answers 401
+   `cloud_sign_in_required` before `bunServer.upgrade` when `cloudAuth.token()`
+   is undefined and never dials; a `cloudBridges` registry of live bridged
+   sockets is closed 4401 by the `/api/cloud-auth/sign-out` handler (and 1001
+   on shutdown), each close releasing its upstream; the `cloud.session.loaded`
+   reducer closes every workspace terminal tab in the same transaction as a
+   `signed-out` record (the seam's sign-out mirror, and a boot that answers
+   signed out); the settle watch stops when the session is not signed in.
+   Tests: `CloudWsTunnel.test.ts` "signed out, the tunnel answers 401 and
+   never dials plue", "sign-out closes every live bridge, upstream included";
+   `WorkspaceSeam.test.ts` "a signed-out session record closes the workspace
+   terminal tabs and only those", "the watch stops when the cloud session
+   signs out".
+5. **The typed-name delete gate lived only in card chrome** (`Flows.ts`,
+   `SlashPayload.ts`, `WorkspaceSeam.ts`, `WorkspaceCard.tsx`). Fix: the flow's
+   input is `{ workspaceId, confirmName }`, both required (`args:
+   "<workspaceId> <name>"`); the slash parser refuses a missing name; the seam
+   refuses before any request unless `confirmName` equals the workspace's
+   name, whoever invoked; the card sends `${workspaceId} ${deleteDraft}`; the
+   flow keeps `confirm` for agent invocations. Tests: `WorkspaceSeam.test.ts`
+   "delete refuses unless the workspace's name is typed back, and never calls
+   plue for a mismatch" ("", a prefix, a case change, the id), `WorkspaceCard.
+   test.tsx` "the delete act asks for the workspace's name typed back" (args
+   `ws-1 review`).
+6. **open/view's final render overwrote a status the watch had settled**
+   (`WorkspaceSeam.ts`). Fix: `renderWorkspace` reads name, repo, bookmark,
+   status, provisioning stage, and suspension time from the collection row
+   when it exists — every act dispatches its DTO before it renders, so the
+   collection is never older than the act's answer, and a poll that landed
+   during the auxiliaries wins. Tests: "a poll that settles before the
+   auxiliaries load wins: card, tree, and collection agree and no watch
+   remains" (aux routes delayed 30 ms, GET answers running: before, card
+   `pending` against a `running` row and tree), "view renders the collection's
+   status when a poll advanced it during the auxiliaries"; the open test now
+   asserts the card equals the collection instead of pinning `pending`.
+
+Also: the tab-close question for a workspace terminal reads "This tab
+detaches from the workspace session; the session keeps running in the cloud
+workspace." (`TabBodies.tsx`); the settle watch stops on sign-out (above);
+per the coordinator (plue#475 deployed), the tunnel sends an upstream Origin
+ONLY when `SMITHERS_CLOUD_WS_ORIGIN` is set — the `https://jjhub.tech`
+default is gone — with the same policy on the refusal re-read (tests "bridges
+frames both ways … and no Origin by default", "SMITHERS_CLOUD_WS_ORIGIN is the
+only source of an upstream Origin").
+
+Gates: `pnpm exec tsc --noEmit` clean. `bun test src` — 1437 pass, 5 fail:
+the 3 pre-existing `TargetGraph.integration.test.ts` failures plus 2 from the
+concurrent change lane's in-flight `Composer.tsx` edit (`ComposerLayout.test.
+tsx` repo-chip copy and `parity.test.ts` Composer handler count 10 → 11),
+files this lane does not touch. `bun test` — apps/shared 130 pass, apps/server
+402 pass. The same change lane applied the identical `WorkspaceCard.tsx` edit
+and an optional-`confirmName` flow in parallel; the flow and parser were
+tightened to required here.
+T1 `e2e/playwright/citc.spec.ts` against the rewritten doubles — 2 passed.
+A final `tsc` run showed one error in `ComposerLayout.test.tsx` ("Cannot find
+name 'host'"), the change lane's edit in progress at that minute (95 changed
+lines, not this lane's file); the run before it was clean with every citc
+change in place.

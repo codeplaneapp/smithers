@@ -264,7 +264,97 @@ describe("the composer header: the repository selector and where it lives", () =
     expect(text(byTestId(view.host, "composer-repo-trigger"))).toBe("smithersai/smithers · smithers")
     const chip = byTestId(view.host, "repo-chip")
     expect(chip?.dataset.origin).toBe("local")
-    expect(text(chip)).toBe("~/smithers · 3 ahead of main")
+    /* Lane change step 4: the probed checkout's pin rides the chip ahead of piper's ahead count. */
+    expect(text(chip)).toBe("~/smithers · kxyz · deadbeef · 3 ahead of main")
+  })
+
+  test("a known revision pins `change#seq`; a newer one names itself only when both seqs are known", async () => {
+    const { store, controller } = await localController()
+    await persisted(store, {
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [
+        { id: "smithersai/smithers", org: "smithersai", ownerKind: "org", name: "smithers", head: { bookmark: "main", changeId: "qp", commitId: "c1" } }
+      ]
+    })
+    await persisted(store, {
+      type: "repos.loaded",
+      actor: "system",
+      repos: [{
+        id: "smithers",
+        path: "/Users/williamcory/smithers",
+        name: "smithers",
+        git: { branch: "main", remote: "git@github.com:smithersai/smithers.git" },
+        jj: { changeId: "kxyz", commitId: "deadbeef", ahead: 3, bookmark: "main" },
+        warnings: [],
+        smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts", workspaces: [] }
+      }]
+    })
+    /* The changes collection knows kxyz at rev 2 of 5 (post-plue#450). */
+    await persisted(store, {
+      type: "change.loaded",
+      actor: "system",
+      change: {
+        id: "smithersai/smithers#kxyz",
+        repoId: "smithersai/smithers",
+        changeId: "kxyz",
+        commitId: "deadbeef",
+        description: "pinned work",
+        authorName: "will",
+        timestamp: "2026-09-01T10:00:00Z",
+        hasConflict: false,
+        parentChangeIds: [],
+        currentSeq: 2,
+        revisionCount: 5
+      }
+    })
+    await persisted(store, {
+      type: "repo.selected",
+      actor: "user",
+      id: "smithersai/smithers#local:/Users/williamcory/smithers"
+    })
+    const view = mount(controller)
+    await view.act(() => {})
+
+    const chip = byTestId(view.host, "repo-chip")
+    expect(text(chip)).toContain("kxyz#2")
+    expect(text(chip)).toContain("rev 5 exists · view")
+    const viewButton = [...(chip?.querySelectorAll("button") ?? [])].find((button) => button.dataset.flow === "change.view")
+    expect(viewButton).toBeDefined()
+
+    /* One seq unknown (today's DTO, plue#450): the bare change id, never a rev claim. */
+    const plain = await localController()
+    await persisted(plain.store, {
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [
+        { id: "smithersai/smithers", org: "smithersai", ownerKind: "org", name: "smithers", head: { bookmark: "main", changeId: "qp", commitId: "c1" } }
+      ]
+    })
+    await persisted(plain.store, {
+      type: "repos.loaded",
+      actor: "system",
+      repos: [{
+        id: "smithers",
+        path: "/Users/williamcory/smithers",
+        name: "smithers",
+        git: { branch: "main", remote: "git@github.com:smithersai/smithers.git" },
+        jj: { changeId: "kxyz", commitId: "deadbeef", ahead: 3, bookmark: "main" },
+        warnings: [],
+        smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts", workspaces: [] }
+      }]
+    })
+    await persisted(plain.store, {
+      type: "repo.selected",
+      actor: "user",
+      id: "smithersai/smithers#local:/Users/williamcory/smithers"
+    })
+    const plainView = mount(plain.controller)
+    await plainView.act(() => {})
+    const plainChip = byTestId(plainView.host, "repo-chip")
+    expect(text(plainChip)).toContain("kxyz")
+    expect(text(plainChip)).not.toContain("#")
+    expect(text(plainChip)).not.toContain("rev ")
   })
 })
 
