@@ -12,13 +12,18 @@
  * The persisted plan and the journal are separate stores, which is why this
  * package owns its own tables and its own migration block.
  *
+ * The ordered steps live under `internal/migrations`, which the export map
+ * blocks, so {@link set} is the only way to reach them. A step imported on
+ * its own would run outside the namespaced ordering that `@smthrs/database`
+ * relies on to decide what has already been applied.
+ *
  * @since 0.1.0
  */
 import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import * as Layer from "effect/Layer"
-import initial from "./migrations/0001_initial.ts"
-import appendOnlyHardening from "./migrations/0002_append_only_hardening.ts"
-import forwardOnlyIdentity from "./migrations/0003_forward_only_identity.ts"
+import initial from "./internal/migrations/0001_initial.ts"
+import appendOnlyHardening from "./internal/migrations/0002_append_only_hardening.ts"
+import forwardOnlyIdentity from "./internal/migrations/0003_forward_only_identity.ts"
 
 /**
  * The plan store's namespaced migration set, for composition with the other

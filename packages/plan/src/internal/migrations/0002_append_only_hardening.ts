@@ -26,7 +26,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  * Pins plan identity and timestamps, forbids plan deletion, and makes node
  * order unique inside each plan.
  *
- * @category migrations
+ * @private
  * @since 0.1.0
  * @slop
  */

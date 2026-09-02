@@ -40,6 +40,19 @@
   `StepKey.content` therefore folds a body digest into every such node, and the
   keys `Plan.compile` derives for the flow calls that previously carried none
   move with it.
+- The raw migration steps moved beneath `src/internal/migrations`, so
+  `@smthrs/plan/migrations/0001_initial` and its siblings no longer resolve.
+  `Migrations.set` is the supported surface; a step imported on its own ran
+  outside the namespaced ordering `Migrator` relies on.
+- `Node.isNode` no longer accepts the public `TypeId` marker on its own. It
+  recognizes a node this package built by registration at construction, and a
+  rehydrated node, an object sharing the node prototype whose own `ast` is a
+  well-formed AST, by that shape, which is what `@smthrs/flow` hands back for
+  an AST that crossed a serialization boundary. `Node.all`, `andThen`,
+  `branch`, and `catch` therefore refuse a forged object carrying the marker,
+  one inheriting it from a node, and one whose `ast` is missing, malformed, or
+  cyclic with their usual `GraphBuildError` instead of storing an `ast` the
+  package never built.
 - `StepKey.EnvironmentIdentity` is now a discriminated union. A declared
   environment may not carry a `runScope` and an undeclared one must, which
   `StepKey.dispatchIdentity` also enforces at run time with the new
@@ -96,6 +109,12 @@
 - The conflict pass now decides orderedness against the live edge set, so a
   writer pair a dependency path already orders is neither annotated, nor given
   a redundant edge, nor refused with `overlap_forbidden`.
+- `Plan.compile` now fails with `cycle` when a reader-after-writer edge would
+  close a cycle, because a declared dependency or a `serialize` edge already
+  orders the producer behind its reader. The edge was dropped before, which
+  left the reader ahead of its producer to measure and cache pre-producer
+  bytes as a legitimate execution. The message names the reader, the producer,
+  the overlapping paths, and the dependency chain.
 - `Plan.compile` no longer recurses per dependency edge and no longer
   materializes a transitive closure, so a large graph compiles in bounded
   memory instead of raising an untyped `RangeError`.

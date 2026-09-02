@@ -55,18 +55,18 @@ additionally needs `PlanStore.layer` over a `DurableWriter` and a `SqlClient`.
 
 ## What is in here
 
-| Module            | Role                                                                                                |
-| ----------------- | --------------------------------------------------------------------------------------------------- |
-| `Node`            | The pure, pipeable authoring AST: `succeed`, `all`, `map`, `andThen`, `branch`, `catch`, `priority` |
-| `Planned`         | The strict placeholder a body sees where a step result will be, and the reference it records        |
-| `GraphBuildError` | The refusals a plan-time build raises instead of producing a wrong plan                             |
-| `FileSet`         | The static filesystem declaration vocabulary: patterns, globs, tree artifacts, filegroups, overlap  |
-| `KeyMaterial`     | What a planner declares about a node: body, tagged input references, layers, capabilities, effects  |
-| `StepKey`         | The compiler that turns material plus resolved dependency digests into an `@smthrs/keys` `Key`      |
-| `Plan`            | `compile`, `append`, the node/edge/conflict schemas, and the digest an approval binds to            |
-| `PlanDiff`        | `smithers plan --diff` as a value: added, removed, re-keyed (with attribution), unchanged           |
-| `PlanStore`       | Append-only SQL persistence, migration block `4000`, enforced by triggers rather than by convention |
-| `Migrations`      | The namespaced migration set, composed by `@smthrs/engine-store`'s `Migrations.sets`                |
+| Module            | Role                                                                                                                                                 |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Node`            | The pure, pipeable authoring AST: `succeed`, `all`, `map`, `andThen`, `branch`, `catch`, `priority`                                                  |
+| `Planned`         | The strict placeholder a body sees where a step result will be, and the reference it records                                                         |
+| `GraphBuildError` | The refusals a plan-time build raises instead of producing a wrong plan                                                                              |
+| `FileSet`         | The static filesystem declaration vocabulary: patterns, globs, tree artifacts, filegroups, overlap                                                   |
+| `KeyMaterial`     | What a planner declares about a node: body, tagged input references, layers, capabilities, effects                                                   |
+| `StepKey`         | The compiler that turns material plus resolved dependency digests into an `@smthrs/keys` `Key`                                                       |
+| `Plan`            | `compile`, `append`, the node/edge/conflict schemas, and the digest an approval binds to                                                             |
+| `PlanDiff`        | `smithers plan --diff` as a value: added, removed, re-keyed (with attribution), unchanged                                                            |
+| `PlanStore`       | Append-only SQL persistence, migration block `4000`, enforced by triggers rather than by convention                                                  |
+| `Migrations`      | The namespaced migration set, composed by `@smthrs/engine-store`'s `Migrations.sets`; its ordered steps live under `internal` and are not importable |
 
 ## The four rules this package exists to keep
 
@@ -117,10 +117,19 @@ Each annotation also carries a runtime strategy, `delay-rebase` or
 actually bites. Both the pair strategy and the runtime strategy are folded into
 the plan digest a human approves.
 
+A node that reads a path another node writes is not a conflict but a missing
+edge: `compile` puts the reader behind its producer by growing `dependsOn`.
+When a declared dependency or a `serialize` edge already orders the producer
+behind its reader, no edge set satisfies both, and `compile` fails with `cycle`
+naming the reader, the producer, the overlapping paths, and the dependency
+chain. Dropping the edge instead would let the reader measure and cache
+pre-producer bytes as a legitimate execution.
+
 ## When it refuses
 
 `Plan.compile` and `Plan.append` fail with a `PlanError` carrying one of seven
-stable codes: `cycle`, `unknown_dependency`, `duplicate_node`,
+stable codes: `cycle` (material dependencies close a loop, or a
+reader-after-writer edge would), `unknown_dependency`, `duplicate_node`,
 `overlap_forbidden`, `invalid_effects` (one path declared as both a write and a
 removal), `invalid_node` (an empty plan id or node id, a priority that is not a
 safe integer, a `kind` or strategy outside its literal set, or key material or

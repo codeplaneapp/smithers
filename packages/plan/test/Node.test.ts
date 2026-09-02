@@ -766,3 +766,208 @@ describe("internal/node call factories", () => {
     }
   })
 })
+
+/**
+ * `isNode` guards every combinator that reads a value's `ast` as trusted
+ * topology. The public marker is an exported string any object can carry, so
+ * a node is either one this package registered when it built it or one with
+ * the node prototype and a well-formed own `ast`: the shape `@smthrs/flow`
+ * hands back for an AST that crossed a serialization boundary.
+ */
+describe("Node.isNode", () => {
+  const genuine = Node.succeed(1)
+  const NodeProto = Object.getPrototypeOf(genuine) as object
+  const leaf = { _tag: "Succeed", value: 1 }
+  const identity = { _tag: "FunctionIdentity", algorithm: "static-node/v1", digest: "d" }
+  /** The shape a rehydrated node has: the node prototype and an own `ast` data property. */
+  const rehydrate = (ast: unknown): Node.Any => Object.assign(Object.create(NodeProto) as Node.Any, { ast })
+
+  const cyclic: Record<string, unknown> = { _tag: "Map", mapper: identity }
+  cyclic.first = cyclic
+  /** Values that are not an AST, each refused at the field that breaks the shape. */
+  const malformed: ReadonlyArray<readonly [label: string, ast: unknown]> = [
+    ["null", null],
+    ["a number", 1],
+    ["no tag", { value: 1 }],
+    ["an unknown tag", { _tag: "Loop" }],
+    ["a priority that is not a safe integer", { _tag: "Succeed", value: 1, priority: 1.5 }],
+    ["an All without nodes", { _tag: "All" }],
+    ["an All whose nodes is an array", { _tag: "All", nodes: [leaf] }],
+    ["an All with a malformed member", { _tag: "All", nodes: { ok: leaf, bad: { _tag: "Loop" } } }],
+    ["a Map without a mapper", { _tag: "Map", first: leaf }],
+    ["a Map whose mapper has the wrong tag", { _tag: "Map", first: leaf, mapper: { ...identity, _tag: "Digest" } }],
+    ["a Map whose mapper names an unknown algorithm", {
+      _tag: "Map",
+      first: leaf,
+      mapper: { ...identity, algorithm: "md5" }
+    }],
+    ["a Map whose mapper digest is not a string", { _tag: "Map", first: leaf, mapper: { ...identity, digest: 1 } }],
+    ["a Map with a malformed first", { _tag: "Map", first: 1, mapper: identity }],
+    ["an AndThen without a continuation", { _tag: "AndThen", first: leaf }],
+    ["an AndThen with a malformed first", { _tag: "AndThen", first: null, continuation: identity }],
+    ["an AndThen with a malformed next", {
+      _tag: "AndThen",
+      first: leaf,
+      continuation: identity,
+      next: { _tag: "Loop" }
+    }],
+    ["a Branch without a subject", { _tag: "Branch", first: leaf, predicate: identity, then: leaf, else: leaf }],
+    ["a Branch without a predicate", { _tag: "Branch", subject: "s", first: leaf, then: leaf, else: leaf }],
+    ["a Branch with a malformed arm", {
+      _tag: "Branch",
+      subject: "s",
+      first: leaf,
+      predicate: identity,
+      then: leaf,
+      else: 1
+    }],
+    ["a Catch without a subject", { _tag: "Catch", protected: leaf, failure: leaf }],
+    ["a Catch with a malformed failure arm", {
+      _tag: "Catch",
+      subject: "s",
+      protected: leaf,
+      failure: { _tag: "Loop" }
+    }],
+    ["a FlowCall without a flow", { _tag: "FlowCall", mode: "inline", payload: {} }],
+    ["a FlowCall with an unknown mode", { _tag: "FlowCall", flow: "f", mode: "detached", payload: {} }],
+    ["an ActionCall without an action", { _tag: "ActionCall", payload: {} }],
+    ["a cyclic ast", cyclic]
+  ]
+
+  const impostors: ReadonlyArray<readonly [label: string, value: unknown]> = [
+    ["an own marker beside a well-formed ast", { [Node.TypeId]: {}, ast: leaf }],
+    ["an own marker and no ast", { [Node.TypeId]: true }],
+    ["an own marker beside a malformed ast tag", { [Node.TypeId]: true, ast: { _tag: "Loop" } }],
+    ["a marker and ast inherited from a genuine node", Object.create(genuine) as unknown],
+    ["a marker and ast inherited from a rehydrated node", Object.create(rehydrate(leaf)) as unknown],
+    ["the node prototype and no ast", Object.create(NodeProto) as unknown],
+    [
+      "the node prototype and an ast accessor",
+      Object.defineProperty(Object.create(NodeProto) as object, "ast", { get: () => leaf })
+    ],
+    ["a proxy that hides a genuine node's ast", new Proxy(genuine, { getOwnPropertyDescriptor: () => undefined })],
+    ["a proxy that disowns the node prototype", new Proxy(genuine, { getPrototypeOf: () => Object.prototype })],
+    ...malformed.map(([label, ast]) => [`the node prototype and ${label} as its ast`, rehydrate(ast)] as const)
+  ]
+
+  const refusal = (build: () => unknown): unknown => {
+    try {
+      build()
+    } catch (error) {
+      return error
+    }
+    return undefined
+  }
+
+  it("recognizes nodes this package built", () => {
+    expect(Node.isNode(genuine)).toBe(true)
+    expect(Node.isNode(genuine.pipe(Node.priority(1)))).toBe(true)
+    expect(Node.isNode(Node.all({ genuine }))).toBe(true)
+    expect(Node.isNode(genuine.pipe(Node.map((value) => value + 1)))).toBe(true)
+    expect(Node.isNode(Node.actionCall({}, "act", {}))).toBe(true)
+  })
+
+  it("recognizes a rehydrated node: the node prototype and a JSON round-tripped ast", () => {
+    const built = Node.all({
+      chain: Node.succeed(0).pipe(
+        Node.map((value) => value + 1),
+        Node.andThen(() => Node.succeed("built")),
+        Node.andThen(Node.succeed("direct")),
+        Node.branch({ if: (value) => value === "direct", then: () => Node.succeed(1), else: () => Node.succeed(2) }),
+        Node.catch({ error: Schema.String, onFailure: () => Node.succeed(3) }),
+        Node.priority(7)
+      ),
+      flow: Node.flowCall({}, "flow/child", "boundary", { seed: 1 }),
+      // A payload of `undefined` has no JSON form, so the round trip drops the key.
+      action: Node.actionCall({}, "action/write", undefined)
+    })
+    const rehydrated = rehydrate(JSON.parse(JSON.stringify(built.ast)))
+    expect(rehydrated.ast).not.toBe(built.ast)
+    expect(Node.isNode(rehydrated)).toBe(true)
+    // Every combinator admits it and stores the ast it carries.
+    expect(tagged(Node.all({ member: rehydrated }).ast, "All").nodes.member).toBe(rehydrated.ast)
+    expect(tagged(Node.andThen(Node.succeed(0), rehydrated).ast, "AndThen").next).toBe(rehydrated.ast)
+    const decided = Node.branch(Node.succeed(0), { if: () => true, then: () => rehydrated, else: () => rehydrated })
+    expect(tagged(decided.ast, "Branch")).toMatchObject({ then: rehydrated.ast, else: rehydrated.ast })
+    expect(tagged(Node.catch(Node.succeed(0), { onFailure: () => rehydrated }).ast, "Catch").failure).toBe(
+      rehydrated.ast
+    )
+  })
+
+  it("accepts a shared sub-ast and refuses a cyclic one", () => {
+    expect(Node.isNode(rehydrate({ _tag: "All", nodes: { left: leaf, right: leaf } }))).toBe(true)
+    expect(Node.isNode(rehydrate({ _tag: "AndThen", first: leaf, continuation: identity, next: leaf }))).toBe(true)
+    expect(Node.isNode(rehydrate(cyclic))).toBe(false)
+  })
+
+  it("walks an ast deeper than the native stack allows", () => {
+    let ast: unknown = leaf
+    for (let depth = 0; depth < 100_000; depth++) ast = { _tag: "Map", first: ast, mapper: identity }
+    expect(Node.isNode(rehydrate(ast))).toBe(true)
+  })
+
+  it("judges a proxy by the shape it forwards", () => {
+    // Nothing structural tells a proxy that forwards a node unchanged from the
+    // node, and the ast it forwards is the node's own, so it passes; the two
+    // proxies in the impostor list diverge from that shape and do not.
+    expect(Node.isNode(new Proxy(genuine, {}))).toBe(true)
+  })
+
+  it("refuses every impostor and every non-object", () => {
+    for (const [label, impostor] of impostors) {
+      expect(Node.isNode(impostor), label).toBe(false)
+    }
+    for (const [label, ast] of malformed) {
+      expect(internal.isNodeAst(ast), label).toBe(false)
+    }
+    expect(Node.isNode(null)).toBe(false)
+    expect(Node.isNode(undefined)).toBe(false)
+    expect(Node.isNode(1)).toBe(false)
+    expect(Node.isNode(Node.TypeId)).toBe(false)
+  })
+
+  it("refuses every impostor in every combinator that admits a node", () => {
+    for (const [label, impostor] of impostors) {
+      const forged = impostor as Node.Any
+      expect(refusal(() => Node.all({ member: forged })), label).toMatchObject({
+        code: "invalid_all_member",
+        node: "member",
+        message: "Node.all expected a Node at member \"member\""
+      })
+      expect(refusal(() => Node.andThen(Node.succeed(0), forged)), label).toMatchObject({
+        code: "invalid_continuation",
+        node: "andThen/next",
+        message: "Node.andThen expected its direct continuation to be a Node"
+      })
+      for (const side of ["then", "else"] as const) {
+        expect(
+          refusal(() =>
+            Node.branch(Node.succeed(0), {
+              if: () => true,
+              then: () => side === "then" ? forged : Node.succeed("then"),
+              else: () => side === "else" ? forged : Node.succeed("else")
+            })
+          ),
+          `${label} (${side})`
+        ).toMatchObject({
+          code: "invalid_continuation",
+          node: `${Node.branchSubject}/${side}`,
+          message: `Node.branch expected its "${side}" arm to return a Node`
+        })
+      }
+      expect(refusal(() => Node.catch(Node.succeed(0), { onFailure: () => forged })), label).toMatchObject({
+        code: "invalid_continuation",
+        node: Node.catchSubject,
+        message: "Node.catch expected its failure arm to return a Node"
+      })
+    }
+  })
+
+  it("admits a genuine node in every combinator that guards one", () => {
+    expect(tagged(Node.all({ member: genuine }).ast, "All").nodes).toEqual({ member: genuine.ast })
+    expect(tagged(Node.andThen(Node.succeed(0), genuine).ast, "AndThen").next).toEqual(genuine.ast)
+    const decided = Node.branch(Node.succeed(0), { if: () => true, then: () => genuine, else: () => genuine })
+    expect(tagged(decided.ast, "Branch")).toMatchObject({ then: genuine.ast, else: genuine.ast })
+    expect(tagged(Node.catch(Node.succeed(0), { onFailure: () => genuine }).ast, "Catch").failure).toEqual(genuine.ast)
+  })
+})

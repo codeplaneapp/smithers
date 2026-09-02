@@ -311,16 +311,22 @@ const overlap = (
   )
 
 /**
- * Whether `reader` consumes a path `writer` produces. The conflict pass above
- * compares write sets against write sets, so this relation is the one it cannot
- * see.
+ * The read declarations of one node that a writer's produced set covers. The
+ * conflict pass above compares write sets against write sets, so this relation
+ * is the one it cannot see. Rendered the way {@link overlap} renders a write,
+ * because a refusal names them.
  *
  * @private
  */
-const readsWhatItWrites = (
+const readOverlap = (
   reads: ReadonlyArray<FileSet.ReadEntry>,
   produced: ReadonlyArray<FileSet.Entry>
-): boolean => reads.some((entry) => produced.some((output) => FileSet.overlaps(entry, output)))
+): ReadonlyArray<string> =>
+  reads.flatMap((entry) =>
+    produced.some((output) => FileSet.overlaps(entry, output))
+      ? [typeof entry === "string" ? entry : entry.include.join(",")]
+      : []
+  )
 
 /** @private */
 type Ordered =
@@ -389,9 +395,11 @@ const topological = (drafts: ReadonlyArray<NodeDraft>, known: ReadonlySet<string
  * dependency path are not conflicts.
  *
  * The second adds reader-after-writer edges: a node that reads a path another
- * node writes is ordered behind its producer. That pair is not a conflict —
- * nothing needs annotating and no strategy applies — it is a missing edge, so
- * only `dependsOn` grows.
+ * node writes is ordered behind its producer. That pair is not a conflict,
+ * because nothing needs annotating and no strategy applies. It is a missing
+ * edge, so only `dependsOn` grows. When the graph already orders the producer
+ * behind its reader, the missing edge would close a cycle and the pass fails
+ * with `cycle` rather than leaving the reader ahead of the bytes it reads.
  *
  * Nodes are visited in plan order, so a `serialize` edge always points from
  * the earlier declaration to the later one and can never close a cycle. Nodes
@@ -414,19 +422,33 @@ const annotate = (
     const conflicts = new Map<string, Array<ConflictAnnotation>>()
     const ordering = new Map<string, Array<string>>()
     const edges = new Map(nodes.map((node) => [node.id, new Set(node.dependsOn)]))
-    const reaches = (from: string, to: string): boolean => {
-      const seen = new Set<string>()
+    // The dependency chain from `from` to `to`, or `undefined` when no path
+    // exists. The chain is what a cycle refusal shows the author, so the walk
+    // records how it arrived rather than only whether it did.
+    const route = (from: string, to: string): ReadonlyArray<string> | undefined => {
+      const arrivedFrom = new Map<string, string>()
+      const seen = new Set<string>([from])
       const stack = [from]
       while (stack.length > 0) {
         const current = stack.pop()!
-        if (current === to) return true
-        if (seen.has(current)) continue
-        seen.add(current)
+        if (current === to) {
+          const chain = [current]
+          for (let step = arrivedFrom.get(current); step !== undefined; step = arrivedFrom.get(step)) {
+            chain.unshift(step)
+          }
+          return chain
+        }
         // Every edge is validated against this plan before conflict analysis.
-        for (const next of edges.get(current)!) stack.push(next)
+        for (const next of edges.get(current)!) {
+          if (seen.has(next)) continue
+          seen.add(next)
+          arrivedFrom.set(next, current)
+          stack.push(next)
+        }
       }
-      return false
+      return undefined
     }
+    const reaches = (from: string, to: string): boolean => route(from, to) !== undefined
     for (let index = 0; index < nodes.length; index++) {
       const later = nodes[index]!
       if (frozen.has(later.id)) continue
@@ -483,17 +505,30 @@ const annotate = (
         if (writer.id === reader.id) continue
         const produced = expanded.get(writer.id)!.produced
         if (produced.length === 0) continue
-        if (!readsWhatItWrites(reads, produced)) continue
+        const paths = readOverlap(reads, produced)
+        if (paths.length === 0) continue
         // Already ordered, by a material edge, a serialize edge, or a path
         // through either.
         if (reaches(reader.id, writer.id)) continue
-        // The graph already orders the writer AFTER the reader. A declared
-        // dependency outranks an inferred ordering and the writer-first edge
-        // would close a cycle, so the pair is left as declared. Checking
-        // reachability rather than relying on plan order is the deviation the
-        // vault note records: plan order alone only justifies edges that point
-        // backwards, and writer-first points either way.
-        if (reaches(writer.id, reader.id)) continue
+        // The graph already orders the writer AFTER the reader, through a
+        // declared dependency or a serialize edge, and the reader still has
+        // to follow its producer. No edge set satisfies both: adding the
+        // reader-first edge closes a cycle, and leaving it out lets the reader
+        // measure pre-producer bytes and cache that execution as legitimate.
+        // Reachability decides it rather than plan order, because plan order
+        // only justifies edges that point backwards and writer-first points
+        // either way.
+        const contradiction = route(writer.id, reader.id)
+        if (contradiction !== undefined) {
+          return yield* Effect.fail(
+            new PlanError({
+              code: "cycle",
+              message: `Plan cycle: node ${reader.id} reads ${paths.join(", ")}, which node ${writer.id} produces, ` +
+                `so ${reader.id} must follow ${writer.id}, but ${writer.id} already depends on ${reader.id} ` +
+                `through ${contradiction.join(" -> ")}`
+            })
+          )
+        }
         ordering.set(reader.id, [...ordering.get(reader.id) ?? [], writer.id])
         edges.get(reader.id)!.add(writer.id)
       }

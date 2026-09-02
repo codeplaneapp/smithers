@@ -7,8 +7,8 @@
  * digest a run's approval binds to. The store never interprets a plan — it
  * records what {@link module:Plan} compiled and hands it back.
  *
- * Growth is append-only and the SQL enforces it (see `migrations/0001_initial`
- * for the triggers). {@link Service.append} inserts the newest generation's
+ * Growth is append-only and the SQL enforces it (see
+ * `internal/migrations/0001_initial` for the triggers). {@link Service.append} inserts the newest generation's
  * rows and advances the plan row's digest; nothing rewrites a node.
  *
  * @since 0.1.0

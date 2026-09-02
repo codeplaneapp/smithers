@@ -21,7 +21,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
 /**
  * Creates the plan tables and the triggers that make them append-only.
  *
- * @category migrations
+ * @private
  * @since 0.1.0
  * @slop
  */

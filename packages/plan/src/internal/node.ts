@@ -684,14 +684,142 @@ export const NodeProto = {
 }
 
 /**
+ * Every node {@link makeNode} built, so a node this module made is recognized
+ * in constant time without walking its AST again.
+ */
+const liveNodes = new WeakSet<object>()
+
+/** The algorithms a {@link FunctionIdentity} may name. */
+const identityAlgorithms: ReadonlySet<unknown> = new Set<FunctionIdentity["algorithm"]>([
+  "sha256-source-ephemeral/v4",
+  "sha256-source-captures/v4",
+  "static-node/v1"
+])
+
+/** The modes a {@link FlowCall} may name. */
+const callModes: ReadonlySet<unknown> = new Set<CallMode>(["inline", "boundary", "handoff"])
+
+/** @private */
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
+
+/** @private */
+const isFunctionIdentity = (value: unknown): value is FunctionIdentity =>
+  isRecord(value) && value._tag === "FunctionIdentity" && identityAlgorithms.has(value.algorithm) &&
+  typeof value.digest === "string"
+
+/** One position of the {@link isNodeAst} walk: an AST to check, or one whose children are all checked. @private */
+type AstVisit = { readonly enter: unknown } | { readonly exit: object }
+
+/**
+ * Checks whether a value has the shape of a {@link NodeAst}: what a JSON round
+ * trip of a genuine AST produces, and nothing looser. Every variant's own
+ * fields are checked, and every child is walked. The walk is an explicit stack
+ * rather than recursion, so an arbitrarily deep AST cannot overflow the native
+ * stack, and it tracks the ancestors of the position it has reached, so a
+ * cyclic object is refused rather than walked forever while a shared sub-AST
+ * still passes.
+ *
+ * @since 1.0.0
+ * @private
+ */
+export const isNodeAst = (value: unknown): value is NodeAst => {
+  const ancestors = new Set<object>()
+  const pending: Array<AstVisit> = [{ enter: value }]
+  while (pending.length > 0) {
+    const visit = pending.pop()!
+    if ("exit" in visit) {
+      ancestors.delete(visit.exit)
+      continue
+    }
+    const ast = visit.enter
+    if (!isRecord(ast) || ancestors.has(ast)) return false
+    if (ast.priority !== undefined && !Number.isSafeInteger(ast.priority)) return false
+    const children: Array<unknown> = []
+    switch (ast._tag) {
+      case "Succeed":
+        break
+      case "All": {
+        if (!isRecord(ast.nodes) || Array.isArray(ast.nodes)) return false
+        for (const child of Object.values(ast.nodes)) children.push(child)
+        break
+      }
+      case "Map": {
+        if (!isFunctionIdentity(ast.mapper)) return false
+        children.push(ast.first)
+        break
+      }
+      case "AndThen": {
+        if (!isFunctionIdentity(ast.continuation)) return false
+        children.push(ast.first)
+        if (ast.next !== undefined) children.push(ast.next)
+        break
+      }
+      case "Branch": {
+        if (typeof ast.subject !== "string" || !isFunctionIdentity(ast.predicate)) return false
+        children.push(ast.first, ast.then, ast.else)
+        break
+      }
+      case "Catch": {
+        if (typeof ast.subject !== "string") return false
+        children.push(ast.protected, ast.failure)
+        break
+      }
+      case "FlowCall": {
+        if (typeof ast.flow !== "string" || !callModes.has(ast.mode)) return false
+        break
+      }
+      case "ActionCall": {
+        if (typeof ast.action !== "string") return false
+        break
+      }
+      default:
+        return false
+    }
+    if (children.length > 0) {
+      ancestors.add(ast)
+      pending.push({ exit: ast })
+      for (const child of children) pending.push({ enter: child })
+    }
+  }
+  return true
+}
+
+/**
+ * Checks whether a value is a node.
+ *
+ * A node this module built is recognized by registration. A node that crossed
+ * a serialization boundary, an object whose prototype is {@link NodeProto} and
+ * whose own `ast` data property passes {@link isNodeAst}, is recognized by that
+ * shape: `@smthrs/flow` hands a rehydrated AST back as a node, and the side
+ * tables are all a round trip loses. The {@link TypeId} marker is an exported
+ * string any object can carry, so it counts for nothing on its own, and an
+ * `ast` that is missing, malformed, cyclic, or an accessor is refused because
+ * every combinator reads it as trusted topology. A proxy is judged by the
+ * shape it forwards.
+ *
+ * @since 1.0.0
+ * @private
+ */
+export const isNode = (value: unknown): value is Node<unknown, unknown, any> => {
+  if (typeof value !== "object" || value === null) return false
+  if (liveNodes.has(value)) return true
+  if (Object.getPrototypeOf(value) !== NodeProto) return false
+  const ast = Object.getOwnPropertyDescriptor(value, "ast")
+  return ast !== undefined && "value" in ast && isNodeAst(ast.value)
+}
+
+/**
  * Wraps an AST as a node.
  *
  * @since 0.1.0
  * @private
  * @slop
  */
-export const makeNode = <A = unknown, E = never, R = never>(ast: NodeAst): Node<A, E, R> =>
-  Object.assign(Object.create(NodeProto), { ast })
+export const makeNode = <A = unknown, E = never, R = never>(ast: NodeAst): Node<A, E, R> => {
+  const node: Node<A, E, R> = Object.assign(Object.create(NodeProto), { ast })
+  liveNodes.add(node)
+  return node
+}
 
 /**
  * Constructs a {@link Succeed}.

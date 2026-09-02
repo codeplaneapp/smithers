@@ -657,16 +657,93 @@ describe("Plan.compile reader-after-writer edges", () => {
       expect(plan.nodes.find((node) => node.id === "reader")!.dependsOn).toEqual(["middle"])
     }))
 
-  it.effect("leaves the pair alone rather than closing a cycle", () =>
+  it.effect("refuses a writer that depends on the reader of its own output", () =>
     Effect.gen(function*() {
-      // The graph already orders the writer AFTER the reader. A declared
-      // dependency outranks an inferred ordering.
-      const plan = yield* withCrypto(compile([
+      // The declared edge orders the writer AFTER the reader, and the reader
+      // has to follow its producer. Dropping either edge would let the reader
+      // measure pre-writer bytes and cache that execution as legitimate, so
+      // the contradiction is refused rather than resolved silently.
+      const error = yield* withCryptoFailure(compile([
         draft("reader", { reads: ["out"] }),
         draft("writer", { writes: ["out"], inputs: [{ _tag: "Ref", from: "reader", path: [] }] })
       ]))
-      expect(plan.nodes.find((node) => node.id === "reader")!.dependsOn).toEqual([])
-      expect(plan.nodes.find((node) => node.id === "writer")!.dependsOn).toEqual(["reader"])
+      expect(error).toBeInstanceOf(Plan.PlanError)
+      expect(error).toMatchObject({
+        code: "cycle",
+        message: "Plan cycle: node reader reads out, which node writer produces, so reader must follow writer, " +
+          "but writer already depends on reader through writer -> reader"
+      })
+    }))
+
+  it.effect("refuses the contradiction through a transitive dependency path", () =>
+    Effect.gen(function*() {
+      const error = yield* withCryptoFailure(compile([
+        draft("reader", { reads: ["out"] }),
+        draft("middle", { inputs: [{ _tag: "Ref", from: "reader", path: [] }] }),
+        draft("writer", { writes: ["out"], inputs: [{ _tag: "Ref", from: "middle", path: [] }] })
+      ]))
+      expect(error).toMatchObject({
+        code: "cycle",
+        message: "Plan cycle: node reader reads out, which node writer produces, so reader must follow writer, " +
+          "but writer already depends on reader through writer -> middle -> reader"
+      })
+    }))
+
+  it.effect("refuses two nodes that each read what the other writes", () =>
+    Effect.gen(function*() {
+      // The first pair puts a behind b. The second pair needs b behind a, and
+      // the only edge that could honor it closes a loop with the first.
+      const error = yield* withCryptoFailure(compile([
+        draft("a", { reads: ["b.out"], writes: ["a.out"] }),
+        draft("b", { reads: ["a.out"], writes: ["b.out"] })
+      ]))
+      expect(error).toMatchObject({
+        code: "cycle",
+        message: "Plan cycle: node b reads a.out, which node a produces, so b must follow a, " +
+          "but a already depends on b through a -> b"
+      })
+    }))
+
+  it.effect("names every overlapping read, including a glob, in the refusal", () =>
+    Effect.gen(function*() {
+      const reader = draft("reader")
+      const error = yield* withCryptoFailure(compile([
+        {
+          ...reader,
+          effects: { ...reader.effects, reads: ["out/a.txt", { _tag: "Glob", include: ["out/**"] }] }
+        },
+        draft("writer", {
+          writes: ["out/a.txt", "out/b.txt"],
+          inputs: [{ _tag: "Ref", from: "reader", path: [] }]
+        })
+      ]))
+      expect(error).toMatchObject({
+        code: "cycle",
+        message: "Plan cycle: node reader reads out/a.txt, out/**, which node writer produces, " +
+          "so reader must follow writer, but writer already depends on reader through writer -> reader"
+      })
+    }))
+
+  it.effect("refuses a serialize edge that points against a read, and accepts the other declaration order", () =>
+    Effect.gen(function*() {
+      // Both nodes write `shared`, so the later declaration is serialized
+      // behind the earlier one. Declared reader-first, that inferred edge
+      // orders the producer of `b.out` after its reader; declared
+      // producer-first, the same edge is the one the read needs.
+      const reader = draft("reader", { reads: ["b.out"], writes: ["shared"] })
+      const producer = draft("producer", { writes: ["shared", "b.out"] })
+      const error = yield* withCryptoFailure(compile([reader, producer]))
+      expect(error).toMatchObject({
+        code: "cycle",
+        message: "Plan cycle: node reader reads b.out, which node producer produces, so reader must follow producer, " +
+          "but producer already depends on reader through producer -> reader"
+      })
+
+      const plan = yield* withCrypto(compile([producer, reader]))
+      expect(plan.nodes.find((node) => node.id === "reader")!.dependsOn).toEqual(["producer"])
+      expect(plan.nodes.find((node) => node.id === "reader")!.conflicts).toMatchObject([
+        { with: "producer", paths: ["shared"], strategy: "serialize" }
+      ])
       expect(acyclic(plan)).toBe(true)
     }))
 
@@ -734,6 +811,19 @@ describe("Plan.append", () => {
       )
       expect(withReader.nodes[0]).toEqual(writerFirst.nodes[0])
       expect(withReader.nodes[1]!.dependsOn).toEqual(["recorded-writer"])
+    }))
+
+  it.effect("accepts a new writer that depends on a frozen reader of its output", () =>
+    Effect.gen(function*() {
+      // The recorded reader already ran and its key covers the bytes it
+      // measured, so a producer elaborated after it is growth, not the
+      // contradiction `compile` refuses within one generation.
+      const base = yield* withCrypto(compile([draft("recorded-reader", { reads: ["out"] })]))
+      const grown = yield* withCrypto(Plan.append(base, [
+        draft("late-writer", { writes: ["out"], inputs: [{ _tag: "Ref", from: "recorded-reader", path: [] }] })
+      ]))
+      expect(grown.nodes[0]).toEqual(base.nodes[0])
+      expect(grown.nodes[1]!.dependsOn).toEqual(["recorded-reader"])
     }))
 
   it.effect("grows the plan without rewriting a single recorded node", () =>

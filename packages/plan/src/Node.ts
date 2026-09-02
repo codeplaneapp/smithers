@@ -29,7 +29,6 @@
  */
 import { dual } from "effect/Function"
 import type * as Pipeable from "effect/Pipeable"
-import * as Predicate from "effect/Predicate"
 import type * as Schema from "effect/Schema"
 import type * as Types from "effect/Types"
 import { GraphBuildError } from "./GraphBuildError.ts"
@@ -213,11 +212,24 @@ export interface CatchOptions<E, B, E2, R2 = never, Handled = E> {
 /**
  * Checks whether a value is a node.
  *
+ * A node this package built is recognized by registration at construction. A
+ * node that crossed a serialization boundary, an object sharing the node
+ * prototype whose own `ast` is a well-formed AST, is recognized by that shape,
+ * because `@smthrs/flow` hands a rehydrated AST back as a node and its side
+ * tables are all a round trip loses. The {@link TypeId} marker is a public
+ * string any object can carry, so it counts for nothing on its own: every
+ * combinator that admits a node reads its `ast` as trusted topology, and an
+ * object carrying the marker on any other prototype, one inheriting it from a
+ * node, and one whose `ast` is missing, malformed, cyclic, or an accessor are
+ * all refused with the same `GraphBuildError` as any other non-node. A proxy
+ * is judged by the shape it forwards: one that forwards a node unchanged
+ * passes, and one that diverges from it does not.
+ *
  * @since 0.1.0
  * @category guards
  * @slop
  */
-export const isNode = (value: unknown): value is Any => Predicate.hasProperty(value, TypeId)
+export const isNode = (value: unknown): value is Any => internal.isNode(value)
 
 /**
  * A node that succeeds with a constant.

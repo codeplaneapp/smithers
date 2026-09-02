@@ -20,7 +20,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
 /**
  * Recreates the forward-only trigger so a plan row can never change identity.
  *
- * @category migrations
+ * @private
  * @since 0.1.0
  * @slop
  */
