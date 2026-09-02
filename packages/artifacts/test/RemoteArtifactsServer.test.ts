@@ -32,7 +32,7 @@ type RangeMode =
   /** Accepts ranges, and drops the connection once, after `failAfterChunks` chunks. */
   | { readonly _tag: "Accept"; readonly failAfterChunks?: number }
   /** Refuses ranged bodies with this status, accepting the whole blob instead. */
-  | { readonly _tag: "Refuse"; readonly status: 411 | 416 }
+  | { readonly _tag: "Refuse"; readonly status: 400 | 411 | 416 }
   /**
    * Never reads `Content-Range`: every `PUT` replaces the stored blob with the
    * body it carried and answers `201`. This is plain WebDAV `PUT`, the dumb
@@ -252,7 +252,9 @@ describe("a real server", () => {
       expect(text(await Effect.runPromise(withCrypto(round)))).toBe(artifact)
     }))
 
-  it.each([411, 416] as const)(
+  // `400` is what the repository's own cache services answer, per RFC 9110
+  // section 14.5's rule for a resource that does not support partial PUT.
+  it.each([400, 411, 416] as const)(
     "falls back to a whole-blob PUT when the server answers %s",
     (status) =>
       onTier({ _tag: "Refuse", status }, async (tier) => {

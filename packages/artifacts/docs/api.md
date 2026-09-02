@@ -125,12 +125,16 @@ an empty `Content-Range: bytes */{total}` probe to discover a retained prefix.
 | `308`                         | Continue after the reported `Range: bytes=0-{last}` prefix. |
 | `2xx` on the completing chunk | Confirm the complete length with `HEAD`.                    |
 | `2xx` before completion       | Treat the server as range-unaware and send the whole blob.  |
-| `411` or `416`                | Send the whole blob.                                        |
+| `400`, `411`, or `416`        | Send the whole blob.                                        |
 | Any other status              | Fail the upload as a transport error.                       |
 
 The offset never moves backward. If a server ignores ranges, omits a confirming
 length, or stores a partial body, the whole-blob `PUT` overwrites the partial
-result. `RemoteArtifacts.Options.chunkBytes` is absent by default.
+result. `RemoteArtifacts.Options.chunkBytes` is absent by default. Both of the
+repository's cache services, the hosted Worker and the self-hosted service,
+answer a ranged `PUT` with `400` and cap one request body at 16 MiB, so
+`chunkBytes` against them degrades to one whole-blob `PUT` and a larger
+artifact is refused with `413`.
 
 ## CombinedArtifacts
 

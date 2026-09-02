@@ -496,7 +496,10 @@ describe("chunked uploads", () => {
       expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 0-3/10", "bytes 4-7/10", "bytes 8-9/10"])
     }))
 
-  it.effect.each([411, 416])("falls back to a whole-blob PUT on %s", (status) =>
+  // `411` and `416` refuse the body's framing; `400` is RFC 9110 section
+  // 14.5's answer from a resource that does not support partial PUT, and it
+  // is what this repository's own hosted and self-hosted cache services send.
+  it.effect.each([400, 411, 416])("falls back to a whole-blob PUT on %s", (status) =>
     Effect.gen(function*() {
       const tier = remote(
         withHeads((call) =>
@@ -512,21 +515,24 @@ describe("chunked uploads", () => {
       expect(tier.calls.filter((call) => call.method === "PUT")[1]!.body).toBe(large)
     }))
 
-  it.effect("falls back when a chunk, not the probe, is refused for range", () =>
-    Effect.gen(function*() {
-      const tier = remote(
-        withHeads((call) =>
-          call.headers["content-range"] === "bytes */10"
-            ? new Response(null, { status: 308 })
-            : call.headers["content-range"] === undefined
-            ? new Response(null, { status: 201 })
-            : new Response(null, { status: 411 })
-        ),
-        { chunkBytes: 4 }
-      )
-      yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
-      expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 0-3/10", undefined])
-    }))
+  it.effect.each([400, 411, 416])(
+    "falls back when a chunk, not the probe, is refused with %s",
+    (status) =>
+      Effect.gen(function*() {
+        const tier = remote(
+          withHeads((call) =>
+            call.headers["content-range"] === "bytes */10"
+              ? new Response(null, { status: 308 })
+              : call.headers["content-range"] === undefined
+              ? new Response(null, { status: 201 })
+              : new Response(null, { status })
+          ),
+          { chunkBytes: 4 }
+        )
+        yield* withCrypto(Effect.flatMap(tier.store, (store) => store.put(bytes(large))))
+        expect(ranges(tier.calls)).toEqual(["bytes */10", "bytes 0-3/10", undefined])
+      })
+  )
 
   it.effect("computes each chunk's range even when one is configured for every request", () =>
     Effect.gen(function*() {

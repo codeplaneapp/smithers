@@ -31,12 +31,19 @@
  * anywhere else, to the empty probe or to a chunk the tier is still owed bytes
  * after, reads as a tier that ignored `Content-Range` and stored the body it
  * was handed, which is what plain WebDAV `PUT` does. That tier, the one that
- * answers `411` or `416`, and the one whose `HEAD` will not confirm the stored
- * length all get the same treatment: one whole-blob `PUT`, which overwrites
- * the partial body the sequence left behind. So the blob always lands whole,
- * and the cost of turning the dial on against a server that never learned
- * about it is round trips, never a digest published over bytes the server does
- * not hold.
+ * answers `400`, `411`, or `416`, and the one whose `HEAD` will not confirm
+ * the stored length all get the same treatment: one whole-blob `PUT`, which
+ * overwrites the partial body the sequence left behind. So the blob always
+ * lands whole, and the cost of turning the dial on against a server that
+ * never learned about it is round trips, never a digest published over bytes
+ * the server does not hold.
+ *
+ * This repository's own hosted and self-hosted cache services are such
+ * servers: neither implements the resumable sequence, and both refuse a
+ * ranged `PUT` with `400`, RFC 9110 section 14.5's answer from a resource
+ * that does not support partial `PUT`. Against them `chunkBytes` costs the
+ * probe round trip and the blob travels whole, and both cap one request body
+ * at 16 MiB, so a blob past that cap is refused with `413` in either mode.
  *
  * The endpoint and its credentials arrive as **layer construction options**.
  * They are capabilities, never step inputs: they are not hashed into a step
@@ -185,6 +192,11 @@ export interface Options {
    * Bazel's dumb-HTTP client does and what every deployment already serving
    * this protocol expects. Set it when a proxy caps request bodies, or when
    * artifacts are large enough that losing a transfer is expensive.
+   *
+   * The repository's own hosted and self-hosted cache services answer the
+   * ranged probe with `400`, so against them this dial degrades to one
+   * whole-blob `PUT`, and their 16 MiB body cap refuses a larger blob with
+   * `413` in either mode.
    */
   readonly chunkBytes?: number | undefined
   /**
@@ -481,8 +493,16 @@ export const make = (
       return last + 1
     }
 
-    /** A tier that refuses ranged bodies, in the two ways HTTP has to say so. */
-    const rejectsRanges = (status: number): boolean => status === 411 || status === 416
+    /**
+     * A tier that refuses ranged bodies, in the three ways HTTP has to say
+     * so. `411` and `416` refuse the body's framing; `400` is RFC 9110
+     * section 14.5's answer from a resource that "does not support partial
+     * PUT requests", and it is what both of this repository's cache services
+     * send. Falling back on it can mask no genuine `400`: the whole-blob
+     * `PUT` that follows presents the same URL, digest, and credential, so a
+     * real refusal comes straight back on that request.
+     */
+    const rejectsRanges = (status: number): boolean => status === 400 || status === 411 || status === 416
 
     /**
      * Whether the tier holds exactly `total` bytes under `digest`, read from
