@@ -62,6 +62,7 @@ describe("the change card", () => {
         changeset: {
           id: 7,
           organization: "canary-changesets-e2e",
+          changeId: "qupxosqw",
           state: "failed",
           failureReason: "member cs-web conflicted",
           targetBookmark: "main",
