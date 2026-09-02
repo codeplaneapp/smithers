@@ -78,6 +78,19 @@ const jj = Smithers.CiToolchain.Jj({ release: "0.39.0" })
 // native half cannot start and the parity check, which is the point of the
 // suite, is the thing that fails.
 const ripgrep = Smithers.CiToolchain.Ripgrep({ release: "14.1.1" })
+// `//packages/build-cli:test` drives a real `forge` and a real Go toolchain:
+// it builds and tests a Foundry package and asserts `forge fmt --check` drift,
+// and it builds a Go package tree. Without them six cases fail on the REQUIRED
+// ubuntu row with `host binary "forge" is not present on PATH`, which is a
+// missing toolchain rather than a defect.
+//
+// These were withdrawn once, on the theory that they displaced pnpm from PATH
+// and caused ~50 `spawn pnpm ENOENT` failures. That was wrong: the failures
+// persisted through two pushes with no Go and no Foundry declared, and 52 of
+// the 55 are the Windows `pnpm.cmd` shim problem, on a row that is advisory.
+// Foundry v1.8.1 installed cleanly on every runner when it was last declared.
+const go = Smithers.CiToolchain.Go({ release: "1.26.0" })
+const foundry = Smithers.CiToolchain.Foundry({ release: "v1.8.1" })
 
 export const ci = Smithers.GithubCiGen({
   packageManager,
@@ -99,6 +112,8 @@ export const ci = Smithers.GithubCiGen({
         runtimes: [node, bun],
         jj,
         ripgrep,
+        go,
+        foundry,
         workflowLint: Smithers.CiToolchain.Actionlint({
           release: "1.7.11",
           workflows: [
@@ -289,7 +304,7 @@ export const ci = Smithers.GithubCiGen({
         { os: "windows-latest", advisory: true }
       ],
       timeoutMinutes: 60,
-      toolchain: Smithers.CiToolchain.Needs({ runtimes: [node, bun], jj, ripgrep }),
+      toolchain: Smithers.CiToolchain.Needs({ runtimes: [node, bun], jj, ripgrep, go, foundry }),
       steps: [{ name: "Package test targets", verb: Smithers.Verb.Test, pattern: "//packages/..." }]
     }
   ]
