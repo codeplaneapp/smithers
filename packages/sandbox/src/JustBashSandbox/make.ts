@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import * as Semaphore from "effect/Semaphore"
 import * as Stream from "effect/Stream"
+import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.ts"
@@ -118,6 +119,7 @@ export const make = (options: JustBashSandboxOptions): Provider => {
           remoteId: workdir,
           workdir,
           spawn: Effect.fnUntraced(function*(command, spawnOptions) {
+            yield* checkEnvironmentNames(spawnOptions.env)
             const env = environment(spawnOptions.env)
             const stdin = spawnOptions.stdin
             const execOptions: JustBashExecOptions = {

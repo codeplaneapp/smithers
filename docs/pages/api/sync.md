@@ -79,6 +79,7 @@ follower has fallen.
 | `SyncClient.make` `bootstrapLimit`               | `SyncClient.defaultBootstrapLimit` (256)      | Entries one catch-up page asks for.                                                                                                                                             |
 | `BranchCommands.Options.maxCommandBytes`         | `SyncProtocol.defaultMaxFrameBytes` (1 MiB)   | Encoded size of one command submission, refused before anything is appended.                                                                                                    |
 | `BranchCommands.Options.ledgerCapacity`          | `BranchCommands.defaultLedgerCapacity` (4096) | Receipts one branch keeps in memory. The journal's producer identity is the durable dedupe, so an evicted receipt costs a round trip and never correctness.                     |
+| `BranchCommands.Options.hydrationLimit`          | `BranchCommands.defaultHydrationLimit` (4096) | Entries one branch's first-touch hydration reads before it stops, so a long history is not charged to the next writer's latency. What the walk misses, the journal answers.     |
 | `BranchPresence.PresenceOptions.maxParticipants` | `BranchPresence.defaultMaxParticipants` (256) | Participants one branch may hold at once; a further announce is refused with `backpressure`.                                                                                    |
 | `RunCatalog.MemoryOptions.changesCapacity`       | `RunCatalog.defaultChangesCapacity` (1024)    | Announcements a stalled `changes` subscriber may fall behind by; the oldest slide out.                                                                                          |
 | `RunCatalog.PollingOptions.intervalMs`           | `RunCatalog.defaultPollIntervalMs` (1000)     | Milliseconds between reads of the durable run set: one bounded query per interval per composition, not per subscriber.                                                          |
@@ -342,7 +343,7 @@ assertion in the other suites, so these are the tests that see it.
 | `WorkspaceShare.Keyring` | interface | models | A keyring: the key that signs new capabilities plus every key still accepted for verification. |
 | `WorkspaceShare.makeHmac` | const | constructors | Constructs the HMAC-SHA-256 workspace share authority over a keyring. |
 | `WorkspaceShare.layerHmac` | const | layers | Provides the HMAC-SHA-256 workspace share authority over a keyring. |
-| `WorkspaceShare.layerConfig` | const | layers | Provides the workspace share authority from configuration: the secret from `FLOWS_SYNC_SECRET` (read as `Redacted`, never logged) and the key name from `FLOWS_SYNC_KEY_ID`, defaulting to `primary`. |
+| `WorkspaceShare.layerConfig` | const | layers | Provides the workspace share authority from configuration: the secret from `SMITHERS_SYNC_SECRET` (read as `Redacted`, never logged) and the key name from `SMITHERS_SYNC_KEY_ID`, defaulting to `primary`. |
 | `SyncPrincipal.Anonymous` | interface | models | A request that presented no credential. |
 | `SyncPrincipal.Workspace` | interface | models | A request authenticated for the workspace's non-branch runs. |
 | `SyncPrincipal.Principal` | type | models | Any authenticated identity a sync request can carry. |
@@ -377,6 +378,7 @@ assertion in the other suites, so these are the tests that see it.
 | `BranchCommands.makeNoop` | const | constructors | Constructs a command ledger that admits nothing. |
 | `BranchCommands.layerNoop` | const | layers | Provides a command ledger that admits nothing. |
 | `BranchCommands.defaultLedgerCapacity` | const | constants | Receipts one branch keeps in memory before the oldest are evicted. |
+| `BranchCommands.defaultHydrationLimit` | const | constants | Entries one branch's first-touch hydration reads before it stops. |
 | `BranchCommands.Options` | interface | models | Admission policy. |
 | `BranchCommands.makeLiveWith` | const | constructors | Constructs the journal-backed branch command ledger under an explicit policy. |
 | `BranchCommands.makeLive` | const | constructors | Constructs the journal-backed branch command ledger with default policy. |

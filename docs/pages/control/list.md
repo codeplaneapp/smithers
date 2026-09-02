@@ -18,7 +18,7 @@ through `ControlClient` over `/rpc` and `/rpc/ws`, and `smithers serve` hosts it
 
 | Receipt | Fields |
 | --- | --- |
-| `flows` | `items`, `nextCursor` |
+| `flows` | `items`, `warnings`, `nextCursor` |
 | `runs` | `items`, `nextCursor` |
 
 ## Errors

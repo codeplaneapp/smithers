@@ -86,19 +86,22 @@ from.
 | `Alerts.defaultDetectors` | const | constants | The four conditions a control plane journals out of the box. |
 | `Alerts.Open` | interface | models | A condition that is open on a run, and when it opened. |
 | `Alerts.Alert` | interface | models | One alert a policy decided to raise. |
+| `Alerts.coalescingKey` | const | getters | The key an alert coalesces on: one open condition on one run. |
 | `Alerts.alertId` | const | getters | The identity a delivery is recorded under. |
 | `Alerts.conditions` | const | projections | Every condition a run's journal leaves open, with the time each opened. |
 | `Alerts.decide` | const | projections | The alerts a policy raises for the conditions open at `now`. |
+| `Alerts.FailureCode` | const + type | models | Why a sink did not take an alert. |
 | `Alerts.AlertError` | class | errors | A sink refused or could not take an alert. |
 | `Alerts.SinkService` | interface | services | Where a raised alert is sent. |
 | `Alerts.Sink` | class | services | The `SinkService` tag. |
 | `Alerts.layerNoop` | const | layers | A sink that accepts every alert and sends it nowhere. |
+| `Alerts.defaultWebhookTimeout` | const | constants | How long the webhook sink waits for an answer before it calls the page refused. |
 | `Alerts.layerWebhook` | const | layers | A sink that POSTs each alert to one webhook. |
 | `Alerts.Tick` | interface | models | What one tick decided. |
 | `Alerts.RuntimeService` | interface | services | The alert runtime: one tick per run. |
 | `Alerts.AlertRuntime` | class | services | The `RuntimeService` tag. |
 | `Alerts.layer` | const | layers | The alert runtime over one policy. |
-| `Notification.Provenance` | const + type | models | Durable origin of a notification. |
+| `Notification.Provenance` | const + type | models | Durable origin of a notification: who said it, from where, and at which turn. |
 | `Notification.HumanSteer` | const | models | A human message that must reach the model before the current turn closes. |
 | `Notification.HumanFollowup` | const | models | A human message that waits for the run to become idle. |
 | `Notification.SystemEvent` | const | models | A machine-originated event. |
@@ -107,15 +110,19 @@ from.
 | `Notification.coalesceKey` | const | getters | The key a pending notification coalesces on, or `null` when it must never be coalesced. |
 | `NotificationEvent.AdmittedEventType` | const | constants | The journal `eventType` recorded for one admission decision. |
 | `NotificationEvent.PromotedEventType` | const | constants | The journal `eventType` recorded when pending notifications are promoted. |
-| `NotificationEvent.Admitted` | const + type | models | A durable admission record. |
-| `NotificationEvent.Promoted` | const + type | models | A durable promotion record. |
+| `NotificationEvent.AdmissionDecision` | const + type | models | What a durable admission record says was decided. |
+| `NotificationEvent.Admitted` | const + type | models | A durable admission record: the notification a run was told about, and what the queue decided to do with it. |
+| `NotificationEvent.Promoted` | const + type | models | A durable promotion record: which notifications one boundary of one lineage delivered. |
 | `NotificationEvent.Event` | type | models | Any journal event owned by this package. |
+| `NotificationEvent.isAdmitted` | const | refinements | Whether an owned event is an admission record. |
+| `NotificationEvent.isPromoted` | const | refinements | Whether an owned event is a promotion record. |
 | `NotificationEvent.fromEntry` | const | constructors | Decodes an owned notification event from a journal entry. |
+| `NotificationState.defaultCapacity` | const | constants | The default maximum number of pending notifications retained per run. |
 | `NotificationState.Pending` | interface | models | A notification retained until it is promoted at a harness safe point. |
 | `NotificationState.AdmissionDecision` | type | models | The result recorded for one durable notification admission. |
 | `NotificationState.State` | interface | models | Immutable bounded queue state derived from the notification journal. |
 | `NotificationState.Admission` | interface | models | One pure admission transition and its visible decision. |
-| `NotificationState.Promotion` | interface | models | A pure promotion transition. |
+| `NotificationState.Promotion` | interface | models | A pure promotion transition: what a boundary takes, and what is left. |
 | `NotificationState.empty` | const | constructors | Creates an empty bounded notification queue. |
 | `NotificationState.admit` | const | operations | Admits a notification, coalescing only pending system events with the same key. |
 | `NotificationState.applyAdmission` | const | operations | Applies the decision already committed in an admission journal event. |
@@ -123,17 +130,17 @@ from.
 | `NotificationState.promoteSteers` | const | operations | Promotes every steer notification admitted at or before the turn-close cutoff. |
 | `NotificationState.promoteQueued` | const | operations | Promotes exactly the oldest pending queue notification. |
 | `NotificationState.applyPromoted` | const | operations | Applies a durable promotion record while replaying journal history. |
-| `NotificationQueue.NotificationError` | class | errors | The queue could not be reached or served the request. |
-| `NotificationQueue.AdmissionReceipt` | interface | models | What admitting one notification decided: its durable sequence number and whether the id had already been admitted. |
+| `NotificationQueue.NotificationError` | class | errors | The queue could not be reached, or it refused what a caller handed it. |
+| `NotificationQueue.AdmissionReceipt` | interface | models | What admitting one notification decided. |
 | `NotificationQueue.DrainInput` | interface | models | The boundary a drain is attempted at, and whether the run would go idle if nothing were delivered. |
 | `NotificationQueue.DrainReceipt` | interface | models | The notifications this boundary delivers, and whether the boundary had already drained. |
 | `NotificationQueue.Service` | interface | services | The durable pending queue: admit a notification exactly once, and drain what a boundary is allowed to deliver. |
 | `NotificationQueue.NotificationQueue` | class | services | The `Service` tag. |
 | `NotificationQueue.make` | const | constructors | Builds a `Service` from an implementation of its methods. |
-| `NotificationQueue.makeNoop` | const | constructors | A `Service` that fails both methods as unavailable. |
+| `NotificationQueue.makeNoop` | const | constructors | A `Service` that fails every method as unavailable. |
 | `NotificationQueue.layerNoop` | const | layers | Provides `makeNoop`. |
-| `NotificationQueue.layer` | const | layers | Journal-backed production layer. |
-| `Projection.defaultCapacity` | const | constants | The default maximum number of pending notifications retained per run. |
+| `NotificationQueue.layerWith` | const | layers | Journal-backed production layer, with the pending capacity a composition chooses. |
+| `NotificationQueue.layer` | const | layers | Journal-backed production layer at the default capacity. |
 | `Projection.derive` | const | projections | Re-derives pending notifications from admitted and promoted journal events. |
 | `SteerPayload.Thinking` | const + type | models | How hard the model should think. |
 | `SteerPayload.MessagePayload` | const | models | A message inserted into the transcript at the next turn boundary. |
