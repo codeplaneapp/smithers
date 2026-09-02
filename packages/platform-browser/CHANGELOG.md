@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `BrowserFileSystem` passes bytes and names across the backend boundary by
+  value. `writeFile` copies `data` and reads `flag` and `mode` when it is
+  called, so a buffer or options object the caller changes before the effect
+  runs, or between retries, no longer changes what is written, and a backend
+  that holds the buffer across its own commit cannot see the change either.
+  `readFile` and `readDirectory` return a buffer and an array the caller owns,
+  so a backend that answers from its own storage is neither corrupted through a
+  result nor able to change one already returned. The copy is made with
+  `new Uint8Array`, because Node's `Buffer` overrides `slice` to return a view.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 ### Added

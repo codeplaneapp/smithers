@@ -6,8 +6,10 @@ the filesystem, the interpreter, and jj. Beside it, the filesystem adapter is
 exercised against a real temp directory for recursive listing, permission
 checks, directory modes, symlink and relative canonicalization including a `..`
 that follows a link, and bounded streaming with refused bounds, and against stub
-backends for every error tag, a looping directory tree, and a backend that
-misreports a read length. The spawner suite pins the rendered command line
+backends for every error tag, a looping directory tree, a backend that
+misreports a read length, and backends that keep the buffers they are handed
+and the containers they answer with, which pin that bytes and names cross the
+boundary by value. The spawner suite pins the rendered command line
 against the kernel's own renderer with hostile argv tokens, every refused
 capability, and the abort boundary: an interpreter that ignores its
 `AbortSignal` must not let a second run start, and a killed handle must report a

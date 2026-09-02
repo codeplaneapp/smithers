@@ -32,7 +32,7 @@ const maximumDepth = 128
 const unbounded = (fs: ZenFsPromisesLike): boolean => fs.lstat === undefined && fs.realpath === undefined
 
 /**
- * The names directly inside one directory.
+ * The names directly inside one directory, in the backend's own array.
  *
  * @private
  */
@@ -113,6 +113,10 @@ const collect = (
  * here with the members it does have, emitting the same `parent/child` shape
  * Node emits.
  *
+ * The array returned is the caller's. The walk builds its own, and the flat
+ * listing copies the backend's, so a backend that answers `readdir` from the
+ * array it stores is neither changed through a result nor able to change one.
+ *
  * @private
  * @since 0.1.0
  * @slop
@@ -127,4 +131,4 @@ export const readDirectory = (
       realPath(fs, path, "readDirectory"),
       (canonical) => collect(fs, path, "", new Set([canonical]), 0)
     )
-    : entriesOf(fs, path)
+    : Effect.map(entriesOf(fs, path), (names) => [...names])

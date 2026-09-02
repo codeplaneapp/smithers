@@ -14,7 +14,21 @@ import { streamFile } from "./streamFile.ts"
 import type { ZenFsPromisesLike } from "./ZenFsPromisesLike.ts"
 
 /**
- * Reads a whole file as bytes through the backend.
+ * A private copy of a byte buffer.
+ *
+ * Bytes cross the backend boundary by value. A backend may hold the buffer it
+ * was handed across its own asynchronous commit, and it may answer `readFile`
+ * with the array it stores, so the adapter copies in both directions rather
+ * than trusting the backend to. `new Uint8Array` rather than `slice`: Node's
+ * `Buffer` overrides `slice` to return a view over the same memory.
+ *
+ * @private
+ */
+const snapshot = (bytes: Uint8Array): Uint8Array => new Uint8Array(bytes)
+
+/**
+ * Reads a whole file as bytes through the backend. The bytes are the
+ * backend's own; a caller that keeps them takes a {@link snapshot} first.
  *
  * @private
  */
@@ -22,10 +36,15 @@ const readBytes = (fs: ZenFsPromisesLike, path: string): Effect.Effect<Uint8Arra
   Effect.tryPromise({ try: () => fs.readFile(path), catch: platformError("readFile", path) })
 
 /**
+ * Writes bytes this adapter already owns, so nothing outside it can change
+ * them before the backend reads them.
+ *
  * `flag` is forwarded rather than dropped: both ZenFS and `node:fs/promises`
  * honour it, and silently turning an `"a"` into a truncating write would lose
  * the caller's data. `"wx"` surfaces as `EEXIST`, which {@link platformError}
- * already normalizes to `AlreadyExists`.
+ * already normalizes to `AlreadyExists`. Both options arrive as values rather
+ * than as the caller's options object, so the effect describes the write the
+ * caller asked for when it called, whatever that object holds when it runs.
  *
  * @private
  */
@@ -33,16 +52,44 @@ const writeBytes = (
   fs: ZenFsPromisesLike,
   path: string,
   data: Uint8Array,
-  options?: { readonly flag?: string | undefined; readonly mode?: number | undefined }
+  flag: string | undefined,
+  mode: number | undefined
 ): Effect.Effect<void, PlatformError.PlatformError> =>
   Effect.tryPromise({
     try: () =>
       fs.writeFile(path, data, {
-        ...(options?.flag === undefined ? {} : { flag: options.flag }),
-        ...(options?.mode === undefined ? {} : { mode: options.mode })
+        ...(flag === undefined ? {} : { flag }),
+        ...(mode === undefined ? {} : { mode })
       }),
     catch: platformError("writeFile", path)
   })
+
+/**
+ * Encodes a string and writes it. A string cannot change under the caller,
+ * and the encoder allocates, so the bytes need no further copy.
+ *
+ * @private
+ */
+const writeText = (
+  fs: ZenFsPromisesLike,
+  path: string,
+  text: string,
+  flag: string | undefined,
+  mode: number | undefined
+): Effect.Effect<void, PlatformError.PlatformError> =>
+  Effect.flatMap(
+    Effect.try({
+      try: () => new TextEncoder().encode(text),
+      catch: (cause) =>
+        PlatformError.badArgument({
+          module: "FileSystem",
+          method: "writeFileString",
+          description: "could not encode string",
+          cause
+        })
+    }),
+    (bytes) => writeBytes(fs, path, bytes, flag, mode)
+  )
 
 /**
  * The refusal every deliberately unsupported operation answers with.
@@ -122,6 +169,14 @@ const denied = (path: string): PlatformError.PlatformError =>
  * and `exists` reports `false` only for a path that is absent, propagating
  * every other backend failure the way effect's own derivation does.
  *
+ * Bytes and names cross the backend boundary by value. `writeFile` copies
+ * `data` and reads `flag` and `mode` when it is called, so the effect it
+ * returns describes one write however the caller's buffer or options change
+ * before it runs or between retries, and however long the backend holds the
+ * bytes it was handed. `readFile` and `readDirectory` return a buffer and an
+ * array the caller owns, so a backend that answers from its own storage can
+ * neither be corrupted through a result nor change one already returned.
+ *
  * The service this builds carries **no** kernel isolation attestation; `layer`
  * is the composition that makes that claim.
  *
@@ -135,9 +190,9 @@ export const make = (fs: ZenFsPromisesLike): FileSystem.FileSystem =>
     makeTempDirectoryScoped: () => unsupported("makeTempDirectoryScoped"),
     makeTempFile: () => unsupported("makeTempFile"),
     makeTempFileScoped: () => unsupported("makeTempFileScoped"),
-    readFile: (path) => readBytes(fs, path),
+    readFile: (path) => Effect.map(readBytes(fs, path), snapshot),
     stream: (path, options) => streamFile(fs, path, options),
-    writeFile: (path, data, options) => writeBytes(fs, path, data, options),
+    writeFile: (path, data, options) => writeBytes(fs, path, snapshot(data), options?.flag, options?.mode),
     /**
      * `makeNoop` does not derive the string helpers from `readFile`/`writeFile`
      * the way `make` does — it hardcodes both to a `NotFound` failure — so they
@@ -156,20 +211,7 @@ export const make = (fs: ZenFsPromisesLike): FileSystem.FileSystem =>
               cause
             })
         })),
-    writeFileString: (path, data, options) =>
-      Effect.flatMap(
-        Effect.try({
-          try: () => new TextEncoder().encode(data),
-          catch: (cause) =>
-            PlatformError.badArgument({
-              module: "FileSystem",
-              method: "writeFileString",
-              description: "could not encode string",
-              cause
-            })
-        }),
-        (bytes) => writeBytes(fs, path, bytes, options)
-      ),
+    writeFileString: (path, data, options) => writeText(fs, path, data, options?.flag, options?.mode),
     /**
      * `mode` is forwarded for the same reason `writeBytes` forwards it:
      * creating a directory 0755 when the caller asked for 0700 is a silent

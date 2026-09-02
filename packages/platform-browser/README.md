@@ -118,6 +118,17 @@ What is served honours its options rather than dropping them:
 | `exists`                                     | `false` only for an absent path; every other failure propagates rather than being reported as absence.                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `stream({ offset, bytesToRead, chunkSize })` | Honoured, and refused when they are not whole byte counts.                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
+Bytes and names cross the backend boundary by value. `writeFile` copies
+`data` and reads `flag` and `mode` when it is called, so the effect it returns
+describes one write however the caller's buffer or options change before it
+runs or between retries, and however long the backend holds the bytes it was
+handed. `readFile` and `readDirectory` return a buffer and an array the caller
+owns: writing into them does not reach a backend that answers from its own
+storage, and a later change in that storage does not reach a result already
+returned. `stream` chunks are fresh allocations for the same reason, and
+`writeFileString` encodes at run time because a string cannot change under the
+caller.
+
 A tab has no working directory, so a relative path given to `realPath` resolves
 against the volume root.
 

@@ -91,6 +91,17 @@ The operations that are served honour their options rather than dropping them.
 | `exists`                                     | `false` only for a path that is absent; every other backend failure propagates, so a refusal to look is not reported as absence                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `stream({ offset, bytesToRead, chunkSize })` | honoured, and refused when they are not whole byte counts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
+Bytes and names cross the backend boundary by value. `writeFile` copies
+`data` and reads `flag` and `mode` when it is called, so the effect it returns
+describes one write however the caller's buffer or options change before it
+runs or between retries, and however long the backend holds the bytes it was
+handed. `readFile` and `readDirectory` return a buffer and an array the caller
+owns: writing into them does not reach a backend that answers from its own
+storage, and a later change in that storage does not reach a result already
+returned. `stream` chunks are fresh allocations for the same reason, and
+`writeFileString` encodes at run time because a string cannot change under the
+caller.
+
 A tab has no working directory, so a relative path handed to `realPath` resolves
 against the volume root rather than against an ambient `process.cwd()` that does
 not exist. The same caveat applies to a relative `cwd` on a spawned command:

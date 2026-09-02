@@ -374,6 +374,71 @@ describe("BrowserFileSystem error mapping", () => {
     }))
 })
 
+/**
+ * Bytes and names cross the backend boundary by value. Node's `readFile` and
+ * `readdir` answer with fresh containers, so the aliasing these pin can only
+ * be shown against a backend that keeps the containers it answers with and
+ * the buffers it is handed; each probe here records what it saw.
+ */
+describe("BrowserFileSystem ownership across the backend boundary", () => {
+  const backend = (): BrowserFileSystem.ZenFsPromisesLike => throwingFs(codeError("ENOENT"))
+
+  /**
+   * A backend may hold the buffer it was handed across its own commit, so it
+   * must be handed one the caller can no longer reach.
+   */
+  it.effect("hands the backend bytes a later mutation of the caller's buffer cannot reach", () =>
+    Effect.gen(function*() {
+      const received: Array<Uint8Array> = []
+      const fileSystem = BrowserFileSystem.make({
+        ...backend(),
+        writeFile: async (_path, data) => {
+          received.push(data)
+        }
+      })
+      const bytes = new Uint8Array([1, 2, 3])
+
+      yield* fileSystem.writeFile("/p", bytes)
+      bytes[0] = 9
+
+      expect(received.map((data) => Array.from(data))).toEqual([[1, 2, 3]])
+    }))
+
+  /**
+   * A backend that answers `readFile` from its own storage would let a caller
+   * corrupt the volume by writing into its result, and would let a later
+   * write change a result already returned.
+   */
+  it.effect("returns bytes the caller owns rather than the backend's storage", () =>
+    Effect.gen(function*() {
+      const store = new Uint8Array([1, 2, 3])
+      const fileSystem = BrowserFileSystem.make({ ...backend(), readFile: async () => store })
+
+      const first = yield* fileSystem.readFile("/p")
+      first[0] = 9
+      const second = yield* fileSystem.readFile("/p")
+      store[1] = 8
+
+      expect(Array.from(store)).toEqual([1, 8, 3])
+      expect(Array.from(first)).toEqual([9, 2, 3])
+      expect(Array.from(second)).toEqual([1, 2, 3])
+    }))
+
+  it.effect("returns a directory listing the caller owns rather than the backend's array", () =>
+    Effect.gen(function*() {
+      const names = ["a", "b"]
+      const fileSystem = BrowserFileSystem.make({ ...backend(), readdir: async () => names })
+
+      const first = yield* fileSystem.readDirectory("/d")
+      first.push("c")
+      const second = yield* fileSystem.readDirectory("/d")
+      names.push("z")
+
+      expect(names).toEqual(["a", "b", "z"])
+      expect(second).toEqual(["a", "b"])
+    }))
+})
+
 describe("BrowserFileSystem operations over node:fs/promises", () => {
   let root: string
 
@@ -466,6 +531,52 @@ describe("BrowserFileSystem operations over node:fs/promises", () => {
 
       expect(outcome.appended).toBe("one\ntwo\nthree\n")
       expect(outcome.clobber.reason).toMatchObject({ _tag: "AlreadyExists", method: "writeFile" })
+    }))
+
+  /**
+   * The effect `writeFile` returns describes one write. The bytes it describes
+   * are fixed when it is called, so a caller that reuses its buffer before the
+   * effect runs, or retries it afterwards, gets the write it asked for.
+   * `Buffer` is what a Node caller hands over, and its `slice` is a view over
+   * the same memory, which is why the copy is not made with `slice`.
+   */
+  it.effect("writes the bytes `writeFile` was called with, however the buffer changes afterwards", () =>
+    Effect.gen(function*() {
+      const bytes = Buffer.from([1, 2, 3])
+      const write = fileSystem.writeFile(path("snapshot.bin"), bytes)
+      bytes[0] = 9
+      yield* write
+      const first = yield* fileSystem.readFile(path("snapshot.bin"))
+      bytes[1] = 8
+      yield* write
+      const retried = yield* fileSystem.readFile(path("snapshot.bin"))
+
+      expect(Array.from(first)).toEqual([1, 2, 3])
+      expect(Array.from(retried)).toEqual([1, 2, 3])
+    }))
+
+  /**
+   * The options are part of the same description: a `flag` or `mode` changed
+   * after the call must not turn an append into a truncating write or widen
+   * the mode a file is created with.
+   */
+  it.effect("reads `flag` and `mode` when `writeFile` is called rather than when it runs", () =>
+    Effect.gen(function*() {
+      const options: { flag?: "a" | "w" } = { flag: "a" }
+      const creation: { mode?: number } = { mode: 0o600 }
+      yield* fileSystem.writeFileString(path("late.txt"), "one")
+      const appendText = fileSystem.writeFileString(path("late.txt"), "two", options)
+      const appendBytes = fileSystem.writeFile(path("late.txt"), encoder.encode("three"), options)
+      const create = fileSystem.writeFile(path("late.bin"), encoder.encode("m"), creation)
+      options.flag = "w"
+      creation.mode = 0o644
+      yield* appendText
+      yield* appendBytes
+      yield* create
+      const created = yield* fileSystem.stat(path("late.bin"))
+
+      expect(yield* fileSystem.readFileString(path("late.txt"))).toBe("onetwothree")
+      expect(created.mode & 0o777).toBe(0o600)
     }))
 
   it.effect("stats files and directories with the corresponding type, size, and mtime", () =>
