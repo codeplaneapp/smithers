@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `Graph.maximumGraphNodes`, `Graph.maximumGraphEdges`,
+  `Graph.maximumGraphConflicts`, and `Graph.maximumPayloadMembers`, the width
+  bounds `Graph.build` enforces alongside its depth bounds, and the
+  `plan_too_large` and `payload_too_large` diagnostics they throw.
+- Added `Markdown.validateSkillFrontmatter` and the `Markdown.SkillFrontmatter`
+  shape, so a caller holding already-parsed frontmatter can apply the Agent
+  Skills rules without a document, and the `skill_invalid_name`,
+  `skill_invalid_description`, `skill_invalid_allowed_tools`,
+  `skill_invalid_compatibility`, `skill_invalid_metadata`, and
+  `skill_invalid_license` error codes.
+
+### Fixed
+
+- Fixed `Markdown.parseSkill`, which accepted documents the Agent Skills
+  specification forbids: any non-empty `name`, a `description` of any length,
+  and a sequence-valued `allowed-tools`. It now enforces the specification's
+  name grammar and 64-character limit, the 1024-character description limit
+  counted in code points, a scalar `allowed-tools`, and the optional
+  `license`, `compatibility`, and `metadata` shapes, each with its own stable
+  code. A sequence-valued `allowed-tools` now fails with
+  `skill_invalid_allowed_tools` instead of being lowered.
+- Fixed `Graph.build`, which bounded depth but not width, so a shallow plan of
+  a few thousand siblings, or one plan value holding an enormous array, could
+  exhaust CPU or memory before any documented limit applied. Node, edge,
+  conflict, and reflected-member counts are now refused at fixed limits before
+  allocation, the write-conflict pass indexes literal writers by path instead
+  of comparing every pair, and reachability walks an adjacency index instead
+  of every recorded edge.
+
 ## [1.0.0-rc.0] - 2026-08-31
 
 ### Added

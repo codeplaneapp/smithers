@@ -204,7 +204,9 @@ export const GraphBuildErrorCode = Schema.Literals([
   "capability_outside_grant",
   "duplicate_node_id",
   "plan_too_deep",
+  "plan_too_large",
   "payload_too_deep",
+  "payload_too_large",
   "invalid_node"
 ])
 
@@ -219,14 +221,18 @@ export type GraphBuildErrorCode = typeof GraphBuildErrorCode.Type
 
 /**
  * A graph-build diagnostic. Declaration diagnostics are recorded so the graph
- * remains inspectable; malformed nodes and depth-limit failures throw during
+ * remains inspectable; malformed nodes and limit failures throw during
  * construction. Fatal diagnostics block {@link keyMaterial}, while
  * `capability_outside_grant` is advisory.
  *
  * `nodeId` is populated for the three effect-envelope codes,
  * `missing_key_material`, `duplicate_node_id`, `plan_too_deep`,
- * `payload_too_deep`, `capability_outside_grant`, and `invalid_node`.
- * `nodes` is populated for `write_conflict`.
+ * `plan_too_large`, `payload_too_deep`, `payload_too_large`,
+ * `capability_outside_grant`, and `invalid_node`. For `plan_too_large` it
+ * names the node whose admission crossed the limit: the node itself, the
+ * target of the edge, or the second writer of the conflict. `nodes` is
+ * populated for `write_conflict`. `paths` carries the offending value path
+ * for `payload_too_large`.
  *
  * @category errors
  * @since 0.0.0
@@ -248,7 +254,9 @@ const fatalGraphBuildErrorCodes: ReadonlySet<GraphBuildErrorCode> = Object.freez
     "missing_key_material",
     "duplicate_node_id",
     "plan_too_deep",
+    "plan_too_large",
     "payload_too_deep",
+    "payload_too_large",
     "invalid_node"
   ])
 )
@@ -259,9 +267,10 @@ const fatalGraphBuildErrorCodes: ReadonlySet<GraphBuildErrorCode> = Object.freez
  * A fatal diagnostic means the graph describes something the package cannot
  * turn into a step key. Every other code is advisory: it reports a narrowing a
  * reader should know about, and the graph still compiles. `invalid_node`,
- * `plan_too_deep`, and `payload_too_deep` are thrown by {@link build} rather
- * than recorded, so they never reach this predicate in practice; they are
- * listed as fatal so a future caller that records one cannot compile it.
+ * `plan_too_deep`, `plan_too_large`, `payload_too_deep`, and
+ * `payload_too_large` are thrown by {@link build} rather than recorded, so
+ * they never reach this predicate in practice; they are listed as fatal so a
+ * future caller that records one cannot compile it.
  *
  * @category predicates
  * @since 0.1.0
@@ -287,6 +296,44 @@ export const maximumGraphDepth = 512
  * @slop
  */
 export const maximumPayloadDepth = 128
+
+/**
+ * Maximum number of nodes, including synthesized lane merges, accepted by
+ * {@link build}.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumGraphNodes = 4096
+
+/**
+ * Maximum number of dependency edges, including the conflict and lane-merge
+ * edges the write-conflict pass adds, accepted by {@link build}.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumGraphEdges = 65_536
+
+/**
+ * Maximum number of write conflicts {@link build} records before it refuses
+ * the plan.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumGraphConflicts = 65_536
+
+/**
+ * Maximum number of members one plan value may expand to while it is
+ * projected into identity: object keys, array items and holes, map entries,
+ * set and chunk values, and bytes, summed across every level of that value.
+ * A flow call's input and a declaration body are budgeted separately.
+ *
+ * @category limits
+ * @since 1.0.0-rc.0
+ */
+export const maximumPayloadMembers = 100_000
 
 interface GraphImpl {
   readonly nodes: ReadonlyArray<InternalNode>
@@ -431,6 +478,38 @@ const symbolIdentity = (value: symbol): SymbolIdentity => {
 const payloadDepthError = (nodeId: string): GraphBuildError =>
   new GraphBuildError({ code: "payload_too_deep", paths: [], nodeId })
 
+/**
+ * Members already produced while projecting one plan value. One budget spans
+ * every level of the value, so a wide object cannot dodge the limit by
+ * spreading its members across many small containers.
+ */
+interface MemberBudget {
+  used: number
+}
+
+const memberBudget = (): MemberBudget => ({ used: 0 })
+
+/**
+ * Accounts for the members a container is about to expand to. The charge is
+ * taken before the members are materialized, so a sparse array with a huge
+ * `length` is refused by its length rather than after its holes are built.
+ */
+const charge = (budget: MemberBudget, members: number, nodeId: string, path: string): void => {
+  budget.used += members
+  if (budget.used > maximumPayloadMembers) {
+    throw new GraphBuildError({ code: "payload_too_large", paths: [path], nodeId })
+  }
+}
+
+// The intrinsic getters read the collection's internal slot, so an own `size`
+// property on a hostile subclass cannot understate the members about to be
+// expanded.
+const mapSize = (value: Map<unknown, unknown>): number =>
+  Object.getOwnPropertyDescriptor(Map.prototype, "size")!.get!.call(value) as number
+
+const setSize = (value: Set<unknown>): number =>
+  Object.getOwnPropertyDescriptor(Set.prototype, "size")!.get!.call(value) as number
+
 class CyclicAnnotationsSignal extends Error {}
 
 const propertyPath = (path: string, key: string): string => `${path}.${key}`
@@ -550,7 +629,8 @@ const schemaTypeParameters = (
   ast: Schema.Top["ast"],
   nodeId: string,
   depth: number,
-  path: string
+  path: string,
+  budget: MemberBudget
 ): ReadonlyArray<unknown> => {
   const parameters = (ast as { readonly typeParameters?: unknown }).typeParameters
   if (!Array.isArray(parameters)) return []
@@ -559,7 +639,8 @@ const schemaTypeParameters = (
       Schema.make(parameter as Parameters<typeof Schema.make>[0]),
       nodeId,
       depth + 1,
-      `${path}.typeParameters[${index}]`
+      `${path}.typeParameters[${index}]`,
+      budget
     )
   )
 }
@@ -573,7 +654,13 @@ const schemaTypeParameters = (
  * identically. That is refused rather than collapsed; annotating the
  * declaration, for example with an `identifier`, restores identity.
  */
-function schemaIdentity(schema: Schema.Top, nodeId: string, depth: number, path: string): unknown {
+function schemaIdentity(
+  schema: Schema.Top,
+  nodeId: string,
+  depth: number,
+  path: string,
+  budget: MemberBudget = memberBudget()
+): unknown {
   if (depth > maximumPayloadDepth) throw payloadDepthError(nodeId)
   // Read the AST exactly once: a schema is caller-supplied, so every extra read
   // is another chance for a hostile or lazily failing accessor to observe a
@@ -582,7 +669,15 @@ function schemaIdentity(schema: Schema.Top, nodeId: string, depth: number, path:
   let annotations: unknown = null
   try {
     if (source.annotations !== undefined) {
-      annotations = reflection(source.annotations, nodeId, new Set(), depth + 1, `${path}.ast.annotations`, true)
+      annotations = reflection(
+        source.annotations,
+        nodeId,
+        new Set(),
+        depth + 1,
+        `${path}.ast.annotations`,
+        true,
+        budget
+      )
     }
   } catch (cause) {
     if (cause instanceof CyclicAnnotationsSignal) {
@@ -591,7 +686,7 @@ function schemaIdentity(schema: Schema.Top, nodeId: string, depth: number, path:
       throw cause
     }
   }
-  const typeParameters = schemaTypeParameters(source, nodeId, depth, path)
+  const typeParameters = schemaTypeParameters(source, nodeId, depth, path, budget)
   const ast = { tag: source._tag, annotations, typeParameters }
   let document: { readonly schema: unknown } | undefined
   try {
@@ -686,10 +781,11 @@ const reflectedMember = (
   seen: Set<object>,
   depth: number,
   path: string,
-  rejectCycles: boolean
+  rejectCycles: boolean,
+  budget: MemberBudget
 ): unknown =>
   "value" in member
-    ? reflection(member.value, nodeId, seen, depth + 1, path, rejectCycles)
+    ? reflection(member.value, nodeId, seen, depth + 1, path, rejectCycles, budget)
     : {
       _tag: "Accessor",
       get: member.get === undefined ? null : internal.functionIdentity(member.get),
@@ -707,7 +803,8 @@ function reflection(
   seen: Set<object> = new Set(),
   depth = 0,
   path = "$",
-  rejectCycles = false
+  rejectCycles = false,
+  budget: MemberBudget = memberBudget()
 ): unknown {
   if (depth > maximumPayloadDepth) throw payloadDepthError(nodeId)
   const descriptor = plannedDescriptor(value)
@@ -750,16 +847,24 @@ function reflection(
     const flow = value as FlowDetails
     const result = {
       _tag: "Flow",
-      input: schemaIdentity(flow.input, nodeId, depth + 1, `${path}.input`),
-      output: schemaIdentity(flow.output, nodeId, depth + 1, `${path}.output`),
+      input: schemaIdentity(flow.input, nodeId, depth + 1, `${path}.input`, budget),
+      output: schemaIdentity(flow.output, nodeId, depth + 1, `${path}.output`, budget),
       capabilities: [...new Set(flow.capabilities)].sort(),
       effects: snapshotEffects(flow.effects),
-      implementation: reflection(flow.implementation, nodeId, seen, depth + 1, `${path}.implementation`, rejectCycles)
+      implementation: reflection(
+        flow.implementation,
+        nodeId,
+        seen,
+        depth + 1,
+        `${path}.implementation`,
+        rejectCycles,
+        budget
+      )
     }
     seen.delete(value)
     return result
   }
-  if (Schema.isSchema(value)) return schemaIdentity(value, nodeId, depth, path)
+  if (Schema.isSchema(value)) return schemaIdentity(value, nodeId, depth, path, budget)
   if (typeof value === "function") return { _tag: "Function", identity: internal.functionIdentity(value) }
   if (seen.has(value)) {
     if (rejectCycles) throw new CyclicAnnotationsSignal()
@@ -776,7 +881,7 @@ function reflection(
         _tag: "Option",
         value: {
           _tag: "Some",
-          value: reflection(member.value, nodeId, seen, depth + 1, `${path}.value`, rejectCycles)
+          value: reflection(member.value, nodeId, seen, depth + 1, `${path}.value`, rejectCycles, budget)
         }
       }
     } finally {
@@ -794,11 +899,11 @@ function reflection(
         value: prototype === resultSuccessPrototype
           ? {
             _tag: "Success",
-            value: reflection(member.value, nodeId, seen, depth + 1, `${path}.success`, rejectCycles)
+            value: reflection(member.value, nodeId, seen, depth + 1, `${path}.success`, rejectCycles, budget)
           }
           : {
             _tag: "Failure",
-            error: reflection(member.value, nodeId, seen, depth + 1, `${path}.failure`, rejectCycles)
+            error: reflection(member.value, nodeId, seen, depth + 1, `${path}.failure`, rejectCycles, budget)
           }
       }
     } finally {
@@ -808,10 +913,11 @@ function reflection(
   if (prototype === chunkPrototype) {
     seen.add(value)
     try {
+      charge(budget, Chunk.size(value as Chunk.Chunk<unknown>), nodeId, path)
       return {
         _tag: "Chunk",
         values: Chunk.toReadonlyArray(value as Chunk.Chunk<unknown>).map((member, index) =>
-          reflection(member, nodeId, seen, depth + 1, `${path}.values[${index}]`, rejectCycles)
+          reflection(member, nodeId, seen, depth + 1, `${path}.values[${index}]`, rejectCycles, budget)
         )
       }
     } finally {
@@ -839,6 +945,7 @@ function reflection(
   }
   const sharedArrayBuffer = typeof SharedArrayBuffer !== "undefined" && value instanceof SharedArrayBuffer
   if (value instanceof ArrayBuffer || sharedArrayBuffer) {
+    charge(budget, value.byteLength, nodeId, path)
     return {
       _tag: "Bytes",
       kind: constructorName(value),
@@ -846,6 +953,7 @@ function reflection(
     }
   }
   if (ArrayBuffer.isView(value)) {
+    charge(budget, value.byteLength, nodeId, path)
     return {
       _tag: "Bytes",
       kind: constructorName(value),
@@ -855,9 +963,10 @@ function reflection(
   seen.add(value)
   if (value instanceof Map) {
     try {
+      charge(budget, mapSize(value), nodeId, path)
       const entries = [...Map.prototype.entries.call(value)].map(([key, member], index) => [
-        reflection(key, nodeId, seen, depth + 1, `${path}.entries[${index}][0]`, rejectCycles),
-        reflection(member, nodeId, seen, depth + 1, `${path}.entries[${index}][1]`, rejectCycles)
+        reflection(key, nodeId, seen, depth + 1, `${path}.entries[${index}][0]`, rejectCycles, budget),
+        reflection(member, nodeId, seen, depth + 1, `${path}.entries[${index}][1]`, rejectCycles, budget)
       ])
       entries.sort(compareJsonText)
       return { _tag: "Map", entries }
@@ -867,8 +976,9 @@ function reflection(
   }
   if (value instanceof Set) {
     try {
+      charge(budget, setSize(value), nodeId, path)
       const values = [...Set.prototype.values.call(value)].map((member, index) =>
-        reflection(member, nodeId, seen, depth + 1, `${path}.values[${index}]`, rejectCycles)
+        reflection(member, nodeId, seen, depth + 1, `${path}.values[${index}]`, rejectCycles, budget)
       )
       values.sort(compareJsonText)
       return { _tag: "Set", values }
@@ -881,6 +991,10 @@ function reflection(
       const descriptors = Object.getOwnPropertyDescriptors(value)
       const symbol = Reflect.ownKeys(descriptors).find((key): key is symbol => typeof key === "symbol")
       if (symbol !== undefined) throw symbolKeyedProperty(symbol, path)
+      const extraKeys = Reflect.ownKeys(descriptors)
+        .filter((key): key is string => typeof key === "string" && key !== "length" && !isArrayIndex(key, value.length))
+        .sort()
+      charge(budget, value.length + extraKeys.length, nodeId, path)
       const items = new Array<unknown>(value.length)
       for (let index = 0; index < value.length; index++) {
         const member = descriptors[String(index)]
@@ -889,19 +1003,16 @@ function reflection(
           String(index),
           member === undefined
             ? { _tag: "Hole" }
-            : reflectedMember(member, nodeId, seen, depth, `${path}[${index}]`, rejectCycles)
+            : reflectedMember(member, nodeId, seen, depth, `${path}[${index}]`, rejectCycles, budget)
         )
       }
-      const extraKeys = Reflect.ownKeys(descriptors)
-        .filter((key): key is string => typeof key === "string" && key !== "length" && !isArrayIndex(key, value.length))
-        .sort()
       if (extraKeys.length === 0) return items
       const extra = Object.create(null) as Record<string, unknown>
       for (const key of extraKeys) {
         define(
           extra,
           key,
-          reflectedMember(descriptors[key]!, nodeId, seen, depth, propertyPath(path, key), rejectCycles)
+          reflectedMember(descriptors[key]!, nodeId, seen, depth, propertyPath(path, key), rejectCycles, budget)
         )
       }
       return { _tag: "Array", items, extra }
@@ -918,12 +1029,13 @@ function reflection(
     const symbol = Reflect.ownKeys(descriptors).find((key): key is symbol => typeof key === "symbol")
     if (symbol !== undefined) throw symbolKeyedProperty(symbol, path)
     const keys = Reflect.ownKeys(descriptors).filter((key): key is string => typeof key === "string").sort()
+    charge(budget, keys.length, nodeId, path)
     const result = Object.create(null) as Record<string, unknown>
     for (const key of keys) {
       define(
         result,
         key,
-        reflectedMember(descriptors[key]!, nodeId, seen, depth, propertyPath(path, key), rejectCycles)
+        reflectedMember(descriptors[key]!, nodeId, seen, depth, propertyPath(path, key), rejectCycles, budget)
       )
     }
     const tag = descriptors._tag
@@ -1163,6 +1275,31 @@ export const build = (
   const observedEdges: Array<InternalEdge> = []
   const observedDiagnostics: Array<GraphBuildError> = []
   const workNodes = new Set<InternalNode>()
+  // Outgoing edges by source, each with its position in `observedEdges`, so a
+  // reachability query and a lane-merge consumer lookup cost the node's degree
+  // rather than a scan of every edge recorded so far.
+  const outgoing = new Map<string, Array<{ readonly to: string; readonly index: number }>>()
+  const edgesFrom = (id: string): ReadonlyArray<{ readonly to: string; readonly index: number }> =>
+    outgoing.get(id) ?? []
+
+  const planTooLarge = (nodeId: string): GraphBuildError =>
+    new GraphBuildError({ code: "plan_too_large", paths: [], nodeId })
+
+  const recordNode = (node: InternalNode): void => {
+    if (observed.length >= maximumGraphNodes) throw planTooLarge(node.id)
+    observed.push(node)
+  }
+
+  const recordEdge = (edge: InternalEdge): void => {
+    if (observedEdges.length >= maximumGraphEdges) throw planTooLarge(edge.to)
+    const index = observedEdges.push(edge) - 1
+    const targets = outgoing.get(edge.from)
+    if (targets === undefined) {
+      outgoing.set(edge.from, [{ to: edge.to, index }])
+    } else {
+      targets.push({ to: edge.to, index })
+    }
+  }
 
   const resolveLayers = (request: LayerRequest): ReadonlyArray<string> =>
     [...new Set(options.resolveLayers?.(request) ?? [])].sort()
@@ -1211,13 +1348,13 @@ export const build = (
       annotations: projection,
       keyMaterial: undefined
     }
-    observed.push(current)
+    recordNode(current)
     if (work) workNodes.add(current)
 
     const depend = (from: string, reason: EdgeReason): void => {
       dependencies.push(from)
       if (reason === "continuation") continuationDependencies.add(from)
-      observedEdges.push({ from, to: id, reason })
+      recordEdge({ from, to: id, reason })
     }
     for (const prerequisite of prerequisites) {
       depend(prerequisite.from, prerequisite.reason)
@@ -1454,7 +1591,7 @@ export const build = (
     /* v8 ignore next -- the conflict pass skips a pair once an edge makes one reachable from the other, so a repeat arrives only from a caller added later */
     if (to.dependencies.includes(from)) return
     to.dependencies.push(from)
-    observedEdges.push({ from, to: to.id, reason })
+    recordEdge({ from, to: to.id, reason })
     /* v8 ignore next 6 -- every visited node and every lane merge is given key material before this pass runs; the guard records the invariant instead of silently dropping the edge from identity if that ever changes */
     if (to.keyMaterial === undefined) {
       observedDiagnostics.push(
@@ -1478,9 +1615,7 @@ export const build = (
       if (current === to) return true
       if (seen.has(current)) continue
       seen.add(current)
-      for (const edge of observedEdges) {
-        if (edge.from === current) pending.push(edge.to)
-      }
+      for (const edge of edgesFrom(current)) pending.push(edge.to)
     }
     return false
   }
@@ -1496,15 +1631,55 @@ export const build = (
     (node): node is InternalNode & { effectiveEffects: Effects.Declaration } =>
       workNodes.has(node) && node.effectiveEffects !== undefined
   )
+  // `Effects.covers` treats only a path ending in `*` as a pattern, so a writer
+  // whose every path is literal can overlap only a writer naming one of the
+  // same strings. Literal writers are bucketed by path and only glob writers
+  // are compared against every later writer; the pair order of the plain
+  // nested loop is preserved so conflict indices and edges do not move.
+  const glob = work.map((node) => node.effectiveEffects.writes.some((path) => path.endsWith("*")))
+  const globWriters: Array<number> = []
+  const literalWriters = new Map<string, Array<number>>()
+  work.forEach((node, index) => {
+    if (glob[index]) {
+      globWriters.push(index)
+      return
+    }
+    for (const path of node.effectiveEffects.writes) {
+      const bucket = literalWriters.get(path)
+      if (bucket === undefined) {
+        literalWriters.set(path, [index])
+      } else {
+        bucket.push(index)
+      }
+    }
+  })
+  const candidates = (left: number): ReadonlyArray<number> => {
+    if (glob[left]) {
+      const every: Array<number> = []
+      for (let right = left + 1; right < work.length; right++) every.push(right)
+      return every
+    }
+    const found = new Set<number>()
+    for (const right of globWriters) {
+      if (right > left) found.add(right)
+    }
+    for (const path of work[left]!.effectiveEffects.writes) {
+      for (const right of literalWriters.get(path)!) {
+        if (right > left) found.add(right)
+      }
+    }
+    return [...found].sort((first, second) => first - second)
+  }
   for (let left = 0; left < work.length; left++) {
     const a = work[left]!
-    for (let right = left + 1; right < work.length; right++) {
+    for (const right of candidates(left)) {
       const b = work[right]!
       const aEffects = a.effectiveEffects
       const bEffects = b.effectiveEffects
-      if (reachable(a.id, b.id) || reachable(b.id, a.id)) continue
       const paths = Effects.overlaps(aEffects, bEffects)
       if (paths.length === 0) continue
+      if (reachable(a.id, b.id) || reachable(b.id, a.id)) continue
+      if (conflicts.length >= maximumGraphConflicts) throw planTooLarge(b.id)
       const selected = strategy(aEffects, bEffects)
       conflicts.push({ nodes: [a.id, b.id], paths, strategy: selected })
       if (selected === "fail") {
@@ -1535,9 +1710,11 @@ export const build = (
   for (let index = 0; index < laneConflicts.length; index++) {
     const laneConflict = laneConflicts[index]!
     const mergeId = `lane.merge.${index}`
+    // Sorted by edge position so consumers keep the order a scan of
+    // `observedEdges` would give them, which key material observes.
     const consumers = new Set(
-      observedEdges
-        .filter((edge) => edge.from === laneConflict.left.id || edge.from === laneConflict.right.id)
+      [...edgesFrom(laneConflict.left.id), ...edgesFrom(laneConflict.right.id)]
+        .sort((first, second) => first.index - second.index)
         .map((edge) => edge.to)
     )
     const capabilities = [
@@ -1595,12 +1772,10 @@ export const build = (
         placement
       }
     }
-    observed.push(mergeNode)
+    recordNode(mergeNode)
     nodeById.set(mergeId, mergeNode)
-    observedEdges.push(
-      { from: laneConflict.left.id, to: mergeId, reason: "lane-merge" },
-      { from: laneConflict.right.id, to: mergeId, reason: "lane-merge" }
-    )
+    recordEdge({ from: laneConflict.left.id, to: mergeId, reason: "lane-merge" })
+    recordEdge({ from: laneConflict.right.id, to: mergeId, reason: "lane-merge" })
     for (const consumerId of consumers) {
       const consumer = nodeById.get(consumerId)
       /* v8 ignore else -- every edge target is a node this build recorded, so the lookup only misses if a later pass invents an edge */

@@ -3,8 +3,12 @@
  * flows.
  *
  * General markdown discovery belongs to `/registry`. Agent Skills
- * frontmatter is parsed with the complete failsafe YAML schema before this
- * module lowers the document to the ordinary flow shape.
+ * frontmatter is parsed with the complete failsafe YAML schema, then checked
+ * against the intrinsic rules of the Agent Skills specification
+ * (https://agentskills.io/specification), before this module lowers the
+ * document to the ordinary flow shape. The one rule that needs the file
+ * system, that `name` equals the skill directory name, stays with the
+ * registry.
  *
  * Governing contract: `packages/core/docs/api.md`, published as
  * https://smithers.sh/api/core.
@@ -15,7 +19,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Effects from "./Effects.ts"
 import * as Flow from "./Flow.ts"
-import * as SkillFrontmatter from "./internal/skillFrontmatter.ts"
+import * as skillFrontmatter from "./internal/skillFrontmatter.ts"
 import * as Placement from "./Placement.ts"
 
 const input = Schema.Struct({ args: Schema.String })
@@ -45,18 +49,32 @@ export interface MarkdownFrontmatter {
 }
 
 /**
+ * Agent Skills frontmatter that passed {@link validateSkillFrontmatter}.
+ *
+ * `allowedTools` is the specification's space-separated `allowed-tools`
+ * scalar, split into tool names. `extra` holds every other field, including
+ * the validated optional `license`, `compatibility`, and `metadata`, as a
+ * frozen null-prototype record.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export interface SkillFrontmatter {
+  readonly name: string
+  readonly description: string
+  readonly allowedTools: ReadonlyArray<string>
+  readonly extra: Record<string, unknown>
+}
+
+/**
  * Parsed Agent Skills document.
  *
  * @category models
  * @since 0.0.0
  * @slop
  */
-export interface SkillDocument {
-  readonly name: string
-  readonly description: string
-  readonly allowedTools: ReadonlyArray<string>
+export interface SkillDocument extends SkillFrontmatter {
   readonly body: string
-  readonly extra: Record<string, unknown>
 }
 
 /**
@@ -70,7 +88,13 @@ export const MarkdownErrorCode = Schema.Literals([
   "skill_missing_frontmatter",
   "skill_invalid_frontmatter",
   "skill_missing_name",
-  "skill_missing_description"
+  "skill_invalid_name",
+  "skill_missing_description",
+  "skill_invalid_description",
+  "skill_invalid_allowed_tools",
+  "skill_invalid_compatibility",
+  "skill_invalid_metadata",
+  "skill_invalid_license"
 ])
 
 /**
@@ -147,74 +171,92 @@ export const lowerMarkdown = (
   }
 }
 
+const fail = (code: MarkdownErrorCode, message: string): Result.Result<never, MarkdownError> =>
+  Result.fail(new MarkdownError({ code, message }))
+
+// The specification's name grammar: lowercase ASCII letters and digits joined
+// by single hyphens, so a leading, trailing, or doubled hyphen fails here.
+const skillNamePattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+
+// The specification measures a field in characters. Counting UTF-16 units
+// would reject a 600-emoji description the specification accepts, so the
+// count walks code points.
+const codePoints = (value: string): number => [...value].length
+
+const isBlank = (value: string): boolean => value.trim() === ""
+
+const isScalarMapping = (value: unknown): boolean =>
+  typeof value === "object" &&
+  value !== null &&
+  !Array.isArray(value) &&
+  Object.values(value).every((member) => typeof member === "string")
+
 /**
- * Parses an Agent Skills document with failsafe-schema YAML semantics.
+ * Checks already-parsed Agent Skills frontmatter against the specification's
+ * intrinsic rules and lowers the fields this package reads.
  *
- * @category constructors
- * @since 0.0.0
- * @slop
+ * `name` is 1 to 64 lowercase ASCII letters, digits, or single hyphens and
+ * cannot start or end with a hyphen. `description` is 1 to 1024 characters.
+ * `allowed-tools`, when present, is one space-separated scalar. `license` is
+ * a scalar, `compatibility` is 1 to 500 characters, and `metadata` maps
+ * string keys to scalar values. A field that is absent reports a `missing`
+ * code; a field that is present but malformed reports its own `invalid` code
+ * without echoing the offending value. The registry keeps the one rule that
+ * needs the file system: `name` must equal the skill directory name.
+ *
+ * @category validation
+ * @since 1.0.0-rc.0
  */
-export const parseSkill = (text: string): Result.Result<SkillDocument, MarkdownError> => {
-  const split = SkillFrontmatter.split(text)
-  if (split.frontmatter === undefined) {
-    return Result.fail(
-      new MarkdownError({
-        code: "skill_missing_frontmatter",
-        message: "SKILL.md requires leading frontmatter"
-      })
+export const validateSkillFrontmatter = (
+  fields: Record<string, unknown>
+): Result.Result<SkillFrontmatter, MarkdownError> => {
+  const name = fields.name
+  if (name === undefined || (typeof name === "string" && isBlank(name))) {
+    return fail("skill_missing_name", "SKILL.md requires a non-empty frontmatter name")
+  }
+  if (typeof name !== "string" || name.length > 64 || !skillNamePattern.test(name)) {
+    return fail(
+      "skill_invalid_name",
+      "SKILL.md name must be 1 to 64 lowercase ASCII letters, digits, or single hyphens, and cannot start or end with a hyphen"
     )
   }
 
-  const parsed = SkillFrontmatter.parse(split.frontmatter)
-  if (Result.isFailure(parsed)) {
-    return Result.fail(
-      new MarkdownError({
-        code: "skill_invalid_frontmatter",
-        message: parsed.failure
-      })
-    )
+  const description = fields.description
+  if (description === undefined || (typeof description === "string" && isBlank(description))) {
+    return fail("skill_missing_description", "SKILL.md requires a non-empty frontmatter description")
+  }
+  if (typeof description !== "string" || codePoints(description) > 1024) {
+    return fail("skill_invalid_description", "SKILL.md description must be a scalar of 1 to 1024 characters")
   }
 
-  const name = parsed.success.name
-  if (typeof name !== "string" || name.trim() === "") {
-    return Result.fail(
-      new MarkdownError({
-        code: "skill_missing_name",
-        message: "SKILL.md requires a non-empty frontmatter name"
-      })
-    )
+  const allowedToolsValue = fields["allowed-tools"]
+  if (allowedToolsValue !== undefined && typeof allowedToolsValue !== "string") {
+    return fail("skill_invalid_allowed_tools", "SKILL.md allowed-tools must be a space-separated scalar")
+  }
+  const allowedTools = allowedToolsValue === undefined
+    ? []
+    : allowedToolsValue.split(/\s+/).filter((tool) => tool.length > 0)
+
+  const license = fields.license
+  if (license !== undefined && typeof license !== "string") {
+    return fail("skill_invalid_license", "SKILL.md license must be a scalar")
   }
 
-  const description = parsed.success.description
-  if (typeof description !== "string" || description.trim() === "") {
-    return Result.fail(
-      new MarkdownError({
-        code: "skill_missing_description",
-        message: "SKILL.md requires a non-empty frontmatter description"
-      })
-    )
-  }
-
-  const allowedToolsValue = parsed.success["allowed-tools"]
-  let allowedTools: ReadonlyArray<string> = []
-  if (typeof allowedToolsValue === "string") {
-    allowedTools = allowedToolsValue.split(/\s+/).filter((tool) => tool.length > 0)
-  } else if (
-    Array.isArray(allowedToolsValue) &&
-    allowedToolsValue.every((tool): tool is string => typeof tool === "string")
+  const compatibility = fields.compatibility
+  if (
+    compatibility !== undefined &&
+    (typeof compatibility !== "string" || codePoints(compatibility) < 1 || codePoints(compatibility) > 500)
   ) {
-    allowedTools = allowedToolsValue
-  } else if (allowedToolsValue !== undefined) {
-    return Result.fail(
-      new MarkdownError({
-        code: "skill_invalid_frontmatter",
-        message: "SKILL.md allowed-tools must be a scalar or sequence of scalars"
-      })
-    )
+    return fail("skill_invalid_compatibility", "SKILL.md compatibility must be a scalar of 1 to 500 characters")
+  }
+
+  const metadata = fields.metadata
+  if (metadata !== undefined && !isScalarMapping(metadata)) {
+    return fail("skill_invalid_metadata", "SKILL.md metadata must be a mapping from string keys to scalar values")
   }
 
   const extra = Object.create(null) as Record<string, unknown>
-  for (const [key, value] of Object.entries(parsed.success)) {
+  for (const [key, value] of Object.entries(fields)) {
     if (key !== "name" && key !== "description" && key !== "allowed-tools") {
       Object.defineProperty(extra, key, {
         value,
@@ -226,13 +268,32 @@ export const parseSkill = (text: string): Result.Result<SkillDocument, MarkdownE
   }
   Object.freeze(extra)
 
-  return Result.succeed({
-    name,
-    description,
-    allowedTools,
-    body: split.body,
-    extra
-  })
+  return Result.succeed({ name, description, allowedTools, extra })
+}
+
+/**
+ * Parses an Agent Skills document with failsafe-schema YAML semantics and
+ * validates its frontmatter with {@link validateSkillFrontmatter}.
+ *
+ * @category constructors
+ * @since 0.0.0
+ * @slop
+ */
+export const parseSkill = (text: string): Result.Result<SkillDocument, MarkdownError> => {
+  const split = skillFrontmatter.split(text)
+  if (split.frontmatter === undefined) {
+    return fail("skill_missing_frontmatter", "SKILL.md requires leading frontmatter")
+  }
+
+  const parsed = skillFrontmatter.parse(split.frontmatter)
+  if (Result.isFailure(parsed)) {
+    return fail("skill_invalid_frontmatter", parsed.failure)
+  }
+
+  return Result.map(validateSkillFrontmatter(parsed.success), (frontmatter) => ({
+    ...frontmatter,
+    body: split.body
+  }))
 }
 
 /**
@@ -241,8 +302,8 @@ export const parseSkill = (text: string): Result.Result<SkillDocument, MarkdownE
  * Only `name`, `description`, and `allowed-tools` are lowered. Every other
  * frontmatter field remains in {@link parseSkill}'s `extra` record for the
  * caller to interpret. Agent Skills frontmatter is untyped failsafe YAML;
- * coercing extra fields here would duplicate the strict validation owned by
- * `@smthrs/registry`.
+ * coercing extra fields such as `model` or `placement` here would duplicate
+ * the flow-level frontmatter typing owned by `@smthrs/registry`.
  *
  * @category constructors
  * @since 0.0.0

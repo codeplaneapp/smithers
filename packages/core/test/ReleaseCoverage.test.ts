@@ -61,8 +61,8 @@ describe("release coverage", () => {
     expect(result).toMatchObject({
       _tag: "Failure",
       failure: {
-        code: "skill_invalid_frontmatter",
-        message: "SKILL.md allowed-tools must be a scalar or sequence of scalars"
+        code: "skill_invalid_allowed_tools",
+        message: "SKILL.md allowed-tools must be a space-separated scalar"
       }
     })
   })

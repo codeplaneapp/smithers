@@ -143,7 +143,9 @@ describe("Graph release regressions", () => {
     "missing_key_material",
     "duplicate_node_id",
     "plan_too_deep",
-    "payload_too_deep"
+    "plan_too_large",
+    "payload_too_deep",
+    "payload_too_large"
   ] as const
 
   it.each(fatalCodes)("blocks key material for fatal diagnostic %s", (code) => {

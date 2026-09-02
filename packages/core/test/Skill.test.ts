@@ -10,33 +10,171 @@ const errorCode = (text: string): Markdown.MarkdownErrorCode => {
   return Result.isFailure(result) ? result.failure.code : "skill_invalid_frontmatter"
 }
 
+const failure = (text: string): Markdown.MarkdownError => {
+  const result = Markdown.parseSkill(text)
+  if (Result.isSuccess(result)) throw new Error("expected parseSkill to fail")
+  return result.failure
+}
+
+const document = (frontmatter: ReadonlyArray<string>): string => ["---", ...frontmatter, "---", "Prompt"].join("\n")
+
 describe("Skill", () => {
   it("parses quoted scalars and a whitespace-separated hyphenated allowed-tools key", () => {
     const skill = parse(
-      "---\nname: 'pdf''s'\ndescription: \"Extract\\nfiles\"\nallowed-tools: Read Bash(pdfinfo:*)\n---\nPrompt"
+      "---\nname: 'pdf-tools'\ndescription: \"Extract\\nfiles\"\nallowed-tools: Read Bash(pdfinfo:*)\n---\nPrompt"
     )
 
     expect(skill).toMatchObject({
-      name: "pdf's",
+      name: "pdf-tools",
       description: "Extract\nfiles",
       allowedTools: ["Read", "Bash(pdfinfo:*)"]
     })
   })
 
-  it("parses flow sequences", () => {
-    const skill = parse(
+  it("rejects a flow sequence for allowed-tools because the specification requires a scalar", () => {
+    const error = failure(
       "---\nname: pdf\ndescription: Extract files\nallowed-tools: [Read, \"Write\", 'Bash(qpdf:*)']\n---\nPrompt"
     )
 
-    expect(skill.allowedTools).toEqual(["Read", "Write", "Bash(qpdf:*)"])
+    expect(error.code).toBe("skill_invalid_allowed_tools")
+    expect(error.message).toBe("SKILL.md allowed-tools must be a space-separated scalar")
   })
 
-  it("parses block sequences", () => {
-    const skill = parse(
-      "---\nname: pdf\ndescription: Extract files\nallowed-tools:\n  - Read\n  - 'Bash(pdfinfo:*)'\n---\nPrompt"
+  it("rejects a block sequence for allowed-tools", () => {
+    expect(
+      errorCode(
+        "---\nname: pdf\ndescription: Extract files\nallowed-tools:\n  - Read\n  - 'Bash(pdfinfo:*)'\n---\nPrompt"
+      )
     )
+      .toBe("skill_invalid_allowed_tools")
+  })
 
-    expect(skill.allowedTools).toEqual(["Read", "Bash(pdfinfo:*)"])
+  it("lowers an empty allowed-tools scalar to no tools", () => {
+    expect(parse(document(["name: pdf", "description: Extract files", "allowed-tools: \"\""])).allowedTools).toEqual([])
+  })
+
+  it("accepts a name at the 64 character boundary and rejects 65", () => {
+    const boundary = "a".repeat(64)
+
+    expect(parse(document([`name: ${boundary}`, "description: d"])).name).toBe(boundary)
+    expect(errorCode(document([`name: ${boundary}a`, "description: d"]))).toBe("skill_invalid_name")
+  })
+
+  it.each([
+    ["uppercase letters", "PDF-Processing"],
+    ["a leading hyphen", "-pdf"],
+    ["a trailing hyphen", "pdf-"],
+    ["consecutive hyphens", "pdf--processing"],
+    ["an underscore", "pdf_processing"],
+    ["an apostrophe", "'pdf''s'"],
+    ["inner whitespace", "'pdf processing'"],
+    ["a non-ASCII lowercase letter", "café"]
+  ])("rejects a name with %s without echoing it", (_, name) => {
+    const error = failure(document([`name: ${name}`, "description: d"]))
+
+    expect(error.code).toBe("skill_invalid_name")
+    expect(error.message).toBe(
+      "SKILL.md name must be 1 to 64 lowercase ASCII letters, digits, or single hyphens, and cannot start or end with a hyphen"
+    )
+    expect(error.message).not.toContain(name.replaceAll("'", ""))
+  })
+
+  it("rejects a mapping-valued name as invalid rather than missing", () => {
+    expect(errorCode(document(["name:", "  nested: value", "description: d"]))).toBe("skill_invalid_name")
+  })
+
+  it("treats an empty name scalar as missing", () => {
+    expect(errorCode(document(["name:", "description: d"]))).toBe("skill_missing_name")
+    expect(errorCode(document(["name: '  '", "description: d"]))).toBe("skill_missing_name")
+  })
+
+  it("treats an empty description scalar as missing", () => {
+    expect(errorCode(document(["name: pdf", "description:"]))).toBe("skill_missing_description")
+    expect(errorCode(document(["name: pdf", "description: '  '"]))).toBe("skill_missing_description")
+  })
+
+  it("validates already-parsed frontmatter without a document", () => {
+    const valid = Markdown.validateSkillFrontmatter({
+      name: "pdf-tools",
+      description: "Extract files",
+      "allowed-tools": "Read  Bash(pdfinfo:*)",
+      license: "MIT",
+      metadata: { author: "me" }
+    })
+    expect(valid).toMatchObject({
+      _tag: "Success",
+      success: {
+        name: "pdf-tools",
+        description: "Extract files",
+        allowedTools: ["Read", "Bash(pdfinfo:*)"],
+        extra: { license: "MIT", metadata: { author: "me" } }
+      }
+    })
+    if (Result.isSuccess(valid)) {
+      expect(Object.getPrototypeOf(valid.success.extra)).toBeNull()
+      expect(Object.isFrozen(valid.success.extra)).toBe(true)
+      expect(Object.keys(valid.success.extra)).toEqual(["license", "metadata"])
+    }
+
+    // Directory-name equality is the registry's rule, so a spec-valid name
+    // passes here whatever directory the document came from.
+    expect(Result.isSuccess(Markdown.validateSkillFrontmatter({ name: "other", description: "d" }))).toBe(true)
+    expect(Markdown.validateSkillFrontmatter({ description: "d" })).toMatchObject({
+      _tag: "Failure",
+      failure: { code: "skill_missing_name" }
+    })
+    expect(Markdown.validateSkillFrontmatter({ name: ["pdf"], description: "d" })).toMatchObject({
+      _tag: "Failure",
+      failure: { code: "skill_invalid_name" }
+    })
+  })
+
+  it("counts description length in Unicode code points at the 1024 boundary", () => {
+    const boundary = "\u{1F600}".repeat(1024)
+
+    expect(boundary.length).toBe(2048)
+    expect(parse(document(["name: pdf", `description: "${boundary}"`])).description).toBe(boundary)
+    const error = failure(document(["name: pdf", `description: "${boundary}\u{1F600}"`]))
+    expect(error.code).toBe("skill_invalid_description")
+    expect(error.message).toBe("SKILL.md description must be a scalar of 1 to 1024 characters")
+  })
+
+  it("rejects a mapping-valued description as invalid rather than missing", () => {
+    expect(errorCode(document(["name: pdf", "description:", "  nested: value"]))).toBe("skill_invalid_description")
+  })
+
+  it("checks compatibility length at the 500 character boundary when present", () => {
+    const boundary = "c".repeat(500)
+
+    expect(parse(document(["name: pdf", "description: d", `compatibility: ${boundary}`])).extra.compatibility)
+      .toBe(boundary)
+    expect(errorCode(document(["name: pdf", "description: d", `compatibility: ${boundary}c`])))
+      .toBe("skill_invalid_compatibility")
+    expect(errorCode(document(["name: pdf", "description: d", "compatibility: \"\""])))
+      .toBe("skill_invalid_compatibility")
+    const error = failure(document(["name: pdf", "description: d", "compatibility:", "  - git"]))
+    expect(error.code).toBe("skill_invalid_compatibility")
+    expect(error.message).toBe("SKILL.md compatibility must be a scalar of 1 to 500 characters")
+  })
+
+  it("requires metadata to map string keys to scalar values", () => {
+    const valid = parse(document(["name: pdf", "description: d", "metadata:", "  author: me", "  version: \"1.0\""]))
+    expect(valid.extra.metadata).toEqual({ author: "me", version: "1.0" })
+
+    const nested = failure(document(["name: pdf", "description: d", "metadata:", "  author:", "    name: me"]))
+    expect(nested.code).toBe("skill_invalid_metadata")
+    expect(nested.message).toBe("SKILL.md metadata must be a mapping from string keys to scalar values")
+    expect(errorCode(document(["name: pdf", "description: d", "metadata:", "  - author"]))).toBe(
+      "skill_invalid_metadata"
+    )
+    expect(errorCode(document(["name: pdf", "description: d", "metadata: loose"]))).toBe("skill_invalid_metadata")
+  })
+
+  it("requires license to be a scalar when present", () => {
+    expect(parse(document(["name: pdf", "description: d", "license: Apache-2.0"])).extra.license).toBe("Apache-2.0")
+    const error = failure(document(["name: pdf", "description: d", "license:", "  spdx: MIT"]))
+    expect(error.code).toBe("skill_invalid_license")
+    expect(error.message).toBe("SKILL.md license must be a scalar")
   })
 
   it("parses folded and literal YAML block scalars", () => {
@@ -66,7 +204,7 @@ describe("Skill", () => {
 
   it("accepts a UTF-8 BOM and CRLF fences without normalizing the body", () => {
     const skill = parse(
-      "\uFEFF---\r\nname: pdf\r\ndescription: Extract files\r\nallowed-tools: [Read, Write]\r\n---\r\nLine one\r\n\r\nLine two"
+      "\uFEFF---\r\nname: pdf\r\ndescription: Extract files\r\nallowed-tools: Read Write\r\n---\r\nLine one\r\n\r\nLine two"
     )
 
     expect(skill.allowedTools).toEqual(["Read", "Write"])

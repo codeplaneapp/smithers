@@ -88,16 +88,39 @@ called invalid can never become a durable step key.
 ## Limits
 
 `Graph.build` walks author-controlled and agent-generated structure, so it
-enforces documented bounds instead of failing with a host stack overflow.
-`Graph.maximumGraphDepth` bounds nested node structure and
-`Graph.maximumPayloadDepth` bounds a reflected plan value. Both refuse with a
-coded `GraphBuildError` naming the offending node. Plan width is deliberately
-unbounded: node count and reflected payload size are the caller's resource
-budget.
+enforces documented bounds instead of failing with a host stack overflow or
+exhausting memory. `Graph.maximumGraphDepth` bounds nested node structure and
+`Graph.maximumPayloadDepth` bounds a reflected plan value; both refuse with
+`plan_too_deep` or `payload_too_deep` naming the offending node.
+`Graph.maximumGraphNodes`, `Graph.maximumGraphEdges`, and
+`Graph.maximumGraphConflicts` bound plan width, counting synthesized lane
+merges and the edges the write-conflict pass adds, and refuse with
+`plan_too_large` naming the node whose admission crossed the limit.
+`Graph.maximumPayloadMembers` bounds the members one plan value expands to
+across every level (object keys, array items and holes, map entries, set and
+chunk values, and bytes) and refuses with `payload_too_large` naming the
+offending value path. A flow call's input and a declaration body are budgeted
+separately. Every limit is checked before the structure it guards is
+allocated.
 
-The write-conflict pass compares every pair of work nodes and tests
-reachability between them, so its cost grows quadratically with the number of
-nodes that declare effects.
+The write-conflict pass buckets literal writers by path, so disjoint literal
+writers cost linear time. A writer whose path ends in `*` is compared against
+every later writer, so its cost grows with the number of nodes that declare
+effects.
+
+## Agent Skills validation
+
+`Markdown.parseSkill` parses frontmatter with the failsafe YAML schema and then
+enforces the intrinsic rules of the Agent Skills specification: a `name` of 1
+to 64 lowercase ASCII letters, digits, or single hyphens that does not start or
+end with a hyphen, a `description` of 1 to 1024 characters counted in code
+points, a scalar space-separated `allowed-tools`, a scalar `license`, a
+`compatibility` of 1 to 500 characters, and `metadata` mapping string keys to
+scalar values. Each field reports its own stable `MarkdownError` code, and an
+invalid value is never echoed into the message.
+`Markdown.validateSkillFrontmatter` applies the same rules to already-parsed
+frontmatter. The one rule that needs the file system, that `name` equals the
+skill directory name, stays with `@smthrs/registry`.
 
 ## Mutability
 
