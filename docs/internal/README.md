@@ -30,7 +30,7 @@ Private-alpha operators should also read the [alpha notes](../alpha-notes.md) fo
 - [Journal](../pages/concepts/journal.md) — the logical WAL, its durable and lossy channels, durable order, projections, and run state.
 - [Step keys and content addressing](../pages/concepts/step-keys.md) — canonical serialization, cache keys, and invocation keys.
 - [Effect integration and error taxonomy](../pages/concepts/effect-integration.md) — services, layers, schemas, and the three effect tiers.
-- [Failure and retry policy](../pages/concepts/failure-and-retry.md) — typed failures, infrastructure interruption, and tier-aware retry.
+- [Failure and retry policy](../pages/concepts/failure-and-retry.md) — typed failures, retry policy, and interruption.
 - [Concurrency](../pages/concepts/concurrency.md) — fibers, durable races, queues, and run coordination.
 - [Host adapters and capability enforcement](../pages/concepts/hosts-and-capabilities.md) — the closed Host surface and permission-decorated layers.
 - [Time travel](../pages/concepts/time-travel.md) — frames, replay, fork, rewind, compensation, and recovery.
