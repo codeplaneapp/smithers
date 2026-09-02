@@ -448,6 +448,44 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     return ok(repo === undefined ? { path } : { path, repo })
   },
   "repos.app": (args) => repoOnly("repos.app", args),
+  /* Lane sync (ADR 0005): Linear and GitHub sync as actions. */
+  "github.app": (args) => repoOnly("github.app", args),
+  "github.app.open": (args) => repoOnly("github.app.open", args),
+  "github.reconcile": (args) => repoOnly("github.reconcile", args),
+  "github.mirror-sync": (args) => repoOnly("github.mirror-sync", args),
+  "repos.import.retry": (args) => required("jobId", args, "repos.import.retry needs the job id"),
+  "linear.connect": (args) => repoOnly("linear.connect", args),
+  "linear.connect.open": (args) => repoOnly("linear.connect.open", args),
+  "linear.connect.confirm": (args) => repoOnly("linear.connect.confirm", args),
+  "linear.connect.team": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
+    if (rest === "" || /\s/.test(rest)) return no("linear.connect.team needs the team id")
+    return ok(repo === undefined ? { teamId: rest } : { teamId: rest, repo })
+  },
+  "linear.connect.repo": (args) => {
+    const tokens = tokensOf(args)
+    const [cardRepo, repo] = tokens
+    if (cardRepo === undefined || repo === undefined || tokens.length > 2) {
+      return no("linear.connect.repo needs the card's repository and the picked owner/repo")
+    }
+    return ok({ cardRepo, repo })
+  },
+  "linear.sync": (args) => optional("integration", args),
+  "linear.activity": (args) => optional("integration", args),
+  "linear.disconnect": (args) => required("integration", args, "linear.disconnect needs an integration: /linear.disconnect <id|team>"),
+  "sync.retry": (args) => required("opId", args, "sync.retry needs an op id"),
+  "sync.ops.show-more": (args) => required("cardId", args, "sync.ops.show-more needs the card id"),
+  "issues.link-linear": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
+    const [head, identifier, ...extra] = rest.split(/\s+/)
+    const number = Number(head)
+    if (!Number.isInteger(number) || number <= 0) return no("issues.link-linear needs an issue number")
+    if (identifier === undefined || identifier === "" || extra.length > 0) {
+      return no("issues.link-linear needs the Linear identifier: /issues.link-linear <n> <identifier>")
+    }
+    return ok(repo === undefined ? { number, identifier } : { number, identifier, repo })
+  },
+  "issues.unlink-linear": (args) => numbered(args, "issues.unlink-linear needs an issue number"),
   "debug.backend": (args) => ok({ backend: args ?? "" }),
   "admin.allowlist.add": (args) => required("login", args, "admin.allowlist.add needs a login"),
   "admin.allowlist.remove": (args) => required("login", args, "admin.allowlist.remove needs a login"),

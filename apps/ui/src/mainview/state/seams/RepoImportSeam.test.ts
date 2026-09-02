@@ -54,17 +54,22 @@ const until = async (predicate: () => boolean, what: string): Promise<void> => {
   }
 }
 
-/** Routes the two import endpoints; everything else answers 404. */
+/** Routes the import endpoints behind the `/api/cloud/*` proxy; everything else answers 404. */
 const importBackend = (
   start: () => Response | Promise<Response>,
-  poll?: () => Response | Promise<Response>
+  poll?: () => Response | Promise<Response>,
+  retry?: () => Response | Promise<Response>
 ): AppServices => ({
   fetchImpl: async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
     const path = new URL(url, "https://app.test").pathname
     const method = init?.method ?? "GET"
-    if (path === "/api/github/import" && method === "POST") return start()
-    if (path.startsWith("/api/github/import/") && method === "GET") {
+    if (path === "/api/cloud/api/github/import" && method === "POST") return start()
+    if (path.startsWith("/api/cloud/api/github/import/") && path.endsWith("/retry") && method === "POST") {
+      if (retry === undefined) return json(404, { message: `no retry stub for ${path}` })
+      return retry()
+    }
+    if (path.startsWith("/api/cloud/api/github/import/") && method === "GET") {
       if (poll === undefined) return json(404, { message: `no poll stub for ${path}` })
       return poll()
     }
@@ -305,5 +310,96 @@ describe("repo import — honest failures", () => {
     // Honest standstill: the job may still run upstream — active, not failed.
     expect(card?.payload.phase).toBe("running")
     expect(card?.status).toBe("active")
+  })
+})
+
+describe("repo import — lane sync", () => {
+  test("the job's counts, repository, and workspace land on the card as the wire carries them", async () => {
+    const withProgress = {
+      ...jobBody("cloning", "importing_refs"),
+      counts: {
+        refs: { done: 214, total: 214 },
+        objects: { done: 900, total: 1200 },
+        issues: { done: 3, total: 41 }
+      }
+    }
+    const doneBody = {
+      ...jobBody("ready", "provisioning_workspace"),
+      workspace_id: "ws-9",
+      repository: { owner: "will", name: "flows" }
+    }
+    const { store, controller } = await readyStore(
+      importBackend(
+        () => json(202, withProgress),
+        pollSequence([() => json(200, doneBody)])
+      )
+    )
+    await controller.commands.run("repos.import", "will/flows")
+
+    /* The start answer's counts render while the job runs. */
+    expect(importCard(store)?.payload.counts).toEqual({
+      refs: { done: 214, total: 214 },
+      objects: { done: 900, total: 1200 },
+      issues: { done: 3, total: 41 }
+    })
+
+    await until(() => importCard(store)?.payload.phase === "done", "the done phase")
+    const card = importCard(store)
+    expect(card?.payload.repository).toEqual({ owner: "will", name: "flows" })
+    expect(card?.payload.workspaceId).toBe("ws-9")
+  })
+
+  test("a structured 429 start lands the refusal and the rate-limit facts on the card", async () => {
+    const { store, controller } = await readyStore(
+      importBackend(() =>
+        json(429, {
+          code: "github_rate_limited",
+          message: "GitHub rate limit exhausted",
+          limit: 5000,
+          remaining: 0,
+          reset_at: "2026-09-02T13:00:00Z"
+        })
+      )
+    )
+    const outcome = await controller.commands.run("repos.import", "will/flows")
+    expect(outcome.status).toBe("failed")
+    const card = importCard(store)
+    expect(card?.payload.detail).toBe("GitHub rate limit exhausted")
+    expect(card?.payload.rateLimit).toEqual({ limit: 5000, remaining: 0, resetAt: "2026-09-02T13:00:00Z" })
+  })
+
+  test("repos.import.retry re-runs the failed job on the same card slot", async () => {
+    const { store, controller } = await readyStore(
+      importBackend(
+        () => json(202, jobBody("cloning", "resolving")),
+        pollSequence([
+          () => json(200, jobBody("failed", "cloning_github", "clone timed out")),
+          () => json(200, jobBody("ready", "provisioning_workspace"))
+        ]),
+        () => json(202, jobBody("cloning", "resolving"))
+      )
+    )
+    await controller.commands.run("repos.import", "will/flows")
+    await until(() => importCard(store)?.payload.phase === "failed", "the failed phase")
+    const ordinalBefore = importCard(store)?.ordinal
+
+    const retry = await controller.commands.run("repos.import.retry", "job-1")
+    expect(retry.status).toBe("executed")
+    expect(importCard(store)?.payload.phase).toBe("running")
+    expect(importCard(store)?.ordinal).toBe(ordinalBefore)
+
+    await until(() => importCard(store)?.payload.phase === "done", "the retried done phase")
+    expect(importCard(store)?.status).toBe("acted")
+  })
+
+  test("repos.import.retry without a tracked job refuses honestly", async () => {
+    const { controller } = await readyStore(importBackend(() => json(202, jobBody("cloning"))))
+    const outcome = await controller.commands.run("repos.import.retry", "job-nope")
+    expect(outcome.status).toBe("failed")
+    if (outcome.status === "failed") {
+      expect(outcome.error).toBe(
+        "No import card tracks job job-nope — the retry button lives on the failed import's card."
+      )
+    }
   })
 })

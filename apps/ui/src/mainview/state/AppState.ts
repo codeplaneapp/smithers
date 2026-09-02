@@ -252,6 +252,8 @@ export const GitHubAppStatusRowSchema = z.object({
   installed: z.boolean(),
   configured: z.boolean(),
   installationId: z.number().int().nullable(),
+  /** The App's install page when the status answer carries it (untrusted until the card checks the origin). */
+  installUrl: z.string().nullable(),
   rateLimit: z.object({
     limit: z.number().int().nonnegative(),
     remaining: z.number().int().nonnegative(),
@@ -265,7 +267,7 @@ export type GitHubAppStatusRow = z.infer<typeof GitHubAppStatusRowSchema>
 /** The fields a status read writes (the reducer adds updatedAt/revision). */
 export type GitHubAppStatusInput = Pick<
   GitHubAppStatusRow,
-  "repo" | "installed" | "configured" | "installationId" | "rateLimit"
+  "repo" | "installed" | "configured" | "installationId" | "installUrl" | "rateLimit"
 >
 
 /** The working-copy id of a local checkout: the pin key, stable across reopens. */

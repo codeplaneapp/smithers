@@ -203,7 +203,8 @@ describe("issues seam — the list", () => {
         state: "open",
         author: "ana",
         comments: 2,
-        updatedAt: "2026-08-11T09:00:00Z"
+        updatedAt: "2026-08-11T09:00:00Z",
+        source: "jjhub"
       },
       {
         number: 9,
@@ -211,10 +212,14 @@ describe("issues seam — the list", () => {
         state: "closed",
         author: null,
         comments: 0,
-        updatedAt: null
+        updatedAt: null,
+        source: "jjhub"
       }
     ])
     expect(calls).toContain("GET /api/repos/will/flows/issues?state=open")
+    // GitHub's issues are read beside jjhub's own; an unstubbed (404) GitHub route is a stated refusal, never a silent absence.
+    expect(calls).toContain("GET /api/user/github-repos/will/flows/issues?state=open")
+    expect(card.payload.github?.refusal).toBeTruthy()
   })
 
   test("issues.list all omits the state param — Plue rejects state=all", async () => {
@@ -229,7 +234,56 @@ describe("issues seam — the list", () => {
     expect(card.payload.filter).toBe("all")
     expect(card.payload.issues).toEqual([])
     expect(calls).toContain("GET /api/repos/will/flows/issues")
-    expect(calls.some((call) => call.includes("state=all"))).toBe(false)
+    // jjhub's own route never sees state=all; GitHub's accepts it.
+    expect(calls.some((call) => call.startsWith("GET /api/repos/") && call.includes("state=all"))).toBe(false)
+    expect(calls).toContain("GET /api/user/github-repos/will/flows/issues?state=all")
+  })
+
+  test("a mirrored repo lists jjhub's own issues AND GitHub's, each row labeled, with the read's provenance from plue's headers", async () => {
+    const { store, controller } = await issuesController(
+      backend({
+        "GET /api/repos/will/flows/issues": json(200, [wireIssue(7)]),
+        "GET /api/user/github-repos/will/flows/issues": new Response(JSON.stringify([wireGithubIssue(12)]), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "x-metadata-source": "synced",
+            "x-metadata-synced-at": "2026-09-02T16:00:00Z",
+            "x-metadata-stale": "true",
+            "x-metadata-sync-error": "rate limited at 15:59"
+          }
+        })
+      })
+    )
+    const outcome = await controller.commands.run("issues.list")
+    expect(outcome.status).toBe("executed")
+    await settled()
+    const card = cardOfKind(store, "issues-will/flows", "issue-list")
+    expect(card.payload.issues.map((issue) => [issue.number, issue.source])).toEqual([[7, "jjhub"], [12, "github"]])
+    expect(card.payload.issues[1]?.htmlUrl).toBe("https://github.com/will/flows/issues/12")
+    expect(card.payload.github).toEqual({
+      source: "synced",
+      syncedAt: "2026-09-02T16:00:00Z",
+      stale: true,
+      syncError: "rate limited at 15:59",
+      refusal: null
+    })
+    // The model reads the rows as text, GitHub rows marked.
+    expect(outcome.status === "executed" ? outcome.value : "").toContain("#12 Upstream bug 12 · open · GitHub")
+  })
+
+  test("a GitHub refusal (not linked, not mirrored) is stated on the card while jjhub's own issues still list", async () => {
+    const { store, controller } = await issuesController(
+      backend({
+        "GET /api/repos/will/flows/issues": json(200, [wireIssue(7)]),
+        "GET /api/user/github-repos/will/flows/issues": json(403, { message: "GitHub is not linked for this account" })
+      })
+    )
+    expect((await controller.commands.run("issues.list")).status).toBe("executed")
+    await settled()
+    const card = cardOfKind(store, "issues-will/flows", "issue-list")
+    expect(card.payload.issues.map((issue) => issue.number)).toEqual([7])
+    expect(card.payload.github?.refusal).toBe("GitHub is not linked for this account")
   })
 })
 

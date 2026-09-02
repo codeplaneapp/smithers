@@ -1149,14 +1149,192 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     input: Schema.Struct({ path: Schema.String, repo: Schema.optional(Schema.String) }),
     handler: ({ path, repo }) => actions.readFile(path, repo)
   }),
+  /*
+   * Lane sync (ADR 0005): Linear and GitHub sync as actions. The reads
+   * render the connector-setup and sync-ops cards; the writes ride the same
+   * seams. `repos.app` stays as the hidden alias of its rename `github.app`.
+   * The routes that do not exist (plue#468 ops/retry, plue#469 setup lookup,
+   * plue#473 reconcile/linear-link) refuse with the ADR's wording from the
+   * seams — the flows never fake them.
+   */
   flow({
-    name: "repos.app",
+    name: "github.app",
     summary: "Check the Smithers GitHub App on a repository",
     runtime: ["jjhub"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
-    handler: ({ repo }) => actions.checkGitHubApp(repo)
+    handler: ({ repo }) => actions.githubApp(repo)
+  }),
+  flow({
+    name: "repos.app",
+    summary: "Check the Smithers GitHub App on a repository",
+    aliasOf: "github.app",
+    hidden: true,
+    runtime: ["jjhub"],
+    args: "[owner/repo]",
+    requires: ["signed-in"],
+    input: RepoTarget,
+    handler: ({ repo }) => actions.githubApp(repo)
+  }),
+  flow({
+    /* The card's Install button — browser mechanics the human clicks. */
+    name: "github.app.open",
+    summary: "Open the GitHub App's install page",
+    hidden: true,
+    runtime: ["jjhub"],
+    args: "[owner/repo]",
+    requires: ["signed-in"],
+    input: RepoTarget,
+    handler: ({ repo }) => actions.githubOpenInstall(repo)
+  }),
+  flow({
+    name: "github.reconcile",
+    summary: "Re-derive the GitHub App's wiring, then re-read the status",
+    runtime: ["jjhub"],
+    args: "[owner/repo]",
+    requires: ["signed-in"],
+    input: RepoTarget,
+    handler: ({ repo }) => actions.githubReconcile(repo)
+  }),
+  flow({
+    name: "github.mirror-sync",
+    summary: "Pull GitHub into the repository's mirror",
+    runtime: ["jjhub"],
+    args: "[owner/repo]",
+    requires: ["signed-in"],
+    input: RepoTarget,
+    handler: ({ repo }) => actions.githubMirrorSync(repo)
+  }),
+  flow({
+    name: "repos.import.retry",
+    summary: "Retry a failed GitHub import job",
+    runtime: ["jjhub"],
+    args: "<jobId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ jobId: Schema.String }),
+    handler: ({ jobId }) => actions.retryImport(jobId)
+  }),
+  flow({
+    name: "linear.connect",
+    summary: "Connect a repository to a Linear team",
+    runtime: ["jjhub"],
+    args: "[owner/repo]",
+    requires: ["signed-in"],
+    input: RepoTarget,
+    handler: ({ repo }) => actions.linearConnect(repo)
+  }),
+  flow({
+    /* The wizard card's step buttons — browser mechanics the human clicks. */
+    name: "linear.connect.open",
+    summary: "Open Linear to authorize the connection",
+    hidden: true,
+    runtime: ["jjhub"],
+    args: "[owner/repo]",
+    requires: ["signed-in"],
+    input: RepoTarget,
+    handler: ({ repo }) => actions.linearConnectOpen(repo)
+  }),
+  flow({
+    name: "linear.connect.team",
+    summary: "Pick the Linear team for the connection",
+    hidden: true,
+    runtime: ["jjhub"],
+    args: "<teamId> [owner/repo]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ teamId: Schema.String, repo: Schema.optional(Schema.String) }),
+    handler: ({ teamId, repo }) => actions.linearConnectTeam(teamId, repo)
+  }),
+  flow({
+    name: "linear.connect.repo",
+    summary: "Pick the repository for the connection",
+    hidden: true,
+    runtime: ["jjhub"],
+    args: "<cardRepo> <owner/repo>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ cardRepo: Schema.String, repo: Schema.String }),
+    handler: ({ cardRepo, repo }) => actions.linearConnectRepo(cardRepo, repo)
+  }),
+  flow({
+    name: "linear.connect.confirm",
+    summary: "Create the Linear integration the wizard gathered",
+    runtime: ["jjhub"],
+    args: "[owner/repo]",
+    requires: ["signed-in"],
+    input: RepoTarget,
+    handler: ({ repo }) => actions.linearConnectConfirm(repo)
+  }),
+  flow({
+    name: "linear.sync",
+    summary: "Sync a Linear integration now",
+    runtime: ["jjhub"],
+    args: "[integration]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ integration: Schema.optional(Schema.String) }),
+    handler: ({ integration }) => actions.linearSync(integration)
+  }),
+  flow({
+    name: "linear.activity",
+    summary: "Show a Linear integration's last 24 hours",
+    runtime: ["jjhub"],
+    args: "[integration]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ integration: Schema.optional(Schema.String) }),
+    handler: ({ integration }) => actions.linearActivity(integration)
+  }),
+  flow({
+    /* Disconnecting drops every issue's Linear link: agent invocations confirm first. */
+    name: "linear.disconnect",
+    summary: "Disconnect a Linear integration",
+    runtime: ["jjhub"],
+    confirm: "disconnect the Linear integration",
+    args: "<integration>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ integration: Schema.String }),
+    handler: ({ integration }) => actions.linearDisconnect(integration)
+  }),
+  flow({
+    name: "sync.retry",
+    summary: "Retry one failed sync op",
+    runtime: ["jjhub"],
+    args: "<opId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ opId: Schema.String }),
+    handler: ({ opId }) => actions.retrySyncOp(opId)
+  }),
+  flow({
+    /* The sync-ops card's Show more — browser mechanics the human clicks. */
+    name: "sync.ops.show-more",
+    summary: "Widen a sync card's ops window",
+    hidden: true,
+    runtime: ["jjhub"],
+    args: "<cardId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ cardId: Schema.String }),
+    handler: ({ cardId }) => actions.showMoreSyncOps(cardId)
+  }),
+  flow({
+    name: "issues.link-linear",
+    summary: "Link an issue to a Linear identifier",
+    runtime: ["jjhub"],
+    args: "<number> <identifier> [owner/repo]",
+    requires: ["signed-in"],
+    input: Schema.Struct({
+      number: Schema.Number,
+      identifier: Schema.String,
+      repo: Schema.optional(Schema.String)
+    }),
+    handler: ({ number, identifier, repo }) => actions.linkIssueLinear(number, identifier, repo)
+  }),
+  flow({
+    name: "issues.unlink-linear",
+    summary: "Remove an issue's Linear link",
+    runtime: ["jjhub"],
+    confirm: "remove the issue's Linear link",
+    args: "<number> [owner/repo]",
+    requires: ["signed-in"],
+    input: NumberedTarget,
+    handler: ({ number, repo }) => actions.unlinkIssueLinear(number, repo)
   }),
   /*
    * Lane citc (ADR 0002): the persistent cloud computers. `workspace.open`
@@ -1362,7 +1540,8 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "change.land",
     summary: "Land a change (its landing request, or its changeset atomically)",
     runtime: ["jjhub"],
-    confirm: "land the change",
+    /* The scope is the whole unit: a landing request lands 1 → N (its stack, from its top change), a changeset every member; the card's button and the seam's line name N. */
+    confirm: "land the change — the whole landing request 1 → N, or the whole changeset",
     args: "<changeId>",
     requires: ["signed-in"],
     input: Schema.Struct({ changeId: Schema.String }),

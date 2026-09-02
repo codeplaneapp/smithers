@@ -43,3 +43,56 @@ export const readErrorMessage = async (response: Response, fallback: string): Pr
   }
   return fallback
 }
+
+/*
+ * Lane sync (ADR 0005 "Rate limits"): a refused GitHub-proxied call. plue's
+ * structured 429 (plue#472) answers `{ code: "github_rate_limited", limit,
+ * remaining, reset_at }`; when the body carries it the caller gets the
+ * rate-limit facts for the card's line (`… · 0 of 5 000 · resets 12:40 ·
+ * Retry after`) beside the honest message. Any other refusal is the verbatim
+ * message alone — no reset is ever invented for a plain 429.
+ */
+export interface GitHubRefusal {
+  readonly message: string
+  readonly rateLimit?: { readonly limit: number; readonly remaining: number; readonly resetAt: string | null }
+}
+
+export const readGitHubRefusal = async (response: Response, fallback: string): Promise<GitHubRefusal> => {
+  const text = (await response.text().catch(() => "")).trim()
+  if (text !== "") {
+    try {
+      const body = JSON.parse(text) as {
+        code?: unknown
+        message?: unknown
+        error?: unknown
+        limit?: unknown
+        remaining?: unknown
+        reset_at?: unknown
+      }
+      const message = typeof body.message === "string" && body.message !== ""
+        ? body.message.slice(0, 240)
+        : typeof body.error === "string" && body.error !== ""
+        ? body.error.slice(0, 240)
+        : fallback
+      if (
+        body.code === "github_rate_limited" &&
+        typeof body.limit === "number" && Number.isInteger(body.limit) &&
+        typeof body.remaining === "number" && Number.isInteger(body.remaining)
+      ) {
+        return {
+          message,
+          rateLimit: {
+            limit: body.limit,
+            remaining: body.remaining,
+            resetAt: typeof body.reset_at === "string" && body.reset_at !== "" ? body.reset_at : null
+          }
+        }
+      }
+      return { message }
+    } catch {
+      // Not JSON at all: plumbing, never copy.
+      return { message: fallback }
+    }
+  }
+  return { message: fallback }
+}

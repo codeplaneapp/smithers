@@ -73,6 +73,7 @@ const PRESENTATION_ONLY = [
   // what let a command-less affordance ship; the wrappers stay listed only
   // because the registry call is one indirection away from the onClick.
   "openNamespace", // slash-menu tree: opening a namespace rewrites the draft to `/ns.` — a draft edit, never a command
+  "changeDraft(", // composer prefill (the issue card's Link to Linear…): a draft edit, never a command — same class as openNamespace
   "openMenu", // dispatches runCommand("chat.surfaces") — the /chat.surfaces command
   "closeMenu", // dispatches runCommand("surfaces"); the entry itself runs its own command
   "onCopy(", // delegated: App.tsx binds it to runCommandArgs("chat.copy-message", ...)
@@ -171,13 +172,23 @@ describe("launch-law parity: every affordance is a command", () => {
       "../SurfaceChrome.tsx": 3,
       "../ToastStack.tsx": 1,
       /* The multi-parity domain cards: every handler routes through onRunCommand. */
-      "../cards/IssueCards.tsx": 2,
+      /* 3 = 2 + the issue card's Link to Linear… composer prefill (lane sync). */
+      "../cards/IssueCards.tsx": 3,
       "../cards/LandingCards.tsx": 4,
       "../cards/FileCards.tsx": 3,
       "../cards/KeysCard.tsx": 1,
       /* Mark-all-read. */
       "../cards/NotificationsCard.tsx": 1,
-      "../cards/RepoImportCard.tsx": 1,
+      /* 2 = Try again + the done state's Open the workspace (lane sync). */
+      "../cards/RepoImportCard.tsx": 2,
+      /*
+       * Lane sync (ADR 0005): the connector-setup card's Open Linear, the
+       * per-team picks, the repository pick, Connect, the connected state's
+       * Sync now / Activity / Disconnect, the GitHub card's Open GitHub /
+       * Re-check / Reconcile, and the sync-ops card's Retry / Show more —
+       * all through onRunCommand with data-flow set.
+       */
+      "../cards/SyncCards.tsx": 12,
       /* The /theme picker: nine swatches, one shared handler through onRunCommand. */
       "../cards/ThemePickerCard.tsx": 1,
       /*

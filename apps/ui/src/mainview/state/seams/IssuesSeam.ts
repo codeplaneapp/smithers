@@ -18,7 +18,8 @@ import { readErrorMessage } from "./SeamContext"
 import type { SeamContext } from "./SeamContext"
 
 export interface IssuesSeam {
-  readonly listIssues: (filter: "open" | "closed" | "all", repo?: string) => Promise<string | void>
+  /** Renders the list card and answers the rows as text (the model reads the value, never the card). */
+  readonly listIssues: (filter: "open" | "closed" | "all", repo?: string) => Promise<string | void | { readonly value: string }>
   readonly viewIssue: (number: number, repo?: string) => Promise<string | void>
   readonly createIssue: (title: string, repo?: string) => Promise<string | void>
   readonly setIssueState: (
@@ -27,7 +28,17 @@ export interface IssuesSeam {
     repo?: string
   ) => Promise<string | void>
   readonly commentOnIssue: (number: number, text: string, repo?: string) => Promise<string | void>
+  /** `issues.link-linear` / `issues.unlink-linear`: refuse honestly until plue#473's route exists. */
+  readonly linkLinear: (number: number, identifier: string, repo?: string) => Promise<string | void>
+  readonly unlinkLinear: (number: number, repo?: string) => Promise<string | void>
 }
+
+/*
+ * Lane sync (ADR 0005 "Filed"): the linear-link column and its routes are
+ * plue#473 — nothing is called, nothing is faked; the refusal names it.
+ */
+export const NO_LINEAR_LINK_REFUSAL =
+  "Linking an issue to Linear doesn't exist yet (plue#473) — when it ships, this act runs it."
 
 type IssueListPayload = Extract<Card, { kind: "issue-list" }>["payload"]
 type IssueListRow = IssueListPayload["issues"][number]
@@ -108,6 +119,15 @@ const parseDetail = (
   comments: ReadonlyArray<IssueCommentRow>
 ): IssuePayload | null => {
   if (!isRecord(value)) return null
+  /*
+   * Lane sync (ADR 0005): the issue's Linear link when the DTO carries it
+   * (plue#473's wire field; absent until it ships — never assumed).
+   */
+  const linear = isRecord(value.linear) &&
+    typeof value.linear.identifier === "string" && value.linear.identifier !== "" &&
+    typeof value.linear.url === "string"
+    ? { identifier: value.linear.identifier, url: value.linear.url }
+    : null
   return {
     repo,
     number: asInt(value.number) ?? number,
@@ -116,7 +136,8 @@ const parseDetail = (
     author: authorLogin(value.author),
     issueBody: typeof value.body === "string" ? value.body : "",
     labels: parseLabels(value.labels),
-    comments: [...comments]
+    comments: [...comments],
+    ...(linear !== null ? { linear } : {})
   }
 }
 
@@ -152,6 +173,45 @@ export const createIssuesSeam = (ctx: SeamContext): IssuesSeam => {
 
   const unreachable = (what: string, error: unknown): string =>
     `Could not reach the backend to ${what}: ${errorText(error)}`
+
+  /**
+   * GitHub's issues for `repo`, through the GitHub-source route, with the
+   * read's provenance from plue's X-Metadata-* headers. A refusal answers
+   * no rows and the reason; the caller states it beside jjhub's own list.
+   */
+  const readGithubIssues = async (
+    repo: string,
+    filter: "open" | "closed" | "all"
+  ): Promise<{
+    readonly issues: Array<IssueListRow & { readonly source: "github"; readonly htmlUrl?: string }>
+    readonly meta?: { source: string; syncedAt: string | null; stale: boolean; syncError: string | null; refusal: string | null }
+  }> => {
+    let response: Response
+    try {
+      response = await ctx.http(githubSourceIssuesPath(repo, filter))
+    } catch (error) {
+      return { issues: [], meta: { source: "unreachable", syncedAt: null, stale: false, syncError: null, refusal: errorText(error) } }
+    }
+    const meta = {
+      source: response.headers.get("x-metadata-source") ?? (response.ok ? "github" : "refused"),
+      syncedAt: response.headers.get("x-metadata-synced-at"),
+      stale: response.headers.get("x-metadata-stale") === "true",
+      syncError: response.headers.get("x-metadata-sync-error"),
+      refusal: null as string | null
+    }
+    if (!response.ok) {
+      return { issues: [], meta: { ...meta, refusal: await readErrorMessage(response, `GitHub issues answered ${response.status}`) } }
+    }
+    const body: unknown = await response.json().catch(() => null)
+    if (!Array.isArray(body)) return { issues: [], meta: { ...meta, refusal: "GitHub issues answered an unreadable payload" } }
+    const issues = body.flatMap((entry) => {
+      const parsed = parseGithubListRow(entry)
+      if (parsed === null) return []
+      const htmlUrl = typeof (entry as { html_url?: unknown }).html_url === "string" ? (entry as { html_url: string }).html_url : undefined
+      return [{ ...parsed, source: "github" as const, ...(htmlUrl === undefined ? {} : { htmlUrl }) }]
+    })
+    return { issues, meta }
+  }
 
   /** The source-only list read; the card carries the degradation note in `body`. */
   const listFromGithubSource = async (
@@ -282,10 +342,20 @@ export const createIssuesSeam = (ctx: SeamContext): IssuesSeam => {
       if (!Array.isArray(body)) {
         return `The backend answered issues for ${repo} with an unreadable payload`
       }
-      const issues = body.flatMap((entry) => {
+      const native = body.flatMap((entry) => {
         const parsed = parseListRow(entry)
-        return parsed === null ? [] : [parsed]
+        return parsed === null ? [] : [{ ...parsed, source: "jjhub" as const }]
       })
+      /*
+       * jjhub's /issues is the repository's OWN tracker and is correctly
+       * empty for a repo mirrored from GitHub; the upstream issues live at
+       * the GitHub-source route (synced store or live GitHub, per plue). One
+       * list shows both, each row labeled with where it came from, and the
+       * GitHub read's provenance rides the card. A GitHub refusal (not
+       * linked, not mirrored) is stated, never a silent absence.
+       */
+      const github = await readGithubIssues(repo, filter)
+      const issues = [...native, ...github.issues]
       upsert({
         id: `issues-${repo}`,
         kind: "issue-list",
@@ -293,8 +363,13 @@ export const createIssuesSeam = (ctx: SeamContext): IssuesSeam => {
         status: "active",
         createdAt: Date.now(),
         ordinal: ctx.nextOrdinal(),
-        payload: { repo, filter, issues }
+        payload: { repo, filter, issues, ...(github.meta === undefined ? {} : { github: github.meta }) }
       })
+      return {
+        value: issues.length === 0
+          ? `No ${filter === "all" ? "" : `${filter} `}issues in ${repo}${github.meta?.refusal ? ` (GitHub: ${github.meta.refusal})` : ""}.`
+          : issues.map((issue) => `#${issue.number} ${issue.title} · ${issue.state}${issue.source === "github" ? " · GitHub" : ""}`).join("\n")
+      }
     },
 
     viewIssue: async (number, explicitRepo) => {
@@ -383,6 +458,17 @@ export const createIssuesSeam = (ctx: SeamContext): IssuesSeam => {
       // The re-fetch below re-lists the comments; the POST echo is not read.
       await response.body?.cancel()
       return refreshDetail(`The comment was posted to issue #${number} in ${repo}`, repo, number)
+    },
+
+    linkLinear: async (number, identifier) => {
+      if (identifier.trim() === "") return "issues.link-linear needs the Linear identifier: /issues.link-linear <n> <identifier>"
+      void number
+      return NO_LINEAR_LINK_REFUSAL
+    },
+
+    unlinkLinear: async (number) => {
+      void number
+      return NO_LINEAR_LINK_REFUSAL
     }
   }
 }

@@ -135,6 +135,8 @@ All mutations require `Content-Type: application/json`; failures use
 | POST | `/api/cloud-auth/start` | Begin the browser login; answers `{ url }` |
 | GET | `/api/cloud-auth/session` | `{ state, username, expiresAt }` — never the token |
 | POST | `/api/cloud-auth/sign-out` | Delete the keychain credential and the in-memory token |
+| POST | `/api/linear-auth/start` | Begin the Linear OAuth handoff (lane sync): a loopback listener on a random port waits for the cloud's redirect; answers `{ url }` to open. 501 offline |
+| GET | `/api/linear-auth/session` | `{ state: "idle" \| "waiting" \| "authorized", setupKey? }` — the setup key once the callback lands, never the token |
 
 WebSocket subscriptions carry target-run and PTY output. Client messages are
 limited to subscription control, `target-run.attach`, and `pty.input`.
@@ -235,6 +237,51 @@ Lane `change` (ADR 0003) makes the change the unit of review:
   reference and names its re-read (`/change.diff <changeId> parent current
   <path>`). Only change-vs-parent has a route today — a rev → rev interdiff
   refuses with the plue#451 wording.
+
+Lane `sync` (ADR 0005) adds Linear and GitHub sync as actions:
+
+- **`connector-setup`** (`/linear.connect [owner/repo]`, `/github.app
+  [owner/repo]`) — one card kind serves both handoffs. The Linear half is
+  the wizard: the steps authorize → team → repository → confirm render as
+  rows that fill in (`authorized as Will`, `ENG · Engineering`), a failed
+  step reads the server error verbatim (`authorization expired · Open
+  Linear again`), and the OAuth handoff rides the Bun server's
+  `/api/linear-auth/*` receiver — the setup key, never a token, reaches the
+  renderer. On confirm the SAME card turns into the connected state:
+  `ENG · Engineering → org/repo`, the last-sync age, and Sync now /
+  Activity / Disconnect (`/linear.sync`, `/linear.activity`,
+  `/linear.disconnect` — the last confirming). The GitHub half renders the
+  App status read (`/github.app`) — installed `· installation <id> ·
+  configured`, or the trusted install link with Open GitHub
+  (`/github.app.open`) — plus Re-check and Reconcile
+  (`/github.reconcile`; the route is 404 in prod today and its message
+  shows verbatim). `/repos.app` stays as `github.app`'s hidden alias.
+- **`sync-ops`** (`/linear.sync [integration]`, `/linear.activity
+  [integration]`, `/github.mirror-sync [owner/repo]`) — one card kind
+  serves Linear syncs and GitHub mirror syncs: the subject, the trigger's
+  one fact (`sync started`, `already running`), and the durable ops, newest
+  first, a failed row carrying the server's error verbatim with Retry
+  (`/sync.retry <opId>`). The ops feed, the per-op retry, and the sync runs
+  do not exist (plue#468/#470): the card renders the ADR's degraded note,
+  `runState` stays null, and `/sync.retry` refuses with the wording — no
+  `/ops` or run route is ever called.
+- **`repo-import`** grows the job's own progress: the stage counts (`refs
+  214 of 214 · objects … · issues …`) when the wire carries them, the
+  failed phase's Retry through `/repos.import.retry <jobId>` (the route
+  exists), and the done state's workspace link (`/workspace.view`). A
+  structured 429 (`code: "github_rate_limited"`) renders the ADR's
+  rate-limit line on every sync card — `GitHub rate limit reached · 0 of
+  5,000 · resets 12:40 · Retry after` — as does a status answer whose
+  remaining budget drops under a fifth; a plain 429 invents no reset.
+- **`issue`** names the Linear link the DTO carries (`Linear ENG-482`,
+  linked) or offers Link to Linear… (a composer prefill for
+  `/issues.link-linear <n> `); the link act and its routes are plue#473, so
+  the flow refuses with the wording and nothing is called.
+
+The Connectors surface's rows read only what the app has read: GitHub's
+count is the App statuses its own act filed, Linear's per-team state is the
+integrations the seam loaded — a repository never checked is absent, never
+assumed.
 
 The composer's origin chip carries the probed checkout's pin: `~/smithers ·
 qupxosqw · a03f5f` (`changeId#seq` only when the changes collection knows a

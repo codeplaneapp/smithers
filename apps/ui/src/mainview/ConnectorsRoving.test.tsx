@@ -12,10 +12,11 @@ import { createAppStore } from "./state/AppStore"
 
 /*
  * The connect surface's roving arrows move between the rows' ACTIONS — the
- * buttons. A status Badge ("Connected ✓ as …") sits in the same action slot
- * carrying data-row-action, but it is not a control: the roving set used to
- * include it, so ArrowDown called focus() on a non-focusable element and the
- * keyboard ring stranded on a row that does nothing when activated (§21.2).
+ * buttons. Lane sync (ADR 0005) made the signed-in GitHub row interactive
+ * (its act is github.app) and added the Linear row, so signed in every row
+ * action is a button and the ring walks them in order, wrapping at the end.
+ * (The pre-sync row wore a status Badge in the action slot; roving onto it
+ * called focus() on a non-focusable element and stranded the ring, §21.2.)
  */
 
 GlobalRegistrator.register()
@@ -76,8 +77,8 @@ const mount = (controller: AppControllerType): HTMLElement => {
   return host
 }
 
-describe("the connect surface's roving arrows skip non-interactive status rows", () => {
-  test("signed in, ArrowDown lands on the Import button, never on the Connected badge", async () => {
+describe("the connect surface's roving arrows walk the row actions", () => {
+  test("signed in, ArrowDown walks GitHub → Linear → Import and wraps", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     store.dispatch({
       type: "identity.session.loaded",
@@ -96,22 +97,23 @@ describe("the connect surface's roving arrows skip non-interactive status rows",
 
     const list = host.querySelector<HTMLElement>(".connect-store-list")
     expect(list).not.toBeNull()
-    // The GitHub row's action slot is a status Badge — present, and not a button.
-    const badge = list?.querySelector("[data-row-action]:not(button)")
-    expect(badge).not.toBeNull()
-    const importButton = list?.querySelector<HTMLButtonElement>("button[data-row-action][data-flow=\"repos.import\"]")
-    expect(importButton).not.toBeNull()
+    /* Lane sync: signed in, every row's action slot is an interactive button. */
+    const buttons = Array.from(list?.querySelectorAll<HTMLButtonElement>("button[data-row-action]") ?? [])
+    const flows = buttons.map((button) => button.dataset.flow)
+    expect(flows).toEqual(["github.app", "linear.connect", "repos.import"])
+    expect(list?.querySelector("[data-row-action]:not(button)")).toBeNull()
 
-    flushSync(() => {
-      list?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }))
-    })
-    expect(document.activeElement).toBe(importButton ?? null)
-
-    // The ring wraps over the buttons only; the badge never takes focus.
-    flushSync(() => {
-      list?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }))
-    })
-    expect(document.activeElement).toBe(importButton ?? null)
-    expect(document.activeElement).not.toBe(badge ?? null)
+    const ring = async (): Promise<Array<string | undefined>> => {
+      const walked: Array<string | undefined> = []
+      for (let step = 0; step < flows.length + 1; step += 1) {
+        flushSync(() => {
+          list?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }))
+        })
+        walked.push((document.activeElement as HTMLButtonElement | null)?.dataset.flow)
+      }
+      return walked
+    }
+    /* The ring walks the rows in order and wraps onto the first. */
+    expect(await ring()).toEqual(["github.app", "linear.connect", "repos.import", "github.app"])
   })
 })

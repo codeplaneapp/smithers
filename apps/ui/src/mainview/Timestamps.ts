@@ -28,3 +28,21 @@ export const timeLabel = (createdAt: number, now: number = Date.now()): string =
   if (gap === 1) return `Yesterday ${clock(at)}`
   return `${at.toLocaleDateString([], { month: "short", day: "numeric" })} ${clock(at)}`
 }
+
+/*
+ * A short age for a recent instant (`4 min ago`) — the vocabulary the sync
+ * cards use for "last sync" and rate-limit resets (ADR 0005). An unparseable
+ * stamp renders verbatim rather than a lie; past a day the stamp vocabulary
+ * reads better than an hour count.
+ */
+export const ageLabel = (iso: string, now: number = Date.now()): string => {
+  const at = Date.parse(iso)
+  if (Number.isNaN(at)) return iso
+  const seconds = Math.max(0, Math.round((now - at) / 1000))
+  if (seconds < 60) return "just now"
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes} min ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} h ago`
+  return timeLabel(at, now)
+}

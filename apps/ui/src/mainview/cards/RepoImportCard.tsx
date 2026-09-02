@@ -1,12 +1,16 @@
 /*
  * The repo-import card: one upserted job card, phase starting → running →
  * done | failed. The frame's StatusPill wears the coarse state; the body
- * names the exact phase, the live stage detail, and — on a failure — one
- * retry act bound to /repos.import.
+ * names the exact phase, the live stage detail, the job's own progress
+ * counts when the wire carries them, and — on a failure — one retry act
+ * (repos.import.retry when the job id is known). The done state links the
+ * workspace the import created; a refused GitHub call's rate-limit line
+ * follows ADR 0005.
  */
 import { Badge, Button } from "@smthrs/ui"
 import { CloudDownload, RefreshCw } from "lucide-react"
 import type { Card } from "../state/AppState"
+import { RateLimitLine } from "./SyncCards"
 
 const PHASE_VARIANT = {
   starting: "outline",
@@ -22,7 +26,7 @@ export const RepoImportCardBody = ({
   readonly card: Extract<Card, { kind: "repo-import" }>
   readonly onRunCommand: (name: string, args?: string) => void
 }) => {
-  const { repo, jobId, phase, detail } = card.payload
+  const { repo, jobId, phase, detail, counts, repository, workspaceId, rateLimit } = card.payload
   return (
     <div className="world-card-list">
       <div className="world-card-row">
@@ -33,15 +37,40 @@ export const RepoImportCardBody = ({
         <Badge variant={PHASE_VARIANT[phase]}>{phase}</Badge>
       </div>
       {detail !== null ? <p className="world-card-path">{detail}</p> : null}
+      {counts !== undefined ?
+        (
+          <p className="world-card-path">
+            {`refs ${counts.refs.done} of ${counts.refs.total} · objects ${counts.objects.done} of ${counts.objects.total} · issues ${counts.issues.done} of ${counts.issues.total}`}
+          </p>
+        ) :
+        null}
       {jobId !== null ? <p className="world-card-path">job {jobId}</p> : null}
+      {phase === "done" && repository != null ?
+        <p className="world-card-path">{`${repository.owner}/${repository.name}`}</p> :
+        null}
+      {phase === "done" && workspaceId != null ?
+        (
+          <div className="world-card-row">
+            <Button
+              size="sm"
+              variant="outline"
+              data-flow="workspace.view"
+              onClick={() => onRunCommand("workspace.view", workspaceId)}
+            >
+              Open the workspace
+            </Button>
+          </div>
+        ) :
+        null}
+      {rateLimit !== undefined ? <RateLimitLine rateLimit={rateLimit} /> : null}
       {phase === "failed" ?
         (
           <div className="world-card-row">
             <Button
               size="sm"
               variant="outline"
-              data-flow="repos.import"
-              onClick={() => onRunCommand("repos.import", repo)}
+              data-flow={jobId !== null ? "repos.import.retry" : "repos.import"}
+              onClick={() => (jobId !== null ? onRunCommand("repos.import.retry", jobId) : onRunCommand("repos.import", repo))}
             >
               <RefreshCw size={14} /> Try again
             </Button>

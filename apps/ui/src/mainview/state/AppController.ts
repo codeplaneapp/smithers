@@ -39,8 +39,8 @@ import { createWorkflowPumpController } from "./controller/workflow-pump"
 import { createWorkflowController, type WorkflowController } from "./controller/workflows"
 import { createRunsController, type RunsController } from "./controller/runs"
 import { createWorldController } from "./controller/world"
-import { createAppStatusSeam } from "./seams/AppStatusSeam"
-import type { AppStatusSeam } from "./seams/AppStatusSeam"
+import { createGitHubSeam } from "./seams/GitHubSeam"
+import type { GitHubSeam } from "./seams/GitHubSeam"
 import { createBillingSeam } from "./seams/BillingSeam"
 import type { BillingSeam } from "./seams/BillingSeam"
 import { createBookmarksSeam } from "./seams/BookmarksSeam"
@@ -66,6 +66,8 @@ import { createChangeSeam } from "./seams/ChangeSeam"
 import type { ChangeSeam } from "./seams/ChangeSeam"
 import type { RepositoriesSeam } from "./seams/RepositoriesSeam"
 import { createRepoImportSeam } from "./seams/RepoImportSeam"
+import { createLinearSeam } from "./seams/LinearSeam"
+import type { LinearSeam } from "./seams/LinearSeam"
 import type { RepoImportSeam } from "./seams/RepoImportSeam"
 import type { SeamContext } from "./seams/SeamContext"
 
@@ -288,6 +290,8 @@ export interface AppController {
   readonly createIssue: IssuesSeam["createIssue"]
   readonly setIssueState: IssuesSeam["setIssueState"]
   readonly commentOnIssue: IssuesSeam["commentOnIssue"]
+  readonly linkIssueLinear: IssuesSeam["linkLinear"]
+  readonly unlinkIssueLinear: IssuesSeam["unlinkLinear"]
   readonly listLandings: LandingsSeam["listLandings"]
   readonly viewLanding: LandingsSeam["viewLanding"]
   readonly createLanding: LandingsSeam["createLanding"]
@@ -302,10 +306,30 @@ export interface AppController {
   readonly viewEnvironment: EnvironmentSeam["viewEnvironment"]
   readonly setEnvironmentVar: EnvironmentSeam["setEnvironmentVar"]
   readonly importRepository: RepoImportSeam["importRepository"]
+  readonly retryImport: RepoImportSeam["retryImport"]
   readonly listBookmarks: BookmarksSeam["listBookmarks"]
   readonly listFiles: FilesSeam["listFiles"]
   readonly readFile: FilesSeam["readFile"]
-  readonly checkGitHubApp: AppStatusSeam["checkGitHubApp"]
+  /*
+   * Lane sync (ADR 0005): Linear and GitHub sync as actions — the
+   * connector-setup cards, the sync-ops card, and the GitHub App status
+   * behind the `/api/cloud/*` proxy (state/seams/LinearSeam.ts,
+   * GitHubSeam.ts).
+   */
+  readonly linearConnect: LinearSeam["connect"]
+  readonly linearConnectOpen: LinearSeam["openLinear"]
+  readonly linearConnectTeam: LinearSeam["pickTeam"]
+  readonly linearConnectRepo: LinearSeam["pickRepository"]
+  readonly linearConnectConfirm: LinearSeam["confirmConnect"]
+  readonly linearSync: LinearSeam["syncNow"]
+  readonly linearActivity: LinearSeam["activity"]
+  readonly linearDisconnect: LinearSeam["disconnect"]
+  readonly retrySyncOp: LinearSeam["retryOp"]
+  readonly showMoreSyncOps: LinearSeam["showMoreOps"]
+  readonly githubApp: GitHubSeam["app"]
+  readonly githubOpenInstall: GitHubSeam["openInstall"]
+  readonly githubReconcile: GitHubSeam["reconcile"]
+  readonly githubMirrorSync: GitHubSeam["mirrorSync"]
   /*
    * Lane piper: the jjhub Cloud session (the CLI browser login; the token
    * never reaches the renderer) and the repository inventory behind the
@@ -488,7 +512,17 @@ export const createAppController = (
   const repoImportSeam = createRepoImportSeam(seamCtx)
   const bookmarksSeam = createBookmarksSeam(seamCtx)
   const filesSeam = createFilesSeam(seamCtx)
-  const appStatusSeam = createAppStatusSeam(seamCtx)
+  /*
+   * Lane sync: the Linear and GitHub seams. The OAuth handoffs ride the
+   * same native openExternal door as cloud sign-in; the Linear handoff's
+   * receiver is the Bun server's /api/linear-auth/* (bun/LinearAuth.ts).
+   */
+  const gitHubSeam = createGitHubSeam(seamCtx, {
+    ...(services.openExternal === undefined ? {} : { openExternal: services.openExternal })
+  })
+  const linearSeam = createLinearSeam(seamCtx, {
+    ...(services.openExternal === undefined ? {} : { openExternal: services.openExternal })
+  })
   /*
    * Lane piper: the cloud session and inventory seams. A definitive
    * signed-in answer pulls the repository inventory; sign-in does the same
@@ -507,6 +541,8 @@ export const createAppController = (
     if (store.collections.cloudSessions.get("cloud")?.state === "signed-in") {
       void repositoriesSeam.loadRepositories()
       void workspaceSeam.refreshWorkspaces()
+      /* Lane sync: the integrations the Connectors surface's Linear row reads. */
+      void linearSeam.refreshIntegrations()
     }
   }
   const loadCloudSession = async (): Promise<void> => {
@@ -971,6 +1007,8 @@ export const createAppController = (
     createIssue: issuesSeam.createIssue,
     setIssueState: issuesSeam.setIssueState,
     commentOnIssue: issuesSeam.commentOnIssue,
+    linkIssueLinear: issuesSeam.linkLinear,
+    unlinkIssueLinear: issuesSeam.unlinkLinear,
     listLandings: landingsSeam.listLandings,
     viewLanding: landingsSeam.viewLanding,
     createLanding: landingsSeam.createLanding,
@@ -985,10 +1023,24 @@ export const createAppController = (
     viewEnvironment: environmentSeam.viewEnvironment,
     setEnvironmentVar: environmentSeam.setEnvironmentVar,
     importRepository: repoImportSeam.importRepository,
+    retryImport: repoImportSeam.retryImport,
     listBookmarks: bookmarksSeam.listBookmarks,
     listFiles: filesSeam.listFiles,
     readFile: filesSeam.readFile,
-    checkGitHubApp: appStatusSeam.checkGitHubApp,
+    linearConnect: linearSeam.connect,
+    linearConnectOpen: linearSeam.openLinear,
+    linearConnectTeam: linearSeam.pickTeam,
+    linearConnectRepo: linearSeam.pickRepository,
+    linearConnectConfirm: linearSeam.confirmConnect,
+    linearSync: linearSeam.syncNow,
+    linearActivity: linearSeam.activity,
+    linearDisconnect: linearSeam.disconnect,
+    retrySyncOp: linearSeam.retryOp,
+    showMoreSyncOps: linearSeam.showMoreOps,
+    githubApp: gitHubSeam.app,
+    githubOpenInstall: gitHubSeam.openInstall,
+    githubReconcile: gitHubSeam.reconcile,
+    githubMirrorSync: gitHubSeam.mirrorSync,
     loadCloudSession,
     signInCloud,
     signOutCloud: cloudSeam.signOut,
@@ -1219,6 +1271,8 @@ export const createAppController = (
     createIssue: issuesSeam.createIssue,
     setIssueState: issuesSeam.setIssueState,
     commentOnIssue: issuesSeam.commentOnIssue,
+    linkIssueLinear: issuesSeam.linkLinear,
+    unlinkIssueLinear: issuesSeam.unlinkLinear,
     listLandings: landingsSeam.listLandings,
     viewLanding: landingsSeam.viewLanding,
     createLanding: landingsSeam.createLanding,
@@ -1233,10 +1287,24 @@ export const createAppController = (
     viewEnvironment: environmentSeam.viewEnvironment,
     setEnvironmentVar: environmentSeam.setEnvironmentVar,
     importRepository: repoImportSeam.importRepository,
+    retryImport: repoImportSeam.retryImport,
     listBookmarks: bookmarksSeam.listBookmarks,
     listFiles: filesSeam.listFiles,
     readFile: filesSeam.readFile,
-    checkGitHubApp: appStatusSeam.checkGitHubApp,
+    linearConnect: linearSeam.connect,
+    linearConnectOpen: linearSeam.openLinear,
+    linearConnectTeam: linearSeam.pickTeam,
+    linearConnectRepo: linearSeam.pickRepository,
+    linearConnectConfirm: linearSeam.confirmConnect,
+    linearSync: linearSeam.syncNow,
+    linearActivity: linearSeam.activity,
+    linearDisconnect: linearSeam.disconnect,
+    retrySyncOp: linearSeam.retryOp,
+    showMoreSyncOps: linearSeam.showMoreOps,
+    githubApp: gitHubSeam.app,
+    githubOpenInstall: gitHubSeam.openInstall,
+    githubReconcile: gitHubSeam.reconcile,
+    githubMirrorSync: gitHubSeam.mirrorSync,
     loadCloudSession,
     signInCloud,
     signOutCloud: cloudSeam.signOut,

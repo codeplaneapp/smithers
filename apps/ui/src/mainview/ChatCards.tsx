@@ -35,6 +35,7 @@ import { KeysCardBody } from "./cards/KeysCard"
 import { LandingCardBody, LandingListCardBody } from "./cards/LandingCards"
 import { NotificationsCardBody } from "./cards/NotificationsCard"
 import { RepoImportCardBody } from "./cards/RepoImportCard"
+import { ConnectorSetupCardBody, SyncOpsCardBody } from "./cards/SyncCards"
 import { RunHistoryCardBody } from "./cards/RunHistoryCard"
 import { RunTimelineCardBody } from "./cards/RunTimelineCard"
 import { RepoPluginCardBody } from "./cards/RepoPluginCard"
@@ -112,6 +113,16 @@ const pillStatus = (card: Card): string => {
     if (card.payload.phase === "done") return "done"
     if (card.payload.phase === "failed") return "failed"
     return "running"
+  }
+  /* Lane sync (ADR 0005): the wizard runs, the connected state settles. */
+  if (card.kind === "connector-setup") {
+    if (card.payload.error !== undefined) return "failed"
+    return card.payload.phase === "connected" ? "done" : "running"
+  }
+  if (card.kind === "sync-ops") {
+    if (card.payload.error !== undefined) return "failed"
+    if (card.payload.runState === "failed") return "failed"
+    return card.payload.runState === "running" ? "running" : "done"
   }
   if (
     card.kind === "issue-list" ||
@@ -1089,6 +1100,8 @@ export function CardView({
           {card.kind === "notifications" ? <NotificationsCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "env" ? <EnvCardBody card={card} /> : null}
           {card.kind === "repo-import" ? <RepoImportCardBody card={card} onRunCommand={onRunCommand} /> : null}
+          {card.kind === "connector-setup" ? <ConnectorSetupCardBody card={card} onRunCommand={onRunCommand} /> : null}
+          {card.kind === "sync-ops" ? <SyncOpsCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "branches" ? <BranchesCardBody card={card} /> : null}
           {card.kind === "file-list" ? <FileListCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "file" ? <FileCardBody card={card} onRunCommand={onRunCommand} /> : null}

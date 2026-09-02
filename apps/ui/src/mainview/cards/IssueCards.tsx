@@ -8,6 +8,7 @@
  */
 import { Badge, Button, Markdown } from "@smthrs/ui"
 import { MessageSquare } from "lucide-react"
+import { useController } from "../ControllerContext"
 import type { Card } from "../state/AppState"
 
 export interface IssueCardActions {
@@ -24,6 +25,15 @@ export const IssueListCardBody = ({
   onRunCommand
 }: { readonly card: Extract<Card, { kind: "issue-list" }> } & IssueCardActions) => (
   <ul className="world-card-list">
+    {card.payload.github !== undefined ?
+      (
+        <li className="world-card-path">
+          {card.payload.github.refusal !== null
+            ? `GitHub: ${card.payload.github.refusal}`
+            : `GitHub · ${card.payload.github.source}${card.payload.github.syncedAt !== null ? ` · synced ${dateLabel(card.payload.github.syncedAt)}` : ""}${card.payload.github.stale ? " · stale" : ""}${card.payload.github.syncError !== null ? ` · sync error: ${card.payload.github.syncError}` : ""}`}
+        </li>
+      ) :
+      null}
     {card.payload.issues.length === 0 ?
       (
         <li className="world-card-empty">
@@ -46,6 +56,7 @@ export const IssueListCardBody = ({
               </span>
             </Button>
             {stateBadge(issue.state)}
+            {issue.source === "github" ? <span className="world-card-path">GitHub</span> : null}
             <span className="world-card-path">
               <MessageSquare size={12} aria-hidden="true" /> {issue.comments}
             </span>
@@ -60,8 +71,9 @@ export const IssueCardBody = ({
   card,
   onRunCommand
 }: { readonly card: Extract<Card, { kind: "issue" }> } & IssueCardActions) => {
-  const { repo, number, title, state, author, issueBody, labels, comments } = card.payload
+  const { repo, number, title, state, author, issueBody, labels, comments, linear } = card.payload
   const toggleCommand = state === "open" ? "issues.close" : "issues.reopen"
+  const controller = useController()
   return (
     <div className="world-card-list">
       <div className="world-card-row">
@@ -74,6 +86,25 @@ export const IssueCardBody = ({
         {repo}
         {author !== null ? ` · opened by ${author}` : ""}
       </p>
+      {/* Lane sync (ADR 0005): the Linear link the DTO carries, or the act that would set it. */}
+      {linear != null ?
+        (
+          <p className="world-card-path">
+            Linear <a href={linear.url} target="_blank" rel="noreferrer">{linear.identifier}</a>
+          </p>
+        ) :
+        (
+          <div className="world-card-row">
+            <Button
+              variant="ghost"
+              size="sm"
+              data-flow="issues.link-linear"
+              onClick={() => controller.changeDraft(`/issues.link-linear ${number} `)}
+            >
+              Link to Linear…
+            </Button>
+          </div>
+        )}
       {labels.length > 0 ?
         (
           <div className="world-card-row">
