@@ -135,6 +135,29 @@ export interface Declared<
   readonly call: (
     payload: PlannedPayload<Payload["~type.make.in"]>
   ) => Node.Node<Success["Type"], Error["Type"], Requires>
+  /**
+   * Attaches the implementation and yields the layer that provides this
+   * declaration's {@link Requirement}.
+   *
+   * Let inference name the returned layer's requirements. The requirement
+   * channel is what a composition trusts: a layer type that under-declares it
+   * still typechecks at `Effect.provide` and dies at runtime as a missing
+   * service. A concrete hand annotation cannot lie — dropping a service from
+   * it is a compile error — but a GENERIC one can: when the annotated
+   * requirement union keeps a deferred member such as
+   * `Output["DecodingServices"]` (constrained only as `unknown` through
+   * `Schema.Top`), TypeScript lets that member absorb every concrete service
+   * the annotation dropped, and the drop compiles. A wrapper that must
+   * annotate — a public interface naming its layer's type, say — therefore
+   * pins the set at a concrete instantiation, where the check works again:
+   *
+   * ```ts
+   * // Wrapped.layer is the wrapper's hand-annotated toLayer result, held
+   * // here with every schema argument concrete.
+   * type Needed = Layer.Services<typeof Wrapped.layer>
+   * expectTypeOf<Meter extends Needed ? true : false>().toEqualTypeOf<true>()
+   * ```
+   */
   readonly toLayer: <R>(
     execute: (payload: Payload["Type"]) => Effect.Effect<Success["Type"], Error["Type"], R>
   ) => Layer.Layer<

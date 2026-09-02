@@ -403,3 +403,47 @@ describe("toLayer provides the requirement it mints", () => {
       expect(provided.name).toBe("requirement/audit")
     }))
 })
+
+describe("a hand annotation on a toLayer result", () => {
+  // The requirement channel is only as honest as its annotation: a layer type
+  // that under-declares still typechecks at Effect.provide and dies at
+  // runtime as a missing service. Never invoked — every assertion here is
+  // about what compiles.
+  const chargeNeedingCrypto: (
+    payload: { readonly cents: number }
+  ) => Effect.Effect<number, string, Crypto.Crypto> = () => Effect.die("type-only witness")
+
+  it("cannot drop a requirement while every member is concrete", () => {
+    const dropped = (): Layer.Layer<ChargeNeeded, never, FlowRuntime.FlowRuntime> =>
+      // @ts-expect-error the implementation also needs Crypto.Crypto
+      Charge.toLayer(chargeNeedingCrypto)
+
+    expectTypeOf(dropped).toBeFunction()
+  })
+
+  it("CAN drop one behind a deferred schema member, so generic wrappers pin concretely", () => {
+    // The witness: the same drop compiles once the annotated union keeps
+    // `Output["DecodingServices"]`, a deferred indexed access constrained only
+    // as `unknown` through `Schema.Top` — TypeScript lets it absorb any
+    // concrete service the annotation lost. This is the caveat documented on
+    // `Action.Declared.toLayer`; if a TypeScript upgrade starts refusing the
+    // witness, delete this case and that caveat together.
+    const witness = <Output extends Schema.Top>(
+      _output: Output
+    ): Layer.Layer<ChargeNeeded, never, FlowRuntime.FlowRuntime | Output["DecodingServices"]> =>
+      Charge.toLayer(chargeNeedingCrypto)
+
+    // What the lie costs: at a concrete instantiation the layer's type no
+    // longer names Crypto.Crypto, though the implementation still needs it.
+    const annotated = () => witness(Schema.String)
+    type Annotated = Layer.Services<ReturnType<typeof annotated>>
+    expectTypeOf<Crypto.Crypto extends Annotated ? true : false>().toEqualTypeOf<false>()
+
+    // The recipe: a wrapper that must annotate pins its requirement set where
+    // the schema arguments are concrete, and membership checks work again.
+    const inferred = () => Charge.toLayer(chargeNeedingCrypto)
+    type Inferred = Layer.Services<ReturnType<typeof inferred>>
+    expectTypeOf<Crypto.Crypto extends Inferred ? true : false>().toEqualTypeOf<true>()
+    expectTypeOf<FlowRuntime.FlowRuntime extends Inferred ? true : false>().toEqualTypeOf<true>()
+  })
+})
