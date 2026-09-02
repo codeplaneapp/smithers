@@ -15,8 +15,8 @@ import * as RpcClient from "effect/unstable/rpc/RpcClient"
 import type * as RpcClientError from "effect/unstable/rpc/RpcClientError"
 import type * as RpcGroup from "effect/unstable/rpc/RpcGroup"
 import type { ShareCapability } from "./BranchProtocol.ts"
-import { causeText } from "./internal/causeText.ts"
-import { positiveInt } from "./internal/options.ts"
+import { boundedText, causeText } from "./internal/causeText.ts"
+import { boundedInt, positiveInt } from "./internal/options.ts"
 import { SyncError, SyncGapError } from "./SyncError.ts"
 import {
   covers,
@@ -24,6 +24,8 @@ import {
   duplicateCursorRunId,
   encodedByteLength,
   type EntriesFrame,
+  maxReadLimit,
+  maxSubscribeCredit,
   type ReadResponse,
   type Resync,
   type Scope,
@@ -163,7 +165,10 @@ const transportError = (cause: unknown): SyncError =>
     ? cause
     : new SyncError({
       code: "transport_failed",
-      message: cause instanceof Error ? cause.message : "Sync RPC transport failed",
+      // Bounded like `cause`. `message` is `Schema.String` and it is the
+      // declared error schema of every RPC, so a host's own sentence must not
+      // be able to be the largest thing this error carries.
+      message: cause instanceof Error ? boundedText(cause.message) : "Sync RPC transport failed",
       cause: causeText(cause)
     })
 
@@ -376,9 +381,19 @@ export const make = ({
         // Every policy this subscription runs under is checked once, here.
         // The declared types say `number`, and `NaN` disabled each comparison
         // it appears in rather than tightening it.
-        const credit = yield* positiveInt("SyncClient.SubscribeOptions.credit", options.credit, defaultCredit)
+        const credit = yield* boundedInt(
+          "SyncClient.SubscribeOptions.credit",
+          options.credit,
+          defaultCredit,
+          maxSubscribeCredit
+        )
         yield* positiveInt("SyncClient.make.maxFrameBytes", maxFrameBytes, defaultMaxFrameBytes)
-        yield* positiveInt("SyncClient.make.bootstrapLimit", bootstrapLimit, defaultBootstrapLimit)
+        yield* boundedInt(
+          "SyncClient.make.bootstrapLimit",
+          bootstrapLimit,
+          defaultBootstrapLimit,
+          maxReadLimit
+        )
         const cursor = cursorMap(options.cursors)
         // The contract: the effective cursor is `max(caller, acknowledged)`
         // per run. The shared map used to win in BOTH directions, which broke
@@ -418,19 +433,26 @@ export const make = ({
          * one it moves as the entry is admitted, which is the weaker promise
          * this client has always made and the one `RunCursor`'s JSDoc now
          * states.
+         *
+         * The position committed is SNAPSHOTTED before the callback runs.
+         * `Entry` is a `Schema.Class`, and instances are not frozen, so
+         * reading `entry.seq` again afterwards let the consumer's own callback
+         * choose the cursor it was being handed an entry for.
          */
         const deliver = (
           runId: JournalEvent.RunId,
           entry: JournalEvent.Entry
-        ): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
-          Stream.concat(
+        ): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> => {
+          const through = entry.seq
+          return Stream.concat(
             Stream.drain(Stream.fromEffect(
               applyEntry === undefined
-                ? commit(runId, entry.seq)
-                : Effect.andThen(applyEntry(entry), commit(runId, entry.seq))
+                ? commit(runId, through)
+                : Effect.andThen(applyEntry(entry), commit(runId, through))
             )),
             Stream.succeed(entry)
           )
+        }
 
         const batch = (frame: EntriesFrame): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> => {
           const frameBytes = entriesByteLength(frame.entries)
@@ -588,6 +610,12 @@ export const make = ({
           Stream.catch(bootstrap(), (failure) => {
             const resync = resyncTarget(failure)
             if (resync === undefined) return Stream.fail(failure)
+            // Snapshotted before the hook runs, for the reason `deliver`
+            // snapshots: the hook is handed the value the commit is read from,
+            // and re-reading it afterwards let a consumer move its own cursor
+            // arbitrarily far forward from inside the callback.
+            const runId = resync.runId
+            const checkpointSeq = resync.checkpointSeq
             return Stream.unwrap(
               // The consumer's hook runs FIRST and must succeed. It is the
               // only point at which a projection can restore the prefix the
@@ -597,7 +625,7 @@ export const make = ({
               onResync(resync).pipe(
                 // The cursor must move BEFORE the restart reads it: the
                 // bootstrap snapshots the cursors as it is issued.
-                Effect.andThen(commit(resync.runId, resync.checkpointSeq)),
+                Effect.andThen(commit(runId, checkpointSeq)),
                 Effect.map(resynced)
               )
             )

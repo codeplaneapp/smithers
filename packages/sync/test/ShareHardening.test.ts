@@ -7,12 +7,13 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import type { JournalEvent } from "@smthrs/journal"
-import { Effect, Exit, Fiber, Layer, Redacted } from "effect"
+import { Effect, Fiber, Layer, Redacted } from "effect"
 import { TestClock } from "effect/testing"
 import { branchOfRunId, branchRunId, ShareCapability, ShareClaims } from "../src/BranchProtocol.ts"
 import * as BranchShare from "../src/BranchShare.ts"
 import { SyncError } from "../src/SyncError.ts"
 import * as WorkspaceShare from "../src/WorkspaceShare.ts"
+import { died, refusalOf } from "./refusal.ts"
 
 const secret = "shared-hardening-secret"
 const branchId = "branch-hardening" as ShareClaims["branchId"]
@@ -161,7 +162,16 @@ describe("share verification under concurrent mutation", () => {
         })
       )
 
-      expect(Exit.isFailure(outcome)).toBe(true)
+      // The REASON is the point. Without the entry snapshot the widened
+      // `access` is what the authorization check reads, and `verify` succeeds;
+      // with it the check reads "read" and refuses for exactly that. Asserting
+      // only that it failed would also pass on a signature mismatch or a
+      // defect, neither of which is what this test is about.
+      const refusal = refusalOf(outcome)
+      expect(died(outcome)).toBe(false)
+      expect(SyncError.is(refusal)).toBe(true)
+      expect(refusal?.code).toBe("unauthorized")
+      expect(refusal?.message).toBe("The share capability is read-only")
     }))
 })
 

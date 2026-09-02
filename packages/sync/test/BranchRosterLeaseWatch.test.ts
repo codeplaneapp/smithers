@@ -11,7 +11,7 @@ import * as Socket from "effect/unstable/socket/Socket"
 import * as BranchCommands from "../src/BranchCommands.ts"
 import * as BranchIds from "../src/BranchIds.ts"
 import * as BranchPresence from "../src/BranchPresence.ts"
-import type { BranchId, ParticipantId } from "../src/BranchProtocol.ts"
+import { type BranchId, Participant, type ParticipantId } from "../src/BranchProtocol.ts"
 import * as BranchRpcs from "../src/BranchRpcs.ts"
 import * as BranchServer from "../src/BranchServer.ts"
 import * as BranchShare from "../src/BranchShare.ts"
@@ -258,5 +258,124 @@ describe("Branch.WatchRoster lease propagation", () => {
 
       expect(rosters).toContainEqual([])
       expect(rosters).toContainEqual([alice])
+    }))
+  // The comparison used to join a participant's fields on a control byte, and
+  // `ParticipantId` and `displayName` are `NonEmptyString` with no charset
+  // constraint: two rosters differing only in where the field boundary falls
+  // rendered identically, so the watch called a real change no change. The
+  // roster is scripted here because the interleaving that reaches it is the
+  // one where a leave and an announce are both applied before the re-list
+  // either of them drove, and the watcher therefore never sees the empty
+  // roster between them.
+  it.live("emits a roster whose fields differ only in where the boundary falls", () =>
+    Effect.gen(function*() {
+      const split = "p\u0000q" as ParticipantId
+      const whole = "p" as ParticipantId
+      const branchId = "roster-boundary" as BranchId
+      const participant = (participantId: ParticipantId, displayName: string) =>
+        new Participant({ branchId, participantId, displayName, cursor: null, leaseExpiresAtMs: 1_000 })
+      const scripted: Array<ReadonlyArray<Participant>> = [
+        [participant(split, "d")],
+        [participant(whole, "q\u0000d")]
+      ]
+      const rosters = yield* Effect.gen(function*() {
+        let lists = 0
+        const presence = BranchPresence.make({
+          ...BranchPresence.makeNoop(),
+          leaseMs: 600_000,
+          changes: Stream.make(branchId),
+          list: () =>
+            Effect.sync(() => {
+              const roster = scripted[Math.min(lists, scripted.length - 1)] ?? []
+              lists += 1
+              return roster
+            })
+        })
+        const pair = yield* TestSocket.makePair()
+        const client = yield* connect(pair, presence)
+        const share = yield* BranchShare.BranchShare
+        const capability = yield* share.mint({
+          branchId,
+          capabilityId: "roster-boundary-capability",
+          access: "write",
+          ttlMs: 600_000
+        })
+        return Array.from(
+          yield* Stream.runCollect(
+            Stream.take(client["Branch.WatchRoster"]({ capability, branchId }), 2)
+          ),
+          (frame) => frame.participants.map((entry) => entry.participantId)
+        )
+      }).pipe(Effect.provide(base), Effect.scoped, Effect.timeoutOption("5 seconds"))
+
+      expect(rosters._tag).toBe("Some")
+      expect(rosters._tag === "Some" ? rosters.value : []).toEqual([[split], [whole]])
+    }))
+
+  // `changesWith` used to wrap only the change half, so its first value always
+  // passed: a change that left the roster identical sent the watcher a second
+  // copy of what the initial emission had just given it.
+  it.effect("does not repeat the initial roster when a change leaves it identical", () =>
+    Effect.gen(function*() {
+      const rosters = yield* program(
+        Effect.gen(function*() {
+          const memory = yield* BranchPresence.makeMemory({ leaseMs })
+          const listedAgain = yield* Deferred.make<void>()
+          let lists = 0
+          // The re-list a change drives has to COMPLETE before the next change
+          // is published, or the two collapse into one list and the case
+          // proves nothing either way.
+          const controlled = BranchPresence.make({
+            ...memory,
+            list: (request) =>
+              Effect.gen(function*() {
+                const roster = yield* memory.list(request)
+                lists += 1
+                if (lists === 2) yield* Deferred.succeed(listedAgain, undefined)
+                return roster
+              })
+          })
+          const pair = yield* TestSocket.makePair()
+          const client = yield* connect(pair, controlled)
+          const share = yield* BranchShare.BranchShare
+          const branchId = "roster-initial" as BranchId
+          const capability = yield* share.mint({
+            branchId,
+            capabilityId: "roster-initial-capability",
+            access: "write",
+            ttlMs: 600_000
+          })
+          const announce = (participantId: ParticipantId, displayName: string) =>
+            client["Branch.Announce"]({ capability, branchId, participantId, displayName, cursor: null })
+          yield* announce(alice, "Alice")
+
+          const initial = yield* Deferred.make<void>()
+          let emissions = 0
+          const watched = yield* Stream.runCollect(
+            Stream.take(
+              client["Branch.WatchRoster"]({ capability, branchId }).pipe(
+                Stream.tap(() => {
+                  emissions += 1
+                  return emissions === 1 ? Deferred.succeed(initial, undefined) : Effect.void
+                })
+              ),
+              2
+            )
+          ).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(initial)
+          // The clock does not move, so alice's lease is unchanged and this
+          // re-announcement leaves the roster exactly as the watcher has it.
+          yield* announce(alice, "Alice")
+          yield* Deferred.await(listedAgain)
+          // A real change, which is what the SECOND emission must be.
+          yield* announce(bob, "Bob")
+          return Array.from(
+            yield* Fiber.join(watched),
+            (frame) => frame.participants.map((participant) => participant.participantId)
+          )
+        })
+      )
+
+      expect(rosters).toEqual([[alice], [alice, bob]])
     }))
 })

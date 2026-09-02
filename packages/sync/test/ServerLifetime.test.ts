@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Journal, JournalEvent } from "@smthrs/journal"
-import { Effect, Fiber, Layer, Redacted, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Redacted, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import * as BranchProtocol from "../src/BranchProtocol.ts"
 import * as BranchShare from "../src/BranchShare.ts"
@@ -42,6 +42,12 @@ describe("subscription lifetime", () => {
   // it declined to disconnect, and a quiet stream never re-authorized at all.
   it.effect("ends a branch subscription with unauthorized when its capability expires", () =>
     Effect.gen(function*() {
+      // Opening the subscription verifies the capability through Web Crypto,
+      // which is asynchronous. Advancing the clock before that resolves would
+      // test the OPENING refusal instead of the expiry of an open stream, so
+      // the journal stream reports when it is attached and the clock does not
+      // move until then.
+      const attached = yield* Deferred.make<void>()
       const failure = yield* (
         Effect.gen(function*() {
           const share = yield* BranchShare.BranchShare
@@ -65,6 +71,7 @@ describe("subscription lifetime", () => {
             ),
             { startImmediately: true }
           )
+          yield* Deferred.await(attached)
           // The stream is quiet: nothing arrives, nothing is acknowledged, and
           // the only thing that can end it is the expiry.
           yield* TestClock.adjust("2 seconds")
@@ -72,7 +79,9 @@ describe("subscription lifetime", () => {
         }).pipe(
           Effect.provide(
             Layer.mergeAll(
-              Journal.layerNoop({ stream: () => Stream.never }),
+              Journal.layerNoop({
+                stream: () => Stream.onStart(Stream.never, Deferred.succeed(attached, undefined))
+              }),
               RunCatalog.layerStatic([branchRun]),
               shareLayer
             )
@@ -151,6 +160,84 @@ describe("subscription lifetime", () => {
       )
 
       expect((failure as SyncError).code).toBe("unauthorized")
+    }))
+
+  // A workspace subscription discovers runs AFTER it opens: reconciliation
+  // admits a branch the catalog names later, under a capability whose expiry
+  // was not part of the deadline the subscription opened with. Reducing that
+  // admission to a yes threw the expiry away, so a branch found this way
+  // streamed for as long as the subscription lived: the exact revocation hole
+  // the deadline exists to close, reached by the one door still open.
+  it.live("ends a subscription when a branch admitted after it opened expires", () =>
+    Effect.gen(function*() {
+      const listed = new Set<JournalEvent.RunId>()
+      const served: Array<string> = []
+      const outcome = yield* (
+        Effect.gen(function*() {
+          const share = yield* BranchShare.BranchShare
+          const capability = yield* share.mint({
+            access: "read",
+            branchId,
+            capabilityId: "late-cap",
+            ttlMs: 2_000
+          })
+          const server = yield* SyncServer.makeLiveWith({ tailIntervalMs: 25 })
+          const following = yield* Effect.forkChild(
+            Effect.flip(
+              Stream.runDrain(
+                Stream.tap(
+                  server.subscribe({
+                    capability,
+                    credit: 4096,
+                    cursors: [],
+                    scope: { _tag: "Workspace" }
+                  }),
+                  (frame) =>
+                    Effect.sync(() => {
+                      if (frame._tag === "Entries") {
+                        for (const value of frame.entries) served.push(`${value.runId}:${value.seq}`)
+                      }
+                    })
+                )
+              )
+            ),
+            { startImmediately: true }
+          )
+          // The branch appears while the subscription is live and inside its
+          // capability's window, so reconciliation is what admits it and the
+          // next round serves it.
+          listed.add(branchRun)
+          yield* Effect.sleep("500 millis")
+          const inWindow = [...served]
+          // Now past the capability's own expiry.
+          return [inWindow, yield* Fiber.join(following)] as const
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              Journal.layerNoop({
+                entries: ({ runId }) => Effect.succeed({ entries: [entry(runId, 0)], hasMore: false })
+              }),
+              Layer.succeed(
+                RunCatalog.RunCatalog,
+                RunCatalog.make({ changes: Stream.empty, list: Effect.sync(() => Array.from(listed)) })
+              ),
+              shareLayer,
+              SyncPrincipal.layerWorkspace("late-branch-owner")
+            )
+          ),
+          Effect.scoped,
+          Effect.timeoutOption("10 seconds")
+        )
+      )
+
+      expect(outcome._tag).toBe("Some")
+      const [inWindow, failure] = outcome._tag === "Some" ? outcome.value : [[], undefined]
+      // The branch WAS served inside its window, so the case is about expiry
+      // and not about the run never becoming visible.
+      expect(inWindow).toContain(`${branchRun}:0`)
+      expect(failure !== undefined && SyncError.is(failure)).toBe(true)
+      expect((failure as SyncError).code).toBe("unauthorized")
+      expect((failure as SyncError).message).toContain("expired")
     }))
 })
 

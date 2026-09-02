@@ -37,3 +37,32 @@ export const positiveInt = (
     })
   )
 }
+
+/**
+ * {@link positiveInt} plus a ceiling, for a policy the WIRE also bounds.
+ *
+ * A value the local schema would accept and the wire schema would refuse is
+ * not a transport failure, but that is what it looked like: the RPC client's
+ * own decode failure arrived through the same channel a dropped connection
+ * does, and the follow retried it under backoff forever. The refusal belongs
+ * here, before a request is built.
+ *
+ * @category validation
+ * @since 1.0.0-rc.0
+ */
+export const boundedInt = (
+  name: string,
+  value: number | undefined,
+  fallback: number,
+  maximum: number
+): Effect.Effect<number, SyncError> =>
+  Effect.flatMap(
+    positiveInt(name, value, fallback),
+    (accepted) =>
+      accepted <= maximum ? Effect.succeed(accepted) : Effect.fail(
+        new SyncError({
+          code: "invalid_request",
+          message: `${name} must be at most ${maximum}, not ${accepted}`
+        })
+      )
+  )

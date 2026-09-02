@@ -1,5 +1,6 @@
 /**
- * The bounded, transport-safe rendering of a host failure.
+ * How a host failure crosses the sync boundary: what a follower is told about
+ * it, and what it is not.
  *
  * `SyncError.cause` crosses the wire to a follower that may hold nothing but a
  * branch share link, so it carries a short string rather than the host object
@@ -19,6 +20,19 @@
 const maxCauseTextLength = 512
 
 /**
+ * Clamps one rendering to {@link maxCauseTextLength}.
+ *
+ * Every string this module produces leaves through here, and so does every
+ * other string a `SyncError` carries out of a host failure: `message` is
+ * `Schema.String` and is as unbounded as `cause` was.
+ *
+ * @category encoding
+ * @since 1.0.0-rc.0
+ */
+export const boundedText = (text: string): string =>
+  text.length <= maxCauseTextLength ? text : `${text.slice(0, maxCauseTextLength)} (truncated)`
+
+/**
  * Renders one host failure as a bounded string.
  *
  * An `Error` renders as `name: message`; anything else renders as its type
@@ -29,12 +43,10 @@ const maxCauseTextLength = 512
  * @category encoding
  * @since 1.0.0-rc.0
  */
-export const causeText = (cause: unknown): string => {
-  const text = cause instanceof Error
-    ? `${cause.name}: ${cause.message}`
-    : Object.prototype.toString.call(cause)
-  return text.length <= maxCauseTextLength ? text : `${text.slice(0, maxCauseTextLength)} (truncated)`
-}
+export const causeText = (cause: unknown): string =>
+  boundedText(
+    cause instanceof Error ? `${cause.name}: ${cause.message}` : Object.prototype.toString.call(cause)
+  )
 
 /**
  * Renders one failure as its TYPE alone, with no message.
@@ -46,13 +58,57 @@ export const causeText = (cause: unknown): string => {
  * driver wrote. `decodeCapability` already refuses to be a parsing oracle;
  * this is the same rule for the read and write paths.
  *
+ * The result is bounded like {@link causeText}: a `Journal` is a host seam, so
+ * the `name` and `code` this reads are as much the host's to choose as the
+ * message it refuses to publish.
+ *
  * @category encoding
  * @since 1.0.0-rc.0
  */
 export const causeCode = (cause: unknown): string => {
   if (cause instanceof Error) {
     const code = (cause as { readonly code?: unknown }).code
-    return typeof code === "string" ? `${cause.name}(${code})` : cause.name
+    return boundedText(typeof code === "string" ? `${cause.name}(${code})` : cause.name)
   }
-  return Object.prototype.toString.call(cause)
+  return boundedText(Object.prototype.toString.call(cause))
+}
+
+/**
+ * The journal codes this boundary can state in its own vocabulary.
+ *
+ * Only codes whose meaning is identical on both sides are here. A journal that
+ * is shut down and a sync boundary that is closed are the same fact; an
+ * admission queue that overflowed and backpressure are the same fact; a
+ * payload the journal could not decode and one this boundary could not decode
+ * are the same fact. Everything else — a fence lost, a sequence conflict, a
+ * projection fault — is a storage-layer distinction a follower cannot act on,
+ * and inventing a sync code for it would say more than is known.
+ */
+const journalCodes: Readonly<Record<string, "backpressure" | "closed" | "decode_failed">> = {
+  decode_failed: "decode_failed",
+  journal_closed: "closed",
+  queue_overflow: "backpressure"
+}
+
+/**
+ * Projects one journal failure's stable code onto this boundary's vocabulary,
+ * or `unknown` when it has no counterpart.
+ *
+ * `SyncError.ErrorCode` already declares `closed`, `backpressure`, and
+ * `decode_failed`, so collapsing every journal failure but `compacted` into
+ * `unknown` threw away a classification the wire could already carry, and left
+ * a follower unable to tell a shut-down journal from an unexplained fault.
+ * Nothing here widens what a follower learns: {@link causeCode} already
+ * publishes the journal's own enumerated code, and the journal's MESSAGE stays
+ * refused on every path.
+ *
+ * @category encoding
+ * @since 1.0.0-rc.0
+ */
+export const journalErrorCode = (
+  cause: unknown
+): "backpressure" | "closed" | "decode_failed" | "unknown" => {
+  if (!(cause instanceof Error)) return "unknown"
+  const code = (cause as { readonly code?: unknown }).code
+  return typeof code === "string" ? journalCodes[code] ?? "unknown" : "unknown"
 }

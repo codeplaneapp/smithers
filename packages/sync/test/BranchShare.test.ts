@@ -1,10 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Duration, Effect, Exit, Redacted, Tracer } from "effect"
+import { Duration, Effect, Redacted, Tracer } from "effect"
 import { TestClock } from "effect/testing"
 import { vi } from "vitest"
 import * as BranchProtocol from "../src/BranchProtocol.ts"
 import * as BranchShare from "../src/BranchShare.ts"
 import { SyncError } from "../src/SyncError.ts"
+import { died, refusalOf } from "./refusal.ts"
 
 const branchId = "live-branch" as BranchProtocol.BranchId
 const otherBranchId = "other-branch" as BranchProtocol.BranchId
@@ -35,9 +36,15 @@ describe("BranchShare", () => {
         })
       )
 
-      // CONTRACT: WebCrypto rejects only the zero-byte key here; this service
-      // currently imposes no minimum strength policy of its own.
-      expect(Exit.isFailure(empty)).toBe(true)
+      // Web Crypto rejects only the zero-byte key; this service imposes no
+      // minimum strength policy of its own, and a one-byte secret therefore
+      // mints and verifies. The rejection crosses as the authority's own typed
+      // error rather than as the Web Crypto defect underneath it.
+      const emptyRefusal = refusalOf(empty)
+      expect(died(empty)).toBe(false)
+      expect(SyncError.is(emptyRefusal)).toBe(true)
+      expect(emptyRefusal?.code).toBe("unknown")
+      expect(emptyRefusal?.message).toBe("Web Crypto could not import the HMAC signing key")
       expect(shortClaims.capabilityId).toBe("short-key")
     }))
 
@@ -211,7 +218,13 @@ describe("BranchShare", () => {
         verify: () => Effect.fail(new SyncError({ code: "unauthorized", message: "overridden" }))
       })
 
-      expect(Exit.isFailure(mintExit)).toBe(true)
+      // A Die satisfies `Exit.isFailure` exactly as a Fail does, which is how
+      // a `mint` that died where its type promises a `SyncError` stayed green.
+      const mintRefusal = refusalOf(mintExit)
+      expect(died(mintExit)).toBe(false)
+      expect(SyncError.is(mintRefusal)).toBe(true)
+      expect(mintRefusal?.code).toBe("unauthorized")
+      expect(mintRefusal?.message).toBe("Branch sharing is unavailable")
       expect(verifyFailure.message).toBe("Branch sharing is unavailable")
       expect(
         (yield* (

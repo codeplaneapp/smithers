@@ -87,15 +87,25 @@ export class SyncError extends Schema.TaggedError<SyncError>()("@smthrs/sync/Syn
    * What it does not verify is that the value was produced by this package: a
    * value constructed in-process with the right fields passes.
    *
+   * It is TOTAL. The value is `unknown`, so ANY property read on it may be a
+   * throwing getter — the tag included, which is the first one read and was
+   * the one read outside the protection — and this guard decides whether a
+   * follow reconnects and whether a cursor moves past a compaction floor: a
+   * question about a value's shape must answer, never raise.
+   *
    * @since 0.1.0
    */
   static readonly is = (value: unknown): value is SyncError => {
-    if (!Predicate.isTagged(value, "@smthrs/sync/SyncError")) return false
-    const candidate = value as { readonly code?: unknown; readonly message?: unknown; readonly resync?: unknown }
-    if (typeof candidate.message !== "string") return false
-    if (typeof candidate.code !== "string" || !codes.has(candidate.code)) return false
-    if (candidate.resync === undefined) return true
-    return candidate.code === "compacted" && Schema.is(Resync)(candidate.resync)
+    try {
+      if (!Predicate.isTagged(value, "@smthrs/sync/SyncError")) return false
+      const candidate = value as { readonly code?: unknown; readonly message?: unknown; readonly resync?: unknown }
+      if (typeof candidate.message !== "string") return false
+      if (typeof candidate.code !== "string" || !codes.has(candidate.code)) return false
+      if (candidate.resync === undefined) return true
+      return candidate.code === "compacted" && Schema.is(Resync)(candidate.resync)
+    } catch {
+      return false
+    }
   }
 }
 

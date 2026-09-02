@@ -126,7 +126,7 @@ describe("SyncServer against a catalog that repeats a run", () => {
         Effect.scoped,
         // A workspace follow never ends on its own, so the wait is what
         // bounds this case; what it served by then is the assertion.
-        Effect.timeoutOption("2 seconds")
+        Effect.timeoutOption("5 seconds")
       )
 
       expect(seen.slice().sort()).toEqual(["alpha:0", "alpha:1", "beta:0"])

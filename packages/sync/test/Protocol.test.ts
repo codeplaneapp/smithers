@@ -37,4 +37,20 @@ describe("SyncError.is", () => {
     expect(SyncError.is(new Error("boom"))).toBe(false)
     expect(SyncError.is(undefined)).toBe(false)
   })
+
+  // The argument is `unknown`, and this guard decides whether a follow
+  // reconnects and whether a cursor moves past a compaction floor. A shape
+  // question that raises instead of answering turns an adversarial value into
+  // a defect in the client's control flow.
+  it("answers false for a value whose fields throw when read", () => {
+    expect(
+      SyncError.is({
+        _tag: "@smthrs/sync/SyncError",
+        code: "closed",
+        get message(): string {
+          throw new Error("boom")
+        }
+      })
+    ).toBe(false)
+  })
 })

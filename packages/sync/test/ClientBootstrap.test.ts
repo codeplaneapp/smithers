@@ -9,7 +9,7 @@ import { JournalEvent } from "@smthrs/journal"
 import { Effect, Stream } from "effect"
 import * as SyncClient from "../src/SyncClient.ts"
 import { SyncError } from "../src/SyncError.ts"
-import type * as SyncProtocol from "../src/SyncProtocol.ts"
+import * as SyncProtocol from "../src/SyncProtocol.ts"
 
 const target = "catch-up" as JournalEvent.RunId
 const foreign = "somebody-elses-run" as JournalEvent.RunId
@@ -221,6 +221,32 @@ describe("SyncClient transport failures", () => {
       expect(typeof cause).toBe("string")
       expect((cause as string).length).toBeLessThan(600)
       expect(cause).toContain("(truncated)")
+      // `message` is the OTHER unbounded string this error carries, and it
+      // used to take the host's sentence verbatim: bounding only `cause` moved
+      // the same 10,000 characters one field over.
+      expect((failure as SyncError).message.length).toBeLessThan(600)
+      expect((failure as SyncError).message).toContain("(truncated)")
+    }))
+
+  // A value the local check accepts and the WIRE schema refuses is not a
+  // transport failure, but it arrived through the same channel a dropped
+  // connection does, and `follow` retried it under backoff forever.
+  it.effect("refuses a credit or bootstrap limit the wire schema would reject", () =>
+    Effect.gen(function*() {
+      const { client } = cursorHonouringServer(1, 1)
+      const overCredit = yield* SyncClient.make({ client })
+      const overLimit = yield* SyncClient.make({ bootstrapLimit: SyncProtocol.maxReadLimit + 1, client })
+      const creditFailure = yield* Effect.flip(
+        Stream.runCollect(
+          overCredit.subscribe({ scope, cursors: [], credit: SyncProtocol.maxSubscribeCredit + 1 })
+        )
+      )
+      const limitFailure = yield* Effect.flip(Stream.runCollect(overLimit.subscribe({ scope, cursors: [] })))
+
+      expect((creditFailure as SyncError).code).toBe("invalid_request")
+      expect((creditFailure as SyncError).message).toContain("credit")
+      expect((limitFailure as SyncError).code).toBe("invalid_request")
+      expect((limitFailure as SyncError).message).toContain("bootstrapLimit")
     }))
 })
 

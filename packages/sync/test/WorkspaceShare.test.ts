@@ -1,8 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Exit, Layer, Redacted } from "effect"
+import { ConfigProvider, Effect, Layer, Redacted } from "effect"
 import { TestClock } from "effect/testing"
 import { SyncError } from "../src/SyncError.ts"
 import * as WorkspaceShare from "../src/WorkspaceShare.ts"
+import { died, refusalOf } from "./refusal.ts"
 
 const key = (kid: string, secret: string): WorkspaceShare.Key => ({ kid, secret: Redacted.make(secret) })
 
@@ -117,7 +118,7 @@ describe("WorkspaceShare", () => {
       expect(missing.message).toBe("The workspace keyring's active kid names no key in the ring")
     }))
 
-  it.effect("keeps the noop authority refusing, dying on mint, and overridable", () =>
+  it.effect("keeps the noop authority refusing on mint as well as verify, and overridable", () =>
     Effect.gen(function*() {
       const noop = WorkspaceShare.makeNoop()
       const mintExit = yield* Effect.exit(noop.mint({ capabilityId: "cap", access: "read", ttlMs: 1 }))
@@ -156,7 +157,14 @@ describe("WorkspaceShare", () => {
         )
       )
 
-      expect(Exit.isFailure(mintExit)).toBe(true)
+      // The CATEGORY, not just that it failed: `mint` used to `Effect.die`
+      // where its declared type promises a `SyncError`, and a Die satisfies
+      // `Exit.isFailure` exactly as a Fail does.
+      const mintRefusal = refusalOf(mintExit)
+      expect(died(mintExit)).toBe(false)
+      expect(SyncError.is(mintRefusal)).toBe(true)
+      expect(mintRefusal?.code).toBe("unauthorized")
+      expect(mintRefusal?.message).toBe("Workspace sharing is unavailable")
       expect(refused.message).toBe("Workspace sharing is unavailable")
       expect(overriddenFailure.message).toBe("overridden")
     }))
@@ -233,6 +241,10 @@ describe("WorkspaceShare", () => {
         )
       )
 
-      expect(Exit.isFailure(exit)).toBe(true)
+      // A missing secret is a typed configuration refusal, not a defect: the
+      // layer must be composable in a host that reports the misconfiguration
+      // rather than crashing on it.
+      expect(died(exit)).toBe(false)
+      expect(refusalOf(exit)).toBeDefined()
     }))
 })

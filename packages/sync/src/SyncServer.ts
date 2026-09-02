@@ -16,7 +16,7 @@ import type * as Rpc from "effect/unstable/rpc/Rpc"
 import type * as RpcGroup from "effect/unstable/rpc/RpcGroup"
 import { type BranchId, branchOfRunId, type ShareCapability, type ShareClaims } from "./BranchProtocol.ts"
 import * as BranchShare from "./BranchShare.ts"
-import { causeCode } from "./internal/causeText.ts"
+import { causeCode, journalErrorCode } from "./internal/causeText.ts"
 import { positiveInt } from "./internal/options.ts"
 import * as RunCatalog from "./RunCatalog.ts"
 import { SyncError } from "./SyncError.ts"
@@ -102,11 +102,20 @@ const journalFailure = (runId: JournalEvent.RunId) => (cause: unknown): SyncErro
       // branch share link, and the journal's message is the SQLite driver's:
       // it routinely carries SQL text, table and column names, and constraint
       // identifiers. `decodeCapability` already refuses to be a parsing
-      // oracle; this is the same rule for the read path.
-      code: "unknown",
+      // oracle; this is the same rule for the read path. The CODE is a
+      // different question from the message: a journal code this boundary
+      // also declares crosses as that code, so a shut-down journal is not
+      // reported as an unexplained fault.
+      code: journalErrorCode(cause),
       message: `Journal read failed for run ${runId}`,
       cause: causeCode(cause)
     })
+
+/** The one refusal a lapsed credential produces, wherever it is noticed. */
+const expired = new SyncError({
+  code: "unauthorized",
+  message: "The capability authorizing this subscription has expired"
+})
 
 const cursorOf = (
   cursors: SyncProtocol.WorkspaceCursor,
@@ -192,20 +201,36 @@ export interface Options {
   readonly tailIntervalMs?: number | undefined
 }
 
+/** The resolved, already-validated read-path policy. */
+interface Resolved {
+  readonly maxFrameBytes: number
+  readonly concurrency: number
+  readonly tailIntervalMs: number
+}
+
+const defaults: Resolved = {
+  maxFrameBytes: SyncProtocol.defaultMaxFrameBytes,
+  concurrency: defaultConcurrency,
+  tailIntervalMs: defaultTailIntervalMs
+}
+
 /**
  * The read path over an already-validated policy.
  *
- * A read fills its page in run order and stops at the first of three bounds:
- * the request's `limit`, the frame ceiling, or the durable tail of every
- * covered run, which is the only case that reports `done: true`. It is a
- * CATCH-UP api, not a fair scheduler: a run with a long backlog takes the
- * page it is offered, and the runs behind it are served by the follower's
- * next page, from the cursors this one returned. The frame ceiling is a page
- * budget, not a verdict on the read: entries are served until the next one
- * would cross it, and the page then reports `done: false` so the follower
- * asks for the rest. Only a SINGLE entry whose own encoded size exceeds the
- * ceiling is refused with `frame_too_large`, because no page can ever carry
- * it.
+ * A read SHARES its page across the runs it covers and stops at the first of
+ * three bounds: the request's `limit`, the frame ceiling, or the durable tail
+ * of every covered run, which is the only case that reports `done: true`.
+ * Every covered run takes a share of the budget before any run takes a second
+ * helping, and what the shares leave unspent is offered back in run order, so
+ * a run with a backlog still takes the larger part of a page but never all of
+ * it. Filling in run order instead let a producer that stayed one page ahead
+ * take every slot of every page: `done` never became true, so a bootstrapping
+ * follower never reached the runs behind it and never reached the live follow
+ * either. The frame ceiling is a page budget, not a verdict on the read:
+ * entries are served until the next one would cross it, and the page then
+ * reports `done: false` so the follower asks for the rest. Only a SINGLE
+ * entry whose own encoded size exceeds the ceiling is refused with
+ * `frame_too_large`, because no page can ever carry it.
  *
  * A workspace subscription's fan-out is bounded without bounding what it
  * serves. Each round reconciles the runs it covers against `RunCatalog.list`,
@@ -239,19 +264,6 @@ export interface Options {
  * when the credential that opened it expires, because a stream authorized
  * once at open is otherwise the one thing a signed expiry cannot revoke.
  */
-/** The resolved, already-validated read-path policy. */
-interface Resolved {
-  readonly maxFrameBytes: number
-  readonly concurrency: number
-  readonly tailIntervalMs: number
-}
-
-const defaults: Resolved = {
-  maxFrameBytes: SyncProtocol.defaultMaxFrameBytes,
-  concurrency: defaultConcurrency,
-  tailIntervalMs: defaultTailIntervalMs
-}
-
 const makeWith = (
   { concurrency, maxFrameBytes, tailIntervalMs }: Resolved
 ): Effect.Effect<Service, never, Journal.Journal | RunCatalog.RunCatalog> =>
@@ -303,12 +315,6 @@ const makeWith = (
      */
     const covered = Effect.map(catalog.list, (ids) => Array.from(new Set(ids)).sort())
 
-    /** Whether the current request is authenticated as the workspace. */
-    const workspacePrincipal: Effect.Effect<boolean> = Effect.map(
-      Effect.service(SyncPrincipal.SyncPrincipal),
-      SyncPrincipal.isWorkspace
-    )
-
     /**
      * The workspace principal's expiry, or a refusal.
      *
@@ -350,15 +356,32 @@ const makeWith = (
           Effect.catch((error) => error.code === "unauthorized" ? Effect.succeed(null) : Effect.fail(error))
         )
 
-    /** Whether one catalog-advertised run may be followed by this request. */
-    const canFollow = (
+    /**
+     * When this request stops being allowed to follow one catalog-advertised
+     * run, or `null` when it may not follow it at all.
+     *
+     * The answer is the EXPIRY, not a yes. A workspace subscription discovers
+     * runs after it opens, and a branch run discovered then is admitted under
+     * a capability whose expiry was not part of the subscription's deadline:
+     * reducing this to a boolean let a branch found by reconciliation stream
+     * for as long as the subscription lived, which is exactly the revocation
+     * hole the deadline exists to close. A non-branch run answers `Infinity`
+     * because the workspace principal's own expiry already bounds the
+     * subscription.
+     */
+    const followUntil = (
       runId: JournalEvent.RunId,
       capability: ShareCapability | undefined
-    ): Effect.Effect<boolean, SyncError> => {
+    ): Effect.Effect<number | null, SyncError> => {
       const branchId = branchOfRunId(runId)
       return branchId === null
-        ? workspacePrincipal
-        : Effect.map(branchClaims(branchId, capability), (claims) => claims !== null)
+        // A NON-branch run is admitted by the workspace principal, and only a
+        // workspace-scoped subscription reaches here: `runIdsFor` refused the
+        // request outright if the principal was anything else, and a
+        // principal is fixed for the life of a request. Its expiry is already
+        // the deadline this subscription opened with.
+        ? Effect.succeed(Number.POSITIVE_INFINITY)
+        : Effect.map(branchClaims(branchId, capability), (claims) => claims === null ? null : claims.expiresAtMs)
     }
 
     /**
@@ -441,47 +464,72 @@ const makeWith = (
         const cursors = new Map(request.cursors.map((cursor) => [cursor.runId, cursor.afterSeq]))
         let done = true
         let frameBytes = 0
-        // The byte ceiling is a PAGE budget, not a verdict on the read. A run
-        // whose next unserved entries sum past 1 MiB is ordinary — branch
-        // commands are admitted individually up to the same ceiling, so three
-        // 400 KB commands produce it — and failing the read for it wedged the
-        // follower forever: `frame_too_large` is neither retried nor
-        // retryable, and the client's next bootstrap carries the same cursors
-        // and gets the same refusal. So the page stops at the budget and
-        // reports `done: false`; only an entry that alone outgrows the
-        // ceiling still refuses, because no page can ever carry it.
-        for (const runId of runIds) {
-          if (entries.length >= limit) {
-            done = false
-            break
-          }
-          const after = cursorOf(request.cursors, runId)
-          const page = yield* journal.entries({
-            runId,
-            ...(after === undefined ? {} : { after }),
-            limit: limit - entries.length
-          }).pipe(Effect.mapError(journalFailure(runId)))
-          let truncated = false
-          for (const accepted of page.entries) {
-            const bytes = SyncProtocol.encodedByteLength(accepted)
-            if (bytes > maxFrameBytes) return yield* frameTooLarge(bytes)
-            if (frameBytes + bytes > maxFrameBytes) {
-              truncated = true
-              break
+        let oversized: number | undefined
+        let truncated = false
+        // Runs that still had more when their share ran out, in the order the
+        // page visited them. They get the budget the page did not spend.
+        const behind: Array<JournalEvent.RunId> = []
+
+        /**
+         * Serves at most `cap` of one run's unserved entries into the page.
+         *
+         * The byte ceiling is a PAGE budget, not a verdict on the read. A run
+         * whose next unserved entries sum past 1 MiB is ordinary — branch
+         * commands are admitted individually up to the same ceiling, so three
+         * 400 KB commands produce it — and failing the read for it wedged the
+         * follower forever: `frame_too_large` is neither retried nor
+         * retryable, and the client's next bootstrap carries the same cursors
+         * and gets the same refusal. So the page stops at the budget and
+         * reports `done: false`; only an entry that alone outgrows the
+         * ceiling still refuses, because no page can ever carry it.
+         */
+        const serve = (runId: JournalEvent.RunId, cap: number) =>
+          Effect.gen(function*() {
+            const after = cursors.get(runId)
+            const page = yield* journal.entries({
+              runId,
+              ...(after === undefined ? {} : { after }),
+              limit: cap
+            }).pipe(Effect.mapError(journalFailure(runId)))
+            for (const accepted of page.entries) {
+              const bytes = SyncProtocol.encodedByteLength(accepted)
+              if (bytes > maxFrameBytes) {
+                oversized = bytes
+                return false
+              }
+              if (frameBytes + bytes > maxFrameBytes) {
+                truncated = true
+                return false
+              }
+              frameBytes += bytes
+              entries.push(accepted)
+              // Cursors track what was SERVED, not what was read, so the next
+              // page resumes at the first entry this one dropped: no entry is
+              // skipped and none is served twice.
+              cursors.set(runId, accepted.seq)
             }
-            frameBytes += bytes
-            entries.push(accepted)
-            // Cursors track what was SERVED, not what was read, so the next
-            // page resumes at the first entry this one dropped: no entry is
-            // skipped and none is served twice.
-            cursors.set(runId, accepted.seq)
-          }
-          if (truncated) {
-            done = false
-            break
-          }
-          if (page.hasMore) done = false
+            return page.hasMore
+          })
+
+        // Each covered run gets a SHARE of the page before any run gets a
+        // second helping. Filling in run order let a producer that stays one
+        // page ahead take every slot of every page: `done` never became true,
+        // so a bootstrapping follower never reached the runs behind it and
+        // never reached the live follow either. It is still a catch-up read
+        // and a busy run still takes the larger part of the budget, but the
+        // part it cannot take is all of it.
+        const share = Math.max(1, Math.floor(limit / Math.max(runIds.length, 1)))
+        for (const runId of runIds) {
+          if (oversized !== undefined || truncated || entries.length >= limit) break
+          if (yield* serve(runId, Math.min(share, limit - entries.length))) behind.push(runId)
         }
+        // The budget the shares did not spend, offered back in the same order.
+        for (const runId of behind) {
+          if (oversized !== undefined || truncated || entries.length >= limit) break
+          yield* serve(runId, limit - entries.length)
+        }
+        if (oversized !== undefined) return yield* frameTooLarge(oversized)
+        if (truncated || entries.length >= limit || behind.length > 0) done = false
         return {
           entries,
           cursors: Array.from(cursors, ([runId, afterSeq]) => ({ runId, afterSeq })),
@@ -539,6 +587,7 @@ const makeWith = (
      */
     const workspaceStream = (
       covering: ReadonlyArray<JournalEvent.RunId>,
+      openedUntil: number,
       request: SyncProtocol.SubscribeRequest
     ): Stream.Stream<SyncProtocol.Frame, SyncError> =>
       Stream.unwrap(Effect.gen(function*() {
@@ -557,6 +606,13 @@ const makeWith = (
         // The runs the NEXT round reads: the catalog's current list, minus
         // what this request may not read. `reconcile` is what moves it.
         let visible: ReadonlyArray<JournalEvent.RunId> = covering
+        // The soonest expiry of every credential this subscription now rests
+        // on. It only ever moves EARLIER: `runIdsFor` seeds it from the
+        // credentials the request opened with, and `reconcile` lowers it when
+        // it admits a branch run the catalog named later. Each round arms its
+        // own deadline from this, so a capability discovered mid-subscription
+        // bounds the frames it authorizes just as the opening ones do.
+        let deadline = openedUntil
         // Every caller establishes that the run has no position yet:
         // `covering` is a deduplicated list, and `reconcile` skips what it
         // already holds.
@@ -600,14 +656,25 @@ const makeWith = (
               // An `unauthorized` run is skipped; a signer fault propagates,
               // so "the signer is broken" is never reported as "not
               // authorized".
-              if (!(yield* canFollow(runId, request.capability))) {
+              const until = yield* followUntil(runId, request.capability)
+              if (until === null) {
                 excluded.add(runId)
                 continue
               }
+              deadline = Math.min(deadline, until)
               cover(runId)
             }
             next.push(runId)
           }
+          // Checked HERE, after this round's admissions have had their say
+          // and before it reads anything, so a round never begins under a
+          // lapsed credential. The deadline the subscription OPENED with is
+          // enforced exactly, by the interrupt `subscribe` arms; a deadline
+          // this reconciliation lowered is enforced at the next round, so a
+          // credential discovered mid-subscription bounds the stream within
+          // one `tailIntervalMs` of its expiry rather than not at all.
+          const nowMs = yield* Clock.currentTimeMillis
+          if (nowMs >= deadline) return yield* Effect.fail(expired)
           visible = next
         })
 
@@ -718,16 +785,10 @@ const makeWith = (
       Number.isFinite(expiresAtMs)
         ? Stream.interruptWhen(
           stream,
-          Effect.flatMap(Clock.currentTimeMillis, (nowMs) =>
-            Effect.andThen(
-              Effect.sleep(Math.max(expiresAtMs - nowMs, 0)),
-              Effect.fail(
-                new SyncError({
-                  code: "unauthorized",
-                  message: "The capability authorizing this subscription has expired"
-                })
-              )
-            ))
+          Effect.flatMap(
+            Clock.currentTimeMillis,
+            (nowMs) => Effect.andThen(Effect.sleep(Math.max(expiresAtMs - nowMs, 0)), Effect.fail(expired))
+          )
         )
         : stream
 
@@ -749,7 +810,7 @@ const makeWith = (
           const { expiresAtMs, runIds } = yield* runIdsFor(request.scope, request.capability)
           const frames = request.scope._tag === "Run"
             ? runStream(request.scope.runId, request.cursors)
-            : workspaceStream(runIds, request)
+            : workspaceStream(runIds, expiresAtMs, request)
           return Stream.take(untilExpiry(expiresAtMs, frames), credit)
         })
       )

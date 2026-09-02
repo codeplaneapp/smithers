@@ -105,6 +105,9 @@ describe("SyncServer.read across a workspace", () => {
       ])
     }))
 
+  // The limit is shared before it is spent: two covered runs and a budget of
+  // two serves one entry of each, not two of whichever run sorts first. The
+  // page is still incomplete, because `busy` has more.
   it.effect("stops at the limit and reports the page as incomplete", () =>
     Effect.gen(function*() {
       const response = yield* (
@@ -122,7 +125,7 @@ describe("SyncServer.read across a workspace", () => {
         })
       )
 
-      expect(response.entries.map((value) => value.runId)).toEqual([busy, busy])
+      expect(response.entries.map((value) => value.runId)).toEqual([busy, empty])
       expect(response.done).toBe(false)
     }))
 
@@ -157,11 +160,55 @@ describe("SyncServer.read across a workspace", () => {
         })
       )
       expect(failure).toBeInstanceOf(SyncError)
-      expect(failure.code).toBe("unknown")
+      // A shut-down journal is a fact this boundary can also state, so it
+      // crosses as `closed` rather than as an unexplained fault. Only the
+      // journal's SENTENCE is refused, never its enumerated code.
+      expect(failure.code).toBe("closed")
       expect(failure.message).toBe(`Journal read failed for run ${busy}`)
       expect(failure.message).not.toContain("journal offline")
       expect(failure.cause).toContain("journal_closed")
       expect(failure.cause).not.toContain("journal offline")
+    }))
+
+  // A journal code with no counterpart here stays unclassified. Inventing a
+  // sync code for a storage-layer distinction a follower cannot act on would
+  // say more than is known.
+  it.effect("keeps a journal code this boundary does not declare unclassified", () =>
+    Effect.gen(function*() {
+      const failure = yield* (
+        Effect.gen(function*() {
+          const server = yield* makeServer([busy], {
+            entries: () => Effect.fail(new Journal.JournalError({ code: "fence_lost", message: "fence lost" }))
+          })
+          return yield* Effect.flip(server.read({ scope: workspace, cursors: [], limit: 10 }))
+        })
+      )
+
+      expect(failure.code).toBe("unknown")
+      expect(failure.cause).toContain("fence_lost")
+    }))
+
+  // Queue overflow and a payload the journal could not decode are the same
+  // facts as this boundary's own backpressure and decode refusal.
+  it.effect("states an overflowing journal queue as backpressure and a decode fault as decode_failed", () =>
+    Effect.gen(function*() {
+      const codes = yield* (
+        Effect.gen(function*() {
+          const overflow = yield* Effect.flip(
+            (yield* makeServer([busy], {
+              entries: () => Effect.fail(new Journal.JournalError({ code: "queue_overflow", message: "full" }))
+            })).read({ scope: workspace, cursors: [], limit: 10 })
+          )
+          const decode = yield* Effect.flip(
+            (yield* makeServer([busy], {
+              entries: () => Effect.fail(new Journal.JournalError({ code: "decode_failed", message: "bad row" }))
+            })).read({ scope: workspace, cursors: [], limit: 10 })
+          )
+          return [overflow.code, decode.code]
+        })
+      )
+
+      expect(codes).toEqual(["backpressure", "decode_failed"])
     }))
 
   // Compaction is a recoverable refusal with a documented resume point, not an

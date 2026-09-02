@@ -6,6 +6,8 @@ import { TestClock } from "effect/testing"
 import * as BranchCommands from "../src/BranchCommands.ts"
 import * as BranchProtocol from "../src/BranchProtocol.ts"
 import * as BranchShare from "../src/BranchShare.ts"
+import { SyncError } from "../src/SyncError.ts"
+import { died, refusalOf } from "./refusal.ts"
 
 const branchId = "ambiguous-commit" as BranchProtocol.BranchId
 const runId = BranchProtocol.branchRunId(branchId)
@@ -73,7 +75,13 @@ describe("BranchCommands ambiguous commit recovery", () => {
         )
       )
 
-      expect(Exit.isFailure(result.ambiguous)).toBe(true)
+      // The lost response reaches the caller as this package's own typed
+      // error, not as the journal's error and not as a defect: a writer that
+      // must decide whether to retry can only do so from the declared channel.
+      const ambiguous = refusalOf(result.ambiguous)
+      expect(died(result.ambiguous)).toBe(false)
+      expect(SyncError.is(ambiguous)).toBe(true)
+      expect(ambiguous?.code).toBe("closed")
       expect(result.retry).toMatchObject({ status: "duplicate", seq: result.page.entries[0]?.seq })
       expect(result.page.entries).toHaveLength(1)
     }))

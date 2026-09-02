@@ -41,7 +41,7 @@ import {
   ShareCapability
 } from "./BranchProtocol.ts"
 import * as BranchShare from "./BranchShare.ts"
-import { causeCode } from "./internal/causeText.ts"
+import { causeCode, journalErrorCode } from "./internal/causeText.ts"
 import { positiveInt } from "./internal/options.ts"
 import { SyncError } from "./SyncError.ts"
 import * as SyncProtocol from "./SyncProtocol.ts"
@@ -113,11 +113,14 @@ export const layerNoop: Layer.Layer<BranchCommands> = Layer.succeed(BranchComman
  * The public `message` is a constant and the `cause` names the failure's type
  * only. A branch writer may hold nothing but a share link, and the journal's
  * own message is the SQLite driver's, which carries SQL text, table and column
- * names, and constraint identifiers.
+ * names, and constraint identifiers. The CODE is a different question from the
+ * message: a journal code this boundary also declares crosses as that code, so
+ * a writer whose commit was lost to a closing journal is told that rather than
+ * being told nothing.
  */
 const journalFailure = (cause: unknown): SyncError =>
   new SyncError({
-    code: "unknown",
+    code: journalErrorCode(cause),
     message: "Branch journal write failed",
     cause: causeCode(cause)
   })

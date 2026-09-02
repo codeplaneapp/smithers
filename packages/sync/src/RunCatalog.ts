@@ -201,6 +201,12 @@ export interface PollingOptions<E, R> {
  * naming, which is what retention collecting it looks like, leaves the view;
  * `list` is the workspace's run set, not a log of every run it ever had.
  *
+ * `list` answers with a fresh array each time, matching {@link layerStatic} and
+ * {@link makeMemory}. Handing back the stored snapshot let a caller sort or
+ * splice the authoritative run set in place under the poll fiber that owns it,
+ * which is a defect a `ReadonlyArray` type hides from TypeScript and not from
+ * JavaScript.
+ *
  * The poll fiber belongs to the caller's scope. Closing the scope stops it.
  *
  * @category constructors
@@ -238,7 +244,7 @@ export const makePolling = <E, R>(
     )
 
     return make({
-      list: Effect.fn("RunCatalog.list")(() => Ref.get(snapshot))(),
+      list: Effect.fn("RunCatalog.list")(() => Effect.map(Ref.get(snapshot), (ids) => [...ids]))(),
       changes: Stream.fromPubSub(changes)
     })
   })
