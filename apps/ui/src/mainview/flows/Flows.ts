@@ -539,6 +539,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "runs.resume",
+    confirm: "resume the run",
     summary: "Resume a parked run",
     runtime: ["jjhub"],
     args: "<runId>",
@@ -559,6 +560,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "runs.signal",
+    confirm: "release the run's wait with a signal",
     summary: "Deliver a named signal to a waiting run",
     runtime: ["jjhub"],
     args: "<runId> <name> [json]",
@@ -572,6 +574,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "runs.steer",
+    confirm: "steer the running agent",
     summary: "Send an operator message into a running run",
     runtime: ["jjhub"],
     args: "<runId> <message>",
@@ -581,6 +584,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "runs.seat",
+    confirm: "change the run's seat",
     summary: "Move a run to a different model seat",
     runtime: ["jjhub"],
     args: "<runId> <seat>",
@@ -590,6 +594,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "runs.thinking",
+    confirm: "change the run's thinking level",
     summary: "Change a run's thinking level",
     runtime: ["jjhub"],
     args: "<runId> <level>",
@@ -599,6 +604,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "runs.tools",
+    confirm: "change the run's tools",
     summary: "Add tools to a run's active set",
     runtime: ["jjhub"],
     args: "<runId> <names,comma-separated>",
