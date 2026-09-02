@@ -781,6 +781,36 @@ export const discoverJjhubRepository = async (
 }
 
 /**
+ * Validates the `SMITHERS_CACHE_URL` override.
+ *
+ * A declaration must be HTTPS. The process override may also be plain HTTP
+ * on loopback, which is how a cache running on the same host (the self-hosted
+ * module, or a local API) is reached; `Cache.ts` admits exactly the same set,
+ * so the override cannot pass discovery and then be refused when the store
+ * opens.
+ *
+ * @category discovery
+ * @since 0.1.0
+ */
+export const normalizeOverrideEndpoint = (value: string): string => {
+  let parsed: URL
+  try {
+    parsed = new URL(value.trim())
+  } catch {
+    return RemoteCache.normalizeEndpoint(value)
+  }
+  const loopback = parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]"
+  if (parsed.protocol !== "http:" || !loopback) return RemoteCache.normalizeEndpoint(value)
+  if (parsed.username !== "" || parsed.password !== "") {
+    throw new Error("remote cache endpoint must not contain credentials")
+  }
+  if (parsed.search !== "" || parsed.hash !== "") {
+    throw new Error("remote cache endpoint must not contain a query or fragment")
+  }
+  return parsed.href.replace(/\/+$/, "")
+}
+
+/**
  * Resolves a remote cache from an already-read declaration.
  *
  * BUILD mode reads its declaration out of the root BUILD.ts namespace; package
@@ -819,7 +849,7 @@ export const remoteCacheOf = (
   }
   const override = endpointOverride?.trim()
   if (override !== undefined && override !== "") {
-    return { endpoint: RemoteCache.normalizeEndpoint(override), credentials: credentials() }
+    return { endpoint: normalizeOverrideEndpoint(override), credentials: credentials() }
   }
   if (declaration === undefined) return undefined
   return { endpoint: RemoteCache.normalizeEndpoint(declaration.endpoint), credentials: credentials() }

@@ -12,6 +12,7 @@ import {
   ensureGitignored,
   isGitPath,
   maximumGitignoreBytes,
+  normalizeOverrideEndpoint,
   parseJjhubRemote,
   remoteCacheOf,
   resolveConfig,
@@ -1075,6 +1076,17 @@ describe("jjhub cache discovery", () => {
     )
     expect(await discoverJjhubRepository(root, {})).toEqual({ repo: "acme/app", host: "api.jjhub.tech" })
     expect(await discoverJjhubRepository(await makeRoot(), {})).toBeUndefined()
+  })
+
+  it("admits a loopback HTTP override the way the store does, and nothing else over HTTP", () => {
+    const declaration = RemoteCache.jjhub({ repo: "acme/app", publicReadToken: token })
+    expect(remoteCacheOf(declaration, "http://127.0.0.1:4100/api/repos/acme/app/build-cache/")).toEqual({
+      endpoint: "http://127.0.0.1:4100/api/repos/acme/app/build-cache",
+      credentials: { _tag: "public", publicReadToken: token, writeTokenEnv: "SMITHERS_CACHE_TOKEN" }
+    })
+    expect(normalizeOverrideEndpoint("http://localhost:8080")).toBe("http://localhost:8080")
+    expect(() => normalizeOverrideEndpoint("http://cache.example.test")).toThrow(/must use HTTPS/)
+    expect(() => normalizeOverrideEndpoint("http://user:pw@localhost:8080")).toThrow(/credentials/)
   })
 
   it("prefers a declaration over discovery", async () => {
