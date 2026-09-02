@@ -1,4 +1,4 @@
-import { CapabilityPattern, parse } from "@smthrs/capability/Capability"
+import { CapabilityPattern, format, parse } from "@smthrs/capability/Capability"
 import { evaluate, Rule } from "@smthrs/capability/Permission"
 import { Effect, Layer, Option } from "effect"
 import { describe, expect, it } from "vitest"
@@ -442,6 +442,26 @@ describe("Authorize", () => {
     expect(Option.isNone(Authorize.claimPattern("fs"))).toBe(true)
     expect(Option.isNone(Authorize.claimPattern(":read"))).toBe(true)
     expect(Option.isNone(Authorize.claimPattern("bogus:verb:thing"))).toBe(true)
+  })
+
+  it("defaults a family claim's missing resource to the recursive glob", () => {
+    expect(Option.getOrThrow(Authorize.claimPattern("model:call"))).toEqual(pattern("model:call", "**"))
+    expect(Option.getOrThrow(Authorize.claimPattern("fs:*"))).toEqual(pattern("fs:*", "**"))
+  })
+
+  it("reads back every formatted pattern, whole authority included", () => {
+    // `Capability.format` of the whole-authority pattern is `*:**`, not the
+    // bare `*` sentinel; the claim reader shares the capability grammar so
+    // the formatted envelope round-trips instead of falling to `None`.
+    const wholeAuthority = pattern("*", "**")
+    expect(Option.getOrThrow(Authorize.claimPattern(format(wholeAuthority)))).toEqual(wholeAuthority)
+    const scoped = pattern("*", "src/**")
+    expect(Option.getOrThrow(Authorize.claimPattern(format(scoped)))).toEqual(scoped)
+  })
+
+  it("decides a formatted whole-authority claim instead of asking", async () => {
+    expect(await verdictOf([allowAll], "*:**")).toBe("allow")
+    expect(await verdictOf([denyAll], "*:**")).toBe("deny")
   })
 
   it("scopes a script park('approval') differently: the link ends and the park is terminal", async () => {

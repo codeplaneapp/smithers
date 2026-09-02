@@ -101,30 +101,26 @@ export const layerNoop = (overrides: Partial<Service> = {}): Layer.Layer<Authori
   Layer.succeed(Authorize)(makeNoop(overrides))
 
 /**
- * Parses a declared claim into a capability pattern. Claims are patterns,
- * not exact capabilities: `*` claims everything, `ns:op` and `ns:*` claim
- * whole action families, `ns:op:resource` claims a resource glob. An
- * unparseable claim is `None` — the seam asks for it, never passes it.
+ * Parses a declared claim into a capability pattern. The pattern grammar
+ * itself belongs to `Capability.parsePattern` — the one reader of
+ * `Capability.format` output, so a formatted whole-authority envelope
+ * (`*:**`) reads back here exactly as the bare `*` sentinel does. Claims
+ * extend that grammar in one direction only: a two-component claim with no
+ * resource (`ns:op`, `ns:*`) claims the whole family, so the missing
+ * resource defaults to `**`. An unparseable claim is `None` — the seam asks
+ * for it, never passes it.
  *
  * @category constructors
  * @since 0.1.0
  * @slop
  */
 export const claimPattern = (declared: string): Option.Option<Capability.CapabilityPattern> => {
-  if (declared === "*") {
-    return Option.some(new Capability.CapabilityPattern({ action: "*", resource: "**" }))
-  }
+  const direct = Capability.parsePattern(declared)
+  if (Option.isSome(direct)) return direct
   const components = declared.split(":")
-  const namespace = components[0]
-  if (namespace === undefined || namespace === "") return Option.none()
-  const operation = components[1]
-  if (operation === undefined || operation === "") return Option.none()
-  const action = `${namespace}:${operation}`
-  const decoded = Schema.decodeUnknownOption(Capability.CapabilityPattern)({
-    action,
-    resource: components.length > 2 ? components.slice(2).join(":") : "**"
-  })
-  return decoded._tag === "Some" ? decoded : Option.none()
+  return components.length === 2
+    ? Capability.parsePattern(`${declared}:**`)
+    : Option.none()
 }
 
 const decodeCapability = Schema.decodeUnknownOption(Capability.Capability)
