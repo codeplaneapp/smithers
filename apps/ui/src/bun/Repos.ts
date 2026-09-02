@@ -202,18 +202,52 @@ export const ownerNameOf = (remote: string | null): string | null => {
  * Read-only like the git probe, through the same sandbox; any failure is the
  * honest absence of the field, never a fake zero.
  */
+/**
+ * A probe spawn may not hold the open request hostage: `jj log -r @` snapshots
+ * the working copy and takes its lock, and on a large checkout that other
+ * sessions are committing in that is seconds, or a wait on the lock. So every
+ * probe runs `--ignore-working-copy` (no snapshot, no lock; the facts are the
+ * repo's, which is what the sidebar states) and is killed after
+ * JJ_PROBE_TIMEOUT_MS, answering the honest absence of the field.
+ */
+export const JJ_PROBE_TIMEOUT_MS = 3000
+
 const jj = async (cwd: string, args: ReadonlyArray<string>): Promise<string | null> => {
   try {
-    const wrapped = wrapSandbox(["jj", "-R", cwd, ...args], probePolicy({ tmpdir: probeTmpdir() }), currentSandboxHost())
+    const wrapped = wrapSandbox(
+      ["jj", "--ignore-working-copy", "-R", cwd, ...args],
+      probePolicy({ tmpdir: probeTmpdir() }),
+      currentSandboxHost()
+    )
     const child = Bun.spawn([...wrapped.argv], {
       env: { ...(Bun.env as Record<string, string | undefined>) },
       stdout: "pipe",
       stderr: "ignore",
       stdin: "ignore"
     })
-    const [code, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()])
-    const value = stdout.trim()
-    return code === 0 && value !== "" ? value : null
+    /*
+     * The bound is a race, not a kill alone: the sandbox wrapper's grandchild
+     * can keep the stdout pipe open after the wrapper dies, so awaiting the
+     * pipe would still hang. On timeout the answer is null now and the
+     * process tree is killed behind it.
+     */
+    const work = Promise.all([child.exited, new Response(child.stdout).text()]).then(([code, stdout]) => {
+      const value = stdout.trim()
+      return code === 0 && value !== "" ? value : null
+    })
+    let deadline: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<null>((resolve) => {
+      deadline = setTimeout(() => {
+        child.kill("SIGKILL")
+        resolve(null)
+      }, JJ_PROBE_TIMEOUT_MS)
+    })
+    try {
+      return await Promise.race([work, timeout])
+    } finally {
+      if (deadline !== undefined) clearTimeout(deadline)
+      work.catch(() => null)
+    }
   } catch {
     return null
   }

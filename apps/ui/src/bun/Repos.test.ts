@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, join } from "node:path"
-import { createRepoStore, detectSmithers, inspectRepo, ownerNameOf, repoId } from "./Repos"
+import { JJ_PROBE_TIMEOUT_MS, createRepoStore, detectSmithers, inspectRepo, ownerNameOf, repoId } from "./Repos"
 
 /*
  * Repository detection (LOCAL-APP.md "Repository detection") against real
@@ -204,4 +204,29 @@ describe("declaration files on a BUILD.ts-rooted checkout", () => {
     await writeFile(join(root, "node_modules", "x", "BUILD.ts"), WORKSPACE)
     expect(detectSmithers(root).declarationFiles).toEqual(["BUILD.ts", "packages/a/BUILD.ts"])
   })
+})
+
+
+describe("the jj probe never holds a repository open hostage", () => {
+  test("a jj that hangs is killed at the probe timeout and the repo opens without jj facts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "smithers-jj-hang-"))
+    const shims = join(dir, "bin")
+    await mkdir(shims)
+    await mkdir(join(dir, ".jj"))
+    // The shim ignores every argument and sleeps well past the timeout.
+    await writeFile(join(shims, "jj"), "#!/bin/sh\nsleep 30\n")
+    await chmod(join(shims, "jj"), 0o755)
+    const realPath = process.env.PATH
+    process.env.PATH = `${shims}:${realPath ?? ""}`
+    const started = Date.now()
+    try {
+      const result = await inspectRepo(dir)
+      expect(result.status).toBe("ok")
+      if (result.status === "ok") expect(result.repo.jj).toBeUndefined()
+      expect(Date.now() - started).toBeLessThan(JJ_PROBE_TIMEOUT_MS * 3)
+    } finally {
+      process.env.PATH = realPath
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, 20_000)
 })
