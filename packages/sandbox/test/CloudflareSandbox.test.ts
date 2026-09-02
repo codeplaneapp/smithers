@@ -373,10 +373,15 @@ describe("CloudflareSandbox", () => {
           )
           expect(copied.code).toBe(0)
           expect(Array.from(yield* session.readFile(`${workdir}/stdin-copy.bin`))).toEqual(Array.from(bytes))
-          // The staged input file is gone once the command ends.
-          expect(yield* Effect.flip(session.readFile(`${workdir}/.smthrs-stdin-0`))).toMatchObject({
-            code: "not_found"
-          })
+          // The staged input is gone once the command ends. The assertion names
+          // the session-private directory rather than a file, because the
+          // staged name is random: "this one literal path is absent" holds just
+          // as well for an implementation that leaks every file it ever staged.
+          const staging = `${workdir}/.smthrs-stdin`
+          const leftovers = yield* Effect.scoped(
+            Effect.flatMap(session.spawn(`test -d '${staging}' && ls -1A '${staging}'`, {}), output)
+          )
+          expect(leftovers).toEqual({ stdout: "", stderr: "", code: 0 })
           yield* Effect.scoped(Effect.asVoid(session.spawn("mkdir -p sub", {})))
           const rooted = yield* Effect.scoped(Effect.flatMap(session.spawn("pwd", { cwd: "./sub/" }), output))
           expect(rooted).toEqual({ stdout: `${workdir}/sub\n`, stderr: "", code: 0 })

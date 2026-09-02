@@ -351,6 +351,53 @@ describe("DirectorySandbox", () => {
     budget
   )
 
+  // Scope closure reaches only the `sh -c` wrapper the host spawner owns. A
+  // shell that forked its work, as a background job or pipeline, leaves that
+  // work running unless the finalizer performs the descendant walk.
+  it.effect(
+    "closing a spawn's scope ends everything the command started",
+    () =>
+      Effect.gen(function*() {
+        const { fs, spawner } = yield* services
+        // The Node host currently adds process-group cleanup of its own. A
+        // non-detached command isolates the provider's descendant guarantee,
+        // because that host fallback can reach only the wrapper process.
+        const wrapperOnly = makeSpawner((command) =>
+          spawner.spawn(
+            command._tag === "StandardCommand"
+              ? ChildProcess.make(command.command, command.args, { ...command.options, detached: false })
+              : command
+          )
+        )
+        const directory = DirectorySandbox.make({ fs, spawner: wrapperOnly, root })
+        let pid: number | undefined
+        yield* Effect.scoped(
+          Effect.gen(function*() {
+            const session = yield* directory.acquire("scope-closure")
+            const started = yield* Effect.scoped(
+              Effect.gen(function*() {
+                const running = yield* session.spawn("sleep 3809 & echo $!; wait", {})
+                const background = Number(yield* firstLine(running))
+                pid = background
+                expect(processIsAlive(background)).toBe(true)
+                return background
+              })
+            )
+            yield* waitFor(() => processHasEnded(started), "the work the closed scope left behind to end")
+          })
+        ).pipe(Effect.ensuring(Effect.sync(() => {
+          spawnSync("pkill", ["-TERM", "-f", "sleep 380[9]"])
+          if (pid === undefined) return
+          try {
+            globalThis.process.kill(pid, "SIGKILL")
+          } catch {
+            // Already gone, which is the point.
+          }
+        })))
+      }),
+    budget
+  )
+
   it.effect("reports a signal it could not deliver and leaves an exited command alone", () =>
     Effect.gen(function*() {
       const directory = yield* provider

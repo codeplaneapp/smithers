@@ -227,6 +227,7 @@ describe("RemoteChildProcessSpawner", () => {
 
         expect(reason(error)).toBe("NotFound")
         expect(error.message).toContain(`${code} provider failure`)
+        expect(error.reason.cause).toBe(failure)
       })
   )
 
@@ -425,10 +426,12 @@ describe("RemoteChildProcessSpawner", () => {
       const provider = RemoteChildProcessSpawner.TestRemote.make({ stdin: true, scripts: { cat: {} } })
 
       const error = yield* Effect.flip(
-        Effect.flatMap(ChildProcessSpawner, (spawner) =>
-          spawner.string(ChildProcess.make("cat", [], { stdin: "inherit" }))).pipe(
-            Effect.provide(RemoteChildProcessSpawner.layer(provider))
-          )
+        Effect.flatMap(
+          ChildProcessSpawner,
+          (spawner) => spawner.string(ChildProcess.make("cat", [], { stdin: "inherit" }))
+        ).pipe(
+          Effect.provide(RemoteChildProcessSpawner.layer(provider))
+        )
       )
       expect(reason(error)).toBe("BadArgument")
       expect(error.message).toContain("cannot inherit this process's standard input")
@@ -437,10 +440,12 @@ describe("RemoteChildProcessSpawner", () => {
       // The same disposition inside a config, and inside a pipeline's leftmost
       // stage, are the same refusal.
       const inConfig = yield* Effect.flip(
-        Effect.flatMap(ChildProcessSpawner, (spawner) =>
-          spawner.string(ChildProcess.make("cat", [], { stdin: { stream: "inherit" } }))).pipe(
-            Effect.provide(RemoteChildProcessSpawner.layer(provider))
-          )
+        Effect.flatMap(
+          ChildProcessSpawner,
+          (spawner) => spawner.string(ChildProcess.make("cat", [], { stdin: { stream: "inherit" } }))
+        ).pipe(
+          Effect.provide(RemoteChildProcessSpawner.layer(provider))
+        )
       )
       expect(inConfig.message).toContain("cannot inherit this process's standard input")
 
@@ -458,10 +463,12 @@ describe("RemoteChildProcessSpawner", () => {
 
       // And the other three dispositions still run.
       for (const stream of ["pipe", "ignore", "overlapped"] as const) {
-        yield* Effect.flatMap(ChildProcessSpawner, (spawner) =>
-          spawner.string(ChildProcess.make("cat", [], { stdin: stream }))).pipe(
-            Effect.provide(RemoteChildProcessSpawner.layer(provider))
-          )
+        yield* Effect.flatMap(
+          ChildProcessSpawner,
+          (spawner) => spawner.string(ChildProcess.make("cat", [], { stdin: stream }))
+        ).pipe(
+          Effect.provide(RemoteChildProcessSpawner.layer(provider))
+        )
       }
       expect(provider.state.commands).toEqual(["cat", "cat", "cat"])
     }))
@@ -518,34 +525,40 @@ describe("RemoteChildProcessSpawner", () => {
       expect(error.message).toContain("first command of a pipeline only")
     }))
 
-  it.effect("stops reading standard input at the bound instead of after the producer finishes", () =>
-    Effect.gen(function*() {
-      const provider = RemoteChildProcessSpawner.TestRemote.make({ stdin: true, scripts: { cat: {} } })
-      const pulled = yield* Ref.make(0)
-      const released = yield* Ref.make(false)
-      // An endless producer. If the bound were checked after the fold, this
-      // test would never return: the fold would keep growing the accumulator
-      // until the heap ran out.
-      const endless = Stream.forever(Stream.make(new Uint8Array(1024 * 1024))).pipe(
-        Stream.tap(() => Ref.update(pulled, (n) => n + 1)),
-        Stream.ensuring(Ref.set(released, true))
-      )
+  it.effect(
+    "stops reading standard input at the bound instead of after the producer finishes",
+    () =>
+      Effect.gen(function*() {
+        const provider = RemoteChildProcessSpawner.TestRemote.make({ stdin: true, scripts: { cat: {} } })
+        const pulled = yield* Ref.make(0)
+        const released = yield* Ref.make(false)
+        // An endless producer. If the bound were checked after the fold, this
+        // test would never return: the fold would keep growing the accumulator
+        // until the heap ran out.
+        const endless = Stream.forever(Stream.make(new Uint8Array(1024 * 1024))).pipe(
+          Stream.tap(() => Ref.update(pulled, (n) => n + 1)),
+          Stream.ensuring(Ref.set(released, true))
+        )
 
-      const error = yield* Effect.flip(
-        Effect.flatMap(ChildProcessSpawner, (spawner) =>
-          spawner.string(ChildProcess.make("cat", [], { stdin: endless }))).pipe(
+        const error = yield* Effect.flip(
+          Effect.flatMap(
+            ChildProcessSpawner,
+            (spawner) => spawner.string(ChildProcess.make("cat", [], { stdin: endless }))
+          ).pipe(
             Effect.provide(RemoteChildProcessSpawner.layer(provider))
           )
-      )
+        )
 
-      expect(error.message).toContain("exceeds")
-      // Seventeen mebibytes were pulled and no more: the sixteen that fit plus
-      // the one that crossed the line and ended the read.
-      expect(yield* Ref.get(pulled)).toBe(17)
-      // The upstream producer's own cleanup ran on the early cutoff.
-      expect(yield* Ref.get(released)).toBe(true)
-      expect(provider.state.commands).toEqual([])
-    }), 30_000)
+        expect(error.message).toContain("exceeds")
+        // Seventeen mebibytes were pulled and no more: the sixteen that fit plus
+        // the one that crossed the line and ended the read.
+        expect(yield* Ref.get(pulled)).toBe(17)
+        // The upstream producer's own cleanup ran on the early cutoff.
+        expect(yield* Ref.get(released)).toBe(true)
+        expect(provider.state.commands).toEqual([])
+      }),
+    30_000
+  )
 
   it.effect("accepts standard input of exactly the bound and refuses one byte more", () =>
     Effect.gen(function*() {

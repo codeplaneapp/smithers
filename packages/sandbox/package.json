@@ -6,7 +6,7 @@
   "smthrs": {
     "group": "engine"
   },
-  "description": "Provider-neutral remote process execution and sandbox health probing for flows",
+  "description": "Provisioned machines, provider-neutral remote process execution, conformance, and sandbox liveness for flows",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",

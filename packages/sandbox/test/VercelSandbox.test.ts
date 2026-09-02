@@ -9,6 +9,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync
@@ -113,6 +114,10 @@ interface Faults {
   commandFailure?: { readonly exitCode: number } | undefined
   /** File reads arrive as UTF-8 text chunks rather than bytes. */
   textReads?: boolean
+  /** File reads reuse one backing buffer for every yielded chunk. */
+  reuseReadBuffer?: boolean
+  /** `writeFiles` overwrites byte buffers after it has consumed them. */
+  mutateWriteBuffers?: boolean
 }
 
 interface Recorded {
@@ -120,10 +125,11 @@ interface Recorded {
   readonly commands: Array<RunInput>
   readonly extended: Array<number>
   readonly stopped: Array<string>
+  readonly writes: Array<{ readonly path: string; readonly content: Uint8Array }>
 }
 
 const fakeSdk = (faults: Faults = {}): { readonly sdk: Sdk; readonly recorded: Recorded } => {
-  const recorded: Recorded = { acquired: [], commands: [], extended: [], stopped: [] }
+  const recorded: Recorded = { acquired: [], commands: [], extended: [], stopped: [], writes: [] }
   const machines = new Map<string, { readonly name: string; running: boolean }>()
   const finished = (result: FinishedRun): CommandFinished => ({
     exitCode: result.exitCode,
@@ -152,10 +158,27 @@ const fakeSdk = (faults: Faults = {}): { readonly sdk: Sdk; readonly recorded: R
       if (faults.readFailure !== undefined) throw faults.readFailure
       const at = resolve(path)
       if (!existsSync(at)) return null
+      if (faults.reuseReadBuffer === true) {
+        const content = new Uint8Array(readFileSync(at))
+        return (async function*() {
+          const reused = new Uint8Array(2)
+          for (let offset = 0; offset < content.length; offset += reused.length) {
+            const length = Math.min(reused.length, content.length - offset)
+            reused.fill(0)
+            reused.set(content.subarray(offset, offset + length))
+            yield reused.subarray(0, length)
+          }
+        })()
+      }
       return faults.textReads === true ? createReadStream(at, "utf8") : createReadStream(at)
     },
     writeFiles: async (files) => {
-      for (const file of files) writeFileSync(resolve(file.path), file.content)
+      for (const file of files) {
+        const content = typeof file.content === "string" ? encoder.encode(file.content) : file.content
+        recorded.writes.push({ path: file.path, content: content.slice() })
+        writeFileSync(resolve(file.path), content)
+        if (faults.mutateWriteBuffers === true && typeof file.content !== "string") file.content.fill(0)
+      }
     },
     extendTimeout: async (duration) => {
       recorded.extended.push(duration)
@@ -230,7 +253,7 @@ describe("VercelSandbox", () => {
         timeoutMs: 15 * 60_000,
         maxDurationMs: 15 * 60_000,
         runtime: "node22",
-        commandEnv: { STATIC_PROOF: "static" },
+        commandEnv: { STATIC_PROOF: "static", KEEP_ME: "kept", REMOVE_ME: "base" },
         workdir: work
       })
       const first = yield* acquired(provider, (session) =>
@@ -240,7 +263,7 @@ describe("VercelSandbox", () => {
           return yield* Effect.scoped(
             Effect.flatMap(
               session.spawn(`printf '%s:%s' "$STATIC_PROOF" "$SPAWN_PROOF"`, {
-                env: { SPAWN_PROOF: "spawn", OMITTED: undefined }
+                env: { SPAWN_PROOF: "spawn", REMOVE_ME: undefined, OMITTED: undefined }
               }),
               (process) => Stream.mkString(Stream.decodeText(process.stdout))
             )
@@ -271,7 +294,7 @@ describe("VercelSandbox", () => {
       expect(recorded.stopped).toHaveLength(2)
       const spawned = recorded.commands.find((command) => command.cmd === "sh")
       expect(spawned?.args?.[0]).toBe("-c")
-      expect(spawned?.env).toEqual({ STATIC_PROOF: "static", SPAWN_PROOF: "spawn" })
+      expect(spawned?.env).toEqual({ STATIC_PROOF: "static", KEEP_ME: "kept", SPAWN_PROOF: "spawn" })
     }))
 
   it.effect("resolves caller-supplied credential sources in precedence order", () =>
@@ -361,8 +384,14 @@ describe("VercelSandbox", () => {
           const bytes = new Uint8Array([0, 1, 2, 255, 10, 13, 7])
           expect(yield* output(session, "cat > stdin-copy.bin", { stdin: bytes })).toEqual({ stdout: "", code: 0 })
           expect(yield* session.readFile(`${work}/stdin-copy.bin`)).toEqual(bytes)
-          // The redirect's staged input is removed once the command ends.
-          expect(yield* Effect.flip(session.readFile(`${work}/.smthrs-stdin-0`))).toMatchObject({ code: "not_found" })
+          // The redirect stages input in the session-private directory and
+          // takes it away when the spawn's scope closes. The assertion names
+          // the directory rather than a file, because the staged name is
+          // random: "this one literal path is absent" holds just as well for an
+          // implementation that leaks every file it ever staged.
+          const staging = `${work}/.smthrs-stdin`
+          expect(yield* output(session, `test -d '${staging}' && ls -1A '${staging}'`))
+            .toEqual({ stdout: "", code: 0 })
 
           expect((yield* output(session, "mkdir -p nested/leaf")).code).toBe(0)
           expect((yield* output(session, "pwd", { cwd: "nested/leaf" })).stdout).toBe(`${work}/nested/leaf\n`)
@@ -391,6 +420,37 @@ describe("VercelSandbox", () => {
           faults.stderrFailure = undefined
         }))
     }), 30_000)
+
+  it.effect("isolates caller bytes from an SDK that mutates write buffers", () =>
+    Effect.gen(function*() {
+      const fake = fakeSdk({ mutateWriteBuffers: true })
+      const work = dir("mutating-write")
+      const content = new Uint8Array([0, 1, 2, 253, 254, 255])
+      const expected = content.slice()
+
+      yield* acquired(VercelSandbox.make({ sdk: fake.sdk, workdir: work }), (session) =>
+        Effect.gen(function*() {
+          const path = `${work}/bytes.bin`
+          yield* session.writeFile(path, content)
+          expect(Array.from(fake.recorded.writes.at(-1)!.content)).toEqual(Array.from(expected))
+          expect(Array.from(content)).toEqual(Array.from(expected))
+          expect(Array.from(yield* session.readFile(path))).toEqual(Array.from(expected))
+        }))
+    }))
+
+  it.effect("copies chunks from an SDK read stream that reuses its backing buffer", () =>
+    Effect.gen(function*() {
+      const fake = fakeSdk({ reuseReadBuffer: true })
+      const work = dir("reused-read")
+      const expected = new Uint8Array([1, 2, 3, 4, 5, 6])
+
+      yield* acquired(VercelSandbox.make({ sdk: fake.sdk, workdir: work }), (session) =>
+        Effect.gen(function*() {
+          const path = `${work}/bytes.bin`
+          yield* session.writeFile(path, expected)
+          expect(Array.from(yield* session.readFile(path))).toEqual(Array.from(expected))
+        }))
+    }))
 
   it.effect("maps vendor and command failures and still runs teardown", () =>
     Effect.gen(function*() {

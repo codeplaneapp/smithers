@@ -221,6 +221,40 @@ describe("Sandbox.fileSystem", () => {
       expect(provider.state.commands).toEqual([])
     }))
 
+  it.effect.each(
+    [
+      { code: "aborted", reason: "Unknown" },
+      { code: "timeout", reason: "TimedOut" },
+      { code: "unavailable", reason: "Unknown" },
+      { code: "not_found", reason: "NotFound" },
+      { code: "spawn_error", reason: "Unknown" },
+      { code: "unknown", reason: "Unknown" }
+    ] as const
+  )("maps provider code $code to $reason at the filesystem seam", ({ code, reason }) =>
+    Effect.gen(function*() {
+      // `unavailable` is the shared table's one filesystem exception: a
+      // broken session must not be mistaken for an absent path.
+      const failure = new ProviderError({ code, message: `${code} while reading` })
+      const provider = Sandbox.TestSession.make()
+      const error = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const session = yield* provider.acquire("probe")
+          const files = Sandbox.fileSystem({
+            ...session,
+            readFile: () => Effect.fail(failure)
+          })
+          return yield* Effect.flip(files.readFile("report.bin"))
+        })
+      )
+
+      expect(error).toBeInstanceOf(PlatformError.PlatformError)
+      expect(error.reason).toMatchObject({
+        _tag: reason,
+        pathOrDescriptor: "/sandbox/report.bin",
+        cause: failure
+      })
+    }))
+
   it.effect("answers exists from the probe's exit code, restating denial, and surfaces probe breakage", () =>
     Effect.gen(function*() {
       const provider = Sandbox.TestSession.make({

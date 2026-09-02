@@ -186,7 +186,8 @@ export const make = (options: DaytonaSandboxOptions): Provider => ({
             yield* checked(result, "unknown", `daytona-sandbox: could not create ${parent}`)
           }
           yield* attempt(
-            () => held.sandbox.fs.uploadFileStream(content, path),
+            // The SDK may retain or mutate its upload buffer after accepting it.
+            () => held.sandbox.fs.uploadFileStream(content.slice(), path),
             "unknown",
             `could not upload ${path}`
           )
@@ -213,8 +214,9 @@ export const make = (options: DaytonaSandboxOptions): Provider => ({
               execute(
                 fed,
                 resolveCwd(spawnOptions.cwd),
+                // Overlay first so a per-spawn `undefined` removes a command default.
                 Object.fromEntries(
-                  [...Object.entries(options.commandEnv ?? {}), ...Object.entries(spawnOptions.env ?? {})].filter(
+                  Object.entries({ ...options.commandEnv, ...spawnOptions.env }).filter(
                     (entry): entry is [string, string] => entry[1] !== undefined
                   )
                 )

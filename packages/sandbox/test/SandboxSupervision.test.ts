@@ -8,7 +8,7 @@
  * fresh session to land on.
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, PlatformError, Ref, Schedule } from "effect"
+import { Deferred, Effect, Fiber, Option, PlatformError, Ref, Schedule } from "effect"
 import { TestClock } from "effect/testing"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
@@ -93,6 +93,35 @@ describe("SandboxSupervision", () => {
       expect(error.message).toContain("test-session")
     }))
 
+  it.effect("fails a spawn that is still starting when its session is retired", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const provider = RemoteChildProcessSpawner.Provider.of({
+        session: "blocked-spawn-session",
+        open: () => Effect.acquireRelease(Effect.void, () => Effect.void),
+        spawn: () => Effect.andThen(Deferred.succeed(entered, undefined), Effect.never),
+        ping: Effect.fail(gone())
+      })
+
+      const bounded = yield* Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner
+        const running = yield* Effect.forkChild(
+          Effect.flip(spawner.exitCode(ChildProcess.make("still-starting"))).pipe(
+            Effect.timeoutOption("2 seconds")
+          ),
+          { startImmediately: true }
+        )
+        yield* Deferred.await(entered)
+        yield* TestClock.adjust("3 seconds")
+        return yield* Fiber.join(running)
+      }).pipe(Effect.provide(SandboxSupervision.layer(provider, { interval })))
+
+      expect(Option.isSome(bounded)).toBe(true)
+      if (Option.isNone(bounded)) return
+      expect(reason(bounded.value)).toBe("NotFound")
+      expect(bounded.value.message).toContain("blocked-spawn-session")
+    }))
+
   it.effect("opens a fresh session for the command that follows a retirement", () =>
     Effect.gen(function*() {
       const healthy = yield* Ref.make(false)
@@ -174,6 +203,41 @@ describe("SandboxSupervision", () => {
 
       expect(provider.state.openedSessions).toEqual(["test-session"])
       expect(yield* Ref.get(record.events)).toEqual([])
+    }))
+
+  it.effect("holds a failing session that never spends its tolerance before the layer goes away", () =>
+    Effect.gen(function*() {
+      // Every probe says unhealthy, but the layer's scope closes long before
+      // the tolerance is spent. Retirement is a verdict about a run of probes,
+      // not about any one, so nothing is retired and nothing is reported; the
+      // session ends because the layer did.
+      const probes = yield* Ref.make(0)
+      const provider = RemoteChildProcessSpawner.TestRemote.make({
+        ping: Effect.andThen(Ref.update(probes, (n) => n + 1), Effect.fail(gone())),
+        scripts: { greet: { stdout: "hello" } }
+      })
+      const record = yield* recorder()
+
+      const probed = yield* Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner
+        yield* spawner.string(ChildProcess.make("greet"))
+        yield* TestClock.adjust("3 seconds")
+        // Still the first session: no retirement happened under it.
+        expect(provider.state.cancellations).toBe(0)
+        yield* spawner.string(ChildProcess.make("greet"))
+        return yield* Ref.get(probes)
+      }).pipe(
+        Effect.provide(SandboxSupervision.layer(provider, { interval, tolerance: 20, reporter: record.reporter }))
+      )
+
+      // Every probe failed, and every one of them was under the tolerance.
+      expect(probed).toBeGreaterThan(0)
+      expect(probed).toBeLessThan(20)
+      expect(provider.state.openedSessions).toEqual(["test-session"])
+      expect(provider.state.commands).toEqual(["greet", "greet"])
+      expect(yield* Ref.get(record.events)).toEqual([])
+      // The layer's own teardown closed it, exactly once.
+      expect(provider.state.cancellations).toBe(1)
     }))
 
   it.effect("retires a session whose ping outlives the probe deadline", () =>

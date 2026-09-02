@@ -638,11 +638,18 @@ export const make = (options: AwsSandboxOptions): Provider => ({
           ? cwd ?? workdir
           : `${workdir}/${cwd.replace(/^(\.\/)+/, "")}`.replace(/\/\.?$/, "")
       const kill = (pidfile: string, signal: string): Effect.Effect<void, ProviderError> =>
-        Effect.asVoid(
-          Effect.flatMap(
-            run(killScript(pidfile, signal.replace(/^SIG/, ""))),
-            (result) => settled(`signalling with ${signal}`, result)
-          )
+        Effect.flatMap(
+          run(killScript(pidfile, signal.replace(/^SIG/, ""))),
+          (result) =>
+            Effect.flatMap(settled(`signalling with ${signal}`, result), (settledResult) =>
+              settledResult.code === 0
+                ? Effect.void
+                : Effect.fail(
+                  failure(
+                    "unknown",
+                    `the signal ${signal} could not be delivered in ${taskArn}: ${settledResult.payload.trim()}`
+                  )
+                ))
         )
 
       const pidfiles = new WeakMap<RemoteProcess, string>()
@@ -672,11 +679,12 @@ export const make = (options: AwsSandboxOptions): Provider => ({
           // Closing the process scope ends the local client, which the guest
           // does not notice. The contract says the scope IS the process's
           // lifetime, so the finalizer signals the guest side too, unless the
-          // command has already been seen to end.
+          // command has already been seen to end. A session that ended without
+          // a status is exactly the case where the guest may still be running.
           let ended = false
-          const observed = Effect.tap(gathered, () =>
+          const observed = Effect.tap(gathered, (result) =>
             Effect.sync(() => {
-              ended = true
+              if (result.code !== undefined) ended = true
             }))
           yield* Effect.addFinalizer(() =>
             ended ? Effect.void : Effect.ignore(kill(pidfile, "SIGTERM"), { log: "Warn" })

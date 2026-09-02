@@ -156,20 +156,30 @@ const replaceRegion = (source, name, body) => {
   return `${source.slice(0, start)}${regionStart(name)}\n\n${body.trim()}\n\n${source.slice(end)}`
 }
 
-const fragments = new Map([["sandbox-namespaces", namespaceTable]])
-
 const outputs = new Map([[Package.api.target, apiPage]])
-const regions = [
-  ...Package.generated.map((entry) => ({ ...entry, body: fragments.get(entry.region) })),
-  ...Package.snippets.map((entry) => ({ ...entry, body: read(join(packageRoot, entry.source)) }))
-]
-for (const region of regions) {
-  if (region.body === undefined) throw new Error(`sandbox docs: nothing generates region ${region.region}`)
-  const current = outputs.get(region.target) ?? read(join(repoRoot, region.target))
-  outputs.set(region.target, replaceRegion(current, region.region, region.body))
+for (const snippet of Package.snippets) {
+  const current = outputs.get(snippet.target) ?? read(join(repoRoot, snippet.target))
+  outputs.set(snippet.target, replaceRegion(current, snippet.region, read(join(packageRoot, snippet.source))))
 }
 
 const failures = []
+
+// The README's namespace table is a fragment rather than generated text,
+// because it lives inside this package's dprint scope and a formatter that
+// pads a table and a generator that does not would rewrite each other forever.
+// It is still not hand-owned: it has to name exactly the namespaces the barrel
+// exports, which is the drift the four-of-fifteen table used to be.
+{
+  const fragment = read(join(packageRoot, "docs", "namespaces.md"))
+  const listed = [...fragment.matchAll(/^\|\s*`(\w+)`\s*\|/gm)].map((match) => match[1])
+  const expected = namespaces.map((namespace) => namespace.name)
+  if (listed.join(",") !== expected.join(",")) {
+    failures.push(
+      `packages/sandbox/docs/namespaces.md: lists ${listed.join(", ")}; the barrel exports ${expected.join(", ")}`
+    )
+  }
+}
+
 for (const path of Package.references) {
   const content = read(join(repoRoot, path))
   if (!content.includes(Package.name) || !content.includes("/api/sandbox")) {

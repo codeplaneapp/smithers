@@ -120,6 +120,8 @@ interface Faults {
   executeFailure?: unknown
   /** The machine reports every command finished with this status (a dying VM). */
   commandFailure?: { readonly exitCode: number; readonly result: string } | undefined
+  /** `uploadFileStream` overwrites byte buffers after it has consumed them. */
+  mutateUploadBuffers?: boolean
 }
 
 interface Recorded {
@@ -130,6 +132,7 @@ interface Recorded {
     { readonly id: string; readonly timeout: number | undefined; readonly wait: boolean | undefined }
   >
   readonly executes: Array<ExecuteCall>
+  readonly uploads: Array<{ readonly path: string; readonly content: Uint8Array }>
 }
 
 const fakeSdk = (faults: Faults = {}): {
@@ -138,7 +141,7 @@ const fakeSdk = (faults: Faults = {}): {
   readonly machines: Map<string, Machine>
   readonly seed: (name: string, dir?: string) => Machine
 } => {
-  const recorded: Recorded = { gets: [], creates: [], starts: [], deletes: [], executes: [] }
+  const recorded: Recorded = { gets: [], creates: [], starts: [], deletes: [], executes: [], uploads: [] }
   const machines = new Map<string, Machine>()
   let nextId = 1
   const seed = (name: string, dir?: string): Machine => {
@@ -182,7 +185,9 @@ const fakeSdk = (faults: Faults = {}): {
       uploadFileStream: async (content, path) => {
         // Relative remote paths resolve against the sandbox working
         // directory, the way the vendor's own examples use them.
+        recorded.uploads.push({ path, content: content.slice() })
         writeFileSync(path.startsWith("/") ? path : join(machine.dir ?? root, path), content)
+        if (faults.mutateUploadBuffers === true) content.fill(0)
       }
     }
   })
@@ -265,7 +270,7 @@ describe("DaytonaSandbox", () => {
         namePrefix: "lane-",
         startTimeoutSeconds: 17,
         deleteTimeoutSeconds: 29,
-        commandEnv: { STATIC_PROOF: "static" }
+        commandEnv: { STATIC_PROOF: "static", KEEP_ME: "kept", REMOVE_ME: "base" }
       })
       const answer = yield* acquired(provider, (session) =>
         Effect.gen(function*() {
@@ -274,7 +279,7 @@ describe("DaytonaSandbox", () => {
           expect(session.workdir).toBe(quoted)
           return yield* output(session, `printf '%s:%s' "$STATIC_PROOF" "$SPAWN_PROOF"`, {
             cwd: "/tmp",
-            env: { SPAWN_PROOF: "spawn", OMITTED: undefined }
+            env: { SPAWN_PROOF: "spawn", REMOVE_ME: undefined, OMITTED: undefined }
           })
         }))
 
@@ -287,8 +292,12 @@ describe("DaytonaSandbox", () => {
       // the provider quoted it; the recorded line is that rendering.
       expect(fake.recorded.executes[0]?.command).toBe(`mkdir -p '${quoted.replaceAll("'", `'\\''`)}'`)
       expect(fake.recorded.executes[1]).toMatchObject({
-        cwd: "/tmp",
-        env: { STATIC_PROOF: "static", SPAWN_PROOF: "spawn" }
+        cwd: "/tmp"
+      })
+      expect(fake.recorded.executes[1]?.env).toEqual({
+        STATIC_PROOF: "static",
+        KEEP_ME: "kept",
+        SPAWN_PROOF: "spawn"
       })
       expect(fake.machines.size).toBe(0)
     }))
@@ -308,11 +317,19 @@ describe("DaytonaSandbox", () => {
           yield* session.writeFile("rooted.bin", new Uint8Array([42]))
           expect(Array.from(yield* session.readFile(`${work}/rooted.bin`))).toEqual([42])
 
-          // Standard input is staged in the workspace, delivered, and the
-          // staged file is removed once the command ends.
+          // Standard input is staged in the session-private directory,
+          // delivered, and taken away when the spawn's scope closes.
+          //
+          // The assertion names the DIRECTORY, not a file. The staged name is
+          // random, so asserting one literal path is absent proves nothing: it
+          // holds just as well for an implementation that leaks every file it
+          // ever staged. `test -d` says the redirect staged where it claims to,
+          // and the empty listing says nothing survived the command.
           expect(yield* output(session, "cat > stdin-copy.bin", { stdin: bytes })).toEqual({ stdout: "", code: 0 })
           expect(yield* session.readFile(`${work}/stdin-copy.bin`)).toEqual(bytes)
-          expect(yield* Effect.flip(session.readFile(`${work}/.smthrs-stdin-0`))).toMatchObject({ code: "not_found" })
+          const staging = `${work}/.smthrs-stdin`
+          expect(yield* output(session, `test -d '${staging}' && ls -1A '${staging}'`))
+            .toEqual({ stdout: "", code: 0 })
 
           // `executeCommand` merges standard error into its one output, so
           // the text arrives on stdout and stderr is honestly empty.
@@ -349,6 +366,22 @@ describe("DaytonaSandbox", () => {
           expect(Array.from(yield* session.readFile(`${explicit}/probe.bin`))).toEqual([7])
         }))
       expect(fake.recorded.deletes[0]).toMatchObject({ timeout: 60, wait: true })
+    }))
+
+  it.effect("isolates caller bytes from an SDK that mutates upload buffers", () =>
+    Effect.gen(function*() {
+      const fake = fakeSdk({ mutateUploadBuffers: true })
+      const content = new Uint8Array([0, 1, 2, 253, 254, 255])
+      const expected = content.slice()
+
+      yield* acquired(DaytonaSandbox.make({ sdk: fake.sdk }), (session) =>
+        Effect.gen(function*() {
+          const path = `${session.workdir}/bytes.bin`
+          yield* session.writeFile(path, content)
+          expect(Array.from(fake.recorded.uploads.at(-1)!.content)).toEqual(Array.from(expected))
+          expect(Array.from(content)).toEqual(Array.from(expected))
+          expect(Array.from(yield* session.readFile(path))).toEqual(Array.from(expected))
+        }))
     }))
 
   it.effect("rejects invalid and undiscoverable workdirs", () =>

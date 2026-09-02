@@ -18,15 +18,13 @@ export const Package = {
   /** Package-owned prose projected into more than one output. */
   snippets: [
     {
+      source: "docs/namespaces.md",
+      region: "sandbox-namespaces",
+      target: "packages/sandbox/README.md"
+    },
+    {
       source: "docs/limits.md",
       region: "sandbox-limits",
-      target: "packages/sandbox/README.md"
-    }
-  ],
-  /** Regions the generator fills from the barrel itself rather than from a file. */
-  generated: [
-    {
-      region: "sandbox-namespaces",
       target: "packages/sandbox/README.md"
     }
   ],

@@ -1,5 +1,9 @@
 /**
- * Bounds a conformance check on the wall clock.
+ * Bounds an effect on the wall clock.
+ *
+ * Both conformance suites bound a check with it, and `RemoteChildProcessSpawner`
+ * bounds the signal a closing scope sends, so a provider that never answers
+ * cannot hang a caller under any clock.
  *
  * @since 0.1.0
  */

@@ -12,6 +12,7 @@
  */
 import * as CommandLine from "@smthrs/kernel/CommandLine"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as PlatformError from "effect/PlatformError"
@@ -27,11 +28,27 @@ import {
   makeHandle,
   ProcessId
 } from "effect/unstable/process/ChildProcessSpawner"
+import { elapsed } from "../internal/deadline.ts"
 import { platformFailure } from "../internal/platformReason.ts"
 import type { Provider, RemoteProcess } from "./Provider.ts"
 import type { ProviderError } from "./ProviderError.ts"
 
 const MODULE = "ChildProcess"
+
+/**
+ * How long the signal a closing scope sends is given before the close moves
+ * on without it.
+ *
+ * A finalizer runs uninterruptibly, so a provider whose `kill` never settles
+ * wedges the fiber closing the scope, and cancellation, layer teardown, and
+ * process shutdown with it. The signal is a courtesy the provider's own
+ * release finalizer repeats when it tears the session down, so it is bounded
+ * rather than waited on: `SandboxSupervision` bounds a caller-supplied
+ * reporter for the same reason. The bound runs on the platform timer, not the
+ * ambient `Clock`, because a caller's test clock can freeze that one and a
+ * frozen clock would restore the hang this exists to prevent.
+ */
+const signalWithin = Duration.seconds(5)
 
 const platformError = platformFailure
 
@@ -269,7 +286,12 @@ const handleOf = (
       // named may belong to someone else by now.
       yield* Effect.addFinalizer(() =>
         running
-          ? Effect.ignore(kill(process, rightmostOptions(child).killSignal ?? defaultSignal))
+          ? Effect.ignore(
+            Effect.raceFirst(
+              kill(process, rightmostOptions(child).killSignal ?? defaultSignal),
+              elapsed(signalWithin)
+            )
+          )
           : Effect.void
       )
     }

@@ -228,10 +228,15 @@ export const make = (
     return makeSpawner(
       Effect.fnUntraced(function*(command) {
         // Acquiring the session and retiring one both hold the permit, so the
-        // session handed out here is never one that has already been retired.
-        // Everything after that is the guard's job.
+        // selected session is never handed out already retired. A retirement
+        // arriving between selection and spawn reaches the spawn through this
+        // race, before the handle guard exists. Everything after that is the
+        // guard's job.
         const open = yield* Effect.mapError(session, platformFailure("open", CommandLine.render(command)))
-        const handle = yield* open.spawner.spawn(command)
+        const handle = yield* Effect.raceFirst(open.spawner.spawn(command), Deferred.await(open.failed))
+        // The wrapped spawner observes a fast process exit in a scoped fiber.
+        // Let that observation run before the retirement guard reads liveness.
+        yield* Effect.yieldNow
         return yield* guarded(handle, open.failed)
       })
     )

@@ -52,5 +52,5 @@ export const platformFailure = (method: string, command: string) =>
     module: "ChildProcess",
     method,
     description: `\`${command}\`: ${error.message}`,
-    cause: error.cause
+    cause: error
   })

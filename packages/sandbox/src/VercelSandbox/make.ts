@@ -90,7 +90,8 @@ const decodeFile = async (
 ): Promise<Uint8Array> => {
   const chunks: Array<Uint8Array> = []
   for await (const chunk of stream) {
-    chunks.push(typeof chunk === "string" ? new TextEncoder().encode(chunk) : chunk)
+    // An SDK stream may reuse pooled storage after each yield.
+    chunks.push(typeof chunk === "string" ? new TextEncoder().encode(chunk) : chunk.slice())
   }
   return concat(chunks)
 }
@@ -220,7 +221,8 @@ export const make = (options: VercelSandboxOptions): Provider => ({
             yield* checked(result, "unknown", `vercel-sandbox: could not create ${parent}`)
           }
           yield* attempt(
-            () => sandbox.writeFiles([{ path, content }]),
+            // The SDK may retain or mutate its upload buffer after accepting it.
+            () => sandbox.writeFiles([{ path, content: content.slice() }]),
             "unknown",
             `could not write ${path}`
           )
@@ -250,8 +252,9 @@ export const make = (options: VercelSandboxOptions): Provider => ({
                 // precede the command's own stdout on this transport.
                 args: ["-c", fed],
                 cwd: resolveCwd(spawnOptions.cwd),
+                // Overlay first so a per-spawn `undefined` removes a command default.
                 env: Object.fromEntries(
-                  [...Object.entries(options.commandEnv ?? {}), ...Object.entries(spawnOptions.env ?? {})].filter(
+                  Object.entries({ ...options.commandEnv, ...spawnOptions.env }).filter(
                     (entry): entry is [string, string] => entry[1] !== undefined
                   )
                 )

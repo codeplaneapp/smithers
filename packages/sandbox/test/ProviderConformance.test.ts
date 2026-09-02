@@ -26,7 +26,8 @@ const commands: ProviderConformance.Commands = {
 const scripts = {
   greet: { stdout: "hello" },
   boom: { exitCode: 3 },
-  serve: { pending: true }
+  serve: { pending: true },
+  cat: { stdout: "sandbox-conformance-stdin" }
 }
 
 const gone = () => new ProviderError({ code: "unavailable", message: "session is gone" })
@@ -132,6 +133,100 @@ describe("ProviderConformance", () => {
       // The signal was delivered and accepted. That is exactly the point.
       expect(provider.state.kills).toContainEqual({ command: "serve", signal: "SIGTERM" })
     }))
+
+  // SandboxConformance bounded its own checks, but the delegated spawner-level
+  // suite had no deadline anywhere. An adapter that never answered therefore
+  // hung both public entry points instead of producing a violation. The kill
+  // shape is the one the deadline alone could not save: losing the race closes
+  // the process scope, and the scope's finalizer sends the same signal again,
+  // uninterruptibly, which is why `layer` bounds that one too.
+  it.live(
+    "convicts every provider boundary that never answers",
+    () =>
+      Effect.gen(function*() {
+        const complete = () =>
+          RemoteChildProcessSpawner.TestRemote.make({ scripts, kill: true, ping: Effect.void, stdin: true })
+        const open = complete()
+        const spawn = complete()
+        const quiet = complete()
+        const ping = complete()
+        const kill = complete()
+        const hung: ReadonlyArray<{
+          readonly provider: RemoteChildProcessSpawner.Provider
+          /** The checks whose own boundary cannot answer, so the deadline is what names them. */
+          readonly timesOut: ReadonlyArray<string>
+          /** Checks this shape must also name, for a reason other than the deadline. */
+          readonly alsoNames?: ReadonlyArray<string>
+        }> = [
+          {
+            // Nothing runs at all: every check waits on the session.
+            provider: { ...open, open: () => Effect.never },
+            timesOut: [
+              "writes-its-output",
+              "reports-a-nonzero-exit",
+              "delivers-standard-input",
+              "answers-a-ping",
+              "signals-a-running-command"
+            ]
+          },
+          {
+            // The session opens and `ping` answers; nothing else can start.
+            provider: { ...spawn, spawn: () => Effect.never },
+            timesOut: [
+              "writes-its-output",
+              "reports-a-nonzero-exit",
+              "delivers-standard-input",
+              "signals-a-running-command"
+            ]
+          },
+          {
+            // The transport starts a command and then goes quiet: the streams
+            // never end and the exit never arrives. Its `kill` still answers,
+            // so `signals-a-running-command` is convicted by the survivor wait
+            // rather than by the deadline.
+            provider: {
+              ...quiet,
+              spawn: () =>
+                Effect.succeed({
+                  stdout: Stream.never,
+                  stderr: Stream.empty,
+                  exitCode: Effect.never
+                })
+            },
+            timesOut: ["writes-its-output", "reports-a-nonzero-exit", "delivers-standard-input"],
+            alsoNames: ["signals-a-running-command"]
+          },
+          {
+            provider: { ...ping, ping: Effect.never },
+            timesOut: ["answers-a-ping"]
+          },
+          {
+            provider: { ...kill, kill: () => Effect.never },
+            timesOut: ["signals-a-running-command"]
+          }
+        ]
+
+        for (const expected of hung) {
+          const violations = yield* ProviderConformance.check(expected.provider, commands, {
+            checkTimeout: "1 second"
+          })
+          const timedOut = violations
+            .filter((violation) => violation.actual.includes("did not finish within"))
+            .map((violation) => violation.check)
+          // Every boundary that cannot answer is named, and the deadline is
+          // given as the reason, so an adapter author reads "this never
+          // returned" rather than watching the suite hang. The assertion is
+          // containment, not equality: a machine under load can starve a check
+          // that would otherwise have answered, and convicting one check too
+          // many is not the failure this case is about.
+          expect(timedOut).toEqual(expect.arrayContaining([...expected.timesOut]))
+          expect(checks(violations)).toEqual(expect.arrayContaining([...expected.alsoNames ?? []]))
+        }
+      }),
+    // Four shapes wait out their own one-second deadlines; the fifth also
+    // waits out the scope-closing signal's bound, on a loaded machine.
+    120_000
+  )
 
   it.effect("holds a provider that declares standard input to actually delivering it", () =>
     Effect.gen(function*() {

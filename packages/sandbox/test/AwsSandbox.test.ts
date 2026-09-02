@@ -229,6 +229,10 @@ interface CliFaults {
   readonly dropSentinel?: boolean | undefined
   /** An older plugin that prints no banner line. */
   readonly noBanner?: boolean | undefined
+  /** Replaces a matching guest command's framed payload and status. */
+  readonly guestResult?:
+    | ((remote: string) => { readonly code: number; readonly payload: string } | undefined)
+    | undefined
 }
 
 interface CliCall {
@@ -281,14 +285,22 @@ const fakeCli = (faults: CliFaults = {}) => {
         ? Stream.empty
         : Stream.make(encoder.encode(`\r\nStarting session with SessionId: ${sessionId}\r\n`))
       const footer = Stream.make(encoder.encode(`\r\n\r\nExiting session with sessionId: ${sessionId}.\r\n`))
-      const merged = Stream.merge(child.stdout, child.stderr).pipe(
-        Stream.map(crlf),
-        Stream.map((bytes) =>
-          faults.dropSentinel === true
-            ? encoder.encode(decoder.decode(bytes).replaceAll("__smthrs_exit_", "__dropped_"))
-            : bytes
+      const guestResult = faults.guestResult?.(remote)
+      const merged = guestResult === undefined
+        ? Stream.merge(child.stdout, child.stderr).pipe(
+          Stream.map(crlf),
+          Stream.map((bytes) =>
+            faults.dropSentinel === true
+              ? encoder.encode(decoder.decode(bytes).replaceAll("__smthrs_exit_", "__dropped_"))
+              : bytes
+          )
         )
-      )
+        : Stream.fromEffect(
+          Effect.map(child.exitCode, () => {
+            const marker = /__smthrs_exit_\d+_/.exec(remote)?.[0] ?? "__smthrs_exit_missing_"
+            return crlf(encoder.encode(`${guestResult.payload}\n${marker}${guestResult.code}__\n`))
+          })
+        )
       return makeHandle({
         pid: child.pid,
         // The plugin reports its own success, never the remote command's.
@@ -846,36 +858,89 @@ describe("AwsSandbox", () => {
     60_000
   )
 
-  it.effect("refuses a write-slice size that would spin or truncate, and accepts the rest", () =>
+  it.effect("fails a signal whose guest kill command reports a nonzero status", () =>
     Effect.gen(function*() {
-      // `chunkBytes` is the increment of the loop that splits a file into
-      // commands. `0` and negatives never advance the offset and spin forever
-      // on empty slices; `NaN` makes the offset `NaN` after one iteration and
-      // ends the loop having written a single empty slice, which is a silently
-      // truncated file rather than an error.
-      for (const chunkBytes of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5, 3072.5]) {
-        const error = yield* Effect.flip(
-          acquired(transportProvider(fakeEcs(), fakeCli(), {}, { chunkBytes }), () => Effect.void)
-        )
-        expect(error).toMatchObject({ code: "spawn_error" })
-        expect((error as ProviderError).message).toContain("ExecTransport.chunkBytes")
-        expect((error as ProviderError).message).toContain("at least 1")
-        expect((error as ProviderError).message).toContain(String(chunkBytes))
-      }
-
-      // A single byte per slice is legal, if wasteful, and the file still
-      // arrives whole.
-      const bytes = new Uint8Array([0, 1, 2, 250, 251, 252])
-      const round = yield* acquired(
-        transportProvider(fakeEcs(), fakeCli(), {}, { chunkBytes: 1 }),
-        (session) =>
+      const cli = fakeCli({
+        guestResult: (remote) =>
+          remote.includes("kids()") ? { code: 1, payload: "kill: operation not permitted" } : undefined
+      })
+      yield* acquired(transportProvider(fakeEcs(), cli), (session) =>
+        Effect.scoped(
           Effect.gen(function*() {
-            yield* session.writeFile(`${root}/sliced.bin`, bytes)
-            return yield* session.readFile(`${root}/sliced.bin`)
+            const process = yield* session.spawn("sleep 30", {})
+            const error = yield* Effect.flip(session.kill!(process, "SIGTERM"))
+            expect(error).toBeInstanceOf(ProviderError)
+            expect(error).toMatchObject({ code: "unknown" })
+            expect(error.message).toContain("SIGTERM")
+            expect(error.message).toContain(session.remoteId)
+            expect(error.message).toContain("operation not permitted")
           })
-      )
-      expect(Array.from(round)).toEqual(Array.from(bytes))
-    }), 60_000)
+        ))
+    }), 30_000)
+
+  it.effect(
+    "signals the guest when a spawn scope closes after its status sentinel was dropped",
+    () =>
+      Effect.gen(function*() {
+        let drop = false
+        const healthy = fakeCli()
+        const dropping = fakeCli({ dropSentinel: true })
+        const provider = transportProvider(fakeEcs(), {
+          calls: healthy.calls,
+          spawner: makeSpawner((command) => drop ? dropping.spawner.spawn(command) : healthy.spawner.spawn(command))
+        })
+
+        yield* acquired(provider, (session) =>
+          Effect.gen(function*() {
+            drop = true
+            const scope = yield* Scope.make()
+            const process = yield* Effect.provideService(session.spawn("true", {}), Scope.Scope, scope)
+            const error = yield* Effect.flip(process.exitCode)
+            expect(error).toMatchObject({ code: "aborted" })
+
+            drop = false
+            yield* Scope.close(scope, Exit.void)
+            const calls = [...healthy.calls, ...dropping.calls]
+            expect(calls.filter((call) => call.remote.includes("kids()"))).toHaveLength(1)
+          }))
+      }),
+    30_000
+  )
+
+  it.effect(
+    "refuses a write-slice size that would spin or truncate, and accepts the rest",
+    () =>
+      Effect.gen(function*() {
+        // `chunkBytes` is the increment of the loop that splits a file into
+        // commands. `0` and negatives never advance the offset and spin forever
+        // on empty slices; `NaN` makes the offset `NaN` after one iteration and
+        // ends the loop having written a single empty slice, which is a silently
+        // truncated file rather than an error.
+        for (const chunkBytes of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5, 3072.5]) {
+          const error = yield* Effect.flip(
+            acquired(transportProvider(fakeEcs(), fakeCli(), {}, { chunkBytes }), () => Effect.void)
+          )
+          expect(error).toMatchObject({ code: "spawn_error" })
+          expect((error as ProviderError).message).toContain("ExecTransport.chunkBytes")
+          expect((error as ProviderError).message).toContain("at least 1")
+          expect((error as ProviderError).message).toContain(String(chunkBytes))
+        }
+
+        // A single byte per slice is legal, if wasteful, and the file still
+        // arrives whole.
+        const bytes = new Uint8Array([0, 1, 2, 250, 251, 252])
+        const round = yield* acquired(
+          transportProvider(fakeEcs(), fakeCli(), {}, { chunkBytes: 1 }),
+          (session) =>
+            Effect.gen(function*() {
+              yield* session.writeFile(`${root}/sliced.bin`, bytes)
+              return yield* session.readFile(`${root}/sliced.bin`)
+            })
+        )
+        expect(Array.from(round)).toEqual(Array.from(bytes))
+      }),
+    60_000
+  )
 
   it.effect("provisions rather than adopting when every task the key names has stopped", () =>
     Effect.gen(function*() {
@@ -905,39 +970,43 @@ describe("AwsSandbox", () => {
       }
     }), 60_000)
 
-  it.effect("pins the nonce framing that separates a command's status from terminal noise", () =>
-    Effect.gen(function*() {
-      // The plugin exits zero whatever the remote command did, so the status
-      // travels in-band inside this framing. Both halves of it are written
-      // here and parsed here; a change to either that is not a change to both
-      // reads every command as `aborted`.
-      const cli = fakeCli()
-      const ran = yield* acquired(
-        transportProvider(fakeEcs(), cli),
-        (session) => output(session, "echo framed; exit 4")
-      )
-      // The wrapper's own status line is what the exit code came from: the
-      // plugin reported zero.
-      expect(ran).toEqual({ stdout: "framed\n", code: 4 })
+  it.effect(
+    "pins the nonce framing that separates a command's status from terminal noise",
+    () =>
+      Effect.gen(function*() {
+        // The plugin exits zero whatever the remote command did, so the status
+        // travels in-band inside this framing. Both halves of it are written
+        // here and parsed here; a change to either that is not a change to both
+        // reads every command as `aborted`.
+        const cli = fakeCli()
+        const ran = yield* acquired(
+          transportProvider(fakeEcs(), cli),
+          (session) => output(session, "echo framed; exit 4")
+        )
+        // The wrapper's own status line is what the exit code came from: the
+        // plugin reported zero.
+        expect(ran).toEqual({ stdout: "framed\n", code: 4 })
 
-      // The workspace is the only part of these lines this test cannot know.
-      const framing = (command: string): string => command.replaceAll(root, "<workdir>")
-      const first = cli.calls[0]!
-      expect(first.args.at(-2)).toBe("--command")
-      expect(framing(first.args.at(-1)!)).toBe(
-        "sh -c '( mkdir -p <workdir> && rm -rf /tmp/.smthrs-sbx && mkdir -p /tmp/.smthrs-sbx ); "
-          + "printf '\\''\\n__smthrs_exit_0_%s__\\n'\\'' \"$?\"'"
-      )
-      // A spawned command records its pid, honors a cancellation left before
-      // it started, and prints the same sentinel with its own nonce.
-      const spawned = cli.calls.find((call) => call.args.at(-1)?.includes("echo framed") === true)!
-      expect(framing(spawned.args.at(-1)!)).toBe(
-        "sh -c 'if [ -e /tmp/.smthrs-sbx/1.pid.cancel ]; then c=143; "
-          + "elif cd <workdir>; then /bin/sh -c '\\''echo framed; exit 4'\\'' & p=$!; "
-          + "echo \"$p\" > /tmp/.smthrs-sbx/1.pid; wait \"$p\"; c=$?; else c=127; fi; "
-          + "printf '\\''\\n__smthrs_exit_1_%s__\\n'\\'' \"$c\"'"
-      )
-    }), 60_000)
+        // The workspace is the only part of these lines this test cannot know.
+        const framing = (command: string): string => command.replaceAll(root, "<workdir>")
+        const first = cli.calls[0]!
+        expect(first.args.at(-2)).toBe("--command")
+        expect(framing(first.args.at(-1)!)).toBe(
+          "sh -c '( mkdir -p <workdir> && rm -rf /tmp/.smthrs-sbx && mkdir -p /tmp/.smthrs-sbx ); "
+            + "printf '\\''\\n__smthrs_exit_0_%s__\\n'\\'' \"$?\"'"
+        )
+        // A spawned command records its pid, honors a cancellation left before
+        // it started, and prints the same sentinel with its own nonce.
+        const spawned = cli.calls.find((call) => call.args.at(-1)?.includes("echo framed") === true)!
+        expect(framing(spawned.args.at(-1)!)).toBe(
+          "sh -c 'if [ -e /tmp/.smthrs-sbx/1.pid.cancel ]; then c=143; "
+            + "elif cd <workdir>; then /bin/sh -c '\\''echo framed; exit 4'\\'' & p=$!; "
+            + "echo \"$p\" > /tmp/.smthrs-sbx/1.pid; wait \"$p\"; c=$?; else c=127; fi; "
+            + "printf '\\''\\n__smthrs_exit_1_%s__\\n'\\'' \"$c\"'"
+        )
+      }),
+    60_000
+  )
 
   it.effect("passes the sandbox conformance suite through the CLI session transport", () =>
     Effect.gen(function*() {
