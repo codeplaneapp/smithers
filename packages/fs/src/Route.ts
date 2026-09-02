@@ -1,21 +1,62 @@
 /**
- * The metadata-only projection of a discovered flow, and its lazy loader.
+ * The immutable metadata projection of a discovered flow, and its lazy loader.
  *
  * @since 0.1.0
  */
 import type * as Flow from "@smthrs/core/Flow"
 import { isFlow } from "@smthrs/core/Flow"
-import type * as Descriptor from "@smthrs/registry/Descriptor"
+import * as Descriptor from "@smthrs/registry/Descriptor"
+import { fileSpecifier } from "@smthrs/registry/Executable"
 import * as Effect from "effect/Effect"
-import type * as Option from "effect/Option"
+import * as Option from "effect/Option"
 import { FsError } from "./FsError.ts"
+import * as Boundary from "./internal/Boundary.ts"
+
+/**
+ * Maximum number of path segments in one route.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maximumRouteDepth = 64
+
+/**
+ * Maximum UTF-16 length of one route segment.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maximumSegmentLength = 255
+
+/**
+ * Maximum UTF-16 length of one slash-joined route name.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maximumRouteNameLength = 4_096
+
+/**
+ * Maximum UTF-16 length of one source or companion path.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maximumPathLength = 16_384
+
+/**
+ * Maximum number of capabilities declared by one route.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maximumCapabilities = 256
 
 /**
  * How a route's body is stored on disk.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Kind = "module" | "markdown" | "skill"
 
@@ -27,7 +68,6 @@ export type Kind = "module" | "markdown" | "skill"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Route {
   readonly name: string
@@ -45,78 +85,304 @@ export interface Route {
 }
 
 /**
- * The name of a route, as a `/`-joined path.
+ * Generated applications augment this map with route-specific input and output
+ * types.
  *
- * Applications that generate a typed route manifest widen this through
- * declaration merging; the portable default is any string.
+ * @example
+ * ```ts
+ * declare module "@smthrs/fs/Route" {
+ *   interface Manifest {
+ *     review: { readonly input: { readonly title: string }; readonly output: string }
+ *   }
+ * }
+ * ```
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
-export type Name = string
+// Declaration merging intentionally starts from an empty manifest.
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface Manifest {}
+
+/**
+ * A route name, narrowed to generated manifest keys when one is available.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type Name = keyof Manifest extends never ? string : Extract<keyof Manifest, string>
 
 /**
  * The decoded input accepted by a named route.
  *
- * @category utility types
+ * @category models
  * @since 0.1.0
- * @slop
  */
-export type Input<_N extends Name> = unknown
+export type Input<N extends Name> = N extends keyof Manifest
+  ? Manifest[N] extends { readonly input: infer I } ? I : unknown
+  : unknown
 
 /**
  * The decoded output returned by a named route.
  *
- * @category utility types
+ * @category models
  * @since 0.1.0
- * @slop
  */
-export type Output<_N extends Name> = unknown
+export type Output<N extends Name> = N extends keyof Manifest
+  ? Manifest[N] extends { readonly output: infer O } ? O : unknown
+  : unknown
 
-const loadFailed = (route: Route, cause: unknown): FsError =>
+const invalidRoute = (path: string, description = "Route metadata violates the command contract"): FsError =>
+  new FsError({ code: "invalid_route", method: "Route.snapshot", description, path })
+
+const text = (
+  value: unknown,
+  options: { readonly path: string; readonly maximum: number; readonly empty?: boolean | undefined }
+): string => {
+  if (
+    typeof value !== "string" || (options.empty !== true && value.length === 0) ||
+    value.length > options.maximum || value.includes("\0") || !Boundary.isWellFormedText(value)
+  ) throw invalidRoute(options.path)
+  return value
+}
+
+const fields = (
+  value: unknown,
+  required: ReadonlyArray<string>,
+  optional: ReadonlyArray<string> = []
+): Readonly<Record<string, unknown>> => {
+  const admitted = Boundary.inspectRecord(value, required, optional)
+  if (!admitted.ok) throw invalidRoute(admitted.path)
+  return admitted.value
+}
+
+const schemaFields = (
+  input: unknown,
+  required: ReadonlyArray<string>,
+  optional: ReadonlyArray<string> = []
+): Readonly<Record<string, unknown>> => {
+  try {
+    if (typeof input !== "object" || input === null || Array.isArray(input)) throw invalidRoute("$")
+    const prototype = Object.getPrototypeOf(input)
+    const known = input instanceof Descriptor.SchemaRefMarkdownArgs ||
+      input instanceof Descriptor.SchemaRefMarkdownOutput ||
+      input instanceof Descriptor.SchemaRefNone ||
+      input instanceof Descriptor.SchemaRefModule ||
+      input instanceof Descriptor.SchemaRefInline
+    if (!known && prototype !== Object.prototype && prototype !== null) throw invalidRoute("$")
+    const allowed = new Set([...required, ...optional])
+    const keys = Reflect.ownKeys(input)
+    if (keys.some((key) => typeof key === "symbol" || !allowed.has(key))) throw invalidRoute("$")
+    const output: Record<string, unknown> = Object.create(null) as Record<string, unknown>
+    for (const key of required) {
+      const descriptor = Object.getOwnPropertyDescriptor(input, key)
+      if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) throw invalidRoute(`$.${key}`)
+      output[key] = descriptor.value
+    }
+    for (const key of optional) {
+      const descriptor = Object.getOwnPropertyDescriptor(input, key)
+      if (descriptor === undefined) continue
+      if (!("value" in descriptor) || !descriptor.enumerable) throw invalidRoute(`$.${key}`)
+      output[key] = descriptor.value
+    }
+    return Object.freeze(output)
+  } catch (cause) {
+    if (cause instanceof FsError) throw cause
+    throw invalidRoute("$")
+  }
+}
+
+const optionText = (
+  input: unknown,
+  path: string,
+  maximum: number
+): Option.Option<string> => {
+  try {
+    if (!Option.isOption(input)) throw invalidRoute(path)
+    if (Option.isNone(input)) return Option.none()
+    return Option.some(text(input.value, { path, maximum }))
+  } catch (cause) {
+    if (cause instanceof FsError) throw cause
+    throw invalidRoute(path)
+  }
+}
+
+const optionPlacement = (input: unknown): Option.Option<Descriptor.Placement> => {
+  try {
+    if (!Option.isOption(input)) throw invalidRoute("$.placement")
+    if (Option.isNone(input)) return Option.none()
+    const placement = input.value
+    if (placement !== "client" && placement !== "local" && placement !== "sandbox" && placement !== "remote") {
+      throw invalidRoute("$.placement")
+    }
+    return Option.some(placement)
+  } catch (cause) {
+    if (cause instanceof FsError) throw cause
+    throw invalidRoute("$.placement")
+  }
+}
+
+const schemaRef = (input: unknown, path: string): Descriptor.SchemaRef => {
+  const tagged = schemaFields(input, ["_tag"], ["path", "field", "document"])
+  switch (tagged._tag) {
+    case "MarkdownArgs":
+      return new Descriptor.SchemaRefMarkdownArgs({})
+    case "MarkdownOutput":
+      return new Descriptor.SchemaRefMarkdownOutput({})
+    case "None":
+      return new Descriptor.SchemaRefNone({})
+    case "Module": {
+      const source = text(tagged.path, { path: `${path}.path`, maximum: maximumPathLength })
+      if (tagged.field !== "input" && tagged.field !== "output") throw invalidRoute(`${path}.field`)
+      return new Descriptor.SchemaRefModule({ path: source, field: tagged.field })
+    }
+    case "Inline": {
+      const admitted = Boundary.admitJson(tagged.document)
+      if (!admitted.ok) throw invalidRoute(`${path}.document${admitted.path.slice(1)}`)
+      return new Descriptor.SchemaRefInline({ document: admitted.value })
+    }
+    default:
+      throw invalidRoute(`${path}._tag`)
+  }
+}
+
+const effectDeclaration = (input: unknown): Descriptor.EffectDeclaration => {
+  const data = fields(input, ["reads", "writes", "mode", "onConflict", "tier"])
+  const reads = Boundary.stringArray(data.reads, {
+    maxItems: maximumCapabilities,
+    maxLength: maximumPathLength
+  })
+  const writes = Boundary.stringArray(data.writes, {
+    maxItems: maximumCapabilities,
+    maxLength: maximumPathLength
+  })
+  if (!reads.ok) throw invalidRoute(`$.effects.reads${reads.path.slice(1)}`)
+  if (!writes.ok) throw invalidRoute(`$.effects.writes${writes.path.slice(1)}`)
+  if (data.mode !== "hermetic" && data.mode !== "expected") throw invalidRoute("$.effects.mode")
+  if (data.onConflict !== "serialize" && data.onConflict !== "lane" && data.onConflict !== "fail") {
+    throw invalidRoute("$.effects.onConflict")
+  }
+  if (data.tier !== "sealed" && data.tier !== "compensable" && data.tier !== "irreversible") {
+    throw invalidRoute("$.effects.tier")
+  }
+  return Object.freeze({
+    reads: reads.value,
+    writes: writes.value,
+    mode: data.mode,
+    onConflict: data.onConflict,
+    tier: data.tier
+  })
+}
+
+const isAbsolutePath = (value: string): boolean =>
+  value.startsWith("file:///") || value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value)
+
+/**
+ * Copies and validates caller-owned route metadata before asynchronous use.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const snapshot = (input: Route): Effect.Effect<Route, FsError> =>
+  Effect.try({
+    try: () => {
+      const data = fields(input, [
+        "name",
+        "segments",
+        "kind",
+        "sourcePath",
+        "description",
+        "input",
+        "output",
+        "capabilities",
+        "effects",
+        "modelInvocable",
+        "placement",
+        "ui"
+      ])
+      const segments = Boundary.stringArray(data.segments, {
+        maxItems: maximumRouteDepth,
+        maxLength: maximumSegmentLength
+      })
+      if (
+        !segments.ok || segments.value.length === 0 ||
+        segments.value.some((segment) => segment === "." || segment === ".." || segment.includes("/"))
+      ) {
+        throw invalidRoute(segments.ok ? "$.segments" : `$.segments${segments.path.slice(1)}`)
+      }
+      const name = text(data.name, { path: "$.name", maximum: maximumRouteNameLength })
+      if (name !== segments.value.join("/")) {
+        throw invalidRoute("$.name", "Route name must equal its slash-joined segments")
+      }
+      if (data.kind !== "module" && data.kind !== "markdown" && data.kind !== "skill") throw invalidRoute("$.kind")
+      const sourcePath = text(data.sourcePath, { path: "$.sourcePath", maximum: maximumPathLength })
+      if (!isAbsolutePath(sourcePath)) throw invalidRoute("$.sourcePath", "Route source paths must be absolute")
+      const capabilities = Boundary.stringArray(data.capabilities, {
+        maxItems: maximumCapabilities,
+        maxLength: maximumPathLength
+      })
+      if (!capabilities.ok) throw invalidRoute(`$.capabilities${capabilities.path.slice(1)}`)
+      if (typeof data.modelInvocable !== "boolean") throw invalidRoute("$.modelInvocable")
+
+      return Object.freeze({
+        name,
+        segments: segments.value,
+        kind: data.kind,
+        sourcePath,
+        description: optionText(data.description, "$.description", maximumPathLength),
+        input: schemaRef(data.input, "$.input"),
+        output: schemaRef(data.output, "$.output"),
+        capabilities: capabilities.value,
+        effects: effectDeclaration(data.effects),
+        modelInvocable: data.modelInvocable,
+        placement: optionPlacement(data.placement),
+        ui: optionText(data.ui, "$.ui", maximumPathLength)
+      })
+    },
+    // Every reflective helper above catches foreign throws and normalizes them.
+    catch: (cause) => cause as FsError
+  })
+
+/**
+ * True only for routes the agent and Incur command surfaces may execute.
+ *
+ * @category guards
+ * @since 0.1.0
+ */
+export const isCommandRoute = (route: Route): boolean => route.kind === "module" && route.modelInvocable
+
+const loadFailed = (): FsError =>
   new FsError({
     code: "load_failed",
     method: "Route.load",
-    description: `Could not load the flow module for "${route.name}"`,
-    cause
+    description: "The selected flow module could not be loaded"
   })
 
 /**
  * Materializes the flow behind a route.
  *
  * Only module routes can be materialized here. Markdown and skill bodies are
- * loaded by the registry, which owns frontmatter and prompt parsing; routing
- * them through this adapter would duplicate that contract.
+ * registry inputs, not executable commands in this private adapter.
  *
  * @category constructors
  * @since 0.1.0
- * @slop
  */
-export const load = (route: Route): Effect.Effect<Flow.Any, FsError> =>
+export const load = (input: Route): Effect.Effect<Flow.Any, FsError> =>
   Effect.gen(function*() {
+    const route = yield* snapshot(input)
     if (route.kind !== "module") {
       return yield* Effect.fail(
         new FsError({
           code: "unsupported_body",
           method: "Route.load",
-          description: `Route "${route.name}" has a ${route.kind} body, which the registry loader owns`
+          description: "Only module routes are executable"
         })
       )
     }
     const module = yield* Effect.tryPromise({
-      try: () => import(/* @vite-ignore */ route.sourcePath) as Promise<{ readonly default?: unknown }>,
-      catch: (cause) => loadFailed(route, cause)
+      try: () => import(/* @vite-ignore */ fileSpecifier(route.sourcePath)) as Promise<{ readonly default?: unknown }>,
+      catch: loadFailed
     })
-    const value = module.default
-    if (!isFlow(value)) {
-      return yield* Effect.fail(
-        new FsError({
-          code: "load_failed",
-          method: "Route.load",
-          description: `Module for "${route.name}" does not default-export a flow`
-        })
-      )
-    }
-    return value
+    if (!isFlow(module.default)) return yield* Effect.fail(loadFailed())
+    return module.default
   })

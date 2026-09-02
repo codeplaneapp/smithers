@@ -1,6 +1,9 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
-import { Effect, Layer, Option } from "effect"
+import { Cause, Effect, Layer, Option } from "effect"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { relative, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import * as FileRouter from "../src/FileRouter.ts"
@@ -62,5 +65,61 @@ describe("FileRouter", () => {
     const second = await scan()
 
     expect(second).toEqual(first)
+  })
+
+  it("resolves a relative root once and returns absolute immutable routes", async () => {
+    const relativeRoot = relative(process.cwd(), root)
+    const config = { root: relativeRoot }
+    const pending = Effect.runPromise(FileRouter.scan(config).pipe(Effect.provide(platformLayer)))
+    config.root = "/"
+    const result = await pending
+
+    expect(result.routes.length).toBeGreaterThan(0)
+    expect(result.routes.every((route) => route.sourcePath.startsWith("/"))).toBe(true)
+    expect(Object.isFrozen(result)).toBe(true)
+    expect(Object.isFrozen(result.routes)).toBe(true)
+  })
+
+  it("preserves a literal backslash segment on POSIX", async () => {
+    if (sep !== "/") return
+    const temporary = await mkdtemp(`${tmpdir()}/smithers-fs-router-`)
+    try {
+      const source = `import { Flow } from "@smthrs/core"\nexport default Flow.make({ description: "fixture" })\n`
+      await mkdir(`${temporary}/a\\b`, { recursive: true })
+      await mkdir(`${temporary}/a/b`, { recursive: true })
+      await writeFile(`${temporary}/a\\b/flow.ts`, source)
+      await writeFile(`${temporary}/a/b/flow.ts`, source)
+      const result = await Effect.runPromise(
+        FileRouter.scan({ root: temporary }).pipe(Effect.provide(platformLayer))
+      )
+      expect(result.routes.map((route) => route.name)).toEqual(["a/b", "a\\b"])
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it("preserves discovery error codes and refuses hostile config", async () => {
+    const missing = await Effect.runPromise(Effect.exit(
+      FileRouter.scan({ root: "/definitely/missing/smithers-flows" }).pipe(Effect.provide(platformLayer))
+    ))
+    expect(missing._tag).toBe("Failure")
+    if (missing._tag === "Failure") {
+      const error = Option.getOrThrow(Cause.findErrorOption(missing.cause))
+      expect(error.code).toBe("root_missing")
+    }
+
+    let called = false
+    const config = Object.defineProperty({}, "root", {
+      enumerable: true,
+      get: () => {
+        called = true
+        return root
+      }
+    })
+    const hostile = await Effect.runPromise(Effect.exit(
+      FileRouter.scan(config as FileRouter.ScanConfig).pipe(Effect.provide(platformLayer))
+    ))
+    expect(hostile._tag).toBe("Failure")
+    expect(called).toBe(false)
   })
 })

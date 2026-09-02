@@ -1,8 +1,8 @@
 /**
  * @since 0.1.0
  *
- * `/fs` — portable file-system routing, flow generation, and command
- * projections for flows.
+ * Private metadata routing and schema-checked command projections for
+ * Smithers flows.
  */
 
 /**

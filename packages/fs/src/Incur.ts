@@ -1,8 +1,9 @@
 /**
- * Incur projection of a file-routed flows command tree.
+ * Incur projection of executable, model-visible module routes.
  *
- * @since 0.0.0
+ * @since 0.1.0
  */
+import type * as Flow from "@smthrs/core/Flow"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import { Cli as IncurCli } from "incur"
@@ -26,72 +27,56 @@ type IncurContext = {
 
 type SelectedRoute = {
   readonly route: Route.Route
+  readonly flow: Flow.Any
   readonly schema: SchemaBridge.CommandSchema
 }
 
-const discoveryFlags = new Set([
-  "--help",
-  "-h",
-  "--llms",
-  "--llms-full",
-  "--schema",
-  "--version"
-])
+const discoveryFlags = new Set(["--help", "-h", "--llms", "--llms-full", "--schema", "--version"])
 
 const isDiscovery = (argv: ReadonlyArray<string>): boolean =>
-  process.env.COMPLETE !== undefined ||
-  argv.includes("--mcp") ||
-  argv.some((token) => discoveryFlags.has(token))
+  process.env.COMPLETE !== undefined || argv.includes("--mcp") || argv.some((token) => discoveryFlags.has(token))
 
 const isFetchDiscovery = (pathname: string): boolean =>
-  pathname === "/mcp" ||
-  pathname === "/openapi.json" ||
-  pathname === "/openapi.yml" ||
-  pathname === "/openapi.yaml" ||
-  pathname.startsWith("/.well-known/")
+  pathname === "/mcp" || pathname === "/openapi.json" || pathname === "/openapi.yml" ||
+  pathname === "/openapi.yaml" || pathname.startsWith("/.well-known/")
 
 const descriptionOf = (route: Route.Route): string | undefined => Option.getOrUndefined(route.description)
 
-const commandTokens = (argv: ReadonlyArray<string>): ReadonlyArray<string> => {
-  const tokens: Array<string> = []
-  for (const token of argv) {
-    if (token.startsWith("-")) {
-      break
-    }
-    tokens.push(token)
-  }
-  return tokens
+const normalizeArgv = (argv: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const first = argv[0]
+  return first === undefined || !first.includes("/")
+    ? argv
+    : Object.freeze([...first.split("/"), ...argv.slice(1)])
 }
 
-const runOptions = (
-  request: Request | undefined
-): { readonly signal: AbortSignal } | undefined => request === undefined ? undefined : { signal: request.signal }
+const commandTokens = (argv: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const tokens: Array<string> = []
+  for (const token of normalizeArgv(argv)) {
+    if (token.startsWith("-")) break
+    tokens.push(token)
+  }
+  return Object.freeze(tokens)
+}
 
-const mapError = (
-  context: IncurContext,
-  error: FsError
-): never =>
-  context.error({
-    code: error.code,
-    exitCode: 1,
-    message: error.description
-  })
+const runOptions = (request: Request | undefined): { readonly signal: AbortSignal } | undefined =>
+  request === undefined ? undefined : { signal: request.signal }
+
+const mapError = (context: IncurContext, error: FsError): never =>
+  context.error({ code: error.code, exitCode: 1, message: error.description })
 
 const execute = (
   selected: SelectedRoute,
   context: IncurContext
 ): Effect.Effect<unknown, never, FlowInvoker.FlowInvoker> =>
   Effect.gen(function*() {
-    const flow = yield* Route.load(selected.route)
-    const assembled = selected.schema.assemble(context.args, context.options)
-    const input = yield* selected.schema.decode(assembled)
+    const input = yield* selected.schema.decode(selected.schema.assemble(context.args, context.options))
     const invoker = yield* Effect.service(FlowInvoker.FlowInvoker)
-    const output = yield* invoker.invoke({
+    const output = yield* invoker.invoke(Object.freeze({
       name: selected.route.name,
-      flow,
+      flow: selected.flow,
       input
-    })
-    return yield* SchemaBridge.encodeOutput(flow.output, output)
+    }))
+    return yield* SchemaBridge.encodeOutput(selected.flow.output, output)
   }).pipe(
     Effect.match({
       onFailure: (error) => mapError(context, error),
@@ -107,12 +92,14 @@ const metadataDefinition = (
   ) => Promise<A>
 ) => ({
   description: descriptionOf(route),
+  /* v8 ignore next -- the public serve/fetch wrappers hydrate and replace a selected definition before Incur may run it */
   run(context: IncurContext) {
     return runEffect(
-      Effect.flatMap(
-        SchemaBridge.toCommandSchema(route.input),
-        (schema) => execute({ route, schema }, context)
-      ),
+      Effect.gen(function*() {
+        const flow = yield* Route.load(route)
+        const schema = yield* SchemaBridge.toCommandSchema(route.input, flow.input)
+        return yield* execute({ route, flow, schema }, context)
+      }),
       runOptions(context.request)
     )
   }
@@ -142,20 +129,8 @@ const buildCli = (
   ) => Promise<A>,
   selected?: SelectedRoute
 ): IncurCli.Cli => {
-  const rootRoute = Option.getOrUndefined(tree.route)
-  const rootDefinition = rootRoute === undefined
-    ? undefined
-    : selected?.route === rootRoute
-    ? selectedDefinition(selected, runEffect)
-    : metadataDefinition(rootRoute, runEffect)
-  const cli = rootDefinition === undefined
-    ? IncurCli.create(name)
-    : IncurCli.create(name, rootDefinition)
-
-  const mountChildren = (
-    parent: IncurCli.Cli,
-    node: CommandTree.CommandTree
-  ): void => {
+  const cli = IncurCli.create(name)
+  const mountChildren = (parent: IncurCli.Cli, node: CommandTree.CommandTree): void => {
     for (const [segment, child] of node.children) {
       const route = Option.getOrUndefined(child.route)
       const selectedHere = route !== undefined && selected?.route === route
@@ -165,17 +140,19 @@ const buildCli = (
         })
         mountChildren(group, child)
         parent.command(group)
-      } else if (route !== undefined) {
+      } else {
+        // A trie node without children is always the leaf of a route; a node
+        // with children reaches this arm only when its own route was selected.
+        const commandRoute = route!
         parent.command(
           segment,
-          selected !== undefined && selected.route === route
+          selectedHere && selected !== undefined
             ? selectedDefinition(selected, runEffect)
-            : metadataDefinition(route, runEffect)
+            : metadataDefinition(commandRoute, runEffect)
         )
       }
     }
   }
-
   mountChildren(cli, tree)
   return cli
 }
@@ -186,30 +163,28 @@ const hydrate = (
 ): Effect.Effect<SelectedRoute, FsError> =>
   Effect.gen(function*() {
     const resolved = yield* CommandTree.resolve(tree, commandTokens(argv))
-    const schema = yield* SchemaBridge.toCommandSchema(resolved.route.input)
-    return { route: resolved.route, schema }
+    const flow = yield* Route.load(resolved.route)
+    const schema = yield* SchemaBridge.toCommandSchema(resolved.route.input, flow.input)
+    return Object.freeze({ route: resolved.route, flow, schema })
   })
 
 /**
- * Projects routes onto an incur CLI while preserving metadata-only discovery
- * and loading a flow module only when its route is executed.
+ * Projects routes onto an Incur CLI while preserving metadata-only discovery.
  *
- * The returned CLI captures the current `FlowInvoker` service so incur's
- * Promise handlers re-enter the same Effect context at the boundary.
- *
- * TODO(/cli): mount this projection from the effect/unstable/cli based
- * package once that package owns the application entrypoint.
+ * Only an invoked module is loaded. Its actual Effect input schema is then
+ * projected into Incur flags and remains the authoritative decoder.
  *
  * @category constructors
- * @since 0.0.0
- * @slop
+ * @since 0.1.0
  */
 export const createCli = (
   name: string,
   routes: ReadonlyArray<Route.Route>
 ): Effect.Effect<IncurCli.Cli, FsError, FlowInvoker.FlowInvoker> =>
   Effect.gen(function*() {
-    const tree = yield* CommandTree.make(routes)
+    const validated = yield* CommandTree.make(routes)
+    const executable = CommandTree.traverse(validated).filter(Route.isCommandRoute)
+    const tree = yield* CommandTree.make(executable)
     const services = yield* Effect.context<FlowInvoker.FlowInvoker>()
     const runEffect = Effect.runPromiseWith(services)
     const cli = buildCli(name, tree, runEffect)
@@ -217,31 +192,24 @@ export const createCli = (
     const metadataFetch = cli.fetch.bind(cli)
 
     cli.serve = async (argv = process.argv.slice(2), options = {}) => {
-      if (isDiscovery(argv)) {
-        return metadataServe(argv, options)
-      }
-      const selected = await runEffect(
-        Effect.option(hydrate(tree, argv))
-      )
-      if (Option.isNone(selected)) {
-        return metadataServe(argv, options)
-      }
-      return buildCli(name, tree, runEffect, selected.value).serve(argv, options)
+      if (isDiscovery(argv)) return metadataServe(argv, options)
+      const normalized = normalizeArgv(argv)
+      const selected = await runEffect(Effect.option(hydrate(tree, normalized)))
+      return Option.isNone(selected)
+        ? metadataServe([...normalized], options)
+        : buildCli(name, tree, runEffect, selected.value).serve([...normalized], options)
     }
 
     cli.fetch = async (request) => {
       const url = new URL(request.url)
-      if (isFetchDiscovery(url.pathname)) {
-        return metadataFetch(request)
-      }
+      if (isFetchDiscovery(url.pathname)) return metadataFetch(request)
       const selected = await runEffect(
         Effect.option(hydrate(tree, url.pathname.split("/").filter(Boolean))),
         { signal: request.signal }
       )
-      if (Option.isNone(selected)) {
-        return metadataFetch(request)
-      }
-      return buildCli(name, tree, runEffect, selected.value).fetch(request)
+      return Option.isNone(selected)
+        ? metadataFetch(request)
+        : buildCli(name, tree, runEffect, selected.value).fetch(request)
     }
 
     return cli

@@ -45,6 +45,15 @@ export interface Service {
  */
 export class FlowInvoker extends Context.Service<FlowInvoker, Service>()("/fs/FlowInvoker") {}
 
+const ownInvoke = (input: unknown, description: string): Service["invoke"] => {
+  if (typeof input !== "object" || input === null) throw new TypeError(description)
+  const descriptor = Object.getOwnPropertyDescriptor(input, "invoke")
+  if (descriptor === undefined || !("value" in descriptor) || typeof descriptor.value !== "function") {
+    throw new TypeError(description)
+  }
+  return descriptor.value
+}
+
 /**
  * Constructs a flow invoker from an implementation.
  *
@@ -52,7 +61,10 @@ export class FlowInvoker extends Context.Service<FlowInvoker, Service>()("/fs/Fl
  * @since 0.1.0
  * @slop
  */
-export const make = (implementation: Service): Service => FlowInvoker.of(implementation)
+export const make = (implementation: Service): Service => {
+  const invoke = ownInvoke(implementation, "FlowInvoker implementations require an own invoke function")
+  return Object.freeze(FlowInvoker.of({ invoke }))
+}
 
 /**
  * Constructs an invoker that fails every invocation.
@@ -61,19 +73,23 @@ export const make = (implementation: Service): Service => FlowInvoker.of(impleme
  * @since 0.1.0
  * @slop
  */
-export const makeNoop = (overrides: Partial<Service> = {}): Service =>
-  make({
-    invoke: Effect.fn("FlowInvoker.invoke")((invocation) =>
+export const makeNoop = (overrides: Partial<Service> = {}): Service => {
+  const descriptor = Object.getOwnPropertyDescriptor(overrides, "invoke")
+  if (descriptor !== undefined && (!("value" in descriptor) || typeof descriptor.value !== "function")) {
+    throw new TypeError("FlowInvoker overrides require an own invoke function")
+  }
+  return make({
+    invoke: descriptor?.value ?? Effect.fn("FlowInvoker.invoke")(() =>
       Effect.fail(
         new FsError({
-          code: "load_failed",
+          code: "invocation_unavailable",
           method: "FlowInvoker.invoke",
-          description: `No flow invoker is available to run "${invocation.name}"`
+          description: "No flow invoker is installed"
         })
       )
-    ),
-    ...overrides
+    )
   })
+}
 
 /**
  * Provides an invoker that fails every invocation.

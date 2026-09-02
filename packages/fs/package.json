@@ -7,7 +7,7 @@
     "group": "agent"
   },
   "private": true,
-  "description": "Portable file-system routing, flow generation, and command projections for flows",
+  "description": "Private metadata routing and schema-checked command projections for Smithers flows",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
     "type": "git",
@@ -32,7 +32,7 @@
   "engines": {
     "node": ">=22.19.0"
   },
-  "sideEffects": [],
+  "sideEffects": false,
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
@@ -74,7 +74,7 @@
     "lint": "eslint src --max-warnings=0 && dprint check",
     "format": "dprint fmt",
     "build": "node scripts/build.mjs",
-    "check": "tsc -b tsconfig.json && tsc -p tsconfig.test.json --noEmit",
+    "check": "tsc -b tsconfig.json && tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.types.json --noEmit",
     "circular": "node scripts/circular.mjs",
     "test": "vitest",
     "coverage": "vitest --coverage"
@@ -84,14 +84,6 @@
     "@smthrs/registry": "1.0.0-rc.0",
     "effect": "4.0.0-rc.108",
     "incur": "0.4.19"
-  },
-  "peerDependencies": {
-    "vite": "^8.0.0"
-  },
-  "peerDependenciesMeta": {
-    "vite": {
-      "optional": true
-    }
   },
   "devDependencies": {
     "@effect/language-service": "0.87.1",
