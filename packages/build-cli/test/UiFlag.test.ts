@@ -191,13 +191,18 @@ describe("--ui under a pipe", () => {
     const served = await serve(root, ["//:good"], false)
     expect(served.exitCode).toBe(0)
     const lines = served.stderr.split("\n")
-    const runLine = process.platform === "darwin" ? 0 : 1
-    if (process.platform === "darwin") {
-      expect(lines).not.toContain("//:good  sandbox: unenforced on this platform")
-    } else {
-      expect(lines[0]).toBe("//:good  sandbox: unenforced on this platform")
-    }
-    expect(lines[runLine]).toMatch(/^\/\/:good {2}ran {2}\d+(?:\.\d)?m?s$/)
+    // Find the run line rather than assume its index. Whether a
+    // `sandbox: unenforced on this platform` note precedes it is a fact about
+    // the HOST, not about what this case tests, which is how `--ui` renders
+    // under a pipe. This used to branch on `process.platform`, asserting that
+    // line was always first on Linux; that stopped being true the moment CI
+    // could enforce confinement, and the case failed for a reason it was never
+    // about. Any note still has to come before the run line, so its position
+    // is checked without requiring it to be there.
+    const runLine = lines.findIndex((line) => /^\/\/:good {2}ran {2}\d+(?:\.\d)?m?s$/.test(line))
+    expect(runLine).toBeGreaterThanOrEqual(0)
+    const unenforced = lines.indexOf("//:good  sandbox: unenforced on this platform")
+    if (unenforced !== -1) expect(unenforced).toBeLessThan(runLine)
     expect(lines[runLine + 1]).toMatch(/^1 targets: 0 hit, 1 ran, 0 failed, 0 skipped \(/)
     expect(served.envelope).toContain("ok: true")
     expect(served.stdout).toBe("")
