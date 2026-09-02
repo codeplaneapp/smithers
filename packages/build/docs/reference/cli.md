@@ -1,28 +1,32 @@
 # CLI reference
 
 ```
-smithers build <command> [args] [options]
+smithers-build <command> [args] [options]
 ```
 
 `smithers-build` is built with [incur](https://github.com/wevm/incur). Every command
 returns a structured result on standard output. Option names are the kebab-case
 form of their schema key, so `cacheDir` is `--cache-dir`. A boolean option that
-defaults to true is turned off with its `--no-` form.
+defaults to true is turned off with its `--no-` form. The behavior prose behind
+every command is colocated with the implementation in `packages/build-cli/docs/`;
+this page is the reference form and must agree with it.
 
-Commands: [`install`](#install), [`build`](#build), [`test`](#test),
-[`lint`](#lint), [`docs`](#docs), [`run`](#run), [`ci`](#ci),
-[`query`](#query), [`graph`](#graph).
+Commands: [`install`](#install), [`create-app`](#create-app), [`build`](#build),
+[`test`](#test), [`lint`](#lint), [`docs`](#docs), [`run`](#run),
+[`target`](#target), [`gitHooks`](#githooks), [`ci`](#ci), [`query`](#query),
+[`graph`](#graph). An argv whose first token starts with `//` or `:` is
+rewritten to `target <label>`, the bare-label form.
 
 ## Common options
 
-Every command accepts these.
+Every command except `create-app` accepts these.
 
 | Option        | Alias | Type   | Default                       | Description                                                                                                           |
 | ------------- | ----- | ------ | ----------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `--workspace` | `-w`  | string | the process working directory | Workspace root containing `BUILD.ts` files                                                                            |
 | `--cache-dir` |       | string | unset                         | Workspace-relative cache directory. Overrides the root declaration; `install` requires the result to remain `.flows`. |
 
-`build`, `test`, `lint`, `docs`, `run`, and `ci` also accept:
+`build`, `test`, `lint`, `docs`, `run`, `target`, and `ci` also accept:
 
 | Option                   | Alias | Type        | Default                    | Description                                                                            |
 | ------------------------ | ----- | ----------- | -------------------------- | -------------------------------------------------------------------------------------- |
@@ -92,6 +96,29 @@ See [Install](../concepts/install.md).
 
 ---
 
+## create-app
+
+Scaffolds a Smithers app from a `@smthrs/create-app` template. It is the one
+command that takes neither `--workspace` nor `--cache-dir`.
+
+```sh
+smithers-build create-app my-app
+smithers-build create-app my-app --template aomi --no-link
+```
+
+| Argument | Description                                        |
+| -------- | -------------------------------------------------- |
+| `dir`    | Directory to create; its name becomes the app name |
+
+| Option       | Alias | Type    | Default   | Description                                                                                        |
+| ------------ | ----- | ------- | --------- | -------------------------------------------------------------------------------------------------- |
+| `--template` | `-t`  | string  | `default` | Template name: `default` or `aomi`                                                                 |
+| `--link`     |       | boolean | `true`    | Point `@smthrs/*` dependencies at the checkout the templates came from; `--no-link` keeps versions |
+
+Failure: error code `create_app_failed`, exit code 1.
+
+---
+
 ## build
 
 Executes the build targets a pattern selects.
@@ -152,6 +179,9 @@ smithers-build lint //...
 smithers-build lint :lint
 ```
 
+In addition to the common execution options, `lint` accepts `--fix`, which
+applies agent lint fixes inside the declared `fixes` write set.
+
 Failure codes: `lint_failed` for planning errors, `targets_failed` for failed
 targets. Exit code 1 for both.
 
@@ -160,8 +190,8 @@ targets. Exit code 1 for both.
 ## docs
 
 Identical to [`build`](#build) except that it selects targets whose target
-declares the `docs` kind. Documentation checks are on demand and are not part
-of the `ci` merged graph.
+declares the `docs` kind. Documentation targets also run under [`ci`](#ci),
+whose merged graph plans them alongside lint, build, and test.
 
 ```sh
 smithers-build docs //...
@@ -188,9 +218,12 @@ smithers-build run //packages/app:dev --no-cache
 
 In addition to the common execution options, `run` accepts:
 
-| Option   | Alias | Type   | Default | Description                                               |
-| -------- | ----- | ------ | ------- | --------------------------------------------------------- |
-| `--name` | `-n`  | string | unset   | Per-invocation package name consumed by `NewPackage` only |
+| Option      | Alias | Type     | Default | Description                                                                         |
+| ----------- | ----- | -------- | ------- | ----------------------------------------------------------------------------------- |
+| `--name`    | `-n`  | string   | unset   | Per-invocation package name consumed by `NewPackage` only                           |
+| `--message` | `-m`  | string   | unset   | Commit message for a `Git.Commit` target; wins over the declared message            |
+| `--sweep`   |       | boolean  | `false` | Let a `Git.Commit` target with no declared path scope commit the whole working tree |
+| `--input`   | `-i`  | string[] | unset   | Payload input for agent targets as `name=value`; repeatable                         |
 
 Failure codes: `run_failed` for planning errors, `targets_failed` for failed
 targets. Exit code 1 for both. A target requiring the intentionally absent
@@ -198,10 +231,73 @@ irreversible-exec layer reports a target failure with `unresolved_action`.
 
 ---
 
+## target
+
+Executes one package-mode label under the verb its rule flavour implies — the
+bare-label form. An argv whose first token starts with `//` or `:` is rewritten
+to `target <label>`, so `smithers-build //packages/flow:lint` is the same
+invocation. It requires a `WORKSPACE.ts` workspace and refuses a `BUILD.ts`
+workspace.
+
+```sh
+smithers-build target //packages/flow:lint
+smithers-build //packages/flow:lint
+```
+
+| Argument | Description          |
+| -------- | -------------------- |
+| `label`  | A package-mode label |
+
+In addition to the common execution options, `target` accepts:
+
+| Option      | Alias | Type     | Default | Description                                                                         |
+| ----------- | ----- | -------- | ------- | ----------------------------------------------------------------------------------- |
+| `--write`   |       | boolean  | `false` | Apply `Diff`, `Generate`, and `CiGen` targets instead of checking drift             |
+| `--fix`     |       | boolean  | `false` | Apply agent lint fixes inside the declared `fixes` write set                        |
+| `--message` | `-m`  | string   | unset   | Commit message for a `Git.Commit` target; wins over the declared message            |
+| `--sweep`   |       | boolean  | `false` | Let a `Git.Commit` target with no declared path scope commit the whole working tree |
+| `--input`   | `-i`  | string[] | unset   | Payload input for agent targets as `name=value`; repeatable                         |
+
+Failure codes: `target_failed` for planning errors, `targets_failed` for failed
+targets. Exit code 1 for both.
+
+See `packages/build-cli/docs/package-mode.md` for `WORKSPACE.ts` discovery and
+the verbs package mode supports.
+
+---
+
+## gitHooks
+
+Checks the `WORKSPACE.ts` `gitHooks` scripts against `.git/hooks`, or installs
+them with `--write`.
+
+```sh
+smithers-build gitHooks
+smithers-build gitHooks --write
+```
+
+| Option    | Alias | Type    | Default | Description                                         |
+| --------- | ----- | ------- | ------- | --------------------------------------------------- |
+| `--write` |       | boolean | `false` | Install the rendered hook scripts into `.git/hooks` |
+
+Plus the [common options](#common-options).
+
+Failures:
+
+| Condition                   | Code               | Exit |
+| --------------------------- | ------------------ | ---- |
+| Planning or workspace error | `git_hooks_failed` | 1    |
+| Check mode found drift      | `git_hooks_drift`  | 1    |
+
+The drift message names each offending file with its status and suggests
+`--write`.
+
+---
+
 ## ci
 
-Plans `build`, `test`, and `lint` over one pattern and executes the merged graph
-once.
+Plans `lint`, `build`, `test`, and `docs` over one pattern and executes the
+merged graph once.
 
 ```sh
 smithers-build ci //...
@@ -210,12 +306,12 @@ smithers-build ci //packages/... --plan
 
 Options: the [common options](#common-options) plus the execution options.
 
-The command plans lint first, then build and test. Merging deduplicates roots,
+The command plans lint first, then build, test, and docs. Merging deduplicates roots,
 targets, and edges on label; first occurrence wins while dependency-first order
 is preserved. A target selected by two verbs runs once. Lint-first ordering
 makes a generator's non-mutating check form win over its build/write form.
 
-An exact label that does not participate in one of the three kinds is tolerated
+An exact label that does not participate in one of the four kinds is tolerated
 as long as it participates in another. Any other planning error propagates. If no
 kind produced a plan, the first refusal is raised, or
 `no targets selected by <pattern>`.

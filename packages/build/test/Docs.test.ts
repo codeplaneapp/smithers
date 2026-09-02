@@ -112,6 +112,38 @@ describe("packages/build prose", () => {
     }
   })
 
+  it("documents every command the CLI registers", () => {
+    // The CLI reference restated `@smthrs/build-cli`'s command surface and
+    // then drifted: three commands shipped with no row here. The inventory is
+    // read out of the registration calls, so a new command moves this gate.
+    const source = read("../build-cli/src/Cli.ts")
+    const names = [...source.matchAll(/\.command\("([^"]+)"/g)].map((match) => match[1]!)
+    expect(names.length).toBeGreaterThanOrEqual(10)
+    const page = read("docs/reference/cli.md")
+    for (const name of names) {
+      expect(page, `reference/cli.md never documents the ${name} command`).toContain(name)
+    }
+  })
+
+  it("keeps prose on the kinds ci actually merges", () => {
+    // `ciKinds` gained "docs" with the workspace import, so pages carried over
+    // from the standalone repo still claimed the docs verb stays out of ci.
+    const source = read("../build-cli/src/Cli.ts")
+    const literal = source.match(/const ciKinds = \[([^\]]*)\]/)
+    expect(literal, "Cli.ts no longer declares ciKinds").not.toBeNull()
+    const kinds = [...literal![1]!.matchAll(/"([^"]+)"/g)].map((match) => match[1]!)
+    expect(kinds).toContain("docs")
+    // The claims wrap across lines, so the scan is per paragraph: one that
+    // speaks of documentation may not also call it excluded from ci.
+    const exclusion = /(?:\bnot\b|\bnever\b)[\s\S]{0,60}?(?:part of|merged into|folded into)[\s\S]{0,60}?\bci\b/i
+    for (const file of proseFiles()) {
+      for (const paragraph of read(file).split(/\n{2,}/)) {
+        if (!/\bdocs\b|\bdocumentation\b/i.test(paragraph)) continue
+        expect(paragraph, `${file} claims the docs verb stays out of ci`).not.toMatch(exclusion)
+      }
+    }
+  })
+
   it("does not promise a declared-manager check the actions no longer make", () => {
     // `d191c9dfcf` deleted `checkDeclaredManager`. A sealed action receives the
     // layer and never the declaration, so prose promising the comparison

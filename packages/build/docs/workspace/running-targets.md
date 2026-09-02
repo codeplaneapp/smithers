@@ -83,8 +83,8 @@ A target that declares several kinds may execute a different form under each one
 check, write, and refresh targets.
 
 The planner resolves attributes, declared inputs, cacheability, and therefore
-content keys per verb. `ci` plans lint first, then build and test, and keeps the
-first occurrence when merging by label. A generator shared by build and lint
+content keys per verb. `ci` plans lint first, then build, test, and docs, and
+keeps the first occurrence when merging by label. A generator shared by build and lint
 therefore contributes its non-mutating check form to CI.
 
 See [Verb-effective attrs](../concepts/targets.md#verb-effective-attrs).

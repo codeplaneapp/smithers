@@ -29,10 +29,11 @@ export const circular = standard.circular
  * reads declared as key material.
  *
  * `StandardPackage.test` knows only `src/` and `test/`. `Docs.test.ts` also
- * reads the package's Markdown, deployment declaration, and self-hosted
- * credential configuration. Leaving those paths undeclared let a cached test
- * result survive a contradictory documentation edit, so this target is the
- * standard Vitest declaration with that complete read set.
+ * reads the package's Markdown, deployment declaration, self-hosted
+ * credential configuration, and the CLI's command registrations in
+ * `packages/build-cli/src/Cli.ts`. Leaving those paths undeclared let a cached
+ * test result survive a contradictory documentation edit, so this target is
+ * the standard Vitest declaration with that complete read set.
  */
 export const test = Smithers.Vitest({
   packageManager,
@@ -44,7 +45,8 @@ export const test = Smithers.Vitest({
     Smithers.glob("docs/**/*.md"),
     Smithers.glob("infra/**/*.md"),
     Smithers.file("infra/alchemy.run.ts"),
-    Smithers.file("terraform/modules/cache/service/config.js")
+    Smithers.file("terraform/modules/cache/service/config.js"),
+    Smithers.file("//packages/build-cli/src/Cli.ts")
   ],
   deps: [lib],
   config: Smithers.file("vitest.config.ts"),

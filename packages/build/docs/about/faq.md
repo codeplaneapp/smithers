@@ -40,8 +40,8 @@ build, test, lint, or CI selection. Examples are cleaning, watch processes,
 package scaffolding, and generated-file writes. `NewPackage` receives its name
 through `smithers-build run <label> --name <package>`.
 
-`docs` selects documentation-parity targets on demand. It is deliberately not
-part of `ci`, whose merged graph contains lint, build, and test only.
+`docs` selects documentation targets standalone. The same targets are also part
+of `ci`, whose merged graph plans lint, build, test, and docs.
 
 ## Which targets actually execute?
 

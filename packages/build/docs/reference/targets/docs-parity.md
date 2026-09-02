@@ -51,7 +51,8 @@ The target does not duplicate JSDoc linting. Export descriptions, `@since`, and
 | Error     | `DocsParityError`, `{path, message}`                     |
 | Executes  | Yes, through `CheckDocsLive`                             |
 
-The `docs` verb is on demand and is not merged into `ci`.
+The `docs` verb also runs these targets standalone; `ci` merges them into its
+graph alongside lint, build, and test.
 
 ## See also
 
