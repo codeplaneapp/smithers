@@ -78,6 +78,9 @@ const jj = Smithers.CiToolchain.Jj({ release: "0.39.0" })
 // native half cannot start and the parity check, which is the point of the
 // suite, is the thing that fails.
 const ripgrep = Smithers.CiToolchain.Ripgrep({ release: "14.1.1" })
+// Confined targets run under bubblewrap on Linux, which the hosted runner
+// image does not ship. The step is a no-op on the macOS and Windows rows.
+const bubblewrap = Smithers.CiToolchain.Apt({ packages: ["bubblewrap"] })
 // `//packages/build-cli:test` drives a real `forge` and a real Go toolchain:
 // it builds and tests a Foundry package and asserts `forge fmt --check` drift,
 // and it builds a Go package tree. Without them six cases fail on the REQUIRED
@@ -112,6 +115,7 @@ export const ci = Smithers.GithubCiGen({
         runtimes: [node, bun],
         jj,
         ripgrep,
+        apt: bubblewrap,
         go,
         foundry,
         workflowLint: Smithers.CiToolchain.Actionlint({
@@ -284,9 +288,10 @@ export const ci = Smithers.GithubCiGen({
       // in `requiredJobs`.
       //
       // The advisory bit is per row, and it is data: `continue-on-error` reads
-      // `matrix.advisory` out of the `include:` rows below, because this
-      // generator emits no `if:` key and a job-level `continue-on-error: true`
-      // would excuse ubuntu along with the rest. ubuntu is required. macOS and
+      // `matrix.advisory` out of the `include:` rows below, because the
+      // generator's only `if:` is the cache-publish guard (unused here) and a
+      // job-level `continue-on-error: true` would excuse ubuntu along with the
+      // rest. ubuntu is required. macOS and
       // Windows are advisory ONLY until the matrix proves them green; promoting
       // one is flipping its boolean to `false`, and `requiredJobs` already
       // names `packages`, so at least one row must stay required.
@@ -304,7 +309,7 @@ export const ci = Smithers.GithubCiGen({
         { os: "windows-latest", advisory: true }
       ],
       timeoutMinutes: 60,
-      toolchain: Smithers.CiToolchain.Needs({ runtimes: [node, bun], jj, ripgrep, go, foundry }),
+      toolchain: Smithers.CiToolchain.Needs({ runtimes: [node, bun], jj, ripgrep, apt: bubblewrap, go, foundry }),
       steps: [{ name: "Package test targets", verb: Smithers.Verb.Test, pattern: "//packages/..." }]
     }
   ]

@@ -43,6 +43,11 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: ripgrep@14.1.1
+      - name: Install system packages
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends 'bubblewrap'
+          fi
       - name: Workspace targets
         run: pnpm exec smithers-build ci '//packages/...' --jobs 2
         env:
@@ -304,6 +309,11 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: ripgrep@14.1.1
+      - name: Install system packages
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends 'bubblewrap'
+          fi
       - name: Package test targets
         run: pnpm exec smithers-build test '//packages/...'
         env:
