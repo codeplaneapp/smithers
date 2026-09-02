@@ -721,10 +721,25 @@ describe("vitest coverage isolation conformance", () => {
       // writes `fence` and `localFence` together; `planning` is called only by
       // `launch`, which has the run it just started; and `Lineage` has already
       // refused an edge with no parent before `originOf` could answer nothing.
+      // The transport classification added in 97c703dc0d brought the rest:
+      // `ControlClient` reads a status only off a `StatusCodeError` cause,
+      // which always carries a response with a numeric status, and re-raises
+      // an interrupt-only cause the fiber never delivers to that operator;
+      // the in-memory runtime's plan and approval maps are keyed by the
+      // identity they are compared against, so a stored row can only
+      // disagree with its key after a reach into private state; and
+      // `SqlControlRuntime` defends the SQLite driver's nested error objects,
+      // the PostgreSQL and MySQL "missing table" phrasings rc.0 never meets,
+      // a `RETURNING` row the same statement just inserted, an ancestor walk
+      // that only revisits ids it already stored, an absent decoded input the
+      // card refuses first, and an approval-token read that finds neither the
+      // row it inserted nor the one already there.
       "control/src/Cancellation.ts": 1,
       "control/src/Channels.ts": 1,
-      "control/src/ControlRuntime.ts": 3,
+      "control/src/ControlClient.ts": 4,
+      "control/src/ControlRuntime.ts": 5,
       "control/src/Lineage.ts": 1,
+      "control/src/SqlControlRuntime.ts": 7,
       "control/src/internal/planning.ts": 1,
       // The agent package's former hints (FlowEngineLike's canonicalization
       // mappers and AgentSession's process-loss fallbacks) were removed with
