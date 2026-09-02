@@ -87,7 +87,9 @@ test("the support matrix links every published package this repository documents
   // page, so an unguarded generator prints it as bare text and a reader has no
   // way to find out what it does.
   assert.match(matrix, /\| \[`@smthrs\/migrate`\]\(\/migration\/migrate-tool\) \|/)
-  assert.match(matrix, /\| \[`@smthrs\/cli`\]\(\/cli\) \|/)
+  // The cli package owns an API page now (packages/cli/PACKAGE.ts targets
+  // docs/pages/api/cli.md), so the generator links it there, as the sidebar does.
+  assert.match(matrix, /\| \[`@smthrs\/cli`\]\(\/api\/cli\) \|/)
   assert.match(matrix, /\| \[`@smthrs\/engine`\]\(\/api\/engine\) \|/)
 })
 
