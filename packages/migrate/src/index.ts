@@ -1,7 +1,7 @@
 /**
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  *
- * `@smthrs/migrate` — upgrades a Smithers 0.x (JSX) project to the Smithers
+ * `@smthrs/migrate` upgrades a Smithers 0.x (JSX) project to the Smithers
  * 1.0 authoring model and leaves an auditable report behind.
  *
  * The package is not a compatibility library. It never recreates the JSX
@@ -12,73 +12,73 @@
 
 /**
  * @category errors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as MigrateError from "./MigrateError.ts"
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as Constructs from "./Constructs.ts"
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as Mapping from "./Mapping.ts"
 
 /**
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as Detect from "./Detect.ts"
 
 /**
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as RunState from "./RunState.ts"
 
 /**
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as Inventory from "./Inventory.ts"
 
 /**
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as ZodSchemaHints from "./ZodSchemaHints.ts"
 
 /**
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as PromptHints from "./PromptHints.ts"
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as Units from "./Units.ts"
 
 /**
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as Checks from "./Checks.ts"
 
 /**
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as Report from "./Report.ts"
 
 /**
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as Scan from "./Scan.ts"
 
@@ -89,7 +89,7 @@ export * as Scan from "./Scan.ts"
  * model, the worked pairs, and the per-unit prompt.
  *
  * @category flow
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as Contract from "./flow/Contract.ts"
 
@@ -98,7 +98,7 @@ export * as Contract from "./flow/Contract.ts"
  * translation.
  *
  * @category flow
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as Gate from "./flow/Gate.ts"
 
@@ -106,7 +106,7 @@ export * as Gate from "./flow/Gate.ts"
  * What one migration run was asked to do.
  *
  * @category flow
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export * as Options from "./flow/Options.ts"
 

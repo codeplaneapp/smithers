@@ -3,10 +3,12 @@
  * pack that nobody trimmed for them, and every name they find resolves to a
  * catalog row or is reported as one that does not.
  *
- * The pack is `/Users/williamcory/plue/.smithers`, the working tree of an
+ * The pack is named by `SMITHERS_MIGRATE_PLUE_PACK`, the working tree of an
  * external project. The test never copies it, never writes to it, and skips
  * with a reason when the directory is not on this machine, so the suite stays
- * green on a checkout that has no Plue beside it.
+ * green on a checkout that has no such pack beside it. The variable is read
+ * first so the case runs wherever the pack is kept, and the maintainer's own
+ * path is the fallback rather than the contract.
  *
  * The scan runs once for the whole file. A pack this size is the tool's real
  * unit of work, not a per-assertion fixture.
@@ -22,7 +24,7 @@ import * as Inventory from "../src/Inventory.ts"
 import * as Mapping from "../src/Mapping.ts"
 import { nodeLayer } from "./fixtures/helpers.ts"
 
-const root = "/Users/williamcory/plue/.smithers"
+const root = process.env["SMITHERS_MIGRATE_PLUE_PACK"] ?? "/Users/williamcory/plue/.smithers"
 const present = existsSync(root)
 
 let detection: Detect.Detection

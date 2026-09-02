@@ -12,7 +12,7 @@
  * the ones on disk after the previous round edited them, not the ones the unit
  * started with.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as AgentAction from "@smthrs/agent/AgentAction"
 import * as Schema from "effect/Schema"
@@ -24,7 +24,7 @@ import * as Transform from "./Transform.ts"
  * The repair step: the unit, the round, and what failed.
  *
  * @category actions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const action = AgentAction.make("smithers/migrate-v1/Repair", {
   payload: {
@@ -45,6 +45,6 @@ export const action = AgentAction.make("smithers/migrate-v1/Repair", {
  * and the same host as the transform step.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layer = action.layer

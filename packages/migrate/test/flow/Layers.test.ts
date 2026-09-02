@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Capability, GrantStore, Workspace } from "@smthrs/kernel"
+import * as Command from "@smthrs/migrate/flow/Command"
 import type * as Contract from "@smthrs/migrate/flow/Contract"
 import * as Layers from "@smthrs/migrate/flow/Layers"
 import * as Scan from "@smthrs/migrate/Scan"
@@ -114,6 +115,25 @@ describe("Layers.rules over a real grant store", () => {
     expect(() => Layers.rules({ root: "../project", runStatePaths, commands }))
       .toThrow(/migration root.*absolute.*\.\.\/project/i)
   })
+
+  it.effect("refuses a relative root in the package's own error channel when a host is composed", () =>
+    Effect.gen(function*() {
+      // A library caller with a relative path gets a `MigrateError` an entry
+      // point can map to an exit status, not a defect from inside a layer.
+      for (
+        const layer of [
+          Layers.layerNode({ root: "relative/project", commands, runStatePaths }),
+          Layers.layerNodeScanned({ root: "relative/project" })
+        ]
+      ) {
+        const failure = yield* Effect.flip(Effect.scoped(Layer.build(layer)))
+        expect(Command.isMigrateError(failure)).toBe(true)
+        if (Command.isMigrateError(failure)) {
+          expect(failure.code).toBe("unsupported-project")
+          expect(failure.message).toContain("relative/project")
+        }
+      }
+    }))
 
   it.effect("lets a unit write inside the project", () =>
     Effect.gen(function*() {

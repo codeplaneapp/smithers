@@ -15,7 +15,7 @@
  * A 1.0 runtime cannot resume a 0.x run. That is why the answer is always
  * "finish, archive, or discard it", never "convert it".
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
@@ -31,7 +31,7 @@ import type { MigrateError } from "./MigrateError.ts"
  * parked, and both block a migration.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const terminalStatuses: ReadonlyArray<string> = ["finished", "failed", "cancelled", "continued"]
 
@@ -39,7 +39,7 @@ export const terminalStatuses: ReadonlyArray<string> = ["finished", "failed", "c
  * How recent a heartbeat has to be for a non-terminal run to count as live.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const defaultLiveWindowMs = 10 * 60 * 1000
 
@@ -48,7 +48,7 @@ export const defaultLiveWindowMs = 10 * 60 * 1000
  * what to do with it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface RunRow {
   readonly runId: string
@@ -69,7 +69,7 @@ export interface RunRow {
  * as a live run does: the tool cannot prove the project has no work in flight.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface DatabaseFinding {
   readonly path: string
@@ -96,7 +96,7 @@ export interface DatabaseFinding {
  * instead and blocks.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ExternalDatabase {
   /** The path exactly as the project's own configuration spells it. */
@@ -110,7 +110,7 @@ export interface ExternalDatabase {
  * a deployment manifest. The tool records it and never connects.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface BackendSetting {
   readonly backend: "postgres" | "pglite"
@@ -122,7 +122,7 @@ export interface BackendSetting {
  * see what archiving would move.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface StateDir {
   readonly path: string
@@ -142,7 +142,7 @@ export interface StateDir {
  * What the tool found, and what the operator has to do about it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface RunStateReport {
   readonly databases: ReadonlyArray<DatabaseFinding>
@@ -167,7 +167,7 @@ export interface RunStateReport {
  * parameter so its verdict is deterministic in a test.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Options {
   readonly now?: number | undefined
@@ -185,7 +185,7 @@ export interface Options {
  * covers.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const roots = (report: RunStateReport): ReadonlyArray<string> => {
   const parent = (file: string): string => {
@@ -217,7 +217,7 @@ export const roots = (report: RunStateReport): ReadonlyArray<string> => {
  * The instruction text the report and stderr both carry, verbatim.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const instructionText = {
   live:
@@ -257,7 +257,7 @@ const stringOr = (value: unknown): string | undefined => (typeof value === "stri
  * blocks the migration instead of silently passing it.
  *
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const readDatabase = (
   file: string,
@@ -397,7 +397,7 @@ const backendSetting = (
  * on them.
  *
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const scan = (
   root: string,

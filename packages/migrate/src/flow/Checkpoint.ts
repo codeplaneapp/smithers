@@ -20,7 +20,7 @@
  * back is not a migration. `allowNoVcs` accepts the copy alone as the way
  * back.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { Action } from "@smthrs/flow"
 import * as Clock from "effect/Clock"
@@ -41,7 +41,7 @@ import * as Exec from "./internal/Exec.ts"
  * Which version control the project is under.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Vcs = Schema.Literals(["jj", "git", "none"])
 
@@ -49,7 +49,7 @@ export const Vcs = Schema.Literals(["jj", "git", "none"])
  * Which version control the project is under.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Vcs = typeof Vcs.Type
 
@@ -58,7 +58,7 @@ export type Vcs = typeof Vcs.Type
  * hand, and the backup directory holding the unit's files as they were.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Ref = Schema.Struct({
   vcs: Vcs,
@@ -109,7 +109,7 @@ export const Ref = Schema.Struct({
  * A recorded checkpoint.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Ref = typeof Ref.Type
 
@@ -137,7 +137,7 @@ interface Pending {
  * run's recorded result.
  *
  * @category actions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const action = Action.make("smithers/migrate-v1/Checkpoint", {
   payload: {
@@ -174,7 +174,7 @@ const isDirectory = (target: string) =>
  * is colocated.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const detectVcs = (
   root: string
@@ -221,7 +221,7 @@ const pending = (
  * checkpoint was taken, so a restore never has to infer it later.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Entry {
   readonly path: string
@@ -290,7 +290,7 @@ const backup = (
  * Digests every file under the given project-relative roots.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const digest = (
   root: string,
@@ -348,7 +348,7 @@ export const digest = (
  * would report the tool's own work as the unit's.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const unwalked: ReadonlyArray<string> = [".git", ".jj", "node_modules"]
 
@@ -369,7 +369,7 @@ export const unwalked: ReadonlyArray<string> = [".git", ".jj", "node_modules"]
  * other, and the unit that wrote it fails with it named.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const generated: ReadonlyArray<string> = [
   "bun.lock",
@@ -384,7 +384,7 @@ export const generated: ReadonlyArray<string> = [
  * every file it kept.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Tree {
   readonly exclude: ReadonlyArray<string>
@@ -404,7 +404,7 @@ const excluded = (relative: string, exclude: ReadonlyArray<string>): boolean =>
  * declaration.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const tree = (
   root: string,
@@ -471,7 +471,7 @@ export const tree = (
  * what a write outside the unit's declared file set is found by.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const treeDiff = (
   root: string,
@@ -531,7 +531,7 @@ const gitRef = (unit: string, at: number): string =>
  * change, the git path writes a ref, and both copy the unit's files aside.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const take = (payload: {
   readonly root: string
@@ -621,7 +621,7 @@ export const take = (payload: {
  * path. This is what the deterministic checks compare against.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const sources = (
   ref: Ref
@@ -650,7 +650,7 @@ export const sources = (
  * uncommitted work.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const diff = (
   root: string,
@@ -698,7 +698,7 @@ export const diff = (
  * point: a failed unit must not cost the operator work the unit never claimed.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const restore = (
   root: string,
@@ -756,7 +756,7 @@ export const restore = (
  * What a rollback could and could not put back.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Rollback {
   readonly restored: ReadonlyArray<string>
@@ -823,7 +823,7 @@ const preserveAdded = (
  *   the caller reports with the checkpoint's own restore command.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const rollback = (
   root: string,
@@ -887,7 +887,7 @@ export const rollback = (
  * Records rollback damage in the pending marker when finish itself fails.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const recordRollback = (
   backupDir: string,
@@ -915,7 +915,7 @@ export const recordRollback = (
  * Removes this unit's marker only after its durable report exists.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const clearPending = (
   backupDir: string,
@@ -941,7 +941,7 @@ export const clearPending = (
  * The checkpoint action's implementation.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layer = action.toLayer(take)
 
@@ -949,7 +949,7 @@ export const layer = action.toLayer(take)
  * Projects a checkpoint into the report's shape.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const toReport = (ref: Ref): Report.Checkpoint => ({
   vcs: ref.vcs,

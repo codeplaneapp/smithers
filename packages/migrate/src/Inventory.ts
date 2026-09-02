@@ -12,7 +12,7 @@
  * written against a foreign authoring API contributes nothing and is reported
  * as `unknown-authoring-api` instead of being mistranslated.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
@@ -31,7 +31,7 @@ import type { MigrateError } from "./MigrateError.ts"
  * detail is thin becomes a guided decision instead of an invented one.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface InventoryEntry {
   readonly file: string
@@ -89,7 +89,7 @@ export interface InventoryEntry {
  * project code and is left alone.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const factoryBindings: ReadonlyArray<string> = [
   "Approval",
@@ -147,7 +147,7 @@ const ctxMethods = new Set(
  * the same file set, resolves them without evaluating anything.
  *
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const factoryNames = (sources: ReadonlyMap<string, string>): ReadonlySet<string> => {
   const names = new Set<string>(["createSmithers", "createSmithersPostgres", "createSmithersCloudflare"])
@@ -290,7 +290,7 @@ const entry = (
  * Scans one file and returns its construct hits.
  *
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const scanFile = (
   file: string,
@@ -788,7 +788,7 @@ export const scanFile = (
  * The zod schema chains declared in one file, by the name they are bound to.
  *
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const zodChains = (
   file: string,
@@ -809,7 +809,7 @@ export const zodChains = (
  * The `.mdx` prompts one file imports, by the local component name.
  *
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const mdxImports = (
   file: string,
@@ -839,7 +839,7 @@ const withoutExtension = (file: string): string => file.replace(/\.(?:[cm]?[jt]s
  * such a pack.
  *
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const factoryReexports = (
   sources: ReadonlyMap<string, string>,
@@ -873,7 +873,7 @@ export const factoryReexports = (
  * file then position so a report is stable.
  *
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const scan = (
   detection: Detect.Detection

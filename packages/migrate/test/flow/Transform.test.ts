@@ -18,6 +18,7 @@ import * as Contract from "@smthrs/migrate/flow/Contract"
 import * as MigrateFlow from "@smthrs/migrate/flow/MigrateFlow"
 import type * as Options from "@smthrs/migrate/flow/Options"
 import * as Transform from "@smthrs/migrate/flow/Transform"
+import * as Mapping from "@smthrs/migrate/Mapping"
 import * as Scan from "@smthrs/migrate/Scan"
 import type * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Effect from "effect/Effect"
@@ -117,6 +118,16 @@ describe("Transform.approvedPackages", () => {
     for (const name of named) expect(Transform.approvedPackages).toContain(name)
     expect(Transform.approvedPackages).toContain("@smthrs/core")
     expect(Transform.approvedPackages).toContain("effect")
+    // And every package a mapping row points the agent at, however the row
+    // spells it: a guided rewrite of `smthrs/memory` is told to use
+    // `@smthrs/memory`, so `@smthrs/memory` has to be installable.
+    for (const row of Mapping.rows) {
+      for (const name of `${row.target ?? ""} ${row.targetModule ?? ""}`.match(/@smthrs\/[a-z-]+/g) ?? []) {
+        expect([row.construct, name, Transform.approvedPackages.includes(name)]).toEqual([row.construct, name, true])
+      }
+    }
+    expect(Transform.approvedPackages).toContain("@smthrs/memory")
+    expect(Transform.approvedPackages).toEqual([...Transform.approvedPackages].sort())
   })
 })
 

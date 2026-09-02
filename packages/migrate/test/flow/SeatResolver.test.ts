@@ -50,6 +50,11 @@ describe("Layers.seatResolver", () => {
     Effect.gen(function*() {
       const unknown = yield* Effect.flip(resolve({ ANTHROPIC_API_KEY: "k" }, "gemini:pro"))
       expect(unknown.message).toBe("No route is configured for the gemini provider")
+      // A provider named after an inherited property is not a provider.
+      for (const provider of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+        const inherited = yield* Effect.flip(resolve({ ANTHROPIC_API_KEY: "k" }, `${provider}:x`))
+        expect(inherited.message).toBe(`No route is configured for the ${provider} provider`)
+      }
 
       const missing = yield* Effect.flip(resolve({ ANTHROPIC_API_KEY: "k" }, "openai:some-model"))
       expect(missing.message).toBe("Set OPENAI_API_KEY to run the openai:some-model seat")

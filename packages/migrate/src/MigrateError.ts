@@ -4,7 +4,7 @@
  * Every scanner, check, and migration step fails with this error so the CLI
  * maps a code onto an exit status without inspecting a cause chain.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Schema from "effect/Schema"
 
@@ -21,7 +21,7 @@ import * as Schema from "effect/Schema"
  * project untouched and exit 1.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const MigrateErrorCode = Schema.Literals([
   "run-state-blocked",
@@ -40,7 +40,7 @@ export const MigrateErrorCode = Schema.Literals([
  * A migration failure code.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type MigrateErrorCode = typeof MigrateErrorCode.Type
 
@@ -49,7 +49,7 @@ export type MigrateErrorCode = typeof MigrateErrorCode.Type
  * JSON-encodable details.
  *
  * @category errors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export class MigrateError extends Schema.TaggedError<MigrateError>()("@smthrs/migrate/MigrateError", {
   code: MigrateErrorCode,
@@ -61,7 +61,7 @@ export class MigrateError extends Schema.TaggedError<MigrateError>()("@smthrs/mi
  * Builds a {@link MigrateError} without naming the fields.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const make = (code: MigrateErrorCode, message: string, details?: string): MigrateError =>
   details === undefined ? new MigrateError({ code, message }) : new MigrateError({ code, message, details })
@@ -71,6 +71,6 @@ export const make = (code: MigrateErrorCode, message: string, details?: string):
  * a missing file never escapes as an untyped defect.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const io = (message: string) => (cause: unknown): MigrateError => make("io", message, String(cause))

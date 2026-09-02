@@ -9,7 +9,7 @@
  * The catalog is data, not behavior. `Mapping` decides what each row becomes,
  * and `Inventory` decides which rows a project actually uses.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { componentProps, facadeExports } from "./internal/FacadeExports.ts"
 import * as Sort from "./internal/Sort.ts"
@@ -20,7 +20,7 @@ import * as Sort from "./internal/Sort.ts"
  * context, and everything else is an imported binding or a project file.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type ConstructKind =
   | "agent"
@@ -42,7 +42,7 @@ export type ConstructKind =
  * One removed 0.x construct.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Construct {
   /** The identifier application code writes. */
@@ -530,7 +530,7 @@ const values: ReadonlyArray<Construct> = facadeExports
  * has no counterpart, so the value resolves to that row.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const subpathOf: ReadonlyMap<string, string> = new Map(
   facadeExports
@@ -543,7 +543,7 @@ export const subpathOf: ReadonlyMap<string, string> = new Map(
  * generated report and a generated document are stable.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const constructs: ReadonlyArray<Construct> = [
   ...structure,
@@ -570,7 +570,7 @@ const index = new Map(constructs.map((entry) => [entry.name, entry]))
  * Looks a construct up by the name application code writes.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const byName = (name: string): Construct | undefined => index.get(name)
 
@@ -578,7 +578,7 @@ export const byName = (name: string): Construct | undefined => index.get(name)
  * Every construct of one kind.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const byKind = (kind: ConstructKind): ReadonlyArray<Construct> =>
   constructs.filter((entry) => entry.kind === kind)
@@ -588,7 +588,7 @@ export const byKind = (kind: ConstructKind): ReadonlyArray<Construct> =>
  * resolved through imports before they reach this function.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const isComponent = (name: string): boolean => index.get(name)?.kind === "component"
 
@@ -600,6 +600,6 @@ export const isComponent = (name: string): boolean => index.get(name)?.kind === 
  * `Detect.scan` reports it as `uncatalogued-import` rather than dropping it.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const isCatalogued = (name: string): boolean => index.has(name) || subpathOf.has(name)

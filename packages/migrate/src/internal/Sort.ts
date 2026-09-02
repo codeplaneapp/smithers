@@ -7,14 +7,14 @@
  * locale data. These comparators order by UTF-16 code unit, which is the same
  * everywhere and is the order `Array.prototype.sort` uses by default.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 
 /**
  * Orders two strings by code unit.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const byText = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0)
@@ -22,7 +22,7 @@ export const byText = (left: string, right: string): number => (left < right ? -
 /**
  * Orders two values by the string one projection returns.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const by = <A>(project: (value: A) => string) => (left: A, right: A): number =>

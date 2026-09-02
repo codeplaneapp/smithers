@@ -3,7 +3,7 @@
  * project ignore rules, and read helpers that turn a missing or unreadable file
  * into a typed `io` failure rather than a defect.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 import * as Effect from "effect/Effect"
@@ -20,7 +20,7 @@ import { io, type MigrateError } from "../MigrateError.ts"
  * state, which the tool reports on but never reads as source. `.flows` is the
  * new runtime's state directory and is not part of a 0.x project.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const ignoredDirectories: ReadonlyArray<string> = [
@@ -48,7 +48,7 @@ export const ignoredDirectories: ReadonlyArray<string> = [
  * execution log and every worktree checkout under it: Plue's pack holds 2,465
  * execution files and 81,864 worktree files beside 500 source files.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const ignoredPaths: ReadonlyArray<string> = [
@@ -67,7 +67,7 @@ export const ignoredPaths: ReadonlyArray<string> = [
  * over a monorepo checkout would spend minutes in directories the tool never
  * reads.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const maxDepth = 12
@@ -78,7 +78,7 @@ export const maxDepth = 12
  * source tree, and reading it would spend the process on text no scanner
  * uses. The skip is reported, never silent.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const maxFileBytes = 8 * 1024 * 1024
@@ -86,7 +86,7 @@ export const maxFileBytes = 8 * 1024 * 1024
 /**
  * One path a walk did not descend into or read, and why.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export interface Skipped {
@@ -98,7 +98,7 @@ export interface Skipped {
 /**
  * What a walk found and what it could not: the files, and every skip.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export interface Walked {
@@ -109,7 +109,7 @@ export interface Walked {
 /**
  * Options for {@link walk}.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export interface WalkOptions {
@@ -133,7 +133,7 @@ const relative = (root: string, path: Path.Path, absolute: string): string => {
  * one. A path that vanished between the listing and the stat is not a skip;
  * it was not there.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const walkReport = (
@@ -205,7 +205,7 @@ export const walkReport = (
  * separators, sorted. The walk's skips are dropped; callers that have to
  * account for them use {@link walkReport}.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const walk = (
@@ -223,7 +223,7 @@ export const walk = (
  * opposite job: proving that a directory the tool must never write to holds
  * exactly the files it held before, which needs every one of them.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const walkAll = (
@@ -260,7 +260,7 @@ export const walkAll = (
  * or a path that is a directory is not absence, and treating it as absence is
  * how a rollback deletes a file it was supposed to restore.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const optionalNotFound = <A, R>(
@@ -275,7 +275,7 @@ export const optionalNotFound = <A, R>(
  * Reads a UTF-8 file, or `undefined` when it does not exist. Any other
  * failure is an `io` error naming the file.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const readIfExists = (
@@ -293,7 +293,7 @@ export const readIfExists = (
 /**
  * Reads a UTF-8 file, or `undefined` when it does not exist or cannot be read.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const readOption = (
@@ -307,7 +307,7 @@ export const readOption = (
 /**
  * Reads a UTF-8 file and fails with `io` when it cannot be read.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const read = (
@@ -321,7 +321,7 @@ export const read = (
 /**
  * Reports whether a path exists.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const exists = (file: string): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
@@ -333,7 +333,7 @@ export const exists = (file: string): Effect.Effect<boolean, never, FileSystem.F
 /**
  * Reports whether a path is a directory.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const isDirectory = (file: string): Effect.Effect<boolean, never, FileSystem.FileSystem> =>
@@ -346,7 +346,7 @@ export const isDirectory = (file: string): Effect.Effect<boolean, never, FileSys
 /**
  * The 1-based line and column of a character offset in `source`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const positionAt = (source: string, offset: number): { readonly line: number; readonly column: number } => {

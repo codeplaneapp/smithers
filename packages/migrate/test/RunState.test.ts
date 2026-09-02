@@ -212,6 +212,49 @@ describe("RunState.scan", () => {
 
       expect(result.databases.map((database) => database.path)).toEqual([".smithers/smithers.db", "smithers.db"])
     }))
+
+  it.effect("records a database that resolves outside the project as external, and blocks on it", () =>
+    Effect.gen(function*() {
+      // Every consumer of a `DatabaseFinding.path` joins it onto the root: the
+      // deny rule, the checkpoint digest, the membership walk, and the archive
+      // refusal. An absolute or `../` spelling fed to any of them watches
+      // nothing while the report claims the project is protected, so the scan
+      // records it apart and blocks instead.
+      const root = copyFixture("jsx-single")
+      const outside = join(root, "..", `outside-${process.pid}.db`)
+      writeFileSync(outside, "")
+      writeFileSync(join(root, ".env"), `SMITHERS_DB=../${outside.split("/").pop()}\n`)
+      writeFileSync(
+        join(root, "smithers.config.ts"),
+        `export default { dbPath: ${JSON.stringify(join(root, "..", "absolute.db"))} }\n`
+      )
+      writeFileSync(join(root, "..", "absolute.db"), "")
+
+      try {
+        const result = yield* report(root)
+
+        expect(result.external.map((entry) => entry.declared).sort()).toEqual([
+          `../${outside.split("/").pop()}`,
+          join(root, "..", "absolute.db")
+        ].sort())
+        for (const entry of result.external) {
+          expect(entry.resolved.startsWith(`${root}/`)).toBe(false)
+        }
+        // Nothing outside the root reaches a consumer that would join it back on.
+        for (const database of result.databases) {
+          expect(database.path.startsWith("/")).toBe(false)
+          expect(database.path.includes("..")).toBe(false)
+        }
+        for (const walked of RunState.roots(result)) {
+          expect(walked.startsWith("/")).toBe(false)
+          expect(walked.includes("..")).toBe(false)
+        }
+        expect(result.verdict).toBe("blocked")
+      } finally {
+        rmSync(outside, { force: true })
+        rmSync(join(root, "..", "absolute.db"), { force: true })
+      }
+    }))
 })
 
 describe("RunState.roots", () => {

@@ -176,8 +176,13 @@ describe("ZodSchemaHints.print refuses what it cannot translate faithfully", () 
       .toBe("Schema.optional(Schema.String.annotate({ description: \"d\" }))")
     expect(ZodSchemaHints.printField("z.string()")).toBe("Schema.String")
     expect(ZodSchemaHints.printField("z.nope()")).toBeUndefined()
-    // `print` alone stays the bare schema, which is what an output wants.
-    expect(ZodSchemaHints.print("z.string().optional()")).toBe("Schema.String")
+    // `print` alone has no spelling for a top-level optional or default, so
+    // it refuses rather than printing the bare schema and calling the chain
+    // automatic; a description is kept as an annotation.
+    expect(ZodSchemaHints.print("z.string().optional()")).toBeUndefined()
+    expect(ZodSchemaHints.print("z.string().default(\"x\")")).toBeUndefined()
+    expect(ZodSchemaHints.classify("z.string().default(\"x\")").class).toBe("guided")
+    expect(ZodSchemaHints.print("z.string().describe(\"d\")")).toBe("Schema.String.annotate({ description: \"d\" })")
   })
 })
 

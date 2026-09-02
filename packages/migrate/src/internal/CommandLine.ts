@@ -9,7 +9,7 @@
  * `test/flow/DerivedCommands.test.ts` pins that the two renderers agree token
  * for token, so a grant written from here is the line the kernel checks.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 
 /** Tokens made only of these characters need no quoting in a POSIX shell. */
@@ -20,7 +20,7 @@ const SAFE = /^[A-Za-z0-9_@%+=:,./-]+$/
  * Identical to `@smthrs/kernel/CommandLine.quote`.
  *
  * @category rendering
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const quote = (token: string): string =>
   token !== "" && SAFE.test(token) ? token : `'${token.replaceAll("'", `'\\''`)}'`
@@ -30,7 +30,7 @@ export const quote = (token: string): string =>
  * a command it spawns with no shell: every token POSIX-quoted.
  *
  * @category rendering
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const renderArgv = (executable: string, args: ReadonlyArray<string>): string =>
   [executable, ...args].map(quote).join(" ")

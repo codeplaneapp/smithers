@@ -21,7 +21,7 @@
  * included: a host that was given no seat and no key refuses by name, which is
  * the honest failure.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
@@ -53,6 +53,7 @@ import * as Redacted from "effect/Redacted"
 import type * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
 import { isAbsolute } from "node:path"
+import { make, type MigrateError } from "../MigrateError.ts"
 import * as Scan from "../Scan.ts"
 import * as Units from "../Units.ts"
 import * as Contract from "./Contract.ts"
@@ -66,7 +67,7 @@ import * as Transform from "./Transform.ts"
  * for the other.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const apiKeyVariable: Readonly<Record<string, string>> = {
   anthropic: "ANTHROPIC_API_KEY",
@@ -83,7 +84,7 @@ export const apiKeyVariable: Readonly<Record<string, string>> = {
  * With no key at all it returns `undefined` and the resolver refuses by name.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const configuredProvider = (
   environment: Readonly<Record<string, string | undefined>>
@@ -129,7 +130,7 @@ const seatOf = <Body, Frame, Event, State>(
  * environment it was given rather than from the process.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const seatResolver = (options: {
   readonly environment: Readonly<Record<string, string | undefined>>
@@ -152,7 +153,12 @@ export const seatResolver = (options: {
         const separator = chosen.indexOf(":")
         const provider = separator < 0 ? "anthropic" : chosen.slice(0, separator)
         const modelId = Seat.modelIdOf(chosen)
-        const variable = apiKeyVariable[provider]
+        // `Object.hasOwn`, not a bare lookup. `apiKeyVariable` is an object
+        // literal, so `--seat constructor:x` or `--seat toString:x` would
+        // otherwise find an inherited function, pass the `undefined` guard,
+        // and tell the operator to set a variable named after a native
+        // function instead of naming the unconfigured provider.
+        const variable = Object.hasOwn(apiKeyVariable, provider) ? apiKeyVariable[provider] : undefined
         if (variable === undefined) {
           return yield* Effect.fail(refusal(declared, `No route is configured for the ${provider} provider`))
         }
@@ -187,7 +193,7 @@ export const seatResolver = (options: {
  * nothing else.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const verificationCommands = (commands: Contract.Commands): ReadonlyArray<string> => [
   ...new Set([
@@ -198,12 +204,23 @@ export const verificationCommands = (commands: Contract.Commands): ReadonlyArray
   ])
 ]
 
+// The grant patterns are built from the root, so a relative one would make a
+// pattern that matches nothing and confine nothing. Both layer constructors
+// refuse it through the error channel before `rules` is reached; the throw here
+// is the invariant behind that refusal, not a path a caller can reach.
 const absoluteRoot = (root: string): string => {
   if (!isAbsolute(root)) {
     throw new TypeError(`migration root must be absolute before grant construction, received "${root}"`)
   }
   return root
 }
+
+/** Refuses a root that is not absolute, in this package's own error channel. */
+const rootRefusal = (root: string): Effect.Effect<void, MigrateError> =>
+  isAbsolute(root) ? Effect.void : Effect.fail(make(
+    "unsupported-project",
+    `The migration root must be an absolute path, and "${root}" is not. Resolve it against the working directory before building the host.`
+  ))
 
 /**
  * The permission rules one migration runs under: the project tree, the
@@ -232,7 +249,7 @@ const absoluteRoot = (root: string): string => {
  * no remembered grant, and no later allow can reach a run-state path.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const rules = (options: {
   readonly root: string
@@ -283,7 +300,7 @@ export const rules = (options: {
  * this composition can see which rollback is in force.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layerSnapshotBoundary: Layer.Layer<FlowEngine.SnapshotBoundary> = Layer.succeed(
   FlowEngine.SnapshotBoundary
@@ -297,7 +314,7 @@ export const layerSnapshotBoundary: Layer.Layer<FlowEngine.SnapshotBoundary> = L
  * What a Node host needs told.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface NodeConfig {
   readonly root: string
@@ -361,36 +378,41 @@ const executorFor = (config: NodeConfig): Layer.Layer<RequestExecutor.RequestExe
  * Everything a migration needs on Node, including the credentialed half.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const layerNode = (config: NodeConfig) => {
-  absoluteRoot(config.root)
-  const seats = Layer.effect(
-    SeatResolver.SeatResolver,
-    Effect.map(RequestExecutor.RequestExecutor, (request) =>
-      seatResolver({
-        environment: config.environment ?? {},
-        seat: config.seat,
-        executor: request
-      }))
-  ).pipe(Layer.provide(executorFor(config)))
-  return MigrateFlow.layer.pipe(
-    Layer.provideMerge(Layer.mergeAll(hostFor(config), seats, Agent.layer)),
-    Layer.provideMerge(agentPolicy),
-    Layer.provideMerge(Agent.layerDefaults),
-    Layer.provideMerge(Action.layerImplementations),
-    Layer.provideMerge(FlowEngine.layerMemory),
-    Layer.provideMerge(layerSnapshotBoundary),
-    Layer.provideMerge(NodeCrypto.layer),
-    Layer.provideMerge(NodeServices.layer)
-  )
-}
+export const layerNode = (config: NodeConfig) =>
+  Layer.unwrap(Effect.gen(function*() {
+    // A relative root is refused, not thrown at. `MigrateError` is this
+    // package's single failure type so an entry point maps a code onto an exit
+    // status without walking a cause chain, and a library caller passing a
+    // relative path is exactly the caller who would otherwise get a defect.
+    yield* rootRefusal(config.root)
+    const seats = Layer.effect(
+      SeatResolver.SeatResolver,
+      Effect.map(RequestExecutor.RequestExecutor, (request) =>
+        seatResolver({
+          environment: config.environment ?? {},
+          seat: config.seat,
+          executor: request
+        }))
+    ).pipe(Layer.provide(executorFor(config)))
+    return MigrateFlow.layer.pipe(
+      Layer.provideMerge(Layer.mergeAll(hostFor(config), seats, Agent.layer)),
+      Layer.provideMerge(agentPolicy),
+      Layer.provideMerge(Agent.layerDefaults),
+      Layer.provideMerge(Action.layerImplementations),
+      Layer.provideMerge(FlowEngine.layerMemory),
+      Layer.provideMerge(layerSnapshotBoundary),
+      Layer.provideMerge(NodeCrypto.layer),
+      Layer.provideMerge(NodeServices.layer)
+    )
+  }))
 
 /**
  * What a Node host needs told when it derives the rest from the project.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ScannedConfig {
   readonly root: string
@@ -428,7 +450,7 @@ export interface ScannedConfig {
  * a third.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const commandsFor = (
   detection: Scan.ScanResult["detection"],
@@ -454,12 +476,12 @@ export const commandsFor = (
  * one. It is the reason this layer fails with the scanner's own error.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const layerNodeScanned = (config: ScannedConfig) => {
-  absoluteRoot(config.root)
-  return Layer.unwrap(
+export const layerNodeScanned = (config: ScannedConfig) =>
+  Layer.unwrap(
     Effect.gen(function*() {
+      yield* rootRefusal(config.root)
       const state = config.state ?? Options.stateOf(config.environment ?? {})
       const result = yield* Scan.scan(config.root, {
         ignore: [config.reportDir ?? ".smithers-migrate"],
@@ -476,7 +498,6 @@ export const layerNodeScanned = (config: ScannedConfig) => {
       })
     })
   ).pipe(Layer.provide(NodeServices.layer))
-}
 
 /**
  * The cell a scripted model answers one frame with.
@@ -487,7 +508,7 @@ export const layerNodeScanned = (config: ScannedConfig) => {
  * decoding and none of the work.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Script = (asked: string) => string
 
@@ -495,7 +516,7 @@ export type Script = (asked: string) => string
  * Ends a scripted cell with the value the declared output schema expects.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const done = (output: unknown): string => `ctx.done(${JSON.stringify(JSON.stringify(output))})`
 
@@ -504,7 +525,7 @@ export const done = (output: unknown): string => `ctx.done(${JSON.stringify(JSON
  * replaces instead of a network.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const scriptedModel = (script: Script): Model.Model => ({
   stream: (request) =>
@@ -544,7 +565,7 @@ const preparedRequest = {
  * are all real, so a scripted test still proves the confinement.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layerScripted = (config: NodeConfig & { readonly script: Script }) => {
   const model = scriptedModel(config.script)
@@ -575,7 +596,7 @@ export const layerScripted = (config: NodeConfig & { readonly script: Script }) 
  * The runtime a migration executes under.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Runtime = FlowRuntime.FlowRuntime
 
@@ -602,7 +623,7 @@ type Expect<T extends true> = T
  * Each composition root above owes nothing at the layer level.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type CompositionRootsAreComplete = [
   Expect<Complete<ReturnType<typeof layerNode>>>,

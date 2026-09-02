@@ -8,7 +8,7 @@
  * project code. Every rule here is a test case over the fixtures in
  * `test/fixtures`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -17,6 +17,7 @@ import * as Path from "effect/Path"
 import ts from "typescript"
 import * as Constructs from "./Constructs.ts"
 import * as Fs from "./internal/Fs.ts"
+import * as Jsonc from "./internal/Jsonc.ts"
 import * as Semver from "./internal/Semver.ts"
 import * as Sort from "./internal/Sort.ts"
 import * as Ts from "./internal/Ts.ts"
@@ -27,7 +28,7 @@ import type { MigrateError } from "./MigrateError.ts"
  * Old package names that identify a 0.x project whatever their version.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const oldPackageNames: ReadonlyArray<string> = ["smthrs", "smithers-orchestrator"]
 
@@ -41,7 +42,7 @@ export const oldPackageNames: ReadonlyArray<string> = ["smthrs", "smithers-orche
  * `createSmithers` from it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const localPackageName = "smithers"
 
@@ -49,7 +50,7 @@ export const localPackageName = "smithers"
  * Scopes whose every package is 0.x.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const oldScopes: ReadonlyArray<string> = ["@smithers/", "@smithers-orchestrator/"]
 
@@ -58,7 +59,7 @@ export const oldScopes: ReadonlyArray<string> = ["@smithers/", "@smithers-orches
  * one of these at a 0.x version is an old package however the version reads.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const deletedSmthrsPackages: ReadonlyArray<string> = [
   "accounts",
@@ -102,7 +103,7 @@ export const deletedSmthrsPackages: ReadonlyArray<string> = [
  * decide what happens to them.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const companionPackages: ReadonlyArray<string> = [
   "@ai-sdk/",
@@ -124,7 +125,7 @@ export const companionPackages: ReadonlyArray<string> = [
  * refuses to guess at its semantics.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const foreignAuthoringApis: ReadonlyArray<string> = ["@smithers-ai/workflow"]
 
@@ -141,7 +142,7 @@ const manifestFields = [
  * The manifest field a dependency was found in.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type ManifestField = (typeof manifestFields)[number]
 
@@ -149,7 +150,7 @@ export type ManifestField = (typeof manifestFields)[number]
  * Why a dependency counts as a Smithers 0.x package.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type OldPackageReason = "old-name" | "old-scope" | "deleted-package" | "old-version"
 
@@ -157,7 +158,7 @@ export type OldPackageReason = "old-name" | "old-scope" | "deleted-package" | "o
  * One old package in one manifest.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface OldPackage {
   readonly name: string
@@ -170,7 +171,7 @@ export interface OldPackage {
  * One companion package the dependency unit has to decide about.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface CompanionPackage {
   readonly name: string
@@ -182,7 +183,7 @@ export interface CompanionPackage {
  * One `package.json` the detector read.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ManifestFinding {
   readonly path: string
@@ -200,7 +201,7 @@ export interface ManifestFinding {
  * migration has to remove.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface TsconfigFinding {
   readonly path: string
@@ -216,7 +217,7 @@ export interface TsconfigFinding {
  * A hit at a file position.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface FileHit {
   readonly file: string
@@ -229,7 +230,7 @@ export interface FileHit {
  * One import of an old specifier.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ImportHit {
   readonly file: string
@@ -257,7 +258,7 @@ export interface ImportHit {
  * it into a second copy under a name derived from `flow.ts`.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type WorkflowApi = "smthrs" | "smithers-orchestrator" | "foreign" | "flows" | "unknown"
 
@@ -265,7 +266,7 @@ export type WorkflowApi = "smthrs" | "smithers-orchestrator" | "foreign" | "flow
  * One workflow file.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface WorkflowFile {
   readonly path: string
@@ -281,7 +282,7 @@ export interface WorkflowFile {
  * One MDX prompt.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface PromptFile {
   readonly path: string
@@ -294,7 +295,7 @@ export interface PromptFile {
  * One workflow UI file, and the `<UI entry>` that names it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface UiFile {
   /** The resolved project path, or the unresolved specifier when missing. */
@@ -307,7 +308,7 @@ export interface UiFile {
  * One old CLI invocation or Smithers environment variable in a script.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ScriptHit {
   readonly file: string
@@ -321,7 +322,7 @@ export interface ScriptHit {
  * The project configuration files a 0.x project carries.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ConfigFindings {
   readonly smithersConfig:
@@ -349,7 +350,7 @@ export interface ConfigFindings {
  * name in a deployment manifest.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface IntegrationHit {
   readonly file: string
@@ -363,7 +364,7 @@ export interface IntegrationHit {
  * A non-fatal detection diagnostic.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Warning {
   readonly code:
@@ -388,7 +389,7 @@ export interface Warning {
  * and a warning that names the field is one an operator can act on.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface EffectDeclaration {
   readonly file: string
@@ -400,7 +401,7 @@ export interface EffectDeclaration {
  * Everything the detector found.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Detection {
   readonly root: string
@@ -433,7 +434,7 @@ export interface Detection {
  * Options for {@link scan}.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ScanOptions {
   readonly ignore?: ReadonlyArray<string> | undefined
@@ -454,7 +455,7 @@ const isSource = (file: string): boolean => sourceExtensions.some((extension) =>
  * both trees is old only where a manifest pins it below `1.0.0`.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface SpecifierContext {
   /** True when a manifest declares the bare name `smithers` as the old facade. */
@@ -474,7 +475,7 @@ export interface SpecifierContext {
  * the same string.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const isOldSpecifier = (specifier: string, context: SpecifierContext = {}): boolean => {
   if (oldPackageNames.includes(specifier)) return true
@@ -504,8 +505,15 @@ export const isOldSpecifier = (specifier: string, context: SpecifierContext = {}
  * not reported as old. The bare name `smithers` is decided by its spec: a
  * `file:`, `link:`, or `workspace:` link into a 0.x checkout, or a 0.x version.
  *
+ * A `@smthrs/` specifier that carries no version is old only when it is a
+ * `file:` or `link:` path, which does point at a checkout on this machine.
+ * `workspace:*`, `catalog:`, `*`, `latest`, an `npm:` alias, and a git URL are
+ * not: `workspace:*` is how a 1.0 monorepo pins its own packages, and
+ * reporting it old would have the project unit delete those dependencies from
+ * `package.json`.
+ *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const classifyPackage = (name: string, version: string): OldPackageReason | undefined => {
   if (oldPackageNames.includes(name)) return "old-name"
@@ -517,7 +525,10 @@ export const classifyPackage = (name: string, version: string): OldPackageReason
   if (oldScopes.some((scope) => name.startsWith(scope))) return "old-scope"
   if (name.startsWith("@smthrs/")) {
     const bare = name.slice("@smthrs/".length)
-    if (!Semver.isBeforeOneZero(version)) return undefined
+    const old = Semver.parse(version) === undefined
+      ? /^(?:file|link):/.test(version)
+      : Semver.isBeforeOneZero(version)
+    if (!old) return undefined
     return deletedSmthrsPackages.includes(bare) ? "deleted-package" : "old-version"
   }
   return undefined
@@ -532,13 +543,14 @@ const readJson = (text: string): Record<string, unknown> | undefined => {
   }
 }
 
-const readJsonWithComments = (text: string): Record<string, unknown> | undefined => {
-  const stripped = text
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:"'\\])\/\/.*$/gm, "$1")
-    .replace(/,(\s*[}\]])/g, "$1")
-  return readJson(stripped)
-}
+// Scanned, not matched. A tsconfig's own `"include": ["**\/*.ts"]` carries the
+// two sequences a block-comment regular expression looks for, so matching one
+// deletes the middle of the include list, and a tsconfig carrying a `smthrs/*`
+// path mapping beside a `**\/*` include stops parsing altogether. The scanner
+// in `internal/Jsonc.ts` is the one reader this package uses; `Archive` and the
+// flow's postconditions read a tsconfig through the same function.
+const readJsonWithComments = (text: string): Record<string, unknown> | undefined =>
+  readJson(Jsonc.withoutComments(text))
 
 const stringRecord = (value: unknown): ReadonlyArray<[string, string]> => {
   if (typeof value !== "object" || value === null) return []
@@ -611,7 +623,7 @@ const interpolationOnly = /^\s*(?:JSON\.stringify\(\s*)?props\.([A-Za-z_$][\w$]*
  * interpolates.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const classifyPrompt = (
   text: string
@@ -685,7 +697,7 @@ const resolveRelative = (
  * account for.
  *
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const scan = (
   root: string,
@@ -1253,7 +1265,7 @@ export const scan = (
     }
     const uis: Array<UiFile> = [...uiPaths]
       .map(([file, referencedBy]) => ({ path: file, resolved: fileSet.has(file), referencedBy: referencedBy.sort() }))
-      .sort((left, right) => left.path.localeCompare(right.path))
+      .sort(Sort.by((entry) => entry.path))
 
     const tests = files.filter((file) =>
       isSource(file) &&
@@ -1382,10 +1394,18 @@ export const scan = (
     }
 
     const environment = options.environment ?? {}
+    // `TMPDIR` ends in a separator on macOS and does not on Linux, and
+    // `RunState.scan` joins the same two parts with `path.join`. Concatenating
+    // them here reported `/tmpsmithers-gateway` on Linux, so the two halves of
+    // one detection disagreed about the path the operator is told to look at.
+    const under = (directory: string | undefined, child: string): string | undefined => {
+      const trimmed = directory?.replace(/\/+$/, "")
+      return trimmed === undefined || trimmed === "" ? undefined : `${trimmed}/${child}`
+    }
     const globalState = [
       environment["SMITHERS_HOME"],
-      environment["HOME"] === undefined ? undefined : `${environment["HOME"]}/.smithers`,
-      environment["TMPDIR"] === undefined ? undefined : `${environment["TMPDIR"]}smithers-gateway`
+      under(environment["HOME"], ".smithers"),
+      under(environment["TMPDIR"], "smithers-gateway")
     ].flatMap((entry) => (entry === undefined ? [] : [entry]))
 
     return {
@@ -1422,7 +1442,7 @@ export const scan = (
  * its `version:` line.
  *
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const resolvedEffectVersions = (lock: string): ReadonlyArray<string> => {
   const found = new Set<string>()

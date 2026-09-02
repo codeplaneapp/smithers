@@ -13,7 +13,7 @@
  * process twelve kilobytes per stream, and a command that never stops
  * printing is stopped by its timeout rather than by the heap.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
@@ -34,7 +34,7 @@ import { type ChildProcessHandle, ChildProcessSpawner } from "effect/unstable/pr
  * earlier bytes were dropped when any were.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Result {
   readonly stdout: string
@@ -47,7 +47,7 @@ export interface Result {
  * Options for {@link run}.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Options {
   readonly cwd?: string | undefined
@@ -62,7 +62,7 @@ export interface Options {
  * timeout cut it off.
  *
  * @category errors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export class ExecFailure {
   readonly _tag = "ExecFailure"
@@ -78,7 +78,7 @@ export class ExecFailure {
  * The number of bytes of a command's output the report keeps at each end.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const tailBytes = 12 * 1024
 
@@ -206,7 +206,7 @@ const spawn = (
  * than leaking it.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const run = (
   command: string,
@@ -222,7 +222,7 @@ export const run = (
  * pass.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const tail = (text: string, limit: number = tailBytes): string => {
   const marked = omittedMarker.exec(text)

@@ -11,7 +11,7 @@
  * composition the template literal cannot express, and the agent decides what
  * it becomes.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import type { Detection } from "./Detect.ts"
 import * as Detect from "./Detect.ts"
@@ -21,7 +21,7 @@ import * as Sort from "./internal/Sort.ts"
  * One converted prompt.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface PromptHint {
   readonly file: string
@@ -36,7 +36,7 @@ export interface PromptHint {
  * Classifies one prompt body.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const classify = (text: string): PromptHint["classification"] => Detect.classifyPrompt(text).classification
 
@@ -50,7 +50,7 @@ const escape = (text: string): string => text.replace(/\\/g, "\\\\").replace(/`/
  * escaped so the prompt still reads as the author wrote it.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const print = (text: string, payloadName = "payload"): string => {
   let result = ""
@@ -78,7 +78,7 @@ export const print = (text: string, payloadName = "payload"): string => {
  * Every prompt the project holds, converted where it can be.
  *
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const hints = (detection: Detection): ReadonlyArray<PromptHint> =>
   detection.prompts

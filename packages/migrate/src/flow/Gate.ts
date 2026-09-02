@@ -18,7 +18,7 @@
  * Both refusals exit 3 rather than 1: the project is intact, and there is a
  * decision to make rather than a failure to fix.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Effect from "effect/Effect"
 import * as Sort from "../internal/Sort.ts"
@@ -30,7 +30,7 @@ import type * as Scan from "../Scan.ts"
  * What the operator allowed on this run.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Options {
   readonly mode: Report.Mode
@@ -43,7 +43,7 @@ export interface Options {
  * The unsafe constructs a scan found, deduplicated and sorted.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const unsafeConstructs = (scan: Scan.ScanResult): ReadonlyArray<string> =>
   [...new Set(scan.units.flatMap((unit) => unit.unsafe))].sort(Sort.byText)
@@ -52,7 +52,7 @@ export const unsafeConstructs = (scan: Scan.ScanResult): ReadonlyArray<string> =
  * The unsafe constructs the operator has not waived.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const unwaived = (
   scan: Scan.ScanResult,
@@ -67,7 +67,7 @@ export const unwaived = (
  * Whether the project's run state stands in the way.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const runStateBlocks = (
   scan: Scan.ScanResult,
@@ -81,7 +81,7 @@ export const runStateBlocks = (
  * report renders them.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const instructions = (scan: Scan.ScanResult): ReadonlyArray<string> => scan.runState.instructions
 
@@ -96,7 +96,7 @@ export const instructions = (scan: Scan.ScanResult): ReadonlyArray<string> => sc
  * smaller root.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const incompleteScan = (
   warnings: ReadonlyArray<{ readonly code: string; readonly file: string; readonly message: string }>
@@ -114,6 +114,29 @@ export const incompleteScan = (
   )
 }
 
+// The two refusals an operator reads, built once. `evaluate` and
+// `evaluateReport` reach the same two gates from a `ScanResult` and from the
+// report derived from it, and the prose is the thing an operator acts on, so a
+// sentence fixed in one spelling and not the other would be a silent
+// divergence neither suite could see.
+const runStateRefusal = (verdict: string, instructions: ReadonlyArray<string>): MigrateError =>
+  make(
+    "run-state-blocked",
+    `This project still holds Smithers 0.x run state (${verdict}). Finish, archive, or discard it, then rerun with --acknowledge-run-state.`,
+    instructions.join("\n")
+  )
+
+const unsafeRefusal = (blocked: ReadonlyArray<string>): MigrateError =>
+  make(
+    "unsafe-blocked",
+    `${blocked.length} construct${blocked.length === 1 ? " has" : "s have"} no safe translation: ${
+      blocked.join(", ")
+    }. Rerun with --allow-unsafe ${
+      blocked.join(",")
+    } to accept a TODO marker and a report entry for each, or --allow-unsafe all.`,
+    blocked.join("\n")
+  )
+
 /**
  * Decides whether this run may edit the project.
  *
@@ -121,7 +144,7 @@ export const incompleteScan = (
  * gate applies to them. Only `apply` is gated.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const evaluate = (
   scan: Scan.ScanResult,
@@ -131,25 +154,10 @@ export const evaluate = (
   const incomplete = incompleteScan(scan.detection.warnings)
   if (incomplete !== undefined) return Effect.fail(incomplete)
   if (runStateBlocks(scan, options.acknowledgeRunState)) {
-    const lines = instructions(scan)
-    return Effect.fail(make(
-      "run-state-blocked",
-      `This project still holds Smithers 0.x run state (${scan.runState.verdict}). Finish, archive, or discard it, then rerun with --acknowledge-run-state.`,
-      lines.join("\n")
-    ))
+    return Effect.fail(runStateRefusal(scan.runState.verdict, instructions(scan)))
   }
   const blocked = unwaived(scan, options.allowUnsafe)
-  if (blocked.length > 0) {
-    return Effect.fail(make(
-      "unsafe-blocked",
-      `${blocked.length} construct${blocked.length === 1 ? " has" : "s have"} no safe translation: ${
-        blocked.join(", ")
-      }. Rerun with --allow-unsafe ${
-        blocked.join(",")
-      } to accept a TODO marker and a report entry for each, or --allow-unsafe all.`,
-      blocked.join("\n")
-    ))
-  }
+  if (blocked.length > 0) return Effect.fail(unsafeRefusal(blocked))
   return Effect.void
 }
 
@@ -161,7 +169,7 @@ export const evaluate = (
  * report its own scan step recorded, not a `ScanResult` nobody serialized.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const unsafeInReport = (report: Report.MigrationReport): ReadonlyArray<string> =>
   [...new Set(report.units.flatMap((unit) => unit.unsupported.map((entry) => entry.construct)))].sort(Sort.byText)
@@ -170,7 +178,7 @@ export const unsafeInReport = (report: Report.MigrationReport): ReadonlyArray<st
  * The unsafe constructs in a report the operator has not waived.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const unwaivedInReport = (
   report: Report.MigrationReport,
@@ -188,7 +196,7 @@ export const unwaivedInReport = (
  * Same two gates as {@link evaluate}, same two codes, same exit 3.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const evaluateReport = (
   report: Report.MigrationReport,
@@ -201,23 +209,9 @@ export const evaluateReport = (
     options.acknowledgeRunState !== true &&
     (report.runState.verdict === "blocked" || report.runState.verdict === "history-only")
   ) {
-    return Effect.fail(make(
-      "run-state-blocked",
-      `This project still holds Smithers 0.x run state (${report.runState.verdict}). Finish, archive, or discard it, then rerun with --acknowledge-run-state.`,
-      report.runState.instructions.join("\n")
-    ))
+    return Effect.fail(runStateRefusal(report.runState.verdict, report.runState.instructions))
   }
   const blocked = unwaivedInReport(report, options.allowUnsafe)
-  if (blocked.length > 0) {
-    return Effect.fail(make(
-      "unsafe-blocked",
-      `${blocked.length} construct${blocked.length === 1 ? " has" : "s have"} no safe translation: ${
-        blocked.join(", ")
-      }. Rerun with --allow-unsafe ${
-        blocked.join(",")
-      } to accept a TODO marker and a report entry for each, or --allow-unsafe all.`,
-      blocked.join("\n")
-    ))
-  }
+  if (blocked.length > 0) return Effect.fail(unsafeRefusal(blocked))
   return Effect.void
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { readdirSync, statSync } from "node:fs"
+import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import * as Inventory from "../src/Inventory.ts"
 import * as Report from "../src/Report.ts"
@@ -167,6 +167,53 @@ describe("Scan.scan over persisted-db", () => {
       expect(statSync(join(root, ".smithers", "executions")).isDirectory()).toBe(true)
       expect(readdirSync(join(root, ".smithers", "executions"))).toEqual(["run-1783757199651"])
     }))
+})
+
+describe("Scan.scan refuses a selection it cannot honour", () => {
+  it.effect("names the unknown id and the ids the project does plan, rather than planning nothing and exiting 0", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+
+      const failure = yield* Effect.flip(Scan.scan(root, { units: ["workflow:helo", "dependencies"] }))
+
+      expect(failure.code).toBe("unsupported-project")
+      expect(failure.message).toContain("\"workflow:helo\"")
+      // The ids it does plan, so the operator can read the typo off the
+      // refusal instead of guessing at the spelling.
+      expect(failure.message).toContain("\"workflow:simple-workflow\"")
+      expect(failure.message).toContain("\"dependencies\"")
+    }).pipe(Effect.provide(nodeLayer)))
+
+  it.effect("selects the units it was given when every id is one the plan carries", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+
+      const result = yield* Scan.scan(root, { units: ["dependencies"] })
+
+      expect(result.units.map((unit) => unit.id)).toEqual(["dependencies"])
+    }).pipe(Effect.provide(nodeLayer)))
+
+  it.effect("refuses two workflows whose ids collide, naming both sources", () =>
+    Effect.gen(function*() {
+      // A pack workflow and a root workflow with the same base name. Both plan
+      // as `workflow:simple-workflow` and both target
+      // `flows/simple-workflow/flow.ts`, so the second unit's rewrite would
+      // overwrite the first one's flow and the report would carry one of the
+      // two outcomes.
+      const root = copyFixture("jsx-single")
+      mkdirSync(join(root, ".smithers", "workflows"), { recursive: true })
+      writeFileSync(
+        join(root, ".smithers", "workflows", "simple-workflow.tsx"),
+        "import { Sequence } from \"smthrs\"\nexport default () => <Sequence />\n"
+      )
+
+      const failure = yield* Effect.flip(Scan.scan(root))
+
+      expect(failure.code).toBe("unsupported-project")
+      expect(failure.message).toContain("workflow:simple-workflow")
+      expect(failure.message).toContain("simple-workflow.jsx")
+      expect(failure.message).toContain(".smithers/workflows/simple-workflow.tsx")
+    }).pipe(Effect.provide(nodeLayer)))
 })
 
 describe("Scan.decisions merges every occurrence of a construct", () => {

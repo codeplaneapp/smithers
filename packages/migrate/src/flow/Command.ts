@@ -7,7 +7,7 @@
  * the plan-time unit list, the composition the execution runs under, and the
  * two renderings a person or a script reads afterwards.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import type * as Agent from "@smthrs/agent/Agent"
 import type * as AgentAction from "@smthrs/agent/AgentAction"
@@ -38,7 +38,7 @@ import type * as Transform from "./Transform.ts"
  * What one migration run was asked to do. The CLI decodes its flags into this.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const MigrateOptions = Options.MigrateOptions
 
@@ -46,7 +46,7 @@ export const MigrateOptions = Options.MigrateOptions
  * What one migration run was asked to do.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type MigrateOptions = Options.MigrateOptions
 
@@ -55,7 +55,7 @@ export type MigrateOptions = Options.MigrateOptions
  * `approve`, and `run` reach the same execution the CLI verb does.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const flowId = "system/migrate"
 
@@ -63,7 +63,7 @@ export const flowId = "system/migrate"
  * Everything {@link run} needs provided.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Requirements =
   | FileSystem.FileSystem
@@ -84,7 +84,7 @@ export type Requirements =
  * the host binds.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Survey {
   readonly scan: Scan.ScanResult
@@ -104,7 +104,7 @@ export interface Survey {
  * project has since outgrown.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const survey = (
   options: MigrateOptions
@@ -128,7 +128,7 @@ export const survey = (
  * The verification commands this project verifies a unit with.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const commandsOf = (
   result: Scan.ScanResult,
@@ -151,7 +151,7 @@ export const commandsOf = (
  * tag would otherwise be printed as an operator instruction.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const isMigrateError = (error: unknown): error is MigrateError =>
   error instanceof MigrateError && Schema.is(MigrateErrorCode)(error.code) && typeof error.message === "string"
@@ -163,7 +163,7 @@ export const isMigrateError = (error: unknown): error is MigrateError =>
  * crash-recovery path for that composition.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const executionId = (options: MigrateOptions, generatedAt: string): string =>
   `migrate-${options.mode}-${generatedAt}`
@@ -172,7 +172,7 @@ export const executionId = (options: MigrateOptions, generatedAt: string): strin
  * Runs one migration and returns its report.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const run = (
   options: MigrateOptions
@@ -187,7 +187,7 @@ export const run = (
  * step is what refuses it if the project has moved on since.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const launch = (
   options: MigrateOptions,
@@ -218,7 +218,7 @@ export const launch = (
  * with the scanner's own error.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layerNode = (config: {
   readonly root: string
@@ -247,7 +247,7 @@ export const layerNode = (config: {
  * execute the same flow under the same journal as everything else.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const registration: typeof MigrateFlow.layer = MigrateFlow.layer
 
@@ -256,7 +256,7 @@ export const registration: typeof MigrateFlow.layer = MigrateFlow.layer
  * is intact and the operator has a decision to make.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const exitCode = (report: Report.MigrationReport): 0 | 1 | 3 => report.exitCode
 
@@ -269,7 +269,7 @@ const count = (label: string, total: number): string => `${total} ${label}${tota
  * and the last line says where it is.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const render = (
   report: Report.MigrationReport,
@@ -315,7 +315,7 @@ export const render = (
  * The directory this run wrote its report into.
  *
  * @category accessors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const reportDirectory = (options: MigrateOptions): string => `${options.root}/${Options.reportDir(options)}`
 
@@ -324,7 +324,7 @@ export const reportDirectory = (options: MigrateOptions): string => `${options.r
  * and returns the report and the rendering the caller asked for.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const runNode = (
   options: MigrateOptions,
@@ -360,7 +360,7 @@ export const runNode = (
  * What the `smithers-migrate` bin and the `smithers migrate` verb parse into.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Flags {
   readonly root: string | undefined
@@ -407,7 +407,7 @@ const list = (value: string | undefined): ReadonlyArray<string> | undefined =>
  * `HOME`, `TMPDIR`); nothing else in it reaches the payload.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const optionsOf = (
   flags: Flags,

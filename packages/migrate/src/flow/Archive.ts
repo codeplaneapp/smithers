@@ -23,7 +23,7 @@
  * rewrite manifests too — and {@link module:MigrateFlow.postconditions} is what
  * checks the result.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { Action } from "@smthrs/flow"
 import * as Effect from "effect/Effect"
@@ -32,6 +32,7 @@ import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import * as Detect from "../Detect.ts"
 import * as Fs from "../internal/Fs.ts"
+import * as Jsonc from "../internal/Jsonc.ts"
 import * as Versions from "../internal/Versions.ts"
 import { io, make, MigrateError } from "../MigrateError.ts"
 import * as Report from "../Report.ts"
@@ -41,7 +42,7 @@ import * as Units from "../Units.ts"
  * The Effect version every migrated project ends on. One pin, repository wide.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const effectVersion = Versions.effectVersion
 
@@ -49,7 +50,7 @@ export const effectVersion = Versions.effectVersion
  * The version every `@smthrs/*` package a migrated project depends on ends on.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const smithersVersion = Versions.smithersVersion
 
@@ -61,7 +62,7 @@ export const smithersVersion = Versions.smithersVersion
  * guessed here.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ManifestRewrite {
   readonly remove: ReadonlyArray<string>
@@ -76,7 +77,7 @@ export interface ManifestRewrite {
  * still pins a package the migrated project no longer declares.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const dependencyFields = [
   "dependencies",
@@ -91,13 +92,22 @@ const sorted = (record: Record<string, string>): Record<string, string> =>
   Object.fromEntries(Object.entries(record).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)))
 
 /**
- * The version a package name is pinned to in a migrated project.
+ * The version a package name is pinned to in a migrated project, or
+ * `undefined` when this package has no pin for it.
+ *
+ * A name with no pin is refused rather than written as `"*"`. A floating
+ * specifier is never a correct pin, and for the `effect` family it is at odds
+ * with the release contract's single-version invariant.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const pinFor = (name: string): string =>
-  name === "effect" ? effectVersion : name.startsWith("@smthrs/") ? smithersVersion : "*"
+export const pinFor = (name: string): string | undefined =>
+  name === "effect" || name.startsWith("@effect/")
+    ? effectVersion
+    : name.startsWith("@smthrs/")
+    ? smithersVersion
+    : undefined
 
 const oldCliPattern =
   /(?:^|\s)(?:(?:bunx|npx|pnpm\s+dlx|pnpm\s+exec)\s+(?:smthrs|smithers-orchestrator)|smithers)\s+(up|workflow\s+run)\s+(\S+)/
@@ -109,7 +119,7 @@ const otherVerb =
  * What one script line became, and why.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ScriptRewrite {
   readonly name: string
@@ -128,7 +138,7 @@ export interface ScriptRewrite {
  * loudly.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const rewriteScripts = (
   scripts: Readonly<Record<string, string>>
@@ -158,7 +168,7 @@ export const rewriteScripts = (
  * produce the same bytes.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const rewriteManifest = (
   text: string,
@@ -177,8 +187,17 @@ export const rewriteManifest = (
   }
   if (rewrite.add.length > 0) {
     const dependencies = { ...(manifest.dependencies as Record<string, string> | undefined) }
-    for (const name of rewrite.add) dependencies[name] = pinFor(name)
-    manifest.dependencies = sorted(dependencies)
+    // A name this package has no pin for is not added. Writing `"*"` would put
+    // a floating specifier in a project manifest the migration claims to have
+    // pinned.
+    let added = false
+    for (const name of rewrite.add) {
+      const pin = pinFor(name)
+      if (pin === undefined) continue
+      dependencies[name] = pin
+      added = true
+    }
+    if (added) manifest.dependencies = sorted(dependencies)
   }
   const scripts = typeof manifest.scripts === "object" && manifest.scripts !== null
     ? rewriteScripts(manifest.scripts as Record<string, string>)
@@ -199,49 +218,15 @@ export const rewriteManifest = (
  * like a comment and is not: `"include": ["**\/*.ts", "**\/*.tsx"]` carries two
  * `/*` sequences and one `*\/` between them, so a regular expression that
  * treats them as a block comment deletes the middle of the include list and
- * leaves valid JSON that names the wrong files. This tracks whether it is
- * inside a string, and a comment is only a comment outside one.
+ * leaves valid JSON that names the wrong files. Trailing commas go the same
+ * way. The scanner lives in `internal/Jsonc.ts` so the detector, this module,
+ * and the postconditions all read a tsconfig the same way; `Detect` cannot
+ * import this module, because this module imports `Detect`.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const withoutComments = (text: string): string => {
-  let out = ""
-  let index = 0
-  let inString = false
-  while (index < text.length) {
-    const character = text[index]!
-    if (inString) {
-      out += character
-      if (character === "\\" && index + 1 < text.length) {
-        out += text[index + 1]!
-        index += 2
-        continue
-      }
-      if (character === "\"") inString = false
-      index += 1
-      continue
-    }
-    if (character === "\"") {
-      inString = true
-      out += character
-      index += 1
-      continue
-    }
-    if (character === "/" && text[index + 1] === "/") {
-      while (index < text.length && text[index] !== "\n") index += 1
-      continue
-    }
-    if (character === "/" && text[index + 1] === "*") {
-      const end = text.indexOf("*/", index + 2)
-      index = end < 0 ? text.length : end + 2
-      continue
-    }
-    out += character
-    index += 1
-  }
-  return out
-}
+export const withoutComments = Jsonc.withoutComments
 
 const stripComments = withoutComments
 
@@ -263,7 +248,7 @@ const stripComments = withoutComments
  * both.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const isOldPathsKey = (key: string, specifiers: Detect.SpecifierContext = {}): boolean =>
   Detect.isOldSpecifier(key.replace(/\*+$/, ""), specifiers)
@@ -280,7 +265,7 @@ export const isOldPathsKey = (key: string, specifiers: Detect.SpecifierContext =
  * manifest declares it and an ordinary name everywhere else.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const rewriteTsconfig = (text: string, specifiers: Detect.SpecifierContext = {}): string => {
   const config = JSON.parse(stripComments(text)) as Record<string, unknown>
@@ -305,7 +290,7 @@ export const rewriteTsconfig = (text: string, specifiers: Detect.SpecifierContex
  * Adds the 1.0 runtime state directory to a `.gitignore`, once.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const rewriteGitignore = (text: string, flowsState = ".flows/"): string => {
   const lines = text.split("\n")
@@ -322,7 +307,7 @@ export const rewriteGitignore = (text: string, flowsState = ".flows/"): string =
  * replaced by what the migration wrote, and is archived.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const isRewritable = (file: string): boolean => {
   const name = file.split("/").pop() ?? file
@@ -333,7 +318,7 @@ export const isRewritable = (file: string): boolean => {
  * One script the migration could not rewrite, and why.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const UnsupportedScript = Schema.Struct({
   script: Schema.String,
@@ -346,7 +331,7 @@ export const UnsupportedScript = Schema.Struct({
  * line it had to leave alone.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Result = Schema.Struct({
   changed: Schema.Array(Report.ChangedFile),
@@ -357,7 +342,7 @@ export const Result = Schema.Struct({
  * What one archive step did.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Result = typeof Result.Type
 
@@ -365,7 +350,7 @@ export type Result = typeof Result.Type
  * The archive step: rewrite what a 1.0 project keeps, move the rest aside.
  *
  * @category actions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const action = Action.make("smithers/migrate-v1/Archive", {
   payload: {
@@ -429,7 +414,7 @@ const oldNames = (manifest: Record<string, unknown>): ReadonlyArray<string> => {
  * when the file is not one this module rewrites.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const rewritten = (
   file: string,
@@ -466,7 +451,7 @@ const under = (file: string, root: string): boolean => file === root || file.sta
  * every source back and takes its archive copy with it.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const run = (payload: {
   readonly root: string
@@ -586,6 +571,6 @@ export const run = (payload: {
  * The archive action's implementation.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layer = action.toLayer(run)

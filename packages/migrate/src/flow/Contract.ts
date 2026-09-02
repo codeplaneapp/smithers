@@ -15,7 +15,7 @@
  * derived, the target paths, the verification commands, and — on a repair
  * round — the failing command output.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Schema from "effect/Schema"
 import * as CommandLine from "../internal/CommandLine.ts"
@@ -31,7 +31,7 @@ import { ArgvCommand, VerificationCommand } from "../Units.ts"
  * without diffing the prose around them.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const prohibitions: ReadonlyArray<string> = [
   "Do not recreate the JSX runtime, React, a reconciler, or a `jsx-runtime` shim.",
@@ -52,7 +52,7 @@ export const prohibitions: ReadonlyArray<string> = [
  * The agent's role, in one paragraph. The first thing it reads.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const role =
   "You upgrade one unit of a Smithers 0.x project to the Smithers 1.0 authoring model. You edit files only through the `write`, `edit`, and `apply_patch` flows, and only inside the project root."
@@ -62,7 +62,7 @@ export const role =
  * reach for, with the module it comes from.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const targetModel = `## The target model
 
@@ -109,7 +109,7 @@ no \`description\` is discovered with a warning and is not runnable.`
  * One verified old-to-new pair, copied from `docs/migration/feature-parity-audit.md`.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Example {
   readonly title: string
@@ -126,7 +126,7 @@ export interface Example {
  * captured-source rule exists to prevent.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const examples: ReadonlyArray<Example> = [
   {
@@ -297,7 +297,7 @@ const longestRun = (text: string, character: string): number => {
  * exactly where this function ends it.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const fenced = (text: string, info = "text"): string => {
   const fence = "`".repeat(Math.max(3, longestRun(text, "`") + 1))
@@ -309,7 +309,7 @@ export const fenced = (text: string, info = "text"): string => {
  * run inside, padded when the text itself starts or ends with one.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const inline = (text: string): string => {
   const ticks = "`".repeat(longestRun(text, "`") + 1)
@@ -325,7 +325,7 @@ const cell = (text: string): string => text.replace(/\|/g, "\\|").replace(/\r?\n
  * props it had, and what class the scanner gave it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const ConstructRow = Schema.Struct({
   file: Schema.String,
@@ -340,7 +340,7 @@ export const ConstructRow = Schema.Struct({
  * One mapping row as the prompt carries it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const MappingRow = Schema.Struct({
   construct: Schema.String,
@@ -359,7 +359,7 @@ export const MappingRow = Schema.Struct({
  * by being given the file.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const SourceFile = Schema.Struct({
   path: Schema.String,
@@ -371,7 +371,7 @@ export const SourceFile = Schema.Struct({
  * `effect/Schema` equivalent, or an MDX prompt with its template literal.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Hint = Schema.Struct({
   kind: Schema.Literals(["zod", "prompt"]),
@@ -394,7 +394,7 @@ export { ArgvCommand, VerificationCommand }
  * spawn describe the same execution.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const commandLine = (command: VerificationCommand): string =>
   typeof command === "string" ? command : CommandLine.renderArgv(command.executable, command.args)
@@ -403,7 +403,7 @@ export const commandLine = (command: VerificationCommand): string =>
  * The commands that decide whether a migrated unit is real.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Commands = Schema.Struct({
   install: Schema.optional(VerificationCommand),
@@ -417,7 +417,7 @@ export const Commands = Schema.Struct({
  * The commands that decide whether a migrated unit is real.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Commands = typeof Commands.Type
 
@@ -430,7 +430,7 @@ export type Commands = typeof Commands.Type
  * first attempt was given.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const UnitBrief = Schema.Struct({
   id: Schema.String,
@@ -469,7 +469,7 @@ export const UnitBrief = Schema.Struct({
  * Everything one unit hands the agent.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type UnitBrief = typeof UnitBrief.Type
 
@@ -478,7 +478,7 @@ export type UnitBrief = typeof UnitBrief.Type
  * the target model, the worked pairs, and how to fill the result.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const text: string = [
   "# Migrating one unit of a Smithers 0.x project",
@@ -524,7 +524,7 @@ export const text: string = [
  * A failing verification round, as the repair prompt carries it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Failures {
   readonly round: number
@@ -551,7 +551,7 @@ const commandBlock = (label: string, result: Report.CommandResult | undefined): 
  * Renders the failing half of a verification round.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const failureReport = (failures: Failures): string => {
   const result = failures.verification
@@ -578,7 +578,7 @@ export const failureReport = (failures: Failures): string => {
  * the agent is being shown the translation, not asked to recall it.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const unitPrompt = (unit: UnitBrief, failures?: Failures): string => {
   const parts: Array<string> = [

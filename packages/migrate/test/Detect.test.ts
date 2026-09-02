@@ -28,6 +28,17 @@ describe("Detect.classifyPackage", () => {
     expect(Detect.classifyPackage("smithers", "file:../../../../smithers")).toBe("old-name")
     expect(Detect.classifyPackage("smithers", "link:../smithers")).toBe("old-name")
     expect(Detect.classifyPackage("smithers", "workspace:*")).toBe("old-name")
+    // A scoped 1.0 package pinned by a 1.0 monorepo's own protocol is not old;
+    // a checkout link on this machine is.
+    expect(Detect.classifyPackage("@smthrs/flow", "workspace:*")).toBeUndefined()
+    expect(Detect.classifyPackage("@smthrs/flow", "catalog:")).toBeUndefined()
+    expect(Detect.classifyPackage("@smthrs/flow", "*")).toBeUndefined()
+    expect(Detect.classifyPackage("@smthrs/flow", "latest")).toBeUndefined()
+    expect(Detect.classifyPackage("@smthrs/flow", "npm:@smthrs/flow@1.0.0-rc.0")).toBeUndefined()
+    expect(Detect.classifyPackage("@smthrs/flow", "file:../smithers/packages/flow")).toBe("old-version")
+    expect(Detect.classifyPackage("@smthrs/flow", "link:../smithers/packages/flow")).toBe("old-version")
+    expect(Detect.classifyPackage("@smthrs/components", "file:../smithers/packages/components")).toBe("deleted-package")
+    expect(Detect.classifyPackage("@smthrs/flow", "0.35.0")).toBe("old-version")
     expect(Detect.classifyPackage("smithers", "0.35.0")).toBe("old-version")
     expect(Detect.classifyPackage("smithers", "^2.1.0")).toBeUndefined()
     expect(Detect.classifyPackage("smithers", "latest")).toBeUndefined()
@@ -71,6 +82,62 @@ describe("Detect.scan over jsx-single", () => {
       const tsconfig = detection.tsconfigs.find((entry) => entry.path === "tsconfig.json")
       expect(tsconfig?.jsx).toBe("react-jsx")
       expect(tsconfig?.jsxImportSource).toBe("smthrs")
+    }))
+
+  it.effect("reads a tsconfig whose own text looks like a comment, path mappings and include alike", () =>
+    Effect.gen(function*() {
+      // The shape this tool exists to find, and the shape a regular expression
+      // could not read: a `smthrs/*` path mapping beside a `**\/*` include,
+      // which carries two `/*` sequences and a `*\/` between them. Stripping
+      // comments by pattern deleted the middle of the include list, and with a
+      // path mapping in front of it the file stopped parsing at all, so the
+      // tsconfig never entered the detection: no unit owned it, no rewrite
+      // reached it, and no typecheck ran over it.
+      const root = copyFixture("jsx-single")
+      writeFileSync(
+        join(root, "tsconfig.json"),
+        [
+          "{",
+          "  // the compiler options this project builds with",
+          "  \"compilerOptions\": {",
+          "    \"jsx\": \"react-jsx\",",
+          "    \"jsxImportSource\": \"smthrs\", /* the 0.x runtime */",
+          "    \"types\": [\"node\"],",
+          "    \"paths\": {",
+          "      \"smthrs/*\": [\"./node_modules/smthrs/*\"],",
+          "      \"@/*\": [\"./src/*\"],",
+          "    }",
+          "  },",
+          "  \"include\": [\"**/*.ts\", \"**/*.tsx\", \"**/*.jsx\", \"**/*.js\"]",
+          "}",
+          ""
+        ].join("\n")
+      )
+
+      const detection = yield* detect(root)
+      const tsconfig = detection.tsconfigs.find((entry) => entry.path === "tsconfig.json")
+
+      // Only the 0.x mappings: the project's own `@/*` alias is not the
+      // migration's business, and the finding exists to name what has to go.
+      expect(tsconfig?.paths).toEqual(["smthrs/*"])
+      expect(tsconfig?.include).toEqual(["**/*.ts", "**/*.tsx", "**/*.jsx", "**/*.js"])
+      expect(tsconfig?.types).toEqual(["node"])
+      expect(tsconfig?.jsx).toBe("react-jsx")
+      expect(tsconfig?.jsxImportSource).toBe("smthrs")
+      expect(detection.warnings.some((warning) => warning.code === "unparsable-tsconfig")).toBe(false)
+    }))
+
+  it.effect("names the global state paths with one separator whatever the environment spelled", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      // macOS ends TMPDIR with a slash and Linux does not; the two halves of a
+      // detection have to agree on the path the operator is told about.
+      const trailing = yield* detect(root, { environment: { HOME: "/home/op/", TMPDIR: "/tmp/t/" } })
+      const bare = yield* detect(root, { environment: { HOME: "/home/op", TMPDIR: "/tmp/t" } })
+      expect(trailing.globalState).toEqual(["/home/op/.smithers", "/tmp/t/smithers-gateway"])
+      expect(bare.globalState).toEqual(trailing.globalState)
+      const empty = yield* detect(root, { environment: { HOME: "", TMPDIR: "/" } })
+      expect(empty.globalState).toEqual([])
     }))
 
   it.effect("judges every effect declaration against the exact release pin, manifests and lockfiles alike", () =>

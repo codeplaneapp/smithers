@@ -220,6 +220,22 @@ describe("Units.plan over plue-pack", () => {
       expect(result.units[0]!.notes).toEqual([])
     }))
 
+  it.effect("derives the formatter in check mode, so a verification never rewrites the repository", () =>
+    Effect.gen(function*() {
+      const dprint = copyFixture("jsx-single")
+      writeFileSync(join(dprint, "dprint.json"), "{}\n")
+      expect((yield* scan(dprint)).units[0]!.verification.format).toEqual(Units.argv("dprint", "check"))
+
+      const prettier = copyFixture("jsx-single")
+      writeFileSync(join(prettier, ".prettierrc"), "{}\n")
+      expect((yield* scan(prettier)).units[0]!.verification.format).toEqual(Units.argv("prettier", "--check", "."))
+
+      // The operator's own line is the operator's, shell semantics and all.
+      const overridden = yield* scan(dprint, { commands: { format: "dprint fmt" } })
+      expect(overridden.units[0]!.verification.format).toBe("dprint fmt")
+      expect((yield* scan(copyFixture("jsx-single"))).units[0]!.verification.format).toBeUndefined()
+    }))
+
   it.effect("refuses to run a smithers.config.ts test line that needs a shell, and says what ran instead", () =>
     Effect.gen(function*() {
       // Repository text gets no shell. A configured line that only means

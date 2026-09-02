@@ -6,7 +6,7 @@
  * depth, is what makes a digest over a value a digest over its meaning.
  * Arrays keep their order, because an array's order is part of its meaning.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 
@@ -30,7 +30,7 @@ const sorted = (value: unknown): unknown => {
  * Renders a JSON value with every object's keys sorted, at every depth.
  * `undefined` properties are omitted, as `JSON.stringify` omits them.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const stringify = (value: unknown): string => JSON.stringify(sorted(value))

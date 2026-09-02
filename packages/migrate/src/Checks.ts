@@ -8,7 +8,7 @@
  * touch run state. A prompt is a request; these checks are the enforcement, and
  * a failed check fails the round exactly as a failed test does.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -25,7 +25,7 @@ import type { UnitPlan } from "./Units.ts"
  * One check's verdict.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface CheckResult {
   readonly name: string
@@ -38,7 +38,7 @@ export interface CheckResult {
  * allowed to change, and a digest of every run-state path it was not.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface CheckpointFiles {
   /** Project-relative path to file text at the checkpoint. */
@@ -251,7 +251,7 @@ const describesTheFlowItDeclares = (
  * the construct. This is what the checks compare against.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ReportedEntry {
   readonly construct: string
@@ -262,7 +262,7 @@ export interface ReportedEntry {
  * The marker the migration leaves where a construct has no translation.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const marker = "TODO(migrate-smithers-v1)"
 
@@ -323,7 +323,7 @@ const digest = (bytes: Uint8Array): string => createHash("sha256").update(bytes)
  * an operator chose is allowed; a seat nobody chose and no source named is not.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const run = (
   root: string,
@@ -505,7 +505,7 @@ export const run = (
  * final verification have run their own commands.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const runState = (
   root: string,
@@ -563,7 +563,7 @@ export const runState = (
  * Effect, the platform layer, and TypeScript, and nothing from the 1.0 runtime.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const discovery = (
   root: string,
@@ -602,6 +602,6 @@ export const discovery = (
  * Reports whether every check passed.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const ok = (results: ReadonlyArray<CheckResult>): boolean => results.every((result) => result.ok)

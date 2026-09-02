@@ -19,7 +19,7 @@ import * as Scan from "@smthrs/migrate/Scan"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import { TestClock } from "effect/testing"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { copyFixture, fixture, hashTree } from "../fixtures/helpers.ts"
 
@@ -131,6 +131,35 @@ describe("MigrateFlow.postconditions", () => {
       writeFileSync(join(root, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`)
       const projectAfter = yield* MigrateFlow.postconditions(root, project)
       expect(projectAfter.find((check) => check.name === "no manifest declares a 0.x package")?.ok).toBe(true)
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("refuses a unit that deleted the files its checks read, rather than passing on their absence", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      const dependencies = yield* outlineOf(root, options(root), "dependencies")
+      const project = yield* outlineOf(root, options(root), "project")
+      // A manifest, a tsconfig, and the ignore file, all gone. The checks
+      // that read them used to skip a missing file and pass.
+      rmSync(join(root, "package.json"))
+      rmSync(join(root, "tsconfig.json"))
+      rmSync(join(root, ".gitignore"), { force: true })
+
+      const byName = (
+        checks: ReadonlyArray<{ name: string; ok: boolean; findings: ReadonlyArray<{ message: string }> }>
+      ) => new Map(checks.map((check) => [check.name, check] as const))
+      const dependenciesChecks = byName(yield* MigrateFlow.postconditions(root, dependencies))
+      expect(dependenciesChecks.get("every manifest the unit owns still exists")?.ok).toBe(false)
+      expect(dependenciesChecks.get("every manifest the unit owns still exists")?.findings[0]?.message)
+        .toContain("manifest was deleted")
+
+      const projectChecks = byName(yield* MigrateFlow.postconditions(root, project))
+      expect(projectChecks.get("every manifest the unit owns still exists")?.ok).toBe(false)
+      expect(
+        projectChecks.get("no tsconfig configures the 0.x JSX runtime")?.findings.map((finding) => finding.message)
+      )
+        .toEqual(["the TypeScript configuration was deleted; a unit may rewrite it and may never remove it"])
+      expect(projectChecks.get("the ignore file covers the 1.0 runtime state")?.findings[0]?.message)
+        .toContain("there is no .gitignore")
     }).pipe(Effect.provide(platform)))
 
   it.effect("refuses a tsconfig that still configures the JSX runtime, and an ignore file without `.flows/`", () =>

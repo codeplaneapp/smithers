@@ -8,14 +8,14 @@
  * turns each row into a catalog entry, and a name that is missing here is a
  * name the scanner drops on the floor.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 
 /**
  * One value export of the old facade.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface FacadeExport {
   /** The identifier application code imports. */
@@ -30,7 +30,7 @@ export interface FacadeExport {
  * The generated export list, sorted by subpath then name.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const facadeExports: ReadonlyArray<FacadeExport> = [
   { name: "AmpAgent", subpath: "", module: "@smthrs/agents" },
@@ -1205,7 +1205,7 @@ export const facadeExports: ReadonlyArray<FacadeExport> = [
  * the old component accepted.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const componentProps: Readonly<Record<string, ReadonlyArray<string>>> = {
   "Approval": [

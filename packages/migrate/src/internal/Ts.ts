@@ -7,7 +7,7 @@
  * removed, and its `node_modules` may be absent. The syntax tree is all the
  * scanners need, and it is available whatever state the project is in.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 import ts from "typescript"
@@ -15,7 +15,7 @@ import ts from "typescript"
 /**
  * One import in a file, with the local name each binding is written as.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export interface ImportRecord {
@@ -34,7 +34,7 @@ export interface ImportRecord {
  * Chooses the script kind from the file extension so JSX parses as JSX and a
  * `.ts` file's angle brackets stay type assertions.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const scriptKind = (file: string): ts.ScriptKind => {
@@ -49,7 +49,7 @@ export const scriptKind = (file: string): ts.ScriptKind => {
  * Parses one file. `.js` parses as JS with JSX enabled, because a 0.x example
  * such as `examples/simple-workflow.jsx` is JavaScript carrying JSX.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const parse = (file: string, text: string): ts.SourceFile =>
@@ -64,7 +64,7 @@ export const parse = (file: string, text: string): ts.SourceFile =>
 /**
  * The 1-based line and column of a node.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const positionOf = (
@@ -78,7 +78,7 @@ export const positionOf = (
 /**
  * Visits every node depth first.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const forEachNode = (node: ts.Node, visit: (node: ts.Node) => void): void => {
@@ -90,7 +90,7 @@ export const forEachNode = (node: ts.Node, visit: (node: ts.Node) => void): void
  * Reads every import in a file, including `export ... from` re-exports, which
  * bind an old specifier just as an import does.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const imports = (source: ts.SourceFile): ReadonlyArray<ImportRecord> => {
@@ -150,7 +150,7 @@ export const imports = (source: ts.SourceFile): ReadonlyArray<ImportRecord> => {
 /**
  * The text of a JSX element's tag, `Foo` or `Foo.Bar`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const tagName = (node: ts.JsxOpeningLikeElement): string => node.tagName.getText()
@@ -159,7 +159,7 @@ export const tagName = (node: ts.JsxOpeningLikeElement): string => node.tagName.
  * The names of the attributes on a JSX element, in source order. A spread
  * attribute is recorded as `...`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const attributeNames = (node: ts.JsxOpeningLikeElement): ReadonlyArray<string> =>
@@ -169,7 +169,7 @@ export const attributeNames = (node: ts.JsxOpeningLikeElement): ReadonlyArray<st
  * The source text of one JSX attribute's value, with the braces removed.
  * Returns `undefined` for a bare attribute (`<Task async>`).
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const attributeText = (node: ts.JsxOpeningLikeElement, name: string): string | undefined => {
@@ -189,7 +189,7 @@ export const attributeText = (node: ts.JsxOpeningLikeElement, name: string): str
 /**
  * The names bound by an object destructuring pattern, by their local name.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const destructuredNames = (pattern: ts.ObjectBindingPattern): ReadonlyMap<string, string> => {
@@ -206,7 +206,7 @@ export const destructuredNames = (pattern: ts.ObjectBindingPattern): ReadonlyMap
 /**
  * The callee text of a call expression, `f` or `a.b`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const calleeName = (node: ts.CallExpression): string => node.expression.getText()
@@ -214,7 +214,7 @@ export const calleeName = (node: ts.CallExpression): string => node.expression.g
 /**
  * One module specifier a file names, whatever form it names it in.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export interface SpecifierRecord {
@@ -232,7 +232,7 @@ export interface SpecifierRecord {
  * A check that asks whether a file still reaches an old package has to see all
  * four forms. A regular expression over `from "..."` sees only two of them.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const moduleSpecifiers = (source: ts.SourceFile): ReadonlyArray<SpecifierRecord> => {
@@ -277,7 +277,7 @@ export const moduleSpecifiers = (source: ts.SourceFile): ReadonlyArray<Specifier
  * A rewrite names each step after the id the source gave it. An id the source
  * computes at run time is not a name this tool may print.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const attributeLiteral = (node: ts.JsxOpeningLikeElement, name: string): string | undefined => {

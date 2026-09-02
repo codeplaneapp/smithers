@@ -7,7 +7,7 @@
  * field carries a clock except `generatedAt` — so two runs of the same scan
  * diff cleanly and a reviewer sees only what actually changed.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -23,7 +23,7 @@ import type { RunStateReport } from "./RunState.ts"
  * The mode the tool ran in.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Mode = Schema.Literals(["scan", "plan", "apply"])
 
@@ -31,7 +31,7 @@ export const Mode = Schema.Literals(["scan", "plan", "apply"])
  * The mode the tool ran in.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Mode = typeof Mode.Type
 
@@ -39,13 +39,23 @@ export type Mode = typeof Mode.Type
  * One command the verification step ran.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const CommandResult = Schema.Struct({
   command: Schema.String,
   exitCode: Schema.Number,
   durationMs: Schema.Number,
+  /**
+   * The last 12 KB the command wrote to stdout, exactly as it wrote it.
+   *
+   * Captured verbatim and never redacted: the operator commits this report,
+   * and a failing install or test suite in a 0.x project can print a registry
+   * token, a value read from `.env`, or a CI credential. Nothing here can tell
+   * a secret from a stack frame, so the Markdown says so beside the commands
+   * and the decision stays with the person committing the file.
+   */
   stdoutTail: Schema.String,
+  /** The last 12 KB of stderr, with the same caveat as {@link CommandResult.stdoutTail}. */
   stderrTail: Schema.String,
   skipped: Schema.optional(Schema.String)
 })
@@ -54,7 +64,7 @@ export const CommandResult = Schema.Struct({
  * One command the verification step ran.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type CommandResult = typeof CommandResult.Type
 
@@ -64,7 +74,7 @@ export type CommandResult = typeof CommandResult.Type
  * runs at most once.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const VerificationResult = Schema.Struct({
   install: Schema.optional(CommandResult),
@@ -78,7 +88,7 @@ export const VerificationResult = Schema.Struct({
  * What verification did.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type VerificationResult = typeof VerificationResult.Type
 
@@ -86,7 +96,7 @@ export type VerificationResult = typeof VerificationResult.Type
  * The class the tool assigned a construct, and who decided it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const MappingDecision = Schema.Struct({
   construct: Schema.String,
@@ -103,7 +113,7 @@ export const MappingDecision = Schema.Struct({
  * The class the tool assigned a construct.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type MappingDecision = typeof MappingDecision.Type
 
@@ -111,7 +121,7 @@ export type MappingDecision = typeof MappingDecision.Type
  * One inventory row, as the report carries it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const InventoryRow = Schema.Struct({
   file: Schema.String,
@@ -126,7 +136,7 @@ export const InventoryRow = Schema.Struct({
  * One inventory row.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type InventoryRow = typeof InventoryRow.Type
 
@@ -134,7 +144,7 @@ export type InventoryRow = typeof InventoryRow.Type
  * One file the migration touched.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const ChangedFile = Schema.Struct({
   path: Schema.String,
@@ -146,7 +156,7 @@ export const ChangedFile = Schema.Struct({
  * One file the migration touched.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type ChangedFile = typeof ChangedFile.Type
 
@@ -154,7 +164,7 @@ export type ChangedFile = typeof ChangedFile.Type
  * A choice the migration made that a reader should check.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Decision = Schema.Struct({
   construct: Schema.String,
@@ -168,7 +178,7 @@ export const Decision = Schema.Struct({
  * A choice the migration made.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Decision = typeof Decision.Type
 
@@ -177,7 +187,7 @@ export type Decision = typeof Decision.Type
  * it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const UnresolvedEntry = Schema.Struct({
   construct: Schema.String,
@@ -192,7 +202,7 @@ export const UnresolvedEntry = Schema.Struct({
  * Something the migration left for a person.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type UnresolvedEntry = typeof UnresolvedEntry.Type
 
@@ -200,7 +210,7 @@ export type UnresolvedEntry = typeof UnresolvedEntry.Type
  * A construct with no counterpart, and the closest composition there is.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const UnsupportedEntry = Schema.Struct({
   construct: Schema.String,
@@ -215,7 +225,7 @@ export const UnsupportedEntry = Schema.Struct({
  * A construct with no counterpart.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type UnsupportedEntry = typeof UnsupportedEntry.Type
 
@@ -223,7 +233,7 @@ export type UnsupportedEntry = typeof UnsupportedEntry.Type
  * The checkpoint a unit can be restored to.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Checkpoint = Schema.Struct({
   vcs: Schema.Literals(["jj", "git", "none"]),
@@ -235,7 +245,7 @@ export const Checkpoint = Schema.Struct({
  * The checkpoint a unit can be restored to.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Checkpoint = typeof Checkpoint.Type
 
@@ -243,7 +253,7 @@ export type Checkpoint = typeof Checkpoint.Type
  * One migration unit's outcome.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const UnitReport = Schema.Struct({
   id: Schema.String,
@@ -265,7 +275,7 @@ export const UnitReport = Schema.Struct({
  * One migration unit's outcome.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type UnitReport = typeof UnitReport.Type
 
@@ -274,7 +284,7 @@ export type UnitReport = typeof UnitReport.Type
  * file contents it read to find it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const ProjectDetection = Schema.Struct({
   manifests: Schema.Array(Schema.Struct({
@@ -325,7 +335,7 @@ export const ProjectDetection = Schema.Struct({
  * The project as the report carries it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type ProjectDetection = typeof ProjectDetection.Type
 
@@ -333,7 +343,7 @@ export type ProjectDetection = typeof ProjectDetection.Type
  * One non-terminal run the report names.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const RunStateRun = Schema.Struct({
   runId: Schema.String,
@@ -346,7 +356,7 @@ export const RunStateRun = Schema.Struct({
  * The run state as the report carries it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const RunStateSummary = Schema.Struct({
   verdict: Schema.Literals(["clean", "history-only", "blocked"]),
@@ -369,7 +379,7 @@ export const RunStateSummary = Schema.Struct({
  * The run state as the report carries it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type RunStateSummary = typeof RunStateSummary.Type
 
@@ -377,7 +387,7 @@ export type RunStateSummary = typeof RunStateSummary.Type
  * A manual follow-up the operator owns.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const FollowUp = Schema.Struct({
   severity: Schema.Literals(["must", "should", "info"]),
@@ -389,7 +399,7 @@ export const FollowUp = Schema.Struct({
  * A manual follow-up the operator owns.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type FollowUp = typeof FollowUp.Type
 
@@ -397,7 +407,7 @@ export type FollowUp = typeof FollowUp.Type
  * The whole report.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export class MigrationReport extends Schema.Class<MigrationReport>("@smthrs/migrate/MigrationReport")({
   version: Schema.Literal(1),
@@ -421,7 +431,7 @@ export class MigrationReport extends Schema.Class<MigrationReport>("@smthrs/migr
  * The tool's own name and version, as the report records them.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const tool = { name: "@smthrs/migrate", version: "1.0.0-rc.0" } as const
 
@@ -429,7 +439,7 @@ export const tool = { name: "@smthrs/migrate", version: "1.0.0-rc.0" } as const
  * Projects a {@link Detection} into the report's project section.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const project = (detection: Detection): ProjectDetection => {
   const config: Array<{ kind: string; path: string; detail: string }> = []
@@ -517,7 +527,7 @@ const summaryRun = (
  * Projects a {@link RunStateReport} into the report's run-state section.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const runState = (report: RunStateReport): RunStateSummary => ({
   verdict: report.verdict,
@@ -540,7 +550,7 @@ export const runState = (report: RunStateReport): RunStateSummary => ({
  * An empty report for one project and mode. Every scan starts here.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const empty = (root: string, mode: Mode, generatedAt: string): MigrationReport =>
   new MigrationReport({
@@ -616,7 +626,7 @@ const canonical = (unit: UnitReport): UnitReport => ({
  * renders the same bytes whatever order the caller collected them in.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const withUnit = (report: MigrationReport, entry: UnitReport): MigrationReport => {
   const unit = canonical(entry)
@@ -630,7 +640,7 @@ export const withUnit = (report: MigrationReport, entry: UnitReport): MigrationR
  * Options for {@link finalize}.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface FinalizeOptions {
   /**
@@ -657,7 +667,7 @@ export interface FinalizeOptions {
  * migrated, so both require `--acknowledge-run-state`.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const finalize = (report: MigrationReport, options: FinalizeOptions = {}): MigrationReport => {
   const unresolved = report.units
@@ -707,7 +717,7 @@ export const finalize = (report: MigrationReport, options: FinalizeOptions = {})
  * The report as canonical JSON, with a trailing newline.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const toJson = (report: MigrationReport): string =>
   `${JSON.stringify(Schema.encodeUnknownSync(MigrationReport)(report), null, 2)}\n`
@@ -729,6 +739,24 @@ const commandLine = (name: string, result: CommandResult | undefined): string =>
     ? `- ${name}: skipped (${result.skipped})`
     : `- ${name}: \`${result.command}\` exited ${result.exitCode} in ${result.durationMs} ms`
 
+/** Whether any command in a verification captured output into the report. */
+const capturedOutput = (result: VerificationResult): boolean =>
+  [result.install, result.format, ...result.typecheck, result.tests, result.discovery]
+    .some((command) => command !== undefined && (command.stdoutTail !== "" || command.stderrTail !== ""))
+
+/**
+ * The sentence an operator has to read before committing the report.
+ *
+ * The README tells them to commit `report.md`, and `report.json` beside it
+ * carries every command's last {@link CommandResult.stdoutTail} bytes exactly
+ * as the command printed them. A failing install or test suite in a 0.x
+ * project prints whatever it prints, a registry token and a value read from
+ * `.env` included, and nothing here can tell a secret from a stack frame, so
+ * the report says so rather than pretending the capture is safe.
+ */
+const captureWarning =
+  "Command output is captured verbatim into `report.json`, up to the last 12 KB of each stream. Review it before committing the report: a failing command can print a token or another secret, and nothing redacts it."
+
 const verificationLines = (result: VerificationResult | undefined): ReadonlyArray<string> => {
   if (result === undefined) return ["Not run."]
   return [
@@ -738,7 +766,8 @@ const verificationLines = (result: VerificationResult | undefined): ReadonlyArra
       ? ["- typecheck: not run"]
       : result.typecheck.map((entry) => commandLine("typecheck", entry))),
     commandLine("tests", result.tests),
-    commandLine("discovery", result.discovery)
+    commandLine("discovery", result.discovery),
+    ...(capturedOutput(result) ? ["", captureWarning] : [])
   ]
 }
 
@@ -750,7 +779,7 @@ const verificationLines = (result: VerificationResult | undefined): ReadonlyArra
  * `Verification`, `Manual follow-ups`, and `Appendix: restoring a checkpoint`.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const toMarkdown = (report: MigrationReport): string => {
   const lines: Array<string> = []
@@ -921,7 +950,7 @@ export const toMarkdown = (report: MigrationReport): string => {
  * Writes `report.json` and `report.md` into `directory`.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const write = (
   directory: string,
@@ -941,7 +970,7 @@ export const write = (
  * The inventory rows the report carries, with each hit's class.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const inventory = (
   hits: ReadonlyArray<InventoryEntry>,

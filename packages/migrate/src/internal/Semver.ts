@@ -7,14 +7,14 @@
  * project it is about to rewrite, so its dependency set stays inside the
  * workspace.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 
 /**
  * A parsed semantic version.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export interface Version {
@@ -31,7 +31,7 @@ const pattern = /(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/
  * `>=0.35.0 <1`, and `0.35.0` all parse. A specifier with no version at all
  * (`file:../smithers`, `workspace:*`, `latest`) returns `undefined`.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const parse = (specifier: string): Version | undefined => {
@@ -68,7 +68,7 @@ const comparePrerelease = (left: ReadonlyArray<string>, right: ReadonlyArray<str
 /**
  * Orders two versions by semver precedence.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const compare = (left: Version, right: Version): number => {
@@ -89,7 +89,7 @@ const oneZeroZero: Version = { major: 1, minor: 0, patch: 0, prerelease: ["0"] }
  * with no version (`file:`, `link:`, `workspace:`) is treated as before it,
  * because a local link in a 0.x project points at a 0.x checkout.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  * @private
  */
 export const isBeforeOneZero = (specifier: string): boolean => {

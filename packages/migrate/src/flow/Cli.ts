@@ -16,7 +16,7 @@
  * the Node runtime when the module is evaluated, which is exactly the side
  * effect a test must not import.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Console from "effect/Console"
@@ -74,7 +74,7 @@ const flags = {
  * `test/flow/Dependencies.test.ts` pins it to `package.json`.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const version = "1.0.0-rc.0"
 
@@ -82,7 +82,7 @@ export const version = "1.0.0-rc.0"
  * The command: one migration, one report, one exit code.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const command = Command.make("smithers-migrate", flags, (config) =>
   Effect.gen(function*() {
@@ -132,7 +132,7 @@ export const command = Command.make("smithers-migrate", flags, (config) =>
  * The executable's entry point.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const main = Command.run(command, { version }).pipe(
   Effect.provide(NodeServices.layer)

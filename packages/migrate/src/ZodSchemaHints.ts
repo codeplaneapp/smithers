@@ -11,7 +11,7 @@
  * behavior that a text rewrite cannot preserve, so they are `guided`: the agent
  * rewrites them and records a decision.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import ts from "typescript"
 import type { Detection } from "./Detect.ts"
@@ -24,7 +24,7 @@ import * as Inventory from "./Inventory.ts"
  * not.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Classification {
   readonly class: "automatic" | "guided"
@@ -35,7 +35,7 @@ export interface Classification {
  * One converted schema declaration.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ZodHint {
   readonly file: string
@@ -75,7 +75,7 @@ const unsupportedCalls: ReadonlyArray<{ readonly name: string; readonly reason: 
  * Classifies one zod chain by its source text.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const classify = (chain: string): Classification => {
   for (const { name, reason } of unsupportedCalls) {
@@ -299,9 +299,19 @@ const convert = (node: ts.Expression): Converted | undefined => {
  * default, `Effect` from `effect/Effect` in scope.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const print = (chain: string): string | undefined => parse(chain)?.text
+export const print = (chain: string): string | undefined => {
+  const value = parse(chain)
+  if (value === undefined) return undefined
+  // A top-level `.optional()` or `.default()` has no bare-schema spelling:
+  // `Schema.optional` is a struct field's, and a decoding default applied at
+  // the top changes what the schema accepts. Printing the bare text would
+  // drop it while calling the chain automatic, so the chain is refused and
+  // stays guided. A description survives as an annotation.
+  if (value.optional || value.decodingDefault !== undefined) return undefined
+  return value.description === undefined ? value.text : `${value.text}.annotate({ description: ${value.description} })`
+}
 
 const parse = (chain: string): Converted | undefined => {
   const source = Ts.parse("chain.ts", `const value = ${chain}`)
@@ -319,7 +329,7 @@ const parse = (chain: string): Converted | undefined => {
  * alone would drop the default a step relied on.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const printField = (chain: string): string | undefined => {
   const value = parse(chain)
@@ -339,7 +349,7 @@ export const printField = (chain: string): string | undefined => {
  * library files, converted where it can be.
  *
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const hints = (detection: Detection): ReadonlyArray<ZodHint> => {
   const files = [

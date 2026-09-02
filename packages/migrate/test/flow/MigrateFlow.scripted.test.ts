@@ -458,6 +458,35 @@ describe("apply over a single-file JSX project", () => {
       expect(hashTree(root)).toEqual(before)
     }))
 
+  it.effect("records a unit its own tooling could not finish, and carries on with the next", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      committed(root)
+      // The archive directory is a file, so the workflow unit's archive cannot
+      // create its first parent and fails with the tool's own `io` error
+      // after the rewrite verified. That error used to end the run and lose
+      // every finished unit; now it is the unit's recorded outcome.
+      mkdirSync(join(root, ".smithers-migrate"), { recursive: true })
+      writeFileSync(join(root, ".smithers-migrate", "archive"), "in the way\n")
+      const before = hashTree(root)
+
+      const { report } = yield* apply(root)
+
+      expect(report.exitCode).toBe(1)
+      const workflow = report.units.find((unit) => unit.id === "workflow:simple-workflow")
+      expect(workflow?.status).toBe("failed")
+      const recorded = workflow?.unresolved.find((entry) => entry.construct === "the unit could not finish")
+      expect(recorded?.reason).toMatch(/^io: could not create/)
+      expect(recorded?.suggestion).toContain("--unit workflow:simple-workflow")
+      // The unit that archives nothing finished, and the one after the failure ran.
+      expect(report.units.find((unit) => unit.id === "dependencies")?.status).toBe("migrated")
+      expect(report.units.map((unit) => unit.id)).toEqual(["dependencies", "workflow:simple-workflow", "project"])
+      // The failed unit's files are as the checkpoint found them.
+      expect(hashTree(root).get("simple-workflow.jsx")).toBe(before.get("simple-workflow.jsx"))
+      expect(existsSync(join(root, "flows", "simple-workflow", "flow.ts"))).toBe(false)
+      expect(existsSync(join(root, ".smithers-migrate", "report.md"))).toBe(true)
+    }))
+
   it.effect("accepts a file copy as the checkpoint when the operator says so", () =>
     Effect.gen(function*() {
       const root = copyFixture("jsx-single")

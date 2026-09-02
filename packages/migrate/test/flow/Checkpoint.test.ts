@@ -12,7 +12,7 @@ import * as Checkpoint from "@smthrs/migrate/flow/Checkpoint"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import { execFileSync } from "node:child_process"
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { userInfo } from "node:os"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -406,5 +406,35 @@ describe("Checkpoint.tree", () => {
       // the machine's — which is exactly what makes a duration testable.
       expect(ref.takenAt).toBe(yield* Clock.currentTimeMillis)
       expect(ref.ref).toBe(`refs/smithers-migrate/workflow-demo/${ref.takenAt}`)
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("terminates over a symlinked directory cycle, recording the link by where it points", () =>
+    Effect.gen(function*() {
+      // `stat` follows symlinks, so a link pointing at an ancestor is a cycle a
+      // walk that descends into it never leaves, and this walk runs at least
+      // twice per unit. A project can hold one for ordinary reasons: a `latest`
+      // link beside the versions it aliases, an `assets` link up out of a docs
+      // directory.
+      const root = gitProject("symlink-cycle")
+      write(root, "docs/page.md", "page\n")
+      symlinkSync(".", join(root, "docs", "latest"), "dir")
+      symlinkSync("../..", join(root, "docs", "up"), "dir")
+
+      const ref = yield* Checkpoint.take({
+        ...payload(root, ["workflow.jsx"]),
+        treeExclude: [".smithers-migrate"]
+      })
+      const walked = JSON.parse(readFileSync(ref.tree, "utf8")) as { files: Record<string, string> }
+
+      // The links are recorded, so a change to where one points is a change the
+      // diff sees, and neither is descended into.
+      expect(Object.keys(walked.files)).toContain("docs/latest")
+      expect(Object.keys(walked.files)).toContain("docs/up")
+      expect(Object.keys(walked.files).some((file) => file.startsWith("docs/latest/"))).toBe(false)
+      expect(Object.keys(walked.files).some((file) => file.startsWith("docs/up/"))).toBe(false)
+      expect(walked.files["docs/latest"]).not.toBe(walked.files["docs/up"])
+
+      // And the diff over the same tree still terminates and reports nothing.
+      expect(yield* Checkpoint.treeDiff(root, ref)).toEqual([])
     }).pipe(Effect.provide(platform)))
 })

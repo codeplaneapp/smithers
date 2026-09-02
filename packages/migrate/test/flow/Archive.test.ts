@@ -178,6 +178,24 @@ describe("Archive.rewriteTsconfig", () => {
   })
 })
 
+describe("Archive.pinFor", () => {
+  it("pins the effect family and the smithers packages, and refuses to guess for anything else", () => {
+    expect(Archive.pinFor("effect")).toBe(Archive.effectVersion)
+    expect(Archive.pinFor("@effect/platform-node")).toBe(Archive.effectVersion)
+    expect(Archive.pinFor("@smthrs/flow")).toBe(Archive.smithersVersion)
+    expect(Archive.pinFor("zod")).toBeUndefined()
+    // A name with no pin is left out rather than written as `"*"`.
+    const before = JSON.stringify({ name: "p", dependencies: { zod: "4.0.0" } })
+    const { text } = Archive.rewriteManifest(before, { remove: [], add: ["left-pad", "@smthrs/flow"] })
+    expect(JSON.parse(text)).toEqual({
+      name: "p",
+      dependencies: { "@smthrs/flow": Archive.smithersVersion, zod: "4.0.0" }
+    })
+    const untouched = Archive.rewriteManifest(before, { remove: [], add: ["left-pad"] })
+    expect(JSON.parse(untouched.text)).toEqual(JSON.parse(before))
+  })
+})
+
 describe("Archive.rewriteGitignore", () => {
   it("adds the 1.0 state directory once", () => {
     expect(Archive.rewriteGitignore("node_modules\n")).toBe("node_modules\n.flows/\n")

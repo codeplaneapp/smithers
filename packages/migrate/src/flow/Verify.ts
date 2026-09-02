@@ -11,7 +11,7 @@
  * the answer is what the repair round is given: the command line, the exit
  * code, how long it took, and the last 12 KB of each stream.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { Action } from "@smthrs/flow"
 import * as Clock from "effect/Clock"
@@ -33,7 +33,7 @@ import * as Exec from "./internal/Exec.ts"
  * registry is not a broken migration — so they get their own, longer budget.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const installTimeoutMs = 10 * 60_000
 
@@ -41,7 +41,7 @@ export const installTimeoutMs = 10 * 60_000
  * How long every other verification command may take.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const commandTimeoutMs = 15 * 60_000
 
@@ -52,7 +52,7 @@ export const commandTimeoutMs = 15 * 60_000
  * writes `node_modules`. Nothing here may replay another run's result.
  *
  * @category actions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const action = Action.make("smithers/migrate-v1/Verify", {
   payload: {
@@ -156,7 +156,7 @@ const discoveryResult = (
  * them only to make a test's clock finite.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Budgets {
   readonly install?: number | undefined
@@ -167,7 +167,7 @@ export interface Budgets {
  * Runs every verification command for one unit.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const run = (payload: {
   readonly root: string
@@ -212,7 +212,7 @@ const failing = (result: Report.CommandResult | undefined): boolean =>
  * to format, and the report says so rather than inventing a verdict.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const verdict = (result: Report.VerificationResult): "pass" | "fail" =>
   failing(result.install) ||
@@ -227,7 +227,7 @@ export const verdict = (result: Report.VerificationResult): "pass" | "fail" =>
  * The failing commands, as one line each. What a report's summary shows.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const failures = (result: Report.VerificationResult): ReadonlyArray<string> =>
   [
@@ -242,6 +242,6 @@ export const failures = (result: Report.VerificationResult): ReadonlyArray<strin
  * The verification action's implementation.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layer = action.toLayer((payload) => run(payload))

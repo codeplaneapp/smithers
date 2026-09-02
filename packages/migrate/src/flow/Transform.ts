@@ -17,7 +17,7 @@
  * runs this project's own verification commands and nothing else, because a
  * spawned process writes where no filesystem rule can see it.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as AgentAction from "@smthrs/agent/AgentAction"
 import * as AgentSession from "@smthrs/agent/AgentSession"
@@ -54,7 +54,7 @@ import * as Verify from "./Verify.ts"
  * than as silence.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const UnitResult = Schema.Struct({
   unit: Schema.String,
@@ -69,7 +69,7 @@ export const UnitResult = Schema.Struct({
  * What the agent hands back for one unit.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type UnitResult = typeof UnitResult.Type
 
@@ -85,7 +85,7 @@ export type UnitResult = typeof UnitResult.Type
  * edit rather than the file the run began with.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const UnitOutline = Schema.Struct({
   id: Schema.String,
@@ -131,18 +131,15 @@ export const UnitOutline = Schema.Struct({
  * A unit as the plan carries it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type UnitOutline = typeof UnitOutline.Type
 
 /**
- * The packages a unit is allowed to add. Nothing else may be installed, and
- * the prompt says so.
- *
- * @category models
- * @since 0.1.0
+ * The packages every migrated project may need whatever its constructs: the
+ * authoring model, the runtime, the standard flows, and the test harness.
  */
-export const approvedPackages: ReadonlyArray<string> = [
+const basePackages: ReadonlyArray<string> = [
   "@smthrs/agent",
   // The discovery descriptor every flow module exports is a `@smthrs/core`
   // `Flow.make`; a list without it forbids the one import the layout needs.
@@ -158,6 +155,27 @@ export const approvedPackages: ReadonlyArray<string> = [
   "@effect/vitest",
   "effect"
 ]
+
+/**
+ * The packages a unit is allowed to add. Nothing else may be installed, and
+ * the prompt says so.
+ *
+ * The list is the base set plus every `@smthrs/*` package a mapping row names
+ * as a target or a target module, derived from the table rather than
+ * restated beside it: the prompt tells the agent to reach for the row's
+ * module and, in the same breath, not to install anything off this list, so
+ * the two have to agree or a guided rewrite of `smthrs/memory` is forbidden
+ * from importing the package it is told to use.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export const approvedPackages: ReadonlyArray<string> = [
+  ...new Set([
+    ...basePackages,
+    ...Mapping.rows.flatMap((row) => `${row.target ?? ""} ${row.targetModule ?? ""}`.match(/@smthrs\/[a-z-]+/g) ?? [])
+  ])
+].sort()
 
 const constructRow = (
   hit: Inventory.InventoryEntry
@@ -220,7 +238,7 @@ const hintRows = (
  * read, write, move, or resume.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const runStatePaths = (result: Scan.ScanResult): ReadonlyArray<string> =>
   [
@@ -233,7 +251,7 @@ export const runStatePaths = (result: Scan.ScanResult): ReadonlyArray<string> =>
  * Builds the plan-time outline of one unit.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const outline = (
   result: Scan.ScanResult,
@@ -298,7 +316,7 @@ const operatorDecisionLines = (
  * agent is given.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const capture = (
   outlined: UnitOutline,
@@ -350,7 +368,7 @@ export const capture = (
  * saw.
  *
  * @category actions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const captureAction = Action.make("smithers/migrate-v1/Capture", {
   payload: {
@@ -374,7 +392,7 @@ export const captureAction = Action.make("smithers/migrate-v1/Capture", {
  * The capture step's implementation.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const captureLayer = captureAction.toLayer(({ checkpoint, current, outline }) =>
   capture(outline, checkpoint, current === true)
@@ -390,7 +408,7 @@ export const captureLayer = captureAction.toLayer(({ checkpoint, current, outlin
  * than the literal the example it was copied from carries.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const seat = "migrate"
 
@@ -398,7 +416,7 @@ export const seat = "migrate"
  * How many cell frames one unit gets before the step fails.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const maxFrames = 60
 
@@ -406,7 +424,7 @@ export const maxFrames = 60
  * The sandbox budget every migration cell runs under.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const limits: Sandbox.Limits = {
   calls: 400,
@@ -420,7 +438,7 @@ export const limits: Sandbox.Limits = {
  * The transform step: one unit in, one {@link UnitResult} out.
  *
  * @category actions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const action = AgentAction.make("smithers/migrate-v1/Transform", {
   payload: { unit: Contract.UnitBrief },
@@ -436,7 +454,7 @@ export const action = AgentAction.make("smithers/migrate-v1/Transform", {
  * The transform step's implementation.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layer = action.layer
 
@@ -460,7 +478,7 @@ export const layer = action.layer
  * these"; a rule set can, and the kernel asks it on every operation.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const envelope = (): ReadonlyArray<string> => [
   "fs:read:/**",
@@ -472,7 +490,7 @@ export const envelope = (): ReadonlyArray<string> => [
  * The mapping lookup, as one ordinary flow.
  *
  * @category flows
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const mappingFlow = CoreFlow.make({
   name: "migrate/mapping",
@@ -490,7 +508,7 @@ export const mappingFlow = CoreFlow.make({
  * rather than answering and being told by a repair round.
  *
  * @category flows
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const verifyFlow = CoreFlow.make({
   name: "migrate/verify",
@@ -520,7 +538,7 @@ export const verifyFlow = CoreFlow.make({
  * the agent should pay for the row it wants, not for all of them.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const bindings = (options: {
   readonly root: string
@@ -586,7 +604,7 @@ export const bindings = (options: {
  * flows, the capability envelope, and the sandbox budget.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const hostLayer = (options: {
   readonly root: string

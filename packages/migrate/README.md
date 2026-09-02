@@ -28,20 +28,22 @@ Two gates gate `apply` and both exit 3. Persisted or live 0.x run state blocks u
 
 The root entry point exports these namespaces; each is also importable from `@smthrs/migrate/<Module>`.
 
-| Module           | Public exports                                                                                                       | Description                                                                                                                                              |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MigrateError`   | `MigrateErrorCode`, `MigrateError`, `make`, `io`                                                                     | The single failure type, with the code the CLI maps onto an exit status.                                                                                 |
-| `Constructs`     | `Construct`, `ConstructKind`, `constructs`, `byName`, `byKind`                                                       | The catalog of every 0.x construct application code can import, with its old source path.                                                                |
-| `Mapping`        | `MappingClass`, `MappingRow`, `rows`, `byConstruct`, `classify`, `snippet`, `subscriptionAgents`                     | The old-to-new mapping table, prop-driven class escalation, and the rewrite text for automatic rows.                                                     |
-| `Detect`         | `Detection`, `ManifestFinding`, `WorkflowFile`, `PromptFile`, `ScriptHit`, `scan`, `isOldSpecifier`                  | Packages, lockfiles, imports, pragmas, tsconfig chains, workflow and prompt files, components, UIs, tests, libraries, scripts, config, and integrations. |
-| `RunState`       | `RunStateReport`, `DatabaseFinding`, `terminalStatuses`, `scan`, `roots`                                             | Read-only detection of live and parked runs, SQLite databases, Postgres and PGlite settings, state directories, and the operator instructions.           |
-| `Inventory`      | `InventoryEntry`, `scan`, `zodChains`, `mdxImports`                                                                  | Per-file construct hits resolved through imports and `createSmithers` destructuring.                                                                     |
-| `ZodSchemaHints` | `ZodHint`, `classify`, `print`, `hints`                                                                              | Classifies zod chains and prints the `effect/Schema` equivalent for the safe subset.                                                                     |
-| `PromptHints`    | `PromptHint`, `classify`, `print`, `hints`                                                                           | Classifies MDX prompts and prints the template literal over `payload`.                                                                                   |
-| `Units`          | `UnitPlan`, `UnitKind`, `UnitNote`, `VerifyCommands`, `plan`, `verifyCommands`, `orderWorkflows`, `specifierContext` | Orders the migration into dependency, workflow, integration, and project units.                                                                          |
-| `Checks`         | `CheckResult`, `run`, `discovery`                                                                                    | The deterministic post-transform checks, including registry discovery.                                                                                   |
-| `Report`         | `MigrationReport`, `UnitReport`, `empty`, `withUnit`, `finalize`, `toJson`, `toMarkdown`, `write`                    | The report schema, its writers, and the deterministic Markdown renderer.                                                                                 |
-| `Scan`           | `ScanResult`, `ScanOptions`, `scan`, `decisions`, `operatorDecisions`, `toReport`                                    | The pipeline that composes every module above.                                                                                                           |
+The exports themselves are not listed here. The reference page's [Exports](https://smithers.sh/migration/migrate-tool#exports) table is generated from the JSDoc of every public module, so it names every export, its category, and where to import it from, and a list kept here as well would be a second one to keep right.
+
+| Module           | Description                                                                                                                                              |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MigrateError`   | The single failure type, with the code the CLI maps onto an exit status.                                                                                 |
+| `Constructs`     | The catalog of every 0.x construct application code can import, with its old source path.                                                                |
+| `Mapping`        | The old-to-new mapping table, prop-driven class escalation, and the rewrite text for automatic rows.                                                     |
+| `Detect`         | Packages, lockfiles, imports, pragmas, tsconfig chains, workflow and prompt files, components, UIs, tests, libraries, scripts, config, and integrations. |
+| `RunState`       | Read-only detection of live and parked runs, SQLite databases, Postgres and PGlite settings, state directories, and the operator instructions.           |
+| `Inventory`      | Per-file construct hits resolved through imports and `createSmithers` destructuring.                                                                     |
+| `ZodSchemaHints` | Classifies zod chains and prints the `effect/Schema` equivalent for the safe subset.                                                                     |
+| `PromptHints`    | Classifies MDX prompts and prints the template literal over `payload`.                                                                                   |
+| `Units`          | Orders the migration into dependency, workflow, integration, and project units.                                                                          |
+| `Checks`         | The deterministic post-transform checks, including registry discovery.                                                                                   |
+| `Report`         | The report schema, its writers, and the deterministic Markdown renderer.                                                                                 |
+| `Scan`           | The pipeline that composes every module above.                                                                                                           |
 
 ## Report
 
@@ -49,11 +51,13 @@ The root entry point exports these namespaces; each is also importable from `@sm
 
 Commit `report.md`. It is the record of what the tool changed, what it could not translate, and what a person still has to decide.
 
+Read the verification output before you commit it. Each command's last 12 KB of stdout and stderr is captured verbatim into `report.json` and rendered into `report.md`, and a failing install or test suite in a 0.x project prints whatever it prints: a registry token, a value read from `.env`, a CI credential. The tool does not redact it, because it cannot tell a secret from a stack frame.
+
 ## Fixtures
 
 `test/fixtures` holds real 0.x projects copied byte for byte, each with a `FIXTURE.md` naming its origin and its commit: `jsx-single` (a single-file JSX example), `plue-pack` (a multi-workflow `.smithers` pack), `batch-issues` (a nested pack that depends on the facade by its bare `file:` name), `mixed-api` (one file that imports Smithers 0.x and a foreign authoring API together), and `persisted-db` (a project whose database must trigger the operator instruction). `jsx-single.migrated` is the hand-written 1.0 output the deterministic checks run against.
 
-`test/PlueGolden.test.ts` runs the scanners read only over `/Users/williamcory/plue/.smithers`, an unsanitized external pack, and skips with a reason when that directory is not on the machine.
+`test/PlueGolden.test.ts` runs the scanners read only over the pack named by `SMITHERS_MIGRATE_PLUE_PACK`, an unsanitized external pack, and skips with a reason when that directory is not on the machine.
 
 <!-- lane flow appends below -->
 
@@ -61,19 +65,19 @@ Commit `report.md`. It is the record of what the tool changed, what it could not
 
 `apply` is one flow execution with one child execution per unit.
 
-| Module        | Exports                                                                                                                  | What it does                                                                                           |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `Contract`    | `prohibitions`, `text`, `examples`, `UnitBrief`, `unitPrompt`, `failureReport`                                           | The system teaching every unit shares, and the per-unit prompt built from captured source.             |
-| `Options`     | `MigrateOptions`, `Mode`, `reportDir`, `flowsDir`, `maxRepairRounds`                                                     | What one run was asked to do; the flow's payload.                                                      |
-| `Gate`        | `evaluate`, `evaluateReport`, `unsafeConstructs`, `instructions`                                                         | The two operator gates, both exit 3.                                                                   |
-| `Checkpoint`  | `action`, `take`, `sources`, `diff`, `tree`, `treeDiff`, `restore`, `rollback`                                           | jj change, git ref, or file copy, plus a digest of the whole tree, taken before a unit edits anything. |
-| `Transform`   | `UnitOutline`, `UnitResult`, `outline`, `capture`, `action`, `hostLayer`, `envelope`                                     | The model-backed rewrite and the host it runs inside.                                                  |
-| `Repair`      | `action`                                                                                                                 | One failing verification round, handed back with the failing output.                                   |
-| `Verify`      | `action`, `run`, `verdict`, `failures`                                                                                   | Install, format, typecheck, tests, and registry discovery.                                             |
-| `Archive`     | `action`, `run`, `isRewritable`, `rewritten`, `rewriteManifest`, `rewriteTsconfig`, `rewriteScripts`, `rewriteGitignore` | Replaced sources moved aside; the manifest, tsconfig, and ignore file rewritten where they are.        |
-| `MigrateFlow` | `flow`, `unit`, `layer`, `outlines`, `unitArtifact`, `finish`, `postconditions`, `writeReport`                           | The graph, its actions, and every implementation.                                                      |
-| `Layers`      | `layerNode`, `layerNodeScanned`, `layerScripted`, `seatResolver`, `rules`, `verificationCommands`                        | The Node composition, its grant rules, and the scripted one tests use.                                 |
-| `Command`     | `MigrateOptions`, `run`, `runNode`, `survey`, `layerNode`, `registration`, `exitCode`, `render`, `flowId`                | The entry point the CLI, the bin, and the control plane share.                                         |
+| Module        | What it does                                                                                           |
+| ------------- | ------------------------------------------------------------------------------------------------------ |
+| `Contract`    | The system teaching every unit shares, and the per-unit prompt built from captured source.             |
+| `Options`     | What one run was asked to do; the flow's payload.                                                      |
+| `Gate`        | The two operator gates, both exit 3.                                                                   |
+| `Checkpoint`  | jj change, git ref, or file copy, plus a digest of the whole tree, taken before a unit edits anything. |
+| `Transform`   | The model-backed rewrite and the host it runs inside.                                                  |
+| `Repair`      | One failing verification round, handed back with the failing output.                                   |
+| `Verify`      | Install, format, typecheck, tests, and registry discovery.                                             |
+| `Archive`     | Replaced sources moved aside; the manifest, tsconfig, and ignore file rewritten where they are.        |
+| `MigrateFlow` | The graph, its actions, and every implementation.                                                      |
+| `Layers`      | The Node composition, its grant rules, and the scripted one tests use.                                 |
+| `Command`     | The entry point the CLI, the bin, and the control plane share.                                         |
 
 Everything above `Contract`, `Gate`, and `Options` is reached by subpath, as `@smthrs/migrate/flow/Command`, because `import "@smthrs/migrate"` loads the scanners and nothing else. Deciding whether to migrate must not require installing the runtime.
 
@@ -97,6 +101,10 @@ A derived command is an executable and its arguments, spawned with no shell: a t
 A unit declares its sources and its targets, and that is the only place it may write. The checkpoint copies every declared path aside, sources and targets alike, and records for each one whether it existed and what its bytes digested to, so a target the operator already had at the path a unit writes comes back byte for byte when the unit fails, and a path that was absent is the only kind a rollback removes. The checkpoint digests the whole tree before the unit starts — everything but `.git`, `.jj`, `node_modules`, the report directory, `.flows/`, and the run-state paths, which have a stricter check of their own — and the diff afterwards is what the unit report's changed files are built from. The agent's own account of what it touched is advisory and is cross-checked against that diff, never trusted in place of it. A write outside the unit's file set fails the unit: a file it added is removed, and a file it modified is named in the report with the command that restores the checkpoint, because the checkpoint copied the unit's own files aside and nothing else.
 
 The agent cannot read run state either. The grant rules deny every filesystem action on each 0.x run-state path and everything under it, so a database, an execution log, or a subscription file is refused by the kernel before its bytes reach a model call; a source that merely shares the directory stays readable. Everything the prompt quotes from the project, sources, hints, snippets, and command output, is fenced so the content cannot end the block, and the contract says in so many words that text inside it is data.
+
+A unit the tool's own steps cannot finish (a checkpoint that cannot be taken, an archive that cannot move a file, a verification that cannot spawn) is recorded as a failed unit with the error's code and message in its report entry, after its restoring scope has put its files back, and the next unit runs; the report still exits 1. The one exception is `no-vcs`, which refuses the whole run before anything is written so the operator sees `--allow-no-vcs`.
+
+Every verification command's output is bounded while it runs: each stream keeps its last 12 KB through a rolling window and the report says how many earlier bytes were dropped. A scan that could not read part of the project (a directory it cannot list, one deeper than twelve levels, a file over 8 MB) records an `incomplete-scan` warning per path; `plan` reports it and `apply` refuses the plan, because a migration of an incomplete plan is a migration of the wrong project.
 
 Before the first unit runs, the flow reads the project once more and compares it with the plan it was given: every unit outline, the run-state roots, the layout, and a digest of every source and target. A project that changed since planning, in any byte the plan covers, is refused with `stale-plan` and exit 1, and nothing is written.
 

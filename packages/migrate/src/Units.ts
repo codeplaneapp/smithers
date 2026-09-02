@@ -13,7 +13,7 @@
  * which removes the old packages, the JSX settings, and the old CLI scripts
  * once nothing depends on them.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Schema from "effect/Schema"
 import type { Detection, SpecifierContext } from "./Detect.ts"
@@ -29,7 +29,7 @@ import type { ZodHint } from "./ZodSchemaHints.ts"
  * What a unit migrates.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type UnitKind = "dependencies" | "workflow" | "integration" | "project"
 
@@ -42,7 +42,7 @@ export type UnitKind = "dependencies" | "workflow" | "integration" | "project"
  * argv element it is exactly that name and nothing more.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const ArgvCommand = Schema.Struct({
   _tag: Schema.Literal("argv"),
@@ -54,7 +54,7 @@ export const ArgvCommand = Schema.Struct({
  * A repository-derived command whose arguments never pass through a shell.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type ArgvCommand = typeof ArgvCommand.Type
 
@@ -67,7 +67,7 @@ export type ArgvCommand = typeof ArgvCommand.Type
  * the line and is the one person allowed to.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const VerificationCommand = Schema.Union([Schema.String, ArgvCommand])
 
@@ -75,7 +75,7 @@ export const VerificationCommand = Schema.Union([Schema.String, ArgvCommand])
  * One structured or explicitly shell-backed verification command.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type VerificationCommand = typeof VerificationCommand.Type
 
@@ -83,7 +83,7 @@ export type VerificationCommand = typeof VerificationCommand.Type
  * Builds a structured command.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const argv = (executable: string, ...args: ReadonlyArray<string>): ArgvCommand => ({
   _tag: "argv",
@@ -95,7 +95,7 @@ export const argv = (executable: string, ...args: ReadonlyArray<string>): ArgvCo
  * The commands that verify one unit.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface VerifyCommands {
   readonly install: VerificationCommand | undefined
@@ -116,7 +116,7 @@ export interface VerifyCommands {
  * `unresolved` table takes.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface UnitNote {
   readonly construct: string
@@ -130,7 +130,7 @@ export interface UnitNote {
  * One migration unit.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface UnitPlan {
   readonly id: string
@@ -156,7 +156,7 @@ export interface UnitPlan {
  * What {@link plan} reads. A `ScanResult` satisfies it.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface PlanInput {
   readonly detection: Detection
@@ -168,7 +168,7 @@ export interface PlanInput {
  * Command overrides, from the CLI.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface CommandOverrides {
   readonly install?: string | undefined
@@ -181,7 +181,7 @@ export interface CommandOverrides {
  * Options for {@link plan}.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Options {
   readonly flowsDir?: string | undefined
@@ -220,7 +220,7 @@ const runner = (manager: string | undefined): readonly [string, ReadonlyArray<st
  * gives repository text no shell. The caller records what it did instead.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const simpleCommand = (line: string): ArgvCommand | undefined => {
   if (!/^[A-Za-z0-9_@%+=:,./ -]+$/.test(line) || /[\r\n\0]/.test(line)) return undefined
@@ -248,7 +248,7 @@ export const simpleCommand = (line: string): ArgvCommand | undefined => {
  * line and keeps its shell semantics.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const verifyCommands = (
   detection: Detection,
@@ -326,7 +326,7 @@ const renderArgv = (command: ArgvCommand): string => CommandLine.renderArgv(comm
  * file is unaffected, because it has no directories to keep.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const flowName = (path: string): string => {
   const match = /(?:^|\/)\.smithers\/workflows\/(.+)$/.exec(path)
@@ -344,7 +344,7 @@ export const flowName = (path: string): string => {
  * plan is checked here and the scan refuses.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const duplicateIds = (
   units: ReadonlyArray<UnitPlan>
@@ -373,7 +373,7 @@ export const duplicateIds = (
  * the scan was.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const specifierContext = (detection: Detection): SpecifierContext => ({
   localFacade: detection.manifests.some((manifest) =>
@@ -401,7 +401,7 @@ export const specifierContext = (detection: Detection): SpecifierContext => ({
  * falls back to the lexical order of the files in it.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const orderWorkflows = <A extends { readonly path: string }>(
   workflows: ReadonlyArray<A>,
@@ -456,7 +456,7 @@ const mappingRows = (hits: ReadonlyArray<InventoryEntry>): ReadonlyArray<Mapping
  * Plans the migration.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const plan = (input: PlanInput, options: Options = {}): ReadonlyArray<UnitPlan> => {
   const flowsDir = options.flowsDir ?? "flows"

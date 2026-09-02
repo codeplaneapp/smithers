@@ -4,7 +4,13 @@
  * falls behind the code, so a new module or a new mapping row cannot land
  * undocumented.
  *
- * @since 0.1.0
+ * They read `docs/api.md`, the prose the package owns, and not the page that
+ * prose is projected onto: `scripts/docs.mjs` writes
+ * `docs/pages/migration/migrate-tool.md` and its `--check` form is the gate
+ * that the page matches this source, so a package test that reached out of the
+ * package would be asserting the generator's output twice over.
+ *
+ * @since 1.0.0-rc.0
  */
 import { describe, expect, it } from "@effect/vitest"
 import { readFileSync } from "node:fs"
@@ -14,11 +20,30 @@ import * as Mapping from "../src/Mapping.ts"
 
 const read = (relative: string): string => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8")
 
-const reference = read("../../../docs/pages/migration/migrate-tool.md")
+const reference = read("../docs/api.md")
 const index = read("../src/index.ts")
 
 /** Every namespace `src/index.ts` re-exports, in source order. */
 const exportedModules = [...index.matchAll(/export \* as (\w+) from/g)].map((match) => match[1] as string)
+
+/**
+ * A Markdown pipe table with the column padding the formatter adds taken back
+ * out.
+ *
+ * `docs/api.md` is package source, so `dprint` aligns every table in it, while
+ * `Mapping.markdownTable` renders one cell per row with single spaces. Both
+ * are right: the question these tests ask is whether the page carries the
+ * table the code produces, not how wide its columns are printed.
+ */
+const unpadded = (text: string): string =>
+  text
+    .split("\n")
+    .map((line) =>
+      line.startsWith("|")
+        ? line.replace(/-{3,}/g, "---").replace(/\s+\|/g, " |").replace(/\|\s+/g, "| ")
+        : line
+    )
+    .join("\n")
 
 describe("reference page", () => {
   it("documents every module the package exports", () => {
@@ -38,7 +63,7 @@ describe("reference page", () => {
   })
 
   it("embeds the mapping table verbatim from Mapping.rows", () => {
-    expect(reference).toContain(Mapping.markdownTable())
+    expect(unpadded(reference)).toContain(unpadded(Mapping.markdownTable()))
   })
 
   it("names every catalog construct in the mapping table", () => {
@@ -55,7 +80,7 @@ describe("reference page", () => {
 
   it("documents the three modes and the three exit codes", () => {
     for (const mode of ["`scan`", "`plan`", "`apply`"]) expect(reference).toContain(mode)
-    for (const line of ["| 0 |", "| 1 |", "| 3 |"]) expect(reference).toContain(line)
+    for (const line of ["| 0 |", "| 1 |", "| 3 |"]) expect(unpadded(reference)).toContain(line)
   })
 })
 

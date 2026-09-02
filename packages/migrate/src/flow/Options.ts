@@ -7,7 +7,7 @@
  * from its flags, so a flag typo fails with a field path instead of a
  * `undefined` three steps later.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -25,7 +25,7 @@ import { make, type MigrateError } from "../MigrateError.ts"
  * and only `apply` is gated.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Mode = Schema.Literals(["scan", "plan", "apply"])
 
@@ -33,7 +33,7 @@ export const Mode = Schema.Literals(["scan", "plan", "apply"])
  * What a run is allowed to do to the project.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Mode = typeof Mode.Type
 
@@ -42,7 +42,7 @@ export type Mode = typeof Mode.Type
  * manifests do not name the commands the operator wants run.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Commands = Schema.Struct({
   install: Schema.optional(Schema.String),
@@ -55,7 +55,7 @@ export const Commands = Schema.Struct({
  * Command overrides for the verification step.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Commands = typeof Commands.Type
 
@@ -63,7 +63,7 @@ export type Commands = typeof Commands.Type
  * Where the migration writes and what it calls the target directory.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Layout = Schema.Struct({
   flowsDir: Schema.String
@@ -80,7 +80,7 @@ export const Layout = Schema.Struct({
  * only environment the scanners read.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const State = Schema.Struct({
   smithersHome: Schema.optional(Schema.String),
@@ -92,7 +92,7 @@ export const State = Schema.Struct({
  * The three state paths a host derives from its environment.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type State = typeof State.Type
 
@@ -103,7 +103,7 @@ export type State = typeof State.Type
  * provider key stays with the seat resolver and never reaches a payload.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const stateOf = (
   environment: Readonly<Record<string, string | undefined>>
@@ -123,7 +123,7 @@ export const stateOf = (
  * the three variables, spelled as the detector expects them.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const scanEnvironment = (state: State | undefined): Readonly<Record<string, string>> => ({
   ...(state?.smithersHome === undefined ? {} : { SMITHERS_HOME: state.smithersHome }),
@@ -157,7 +157,7 @@ const MigrateOptionsFields = Schema.Struct({
  * check that guards the tree.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const reservedDirectories: ReadonlyArray<string> = [".flows", ".git", ".jj", "node_modules"]
 
@@ -172,7 +172,7 @@ export const reservedDirectories: ReadonlyArray<string> = [".flows", ".git", ".j
  * to the copies the migration takes of them.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const reportDirEntries: ReadonlyArray<string> = [
   "archive",
@@ -194,7 +194,7 @@ export const reportDirEntries: ReadonlyArray<string> = [
  * under one.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const relativePathIssue = (label: string, value: string): string | undefined => {
   if (value === "") return `${label} must not be empty`
@@ -228,7 +228,7 @@ const under = (inner: string, outer: string): boolean => inner === outer || inne
  * flows directory under the report directory is archived with the backups.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layoutIssue = (options: {
   readonly root: string
@@ -268,7 +268,7 @@ export const layoutIssue = (options: {
  * see: a symlink already on disk.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const MigrateOptions = MigrateOptionsFields.check(
   Schema.makeFilter((options) => layoutIssue(options) ?? true, { title: "containedLayout" })
@@ -278,7 +278,7 @@ export const MigrateOptions = MigrateOptionsFields.check(
  * Everything one migration run was asked to do.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type MigrateOptions = typeof MigrateOptions.Type
 
@@ -287,7 +287,7 @@ export type MigrateOptions = typeof MigrateOptions.Type
  * project root.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const defaultReportDir = ".smithers-migrate"
 
@@ -296,7 +296,7 @@ export const defaultReportDir = ".smithers-migrate"
  * root. It follows the registry's own project source layout.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const defaultFlowsDir = "flows"
 
@@ -305,7 +305,7 @@ export const defaultFlowsDir = "flows"
  * command output before the run restores its checkpoint and moves on.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const defaultMaxRepairRounds = 3
 
@@ -313,7 +313,7 @@ export const defaultMaxRepairRounds = 3
  * The report directory this run writes into.
  *
  * @category accessors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const reportDir = (options: MigrateOptions): string => options.reportDir ?? defaultReportDir
 
@@ -321,7 +321,7 @@ export const reportDir = (options: MigrateOptions): string => options.reportDir 
  * The flows directory this run migrates into.
  *
  * @category accessors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const flowsDir = (options: MigrateOptions): string => options.layout?.flowsDir ?? defaultFlowsDir
 
@@ -329,7 +329,7 @@ export const flowsDir = (options: MigrateOptions): string => options.layout?.flo
  * The repair budget this run allows, floored at zero.
  *
  * @category accessors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const maxRepairRounds = (options: MigrateOptions): number =>
   Math.max(0, options.maxRepairRounds ?? defaultMaxRepairRounds)
@@ -377,7 +377,7 @@ const realAncestor = (
  * Runs before the first scan and before the first write, and never writes.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const validateLayout = (
   options: MigrateOptions

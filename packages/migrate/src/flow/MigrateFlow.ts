@@ -21,7 +21,7 @@
  * unit is shown has to be the text on disk when that unit starts, and an
  * earlier unit may have rewritten it.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as AgentAction from "@smthrs/agent/AgentAction"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
@@ -57,7 +57,7 @@ import * as Verify from "./Verify.ts"
  * Everything one unit's graph needs implemented.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type UnitRequires =
   | Action.Requirement<"smithers/migrate-v1/Checkpoint">
@@ -72,19 +72,20 @@ export type UnitRequires =
  * its own context, so the unit's requirements are not the caller's.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Requires =
   | Action.Requirement<"smithers/migrate-v1/Scan">
   | Action.Requirement<"smithers/migrate-v1/Gate">
   | Action.Requirement<"smithers/migrate-v1/Seal">
+  | Action.Requirement<"smithers/migrate-v1/Settle">
   | Action.Requirement<"smithers/migrate-v1/WriteReport">
 
 /**
  * The flow tag the control plane registers this migration under.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const tag = "smithers/migrate-v1"
 
@@ -92,7 +93,7 @@ export const tag = "smithers/migrate-v1"
  * The child flow tag, one execution per unit.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const unitTag = "smithers/migrate-v1/unit"
 
@@ -129,7 +130,7 @@ const scanOptions = (options: Options.MigrateOptions): Scan.Options => ({
  * never to write.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layoutConflict = (
   result: Scan.ScanResult,
@@ -158,7 +159,7 @@ export const layoutConflict = (
  * the migration reads or protects.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const scan = (
   options: Options.MigrateOptions
@@ -176,7 +177,7 @@ export const scan = (
  * first attempt saw instead of walking the project again.
  *
  * @category actions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const scanAction = Action.make("smithers/migrate-v1/Scan", {
   payload: {
@@ -191,7 +192,7 @@ export const scanAction = Action.make("smithers/migrate-v1/Scan", {
  * The scan step's implementation.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const scanLayer = scanAction.toLayer(({ generatedAt, options }) =>
   Effect.map(scan(options), (result) =>
@@ -205,7 +206,7 @@ export const scanLayer = scanAction.toLayer(({ generatedAt, options }) =>
  * own scan found.
  *
  * @category actions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const gateAction = Action.make("smithers/migrate-v1/Gate", {
   payload: {
@@ -229,7 +230,7 @@ export const gateAction = Action.make("smithers/migrate-v1/Gate", {
  * touched a project the operator had not agreed to touch.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const gateLayer = gateAction.toLayer(({ options, report, unitIds }) =>
   Effect.gen(function*() {
@@ -256,7 +257,7 @@ export const gateLayer = gateAction.toLayer(({ options, report, unitIds }) =>
  * The checkpoint-time state of one path a plan covers.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const SealedFile = Schema.Struct({
   path: Schema.String,
@@ -275,7 +276,7 @@ export const SealedFile = Schema.Struct({
  * did.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const PlanSeal = Schema.Struct({
   digest: Schema.String,
@@ -286,7 +287,7 @@ export const PlanSeal = Schema.Struct({
  * A plan, sealed.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type PlanSeal = typeof PlanSeal.Type
 
@@ -301,7 +302,7 @@ const sha256 = (text: string | Uint8Array): string => createHash("sha256").updat
  * digest.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const planSeal = (
   result: Scan.ScanResult,
@@ -338,7 +339,7 @@ export const planSeal = (
  * that exists in one and not the other.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const sealDifferences = (planned: PlanSeal, current: PlanSeal): ReadonlyArray<string> => {
   const before = new Map(planned.files.map((file) => [file.path, file] as const))
@@ -367,7 +368,7 @@ export const sealDifferences = (planned: PlanSeal, current: PlanSeal): ReadonlyA
  * by this run.
  *
  * @category actions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const sealAction = Action.make("smithers/migrate-v1/Seal", {
   payload: {
@@ -383,7 +384,7 @@ export const sealAction = Action.make("smithers/migrate-v1/Seal", {
  * Checks the sealed plan against a fresh read of the project.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const seal = (payload: {
   readonly options: Options.MigrateOptions
@@ -419,7 +420,7 @@ export const seal = (payload: {
  * The seal step's implementation.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const sealLayer = sealAction.toLayer(seal)
 
@@ -427,7 +428,7 @@ export const sealLayer = sealAction.toLayer(seal)
  * What one unit's execution settles on.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const UnitOutcome = Report.UnitReport
 
@@ -435,7 +436,7 @@ export const UnitOutcome = Report.UnitReport
  * What one unit's execution settles on.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type UnitOutcome = typeof UnitOutcome.Type
 
@@ -457,7 +458,7 @@ export type UnitOutcome = typeof UnitOutcome.Type
  * for.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const unitArtifact = (options: Options.MigrateOptions, id: string): string =>
   `${Options.reportDir(options)}/units/${id.replace(/[^A-Za-z0-9._-]+/g, "-")}-${sha256(id).slice(0, 16)}.json`
@@ -471,7 +472,7 @@ export const unitArtifact = (options: Options.MigrateOptions, id: string): strin
  * `irreversible` because it moves files and restores a checkpoint.
  *
  * @category actions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const finishAction = Action.make("smithers/migrate-v1/Finish", {
   payload: {
@@ -545,7 +546,7 @@ const unitPlanFor = (
  * are part of what produces that state.
  *
  * @category checks
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const postconditions = (
   root: string,
@@ -730,7 +731,7 @@ export const postconditions = (
  * that is written down.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const finish = (payload: typeof finishAction.payloadSchema.Type): Effect.Effect<
   UnitOutcome,
@@ -1030,7 +1031,7 @@ const canonical = (input: {
  * The finish step's implementation.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const finishLayer = finishAction.toLayer((payload) =>
   Effect.tap(finish(payload), (outcome) =>
@@ -1062,7 +1063,7 @@ const writeUnitReport = (
  * failure of this step, never a unit quietly left out of the report.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const readUnitReport = (
   options: Options.MigrateOptions,
@@ -1123,11 +1124,90 @@ const unaccounted = (
 }
 
 /**
+ * The settle step: record a unit that failed with this package's own error
+ * before its finish step could write an outcome.
+ *
+ * A checkpoint that cannot be taken, a verification that cannot spawn, an
+ * archive that cannot move a file: each fails its unit's execution with a
+ * `MigrateError` after the unit's restoring scope has put its files back. The
+ * error is the operator's evidence, so it is written into the unit's own
+ * artifact as the reason the unit failed, and the run goes on to the next
+ * unit; every finished unit keeps its outcome and the report exits nonzero.
+ *
+ * One code is not a unit's failure: `no-vcs` is a refusal of the whole run
+ * before it has written anything, so it is raised again unchanged and the
+ * operator sees `--allow-no-vcs` in the refusal rather than a report.
+ *
+ * `irreversible` because it writes the artifact.
+ *
+ * @category actions
+ * @since 1.0.0-rc.0
+ */
+export const settleAction = Action.make("smithers/migrate-v1/Settle", {
+  payload: {
+    options: Options.MigrateOptions,
+    outline: Transform.UnitOutline,
+    failure: MigrateError
+  },
+  success: Schema.String,
+  error: MigrateError,
+  tier: "irreversible"
+})
+
+/**
+ * Records a unit-level failure as the unit's outcome and answers with the
+ * unit id, or re-raises a refusal that belongs to the whole run.
+ *
+ * @category execution
+ * @since 1.0.0-rc.0
+ */
+export const settle = (payload: {
+  readonly options: Options.MigrateOptions
+  readonly outline: Transform.UnitOutline
+  readonly failure: MigrateError
+}): Effect.Effect<string, MigrateError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function*() {
+    const { failure, options, outline } = payload
+    if (failure.code === "no-vcs") return yield* Effect.fail(failure)
+    const outcome: UnitOutcome = {
+      id: outline.id,
+      kind: outline.kind,
+      sources: outline.sources,
+      targets: outline.targets,
+      status: "failed",
+      changedFiles: [],
+      decisions: [],
+      unresolved: [{
+        construct: "the unit could not finish",
+        reason: `${failure.code}: ${failure.message}${failure.details === undefined ? "" : `\n${failure.details}`}`,
+        file: outline.sources[0] ?? outline.id,
+        line: 1,
+        suggestion: `The unit's files were restored from its checkpoint. Read ${
+          Options.reportDir(options)
+        }/pending-unit.json if it exists, fix the cause, then rerun with --unit ${outline.id}`
+      }],
+      unsupported: [],
+      repairRounds: 0,
+      durationMs: 0
+    }
+    yield* writeUnitReport(options, outcome)
+    return outline.id
+  })
+
+/**
+ * The settle step's implementation.
+ *
+ * @category layers
+ * @since 1.0.0-rc.0
+ */
+export const settleLayer = settleAction.toLayer(settle)
+
+/**
  * The report step: fold every unit outcome into the scan's report and write
  * `report.json` and `report.md`.
  *
  * @category actions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const writeReportAction = Action.make("smithers/migrate-v1/WriteReport", {
   payload: {
@@ -1145,7 +1225,7 @@ export const writeReportAction = Action.make("smithers/migrate-v1/WriteReport", 
  * Folds the unit outcomes into the report and writes it.
  *
  * @category execution
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const writeReport = (payload: {
   readonly options: Options.MigrateOptions
@@ -1181,7 +1261,7 @@ export const writeReport = (payload: {
  * The report step's implementation.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const writeReportLayer = writeReportAction.toLayer(writeReport)
 
@@ -1189,7 +1269,7 @@ export const writeReportLayer = writeReportAction.toLayer(writeReport)
  * One unit's migration, as its own durable execution.
  *
  * @category flows
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const unit = Flow.make(unitTag, {
   payload: {
@@ -1320,7 +1400,7 @@ export const unit = Flow.make(unitTag, {
  * The migration.
  *
  * @category flows
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const flow = Flow.make(tag, {
   payload: {
@@ -1357,10 +1437,28 @@ export const flow = Flow.make(tag, {
               if (outlined === undefined) {
                 return writeReportAction.call({ options: approved, report, unitIds, after })
               }
-              return Node.andThen(
-                unit.child({ options: approved, outline: outlined, runStateRoots, after }),
-                (settled) => step(index + 1, settled.id)
+              // A unit that fails is a unit that failed, not a migration that
+              // stopped. An agent failure already settles its unit, and a
+              // `MigrateError` raised by the checkpoint, the verification, the
+              // archive, or the artifact write is settled the same way here:
+              // the unit's restoring scope has already put its files back, the
+              // next unit runs, and the report is written. A unit with no
+              // recorded outcome is reported `failed` by `writeReport`, so the
+              // run still exits nonzero and the operator reads what happened
+              // in the report instead of losing every finished unit with it.
+              // The catch wraps only this unit's call, never the recursion, so
+              // one failure cannot re-enter the rest of the plan.
+              const settled = Node.catch(
+                Node.map(
+                  unit.child({ options: approved, outline: outlined, runStateRoots, after }),
+                  (outcome) => outcome.id
+                ),
+                {
+                  error: MigrateError,
+                  onFailure: (failure) => settleAction.call({ options: approved, outline: outlined, failure })
+                }
               )
+              return Node.andThen(settled, (id) => step(index + 1, id))
             }
             // The seal runs after the gate and reads the tree once more; the
             // first unit runs after the seal, and says so with the root the
@@ -1385,7 +1483,7 @@ export const flow = Flow.make(tag, {
  * because it is public API.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layer = Layer.mergeAll(
   Checkpoint.layer,
@@ -1398,6 +1496,7 @@ export const layer = Layer.mergeAll(
   scanLayer,
   gateLayer,
   sealLayer,
+  settleLayer,
   writeReportLayer,
   Interpreter.layer(unit),
   Interpreter.layer(flow)
@@ -1407,7 +1506,7 @@ export const layer = Layer.mergeAll(
  * The run-state roots a scan implies, in the shape the unit flow takes.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const runStateRoots = (result: Scan.ScanResult): ReadonlyArray<string> => RunState.roots(result.runState)
 
@@ -1415,7 +1514,7 @@ export const runStateRoots = (result: Scan.ScanResult): ReadonlyArray<string> =>
  * The plan-time outlines of every unit a scan found.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const outlines = (
   result: Scan.ScanResult,

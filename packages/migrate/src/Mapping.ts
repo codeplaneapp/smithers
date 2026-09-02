@@ -15,7 +15,7 @@
  * maxConcurrency>` is guided, and `<Task hijack>` is unsafe, because the prop
  * is the part with no counterpart.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Constructs from "./Constructs.ts"
 import * as Sort from "./internal/Sort.ts"
@@ -31,7 +31,7 @@ import * as ZodSchemaHints from "./ZodSchemaHints.ts"
  * decision the report has to carry rather than a rewrite the tool may pick.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const subscriptionAgents: ReadonlyArray<string> = [
   "ClaudeCodeAgent",
@@ -44,7 +44,7 @@ export const subscriptionAgents: ReadonlyArray<string> = [
  * The suggestion the report offers for every {@link subscriptionAgents} hit.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const subscriptionSuggestion =
   "keep subscription auth through the flows harness, or choose an API seat; pools stay pools"
@@ -53,7 +53,7 @@ export const subscriptionSuggestion =
  * How much freedom the migration has with one construct.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type MappingClass = "automatic" | "guided" | "unsafe"
 
@@ -61,7 +61,7 @@ export type MappingClass = "automatic" | "guided" | "unsafe"
  * One mapping row.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface MappingRow {
   readonly construct: string
@@ -821,7 +821,7 @@ const honest = (entry: MappingRow): MappingRow =>
  * generated document is stable.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const rows: ReadonlyArray<MappingRow> = [
   ...table,
@@ -836,7 +836,7 @@ const index = new Map(rows.map((entry) => [entry.construct, entry]))
  * Looks a mapping row up by construct name.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const byConstruct = (construct: string): MappingRow | undefined => index.get(construct)
 
@@ -851,7 +851,7 @@ export const byConstruct = (construct: string): MappingRow | undefined => index.
  * the catalog does not know, and `Detect` reports it as `uncatalogued-import`.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const byImport = (name: string): MappingRow | undefined => {
   const direct = index.get(name)
@@ -957,7 +957,7 @@ const order: Record<MappingClass, number> = { automatic: 0, guided: 1, unsafe: 2
  * The class of one hit, and why it is not the table's class when it is not.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const classifyWithReason = (
   hit: InventoryEntry
@@ -1006,7 +1006,7 @@ const needsSnippet = (construct: string): boolean =>
  * The class of one hit.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const classify = (hit: InventoryEntry): MappingClass => classifyWithReason(hit).class
 
@@ -1256,7 +1256,7 @@ const sequenced = (
  * rest at run time.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const snippet = (hit: InventoryEntry): string | undefined => {
   const detail = hit.detail ?? {}
@@ -1477,7 +1477,7 @@ const cell = (value: string | null): string => (value === null ? "none" : `\`${v
  * renderer touches nothing else.
  *
  * @category rendering
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const markdownTable = (): string => {
   const lines = [

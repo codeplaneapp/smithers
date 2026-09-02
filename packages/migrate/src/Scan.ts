@@ -7,7 +7,7 @@
  * That is what makes `scan` and `plan` safe to run on a project the operator
  * has not decided about yet.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
@@ -27,7 +27,7 @@ import * as ZodSchemaHints from "./ZodSchemaHints.ts"
  * Everything one scan found.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ScanResult {
   readonly root: string
@@ -46,7 +46,7 @@ export interface ScanResult {
  * Options for {@link scan}.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Options {
   readonly ignore?: ReadonlyArray<string> | undefined
@@ -66,7 +66,7 @@ const severity: Record<Mapping.MappingClass, number> = { automatic: 0, guided: 1
  * reason any of them gave.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const decisions = (
   hits: ReadonlyArray<Inventory.InventoryEntry>
@@ -110,7 +110,7 @@ export const decisions = (
  * do with it.
  *
  * @category scanners
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const scan = (
   root: string,
@@ -173,7 +173,7 @@ export const scan = (
  * the mapping table and record nothing an operator can act on.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const operatorDecisions = (
   unit: Units.UnitPlan
@@ -197,7 +197,7 @@ export const operatorDecisions = (
  * in `apply` mode.
  *
  * @category combinators
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const toReport = (
   result: ScanResult,
