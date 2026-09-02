@@ -100,12 +100,14 @@ next request rather than replaying content the provider will reject. Partial
 tool-call arguments on that interrupted turn are preserved verbatim for audit;
 they are never rewritten to `{}` or treated as executable input.
 
-### The ChatGPT route drops maxTokens
+### The ChatGPT route refuses maxTokens
 
 `OpenAIChatGPT.make` targets the ChatGPT-subscription backend, which rejects
-`max_output_tokens` outright. That route therefore omits the caller's
-`params.maxTokens` from the body by design, verified against the live backend.
-Every other route sends it.
+`max_output_tokens` outright and offers no other output cap, verified against
+the live backend. A request that sets `params.maxTokens` therefore fails in
+`Route.prepare` as `invalid_request` with `path: "params.maxTokens"`, before
+signing and transport, rather than being sent without the budget the caller
+asked for. Omit `maxTokens` on that route. Every other route sends it.
 
 ## Redaction and limits
 

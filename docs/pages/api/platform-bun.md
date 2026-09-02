@@ -93,7 +93,11 @@ a default: only the program knows whether it has a durable one.
 
 `layerAt` and `layerContainedAt` are the two layers with `Jj` bound to one
 absolute repository root rather than the process working directory. Both refuse
-a relative root.
+a root that is not absolute, the empty string included, by throwing
+`BunHost.BunHostError` with `code: "invalid_repository_root"` when the factory
+is called. The error is this package's: its message names the Bun factory that
+refused, never the adapter behind the `Jj` slot, and repeats at most 64
+characters of the root. Branch on `code`, never on the message.
 
 Both contained factories take `BunHost.ContainedOptions`: the escalation
 deadline plus the reaper's `ownerPid` and system seam. `platform` is not part of
@@ -148,6 +152,8 @@ with capability checks. [@smthrs/platform-node](/api/platform-node) and
 | `BunFileSystem.layerWith`   | const | layers   | Provides the same filesystem against an explicitly configured interpreter and set of byte limits. |
 | `BunFileSystem.Options`     | type  | models   | The interpreter and byte limits `layerWith` accepts.                                              |
 | `BunHost.BunHost`           | type  | models   | The complete closed Host service union provided by Bun.                                           |
+| `BunHost.BunHostErrorCode`  | type  | models   | The stable codes a `BunHost` factory refuses with.                                                |
+| `BunHost.BunHostError`      | class | errors   | The refusal a `BunHost` factory throws before it builds a layer.                                  |
 | `BunHost.implementationIds` | const | models   | Stable implementation identities keyed by the closed Host service slots.                          |
 | `BunHost.ContainedOptions`  | type  | models   | What a caller may configure about containment.                                                    |
 | `BunHost.layer`             | const | layers   | Provides all five Bun Host services, including the runtime-independent Path service.              |

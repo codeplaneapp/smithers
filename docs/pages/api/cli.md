@@ -52,6 +52,13 @@ The stable process statuses are 0 for success, 1 for a failed operation or run,
 2 for usage, 3 for a run waiting on approval, 130 for cancellation, and 143 for
 termination.
 
+A failure is one line on stderr and nothing on stdout, so a `--json` reader
+never finds a diagnostic inside its document. The line names the failure's
+class rather than its namespace (`ClaimLost`, not `/control/ClaimLost`),
+followed by its sentence. A control failure that carries no sentence is
+reported by the fields it does carry, contract code first:
+`ClaimLost: claim_lost runId=run-42`.
+
 ## Command documentation
 
 The [`smithers` command pages](/cli) are generated from the real Effect CLI

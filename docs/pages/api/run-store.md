@@ -70,9 +70,17 @@ persist. Lifecycle stamps read the Effect `Clock`: `create` writes
 the same reading.
 
 Every `nowMs` and `LivenessEvidence.checkedAtMs` is validated as a non-negative
-safe integer, then trusted: the store cannot distinguish a slow clock from a
-lie. That is correct for an in-process library over a local SQLite file whose
-caller can issue raw SQL itself, and it must not cross a trust boundary.
+safe integer. The lease operations (`claim`, `claimAndOwn`, `steal`,
+`heartbeat`, and `recoverClaim`) also refuse a `nowMs` that runs ahead of the
+store's `Clock` by more than `heartbeatSkewAllowance` with `invalid_run`, so a
+runaway caller clock can neither steal a fresh owner nor pin a lease past the
+cutoff. A reading behind the clock is admitted; it only makes staleness
+judgments more conservative. `requestCancel` keeps its literal reading, which
+is request data rather than a lease predicate, and `claimedAtMs` fence tokens
+are compared against the row rather than bounded. Inside the allowance the
+reading is trusted: the store cannot distinguish a slow clock from a lie. That
+is correct for an in-process library over a local SQLite file whose caller can
+issue raw SQL itself, and it must not cross a trust boundary.
 Evidence binds to one instant by exact equality, so a probe taken at T is
 refused by a call made at T+1. Heartbeats are monotonic, so a pulse delayed
 past a newer one reports `Updated` without moving the lease backwards.

@@ -19,7 +19,7 @@ Everything durable in Smithers is one of a small number of shapes. This page nam
 | -------------------- | ----------------------------- | ------------------------------------ | ---------------------- |
 | Journal entry        | `flows_journal_events`        | `0001_initial`                       | `@smthrs/journal`      |
 | Journal checkpoint   | `flows_journal_checkpoints`   | `0002_checkpoints`                   | `@smthrs/journal`      |
-| Run row              | `flows_runs`                  | `0001_initial`                       | `@smthrs/run-store`    |
+| Run row              | `flows_runs`                  | `0001_initial`, `0002_lineage`       | `@smthrs/run-store`    |
 | Attempt row          | `flows_attempts`              | `0001_initial`                       | `@smthrs/run-store`    |
 | Cache row            | `flows_step_cache`            | `0001_initial`                       | `@smthrs/step-cache`   |
 | Deferred completion  | `flows_deferred_completions`  | `0001_initial`                       | `@smthrs/engine-store` |
@@ -122,14 +122,17 @@ Readers: `Journal.entries` pages history, `Journal.stream` replays then follows,
 | `owner_host_id`, `owner_pid`, `owner_nonce`, `heartbeat_at_ms` | the ownership fence                                                   |
 | `claim_host_id`, `claim_pid`, `claim_nonce`, `claimed_at_ms`   | the claim generation                                                  |
 | `state_json`                                                   | encoded payload and, once terminal, the encoded `Flow.Result`         |
-| `parent_run_id`, `cancel_requested_at_ms`                      | lineage and cancellation guards                                       |
+| `parent_run_id`, `cancel_requested_at_ms`                      | parentage and cancellation guards                                     |
+| `lineage_id`, `round_ordinal`                                  | the trampoline pair added by `0002_lineage`, unique together          |
 | `waiting_reason`, `waiting_wake_at_ms`, `waiting_token`        | parked-run query and wake data                                        |
 
-Invariants, enforced by table `CHECK` constraints rather than by convention:
+`lineage_id` and `round_ordinal` are `NULL` on an ordinary run, which reads as round 0 of a lineage of one. `waiting_*` is created by this migration but read and written only by `@smthrs/engine-store`; `RunStore.RunRow` does not model those three columns.
 
-- A `running` row has all four owner fields set. Any other status has all four `NULL`. Moving to `suspended` or a terminal status therefore clears ownership atomically with the transition.
-- The four claim fields are all set or all `NULL`.
-- The lifecycle is `pending → running → completed | failed | suspended | cancelled`, and `suspended → running` on a wake.
+Table `CHECK` constraints enforce the first two invariants below. The third is a convention `RunStore` upholds, not a constraint:
+
+- Enforced: a `running` row has all four owner fields set. Any other status has all four `NULL`. Moving to `suspended` or a terminal status therefore clears ownership atomically with the transition.
+- Enforced: the four claim fields are all set or all `NULL`, and `status` is one of the six names above.
+- Convention: the lifecycle is `pending → running → completed | failed | suspended | cancelled`, and `suspended → running` on a wake. Nothing in the schema enforces the transition graph. `transitionOwned` writes any `RunStatus` its owner fence admits, so a writer that bypasses `RunStore` can land a shape no reader expects.
 
 Ownership constants live in `Ownership`: a 1 second heartbeat interval, a 19 second write tolerance, and a 30 second stale threshold. The write tolerance is eleven ticks shorter than the steal cutoff, so an owner whose heartbeat writes fail is always interrupted before a peer may take over.
 
@@ -325,21 +328,20 @@ These are the behaviors that have to be exercised against real implementations, 
 | Package                         | Suites | Notable coverage                                                                                                                                                                                                                |
 | ------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@smthrs/platform-node`         | 2      | the shared contract suite (`@smthrs/kernel/test/contract`) against the Node bundle, once with explicit expectations and once taking every default                                                                               |
-| `@smthrs/platform-bun`          | 1      | the same suite against the Bun bundle, which runs the Node fallback under vitest                                                                                                                                                |
-| `@smthrs/platform-browser`      | 5      | the same suite against `BrowserHost`, plus the ZenFS filesystem adapter and the just-bash spawner                                                                                                                               |
+| `@smthrs/platform-bun`          | 5      | the shared contract suite against `BunHost.layerAt` with a loopback server behind the HTTP probes, the manual-redirect fail-closed case, the guarded descriptor-relative filesystem, real-process containment and reaping, and the barrel with its browser-free module graph |
+| `@smthrs/platform-browser` | 8 | the shared contract suite against `BrowserHost` three ways (the full wasm-backed bundle, manual redirects, one shared mount), the ZenFS filesystem adapter and its bounded streaming against a real directory, the just-bash spawner's rendering, refusals, handle capabilities, and abort boundary, the browser bundle gate, and the barrel with its kernel isolation attestation |
 | `@smthrs/jj`                    | 4      | the contract and its no-op, the jj CLI against a real repository, error classification against a scripted binary, and the Bun and browser layers                                                                                |
 | `@smthrs/sandbox`               | 23     | the barrel, spawner adaptation and kill, the scripted and real-process providers, both conformance suites, the health probe, supervision, the session contract, and nine machine providers, three of them against real backends |
-| `@smthrs/platform-browser`      | 4      | the filesystem adapter's operations and bounded streaming against a real directory, the spawner's command rendering, rejected inputs, handle capabilities, and its serialized uninterruptible boundary, and the aggregate layer |
 | `@smthrs/journal`               | 12     | durable and lossy admission, fencing, transactions, retention, redaction, projections, migrations                                                                                                                               |
 | `@smthrs/run-store`             | 9      | run and attempt stores, ownership arbitration, run metadata, migrations                                                                                                                                                         |
-| `@smthrs/step-cache`            | 6      | cache admission, eviction, provenance, migrations                                                                                                                                                                               |
+| `@smthrs/step-cache`            | 13     | bounded-JSON admission, the SQL head and its provenance ledger, durability and crash recovery, expiry and sweeping, fenced eviction, the remote HTTP tier, the combined tiers, metrics, redaction, artifact references, migrations, the barrel contract, and the test double |
 | `@smthrs/database`              | 4      | the write-serialization contract, concurrent open, artifact shape                                                                                                                                                               |
-| `@smthrs/kernel`                | 23     | capability parsing, matching, subsumption, tiers, ambient sets, grants and their journal persistence, every decorated service                                                                                                   |
+| `@smthrs/kernel`                | 38     | capability parsing, matching, subsumption, tiers, ambient sets, grants and their journal persistence, every decorated service                                                                                                   |
 | `@smthrs/canonical`             | 1      | RFC 8785 vectors, malformed Unicode, boundary values, and large values                                                                                                                                                          |
 | `@smthrs/crypto` | 3      | package-owned vector, property, host-adversary, error, redaction, and parity coverage                                                                                                                                           |
 | `@smthrs/keys`     | 3      | frozen `key1_` vectors, stored-key identity and version rejection, canonical equality properties, typed host failures, diagnostic redaction, irreversibility, and browser-safe source imports                                   |
 | `@smthrs/plan`     | 10     | the step-key compiler and its collision cases, plan compilation, conflict annotation and append, the append-only store, the node AST, planned-value refusals, build refusals                                                    |
-| `@smthrs/artifacts`             | 5      | the store contract, the memory and filesystem implementations, the combined tier, and the remote client                                                                                                                         |
+| `@smthrs/artifacts`             | 12     | the store contract, the memory and filesystem implementations, the combined tier, digest validation, the store counters, the remote client against both a stub transport and a real loopback HTTP server that resumes an interrupted chunked upload, the sweep, and the cross-process lock and backup lease that fence publication against deletion, the lock also across real spawned processes |
 | `@smthrs/flow`     | 28     | flow definitions and their combinators, execution ids, results, suspension and nested suspension, cancellation, child boundaries and trampoline handoffs, graph building and priority, the interpreter, action declaration, requirements, combinators and retry pinning, deferreds, clocks, queues, wait points, polling, human tasks, sleeps, file boundaries, cache policy, retry policy data, step identity |
 | `@smthrs/engine`                | 18     | action identity and keys, ordinal stability, keyless concurrency, tiers, durable attempt resume, the memory engine, retry decisions, proxies                                                                                    |
 | `@smthrs/engine-store`          | 61     | the durability matrix: ownership, adoption, sweeps, parking, cancellation, cycles, attempt persistence, cache admission, boundaries, WAL atomicity, fault matrix                                                                |
@@ -347,6 +349,20 @@ These are the behaviors that have to be exercised against real implementations, 
 | `@smthrs/time-travel`           | 21     | the `TimeTravel` service surface, replay, fork and its lineage, rewind with claims, concurrency and rollback, truncation, compensation, recovery, both stores                                                                   |
 | `@smthrs/flows`    | 14     | the barrel namespace universe and the absence of an unsupported Cloudflare runtime subpath, the real-SQLite `NodeRuntime` journey and its guarded host composition, three integration hosts (containment, reaping, signals), the AST spawn-containment gate, sandboxed child execution against both a scripted and a real provider plus its retry policy, the authoring end-to-end program and its error surface, the shipped CLI composition contract, and the repository-wide coverage-isolation conformance suite |
 | `@smthrs/examples`              | 11     | every documentation example, run end to end against the real packages                                                                                                                                                           |
+
+{/* generated:kernel-testing start */}
+
+The package-owned `@smthrs/kernel` suite covers capability-set
+intersection, bounded and immutable grant state, journal replay and envelope
+limits, canonical filesystem resources and descriptor identity, command
+snapshots, process containment and ledger recovery, HTTP method/origin and
+redirect authorization, Jujutsu resources, browser-safe imports, and every
+supported and refused host operation. Its public
+`@smthrs/kernel/test/contract` matrix is also run by the Node, Bun, browser,
+test, and unsupported host bundles, including observable process liveness and
+multi-leg pipelines.
+
+{/* generated:kernel-testing end */}
 
 {/* generated:keys-testing start */}
 
@@ -368,6 +384,29 @@ input snapshots, malformed or mutable output, missing services, exact stable
 failures with preserved causes, diagnostic redaction, and irreversibility.
 
 {/* generated:crypto-testing end */}
+
+{/* generated:platform-browser-testing start */}
+
+The package-owned
+`@smthrs/platform-browser` suite runs the shared host
+contract against `BrowserHost` three ways: the full bundle over the committed
+`flows_jj.wasm`, the manual-redirect `HttpClient`, and one real mount shared by
+the filesystem, the interpreter, and jj. Beside it, the filesystem adapter is
+exercised against a real temp directory for recursive listing, permission
+checks, directory modes, symlink and relative canonicalization including a `..`
+that follows a link, and bounded streaming with refused bounds, and against stub
+backends for every error tag, a looping directory tree, a backend that
+misreports a read length, and backends that keep the buffers they are handed
+and the containers they answer with, which pin that bytes and names cross the
+boundary by value. The spawner suite pins the rendered command line
+against the kernel's own renderer with hostile argv tokens, every refused
+capability, and the abort boundary: an interpreter that ignores its
+`AbortSignal` must not let a second run start, and a killed handle must report a
+`PlatformError` rather than interrupt its caller. The barrel suite pins the
+namespace universe and the kernel isolation attestation that `layer` makes and
+`make` does not.
+
+{/* generated:platform-browser-testing end */}
 
 {/* generated:plan-testing start */}
 
@@ -785,15 +824,33 @@ If an application extension later wraps agent CLIs into workflows the way Smithe
 
 The alternative was keeping the `@smthrs/pty` package that once shipped here. It was removed: its contract had no production consumer, and its Node implementation was piped stdio rather than a pseudo-terminal, so it could not honestly back the contract it named.
 
+### D14. Core extension is dependency injection; cell-loop extension uses the plugin kernel
+
+Durable-engine policy is injected at the service or constructor seam that
+applies it. The public `@smthrs/plugin` package is the narrower,
+bounded extension point for the assembled agent cell host. Its shared catalog
+contains only configuration hooks; `@smthrs/agent` adds and dispatches the
+registry, flow-binding, and model-request waterfalls it owns.
+
+The alternative was an engine-wide lifecycle catalog. That would duplicate
+Effect services, make ordering part of durable execution semantics, and let a
+plugin intercept retry, cache, journal, ownership, or wait policy outside the
+component responsible for it.
+
+Cost: a host must declare both the augmented TypeScript hook interface and the
+matching runtime catalog. Resolution validates and freezes that bounded catalog
+at startup. Adding a typed hook without adding it to the host catalog does not
+make it dispatchable.
+
 ### Decisions the review contested and their outcome
 
-| Question | Review position | Outcome |
-| --- | --- | --- |
-| Ship 0.1.0 or an experimental preview | a full 0.1.0, with WAL atomicity fixed first | atomicity landed; the version is `0.1.0` |
-| Package naming | keep the `@smthrs/*` names | kept |
-| Publish `@smthrs/plugin` | hold it back as private until dispatch is wired, because publishing sells an extension API nothing calls | settled for the bounded assembled cell loop: `@smthrs/agent` dispatches its configuration, registry, flow-binding, and model-request hooks; durable-core policy remains dependency injection, with no engine-wide lifecycle hook catalog. The package exists and the decision whether to publish it remains open for the agent track. |
-| Browser claim | narrow the claim and gate it, rather than restructure subpaths for 0.1.0 | narrowed and gated by `pnpm run browser`; the gate has since grown to twenty-four browser entry points as each Node read moved behind a port, so the barrel and engine-store now bundle too; only the platform bundles, the jj and SQLite drivers, and the test host stay Node-only |
-| Positioning against Temporal, Restate, Inngest | lead with Effect integration, embeddability, content addressing, and time travel; do not lead with parity | adopted, see External |
+| Question                                       | Review position                                                                                           | Outcome                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ship 0.1.0 or an experimental preview          | a full 0.1.0, with WAL atomicity fixed first                                                              | atomicity landed; the version is `0.1.0`                                                                                                                                                                                                                                                                                                       |
+| Package naming                                 | keep the `@smthrs/*` names                                                                                | kept                                                                                                                                                                                                                                                                                                                                           |
+| Publish `@smthrs/plugin`                       | hold it back as private until dispatch is wired, because publishing sells an extension API nothing calls  | published for the bounded assembled cell loop: `@smthrs/agent` dispatches its configuration, registry, flow-binding, and model-request hooks; durable-core policy remains dependency injection, with no engine-wide lifecycle hook catalog. See [D14](#d14-core-extension-is-dependency-injection-cell-loop-extension-uses-the-plugin-kernel). |
+| Browser claim                                  | narrow the claim and gate it, rather than restructure subpaths for 0.1.0                                  | narrowed and gated by `pnpm run browser`; the gate has since grown to twenty-four browser entry points as each Node read moved behind a port, so the barrel and engine-store now bundle too; only the platform bundles, the jj and SQLite drivers, and the test host stay Node-only                                                            |
+| Positioning against Temporal, Restate, Inngest | lead with Effect integration, embeddability, content addressing, and time travel; do not lead with parity | adopted, see External                                                                                                                                                                                                                                                                                                             |
 
 ### Reading next
 
