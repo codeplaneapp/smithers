@@ -53,6 +53,14 @@ The native RPC surface has exactly two privileged operations:
 
 Neither operation has an HTTP fallback in the packaged app.
 
+The identity proxy re-scopes the seam's session cookie to the local origin
+before the WebView sees it: `Domain` goes because the cookie belongs to this
+origin now, and `Secure` goes because WebKit refuses a `Secure` cookie set over
+`http://127.0.0.1` (Chromium accepts one, so only the native renderer showed
+the failure). The trail line for `/api/auth/native/claim` names the cookie's
+attributes, never its value, and every `/` and `/api/*` request leaves a
+`METHOD /path -> status in Nms` line.
+
 ## Repository and process authority
 
 Native repository opening is a two-step grant flow: the picker authorizes a

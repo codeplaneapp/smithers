@@ -171,11 +171,32 @@ const stubIdentity = (pathname: string): Response =>
     ? json({ status: "signed-out" })
     : jsonError(501, "not_implemented", "The identity seam is stubbed in this build.")
 
+/*
+ * Re-scope an upstream Set-Cookie to this origin. The identity seam serves
+ * https, so its session cookie arrives `Domain=<seam>; Secure`. This origin is
+ * plain http on loopback: `Domain` would keep the cookie off it, and WebKit
+ * (the native renderer) refuses a `Secure` cookie set over http://127.0.0.1
+ * or http://localhost, where Chromium accepts one. That difference is why the
+ * headless T1 tier signed in while the native app answered "the sign-in
+ * cookie never reached it". Both attributes go; the rest travel unchanged.
+ */
+export const rescopeCookie = (cookie: string): string =>
+  cookie.replace(/;\s*domain=[^;]*/gi, "").replace(/;\s*secure(?=\s*(?:;|$))/gi, "")
+
+/** A Set-Cookie for the trail: its name and attributes, never its value. */
+export const describeCookie = (cookie: string): string => {
+  const [pair = "", ...attributes] = cookie.split(";")
+  const name = pair.split("=")[0]?.trim() ?? ""
+  return [`${name}=<redacted>`, ...attributes.map((attribute) => attribute.trim())]
+    .filter((part) => part !== "")
+    .join("; ")
+}
+
 /**
  * Forwards an identity request to the deployed seam. The upstream refuses
  * cross-origin writes, so the Origin header follows the upstream (the same
  * rewrite the old Vite dev proxy did), and a session cookie it sets is
- * re-scoped to this origin by dropping its Domain attribute.
+ * re-scoped to this origin (rescopeCookie).
  */
 const proxyIdentity = async (
   request: Request,
@@ -205,15 +226,18 @@ const proxyIdentity = async (
   const cookies = response.headers.getSetCookie()
   if (cookies.length > 0) {
     out.delete("set-cookie")
-    for (const cookie of cookies) out.append("set-cookie", cookie.replace(/;\s*domain=[^;]*/i, ""))
+    for (const cookie of cookies) out.append("set-cookie", rescopeCookie(cookie))
   }
   /*
    * The native handoff's session travels ONLY as the claim's Set-Cookie. A
    * ready claim without one is the exact failure the app cannot see from
-   * JavaScript, so the trail states it here, where the header is visible.
+   * JavaScript, so the trail states it here, where the header is visible,
+   * with the attributes the WebView was handed (never the value): an
+   * attribute the WebView refuses is the same invisible failure.
    */
   if (url.pathname === AUTH_NATIVE_CLAIM_PATH && log !== undefined) {
-    log(`${AUTH_NATIVE_CLAIM_PATH} -> ${response.status}, set-cookie ${cookies.length > 0 ? "present" : "absent"}`)
+    const shape = cookies.map((cookie) => describeCookie(rescopeCookie(cookie))).join(" | ")
+    log(`${AUTH_NATIVE_CLAIM_PATH} -> ${response.status}, set-cookie ${cookies.length > 0 ? `present: ${shape}` : "absent"}`)
   }
   return new Response(response.body, { status: response.status, headers: out })
 }
@@ -427,74 +451,88 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
   /* Filled immediately after Bun chooses the port, before callers can reach it. */
   let origin = ""
   let expectedHost = ""
+  const handle = async (request: Request, bunServer: Server<WsSocketData>): Promise<Response | undefined> => {
+    const url = new URL(request.url)
+    const { pathname } = url
+    if (request.headers.get("host") !== expectedHost) {
+      return jsonError(421, "invalid_host", "This local server accepts only its loopback origin.")
+    }
+    if (pathname === "/ws") {
+      const requestOrigin = request.headers.get("origin")
+      if (requestOrigin !== null && requestOrigin !== origin) {
+        return jsonError(403, "invalid_origin", "WebSocket origin does not match the local app.")
+      }
+      const protocols = (request.headers.get("sec-websocket-protocol") ?? "")
+        .split(",")
+        .map((value) => value.trim())
+      if (!protocols.includes(websocketProtocol)) {
+        return jsonError(401, "local_session_required", "The local session capability is required.")
+      }
+      const upgraded = bunServer.upgrade(request, {
+        data: { topics: new Set<string>() },
+        headers: { "sec-websocket-protocol": websocketProtocol }
+      })
+      return upgraded ? undefined : jsonError(400, "upgrade_failed", "Expected a WebSocket upgrade.")
+    }
+    if (pathname.startsWith("/api/")) {
+      /*
+       * Health remains public for process-supervisor readiness probes. The
+       * two OAuth legs are top-level NAVIGATIONS (window.location or the
+       * system browser opened by the native handoff) and a navigation can
+       * carry no custom header, so gating them on the session header made
+       * every GitHub sign-in from this origin answer 401 before the
+       * identity seam ever saw it. They carry no local privilege — the
+       * proxy forwards them to the identity upstream and back.
+       */
+      const oauthNavigation = request.method === "GET" &&
+        (pathname === AUTH_SIGN_IN_PATH || pathname === AUTH_CALLBACK_PATH)
+      if (pathname !== HEALTH_PATH && !oauthNavigation) {
+        if (request.headers.get(LOCAL_SESSION_HEADER) !== sessionToken) {
+          return jsonError(401, "local_session_required", "The local session capability is required.")
+        }
+        const requestOrigin = request.headers.get("origin")
+        if (requestOrigin !== null && requestOrigin !== origin) {
+          return jsonError(403, "invalid_origin", "Request origin does not match the local app.")
+        }
+      }
+      const matched = router.match(request.method, pathname)
+      if (matched !== undefined) {
+        try {
+          return await matched.handler({ request, url, params: matched.params })
+        } catch (error) {
+          log(`${request.method} ${pathname} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
+          return jsonError(500, "internal", error instanceof Error ? error.message : "Request failed.")
+        }
+      }
+      if (router.knows(pathname)) return jsonError(405, "method_not_allowed", `${request.method} is not allowed on ${pathname}.`)
+      if (pathname.startsWith(AUTH_ROUTE_PREFIX) || pathname.startsWith(IDENTITY_ROUTE_PREFIX)) {
+        return identityUpstream === null ? stubIdentity(pathname) : proxyIdentity(request, url, identityUpstream, log)
+      }
+      return jsonError(404, "not_found", `No route for ${request.method} ${pathname}.`)
+    }
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return jsonError(405, "method_not_allowed", `${request.method} is not allowed on ${pathname}.`)
+    }
+    return serveStatic(pathname)
+  }
   const server = Bun.serve<WsSocketData>({
     hostname: "127.0.0.1",
     port: options.port ?? 0,
     idleTimeout: 255,
+    /*
+     * Every "/" and "/api/*" request leaves one trail line with its status
+     * and duration, written after the handler answers. A sign-in that fails
+     * silently inside the WebView is visible here as the sequence of answers
+     * the page got; a WebSocket upgrade answers nothing and leaves no line.
+     */
     fetch: async (request, bunServer) => {
-      const url = new URL(request.url)
-      const { pathname } = url
-      if (request.headers.get("host") !== expectedHost) {
-        return jsonError(421, "invalid_host", "This local server accepts only its loopback origin.")
+      const started = performance.now()
+      const response = await handle(request, bunServer)
+      const { pathname } = new URL(request.url)
+      if (response !== undefined && (pathname === "/" || pathname.startsWith("/api/"))) {
+        log(`${request.method} ${pathname} -> ${response.status} in ${Math.round(performance.now() - started)}ms`)
       }
-      if (pathname === "/" || pathname.startsWith("/api/")) log(`${request.method} ${pathname}`)
-      if (pathname === "/ws") {
-        const requestOrigin = request.headers.get("origin")
-        if (requestOrigin !== null && requestOrigin !== origin) {
-          return jsonError(403, "invalid_origin", "WebSocket origin does not match the local app.")
-        }
-        const protocols = (request.headers.get("sec-websocket-protocol") ?? "")
-          .split(",")
-          .map((value) => value.trim())
-        if (!protocols.includes(websocketProtocol)) {
-          return jsonError(401, "local_session_required", "The local session capability is required.")
-        }
-        const upgraded = bunServer.upgrade(request, {
-          data: { topics: new Set<string>() },
-          headers: { "sec-websocket-protocol": websocketProtocol }
-        })
-        return upgraded ? undefined : jsonError(400, "upgrade_failed", "Expected a WebSocket upgrade.")
-      }
-      if (pathname.startsWith("/api/")) {
-        /*
-         * Health remains public for process-supervisor readiness probes. The
-         * two OAuth legs are top-level NAVIGATIONS (window.location or the
-         * system browser opened by the native handoff) and a navigation can
-         * carry no custom header, so gating them on the session header made
-         * every GitHub sign-in from this origin answer 401 before the
-         * identity seam ever saw it. They carry no local privilege — the
-         * proxy forwards them to the identity upstream and back.
-         */
-        const oauthNavigation = request.method === "GET" &&
-          (pathname === AUTH_SIGN_IN_PATH || pathname === AUTH_CALLBACK_PATH)
-        if (pathname !== HEALTH_PATH && !oauthNavigation) {
-          if (request.headers.get(LOCAL_SESSION_HEADER) !== sessionToken) {
-            return jsonError(401, "local_session_required", "The local session capability is required.")
-          }
-          const requestOrigin = request.headers.get("origin")
-          if (requestOrigin !== null && requestOrigin !== origin) {
-            return jsonError(403, "invalid_origin", "Request origin does not match the local app.")
-          }
-        }
-        const matched = router.match(request.method, pathname)
-        if (matched !== undefined) {
-          try {
-            return await matched.handler({ request, url, params: matched.params })
-          } catch (error) {
-            log(`${request.method} ${pathname} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`)
-            return jsonError(500, "internal", error instanceof Error ? error.message : "Request failed.")
-          }
-        }
-        if (router.knows(pathname)) return jsonError(405, "method_not_allowed", `${request.method} is not allowed on ${pathname}.`)
-        if (pathname.startsWith(AUTH_ROUTE_PREFIX) || pathname.startsWith(IDENTITY_ROUTE_PREFIX)) {
-          return identityUpstream === null ? stubIdentity(pathname) : proxyIdentity(request, url, identityUpstream, log)
-        }
-        return jsonError(404, "not_found", `No route for ${request.method} ${pathname}.`)
-      }
-      if (request.method !== "GET" && request.method !== "HEAD") {
-        return jsonError(405, "method_not_allowed", `${request.method} is not allowed on ${pathname}.`)
-      }
-      return serveStatic(pathname)
+      return response
     },
     websocket: {
       maxPayloadLength: MAX_WS_FRAME_BYTES,

@@ -6,7 +6,7 @@ import { isAgentTurnFrame } from "smithers-shared/NativeAgent"
 import type { AgentTurnFrame } from "smithers-shared/NativeAgent"
 import { LOCAL_SESSION_HEADER, LOCAL_SESSION_META } from "smithers-shared/LocalSession"
 import { createPtyManager } from "./Pty"
-import { defaultDistDir, startLocalServer } from "./server"
+import { defaultDistDir, describeCookie, rescopeCookie, startLocalServer } from "./server"
 import type { LocalServer } from "./server"
 
 let dist = ""
@@ -280,11 +280,39 @@ describe("the local origin", () => {
       const cookie = response.headers.getSetCookie()[0] ?? ""
       expect(cookie.startsWith("smithers_session=sealed")).toBe(true)
       expect(cookie.toLowerCase()).not.toContain("domain=")
-      expect(proxyLogs).toContain("/api/auth/native/claim -> 200, set-cookie present")
+      // WebKit refuses a Secure cookie set over http://127.0.0.1; every other attribute survives.
+      expect(cookie.toLowerCase()).not.toContain("secure")
+      expect(cookie).toContain("Path=/")
+      expect(cookie).toContain("HttpOnly")
+      expect(cookie).toContain("SameSite=Lax")
+      // The trail names the attributes the WebView was handed, never the value.
+      expect(proxyLogs).toContain(
+        "/api/auth/native/claim -> 200, set-cookie present: smithers_session=<redacted>; Path=/; HttpOnly; SameSite=Lax"
+      )
+      expect(proxyLogs.join("\n")).not.toContain("sealed")
     } finally {
       await proxied.stop()
       upstream.stop(true)
     }
+  })
+
+  test("rescopeCookie drops Domain and Secure wherever they sit and leaves the rest", () => {
+    expect(rescopeCookie("s=v; Domain=identity.test; Path=/; HttpOnly; Secure; SameSite=Lax"))
+      .toBe("s=v; Path=/; HttpOnly; SameSite=Lax")
+    expect(rescopeCookie("s=v; Path=/; secure")).toBe("s=v; Path=/")
+    expect(rescopeCookie("s=v; Secure; Path=/")).toBe("s=v; Path=/")
+    // Only the attribute goes: a name or value that merely contains the word stays.
+    expect(rescopeCookie("secure_id=insecure; Path=/; SecureFlag=1")).toBe("secure_id=insecure; Path=/; SecureFlag=1")
+    expect(describeCookie("smithers_session=sealed-secret; Path=/; HttpOnly")).toBe(
+      "smithers_session=<redacted>; Path=/; HttpOnly"
+    )
+  })
+
+  test("every / and /api request leaves a status-and-duration trail line", async () => {
+    const before = logs.length
+    const response = await fetch(`${server.origin}/api/health`)
+    expect(response.status).toBe(200)
+    expect(logs.slice(before).some((line) => /^GET \/api\/health -> 200 in \d+ms$/.test(line))).toBe(true)
   })
 
   test("the stub identity seam answers signed-out and nothing else", async () => {
