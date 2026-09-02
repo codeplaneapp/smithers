@@ -5,6 +5,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { DurableWriter } from "@smthrs/database"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
+import * as ObservabilityMetric from "@smthrs/observability/Metric"
 import { Clock, Effect, Metric } from "effect"
 import { TestClock } from "effect/testing"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
@@ -178,6 +179,7 @@ describe("RunStoreMetrics", () => {
         expect(
           yield* count(Metric.withAttributes(RunStoreMetrics.transition.FenceLost, { to: "completed" }))
         ).toBe(1)
+        expect(yield* count(ObservabilityMetric.runThroughput)).toBe(1)
       }))
     }))
 

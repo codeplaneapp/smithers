@@ -21,6 +21,7 @@
  */
 import { DurableWriter, fromSqlError } from "@smthrs/database/DurableWriter"
 import { OwnerId } from "@smthrs/journal/OwnerId"
+import * as ObservabilityMetric from "@smthrs/observability/Metric"
 import { Cause, Clock, Context, Duration, Effect, Layer, Metric, Schema } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as SqlError from "effect/unstable/sql/SqlError"
@@ -1536,7 +1537,7 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
       const requireCancelAbsent = guard?.cancelRequested === "absent" ? 1 : 0
       const requireCancelPresent = guard?.cancelRequested === "present" ? 1 : 0
       const transitionedAtMs = yield* Clock.currentTimeMillis
-      return yield* write(
+      const outcome = yield* write(
         "transitionOwned",
         Effect.gen(function*() {
           const rows = toStatus === "running"
@@ -1590,6 +1591,10 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
           return ownsRow ? guardFailed : fenceLost
         })
       )
+      if (outcome._tag === "Transitioned" && terminalStatuses.has(toStatus)) {
+        yield* Metric.update(ObservabilityMetric.runThroughput, 1)
+      }
+      return outcome
     }).pipe(
       observeOutcome((outcome) =>
         Metric.withAttributes(RunStoreMetrics.transition[outcome._tag], {
