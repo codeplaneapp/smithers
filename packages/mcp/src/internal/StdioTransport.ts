@@ -12,7 +12,7 @@
  * stream) is the reason to add a subscription surface here rather than
  * threading one more parameter through every constructor now.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { Deferred, Effect, HashMap, Option, Queue, Ref, Stream } from "effect"
 import type { Scope } from "effect"
@@ -25,20 +25,20 @@ import * as Rpc from "./Rpc.ts"
  * One live connection to a spawned MCP server.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Transport {
   /** Sends a request and resolves with its `result`, or fails with the server's `error`. */
   readonly request: (method: string, params?: unknown, timeoutMs?: number) => Effect.Effect<unknown, McpError>
-  /** Sends a notification. The server never replies, so this never waits on one. */
-  readonly notify: (method: string, params?: unknown) => Effect.Effect<void, McpError>
+  /** Sends a notification, bounding queue admission by the optional positive-integer deadline. */
+  readonly notify: (method: string, params?: unknown, timeoutMs?: number) => Effect.Effect<void, McpError>
 }
 
 /**
  * Options accepted by {@link connect}.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ConnectOptions {
   /** The name this server is known by, for error messages only. */
@@ -46,20 +46,25 @@ export interface ConnectOptions {
   readonly command: string
   readonly args: ReadonlyArray<string>
   readonly cwd?: string | undefined
+  /** Values merged into the inherited child environment rather than replacing it. */
   readonly env?: Record<string, string | undefined> | undefined
-  /** Default deadline for a request/reply exchange. */
+  /** Default deadline for a request/reply exchange. See {@link defaultRequestTimeoutMs}. */
   readonly requestTimeoutMs?: number | undefined
-  /** Maximum number of frames waiting to be written. */
+  /** Maximum number of frames waiting to be written. See {@link defaultQueueCapacity}. */
   readonly queueCapacity?: number | undefined
-  /** Maximum UTF-8 bytes accepted in one inbound JSON-RPC frame. */
+  /** Maximum UTF-8 bytes accepted in one inbound JSON-RPC frame. See {@link defaultMaxFrameBytes}. */
   readonly maxFrameBytes?: number | undefined
+  /** Maximum UTF-8 bytes emitted in one JSON-RPC frame. See {@link defaultMaxOutboundFrameBytes}. */
+  readonly maxOutboundFrameBytes?: number | undefined
+  /** Maximum diagnostic stderr bytes retained in memory. See {@link defaultMaxStderrBytes}. */
+  readonly maxStderrBytes?: number | undefined
 }
 
 /**
  * Default request deadline.
  *
  * @category constants
- * @since 1.0.0
+ * @since 1.0.0-rc.0
  */
 export const defaultRequestTimeoutMs = 120_000
 
@@ -67,7 +72,7 @@ export const defaultRequestTimeoutMs = 120_000
  * Default number of outbound frames allowed to wait in memory.
  *
  * @category constants
- * @since 1.0.0
+ * @since 1.0.0-rc.0
  */
 export const defaultQueueCapacity = 64
 
@@ -75,9 +80,25 @@ export const defaultQueueCapacity = 64
  * Default maximum inbound JSON-RPC frame size (one MiB).
  *
  * @category constants
- * @since 1.0.0
+ * @since 1.0.0-rc.0
  */
 export const defaultMaxFrameBytes = 1024 * 1024
+
+/**
+ * Default maximum outbound JSON-RPC frame size (one MiB).
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const defaultMaxOutboundFrameBytes = 1024 * 1024
+
+/**
+ * Default maximum child-stderr tail retained for connection diagnostics.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const defaultMaxStderrBytes = 2048
 
 const closed = (server: string, reason: string): McpError =>
   new McpError({ code: "connection_closed", message: `MCP server "${server}" ${reason}`, server })
@@ -92,17 +113,40 @@ const timeout = (server: string, method: string, timeoutMs: number): McpError =>
 const protocol = (server: string, message: string): McpError =>
   new McpError({ code: "protocol_error", message, server })
 
-type Reply = Deferred.Deferred<unknown, McpError>
+const diagnosticErrorCodes: ReadonlySet<string> = new Set(["spawn_failed", "timeout", "connection_closed"])
+const cancellationReason = "request no longer awaited"
+
+type Pending = {
+  readonly deferred: Deferred.Deferred<unknown, McpError>
+  readonly method: string
+}
 
 type ConnectionState = {
   readonly _tag: "Open"
-  readonly pending: HashMap.HashMap<number, Reply>
+  readonly pending: HashMap.HashMap<number, Pending>
 } | {
   readonly _tag: "Closed"
   readonly error: McpError
 }
 
 const positiveInteger = (value: number): boolean => Number.isInteger(value) && value > 0
+
+const limitError = (server: string, name: string): McpError =>
+  protocol(server, `MCP option "${name}" must be a positive integer`)
+
+const replyError = (
+  server: string,
+  method: string,
+  reply: Extract<Rpc.Reply, { readonly _tag: "Error" }>
+): McpError => {
+  const scalar = ["string", "number", "boolean"].includes(typeof reply.data) ? String(reply.data) : undefined
+  const suffix = scalar !== undefined && scalar.length <= 120 ? ` [data: ${scalar}]` : ""
+  return new McpError({
+    code: method === "tools/call" ? "tool_failed" : "protocol_error",
+    message: `MCP server "${server}" failed ${method} (${reply.code}): ${reply.message}${suffix}`,
+    server
+  })
+}
 
 /** Splits stdout without ever retaining more than one bounded partial frame. */
 const frames = (
@@ -147,7 +191,7 @@ const frames = (
  * `connection_closed` instead of hanging forever.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const connect = (
   options: ConnectOptions
@@ -156,19 +200,27 @@ export const connect = (
     const requestTimeoutMs = options.requestTimeoutMs ?? defaultRequestTimeoutMs
     const queueCapacity = options.queueCapacity ?? defaultQueueCapacity
     const maxFrameBytes = options.maxFrameBytes ?? defaultMaxFrameBytes
-    if (!positiveInteger(requestTimeoutMs) || !positiveInteger(queueCapacity) || !positiveInteger(maxFrameBytes)) {
-      return yield* Effect.fail(protocol(options.server, "MCP transport limits must be positive integers"))
+    const maxOutboundFrameBytes = options.maxOutboundFrameBytes ?? defaultMaxOutboundFrameBytes
+    const maxStderrBytes = options.maxStderrBytes ?? defaultMaxStderrBytes
+    const invalidLimit = [
+      ["requestTimeoutMs", requestTimeoutMs],
+      ["queueCapacity", queueCapacity],
+      ["maxFrameBytes", maxFrameBytes],
+      ["maxOutboundFrameBytes", maxOutboundFrameBytes],
+      ["maxStderrBytes", maxStderrBytes]
+    ].find(([, value]) => !positiveInteger(value as number))
+    if (invalidLimit !== undefined) {
+      return yield* Effect.fail(limitError(options.server, invalidLimit[0] as string))
     }
 
     const handle = yield* ChildProcess.make(options.command, options.args, {
       cwd: options.cwd,
-      env: options.env,
+      ...(options.env === undefined ? {} : { env: options.env, extendEnv: true }),
       stdin: "pipe",
       stdout: "pipe",
-      // A server's diagnostic logging on stderr is not this transport's
-      // concern yet; draining it into a second reader is the reason to add
-      // one later rather than buffer output nobody reads today.
-      stderr: "ignore"
+      // Stderr is diagnostic only: a scoped drainer below retains at most the
+      // configured byte tail, and stderr failure never fails the connection.
+      stderr: "pipe"
     }).pipe(
       Effect.mapError((error) =>
         new McpError({
@@ -179,13 +231,42 @@ export const connect = (
       )
     )
 
+    const stderrTail = yield* Ref.make<Uint8Array>(new Uint8Array())
+    yield* handle.stderr.pipe(
+      Stream.runForEach((chunk) =>
+        Ref.update(stderrTail, (current) => {
+          const tail = chunk.byteLength >= maxStderrBytes
+            ? chunk.slice(chunk.byteLength - maxStderrBytes)
+            : chunk
+          const headLength = Math.min(current.byteLength, maxStderrBytes - tail.byteLength)
+          const next = new Uint8Array(headLength + tail.byteLength)
+          next.set(current.subarray(current.byteLength - headLength))
+          next.set(tail, headLength)
+          return next
+        })
+      ),
+      Effect.ignore,
+      Effect.forkScoped
+    )
+
+    const withStderr = (error: McpError): Effect.Effect<McpError> => {
+      if (!diagnosticErrorCodes.has(error.code)) return Effect.succeed(error)
+      return Effect.map(Ref.get(stderrTail), (bytes) => {
+        const rendered = new TextDecoder().decode(bytes).replace(/\s+/g, " ").trim()
+        return rendered === ""
+          ? error
+          : new McpError({ code: error.code, message: `${error.message} (stderr: ${rendered})`, server: error.server })
+      })
+    }
+
     const nextId = yield* Ref.make(0)
     const outbound = yield* Queue.bounded<Uint8Array>(queueCapacity)
     const state = yield* Ref.make<ConnectionState>({ _tag: "Open", pending: HashMap.empty() })
 
     /** Closes once, fails every waiter, and rejects all future traffic. */
-    const closeWith = (error: McpError) =>
+    const closeWith = (baseError: McpError) =>
       Effect.uninterruptible(Effect.gen(function*() {
+        const error = yield* withStderr(baseError)
         const waiters = yield* Ref.modify(state, (current) =>
           current._tag === "Closed"
             ? [undefined, current] as const
@@ -195,11 +276,13 @@ export const connect = (
         // No caller can leave the connection scope before this cleanup has
         // completed because the request deferreds are the terminal signal.
         yield* Queue.shutdown(outbound)
-        yield* Effect.forEach(waiters, (deferred) => Deferred.fail(deferred, error), {
+        yield* Effect.forEach(waiters, (pending) => Deferred.fail(pending.deferred, error), {
           discard: true
         })
       }))
 
+    // Scope closure tears down the child, so no remote process remains to
+    // receive per-request cancellations from this connection finalizer.
     yield* Effect.addFinalizer(() => closeWith(closed(options.server, "connection scope closed")))
 
     // Writer: drains outbound frames into the process's stdin for the life of
@@ -211,30 +294,39 @@ export const connect = (
       Effect.forkScoped
     )
 
-    // Reader: one line of stdout is one JSON-RPC message. A reply resolves
-    // its pending deferred by id; anything else — a malformed line, a
-    // notification, a reply to an id nobody is waiting on — is dropped.
+    // Reader: one line of stdout is one JSON-RPC message. A validated reply
+    // resolves its pending request by id; malformed replies close the whole
+    // connection, while non-replies and unknown ids are dropped.
     yield* frames(options.server, maxFrameBytes, handle.stdout).pipe(
       Stream.runForEach((line) =>
         Effect.gen(function*() {
           const message = Rpc.parse(line)
           if (message === undefined) return
           if (!Rpc.isReply(message)) return
-          const deferred = yield* Ref.modify(state, (current) => {
-            if (current._tag === "Closed") return [Option.none<Reply>(), current] as const
+          const reply = Rpc.replyOf(message)
+          if (reply._tag === "Malformed") {
+            return yield* Effect.fail(
+              protocol(
+                options.server,
+                `MCP server "${options.server}" sent a malformed JSON-RPC reply: ${reply.reason}`
+              )
+            )
+          }
+          const pending = yield* Ref.modify(state, (current) => {
+            if (current._tag === "Closed") return [Option.none<Pending>(), current] as const
             return [
-              HashMap.get(current.pending, message.id),
-              { ...current, pending: HashMap.remove(current.pending, message.id) }
+              HashMap.get(current.pending, reply.id),
+              { ...current, pending: HashMap.remove(current.pending, reply.id) }
             ] as const
           })
-          if (Option.isNone(deferred)) return
-          if (message.error !== undefined) {
+          if (Option.isNone(pending)) return
+          if (reply._tag === "Error") {
             yield* Deferred.fail(
-              deferred.value,
-              new McpError({ code: "tool_failed", message: message.error.message, server: options.server })
+              pending.value.deferred,
+              replyError(options.server, pending.value.method, reply)
             )
           } else {
-            yield* Deferred.succeed(deferred.value, message.result)
+            yield* Deferred.succeed(pending.value.deferred, reply.result)
           }
         })
       ),
@@ -258,17 +350,35 @@ export const connect = (
       Effect.forkScoped
     )
 
-    const removePending = (id: number) =>
-      Ref.update(state, (current) =>
-        current._tag === "Closed"
-          ? current
-          : { ...current, pending: HashMap.remove(current.pending, id) })
+    const takePending = (id: number): Effect.Effect<boolean> =>
+      Ref.modify(state, (current) => {
+        if (current._tag === "Closed") return [false, current]
+        const present = HashMap.has(current.pending, id)
+        return [present, { ...current, pending: HashMap.remove(current.pending, id) }]
+      })
 
     const enqueue = (frame: Uint8Array): Effect.Effect<void, McpError> =>
       Effect.flatMap(Queue.offer(outbound, frame), (offered) =>
         offered
           ? Effect.void
-          : Effect.fail(closed(options.server, "outbound queue closed")))
+          : Effect.flatMap(withStderr(closed(options.server, "outbound queue closed")), Effect.fail))
+
+    const frameOf = (method: string, message: Rpc.Outbound): Effect.Effect<Uint8Array, McpError> =>
+      Effect.try({
+        try: () => Rpc.encode(message),
+        catch: () => protocol(options.server, `MCP server "${options.server}" could not encode a ${method} frame`)
+      }).pipe(
+        Effect.flatMap((frame) =>
+          frame.byteLength <= maxOutboundFrameBytes
+            ? Effect.succeed(frame)
+            : Effect.fail(
+              protocol(
+                options.server,
+                `MCP server "${options.server}" tried to send a ${method} frame larger than ${maxOutboundFrameBytes} bytes`
+              )
+            )
+        )
+      )
 
     const request = (
       method: string,
@@ -281,34 +391,57 @@ export const connect = (
         }
         const id = yield* Ref.updateAndGet(nextId, (n) => n + 1)
         const deferred = yield* Deferred.make<unknown, McpError>()
+        const frame = yield* frameOf(method, { jsonrpc: "2.0", id, method, params })
+        let sent = false
         return yield* Effect.gen(function*() {
           const registration = yield* Ref.modify(state, (current) =>
             current._tag === "Closed"
               ? [current.error, current] as const
-              : [undefined, { ...current, pending: HashMap.set(current.pending, id, deferred) }] as const)
+              : [undefined, {
+                ...current,
+                pending: HashMap.set(current.pending, id, { deferred, method })
+              }] as const)
           if (registration !== undefined) return yield* Effect.fail(registration)
-          yield* enqueue(Rpc.encode({ jsonrpc: "2.0", id, method, params }))
+          yield* enqueue(frame)
+          sent = true
           return yield* Deferred.await(deferred)
         }).pipe(
-          Effect.ensuring(removePending(id)),
+          Effect.ensuring(Effect.gen(function*() {
+            const pending = yield* takePending(id)
+            if (!sent || !pending || method === "initialize") return
+            yield* frameOf("notifications/cancelled", {
+              jsonrpc: "2.0",
+              method: "notifications/cancelled",
+              params: { requestId: id, reason: cancellationReason }
+            }).pipe(Effect.flatMap(enqueue), Effect.ignore)
+          })),
           Effect.timeoutOrElse({
             duration: timeoutMs,
-            orElse: () => Effect.fail(timeout(options.server, method, timeoutMs))
+            orElse: () => Effect.flatMap(withStderr(timeout(options.server, method, timeoutMs)), Effect.fail)
           })
         )
       })
 
-    const notify = (method: string, params?: unknown): Effect.Effect<void, McpError> =>
-      Effect.gen(function*() {
+    const notify = (
+      method: string,
+      params?: unknown,
+      timeoutMs = requestTimeoutMs
+    ): Effect.Effect<void, McpError> => {
+      if (!positiveInteger(timeoutMs)) {
+        return Effect.fail(protocol(options.server, "MCP notification timeout must be a positive integer"))
+      }
+      return Effect.gen(function*() {
         const current = yield* Ref.get(state)
         if (current._tag === "Closed") return yield* Effect.fail(current.error)
-        yield* enqueue(Rpc.encode({ jsonrpc: "2.0", method, params }))
+        const frame = yield* frameOf(method, { jsonrpc: "2.0", method, params })
+        yield* enqueue(frame)
       }).pipe(
         Effect.timeoutOrElse({
-          duration: requestTimeoutMs,
-          orElse: () => Effect.fail(timeout(options.server, method, requestTimeoutMs))
+          duration: timeoutMs,
+          orElse: () => Effect.flatMap(withStderr(timeout(options.server, method, timeoutMs)), Effect.fail)
         })
       )
+    }
 
     return { request, notify }
   })

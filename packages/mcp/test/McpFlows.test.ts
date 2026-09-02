@@ -1,17 +1,22 @@
+import * as Capability from "@smthrs/capability/Capability"
 import * as Cell from "@smthrs/harness/Cell"
 import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
-import { Deferred, Effect, Fiber, Layer, Option, Queue, Ref, Sink, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Option, Queue, Ref, Schema, Sink, Stream } from "effect"
 import type { Scope } from "effect"
 import * as PlatformError from "effect/PlatformError"
 import type * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ExitCode, makeHandle, ProcessId } from "effect/unstable/process/ChildProcessSpawner"
-import { describe, expect, it } from "vitest"
+import { readFileSync } from "node:fs"
+import { describe, expect, it, vi } from "vitest"
 import * as Rpc from "../src/internal/Rpc.ts"
 import * as StdioTransport from "../src/internal/StdioTransport.ts"
 import * as McpClient from "../src/McpClient.ts"
 import * as McpFlows from "../src/McpFlows.ts"
 
 const execute = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
+
+const waitFor = (assertion: () => void): Effect.Effect<void> =>
+  Effect.promise(() => vi.waitFor(assertion, { timeout: 1_000 }))
 
 type HandleOptions = Parameters<typeof makeHandle>[0]
 
@@ -53,6 +58,7 @@ const fakeServer = (
   options: {
     readonly delimiter?: string | undefined
     readonly closeAfterReply?: boolean | undefined
+    readonly envelope?: ((request: Rpc.Outbound, result: unknown) => unknown) | undefined
   } = {}
 ): Effect.Effect<ChildProcessSpawner.ChildProcessSpawner["Service"]> =>
   Effect.gen(function*() {
@@ -68,14 +74,14 @@ const fakeServer = (
         yield* Ref.set(buffer, lines.pop() ?? "")
         for (const line of lines) {
           const request = Rpc.parse(line)
-          if (request === undefined || request.id === undefined) continue
-          const result = respond(request as unknown as Rpc.Outbound)
-          if (result === undefined) continue
+          if (request === undefined) continue
+          const outbound = request as unknown as Rpc.Outbound
+          const result = respond(outbound)
+          if (request.id === undefined || result === undefined) continue
+          const reply = options.envelope?.(outbound, result) ?? { jsonrpc: "2.0", id: request.id, result }
           yield* Queue.offer(
             replies,
-            encoder.encode(
-              `${JSON.stringify({ jsonrpc: "2.0", id: request.id, result })}${options.delimiter ?? "\n"}`
-            )
+            encoder.encode(`${JSON.stringify(reply)}${options.delimiter ?? "\n"}`)
           )
         }
       })
@@ -95,7 +101,9 @@ const TOOLS = [
 ]
 
 const respondToEcho = (request: Rpc.Outbound): unknown => {
-  if (request.method === "initialize") return { protocolVersion: "2025-06-18", capabilities: {}, serverInfo: {} }
+  if (request.method === "initialize") {
+    return { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: {} }
+  }
   if (request.method === "tools/list") return { tools: TOOLS }
   if (request.method === "tools/call") {
     const params = request.params as {
@@ -113,6 +121,7 @@ const withFakeServer = <A, E>(
   options?: {
     readonly delimiter?: string | undefined
     readonly closeAfterReply?: boolean | undefined
+    readonly envelope?: ((request: Rpc.Outbound, result: unknown) => unknown) | undefined
   }
 ): Promise<A> =>
   execute(Effect.scoped(Effect.gen(function*() {
@@ -121,13 +130,44 @@ const withFakeServer = <A, E>(
   })))
 
 describe("McpClient.connect", () => {
+  it("sends the frozen Smithers initialize payload using the package version", async () => {
+    const requests: Array<Rpc.Outbound> = []
+    await withFakeServer(
+      (request) => {
+        requests.push(request)
+        return respondToEcho(request)
+      },
+      McpClient.connect({ server: "handshake", command: "echo-mcp", args: [] })
+    )
+    const manifest = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8")
+    ) as { readonly version: string }
+
+    expect(McpClient.clientInfo).toEqual({ name: "smithers", version: manifest.version })
+    expect(requests[0]).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "smithers", version: "1.0.0-rc.0" }
+      }
+    })
+  })
+
   it("completes the handshake and fetches the tool catalog", async () => {
     const client = await withFakeServer(
       respondToEcho,
       McpClient.connect({ server: "echo", command: "echo-mcp", args: [] })
     )
     expect(client.server).toBe("echo")
-    expect(client.tools).toEqual([{ name: "add", description: "Adds two numbers", inputSchema: TOOLS[0]!.inputSchema }])
+    expect(client.tools).toEqual([{
+      name: "add",
+      description: "Adds two numbers",
+      inputSchema: TOOLS[0]!.inputSchema,
+      outputSchema: undefined
+    }])
   })
 
   it("calls a remote tool and decodes its result", async () => {
@@ -138,18 +178,434 @@ describe("McpClient.connect", () => {
         (client) => client.callTool("add", { a: 2, b: 3 })
       )
     )
-    expect(result).toEqual({ content: [{ type: "text", text: "5" }], isError: false })
+    expect(result).toEqual({
+      content: [{ type: "text", text: "5" }],
+      isError: false,
+      structuredContent: undefined
+    })
   })
 
   it("fails with invalid_response when tools/list is malformed", async () => {
-    const exit = await execute(Effect.scoped(Effect.gen(function*() {
-      const spawner = yield* fakeServer((request) => request.method === "initialize" ? {} : { notTools: [] })
+    const error = await execute(Effect.scoped(Effect.gen(function*() {
+      const spawner = yield* fakeServer((request) =>
+        request.method === "initialize"
+          ? { protocolVersion: "2025-06-18", capabilities: { tools: {} } }
+          : { notTools: [] }
+      )
       return yield* Effect.provide(
-        Effect.exit(McpClient.connect({ server: "broken", command: "broken-mcp", args: [] })),
+        Effect.flip(McpClient.connect({ server: "broken", command: "broken-mcp", args: [] })),
         Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(spawner)
       )
     })))
-    expect(exit._tag).toBe("Failure")
+    expect(error).toMatchObject({
+      code: "invalid_response",
+      server: "broken",
+      message: "MCP server \"broken\" returned a tools/list result with no tools array"
+    })
+  })
+
+  it("exports every documented default from the public client module", () => {
+    expect(McpClient.defaultHandshakeTimeoutMs).toBe(10_000)
+    expect(McpClient.defaultRequestTimeoutMs).toBe(StdioTransport.defaultRequestTimeoutMs)
+    expect(McpClient.defaultQueueCapacity).toBe(StdioTransport.defaultQueueCapacity)
+    expect(McpClient.defaultMaxFrameBytes).toBe(StdioTransport.defaultMaxFrameBytes)
+    expect(McpClient.defaultMaxOutboundFrameBytes).toBe(StdioTransport.defaultMaxOutboundFrameBytes)
+    expect(McpClient.defaultMaxStderrBytes).toBe(StdioTransport.defaultMaxStderrBytes)
+    expect(McpClient.defaultMaxTools).toBe(256)
+    expect(McpClient.defaultMaxToolNameBytes).toBe(128)
+    expect(McpClient.defaultMaxCatalogPages).toBe(32)
+  })
+
+  it("preserves tool outputSchema objects", async () => {
+    const client = await withFakeServer(
+      (request) => {
+        if (request.method === "initialize") {
+          return { protocolVersion: "2025-06-18", capabilities: { tools: {} } }
+        }
+        if (request.method === "tools/list") {
+          return {
+            tools: [{
+              name: "typed",
+              inputSchema: { type: "object" },
+              outputSchema: { type: "object", properties: { answer: { type: "number" } } }
+            }]
+          }
+        }
+        return undefined
+      },
+      McpClient.connect({ server: "schemas", command: "schema-mcp", args: [] })
+    )
+
+    expect(client.tools[0]?.outputSchema).toEqual({
+      type: "object",
+      properties: { answer: { type: "number" } }
+    })
+  })
+
+  it.each([
+    {
+      label: "missing inputSchema",
+      tool: { name: "bad" },
+      message: "MCP server \"catalog\" returned a tool whose inputSchema is not a JSON Schema object of type \"object\""
+    },
+    {
+      label: "null inputSchema",
+      tool: { name: "bad", inputSchema: null },
+      message: "MCP server \"catalog\" returned a tool whose inputSchema is not a JSON Schema object of type \"object\""
+    },
+    {
+      label: "array inputSchema",
+      tool: { name: "bad", inputSchema: [] },
+      message: "MCP server \"catalog\" returned a tool whose inputSchema is not a JSON Schema object of type \"object\""
+    },
+    {
+      label: "non-object inputSchema type",
+      tool: { name: "bad", inputSchema: { type: "string" } },
+      message: "MCP server \"catalog\" returned a tool whose inputSchema is not a JSON Schema object of type \"object\""
+    },
+    {
+      label: "null outputSchema",
+      tool: { name: "bad", inputSchema: {}, outputSchema: null },
+      message: "MCP server \"catalog\" returned a tool whose outputSchema is not a JSON object"
+    },
+    {
+      label: "array outputSchema",
+      tool: { name: "bad", inputSchema: {}, outputSchema: [] },
+      message: "MCP server \"catalog\" returned a tool whose outputSchema is not a JSON object"
+    },
+    {
+      label: "scalar outputSchema",
+      tool: { name: "bad", inputSchema: {}, outputSchema: true },
+      message: "MCP server \"catalog\" returned a tool whose outputSchema is not a JSON object"
+    },
+    {
+      label: "slash in the name",
+      tool: { name: "bad/name", inputSchema: {} },
+      message: "MCP server \"catalog\" returned a tool name containing a control character or \"/\""
+    },
+    {
+      label: "C0 control in the name",
+      tool: { name: "bad\nname", inputSchema: {} },
+      message: "MCP server \"catalog\" returned a tool name containing a control character or \"/\""
+    },
+    {
+      label: "DEL in the name",
+      tool: { name: "bad\u007fname", inputSchema: {} },
+      message: "MCP server \"catalog\" returned a tool name containing a control character or \"/\""
+    }
+  ])("rejects a catalog tool with $label", async ({ message, tool }) => {
+    const error = await withFakeServer(
+      (request) => {
+        if (request.method === "initialize") {
+          return { protocolVersion: "2025-06-18", capabilities: { tools: {} } }
+        }
+        if (request.method === "tools/list") return { tools: [tool] }
+        return undefined
+      },
+      Effect.flip(McpClient.connect({ server: "catalog", command: "catalog-mcp", args: [] }))
+    )
+
+    expect(error).toMatchObject({ code: "invalid_response", server: "catalog", message })
+  })
+
+  it("accepts each catalog bound exactly at its configured limit", async () => {
+    const client = await withFakeServer(
+      (request) => {
+        if (request.method === "initialize") {
+          return { protocolVersion: "2025-06-18", capabilities: { tools: {} } }
+        }
+        if (request.method === "tools/list") {
+          return { tools: [{ name: "éé", inputSchema: {} }, { name: "okay", inputSchema: {} }] }
+        }
+        return undefined
+      },
+      McpClient.connect({
+        server: "catalog-boundary",
+        command: "catalog-mcp",
+        args: [],
+        maxTools: 2,
+        maxToolNameBytes: 4,
+        maxCatalogPages: 1
+      })
+    )
+
+    expect(client.tools.map((tool) => tool.name)).toEqual(["éé", "okay"])
+  })
+
+  it.each([
+    {
+      options: { maxTools: 1 },
+      tools: [{ name: "one", inputSchema: {} }, { name: "two", inputSchema: {} }],
+      message: "MCP server \"catalog-limit\" returned more than 1 tools"
+    },
+    {
+      options: { maxToolNameBytes: 3 },
+      tools: [{ name: "éé", inputSchema: {} }],
+      message: "MCP server \"catalog-limit\" returned a tool name longer than 3 bytes"
+    }
+  ])("rejects a catalog one past $options", async ({ message, options, tools }) => {
+    const error = await withFakeServer(
+      (request) => {
+        if (request.method === "initialize") {
+          return { protocolVersion: "2025-06-18", capabilities: { tools: {} } }
+        }
+        if (request.method === "tools/list") return { tools }
+        return undefined
+      },
+      Effect.flip(McpClient.connect({
+        server: "catalog-limit",
+        command: "catalog-mcp",
+        args: [],
+        ...options
+      }))
+    )
+
+    expect(error).toMatchObject({ code: "invalid_response", server: "catalog-limit", message })
+  })
+
+  it.each(
+    [
+      ["handshakeTimeoutMs", 0],
+      ["maxTools", 0],
+      ["maxToolNameBytes", -1],
+      ["maxCatalogPages", 1.5]
+    ] as const
+  )("rejects an invalid public limit %s", async (name, value) => {
+    const error = await withFakeServer(
+      respondToEcho,
+      Effect.flip(McpClient.connect({
+        server: "client-limit",
+        command: "mcp",
+        args: [],
+        [name]: value
+      }))
+    )
+
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      server: "client-limit",
+      message: `MCP option "${name}" must be a positive integer`
+    })
+  })
+
+  it("treats an explicit undefined nextCursor as the end of the catalog", async () => {
+    const client = await withFakeServer(
+      (request) => {
+        if (request.method === "initialize") {
+          return { protocolVersion: "2025-06-18", capabilities: { tools: {} } }
+        }
+        if (request.method === "tools/list") return { tools: TOOLS, nextCursor: undefined }
+        return undefined
+      },
+      McpClient.connect({ server: "undefined-cursor", command: "mcp", args: [] })
+    )
+
+    expect(client.tools).toHaveLength(1)
+  })
+
+  it("fails an unknown tool before writing a tools/call frame", async () => {
+    const methods: Array<string> = []
+    const error = await withFakeServer(
+      (request) => {
+        methods.push(request.method)
+        return respondToEcho(request)
+      },
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "known-tools", command: "mcp", args: [] })
+        return yield* Effect.flip(client.callTool("nope", {}))
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "tool_not_found",
+      server: "known-tools",
+      message: "MCP server \"known-tools\" has no tool \"nope\""
+    })
+    expect(methods).toEqual(["initialize", "notifications/initialized", "tools/list"])
+  })
+
+  it.each([
+    {
+      label: "BigInt",
+      value: 1n,
+      path: "arguments.value",
+      reason: "a bigint"
+    },
+    {
+      label: "NaN",
+      value: Number.NaN,
+      path: "arguments.value",
+      reason: "a non-finite number"
+    },
+    {
+      label: "Infinity",
+      value: Number.POSITIVE_INFINITY,
+      path: "arguments.value",
+      reason: "a non-finite number"
+    },
+    {
+      label: "undefined",
+      value: undefined,
+      path: "arguments.value",
+      reason: "undefined"
+    },
+    {
+      label: "function",
+      value: () => undefined,
+      path: "arguments.value",
+      reason: "a function"
+    },
+    {
+      label: "symbol",
+      value: Symbol("value"),
+      path: "arguments.value",
+      reason: "a symbol"
+    },
+    {
+      label: "Date",
+      value: new Date(0),
+      path: "arguments.value",
+      reason: "an object with a non-plain prototype"
+    },
+    {
+      label: "inherited prototype",
+      value: Object.create({ inherited: 1 }) as Record<string, unknown>,
+      path: "arguments.value",
+      reason: "an object with a non-plain prototype"
+    },
+    {
+      label: "enumerable symbol key",
+      value: Object.defineProperty({}, Symbol("hidden"), { enumerable: true, value: 1 }),
+      path: "arguments.value",
+      reason: "a symbol-keyed property"
+    }
+  ])("rejects a non-JSON $label tool argument", async ({ path, reason, value }) => {
+    const error = await withFakeServer(
+      respondToEcho,
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "arguments", command: "mcp", args: [] })
+        return yield* Effect.flip(client.callTool("add", { value }))
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      server: "arguments",
+      message: `MCP server "arguments" was sent a tool argument that is not JSON at ${path}: ${reason}`
+    })
+  })
+
+  it("reports the bounded path to a nested invalid argument", async () => {
+    const longKey = "x".repeat(140)
+    const error = await withFakeServer(
+      respondToEcho,
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "arguments", command: "mcp", args: [] })
+        return yield* Effect.flip(client.callTool("add", {
+          nested: { items: [0, { [longKey]: undefined }] }
+        }))
+      })
+    )
+
+    expect(error.code).toBe("protocol_error")
+    expect(error.server).toBe("arguments")
+    expect(error.message).toContain("arguments.nested.items[1].")
+    const renderedPath = error.message.split(": ")[0]!.split(" at ")[1]!
+    expect(renderedPath.length).toBeLessThanOrEqual(120)
+  })
+
+  it("rejects cyclic arguments without a serialization defect", async () => {
+    const cyclic: Record<string, unknown> = {}
+    cyclic.self = cyclic
+    const error = await withFakeServer(
+      respondToEcho,
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "arguments", command: "mcp", args: [] })
+        return yield* Effect.flip(client.callTool("add", cyclic))
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      server: "arguments",
+      message:
+        "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.self: a cyclic reference"
+    })
+  })
+
+  it("snapshots valid JSON arguments before the returned effect runs", async () => {
+    let sent: unknown
+    const arguments_: { a: number; nested: Array<unknown> } = {
+      a: 2,
+      nested: [null, true, "text", { value: 3 }]
+    }
+    const nullPrototype = Object.assign(Object.create(null) as Record<string, unknown>, { okay: true })
+    arguments_.nested.push(nullPrototype)
+    await withFakeServer(
+      (request) => {
+        if (request.method === "tools/call") {
+          sent = (request.params as { readonly arguments: unknown }).arguments
+          return { content: [], isError: false }
+        }
+        return respondToEcho(request)
+      },
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "snapshot", command: "mcp", args: [] })
+        const call = client.callTool("add", arguments_)
+        arguments_.a = 99
+        ;(arguments_.nested[3] as { value: number }).value = 99
+        yield* call
+      })
+    )
+
+    expect(sent).toEqual({
+      a: 2,
+      nested: [null, true, "text", { value: 3 }, { okay: true }]
+    })
+  })
+})
+
+describe("McpClient.ConnectOptionsSchema", () => {
+  it("decodes a minimal persisted server entry", () => {
+    expect(
+      Schema.decodeUnknownSync(McpClient.ConnectOptionsSchema)({
+        server: "fixture",
+        command: "node",
+        args: []
+      })
+    ).toEqual({ server: "fixture", command: "node", args: [] })
+  })
+
+  it("decodes every supported persisted server option", () => {
+    const entry = {
+      server: "fixture",
+      command: "node",
+      args: ["server.mjs"],
+      cwd: "/workspace",
+      env: { TOKEN: "redacted" },
+      handshakeTimeoutMs: 1,
+      requestTimeoutMs: 2,
+      queueCapacity: 3,
+      maxFrameBytes: 4,
+      maxOutboundFrameBytes: 5,
+      maxStderrBytes: 6,
+      maxTools: 7,
+      maxToolNameBytes: 8,
+      maxCatalogPages: 9
+    }
+
+    expect(Schema.decodeUnknownSync(McpClient.ConnectOptionsSchema)(entry)).toEqual(entry)
+  })
+
+  it.each([
+    ["an array environment", { server: "fixture", command: "node", args: [], env: ["A", "B"] }],
+    ["an empty server", { server: "", command: "node", args: [] }],
+    ["an empty command", { server: "fixture", command: "", args: [] }],
+    ["a non-integer limit", { server: "fixture", command: "node", args: [], handshakeTimeoutMs: 1.5 }],
+    ["a zero limit", { server: "fixture", command: "node", args: [], requestTimeoutMs: 0 }],
+    ["a negative limit", { server: "fixture", command: "node", args: [], maxStderrBytes: -1 }]
+  ])("rejects %s", (_label, entry) => {
+    expect(() => Schema.decodeUnknownSync(McpClient.ConnectOptionsSchema)(entry)).toThrow()
   })
 })
 
@@ -158,6 +614,8 @@ describe("StdioTransport limits and terminal state", () => {
     { requestTimeoutMs: 0 },
     { queueCapacity: 0 },
     { maxFrameBytes: 0 },
+    { maxOutboundFrameBytes: 0 },
+    { maxStderrBytes: 0 },
     { requestTimeoutMs: 1.5 }
   ])("rejects invalid transport limits: %o", async (limits) => {
     const error = await withFakeServer(
@@ -178,6 +636,239 @@ describe("StdioTransport limits and terminal state", () => {
     )
 
     expect(error).toMatchObject({ code: "protocol_error", server: "deadline" })
+  })
+
+  it("rejects an invalid per-notification deadline before writing", async () => {
+    const frames: Array<Rpc.Outbound> = []
+    const error = await withFakeServer(
+      (request) => {
+        frames.push(request)
+        return undefined
+      },
+      Effect.gen(function*() {
+        const transport = yield* StdioTransport.connect({ server: "notify-deadline", command: "mcp", args: [] })
+        return yield* Effect.flip(transport.notify("notifications/test", {}, 0))
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      server: "notify-deadline",
+      message: "MCP notification timeout must be a positive integer"
+    })
+    expect(frames).toEqual([])
+  })
+
+  it("cancels exactly once when a tools/call request times out", async () => {
+    const frames: Array<Rpc.Outbound> = []
+    const error = await withFakeServer(
+      (request) => {
+        frames.push(request)
+        return undefined
+      },
+      Effect.gen(function*() {
+        const transport = yield* StdioTransport.connect({
+          server: "cancel-timeout",
+          command: "mcp",
+          args: [],
+          requestTimeoutMs: 25
+        })
+        const failure = yield* Effect.flip(transport.request("tools/call", { secret: "do-not-copy" }))
+        yield* waitFor(() =>
+          expect(frames.filter((frame) => frame.method === "notifications/cancelled")).toHaveLength(1)
+        )
+        return failure
+      })
+    )
+    const request = frames.find((frame) => frame.method === "tools/call")!
+
+    expect(error).toMatchObject({
+      code: "timeout",
+      server: "cancel-timeout",
+      message: "MCP server \"cancel-timeout\" did not answer tools/call within 25ms"
+    })
+    expect(frames.filter((frame) => frame.method === "notifications/cancelled")).toEqual([{
+      jsonrpc: "2.0",
+      method: "notifications/cancelled",
+      params: { requestId: request.id, reason: "request no longer awaited" }
+    }])
+  })
+
+  it("cancels exactly once when an outer fiber interrupts tools/call", async () => {
+    const frames: Array<Rpc.Outbound> = []
+    await withFakeServer(
+      (request) => {
+        frames.push(request)
+        return undefined
+      },
+      Effect.gen(function*() {
+        const transport = yield* StdioTransport.connect({ server: "cancel-interrupt", command: "mcp", args: [] })
+        const pending = yield* Effect.forkChild(transport.request("tools/call", {}), { startImmediately: true })
+        yield* waitFor(() => expect(frames.filter((frame) => frame.method === "tools/call")).toHaveLength(1))
+        yield* Fiber.interrupt(pending)
+        yield* waitFor(() =>
+          expect(frames.filter((frame) => frame.method === "notifications/cancelled")).toHaveLength(1)
+        )
+      })
+    )
+    const request = frames.find((frame) => frame.method === "tools/call")!
+
+    expect(frames.filter((frame) => frame.method === "notifications/cancelled")).toEqual([{
+      jsonrpc: "2.0",
+      method: "notifications/cancelled",
+      params: { requestId: request.id, reason: "request no longer awaited" }
+    }])
+  })
+
+  it("does not cancel a tools/call request that receives a normal reply", async () => {
+    const frames: Array<Rpc.Outbound> = []
+    const result = await withFakeServer(
+      (request) => {
+        frames.push(request)
+        return "done"
+      },
+      Effect.gen(function*() {
+        const transport = yield* StdioTransport.connect({ server: "settled", command: "mcp", args: [] })
+        const value = yield* transport.request("tools/call", {})
+        yield* Effect.sleep("25 millis")
+        return value
+      })
+    )
+
+    expect(result).toBe("done")
+    expect(frames.filter((frame) => frame.method === "notifications/cancelled")).toEqual([])
+  })
+
+  it("does not cancel a tools/call request that receives a JSON-RPC error", async () => {
+    const frames: Array<Rpc.Outbound> = []
+    const error = await withFakeServer(
+      (request) => {
+        frames.push(request)
+        return "ignored"
+      },
+      Effect.gen(function*() {
+        const transport = yield* StdioTransport.connect({ server: "settled-error", command: "mcp", args: [] })
+        const failure = yield* Effect.flip(transport.request("tools/call", {}))
+        yield* Effect.sleep("25 millis")
+        return failure
+      }),
+      {
+        envelope: (request) => ({
+          jsonrpc: "2.0",
+          id: request.id,
+          error: { code: -32_000, message: "remote failure" }
+        })
+      }
+    )
+
+    expect(error).toMatchObject({
+      code: "tool_failed",
+      server: "settled-error",
+      message: "MCP server \"settled-error\" failed tools/call (-32000): remote failure"
+    })
+    expect(frames.filter((frame) => frame.method === "notifications/cancelled")).toEqual([])
+  })
+
+  it("never cancels initialize when it times out", async () => {
+    const frames: Array<Rpc.Outbound> = []
+    const error = await withFakeServer(
+      (request) => {
+        frames.push(request)
+        return undefined
+      },
+      Effect.gen(function*() {
+        const transport = yield* StdioTransport.connect({ server: "initialize-timeout", command: "mcp", args: [] })
+        const failure = yield* Effect.flip(transport.request("initialize", {}, 25))
+        yield* Effect.sleep("25 millis")
+        return failure
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "timeout",
+      server: "initialize-timeout",
+      message: "MCP server \"initialize-timeout\" did not answer initialize within 25ms"
+    })
+    expect(frames.filter((frame) => frame.method === "notifications/cancelled")).toEqual([])
+  })
+
+  it("accepts an outbound frame exactly at maxOutboundFrameBytes", async () => {
+    const params = { value: "bounded" }
+    const bytes = Rpc.encode({ jsonrpc: "2.0", id: 1, method: "ping", params }).byteLength
+    const result = await withFakeServer(
+      () => "pong",
+      Effect.gen(function*() {
+        const transport = yield* StdioTransport.connect({
+          server: "outbound-boundary",
+          command: "mcp",
+          args: [],
+          maxOutboundFrameBytes: bytes
+        })
+        return yield* transport.request("ping", params)
+      })
+    )
+
+    expect(result).toBe("pong")
+  })
+
+  it("rejects an outbound frame one byte past maxOutboundFrameBytes", async () => {
+    const params = { value: "bounded" }
+    const bytes = Rpc.encode({ jsonrpc: "2.0", id: 1, method: "ping", params }).byteLength
+    const error = await withFakeServer(
+      () => "pong",
+      Effect.gen(function*() {
+        const transport = yield* StdioTransport.connect({
+          server: "outbound-limit",
+          command: "mcp",
+          args: [],
+          maxOutboundFrameBytes: bytes - 1
+        })
+        return yield* Effect.flip(transport.request("ping", params))
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      server: "outbound-limit",
+      message: `MCP server "outbound-limit" tried to send a ping frame larger than ${bytes - 1} bytes`
+    })
+  })
+
+  it("turns an unexpected request serialization failure into protocol_error", async () => {
+    const error = await withFakeServer(
+      () => "pong",
+      Effect.gen(function*() {
+        const transport = yield* StdioTransport.connect({ server: "encode", command: "mcp", args: [] })
+        return yield* Effect.flip(transport.request("raw", { value: 1n }))
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      server: "encode",
+      message: "MCP server \"encode\" could not encode a raw frame"
+    })
+  })
+
+  it("bounds and safely encodes notifications", async () => {
+    const error = await withFakeServer(
+      respondToEcho,
+      Effect.gen(function*() {
+        const transport = yield* StdioTransport.connect({
+          server: "notification-limit",
+          command: "mcp",
+          args: [],
+          maxOutboundFrameBytes: 1
+        })
+        return yield* Effect.flip(transport.notify("large", { value: "x" }))
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      server: "notification-limit",
+      message: "MCP server \"notification-limit\" tried to send a large frame larger than 1 bytes"
+    })
   })
 
   it.each([
@@ -378,6 +1069,16 @@ describe("StdioTransport limits and terminal state", () => {
 })
 
 describe("McpFlows.mcp", () => {
+  const projectionClient: McpClient.McpClient = {
+    server: "catalog",
+    tools: [
+      { name: "first", description: undefined, inputSchema: {}, outputSchema: undefined },
+      { name: "second", description: undefined, inputSchema: {}, outputSchema: undefined },
+      { name: "third", description: undefined, inputSchema: {}, outputSchema: undefined }
+    ],
+    callTool: () => Effect.succeed({ content: [], isError: false, structuredContent: undefined })
+  }
+
   it("projects one flow per tool, disclosing the server's own input schema", async () => {
     const client = await withFakeServer(
       respondToEcho,
@@ -385,9 +1086,99 @@ describe("McpFlows.mcp", () => {
     )
     const source = McpFlows.mcp(client)
     const bindings = await execute(source.bindings())
+    expect(source.name).toBe("mcp/echo")
     expect(bindings).toHaveLength(1)
     expect(bindings[0]!.descriptor.name).toBe("mcp/echo/add")
     expect(bindings[0]!.descriptor.capabilities).toEqual(McpFlows.capabilities)
+  })
+
+  it("derives one capability declaration for every host action", () => {
+    expect(McpFlows.capabilities).toHaveLength(Capability.Action.literals.length)
+  })
+
+  it("includes every host action in the parseable capability form", () => {
+    for (const action of Capability.Action.literals) {
+      expect(McpFlows.capabilities).toContain(`${action}:**`)
+    }
+  })
+
+  it("freezes the shared capability declarations", () => {
+    expect(Object.isFrozen(McpFlows.capabilities)).toBe(true)
+  })
+
+  it("applies include in catalog order", async () => {
+    const bindings = await execute(McpFlows.mcp(projectionClient, { include: ["third", "first"] }).bindings())
+
+    expect(bindings.map((binding) => binding.descriptor.name)).toEqual([
+      "mcp/catalog/first",
+      "mcp/catalog/third"
+    ])
+  })
+
+  it("applies exclude after include", async () => {
+    const bindings = await execute(
+      McpFlows.mcp(projectionClient, {
+        include: ["first", "second"],
+        exclude: ["second"]
+      }).bindings()
+    )
+
+    expect(bindings.map((binding) => binding.descriptor.name)).toEqual(["mcp/catalog/first"])
+  })
+
+  it("uses namePrefix for the source and every projected flow", async () => {
+    const source = McpFlows.mcp(projectionClient, { namePrefix: "remote/catalog" })
+    const bindings = await execute(source.bindings())
+
+    expect(source.name).toBe("remote/catalog")
+    expect(bindings.map((binding) => binding.descriptor.name)).toEqual([
+      "remote/catalog/first",
+      "remote/catalog/second",
+      "remote/catalog/third"
+    ])
+  })
+
+  it("keeps the default source and flow names when options are omitted", async () => {
+    const source = McpFlows.mcp(projectionClient)
+    const bindings = await execute(source.bindings())
+
+    expect(source.name).toBe("mcp/catalog")
+    expect(bindings.map((binding) => binding.descriptor.name)).toEqual([
+      "mcp/catalog/first",
+      "mcp/catalog/second",
+      "mcp/catalog/third"
+    ])
+  })
+
+  it("fails connected when include names a tool the server does not offer", async () => {
+    const error = await withFakeServer(
+      respondToEcho,
+      Effect.flip(McpFlows.connected({
+        server: "checked",
+        command: "mcp",
+        args: [],
+        include: ["missing"]
+      }))
+    )
+
+    expect(error).toMatchObject({
+      code: "tool_not_found",
+      server: "checked",
+      message: "MCP server \"checked\" offers no tool \"missing\" named by include"
+    })
+  })
+
+  it("fails connected when namePrefix is empty", async () => {
+    const error = await withFakeServer(
+      respondToEcho,
+      Effect.flip(McpFlows.connected({ server: "checked", command: "mcp", args: [], namePrefix: "" }))
+    )
+
+    expect(error).toMatchObject({
+      code: "protocol_error",
+      server: "checked",
+      message: "MCP server \"checked\" option \"namePrefix\" must not be empty"
+    })
   })
 
   it("runs a tool call through the produced binding", async () => {
@@ -420,11 +1211,53 @@ describe("McpFlows.mcp", () => {
   it("uses conservative metadata defaults for an incomplete tool description", async () => {
     const source = McpFlows.mcp({
       server: "partial",
-      tools: [{ name: "run", description: undefined, inputSchema: undefined }],
-      callTool: () => Effect.succeed({ content: [], isError: false })
+      tools: [{ name: "run", description: undefined, inputSchema: { type: "object" }, outputSchema: undefined }],
+      callTool: () => Effect.succeed({ content: [], isError: false, structuredContent: undefined })
     })
     const [binding] = await execute(source.bindings())
     expect(binding!.descriptor.description).toBe("MCP tool \"run\" on server \"partial\"")
     expect(binding!.descriptor.input).toMatchObject({ document: { type: "object" } })
+  })
+
+  it("passes structuredContent through the binding output schema", async () => {
+    const source = McpFlows.mcp({
+      server: "structured",
+      tools: [{ name: "run", description: undefined, inputSchema: {}, outputSchema: undefined }],
+      callTool: () =>
+        Effect.succeed({
+          content: [{ type: "text", text: "done" }],
+          isError: false,
+          structuredContent: { answer: 42 }
+        })
+    })
+    const [binding] = await execute(source.bindings())
+    const call = new Cell.Call({
+      flowName: "mcp/structured/run",
+      input: {},
+      capabilities: McpFlows.capabilities,
+      effects: binding!.descriptor.effects,
+      placement: Option.none(),
+      identity: new Cell.CallIdentity({
+        session: "structured",
+        frame: 0,
+        cell: "test",
+        ordinal: 0,
+        declaration: Cell.declarationDigest(binding!.descriptor),
+        layers: []
+      })
+    })
+
+    const result = await execute(binding!.run(call))
+    expect(result.value).toEqual({
+      content: [{ type: "text", text: "done" }],
+      isError: false,
+      structuredContent: { answer: 42 }
+    })
+  })
+
+  it("exports every MCP flow contract", () => {
+    expect(McpFlows.Args).toBeDefined()
+    expect(McpFlows.Result).toBeDefined()
+    expect(McpFlows.effects).toBeDefined()
   })
 })

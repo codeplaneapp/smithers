@@ -9,38 +9,39 @@
  * happens to proxy a remote MCP `tools/call`; a cell that reads a file and a
  * cell that calls an MCP tool run the identical two lines.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-import type * as Capability from "@smthrs/capability/Capability"
+import * as Capability from "@smthrs/capability/Capability"
 import * as Effects from "@smthrs/core/Effects"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import { Effect, Schema } from "effect"
 import type { Scope } from "effect"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as McpClient from "./McpClient.ts"
-import type { McpError } from "./McpError.ts"
+import { McpError } from "./McpError.ts"
 
 /**
- * Decoded input accepted by every MCP tool flow: whatever the remote tool's
- * own JSON Schema describes. The registry still discloses the real parameter
+ * Decoded input accepted by every MCP tool flow, which is whatever the remote
+ * tool's own JSON Schema describes. The registry still discloses the real parameter
  * shape — see {@link toolBinding} — this is only the runtime decode, and it
  * is permissive because the server, not this adapter, owns validation.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-const Args = Schema.Record(Schema.String, Schema.Unknown)
+export const Args = Schema.Record(Schema.String, Schema.Unknown)
 
 /**
- * Decoded output returned by every MCP tool flow: the tool's content blocks,
- * passed through by shape, and whether the server reported an error.
+ * Decoded output returned by every MCP tool flow, carrying the tool's content
+ * blocks by shape plus whether the server reported an error.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-const Result = Schema.Struct({
+export const Result = Schema.Struct({
   content: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
-  isError: Schema.Boolean
+  isError: Schema.Boolean,
+  structuredContent: Schema.optional(Schema.Record(Schema.String, Schema.Unknown))
 })
 
 /**
@@ -51,45 +52,28 @@ const Result = Schema.Struct({
  * for a skill with no declared `capabilities`: the honest declaration is
  * everything, not a guess.
  *
- * It is spelled out one action at a time because the cell boundary reads a
- * declared capability with `Capability.parse`, which takes an exact
- * `namespace:operation:resource` and rejects anything else. The bare `"*"`
- * this module used to declare parsed as nothing, and an unparseable
- * declaration is treated as unauthorized, so every MCP tool was refused with
- * `capability_refused` before it ran even under an unrestricted envelope. The
- * strings below say the same thing and say it in the vocabulary the boundary
- * reads, so a run whose envelope covers everything reaches the tool and a run
- * with a narrower envelope still does not.
+ * It is spelled as one exact `namespace:operation:resource` per action because
+ * the cell boundary reads each declaration with `Capability.parse`, which
+ * rejects anything that does not have exactly those three colon-separated
+ * components. An unparseable declaration counts as unauthorized. The list is
+ * derived from `Capability.Action.literals`, so adding a host action cannot
+ * silently omit it from MCP tools, and it is frozen because every binding
+ * shares this reference.
  *
  * @category constants
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const capabilities: ReadonlyArray<string> = (
-  [
-    "fs:read",
-    "fs:write",
-    "net:get",
-    "net:post",
-    "model:call",
-    "proc:spawn",
-    "jj:status",
-    "jj:diff",
-    "jj:snapshot",
-    "jj:restore",
-    "jj:workspace-add",
-    "jj:workspace-forget",
-    "jj:root",
-    "jj:revert"
-  ] satisfies ReadonlyArray<Capability.Action>
-).map((action) => `${action}:**`)
+export const capabilities: ReadonlyArray<string> = Object.freeze(
+  Capability.Action.literals.map((action) => `${action}:**`)
+)
 
 /**
  * The conservative effect envelope every MCP tool flow declares.
  *
  * @category effects
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-const effects = Effects.make({
+export const effects = Effects.make({
   reads: ["**"],
   writes: ["**"],
   mode: "expected",
@@ -97,12 +81,32 @@ const effects = Effects.make({
   tier: "irreversible"
 })
 
+/**
+ * Selects and names the tools projected from one MCP catalog.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export interface ProjectionOptions {
+  /** Exact tool names to project. Omitted or empty means every tool. */
+  readonly include?: ReadonlyArray<string> | undefined
+  /** Exact tool names to drop, applied after `include`. */
+  readonly exclude?: ReadonlyArray<string> | undefined
+  /** Replaces the default `mcp/<server>` flow-name prefix. */
+  readonly namePrefix?: string | undefined
+}
+
 /** One remote tool, bound to a flow name scoped by server so two servers may reuse a tool name. */
-const toolBinding = (client: McpClient.McpClient, tool: McpClient.ToolDescription): FlowBinding.Binding =>
-  FlowBinding.make({
+const toolBinding = (
+  client: McpClient.McpClient,
+  tool: McpClient.ToolDescription,
+  prefix: string
+): FlowBinding.Binding => {
+  const toolName = tool.name
+  return FlowBinding.make({
     flow: {
-      name: `mcp/${client.server}/${tool.name}`,
-      description: tool.description ?? `MCP tool "${tool.name}" on server "${client.server}"`,
+      name: `${prefix}/${toolName}`,
+      description: tool.description ?? `MCP tool "${toolName}" on server "${client.server}"`,
       capabilities,
       effects,
       input: Args,
@@ -111,13 +115,18 @@ const toolBinding = (client: McpClient.McpClient, tool: McpClient.ToolDescriptio
     // The server's own JSON Schema document, carried by value so a caller
     // reading `ctx.flows` sees the real parameter shape rather than `Args`'s
     // permissive record type.
-    inputDocument: (tool.inputSchema ?? { type: "object" }) as Schema.Json,
+    inputDocument: tool.inputSchema as Schema.Json,
     handler: (input): Effect.Effect<typeof Result.Type, McpError> =>
-      Effect.map(client.callTool(tool.name, input), (result) => ({
-        content: result.content,
-        isError: result.isError
-      }))
+      Effect.map(client.callTool(toolName, input), (result) =>
+        result.structuredContent === undefined
+          ? { content: result.content, isError: result.isError }
+          : {
+            content: result.content,
+            isError: result.isError,
+            structuredContent: result.structuredContent
+          })
   })
+}
 
 /**
  * Projects an already-connected MCP session's tool catalog as a
@@ -129,23 +138,57 @@ const toolBinding = (client: McpClient.McpClient, tool: McpClient.ToolDescriptio
  * place it composes every other scoped kernel service, and passes the live
  * client here.
  *
+ * This constructor is total: it applies exact filters to the catalog it is
+ * given. Use {@link connected} when unknown `include` names and an empty
+ * `namePrefix` must fail loudly against a freshly fetched catalog.
+ *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
-export const mcp = (client: McpClient.McpClient): FlowBinding.Source =>
-  FlowBinding.source(`mcp/${client.server}`, client.tools.map((tool) => toolBinding(client, tool)))
+export const mcp = (client: McpClient.McpClient, options: ProjectionOptions = {}): FlowBinding.Source => {
+  const prefix = options.namePrefix ?? `mcp/${client.server}`
+  const include = options.include === undefined || options.include.length === 0
+    ? undefined
+    : new Set(options.include)
+  const exclude = new Set(options.exclude ?? [])
+  const tools = client.tools.filter((tool) =>
+    (include === undefined || include.has(tool.name)) && !exclude.has(tool.name)
+  )
+  return FlowBinding.source(prefix, tools.map((tool) => toolBinding(client, tool, prefix)))
+}
 
 /**
  * Connects to an MCP server and projects its tools in one step.
  *
- * Convenience only: `Effect.map(McpClient.connect(options), mcp)` written out
- * for the common case of one server whose connection lifetime is the flow
- * source's lifetime.
+ * This is the checked entry point: it validates projection options against
+ * the freshly fetched catalog before constructing the source.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const connected = (
-  options: McpClient.ConnectOptions
+  options: McpClient.ConnectOptions & ProjectionOptions
 ): Effect.Effect<FlowBinding.Source, McpError, ChildProcessSpawner | Scope.Scope> =>
-  Effect.map(McpClient.connect(options), mcp)
+  Effect.flatMap(McpClient.connect(options), (client) => {
+    if (options.namePrefix === "") {
+      return Effect.fail(
+        new McpError({
+          code: "protocol_error",
+          message: `MCP server "${client.server}" option "namePrefix" must not be empty`,
+          server: client.server
+        })
+      )
+    }
+    const offered = new Set(client.tools.map((tool) => tool.name))
+    const missing = options.include?.find((name) => !offered.has(name))
+    if (missing !== undefined) {
+      return Effect.fail(
+        new McpError({
+          code: "tool_not_found",
+          message: `MCP server "${client.server}" offers no tool "${missing}" named by include`,
+          server: client.server
+        })
+      )
+    }
+    return Effect.succeed(mcp(client, options))
+  })

@@ -1,7 +1,7 @@
 /**
  * The single typed error returned by the MCP client and flow adapter.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import { Schema } from "effect"
 
@@ -9,7 +9,7 @@ import { Schema } from "effect"
  * Stable, model-facing failure codes for MCP operations.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Code = Schema.Literals([
   "spawn_failed",
@@ -25,7 +25,7 @@ export const Code = Schema.Literals([
  * Stable, model-facing failure codes for MCP operations.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Code = typeof Code.Type
 
@@ -38,7 +38,7 @@ export type Code = typeof Code.Type
  * response could not be parsed.
  *
  * @category errors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export class McpError extends Schema.TaggedError<McpError>()("flows/mcp/McpError", {
   code: Code,

@@ -41,7 +41,7 @@ const send = (message) => process.stdout.write(JSON.stringify(message) + "\n")
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const request = JSON.parse(line)
   if (request.method === "initialize") {
-    send({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "fixture" } } })
+    send({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "fixture" } } })
     return
   }
   if (request.method === "tools/list") {
