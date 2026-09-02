@@ -7,7 +7,12 @@ import type * as Runner from "../src/Runner.ts"
 
 const empty = (): Promise<Regression.Report> =>
   Effect.runPromise(
-    Regression.compare({ version: 1, records: [] }, { runId: "run", suite: "s", cases: [], observations: [] })
+    Regression.compare({ version: 1, suite: "s", records: [] }, {
+      runId: "run",
+      suite: "s",
+      cases: [],
+      observations: []
+    })
   )
 
 const observation = (
@@ -56,7 +61,7 @@ describe("Report", () => {
   it("freezes the JSON wire format", async () => {
     const result = await empty()
     expect(Report.json(result)).toBe(
-      "{\"baseline\":{\"records\":[],\"version\":1},\"inconclusive\":[],\"missing\":[],\"nondeterminism\":[]," +
+      "{\"baseline\":{\"records\":[],\"suite\":\"s\",\"version\":1},\"inconclusive\":[],\"missing\":[],\"nondeterminism\":[]," +
         "\"regressions\":[],\"run\":{\"cases\":[],\"observations\":[],\"runId\":\"run\",\"suite\":\"s\"}," +
         "\"samples\":[],\"suite\":\"s\"}\n"
     )
@@ -82,7 +87,7 @@ describe("Report", () => {
       }
     }
     expect(Report.json(failed)).toBe(
-      "{\"baseline\":{\"records\":[],\"version\":1},\"inconclusive\":[],\"missing\":[],\"nondeterminism\":[]," +
+      "{\"baseline\":{\"records\":[],\"suite\":\"s\",\"version\":1},\"inconclusive\":[],\"missing\":[],\"nondeterminism\":[]," +
         "\"regressions\":[],\"run\":{\"cases\":[{\"case\":\"broken\",\"error\":{" +
         "\"_tag\":\"flows/evals/EvalError\",\"code\":\"executor\",\"message\":\"Target failed for case 'broken': boom\"," +
         "\"name\":\"flows/evals/EvalError\",\"path\":\"cases[0].input\"},\"observations\":[]}]," +

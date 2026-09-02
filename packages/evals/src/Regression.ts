@@ -178,8 +178,10 @@ const pairsFor = (
  *
  * Fails with `invalid_tolerance` when a tolerance is not finite and
  * non-negative, and with `invalid_baseline` when the artifact or any of its
- * records belongs to a suite other than the one the run reports. Artifact
- * ownership covers an empty baseline, whose records cannot identify its suite.
+ * records belongs to a suite other than the one the run reports. An empty
+ * baseline must name its suite because no record can establish ownership. A
+ * legacy baseline without `suite` remains comparable when its records belong to
+ * the run's suite.
  *
  * @category constructors
  * @since 0.1.0
@@ -215,6 +217,15 @@ export const compare = (
       new EvalError({
         code: "invalid_baseline",
         message: `Baseline belongs to suite '${baselineSuite}', but the run is suite '${run.suite}'`,
+        path: "baseline.suite"
+      })
+    )
+  }
+  if (baselineSuite === undefined && baseline.records.length === 0) {
+    return Effect.fail(
+      new EvalError({
+        code: "invalid_baseline",
+        message: `Baseline has no suite and no records, so it cannot establish ownership for run suite '${run.suite}'`,
         path: "baseline.suite"
       })
     )

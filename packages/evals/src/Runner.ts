@@ -11,6 +11,7 @@
 import type * as ScorerRunner from "@smthrs/scorers/Runner"
 import * as Sampling from "@smthrs/scorers/Sampling"
 import * as Scorer from "@smthrs/scorers/Scorer"
+import { ScorerError, type ScorerErrorCode } from "@smthrs/scorers/ScorerError"
 import type * as ScoreStore from "@smthrs/scorers/ScoreStore"
 import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
@@ -229,6 +230,16 @@ const inconclusiveReason = (what: string, cause: Cause.Cause<unknown>): string =
   return `${what}: ${boundedReason(summary)}`
 }
 
+const inconclusiveCode = (cause: Cause.Cause<unknown>): ScorerErrorCode => {
+  const failure = Cause.squash(cause)
+  return failure instanceof ScorerError ? failure.code : "inconclusive"
+}
+
+// A case failure always locates itself. An executor that named the offending
+// value keeps its own path; one that named nothing still gets the case, because
+// a failure with no path leaves a caller nothing to branch on but prose.
+const casePath = (name: string): string => `cases['${name}']`
+
 const runCase = (executor: CaseExecutorService, suiteCase: Case): Effect.Effect<CaseResult> =>
   executor.run(suiteCase).pipe(
     Effect.match({
@@ -238,12 +249,13 @@ const runCase = (executor: CaseExecutorService, suiteCase: Case): Effect.Effect<
           ? new EvalError({
             code: cause.code,
             message: `Target failed for case '${suiteCase.name}': ${cause.message}`,
-            ...(cause.path === undefined ? {} : { path: cause.path }),
+            path: cause.path ?? casePath(suiteCase.name),
             cause
           })
           : new EvalError({
             code: "executor",
             message: `Target failed for case '${suiteCase.name}': ${String(cause)}`,
+            path: casePath(suiteCase.name),
             cause
           }),
         observations: []
@@ -332,6 +344,7 @@ const executeInline = (job: ScoreJob): Effect.Effect<ScoreObservation> =>
         : Effect.succeed({
           ...job.observation,
           kind: "inconclusive" as const,
+          code: inconclusiveCode(cause),
           reason: inconclusiveReason("Scorer execution failed", cause),
           at: job.at
         })
@@ -447,6 +460,7 @@ const score = (
                 observation: {
                   ...job.observation,
                   kind: "inconclusive" as const,
+                  code: "inconclusive" as const,
                   reason: inconclusiveReason("Scorer batch failed", cause),
                   at: job.at
                 }
@@ -524,6 +538,7 @@ const score = (
               jobs.map((job) => ({
                 ...job.observation,
                 kind: "inconclusive" as const,
+                code: "inconclusive" as const,
                 reason: inconclusiveReason("Scorer batch failed", cause),
                 at: job.at
               }))
@@ -586,7 +601,8 @@ const score = (
  *
  * Scoring goes through `options.scorer` when the caller passes one, the
  * {@link Runner} service when one is provided, and {@link makeInline}
- * otherwise. A case whose target failed keeps its typed error and produces no
+ * otherwise. A case whose target failed keeps its typed error, locates itself
+ * with the executor's own `path` or with `cases['<name>']`, and produces no
  * observations; a scorer that failed produces an inconclusive observation. The
  * run itself fails only with `invalid_run_options` for a non-canonical run
  * identity or timestamp, `invalid_suite` for an unusable sampling policy,

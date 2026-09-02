@@ -2,6 +2,7 @@ import * as Flow from "@smthrs/core/Flow"
 import * as Binding from "@smthrs/scorers/Binding"
 import type * as Sampling from "@smthrs/scorers/Sampling"
 import * as Scorer from "@smthrs/scorers/Scorer"
+import { ScorerError } from "@smthrs/scorers/ScorerError"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -99,6 +100,23 @@ describe("Runner", () => {
     const result = await Effect.runPromise(Runner.run(suite, runOptions).pipe(Effect.provide(succeeding)))
     expect(result.observations).toHaveLength(1)
     expect(result.observations[0]).toMatchObject({ kind: "score", score: 1, reason: "exact", scorerName: "exact" })
+  })
+
+  it("preserves a typed scorer failure code in the inline batch result", async () => {
+    const result = await Effect.runPromise(
+      Runner.makeInline().runBatch([{
+        identity: "typed-failure",
+        observation: { targetStepKey: "step", scorerKey: scorerFlow.scorerKey },
+        score: Effect.fail(new ScorerError({ code: "store", message: "judge storage unavailable" })),
+        at: 0
+      }])
+    )
+
+    expect(result[0]).toMatchObject({
+      kind: "inconclusive",
+      code: "store",
+      reason: expect.stringContaining("judge storage unavailable")
+    })
   })
 
   it("scores through the provided Runner service and through the inline layer", async () => {
@@ -209,6 +227,15 @@ describe("Runner", () => {
     const result = await Effect.runPromise(Runner.run(suite, runOptions).pipe(Effect.provide(executor)))
     expect(result.cases[0]?.error?.code).toBe("executor")
     expect(result.cases[0]?.error?.message).toBe("Target failed for case 'one': raw failure")
+    expect(result.cases[0]?.error?.path).toBe("cases['one']")
+  })
+
+  it("locates a typed target failure that named no path at the case", async () => {
+    const suite = await suiteOf("pathless-failure", [])
+    const executor = executorFor(() => Effect.fail(new EvalError({ code: "executor", message: "the host is gone" })))
+    const result = await Effect.runPromise(Runner.run(suite, runOptions).pipe(Effect.provide(executor)))
+    expect(result.cases[0]?.error?.code).toBe("executor")
+    expect(result.cases[0]?.error?.path).toBe("cases['one']")
   })
 
   it("applies deterministic scorer sampling before batch execution", async () => {
@@ -713,6 +740,7 @@ describe("Runner", () => {
               jobs.map((job) => ({
                 ...job.observation,
                 kind: "inconclusive" as const,
+                code: "inconclusive" as const,
                 reason: "judge down",
                 at: job.at
               }))
@@ -752,7 +780,7 @@ describe("Runner", () => {
       }> => item.kind === "inconclusive")
       const rendered = Report.markdown({
         suite: result.suite,
-        baseline: { version: 1, records: [] },
+        baseline: { version: 1, suite: result.suite, records: [] },
         run: result,
         regressions: [],
         nondeterminism: [],

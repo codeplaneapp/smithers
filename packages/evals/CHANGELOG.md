@@ -49,8 +49,9 @@
 - Turn a batch score that is not finite and inside `[0, 1]` into an inconclusive
   observation naming the scorer and the offending value.
 - Fail `Regression.compare` with `invalid_baseline` when the artifact or any of
-  its records belongs to another suite. Such a comparison used to report zero
-  findings, and an empty baseline named no suite at all.
+  its records belongs to another suite, or when an empty legacy artifact names
+  no suite. Older suite-less artifacts with records remain readable because the
+  records establish ownership. These comparisons used to report zero findings.
 - Snapshot and freeze suite cases and bindings, including a binding's sampling
   policy, and reject data that cannot be structured-cloned, so a run stays
   reproducible from the validated suite. `Suite.make` validated at call time and

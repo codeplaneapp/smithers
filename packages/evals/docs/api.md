@@ -79,8 +79,10 @@ Four rules decide what a comparison reports, and none of them are obvious:
   equal copy grades nothing.
 - **A baseline belongs to one suite.** New artifacts carry `Baseline.suite`, so
   ownership is checked even when the baseline has no records. Older artifacts
-  without that field still load and rely on each record's suite. A mismatch
-  fails with `invalid_baseline` rather than reporting a clean pass.
+  without that field still load and rely on each record's suite. A suite-less
+  artifact with no records also loads, but comparison refuses it because nothing
+  establishes ownership. A mismatch fails with `invalid_baseline` rather than
+  reporting a clean pass.
 
 ## Failure codes
 
@@ -90,7 +92,7 @@ Four rules decide what a comparison reports, and none of them are obvious:
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
 | `invalid_suite`       | The suite declaration is wrong: a name, a case, a concurrency, a fixture line, non-cloneable case data, or an undecidable sampling policy. | The suite author          |
 | `invalid_run_options` | `Runner.run`'s own options are wrong: an empty `runId`, or an `at` that is not a canonical UTC instant.                                    | The caller                |
-| `invalid_baseline`    | The committed baseline is unreadable, holds a record the schema rejects, or belongs to another suite.                                      | Regenerate the baseline   |
+| `invalid_baseline`    | The committed baseline is unreadable, holds a record the schema rejects, belongs to another suite, or cannot establish suite ownership.    | Regenerate the baseline   |
 | `invalid_tolerance`   | A comparison tolerance is not a finite non-negative number.                                                                                | The caller                |
 | `executor`            | The target flow failed for a case, or no executor was available.                                                                           | The target or the wiring  |
 | `ambiguous_score_job` | Two jobs share a step key and scorer, so an order-only runner cannot attribute their results to cases.                                     | The suite or batch runner |
@@ -98,8 +100,11 @@ Four rules decide what a comparison reports, and none of them are obvious:
 | `scorer_unavailable`  | No batch runner was available to score with.                                                                                               | The wiring                |
 
 Most failures carry a `path` locating the offending value: `cases[1].input`,
-`records[3].score`, `options.at`, `runBatch[0]`. A failure about an artifact as a
-whole, or about the absence of a runner, carries no path.
+`records[3].score`, `options.at`, `runBatch[0]`. A case whose target failed keeps
+the executor's own path when it named one and is located at `cases['<name>']`
+otherwise, so a failed case is always locatable. Only two failures carry no path:
+one about an artifact as a whole (`Baseline` is not JSON, or is not an object)
+and one about the absence of a runner (`scorer_unavailable`).
 
 ## The batch protocol
 

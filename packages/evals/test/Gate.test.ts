@@ -12,7 +12,7 @@ const report = (
   observations: ReadonlyArray<Runner.Observation>
 ): Regression.Report => ({
   suite: "s",
-  baseline: { version: 1 as const, records: [] },
+  baseline: { version: 1 as const, suite: "s", records: [] },
   run: { runId: "run", suite: "s", cases: [], observations },
   regressions: [],
   nondeterminism: [],
@@ -162,7 +162,7 @@ describe("Gate", () => {
       Runner.run(suite, { runId: "run", at: "2026-01-01T00:00:00.000Z" }).pipe(Effect.provide(executor))
     )
     const healthy = { ...run, cases: [...run.cases, { case: "healthy", observations: [] }] }
-    const comparison = await Effect.runPromise(Regression.compare({ version: 1, records: [] }, healthy))
+    const comparison = await Effect.runPromise(Regression.compare({ version: 1, suite: "s", records: [] }, healthy))
     const verdict = await Effect.runPromise(Gate.check(comparison))
     expect(verdict._tag).toBe("Inconclusive")
     expect(Gate.ciGrade(verdict).summary).toContain(

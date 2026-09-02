@@ -120,15 +120,35 @@ describe("Regression", () => {
     expect(foreign.code).toBe("invalid_baseline")
     expect(foreign.message).toBe("Baseline belongs to suite 'OTHER', but the run is suite 's'")
     expect(foreign.path).toBe("baseline.suite")
+  })
 
-    const legacy = await Effect.runPromise(Baseline.load("{\"version\":1,\"records\":[]}"))
-    const report = await Effect.runPromise(Regression.compare(legacy, {
-      runId: "run",
-      suite: "s",
-      cases: [],
-      observations: []
-    }))
+  it("refuses a suite-less empty baseline made or loaded through the public API", async () => {
+    const candidates = [
+      await Effect.runPromise(Baseline.make({ records: [] })),
+      await Effect.runPromise(Baseline.load("{\"version\":1,\"records\":[]}"))
+    ]
+    for (const candidate of candidates) {
+      const error = await failure(
+        Regression.compare(candidate, { runId: "run", suite: "s", cases: [], observations: [] })
+      )
+      expect(error.code).toBe("invalid_baseline")
+      expect(error.message).toBe(
+        "Baseline has no suite and no records, so it cannot establish ownership for run suite 's'"
+      )
+      expect(error.path).toBe("baseline.suite")
+    }
+  })
+
+  it("compares a legacy baseline whose records establish suite ownership", async () => {
+    const legacy = await Effect.runPromise(
+      Baseline.load(
+        "{\"version\":1,\"records\":[{\"suite\":\"s\",\"case\":\"c\",\"scorer\":\"x\",\"stepKey\":\"old\",\"score\":0.9}]}"
+      )
+    )
+    const report = await Effect.runPromise(Regression.compare(legacy, run("old", 0.9)))
     expect(legacy.suite).toBeUndefined()
+    expect(report.regressions).toEqual([])
+    expect(report.nondeterminism).toEqual([])
     expect(report.missing).toEqual([])
   })
 
@@ -139,7 +159,7 @@ describe("Regression", () => {
     expect(missingFromRun.missing).toEqual([{ side: "run", case: "c", scorer: "x", stepKey: "old" }])
 
     const missingFromBaseline = await Effect.runPromise(
-      Regression.compare({ version: 1, records: [] }, run("new", 0.5))
+      Regression.compare({ version: 1, suite: "s", records: [] }, run("new", 0.5))
     )
     expect(missingFromBaseline.missing).toEqual([{ side: "baseline", case: "c", scorer: "x", stepKey: "new" }])
   })
@@ -194,7 +214,7 @@ describe("Regression", () => {
 
   it("carries inconclusive observations through untouched", async () => {
     const report = await Effect.runPromise(
-      Regression.compare({ version: 1, records: [] }, {
+      Regression.compare({ version: 1, suite: "s", records: [] }, {
         runId: "run",
         suite: "s",
         cases: [],
