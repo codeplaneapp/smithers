@@ -830,6 +830,24 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
   if (needs.apt !== undefined) {
     // The generator emits no `if:` key, so the step decides for itself: a
     // runner without apt-get (macOS, Windows) runs nothing and stays green.
+    //
+    // Installing bubblewrap is not enough to make it work. `bwrap` unshares a
+    // network namespace and then brings up loopback, which needs CAP_NET_ADMIN
+    // inside the new user namespace, and ubuntu-24.04 restricts unprivileged
+    // user namespaces through AppArmor. Every confined target therefore died
+    // with `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`, 74
+    // tests on the required row, for a mechanism the host had installed and
+    // would not let run. The sysctl lifts exactly that restriction, on a
+    // throwaway VM, so the suite exercises real confinement instead of
+    // reporting which host it ran on. It is guarded twice: `bubblewrap` has to
+    // be among the declared packages, and the key has to exist on this kernel.
+    const sandboxSetup = needs.apt.packages.includes("bubblewrap")
+      ? [
+        "  if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then",
+        "    sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0",
+        "  fi"
+      ]
+      : []
     steps.push({
       name: "Install system packages",
       run: [
@@ -837,6 +855,7 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
         `  sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ${
           needs.apt.packages.map(shellWord).join(" ")
         }`,
+        ...sandboxSetup,
         "fi"
       ].join("\n")
     })
