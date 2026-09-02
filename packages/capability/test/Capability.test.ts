@@ -34,6 +34,8 @@ describe("Capability", () => {
   it.each(
     [
       ["*:**", "*", "**"],
+      // The bare sentinel markdown discovery emits for an undeclared flow.
+      ["*", "*", "**"],
       ["*:", "*", ""],
       ["fs:*:/workspace/**", "fs:*", "/workspace/**"],
       ["fs:read:/a:b", "fs:read", "/a:b"],
@@ -45,7 +47,7 @@ describe("Capability", () => {
     expect(Option.getOrThrow(Capability.parsePattern(input))).toEqual(pattern(action, resource))
   })
 
-  it.each(["*", "fs:read", "nope:read:/a", ":fs:read:x"])(
+  it.each(["fs:read", "nope:read:/a", ":fs:read:x"])(
     "rejects the malformed capability pattern %s",
     (input) => {
       expect(Capability.parsePattern(input)).toStrictEqual(Option.none())

@@ -85,9 +85,11 @@ inputs. `Capability.withinMatchBudget` reports that case and
 `Capability.format` renders a capability or a pattern as `action:resource`, and
 it is the durable identity a grant envelope is deduplicated and sorted by.
 `Capability.parse` reads back an exact capability and `Capability.parsePattern`
-reads back a pattern, including the whole-authority `*:**`. Both return
-`Option.none()` rather than guessing: a missing resource is a rejection, not a
-default.
+reads back a pattern, including the whole-authority `*:**` and its bare `*`
+sentinel form, the string markdown discovery emits for a flow that declares no
+capabilities and plans persist in durable key material, which parses to
+`*:**`. Apart from that one sentinel, both return `Option.none()` rather than
+guessing: a missing resource is a rejection, not a default.
 
 ## Permission failures
 
