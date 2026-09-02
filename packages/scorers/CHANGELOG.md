@@ -78,6 +78,13 @@ the published `1.0.0-rc.0` packages, so every `@since` tag in `src/` reads
 
 ### Fixed
 
+- The four migration modules export their effect as the named binding
+  `migration` and `Migrations` imports each one by name; the default exports
+  are gone. The CommonJS build (`scripts/build.mjs`, esbuild under
+  `"type": "module"`) emitted Node-style interop for a default import of a
+  sibling module, so `Migrations.run` in `dist/cjs` received the whole
+  `{ __esModule, default }` wrapper instead of the migration effect and no
+  migration could apply through the `require` entry.
 - `Scorer.make` now rejects a non-string `id` or `version` with
   `invalid_declaration` and maps an unexpected configuration-walk failure to
   the same typed error instead of leaking a host `TypeError` or `RangeError`.

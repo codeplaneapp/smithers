@@ -5,10 +5,10 @@
  */
 import * as Layer from "effect/Layer"
 import * as Migrator from "effect/unstable/sql/Migrator"
-import scores from "./0001_scores.ts"
-import jobs from "./0002_score_jobs.ts"
-import failureCodes from "./0003_score_failure_codes.ts"
-import requiredFailureCodes from "./0004_require_failure_codes.ts"
+import { migration as scores } from "./0001_scores.ts"
+import { migration as jobs } from "./0002_score_jobs.ts"
+import { migration as failureCodes } from "./0003_score_failure_codes.ts"
+import { migration as requiredFailureCodes } from "./0004_require_failure_codes.ts"
 
 const migrations = {
   "0001_scores": scores,

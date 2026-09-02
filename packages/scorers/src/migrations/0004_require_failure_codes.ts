@@ -18,7 +18,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  * @category migrations
  * @since 0.1.0
  */
-const migration: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
+export const migration: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
   yield* sql`CREATE TABLE flows_scores_classified (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,5 +56,3 @@ const migration: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(
   yield* sql`CREATE INDEX flows_scores_lookup_idx
     ON flows_scores (target_step_key, scorer_key, at_ms)`
 })
-
-export default migration

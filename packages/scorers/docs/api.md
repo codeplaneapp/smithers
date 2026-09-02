@@ -8,8 +8,11 @@ consumer in the tree.
 The root entry point re-exports every module as a namespace. Top-level modules
 are also importable directly as `@smthrs/scorers/<Module>`. `internal/*` and
 nested `*/index` subpaths are blocked, so the migration aggregator is reachable
-only through the root `Migrations` namespace. The four migration modules are
-public subpaths and each has a default export, the migration effect itself.
+only through the root `Migrations` namespace. The four `migrations/*` modules
+are blocked as well; each exports its migration effect as the named binding
+`migration`, and `Migrations` imports every one of them by name. None has a
+default export, because the CommonJS build reads a default import of a sibling
+module as the whole interop wrapper rather than the effect.
 
 Every declaration carrying `@category` is listed in the generated
 [`exports.md`](./exports.md) index. `//packages/scorers:docsPages` drift-checks
