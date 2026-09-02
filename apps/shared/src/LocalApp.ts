@@ -389,6 +389,33 @@ export const splitLabel = (label: string): { readonly package: string; readonly 
   return { package: label.slice(0, colon), name: label.slice(colon + 1) }
 }
 
+/*
+ * The jjhub Cloud seam on the local origin (docs/decisions/0001-piper-one-truth.md):
+ * `/api/cloud/*` proxies to the cloud API (SMITHERS_CLOUD_API, default
+ * https://api.jjhub.tech) with the Bun-held bearer attached, and the
+ * `/api/cloud-auth/*` routes run the CLI's browser login. The token NEVER
+ * reaches the renderer: the session answer carries only what a person sees.
+ */
+export const CLOUD_ROUTE_PREFIX = "/api/cloud/"
+export const CLOUD_AUTH_START_PATH = "/api/cloud-auth/start"
+export const CLOUD_AUTH_SESSION_PATH = "/api/cloud-auth/session"
+export const CLOUD_AUTH_SIGN_OUT_PATH = "/api/cloud-auth/sign-out"
+export const CloudSessionSchema = z.object({
+  state: z.enum(["signed-out", "signing-in", "signed-in"]),
+  username: z.string().nullable(),
+  expiresAt: z.string().nullable(),
+  /**
+   * Set when the post-sign-in scope probe (GET /api/user/workspaces) answered
+   * 403 insufficient-scope: the legacy token set lacks workspace/agent/
+   * approval scopes, so those acts must say "sign in again to enable".
+   */
+  scopes: z.literal("degraded").optional()
+})
+export type CloudSession = z.infer<typeof CloudSessionSchema>
+/** `POST /api/cloud-auth/start` */
+export const CloudAuthStartResponseSchema = z.object({ url: z.string() })
+export type CloudAuthStartResponse = z.infer<typeof CloudAuthStartResponseSchema>
+
 /** `GET /api/harnesses` */
 export const HarnessesResponseSchema = z.object({ harnesses: z.array(HarnessSchema) })
 /** `GET /api/repos` */
