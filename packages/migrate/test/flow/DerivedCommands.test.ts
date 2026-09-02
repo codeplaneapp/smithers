@@ -111,7 +111,7 @@ describe("derived typecheck commands over hostile tsconfig names", () => {
       GrantStore.layer({
         attended: false,
         rules: Layers.rules({
-          root: "/tmp/project",
+          root: Effect.runSync(Layers.migrationRoot("/tmp/project")),
           runStatePaths: [],
           commands: {
             typecheck: [Units.argv("tsc", "--noEmit", "-p", "tsconfig.;touch pwned;.json")],

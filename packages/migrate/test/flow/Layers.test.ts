@@ -20,7 +20,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { copyFixture, nodeLayer } from "../fixtures/helpers.ts"
 
-const root = "/tmp/project"
+const root = Effect.runSync(Layers.migrationRoot("/tmp/project"))
 
 const commands: Contract.Commands = {
   install: "pnpm install --frozen-lockfile",
@@ -111,10 +111,24 @@ describe("Layers.commandsFor over a real project", () => {
 })
 
 describe("Layers.rules over a real grant store", () => {
-  it("refuses a relative root before constructing grant rules", () => {
-    expect(() => Layers.rules({ root: "../project", runStatePaths, commands }))
-      .toThrow(/migration root.*absolute.*\.\.\/project/i)
-  })
+  it.effect("refuses a relative root in the smart constructor rules are built from", () =>
+    Effect.gen(function*() {
+      // `rules` takes a `MigrationRoot`, so the only way to a rule set is
+      // through this constructor and a relative root never reaches a pattern.
+      const failure = yield* Effect.flip(Layers.migrationRoot("../project"))
+
+      expect(Command.isMigrateError(failure)).toBe(true)
+      if (Command.isMigrateError(failure)) {
+        expect(failure.code).toBe("unsupported-project")
+        expect(failure.message).toContain("../project")
+      }
+      // The other half of the same claim, which only a typecheck can make: an
+      // unproven string is not a root `rules` accepts, so the relative case is
+      // unreachable rather than guarded against. `tsc` fails this file if this
+      // call ever compiles.
+      // @ts-expect-error a bare string is not a proven-absolute migration root
+      expect(() => Layers.rules({ root: "/tmp/project", runStatePaths, commands })).not.toThrow()
+    }))
 
   it.effect("refuses a relative root in the package's own error channel when a host is composed", () =>
     Effect.gen(function*() {

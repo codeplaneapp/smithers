@@ -1,13 +1,8 @@
 This page is the public API reference for the **Smithers 0.x to 1.0 migration
 tool**: the scanners that read a JSX-era project, the mapping that says what
 each construct becomes, the checks that enforce the migration contract, and the
-report that records all of it.
-
-The package is not a compatibility library. It rewrites application source to
-`Flow`, `Action`, and Effect, archives the old sources, and leaves an auditable
-report. It never recreates the JSX runtime, never embeds a scheduler in
-application code, never hides an untranslatable construct behind `any`, and
-never rewrites or resumes 0.x run state.
+report that records all of it. `apply` rewrites application source to `Flow`,
+`Action`, and Effect, archives the old sources, and writes that report.
 
 Everything on this page is deterministic. The report's Markdown is a pure
 function of its JSON, and every list in the JSON is sorted, so two reads of

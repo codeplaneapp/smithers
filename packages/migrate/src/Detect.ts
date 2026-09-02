@@ -56,7 +56,8 @@ export const oldScopes: ReadonlyArray<string> = ["@smithers/", "@smithers-orches
 
 /**
  * `@smthrs/<name>` packages that exist only in the 0.x tree. A dependency on
- * one of these at a 0.x version is an old package however the version reads.
+ * one of these is an old package however it is pinned: the name has no 1.0
+ * release for a specifier to point at.
  *
  * @category models
  * @since 1.0.0-rc.0
@@ -512,6 +513,10 @@ export const isOldSpecifier = (specifier: string, context: SpecifierContext = {}
  * reporting it old would have the project unit delete those dependencies from
  * `package.json`.
  *
+ * That spec rule decides names that exist in both trees. A name in
+ * {@link deletedSmthrsPackages} exists in neither, so it is decided by name
+ * alone, exactly as {@link isOldSpecifier} decides an import of it.
+ *
  * @category combinators
  * @since 1.0.0-rc.0
  */
@@ -525,11 +530,17 @@ export const classifyPackage = (name: string, version: string): OldPackageReason
   if (oldScopes.some((scope) => name.startsWith(scope))) return "old-scope"
   if (name.startsWith("@smthrs/")) {
     const bare = name.slice("@smthrs/".length)
+    // Before the version, not after it. A deleted name has no 1.0 release, so
+    // there is no specifier that makes it current, and a version test that ran
+    // first dropped `@smthrs/components: workspace:*` out of `oldPackages`
+    // altogether: no unit planned it, the archive left it in `package.json`,
+    // and the postconditions read the same classification and passed over the
+    // uninstallable dependency the project was left with.
+    if (deletedSmthrsPackages.includes(bare)) return "deleted-package"
     const old = Semver.parse(version) === undefined
       ? /^(?:file|link):/.test(version)
       : Semver.isBeforeOneZero(version)
-    if (!old) return undefined
-    return deletedSmthrsPackages.includes(bare) ? "deleted-package" : "old-version"
+    return old ? "old-version" : undefined
   }
   return undefined
 }

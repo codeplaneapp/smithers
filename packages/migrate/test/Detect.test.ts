@@ -43,6 +43,24 @@ describe("Detect.classifyPackage", () => {
     expect(Detect.classifyPackage("smithers", "^2.1.0")).toBeUndefined()
     expect(Detect.classifyPackage("smithers", "latest")).toBeUndefined()
   })
+
+  it("decides a name the 1.0 tree deleted by name, whatever it is pinned to", () => {
+    // `@smthrs/components` has no 1.0 release, so every specifier on it names
+    // a package that only ever existed in the 0.x tree. The spec-based rule
+    // that keeps `@smthrs/flow: workspace:*` is about names that exist in both
+    // trees; applying it here left a dependency nothing can install out of
+    // `oldPackages`, so no unit planned it, the archive never removed it, and
+    // the postconditions passed over it.
+    for (const version of ["workspace:*", "catalog:", "*", "latest", "0.35.0", "1.0.0-rc.0"]) {
+      expect(Detect.classifyPackage("@smthrs/components", version)).toBe("deleted-package")
+    }
+    expect(Detect.classifyPackage("@smthrs/gateway-ui", "latest")).toBe("deleted-package")
+    expect(Detect.classifyPackage("@smthrs/react-reconciler", "npm:@smthrs/react-reconciler@0.35.0"))
+      .toBe("deleted-package")
+    // The import classifier already decided the same names by name alone, and
+    // the two halves of the same detection must not disagree.
+    expect(Detect.isOldSpecifier("@smthrs/components")).toBe(true)
+  })
 })
 
 describe("Detect.classifyPrompt", () => {

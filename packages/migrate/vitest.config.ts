@@ -28,9 +28,15 @@ export default defineConfig({
       // built binary, and the command it runs is `flow/Cli.ts`, covered in
       // process. The floor below allows for it.
       // A ratchet, not the goal. The rc contract's baseline is 100 on every
-      // default run; the package measures 92.7 / 83.2 / 94.0 / 95.2 today, so
-      // the floor sits just under that and a change that lowers coverage
-      // fails here rather than passing under a threshold nobody meets.
+      // default run. On a checkout with no `SMITHERS_MIGRATE_PLUE_PACK` beside
+      // it, which is every checkout but the maintainer's, the package measures
+      // 94.4 statements, 86.0 branches, 95.3 functions, and 96.9 lines. The
+      // floor sits under that so a change that lowers coverage fails here
+      // rather than passing under a threshold nobody meets. Raise both
+      // together: `packages/flows/test/vitestCoverageIsolation.test.ts`
+      // carries the comment justifying this package's place in
+      // `coverageFloorDeferred`, and it has to state the same numbers these
+      // thresholds do.
       thresholds: {
         branches: 83,
         functions: 93,

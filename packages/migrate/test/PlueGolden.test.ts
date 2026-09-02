@@ -5,10 +5,11 @@
  *
  * The pack is named by `SMITHERS_MIGRATE_PLUE_PACK`, the working tree of an
  * external project. The test never copies it, never writes to it, and skips
- * with a reason when the directory is not on this machine, so the suite stays
- * green on a checkout that has no such pack beside it. The variable is read
- * first so the case runs wherever the pack is kept, and the maintainer's own
- * path is the fallback rather than the contract.
+ * when the variable is unset or names a directory that is not on this machine,
+ * so the suite stays green on a checkout that has no such pack beside it. The
+ * variable is the only way in: a default path would be one contributor's home
+ * directory shipped in a published package, and a machine that happened to
+ * match it would run a different test from everyone else's.
  *
  * The scan runs once for the whole file. A pack this size is the tool's real
  * unit of work, not a per-assertion fixture.
@@ -24,8 +25,8 @@ import * as Inventory from "../src/Inventory.ts"
 import * as Mapping from "../src/Mapping.ts"
 import { nodeLayer } from "./fixtures/helpers.ts"
 
-const root = process.env["SMITHERS_MIGRATE_PLUE_PACK"] ?? "/Users/williamcory/plue/.smithers"
-const present = existsSync(root)
+const root = process.env["SMITHERS_MIGRATE_PLUE_PACK"] ?? ""
+const present = root !== "" && existsSync(root)
 
 let detection: Detect.Detection
 let hits: ReadonlyArray<Inventory.InventoryEntry>

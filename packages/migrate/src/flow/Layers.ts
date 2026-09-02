@@ -47,6 +47,7 @@ import * as OpenAICompatible from "@smthrs/model/OpenAICompatible"
 import * as RequestExecutor from "@smthrs/model/RequestExecutor"
 import * as Route from "@smthrs/model/Route"
 import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
+import type * as Brand from "effect/Brand"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
@@ -204,20 +205,33 @@ export const verificationCommands = (commands: Contract.Commands): ReadonlyArray
   ])
 ]
 
-// The grant patterns are built from the root, so a relative one would make a
-// pattern that matches nothing and confine nothing. Both layer constructors
-// refuse it through the error channel before `rules` is reached; the throw here
-// is the invariant behind that refusal, not a path a caller can reach.
-const absoluteRoot = (root: string): string => {
-  if (!isAbsolute(root)) {
-    throw new TypeError(`migration root must be absolute before grant construction, received "${root}"`)
-  }
-  return root
-}
+/**
+ * A migration root proven absolute.
+ *
+ * Every grant pattern in {@link rules} is this root with a suffix, so a
+ * relative root builds patterns that match nothing: the agent would run with
+ * no filesystem allow, no run-state denial, and no confinement, which is the
+ * one failure mode this module exists to prevent. The brand makes that state
+ * unrepresentable instead of guarding against it. The check happens once, in
+ * {@link migrationRoot}, and every later caller carries the proof in its type.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type MigrationRoot = Brand.Branded<string, "@smthrs/migrate/Layers/MigrationRoot">
 
-/** Refuses a root that is not absolute, in this package's own error channel. */
-const rootRefusal = (root: string): Effect.Effect<void, MigrateError> =>
-  isAbsolute(root) ? Effect.void : Effect.fail(make(
+/**
+ * Proves a root absolute, in this package's own error channel.
+ *
+ * A relative path fails with `unsupported-project` rather than throwing, so a
+ * library caller building rules by hand gets the one failure type an entry
+ * point maps onto an exit status, not a defect raised from inside a layer.
+ *
+ * @category constructors
+ * @since 1.0.0-rc.0
+ */
+export const migrationRoot = (root: string): Effect.Effect<MigrationRoot, MigrateError> =>
+  isAbsolute(root) ? Effect.succeed(root as MigrationRoot) : Effect.fail(make(
     "unsupported-project",
     `The migration root must be an absolute path, and "${root}" is not. Resolve it against the working directory before building the host.`
   ))
@@ -248,15 +262,18 @@ const rootRefusal = (root: string): Effect.Effect<void, MigrateError> =>
  * The denials come last and are configured rules, so they veto: no envelope,
  * no remembered grant, and no later allow can reach a run-state path.
  *
+ * The root is a {@link MigrationRoot} rather than a string, so a relative path
+ * is refused by {@link migrationRoot} before any pattern is built.
+ *
  * @category combinators
  * @since 1.0.0-rc.0
  */
 export const rules = (options: {
-  readonly root: string
+  readonly root: MigrationRoot
   readonly runStatePaths: ReadonlyArray<string>
   readonly commands: Contract.Commands
 }): ReadonlyArray<Permission.Rule> => {
-  const root = absoluteRoot(options.root).replace(/\/+$/, "")
+  const root = options.root.replace(/\/+$/, "")
   const allow = (action: Capability.PatternAction, resource: string): Permission.Rule =>
     new Permission.Rule({ effect: "allow", pattern: new Capability.CapabilityPattern({ action, resource }) })
   const deny = (action: Capability.PatternAction, resource: string): Permission.Rule =>
@@ -324,14 +341,22 @@ export interface NodeConfig {
   readonly seat?: string | undefined
 }
 
-const grantsFor = (config: NodeConfig): Layer.Layer<GrantStore.GrantStore, never, never> =>
+/**
+ * A {@link NodeConfig} whose root has been through {@link migrationRoot}. Every
+ * composition helper below takes one of these rather than validating again.
+ */
+interface ValidatedConfig extends NodeConfig {
+  readonly root: MigrationRoot
+}
+
+const grantsFor = (config: ValidatedConfig): Layer.Layer<GrantStore.GrantStore, never, never> =>
   GrantStore.layer({
     attended: false,
     rules: rules({ root: config.root, runStatePaths: config.runStatePaths, commands: config.commands })
   }).pipe(Layer.provide(Workspace.layer(config.root)), Layer.orDie)
 
 const hostFor = (
-  config: NodeConfig
+  config: ValidatedConfig
 ): Layer.Layer<AgentAction.Host, never, never> => {
   const grants = grantsFor(config)
   // The kernel-guarded platform, as `@smthrs/cli`'s `layerGuardedPlatform`
@@ -368,7 +393,7 @@ const agentPolicy = Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbou
 // nothing a migration reaches is refused by this, but a host that narrows
 // either one gets the narrowing it asked for instead of a guard consulting a
 // store nobody configured.
-const executorFor = (config: NodeConfig): Layer.Layer<RequestExecutor.RequestExecutor, never, never> =>
+const executorFor = (config: ValidatedConfig): Layer.Layer<RequestExecutor.RequestExecutor, never, never> =>
   RequestExecutor.layer.pipe(
     Layer.provide(KernelHttpClient.layer),
     Layer.provide([NodeHttpClient.layerUndici, grantsFor(config)])
@@ -386,7 +411,9 @@ export const layerNode = (config: NodeConfig) =>
     // package's single failure type so an entry point maps a code onto an exit
     // status without walking a cause chain, and a library caller passing a
     // relative path is exactly the caller who would otherwise get a defect.
-    yield* rootRefusal(config.root)
+    // The proof travels with the value from here on: nothing below takes a
+    // bare string root.
+    const validated: ValidatedConfig = { ...config, root: yield* migrationRoot(config.root) }
     const seats = Layer.effect(
       SeatResolver.SeatResolver,
       Effect.map(RequestExecutor.RequestExecutor, (request) =>
@@ -395,9 +422,9 @@ export const layerNode = (config: NodeConfig) =>
           seat: config.seat,
           executor: request
         }))
-    ).pipe(Layer.provide(executorFor(config)))
+    ).pipe(Layer.provide(executorFor(validated)))
     return MigrateFlow.layer.pipe(
-      Layer.provideMerge(Layer.mergeAll(hostFor(config), seats, Agent.layer)),
+      Layer.provideMerge(Layer.mergeAll(hostFor(validated), seats, Agent.layer)),
       Layer.provideMerge(agentPolicy),
       Layer.provideMerge(Agent.layerDefaults),
       Layer.provideMerge(Action.layerImplementations),
@@ -481,7 +508,9 @@ export const commandsFor = (
 export const layerNodeScanned = (config: ScannedConfig) =>
   Layer.unwrap(
     Effect.gen(function*() {
-      yield* rootRefusal(config.root)
+      // Before the scan, not after it: a relative root is refused without
+      // reading the project at all.
+      yield* migrationRoot(config.root)
       const state = config.state ?? Options.stateOf(config.environment ?? {})
       const result = yield* Scan.scan(config.root, {
         ignore: [config.reportDir ?? ".smithers-migrate"],
@@ -567,30 +596,35 @@ const preparedRequest = {
  * @category layers
  * @since 1.0.0-rc.0
  */
-export const layerScripted = (config: NodeConfig & { readonly script: Script }) => {
-  const model = scriptedModel(config.script)
-  const seats = SeatResolver.layer({
-    resolve: (id) =>
-      Effect.succeed(
-        Seat.make({
-          id,
-          model,
-          route: { prepare: () => Effect.succeed(preparedRequest) },
-          contextWindowTokens: 200_000
-        })
-      )
-  })
-  return MigrateFlow.layer.pipe(
-    Layer.provideMerge(Layer.mergeAll(hostFor(config), seats, Agent.layer)),
-    Layer.provideMerge(agentPolicy),
-    Layer.provideMerge(Agent.layerDefaults),
-    Layer.provideMerge(Action.layerImplementations),
-    Layer.provideMerge(FlowEngine.layerMemory),
-    Layer.provideMerge(layerSnapshotBoundary),
-    Layer.provideMerge(NodeCrypto.layer),
-    Layer.provideMerge(NodeServices.layer)
-  )
-}
+export const layerScripted = (config: NodeConfig & { readonly script: Script }) =>
+  Layer.unwrap(Effect.gen(function*() {
+    // The same refusal the credentialed root makes. A scripted composition
+    // that accepted a relative root would build the grant rules a test then
+    // asserts confinement against out of patterns matching nothing.
+    const validated: ValidatedConfig = { ...config, root: yield* migrationRoot(config.root) }
+    const model = scriptedModel(config.script)
+    const seats = SeatResolver.layer({
+      resolve: (id) =>
+        Effect.succeed(
+          Seat.make({
+            id,
+            model,
+            route: { prepare: () => Effect.succeed(preparedRequest) },
+            contextWindowTokens: 200_000
+          })
+        )
+    })
+    return MigrateFlow.layer.pipe(
+      Layer.provideMerge(Layer.mergeAll(hostFor(validated), seats, Agent.layer)),
+      Layer.provideMerge(agentPolicy),
+      Layer.provideMerge(Agent.layerDefaults),
+      Layer.provideMerge(Action.layerImplementations),
+      Layer.provideMerge(FlowEngine.layerMemory),
+      Layer.provideMerge(layerSnapshotBoundary),
+      Layer.provideMerge(NodeCrypto.layer),
+      Layer.provideMerge(NodeServices.layer)
+    )
+  }))
 
 /**
  * The runtime a migration executes under.

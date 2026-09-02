@@ -35,6 +35,13 @@ const exportedModules = [...index.matchAll(/export \* as (\w+) from/g)].map((mat
  * are right: the question these tests ask is whether the page carries the
  * table the code produces, not how wide its columns are printed.
  */
+/**
+ * Prose with its JSDoc gutter and its line wrapping taken out, so a sentence
+ * can be looked for as the sentence it is rather than as the bytes one file
+ * happens to have wrapped it into.
+ */
+const unwrapped = (text: string): string => text.replace(/^\s*\*\s?/gm, "").replace(/\s+/g, " ")
+
 const unpadded = (text: string): string =>
   text
     .split("\n")
@@ -73,9 +80,16 @@ describe("reference page", () => {
     expect(missing.map((construct) => construct.name)).toEqual([])
   })
 
-  it("states the product rule the tool is built around", () => {
-    expect(reference).toContain("not a compatibility library")
-    expect(reference).toContain("never rewrites or resumes 0.x run state")
+  it("states the product rule the tool is built around, in the barrel header", () => {
+    // The generator projects the barrel's module JSDoc onto the page above
+    // this prose, so the rule belongs there and `docs/api.md` must not say it
+    // a second time: the page carried both wordings, one after the other.
+    // Both sources wrap their prose, so the comparison is on the unwrapped
+    // text rather than on the bytes.
+    expect(unwrapped(index)).toContain("not a compatibility library")
+    expect(unwrapped(index)).toContain("never rewrites or resumes 0.x run state")
+    expect(unwrapped(reference)).not.toContain("not a compatibility library")
+    expect(unwrapped(reference)).not.toContain("never rewrites or resumes 0.x run state")
   })
 
   it("documents the three modes and the three exit codes", () => {

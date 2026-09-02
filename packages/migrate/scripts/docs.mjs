@@ -81,7 +81,11 @@ const moduleDoc = (source) => {
 
 const exportedDocs = (source) => {
   const entries = []
-  const pattern = /\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*\nexport (type|const|class|interface|function) (\w+)/g
+  // Anchored to the start of a line. A JSDoc block for a top-level export
+  // begins in column 0, while `${root}/**` inside `Layers.rules` does not, and
+  // an unanchored `/**` matched that template literal and published the middle
+  // of a function body as `Layers.layerSnapshotBoundary`'s summary.
+  const pattern = /^\/\*\*((?:[^*]|\*(?!\/))*)\*\/\s*\nexport (type|const|class|interface|function) (\w+)/gm
   for (let match = pattern.exec(source); match !== null; match = pattern.exec(source)) {
     const body = ungutter(match[1])
     const category = /@category (\S+)/.exec(body)?.[1]
