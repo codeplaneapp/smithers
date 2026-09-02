@@ -3538,14 +3538,17 @@ export const execute = async (
     body: () => Promise<ExecOutcome>
   ): Promise<ExecOutcome> => {
     const snapshot = await PackageTree.snapshotTree(root, cacheDirectory)
-    // Git omits gitignored paths, so a cheap content-free guard records them
-    // separately; an out-of-set write to a gitignored path would otherwise be
-    // invisible to the change set and never reverted.
-    const ignored = await PackageTree.snapshotIgnored(root, cacheDirectory)
-    // Git cannot see a write that lands through an in-workspace symlink whose
-    // real target leaves the workspace; those portals are measured directly.
-    const portals = await PackageTree.snapshotPortals(root, cacheDirectory)
+    let ignored: PackageTree.IgnoredSnapshot | undefined
+    let portals: PackageTree.PortalSnapshot | undefined
     try {
+      // Git omits gitignored paths, so a separate guard records them with
+      // their bytes; a write to a gitignored path would otherwise be invisible
+      // to the change set and never reverted. A gitignored tree the guard
+      // cannot stash whole refuses the body here, before it runs.
+      ignored = await PackageTree.snapshotIgnored(root, cacheDirectory)
+      // Git cannot see a write that lands through an in-workspace symlink whose
+      // real target leaves the workspace; those portals are measured directly.
+      portals = await PackageTree.snapshotPortals(root, cacheDirectory)
       let ran: ExecOutcome
       try {
         ran = await body()
@@ -3558,27 +3561,21 @@ export const execute = async (
       // therefore out of any write-set; it is reverted whether the run passed
       // or failed.
       const escapedPortals = await PackageTree.revertChangedPortals(portals)
+      // A gitignored path the census never measured (a nested repository, or a
+      // path inside one) is left as the tool left it and named here, because a
+      // removal would destroy contents the stash never held.
+      const unrestored: Array<string> = []
       if (!ran.ok) {
-        // A failed apply reverts every tracked change it made: a partial write
-        // from a tool that then errored is not a state anyone asked for.
-        //
-        // Gitignored paths are the documented exception, and the asymmetry is
-        // deliberate. Their prior bytes are never stashed, so `revertIgnored`
-        // deletes rather than restores. Applying that to a path inside the
-        // node's own write set would destroy a pre-existing regenerable
-        // artifact the run merely rewrote, which is worse than the partial
-        // state. So an out-of-set ignored write is reverted (it was never
-        // authorized) and an in-set one is kept. A target author who needs an
-        // ignored output to be all-or-nothing declares it as an `outDir`,
-        // which is captured and restored whole.
+        // A failed apply reverts every change it made, tracked or gitignored,
+        // in set or not: a partial write from a tool that then errored is not
+        // a state anyone asked for, and the stash holds the prior bytes of
+        // every gitignored file, so the revert is exact.
         for (const path of changed) await PackageTree.revertPath(snapshot, path)
         for (const path of changedIgnored) {
-          const resolved = PackageTree.resolveChangedPath(root, path)
-          if (resolved === undefined || !matchesWriteSet(resolved, writeSet)) {
-            await PackageTree.revertIgnored(ignored, path)
-          }
+          if (!(await PackageTree.revertIgnored(ignored, path))) unrestored.push(path)
         }
-        return ran
+        if (unrestored.length === 0) return ran
+        return { ok: false, error: `${ran.error}; gitignored paths not restored: ${unrestored.join(", ")}` }
       }
       const outOfSet: Array<string> = []
       for (const path of changed) {
@@ -3590,21 +3587,28 @@ export const execute = async (
       for (const path of changedIgnored) {
         const resolved = PackageTree.resolveChangedPath(root, path)
         if (resolved === undefined || !matchesWriteSet(resolved, writeSet)) {
-          await PackageTree.revertIgnored(ignored, path)
+          if (!(await PackageTree.revertIgnored(ignored, path))) unrestored.push(path)
           ignoredOutOfSet.push(path)
         }
       }
       const offenders = [...outOfSet, ...ignoredOutOfSet, ...escapedPortals]
       if (offenders.length > 0) {
-        return {
-          ok: false,
-          error: `wrote outside its declared write-set (reverted): ${offenders.join(", ")}`
+        if (unrestored.length === 0) {
+          return {
+            ok: false,
+            error: `wrote outside its declared write-set (reverted): ${offenders.join(", ")}`
+          }
         }
+        const described = offenders.map((path) =>
+          unrestored.includes(path) ? `${path} (not restored)` : `${path} (reverted)`
+        )
+        return { ok: false, error: `wrote outside its declared write-set: ${described.join(", ")}` }
       }
       return ran
     } finally {
       await PackageTree.releaseSnapshot(snapshot)
-      await PackageTree.releasePortals(portals)
+      if (ignored !== undefined) await PackageTree.releaseIgnored(ignored)
+      if (portals !== undefined) await PackageTree.releasePortals(portals)
     }
   }
 
@@ -5081,8 +5085,9 @@ export const execute = async (
    * a peer made at the same moment, so every concurrent peer's output reads as
    * this node writing outside its declared set. Tracked paths were restored
    * from this node's stash and gitignored paths went through `revertIgnored`,
-   * a recursive removal, so two write nodes deleted each other's work and a
-   * plain build target lost its whole `dist` tree to a write node beside it.
+   * at the time a recursive removal, so two write nodes deleted each other's
+   * work and a plain build target lost its whole `dist` tree to a write node
+   * beside it.
    *
    * The exclusion is against nodes of EVERY mode, not just other write nodes:
    * the destructive case has a peer that never enters write mode at all. It

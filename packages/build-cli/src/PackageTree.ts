@@ -316,10 +316,10 @@ const skipStatusPath = (cacheDirectory: string, path: string): boolean =>
  * @since 0.1.0
  */
 export const snapshotTree = async (root: string, cacheDirectory: string): Promise<TreeSnapshot> => {
-  // Gitignored paths are handled by the separate, content-free ignored guard
-  // ({@link snapshotIgnored}); hashing and stashing the whole ignored tree
-  // here — the gitignored build artifacts and the jj store among it — would be
-  // a per-run cost out of all proportion to the dirty source set this measures.
+  // Gitignored paths are handled by the separate ignored guard
+  // ({@link snapshotIgnored}), which carries its own ceilings: hashing the
+  // whole ignored tree here, with the build artifacts among it, would be a
+  // per-run cost out of all proportion to the dirty source set this measures.
   const raw = await runGit(root, ["status", "--porcelain", "-z", "--untracked-files=all"])
   const states = new Map<string, PathState>()
   const stashDirectory = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-writeset-"))
@@ -446,24 +446,95 @@ export const releaseSnapshot = async (snapshot: TreeSnapshot): Promise<void> => 
   await Fs.rm(snapshot.stashDirectory, { recursive: true, force: true })
 }
 
-/** The cheap identity of one gitignored path: presence, kind, and size/mtime. */
+/** The recorded identity of one gitignored path, plus what restoring it needs. */
 interface IgnoredEntry {
   readonly kind: "file" | "link" | "dir"
   readonly size: number
   readonly mtimeMs: number
+  /** Permission bits, restored with the bytes so a `0600` secret stays one. */
+  readonly mode: number
+  /** A link's target text, which describes the link completely; empty for anything else. */
+  readonly target: string
 }
 
 /**
- * A content-free snapshot of the workspace's gitignored paths before a tool
- * runs.
+ * The ceilings the gitignored census may not cross.
  *
- * `git status` omits ignored paths unless asked, so an out-of-set write to a
- * gitignored path is invisible to {@link changedSinceSnapshot}. This guard
- * closes that gap without the cost of the full write-set snapshot: it records
- * only each ignored path's name and `lstat` identity — no content is read,
- * hashed, or stashed — so the potentially large gitignored trees (build
- * artifacts, the jj store) are not walked byte for byte on every run.
- * `node_modules`, the cache, and version-control internals are excluded.
+ * @category write sets
+ * @since 0.1.0
+ */
+export interface IgnoredLimits {
+  /** Gitignored files, links, and unentered directories counted. */
+  readonly entries: number
+  /** Bytes across every gitignored file the census stashes. */
+  readonly totalBytes: number
+}
+
+/**
+ * The ceilings the gitignored census may not cross.
+ *
+ * The census stashes every gitignored file's bytes so a write to one can be
+ * restored exactly, and that copy is a per-run cost paid before the body
+ * runs. A tree over either ceiling is refused with {@link IgnoredCensusError}
+ * rather than guarded partially: the guard has no mode in which a claimed
+ * rollback can silently fail to hold. `node_modules`, the cache directory,
+ * and version-control internals never count.
+ *
+ * @category write sets
+ * @since 0.1.0
+ */
+export const ignoredLimits = {
+  /** Gitignored files, links, and unentered directories counted. */
+  entries: 50_000,
+  /** Bytes across every gitignored file the census stashes. */
+  totalBytes: 1024 * 1024 * 1024
+} as const satisfies IgnoredLimits
+
+/**
+ * A gitignored tree the write-set guard cannot restore exactly, so the
+ * target behind it is refused before it runs.
+ *
+ * @category errors
+ * @since 0.1.0
+ */
+export class IgnoredCensusError extends Error {
+  override readonly name = "IgnoredCensusError"
+  /** The ceiling crossed, or `unreadable` when a gitignored file could not be stashed. */
+  readonly reason: "entries" | "totalBytes" | "unreadable"
+  /** The workspace-relative gitignored path at which the census stopped. */
+  readonly path: string
+
+  constructor(
+    reason: "entries" | "totalBytes" | "unreadable",
+    path: string,
+    limits: IgnoredLimits,
+    options?: ErrorOptions
+  ) {
+    super(
+      reason === "entries"
+        ? `the write-set guard cannot restore the gitignored tree: more than ${limits.entries} entries, at ${path}`
+        : reason === "totalBytes"
+        ? `the write-set guard cannot restore the gitignored tree: more than ${limits.totalBytes} bytes, at ${path}`
+        : `the write-set guard cannot restore the gitignored tree: ${path} could not be read`,
+      options
+    )
+    this.reason = reason
+    this.path = path
+  }
+}
+
+/**
+ * A snapshot of the workspace's gitignored paths before a tool runs: each
+ * path's identity, plus a stash of every gitignored file's bytes.
+ *
+ * `git status` omits ignored paths unless asked, so a write to a gitignored
+ * path is invisible to {@link changedSinceSnapshot}. This guard closes that
+ * gap. It records each ignored path's `lstat` identity and copies each
+ * ignored file into the stash, so an overwritten, deleted, or replaced
+ * ignored path goes back to exactly what it was. A directory git does not
+ * enter (a nested repository) is recorded by identity alone: a change under
+ * it can be reported, never restored. `node_modules`, the cache, and
+ * version-control internals are excluded.
  *
  * @category write sets
  * @since 0.1.0
@@ -471,48 +542,101 @@ interface IgnoredEntry {
 export interface IgnoredSnapshot {
   readonly root: string
   readonly entries: ReadonlyMap<string, IgnoredEntry>
+  readonly stashDirectory: string
 }
+
+/** The identity of one gitignored path now, or undefined once it is gone. */
+const identityOf = async (absolute: string): Promise<IgnoredEntry | undefined> => {
+  let stats: NodeFs.Stats
+  try {
+    stats = await Fs.lstat(absolute)
+  } catch {
+    return undefined
+  }
+  const kind = stats.isSymbolicLink() ? "link" : stats.isDirectory() ? "dir" : "file"
+  return {
+    kind,
+    size: stats.size,
+    mtimeMs: stats.mtimeMs,
+    mode: stats.mode & 0o7777,
+    target: kind === "link" ? await Fs.readlink(absolute) : ""
+  }
+}
+
+const sameIgnored = (left: IgnoredEntry, right: IgnoredEntry): boolean =>
+  left.kind === right.kind && left.size === right.size && left.mtimeMs === right.mtimeMs &&
+  left.mode === right.mode && left.target === right.target
 
 const listIgnored = async (root: string, cacheDirectory: string): Promise<Map<string, IgnoredEntry>> => {
   // The failure propagates instead of reading as an empty census. This runs
   // once before the body and once after: swallowing a failure after leaves the
-  // guard silently blind to out-of-set writes to gitignored paths, and
-  // swallowing one before makes every gitignored path read as newly created
-  // after, sending each one outside the write-set to `revertIgnored`, which
-  // removes it recursively. Either way a guard that cannot measure must fail
-  // its target, not report that it found nothing.
+  // guard silently blind to writes to gitignored paths, and swallowing one
+  // before makes every gitignored path read as newly created after, sending
+  // each one to `revertIgnored` as a path the tool created, which removes it.
+  // Either way a guard that cannot measure must fail its target, not report
+  // that it found nothing.
   const raw = await runGit(root, ["status", "--porcelain", "-z", "--untracked-files=all", "--ignored"])
   const entries = new Map<string, IgnoredEntry>()
   for (const status of parseStatusZ(raw)) {
     if (!status.status.startsWith("!!")) continue
     const path = status.path.endsWith("/") ? status.path.slice(0, -1) : status.path
     if (path === "" || skipStatusPath(cacheDirectory, path)) continue
-    let stats: NodeFs.Stats
-    try {
-      stats = await Fs.lstat(NodePath.join(root, path))
-    } catch {
-      continue
-    }
-    const kind = stats.isSymbolicLink() ? "link" : stats.isDirectory() ? "dir" : "file"
-    entries.set(path, { kind, size: stats.size, mtimeMs: stats.mtimeMs })
+    const entry = await identityOf(NodePath.join(root, path))
+    if (entry !== undefined) entries.set(path, entry)
   }
   return entries
 }
 
+const ignoredStashFile = (snapshot: IgnoredSnapshot, path: string): string =>
+  NodePath.join(snapshot.stashDirectory, digestBytes(Buffer.from(path, "utf8")))
+
 /**
- * Records the gitignored paths present before a tool runs.
+ * Records the gitignored paths present before a tool runs and stashes their
+ * bytes, or refuses with {@link IgnoredCensusError} when the tree crosses
+ * `limits` or holds a file the census cannot read.
  *
  * @category write sets
  * @since 0.1.0
  */
-export const snapshotIgnored = async (root: string, cacheDirectory: string): Promise<IgnoredSnapshot> => ({
-  root,
-  entries: await listIgnored(root, cacheDirectory)
-})
+export const snapshotIgnored = async (
+  root: string,
+  cacheDirectory: string,
+  limits: IgnoredLimits = ignoredLimits
+): Promise<IgnoredSnapshot> => {
+  const entries = await listIgnored(root, cacheDirectory)
+  const stashDirectory = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-ignored-"))
+  const snapshot: IgnoredSnapshot = { root, entries, stashDirectory }
+  try {
+    let count = 0
+    let totalBytes = 0
+    for (const [path, entry] of entries) {
+      count += 1
+      if (count > limits.entries) throw new IgnoredCensusError("entries", path, limits)
+      if (entry.kind !== "file") continue
+      totalBytes += entry.size
+      if (totalBytes > limits.totalBytes) throw new IgnoredCensusError("totalBytes", path, limits)
+      try {
+        // A reflink where the filesystem offers one, a byte copy elsewhere:
+        // the stash is exact either way, and cheap where it can be.
+        await Fs.copyFile(
+          NodePath.join(root, path),
+          ignoredStashFile(snapshot, path),
+          NodeFs.constants.COPYFILE_FICLONE
+        )
+      } catch (cause) {
+        throw new IgnoredCensusError("unreadable", path, limits, { cause })
+      }
+    }
+  } catch (cause) {
+    await releaseIgnored(snapshot)
+    throw cause
+  }
+  return snapshot
+}
 
 /**
- * The gitignored paths a tool created or overwrote since the snapshot,
- * resolved through symlinks like {@link changedSinceSnapshot}.
+ * The gitignored paths a tool created, overwrote, replaced, or deleted since
+ * the snapshot, resolved through symlinks like {@link changedSinceSnapshot}.
  *
  * @category write sets
  * @since 0.1.0
@@ -525,33 +649,67 @@ export const changedIgnored = async (
   const changed = new Set<string>()
   for (const [path, entry] of after) {
     const before = snapshot.entries.get(path)
-    if (
-      before === undefined ||
-      before.kind !== entry.kind ||
-      before.size !== entry.size ||
-      before.mtimeMs !== entry.mtimeMs
-    ) {
-      changed.add(path)
-    }
+    if (before === undefined || !sameIgnored(before, entry)) changed.add(path)
+  }
+  for (const [path, before] of snapshot.entries) {
+    if (after.has(path)) continue
+    // A path the census no longer lists was deleted, or it merely stopped
+    // being ignored (a rewritten `.gitignore`) and still stands as it was.
+    const now = await identityOf(NodePath.join(snapshot.root, path))
+    if (now === undefined || !sameIgnored(before, now)) changed.add(path)
   }
   return [...changed].sort()
 }
 
+/** Whether an ancestor of `path` is a directory the census recorded without entering. */
+const insideUnmeasured = (snapshot: IgnoredSnapshot, path: string): boolean => {
+  let ancestor = NodePath.posix.dirname(path)
+  while (ancestor !== ".") {
+    if (snapshot.entries.get(ancestor)?.kind === "dir") return true
+    ancestor = NodePath.posix.dirname(ancestor)
+  }
+  return false
+}
+
 /**
- * Reverts one gitignored path a tool wrote out of set.
+ * Restores one gitignored path to its snapshot state and reports whether it
+ * could. A created path is removed; an overwritten or deleted file gets its
+ * stashed bytes and mode back; a replaced link gets its target back.
  *
- * A gitignored path's prior bytes are not stashed (the ignored tree is never
- * copied), so the revert deletes the offending path. A newly created leak is
- * removed entirely; an overwritten pre-existing ignored file — a rare, always
- * out-of-set event, since an in-set ignored write is kept — is removed rather
- * than restored, which still undoes the unauthorized write of a regenerable
- * ignored artifact.
+ * A path the census never measured, a directory git does not enter or
+ * anything inside one, is left exactly as the tool left it and reported as
+ * not restored: its contents were never stashed, so removal would be the
+ * data loss this guard exists to prevent.
  *
  * @category write sets
  * @since 0.1.0
  */
-export const revertIgnored = async (snapshot: IgnoredSnapshot, path: string): Promise<void> => {
-  await Fs.rm(NodePath.join(snapshot.root, path), { recursive: true, force: true })
+export const revertIgnored = async (snapshot: IgnoredSnapshot, path: string): Promise<boolean> => {
+  const before = snapshot.entries.get(path)
+  if (before?.kind === "dir" || insideUnmeasured(snapshot, path)) return false
+  const absolute = NodePath.join(snapshot.root, path)
+  const now = await identityOf(absolute)
+  if (now?.kind === "dir") return false
+  if (now !== undefined) await Fs.rm(absolute, { force: true })
+  if (before === undefined) return true
+  await Fs.mkdir(NodePath.dirname(absolute), { recursive: true })
+  if (before.kind === "link") {
+    await Fs.symlink(before.target, absolute)
+    return true
+  }
+  await Fs.copyFile(ignoredStashFile(snapshot, path), absolute)
+  await Fs.chmod(absolute, before.mode)
+  return true
+}
+
+/**
+ * Releases the stash an ignored snapshot holds.
+ *
+ * @category write sets
+ * @since 0.1.0
+ */
+export const releaseIgnored = async (snapshot: IgnoredSnapshot): Promise<void> => {
+  await Fs.rm(snapshot.stashDirectory, { recursive: true, force: true })
 }
 
 /**

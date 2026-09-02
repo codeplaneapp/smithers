@@ -345,6 +345,172 @@ export const Package = S.Package({ targets: { bad } })
     expect(leakGone).toBe(true)
     expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("b")
   })
+
+  /**
+   * The ignored guard used to stash no bytes, so its only revert was removal:
+   * an out-of-set overwrite of a pre-existing `.env` deleted the user's file.
+   */
+  it("restores a pre-existing gitignored file that a tool overwrote out of set", async () => {
+    const root = await temporaryWorkspace()
+    await write(root, "WORKSPACE.ts", workspaceModule())
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+const bad = S.Shell.Diff({ command: "printf b > out.txt && printf leaked > .env", changes: ["out.txt"] })
+export const Package = S.Package({ targets: { bad } })
+`
+    )
+    await write(root, "out.txt", "a")
+    await write(root, ".env", "secret")
+    await write(root, ".gitignore", ".env\n")
+    commitAll(root)
+    const { exitCode, logs } = await serve(root, ["//:bad", "--write"])
+    expect(exitCode).toBe(1)
+    expect(logs).toContain("wrote outside its declared write-set")
+    expect(logs).toContain(".env")
+    expect(await Fs.readFile(NodePath.join(root, ".env"), "utf8")).toBe("secret")
+    expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("b")
+  })
+
+  /** A failed body reverts everything it touched, gitignored in-set output included. */
+  it("reverts a failed tool's in-set gitignored writes", async () => {
+    const root = await temporaryWorkspace()
+    await write(root, "WORKSPACE.ts", workspaceModule())
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+const bad = S.Shell.Diff({
+  command: "printf rewritten > dist/a.js && printf partial > dist/b.js && exit 1",
+  changes: ["dist/**"]
+})
+export const Package = S.Package({ targets: { bad } })
+`
+    )
+    await write(root, "dist/a.js", "old")
+    await write(root, ".gitignore", "dist/\n")
+    commitAll(root)
+    const { exitCode } = await serve(root, ["//:bad", "--write"])
+    expect(exitCode).toBe(1)
+    expect(await Fs.readFile(NodePath.join(root, "dist", "a.js"), "utf8")).toBe("old")
+    const partialGone = await Fs.access(NodePath.join(root, "dist", "b.js")).then(() => false, () => true)
+    expect(partialGone).toBe(true)
+  })
+
+  it("fails a tool that writes into a gitignored nested repository, which it cannot restore", async () => {
+    const root = await temporaryWorkspace()
+    await write(root, "WORKSPACE.ts", workspaceModule())
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+const bad = S.Shell.Diff({
+  command: "printf b > out.txt && printf x > vendor/nested/new.txt && printf leak > leak.txt",
+  changes: ["out.txt"]
+})
+export const Package = S.Package({ targets: { bad } })
+`
+    )
+    await write(root, "out.txt", "a")
+    await write(root, ".gitignore", "vendor/\nleak.txt\n")
+    await write(root, "vendor/nested/x.txt", "x")
+    git(NodePath.join(root, "vendor", "nested"), "init", "-q")
+    commitAll(root)
+    const { exitCode, logs } = await serve(root, ["//:bad", "--write"])
+    expect(exitCode).toBe(1)
+    // The failure says which offender went back and which one could not.
+    expect(logs).toContain("wrote outside its declared write-set: leak.txt (reverted), vendor/nested (not restored)")
+    const leakGone = await Fs.access(NodePath.join(root, "leak.txt")).then(() => false, () => true)
+    expect(leakGone).toBe(true)
+    // The nested repository is left exactly as the tool left it: never removed.
+    expect(await Fs.readFile(NodePath.join(root, "vendor", "nested", "x.txt"), "utf8")).toBe("x")
+    expect(await Fs.readFile(NodePath.join(root, "vendor", "nested", "new.txt"), "utf8")).toBe("x")
+  })
+
+  it("names the gitignored paths a failed tool left that the guard could not restore", async () => {
+    const root = await temporaryWorkspace()
+    await write(root, "WORKSPACE.ts", workspaceModule())
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+const bad = S.Shell.Diff({ command: "printf y > vendor/nested/y.txt && exit 1", changes: ["vendor/**"] })
+export const Package = S.Package({ targets: { bad } })
+`
+    )
+    await write(root, ".gitignore", "vendor/\n")
+    await write(root, "vendor/nested/x.txt", "x")
+    git(NodePath.join(root, "vendor", "nested"), "init", "-q")
+    commitAll(root)
+    const { exitCode, logs } = await serve(root, ["//:bad", "--write"])
+    expect(exitCode).toBe(1)
+    expect(logs).toContain("gitignored paths not restored: vendor/nested")
+    expect(await Fs.readFile(NodePath.join(root, "vendor", "nested", "y.txt"), "utf8")).toBe("y")
+  })
+
+  /**
+   * The guard has no partial mode: a gitignored tree it cannot stash whole
+   * refuses the target before the body runs, and the refusal releases every
+   * stash it had already taken.
+   */
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "refuses a write target over a gitignored file the census cannot stash, before the body runs",
+    async () => {
+      const root = await temporaryWorkspace()
+      await write(root, "WORKSPACE.ts", workspaceModule())
+      await write(
+        root,
+        "PACKAGE.ts",
+        `import { Smithers as S } from "@smthrs/targets"
+const fmt = S.Shell.Diff({ command: "printf b > out.txt", changes: ["out.txt"] })
+export const Package = S.Package({ targets: { fmt } })
+`
+      )
+      await write(root, "out.txt", "a")
+      await write(root, ".gitignore", "sealed.txt\n")
+      await write(root, "sealed.txt", "x")
+      commitAll(root)
+      await Fs.chmod(NodePath.join(root, "sealed.txt"), 0o000)
+      try {
+        const { exitCode, logs } = await serve(root, ["//:fmt", "--write"])
+        expect(exitCode).toBe(1)
+        expect(logs).toContain("the write-set guard cannot restore the gitignored tree: sealed.txt could not be read")
+        expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("a")
+      } finally {
+        await Fs.chmod(NodePath.join(root, "sealed.txt"), 0o644)
+      }
+    }
+  )
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "refuses a write target over an escaping symlink the portal census cannot read, before the body runs",
+    async () => {
+      const root = await temporaryWorkspace()
+      const external = await tracked(Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-sealed-portal-")))
+      await write(root, "WORKSPACE.ts", workspaceModule())
+      await write(
+        root,
+        "PACKAGE.ts",
+        `import { Smithers as S } from "@smthrs/targets"
+const fmt = S.Shell.Diff({ command: "printf b > out.txt", changes: ["out.txt"] })
+export const Package = S.Package({ targets: { fmt } })
+`
+      )
+      await write(root, "out.txt", "a")
+      await Fs.symlink(external, NodePath.join(root, "portal"))
+      commitAll(root)
+      await Fs.chmod(external, 0o000)
+      try {
+        const { exitCode, logs } = await serve(root, ["//:fmt", "--write"])
+        expect(exitCode).toBe(1)
+        expect(logs).toContain("the write-set guard cannot confine portal")
+        expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("a")
+      } finally {
+        await Fs.chmod(external, 0o755)
+      }
+    }
+  )
 })
 
 describe("write-set enforcement against a concurrent peer", () => {
@@ -393,8 +559,8 @@ export const Package = S.Package({ targets: { alpha, beta } })
   })
 
   it("does not let a write node delete a concurrent build's gitignored output directory", async () => {
-    // The ignored-path census is the more destructive half: an out-of-set
-    // gitignored path is removed recursively, so a peer emitting into dist/
+    // The ignored-path census was the more destructive half: an out-of-set
+    // gitignored path was removed recursively, so a peer emitting into dist/
     // lost the whole directory. This is also why the exclusion cannot be
     // between write nodes alone; the peer here never enters write mode.
     const root = await temporaryWorkspace()

@@ -243,7 +243,7 @@ describe("the write-set guard reads git honestly", () => {
     // `listIgnored` runs once before the body and once after. Swallowing the
     // failure disarms the guard when it fails after, and makes every ignored
     // path read as newly created when it fails before, which sends each one
-    // that does not match the write-set to a recursive removal.
+    // that does not match the write-set to `revertIgnored` as a created path.
     await Fs.rm(NodePath.join(root, ".git"), { recursive: true, force: true })
     await expect(PackageTree.snapshotIgnored(root, ".flows")).rejects.toThrow(/git status failed/)
   })
@@ -567,4 +567,208 @@ describe("the portal census refuses what it cannot measure", () => {
       await PackageTree.releasePortals(snapshot)
     }
   })
+})
+
+describe("the ignored guard restores what a body changed", () => {
+  const git = (cwd: string, ...args: ReadonlyArray<string>): void => {
+    ChildProcess.execFileSync("git", [...args], { cwd, stdio: "ignore" })
+  }
+  const ignoring = async (patterns: string): Promise<void> => {
+    git(root, "init", "--quiet", ".")
+    await Fs.writeFile(NodePath.join(root, ".gitignore"), patterns)
+  }
+  const exists = (path: string): Promise<boolean> => Fs.lstat(path).then(() => true, () => false)
+  const refusal = (limits?: PackageTree.IgnoredLimits): Promise<unknown> =>
+    PackageTree.snapshotIgnored(root, ".flows", limits).then(
+      (snapshot) => PackageTree.releaseIgnored(snapshot).then(() => undefined),
+      (cause: unknown) => cause
+    )
+
+  /**
+   * The guard used to record an ignored path's identity and no bytes, so the
+   * only revert it had was removal: a tool that overwrote `.env` out of set
+   * had the user's `.env` deleted for it.
+   */
+  it("restores an overwritten pre-existing ignored file with its bytes and mode", async () => {
+    await ignoring(".env\n")
+    const env = NodePath.join(root, ".env")
+    await Fs.writeFile(env, "secret")
+    await Fs.chmod(env, 0o600)
+    const snapshot = await PackageTree.snapshotIgnored(root, ".flows")
+    try {
+      await Fs.writeFile(env, "leaked bytes")
+      await Fs.chmod(env, 0o644)
+      expect(await PackageTree.changedIgnored(snapshot, ".flows")).toEqual([".env"])
+      expect(await PackageTree.revertIgnored(snapshot, ".env")).toBe(true)
+      expect(await Fs.readFile(env, "utf8")).toBe("secret")
+      expect((await Fs.lstat(env)).mode & 0o777).toBe(0o600)
+    } finally {
+      await PackageTree.releaseIgnored(snapshot)
+    }
+    expect(await exists(snapshot.stashDirectory)).toBe(false)
+  })
+
+  it("restores a deleted ignored file and removes a created one", async () => {
+    await ignoring("dist/\n")
+    await Fs.mkdir(NodePath.join(root, "dist", "sub"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "dist", "sub", "a.js"), "old")
+    const snapshot = await PackageTree.snapshotIgnored(root, ".flows")
+    try {
+      await Fs.rm(NodePath.join(root, "dist"), { recursive: true, force: true })
+      await Fs.mkdir(NodePath.join(root, "dist"))
+      await Fs.writeFile(NodePath.join(root, "dist", "b.js"), "new")
+      const changed = await PackageTree.changedIgnored(snapshot, ".flows")
+      expect(changed).toEqual(["dist/b.js", "dist/sub/a.js"])
+      for (const path of changed) expect(await PackageTree.revertIgnored(snapshot, path)).toBe(true)
+      expect(await Fs.readFile(NodePath.join(root, "dist", "sub", "a.js"), "utf8")).toBe("old")
+      expect(await exists(NodePath.join(root, "dist", "b.js"))).toBe(false)
+    } finally {
+      await PackageTree.releaseIgnored(snapshot)
+    }
+  })
+
+  it("restores a replaced ignored symlink to its target", async () => {
+    await ignoring("alias\n")
+    await Fs.symlink("dist", NodePath.join(root, "alias"))
+    const snapshot = await PackageTree.snapshotIgnored(root, ".flows")
+    try {
+      await Fs.rm(NodePath.join(root, "alias"))
+      await Fs.writeFile(NodePath.join(root, "alias"), "not a link")
+      expect(await PackageTree.changedIgnored(snapshot, ".flows")).toEqual(["alias"])
+      expect(await PackageTree.revertIgnored(snapshot, "alias")).toBe(true)
+      expect(await Fs.readlink(NodePath.join(root, "alias"))).toBe("dist")
+    } finally {
+      await PackageTree.releaseIgnored(snapshot)
+    }
+  })
+
+  it("does not count a path that merely stopped being ignored", async () => {
+    await ignoring("keep.txt\n")
+    await Fs.writeFile(NodePath.join(root, "keep.txt"), "kept")
+    const snapshot = await PackageTree.snapshotIgnored(root, ".flows")
+    try {
+      await Fs.writeFile(NodePath.join(root, ".gitignore"), "")
+      expect(await PackageTree.changedIgnored(snapshot, ".flows")).toEqual([])
+    } finally {
+      await PackageTree.releaseIgnored(snapshot)
+    }
+  })
+
+  /**
+   * Git never enters a nested repository, so the census sees only its
+   * directory and the stash holds none of its contents. The old revert removed
+   * the whole directory; the honest answer is to name it and leave it.
+   */
+  it("names a nested repository it cannot restore and leaves it in place", async () => {
+    await ignoring("vendor/\n")
+    const nested = NodePath.join(root, "vendor", "nested")
+    await Fs.mkdir(nested, { recursive: true })
+    git(nested, "init", "--quiet", ".")
+    await Fs.writeFile(NodePath.join(nested, "x.txt"), "x")
+    const snapshot = await PackageTree.snapshotIgnored(root, ".flows")
+    try {
+      await Fs.writeFile(NodePath.join(nested, "y.txt"), "y")
+      expect(await PackageTree.changedIgnored(snapshot, ".flows")).toEqual(["vendor/nested"])
+      expect(await PackageTree.revertIgnored(snapshot, "vendor/nested")).toBe(false)
+      expect(await Fs.readFile(NodePath.join(nested, "x.txt"), "utf8")).toBe("x")
+      expect(await Fs.readFile(NodePath.join(nested, "y.txt"), "utf8")).toBe("y")
+    } finally {
+      await PackageTree.releaseIgnored(snapshot)
+    }
+  })
+
+  /**
+   * A tool that removed a nested repository's `.git` makes git list the files
+   * it used to hide. They read as created, and removing them would be the
+   * same loss; a path under a directory the census never entered is left.
+   */
+  it("leaves the files a tool surfaced by un-initializing a nested repository", async () => {
+    await ignoring("vendor/\n")
+    const nested = NodePath.join(root, "vendor", "nested")
+    await Fs.mkdir(nested, { recursive: true })
+    git(nested, "init", "--quiet", ".")
+    await Fs.writeFile(NodePath.join(nested, "x.txt"), "x")
+    const snapshot = await PackageTree.snapshotIgnored(root, ".flows")
+    try {
+      await Fs.rm(NodePath.join(nested, ".git"), { recursive: true, force: true })
+      const changed = await PackageTree.changedIgnored(snapshot, ".flows")
+      expect(changed).toEqual(["vendor/nested", "vendor/nested/x.txt"])
+      for (const path of changed) expect(await PackageTree.revertIgnored(snapshot, path)).toBe(false)
+      expect(await Fs.readFile(NodePath.join(nested, "x.txt"), "utf8")).toBe("x")
+    } finally {
+      await PackageTree.releaseIgnored(snapshot)
+    }
+  })
+
+  /**
+   * The tool ran `git init` inside `dist`, so a directory git will not enter
+   * now stands where the census saw files. Those files are still the user's;
+   * the guard leaves the directory rather than removing it.
+   */
+  it("leaves a directory git stopped entering during the body", async () => {
+    await ignoring("dist/\n")
+    await Fs.mkdir(NodePath.join(root, "dist"))
+    await Fs.writeFile(NodePath.join(root, "dist", "a.js"), "old")
+    const snapshot = await PackageTree.snapshotIgnored(root, ".flows")
+    try {
+      git(NodePath.join(root, "dist"), "init", "--quiet", ".")
+      expect(await PackageTree.changedIgnored(snapshot, ".flows")).toEqual(["dist"])
+      expect(await PackageTree.revertIgnored(snapshot, "dist")).toBe(false)
+      expect(await Fs.readFile(NodePath.join(root, "dist", "a.js"), "utf8")).toBe("old")
+    } finally {
+      await PackageTree.releaseIgnored(snapshot)
+    }
+  })
+
+  it("counts a path that stopped being ignored only when it also changed", async () => {
+    await ignoring("keep.txt\n")
+    await Fs.writeFile(NodePath.join(root, "keep.txt"), "kept")
+    const snapshot = await PackageTree.snapshotIgnored(root, ".flows")
+    try {
+      await Fs.writeFile(NodePath.join(root, ".gitignore"), "")
+      await Fs.writeFile(NodePath.join(root, "keep.txt"), "rewritten")
+      expect(await PackageTree.changedIgnored(snapshot, ".flows")).toEqual(["keep.txt"])
+      expect(await PackageTree.revertIgnored(snapshot, "keep.txt")).toBe(true)
+      expect(await Fs.readFile(NodePath.join(root, "keep.txt"), "utf8")).toBe("kept")
+    } finally {
+      await PackageTree.releaseIgnored(snapshot)
+    }
+  })
+
+  it("refuses a census over the entry ceiling", async () => {
+    await ignoring("*.log\n")
+    await Fs.writeFile(NodePath.join(root, "a.log"), "a")
+    await Fs.writeFile(NodePath.join(root, "b.log"), "b")
+    const refused = await refusal({ ...PackageTree.ignoredLimits, entries: 1 })
+    expect(refused).toBeInstanceOf(PackageTree.IgnoredCensusError)
+    expect((refused as PackageTree.IgnoredCensusError).reason).toBe("entries")
+  })
+
+  it("refuses a census whose stash would cross the byte ceiling, and stashes one under it", async () => {
+    await ignoring("*.bin\n")
+    await Fs.writeFile(NodePath.join(root, "a.bin"), "ab")
+    expect(await refusal({ ...PackageTree.ignoredLimits, totalBytes: 2 })).toBeUndefined()
+    await Fs.writeFile(NodePath.join(root, "b.bin"), "c")
+    const refused = await refusal({ ...PackageTree.ignoredLimits, totalBytes: 2 })
+    expect(refused).toBeInstanceOf(PackageTree.IgnoredCensusError)
+    expect((refused as PackageTree.IgnoredCensusError).reason).toBe("totalBytes")
+  })
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "refuses a census with an ignored file it cannot read",
+    async () => {
+      await ignoring("sealed.txt\n")
+      const sealed = NodePath.join(root, "sealed.txt")
+      await Fs.writeFile(sealed, "x")
+      await Fs.chmod(sealed, 0o000)
+      try {
+        const refused = await refusal()
+        expect(refused).toBeInstanceOf(PackageTree.IgnoredCensusError)
+        expect((refused as PackageTree.IgnoredCensusError).reason).toBe("unreadable")
+        expect((refused as PackageTree.IgnoredCensusError).path).toBe("sealed.txt")
+      } finally {
+        await Fs.chmod(sealed, 0o644)
+      }
+    }
+  )
 })
