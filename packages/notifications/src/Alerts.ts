@@ -5,8 +5,8 @@
  * A notification queue answers "tell this run something". An alert answers the
  * question nobody is around to ask: a run has been waiting for an approval for
  * an hour, and the person who could grant it does not know. The two are the
- * same machinery — an alert is admitted as a coalesced system event — and
- * differ only in who decides to write one.
+ * same machinery, since an alert is admitted as a coalesced system event, and
+ * they differ only in who decides to write one.
  *
  * ## Journal time, not wall time
  *
@@ -23,15 +23,23 @@
  * That ordering is deliberate and it is the reason the guarantee is
  * at-least-once rather than exactly-once: a process that dies between the
  * accepted send and the delivery record has paged, left no evidence of it, and
- * will page again on the next tick. The alternative — recording the delivery
- * first — turns the same crash into a page nobody ever receives, which for an
- * alert is the worse failure.
+ * will page again on the next tick. Recording the delivery first turns the
+ * same crash into a page nobody ever receives, which for an alert is the worse
+ * failure.
  *
  * So the sink owns the last mile: {@link SinkService.deliver} MUST be
  * idempotent on {@link alertId}, which is stable for the life of one condition
  * and reaches the sink on every alert it is handed. A sink that fails journals
- * `flows.alerts.failed` and the alert is retried on the next tick, because a
- * refused page is not a delivered page.
+ * `flows.alerts.failed` once per failure code and the alert is retried on the
+ * next tick, because a refused page is not a delivered page.
+ *
+ * ## What a refusal costs
+ *
+ * The queue can refuse the admission when a run already holds its capacity of
+ * pending notifications. A tick that is refused pages nobody: the alert comes
+ * back in {@link Tick.refused}, the refusal is journaled, and the next tick
+ * tries again once a boundary has drained. Calling the sink anyway would page
+ * about an alert the run will never see.
  *
  * ## Conditions are data
  *
@@ -43,7 +51,7 @@
  * @since 0.1.0
  */
 import { Journal, JournalEvent } from "@smthrs/journal"
-import { Clock, Context, Effect, Layer, Result, Schema } from "effect"
+import { Clock, Context, Duration, Effect, Layer, Result, Schema } from "effect"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import type * as NotificationModel from "./Notification.ts"
@@ -59,6 +67,10 @@ export const deliveredEventType = "flows.alerts.delivered"
 
 /**
  * The journal event type one failed delivery attempt is recorded under.
+ *
+ * One entry is written per alert per failure code, never one per tick: a
+ * webhook that stays down for an hour leaves one record, not a hundred and
+ * twenty that every later tick has to read past.
  *
  * @category constants
  * @since 0.1.0
@@ -110,11 +122,17 @@ export type Detector = typeof Detector.Type
 /**
  * What to do about one condition, and after how long.
  *
+ * `afterMs` is a whole, non-negative number of milliseconds. The bound is the
+ * schema's job because the delay is also arithmetic on journal time: a `NaN`
+ * delay fires on the first tick and stamps a `firedAt` that JSON writes as
+ * `null`, and a negative one fires with a `firedAt` earlier than the condition
+ * it describes.
+ *
  * @category models
  * @since 0.1.0
  */
 export const Rule = Schema.Struct({
-  afterMs: Schema.Number,
+  afterMs: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
   severity: Schema.optional(Severity),
   owner: Schema.optional(Schema.String),
   runbook: Schema.optional(Schema.String)
@@ -208,11 +226,27 @@ export interface Alert {
 }
 
 /**
+ * The key an alert coalesces on: one open condition on one run.
+ *
+ * Each component is percent-encoded before it is joined, so a run id or a
+ * condition name containing the separator cannot forge another pair's key and
+ * suppress a page that belongs to somebody else. Both components are values a
+ * deployment chooses, which is why the encoding is not optional.
+ *
+ * @param runId the run the condition is open on
+ * @param condition the condition name the policy uses
+ * @category getters
+ * @since 1.0.0
+ */
+export const coalescingKey = (runId: string, condition: string): string =>
+  `${encodeURIComponent(runId)}:${encodeURIComponent(condition)}`
+
+/**
  * The identity a delivery is recorded under.
  *
  * The opening time is part of it on purpose. A condition that clears and
- * re-opens is a NEW alert — the second approval wait is not the first one — and
- * a key without the time would suppress it forever.
+ * re-opens is a NEW alert, because the second approval wait is not the first
+ * one, and a key without the time would suppress it forever.
  *
  * @param alert the alert
  * @category getters
@@ -230,6 +264,42 @@ const payloadRecord = (payload: unknown): Readonly<Record<string, unknown>> | un
   typeof payload === "object" && payload !== null && !Array.isArray(payload)
     ? payload as Readonly<Record<string, unknown>>
     : undefined
+
+/**
+ * Folds one entry into the open-condition map. Shared by the exported
+ * projection and the runtime's incremental read, so both decide a condition
+ * the same way.
+ *
+ * The alerter's own records are never evidence about a condition. They are
+ * written into the same journal they are read from, and they carry the alert's
+ * own vocabulary: a refusal reports the answering HTTP `status`, which a
+ * detector watching the run's `status` would read as the condition clearing.
+ * A page would then close the condition it paged about and the next tick would
+ * re-open it, so a webhook that answered 503 once would alert forever.
+ */
+const observe = (
+  policy: Policy,
+  detectors: Readonly<Record<string, Detector>>,
+  entry: JournalEvent.Entry,
+  payload: Readonly<Record<string, unknown>>,
+  open: Map<string, number>
+): void => {
+  if (entry.eventType === deliveredEventType || entry.eventType === failedEventType) return
+  for (const condition of Object.keys(policy.rules)) {
+    const detector = detectors[condition]
+    if (detector === undefined) continue
+    if (detector.eventTypes !== undefined && !detector.eventTypes.includes(entry.eventType)) continue
+    // Own properties only. `in` walks `Object.prototype`, so a detector named
+    // `toString` or `constructor` would read every record-shaped entry in the
+    // run as evidence and close the condition on all of them.
+    if (!Object.hasOwn(payload, detector.field)) continue
+    if (payload[detector.field] === detector.value) {
+      if (!open.has(condition)) open.set(condition, entry.emittedAtMs)
+    } else {
+      open.delete(condition)
+    }
+  }
+}
 
 /**
  * Every condition a run's journal leaves open, with the time each opened.
@@ -255,17 +325,7 @@ export const conditions = (
   for (const entry of entries) {
     const payload = payloadRecord(entry.payload)
     if (payload === undefined) continue
-    for (const condition of Object.keys(policy.rules)) {
-      const detector = detectors[condition]
-      if (detector === undefined) continue
-      if (detector.eventTypes !== undefined && !detector.eventTypes.includes(entry.eventType)) continue
-      if (!(detector.field in payload)) continue
-      if (payload[detector.field] === detector.value) {
-        if (!open.has(condition)) open.set(condition, entry.emittedAtMs)
-      } else {
-        open.delete(condition)
-      }
-    }
+    observe(policy, detectors, entry, payload, open)
   }
   return Array.from(open, ([condition, since]) => ({ runId, condition, since }))
 }
@@ -277,7 +337,7 @@ export const conditions = (
  * alerts in any process, at any instant past the delay. `now` decides WHETHER
  * an alert is raised; it never appears in one. A condition that has been open
  * for less than its rule's delay raises nothing, which is the whole point of
- * the delay — most stalls clear themselves.
+ * the delay, because most stalls clear themselves.
  *
  * @param policy the policy
  * @param open the conditions the journal left open
@@ -307,14 +367,39 @@ export const decide = (
       // permanently undeliverable the moment a tick refused and time moved on.
       firedAt: condition.since + rule.afterMs,
       severity,
-      coalescingKey: `${condition.runId}:${condition.condition}`,
+      coalescingKey: coalescingKey(condition.runId, condition.condition),
       ...(owner === undefined ? {} : { owner }),
       ...(runbook === undefined ? {} : { runbook })
     }]
   })
 
 /**
+ * Why a sink did not take an alert.
+ *
+ * `sink_rejected` is an answer that refused the page, `sink_unreachable` a
+ * request that never got one, and `sink_timeout` one that got no answer inside
+ * the sink's bound.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export const FailureCode = Schema.Literals(["sink_rejected", "sink_unreachable", "sink_timeout"])
+
+/**
+ * Why a sink did not take an alert.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type FailureCode = typeof FailureCode.Type
+
+/**
  * A sink refused or could not take an alert.
+ *
+ * The error carries a code, the answering status when there was one, and a
+ * short reason. It deliberately holds no request: a webhook request carries
+ * the credential the deployment handed {@link layerWebhook}, and an error is
+ * logged, encoded, and journaled in places a credential must never reach.
  *
  * @category errors
  * @since 0.1.0
@@ -322,8 +407,12 @@ export const decide = (
 export class AlertError extends Schema.TaggedError<AlertError>()(
   "/notifications/AlertError",
   {
+    code: FailureCode.pipe(Schema.withConstructorDefault(Effect.succeed("sink_rejected" as const))),
     message: Schema.String,
-    cause: Schema.optional(Schema.Unknown)
+    /** The HTTP status that refused the page, when the sink speaks HTTP. */
+    status: Schema.optional(Schema.Int),
+    /** A short, credential-free description of the transport failure. */
+    reason: Schema.optional(Schema.String)
   }
 ) {}
 
@@ -343,8 +432,8 @@ export interface SinkService {
    *
    * Delivery is at-least-once: the `flows.alerts.delivered` record is written
    * after this effect succeeds, so a process that dies in between pages again
-   * on the next tick. Every field of the alert — {@link Alert.firedAt}
-   * included — is derived from the journal, so the same alert is byte-identical
+   * on the next tick. Every field of the alert, {@link Alert.firedAt}
+   * included, is derived from the journal, so the same alert is byte-identical
    * on every attempt and `alertId(alert)` is the deduplication key a receiving
    * system should key on. A sink that cannot dedupe is a sink that will
    * occasionally page twice about one condition.
@@ -376,40 +465,83 @@ export class Sink extends Context.Service<Sink, SinkService>()("/notifications/A
 export const layerNoop: Layer.Layer<Sink> = Layer.succeed(Sink)({ deliver: () => Effect.void })
 
 /**
+ * How long the webhook sink waits for an answer before it calls the page
+ * refused.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const defaultWebhookTimeout: Duration.Duration = Duration.seconds(10)
+
+/**
  * A sink that POSTs each alert to one webhook.
  *
- * A non-2xx response is a failure, not a delivery. Paging is exactly the case
- * where a silently dropped request is worse than a retry.
+ * The body is the alert plus its {@link alertId}, and the same id is sent as
+ * an `Idempotency-Key` header, because the package requires the receiver to
+ * dedupe on it and a body without it cannot. The header is set after the
+ * caller's headers, so it is the one this sink sends.
  *
- * @param options the endpoint and any headers it needs
+ * A non-2xx response is a failure, not a delivery, and an endpoint that never
+ * answers is a failure after `timeout`. Paging is exactly the case where a
+ * silently dropped request is worse than a retry, and a hung request is worse
+ * than either: it is indistinguishable from silence, so it must not be
+ * possible to wait on one forever.
+ *
+ * @param options the endpoint, any headers it needs, and how long to wait
  * @category layers
  * @since 0.1.0
  */
 export const layerWebhook = (
-  options: { readonly url: string; readonly headers?: Readonly<Record<string, string>> | undefined }
+  options: {
+    readonly url: string
+    readonly headers?: Readonly<Record<string, string>> | undefined
+    readonly timeout?: Duration.Duration | undefined
+  }
 ): Layer.Layer<Sink, never, HttpClient.HttpClient> =>
   Layer.effect(
     Sink,
     Effect.gen(function*() {
       const client = yield* HttpClient.HttpClient
+      const timeout = options.timeout ?? defaultWebhookTimeout
       return {
         deliver: (alert) =>
           client.execute(
             HttpClientRequest.post(options.url).pipe(
               (request) =>
                 options.headers === undefined ? request : HttpClientRequest.setHeaders(request, options.headers),
-              HttpClientRequest.bodyJsonUnsafe(alert)
+              HttpClientRequest.setHeader("Idempotency-Key", alertId(alert)),
+              HttpClientRequest.bodyJsonUnsafe({ ...alert, alertId: alertId(alert) })
             )
           ).pipe(
             Effect.flatMap((response) =>
               response.status >= 200 && response.status < 300
                 ? Effect.void
                 : Effect.fail(
-                  new AlertError({ message: `Alert webhook answered ${response.status}` })
+                  new AlertError({
+                    code: "sink_rejected",
+                    status: response.status,
+                    message: `Alert webhook answered ${response.status}`
+                  })
                 )
             ),
+            Effect.timeout(timeout),
+            Effect.catchTag("TimeoutError", () =>
+              Effect.fail(
+                new AlertError({
+                  code: "sink_timeout",
+                  message: `Alert webhook did not answer within ${Duration.toMillis(timeout)} ms`
+                })
+              )),
+            // The transport error holds the request, and the request holds the
+            // caller's headers. Only its reason tag crosses into the failure.
             Effect.catchTag("HttpClientError", (cause) =>
-              Effect.fail(new AlertError({ message: "Alert webhook could not be reached", cause })))
+              Effect.fail(
+                new AlertError({
+                  code: "sink_unreachable",
+                  reason: cause.reason._tag,
+                  message: "Alert webhook could not be reached"
+                })
+              ))
           )
       }
     })
@@ -426,6 +558,11 @@ export interface Tick {
   readonly delivered: ReadonlyArray<Alert>
   /** Alerts the sink refused on this tick. They are retried on the next one. */
   readonly failed: ReadonlyArray<Alert>
+  /**
+   * Alerts the notification queue refused because the run is at capacity. The
+   * sink was not called for them, and they are retried on the next tick.
+   */
+  readonly refused: ReadonlyArray<Alert>
   /** Alerts that had already been delivered, and were not delivered again. */
   readonly suppressed: ReadonlyArray<Alert>
 }
@@ -441,12 +578,13 @@ export interface RuntimeService {
    * Reads one run's journal and pages about whatever has waited too long.
    *
    * The two failures stay apart because they mean different things to an
-   * operator. A `JournalError` is the alerter's own record channel failing —
-   * it read no entries, or it could not write the delivery record. A
-   * `NotificationError` is the notification queue refusing the admission, so
-   * the alert exists and has nowhere durable to sit. Neither is a sink
-   * failure: a refused page is journaled as `flows.alerts.failed` and retried
-   * on the next tick, and it comes back in {@link Tick.failed}.
+   * operator. A `JournalError` is the alerter's own record channel failing: it
+   * read no entries, or it could not write the delivery record. A
+   * `NotificationError` is the notification queue rejecting the alert outright,
+   * which is a producer or storage fault rather than a full queue. Neither is
+   * a sink failure: a refused page is journaled as `flows.alerts.failed` and
+   * retried on the next tick, and it comes back in {@link Tick.failed}. A queue
+   * at capacity is not a failure either; it comes back in {@link Tick.refused}.
    */
   readonly tick: (runId: string) => Effect.Effect<Tick, Journal.JournalError | NotificationError>
 }
@@ -461,21 +599,18 @@ export class AlertRuntime extends Context.Service<AlertRuntime, RuntimeService>(
   "/notifications/AlertRuntime"
 ) {}
 
-const entriesOf = (
-  journal: Journal.Service,
-  runId: JournalEvent.RunId
-): Effect.Effect<ReadonlyArray<JournalEvent.Entry>, Journal.JournalError> =>
-  Effect.gen(function*() {
-    const entries: Array<JournalEvent.Entry> = []
-    let after: JournalEvent.Seq | undefined
-    while (true) {
-      const page = yield* journal.entries({ runId, ...(after === undefined ? {} : { after }), limit: 512 })
-      entries.push(...page.entries)
-      if (!page.hasMore || page.entries.length === 0) break
-      after = page.entries.at(-1)!.seq
-    }
-    return entries
-  })
+/**
+ * One run's folded alert history: the conditions still open, the alerts
+ * already paged, and the sequence the fold stopped at.
+ */
+interface Watched {
+  readonly open: ReadonlyMap<string, number>
+  readonly delivered: ReadonlySet<string>
+  readonly cursor: number | undefined
+}
+
+/** How many runs one alert runtime keeps folded at a time. */
+const maximumWatchedRuns = 64
 
 const alertNotification = (alert: Alert): NotificationModel.Notification => ({
   _tag: "system-event",
@@ -506,10 +641,13 @@ const alertNotification = (alert: Alert): NotificationModel.Notification => ({
  * have outlived their delay, and for each one that has not already been
  * delivered: admits a coalesced system event, sends it to the sink, and
  * journals the delivery. The admission comes first because it is idempotent
- * and the send is not — a crash between them costs a duplicate admission,
- * which the queue drops. A crash between an accepted send and the delivery
+ * and the send is not: a crash between them costs a duplicate admission, which
+ * the queue drops, while a crash between an accepted send and the delivery
  * record costs a duplicate PAGE, which is why {@link SinkService.deliver} is
  * required to dedupe on {@link alertId}.
+ *
+ * The policy is decoded when the layer is built, so a rule with an impossible
+ * delay fails the composition by name instead of mis-paging at 3am.
  *
  * @param policy the rules to enforce
  * @category layers
@@ -521,19 +659,64 @@ export const layer = (
   Layer.effect(
     AlertRuntime,
     Effect.gen(function*() {
+      const checked = yield* Effect.orDie(Schema.decodeUnknownEffect(Policy)(policy))
+      const detectors = detectorsOf(checked)
       const journal = yield* Journal.Journal
       const queue = yield* NotificationQueue
       const sink = yield* Sink
+      // Folded history per run, so a tick costs the entries committed since
+      // the previous one rather than the run's whole journal.
+      const watched = new Map<string, Watched>()
+
+      const observed = (runId: JournalEvent.RunId): Effect.Effect<Watched, Journal.JournalError> =>
+        Effect.gen(function*() {
+          const base: Watched = watched.get(runId) ??
+            { open: new Map(), delivered: new Set(), cursor: undefined }
+          const fresh: Array<JournalEvent.Entry> = []
+          let after = base.cursor === undefined ? undefined : JournalEvent.Seq.make(base.cursor)
+          while (true) {
+            const page = yield* journal.entries({ runId, ...(after === undefined ? {} : { after }), limit: 512 })
+            fresh.push(...page.entries)
+            if (!page.hasMore || page.entries.length === 0) break
+            after = page.entries.at(-1)!.seq
+          }
+          if (fresh.length === 0) return base
+
+          const open = new Map(base.open)
+          const delivered = new Set(base.delivered)
+          let cursor = base.cursor
+          for (const entry of fresh) {
+            cursor = entry.seq
+            const payload = payloadRecord(entry.payload)
+            if (payload === undefined) continue
+            if (entry.eventType === deliveredEventType) {
+              const id = payload["alertId"]
+              if (typeof id === "string") delivered.add(id)
+            }
+            observe(checked, detectors, entry, payload, open)
+          }
+          const next: Watched = { open, delivered, cursor }
+          watched.delete(runId)
+          watched.set(runId, next)
+          if (watched.size > maximumWatchedRuns) watched.delete(watched.keys().next().value!)
+          return next
+        })
 
       const record = (
         eventType: string,
         alert: Alert,
-        detail?: string
+        source: string,
+        outcome: { readonly code?: string | undefined; readonly status?: number | undefined }
       ): Effect.Effect<void, Journal.JournalError> =>
         journal.emitDurableUnfenced(
           new JournalEvent.Input({
             runId: JournalEvent.RunId.make(alert.runId),
-            sourceId: JournalEvent.SourceId.make(`/notifications/alerts/${alertId(alert)}`),
+            sourceId: JournalEvent.SourceId.make(`/notifications/alerts/${alertId(alert)}/${source}`),
+            sourceSeq: JournalEvent.SourceSeq.make(0),
+            // One record per alert per outcome. Without an explicit identity
+            // the journal allocates a new sequence on every attempt, and a
+            // webhook that stays down appends a row per tick forever.
+            dedupe: "identity",
             eventType,
             payload: {
               runId: alert.runId,
@@ -541,7 +724,8 @@ export const layer = (
               since: alert.since,
               severity: alert.severity,
               alertId: alertId(alert),
-              ...(detail === undefined ? {} : { detail })
+              ...(outcome.code === undefined ? {} : { code: outcome.code }),
+              ...(outcome.status === undefined ? {} : { status: outcome.status })
             }
           })
         ).pipe(Effect.asVoid)
@@ -549,38 +733,43 @@ export const layer = (
       return AlertRuntime.of({
         tick: Effect.fn("AlertRuntime.tick")(function*(runId: string) {
           const journalRunId = JournalEvent.RunId.make(runId)
-          const entries = yield* entriesOf(journal, journalRunId)
+          const history = yield* observed(journalRunId)
           const now = yield* Clock.currentTimeMillis
-          const raised = decide(policy, conditions(policy, runId, entries), now)
-          const alreadyDelivered = new Set(
-            entries.filter((entry) => entry.eventType === deliveredEventType).flatMap((entry) => {
-              const payload = payloadRecord(entry.payload)
-              const id = payload?.["alertId"]
-              return typeof id === "string" ? [id] : []
-            })
-          )
+          const open = Array.from(history.open, ([condition, since]) => ({ runId, condition, since }))
+          const raised = decide(checked, open, now)
           const delivered: Array<Alert> = []
           const failed: Array<Alert> = []
+          const refused: Array<Alert> = []
           const suppressed: Array<Alert> = []
           for (const alert of raised) {
-            if (alreadyDelivered.has(alertId(alert))) {
+            if (history.delivered.has(alertId(alert))) {
               suppressed.push(alert)
               continue
             }
-            // Raised unchanged: a queue that refuses the admission is not the
-            // journal failing, and calling it `sink_failed` would send an
-            // operator looking at the webhook.
-            yield* queue.admit(runId, alertNotification(alert))
+            // Raised unchanged: a queue that rejects the admission outright is
+            // not the journal failing, and calling it `sink_failed` would send
+            // an operator looking at the webhook.
+            const receipt = yield* queue.admit(runId, alertNotification(alert))
+            if (receipt.decision === "rejected-full") {
+              // The alert has nowhere durable to sit, so paging about it would
+              // tell an operator about something the run will never read.
+              yield* record(failedEventType, alert, "refused", { code: "notification_full" })
+              refused.push(alert)
+              continue
+            }
             const outcome = yield* Effect.result(sink.deliver(alert))
             if (Result.isFailure(outcome)) {
-              yield* record(failedEventType, alert, outcome.failure.message)
+              yield* record(failedEventType, alert, `failed/${outcome.failure.code}`, {
+                code: outcome.failure.code,
+                status: outcome.failure.status
+              })
               failed.push(alert)
             } else {
-              yield* record(deliveredEventType, alert)
+              yield* record(deliveredEventType, alert, "delivered", {})
               delivered.push(alert)
             }
           }
-          return { delivered, failed, suppressed }
+          return { delivered, failed, refused, suppressed }
         })
       })
     })

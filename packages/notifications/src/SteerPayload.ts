@@ -8,13 +8,12 @@
  * either of them.
  *
  * The payload is stored as JSON in the journal, which makes decoding the
- * interesting half. A payload written before this vocabulary existed carries
- * only `body`; it decodes as a message, because a steer that stopped being
- * deliverable after an upgrade would be a steer the operator watched
- * disappear. A payload this module cannot classify decodes as nothing at all,
- * because notifications also carry webhook bodies and system events, and
- * rendering one of those as an instruction would put an unrelated payload in
- * front of the model.
+ * interesting half. A record carrying a `body` string and no `kind` decodes as
+ * a message, because that is what a minimal caller means by it: the control
+ * plane's steer RPC accepts the same shape. A payload this module cannot
+ * classify decodes as nothing at all, because notifications also carry webhook
+ * bodies and system events, and rendering one of those as an instruction would
+ * put an unrelated payload in front of the model.
  *
  * @since 0.1.0
  */
@@ -127,7 +126,8 @@ const record = (value: unknown): Readonly<Record<string, unknown>> | undefined =
 export const decode = (payload: unknown): SteerPayload | undefined => {
   const fields = record(payload)
   if (fields === undefined) return undefined
-  // A payload with a body and no kind predates the vocabulary.
+  // A record with a body and no kind is a message: it is the shape a caller
+  // writes when it has nothing else to say.
   const candidate = fields["kind"] === undefined && typeof fields["body"] === "string"
     ? { kind: "Message", body: fields["body"] }
     : fields
@@ -139,10 +139,16 @@ export const decode = (payload: unknown): SteerPayload | undefined => {
  * The payload a steering item is stored as.
  *
  * Every item is written with its `kind`, including a message: the body-only
- * form is read for compatibility and never written.
+ * form is read as a convenience and never written.
+ *
+ * The returned record shares no mutable structure with `item`. A caller hands
+ * the result to an admission that serializes it later, so an array still
+ * aliased to the caller could change what is durably journaled after the call
+ * returned.
  *
  * @param item the steering item
  * @category conversions
  * @since 0.1.0
  */
-export const encode = (item: SteerPayload): Readonly<Record<string, unknown>> => ({ ...item })
+export const encode = (item: SteerPayload): Readonly<Record<string, unknown>> =>
+  item.kind === "Tools" ? { ...item, toolNames: [...item.toolNames] } : { ...item }

@@ -10,7 +10,7 @@
  */
 import { Journal, JournalEvent } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
-import { Effect, Layer } from "effect"
+import { Duration, Effect, Layer } from "effect"
 import { TestClock } from "effect/testing"
 import * as HttpBody from "effect/unstable/http/HttpBody"
 import * as HttpClient from "effect/unstable/http/HttpClient"
@@ -95,6 +95,56 @@ describe("Alerts.conditions", () => {
     const open = Alerts.conditions(policy, runId, [entry(1, 5_000, "control.run.failed", { status: "failed" })])
 
     expect(open).toEqual([])
+  })
+
+  it("never reads its own delivery records as evidence about a condition", () => {
+    const open = Alerts.conditions(policy, runId, [
+      entry(1, 5_000, "control.run.parked", { status: "waiting-approval" }),
+      // A refusal reports the HTTP status that refused the page. Read as
+      // evidence it would close the very condition it paged about, and the
+      // alert would fire again on the next tick, forever.
+      entry(2, 6_000, Alerts.failedEventType, { runId, condition: "waiting-approval", code: "sink_rejected", status: 503 }),
+      entry(3, 7_000, Alerts.deliveredEventType, { runId, condition: "waiting-approval", status: 200 })
+    ])
+
+    expect(open).toEqual([{ runId, condition: "waiting-approval", since: 5_000 }])
+  })
+
+  it("reads a detector named after an Object.prototype member as an own property", () => {
+    // `field in payload` is true for `toString` on every record `JSON.parse`
+    // produced, so a detector named after a prototype member would treat every
+    // entry in the run as evidence and close its condition on all of them.
+    const inherited: Alerts.Policy = {
+      rules: { "vendor-state": { afterMs: 0 } },
+      detectors: { "vendor-state": { field: "toString", value: "degraded" } }
+    }
+    const open = Alerts.conditions(inherited, runId, [
+      entry(1, 1_000, "vendor.report", { toString: "degraded" }),
+      entry(2, 2_000, "vendor.report", { unrelated: true })
+    ])
+
+    expect(open).toEqual([{ runId, condition: "vendor-state", since: 1_000 }])
+  })
+})
+
+describe("Alerts identity", () => {
+  it("cannot let one run and condition forge another pair's key", () => {
+    // Both halves are values a deployment chooses: a run id may contain a
+    // colon and condition names come from the policy's own keys. Plain
+    // concatenation would make these two the same key, and a sink obeying the
+    // deduplication contract would suppress a page that belongs to nobody it
+    // has heard from.
+    expect(Alerts.coalescingKey("a:b", "c")).not.toBe(Alerts.coalescingKey("a", "b:c"))
+    expect(Alerts.alertId({ coalescingKey: Alerts.coalescingKey("a:b", "c"), since: 1 })).not.toBe(
+      Alerts.alertId({ coalescingKey: Alerts.coalescingKey("a", "b:c"), since: 1 })
+    )
+  })
+
+  it("gives a condition that cleared and re-opened a key of its own", () => {
+    const first = Alerts.alertId({ coalescingKey: Alerts.coalescingKey(runId, "stalled"), since: 1_000 })
+    const second = Alerts.alertId({ coalescingKey: Alerts.coalescingKey(runId, "stalled"), since: 2_000 })
+
+    expect(first).not.toBe(second)
   })
 })
 
@@ -260,7 +310,7 @@ describe("Alerts.layer over a real journal", () => {
       }).pipe(Effect.provide(stack(sink.layer)), Effect.scoped, Effect.orDie)
     )
 
-    expect(observed).toEqual({ delivered: [], failed: [], suppressed: [] })
+    expect(observed).toEqual({ delivered: [], failed: [], refused: [], suppressed: [] })
     expect(sink.sent).toEqual([])
   })
 
@@ -348,6 +398,7 @@ interface Sent {
   readonly url: string
   readonly method: string
   readonly authorization: string | undefined
+  readonly idempotencyKey: string | undefined
   readonly body: unknown
 }
 
@@ -374,6 +425,7 @@ const recordingClient = (
         url: request.url,
         method: request.method,
         authorization: request.headers["authorization"],
+        idempotencyKey: request.headers["idempotency-key"],
         body: decodeBody(request.body)
       })
       return answered instanceof HttpClientError.HttpClientError
@@ -446,7 +498,9 @@ describe("Alerts.layerWebhook", () => {
     // A page nobody accepted is not a page that went out.
     expect(observed.refused.delivered).toEqual([])
     expect(observed.refused.failed.map((alert) => alert.condition)).toEqual(["waiting-approval"])
-    expect(observed.detail).toMatchObject({ detail: "Alert webhook answered 503" })
+    // The journal records the code and the status, never the sink's prose: the
+    // message is authored by whatever sink a deployment installed.
+    expect(observed.detail).toMatchObject({ code: "sink_rejected", status: 503 })
     expect(observed.retried.delivered).toHaveLength(1)
     expect(webhook.client.sent).toHaveLength(2)
   })
@@ -473,7 +527,106 @@ describe("Alerts.layerWebhook", () => {
     )
 
     expect(observed.refused.failed.map((alert) => alert.condition)).toEqual(["waiting-approval"])
-    expect(observed.detail).toMatchObject({ detail: "Alert webhook could not be reached" })
+    expect(observed.detail).toMatchObject({ code: "sink_unreachable" })
+    // The transport error holds the request, and the request holds the bearer
+    // token this sink was built with. Neither may reach the journal.
+    expect(JSON.stringify(observed.detail)).not.toContain("Bearer")
+    expect(JSON.stringify(observed.detail)).not.toContain("authorization")
+  })
+
+  it("sends the deduplication key the package requires the receiver to key on", async () => {
+    const webhook = webhookStack(() => new Response("", { status: 200 }))
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const alerts = yield* Alerts.AlertRuntime
+        yield* parkForApproval
+        yield* TestClock.adjust("2 minutes")
+        return yield* alerts.tick(runId)
+      }).pipe(Effect.provide(webhook.stack), Effect.scoped, Effect.orDie)
+    )
+
+    const key = Alerts.alertId(observed.delivered[0]!)
+    // A body without the id cannot be deduped by the receiver the package
+    // requires to dedupe, and the header is what an HTTP receiver keys on.
+    expect(webhook.client.sent[0]?.idempotencyKey).toBe(key)
+    expect((webhook.client.sent[0]?.body as { alertId?: string }).alertId).toBe(key)
+  })
+
+  it("answers a hung endpoint within its bound instead of waiting forever", async () => {
+    // The real clock, and a client that never answers. A paging path that can
+    // hang is indistinguishable from a quiet system.
+    const client = Layer.succeed(HttpClient.HttpClient)(HttpClient.make(() => Effect.never))
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const alerts = yield* Alerts.AlertRuntime
+        const journal = yield* Journal.Journal
+        yield* parkForApproval
+        const refused = yield* alerts.tick(runId)
+        const entries = yield* journal.entries({ runId: JournalEvent.RunId.make(runId), limit: 512 })
+        return {
+          refused,
+          detail: entries.entries.find((entry) => entry.eventType === Alerts.failedEventType)?.payload
+        }
+      }).pipe(
+        Effect.provide(
+          Alerts.layer({ rules: { "waiting-approval": { afterMs: 0 } } }).pipe(
+            Layer.provideMerge(
+              Layer.mergeAll(
+                NotificationQueue.layer,
+                Alerts.layerWebhook({ url: "https://pager.test/hung", timeout: Duration.millis(20) }).pipe(
+                  Layer.provide(client)
+                )
+              )
+            ),
+            Layer.provideMerge(TestJournal.layer())
+          )
+        ),
+        Effect.scoped,
+        Effect.orDie
+      )
+    )
+
+    expect(observed.refused.failed.map((alert) => alert.condition)).toEqual(["waiting-approval"])
+    expect(observed.detail).toMatchObject({ code: "sink_timeout" })
+  })
+
+  it("takes a 2xx answer and nothing on either side of it", async () => {
+    const deliver = (status: number) =>
+      Effect.gen(function*() {
+        const sink = yield* Alerts.Sink
+        return yield* Effect.result(sink.deliver({
+          runId,
+          condition: "waiting-approval",
+          since: 0,
+          firedAt: 0,
+          severity: "warning",
+          coalescingKey: Alerts.coalescingKey(runId, "waiting-approval")
+        }))
+      }).pipe(
+        Effect.provide(
+          Alerts.layerWebhook({ url: "https://pager.test/alerts" }).pipe(
+            Layer.provide(
+              Layer.succeed(HttpClient.HttpClient)(
+                HttpClient.make((request) =>
+                  Effect.succeed(HttpClientResponse.fromWeb(request, new Response("", { status })))
+                )
+              )
+            )
+          )
+        ),
+        Effect.scoped
+      )
+
+    // The web `Response` constructor refuses a status under 200, so 200 is the
+    // lowest an HTTP sink can actually be handed; 299 and 300 are the boundary
+    // a redirect or a misrouted proxy lands on.
+    const observed = await Effect.runPromise(Effect.all([deliver(200), deliver(299), deliver(300)]))
+
+    expect(observed.map((result) => result._tag)).toEqual(["Success", "Success", "Failure"])
+    expect(observed[2]._tag === "Failure" ? observed[2].failure : undefined).toMatchObject({
+      code: "sink_rejected",
+      status: 300
+    })
   })
 
   it("sends nothing at all through the noop sink", async () => {
@@ -531,6 +684,167 @@ describe("Alerts.tick over a journal and a queue that can refuse", () => {
     )
 
     expect(observed.delivered.map((alert) => alert.condition)).toEqual(["waiting-approval"])
+  })
+
+  it("records one refusal per failure, however long the endpoint stays down", async () => {
+    const sink = controllableSink()
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const alerts = yield* Alerts.AlertRuntime
+        yield* parkForApproval
+        yield* TestClock.adjust("2 minutes")
+        sink.set("fail")
+        yield* alerts.tick(runId)
+        yield* TestClock.adjust("30 seconds")
+        yield* alerts.tick(runId)
+        yield* TestClock.adjust("30 seconds")
+        yield* alerts.tick(runId)
+        return yield* countEntries(Alerts.failedEventType)
+      }).pipe(Effect.provide(stack(sink.layer)), Effect.scoped, Effect.orDie)
+    )
+
+    // A webhook down for an hour on a 30 s tick would otherwise append 120
+    // rows for one condition, and every later tick reads past all of them.
+    expect(observed).toBe(1)
+  })
+
+  it("pages nobody about an alert the run has no room to receive", async () => {
+    const sink = controllableSink()
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const alerts = yield* Alerts.AlertRuntime
+        const queue = yield* NotificationQueue.NotificationQueue
+        // One slot, already taken by an operator steer.
+        yield* queue.admit(runId, {
+          _tag: "human-steer",
+          id: "occupant",
+          delivery: "steer",
+          targetLineageId: runId,
+          provenance: {
+            sourceRunId: "operator",
+            sourceLineageId: "operator/root",
+            sourceTurn: 0,
+            sourceActor: "human:will"
+          },
+          payload: { body: "already here" }
+        })
+        yield* parkForApproval
+        yield* TestClock.adjust("2 minutes")
+        const full = yield* alerts.tick(runId)
+        yield* queue.drain({ runId, targetLineageId: runId, boundary: "turn-1", wouldIdle: false })
+        const drained = yield* alerts.tick(runId)
+        return {
+          full,
+          drained,
+          delivered: yield* countEntries(Alerts.deliveredEventType),
+          failed: yield* countEntries(Alerts.failedEventType)
+        }
+      }).pipe(
+        Effect.provide(
+          Alerts.layer(policy).pipe(
+            Layer.provideMerge(Layer.mergeAll(NotificationQueue.layerWith({ capacity: 1 }), sink.layer)),
+            Layer.provideMerge(TestJournal.layer()),
+            Layer.provideMerge(TestClock.layer())
+          )
+        ),
+        Effect.scoped,
+        Effect.orDie
+      )
+    )
+
+    // Paging about an alert the run will never read tells an operator about
+    // something that is not going to happen.
+    expect(observed.full.refused.map((alert) => alert.condition)).toEqual(["waiting-approval"])
+    expect(observed.full.delivered).toEqual([])
+    expect(sink.sent).toHaveLength(1)
+    expect(observed.drained.delivered.map((alert) => alert.condition)).toEqual(["waiting-approval"])
+    expect(observed.delivered).toBe(1)
+    expect(observed.failed).toBe(1)
+  })
+
+  it("ignores an entry whose payload is not a record while folding a run", async () => {
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const journal = yield* Journal.Journal
+        const alerts = yield* Alerts.AlertRuntime
+        // A journal is written by whoever wrote it, and an array is not
+        // evidence about any condition.
+        yield* journal.emitDurableUnfenced(
+          new JournalEvent.Input({
+            runId: JournalEvent.RunId.make(runId),
+            sourceId: JournalEvent.SourceId.make("/foreign"),
+            eventType: "foreign.list",
+            payload: ["not", "a", "record"]
+          })
+        )
+        yield* parkForApproval
+        yield* TestClock.adjust("2 minutes")
+        return yield* alerts.tick(runId)
+      }).pipe(Effect.provide(stack(Alerts.layerNoop)), Effect.scoped, Effect.orDie)
+    )
+
+    expect(observed.delivered.map((alert) => alert.condition)).toEqual(["waiting-approval"])
+  })
+
+  it("forgets the least recently watched run rather than growing without bound", async () => {
+    const runs = 65
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        const journal = yield* Journal.Journal
+        const alerts = yield* Alerts.AlertRuntime
+        yield* Effect.forEach(
+          Array.from({ length: runs }, (_, index) => `bulk-run-${index}`),
+          (id) =>
+            journal.emitDurableUnfenced(
+              new JournalEvent.Input({
+                runId: JournalEvent.RunId.make(id),
+                sourceId: JournalEvent.SourceId.make("/control"),
+                eventType: "control.run.parked",
+                payload: { runId: id, status: "waiting-approval" }
+              })
+            ),
+          { discard: true }
+        )
+        yield* TestClock.adjust("2 minutes")
+        yield* Effect.forEach(
+          Array.from({ length: runs }, (_, index) => `bulk-run-${index}`),
+          (id) => alerts.tick(id),
+          { discard: true }
+        )
+        // The first run was evicted, so this tick folds it again from the
+        // beginning and must reach the same answer.
+        return yield* alerts.tick("bulk-run-0")
+      }).pipe(Effect.provide(stack(Alerts.layerNoop)), Effect.scoped, Effect.orDie)
+    )
+
+    expect(observed.suppressed.map((alert) => alert.condition)).toEqual(["waiting-approval"])
+    expect(observed.delivered).toEqual([])
+  })
+
+  it("refuses a policy whose delay is not a whole number of milliseconds", async () => {
+    const built = (afterMs: number) =>
+      Effect.runPromise(
+        Effect.exit(
+          Effect.void.pipe(
+            Effect.provide(
+              Alerts.layer({ rules: { "waiting-approval": { afterMs } } }).pipe(
+                Layer.provideMerge(Layer.mergeAll(NotificationQueue.layer, Alerts.layerNoop)),
+                Layer.provideMerge(TestJournal.layer())
+              )
+            ),
+            Effect.scoped
+          )
+        )
+      )
+
+    // A NaN delay fires on the first tick and stamps a `firedAt` that JSON
+    // writes as null; a negative one fires before the condition it describes;
+    // an infinite one never fires and looks exactly like a quiet system. All
+    // three are policy typos, and a composition is where a typo should stop.
+    for (const afterMs of [-1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 1.5]) {
+      expect((await built(afterMs))._tag).toBe("Failure")
+    }
+    expect((await built(0))._tag).toBe("Success")
   })
 
   it("raises the queue's own refusal instead of calling it a journal failure", async () => {

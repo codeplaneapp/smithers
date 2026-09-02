@@ -1,6 +1,6 @@
 import { Journal, JournalEvent } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
 import { describe, expect, it } from "vitest"
 import type { Notification } from "../src/Notification.ts"
 import * as NotificationQueue from "../src/NotificationQueue.ts"
@@ -38,6 +38,29 @@ const run = <A, E>(
     )
   )
 
+/** The same stack over a queue built with a capacity the case chooses. */
+const runAt = <A, E>(
+  capacity: number,
+  effect: Effect.Effect<A, E, NotificationQueue.NotificationQueue | Journal.Journal>
+): Promise<A> =>
+  Effect.runPromise(
+    effect.pipe(
+      Effect.provide(NotificationQueue.layerWith({ capacity })),
+      Effect.provide(TestJournal.layer()),
+      Effect.scoped
+    )
+  )
+
+/** Whatever the caller passes, so a case can hand `admit` a value no type allows. */
+const untyped = (value: unknown): Notification => value as Notification
+
+/** A record nested `depth` levels deep, for the depth bound. */
+const nested = (depth: number): Record<string, unknown> => {
+  let value: Record<string, unknown> = {}
+  for (let level = 0; level < depth; level += 1) value = { nested: value }
+  return value
+}
+
 describe("NotificationQueue", () => {
   it("durably admits an id exactly once with provenance intact", async () => {
     const notification = item("n-1", "steer")
@@ -67,7 +90,12 @@ describe("NotificationQueue", () => {
       })
     )
 
-    expect(error.code).toBe("idempotency_conflict")
+    // The queue's own comparison decided this, so it raises the queue's own
+    // error rather than borrowing the storage layer's `idempotency_conflict`.
+    expect(error.code).toBe("notification_id_reused")
+    expect(error).toMatchObject({ notificationId: "same" })
+    expect(error.message).not.toContain("first")
+    expect(error.message).not.toContain("second")
   })
 
   it("serializes concurrent admissions at the durable capacity", async () => {
@@ -259,5 +287,416 @@ describe("NotificationQueue", () => {
     )
 
     expect(observed).toEqual([])
+  })
+
+  it("admits a notification the full queue refused, once a boundary has drained", async () => {
+    const observed = await runAt(
+      1,
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        const journal = yield* Journal.Journal
+        yield* queue.admit("run", item("first", "steer"))
+        const refused = yield* queue.admit("run", item("second", "steer"))
+        // A refusal that had been journaled as an admission would match on
+        // every later attempt and burn the id for the life of the run.
+        const admissions = yield* journal.entries({ runId: JournalEvent.RunId.make("run"), limit: 512 }).pipe(
+          Effect.map((page) => page.entries.filter((entry) => entry.eventType === "flows/notifications/Admitted"))
+        )
+        yield* queue.drain({ runId: "run", targetLineageId: "run/root", boundary: "turn-1", wouldIdle: false })
+        const retried = yield* queue.admit("run", item("second", "steer"))
+        return { refused, admissions: admissions.length, retried, pending: yield* queue.pending("run") }
+      })
+    )
+
+    expect(observed.refused).toEqual({
+      notificationId: "second",
+      decision: "rejected-full",
+      seq: undefined,
+      duplicate: false
+    })
+    expect(observed.admissions).toBe(1)
+    expect(observed.retried).toMatchObject({ decision: "admitted", duplicate: false })
+    expect(observed.pending.map(({ id }) => id)).toEqual(["second"])
+  })
+
+  it("keeps two lineages that close the same boundary name apart", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        yield* queue.admit("run", item("root-steer", "steer", "run/root"))
+        yield* queue.admit("run", item("child-steer", "steer", "run/root/child"))
+        // ONE boundary name, two lineages. A drain identity keyed on the
+        // boundary alone makes the second drain a repeat of the first, and the
+        // child's steer stays pending forever.
+        const root = yield* queue.drain({
+          runId: "run",
+          targetLineageId: "run/root",
+          boundary: "turn-1",
+          wouldIdle: false
+        })
+        const child = yield* queue.drain({
+          runId: "run",
+          targetLineageId: "run/root/child",
+          boundary: "turn-1",
+          wouldIdle: false
+        })
+        return { root, child, pending: yield* queue.pending("run") }
+      })
+    )
+
+    expect(observed.root.notifications.map(({ id }) => id)).toEqual(["root-steer"])
+    expect(observed.root.duplicate).toBe(false)
+    expect(observed.child.notifications.map(({ id }) => id)).toEqual(["child-steer"])
+    expect(observed.child.duplicate).toBe(false)
+    expect(observed.pending).toEqual([])
+  })
+
+  it("cannot let a lineage forge another pair's drain identity through a slash", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        yield* queue.admit("run", item("a", "steer", "one/two"))
+        yield* queue.admit("run", item("b", "steer", "one"))
+        const first = yield* queue.drain({
+          runId: "run",
+          targetLineageId: "one/two",
+          boundary: "three",
+          wouldIdle: false
+        })
+        const second = yield* queue.drain({
+          runId: "run",
+          targetLineageId: "one",
+          boundary: "two/three",
+          wouldIdle: false
+        })
+        return { first, second }
+      })
+    )
+
+    expect(observed.first.notifications.map(({ id }) => id)).toEqual(["a"])
+    expect(observed.second.notifications.map(({ id }) => id)).toEqual(["b"])
+    expect(observed.second.duplicate).toBe(false)
+  })
+
+  it("holds a steer admitted after the turn opened until the next boundary", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        const opened = yield* queue.admit("run", item("before", "steer"))
+        yield* queue.admit("run", item("after", "steer"))
+        // The turn opened at the sequence the first steer committed at, so the
+        // steer that arrived while the model was already reading is held.
+        const closing = yield* queue.drain({
+          runId: "run",
+          targetLineageId: "run/root",
+          boundary: "turn-1",
+          wouldIdle: false,
+          cutoffSeq: opened.seq
+        })
+        const next = yield* queue.drain({
+          runId: "run",
+          targetLineageId: "run/root",
+          boundary: "turn-2",
+          wouldIdle: false
+        })
+        return { closing, next }
+      })
+    )
+
+    expect(observed.closing.notifications.map(({ id }) => id)).toEqual(["before"])
+    expect(observed.next.notifications.map(({ id }) => id)).toEqual(["after"])
+  })
+
+  it("refuses a value that is not a notification instead of acknowledging it", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        const journal = yield* Journal.Journal
+        // Acknowledged at a real sequence and then skipped by `fromEntry` on
+        // every replay is the worst failure a durable queue has.
+        const error = yield* queue.admit("run", untyped({ id: "bad" })).pipe(Effect.flip)
+        const entries = yield* journal.entries({ runId: JournalEvent.RunId.make("run"), limit: 512 })
+        return { error, entries: entries.entries.length }
+      })
+    )
+
+    expect(observed.error.code).toBe("notification_invalid")
+    expect(observed.error.notificationId).toBe("bad")
+    expect(observed.error.path).toBeUndefined()
+    // A refusal reports the shape it wanted, bounded, and never the value.
+    expect(observed.error.message.length).toBeLessThanOrEqual(200)
+    expect(observed.error.message.endsWith("...")).toBe(true)
+    expect(observed.entries).toBe(0)
+  })
+
+  it("names the field that failed and nothing about its value", async () => {
+    const error = await run(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        return yield* queue.admit(
+          "run",
+          untyped({ ...item("n-1", "steer"), provenance: { ...item("n-1", "steer").provenance, sourceTurn: -1 } })
+        ).pipe(Effect.flip)
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "notification_invalid",
+      notificationId: "n-1",
+      path: "provenance.sourceTurn"
+    })
+    expect(error.message).not.toContain("-1")
+  })
+
+  it("refuses a payload that is not JSON, naming the field and not the value", async () => {
+    const error = await run(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        // `payload: Schema.Json` is a compile-time promise only, and an
+        // untyped producer forwarding an external body can break it.
+        return yield* queue.admit(
+          "run",
+          untyped({ ...item("callable", "steer"), payload: { onDone: () => undefined } })
+        ).pipe(Effect.flip)
+      })
+    )
+
+    expect(error).toMatchObject({
+      code: "notification_invalid",
+      notificationId: "callable",
+      path: "payload",
+      message: "InvalidType"
+    })
+  })
+
+  it("refuses a value with no readable id without inventing one", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        return {
+          text: yield* queue.admit("run", untyped("not a notification")).pipe(Effect.flip),
+          nothing: yield* queue.admit("run", untyped(null)).pipe(Effect.flip),
+          numeric: yield* queue.admit("run", untyped({ id: 7 })).pipe(Effect.flip)
+        }
+      })
+    )
+
+    for (const error of [observed.text, observed.nothing, observed.numeric]) {
+      expect(error.code).toBe("notification_invalid")
+      expect(error.notificationId).toBeUndefined()
+    }
+  })
+
+  it("refuses a payload nested past the depth bound rather than overflowing the stack", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        return {
+          identified: yield* queue.admit(
+            "run",
+            untyped({ ...item("deep", "steer"), payload: nested(400) })
+          ).pipe(Effect.flip),
+          anonymous: yield* queue.admit("run", untyped(nested(400))).pipe(Effect.flip)
+        }
+      })
+    )
+
+    expect(observed.identified).toMatchObject({ code: "notification_invalid", notificationId: "deep" })
+    expect(observed.identified.message).toContain("256")
+    expect(observed.anonymous.notificationId).toBeUndefined()
+  })
+
+  it("admits a payload that stops one level short of the bound", async () => {
+    const receipt = await run(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        return yield* queue.admit("run", untyped({ ...item("shallow", "steer"), payload: nested(8) }))
+      })
+    )
+
+    expect(receipt.decision).toBe("admitted")
+  })
+
+  it("treats an admission written in a different key order as the same notification", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        const notification = item("ordered", "steer")
+        const first = yield* queue.admit("run", notification)
+        // The same content, written the other way round. A comparison over
+        // `JSON.stringify` alone would call this a reused id.
+        const reordered = yield* queue.admit(
+          "run",
+          untyped({
+            payload: { body: "ordered" },
+            provenance: {
+              sourceActor: notification.provenance.sourceActor,
+              sourceTurn: notification.provenance.sourceTurn,
+              sourceLineageId: notification.provenance.sourceLineageId,
+              sourceRunId: notification.provenance.sourceRunId
+            },
+            targetLineageId: notification.targetLineageId,
+            delivery: "steer",
+            id: "ordered",
+            _tag: "human-steer"
+          })
+        )
+        return { first, reordered }
+      })
+    )
+
+    expect(observed.reordered).toMatchObject({ duplicate: true, decision: "admitted", seq: observed.first.seq })
+  })
+
+  it("journals a snapshot the caller cannot edit afterwards", async () => {
+    const payload: Record<string, unknown> = { body: "as admitted", tools: ["read"] }
+    const notification = untyped({ ...item("snapshot", "steer"), payload })
+    const observed = await run(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        yield* queue.admit("run", notification)
+        payload["body"] = "edited after the call returned"
+        ;(payload["tools"] as Array<string> ).push("write")
+        return yield* queue.drain({
+          runId: "run",
+          targetLineageId: "run/root",
+          boundary: "turn-1",
+          wouldIdle: false
+        })
+      })
+    )
+
+    expect(observed.notifications[0]?.payload).toEqual({ body: "as admitted", tools: ["read"] })
+  })
+
+  it("reads a duplicate's decision back from the record rather than recomputing it", async () => {
+    const observed = await Effect.runPromise(
+      Effect.gen(function*() {
+        // Two independently built queues over ONE journal: two processes.
+        const first = yield* NotificationQueue.NotificationQueue.pipe(
+          Effect.provide(NotificationQueue.layerWith({ capacity: 1 }))
+        )
+        const second = yield* NotificationQueue.NotificationQueue.pipe(
+          Effect.provide(NotificationQueue.layerWith({ capacity: 1 }))
+        )
+        const committed = yield* first.admit("run", item("shared", "steer"))
+        return { committed, echoed: yield* second.admit("run", item("shared", "steer")) }
+      }).pipe(Effect.provide(TestJournal.layer()), Effect.scoped)
+    )
+
+    expect(observed.echoed).toEqual({
+      notificationId: "shared",
+      decision: observed.committed.decision,
+      seq: observed.committed.seq,
+      duplicate: true
+    })
+  })
+
+  it("refuses to invent an admission when another writer holds the identity", async () => {
+    const error = await run(
+      Effect.gen(function*() {
+        const journal = yield* Journal.Journal
+        const queue = yield* NotificationQueue.NotificationQueue
+        yield* journal.emitDurableUnfenced(
+          new JournalEvent.Input({
+            runId: JournalEvent.RunId.make("run"),
+            sourceId: JournalEvent.SourceId.make("/notifications/admission/squatted"),
+            sourceSeq: JournalEvent.SourceSeq.make(0),
+            eventType: "foreign",
+            payload: { squatter: true }
+          })
+        )
+        yield* journal.flush
+        return yield* queue.admit("run", item("squatted", "steer")).pipe(Effect.flip)
+      })
+    )
+
+    expect(error).toMatchObject({ code: "notification_id_reused", notificationId: "squatted" })
+  })
+
+  it("refuses to invent a delivery when another writer holds the drain identity", async () => {
+    const error = await run(
+      Effect.gen(function*() {
+        const journal = yield* Journal.Journal
+        const queue = yield* NotificationQueue.NotificationQueue
+        yield* journal.emitDurableUnfenced(
+          new JournalEvent.Input({
+            runId: JournalEvent.RunId.make("run"),
+            sourceId: JournalEvent.SourceId.make("/notifications/drain/run%2Froot/turn-1"),
+            sourceSeq: JournalEvent.SourceSeq.make(0),
+            eventType: "foreign",
+            payload: { squatter: true }
+          })
+        )
+        yield* journal.flush
+        return yield* queue.drain({
+          runId: "run",
+          targetLineageId: "run/root",
+          boundary: "turn-1",
+          wouldIdle: false
+        }).pipe(Effect.flip)
+      })
+    )
+
+    expect(error.code).toBe("notification_unavailable")
+  })
+
+  it("pages only the entries committed since the previous fold", async () => {
+    const reads = { pages: 0, entries: 0 }
+    const counting = Layer.effect(
+      Journal.Journal,
+      Effect.map(Journal.Journal, (journal) =>
+        Journal.Journal.of({
+          ...journal,
+          entries: (options) =>
+            journal.entries(options).pipe(Effect.tap((page) =>
+              Effect.sync(() => {
+                reads.pages += 1
+                reads.entries += page.entries.length
+              })
+            ))
+        }))
+    ).pipe(Layer.provide(TestJournal.layer()))
+
+    const admissions = 60
+    await Effect.runPromise(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        yield* Effect.forEach(
+          Array.from({ length: admissions }, (_, index) => index),
+          (index) => queue.admit("run", item(`n-${index}`, "steer")),
+          { discard: true }
+        )
+        yield* queue.pending("run")
+      }).pipe(
+        Effect.provide(NotificationQueue.layerWith({ capacity: admissions })),
+        Effect.provide(counting),
+        Effect.scoped
+      )
+    )
+
+    // A fold that re-read the whole run on every call costs entries quadratic
+    // in the admissions: 60 admissions read at least 1,800 entries twice over.
+    // Paging from the cursor costs each entry a bounded number of reads.
+    expect(reads.entries).toBeLessThan(4 * admissions)
+    expect(reads.pages).toBeGreaterThan(0)
+  })
+
+  it("forgets the least recently folded run rather than growing without bound", async () => {
+    const observed = await run(
+      Effect.gen(function*() {
+        const queue = yield* NotificationQueue.NotificationQueue
+        // One more run than the fold retains, so the first is evicted and has
+        // to be folded again from the beginning.
+        yield* Effect.forEach(
+          Array.from({ length: 65 }, (_, index) => index),
+          (index) => queue.admit(`run-${index}`, item(`n-${index}`, "steer")),
+          { discard: true }
+        )
+        return yield* queue.pending("run-0")
+      })
+    )
+
+    expect(observed.map(({ id }) => id)).toEqual(["n-0"])
   })
 })

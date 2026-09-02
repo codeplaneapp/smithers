@@ -6,11 +6,16 @@
 import { Schema } from "effect"
 
 /**
- * Durable origin of a notification.
+ * Durable origin of a notification: who said it, from where, and at which
+ * turn.
+ *
+ * Provenance travels with the notification because the run that receives one
+ * is not the run that wrote it. An operator steer, a parent run's event, and a
+ * webhook all arrive on the same queue, and only these fields say which is
+ * which after the fact.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const Provenance = Schema.Struct({
   sourceRunId: Schema.String,
@@ -24,7 +29,6 @@ export const Provenance = Schema.Struct({
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Provenance = typeof Provenance.Type
 
@@ -38,9 +42,12 @@ const common = {
 /**
  * A human message that must reach the model before the current turn closes.
  *
+ * `id` is the caller's idempotency key: admitting it twice with the same
+ * content is one notification, and admitting it with different content is a
+ * producer bug the queue refuses.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const HumanSteer = Schema.TaggedStruct("human-steer", {
   ...common,
@@ -50,9 +57,12 @@ export const HumanSteer = Schema.TaggedStruct("human-steer", {
 /**
  * A human message that waits for the run to become idle.
  *
+ * The delivery class is the whole difference from {@link HumanSteer}: a
+ * follow-up is not urgent enough to interrupt the turn in flight, so it is
+ * promoted one at a time when the run would otherwise have nothing to do.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const HumanFollowup = Schema.TaggedStruct("human-followup", {
   ...common,
@@ -63,9 +73,12 @@ export const HumanFollowup = Schema.TaggedStruct("human-followup", {
  * A machine-originated event. Consecutive events sharing a coalescing key
  * collapse to the most recent payload while pending.
  *
+ * Coalescing is what keeps a chatty producer from filling the queue: ten
+ * updates about one condition are one pending notification carrying the latest
+ * of them. An event with no key never coalesces.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const SystemEvent = Schema.TaggedStruct("system-event", {
   ...common,
@@ -76,9 +89,12 @@ export const SystemEvent = Schema.TaggedStruct("system-event", {
 /**
  * Any durable notification retained by the pending queue.
  *
+ * `NotificationQueue.admit` decodes its argument against this union before it
+ * journals anything, so a value that does not match it is refused rather than
+ * acknowledged and then skipped by every replay.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export const Notification = Schema.Union([HumanSteer, HumanFollowup, SystemEvent])
 
@@ -87,7 +103,6 @@ export const Notification = Schema.Union([HumanSteer, HumanFollowup, SystemEvent
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export type Notification = typeof Notification.Type
 
@@ -97,9 +112,9 @@ export type Notification = typeof Notification.Type
  * `steer` notifications are promoted in a batch at turn close; `queue`
  * notifications are promoted one at a time when the run would otherwise idle.
  *
+ * @param notification the notification to classify
  * @category getters
  * @since 0.1.0
- * @slop
  */
 export const admissionClass = (notification: Notification): "steer" | "queue" => notification.delivery
 
@@ -107,9 +122,9 @@ export const admissionClass = (notification: Notification): "steer" | "queue" =>
  * The key a pending notification coalesces on, or `null` when it must never
  * be coalesced. Only system events coalesce, and only when they declare a key.
  *
+ * @param notification the notification to key
  * @category getters
  * @since 0.1.0
- * @slop
  */
 export const coalesceKey = (notification: Notification): string | null =>
   notification._tag === "system-event" ? notification.coalescingKey ?? null : null

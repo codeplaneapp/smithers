@@ -83,4 +83,15 @@ describe("SteerPayload.encode", () => {
       toolNames: ["grep"]
     })
   })
+
+  it("shares no mutable structure with the item it was given", () => {
+    // The control plane hands this record to an admission that serializes it
+    // later, so an array still aliased to the caller would change what is
+    // durably journaled after the call returned.
+    const toolNames: Array<string> = ["grep"]
+    const encoded = SteerPayload.encode({ kind: "Tools", toolNames })
+    toolNames.push("write")
+
+    expect(encoded).toEqual({ kind: "Tools", toolNames: ["grep"] })
+  })
 })

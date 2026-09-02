@@ -5,13 +5,30 @@
  */
 import type { Notification } from "./Notification.ts"
 import { admissionClass, coalesceKey } from "./Notification.ts"
+import type * as NotificationEvent from "./NotificationEvent.ts"
+
+/**
+ * The default maximum number of pending notifications retained per run.
+ *
+ * The bound is what makes an undrained run a known quantity instead of a
+ * function of how long it was ignored. Admitting past it decides
+ * `rejected-full`, which retains nothing and writes no journal entry, so the
+ * notification is admissible again once a boundary drains.
+ * `NotificationQueue.layerWith` raises or lowers it for one composition.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const defaultCapacity = 128
 
 /**
  * A notification retained until it is promoted at a harness safe point.
  *
+ * `seq` is the journal sequence the admission committed at, which is what a
+ * turn-close cutoff compares against.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Pending {
   readonly notification: Notification
@@ -21,18 +38,27 @@ export interface Pending {
 /**
  * The result recorded for one durable notification admission.
  *
+ * Re-exported from `NotificationEvent`, which owns the single declaration, so
+ * the type these signatures use and the schema the journal validates against
+ * can never drift apart.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
-export type AdmissionDecision = "admitted" | "coalesced" | "rejected-full"
+export type AdmissionDecision = NotificationEvent.AdmissionDecision
 
 /**
  * Immutable bounded queue state derived from the notification journal.
  *
+ * The value is immutable in its own structure: the state and the `Pending`
+ * wrappers it holds are frozen, and every transition returns a new state
+ * rather than editing this one. The notifications inside are not re-frozen
+ * here, because `NotificationQueue.admit` already snapshots a notification at
+ * the durability boundary, so no state built by the queue shares mutable
+ * structure with a caller.
+ *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface State {
   readonly capacity: number
@@ -44,7 +70,6 @@ export interface State {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Admission {
   readonly state: State
@@ -52,11 +77,10 @@ export interface Admission {
 }
 
 /**
- * A pure promotion transition.
+ * A pure promotion transition: what a boundary takes, and what is left.
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Promotion {
   readonly state: State
@@ -81,9 +105,12 @@ const immutablePromotion = (state: State, promoted: ReadonlyArray<Pending>): Pro
 /**
  * Creates an empty bounded notification queue.
  *
+ * A capacity that is not a finite number becomes zero, so a misconfigured
+ * bound refuses everything loudly rather than retaining an unbounded backlog.
+ *
+ * @param capacity the maximum number of pending notifications
  * @category constructors
  * @since 0.1.0
- * @slop
  */
 export const empty = (capacity: number): State => immutable(normalizedCapacity(capacity), [])
 
@@ -91,9 +118,16 @@ export const empty = (capacity: number): State => immutable(normalizedCapacity(c
  * Admits a notification, coalescing only pending system events with the same
  * key. Coalescing retains the first sequence so replay order remains stable.
  *
+ * A queue already at capacity decides `rejected-full` and retains nothing. The
+ * caller owns what happens next: `NotificationQueue.admit` writes no journal
+ * entry for that decision, so the same notification is admissible again once a
+ * boundary drains.
+ *
+ * @param state the current queue state
+ * @param notification the notification to admit
+ * @param seq the journal sequence the admission is recorded at
  * @category operations
  * @since 0.1.0
- * @slop
  */
 export const admit = (state: State, notification: Notification, seq: number): Admission => {
   const key = notification._tag === "system-event" ? coalesceKey(notification) : null
@@ -122,6 +156,15 @@ export const admit = (state: State, notification: Notification, seq: number): Ad
 /**
  * Applies the decision already committed in an admission journal event.
  *
+ * Replay never re-decides: the committed decision is the one that happened,
+ * whatever this process's state would have chosen. The `rejected-full` branch
+ * stays reachable for a record written by any other writer, even though this
+ * package never writes one.
+ *
+ * @param state the state so far
+ * @param notification the notification the record admitted
+ * @param seq the journal sequence the record committed at
+ * @param decision the decision the record carries
  * @category operations
  * @since 0.1.0
  */
@@ -148,9 +191,11 @@ export const applyAdmission = (
 /**
  * Returns still-pending notifications in their durable journal order.
  *
+ * @param state the current queue state
+ * @param admission which admission class to report
+ * @param targetLineageId the lineage to report for, or every lineage when absent
  * @category getters
  * @since 0.1.0
- * @slop
  */
 export const pending = (
   state: State,
@@ -168,9 +213,15 @@ export const pending = (
  * Promotes every steer notification admitted at or before the turn-close
  * cutoff. Notifications admitted after the cutoff remain pending.
  *
+ * The cutoff is what holds a steer that arrived mid-turn until the next
+ * boundary, and `NotificationQueue.DrainInput.cutoffSeq` is how a caller sets
+ * it. A drain that names no cutoff delivers everything pending for the lineage.
+ *
+ * @param state the current queue state
+ * @param cutoffSeq the highest admission sequence this boundary may deliver
+ * @param targetLineageId the lineage the boundary belongs to, or every lineage when absent
  * @category operations
  * @since 0.1.0
- * @slop
  */
 export const promoteSteers = (state: State, cutoffSeq: number, targetLineageId?: string): Promotion => {
   const promoted: Array<Pending> = []
@@ -192,9 +243,10 @@ export const promoteSteers = (state: State, cutoffSeq: number, targetLineageId?:
 /**
  * Promotes exactly the oldest pending queue notification.
  *
+ * @param state the current queue state
+ * @param targetLineageId the lineage the boundary belongs to, or every lineage when absent
  * @category operations
  * @since 0.1.0
- * @slop
  */
 export const promoteQueued = (state: State, targetLineageId?: string): Promotion => {
   const index = state.items.findIndex((item) =>
@@ -212,9 +264,10 @@ export const promoteQueued = (state: State, targetLineageId?: string): Promotion
 /**
  * Applies a durable promotion record while replaying journal history.
  *
+ * @param state the state so far
+ * @param ids the notification ids the record promoted
  * @category operations
  * @since 0.1.0
- * @slop
  */
 export const applyPromoted = (state: State, ids: ReadonlyArray<string>): State => {
   if (ids.length === 0) return state
