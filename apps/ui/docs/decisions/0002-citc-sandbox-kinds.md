@@ -40,3 +40,12 @@ Source: plue backend session handoff.
   target_bookmark, repo_full_name, html_url, status, provisioning_stage,
   is_fork, parent_workspace_id, vm_id, persistence, ssh_host, snapshot_id,
   idle_timeout_seconds, suspended_at, created_at, updated_at.
+
+## Defaults taken 2026-09-02 (reversible; will's two open calls)
+
+- No environment or image picker in the workspace card, now or later, unless
+  will says otherwise: kind and environment come from the repository's
+  `.smithers/environment.nix`; a repository without one offers `container`
+  only, stated in words.
+- Fork and Snapshot sit on the card footer beside Suspend/Resume; the
+  Snapshots facet lists snapshots with Fork from / Save as template / Delete.
