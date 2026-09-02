@@ -1790,7 +1790,9 @@ const visit = async (
       entries.push({ path, value: { kind: "bytes", text: OwnersResolution.renderCodeowners(context.index, org) } })
     } else {
       const file = attrMember(attrs, "file")
-      for (const rendered of OwnersResolution.renderOwnersTree(context.index, typeof file === "string" ? file : "OWNERS")) {
+      for (
+        const rendered of OwnersResolution.renderOwnersTree(context.index, typeof file === "string" ? file : "OWNERS")
+      ) {
         entries.push({ path: rendered.path, value: { kind: "bytes", text: rendered.content } })
       }
     }

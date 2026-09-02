@@ -69,7 +69,9 @@ export interface Dependents {
 export interface PackageOwners {
   readonly query: string
   readonly package: string
-  readonly owners: ReadonlyArray<{ readonly owner: string; readonly role: string; readonly reasons: ReadonlyArray<string> }>
+  readonly owners: ReadonlyArray<
+    { readonly owner: string; readonly role: string; readonly reasons: ReadonlyArray<string> }
+  >
   readonly agentPolicy: string
   readonly upstream: ReadonlyArray<string>
 }
@@ -136,14 +138,18 @@ export const text = (
 ): string => {
   if ("dependents" in result) {
     const count = result.dependents.length
-    const head = `${style.bold(result.root)} ${style.dim(`is depended on by ${count} ${count === 1 ? "target" : "targets"}`)}`
+    const head = `${style.bold(result.root)} ${
+      style.dim(`is depended on by ${count} ${count === 1 ? "target" : "targets"}`)
+    }`
     return [head, ...result.dependents.map((label) => `  ${label}`)].join("\n")
   }
   if ("owners" in result) {
     const head = `${style.bold(result.package)} ${style.dim(`agents: ${result.agentPolicy}`)}`
     const owners = result.owners.length === 0
       ? [`  ${style.dim("no owners")}`]
-      : result.owners.map((entry) => `  ${entry.owner.padEnd(24)}  ${entry.role}  ${style.dim(entry.reasons.join(", "))}`)
+      : result.owners.map((entry) =>
+        `  ${entry.owner.padEnd(24)}  ${entry.role}  ${style.dim(entry.reasons.join(", "))}`
+      )
     const upstream = result.upstream.length === 0
       ? []
       : [style.dim(`depends on ${result.upstream.join(" ")}`)]

@@ -334,9 +334,13 @@ export class PackageIndex {
     const checkTeams = (declaration: Owners.Declaration, where: string): void => {
       for (const team of Owners.teamReferences(declaration)) {
         if (!teams.has(team)) {
-          throw new PackageError("unknown_team", `owners of ${where} name team:${team}, which the workspace S.Teams roster does not declare`, {
-            path: where
-          })
+          throw new PackageError(
+            "unknown_team",
+            `owners of ${where} name team:${team}, which the workspace S.Teams roster does not declare`,
+            {
+              path: where
+            }
+          )
         }
       }
     }

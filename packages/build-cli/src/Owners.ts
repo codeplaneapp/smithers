@@ -27,7 +27,7 @@
  * @since 0.1.0
  */
 import * as Input from "@smthrs/targets/Input"
-import * as Owners from "@smthrs/targets/Owners"
+import type * as Owners from "@smthrs/targets/Owners"
 import * as Target from "@smthrs/targets/Target"
 import { minimatch } from "minimatch"
 import * as Ansi from "./Ansi.ts"
@@ -210,7 +210,9 @@ export const packageOwners = (index: PackageIndex, packagePath: string): Readonl
   for (const ancestor of chainOf(index, packagePath)) {
     const declaration = index.ownersOf(ancestor)
     if (declaration === undefined) continue
-    const reason: Reason = ancestor === packagePath ? { kind: "direct" } : { kind: "inherited", from: packageLabel(ancestor) }
+    const reason: Reason = ancestor === packagePath
+      ? { kind: "direct" }
+      : { kind: "inherited", from: packageLabel(ancestor) }
     for (const owner of declaration.owners) {
       set.add(owner, "approve", reason)
       declared = true
@@ -254,7 +256,9 @@ export const agentPolicyOf = (index: PackageIndex, path: string): Owners.AgentPo
 }
 
 /** Every package that claims upstream changes, with its claim. */
-const claimants = (index: PackageIndex): ReadonlyArray<{ readonly packagePath: string; readonly claim: Owners.Upstream }> => {
+const claimants = (
+  index: PackageIndex
+): ReadonlyArray<{ readonly packagePath: string; readonly claim: Owners.Upstream }> => {
   const found: Array<{ readonly packagePath: string; readonly claim: Owners.Upstream }> = []
   for (const packagePath of index.packages()) {
     const claim = index.ownersOf(packagePath)?.upstream
@@ -397,7 +401,14 @@ export const toJson = (resolution: Resolution): {
   readonly touched_paths: ReadonlyArray<{
     readonly path: string
     readonly package: string
-    readonly owners: ReadonlyArray<{ readonly login?: string; readonly team?: string; readonly role: string; readonly reasons: ReadonlyArray<string> }>
+    readonly owners: ReadonlyArray<
+      {
+        readonly login?: string
+        readonly team?: string
+        readonly role: string
+        readonly reasons: ReadonlyArray<string>
+      }
+    >
     readonly agent_policy: Owners.AgentPolicy
     readonly packages: ReadonlyArray<string>
   }>
@@ -419,7 +430,12 @@ export const toJson = (resolution: Resolution): {
   suggested_reviewers: resolution.suggestedReviewers
 })
 
-/** One reason rendered the way the JSON and the table both show it. */
+/**
+ * One reason rendered the way the JSON and the table both show it.
+ *
+ * @category rendering
+ * @since 0.1.0
+ */
 export const reasonText = (reason: Reason): string => {
   switch (reason.kind) {
     case "direct":
@@ -506,7 +522,11 @@ export const renderCodeowners = (index: PackageIndex, org: string): string => {
     const declaration = index.ownersOf(packagePath)
     if (owners.length === 0 && (declaration === undefined || declaration.perFile.length === 0)) continue
     if (owners.length > 0) {
-      lines.push(`${codeownersPattern(packagePath, undefined)} ${owners.map((entry) => codeownersHandle(org, entry.owner)).join(" ")}`)
+      lines.push(
+        `${codeownersPattern(packagePath, undefined)} ${
+          owners.map((entry) => codeownersHandle(org, entry.owner)).join(" ")
+        }`
+      )
     }
     if (declaration !== undefined) {
       for (const rule of declaration.perFile) {
@@ -514,7 +534,9 @@ export const renderCodeowners = (index: PackageIndex, org: string): string => {
         for (const entry of owners) merged.add(entry.owner, "approve", { kind: "direct" })
         for (const owner of rule.owners) merged.add(owner, "approve", { kind: "per-file", pattern: rule.pattern })
         lines.push(
-          `${codeownersPattern(packagePath, rule.pattern)} ${merged.list().map((entry) => codeownersHandle(org, entry.owner)).join(" ")}`
+          `${codeownersPattern(packagePath, rule.pattern)} ${
+            merged.list().map((entry) => codeownersHandle(org, entry.owner)).join(" ")
+          }`
         )
       }
     }
@@ -544,13 +566,17 @@ export const renderOwnersTree = (
     const declaration = index.ownersOf(packagePath)
     const workspaceDefaults = packagePath === "" && declaration === undefined ? index.workspace.owners : undefined
     const effective = declaration ?? workspaceDefaults
-    const upstream: Array<{ readonly label: string; readonly mode: "review" | "approve"; readonly owners: ReadonlyArray<Owners.Owner> }> = []
+    const upstream: Array<
+      { readonly label: string; readonly mode: "review" | "approve"; readonly owners: ReadonlyArray<Owners.Owner> }
+    > = []
     for (const claimant of claims) {
       if (claimant.packagePath === packagePath) continue
       if (!new Set(upstreamPackages(index, claimant.packagePath)).has(packagePath)) continue
       if (!claimCovers(claimant.claim, packagePath)) continue
       const owners = packageOwners(index, claimant.packagePath).map((entry) => entry.owner)
-      if (owners.length > 0) upstream.push({ label: packageLabel(claimant.packagePath), mode: claimant.claim.mode, owners })
+      if (owners.length > 0) {
+        upstream.push({ label: packageLabel(claimant.packagePath), mode: claimant.claim.mode, owners })
+      }
     }
     if (effective === undefined && upstream.length === 0) continue
     const lines: Array<string> = [
