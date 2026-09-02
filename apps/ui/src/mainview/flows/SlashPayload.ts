@@ -472,7 +472,14 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   },
   "linear.sync": (args) => optional("integration", args),
   "linear.activity": (args) => optional("integration", args),
-  "linear.disconnect": (args) => required("integration", args, "linear.disconnect needs an integration: /linear.disconnect <id|team>"),
+  "linear.disconnect": (args) => {
+    /* `<integration> <teamKey>`: the key typed back confirms; without it the seam names the exact invocation. */
+    const tokens = tokensOf(args)
+    const [integration, confirmKey] = tokens
+    if (integration === undefined) return no("linear.disconnect needs an integration: /linear.disconnect <id|team> <teamKey>")
+    if (tokens.length > 2) return no("linear.disconnect takes an integration and its team key typed back")
+    return ok(confirmKey === undefined ? { integration } : { integration, confirmKey })
+  },
   "sync.retry": (args) => required("opId", args, "sync.retry needs an op id"),
   "sync.ops.show-more": (args) => required("cardId", args, "sync.ops.show-more needs the card id"),
   "issues.link-linear": (args) => {
@@ -485,7 +492,16 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     }
     return ok(repo === undefined ? { number, identifier } : { number, identifier, repo })
   },
-  "issues.unlink-linear": (args) => numbered(args, "issues.unlink-linear needs an issue number"),
+  "issues.unlink-linear": (args) => {
+    /* `<n> <identifier> [owner/repo]`: the identifier typed back confirms; without it the seam names the exact invocation. */
+    const { rest, repo } = splitTrailingRepo(args)
+    const [head, identifier, ...extra] = rest.split(/\s+/)
+    const number = Number(head)
+    if (!Number.isInteger(number) || number <= 0) return no("issues.unlink-linear needs an issue number")
+    if (extra.length > 0) return no("issues.unlink-linear takes an issue number, its Linear identifier typed back, and optionally an owner/repo")
+    const confirmed = identifier === undefined || identifier === "" ? {} : { identifier }
+    return ok(repo === undefined ? { number, ...confirmed } : { number, ...confirmed, repo })
+  },
   "debug.backend": (args) => ok({ backend: args ?? "" }),
   "admin.allowlist.add": (args) => required("login", args, "admin.allowlist.add needs a login"),
   "admin.allowlist.remove": (args) => required("login", args, "admin.allowlist.remove needs a login"),

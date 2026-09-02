@@ -139,9 +139,9 @@ flow above; state words come only from the DTOs.
 | `linear.connect` / `linear.connect.confirm` | `[repo]` | |
 | `linear.sync` | `[integration]` | |
 | `linear.activity` | `[integration]` | |
-| `linear.disconnect` | `<integration>` | yes |
+| `linear.disconnect` | `<integration> <teamKey>` (the key typed back is the user confirm; the card's second click sends it) | yes |
 | `sync.retry` | `<opId>` | |
-| `issues.link-linear` / `issues.unlink-linear` | `<n> <identifier>` / `<n>` | unlink yes |
+| `issues.link-linear` / `issues.unlink-linear` | `<n> <identifier>` / `<n> <identifier>` (typed back as the user confirm) | unlink yes |
 | `github.app` (renames `repos.app`), `github.reconcile` | `[repo]` | |
 | `repos.import`, `repos.import.retry` | `<owner/repo>` / `<jobId>` | |
 | `github.mirror-sync` | `[repo]` | |

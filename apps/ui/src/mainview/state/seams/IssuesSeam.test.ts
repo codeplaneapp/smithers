@@ -6,6 +6,7 @@ import type { AppServices } from "../AppController"
 import type { Card } from "../AppState"
 import { createAppStore } from "../AppStore"
 import type { AppStore } from "../AppStore"
+import { NO_LINEAR_LINK_REFUSAL } from "./IssuesSeam"
 
 /*
  * The issues seam, driven through the one command run path: issues.list /
@@ -556,5 +557,50 @@ describe("issues seam — source-only fallback (repo not imported)", () => {
     expect(calls.some((call) => call.includes("/api/user/github-repos/"))).toBe(false)
     await settled()
     expect(store.collections.cards.get("issue-will/flows-7")).toBeUndefined()
+  })
+})
+
+describe("issues seam — the Linear link's confirm (lane sync, review finding 4)", () => {
+  test("issues.unlink-linear needs the identifier typed back; with it the plue#473 refusal answers and nothing is called", async () => {
+    const calls: string[] = []
+    const { controller } = await issuesController(
+      backend({
+        "GET /api/repos/will/flows/issues/7": json(200, {
+          ...wireIssue(7),
+          linear: { identifier: "ENG-482", url: "https://linear.app/acme/issue/ENG-482" }
+        }),
+        "GET /api/repos/will/flows/issues/7/comments": json(200, [])
+      }, calls)
+    )
+    await controller.commands.run("issues.view", "7")
+    const before = calls.length
+
+    const bare = await controller.commands.run("issues.unlink-linear", "7")
+    expect(bare.status).toBe("failed")
+    if (bare.status === "failed") {
+      expect(bare.error).toBe(
+        "Unlinking issue #7 in will/flows from Linear needs its identifier typed back exactly — /issues.unlink-linear 7 ENG-482."
+      )
+    }
+    const wrong = await controller.commands.run("issues.unlink-linear", "7 ENG-1")
+    expect(wrong.status).toBe("failed")
+    if (wrong.status === "failed") expect(wrong.error).toContain("/issues.unlink-linear 7 ENG-482")
+
+    const typed = await controller.commands.run("issues.unlink-linear", "7 ENG-482")
+    expect(typed.status).toBe("failed")
+    if (typed.status === "failed") expect(typed.error).toBe(NO_LINEAR_LINK_REFUSAL)
+    /* No route exists (plue#473): none of the three made a request. */
+    expect(calls.length).toBe(before)
+  })
+
+  test("with no issue card read, the identifier is still required and the answer shows the shape", async () => {
+    const { controller } = await issuesController(backend({}))
+    const bare = await controller.commands.run("issues.unlink-linear", "9")
+    expect(bare.status).toBe("failed")
+    if (bare.status === "failed") {
+      expect(bare.error).toBe(
+        "Unlinking issue #9 in will/flows from Linear needs its identifier typed back exactly — /issues.unlink-linear 9 <identifier>."
+      )
+    }
   })
 })

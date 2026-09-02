@@ -30,7 +30,12 @@ export interface IssuesSeam {
   readonly commentOnIssue: (number: number, text: string, repo?: string) => Promise<string | void>
   /** `issues.link-linear` / `issues.unlink-linear`: refuse honestly until plue#473's route exists. */
   readonly linkLinear: (number: number, identifier: string, repo?: string) => Promise<string | void>
-  readonly unlinkLinear: (number: number, repo?: string) => Promise<string | void>
+  /**
+   * `issues.unlink-linear <n> <identifier>`: the identifier typed back is the
+   * confirm (a slash, an agent's confirmed invocation, and a card act all
+   * carry it); the unlink itself is plue#473 and refuses honestly.
+   */
+  readonly unlinkLinear: (number: number, identifier?: string, repo?: string) => Promise<string | void>
 }
 
 /*
@@ -466,8 +471,20 @@ export const createIssuesSeam = (ctx: SeamContext): IssuesSeam => {
       return NO_LINEAR_LINK_REFUSAL
     },
 
-    unlinkLinear: async (number) => {
-      void number
+    unlinkLinear: async (number, identifier, explicitRepo) => {
+      /*
+       * Removing a link is consequential (review finding 4), so the typed
+       * identifier gates it HERE, not in any card's chrome: the issue card's
+       * own link is the identifier to type back when the app has read it.
+       */
+      const target = resolveTargetRepo(ctx.store, explicitRepo)
+      if ("error" in target) return target.error
+      const detail = ctx.store.collections.cards.get(`issue-${target.repo}-${number}`)
+      const known = detail?.kind === "issue" ? detail.payload.linear?.identifier ?? null : null
+      const typed = identifier?.trim() ?? ""
+      if (typed === "" || (known !== null && typed !== known)) {
+        return `Unlinking issue #${number} in ${target.repo} from Linear needs its identifier typed back exactly — /issues.unlink-linear ${number} ${known ?? "<identifier>"}.`
+      }
       return NO_LINEAR_LINK_REFUSAL
     }
   }

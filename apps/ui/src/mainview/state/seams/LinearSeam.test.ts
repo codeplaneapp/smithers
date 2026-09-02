@@ -60,7 +60,8 @@ const SETUP = {
   viewer: { id: "u1", email: "will@example.com", name: "Will" }
 }
 
-type Route = () => Response
+/* A route sees the request init, so a double can record the body a write posted. */
+type Route = (init?: RequestInit) => Response
 
 const harness = async (
   routes: Record<string, Route>,
@@ -76,7 +77,7 @@ const harness = async (
       requests.push(key)
       const route = routes[key] ?? routes[path]
       if (route === undefined) return chiNotFound()
-      return route()
+      return route(init)
     },
     baseUrl: "",
     store,
@@ -300,6 +301,59 @@ describe("createLinearSeam", () => {
     expect(row?.lastSyncAt).toBe("2026-09-02T09:00:00Z")
   })
 
+  test("picking another repository at step 3 keeps the card, and Connect posts the picked repository", async () => {
+    /*
+     * Review finding 1: the card id is keyed on the repository the wizard
+     * opened on, while step 3 rewrites payload.repo — and the card's Connect
+     * passes payload.repo. Resolving the card by that repo alone found no
+     * card, so the wizard could never complete for anything but the default.
+     */
+    const posted: Array<unknown> = []
+    const picked = { ...INTEGRATION, repo_owner: "acme", repo_name: "flows" }
+    let integrations: Array<unknown> = []
+    const { store, seam } = await harness(
+      {
+        "POST /api/linear-auth/start": json(200, { url: "https://api.jjhub.tech/api/auth/linear" }),
+        "GET /api/linear-auth/session": authorizedSession(),
+        "api/linear/setup/sk-123": json(200, SETUP),
+        "POST api/linear": (init) => {
+          posted.push(JSON.parse(String(init?.body)))
+          integrations = [picked]
+          return json(201, picked)()
+        },
+        "api/linear": () => json(200, integrations)(),
+        "DELETE api/linear/7": () => {
+          integrations = []
+          return new Response(null, { status: 204 })
+        }
+      },
+      { pollMs: 1, timeoutMs: 5000, openExternal: async () => true }
+    )
+    await seam.connect()
+    await seam.openLinear()
+    await seam.pickTeam("team-eng")
+
+    await seam.pickRepository("will/smithers", "acme/flows")
+    expect(cardOf(store)?.title).toBe("Connect Linear · acme/flows")
+    expect(payloadOf(store)?.repo).toBe("acme/flows")
+    expect(payloadOf(store)?.steps.find((step) => step.id === "repository")?.detail).toBe("acme/flows")
+
+    /* The card's Connect button passes the picked repository, not the opening one. */
+    const result = await seam.confirmConnect("acme/flows")
+
+    expect(textOf(result)).toBe("Linear ENG connected to acme/flows — the card tracks it.")
+    expect(posted).toEqual([{ setup_key: "sk-123", linear_team_id: "team-eng", repo: "acme/flows" }])
+    /* The SAME card turned connected — no second card under the picked repo's id. */
+    expect(store.collections.cards.get("connector-setup-linear-acme/flows")).toBeUndefined()
+    expect(cardOf(store)?.title).toBe("Linear · ENG → acme/flows")
+    expect(payloadOf(store)?.phase).toBe("connected")
+    expect(payloadOf(store)?.integration?.id).toBe(7)
+
+    /* Disconnect finds that same card, keyed on the opening repository. */
+    await seam.disconnect("7", "ENG")
+    expect(cardOf(store)).toBeUndefined()
+  })
+
   test("confirmConnect before the team pick names the missing step", async () => {
     const { seam } = await harness({})
     await seam.connect()
@@ -340,6 +394,19 @@ describe("createLinearSeam", () => {
     expect(textOf(result)).toBe("pushing op 3 failed: remote rejected")
     expect(syncPayloadOf(failing.store)?.error).toBe("pushing op 3 failed: remote rejected")
     expect(failing.store.collections.cards.get("sync-ops-linear-7")?.status).toBe("error")
+  })
+
+  test("a sync refusal carrying both a status token and a message shows the message verbatim", async () => {
+    /* Review finding 13: the machine token led, so the server's sentence never reached the card. */
+    const { store, seam } = await harness({
+      "api/linear": json(200, [INTEGRATION]),
+      "POST api/linear/7/sync": json(422, { status: "sync_failed", message: "Linear API: 422 label 'infra' does not exist" })
+    })
+
+    const result = await seam.syncNow("7")
+
+    expect(textOf(result)).toBe("Linear API: 422 label 'infra' does not exist")
+    expect(syncPayloadOf(store)?.error).toBe("Linear API: 422 label 'infra' does not exist")
   })
 
   test("syncNow with several integrations names them; with none, points at connect", async () => {
@@ -393,7 +460,21 @@ describe("createLinearSeam", () => {
     await seam.confirmConnect()
     expect(store.collections.cards.get("connector-setup-linear-will/smithers")?.kind).toBe("connector-setup")
 
-    const result = await seam.disconnect("7")
+    /*
+     * Review finding 4: disconnecting is consequential, so the team key typed
+     * back is the confirm — without it (or with the wrong one) nothing is
+     * deleted and the answer names the exact invocation.
+     */
+    expect(textOf(await seam.disconnect("7"))).toBe(
+      "Disconnecting Linear ENG from will/smithers needs its team key typed back exactly — /linear.disconnect 7 ENG."
+    )
+    expect(textOf(await seam.disconnect("7", "DES"))).toBe(
+      "Disconnecting Linear ENG from will/smithers needs its team key typed back exactly — /linear.disconnect 7 ENG."
+    )
+    expect(requests).not.toContain("DELETE api/linear/7")
+    expect(store.collections.cards.get("connector-setup-linear-will/smithers")?.kind).toBe("connector-setup")
+
+    const result = await seam.disconnect("7", "ENG")
 
     expect(requests).toContain("DELETE api/linear/7")
     expect(textOf(result)).toBe("Linear ENG disconnected from will/smithers.")

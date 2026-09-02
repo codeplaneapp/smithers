@@ -1288,10 +1288,11 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Disconnect a Linear integration",
     runtime: ["jjhub"],
     confirm: "disconnect the Linear integration",
-    args: "<integration>",
+    /* The team key typed back is the flow's own input: the seam disconnects only when it matches, whoever invoked. */
+    args: "<integration> <teamKey>",
     requires: ["signed-in"],
-    input: Schema.Struct({ integration: Schema.String }),
-    handler: ({ integration }) => actions.linearDisconnect(integration)
+    input: Schema.Struct({ integration: Schema.String, confirmKey: Schema.optional(Schema.String) }),
+    handler: ({ integration, confirmKey }) => actions.linearDisconnect(integration, confirmKey)
   }),
   flow({
     name: "sync.retry",
@@ -1331,10 +1332,15 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Remove an issue's Linear link",
     runtime: ["jjhub"],
     confirm: "remove the issue's Linear link",
-    args: "<number> [owner/repo]",
+    /* The identifier typed back is the flow's own input: the seam unlinks only when it matches, whoever invoked. */
+    args: "<number> <identifier> [owner/repo]",
     requires: ["signed-in"],
-    input: NumberedTarget,
-    handler: ({ number, repo }) => actions.unlinkIssueLinear(number, repo)
+    input: Schema.Struct({
+      number: Schema.Number,
+      identifier: Schema.optional(Schema.String),
+      repo: Schema.optional(Schema.String)
+    }),
+    handler: ({ number, identifier, repo }) => actions.unlinkIssueLinear(number, identifier, repo)
   }),
   /*
    * Lane citc (ADR 0002): the persistent cloud computers. `workspace.open`

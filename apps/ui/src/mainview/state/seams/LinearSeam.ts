@@ -72,8 +72,13 @@ export interface LinearSeam {
   readonly syncNow: (integration?: string) => Promise<string | void | { readonly value: string }>
   /** `linear.activity [integration]`: the last 24 hours' ops card (the feed is plue#468 — degraded). */
   readonly activity: (integration?: string) => Promise<string | void | { readonly value: string }>
-  /** `linear.disconnect <integration>`: delete the integration; the connected card leaves the transcript. */
-  readonly disconnect: (integration: string) => Promise<string | void | { readonly value: string }>
+  /**
+   * `linear.disconnect <integration> <teamKey>`: delete the integration; the
+   * connected card leaves the transcript. The team key typed back is the
+   * confirm — a slash, an agent's confirmed invocation, and the card's second
+   * click all carry it, and only the integration's own key disconnects.
+   */
+  readonly disconnect: (integration: string, confirmKey?: string) => Promise<string | void | { readonly value: string }>
   /** `sync.retry <opId>`: refuses honestly until plue#468 records ops. */
   readonly retryOp: (opId: string) => Promise<string | void>
   /** Hidden, card-scoped: the sync-ops card's Show more — widens the ops window. */
@@ -198,13 +203,29 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
 
   /* ---- the card ---- */
 
-  const readCard = (repo: string): SetupPayload | undefined => {
-    const existing = ctx.store.collections.cards.get(cardIdOf(repo))
-    return existing?.kind === "connector-setup" && existing.payload.connector === "linear" ? existing.payload : undefined
+  /*
+   * The wizard card an act addresses. The id is keyed on the repository the
+   * wizard was OPENED on and stays put for the card's life (the SAME card
+   * turns connected), while step 3 may point `payload.repo` at another
+   * repository — so the card's own buttons arrive carrying the picked repo.
+   * A card under that id answers first; otherwise the card whose payload
+   * names the repo does. Keying the lookup on the payload's repo alone made
+   * Connect fail for every pick but the default.
+   */
+  const findCard = (repo: string): { readonly id: string; readonly payload: SetupPayload } | undefined => {
+    const direct = ctx.store.collections.cards.get(cardIdOf(repo))
+    if (direct?.kind === "connector-setup" && direct.payload.connector === "linear") {
+      return { id: direct.id, payload: direct.payload }
+    }
+    for (const card of ctx.store.collections.cards.values()) {
+      if (card.kind === "connector-setup" && card.payload.connector === "linear" && card.payload.repo === repo) {
+        return { id: card.id, payload: card.payload }
+      }
+    }
+    return undefined
   }
 
-  const upsertCard = (repo: string, patch: Partial<SetupPayload>): void => {
-    const id = cardIdOf(repo)
+  const upsertCard = (id: string, repo: string, patch: Partial<SetupPayload>): void => {
     const existing = ctx.store.collections.cards.get(id)
     const prior = existing?.kind === "connector-setup" && existing.payload.connector === "linear" ? existing.payload : undefined
     const payload: SetupPayload = {
@@ -317,7 +338,7 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     if (refusal !== undefined) return refusal
     const target = resolveTargetRepo(ctx.store, repo)
     if ("error" in target) return target.error
-    upsertCard(target.repo, { phase: "setup", steps: freshSteps(target.repo) })
+    upsertCard(cardIdOf(target.repo), target.repo, { phase: "setup", steps: freshSteps(target.repo) })
     return { value: `Connect Linear on ${target.repo} — the card walks the handoff.` }
   }
 
@@ -327,8 +348,14 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     const target = resolveTargetRepo(ctx.store, repo)
     if ("error" in target) return target.error
     const repoId = target.repo
-    const prior = readCard(repoId)
-    if (prior === undefined) return `No Linear connect card for ${repoId} — /linear.connect opens it.`
+    const found = findCard(repoId)
+    if (found === undefined) return `No Linear connect card for ${repoId} — /linear.connect opens it.`
+    const { id } = found
+    const prior = found.payload
+    const readCard = (): SetupPayload | undefined => {
+      const current = ctx.store.collections.cards.get(id)
+      return current?.kind === "connector-setup" ? current.payload : undefined
+    }
     /* The handoff: the local origin listens for the setup key. */
     let response: Response
     try {
@@ -339,18 +366,18 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
       })
     } catch (error) {
       const message = `Could not reach the local app to start the Linear authorization: ${error instanceof Error ? error.message : String(error)}`
-      upsertCard(repoId, { steps: patchStep(prior.steps, "authorize", { state: "error", error: message }) })
+      upsertCard(id, repoId, { steps: patchStep(prior.steps, "authorize", { state: "error", error: message }) })
       return message
     }
     if (!response.ok) {
       const message = await readErrorMessage(response, `The Linear authorization couldn't start (${response.status}).`)
-      upsertCard(repoId, { steps: patchStep(prior.steps, "authorize", { state: "error", error: message }) })
+      upsertCard(id, repoId, { steps: patchStep(prior.steps, "authorize", { state: "error", error: message }) })
       return message
     }
     const started = LinearAuthStartResponseSchema.safeParse(await response.json().catch(() => null))
     if (!started.success) {
       const message = "The local app answered the Linear authorization with an unreadable payload."
-      upsertCard(repoId, { steps: patchStep(prior.steps, "authorize", { state: "error", error: message }) })
+      upsertCard(id, repoId, { steps: patchStep(prior.steps, "authorize", { state: "error", error: message }) })
       return message
     }
     if (deps.openExternal !== undefined) void deps.openExternal(started.data.url)
@@ -375,21 +402,21 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
       if (Date.now() > deadline) break
     }
     if (setupKey === null) {
-      const current = readCard(repoId) ?? prior
-      upsertCard(repoId, { steps: patchStep(current.steps, "authorize", { state: "error", error: HANDOFF_TIMEOUT_NOTE }) })
+      const current = readCard() ?? prior
+      upsertCard(id, repoId, { steps: patchStep(current.steps, "authorize", { state: "error", error: HANDOFF_TIMEOUT_NOTE }) })
       return HANDOFF_TIMEOUT_NOTE
     }
     /* The setup lookup: the teams the key can see (plue#469). */
     const answer = await getJson(`/linear/setup/${encodeURIComponent(setupKey)}`)
     if ("error" in answer) {
-      const current = readCard(repoId) ?? prior
+      const current = readCard() ?? prior
       const expired = /setup/i.test(answer.error) && /(expired|not found)/i.test(answer.error)
       if (expired) {
-        upsertCard(repoId, { steps: patchStep(current.steps, "authorize", { state: "error", error: SETUP_EXPIRED_NOTE }) })
+        upsertCard(id, repoId, { steps: patchStep(current.steps, "authorize", { state: "error", error: SETUP_EXPIRED_NOTE }) })
         return SETUP_EXPIRED_NOTE
       }
       const routeMissing = /\(404\)$/.test(answer.error)
-      upsertCard(repoId, {
+      upsertCard(id, repoId, {
         setupKey,
         steps: routeMissing
           ? patchStep(patchStep(current.steps, "authorize", { state: "done", detail: "authorized" }), "team", { state: "error", error: NO_TEAM_PICK_NOTE })
@@ -399,18 +426,18 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     }
     const setup = parseSetup(answer.body)
     if (setup === null) {
-      const current = readCard(repoId) ?? prior
+      const current = readCard() ?? prior
       const message = "Smithers Cloud's answer for the Linear setup was malformed."
-      upsertCard(repoId, { steps: patchStep(current.steps, "authorize", { state: "error", error: message }) })
+      upsertCard(id, repoId, { steps: patchStep(current.steps, "authorize", { state: "error", error: message }) })
       return message
     }
     if (setup.expiresAt !== null && Date.parse(setup.expiresAt) <= Date.now()) {
-      const current = readCard(repoId) ?? prior
-      upsertCard(repoId, { steps: patchStep(current.steps, "authorize", { state: "error", error: SETUP_EXPIRED_NOTE }) })
+      const current = readCard() ?? prior
+      upsertCard(id, repoId, { steps: patchStep(current.steps, "authorize", { state: "error", error: SETUP_EXPIRED_NOTE }) })
       return SETUP_EXPIRED_NOTE
     }
-    const current = readCard(repoId) ?? prior
-    upsertCard(repoId, {
+    const current = readCard() ?? prior
+    upsertCard(id, repoId, {
       setupKey,
       ...(setup.expiresAt !== null ? { setupExpiresAt: setup.expiresAt } : {}),
       actor: setup.actor,
@@ -427,11 +454,12 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
   const pickTeam: LinearSeam["pickTeam"] = async (teamId, repo) => {
     const target = resolveTargetRepo(ctx.store, repo)
     if ("error" in target) return target.error
-    const prior = readCard(target.repo)
-    if (prior === undefined) return `No Linear connect card for ${target.repo} — /linear.connect opens it.`
+    const found = findCard(target.repo)
+    if (found === undefined) return `No Linear connect card for ${target.repo} — /linear.connect opens it.`
+    const prior = found.payload
     const team = prior.teams?.find((candidate) => candidate.id === teamId)
     if (team === undefined) return `Team ${teamId} is not one this authorization can see.`
-    upsertCard(target.repo, {
+    upsertCard(found.id, prior.repo, {
       teamId: team.id,
       steps: patchStep(
         patchStep(prior.steps, "team", { state: "done", detail: `${team.key} · ${team.name}` }),
@@ -443,25 +471,14 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
   }
 
   const pickRepository: LinearSeam["pickRepository"] = async (cardRepo, repo) => {
-    const prior = readCard(cardRepo)
-    if (prior === undefined) return `No Linear connect card for ${cardRepo} — /linear.connect opens it.`
+    const found = findCard(cardRepo)
+    if (found === undefined) return `No Linear connect card for ${cardRepo} — /linear.connect opens it.`
     const target = resolveTargetRepo(ctx.store, repo)
     if ("error" in target) return target.error
     /* The card id stays where the wizard was opened; the repository the
-       create posts follows the pick. */
-    const existing = ctx.store.collections.cards.get(cardIdOf(cardRepo))
-    if (existing === undefined || existing.kind !== "connector-setup") return
-    ctx.dispatch({
-      type: "card.upsert",
-      actor: ctx.actor(),
-      card: {
-        ...existing,
-        payload: {
-          ...existing.payload,
-          repo: target.repo,
-          steps: patchStep(prior.steps, "repository", { detail: target.repo, state: "active" })
-        }
-      }
+       create posts (and the title) follows the pick. */
+    upsertCard(found.id, target.repo, {
+      steps: patchStep(found.payload.steps, "repository", { detail: target.repo, state: "active" })
     })
     return
   }
@@ -471,8 +488,9 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     if (refusal !== undefined) return refusal
     const target = resolveTargetRepo(ctx.store, repo)
     if ("error" in target) return target.error
-    const prior = readCard(target.repo)
-    if (prior === undefined) return `No Linear connect card for ${target.repo} — /linear.connect opens it.`
+    const found = findCard(target.repo)
+    if (found === undefined) return `No Linear connect card for ${target.repo} — /linear.connect opens it.`
+    const prior = found.payload
     if (prior.setupKey === undefined) return "Step 1 first: Open Linear and authorize."
     if (prior.teamId === undefined) return "Step 2 first: pick the Linear team."
     const created = await sendJson("POST", "/linear", {
@@ -481,7 +499,7 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
       repo: prior.repo
     })
     if ("error" in created) {
-      upsertCard(target.repo, { error: created.error })
+      upsertCard(found.id, prior.repo, { error: created.error })
       return created.error
     }
     await refreshIntegrations()
@@ -489,7 +507,7 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
       (candidate) => linearIntegrationRepo(candidate) === prior.repo && candidate.teamId === prior.teamId
     )
     const wire = isRecord(created.body) ? created.body : {}
-    upsertCard(target.repo, {
+    upsertCard(found.id, prior.repo, {
       phase: "connected",
       error: undefined,
       integration: {
@@ -531,9 +549,10 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
       renderSyncCard(row, { trigger: status === "sync_started" ? "sync started" : status === "sync_already_running" ? "already running" : null })
       return { value: `Sync started for Linear ${row.teamKey} ↔ ${linearIntegrationRepo(row)} — the card tracks it.` }
     }
-    const message = status ?? (isRecord(body) && typeof body.message === "string" && body.message !== ""
+    /* The server's sentence leads; its machine token stands in only when no sentence came. */
+    const message = (isRecord(body) && typeof body.message === "string" && body.message !== ""
       ? body.message.slice(0, 240)
-      : `Starting the sync failed (${response.status})`)
+      : null) ?? status ?? `Starting the sync failed (${response.status})`
     renderSyncCard(row, { error: message })
     return message
   }
@@ -547,22 +566,42 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     return { value: `The last 24 hours of Linear ${resolved.integration.teamKey} — the feed is plue#468, the card says so.` }
   }
 
-  const disconnect: LinearSeam["disconnect"] = async (integration) => {
+  const disconnect: LinearSeam["disconnect"] = async (integration, confirmKey) => {
     const refusal = gate()
     if (refusal !== undefined) return refusal
-    if (integration.trim() === "") return "linear.disconnect needs an integration: /linear.disconnect <id|team>"
+    if (integration.trim() === "") return "linear.disconnect needs an integration: /linear.disconnect <id|team> <teamKey>"
     const resolved = await resolveIntegration(integration)
     if ("error" in resolved) return resolved.error
     const row = resolved.integration
+    const repo = linearIntegrationRepo(row)
+    /*
+     * The typed-key gate lives HERE, not only in the card's chrome (the
+     * workspace delete's rule): a slash, an agent's confirmed invocation, and
+     * the card's second click all arrive with the key the invoker typed, and
+     * only the integration's own team key disconnects. A row the wire left
+     * without a key takes its id instead — never an empty match.
+     */
+    const expected = row.teamKey !== "" ? row.teamKey : row.id
+    if ((confirmKey ?? "").trim() !== expected) {
+      return `Disconnecting Linear ${row.teamKey} from ${repo} needs its team key typed back exactly — /linear.disconnect ${row.id} ${expected}.`
+    }
     const removed = await sendJson("DELETE", `/linear/${encodeURIComponent(row.id)}`)
     if ("error" in removed) return removed.error
     await refreshIntegrations()
-    /* A disconnected card leaves the transcript: any state it could show now would be a lie. */
-    const cardId = cardIdOf(linearIntegrationRepo(row))
-    if (ctx.store.collections.cards.get(cardId) !== undefined) {
+    /*
+     * A disconnected card leaves the transcript: any state it could show now
+     * would be a lie. The connected card carries the integration's id; a
+     * wizard opened on another repository and pointed here at step 3 is
+     * still found through its payload.
+     */
+    const connected = [...ctx.store.collections.cards.values()].find(
+      (card) => card.kind === "connector-setup" && card.payload.connector === "linear" && card.payload.integration?.id === Number(row.id)
+    )
+    const cardId = connected?.id ?? findCard(repo)?.id
+    if (cardId !== undefined) {
       ctx.dispatch({ type: "card.removed", actor: ctx.actor(), id: cardId })
     }
-    return { value: `Linear ${row.teamKey} disconnected from ${linearIntegrationRepo(row)}.` }
+    return { value: `Linear ${row.teamKey} disconnected from ${repo}.` }
   }
 
   const retryOp: LinearSeam["retryOp"] = async (opId) => {
