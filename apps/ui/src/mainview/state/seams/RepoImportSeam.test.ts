@@ -225,7 +225,7 @@ describe("repo import — the happy path", () => {
 })
 
 describe("repo import — already imported", () => {
-  test("a 409 start answers done · already imported, not a failure", async () => {
+  test("a 409 'already exists' answers done with plue's message verbatim, not a failure", async () => {
     const { store, controller } = await readyStore(
       importBackend(() => json(409, { message: "repository 'flows' already exists" }))
     )
@@ -233,8 +233,60 @@ describe("repo import — already imported", () => {
     expect(outcome.status).toBe("executed")
     const card = importCard(store)
     expect(card?.payload.phase).toBe("done")
-    expect(card?.payload.detail).toBe("already imported")
+    /* Review finding 7: "already imported" was invented for every 409; the server's own verdict reads. */
+    expect(card?.payload.detail).toBe("repository 'flows' already exists")
     expect(card?.status).toBe("acted")
+  })
+
+  test("a 409 'already active' is not done: plue's message reads verbatim and the card keeps tracking its job", async () => {
+    /*
+     * Review finding 7: a large import outlived the poll budget, the card said
+     * "lost the stream — run /repos.import again", the re-run answered 409
+     * already-active, and the card flipped to done while the clone still ran.
+     */
+    const attemptsBefore = repoImportPolling.maxAttempts
+    repoImportPolling.maxAttempts = 2
+    try {
+      let starts = 0
+      const { store, controller } = await readyStore(
+        importBackend(
+          () => {
+            starts += 1
+            return starts === 1
+              ? json(202, jobBody("cloning", "resolving"))
+              : json(409, {
+                code: "github_import_already_active",
+                message: "this GitHub repository is already being imported with a different target bookmark"
+              })
+          },
+          pollSequence([
+            () => json(200, jobBody("cloning", "cloning_github")),
+            () => json(200, jobBody("cloning", "cloning_github")),
+            () => json(200, jobBody("cloning", "pushing_mirror")),
+            () => json(200, jobBody("ready", "provisioning_workspace"))
+          ])
+        )
+      )
+      await controller.commands.run("repos.import", "will/flows")
+      await until(() => importCard(store)?.payload.detail === REPO_IMPORT_LOST_STREAM_DETAIL, "the lost-stream detail")
+
+      const rerun = await controller.commands.run("repos.import", "will/flows")
+      expect(rerun.status).toBe("executed")
+      const card = importCard(store)
+      expect(card?.payload.phase).toBe("running")
+      expect(card?.payload.detail).toBe("this GitHub repository is already being imported with a different target bookmark")
+      expect(card?.payload.jobId).toBe("job-1")
+      expect(card?.status).toBe("active")
+
+      await until(() => importCard(store)?.payload.phase === "done", "the done phase after the resumed tracking")
+      expect(importCard(store)?.status).toBe("acted")
+    } finally {
+      repoImportPolling.maxAttempts = attemptsBefore
+    }
+  })
+
+  test("the poll budget outlives a large clone: thirty minutes at the production cadence", () => {
+    expect(repoImportPolling.maxAttempts * 2_000).toBeGreaterThanOrEqual(30 * 60_000)
   })
 
   test("a start answer already 'ready' is stated as already imported", async () => {
@@ -289,6 +341,46 @@ describe("repo import — honest failures", () => {
     const card = importCard(store)
     expect(card?.status).toBe("error")
     expect(card?.payload.detail).toBe("clone timed out")
+  })
+
+  test("a poll the server refuses reads its message verbatim with Retry — never the lost-stream detail", async () => {
+    /* Review finding 6: any non-OK poll counted as a drop and, after three, read as a lost stream. */
+    const { store, controller } = await readyStore(
+      importBackend(
+        () => json(202, jobBody("cloning", "resolving")),
+        () => json(500, { message: "the mirror pool is full" })
+      )
+    )
+    const outcome = await controller.commands.run("repos.import", "will/flows")
+    expect(outcome.status).toBe("executed")
+    await until(() => importCard(store)?.payload.phase === "failed", "the failed phase")
+    const card = importCard(store)
+    expect(card?.status).toBe("error")
+    expect(card?.payload.detail).toBe("the mirror pool is full")
+    expect(card?.payload.error).toBe("the mirror pool is full")
+    expect(card?.payload.jobId).toBe("job-1")
+    expect(importUpserts(store).some((entry) => entry.payload.detail === REPO_IMPORT_LOST_STREAM_DETAIL)).toBe(false)
+  })
+
+  test("a structured 429 during polling lands the rate-limit facts and the message on the card", async () => {
+    const { store, controller } = await readyStore(
+      importBackend(
+        () => json(202, jobBody("cloning", "resolving")),
+        () =>
+          json(429, {
+            code: "github_rate_limited",
+            message: "GitHub rate limit exhausted",
+            limit: 5000,
+            remaining: 0,
+            reset_at: "2026-09-02T13:00:00Z"
+          })
+      )
+    )
+    await controller.commands.run("repos.import", "will/flows")
+    await until(() => importCard(store)?.payload.phase === "failed", "the failed phase")
+    const card = importCard(store)
+    expect(card?.payload.detail).toBe("GitHub rate limit exhausted")
+    expect(card?.payload.rateLimit).toEqual({ limit: 5000, remaining: 0, resetAt: "2026-09-02T13:00:00Z" })
   })
 
   test("persistent poll failures give up honestly with the lost-stream detail", async () => {

@@ -25,11 +25,14 @@ export interface RepoImportSeam {
 /**
  * Poll cadence knobs, module-level so tests can shorten the wait: one status
  * check every `delayMs`, at most `maxAttempts` checks, and `networkRetries`
- * consecutive failed polls tolerated before the loop stops tracking.
+ * consecutive dropped polls tolerated before the loop stops tracking. The
+ * budget is thirty minutes at the production cadence: a large repository's
+ * clone outlives two, and a card that gave up early sent the user into a
+ * re-run and a 409 (review finding 7).
  */
 export const repoImportPolling = {
   delayMs: 2_000,
-  maxAttempts: 60,
+  maxAttempts: 900,
   networkRetries: 2
 }
 
@@ -58,6 +61,8 @@ interface ImportJobAnswer {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
+
+const str = (value: unknown): string | null => (typeof value === "string" && value !== "" ? value : null)
 
 const parseCount = (value: unknown): ImportCount | null => {
   if (!isRecord(value)) return null
@@ -228,13 +233,33 @@ export const createRepoImportSeam = (ctx: SeamContext): RepoImportSeam => {
       await sleep(repoImportPolling.delayMs)
       if (epochs.get(repo) !== epoch) return
       let job: ImportJobAnswer | null = null
+      let refusal: GitHubRefusal | null = null
       try {
         const response = await ctx.http(cloud(`/github/import/${encodeURIComponent(jobId)}`))
         if (response.ok) job = parseImportJob(await response.json().catch(() => undefined))
+        else refusal = await readGitHubRefusal(response, `Reading the import job failed (HTTP ${response.status})`)
       } catch {
         // A dropped poll is retried below; the job keeps running upstream.
       }
       if (epochs.get(repo) !== epoch) return
+      if (refusal !== null) {
+        /*
+         * The server refused the read (a 401, a 500, a structured 429): its
+         * words land on the card verbatim — with the rate-limit line when it
+         * carried one — and Try again re-runs the job. Only a dropped
+         * connection or an unreadable answer counts against the drop budget
+         * (review finding 6: every non-OK poll used to read as a lost stream).
+         */
+        upsert(repo, ordinal, createdAt, {
+          jobId,
+          phase: "failed",
+          detail: refusal.message,
+          error: refusal.message,
+          ...(refusal.rateLimit !== undefined ? { rateLimit: refusal.rateLimit } : {})
+        })
+        settleEpoch()
+        return
+      }
       if (job === null) {
         failures += 1
         if (failures <= repoImportPolling.networkRetries) continue
@@ -280,6 +305,9 @@ export const createRepoImportSeam = (ctx: SeamContext): RepoImportSeam => {
     const createdAt = options.keepOrdinal?.createdAt ?? Date.now()
     const epoch = (epochs.get(repo) ?? 0) + 1
     epochs.set(repo, epoch)
+    /* The job this card already tracks — a 409 "already active" resumes it when the answer names none. */
+    const tracked = ctx.store.collections.cards.get(`repo-import-${repo}`)
+    const priorJobId = tracked?.kind === "repo-import" ? tracked.payload.jobId : null
     upsert(repo, ordinal, createdAt, { phase: "starting", detail: null, jobId: options.keepOrdinal === undefined ? null : undefined })
     /*
      * A start that ends without a tracking loop (every branch that returns
@@ -302,11 +330,30 @@ export const createRepoImportSeam = (ctx: SeamContext): RepoImportSeam => {
       return message
     }
     if (response.status === 409) {
-      // Plue's conflict verdicts ("repository already exists",
-      // "github_import_already_active") both mean the mirror is already
-      // there or already on its way — stated honestly, not failed.
-      upsert(repo, ordinal, createdAt, { phase: "done", detail: "already imported" })
-      settleEpoch()
+      /*
+       * Plue's conflict verdicts are two different states, both read verbatim
+       * (review finding 7): `github_import_already_active` — the job is on its
+       * way, so the card keeps tracking it (the answer's job id, else the job
+       * this card already tracks) — and "repository … already exists" — the
+       * mirror is already there. Neither is a failure; only the second is done.
+       */
+      const body: unknown = await response.json().catch(() => null)
+      const record = isRecord(body) ? body : {}
+      const message = str(record.message)?.slice(0, 240) ?? "The import was refused (HTTP 409)"
+      const active = record.code === "github_import_already_active" || /already being imported/i.test(message)
+      if (!active) {
+        upsert(repo, ordinal, createdAt, { phase: "done", detail: message })
+        settleEpoch()
+        return undefined
+      }
+      const activeJobId = str(record.importJobId) ?? str(record.import_job_id) ?? str(record.job_id) ?? priorJobId
+      if (activeJobId === null) {
+        upsert(repo, ordinal, createdAt, { phase: "running", detail: message })
+        settleEpoch()
+        return undefined
+      }
+      upsert(repo, ordinal, createdAt, { jobId: activeJobId, phase: "running", detail: message })
+      void track(repo, activeJobId, ordinal, createdAt, epoch)
       return undefined
     }
     if (!response.ok) {
