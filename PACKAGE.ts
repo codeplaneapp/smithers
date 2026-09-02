@@ -191,6 +191,19 @@ const packageCi = standardPackages.map((entry) => entry.ci)
 /** Every standard package's compile, lint, and format gates, in that order. */
 const packageStaticChecks = standardPackages.flatMap((entry) => [entry.check, entry.lint, entry.fmt])
 
+/**
+ * The package roster as one target.
+ *
+ * A generated lane renders one GitHub job per target it names, so passing the
+ * roster itself rendered 51 jobs on each of three host lanes. The retired
+ * ci.yml ran the whole package graph as a single job per platform, and 174
+ * jobs a push is not the same pipeline at a different granularity: it is a
+ * different cost. Naming one suite restores the old shape, and it also makes
+ * cross-platform drift impossible, because every platform now runs the same
+ * label rather than its own copy of a list.
+ */
+const packageSuites = S.Suite({ tests: [...packageCi] })
+
 // --- agent lints (port of lint/BUILD.ts) --------------------------------
 
 const changes = S.gitDiff("origin/main")
@@ -396,11 +409,9 @@ const ciWasm = S.Github.Workflow({
 // yet. What this workflow runs instead is every target the repository already
 // executes through the `bun` binary, so the Bun runtime stays covered by a
 // named job. Adding ci/PACKAGE.ts replaces this list.
-const ciBun = S.Github.Workflow({
-  name: "ci-bun",
-  on,
-  setup: githubSetup,
-  run: [
+// One job, for the same reason `packageSuites` is one job.
+const bunSuites = S.Suite({
+  tests: [
     appsBugWorker.unitTests,
     appsReview.unitTests,
     appsServer.unitTests,
@@ -416,6 +427,13 @@ const ciBun = S.Github.Workflow({
     evalsReviewSeededBugs.suite,
     evalsReviewSeededBugs.scorer
   ]
+})
+
+const ciBun = S.Github.Workflow({
+  name: "ci-bun",
+  on,
+  setup: githubSetup,
+  run: [bunSuites]
 })
 
 // Port of ci.yml `apps-e2e`, which runs `//apps/ui`. The browser suites the
@@ -490,7 +508,7 @@ const ciNodeUbuntu = S.Github.Workflow({
   on,
   runsOn: "ubuntu-latest",
   setup: githubSetup,
-  run: [...packageCi]
+  run: [packageSuites]
 })
 
 const ciNodeMacos = S.Github.Workflow({
@@ -503,7 +521,7 @@ const ciNodeMacos = S.Github.Workflow({
   // Windows-only failure has never blocked a merge here.
   continueOnError: true,
   setup: githubSetup,
-  run: [...packageCi]
+  run: [packageSuites]
 })
 
 const ciNodeWindows = S.Github.Workflow({
@@ -512,7 +530,7 @@ const ciNodeWindows = S.Github.Workflow({
   runsOn: "windows-latest",
   continueOnError: true,
   setup: githubSetup,
-  run: [...packageCi]
+  run: [packageSuites]
 })
 
 const githubCi = S.Github.CiGen({
@@ -613,6 +631,8 @@ export const Package = S.Package({
     ciNodeUbuntu,
     ciNodeMacos,
     ciNodeWindows,
+    packageSuites,
+    bunSuites,
     githubCi,
     ci,
     effectBump,

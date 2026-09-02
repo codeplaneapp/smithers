@@ -588,18 +588,41 @@ describe("vitest coverage isolation conformance", () => {
       const advisory = name === "ci-node-macos" || name === "ci-node-windows"
       if (advisory) expect(contents, name).toMatch(/^\s*continue-on-error: true$/m)
       else expect(contents, name).not.toContain("continue-on-error")
-      return [...contents.matchAll(/run: pnpm exec smithers-build '\/\/packages\/([^:]+):ci'$/gm)]
+      return [...contents.matchAll(/run: pnpm exec smithers-build '(\/\/[^']+)'$/gm)]
         .map((match) => match[1]!)
         .sort()
     }
+    const ubuntu = laneTargets("ci-node-ubuntu", "ubuntu-latest")
     const macos = laneTargets("ci-node-macos", "macos-latest")
     const windows = laneTargets("ci-node-windows", "windows-latest")
-    // One roster, rendered twice: the two platforms cannot drift into running
-    // different steps.
-    expect(macos).toEqual(windows)
-    // And the roster is this suite's own package universe, so a new package
-    // joins every platform or fails here rather than shipping ubuntu-only.
-    expect(macos).toEqual([...packages].sort())
+    // One label, not one job per package. A lane renders a job per target it
+    // names, so naming the roster itself put 51 jobs on each of three host
+    // lanes, 174 a push against the retired pipeline's handful, and GitHub
+    // stopped scheduling them. Naming the suite restores the old shape and
+    // makes drift structural rather than asserted: all three platforms run the
+    // same label, so they cannot diverge.
+    expect(ubuntu).toEqual(["//:packageSuites"])
+    expect(macos).toEqual(ubuntu)
+    expect(windows).toEqual(ubuntu)
+
+    // The roster moved into the declaration, so the "a new package joins every
+    // platform" half is checked there: `standardPackages` in the root
+    // PACKAGE.ts is what `//:packageSuites` composes, and it must be this
+    // suite's own package universe.
+    const root = readFileSync(join(packagesDir, "..", "PACKAGE.ts"), "utf8")
+    const directoryOf = new Map(
+      [...root.matchAll(/^import \{ Package as (\w+) \} from "\.\/packages\/([^/]+)\/PACKAGE\.js"$/gm)]
+        .map((match) => [match[1]!, match[2]!] as const)
+    )
+    const roster = root.match(/const standardPackages = \[([\s\S]*?)\] as const/)?.[1]
+    expect(roster, "standardPackages roster not found in the root PACKAGE.ts").toBeTypeOf("string")
+    const rostered = (roster ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== "")
+      .map((entry) => directoryOf.get(entry) ?? entry)
+      .sort()
+    expect(rostered).toEqual([...packages].sort())
   })
 
   it("keeps every CI step a target invocation, never a hand-written command", () => {
