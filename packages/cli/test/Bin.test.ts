@@ -454,7 +454,13 @@ describe("an invocation that never runs a command answers before the control pla
     })
   })
 
-  it("classifies every shipped verb as a real command, not an unknown subcommand", () => {
+  // This one spawns the executable once per shipped verb, so its budget is the
+  // describe's 26 times over rather than one invocation's. Measured 24.7s
+  // locally and 259.3s on a two-core CI runner, a ratio of 10.5 that the
+  // shared 240s budget lands just under; 600s keeps the headroom real without
+  // hiding a regression, since a verb that started booting the control plane
+  // would still blow through it.
+  it("classifies every shipped verb as a real command, not an unknown subcommand", { timeout: 600_000 }, () => {
     // The resolver is the command tree, so every name the tree declares has to
     // resolve through it. A verb that stopped resolving would reach an
     // operator as a did-you-mean list for a verb that exists. The removed
