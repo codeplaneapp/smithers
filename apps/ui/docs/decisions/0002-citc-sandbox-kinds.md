@@ -49,3 +49,21 @@ Source: plue backend session handoff.
   only, stated in words.
 - Fork and Snapshot sit on the card footer beside Suspend/Resume; the
   Snapshots facet lists snapshots with Fork from / Save as template / Delete.
+
+## Terminal attach contract (plue-0c, 2026-09-02)
+
+`GET wss://api.jjhub.tech/api/repos/{o}/{r}/workspace/sessions/{id}/terminal`,
+subprotocol `terminal`. A Bearer PAT alone is accepted (RequireAuth →
+write:repository → repo write → feature gates → per-user open-rate limit);
+the `?ticket=` from `POST /api/auth/sse-ticket` (30 s, single use) exists
+only for browsers, so the Bun tunnel sends the bearer and no ticket. The
+Origin header is mandatory and checked before auth: the tunnel sends
+`https://jjhub.tech` (override `SMITHERS_CLOUD_WS_ORIGIN`). No reserved app
+origin: the check is CSRF defense for cookie sessions, so plue#475 skips it
+for Bearer principals; when it lands the tunnel needs no Origin and the
+override stays as a knob for environments that still enforce it. Max message 64 KiB; server pings; resize is
+text JSON `{"type":"resize","cols","rows"}`; PTY bytes are binary frames.
+Pre-upgrade failures are HTTP (401 ticket, 403 origin, 409 session
+provisioning or stopped, 429 caps). Close codes: 1008 `access revoked: …`
+(final, the card says revoked), 1011 `failed to attach terminal` (retry
+once), 1001 `terminal client too slow` (reconnect), 1000 normal (final).
