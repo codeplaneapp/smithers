@@ -137,12 +137,15 @@ rules make it usable:
 
 - **The accumulator is keyed by the model step's content key, and it is
   projected from the journal.** Every accounted call writes a
-  `flows.agent.usage.v1` record, and a budget built inside a resumed run folds
-  that run's records back before it decides anything. Without the projection a
-  restart would start the accounting at zero and hand the run a second full
-  allowance, because the engine resumes from recorded node results and never
-  re-enters a settled step. The content key stops the two sources double
-  counting: a recovered record and its own live call are the same key.
+  `flows.agent.usage.v1` record, a run's first decision writes its latency
+  clock zero as a `flows.agent.budget-started.v1` record, and a budget built
+  inside a resumed run folds both back before it decides anything. Without the
+  projection a restart would start the accounting at zero, hand the run a
+  second full token allowance, and re-arm its whole latency window, because
+  the engine resumes from recorded node results and never re-enters a settled
+  step. The content key stops the two sources double counting: a recovered
+  record and its own live call are the same key. The earliest recorded clock
+  zero wins, so a duplicate write cannot move a latency allowance forward.
 - **Refusal is a projection.** The check runs before a call and projects its
   cost as the largest call the run has made. A budget that noticed afterwards
   would always be exceeded by the call that exceeded it.
@@ -178,9 +181,10 @@ allowance and its own latency clock, and `Budget.usageOf(runId)` reads one run's
 spend. `Budget.defaultMaxRuns` bounds how many tallies it holds in memory, and
 `Budget.layer(policy, { maxRuns })` sets it.
 
-`Budget.usageEvent` is the one record this module writes to be READ BACK rather
-than read by an operator. It goes on the journal's durable channel for that
-reason, and its write failure is reported rather than ignored. A composition
+`Budget.usageEvent` and `Budget.budgetStartedEvent` are the records this
+module writes to be READ BACK rather than read by an operator. Both go on the
+journal's durable channel for that reason, and a write failure on either is
+reported rather than ignored. A composition
 with no journal at all, such as the reference memory engine, accounts within one
 process and recovers nothing across a restart: that absence is the one this
 module reads as "nothing recorded" rather than as "spend unknown", because such
