@@ -23,8 +23,8 @@ disposition `keep`): it has no registry consumer, so publishing an API page for
 it on the documentation site would describe a package nobody can install. When
 the Phase 4 UI port makes this package public, add the generator following the
 `packages/crypto` recipe (`Package.ts` + `scripts/docs.mjs` + a
-`Smithers.Generate` target + a `scripts/check-docs.mjs` line) and this note goes
-away.
+`Smithers.Generate` target; `scripts/check-docs.mjs` discovers the generator on
+disk and needs no line of its own) and this note goes away.
 
 `src/README.md` used to hold a second copy of the layering notes and drifted
 from the root README independently. It is gone; `architecture.md` is the one

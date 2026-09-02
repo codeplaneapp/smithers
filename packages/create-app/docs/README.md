@@ -29,9 +29,9 @@ When the package publishes, follow the shape `packages/crypto` landed:
    `docs/*.md` and `package.json` as data and the page paths as changes. The
    `run` verb writes, the `lint` verb drift-checks, and the workspace `ci` step
    already runs the lint form.
-4. Add the sidebar entry in `vocs.config.ts` and register
-   `["the create-app package documentation is current", ["packages/create-app/scripts/docs.mjs", "--check"]]`
-   in `scripts/check-docs.mjs`.
+4. Add the sidebar entry in `vocs.config.ts`. Nothing registers the generator
+   with `scripts/check-docs.mjs`: that gate discovers every
+   `packages/*/scripts/docs.mjs` on disk and runs it with `--check`.
 
 ## Files
 
