@@ -612,38 +612,21 @@ const askIdentity = (
 }
 
 /**
- * Parses one formatted capability into the pattern schema, refusing anything
- * it cannot name. Dropping an unparseable entry narrows authority — the
- * fail-closed direction — because an empty envelope grants nothing.
+ * Parses a run envelope's formatted capabilities, dropping every entry the
+ * capability grammar cannot name. Dropping an unparseable entry narrows
+ * authority — the fail-closed direction — because an empty envelope grants
+ * nothing.
  *
- * The bare `*` is the one token that is whole authority rather than an
- * action-and-resource pair. `@smthrs/registry`'s `MarkdownFlow` emits exactly
- * that string for a flow whose frontmatter declares no `capabilities:`, and
- * `smithers plan` prints it back as the plan's envelope, so refusing it left
- * every markdown-declared agent run with an empty envelope: `bash`, `read`,
- * and `write` all failed with "outside this run's capability envelope" and
- * the built-in harness could not touch a file or run a command. It expands to
- * `{ action: "*", resource: "**" }` — `**` and not `*`, because
- * `Capability.subsumes` recognises only `**` as recursive and a grant written
- * with `*` can never be proven to cover anything. The rest of the grammar is
- * owned by `@smthrs/capability`; the bare `*` is the one token its parser does
- * not accept.
- */
-const pattern = (formatted: string): Option.Option<Capability.CapabilityPattern> =>
-  formatted === "*"
-    ? Schema.decodeUnknownOption(Capability.CapabilityPattern)({ action: "*", resource: "**" })
-    : Capability.parsePattern(formatted)
-
-/**
- * Parses a run envelope's formatted capabilities, dropping every entry
- * {@link pattern} cannot name.
+ * The bare `*` a markdown-declared flow carries when its frontmatter names no
+ * `capabilities:` is part of the grammar itself: `Capability.parsePattern`
+ * expands it to `*:**`, so nothing here special-cases it.
  *
  * @category conversions
  * @since 0.1.0
  */
 export const patterns = (capabilities: ReadonlyArray<string>): ReadonlyArray<Capability.CapabilityPattern> =>
   capabilities.flatMap((formatted) => {
-    const parsed = pattern(formatted)
+    const parsed = Capability.parsePattern(formatted)
     return Option.isSome(parsed) ? [parsed.value] : []
   })
 
