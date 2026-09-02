@@ -45,6 +45,25 @@ const server = createServer((request, response) => {
     response.end("no such schema\n")
     return
   }
+  if (request.url?.startsWith("/declared-too-large") === true) {
+    response.writeHead(200, {
+      "content-type": "application/octet-stream",
+      "content-length": String(FetchExec.maximumFetchBytes + 1)
+    })
+    response.end("small body")
+    return
+  }
+  if (request.url?.startsWith("/chunked-too-large") === true) {
+    response.writeHead(200, { "content-type": "application/octet-stream" })
+    response.write(Buffer.alloc(8, 0x61))
+    response.end(Buffer.alloc(8, 0x62))
+    return
+  }
+  if (request.url?.startsWith("/redirect") === true) {
+    response.writeHead(302, { location: "/schema.graphql" })
+    response.end()
+    return
+  }
   response.writeHead(200, { "content-type": "application/octet-stream", "content-length": schemaBytes.byteLength })
   response.end(schemaBytes)
 })
@@ -62,6 +81,12 @@ const write = async (root: string, relative: string, text: string): Promise<void
 
 const temporaryWorkspace = async (): Promise<string> =>
   tracked(Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-fetch-target-"))))
+
+const fetchTemporaries = async (destination: string): Promise<ReadonlyArray<string>> => {
+  const names = await Fs.readdir(NodePath.dirname(destination)).catch(() => [])
+  const prefix = `${NodePath.basename(destination)}.smthrs-fetch-`
+  return names.filter((name) => name.startsWith(prefix))
+}
 
 /**
  * Serves one command against a workspace, capturing exit code and output.
@@ -301,6 +326,62 @@ describe("S.Fetch in a PACKAGE.ts workspace", () => {
     expect((await Fs.stat(destination)).mode & 0o777).toBe(downloadedMode)
   })
 
+  it("refuses an oversized Content-Length before reading the response body", async () => {
+    const root = await temporaryWorkspace()
+    const destination = NodePath.join(root, "data/declared.bin")
+    const error = await FetchExec.execute({
+      root,
+      target: FetchTarget.Fetch({
+        url: serverUrl.replace("/schema.graphql", "/declared-too-large"),
+        sha256: schemaSha256,
+        out: "declared.bin"
+      }),
+      outFile: "data/declared.bin"
+    }).then(() => undefined, (cause: unknown) => cause)
+    expect(error).toBeInstanceOf(FetchExec.FetchError)
+    expect(error).toMatchObject({ code: "body_too_large" })
+    expect((error as Error).message).toContain("declares")
+    await expect(Fs.access(destination)).rejects.toThrow()
+    expect(await fetchTemporaries(destination)).toEqual([])
+  })
+
+  it("removes the partial file when a chunked response crosses the byte cap", async () => {
+    const root = await temporaryWorkspace()
+    const destination = NodePath.join(root, "data/chunked.bin")
+    const error = await FetchExec.execute({
+      root,
+      target: FetchTarget.Fetch({
+        url: serverUrl.replace("/schema.graphql", "/chunked-too-large"),
+        sha256: schemaSha256,
+        out: "chunked.bin"
+      }),
+      outFile: "data/chunked.bin",
+      limitBytes: 10
+    }).then(() => undefined, (cause: unknown) => cause)
+    expect(error).toBeInstanceOf(FetchExec.FetchError)
+    expect(error).toMatchObject({ code: "body_too_large" })
+    expect((error as Error).message).toContain("exceeded the 10 byte limit")
+    await expect(Fs.access(destination)).rejects.toThrow()
+    expect(await fetchTemporaries(destination)).toEqual([])
+  })
+
+  it("publishes a successful fetch through one redirect hop", async () => {
+    const root = await temporaryWorkspace()
+    const destination = NodePath.join(root, "data/redirected.bin")
+    const result = await FetchExec.execute({
+      root,
+      target: FetchTarget.Fetch({
+        url: serverUrl.replace("/schema.graphql", "/redirect"),
+        sha256: schemaSha256,
+        out: "redirected.bin"
+      }),
+      outFile: "data/redirected.bin"
+    })
+    expect(result).toEqual({ bytes: schemaBytes.byteLength, sha256: schemaSha256 })
+    expect(await Fs.readFile(destination)).toEqual(schemaBytes)
+    expect(await fetchTemporaries(destination)).toEqual([])
+  })
+
   it("reports the HTTP status and the transport reason as typed failures without writing", async () => {
     const missingUrl = `${serverUrl.replace("/schema.graphql", "/missing.graphql")}`
     const root = await fixtureWorkspace({ url: missingUrl })
@@ -361,6 +442,7 @@ describe("S.Fetch in a PACKAGE.ts workspace", () => {
       actualSha256: schemaSha256
     })
     expect(await Fs.readFile(NodePath.join(root, "data/direct.graphql"), "utf8")).toBe("unchanged\n")
+    expect(await fetchTemporaries(NodePath.join(root, "data/direct.graphql"))).toEqual([])
   })
 })
 
@@ -406,6 +488,42 @@ describe("the declared remote cache reaches package mode", () => {
     expect(result.exitCode, result.logs).toBe(0)
     expect(result.logs).toContain("smthrs: remote cache disabled after a failure")
   }, 120_000)
+
+  /**
+   * Resolving the credentials is half the contract; withholding them is the
+   * other half. `Executor` passes `credentialEnvNames(...)` to every BUILD-mode
+   * target spawn, and package mode resolved the same credentials and then
+   * passed nothing, so a `WORKSPACE.ts` name such as `FIXTURE_CACHE_READ_TOKEN`
+   * stayed readable by every tool the graph ran.
+   */
+  it.skipIf(process.platform === "win32")(
+    "withholds the workspace-declared cache credentials from a target subprocess",
+    async () => {
+      const root = await temporaryWorkspace()
+      await write(root, "WORKSPACE.ts", workspaceModule)
+      await write(
+        root,
+        "data/PACKAGE.ts",
+        `import { Smithers as S } from "@smthrs/targets"
+const credentialProbe = S.Shell.Test({
+  command: 'test -z "$FIXTURE_CACHE_READ_TOKEN" && test -z "$FIXTURE_CACHE_WRITE_TOKEN" && test "$MARKER" = kept',
+  env: {
+    FIXTURE_CACHE_READ_TOKEN: "leaked-read",
+    FIXTURE_CACHE_WRITE_TOKEN: "leaked-write",
+    MARKER: "kept",
+  },
+})
+export const Package = S.Package({ targets: { credentialProbe } })
+`
+      )
+
+      const result = await serve(root, ["//data:credentialProbe", "--ui", "plain"])
+      // The probe exits 0 only when both credential names are absent and the
+      // ordinary declared variable beside them still arrived.
+      expect(result.exitCode, result.logs).toBe(0)
+    },
+    120_000
+  )
 })
 
 describe("package-mode failures report why, not that", () => {

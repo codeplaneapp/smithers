@@ -862,6 +862,88 @@ echo '{"type":"item.completed","item":{"type":"agent_message","text":"{\\"note\\
 })
 
 describe("prompt files and verdict stores", () => {
+  it("reads a plain prompt file inside the workspace", async () => {
+    await write("src/a.ts", "export const a = 2\n")
+    const factory = scripted([{ findings: [] }])
+    await Effect.runPromise(
+      AgentSession.runAgentLint(runtimeOf({ sessions: factory }), lintPayload())
+    )
+    expect(factory.requests()[0]!.prompt).toContain("Reject any added TODO comment.")
+  })
+
+  it.skipIf(process.platform === "win32")(
+    "refuses a prompt whose final component is a symlink outside the workspace",
+    async () => {
+      const outside = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-agent-outside-"))
+      try {
+        const hostPrompt = NodePath.join(outside, "prompt.md")
+        await Fs.writeFile(hostPrompt, "host prompt\n", "utf8")
+        await Fs.symlink(hostPrompt, NodePath.join(root, "linked-prompt.md"))
+        await write("src/a.ts", "export const a = 2\n")
+        const factory = scripted([])
+        const error = await Effect.runPromise(
+          Effect.flip(
+            AgentSession.runAgentLint(
+              runtimeOf({ sessions: factory }),
+              lintPayload({ promptPath: "linked-prompt.md" })
+            )
+          )
+        )
+        expect(error._tag).toBe("smithers-build/AgentSessionError")
+        expect(error).toMatchObject({ phase: "read" })
+        expect(factory.opens()).toBe(0)
+      } finally {
+        await Fs.rm(outside, { recursive: true, force: true })
+      }
+    }
+  )
+
+  it.skipIf(process.platform === "win32")(
+    "refuses a prompt whose parent is a symlink outside the workspace",
+    async () => {
+      const outside = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-agent-outside-"))
+      try {
+        await Fs.writeFile(NodePath.join(outside, "prompt.md"), "host prompt\n", "utf8")
+        await Fs.symlink(outside, NodePath.join(root, "linked-parent"), "dir")
+        await write("src/a.ts", "export const a = 2\n")
+        const factory = scripted([])
+        const error = await Effect.runPromise(
+          Effect.flip(
+            AgentSession.runAgentLint(
+              runtimeOf({ sessions: factory }),
+              lintPayload({ promptPath: "linked-parent/prompt.md" })
+            )
+          )
+        )
+        expect(error._tag).toBe("smithers-build/AgentSessionError")
+        expect(error).toMatchObject({ phase: "read" })
+        expect(error.message).toContain("prompt file linked-parent/prompt.md resolves outside the workspace")
+        expect(factory.opens()).toBe(0)
+      } finally {
+        await Fs.rm(outside, { recursive: true, force: true })
+      }
+    }
+  )
+
+  it.skipIf(process.platform === "win32")(
+    "refuses a rendered data file whose parent is a symlink outside the workspace",
+    async () => {
+      const outside = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-agent-outside-"))
+      try {
+        await Fs.writeFile(NodePath.join(outside, "data.txt"), "host data\n", "utf8")
+        await Fs.symlink(outside, NodePath.join(root, "linked-data"), "dir")
+        const error = await Effect.runPromise(
+          Effect.flip(AgentSession.renderDataFiles(root, ["linked-data/data.txt"]))
+        )
+        expect(error._tag).toBe("smithers-build/AgentSessionError")
+        expect(error.phase).toBe("read")
+        expect(error.message).toContain("data file linked-data/data.txt resolves outside the workspace")
+      } finally {
+        await Fs.rm(outside, { recursive: true, force: true })
+      }
+    }
+  )
+
   it("resolves //-prefixed prompt paths from the workspace root", async () => {
     await write("src/a.ts", "export const a = 2\n")
     const factory = scripted([{ findings: [] }])
@@ -974,6 +1056,72 @@ describe("prompt files and verdict stores", () => {
 })
 
 describe("codex smoke", () => {
+  /**
+   * The real CLI path, driven end to end against a stand-in binary.
+   *
+   * The live smoke below spends model tokens and is opt-in, which left the
+   * whole `makeCliSessionFactory` codex branch — the argv it builds, the stdin
+   * it writes the prompt to, and the JSONL event stream it reads the envelope
+   * back out of — unexercised in every default run. The stand-in is the real
+   * contract minus the model: it records the argv and the prompt it was given
+   * and answers the documented `item.completed` / `agent_message` events.
+   */
+  it.skipIf(process.platform === "win32")(
+    "drives the real codex argv and event stream against a stand-in binary",
+    async () => {
+      const directory = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-codex-stub-"))
+      try {
+        const observed = NodePath.join(directory, "observed.json")
+        const executable = NodePath.join(directory, "codex-stub.mjs")
+        await Fs.writeFile(
+          executable,
+          "#!/usr/bin/env node\n" +
+            "import { readFileSync, writeFileSync } from \"node:fs\"\n" +
+            `const prompt = readFileSync(0, "utf8")\n` +
+            `writeFileSync(${JSON.stringify(observed)}, JSON.stringify({ argv: process.argv.slice(2), prompt }))\n` +
+            "const envelope = { findings: [], edits: [], note: \"stub\" }\n" +
+            // A leading non-message event and a trailing one: the extractor
+            // takes the last agent_message and ignores everything else.
+            "process.stdout.write(JSON.stringify({ type: \"turn.started\" }) + \"\\n\")\n" +
+            "process.stdout.write(JSON.stringify({\n" +
+            "  type: \"item.completed\",\n" +
+            "  item: { type: \"agent_message\", text: JSON.stringify(envelope) }\n" +
+            "}) + \"\\n\")\n",
+          "utf8"
+        )
+        await Fs.chmod(executable, 0o755)
+
+        const factory = AgentSession.makeCliSessionFactory({
+          workspaceRoot: root,
+          agents: AgentTarget.Agents({ default: AgentTarget.Codex({ model: "gpt-5.6-sol" }) }),
+          executables: { codex: executable },
+          timeoutMs: 30_000
+        })
+        const session = await Effect.runPromise(factory.open(undefined))
+        expect(session.identity).toBe("codex:gpt-5.6-sol")
+        const envelope = await Effect.runPromise(session.run({ purpose: "lint", prompt: "answer the contract" }))
+        expect(envelope.findings).toEqual([])
+        expect(envelope.edits).toEqual([])
+        expect(envelope.note).toBe("stub")
+
+        const seen = JSON.parse(await Fs.readFile(observed, "utf8")) as {
+          argv: Array<string>
+          prompt: string
+        }
+        // The prompt travels over stdin, never argv.
+        expect(seen.prompt).toBe("answer the contract")
+        expect(seen.argv.join(" ")).not.toContain("answer the contract")
+        expect(seen.argv.slice(0, 3)).toEqual(["exec", "--json", "--skip-git-repo-check"])
+        expect(seen.argv).toContain("--sandbox")
+        expect(seen.argv).toContain("read-only")
+        expect(seen.argv[seen.argv.length - 1]).toBe("-")
+        expect(seen.argv[seen.argv.indexOf("--model") + 1]).toBe("gpt-5.6-sol")
+      } finally {
+        await Fs.rm(directory, { recursive: true, force: true })
+      }
+    }
+  )
+
   // One real session through the codex CLI, opt-in only: SMTHRS_CODEX_SMOKE=1.
   // Kept out of the default run so the suite spends no model tokens.
   it.skipIf(process.env["SMTHRS_CODEX_SMOKE"] !== "1")(

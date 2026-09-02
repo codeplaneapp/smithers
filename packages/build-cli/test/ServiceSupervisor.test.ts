@@ -113,6 +113,139 @@ describe("parseDurationMs", () => {
 })
 
 describe("spec validation", () => {
+  /**
+   * Every refusal the descriptor-only snapshot can raise, so the copy that
+   * exists to keep caller code out of validation is itself covered rather than
+   * trusted. Each case names one shape a hostile or malformed caller can hand
+   * `acquire`.
+   */
+  it("names the exact shape it refuses", async () => {
+    const base = { key: "//x:shape", cwd: fixtureDir, argv: [process.execPath, serverPath] }
+    const refusal = async (
+      spec: unknown,
+      expected: string
+    ): Promise<void> => {
+      const error = await acquireFlipped(spec as ServiceSupervisor.ServiceSpec)
+      expect(error.reason, expected).toBe("invalid-spec")
+      expect(error.message).toContain(expected)
+    }
+
+    await refusal([], "a service spec must be a plain object")
+    await refusal(Object.create({ inherited: 1 }), "a service spec must be a plain object")
+    await refusal({ ...base, extra: 1 }, "a service spec contains an unknown property: extra")
+    await refusal({ ...base, [Symbol("s")]: 1 }, "a service spec must not contain symbol properties")
+    await refusal({ ...base, toJSON: () => base }, "a service spec must not define toJSON")
+
+    const sparse = { ...base, argv: [process.execPath, serverPath] as Array<unknown> }
+    Object.defineProperty(sparse.argv, "tagged", { enumerable: true, value: 1 })
+    await refusal(sparse, "service spec argv must be a dense array without extra properties")
+
+    await refusal({ ...base, env: [] }, "service spec env must be a plain object")
+    await refusal({ ...base, env: { PATH: 1 } }, "env must be a record of strings")
+    await refusal(
+      { ...base, readiness: { port: 1, nope: true } },
+      "service spec readiness contains an unknown property: nope"
+    )
+    await refusal({ ...base, prepare: new Proxy([], {}) }, "service spec prepare must not be a proxy")
+
+    const nonEnumerable = { cwd: fixtureDir, argv: base.argv }
+    Object.defineProperty(nonEnumerable, "key", { enumerable: false, value: "//x:hidden" })
+    await refusal(nonEnumerable, "service spec key must be an enumerable data property")
+  })
+
+  it("rejects an argv getter without running it", async () => {
+    let reads = 0
+    const caller = { key: "//x:argv-getter", cwd: fixtureDir } as unknown as ServiceSupervisor.ServiceSpec
+    Object.defineProperty(caller, "argv", {
+      enumerable: true,
+      get: () => {
+        reads += 1
+        return [process.execPath, serverPath]
+      }
+    })
+    const error = await acquireFlipped(caller)
+    expect(error.reason).toBe("invalid-spec")
+    expect(error.message).toContain("argv must be an enumerable data property")
+    expect(reads).toBe(0)
+  })
+
+  it("reports the argv shape error after snapshotting a non-array value", async () => {
+    const error = await acquireFlipped({
+      key: "//x:argv-shape",
+      cwd: fixtureDir,
+      argv: "node" as never
+    })
+    expect(error.reason).toBe("invalid-spec")
+    expect(error.message).toBe("service //x:argv-shape requires a non-empty argv of strings")
+  })
+
+  it("rejects a proxied env record", async () => {
+    const error = await acquireFlipped({
+      key: "//x:env-proxy",
+      cwd: fixtureDir,
+      argv: [process.execPath, serverPath],
+      env: new Proxy({ MARKER: "value" }, {})
+    })
+    expect(error.reason).toBe("invalid-spec")
+    expect(error.message).toContain("env must not be a proxy")
+  })
+
+  it("rejects a readiness JSON hook without running it", async () => {
+    let calls = 0
+    const error = await acquireFlipped({
+      key: "//x:readiness-json",
+      cwd: fixtureDir,
+      argv: [process.execPath, serverPath],
+      readiness: {
+        port: 1,
+        toJSON: () => {
+          calls += 1
+          return { port: 1 }
+        }
+      } as ServiceSupervisor.Readiness
+    })
+    expect(error.reason).toBe("invalid-spec")
+    expect(error.message).toContain("readiness must not define toJSON")
+    expect(calls).toBe(0)
+  })
+
+  it("starts the validated argv when the caller mutates during prepare", async () => {
+    const directory = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-service-snapshot-"))
+    const marker = NodePath.join(directory, "prepare-started")
+    const program = "process.stdout.write(process.argv[1]); setInterval(() => {}, 1000)"
+    const caller: {
+      key: string
+      cwd: string
+      argv: [string, ...Array<string>]
+      prepare: Array<[string, ...Array<string>]>
+    } = {
+      key: "//x:snapshot",
+      cwd: directory,
+      argv: [process.execPath, "-e", program, "validated"],
+      prepare: [[
+        process.execPath,
+        "-e",
+        `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'started'); setTimeout(() => {}, 500)`
+      ]]
+    }
+    try {
+      const acquisition = run(Effect.scoped(Effect.gen(function*() {
+        const supervisor = yield* ServiceSupervisor.make
+        const handle = yield* supervisor.acquire(caller)
+        yield* Effect.sleep(100)
+        return handle.outputTail()
+      })))
+      await waitFor(() => Fs.access(marker).then(() => true, () => false), 5_000)
+      caller.argv[3] = "mutated-entry"
+      caller.argv = [process.execPath, "-e", program, "mutated-array"]
+      const output = await acquisition
+      expect(output).toContain("validated")
+      expect(output).not.toContain("mutated")
+    } finally {
+      await Fs.rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it("refuses a bad readiness timeout format", async () => {
     const error = await acquireFlipped({
       key: "//x:bad-timeout",

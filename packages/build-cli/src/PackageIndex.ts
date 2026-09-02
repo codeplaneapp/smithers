@@ -13,6 +13,7 @@
 import * as PackageValue from "@smthrs/targets/Package"
 import * as Target from "@smthrs/targets/Target"
 import * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration"
+import { collectTargets } from "./internal/Attrs.ts"
 import * as Path from "./internal/Path.ts"
 import { byCodeUnit, posix } from "./internal/Text.ts"
 import * as Label from "./Label.ts"
@@ -45,26 +46,6 @@ export interface Edge {
   readonly from: string
   readonly to: string
   readonly kind: "data" | "gates" | "services"
-}
-
-/** Collects every target reachable inside one attr value, without user code. */
-const collectTargets = (value: unknown, into: Set<Target.AnyTarget>, seen: Set<object>): void => {
-  if (Target.isTarget(value)) {
-    into.add(value)
-    return
-  }
-  if (typeof value !== "object" || value === null || seen.has(value)) return
-  seen.add(value)
-  if (Array.isArray(value)) {
-    for (const entry of value) collectTargets(entry, into, seen)
-    return
-  }
-  const prototype = Object.getPrototypeOf(value)
-  if (prototype !== Object.prototype && prototype !== null) return
-  for (const key of Object.getOwnPropertyNames(value)) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)
-    if (descriptor !== undefined && "value" in descriptor) collectTargets(descriptor.value, into, seen)
-  }
 }
 
 /** Collects every tagged reference record inside one attr value. */
@@ -113,8 +94,7 @@ const assertLegalDataClosure = (row: IndexedTarget): void => {
   if (typeof attrs !== "object" || attrs === null) return
   const descriptor = Object.getOwnPropertyDescriptor(attrs, "data")
   if (descriptor === undefined || !("value" in descriptor)) return
-  const entries = new Set<Target.AnyTarget>()
-  collectTargets(descriptor.value, entries, new Set())
+  const entries = new Set<Target.AnyTarget>(collectTargets(descriptor.value))
   const seen = new Set<Target.AnyTarget>()
   const stack = [...entries]
   while (stack.length > 0) {
@@ -454,7 +434,7 @@ export class PackageIndex {
         for (const kind of ["data", "gates", "services"] as const) {
           const descriptor = Object.getOwnPropertyDescriptor(attrs, kind)
           if (descriptor !== undefined && "value" in descriptor) {
-            collectTargets(descriptor.value, buckets[kind], new Set())
+            for (const found of collectTargets(descriptor.value)) buckets[kind].add(found)
           }
         }
       }

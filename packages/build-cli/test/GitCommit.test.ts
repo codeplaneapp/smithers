@@ -82,6 +82,7 @@ describe("commit with fake gates", () => {
     const result = await GitCommit.commit({
       root,
       target: fixedCommit([gate]),
+      sweepWorkingTree: true,
       gateRunner: {
         run: async (gates) => {
           seen.push(gates)
@@ -104,6 +105,7 @@ describe("commit with fake gates", () => {
     const error = await failure(GitCommit.commit({
       root,
       target: fixedCommit([gateTarget()]),
+      sweepWorkingTree: true,
       gateRunner: {
         run: async () => [{ target: "Memory.Retain", message: "lint failed" }]
       }
@@ -119,6 +121,7 @@ describe("commit with fake gates", () => {
     const result = await GitCommit.commit({
       root,
       target: fixedCommit(),
+      sweepWorkingTree: true,
       gateRunner: greenGates,
       messageOverride: "fix: override wins"
     })
@@ -165,7 +168,7 @@ describe("commit scope", () => {
     expect(await git(root, ["status", "--porcelain"])).toBe(" M outside-tracked.txt\n")
   })
 
-  it("an unscoped commit reports every path it swept", async () => {
+  it("an acknowledged sweep reports every path it swept", async () => {
     const root = await scopedRepo()
     await Fs.writeFile(NodePath.join(root, "scope/owned.txt"), "owned change\n", "utf8")
     await Fs.writeFile(NodePath.join(root, "outside-tracked.txt"), "concurrent change\n", "utf8")
@@ -174,10 +177,73 @@ describe("commit scope", () => {
     const result = await GitCommit.commit({
       root,
       target: fixedCommit(),
+      sweepWorkingTree: true,
       gateRunner: greenGates
     })
 
     expect(result.staged).toEqual(["outside-tracked.txt", "outside-untracked.txt", "scope/owned.txt"])
+  })
+
+  it("refuses to sweep a dirty tree when the invocation declares no scope", async () => {
+    const root = await scopedRepo()
+    const before = await head(root)
+    await Fs.writeFile(NodePath.join(root, "scope/owned.txt"), "owned change\n", "utf8")
+    await Fs.writeFile(NodePath.join(root, "outside-tracked.txt"), "concurrent change\n", "utf8")
+    await Fs.writeFile(NodePath.join(root, "outside-untracked.txt"), "concurrent addition\n", "utf8")
+
+    const error = await failure(GitCommit.commit({
+      root,
+      target: fixedCommit(),
+      gateRunner: greenGates
+    }))
+
+    expect(error.code).toBe("unrelated_changes")
+    expect(error.message).toContain("outside-tracked.txt")
+    expect(error.message).toContain("outside-untracked.txt")
+    expect(error.message).toContain("scope/owned.txt")
+    expect(await head(root)).toBe(before)
+    // Nothing was staged: the refusal lands before `git add` runs.
+    expect(await git(root, ["diff", "--cached", "--name-only"])).toBe("")
+    expect(await git(root, ["status", "--porcelain"])).toBe(
+      " M outside-tracked.txt\n M scope/owned.txt\n?? outside-untracked.txt\n"
+    )
+  })
+
+  it("names a path whose text a porcelain listing would otherwise quote", async () => {
+    const root = await scopedRepo()
+    await Fs.writeFile(NodePath.join(root, "a file with spaces.txt"), "concurrent addition\n", "utf8")
+
+    const error = await failure(GitCommit.commit({
+      root,
+      target: fixedCommit(),
+      gateRunner: greenGates
+    }))
+
+    expect(error.code).toBe("unrelated_changes")
+    expect(error.message).toContain("a file with spaces.txt")
+  })
+
+  it("refuses a scoped commit when the index carries a staged path outside the scope", async () => {
+    const root = await scopedRepo()
+    const before = await head(root)
+    await Fs.writeFile(NodePath.join(root, "scope/owned.txt"), "owned change\n", "utf8")
+    await Fs.writeFile(NodePath.join(root, "outside-tracked.txt"), "concurrent change\n", "utf8")
+    // `git add -A -- <paths>` scopes only the new staging operation; the commit
+    // that follows publishes the whole index, so a path staged before the
+    // invocation would ride along unless the guard refuses it.
+    await git(root, ["add", "--", "outside-tracked.txt"])
+
+    const error = await failure(GitCommit.commit({
+      root,
+      target: fixedCommit(),
+      gateRunner: greenGates,
+      paths: ["scope/owned.txt"]
+    }))
+
+    expect(error.code).toBe("unrelated_changes")
+    expect(error.message).toContain("outside-tracked.txt")
+    expect(error.message).not.toContain("scope/owned.txt")
+    expect(await head(root)).toBe(before)
   })
 
   it("refuses an empty scope", async () => {
@@ -223,6 +289,7 @@ describe("agent-written messages", () => {
     const result = await GitCommit.commit({
       root,
       target: agentCommit(),
+      sweepWorkingTree: true,
       gateRunner: greenGates,
       agentMessage: {
         compose: async (context) => {
@@ -246,6 +313,7 @@ describe("agent-written messages", () => {
     const result = await GitCommit.commit({
       root,
       target: agentCommit(),
+      sweepWorkingTree: true,
       gateRunner: greenGates,
       agentMessage: {
         compose: async () => {
@@ -266,6 +334,7 @@ describe("agent-written messages", () => {
     const error = await failure(GitCommit.commit({
       root,
       target: agentCommit(),
+      sweepWorkingTree: true,
       gateRunner: greenGates
     }))
     expect(error.code).toBe("agent_message_unavailable")
@@ -280,6 +349,7 @@ describe("agent-written messages", () => {
     const error = await failure(GitCommit.commit({
       root,
       target: agentCommit(),
+      sweepWorkingTree: true,
       gateRunner: greenGates,
       agentMessage: { compose: async () => "   " }
     }))

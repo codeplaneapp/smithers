@@ -54,9 +54,12 @@ const executionOptions = workspaceOption.extend({
   cache: z.boolean().default(true).describe("Consult the result cache before running; --no-cache bypasses reads")
 })
 
-/** The flags outward and agent targets take: the commit message override and payload inputs. */
+/** The flags outward and agent targets take: the commit message override, the sweep, and payload inputs. */
 const invocationOptions = {
   message: z.string().optional().describe("Commit message for a Git.Commit target; wins over the declared message"),
+  sweep: z.boolean().default(false).describe(
+    "Let a Git.Commit target with no declared path scope commit the whole working tree"
+  ),
   input: z.array(z.string()).optional().describe("Payload input for agent targets as name=value; repeatable")
 }
 
@@ -450,6 +453,7 @@ interface ModeFlags {
   readonly write?: boolean | undefined
   readonly fix?: boolean | undefined
   readonly message?: string | undefined
+  readonly sweep?: boolean | undefined
   readonly input?: ReadonlyArray<string> | undefined
 }
 
@@ -504,6 +508,7 @@ const runPackageVerb = async (
     signal: config.signal,
     reporter,
     message: flags.message,
+    sweep: flags.sweep,
     inputs: parseInputs(flags.input),
     environment: config.environment
   })
@@ -694,12 +699,12 @@ const executeCommand = async <A extends Outcome>(
  */
 export const makeCli = (config: RuntimeConfig = {}) =>
   Cli.create("smithers-build", {
-    description: "Execute BUILD.ts targets and install pnpm workspaces with flows",
+    description: "Execute BUILD.ts and PACKAGE.ts targets and install the workspace with flows",
     version: "0.1.0",
     globals: globalOptions
   })
     .command("install", {
-      description: "Plan and execute the pnpm install Flow",
+      description: "Plan and execute the install Flow under the toolchain the workspace declares",
       options: workspaceOption,
       alias: { workspace: "w" },
       async run(context) {

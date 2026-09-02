@@ -490,7 +490,8 @@ const normalizeRunInstallOptions = (value: unknown): {
 }
 
 /**
- * Plans and executes the install package's Install Flow under pnpm.
+ * Plans and executes the install package's Install Flow under the declared
+ * toolchain, or under {@link defaultToolchain} when the caller passes none.
  *
  * The package-manager service carries the absolute workspace root, so this
  * operation never mutates the process-wide current directory and independent

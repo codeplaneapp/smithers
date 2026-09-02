@@ -70,8 +70,7 @@ export const defaultTimeoutMs = 15 * 60 * 1000
 /** Ceiling for one response file read; a larger response is refused. */
 const maximumResponseBytes = 128 * 1024 * 1024
 
-/** UTF-16 code-unit ordering, host-locale independent. */
-
+/** The typed refusal a malformed runner payload or response answers with. */
 const execError = (
   argv: readonly [string, ...Array<string>],
   message: string
@@ -80,6 +79,7 @@ const execError = (
   argv: [...argv] as [string, ...Array<string>],
   cwd: ".",
   exitCode: -1,
+  code: "invalid_payload",
   stdout: "",
   stderr: message.length <= Exec.stderrTailLimit ? message : message.slice(0, Exec.stderrTailLimit)
 })
@@ -253,6 +253,10 @@ if (kind === "resolve") {
   for (const child of children) for (const module of child.modules ?? []) visit(module)
   const files = new Map()
   const packages = new Set()
+  // A name such as "..foo" is still inside the workspace; only a complete
+  // parent segment escapes it.
+  const escapes = (relative) =>
+    relative === ".." || relative.startsWith(".." + path.sep) || relative.startsWith("../")
   for (const resource of resources) {
     const marker = resource.lastIndexOf(path.sep + "node_modules" + path.sep)
     if (marker >= 0) {
@@ -265,7 +269,7 @@ if (kind === "resolve") {
       continue
     }
     const relative = path.relative(workspaceRoot, resource)
-    if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) continue
+    if (relative === "" || escapes(relative) || path.isAbsolute(relative)) continue
     let stat
     try {
       stat = fs.statSync(resource)

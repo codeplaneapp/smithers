@@ -1,10 +1,17 @@
+import * as PackageManager from "@smthrs/build/PackageManager"
 import * as Runtime from "@smthrs/build/Runtime"
 import * as Effect from "effect/Effect"
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { layerNonInteractiveNodeServices, layerRuntime, packageManagerEnvironment, runInstall } from "../src/engine.ts"
+import {
+  layerNonInteractiveNodeServices,
+  layerPackageManager,
+  layerRuntime,
+  packageManagerEnvironment,
+  runInstall
+} from "../src/engine.ts"
 
 describe("install engine boundary", () => {
   it.skipIf(process.platform === "win32")(
@@ -215,6 +222,35 @@ describe("runInstall option normalization", () => {
     // Normalization must let it through; the call then fails on the workspace
     // path, which is what proves it got past the allowlist.
     await expect(runInstall("/path/need/not/exist", { toolchain })).rejects.toThrow(/ENOENT/)
+  })
+
+  /**
+   * Accepting the option is only half of it. `Cli.ts` reads the workspace
+   * declaration and hands it here so the local `install` runs the manager the
+   * workspace names, and nothing pinned that the declared manager is the one
+   * the layer actually builds: `install` used to pin `defaultToolchain` while
+   * the generated CI workflow used the declaration, so the two could disagree
+   * about the package manager.
+   */
+  it("builds the layer for the declared non-default manager", async () => {
+    const root = await mkdtemp(join(tmpdir(), "smithers-declared-manager-"))
+    const nameOf = (declared: typeof toolchain | undefined): Promise<string> =>
+      Effect.runPromise(
+        Effect.map(PackageManager.PackageManager, (manager) => manager.name).pipe(
+          Effect.provide(
+            declared === undefined ? layerPackageManager(root) : layerPackageManager(root, declared)
+          ),
+          Effect.provide(layerNonInteractiveNodeServices)
+        )
+      )
+    try {
+      expect(await nameOf(toolchain)).toBe("bun")
+      // Omitting the declaration still pins the default, which is what made the
+      // two disagree: `install` ran pnpm while the generated workflow ran bun.
+      expect(await nameOf(undefined)).toBe("pnpm")
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
   })
 
   it("rejects a toolchain whose fields are accessors", async () => {

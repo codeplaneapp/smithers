@@ -62,6 +62,7 @@ import * as GitCommit from "./GitCommit.ts"
 import * as GithubRender from "./GithubRender.ts"
 import * as GitSubmoduleExec from "./GitSubmoduleExec.ts"
 import * as GoExec from "./GoExec.ts"
+import { collectTargets } from "./internal/Attrs.ts"
 import * as Path from "./internal/Path.ts"
 import { posix, sha256Hex } from "./internal/Text.ts"
 import * as MemoryBackend from "./MemoryBackend.ts"
@@ -75,7 +76,7 @@ import * as Resolver from "./Resolver.ts"
 import * as RspackRunner from "./RspackRunner.ts"
 import * as ServiceSupervisor from "./ServiceSupervisor.ts"
 import * as StampExec from "./StampExec.ts"
-import type * as Workspace from "./Workspace.ts"
+import * as Workspace from "./Workspace.ts"
 
 /**
  * Cache-key salt for package-mode execution semantics.
@@ -521,6 +522,17 @@ export interface RunOptions {
   readonly reporter?: Reporter.Reporter | undefined
   /** `-m` override for `Git.Commit`; wins over the declared message. */
   readonly message?: string | undefined
+  /**
+   * `--sweep`: lets a `Git.Commit` target with no declared path scope commit
+   * the whole working tree.
+   *
+   * `Git.Commit` attrs cannot express a scope, so the rule used to stage
+   * everything the tree carried — a concurrent agent's edits included — with a
+   * reporter warning as the only notice. A notice is not a guard. Without this
+   * flag the commit refuses, naming the changes it would have absorbed; the
+   * operator who wants them commits with the flag and says so.
+   */
+  readonly sweep?: boolean | undefined
   /** `--input name=value` payload values for agent targets. */
   readonly inputs?: Readonly<Record<string, string>> | undefined
   /**
@@ -529,26 +541,6 @@ export interface RunOptions {
    * read. Defaults to `process.env`; tests inject a hermetic record.
    */
   readonly environment?: Readonly<Record<string, string | undefined>> | undefined
-}
-
-/** Collects targets reachable inside one attr value, without user code. */
-const collectTargets = (value: unknown, into: Array<Target.AnyTarget>, seen: Set<object>): void => {
-  if (Target.isTarget(value)) {
-    into.push(value)
-    return
-  }
-  if (typeof value !== "object" || value === null || seen.has(value)) return
-  seen.add(value)
-  if (Array.isArray(value)) {
-    for (const entry of value) collectTargets(entry, into, seen)
-    return
-  }
-  const prototype = Object.getPrototypeOf(value)
-  if (prototype !== Object.prototype && prototype !== null) return
-  for (const key of Object.getOwnPropertyNames(value)) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)
-    if (descriptor !== undefined && "value" in descriptor) collectTargets(descriptor.value, into, seen)
-  }
 }
 
 /** Collects tagged records of one tag inside an attr value. */
@@ -574,11 +566,8 @@ const attrMember = (attrs: unknown, name: string): unknown => {
   return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined
 }
 
-const attrTargets = (attrs: unknown, name: string): ReadonlyArray<Target.AnyTarget> => {
-  const found: Array<Target.AnyTarget> = []
-  collectTargets(attrMember(attrs, name), found, new Set())
-  return found
-}
+const attrTargets = (attrs: unknown, name: string): ReadonlyArray<Target.AnyTarget> =>
+  collectTargets(attrMember(attrs, name))
 
 /** One resolved tool: the executable path plus its key-material identity. */
 interface ResolvedTool {
@@ -3056,6 +3045,14 @@ export const execute = async (
     publishNamespace: options.remoteCache?.publishNamespace,
     warn: reporter.warn
   })
+  // The environment names that carry this workspace's remote-cache tokens.
+  // BUILD mode withholds them from every target subprocess (Executor.ts);
+  // package mode resolved the same credentials and then handed children a
+  // clone of `process.env`, so a declared `MY_CACHE_TOKEN` stayed readable by
+  // every tool and agent the graph spawned.
+  const credentialNames = options.remoteCache === undefined
+    ? []
+    : Workspace.credentialEnvNames(options.remoteCache.credentials)
   const reports = new Map<string, Executor.TargetReport>()
   const notGreen = new Set<string>()
   const byLabel = new Map(planned.workList.map((node) => [node.label, node]))
@@ -3154,6 +3151,7 @@ export const execute = async (
       Exec.run({
         workspaceRoot,
         cacheDirectory,
+        sensitiveEnv: credentialNames,
         ...(process.env["SMTHRS_REPO_CHILD"] === "1"
           ? {
             onStdout: (chunk: Uint8Array) => process.stdout.write(chunk),
@@ -3772,7 +3770,7 @@ export const execute = async (
   let baseSessions: AgentSession.SessionFactory | undefined
   const sessionsOf = (): AgentSession.SessionFactory => {
     baseSessions ??= AgentFake.sessionFactoryFromEnvironment(
-      { workspaceRoot: root, agents: index.workspace.agents },
+      { workspaceRoot: root, agents: index.workspace.agents, sensitiveEnv: credentialNames },
       environment
     )
     return baseSessions
@@ -4951,12 +4949,15 @@ export const execute = async (
               gateRunner: commitGateRunner,
               agentMessage: agentMessageComposer(signal),
               // `Git.Commit` attrs cannot express a scope today. The write set is the only
-              // available scope, and it stays empty until the rule declares one.
+              // available scope, and it stays empty until the rule declares one. An empty
+              // scope is not an invitation to sweep the tree: `commit` refuses an
+              // invocation that owns nothing unless the operator passed `--sweep`.
               ...(node.writeSet.length === 0 ? {} : { paths: node.writeSet }),
+              sweepWorkingTree: options.sweep === true,
               messageOverride: options.message
             })
             if (node.writeSet.length === 0) {
-              reporter.warn(`${node.label}  staged the whole working tree: Git.Commit declares no path scope`)
+              reporter.warn(`${node.label}  staged the whole working tree: --sweep, and no declared path scope`)
             }
             log(
               `${node.label}  committed ${result.sha.slice(0, 12)}: ${result.message.split("\n")[0] ?? ""}; ` +

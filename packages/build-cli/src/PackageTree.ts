@@ -20,6 +20,11 @@ import * as Environment from "./Environment.ts"
 import * as Path from "./internal/Path.ts"
 import { byCodeUnit, posix } from "./internal/Text.ts"
 
+const errno = (cause: unknown): string | undefined =>
+  typeof cause === "object" && cause !== null && "code" in cause && typeof cause.code === "string"
+    ? cause.code
+    : undefined
+
 /**
  * The sha256 hex digest of one buffer.
  *
@@ -28,27 +33,37 @@ import { byCodeUnit, posix } from "./internal/Text.ts"
  */
 export const digestBytes = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex")
 
-/**
- * The sha256 hex digest of one file's bytes, streamed.
- *
- * @category hashing
- * @since 0.1.0
- */
-export const digestFileBytes = async (path: string): Promise<string> => {
+/** The digest and observed byte count of one streamed file. */
+interface FileDigest {
+  readonly digest: string
+  readonly size: number
+}
+
+const digestFile = async (path: string): Promise<FileDigest> => {
   const hash = createHash("sha256")
   const handle = await Fs.open(path, "r")
+  let size = 0
   try {
     const buffer = Buffer.allocUnsafe(1 << 16)
     while (true) {
       const { bytesRead } = await handle.read(buffer, 0, buffer.length)
       if (bytesRead === 0) break
       hash.update(buffer.subarray(0, bytesRead))
+      size += bytesRead
     }
   } finally {
     await handle.close()
   }
-  return hash.digest("hex")
+  return { digest: hash.digest("hex"), size }
 }
+
+/**
+ * The sha256 hex digest of one file's bytes, streamed.
+ *
+ * @category hashing
+ * @since 0.1.0
+ */
+export const digestFileBytes = async (path: string): Promise<string> => (await digestFile(path)).digest
 
 /**
  * Searches the host PATH for one executable, returning its absolute path or
@@ -617,11 +632,34 @@ class PortalOverflow extends Error {
 const portalStashKey = (index: number, relative: string): string =>
   digestBytes(Buffer.from(`${index}\0${relative}`, "utf8"))
 
+/** Resolves a missing path through the nearest ancestor that can be resolved. */
+const resolveFromExistingAncestor = async (absolute: string): Promise<string> => {
+  let ancestor = absolute
+  while (true) {
+    try {
+      const realAncestor = await Fs.realpath(ancestor)
+      return NodePath.resolve(realAncestor, NodePath.relative(ancestor, absolute))
+    } catch (cause) {
+      const code = errno(cause)
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw cause
+      const parent = NodePath.dirname(ancestor)
+      if (parent === ancestor) throw cause
+      ancestor = parent
+    }
+  }
+}
+
 /** Walks one portal target into a relative-path → state map, or throws on overflow. */
 const walkPortalTarget = async (realTarget: string): Promise<Map<string, PathState>> => {
   const states = new Map<string, PathState>()
   let count = 0
-  const rootStats = await Fs.lstat(realTarget)
+  let rootStats: NodeFs.Stats
+  try {
+    rootStats = await Fs.lstat(realTarget)
+  } catch (cause) {
+    if (errno(cause) === "ENOENT") return states
+    throw cause
+  }
   if (!rootStats.isDirectory()) {
     states.set("", await statePath(realTarget))
     return states
@@ -699,19 +737,34 @@ export const snapshotPortals = async (
     }
     if (!stats.isSymbolicLink()) continue
     let realTarget: string
+    let states: Map<string, PathState> | undefined
     try {
       realTarget = await Fs.realpath(absolute)
-    } catch {
-      continue
+    } catch (realpathCause) {
+      try {
+        const target = await Fs.readlink(absolute)
+        const intended = NodePath.resolve(NodePath.dirname(absolute), target)
+        realTarget = await resolveFromExistingAncestor(intended)
+      } catch (cause) {
+        throw new PortalCensusError("unreadable", link, { cause: cause ?? realpathCause })
+      }
+      // The target does not exist yet. An in-workspace destination remains
+      // covered by git; an escaping destination starts as an empty portal so
+      // a file created through the dangling link is visible after the run.
+      if (Path.contains(realRoot, realTarget)) continue
+      states = new Map()
     }
     // A symlink resolving inside the workspace is judged by the git write-set,
     // not here; only an escaping one is a portal.
     if (Path.contains(realRoot, realTarget)) continue
-    let states: Map<string, PathState>
-    try {
-      states = await walkPortalTarget(realTarget)
-    } catch (cause) {
-      throw new PortalCensusError(cause instanceof PortalOverflow ? "too-large" : "unreadable", link, { cause })
+    if (states === undefined) {
+      try {
+        states = await walkPortalTarget(realTarget)
+      } catch (cause) {
+        throw new PortalCensusError(cause instanceof PortalOverflow ? "too-large" : "unreadable", link, {
+          cause
+        })
+      }
     }
     for (const [relativePath, state] of states) {
       if (state.kind === "file") {
@@ -862,6 +915,27 @@ const casDirectory = (root: string, cacheDirectory: string): string =>
   NodePath.join(root, ...cacheDirectory.split("/"), "cas")
 
 /**
+ * Configurable ceilings for one captured outDir.
+ *
+ * @category artifacts
+ * @since 0.1.0
+ */
+export interface OutDirLimits {
+  /** Directory nesting below the outDir root. */
+  readonly depth: number
+  /** Files, directories, and symlinks visited. */
+  readonly entries: number
+  /** UTF-8 bytes in one entry's outDir-relative path. */
+  readonly pathBytes: number
+  /** Bytes in one captured file. */
+  readonly fileBytes: number
+  /** Bytes across every captured file in one outDir. */
+  readonly totalBytes: number
+  /** UTF-8 bytes in the encoded manifest entry array. */
+  readonly manifestBytes: number
+}
+
+/**
  * The ceilings one captured outDir may not cross.
  *
  * The capture walk used to have none, while the portal census sixty lines
@@ -884,8 +958,10 @@ export const outDirLimits = {
   /** Bytes in one captured file. */
   fileBytes: 4 * 1024 * 1024 * 1024,
   /** Bytes across every captured file in one outDir. */
-  totalBytes: 16 * 1024 * 1024 * 1024
-} as const
+  totalBytes: 16 * 1024 * 1024 * 1024,
+  /** UTF-8 bytes in the encoded manifest entry array. */
+  manifestBytes: 64 * 1024 * 1024
+} as const satisfies OutDirLimits
 
 /**
  * A captured tree that crosses one of {@link outDirLimits}.
@@ -896,11 +972,49 @@ export const outDirLimits = {
 export class OutDirLimitError extends Error {
   override readonly name = "OutDirLimitError"
   /** Which ceiling the tree crossed. */
-  readonly limit: keyof typeof outDirLimits
+  readonly limit: keyof OutDirLimits
 
-  constructor(limit: keyof typeof outDirLimits, path: string) {
-    super(`captured output ${path} crosses the ${limit} limit of ${outDirLimits[limit]}`)
+  constructor(limit: keyof OutDirLimits, path: string, ceiling: number = outDirLimits[limit]) {
+    super(`captured output ${path} crosses the ${limit} limit of ${ceiling}`)
     this.limit = limit
+  }
+}
+
+/**
+ * Proves an output path cannot escape through its nearest existing ancestor.
+ *
+ * Restore callers run this before `mkdir`: resolving only the completed
+ * parent would discover an escaping symlink after recursive creation had
+ * already written directories outside the workspace.
+ */
+const confinedAncestor = async (root: string, absolute: string, path: string): Promise<void> => {
+  const realRoot = await Fs.realpath(root)
+  let ancestor = NodePath.dirname(absolute)
+  while (true) {
+    try {
+      await Fs.lstat(ancestor)
+    } catch (cause) {
+      const code = errno(cause)
+      if (code !== "ENOENT" && code !== "ENOTDIR") {
+        throw new Error(`declared output ${path} has no readable parent directory`, { cause })
+      }
+      const parent = NodePath.dirname(ancestor)
+      if (parent === ancestor) {
+        throw new Error(`declared output ${path} has no readable parent directory`, { cause })
+      }
+      ancestor = parent
+      continue
+    }
+    let realAncestor: string
+    try {
+      realAncestor = await Fs.realpath(ancestor)
+    } catch (cause) {
+      throw new Error(`declared output ${path} has no readable parent directory`, { cause })
+    }
+    if (!Path.contains(realRoot, realAncestor)) {
+      throw new Error(`declared output ${path} resolves outside the workspace through a symlinked parent`)
+    }
+    return
   }
 }
 
@@ -938,7 +1052,8 @@ export const captureOutDir = async (
   root: string,
   cacheDirectory: string,
   outDir: string,
-  storeRoot: string = root
+  storeRoot: string = root,
+  limits: Readonly<OutDirLimits> = outDirLimits
 ): Promise<OutDirManifest> => {
   const absolute = NodePath.join(root, ...outDir.split("/"))
   let stats: NodeFs.Stats
@@ -949,22 +1064,32 @@ export const captureOutDir = async (
   }
   if (!stats.isDirectory()) throw new Error(`declared outDir is not a directory: ${outDir}`)
   await confinedParent(root, absolute, outDir)
-  const cas = casDirectory(storeRoot, cacheDirectory)
-  await Fs.mkdir(cas, { recursive: true })
   const entries: Array<ManifestEntry> = []
+  const files: Array<{
+    readonly absolute: string
+    readonly relative: string
+    readonly digest: string
+    readonly size: number
+    readonly executable: boolean
+  }> = []
   let visited = 0
   let totalBytes = 0
+  // The walk stays recursive on purpose: `limits.depth` bounds the nesting at
+  // 64 frames, so it cannot overflow the stack, and an iterative rewrite would
+  // trade a readable traversal for an explicit stack that proves nothing more.
   const walk = async (directory: string, relative: string, depth: number): Promise<void> => {
-    if (depth > outDirLimits.depth) throw new OutDirLimitError("depth", `${outDir}/${relative}`)
+    if (depth > limits.depth) throw new OutDirLimitError("depth", `${outDir}/${relative}`, limits.depth)
     const names = (await Fs.readdir(directory, { withFileTypes: true }))
       .sort((left, right) => byCodeUnit(left.name, right.name))
     for (const entry of names) {
       const childAbsolute = NodePath.join(directory, entry.name)
       const childRelative = relative === "" ? entry.name : `${relative}/${entry.name}`
       visited += 1
-      if (visited > outDirLimits.entries) throw new OutDirLimitError("entries", `${outDir}/${childRelative}`)
-      if (Buffer.byteLength(childRelative, "utf8") > outDirLimits.pathBytes) {
-        throw new OutDirLimitError("pathBytes", `${outDir}/${childRelative}`)
+      if (visited > limits.entries) {
+        throw new OutDirLimitError("entries", `${outDir}/${childRelative}`, limits.entries)
+      }
+      if (Buffer.byteLength(childRelative, "utf8") > limits.pathBytes) {
+        throw new OutDirLimitError("pathBytes", `${outDir}/${childRelative}`, limits.pathBytes)
       }
       if (entry.isSymbolicLink()) {
         entries.push({
@@ -977,42 +1102,67 @@ export const captureOutDir = async (
       } else if (entry.isDirectory()) {
         await walk(childAbsolute, childRelative, depth + 1)
       } else if (entry.isFile()) {
-        const size = (await Fs.lstat(childAbsolute)).size
-        if (size > outDirLimits.fileBytes) throw new OutDirLimitError("fileBytes", `${outDir}/${childRelative}`)
-        totalBytes += size
-        if (totalBytes > outDirLimits.totalBytes) {
-          throw new OutDirLimitError("totalBytes", `${outDir}/${childRelative}`)
+        // The cheap `lstat` size rejects an oversized file before it is read;
+        // the streamed count below rejects one that grew after the stat, which
+        // is the only way past the first check.
+        if ((await Fs.lstat(childAbsolute)).size > limits.fileBytes) {
+          throw new OutDirLimitError("fileBytes", `${outDir}/${childRelative}`, limits.fileBytes)
         }
-        const digest = await digestFileBytes(childAbsolute)
-        const blob = NodePath.join(cas, digest)
-        // A blob is content-addressed, so an existing one of the right name is
-        // usually the right bytes. It is not trusted on name alone: a
-        // tampered or truncated blob is re-verified against its digest and
-        // rewritten from the freshly produced file, so a rebuild heals the CAS
-        // instead of leaving it poisoned for every later run to miss on.
-        let present: boolean
-        try {
-          present = (await digestFileBytes(blob)) === digest
-        } catch {
-          present = false
+        const observed = await digestFile(childAbsolute)
+        if (observed.size > limits.fileBytes) {
+          throw new OutDirLimitError("fileBytes", `${outDir}/${childRelative}`, limits.fileBytes)
         }
-        if (!present) {
-          const temp = `${blob}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`
-          await Fs.copyFile(childAbsolute, temp)
-          await Fs.rename(temp, blob)
+        totalBytes += observed.size
+        if (totalBytes > limits.totalBytes) {
+          throw new OutDirLimitError("totalBytes", `${outDir}/${childRelative}`, limits.totalBytes)
         }
         const mode = (await Fs.stat(childAbsolute)).mode
+        const executable = (mode & 0o111) !== 0
+        files.push({
+          absolute: childAbsolute,
+          relative: childRelative,
+          digest: observed.digest,
+          size: observed.size,
+          executable
+        })
         entries.push({
           path: childRelative,
           kind: "file",
-          digest,
-          executable: (mode & 0o111) !== 0,
+          digest: observed.digest,
+          executable,
           target: ""
         })
       }
     }
   }
   await walk(absolute, "", 0)
+  if (Buffer.byteLength(JSON.stringify(entries), "utf8") > limits.manifestBytes) {
+    throw new OutDirLimitError("manifestBytes", outDir, limits.manifestBytes)
+  }
+
+  // Validation and hashing finish before the store is created or changed. A
+  // later path or aggregate limit therefore cannot leave a partial CAS write.
+  const cas = casDirectory(storeRoot, cacheDirectory)
+  await Fs.mkdir(cas, { recursive: true })
+  for (const file of files) {
+    const blob = NodePath.join(cas, file.digest)
+    // A blob is content-addressed, so an existing one of the right name is
+    // usually the right bytes. It is not trusted on name alone: a tampered or
+    // truncated blob is re-verified against its digest and rewritten from the
+    // freshly produced file, so a rebuild heals the CAS instead of leaving it
+    // poisoned for every later run to miss on.
+    let present: boolean
+    try {
+      present = (await digestFileBytes(blob)) === file.digest
+    } catch {
+      present = false
+    }
+    if (!present) {
+      const temp = `${blob}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`
+      await Fs.copyFile(file.absolute, temp)
+      await Fs.rename(temp, blob)
+    }
+  }
   return { outDir, entries }
 }
 
@@ -1100,6 +1250,7 @@ export const materializeFile = async (
   if (!isConfinedRelative(manifest.path)) throw new Error(`materialize refused path: ${manifest.path}`)
   const destination = NodePath.join(root, ...manifest.path.split("/"))
   const blob = NodePath.join(casDirectory(root, cacheDirectory), manifest.digest)
+  await confinedAncestor(root, destination, manifest.path)
   await Fs.mkdir(NodePath.dirname(destination), { recursive: true })
   await confinedParent(root, destination, manifest.path)
   const temporary = `${destination}.smthrs-${process.pid}-${Math.random().toString(16).slice(2)}`
@@ -1208,6 +1359,38 @@ export const verifyManifestBlobs = async (
   return undefined
 }
 
+/** Restores the only prior tree stranded by a crash between publish renames. */
+const recoverStrandedTree = async (parent: string, absolute: string): Promise<void> => {
+  try {
+    await Fs.lstat(absolute)
+    return
+  } catch (cause) {
+    if (errno(cause) !== "ENOENT") throw cause
+  }
+  const oldTrees = (await Fs.readdir(parent, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith(".smthrs-old-"))
+  // Exactly one is a crash this invocation can undo. Two or more means another
+  // publish is in flight or crashed too, and guessing which tree is the output
+  // would publish the wrong bytes; they are left for an operator.
+  if (oldTrees.length === 1) await Fs.rename(NodePath.join(parent, oldTrees[0]!.name), absolute)
+}
+
+const unsupportedDirectorySync = new Set(["EINVAL", "EPERM", "EISDIR", "EACCES", "ENOTSUP"])
+
+/** Makes the publishing rename durable when the host supports directory fsync. */
+const syncDirectory = async (directory: string): Promise<void> => {
+  let handle: Awaited<ReturnType<typeof Fs.open>> | undefined
+  try {
+    handle = await Fs.open(directory, "r")
+    await handle.sync()
+  } catch (cause) {
+    const code = errno(cause)
+    if (code === undefined || !unsupportedDirectorySync.has(code)) throw cause
+  } finally {
+    if (handle !== undefined) await handle.close()
+  }
+}
+
 /**
  * Materializes one manifest tree atomically: the tree is fully built as a
  * temp sibling, then rename-swapped over the outDir root.
@@ -1223,16 +1406,19 @@ export const materializeManifest = async (
   const cas = casDirectory(root, cacheDirectory)
   const absolute = NodePath.join(root, ...manifest.outDir.split("/"))
   const parent = NodePath.dirname(absolute)
+  await confinedAncestor(root, absolute, manifest.outDir)
   await Fs.mkdir(parent, { recursive: true })
+  await confinedParent(root, absolute, manifest.outDir)
+  await recoverStrandedTree(parent, absolute)
   const stamp = `${process.pid}-${Math.random().toString(36).slice(2)}`
   const temp = NodePath.join(parent, `.smthrs-mat-${stamp}`)
-  await Fs.mkdir(temp, { recursive: true })
-  const tempReal = await Fs.realpath(temp)
-  // The temp tree is a sibling of the destination, so proving every entry
-  // stays under `tempReal` proves nothing if `tempReal` itself already left
-  // the workspace through a symlinked output parent.
-  await confinedParent(root, temp, manifest.outDir)
   try {
+    await Fs.mkdir(temp, { recursive: true })
+    // The temp tree is a sibling of the destination, so proving every entry
+    // stays under `tempReal` proves nothing if `tempReal` itself already left
+    // the workspace through a symlinked output parent.
+    await confinedParent(root, temp, manifest.outDir)
+    const tempReal = await Fs.realpath(temp)
     for (const entry of manifest.entries) {
       const destination = NodePath.join(temp, ...entry.path.split("/"))
       const parentDirectory = NodePath.dirname(destination)
@@ -1285,6 +1471,7 @@ export const materializeManifest = async (
       }
       throw cause
     }
+    await syncDirectory(parent)
     if (hadOld) await Fs.rm(old, { recursive: true, force: true })
   } catch (cause) {
     await Fs.rm(temp, { recursive: true, force: true })
@@ -1304,9 +1491,9 @@ export const materializeManifest = async (
  * policy the capture uses, and the file and symlink sets are compared both
  * ways.
  *
- * Directories are walked, never compared: a capture records files and symlinks
- * only, so an empty directory is absent from every manifest and reporting one
- * as a difference would re-materialize the tree on every hit.
+ * A manifest omits directories, so their exact set is derived from every
+ * entry's ancestors plus the outDir root. Any other directory is stale output
+ * and makes the tree differ.
  *
  * @category artifacts
  * @since 0.1.0
@@ -1329,6 +1516,16 @@ export const treeMatchesManifest = async (
     }
   }
   const declared = new Set(manifest.entries.map((entry) => entry.path))
+  const declaredDirectories = new Set<string>([""])
+  for (const entry of manifest.entries) {
+    const segments = entry.path.split("/")
+    segments.pop()
+    let directory = ""
+    for (const segment of segments) {
+      directory = directory === "" ? segment : `${directory}/${segment}`
+      declaredDirectories.add(directory)
+    }
+  }
   let extra: string | undefined
   const walk = async (directory: string, relative: string, depth: number): Promise<void> => {
     if (extra !== undefined) return
@@ -1348,6 +1545,10 @@ export const treeMatchesManifest = async (
       if (extra !== undefined) return
       const childRelative = relative === "" ? entry.name : `${relative}/${entry.name}`
       if (entry.isDirectory() && !entry.isSymbolicLink()) {
+        if (!declaredDirectories.has(childRelative)) {
+          extra ??= `${manifest.outDir}/${childRelative} is not in the captured tree`
+          return
+        }
         await walk(NodePath.join(directory, entry.name), childRelative, depth + 1)
         continue
       }

@@ -203,6 +203,77 @@ export const Package = S.Package({ targets: { capped, perCpu, test, viaGotestsum
   return root
 }
 
+/** A module whose one package is compiled from Go, C, and a C header through cgo. */
+const cgoFixture = async (): Promise<string> => {
+  const root = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-go-cgo-")))
+  temporaryDirectories.push(root)
+  await write(root, "go.mod", "module example.test/cgo\n\ngo 1.26.0\n")
+  await write(root, "go.sum", "")
+  await write(
+    root,
+    "native/native.go",
+    "package native\n\n/*\n#include \"value.h\"\n*/\nimport \"C\"\n\n" +
+      "func Value() int { return int(C.native_value()) }\n"
+  )
+  await write(root, "native/value.h", "int native_value(void);\n")
+  await write(root, "native/value.c", "#include \"value.h\"\n\nint native_value(void) { return 7; }\n")
+  await write(
+    root,
+    "native/native_test.go",
+    "package native\n\nimport \"testing\"\n\n" +
+      "func TestValue(t *testing.T) {\n\tif Value() != 7 { t.Fatalf(\"got %d\", Value()) }\n}\n"
+  )
+  await write(
+    root,
+    "WORKSPACE.ts",
+    `import { Smithers as S } from "@smthrs/targets"
+const go = S.Go.Toolchain({ mod: S.file("//go.mod"), sum: S.file("//go.sum"), versions: S.Nix.DevShell({ flake: S.file("//go.mod"), lock: S.file("//go.sum") }), cgo: true })
+export const Workspace = S.Workspace("cgo", { repository: "git+https://example.test/cgo.git", cache: S.Cache({ directory: ".flows" }), toolchains: [go] })
+`
+  )
+  await write(
+    root,
+    "PACKAGE.ts",
+    `import { Smithers as S } from "@smthrs/targets"
+const test = S.Go.Test({ pkgs: ["./native"] })
+export const Package = S.Package({ targets: { test } })
+`
+  )
+  return root
+}
+
+/** cgo needs a host C compiler; a runner without one cannot build the fixture at all. */
+const hasCCompiler = PackageTree.findOnPath("cc") !== undefined || PackageTree.findOnPath("clang") !== undefined
+
+describe("Go native compiler inputs", () => {
+  /**
+   * `GoListRow` stopped at the Go and embed collections, so a `.c`, `.h`, or
+   * `.s` file a cgo package compiles was absent from the closure. Editing one
+   * left the target key unchanged and the cache served a binary built from the
+   * previous sources — the one defect class this package otherwise refuses.
+   * `go list` is the oracle: every collection it reports is keyed.
+   */
+  it.skipIf(!hasCCompiler)("re-keys when a C source or header a cgo package compiles changes", async () => {
+    const root = await cgoFixture()
+    expect((await serve(root, ["//:test"])).logs).toContain("//:test  ran")
+    expect((await serve(root, ["//:test"])).logs).toContain("//:test  hit")
+
+    await write(
+      root,
+      "native/value.c",
+      "#include \"value.h\"\n\n/* edited */\nint native_value(void) { return 7; }\n"
+    )
+    expect((await serve(root, ["//:test"])).logs).toContain("//:test  ran")
+
+    await write(root, "native/value.h", "/* edited */\nint native_value(void);\n")
+    expect((await serve(root, ["//:test"])).logs).toContain("//:test  ran")
+
+    // A file the compiler never reads still leaves the key alone.
+    await write(root, "outside.txt", "outside\n")
+    expect((await serve(root, ["//:test"])).logs).toContain("//:test  hit")
+  }, 180_000)
+})
+
 describe("Go toolchain environment", () => {
   it("gives the toolchain's GOEXPERIMENT to plan-time go list, so a jsonv2 module plans and runs", async () => {
     const root = await experimentFixture()

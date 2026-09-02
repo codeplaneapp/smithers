@@ -159,6 +159,31 @@ describe("force-spec routing", () => {
     expect(index.targets().map((row) => row.label)).toEqual(goldenLabels)
   })
 
+  /**
+   * The class documents itself as immutable and used to store, and hand back,
+   * the caller's live row array. `ReadonlyArray` is erased at runtime, so a
+   * spliced row would have left subtree resolution and edge computation
+   * reading one set of rows while exact resolution still consulted the
+   * separately built label map: two answers from one index.
+   */
+  it("hands back rows a caller cannot mutate", async () => {
+    const index = await openIndex(forceSpec)
+    const rows = index.targets() as unknown as Array<{ label: string }>
+    const before = rows.map((row) => row.label)
+
+    expect(() => rows.splice(0, 1)).toThrow(TypeError)
+    expect(() => rows.push({ label: "//injected:target" })).toThrow(TypeError)
+    expect(() => {
+      rows[0]!.label = "//renamed:target"
+    }).toThrow(TypeError)
+
+    expect(index.targets().map((row) => row.label)).toEqual(before)
+    // Exact resolution and subtree resolution still agree on the same row.
+    const [exact] = index.resolve("//src:relayArtifacts")
+    expect(exact).toBeDefined()
+    expect(index.resolve("//...").filter((row) => row.label === "//src:relayArtifacts")).toEqual([exact])
+  })
+
   it("classifies data, gates, and services edges", async () => {
     const index = await openIndex(forceSpec)
     const edges = index.edges(index.resolve("//..."))

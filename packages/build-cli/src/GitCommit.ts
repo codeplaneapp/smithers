@@ -1,9 +1,10 @@
 /**
  * Executes one `Git.Commit` target: stage, gate, message, commit.
  *
- * The sequence is fixed. The owned paths, or the whole tree when no scope is
- * present, are staged first so the gates check the exact candidate that will
- * be committed. The gates then run through the injected {@link GateRunner};
+ * The sequence is fixed. A change the invocation does not own refuses it
+ * before anything is staged; the owned paths are then staged so the gates
+ * check the exact candidate that will be committed. The gates run through the
+ * injected {@link GateRunner};
  * a red gate refuses the commit with a typed error and creates nothing. The
  * message is the `-m` override when the invoker passed one, the declared fixed
  * text otherwise, or the injected {@link AgentMessage} composition when the
@@ -31,6 +32,7 @@ import * as NodeChildProcess from "node:child_process"
 export type ErrorCode =
   | "not_a_git_repository"
   | "invalid_paths"
+  | "unrelated_changes"
   | "nothing_to_commit"
   | "gates_failed"
   | "agent_message_unavailable"
@@ -119,7 +121,7 @@ export interface CommitResult {
   /**
    * The paths recorded in the created commit.
    *
-   * An unscoped stage sweeps whatever the working tree carries, so callers
+   * An acknowledged sweep stages whatever the working tree carries, so callers
    * use this list to report what entered the commit instead of assuming.
    */
   readonly staged: ReadonlyArray<string>
@@ -127,6 +129,16 @@ export interface CommitResult {
 
 /** Maximum staged-diff code units handed to an agent composition. */
 const stagedDiffLimit = 200 * 1024
+
+/** Maximum unrelated paths named in an `unrelated_changes` refusal. */
+const namedOffenderLimit = 20
+
+/** One `git status --porcelain` entry: its index column, its worktree column, and its path. */
+interface StatusEntry {
+  readonly index: string
+  readonly worktree: string
+  readonly path: string
+}
 
 interface GitOutput {
   readonly exitCode: number
@@ -177,6 +189,83 @@ const gitOk = async (root: string, args: ReadonlyArray<string>): Promise<GitOutp
 }
 
 /**
+ * Reads the working tree's change set, optionally narrowed by pathspecs.
+ *
+ * `-z` is the only parseable form: a path with a space, a quote, or a newline
+ * is rendered verbatim between NUL separators instead of C-quoted. A rename or
+ * copy entry carries its origin path as one extra NUL-separated field, which
+ * is read and discarded so the following entry is not misparsed as a path.
+ */
+const status = async (root: string, pathspecs: ReadonlyArray<string>): Promise<ReadonlyArray<StatusEntry>> => {
+  const raw = (await gitOk(root, [
+    "status",
+    "--porcelain",
+    "-z",
+    "--untracked-files=all",
+    ...(pathspecs.length === 0 ? [] : ["--", ...pathspecs])
+  ])).stdout
+  const fields = raw.split("\0")
+  const entries: Array<StatusEntry> = []
+  for (let cursor = 0; cursor < fields.length; cursor += 1) {
+    const field = fields[cursor]!
+    if (field.length < 4) continue
+    const index = field[0]!
+    const worktree = field[1]!
+    entries.push({ index, worktree, path: field.slice(3) })
+    if (index === "R" || index === "C") cursor += 1
+  }
+  return entries
+}
+
+/**
+ * Refuses to commit changes the invocation did not declare.
+ *
+ * `git add -A` used to run unconditionally, and the comment beside it called
+ * the sweep deliberate. That swept every unrelated modification, addition, and
+ * deletion sitting in the working tree — a concurrent agent's edits included —
+ * into the commit this target creates, and no attr on `Git.Commit` can express
+ * a scope, so the target author had no way to stop it. A notice is not a
+ * guard: an invocation that cannot name what it owns refuses here instead.
+ *
+ * A scoped invocation is narrower. `git add -A -- <paths>` scopes only the new
+ * staging operation; the commit that follows publishes the whole index, so a
+ * path staged before the invocation rides along. Pre-staged paths outside the
+ * scope are therefore refused too, while an unstaged unrelated edit is left
+ * alone — leaving it in the working tree is exactly what the scope is for.
+ */
+const refuseUnrelated = async (
+  root: string,
+  paths: ReadonlyArray<string> | undefined,
+  sweepWorkingTree: boolean
+): Promise<void> => {
+  if (sweepWorkingTree) return
+  const dirty = await status(root, [])
+  if (dirty.length === 0) return
+  if (paths === undefined) {
+    const named = dirty.map((entry) => entry.path).sort()
+    throw new GitCommitError(
+      "unrelated_changes",
+      `the working tree carries ${named.length} change(s) this commit does not own and no path scope was ` +
+        `declared: ${named.slice(0, namedOffenderLimit).join(", ")}` +
+        `${named.length > namedOffenderLimit ? `, and ${named.length - namedOffenderLimit} more` : ""}`
+    )
+  }
+  const owned = new Set((await status(root, paths)).map((entry) => entry.path))
+  // An untracked path reports `??`; anything else in the index column is staged.
+  const staged = dirty
+    .filter((entry) => entry.index !== " " && entry.index !== "?" && !owned.has(entry.path))
+    .map((entry) => entry.path)
+    .sort()
+  if (staged.length === 0) return
+  throw new GitCommitError(
+    "unrelated_changes",
+    `the index carries ${staged.length} staged path(s) outside this commit's scope: ` +
+      `${staged.slice(0, namedOffenderLimit).join(", ")}` +
+      `${staged.length > namedOffenderLimit ? `, and ${staged.length - namedOffenderLimit} more` : ""}`
+  )
+}
+
+/**
  * Options accepted by {@link commit}.
  *
  * @category models
@@ -186,12 +275,23 @@ export interface CommitOptions {
   /** The repository root the commit is created in. */
   readonly root: string
   /**
-   * The pathspecs this commit owns, or undefined to stage the whole tree.
+   * The pathspecs this commit owns, or undefined when it owns nothing.
    *
    * A scoped stage leaves a concurrent unrelated edit elsewhere unstaged and
-   * uncommitted. Current `Git.Commit` attrs can express only the unscoped form.
+   * uncommitted. Current `Git.Commit` attrs can express no scope at all, so a
+   * target-driven invocation always arrives here undefined and is refused by
+   * {@link refuseUnrelated} rather than sweeping the tree.
    */
   readonly paths?: ReadonlyArray<string> | undefined
+  /**
+   * Acknowledges that this invocation intends to commit the whole working
+   * tree, unrelated concurrent changes included.
+   *
+   * The acknowledgement exists so the sweep is a caller's stated intent rather
+   * than the default a target inherits by declaring nothing. No target-driven
+   * invocation passes it.
+   */
+  readonly sweepWorkingTree?: boolean | undefined
   /** The `Git.Commit` target whose validated attrs drive the invocation. */
   readonly target: Target.AnyTarget
   /** Runs the declared gates against the staged tree. */
@@ -225,6 +325,7 @@ export const commit = async (options: CommitOptions): Promise<CommitResult> => {
   if (inside.exitCode !== 0 || inside.stdout.trim() !== "true") {
     throw new GitCommitError("not_a_git_repository", `${options.root} is not inside a git work tree`)
   }
+  await refuseUnrelated(options.root, paths, options.sweepWorkingTree === true)
   // `-A` includes deletions owned by the scope; `--` protects a pathspec that starts with a dash.
   await gitOk(options.root, paths === undefined ? ["add", "-A"] : ["add", "-A", "--", ...paths])
   const candidate = await git(options.root, ["diff", "--cached", "--quiet"])

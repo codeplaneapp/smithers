@@ -1278,9 +1278,11 @@ const resolvePromptPath = (
  * the text of a path, and `stat`/`readFile` then follow symlinks, so an
  * in-workspace link pointing at `~/.ssh/id_rsa` plus a declared path that
  * traverses it used to send a host file straight into a model prompt. The file
- * is opened, then the *opened descriptor* is resolved and re-checked against
- * the real workspace root, and the size is taken from the descriptor rather
- * than from a prior `stat` so the file cannot grow between the two.
+ * is opened without following a final-component link, the current pathname is
+ * resolved and re-checked against the real workspace root, and that resolved
+ * path must still name the same device and inode as the open descriptor. The
+ * size and bytes then come from the descriptor, so a pathname replacement
+ * cannot substitute a different file after validation.
  */
 const readWithinWorkspace = async (
   workspaceRoot: string,
@@ -1298,6 +1300,10 @@ const readWithinWorkspace = async (
     const real = await Fs.realpath(absolute)
     if (!Path.contains(realRoot, real)) {
       throw new Error(`${label} resolves outside the workspace through a symlink`)
+    }
+    const resolved = await Fs.stat(real)
+    if (stat.dev !== resolved.dev || stat.ino !== resolved.ino) {
+      throw new Error(`${label} was replaced while it was being read`)
     }
     if (stat.size > limit) return { kind: "oversize", size: stat.size }
     const bytes = Buffer.alloc(stat.size)

@@ -315,6 +315,131 @@ const canonicalize = (spec: ServiceSpec): string =>
     stop: spec.stop === undefined ? null : { grace: spec.stop.grace, signal: spec.stop.signal }
   })
 
+const serviceSpecKeys = new Set([
+  "key",
+  "cwd",
+  "argv",
+  "env",
+  "secrets",
+  "secretUrls",
+  "readiness",
+  "health",
+  "stop",
+  "prepare",
+  "init",
+  "cleanup"
+])
+
+/** Reads one caller field without invoking an accessor. */
+const dataMember = (object: object, key: string, what: string): unknown => {
+  let descriptor: PropertyDescriptor | undefined
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(object, key)
+  } catch {
+    throw new TypeError(`${what} could not be inspected safely`)
+  }
+  if (descriptor === undefined) return undefined
+  if (!("value" in descriptor) || descriptor.enumerable !== true) {
+    throw new TypeError(`${what} must be an enumerable data property`)
+  }
+  return descriptor.value
+}
+
+/** Returns inert own string keys, rejecting hooks that JSON could execute. */
+const dataKeys = (value: object, what: string): ReadonlyArray<string> => {
+  if (NodeUtil.isProxy(value)) throw new TypeError(`${what} must not be a proxy`)
+  let keys: Array<string | symbol>
+  try {
+    keys = Reflect.ownKeys(value)
+  } catch {
+    throw new TypeError(`${what} could not be inspected safely`)
+  }
+  if (keys.some((key) => typeof key === "symbol")) {
+    throw new TypeError(`${what} must not contain symbol properties`)
+  }
+  const strings = keys as Array<string>
+  if (strings.includes("toJSON")) throw new TypeError(`${what} must not define toJSON`)
+  return strings
+}
+
+/** Rejects nested caller objects that could execute while being inspected. */
+const inspectNested = (value: unknown, what: string): unknown => {
+  if (typeof value === "object" && value !== null) dataKeys(value, what)
+  return value
+}
+
+/** Copies one dense caller array through indexed data descriptors only. */
+const snapshotArray = (
+  value: unknown,
+  what: string,
+  copy: (entry: unknown, index: number) => unknown = (entry) => inspectNested(entry, what)
+): unknown => {
+  if (typeof value === "object" && value !== null && NodeUtil.isProxy(value)) {
+    throw new TypeError(`${what} must not be a proxy`)
+  }
+  if (!Array.isArray(value)) return inspectNested(value, what)
+  let prototype: object | null
+  try {
+    prototype = Object.getPrototypeOf(value) as object | null
+  } catch {
+    throw new TypeError(`${what} could not be inspected safely`)
+  }
+  if (prototype !== Array.prototype) throw new TypeError(`${what} must be an array`)
+  const keys = dataKeys(value, what)
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length")
+  if (
+    lengthDescriptor === undefined || !("value" in lengthDescriptor) ||
+    !Number.isSafeInteger(lengthDescriptor.value) || lengthDescriptor.value < 0
+  ) {
+    throw new TypeError(`${what} has an invalid length`)
+  }
+  const length = lengthDescriptor.value as number
+  if (keys.length !== length + 1) {
+    throw new TypeError(`${what} must be a dense array without extra properties`)
+  }
+  const available = new Set(keys)
+  const output: Array<unknown> = []
+  for (let index = 0; index < length; index += 1) {
+    if (!available.has(String(index))) {
+      throw new TypeError(`${what} must be a dense array without extra properties`)
+    }
+    output.push(copy(dataMember(value, String(index), `${what}[${index}]`), index))
+  }
+  return Object.freeze(output)
+}
+
+/** Copies one nested record through its own enumerable data descriptors. */
+const snapshotRecord = (
+  value: unknown,
+  what: string,
+  allowed: ReadonlySet<string> | undefined,
+  copy: (key: string, member: unknown) => unknown = (_key, member) => inspectNested(member, what)
+): unknown => {
+  if (typeof value === "object" && value !== null && NodeUtil.isProxy(value)) {
+    throw new TypeError(`${what} must not be a proxy`)
+  }
+  if (typeof value !== "object" || value === null) return value
+  if (Array.isArray(value)) throw new TypeError(`${what} must be a plain object`)
+  let prototype: object | null
+  try {
+    prototype = Object.getPrototypeOf(value) as object | null
+  } catch {
+    throw new TypeError(`${what} could not be inspected safely`)
+  }
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError(`${what} must be a plain object`)
+  }
+  const keys = dataKeys(value, what)
+  if (allowed !== undefined) {
+    for (const key of keys) {
+      if (!allowed.has(key)) throw new TypeError(`${what} contains an unknown property: ${key}`)
+    }
+  }
+  return Object.freeze(Object.fromEntries(
+    keys.map((key) => [key, copy(key, dataMember(value, key, `${what}.${key}`))])
+  ))
+}
+
 /**
  * A frozen plain-data copy of the caller's spec.
  *
@@ -323,60 +448,91 @@ const canonicalize = (spec: ServiceSpec): string =>
  * before re-reading argv, env, and readiness off it. A caller could therefore
  * change the command, or its declared capabilities, *after* the canonical
  * same-key identity had been computed from the earlier values, so the identity
- * and the thing it identified could disagree. Snapshotting the flat data here
- * means everything after the first await reads what was validated.
+ * and the thing it identified could disagree. Every copied container is now
+ * rebuilt from own enumerable data descriptors, so validation executes no
+ * caller getter, proxy trap, or JSON hook and later awaits read only the frozen
+ * snapshot.
  *
  * Secret declarations are carried by reference on purpose: they are validated
  * by `Secret.isHttpCredential`/`Secret.isSecret` and the resolution boundary
  * matches them by identity.
  */
-const snapshotSpec = (spec: ServiceSpec): ServiceSpec => {
-  const argv = [...spec.argv] as [string, ...Array<string>]
-  const commands = (
-    value: ReadonlyArray<readonly [string, ...Array<string>]> | undefined
-  ): ReadonlyArray<readonly [string, ...Array<string>]> | undefined =>
-    value === undefined
-      ? undefined
-      : Object.freeze(value.map((argv) => Object.freeze([...argv]) as unknown as readonly [string, ...Array<string>]))
+const snapshotSpec = (caller: ServiceSpec): ServiceSpec => {
+  if (typeof caller !== "object" || caller === null || Array.isArray(caller) || NodeUtil.isProxy(caller)) {
+    throw new TypeError("a service spec must be a plain object")
+  }
+  let prototype: object | null
+  try {
+    prototype = Object.getPrototypeOf(caller) as object | null
+  } catch {
+    throw new TypeError("a service spec could not be inspected safely")
+  }
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError("a service spec must be a plain object")
+  }
+  for (const key of dataKeys(caller, "a service spec")) {
+    if (!serviceSpecKeys.has(key)) throw new TypeError(`a service spec contains an unknown property: ${key}`)
+  }
+  const read = (key: string): unknown => dataMember(caller, key, `service spec ${key}`)
+  const commands = (value: unknown, what: string): unknown =>
+    snapshotArray(value, what, (argv, index) => snapshotArray(argv, `${what}[${index}]`))
+  const argv = snapshotArray(read("argv"), "service spec argv")
+  const env = snapshotRecord(read("env"), "service spec env", undefined)
+  const secrets = snapshotArray(read("secrets"), "service spec secrets")
+  const secretUrls = snapshotArray(read("secretUrls"), "service spec secretUrls", (entry, index) =>
+    snapshotRecord(
+      entry,
+      `service spec secretUrls[${index}]`,
+      new Set(["index", "secret"])
+    ))
+  const readiness = snapshotRecord(
+    read("readiness"),
+    "service spec readiness",
+    new Set(["port", "http", "timeout", "exec"]),
+    (key, member) =>
+      key === "exec" ? snapshotArray(member, "service spec readiness.exec") : inspectNested(
+        member,
+        `service spec readiness.${key}`
+      )
+  )
+  const health = snapshotRecord(read("health"), "service spec health", new Set(["interval", "failures"]))
+  const stop = snapshotRecord(read("stop"), "service spec stop", new Set(["signal", "grace"]))
+  const prepare = commands(read("prepare"), "service spec prepare")
+  const init = commands(read("init"), "service spec init")
+  const cleanup = commands(read("cleanup"), "service spec cleanup")
   return Object.freeze({
-    key: spec.key,
-    cwd: spec.cwd,
-    argv: Object.freeze(argv),
-    ...(spec.env === undefined ? {} : { env: Object.freeze({ ...spec.env }) }),
-    ...(spec.secrets === undefined ? {} : { secrets: Object.freeze([...spec.secrets]) }),
-    ...(spec.secretUrls === undefined
-      ? {}
-      : { secretUrls: Object.freeze(spec.secretUrls.map((entry) => Object.freeze({ ...entry }))) }),
-    ...(spec.readiness === undefined
-      ? {}
-      : {
-        readiness: Object.freeze(
-          "exec" in spec.readiness
-            ? { ...spec.readiness, exec: Object.freeze([...spec.readiness.exec]) }
-            : { ...spec.readiness }
-        ) as Readiness
-      }),
-    ...(spec.health === undefined ? {} : { health: Object.freeze({ ...spec.health }) }),
-    ...(spec.stop === undefined ? {} : { stop: Object.freeze({ ...spec.stop }) }),
-    ...(spec.prepare === undefined ? {} : { prepare: commands(spec.prepare)! }),
-    ...(spec.init === undefined ? {} : { init: commands(spec.init)! }),
-    ...(spec.cleanup === undefined ? {} : { cleanup: commands(spec.cleanup)! })
-  })
+    key: inspectNested(read("key"), "service spec key"),
+    cwd: inspectNested(read("cwd"), "service spec cwd"),
+    argv,
+    ...(env === undefined ? {} : { env }),
+    ...(secrets === undefined ? {} : { secrets }),
+    ...(secretUrls === undefined ? {} : { secretUrls }),
+    ...(readiness === undefined ? {} : { readiness }),
+    ...(health === undefined ? {} : { health }),
+    ...(stop === undefined ? {} : { stop }),
+    ...(prepare === undefined ? {} : { prepare }),
+    ...(init === undefined ? {} : { init }),
+    ...(cleanup === undefined ? {} : { cleanup })
+  }) as unknown as ServiceSpec
+}
+
+/** Reads a diagnostic key without invoking caller code. */
+const diagnosticKey = (caller: ServiceSpec): string => {
+  if (typeof caller !== "object" || caller === null || NodeUtil.isProxy(caller)) return "<invalid key>"
+  let descriptor: PropertyDescriptor | undefined
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(caller, "key")
+  } catch {
+    return "<invalid key>"
+  }
+  return descriptor !== undefined && "value" in descriptor && descriptor.enumerable === true &&
+      typeof descriptor.value === "string" && descriptor.value !== ""
+    ? descriptor.value
+    : "<invalid key>"
 }
 
 /** Validates one spec and parses its durations, or throws the exact reason. */
 const parseSpec = (caller: ServiceSpec): ParsedSpec => {
-  if (typeof caller !== "object" || caller === null || NodeUtil.isProxy(caller)) {
-    throw new Error("a service spec must be a plain object")
-  }
-  if (
-    !Array.isArray(caller.argv) || caller.argv.length === 0 ||
-    caller.argv.some((entry) => typeof entry !== "string")
-  ) {
-    throw new Error(
-      `service ${typeof caller.key === "string" ? caller.key : "<unnamed>"} requires a non-empty argv of strings`
-    )
-  }
   const spec = snapshotSpec(caller)
   if (typeof spec.key !== "string" || spec.key === "") {
     throw new Error("a service spec requires a non-empty key")
@@ -385,6 +541,14 @@ const parseSpec = (caller: ServiceSpec): ParsedSpec => {
     throw new Error(`service ${spec.key} requires a non-empty argv of strings`)
   }
   if (spec.argv[0] === "") throw new Error(`service ${spec.key} argv[0] must name an executable`)
+  if (
+    spec.env !== undefined && (
+      typeof spec.env !== "object" || spec.env === null || Array.isArray(spec.env) ||
+      Object.values(spec.env).some((value) => typeof value !== "string")
+    )
+  ) {
+    throw new Error(`service ${spec.key} env must be a record of strings`)
+  }
   if (
     spec.secrets !== undefined && (
       !Array.isArray(spec.secrets) || spec.secrets.some((secret) => !Secret.isHttpCredential(secret))
@@ -1080,33 +1244,34 @@ export const make: Effect.Effect<ServiceSupervisor, never, Scope.Scope> = Effect
         try: () => parseSpec(spec),
         catch: (cause) =>
           new ServiceError({
-            key: typeof spec.key === "string" && spec.key !== "" ? spec.key : "<invalid key>",
+            key: diagnosticKey(spec),
             reason: "invalid-spec",
             message: cause instanceof Error ? cause.message : String(cause),
             outputTail: ""
           })
       })
+      const key = parsed.spec.key
       // Registration and the drift check are one synchronous step, so two
       // concurrent acquires cannot interleave between check and set.
       yield* Effect.suspend(() => {
-        const existing = specs.get(spec.key)
+        const existing = specs.get(key)
         if (existing === undefined) {
-          specs.set(spec.key, parsed)
+          specs.set(key, parsed)
           return Effect.void
         }
         return existing.canonical === parsed.canonical
           ? Effect.void
           : Effect.fail(
             new ServiceError({
-              key: spec.key,
+              key,
               reason: "spec-drift",
-              message: `service ${spec.key} was acquired twice with different specs; ` +
+              message: `service ${key} was acquired twice with different specs; ` +
                 `one key must resolve to one command per supervisor`,
               outputTail: ""
             })
           )
       })
-      const service = yield* RcMap.get(services, spec.key)
+      const service = yield* RcMap.get(services, key)
       // A service that already went unhealthy fails new consumers immediately
       // rather than handing out a dead handle.
       if (Deferred.isDoneUnsafe(service.unhealthy)) {

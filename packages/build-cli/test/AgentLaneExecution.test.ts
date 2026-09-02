@@ -609,35 +609,43 @@ export const Package = S.Package({ targets: { gate, redGate, commit, agentCommit
     const base = git(root, "rev-parse", "HEAD").trim()
 
     await write(root, "one.txt", "1\n")
-    const declared = await serve(root, ["//:commit"])
+    // Without `--sweep` the rule refuses rather than absorbing a concurrent edit.
+    const unswept = await serve(root, ["//:commit"])
+    expect(unswept.exitCode).toBe(1)
+    expect(unswept.logs).toContain("//:gate  ran")
+    expect(unswept.logs).toContain("unrelated_changes")
+    expect(unswept.logs).toContain("one.txt")
+    expect(git(root, "rev-parse", "HEAD").trim()).toBe(base)
+    expect(git(root, "status", "--porcelain").trim()).toBe("?? one.txt")
+
+    const declared = await serve(root, ["//:commit", "--sweep"])
     expect(declared.exitCode).toBe(0)
-    expect(declared.logs).toContain("//:gate  ran")
     expect(declared.logs).toContain(
-      "//:commit  staged the whole working tree: Git.Commit declares no path scope"
+      "//:commit  staged the whole working tree: --sweep, and no declared path scope"
     )
     expect(declared.logs).toMatch(/\/\/:commit  committed [0-9a-f]{12}: chore: declared; 1 file\(s\)/)
     expect(git(root, "log", "-1", "--format=%s").trim()).toBe("chore: declared")
     expect(git(root, "status", "--porcelain").trim()).toBe("")
 
     await write(root, "two.txt", "2\n")
-    const overridden = await serve(root, ["//:commit", "-m", "feat: override wins"])
+    const overridden = await serve(root, ["//:commit", "--sweep", "-m", "feat: override wins"])
     expect(overridden.exitCode).toBe(0)
     expect(git(root, "log", "-1", "--format=%s").trim()).toBe("feat: override wins")
 
     await write(root, "three.txt", "3\n")
     const logPath = await script(root, [{ purpose: "diff", note: "docs: composed by the agent" }])
-    const composed = await serve(root, ["//:agentCommit"])
+    const composed = await serve(root, ["//:agentCommit", "--sweep"])
     expect(composed.exitCode).toBe(0)
     expect(git(root, "log", "-1", "--format=%s").trim()).toBe("docs: composed by the agent")
     expect(await spawns(logPath)).toBe(1)
 
-    const nothing = await serve(root, ["//:commit"])
+    const nothing = await serve(root, ["//:commit", "--sweep"])
     expect(nothing.exitCode).toBe(1)
     expect(nothing.logs).toContain("nothing_to_commit")
 
     await write(root, "four.txt", "4\n")
     const head = git(root, "rev-parse", "HEAD").trim()
-    const blocked = await serve(root, ["//:blocked"])
+    const blocked = await serve(root, ["//:blocked", "--sweep"])
     expect(blocked.exitCode).toBe(1)
     expect(blocked.logs).toContain("//:redGate  failed")
     expect(blocked.logs).toContain("refused: gate //:redGate is not green")

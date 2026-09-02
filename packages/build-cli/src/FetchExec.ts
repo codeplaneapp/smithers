@@ -3,10 +3,10 @@
  *
  * Planning resolves the single declared output against the declaring package
  * and records the network capability that is intrinsic to a fetch. Execution
- * retrieves bytes through Effect's Node `HttpClient`, verifies the declared
- * sha256 before touching the workspace, and publishes the verified file by a
- * same-directory atomic rename. CAS capture and replay remain owned by the
- * shared package executor.
+ * retrieves bytes through Effect's Node `HttpClient`, streams them into a
+ * same-directory temporary file, verifies the declared sha256, and publishes
+ * the verified file by atomic rename without disturbing the destination first.
+ * CAS capture and replay remain owned by the shared package executor.
  *
  * @since 0.1.0
  */
@@ -162,13 +162,14 @@ const transportReason = (cause: unknown, fallback: string): string => {
 }
 
 /**
- * Largest response body one `S.Fetch` will hold, in bytes.
+ * Largest response body one `S.Fetch` will accept, in bytes.
  *
  * A fetch used to call `arrayBuffer` with no bound and no deadline of its own,
  * so a large or endless chunked response exhausted memory or hung until an
  * optional caller-supplied signal fired — and a declared Fetch may pass none.
  * The body is measured as it arrives and abandoned the moment it crosses this
- * line.
+ * line. Accepted bytes stream to a same-directory temporary file rather than
+ * accumulating in memory.
  *
  * @category limits
  * @since 0.1.0
@@ -208,11 +209,45 @@ export const redactUrl = (url: string): string => {
     `${query ? "?<redacted>" : ""}`
 }
 
-const downloadedBytes = async (
+interface DownloadedFile {
+  readonly bytes: number
+  readonly sha256: string
+}
+
+const writeFailure = (destination: string, cause: unknown): FetchError =>
+  new FetchError(
+    "write_failed",
+    `Fetch could not publish ${destination}: ${Diagnostic.describe(cause)}`,
+    undefined,
+    undefined,
+    { cause }
+  )
+
+/** Writes one complete response chunk, accounting for partial file writes. */
+const writeChunk = async (handle: Fs.FileHandle, chunk: Uint8Array): Promise<void> => {
+  let offset = 0
+  while (offset < chunk.byteLength) {
+    const { bytesWritten } = await handle.write(chunk, offset, chunk.byteLength - offset, null)
+    if (bytesWritten === 0) throw new Error("the temporary fetch file accepted a zero-byte write")
+    offset += bytesWritten
+  }
+}
+
+const downloadedFile = async (
   url: string,
-  signal: AbortSignal | undefined
-): Promise<Uint8Array> => {
+  signal: AbortSignal | undefined,
+  temporary: string,
+  destination: string,
+  limitBytes: number
+): Promise<DownloadedFile> => {
   const safeUrl = redactUrl(url)
+  let handle: Fs.FileHandle | undefined
+  const openTemporary = async (): Promise<Fs.FileHandle> => {
+    if (handle !== undefined) return handle
+    await Fs.mkdir(NodePath.dirname(destination), { recursive: true })
+    handle = await Fs.open(temporary, "wx", 0o644)
+    return handle
+  }
   const effect = Effect.scoped(Effect.gen(function*() {
     const transport = yield* HttpClient.HttpClient
     const client = HttpClient.followRedirects(transport)
@@ -225,38 +260,47 @@ const downloadedBytes = async (
     const declared = response.headers["content-length"]
     if (declared !== undefined && /^\d+$/.test(declared)) {
       const declaredBytes = Number(declared)
-      if (Number.isSafeInteger(declaredBytes) && declaredBytes > maximumFetchBytes) {
+      if (Number.isSafeInteger(declaredBytes) && declaredBytes > limitBytes) {
         return yield* Effect.fail(
           new FetchError(
             "body_too_large",
-            `Fetch response for ${safeUrl} declares ${declaredBytes} bytes, over the ${maximumFetchBytes} limit`
+            `Fetch response for ${safeUrl} declares ${declaredBytes} bytes, over the ${limitBytes} limit`
           )
         )
       }
     }
-    const chunks: Array<Uint8Array> = []
+    const hash = createHash("sha256")
     let received = 0
     yield* Stream.runForEach(response.stream, (chunk: Uint8Array) =>
-      Effect.suspend(() => {
-        received += chunk.byteLength
-        if (received > maximumFetchBytes) {
-          return Effect.fail(
-            new FetchError(
+      Effect.tryPromise({
+        try: async () => {
+          const next = received + chunk.byteLength
+          if (next > limitBytes) {
+            throw new FetchError(
               "body_too_large",
-              `Fetch response for ${safeUrl} exceeded the ${maximumFetchBytes} byte limit`
+              `Fetch response for ${safeUrl} exceeded the ${limitBytes} byte limit`
             )
-          )
-        }
-        chunks.push(new Uint8Array(chunk))
-        return Effect.void
+          }
+          const output = await openTemporary()
+          await writeChunk(output, chunk)
+          hash.update(chunk)
+          received = next
+        },
+        catch: (cause) => cause instanceof FetchError ? cause : writeFailure(destination, cause)
       }))
-    const bytes = new Uint8Array(received)
-    let offset = 0
-    for (const chunk of chunks) {
-      bytes.set(chunk, offset)
-      offset += chunk.byteLength
-    }
-    return bytes
+    yield* Effect.tryPromise({
+      try: async () => {
+        const output = await openTemporary()
+        // `open`'s mode is masked by the process umask, but a CAS restore of
+        // the same file chmods it to 0o644. Keep a fresh download identical.
+        await output.chmod(0o644)
+        await output.sync()
+        await output.close()
+        handle = undefined
+      },
+      catch: (cause) => writeFailure(destination, cause)
+    })
+    return { bytes: received, sha256: hash.digest("hex") }
   })).pipe(
     Effect.provide(NodeHttpClient.layerUndici),
     // A declared Fetch may carry no signal at all, so the request owns a
@@ -266,45 +310,28 @@ const downloadedBytes = async (
       orElse: () => Effect.fail(new FetchError("request_failed", `Fetch request for ${safeUrl} did not finish in time`))
     })
   )
-  const exit = await Effect.runPromiseExit(effect, { signal })
-  if (Exit.isSuccess(exit)) return exit.value
-  const cause: unknown = Cause.squash(exit.cause)
-  if (cause instanceof FetchError) throw cause
-  throw new FetchError(
-    "request_failed",
-    `Fetch request failed for ${safeUrl}: ${transportReason(cause, "HTTP transport failed")}`,
-    undefined,
-    undefined,
-    { cause }
-  )
-}
-
-const atomicWrite = async (destination: string, bytes: Uint8Array): Promise<void> => {
-  const temporary = `${destination}.smthrs-fetch-${process.pid}-${randomBytes(6).toString("hex")}`
   try {
-    await Fs.mkdir(NodePath.dirname(destination), { recursive: true })
-    const handle = await Fs.open(temporary, "wx", 0o644)
-    try {
-      await handle.writeFile(bytes)
-      // `open`'s mode is masked by the process umask, but a CAS restore of the
-      // same file chmods it to 0o644. Setting the mode explicitly keeps a
-      // fresh download and a restored one identical in metadata as well as
-      // bytes, whatever umask the run inherited.
-      await handle.chmod(0o644)
-      await handle.sync()
-    } finally {
-      await handle.close()
-    }
-    await Fs.rename(temporary, destination)
-  } catch (cause) {
-    await Fs.rm(temporary, { force: true }).catch(() => undefined)
+    const exit = await Effect.runPromiseExit(effect, { signal })
+    if (Exit.isSuccess(exit)) return exit.value
+    const cause: unknown = Cause.squash(exit.cause)
+    if (cause instanceof FetchError) throw cause
     throw new FetchError(
-      "write_failed",
-      `Fetch could not publish ${destination}: ${Diagnostic.describe(cause)}`,
+      "request_failed",
+      `Fetch request failed for ${safeUrl}: ${transportReason(cause, "HTTP transport failed")}`,
       undefined,
       undefined,
       { cause }
     )
+  } finally {
+    if (handle !== undefined) await handle.close().catch(() => undefined)
+  }
+}
+
+const publishTemporary = async (temporary: string, destination: string): Promise<void> => {
+  try {
+    await Fs.rename(temporary, destination)
+  } catch (cause) {
+    throw writeFailure(destination, cause)
   }
 }
 
@@ -322,9 +349,10 @@ export interface Result {
 /**
  * Downloads, verifies, and atomically publishes one Fetch target.
  *
- * Digest verification is deliberately complete before `atomicWrite` is
- * called. A mismatch therefore cannot create a destination or disturb an
- * existing one, and the typed failure carries both hashes.
+ * The response streams into a same-directory temporary file while sha256 is
+ * updated incrementally. Digest verification is complete before that file is
+ * renamed over the destination. A mismatch therefore cannot create or disturb
+ * the destination, and the typed failure carries both hashes.
  *
  * @category execution
  * @since 0.1.0
@@ -334,19 +362,32 @@ export const execute = async (options: {
   readonly target: Target.AnyTarget
   readonly outFile: string
   readonly signal?: AbortSignal | undefined
+  /** Internal test seam; production callers use {@link maximumFetchBytes}. */
+  readonly limitBytes?: number | undefined
 }): Promise<Result> => {
   const attrs = FetchTarget.fetchAttrsOf(options.target)
-  const bytes = await downloadedBytes(attrs.url, options.signal)
-  const actual = createHash("sha256").update(bytes).digest("hex")
-  if (actual !== attrs.sha256) {
-    throw new FetchError(
-      "digest_mismatch",
-      `Fetch sha256 mismatch: expected ${attrs.sha256}, actual ${actual}`,
-      attrs.sha256,
-      actual
-    )
-  }
   const destination = NodePath.join(options.root, ...options.outFile.split("/"))
-  await atomicWrite(destination, bytes)
-  return { bytes: bytes.byteLength, sha256: actual }
+  const temporary = `${destination}.smthrs-fetch-${process.pid}-${randomBytes(6).toString("hex")}`
+  try {
+    const downloaded = await downloadedFile(
+      attrs.url,
+      options.signal,
+      temporary,
+      destination,
+      options.limitBytes ?? maximumFetchBytes
+    )
+    if (downloaded.sha256 !== attrs.sha256) {
+      throw new FetchError(
+        "digest_mismatch",
+        `Fetch sha256 mismatch: expected ${attrs.sha256}, actual ${downloaded.sha256}`,
+        attrs.sha256,
+        downloaded.sha256
+      )
+    }
+    await publishTemporary(temporary, destination)
+    return downloaded
+  } catch (cause) {
+    await Fs.rm(temporary, { force: true }).catch(() => undefined)
+    throw cause
+  }
 }

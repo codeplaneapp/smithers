@@ -9,13 +9,32 @@ import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as PackageTree from "../src/PackageTree.ts"
+
+/** Makes one pre-digest lstat report a stale size for the growth-race test. */
+const lstatSizeOverride: { path: string | undefined; size: number } = { path: undefined, size: 0 }
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:fs/promises")>()
+  return {
+    ...original,
+    default: original,
+    lstat: async (path: NodeFs.PathLike): Promise<NodeFs.Stats> => {
+      const stats = await original.lstat(path)
+      if (lstatSizeOverride.path === String(path)) {
+        Object.defineProperty(stats, "size", { configurable: true, value: lstatSizeOverride.size })
+      }
+      return stats
+    }
+  }
+})
 
 let root: string
 let outside: string
 
 beforeEach(async () => {
+  lstatSizeOverride.path = undefined
   const base = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-tree-")))
   root = NodePath.join(base, "workspace")
   outside = NodePath.join(base, "outside")
@@ -24,6 +43,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  lstatSizeOverride.path = undefined
   await Fs.rm(NodePath.dirname(root), { recursive: true, force: true }).catch(() => {})
 })
 
@@ -247,6 +267,13 @@ describe("treeMatchesManifest compares the tree, not just the manifest", () => {
     expect(await PackageTree.treeMatchesManifest(root, manifest)).toBeUndefined()
   })
 
+  it("matches nested directories created by materializeManifest", async () => {
+    const manifest = await capture()
+    await Fs.rm(NodePath.join(root, "dist"), { recursive: true, force: true })
+    await PackageTree.materializeManifest(root, ".flows", manifest)
+    expect(await PackageTree.treeMatchesManifest(root, manifest)).toBeUndefined()
+  })
+
   /**
    * `PackageExec` skips materialization entirely when this answers undefined,
    * so anything it cannot see survives a cache hit into the declared output
@@ -263,6 +290,22 @@ describe("treeMatchesManifest compares the tree, not just the manifest", () => {
     const manifest = await capture()
     await Fs.symlink("a.txt", NodePath.join(root, "dist", "alias"))
     expect(await PackageTree.treeMatchesManifest(root, manifest)).toMatch(/dist\/alias is not in the captured/)
+  })
+
+  it("reports an extra empty directory", async () => {
+    const manifest = await capture()
+    await Fs.mkdir(NodePath.join(root, "dist", "empty"))
+    expect(await PackageTree.treeMatchesManifest(root, manifest)).toBe(
+      "dist/empty is not in the captured tree"
+    )
+  })
+
+  it("reports an extra empty nested directory", async () => {
+    const manifest = await capture()
+    await Fs.mkdir(NodePath.join(root, "dist", "nested", "empty", "deeper"), { recursive: true })
+    expect(await PackageTree.treeMatchesManifest(root, manifest)).toBe(
+      "dist/nested/empty is not in the captured tree"
+    )
   })
 
   /** Capture records the executable bit; the comparison used to ignore it. */
@@ -295,11 +338,23 @@ describe("output capture refuses a symlinked parent", () => {
     await Fs.mkdir(cas, { recursive: true })
     const digest = sha256("restored")
     await Fs.writeFile(NodePath.join(cas, digest), "restored")
+    await Fs.writeFile(NodePath.join(outside, "keep.txt"), "untouched")
     await Fs.symlink(outside, NodePath.join(root, "link"))
     await expect(
-      PackageTree.materializeFile(root, ".flows", { path: "link/a.txt", digest, executable: false })
+      PackageTree.materializeFile(root, ".flows", { path: "link/new/a.txt", digest, executable: false })
     ).rejects.toThrow(/resolves outside the workspace through a symlinked parent/)
-    expect(await Fs.readdir(outside)).toEqual([])
+    expect(await Fs.readdir(outside)).toEqual(["keep.txt"])
+  })
+
+  it("refuses to restore a manifest before creating a temp tree through a symlinked parent", async () => {
+    await Fs.writeFile(NodePath.join(outside, "keep.txt"), "untouched")
+    await Fs.symlink(outside, NodePath.join(root, "link"))
+    await expect(
+      PackageTree.materializeManifest(root, ".flows", { outDir: "link/dist", entries: [] })
+    ).rejects.toThrow(/resolves outside the workspace through a symlinked parent/)
+    const externalEntries = await Fs.readdir(outside)
+    expect(externalEntries).toEqual(["keep.txt"])
+    expect(externalEntries.filter((name) => name.startsWith(".smthrs-mat-"))).toEqual([])
   })
 })
 
@@ -318,6 +373,23 @@ describe("captureFile heals a tampered CAS blob", () => {
     expect(await Fs.readFile(blob, "utf8")).toBe("art")
     expect(await PackageTree.verifyFileManifest(root, ".flows", first)).toBeUndefined()
   })
+
+  it("refuses a declared output file the target never created", async () => {
+    await expect(PackageTree.captureFile(root, ".flows", "never-written.txt"))
+      .rejects.toThrow(/declared output file was not created: never-written.txt/)
+  })
+
+  it("reports a missing and a tampered CAS blob against the same manifest", async () => {
+    await Fs.writeFile(NodePath.join(root, "out.txt"), "art")
+    const manifest = await PackageTree.captureFile(root, ".flows", "out.txt")
+    const blob = NodePath.join(root, ".flows", "cas", manifest.digest)
+    await Fs.writeFile(blob, "tampered")
+    expect(await PackageTree.verifyFileManifest(root, ".flows", manifest))
+      .toBe("cas blob tampered for out.txt")
+    await Fs.rm(blob)
+    expect(await PackageTree.verifyFileManifest(root, ".flows", manifest))
+      .toBe("cas blob missing for out.txt")
+  })
 })
 
 describe("captureOutDir bounds the tree it walks", () => {
@@ -335,6 +407,89 @@ describe("captureOutDir bounds the tree it walks", () => {
     const manifest = await PackageTree.captureOutDir(root, ".flows", "dist")
     expect(manifest.entries).toHaveLength(1)
   })
+
+  it("accepts the entries boundary and refuses one entry over it", async () => {
+    const limits = { ...PackageTree.outDirLimits, entries: 2 }
+    await Fs.mkdir(NodePath.join(root, "dist", "nested"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "dist", "nested", "a"), "a")
+    await expect(PackageTree.captureOutDir(root, ".flows", "dist", root, limits)).resolves.toMatchObject({
+      entries: [{ path: "nested/a" }]
+    })
+
+    await Fs.writeFile(NodePath.join(root, "dist", "z"), "z")
+    await expect(PackageTree.captureOutDir(root, ".flows", "dist", root, limits)).rejects.toMatchObject({
+      limit: "entries"
+    })
+  })
+
+  it("accepts the pathBytes boundary and refuses one byte over it", async () => {
+    const limits = { ...PackageTree.outDirLimits, pathBytes: 5 }
+    await Fs.mkdir(NodePath.join(root, "dist"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "dist", "abcde"), "exact")
+    await expect(PackageTree.captureOutDir(root, ".flows", "dist", root, limits)).resolves.toBeDefined()
+
+    await Fs.writeFile(NodePath.join(root, "dist", "abcdef"), "over")
+    await expect(PackageTree.captureOutDir(root, ".flows", "dist", root, limits)).rejects.toMatchObject({
+      limit: "pathBytes"
+    })
+  })
+
+  it("accepts the manifestBytes boundary and refuses one byte over it", async () => {
+    await Fs.mkdir(NodePath.join(root, "dist"), { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "dist", "a.txt"), "x")
+    const expectedEntry: PackageTree.ManifestEntry = {
+      path: "a.txt",
+      kind: "file",
+      digest: sha256("x"),
+      executable: false,
+      target: ""
+    }
+    const encodedSize = Buffer.byteLength(JSON.stringify([expectedEntry]), "utf8")
+    await expect(PackageTree.captureOutDir(root, ".flows", "dist", root, {
+      ...PackageTree.outDirLimits,
+      manifestBytes: encodedSize
+    })).resolves.toEqual({ outDir: "dist", entries: [expectedEntry] })
+
+    await expect(PackageTree.captureOutDir(root, ".flows", "dist", root, {
+      ...PackageTree.outDirLimits,
+      manifestBytes: encodedSize - 1
+    })).rejects.toMatchObject({ limit: "manifestBytes" })
+  })
+
+  it("does not publish a blob when a later entry crosses a limit", async () => {
+    const cas = NodePath.join(root, ".flows", "cas")
+    await Fs.mkdir(NodePath.join(root, "dist"), { recursive: true })
+    await Fs.mkdir(cas, { recursive: true })
+    await Fs.writeFile(NodePath.join(root, "dist", "a"), "first")
+    await Fs.writeFile(NodePath.join(root, "dist", "b"), "second")
+
+    await expect(PackageTree.captureOutDir(root, ".flows", "dist", root, {
+      ...PackageTree.outDirLimits,
+      entries: 1
+    })).rejects.toMatchObject({ limit: "entries" })
+    expect(await Fs.readdir(cas)).toEqual([])
+  })
+
+  it("enforces file and total byte limits against the bytes the digest consumed", async () => {
+    const file = NodePath.join(root, "dist", "growing.txt")
+    await Fs.mkdir(NodePath.dirname(file), { recursive: true })
+    await Fs.writeFile(file, "12")
+    lstatSizeOverride.path = file
+    lstatSizeOverride.size = 0
+    try {
+      await expect(PackageTree.captureOutDir(root, ".flows", "dist", root, {
+        ...PackageTree.outDirLimits,
+        fileBytes: 1
+      })).rejects.toMatchObject({ limit: "fileBytes" })
+      await expect(PackageTree.captureOutDir(root, ".flows", "dist", root, {
+        ...PackageTree.outDirLimits,
+        fileBytes: 2,
+        totalBytes: 1
+      })).rejects.toMatchObject({ limit: "totalBytes" })
+    } finally {
+      lstatSizeOverride.path = undefined
+    }
+  })
 })
 
 describe("the portal census refuses what it cannot measure", () => {
@@ -348,22 +503,55 @@ describe("the portal census refuses what it cannot measure", () => {
    * directory racing the census — report it through a log line, and run the
    * target anyway with the write-set guard silently disarmed over that portal.
    */
-  it("fails the census when an escaping portal's target cannot be read", async () => {
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "fails the census when an escaping portal's target cannot be read",
+    async () => {
+      git("init", "--quiet", ".")
+      await Fs.mkdir(NodePath.join(outside, "sealed"), { recursive: true })
+      await Fs.writeFile(NodePath.join(outside, "sealed", "a.txt"), "x")
+      await Fs.symlink(NodePath.join(outside, "sealed"), NodePath.join(root, "portal"))
+      await Fs.chmod(NodePath.join(outside, "sealed"), 0o000)
+      try {
+        const censused = await PackageTree.snapshotPortals(root, ".flows").then(
+          () => undefined,
+          (cause: unknown) => cause
+        )
+        expect(censused).toBeInstanceOf(PackageTree.PortalCensusError)
+        expect((censused as PackageTree.PortalCensusError).link).toBe("portal")
+        expect((censused as PackageTree.PortalCensusError).reason).toBe("unreadable")
+      } finally {
+        await Fs.chmod(NodePath.join(outside, "sealed"), 0o755)
+      }
+    }
+  )
+
+  it("censuses and reverts a file created through a dangling escaping symlink", async () => {
     git("init", "--quiet", ".")
-    await Fs.mkdir(NodePath.join(outside, "sealed"), { recursive: true })
-    await Fs.writeFile(NodePath.join(outside, "sealed", "a.txt"), "x")
-    await Fs.symlink(NodePath.join(outside, "sealed"), NodePath.join(root, "portal"))
-    await Fs.chmod(NodePath.join(outside, "sealed"), 0o000)
+    const escapedTarget = NodePath.join(outside, "created.txt")
+    await Fs.symlink(escapedTarget, NodePath.join(root, "portal"))
+    const snapshot = await PackageTree.snapshotPortals(root, ".flows")
     try {
-      const censused = await PackageTree.snapshotPortals(root, ".flows").then(
-        () => undefined,
-        (cause: unknown) => cause
-      )
-      expect(censused).toBeInstanceOf(PackageTree.PortalCensusError)
-      expect((censused as PackageTree.PortalCensusError).link).toBe("portal")
-      expect((censused as PackageTree.PortalCensusError).reason).toBe("unreadable")
+      expect(snapshot.portals).toHaveLength(1)
+      expect(snapshot.portals[0]).toMatchObject({ link: "portal", realTarget: escapedTarget })
+      expect([...snapshot.portals[0]!.states]).toEqual([])
+      expect(await PackageTree.revertChangedPortals(snapshot)).toEqual([])
+
+      await Fs.writeFile(NodePath.join(root, "portal"), "escaped")
+      expect(await PackageTree.revertChangedPortals(snapshot)).toEqual(["portal"])
+      expect(await Fs.lstat(escapedTarget).then(() => true, () => false)).toBe(false)
     } finally {
-      await Fs.chmod(NodePath.join(outside, "sealed"), 0o755)
+      await PackageTree.releasePortals(snapshot)
+    }
+  })
+
+  it("leaves a dangling symlink to an in-workspace destination to the git guard", async () => {
+    git("init", "--quiet", ".")
+    await Fs.symlink("created.txt", NodePath.join(root, "inside"))
+    const snapshot = await PackageTree.snapshotPortals(root, ".flows")
+    try {
+      expect(snapshot.portals).toEqual([])
+    } finally {
+      await PackageTree.releasePortals(snapshot)
     }
   })
 
