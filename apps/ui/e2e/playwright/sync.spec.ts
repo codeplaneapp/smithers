@@ -139,7 +139,7 @@ test("T1: /linear.connect walks the wizard and turns the card connected", async 
   await page.goto("/")
 
   await runSlash(page, "/linear.connect")
-  const card = page.getByTestId(`card-connector-setup-linear-${REPO}`)
+  const card = page.getByTestId("card-connector-setup-linear-smithersai/smithers")
   await expect(card).toBeVisible({ timeout: 15_000 })
   await expect(card).toContainText("Authorize in your browser")
 
@@ -187,7 +187,7 @@ test("T1: /repos.import tracks the job to done with the workspace link", async (
   await page.goto("/")
 
   await runSlash(page, `/repos.import ${REPO}`)
-  const card = page.getByTestId(`card-repo-import-${REPO}`)
+  const card = page.getByTestId("card-repo-import-smithersai/smithers")
   await expect(card).toBeVisible({ timeout: 15_000 })
   await expect(card).toContainText("Contacting GitHub…")
 
