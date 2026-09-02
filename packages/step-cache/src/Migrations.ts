@@ -14,7 +14,7 @@
  */
 import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import * as Layer from "effect/Layer"
-import initial from "./migrations/0001_initial.ts"
+import { initial } from "./migrations/0001_initial.ts"
 
 /**
  * The step cache's namespaced migration set, for composition with the other

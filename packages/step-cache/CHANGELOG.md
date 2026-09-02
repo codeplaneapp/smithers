@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The CommonJS build of `Migrations` no longer reads the migration module's
+  whole exports object in place of its Effect. esbuild compiles a default
+  import of a sibling under `"type": "module"` to Node-style interop, so
+  `set.migrations["0001_initial"]` had no `pipe` in `dist/cjs` and every
+  `require` consumer failed at schema time. `migrations/0001_initial` now
+  exports the named `initial` binding and has no default export.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 ### Added

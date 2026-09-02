@@ -29,7 +29,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  * @category migrations
  * @since 0.1.0
  */
-const initial: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
+export const initial: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
 
   yield* sql`CREATE TABLE flows_step_cache (
@@ -66,5 +66,3 @@ const initial: Effect.Effect<void, unknown, SqlClient.SqlClient> = Effect.gen(fu
     PRIMARY KEY (key_digest, recorded_run_id, recorded_event_seq)
   )`
 })
-
-export default initial

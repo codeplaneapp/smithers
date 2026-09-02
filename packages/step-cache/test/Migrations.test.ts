@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as Migrations from "../src/Migrations.ts"
+import * as Initial from "../src/migrations/0001_initial.ts"
 
 interface SqliteMasterRow {
   readonly name: string
@@ -20,6 +21,27 @@ const migrated = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
   effect.pipe(Effect.provide(Migrations.layer), Effect.provide(TestDatabase.layer))
 
 describe("step-cache migrations", () => {
+  // The CommonJS build converts every module with esbuild under `"type":
+  // "module"`, where a default import of a sibling resolves to the sibling's
+  // whole exports object rather than the Effect it exported. A migration
+  // module therefore exports a named binding and never a default, and the
+  // set holds Effects however the package was built.
+  it("holds an Effect under every migration id", () => {
+    const entries = Object.entries(Migrations.set.migrations)
+    expect(entries.map(([id]) => id)).toEqual(["0001_initial"])
+    for (const [, migration] of entries) {
+      expect(Effect.isEffect(migration)).toBe(true)
+      expect(typeof migration.pipe).toBe("function")
+    }
+    expect(Migrations.set.migrations["0001_initial"]).toBe(Initial.initial)
+  })
+
+  it("exports each migration as a named binding and never as a default", () => {
+    expect("default" in Initial).toBe(false)
+    expect(Object.keys(Initial)).toEqual(["initial"])
+    expect(Effect.isEffect(Initial.initial)).toBe(true)
+  })
+
   it.effect("migrates a fresh database and reruns idempotently", () =>
     Effect.gen(function*() {
       yield* migrated(Effect.gen(function*() {
