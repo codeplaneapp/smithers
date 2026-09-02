@@ -6,6 +6,7 @@
 import * as CommandLine from "@smthrs/kernel/CommandLine"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
+import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { providerFailure } from "../internal/localProcess.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import { stdinRedirect } from "../internal/stdinRedirect.ts"
@@ -209,28 +210,31 @@ export const make = (options: DaytonaSandboxOptions): Provider => ({
         remoteId: held.sandbox.id,
         workdir,
         spawn: (command, spawnOptions) =>
-          Effect.flatMap(redirect(command, spawnOptions.stdin), (fed) =>
-            Effect.map(
-              execute(
-                fed,
-                resolveCwd(spawnOptions.cwd),
-                // Overlay first so a per-spawn `undefined` removes a command default.
-                Object.fromEntries(
-                  Object.entries({ ...options.commandEnv, ...spawnOptions.env }).filter(
-                    (entry): entry is [string, string] => entry[1] !== undefined
+          Effect.flatMap(
+            Effect.andThen(checkEnvironmentNames(spawnOptions.env), redirect(command, spawnOptions.stdin)),
+            (fed) =>
+              Effect.map(
+                execute(
+                  fed,
+                  resolveCwd(spawnOptions.cwd),
+                  // Overlay first so a per-spawn `undefined` removes a command default.
+                  Object.fromEntries(
+                    Object.entries({ ...options.commandEnv, ...spawnOptions.env }).filter(
+                      (entry): entry is [string, string] => entry[1] !== undefined
+                    )
                   )
-                )
-              ),
-              (result) => ({
-                // `result` is the command's combined output: the wire
-                // response has no stderr field and the endpoint merges
-                // standard error into it, so the merged text is delivered on
-                // stdout and stderr stays honestly empty.
-                stdout: Stream.make(encoder.encode(result.result)),
-                stderr: Stream.empty,
-                exitCode: Effect.succeed(result.exitCode)
-              })
-            )),
+                ),
+                (result) => ({
+                  // `result` is the command's combined output: the wire
+                  // response has no stderr field and the endpoint merges
+                  // standard error into it, so the merged text is delivered on
+                  // stdout and stderr stays honestly empty.
+                  stdout: Stream.make(encoder.encode(result.result)),
+                  stderr: Stream.empty,
+                  exitCode: Effect.succeed(result.exitCode)
+                })
+              )
+          ),
         readFile: (path) =>
           Effect.tryPromise({
             try: () => held.sandbox.fs.downloadFile(path).then((content) => new Uint8Array(content)),

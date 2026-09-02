@@ -7,6 +7,7 @@ import * as CommandLine from "@smthrs/kernel/CommandLine"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import { decodeBase64, encodeBase64 } from "../internal/base64.ts"
+import { checkEnvironmentNames } from "../internal/environmentNames.ts"
 import { sessionSlug } from "../internal/sessionSlug.ts"
 import { stdinRedirect } from "../internal/stdinRedirect.ts"
 import type { RemoteProcess } from "../RemoteChildProcessSpawner/Provider.ts"
@@ -152,42 +153,45 @@ export const make = <Binding>(options: CloudflareSandboxOptions<Binding>): Provi
             : `${workdir}/${cwd.replace(/^(\.\/)+/, "")}`.replace(/\/\.?$/, "")
 
         const spawn: Session["spawn"] = (command, spawnOptions) =>
-          Effect.flatMap(redirect(command, spawnOptions.stdin), (fed) => {
-            const commandOptions = {
-              cwd: resolveCwd(spawnOptions.cwd),
-              env: definedEnv(spawnOptions.env)
+          Effect.flatMap(
+            Effect.andThen(checkEnvironmentNames(spawnOptions.env), redirect(command, spawnOptions.stdin)),
+            (fed) => {
+              const commandOptions = {
+                cwd: resolveCwd(spawnOptions.cwd),
+                env: definedEnv(spawnOptions.env)
+              }
+              return options.execution === "process"
+                ? Effect.flatMap(
+                  attempt(
+                    async () => {
+                      const started = await sandbox.startProcess(fed, commandOptions)
+                      const exit = await started.waitForExit()
+                      const logs = await started.getLogs()
+                      return {
+                        ...logs,
+                        exitCode: exit.exitCode ?? started.exitCode
+                      }
+                    },
+                    "spawn_error",
+                    `process failed for ${command}`
+                  ),
+                  (result) =>
+                    result.exitCode === undefined
+                      ? Effect.fail(
+                        failed("spawn_error", `the sandbox reported no exit status for \`${command}\``, result)
+                      )
+                      : Effect.succeed(processOf(result.stdout, result.stderr, result.exitCode))
+                )
+                : Effect.map(
+                  attempt(
+                    () => sandbox.exec(fed, commandOptions),
+                    "spawn_error",
+                    `exec failed for ${command}`
+                  ),
+                  (result) => processOf(result.stdout, result.stderr, result.exitCode)
+                )
             }
-            return options.execution === "process"
-              ? Effect.flatMap(
-                attempt(
-                  async () => {
-                    const started = await sandbox.startProcess(fed, commandOptions)
-                    const exit = await started.waitForExit()
-                    const logs = await started.getLogs()
-                    return {
-                      ...logs,
-                      exitCode: exit.exitCode ?? started.exitCode
-                    }
-                  },
-                  "spawn_error",
-                  `process failed for ${command}`
-                ),
-                (result) =>
-                  result.exitCode === undefined
-                    ? Effect.fail(
-                      failed("spawn_error", `the sandbox reported no exit status for \`${command}\``, result)
-                    )
-                    : Effect.succeed(processOf(result.stdout, result.stderr, result.exitCode))
-              )
-              : Effect.map(
-                attempt(
-                  () => sandbox.exec(fed, commandOptions),
-                  "spawn_error",
-                  `exec failed for ${command}`
-                ),
-                (result) => processOf(result.stdout, result.stderr, result.exitCode)
-              )
-          })
+          )
 
         const session: Session = {
           id: sessionKey,

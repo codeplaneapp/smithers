@@ -28,6 +28,14 @@ import type { ProviderError } from "../RemoteChildProcessSpawner/ProviderError.t
  * - `spawn` without a `cwd` runs in {@link Session.workdir}, and a relative
  *   `cwd` is taken under it, never under whatever directory the transport
  *   happens to start in.
+ * - `spawn` refuses an `options.env` name that is not a shell identifier,
+ *   rather than delivering a variable the command will not see. The command
+ *   is arbitrary shell text, so a shell always runs it, and a shell rebuilds
+ *   its environment from the names matching `[A-Za-z_][A-Za-z0-9_]*` when it
+ *   starts. Dash, `/bin/sh` on Debian and Ubuntu, drops `a-b`; bash,
+ *   `/bin/sh` on macOS, keeps it. Delivery is therefore not portable and the
+ *   loss is invisible to the host, so the seam fails closed on every
+ *   provider and every platform instead of losing the variable in the guest.
  * - `spawn` delivers `options.stdin` as the command's complete standard
  *   input. A transport with no input channel of its own writes the bytes to a
  *   file in the workspace and redirects the command from it; either way the
