@@ -10,10 +10,14 @@ import { Badge, Button, Markdown } from "@smthrs/ui"
 import { MessageSquare } from "lucide-react"
 import { useController } from "../ControllerContext"
 import type { Card } from "../state/AppState"
+import { trustedHttpsUrl } from "../state/seams/SeamContext"
 
 export interface IssueCardActions {
   readonly onRunCommand: (name: string, args?: string) => void
 }
+
+/** Only an https linear.app URL off the DTO is followed; anything else renders the identifier as text. */
+export const trustedLinearUrl = (value: string): string | null => trustedHttpsUrl(value, "linear.app")
 
 const stateBadge = (state: "open" | "closed") => <Badge variant={state === "open" ? "success" : "muted"}>{state}</Badge>
 
@@ -74,6 +78,8 @@ export const IssueCardBody = ({
   const { repo, number, title, state, author, issueBody, labels, comments, linear } = card.payload
   const toggleCommand = state === "open" ? "issues.close" : "issues.reopen"
   const controller = useController()
+  /* The DTO's URL is vetted like the install URL (review finding 10): https on linear.app, or no link at all. */
+  const linearHref = linear != null ? trustedLinearUrl(linear.url) : null
   return (
     <div className="world-card-list">
       <div className="world-card-row">
@@ -90,7 +96,10 @@ export const IssueCardBody = ({
       {linear != null ?
         (
           <p className="world-card-path">
-            Linear <a href={linear.url} target="_blank" rel="noreferrer">{linear.identifier}</a>
+            Linear{" "}
+            {linearHref !== null ?
+              <a href={linearHref} target="_blank" rel="noreferrer">{linear.identifier}</a> :
+              <span>{linear.identifier}</span>}
           </p>
         ) :
         (

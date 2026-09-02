@@ -23,7 +23,7 @@
 import { CLOUD_ROUTE_PREFIX } from "smithers-shared/LocalApp"
 import type { Card, GitHubAppStatusInput } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
-import { readGitHubRefusal } from "./SeamContext"
+import { readGitHubRefusal, trustedHttpsUrl } from "./SeamContext"
 import type { GitHubRefusal, SeamContext } from "./SeamContext"
 
 export const SIGN_OUT_REFUSAL = "Sign in to Smithers Cloud first — /cloud.sign-in."
@@ -57,14 +57,7 @@ const intOrNull = (value: unknown): number | null =>
   typeof value === "number" && Number.isInteger(value) ? value : null
 
 /** Only the github.com https install origin is worth linking (multi githubInstallUrl.ts). */
-export const trustedInstallUrl = (value: string): string | null => {
-  try {
-    const url = new URL(value)
-    return url.protocol === "https:" && url.hostname === "github.com" ? url.toString() : null
-  } catch {
-    return null
-  }
-}
+export const trustedInstallUrl = (value: string): string | null => trustedHttpsUrl(value, "github.com")
 
 interface StatusAnswer {
   readonly installed: boolean
