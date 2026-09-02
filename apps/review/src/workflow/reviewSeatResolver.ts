@@ -76,8 +76,10 @@ export function missingSeatCredential(
 const PROVIDER_HOSTS: ReadonlyArray<string> = ["api.anthropic.com", "api.openai.com", "openrouter.ai"];
 
 /**
- * Every host a review's seats can reach, lowercased the way the kernel spells
- * them.
+ * Every origin resource a review's seats can reach, lowercased the way the
+ * kernel spells it. HTTPS keeps the historical host-only form; every other
+ * scheme keeps `protocol//` so an HTTP grant cannot authorize HTTPS or vice
+ * versa.
  *
  * @since 1.0.0
  * @category constructors
@@ -89,7 +91,9 @@ export function modelCallHosts(
   const baseUrl = environment.ANTHROPIC_BASE_URL?.trim();
   if (baseUrl !== undefined && baseUrl !== "") {
     try {
-      hosts.add(new URL(baseUrl).host.toLowerCase());
+      const url = new URL(baseUrl);
+      const host = url.host.toLowerCase();
+      hosts.add(url.protocol === "https:" ? host : `${url.protocol}//${host}`);
     } catch {
       // An unparseable base URL is the route builder's failure to report, with
       // a message naming the value. Granting nothing for it keeps this set
