@@ -78,6 +78,12 @@ const jj = Smithers.CiToolchain.Jj({ release: "0.39.0" })
 // native half cannot start and the parity check, which is the point of the
 // suite, is the thing that fails.
 const ripgrep = Smithers.CiToolchain.Ripgrep({ release: "14.1.1" })
+// `//packages/build-cli:test` builds and tests a real Go package tree and a
+// real Foundry package, and asserts `forge fmt --check` drift. GitHub's image
+// ships Docker, which is why the Docker cases in the same file pass, and
+// neither of these.
+const go = Smithers.CiToolchain.Go({ release: "1.26.0" })
+const foundry = Smithers.CiToolchain.Foundry({ release: "v1.31.2" })
 
 export const ci = Smithers.GithubCiGen({
   packageManager,
@@ -99,6 +105,8 @@ export const ci = Smithers.GithubCiGen({
         runtimes: [node, bun],
         jj,
         ripgrep,
+        go,
+        foundry,
         workflowLint: Smithers.CiToolchain.Actionlint({
           release: "1.7.11",
           workflows: [
@@ -289,7 +297,7 @@ export const ci = Smithers.GithubCiGen({
         { os: "windows-latest", advisory: true }
       ],
       timeoutMinutes: 60,
-      toolchain: Smithers.CiToolchain.Needs({ runtimes: [node, bun], jj, ripgrep }),
+      toolchain: Smithers.CiToolchain.Needs({ runtimes: [node, bun], jj, ripgrep, go, foundry }),
       steps: [{ name: "Package test targets", verb: Smithers.Verb.Test, pattern: "//packages/..." }]
     }
   ]

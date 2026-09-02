@@ -355,6 +355,8 @@ export const actions = {
   setupBun: "oven-sh/setup-bun@v2",
   setupPnpm: "pnpm/action-setup@v6",
   installTool: "taiki-e/install-action@v2",
+  setupGo: "actions/setup-go@v5",
+  foundryToolchain: "foundry-rs/foundry-toolchain@v1",
   rustCache: "Swatinem/rust-cache@v2",
   uploadArtifact: "actions/upload-artifact@v4"
 } as const
@@ -725,6 +727,20 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
       name: "Install ripgrep",
       uses: actions.installTool,
       with: { tool: `ripgrep@${needs.ripgrep.release}` }
+    })
+  }
+  if (needs.go !== undefined) {
+    steps.push({
+      name: "Install Go",
+      uses: actions.setupGo,
+      with: { "go-version": needs.go.release }
+    })
+  }
+  if (needs.foundry !== undefined) {
+    steps.push({
+      name: "Install Foundry",
+      uses: actions.foundryToolchain,
+      with: { version: needs.foundry.release }
     })
   }
   if (needs.browser !== undefined) {

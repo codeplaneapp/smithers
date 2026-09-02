@@ -222,6 +222,81 @@ export const RipgrepSetup = Schema.Struct({ release: RipgrepRelease })
 export type RipgrepSetup = typeof RipgrepSetup.Type
 
 /**
+ * The Go toolchains a runner may install.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const GoRelease = Schema.Literals(["1.26.0"])
+
+/**
+ * The Go toolchains a runner may install.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type GoRelease = typeof GoRelease.Type
+
+/**
+ * Schema for a declared Go installation.
+ *
+ * `@smthrs/build-cli` supports Go packages as a first-class package type and
+ * proves it by building and testing a real Go tree. Without the toolchain the
+ * suite does not weaken, it fails, and the only check that the Go package type
+ * still works is the one that stops running.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const GoSetup = Schema.Struct({ release: GoRelease })
+
+/**
+ * One declared Go installation.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type GoSetup = typeof GoSetup.Type
+
+/**
+ * The Foundry releases a runner may install.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const FoundryRelease = Schema.Literals(["v1.31.2"])
+
+/**
+ * The Foundry releases a runner may install.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type FoundryRelease = typeof FoundryRelease.Type
+
+/**
+ * Schema for a declared Foundry installation.
+ *
+ * The build tool's Foundry support is proved against a real `forge`: the suite
+ * builds and tests a Foundry package, caches both results, and asserts that
+ * `forge fmt --check` reports drift. Every one of those assertions is about
+ * what the binary does, so a runner without it removes the check rather than
+ * relaxing it.
+ *
+ * @category schemas
+ * @since 0.1.0
+ */
+export const FoundrySetup = Schema.Struct({ release: FoundryRelease })
+
+/**
+ * One declared Foundry installation.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type FoundrySetup = typeof FoundrySetup.Type
+
+/**
  * Schema for a declared jj installation.
  *
  * `colocate` asks the generator for the `jj git init --colocate` step: a GitHub
@@ -252,6 +327,23 @@ export type JjSetup = typeof JjSetup.Type
  */
 export const Ripgrep = (options: { readonly release: RipgrepRelease }): RipgrepSetup =>
   RipgrepSetup.make({ release: options.release })
+
+/**
+ * Declares that a job installs a Go toolchain.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const Go = (options: { readonly release: GoRelease }): GoSetup => GoSetup.make({ release: options.release })
+
+/**
+ * Declares that a job installs Foundry.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const Foundry = (options: { readonly release: FoundryRelease }): FoundrySetup =>
+  FoundrySetup.make({ release: options.release })
 
 /**
  * Declares that a job installs the jj CLI.
@@ -527,6 +619,8 @@ export const Toolchain = Schema.Struct({
   rust: Schema.optional(RustSetup),
   jj: Schema.optional(JjSetup),
   ripgrep: Schema.optional(RipgrepSetup),
+  go: Schema.optional(GoSetup),
+  foundry: Schema.optional(FoundrySetup),
   browser: Schema.optional(SystemBrowser),
   workflowLint: Schema.optional(WorkflowLint),
   artifacts: Schema.optional(ArtifactUpload)
@@ -570,6 +664,8 @@ export const Needs = (options: {
   readonly rust?: RustSetup | undefined
   readonly jj?: JjSetup | undefined
   readonly ripgrep?: RipgrepSetup | undefined
+  readonly go?: GoSetup | undefined
+  readonly foundry?: FoundrySetup | undefined
   readonly browser?: SystemBrowser | undefined
   readonly workflowLint?: WorkflowLint | undefined
   readonly artifacts?: ArtifactUpload | undefined
@@ -581,6 +677,8 @@ export const Needs = (options: {
     ...(options.rust === undefined ? {} : { rust: options.rust }),
     ...(options.jj === undefined ? {} : { jj: options.jj }),
     ...(options.ripgrep === undefined ? {} : { ripgrep: options.ripgrep }),
+    ...(options.go === undefined ? {} : { go: options.go }),
+    ...(options.foundry === undefined ? {} : { foundry: options.foundry }),
     ...(options.browser === undefined ? {} : { browser: options.browser }),
     ...(options.workflowLint === undefined ? {} : { workflowLint: options.workflowLint }),
     ...(options.artifacts === undefined ? {} : { artifacts: options.artifacts })
