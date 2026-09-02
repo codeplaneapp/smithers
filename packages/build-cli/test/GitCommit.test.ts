@@ -39,6 +39,17 @@ const temporaryRepo = async (): Promise<string> => {
   return root
 }
 
+/** A throwaway repository with tracked files inside and outside a commit scope. */
+const scopedRepo = async (): Promise<string> => {
+  const root = await temporaryRepo()
+  await Fs.mkdir(NodePath.join(root, "scope"), { recursive: true })
+  await Fs.writeFile(NodePath.join(root, "scope/owned.txt"), "owned baseline\n", "utf8")
+  await Fs.writeFile(NodePath.join(root, "outside-tracked.txt"), "outside baseline\n", "utf8")
+  await git(root, ["add", "-A"])
+  await git(root, ["commit", "--quiet", "-m", "scope baseline"])
+  return root
+}
+
 const head = (root: string): Promise<string> => git(root, ["rev-parse", "HEAD"]).then((sha) => sha.trim())
 
 const gateTarget = (): Target.AnyTarget => S.Memory.Retain({ source: S.gitCommit("HEAD"), tags: ["gate"] })
@@ -113,6 +124,94 @@ describe("commit with fake gates", () => {
     })
     expect(result.message).toBe("fix: override wins")
     expect(await git(root, ["log", "-1", "--format=%s"])).toBe("fix: override wins\n")
+  })
+})
+
+describe("commit scope", () => {
+  it("a scoped commit leaves a concurrent unrelated edit out of the commit and in the working tree", async () => {
+    const root = await scopedRepo()
+    await Fs.writeFile(NodePath.join(root, "scope/owned.txt"), "owned change\n", "utf8")
+    await Fs.writeFile(NodePath.join(root, "outside-tracked.txt"), "concurrent change\n", "utf8")
+    await Fs.writeFile(NodePath.join(root, "outside-untracked.txt"), "concurrent addition\n", "utf8")
+
+    const result = await GitCommit.commit({
+      root,
+      target: fixedCommit(),
+      gateRunner: greenGates,
+      paths: ["scope/owned.txt"]
+    })
+
+    expect(await git(root, ["show", "--name-only", "--pretty=format:", "HEAD"])).toBe("scope/owned.txt\n")
+    expect(result.staged).toEqual(["scope/owned.txt"])
+    expect(await git(root, ["status", "--porcelain"])).toBe(
+      " M outside-tracked.txt\n?? outside-untracked.txt\n"
+    )
+  })
+
+  it("a scoped commit stages a deletion inside the scope", async () => {
+    const root = await scopedRepo()
+    await Fs.rm(NodePath.join(root, "scope/owned.txt"))
+    await Fs.writeFile(NodePath.join(root, "outside-tracked.txt"), "concurrent change\n", "utf8")
+
+    const result = await GitCommit.commit({
+      root,
+      target: fixedCommit(),
+      gateRunner: greenGates,
+      paths: ["scope/owned.txt"]
+    })
+
+    expect(result.staged).toEqual(["scope/owned.txt"])
+    expect(await git(root, ["ls-tree", "--name-only", "HEAD", "--", "scope/owned.txt"])).toBe("")
+    expect(await git(root, ["status", "--porcelain"])).toBe(" M outside-tracked.txt\n")
+  })
+
+  it("an unscoped commit reports every path it swept", async () => {
+    const root = await scopedRepo()
+    await Fs.writeFile(NodePath.join(root, "scope/owned.txt"), "owned change\n", "utf8")
+    await Fs.writeFile(NodePath.join(root, "outside-tracked.txt"), "concurrent change\n", "utf8")
+    await Fs.writeFile(NodePath.join(root, "outside-untracked.txt"), "concurrent addition\n", "utf8")
+
+    const result = await GitCommit.commit({
+      root,
+      target: fixedCommit(),
+      gateRunner: greenGates
+    })
+
+    expect(result.staged).toEqual(["outside-tracked.txt", "outside-untracked.txt", "scope/owned.txt"])
+  })
+
+  it("refuses an empty scope", async () => {
+    const root = await scopedRepo()
+    await Fs.writeFile(NodePath.join(root, "scope/owned.txt"), "owned change\n", "utf8")
+    const before = await git(root, ["status", "--porcelain"])
+
+    const error = await failure(GitCommit.commit({
+      root,
+      target: fixedCommit(),
+      gateRunner: greenGates,
+      paths: []
+    }))
+
+    expect(error.code).toBe("invalid_paths")
+    expect(await git(root, ["status", "--porcelain"])).toBe(before)
+  })
+
+  it("refuses a blank pathspec", async () => {
+    const root = await scopedRepo()
+    await Fs.writeFile(NodePath.join(root, "scope/owned.txt"), "owned change\n", "utf8")
+    const before = await git(root, ["status", "--porcelain"])
+
+    const error = await failure(GitCommit.commit({
+      root,
+      target: fixedCommit(),
+      gateRunner: greenGates,
+      paths: ["scope/owned.txt", " \t"]
+    }))
+
+    expect(error.code).toBe("invalid_paths")
+    expect(error.message).toContain("pathspec at index 1")
+    expect(error.message).toContain(JSON.stringify(" \t"))
+    expect(await git(root, ["status", "--porcelain"])).toBe(before)
   })
 })
 

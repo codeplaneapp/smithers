@@ -25,8 +25,9 @@ These take `--workspace, -w <dir>` (default: the current directory) and
 graph without executing it; `--mermaid` renders a flowchart instead of a text
 tree, in both BUILD mode and package mode.
 
-`install` plans and executes the install Flow. It refuses to run in a package
-mode workspace.
+`install` plans and executes the install Flow under the package manager and
+runtime named by the root BUILD.ts `Install` declaration. It falls back to pnpm
+on node when the workspace declares none, and refuses to run in package mode.
 
 ## Execution commands
 

@@ -443,7 +443,10 @@ describe("edges and bounds", () => {
     expect(packageDirectoryOf(root, "")).toBe("")
     expect(packageDirectoryOf(root, root)).toBe("")
     expect(packageDirectoryOf(root, NodePath.join(root, "packages", "app"))).toBe("packages/app")
+    expect(packageDirectoryOf(root, NodePath.join(root, "..foo"))).toBe("..foo")
     expect(() => packageDirectoryOf(root, NodePath.dirname(root))).toThrow(ResolverConfigError)
+    expect(() => packageDirectoryOf(root, NodePath.join(NodePath.dirname(root), "outside")))
+      .toThrow(ResolverConfigError)
   })
 
   it("treats a malformed package.json as a manifest-less package", async () => {

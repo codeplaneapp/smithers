@@ -23,6 +23,7 @@ import * as NodePath from "node:path"
 import { pathToFileURL } from "node:url"
 import { buildModuleUrl, importDeclarationModule, installEffectResolution } from "./effect-resolution.js"
 import { errorCode, failureMessage, optionalOpenFlag } from "./internal/Fs.ts"
+import * as Path from "./internal/Path.ts"
 import { byCodeUnit, posix } from "./internal/Text.ts"
 import * as Label from "./Label.ts"
 
@@ -480,6 +481,31 @@ export const resolveConfig = async (
 }
 
 /**
+ * Resolves the root Install target's declared attributes.
+ *
+ * The `install` verb executes a Flow the workspace may not have declared as a
+ * target at all, so the CLI reads the declared attrs and hands them to
+ * `declaredToolchain` rather than assuming the default manager. The namespace
+ * import is the memoized one that {@link resolveConfig} already performed.
+ *
+ * @category discovery
+ * @since 0.1.0
+ * @slop
+ */
+export const resolveInstallAttrs = async (root: string): Promise<unknown> => {
+  const canonical = await SafeFs.canonicalRoot(root)
+  const entry = await buildEntry(canonical, "BUILD.ts")
+  if (entry === undefined) return undefined
+  const namespace = await importNamespace(entry)
+  for (const [, value] of Object.entries(Object(namespace)).sort(([left], [right]) => byCodeUnit(left, right))) {
+    if (!Target.isTarget(value)) continue
+    const metadata = Target.metadata(value)
+    if (metadata.target === "Install") return metadata.attrs
+  }
+  return undefined
+}
+
+/**
  * Which credentials a workspace declared for its remote cache.
  *
  * A remote build cache has untrusted readers and trusted writers: every job
@@ -886,10 +912,7 @@ export class Workspace {
       ? Config.defaultCacheDirectory
       : Config.normalizeCacheDirectory(options.cacheDirectory)
     const resolvedCwd = NodePath.resolve(cwd)
-    const relativeCwd = NodePath.relative(absolute, resolvedCwd)
-    const effectiveCwd = relativeCwd.startsWith("..") || NodePath.isAbsolute(relativeCwd)
-      ? absolute
-      : resolvedCwd
+    const effectiveCwd = Path.contains(absolute, resolvedCwd) ? resolvedCwd : absolute
     return new Workspace(
       absolute,
       effectiveCwd,

@@ -377,8 +377,8 @@ export const resolveChangedPath = (root: string, path: string): string | undefin
     }
   }
   const realRoot = NodeFs.realpathSync(root)
-  const relative = NodePath.relative(realRoot, real)
-  if (relative === "" || relative.startsWith("..") || NodePath.isAbsolute(relative)) return undefined
+  const relative = Path.containedRelative(realRoot, real)
+  if (relative === undefined || relative === "") return undefined
   return posix(relative)
 }
 
@@ -704,10 +704,9 @@ export const snapshotPortals = async (
     } catch {
       continue
     }
-    const relative = NodePath.relative(realRoot, realTarget)
     // A symlink resolving inside the workspace is judged by the git write-set,
     // not here; only an escaping one is a portal.
-    if (relative === "" || (!relative.startsWith("..") && !NodePath.isAbsolute(relative))) continue
+    if (Path.contains(realRoot, realTarget)) continue
     let states: Map<string, PathState>
     try {
       states = await walkPortalTarget(realTarget)
@@ -1244,8 +1243,7 @@ export const materializeManifest = async (
       // file written through the link; resolving the real parent and checking
       // it stays under the temp root closes that write-through path regardless.
       const realParent = await Fs.realpath(parentDirectory)
-      const relative = NodePath.relative(tempReal, realParent)
-      if (relative !== "" && (relative.startsWith("..") || NodePath.isAbsolute(relative))) {
+      if (!Path.contains(tempReal, realParent)) {
         throw new Error(`materialize refused a path that leaves the outDir: ${entry.path}`)
       }
       if (entry.kind === "link") {

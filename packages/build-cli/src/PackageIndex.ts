@@ -13,8 +13,8 @@
 import * as PackageValue from "@smthrs/targets/Package"
 import * as Target from "@smthrs/targets/Target"
 import * as WorkspaceDeclaration from "@smthrs/targets/WorkspaceDeclaration"
-import * as NodePath from "node:path"
-import { byCodeUnit } from "./internal/Text.ts"
+import * as Path from "./internal/Path.ts"
+import { byCodeUnit, posix } from "./internal/Text.ts"
 import * as Label from "./Label.ts"
 import { PackageError } from "./PackageError.ts"
 import type { LoadedGraph } from "./PackageLoader.ts"
@@ -255,9 +255,9 @@ export class PackageIndex {
       instanceChecked.add(target)
       const source = Target.metadata(target).sourceFile
       if (source === undefined) return
-      const relative = NodePath.relative(graph.root, source)
-      if (relative === "" || relative.startsWith("..") || NodePath.isAbsolute(relative)) return
-      const posixRelative = relative.split(NodePath.sep).join("/")
+      const relative = Path.containedRelative(graph.root, source)
+      if (relative === undefined || relative === "") return
+      const posixRelative = posix(relative)
       const exact = declarationFiles.get(posixRelative.toLowerCase())
       if (exact !== undefined && exact !== posixRelative) {
         throw new PackageError(

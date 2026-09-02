@@ -5,6 +5,7 @@
  */
 import * as ChildProcess from "node:child_process"
 import { createHash } from "node:crypto"
+import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
@@ -27,6 +28,20 @@ afterEach(async () => {
 })
 
 const sha256 = (bytes: string): string => createHash("sha256").update(bytes).digest("hex")
+
+describe("resolveChangedPath", () => {
+  it("admits a two-dot-prefixed child and refuses a genuine escape", () => {
+    const workspace = NodeFs.realpathSync(NodeFs.mkdtempSync(NodePath.join(root, "changed-")))
+    const prefixed = NodePath.join(workspace, "..foo")
+    NodeFs.mkdirSync(prefixed)
+    NodeFs.writeFileSync(NodePath.join(prefixed, "file.txt"), "inside\n")
+    const external = NodePath.join(root, "outside.txt")
+    NodeFs.writeFileSync(external, "outside\n")
+
+    expect(PackageTree.resolveChangedPath(workspace, "..foo/file.txt")).toBe("..foo/file.txt")
+    expect(PackageTree.resolveChangedPath(workspace, NodePath.relative(workspace, external))).toBeUndefined()
+  })
+})
 
 describe("decodeManifest confines every untrusted path", () => {
   it("rejects an outDir that escapes the workspace with ..", () => {

@@ -62,6 +62,7 @@ import * as GitCommit from "./GitCommit.ts"
 import * as GithubRender from "./GithubRender.ts"
 import * as GitSubmoduleExec from "./GitSubmoduleExec.ts"
 import * as GoExec from "./GoExec.ts"
+import * as Path from "./internal/Path.ts"
 import { posix, sha256Hex } from "./internal/Text.ts"
 import * as MemoryBackend from "./MemoryBackend.ts"
 import * as OverlayExec from "./OverlayExec.ts"
@@ -1258,9 +1259,9 @@ const resolveBun = async (context: PlanContext): Promise<ToolOutcome> => {
 const packagePathOf = (context: PlanContext, target: Target.AnyTarget): string => {
   const source = Target.metadata(target).sourceFile
   if (source !== undefined) {
-    const relative = NodePath.relative(context.root, NodePath.dirname(source))
+    const relative = Path.containedRelative(context.root, NodePath.dirname(source))
     if (relative === "") return ""
-    if (!relative.startsWith("..") && !NodePath.isAbsolute(relative)) return posix(relative)
+    if (relative !== undefined) return posix(relative)
   }
   return context.index.ownerOf(target) ?? ""
 }
@@ -4949,9 +4950,18 @@ export const execute = async (
               target: node.declaration,
               gateRunner: commitGateRunner,
               agentMessage: agentMessageComposer(signal),
+              // `Git.Commit` attrs cannot express a scope today. The write set is the only
+              // available scope, and it stays empty until the rule declares one.
+              ...(node.writeSet.length === 0 ? {} : { paths: node.writeSet }),
               messageOverride: options.message
             })
-            log(`${node.label}  committed ${result.sha.slice(0, 12)}: ${result.message.split("\n")[0] ?? ""}`)
+            if (node.writeSet.length === 0) {
+              reporter.warn(`${node.label}  staged the whole working tree: Git.Commit declares no path scope`)
+            }
+            log(
+              `${node.label}  committed ${result.sha.slice(0, 12)}: ${result.message.split("\n")[0] ?? ""}; ` +
+                `${result.staged.length} file(s)`
+            )
             return green("ran")
           } catch (cause) {
             if (GitCommit.isGitCommitError(cause)) return fail(cause.message)

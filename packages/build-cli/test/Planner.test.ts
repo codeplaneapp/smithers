@@ -17,6 +17,7 @@ import * as NodePath from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   encodeKeyMaterial,
+  EXECUTION_FORMAT,
   fingerprintSources,
   implementationFingerprint,
   type KeyMaterial,
@@ -27,6 +28,32 @@ import {
 } from "../src/Planner.ts"
 
 const material = (body: unknown): KeyMaterial => ({ body, inputs: null, layers: [], capabilities: [] })
+
+type RandomValue =
+  | undefined
+  | null
+  | boolean
+  | number
+  | string
+  | Array<RandomValue>
+  | { readonly [key: string]: RandomValue }
+
+/** Advances one deterministic 32-bit linear congruential generator state. */
+const nextRandom = (state: number): number => (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0
+
+/** Compares generated plain data without consulting the key encoder. */
+const sameValue = (left: RandomValue, right: RandomValue): boolean => {
+  if (Object.is(left, right)) return true
+  if (left === null || right === null || typeof left !== "object" || typeof right !== "object") return false
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false
+    return left.every((value, index) => sameValue(value, right[index]))
+  }
+  const leftKeys = Object.keys(left).sort()
+  const rightKeys = Object.keys(right).sort()
+  if (leftKeys.length !== rightKeys.length) return false
+  return leftKeys.every((key, index) => key === rightKeys[index] && sameValue(left[key], right[key]))
+}
 
 const temporaries: Array<string> = []
 
@@ -48,6 +75,47 @@ afterEach(async () => {
 })
 
 describe("keyOf", () => {
+  /**
+   * This wire-format golden pins the bytes that address every stored local and
+   * remote cache entry. A tagging change invalidates that cache, so it must be
+   * a deliberate edit to this literal and never a silent refactor.
+   */
+  it("pins every encodable form in one golden vector", () => {
+    const golden: KeyMaterial = {
+      body: {
+        text: "é😀",
+        zero: 0,
+        negativeZero: -0,
+        negative: -17,
+        fractional: 1.25,
+        truth: true,
+        falsehood: false,
+        nullable: null,
+        undefinedMember: undefined,
+        emptyArray: [],
+        nestedArray: [1, ["inner", null]],
+        emptyObject: {},
+        nestedObject: { child: { value: "leaf" } },
+        Z: "code-unit first",
+        a: "locale first"
+      },
+      layers: ["layer:base", "layer:runtime"],
+      capabilities: ["fs:read", "process:spawn"],
+      inputs: { source: "src/input.ts", flags: [true, undefined] }
+    }
+
+    expect(encodeKeyMaterial(golden)).toBe(
+      "smithers-build-key/1\u0000o4:s4:bodyo15:s1:Zs15:code-unit firsts1:as12:locale firsts10:emptyArraya0:s11:emptyObjecto0:s9:falsehoodfs10:fractionald1.25;s8:negatived-17;s12:negativeZerod-0;s11:nestedArraya2:d1;a2:s5:innerns12:nestedObjecto1:s5:childo1:s5:values4:leafs8:nullablens4:texts3:é😀s5:truthts15:undefinedMemberus4:zerod0;s12:capabilitiesa2:s7:fs:reads13:process:spawns6:inputso2:s5:flagsa2:tus6:sources12:src/input.tss6:layersa2:s10:layer:bases13:layer:runtime"
+    )
+    expect(keyOf(golden)).toBe("d0c04dc0dad69b4aa998bf992c47a6f1a89d726567d5db243a626d0495a342ee")
+  })
+
+  it("pins the execution cache format number", () => {
+    // The number is part of every cache address. Bumping it declares a format
+    // change, so this assertion forces that bump to be intentional.
+    expect(EXECUTION_FORMAT).toBe(5)
+  })
+
   it("hashes object keys in code-unit order, independent of the host locale", () => {
     // `localeCompare` answers differently under different host locales and ICU
     // versions: in an English locale `a` sorts before `Z`, by code unit `Z`
@@ -165,6 +233,84 @@ describe("keyOf", () => {
     const holder = Object.create(null) as Record<string, unknown>
     holder["a"] = 1
     expect(keyOf(material(holder))).toBe(keyOf(material({ a: 1 })))
+  })
+
+  /**
+   * This property uses a hand-written structural oracle because comparing the
+   * encoder against itself would prove nothing. The oracle checks both that one
+   * encoding never groups different values and that equal values never split
+   * across encodings.
+   */
+  it("is injective across a deterministic generated corpus", () => {
+    let state = 0x5eed_c0de
+    const randomInt = (limit: number): number => {
+      state = nextRandom(state)
+      return state % limit
+    }
+    const stringAlphabet = ["a", "Z", "0", "é", "😀"]
+    const objectKeys = ["a", "b", "c", "Z", "x", "y"]
+    const randomString = (): string => {
+      const length = randomInt(7)
+      return Array.from({ length }, () => stringAlphabet[randomInt(stringAlphabet.length)]).join("")
+    }
+    const randomValue = (depth: number): RandomValue => {
+      const form = randomInt(depth === 4 ? 5 : 7)
+      switch (form) {
+        case 0:
+          return undefined
+        case 1:
+          return null
+        case 2:
+          return randomInt(2) === 0
+        case 3:
+          return randomInt(129) - 64
+        case 4:
+          return randomString()
+        case 5:
+          return Array.from({ length: randomInt(7) }, () => randomValue(depth + 1))
+        default: {
+          const value: Record<string, RandomValue> = {}
+          const members = randomInt(7)
+          for (let index = 0; index < members; index += 1) {
+            value[objectKeys[randomInt(objectKeys.length)]!] = randomValue(depth + 1)
+          }
+          return value
+        }
+      }
+    }
+
+    const corpus = Array.from({ length: 8_192 }, () => randomValue(0))
+    const groups = new Map<string, Array<RandomValue>>()
+    for (const value of corpus) {
+      const encoding = encodeKeyMaterial(material(value))
+      const group = groups.get(encoding)
+      if (group === undefined) groups.set(encoding, [value])
+      else group.push(value)
+    }
+
+    expect(groups.size).toBeGreaterThanOrEqual(1_500)
+    let collision: { readonly encoding: string; readonly left: RandomValue; readonly right: RandomValue } | undefined
+    for (const [encoding, group] of groups) {
+      const first = group[0]!
+      const different = group.findIndex((value) => !sameValue(first, value))
+      if (different !== -1) {
+        collision = { encoding, left: first, right: group[different]! }
+        break
+      }
+    }
+    expect(collision).toBeUndefined()
+
+    const representatives = [...groups.entries()].map(([encoding, values]) => ({ encoding, value: values[0]! }))
+    let split: { readonly left: string; readonly right: string } | undefined
+    findSplit: for (let left = 0; left < representatives.length; left += 1) {
+      for (let right = left + 1; right < representatives.length; right += 1) {
+        if (sameValue(representatives[left]!.value, representatives[right]!.value)) {
+          split = { left: representatives[left]!.encoding, right: representatives[right]!.encoding }
+          break findSplit
+        }
+      }
+    }
+    expect(split).toBeUndefined()
   })
 })
 

@@ -1,6 +1,16 @@
 /**
  * Programmatic smithers-build CLI modules.
  *
+ * The barrel is a curated convenience, not the surface. `package.json` maps
+ * `./*` onto `src/*.ts`, so every module is importable by its own path whether
+ * or not it is named here. A module earns a namespace re-export when a host
+ * embedding the CLI drives it directly: the session and gate fakes an
+ * integration test injects, the target executors it invokes on their own, the
+ * planner and the renderers it reads results through, and the workspace
+ * loader it opens a tree with. The planner internals, the cache, and the
+ * package-mode execution engine are reached through those, so they are left to
+ * the wildcard rather than listed twice.
+ *
  * @since 0.1.0
  */
 

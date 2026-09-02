@@ -41,6 +41,10 @@ export default tseslint.config(
     },
     settings: {
       "import/resolver": {
+        // Package metadata may share a subpath name with a TypeScript export, so Node must not bypass package exports.
+        node: {
+          extensions: [".js", ".jsx", ".mjs", ".cjs"]
+        },
         typescript: {
           project: ["./tsconfig.json"]
         }

@@ -34,6 +34,25 @@ describe("Query.text", () => {
     expect(styled).toContain("\u001b[32mtest\u001b[39m")
   })
 
+  it("renders a package refusal in plain and coloured listings", () => {
+    const refused: Query.Listing = {
+      query: "//src:missing",
+      targets: [{
+        label: "//src:missing",
+        target: "Repo.Target",
+        kinds: ["build"],
+        refusal: "repository unavailable"
+      }]
+    }
+    const plain = [
+      "LABEL          TARGET       KINDS",
+      "//src:missing  Repo.Target  build  (refused: repository unavailable)"
+    ].join("\n")
+
+    expect(Query.text(refused)).toBe(plain)
+    expect(Ansi.strip(Query.text(refused, Ansi.colors))).toBe(plain)
+  })
+
   it("names an empty listing", () => {
     expect(Query.text({ query: "//nope", targets: [] })).toBe("no targets match //nope")
   })

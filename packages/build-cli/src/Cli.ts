@@ -17,7 +17,7 @@ import * as Ansi from "./Ansi.ts"
 import { normalizePublishNamespace } from "./Cache.ts"
 import * as CreateApp from "./CreateApp.ts"
 import * as Diagnostic from "./Diagnostic.ts"
-import { runInstall } from "./engine.ts"
+import { declaredToolchain, runInstall } from "./engine.ts"
 import * as Executor from "./Executor.ts"
 import * as GitHooks from "./GitHooks.ts"
 import * as GraphOutput from "./GraphOutput.ts"
@@ -36,6 +36,7 @@ import {
   remoteCacheOf,
   resolveConfig,
   type ResolvedRemoteCache,
+  resolveInstallAttrs,
   resolveRemoteCache,
   Workspace
 } from "./Workspace.ts"
@@ -707,6 +708,8 @@ export const makeCli = (config: RuntimeConfig = {}) =>
           const prepared = await prepare(context.options, config)
           return await runInstall(prepared.root, {
             cacheDirectory: prepared.cacheDirectory,
+            // runInstall is a library entry point with no workspace discovery, so the CLI reads attrs here.
+            toolchain: declaredToolchain(await resolveInstallAttrs(prepared.root)),
             sensitiveEnvironment: prepared.remoteCache === undefined
               ? []
               : credentialEnvNames(prepared.remoteCache.credentials),

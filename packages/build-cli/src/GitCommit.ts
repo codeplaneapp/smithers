@@ -1,13 +1,13 @@
 /**
  * Executes one `Git.Commit` target: stage, gate, message, commit.
  *
- * The sequence is fixed. The whole tree is staged first so the gates check
- * the exact candidate that will be committed. The gates then run through the
- * injected {@link GateRunner}; a red gate refuses the commit with a typed
- * error and creates nothing. The message is the `-m` override when the
- * invoker passed one, the declared fixed text otherwise, or the injected
- * {@link AgentMessage} composition when the declaration names an agent.
- * Only then is the commit created.
+ * The sequence is fixed. The owned paths, or the whole tree when no scope is
+ * present, are staged first so the gates check the exact candidate that will
+ * be committed. The gates then run through the injected {@link GateRunner};
+ * a red gate refuses the commit with a typed error and creates nothing. The
+ * message is the `-m` override when the invoker passed one, the declared fixed
+ * text otherwise, or the injected {@link AgentMessage} composition when the
+ * declaration names an agent. Only then is the commit created.
  *
  * Both collaborators are interfaces because their real implementations are
  * integration concerns: the real GateRunner is the executor running gate
@@ -30,6 +30,7 @@ import * as NodeChildProcess from "node:child_process"
  */
 export type ErrorCode =
   | "not_a_git_repository"
+  | "invalid_paths"
   | "nothing_to_commit"
   | "gates_failed"
   | "agent_message_unavailable"
@@ -115,6 +116,13 @@ export interface AgentMessage {
 export interface CommitResult {
   readonly sha: string
   readonly message: string
+  /**
+   * The paths recorded in the created commit.
+   *
+   * An unscoped stage sweeps whatever the working tree carries, so callers
+   * use this list to report what entered the commit instead of assuming.
+   */
+  readonly staged: ReadonlyArray<string>
 }
 
 /** Maximum staged-diff code units handed to an agent composition. */
@@ -177,6 +185,13 @@ const gitOk = async (root: string, args: ReadonlyArray<string>): Promise<GitOutp
 export interface CommitOptions {
   /** The repository root the commit is created in. */
   readonly root: string
+  /**
+   * The pathspecs this commit owns, or undefined to stage the whole tree.
+   *
+   * A scoped stage leaves a concurrent unrelated edit elsewhere unstaged and
+   * uncommitted. Current `Git.Commit` attrs can express only the unscoped form.
+   */
+  readonly paths?: ReadonlyArray<string> | undefined
   /** The `Git.Commit` target whose validated attrs drive the invocation. */
   readonly target: Target.AnyTarget
   /** Runs the declared gates against the staged tree. */
@@ -194,15 +209,26 @@ export interface CommitOptions {
  * @since 0.1.0
  */
 export const commit = async (options: CommitOptions): Promise<CommitResult> => {
+  const paths = options.paths
+  if (paths !== undefined) {
+    if (paths.length === 0) {
+      throw new GitCommitError("invalid_paths", "paths is an empty scope; omit it only to stage the whole tree")
+    }
+    for (const [index, path] of paths.entries()) {
+      if (path.trim() === "") {
+        throw new GitCommitError("invalid_paths", `pathspec at index ${index} is blank: ${JSON.stringify(path)}`)
+      }
+    }
+  }
   const attrs = GitTarget.commitAttrsOf(options.target)
   const inside = await git(options.root, ["rev-parse", "--is-inside-work-tree"])
   if (inside.exitCode !== 0 || inside.stdout.trim() !== "true") {
     throw new GitCommitError("not_a_git_repository", `${options.root} is not inside a git work tree`)
   }
-  // Stage the whole tree first so the gates and the commit see one candidate.
-  await gitOk(options.root, ["add", "-A"])
-  const staged = await git(options.root, ["diff", "--cached", "--quiet"])
-  if (staged.exitCode === 0) {
+  // `-A` includes deletions owned by the scope; `--` protects a pathspec that starts with a dash.
+  await gitOk(options.root, paths === undefined ? ["add", "-A"] : ["add", "-A", "--", ...paths])
+  const candidate = await git(options.root, ["diff", "--cached", "--quiet"])
+  if (candidate.exitCode === 0) {
     throw new GitCommitError("nothing_to_commit", "the staged tree is identical to HEAD")
   }
   const failures = await options.gateRunner.run(attrs.gates)
@@ -240,7 +266,9 @@ export const commit = async (options: CommitOptions): Promise<CommitResult> => {
   if (message.trim() === "") {
     throw new GitCommitError("empty_message", "the commit message is empty")
   }
+  const staged = (await gitOk(options.root, ["diff", "--cached", "--name-only", "-z"]))
+    .stdout.split("\0").slice(0, -1)
   await gitOk(options.root, ["-c", "commit.gpgsign=false", "commit", "-m", message])
   const sha = await gitOk(options.root, ["rev-parse", "HEAD"])
-  return { sha: sha.stdout.trim(), message }
+  return { sha: sha.stdout.trim(), message, staged }
 }

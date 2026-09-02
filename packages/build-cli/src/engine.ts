@@ -306,15 +306,19 @@ export const declaredToolchain = (attrs: unknown): Toolchain => {
 /**
  * The runtime layer for this host.
  *
- * The platform is read here, at the composition root, and passed in. Neither
- * the runtime service nor the package-manager service reads `process` itself,
- * which is what keeps both browser-bundleable.
+ * The platform and a sanitized host-environment snapshot are read here, at
+ * the composition root, and passed in. The runtime selects only executable
+ * lookup names from that snapshot, so a workspace-declared `--version` probe
+ * cannot inherit CI credentials.
  *
  * @category layers
  * @since 0.1.0
  * @slop
  */
-export const layerRuntime = (toolchain: Toolchain) => {
+export const layerRuntime = (
+  toolchain: Toolchain,
+  environment: Readonly<Record<string, string | undefined>> = packageManagerEnvironment(process.env)
+) => {
   const options = {
     requirement: toolchain.runtimeVersion,
     platform: {
@@ -322,6 +326,7 @@ export const layerRuntime = (toolchain: Toolchain) => {
       arch: process.arch,
       libc: null
     },
+    environment,
     ...(toolchain.runtimeExecutable === undefined ? {} : { executable: toolchain.runtimeExecutable })
   }
   return toolchain.runtime === "bun" ? Runtime.layerBun(options) : Runtime.layerNode(options)
@@ -352,7 +357,7 @@ export const layerPackageManager = (
   const manager = toolchain.manager === "bun"
     ? PackageManager.layerBun(options)
     : PackageManager.layerPnpm(options)
-  return manager.pipe(Layer.provideMerge(layerRuntime(toolchain)))
+  return manager.pipe(Layer.provideMerge(layerRuntime(toolchain, environment)))
 }
 
 /**

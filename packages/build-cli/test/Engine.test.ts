@@ -1,7 +1,51 @@
+import * as Runtime from "@smthrs/build/Runtime"
+import * as Effect from "effect/Effect"
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { packageManagerEnvironment, runInstall } from "../src/engine.ts"
+import { layerNonInteractiveNodeServices, layerRuntime, packageManagerEnvironment, runInstall } from "../src/engine.ts"
 
 describe("install engine boundary", () => {
+  it.skipIf(process.platform === "win32")(
+    "withholds ambient credentials from a production runtime probe",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "smithers-runtime-probe-"))
+      const executable = join(root, "runtime-probe.mjs")
+      const observed = join(root, "observed.json")
+      await writeFile(
+        executable,
+        `#!/usr/bin/env node\n` +
+          `import { writeFileSync } from "node:fs"\n` +
+          `writeFileSync(${JSON.stringify(observed)}, JSON.stringify(process.env.RUNTIME_PROBE_SECRET ?? null))\n` +
+          `process.stdout.write("1.0.0\\n")\n`
+      )
+      await chmod(executable, 0o755)
+      process.env.RUNTIME_PROBE_SECRET = "must-not-cross"
+      try {
+        const toolchain = {
+          manager: "pnpm" as const,
+          managerVersion: ">=0.0.0",
+          managerExecutable: undefined,
+          runtime: "node" as const,
+          runtimeVersion: "1.0.0",
+          runtimeExecutable: executable
+        }
+        const version = await Effect.runPromise(
+          Effect.flatMap(Runtime.Runtime, (runtime) => runtime.version).pipe(
+            Effect.provide(layerRuntime(toolchain)),
+            Effect.provide(layerNonInteractiveNodeServices)
+          )
+        )
+        expect(version).toBe("1.0.0")
+        expect(JSON.parse(await readFile(observed, "utf8"))).toBeNull()
+      } finally {
+        delete process.env.RUNTIME_PROBE_SECRET
+        await rm(root, { force: true, recursive: true })
+      }
+    }
+  )
+
   it("withholds default and workspace-declared cache credentials from package managers", () => {
     const environment = packageManagerEnvironment(
       {

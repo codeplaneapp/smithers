@@ -46,6 +46,7 @@ import { builtinModules } from "node:module"
 import * as NodePath from "node:path"
 import * as ts from "typescript"
 import type { CachedResult, CacheStore } from "./Cache.ts"
+import * as Path from "./internal/Path.ts"
 import { posix, sha256Hex as sha256 } from "./internal/Text.ts"
 
 /**
@@ -195,8 +196,8 @@ interface TsconfigLayer {
 }
 
 const workspaceRelative = (workspaceRoot: string, absolute: string, what: string): string => {
-  const relative = NodePath.relative(workspaceRoot, absolute)
-  if (relative.startsWith("..") || NodePath.isAbsolute(relative)) {
+  const relative = Path.containedRelative(workspaceRoot, absolute)
+  if (relative === undefined) {
     throw new ResolverConfigError(`${what} resolves outside the workspace: ${absolute}`)
   }
   return posix(relative)
@@ -956,11 +957,11 @@ export const computeClosure = async (options: {
  */
 export const packageDirectoryOf = (workspaceRoot: string, base: string): string => {
   if (base === "") return ""
-  const relative = NodePath.relative(NodePath.resolve(workspaceRoot), base)
-  if (relative === "") return ""
-  if (relative.startsWith("..") || NodePath.isAbsolute(relative)) {
+  const relative = Path.containedRelative(NodePath.resolve(workspaceRoot), base)
+  if (relative === undefined) {
     throw new ResolverConfigError(`anchored source is declared outside the workspace: ${base}`)
   }
+  if (relative === "") return ""
   return posix(relative)
 }
 

@@ -2,6 +2,7 @@ import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { declaredToolchain, defaultToolchain } from "../src/engine.ts"
 import * as Planner from "../src/Planner.ts"
 import {
   discoverable,
@@ -9,6 +10,7 @@ import {
   isGitPath,
   maximumGitignoreBytes,
   resolveConfig,
+  resolveInstallAttrs,
   resolveRemoteCache,
   Workspace
 } from "../src/Workspace.ts"
@@ -146,6 +148,60 @@ describe("resolveConfig", () => {
         "}\n"
     )
     await expect(resolveConfig(root)).rejects.toThrow(/must not leave the workspace/)
+  })
+})
+
+describe("resolveInstallAttrs", () => {
+  it("reads the Install target's declared package manager", async () => {
+    await write(
+      "BUILD.ts",
+      `import * as Smithers from "${NodePath.resolve(import.meta.dirname, "../../targets/src/Smithers.ts")}"\n` +
+        "const runtime = Smithers.Runtime.Bun({ version: \">=1.3.0\" })\n" +
+        "const packageManager = Smithers.PackageManager.BunPackages({ runtime })\n" +
+        "export const install = Smithers.Install({ packageManager })\n"
+    )
+
+    expect(declaredToolchain(await resolveInstallAttrs(root)).manager).toBe("bun")
+  })
+
+  it("returns undefined for a workspace with no Install target", async () => {
+    await write(
+      "BUILD.ts",
+      `import * as Smithers from "${NodePath.resolve(import.meta.dirname, "../../targets/src/Smithers.ts")}"\n` +
+        "const runtime = Smithers.Runtime.Bun({ version: \">=1.3.0\" })\n" +
+        "const packageManager = Smithers.PackageManager.BunPackages({ runtime })\n" +
+        "export const lockfile = Smithers.Lockfile({ packageManager })\n" +
+        "export const nothing = 1\n"
+    )
+
+    const attrs = await resolveInstallAttrs(root)
+    expect(attrs).toBeUndefined()
+    expect(declaredToolchain(attrs).manager).toBe(defaultToolchain.manager)
+  })
+
+  it("returns undefined for a root with no BUILD.ts", async () => {
+    const attrs = await resolveInstallAttrs(root)
+    expect(attrs).toBeUndefined()
+    expect(declaredToolchain(attrs).manager).toBe(defaultToolchain.manager)
+  })
+
+  it("picks the same Install declaration on every run when two are exported", async () => {
+    await write(
+      "BUILD.ts",
+      `import * as Smithers from "${NodePath.resolve(import.meta.dirname, "../../targets/src/Smithers.ts")}"\n` +
+        "const runtime = Smithers.Runtime.Bun({ version: \">=1.3.0\" })\n" +
+        "export const zInstall = Smithers.Install({\n" +
+        "  packageManager: Smithers.PackageManager.BunPackages({ runtime, executable: \"z-bun\" })\n" +
+        "})\n" +
+        "export const aInstall = Smithers.Install({\n" +
+        "  packageManager: Smithers.PackageManager.BunPackages({ runtime, executable: \"a-bun\" })\n" +
+        "})\n"
+    )
+
+    const first = await resolveInstallAttrs(root)
+    const second = await resolveInstallAttrs(root)
+    expect(first).toBe(second)
+    expect(declaredToolchain(first).managerExecutable).toBe("a-bun")
   })
 })
 

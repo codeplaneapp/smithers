@@ -5,6 +5,7 @@ import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
+import { PACKAGE_EXECUTION_FORMAT } from "../src/PackageExec.ts"
 
 /** Temp directories this file created; removed after the suite so a run leaves nothing in the OS temp dir. */
 const temporaryDirectories: Array<string> = []
@@ -88,6 +89,14 @@ const keyOf = (planOutput: string, label: string): string => {
   }
   throw new Error(`no key found for ${label} in:\n${planOutput}`)
 }
+
+describe("package execution format", () => {
+  it("pins the package cache format number", () => {
+    // The number is part of every cache address. Bumping it declares a format
+    // change, so this assertion forces that bump to be intentional.
+    expect(PACKAGE_EXECUTION_FORMAT).toBe(1)
+  })
+})
 
 describe("bare-label execution and verb mapping", () => {
   it("executes a Shell.Run command target via the bare-label form", async () => {

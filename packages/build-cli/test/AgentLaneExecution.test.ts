@@ -612,7 +612,10 @@ export const Package = S.Package({ targets: { gate, redGate, commit, agentCommit
     const declared = await serve(root, ["//:commit"])
     expect(declared.exitCode).toBe(0)
     expect(declared.logs).toContain("//:gate  ran")
-    expect(declared.logs).toContain("//:commit  committed")
+    expect(declared.logs).toContain(
+      "//:commit  staged the whole working tree: Git.Commit declares no path scope"
+    )
+    expect(declared.logs).toMatch(/\/\/:commit  committed [0-9a-f]{12}: chore: declared; 1 file\(s\)/)
     expect(git(root, "log", "-1", "--format=%s").trim()).toBe("chore: declared")
     expect(git(root, "status", "--porcelain").trim()).toBe("")
 
@@ -642,6 +645,45 @@ export const Package = S.Package({ targets: { gate, redGate, commit, agentCommit
     // Nothing was staged: the refusal happened before `git add -A`.
     expect(git(root, "status", "--porcelain").trim()).toBe("?? four.txt")
     expect(base).not.toBe(head)
+  }, 120_000)
+
+  it("uses a declared write set as the commit scope", async () => {
+    const root = await temporaryWorkspace()
+    await write(root, "WORKSPACE.ts", workspaceModule())
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+import * as Target from "@smthrs/targets/Target"
+const base = S.Git.Commit({ gates: [], message: "chore: scoped" })
+const baseMetadata = Target.metadata(base)
+const attrs = Object.freeze({ ...(baseMetadata.attrs as object), changes: ["owned.txt"] })
+const scoped = Object.assign(() => undefined, base) as typeof base
+Object.defineProperty(scoped, Target.TargetTypeId, {
+  value: Object.freeze({
+    ...baseMetadata,
+    attrs,
+    forKind: (kind: Target.Kind) => ({ ...baseMetadata.forKind(kind), attrs }),
+  }),
+})
+export const Package = S.Package({ targets: { scoped } })
+`
+    )
+    await write(root, "owned.txt", "owned baseline\n")
+    await write(root, "other.txt", "other baseline\n")
+    initRepo(root)
+    commitAll(root)
+
+    await write(root, "owned.txt", "owned change\n")
+    await write(root, "other.txt", "concurrent change\n")
+    await write(root, "untracked.txt", "concurrent addition\n")
+    const scoped = await serve(root, ["//:scoped"])
+
+    expect(scoped.exitCode).toBe(0)
+    expect(scoped.logs).not.toContain("staged the whole working tree")
+    expect(scoped.logs).toMatch(/\/\/:scoped  committed [0-9a-f]{12}: chore: scoped; 1 file\(s\)/)
+    expect(git(root, "show", "--name-only", "--pretty=format:", "HEAD")).toBe("owned.txt\n")
+    expect(git(root, "status", "--porcelain")).toBe(" M other.txt\n?? untracked.txt\n")
   }, 120_000)
 })
 
