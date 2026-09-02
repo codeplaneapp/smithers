@@ -6,7 +6,7 @@ import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { Clean } from "../src/Clean.ts"
+import { Clean } from "../src/Compose.ts"
 import * as Filegroup from "../src/Filegroup.ts"
 import * as Input from "../src/Input.ts"
 import * as Target from "../src/Target.ts"
@@ -132,7 +132,7 @@ describe("Filegroup.sources", () => {
   })
 
   it("keeps a target that is not a group as a dependency contributing no files", () => {
-    const other = Clean({ runtime, paths: ["dist"], deps: [], includeNodeModules: false })
+    const other = Clean({ paths: ["dist"] })
     const group = Filegroup.Filegroup({ srcs: [other, Input.file("only.ts")] })
     expect(Filegroup.sources(Target.metadata(group).attrs as Filegroup.Attrs)).toEqual([
       { _tag: "File", path: "only.ts" }

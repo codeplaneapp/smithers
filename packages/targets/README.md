@@ -13,10 +13,17 @@ that consumes this package imports the module it needs directly instead, as
 Catalog rules reach execution by one of two routes, and the difference matters
 when you trace a failure:
 
-| Route            | Rules                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | What runs                                                             |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| Flow body        | `Typecheck`, `Vitest`, `VitestCoverage`, `VitestWatch`, `EsLint`, `Dprint`, `BiomeCheck`, `DepsLint`, `PackageLint`, `DocsParity`, `LlmLint`, `SortPackageJson`, `TsBuild`, `DtsBuild`, `ToolBuild`, `ToolRun`, `NodeTest`, `NodeBinary`, `Install`, `Lockfile`, `Tsconfig`, `PnpmWorkspace`, `Filegroup`, `NewPackage`, `GithubCiGen`, `NpmPublish`, `JsrPublish`, `TypedocDocs`, `Changesets`, `Clean`, `Dev`, `Bundler.*`, `CargoLint`, `CargoTest`, `PackageJson*` | The declaration's own plan, through the shared `Exec` action.         |
-| Package executor | every `Cargo.*`, `Go.*`, `Docker.*`, `Github.*`, `Npm.*`, `Git.*`, `Changesets.*`, `NodeArtifact` (`Copy`, `Literal`, `Overlay`), `Agent.*`, `Foundry.*`, `Shell.*`, `Memory.*`, `Anvil.Fork`, `Cron`, `Fetch`, `Repo.Target`, `Suite`, `Alias`, `Files.Test`                                                                                                                                                                                                          | `@smthrs/build-cli`'s `PackageExec` dispatches natively by rule name. |
+| Route            | What runs                                                             |
+| ---------------- | --------------------------------------------------------------------- |
+| Flow body        | The declaration's own plan, through the shared `Exec` action.         |
+| Package executor | `@smthrs/build-cli`'s `PackageExec` dispatches natively by rule name. |
+
+Which route a given rule takes is a property of its declaration, not of its
+namespace: `Shell.Run` plans an exec and `Shell.Serve` does not, and both live
+in `Shell`. [`docs/rules.md`](./docs/rules.md) lists the route of every rule in
+the catalog and is generated from the `Target.make` declarations themselves, so
+read it there rather than from a list written by hand here, which is how this
+paragraph used to be wrong about ten rules at once.
 
 A package-executor rule's Flow body is `Target.notImplemented`, so running one
 under a bare Flow runtime fails with `smithers-build/NotImplemented` rather than

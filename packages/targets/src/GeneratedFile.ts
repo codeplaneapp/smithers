@@ -96,10 +96,23 @@ export class DriftError extends Schema.TaggedError<DriftError>()(
      * file belongs, invalid UTF-8, or an oversized file all reach this error,
      * and calling any of them drift would send an operator to regenerate a
      * file whose problem regeneration does not touch.
+     *
+     * Required, not optional: an optional discriminator left every public
+     * error flow free to report the reasonless value this field exists to
+     * eliminate, so a caller still had to read the prose to tell the three
+     * apart.
      */
-    reason: Schema.optional(Schema.Literals(["missing", "drifted", "unreadable"]))
+    reason: Schema.Literals(["missing", "drifted", "unreadable"])
   }
 ) {}
+
+/**
+ * Why one generated-file check failed.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type DriftReason = DriftError["reason"]
 
 /**
  * Constructs a typed generated-file drift failure.
@@ -107,7 +120,8 @@ export class DriftError extends Schema.TaggedError<DriftError>()(
  * @category constructors
  * @since 0.1.0
  */
-export const driftError = (path: string, message: string): DriftError => new DriftError({ path, message })
+export const driftError = (path: string, message: string, reason: DriftReason): DriftError =>
+  new DriftError({ path, message, reason })
 
 /**
  * Writes one generated file.

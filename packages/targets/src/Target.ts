@@ -536,12 +536,57 @@ export const guard = <
   validate: (attrs: Attrs["~type.make.in"]) => void
 ): Definition<Id, Attrs, Success, Error, Requires> =>
   Object.assign(
-    (attrs: Attrs["~type.make.in"]): Target<Id, Attrs, Success, Error, Requires> => {
-      validate(attrs)
-      return definition(attrs)
+    (attrsInput: Attrs["~type.make.in"]): Target<Id, Attrs, Success, Error, Requires> => {
+      // The pre-validation used to read the author's own object, which put a
+      // read ahead of the construction boundary: a Proxy sprang its traps and
+      // an enumerable getter ran before either guard refused the declaration,
+      // and a getter answering differently on its two reads would be
+      // validated on one value and planned on another. Validating the
+      // snapshot puts every read behind the same boundary, and passing the
+      // snapshot on costs a second copy of plain data rather than a second
+      // read of author code.
+      const site = sourceSite()
+      let snapshot: Attrs["~type.make.in"]
+      try {
+        snapshot = snapshotAttrs(attrsInput, 0, { count: 0 }, new Map())
+      } catch (cause) {
+        throw declarationRejected(definition.id, site, cause)
+      }
+      validate(snapshot)
+      return definition(snapshot)
     },
     { id: definition.id, attrs: definition.attrs, kinds: definition.kinds }
   )
+
+/**
+ * Restores a rule's identity on the callable the catalog exports in its place.
+ *
+ * A few rules cannot be exported as their {@link Definition}: one takes no
+ * attrs in its BUILD-era form, another returns the target with a `files`
+ * projection attached. Each was written as a bare arrow, which threw away the
+ * `id`, `attrs` schema, and `kinds` that every other rule carries, so a tool
+ * reading a rule's attrs schema for validation, documentation, or editor
+ * support saw a hole where a rule should be. This keeps the wrapper's own
+ * call signature and puts the rule identity back on it.
+ *
+ * Use {@link guard} instead whenever the wrapper only pre-validates: it also
+ * moves the validation behind the construction boundary, which this does not.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const rule = <
+  Id extends string,
+  Attrs extends Flow.AnyStructSchema,
+  Success extends Schema.Top,
+  Error extends Schema.Top,
+  Requires,
+  Callable extends (...args: never) => unknown
+>(
+  definition: Definition<Id, Attrs, Success, Error, Requires>,
+  callable: Callable
+): Callable & { readonly id: Id; readonly attrs: Attrs; readonly kinds: ReadonlyArray<Kind> } =>
+  Object.assign(callable, { id: definition.id, attrs: definition.attrs, kinds: definition.kinds })
 
 /**
  * Reads the planner metadata attached by {@link make}.
@@ -694,6 +739,25 @@ const nonDataProperty = (key: string): TypeError =>
   new TypeError(`target attrs must contain only enumerable data properties; ${JSON.stringify(key)} is an accessor`)
 
 /**
+ * Names the constructor of a value the snapshot refuses to walk.
+ *
+ * The name is read off the prototype's own `constructor` descriptor rather
+ * than through a property access, so a hostile prototype cannot run a getter
+ * while the declaration is being rejected.
+ */
+const exoticValue = (value: object): TypeError => {
+  const prototype = Object.getPrototypeOf(value) as object | null
+  const descriptor = prototype === null ? undefined : Object.getOwnPropertyDescriptor(prototype, "constructor")
+  const constructor = descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined
+  const name = typeof constructor === "function" && typeof constructor.name === "string" && constructor.name !== ""
+    ? constructor.name
+    : "an object with a prototype of its own"
+  return new TypeError(
+    `target attrs must contain only plain data, targets, dependency selectors, and declared inputs; got ${name}`
+  )
+}
+
+/**
  * Attrs nesting one declaration may reach.
  *
  * @category constants
@@ -736,7 +800,14 @@ const snapshotAttrs = (
   if (isTarget(value) || isDependencySelector(value) || Input.isDeclared(value)) return value
   const prototype = Object.getPrototypeOf(value)
   const isPlainArray = Array.isArray(value) && prototype === Array.prototype
-  if (!isPlainArray && prototype !== Object.prototype && prototype !== null) return value
+  // A target, a dependency selector, and a declared input are the three
+  // handles the author legitimately passes through, and each is recognized
+  // above. Anything else carrying a prototype of its own used to pass through
+  // unwalked, which let a class instance reach the schema with its accessors
+  // intact: the decode invoked them, so the accessor guard this snapshot
+  // exists to enforce was skipped for exactly the values that could defeat
+  // it. An unrecognized exotic value is refused instead of trusted.
+  if (!isPlainArray && prototype !== Object.prototype && prototype !== null) throw exoticValue(value)
   // A value reached twice keeps one copy, which is also what makes a cyclic
   // declaration terminate here instead of running out the depth bound.
   const existing = seen.get(value)
@@ -790,6 +861,28 @@ const freezeOwned = (value: unknown): void => {
     const descriptor = Object.getOwnPropertyDescriptor(value, key)
     if (descriptor !== undefined && "value" in descriptor) freezeOwned(descriptor.value)
   }
+}
+
+/**
+ * Freezes a schema-identity document and everything reachable inside it.
+ *
+ * The `Metadata` record was frozen while the JSON-schema documents hanging off
+ * `schemaIdentity` were not, so the one part of the metadata that is key
+ * material for the planner stayed writable after the checks that validated it:
+ * assigning `metadata.schemaIdentity.attrs` changed what every later reader
+ * saw. These documents are produced here and belong to this definition, so
+ * nothing outside may write them. A `Set` of visited objects, rather than the
+ * `Object.isFrozen` shortcut, is what terminates on a `$ref` cycle.
+ */
+const freezeDocument = <A>(document: A, seen: Set<object> = new Set()): A => {
+  if (typeof document !== "object" || document === null || seen.has(document)) return document
+  seen.add(document)
+  Object.freeze(document)
+  for (const key of Object.getOwnPropertyNames(document)) {
+    const descriptor = Object.getOwnPropertyDescriptor(document, key)
+    if (descriptor !== undefined && "value" in descriptor) freezeDocument(descriptor.value, seen)
+  }
+  return document
 }
 
 const freezeView = (view: KindView): KindView => {
@@ -939,11 +1032,11 @@ export const make = <
   const successSchema = options.success ?? (Schema.Void as unknown as Success)
   const errorSchema = options.error ?? (Schema.Never as unknown as Error)
   const decodeSuccess = Schema.decodeUnknownSync(Schema.toType(successSchema))
-  const schemaIdentity = {
+  const schemaIdentity = freezeDocument({
     attrs: Schema.toJsonSchemaDocument(options.attrs),
     success: Schema.toJsonSchemaDocument(successSchema),
     error: Schema.toJsonSchemaDocument(errorSchema)
-  }
+  })
   const functionIdentity = (operation: unknown): Node.FunctionIdentity | null =>
     operation === undefined ? null : Node.functionIdentity(operation)
   const implementationDigest = createHash("sha256").update(JSON.stringify({

@@ -25,19 +25,40 @@ if (manifest.name !== Package.name) {
 const sourceDirectory = join(packageRoot, Package.rules.source)
 const generated = join(repositoryRoot, Package.rules.target)
 
+/** Every `Target.make(` call in one module, matched or not. */
+const declarationCount = (text) => text.split("Target.make(").length - 1
+
+/**
+ * The rule id one `Target.make` call names.
+ *
+ * A few rules pass a module constant rather than a literal, because the same
+ * name is also their type guard's comparison value. Reading the constant back
+ * out of the module keeps them in the table: matching only string literals
+ * silently dropped three rules while the page claimed to list every one.
+ */
+const ruleId = (text, head) => {
+  const literal = /^"([^"]+)"$/.exec(head)
+  if (literal !== null) return literal[1]
+  const binding = new RegExp(`\\bconst ${head} = "([^"]+)"`).exec(text)
+  return binding === null ? undefined : binding[1]
+}
+
 /** One `Target.make("<id>", { ... kinds: [...] })` declaration. */
 const declarations = () => {
   const found = []
+  let calls = 0
   for (const entry of readdirSync(sourceDirectory).sort()) {
     if (!entry.endsWith(".ts")) continue
     const text = readFileSync(join(sourceDirectory, entry), "utf8")
+    calls += declarationCount(text)
     // The declaration head plus everything up to the first `kinds:` line. The
     // scan is deliberately shallow: a rule that does not spell its kinds as a
     // literal array is a rule whose verbs are not readable here, and that is
     // reported rather than guessed at.
-    const pattern = /Target\.make\(\s*"([^"]+)"\s*,\s*\{([^]*?)\n\}\)/g
+    const pattern = /Target\.make\(\s*("[^"]+"|[A-Za-z_$][\w$]*)\s*,\s*\{([^]*?)\n\}\)/g
     for (const match of text.matchAll(pattern)) {
-      const id = match[1]
+      const id = ruleId(text, match[1])
+      if (id === undefined) continue
       const body = match[2]
       // `Alias` and `Materialize` mirror the verbs of the target they wrap,
       // so their kinds are a variable rather than a literal and the table says
@@ -46,7 +67,11 @@ const declarations = () => {
       const mirroredKinds = /\n\s{4}kinds,/.test(body)
       const cached = /\n\s{2}cache:\s*(true|false|\()/.exec(body)
       const outputs = /\n\s{2}outputs:/.test(body)
-      const notImplemented = body.includes("Target.notImplemented")
+      // A rule runs under the package executor only when its whole body is a
+      // refusal. Three rules plan a real body and reach `Target.notImplemented`
+      // for one operand kind their lane has not landed, and reading the bare
+      // mention put those three in the wrong route.
+      const notImplemented = /implementation:\s*\(\)\s*=>\s*Target\.notImplemented\(/.test(body)
       found.push({
         id,
         module: entry.replace(/\.ts$/, ""),
@@ -61,6 +86,15 @@ const declarations = () => {
         route: notImplemented ? "package executor" : "flow body"
       })
     }
+  }
+  // The page says it lists every rule, so a declaration the scan did not match
+  // is a failure rather than a quiet omission: an under-reported catalog reads
+  // exactly like a complete one.
+  if (found.length !== calls) {
+    throw new Error(
+      `packages/targets/scripts/docs.mjs matched ${found.length} of ${calls} Target.make declarations; ` +
+        "a declaration names its rule in a form the scan cannot read"
+    )
   }
   return found.sort((left, right) => left.id.localeCompare(right.id))
 }
@@ -118,6 +152,21 @@ if (rules.length === 0) throw new Error("packages/targets/scripts/docs.mjs found
 const unreadable = rules.filter((rule) => rule.kinds === "unreadable")
 if (unreadable.length > 0) {
   throw new Error(`rules with unreadable kinds: ${unreadable.map((rule) => rule.id).join(", ")}`)
+}
+// A rule id identifies a rule, which is the premise the whole catalog rests
+// on: a BUILD.ts author writes one, the package executor dispatches on one,
+// and the planner keys on one. Two declarations under one id make the table
+// emit two rows for the same name and leave whichever one the namespace
+// happens to export as the one an author can actually reach.
+const byId = new Map()
+for (const rule of rules) byId.set(rule.id, [...byId.get(rule.id) ?? [], rule.module])
+const duplicates = [...byId].filter(([, modules]) => modules.length > 1)
+if (duplicates.length > 0) {
+  throw new Error(
+    `two Target.make declarations share one rule id: ${
+      duplicates.map(([id, modules]) => `${id} (${modules.join(", ")})`).join("; ")
+    }`
+  )
 }
 const next = render(rules)
 if (next.includes("—")) throw new Error("generated documentation must not contain em-dashes")

@@ -6,80 +6,119 @@
  * catalog used to export a hand-written wrapper annotated `Target.AnyTarget`
  * that carried none of them, so a tool reading a rule's attrs schema for
  * validation, documentation, or editor support worked for one arbitrary half.
+ *
+ * The check starts from the `Target.make` declarations in `src/` rather than
+ * from what the namespace happens to expose. An earlier version of this file
+ * collected namespace members that already had the shape and then asserted
+ * they had it, so a rule that lost its shape dropped out of the collection
+ * instead of failing: exactly the regression this file exists to catch could
+ * not turn it red.
  */
+import { readdirSync, readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { Smithers } from "../src/index.ts"
 import * as Target from "../src/Target.ts"
 
+const sourceDirectory = join(dirname(dirname(fileURLToPath(import.meta.url))), "src")
+
 /**
  * Sugar and combinators, which take something other than one rule's attrs and
- * are therefore not rules: `Alias` and `Materialize` take a target, and `Ci`
- * expands to a `Github.CiGen` declaration.
+ * are therefore not reachable as the rule itself: `Alias` and `Materialize`
+ * take a target, `Github.Ci` expands to a `Github.CiGen` declaration, and the
+ * two `Bundler.Rspack` methods take named options a configured bundler
+ * rebuilds its attrs from. Publishing an `attrs` schema on any of them would
+ * describe an input the callable does not accept.
  */
-const notRules = new Set(["Alias", "Materialize", "Ci"])
+const sugar = new Set([
+  "Alias",
+  "Materialize",
+  "Github.Ci",
+  "Bundler.Rspack.resolve",
+  "Bundler.Rspack.build"
+])
+
+/** Reads the rule id one `Target.make` call names, literal or module constant. */
+const ruleId = (text: string, head: string): string | undefined => {
+  const literal = /^"([^"]+)"$/.exec(head)
+  if (literal !== null) return literal[1]
+  const binding = new RegExp(`\\bconst ${head} = "([^"]+)"`).exec(text)
+  return binding === null ? undefined : binding[1]
+}
+
+/** Every rule id declared in `src/`, read from the sources rather than the namespace. */
+const declaredRuleIds = (): ReadonlyArray<string> => {
+  const ids: Array<string> = []
+  for (const entry of readdirSync(sourceDirectory).sort()) {
+    if (!entry.endsWith(".ts")) continue
+    const text = readFileSync(join(sourceDirectory, entry), "utf8")
+    for (const match of text.matchAll(/Target\.make\(\s*("[^"]+"|[A-Za-z_$][\w$]*)\s*,/g)) {
+      const id = ruleId(text, match[1]!)
+      expect(id, `${entry} declares a rule whose id this scan cannot read: ${match[1]}`).toBeDefined()
+      ids.push(id!)
+    }
+  }
+  return ids
+}
 
 const isDefinitionLike = (value: unknown): boolean =>
   typeof value === "function" && "id" in value && "attrs" in value && "kinds" in value
 
-const walk = (
-  namespace: Readonly<Record<string, unknown>>,
-  prefix: string,
-  seen: Set<unknown>,
-  found: Array<{ readonly path: string; readonly value: unknown }>
-): void => {
-  for (const [key, value] of Object.entries(namespace)) {
-    if (key.startsWith("_") || seen.has(value)) continue
-    const path = prefix === "" ? key : `${prefix}.${key}`
-    if (isDefinitionLike(value)) {
-      found.push({ path, value })
-      continue
-    }
-    // Only the small rule namespaces are walked: Cargo, Docker, Github, and
-    // the like. Everything else on Smithers is a schema or a declaration
-    // constructor and has no rule identity to check.
-    if (typeof value === "object" && value !== null && prefix === "" && ruleNamespaces.has(key)) {
-      seen.add(value)
-      walk(value as Record<string, unknown>, path, seen, found)
+/** Every namespace member that claims a rule id, indexed by the id it claims. */
+const exportedRules = (): ReadonlyMap<string, { readonly path: string; readonly value: unknown }> => {
+  const found = new Map<string, { readonly path: string; readonly value: unknown }>()
+  const seen = new Set<unknown>()
+  const walk = (namespace: Readonly<Record<string, unknown>>, prefix: string, depth: number): void => {
+    if (depth > 2) return
+    for (const [key, value] of Object.entries(namespace)) {
+      if (key.startsWith("_") || value === null || seen.has(value)) continue
+      if (typeof value !== "function" && typeof value !== "object") continue
+      const path = prefix === "" ? key : `${prefix}.${key}`
+      const id = (value as { readonly id?: unknown }).id
+      if (typeof id === "string" && !found.has(id)) {
+        found.set(id, { path, value })
+        continue
+      }
+      if (typeof value === "object") {
+        seen.add(value)
+        walk(value as Record<string, unknown>, path, depth + 1)
+      }
     }
   }
+  walk(Smithers as unknown as Record<string, unknown>, "", 0)
+  return found
 }
 
-const ruleNamespaces = new Set([
-  "Agent",
-  "Api",
-  "Bundler",
-  "Cargo",
-  "Changesets",
-  "Docker",
-  "Files",
-  "Foundry",
-  "Git",
-  "Github",
-  "Go",
-  "Markdown",
-  "Memory",
-  "Npm",
-  "Repo",
-  "Shell",
-  "Size"
-])
-
 describe("every catalog rule exports one shape", () => {
-  const found: Array<{ readonly path: string; readonly value: unknown }> = []
-  walk(Smithers as unknown as Record<string, unknown>, "", new Set(), found)
+  const declared = declaredRuleIds()
+  const exported = exportedRules()
 
-  it("finds the whole catalog rather than a handful", () => {
-    expect(found.length).toBeGreaterThan(60)
+  it("declares a rule id exactly once", () => {
+    const byId = new Map<string, number>()
+    for (const id of declared) byId.set(id, (byId.get(id) ?? 0) + 1)
+    expect([...byId].filter(([, count]) => count > 1)).toEqual([])
   })
 
-  it.each(found.map((entry) => entry.path))("%s carries id, attrs, and kinds", (path) => {
-    const entry = found.find((candidate) => candidate.path === path)!
-    const rule = entry.value as { id: unknown; attrs: unknown; kinds: unknown }
-    expect(typeof rule.id).toBe("string")
-    expect(rule.id).not.toBe("")
-    expect(rule.attrs).toBeDefined()
-    expect(typeof (rule.attrs as { readonly make?: unknown }).make).toBe("function")
-    expect(Array.isArray(rule.kinds)).toBe(true)
+  it("finds the whole catalog rather than a handful", () => {
+    expect(declared.length).toBeGreaterThan(100)
+  })
+
+  it.each(declared.filter((id) => !sugar.has(id)))("%s is reachable on the namespace", (id) => {
+    const entry = exported.get(id)
+    expect(entry, `no Smithers member reports the rule id ${id}`).toBeDefined()
+    const value = entry!.value as { id: unknown; attrs: unknown; kinds: unknown }
+    expect(isDefinitionLike(value), `${entry!.path} carries no attrs or kinds`).toBe(true)
+    expect(value.id).toBe(id)
+    expect(typeof (value.attrs as { readonly make?: unknown }).make).toBe("function")
+    expect(Array.isArray(value.kinds)).toBe(true)
+  })
+
+  it("names only sugar and combinators as exceptions", () => {
+    for (const id of sugar) {
+      expect(declared, `${id} is named an exception but is not a declared rule`).toContain(id)
+      expect(exported.has(id), `${id} is named an exception but reports a rule id`).toBe(false)
+    }
   })
 
   it("keeps the guarded rules callable and still refusing", () => {
@@ -93,16 +132,23 @@ describe("every catalog rule exports one shape", () => {
     expect(Smithers.Generate.id).toBe("Generate")
     expect(Smithers.Github.Pr.id).toBe("Github.Pr")
     expect(Smithers.Typecheck.id).toBe("Typecheck")
+    expect(Smithers.Cargo.Clippy.id).toBe("Cargo.Clippy")
+    expect(Smithers.Cargo.Fmt.id).toBe("Cargo.Fmt")
+    expect(Smithers.Cargo.Test.id).toBe("Cargo.Test")
+    expect(Smithers.Go.Packages.id).toBe("Go.Packages")
+    expect(Smithers.ImportClosure.id).toBe("ImportClosure")
   })
 
-  it("names only sugar and combinators as exceptions", () => {
-    for (const name of notRules) {
-      const value = name === "Ci"
-        ? (Smithers.Github as unknown as Record<string, unknown>)["Ci"]
-        : (Smithers as unknown as Record<string, unknown>)[name]
-      expect(typeof value).toBe("function")
-      expect(isDefinitionLike(value)).toBe(false)
-    }
+  it("keeps the two-form cargo rules answering both forms", () => {
+    expect(Smithers.Cargo.Fmt().name).toBe("fmt")
+    expect(Target.metadata(Smithers.Cargo.Fmt({ workspace: true, data: [], changes: [] })).target)
+      .toBe("Cargo.Fmt")
+    expect(Smithers.Cargo.Clippy({ locked: true }).name).toBe("clippy")
+    expect(Target.metadata(Smithers.Cargo.Clippy({ workspace: true, data: [] })).target)
+      .toBe("Cargo.Clippy")
+    expect(Smithers.Cargo.Test({ locked: true }).name).toBe("test")
+    expect(Target.metadata(Smithers.Cargo.Test({ workspace: true, data: [] })).target)
+      .toBe("Cargo.Test")
   })
 
   it("still constructs a target from a guarded rule", () => {

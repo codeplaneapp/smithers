@@ -33,7 +33,6 @@ running one under a bare Flow runtime fails loudly instead of doing nothing.
 | `Changesets`             | Changesets        | run                | no        | no               | flow body        |
 | `Changesets.Publish`     | ChangesetsTarget  | run                | no        | no               | package executor |
 | `Changesets.Version`     | ChangesetsTarget  | run, lint          | by attrs  | no               | package executor |
-| `Clean`                  | Clean             | run                | no        | no               | flow body        |
 | `Clean`                  | Compose           | run                | no        | no               | package executor |
 | `Copy`                   | NodeArtifact      | build              | yes       | no               | package executor |
 | `Cron`                   | CronTarget        | run                | no        | no               | package executor |
@@ -48,10 +47,12 @@ running one under a bare Flow runtime fails loudly instead of doing nothing.
 | `Dprint`                 | Dprint            | lint               | no        | no               | flow body        |
 | `DtsBuild`               | DtsBuild          | build              | no        | yes              | flow body        |
 | `EsLint`                 | EsLint            | lint               | no        | no               | flow body        |
+| `Fetch`                  | Fetch             | build              | no        | yes              | package executor |
+| `Filegroup`              | Filegroup         | none               | yes       | no               | flow body        |
 | `Foundry.Build`          | Foundry           | build              | yes       | yes              | flow body        |
 | `Foundry.Fmt`            | Foundry           | lint, run          | by attrs  | no               | flow body        |
 | `Foundry.Test`           | Foundry           | test               | yes       | no               | flow body        |
-| `Generate`               | Compose           | run, lint          | no        | no               | package executor |
+| `Generate`               | Compose           | run, lint          | no        | no               | flow body        |
 | `Git.Commit`             | GitTarget         | run                | no        | no               | package executor |
 | `Git.Pr`                 | GitTarget         | run                | no        | no               | package executor |
 | `Git.Submodule`          | GitTarget         | build              | yes       | no               | package executor |
@@ -71,6 +72,7 @@ running one under a bare Flow runtime fails loudly instead of doing nothing.
 | `Go.ModDownload`         | Go                | build              | no        | no               | package executor |
 | `Go.Packages`            | Go                | build              | no        | no               | package executor |
 | `Go.Test`                | Go                | test               | no        | no               | package executor |
+| `ImportClosure`          | Compose           | build              | no        | no               | flow body        |
 | `Install`                | Install           | run                | no        | no               | flow body        |
 | `JsrPublish`             | JsrPublish        | run                | no        | no               | flow body        |
 | `Literal`                | NodeArtifact      | build              | yes       | no               | package executor |
@@ -100,7 +102,7 @@ running one under a bare Flow runtime fails loudly instead of doing nothing.
 | `Size.Budgets`           | NodeArtifact      | test               | yes       | no               | package executor |
 | `SortPackageJson`        | SortPackageJson   | build, lint        | no        | yes              | flow body        |
 | `Suite`                  | Compose           | test               | no        | no               | package executor |
-| `Test`                   | Compose           | test               | no        | no               | package executor |
+| `Test`                   | Compose           | test               | no        | no               | flow body        |
 | `ToolBuild`              | ToolBuild         | build              | by attrs  | yes              | flow body        |
 | `ToolRun`                | ToolRun           | run                | no        | no               | flow body        |
 | `TsBuild`                | TsBuild           | build              | no        | yes              | flow body        |
@@ -111,4 +113,4 @@ running one under a bare Flow runtime fails loudly instead of doing nothing.
 | `VitestCoverage`         | VitestCoverage    | test               | no        | yes              | flow body        |
 | `VitestWatch`            | VitestWatch       | run                | no        | no               | flow body        |
 
-100 rules.
+102 rules.

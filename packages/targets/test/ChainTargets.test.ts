@@ -136,6 +136,26 @@ describe("Anvil and Docker targets", () => {
     })
   })
 
+  it("gives two image builds two output paths when only the platforms or the build args differ", () => {
+    const base = { dockerfile: Input.file("//Dockerfile"), context: "//" } as const
+    const pathOf = (attrs: Parameters<typeof Docker.Build>[0]): string =>
+      Target.metadata(Docker.Build(attrs)).outputs?.paths[0] ?? ""
+    const plain = pathOf(base)
+    const arm = pathOf({ ...base, platforms: ["linux/arm64"] })
+    const amd = pathOf({ ...base, platforms: ["linux/amd64"] })
+    const release = pathOf({ ...base, buildArgs: { profile: "release" } })
+    const debug = pathOf({ ...base, buildArgs: { profile: "debug" } })
+    expect(new Set([plain, arm, amd, release, debug]).size).toBe(5)
+  })
+
+  it("names one output for a build-arg table written in two key orders", () => {
+    const base = { dockerfile: Input.file("//Dockerfile"), context: "//" } as const
+    const pathOf = (attrs: Parameters<typeof Docker.Build>[0]): string =>
+      Target.metadata(Docker.Build(attrs)).outputs?.paths[0] ?? ""
+    expect(pathOf({ ...base, buildArgs: { a: "1", b: "2" } }))
+      .toBe(pathOf({ ...base, buildArgs: { b: "2", a: "1" } }))
+  })
+
   it("rejects unknown and malformed service attrs", () => {
     expect(() => Docker.Service({ image: "postgres", readiness: { exec: [], timeout: "1s" } } as never)).toThrow(
       /declaration.*invalid/s

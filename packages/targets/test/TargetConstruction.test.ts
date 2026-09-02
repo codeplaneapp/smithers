@@ -108,6 +108,129 @@ describe("validated metadata is immutable", () => {
     expect(Target.metadata(target).implementationDigest).toBe(digest)
     expect(Target.metadata(target).inputs.length).toBe(before.inputs.length)
   })
+
+  const schemaIdentity = () =>
+    Target.metadata(docsParity()).schemaIdentity as {
+      attrs: unknown
+      success: unknown
+      error: unknown
+    }
+
+  it("freezes the schema identity and the documents inside it", () => {
+    const identity = schemaIdentity()
+    expect(Object.isFrozen(identity)).toBe(true)
+    expect(Object.isFrozen(identity.attrs)).toBe(true)
+    expect(Object.isFrozen(identity.success)).toBe(true)
+    expect(Object.isFrozen(identity.error)).toBe(true)
+  })
+
+  it("refuses to rewrite the schema identity the planner keys on", () => {
+    const identity = schemaIdentity()
+    const before = identity.attrs
+    expect(() => {
+      identity.attrs = { mutated: true }
+    }).toThrow(TypeError)
+    expect(schemaIdentity().attrs).toBe(before)
+  })
+})
+
+describe("the pre-validation reads the snapshot, not the author's object", () => {
+  const clippy = () => ({ workspace: true, data: [] as Array<never> })
+
+  it("never invokes an accessor on a guarded rule's attrs", () => {
+    let reads = 0
+    const attrs = {
+      data: [],
+      get workspace() {
+        reads += 1
+        return true
+      }
+    }
+    expect(() => Smithers.Cargo.Build(attrs as never)).toThrow(/enumerable data properties/)
+    expect(reads).toBe(0)
+  })
+
+  it("springs no Proxy trap on a guarded rule before the refusal", () => {
+    const traps: Array<string> = []
+    const attrs = new Proxy(clippy(), {
+      get: (target, key, receiver) => {
+        traps.push(String(key))
+        return Reflect.get(target, key, receiver)
+      },
+      ownKeys: (target) => {
+        traps.push("ownKeys")
+        return Reflect.ownKeys(target)
+      }
+    })
+    expect(() => Smithers.Cargo.Build(attrs as never)).toThrow(/must not contain a Proxy/)
+    expect(traps).toEqual([])
+  })
+
+  it("names the BUILD site when a guarded rule is refused before its schema", () => {
+    expect(() => Smithers.Cargo.Build({ workspace: {} as never } as never))
+      .toThrow(/Cargo\.Build declaration is invalid/)
+  })
+
+  it("still refuses the guard's own rule after the snapshot", () => {
+    expect(() => Smithers.Cargo.Build({ data: [] } as never))
+      .toThrow(/Cargo\.Build requires exactly one of/)
+  })
+})
+
+describe("only plain data, targets, and declared inputs reach the schema", () => {
+  it("refuses a class instance and names its constructor", () => {
+    class BuildArgs {
+      get version(): string {
+        return "1"
+      }
+    }
+    expect(() =>
+      Smithers.Docker.Build({
+        dockerfile: Smithers.file("Dockerfile"),
+        context: ".",
+        buildArgs: new BuildArgs() as never
+      })
+    ).toThrow(/BuildArgs/)
+  })
+
+  it("never invokes the accessor of a refused exotic value", () => {
+    let reads = 0
+    class BuildArgs {
+      get version(): string {
+        reads += 1
+        return "1"
+      }
+    }
+    expect(() =>
+      Smithers.Docker.Build({
+        dockerfile: Smithers.file("Dockerfile"),
+        context: ".",
+        buildArgs: new BuildArgs() as never
+      })
+    ).toThrow(/plain data/)
+    expect(reads).toBe(0)
+  })
+
+  it("refuses a null-constructor exotic without naming one", () => {
+    const exotic = Object.create(Object.create(null)) as Record<string, unknown>
+    exotic["version"] = "1"
+    expect(() =>
+      Smithers.Docker.Build({
+        dockerfile: Smithers.file("Dockerfile"),
+        context: ".",
+        buildArgs: exotic as never
+      })
+    ).toThrow(/an object with a prototype of its own/)
+  })
+
+  it("keeps a plain table and a declared input working", () => {
+    const target = Smithers.Docker.Build({
+      dockerfile: Smithers.file("Dockerfile"),
+      context: ".",
+      buildArgs: { version: "1" }
+    })
+    expect(Target.metadata(target).target).toBe("Docker.Build")
+  })
 })
 
 describe("nested target handles stay opaque", () => {

@@ -104,8 +104,7 @@ const serviceDefinition = Target.make("Docker.Service", {
  * A constant path collides the moment one package declares two image builds,
  * and a lossy slug collides for `a/b` and `a?b` alike. The readable slug is
  * kept for a legible tree and a digest of the label settles the name, so two
- * declarations differing anywhere name two outputs. The package executor
- * renders the same path from the same function rather than deriving its own.
+ * declarations that differ in any labelled part name two outputs.
  *
  * The label is the ordered parts of the declaration rather than one joined
  * string, digested through `JSON.stringify`, so no separator can be forged: a
@@ -115,10 +114,15 @@ const serviceDefinition = Target.make("Docker.Service", {
  * an unprintable byte in this source file and make it unreadable to `git
  * diff` and to every plain-text search.
  *
+ * `@smthrs/build-cli` still derives its own output directory for these two
+ * rules, so the path the executor writes is not yet this one. Until that
+ * import lands, this is the declared path the planner reads in BUILD mode and
+ * the two disagree in package mode.
+ *
  * @category accessors
  * @since 0.1.0
  */
-export const imageOutputPath = (name: string, label: ReadonlyArray<string>): string => {
+export const imageOutputPath = (name: string, label: ReadonlyArray<unknown>): string => {
   const slug = name
     .replaceAll(/[^A-Za-z0-9]+/g, "-")
     .replaceAll(/^-+|-+$/g, "")
@@ -127,13 +131,43 @@ export const imageOutputPath = (name: string, label: ReadonlyArray<string>): str
   return slug === "" ? `docker-image-${digest}` : `docker-image-${slug}-${digest}`
 }
 
+/**
+ * Renders a build-arg table as ordered pairs.
+ *
+ * `JSON.stringify` preserves insertion order, so the same table written with
+ * its keys in two orders would otherwise digest to two different names for one
+ * build. Sorting by key makes the label a function of the table's contents.
+ * The values are `Schema.Unknown`, and a stamp is an object, so each value is
+ * carried through as it is rather than coerced to a string.
+ */
+const orderedBuildArgs = (
+  buildArgs: Readonly<Record<string, unknown>> | undefined
+): ReadonlyArray<readonly [string, unknown]> | null =>
+  buildArgs === undefined
+    ? null
+    : Object.entries(buildArgs).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+
 const buildDefinition = Target.make("Docker.Build", {
   attrs: BuildAttrs,
   kinds: ["build"],
   cache: true,
+  // Everything a Dockerfile build reads that is plain declaration data is in
+  // the label. Two builds over one dockerfile and one context that differ
+  // only in their platforms or their build args are two images and must not
+  // share an output tree. `data` and `sandbox` are deliberately absent: a
+  // target has no declaration-time identity to digest, so a build that varies
+  // only by a `data` edge still shares this path.
   outputs: (attrs) => ({
     cwd: ".",
-    paths: [imageOutputPath(attrs.context, ["Docker.Build", attrs.dockerfile.path, attrs.context])]
+    paths: [
+      imageOutputPath(attrs.context, [
+        "Docker.Build",
+        attrs.dockerfile.path,
+        attrs.context,
+        attrs.platforms === undefined ? null : [...attrs.platforms],
+        orderedBuildArgs(attrs.buildArgs)
+      ])
+    ]
   }),
   implementation: () => Target.notImplemented("Docker.Build")
 })

@@ -5,6 +5,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as Schema from "effect/Schema"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
@@ -76,6 +77,38 @@ describe("Exec failure codes", () => {
     expect(error.code).toBe("exit_status")
     expect(error.exitCode).toBe(3)
   })
+
+  // The codes above are only worth switching on if the schema refuses the
+  // reasonless value. While `code` was optional, the exported type still
+  // admitted the untyped failure these codes exist to eliminate, so an
+  // encoder outside this package could produce one.
+  it("refuses an exec failure that names no code", () => {
+    const withoutCode = {
+      _tag: "smithers-build/ExecError",
+      argv: ["tool"],
+      cwd: ".",
+      exitCode: -1,
+      stdout: "",
+      stderr: "it failed"
+    }
+    expect(() => Schema.decodeUnknownSync(Exec.ExecError)(withoutCode)).toThrow()
+    expect(Schema.decodeUnknownSync(Exec.ExecError)({ ...withoutCode, code: "spawn_failed" }).code)
+      .toBe("spawn_failed")
+  })
+
+  it("refuses an exec failure whose code is not one of the closed set", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Exec.ExecError)({
+        _tag: "smithers-build/ExecError",
+        argv: ["tool"],
+        cwd: ".",
+        exitCode: -1,
+        stdout: "",
+        stderr: "it failed",
+        code: "something_else"
+      })
+    ).toThrow()
+  })
 })
 
 const driftOf = (exit: Exit.Exit<unknown, GeneratedFile.DriftError>): GeneratedFile.DriftError => {
@@ -125,6 +158,25 @@ describe("generated-file check reasons", () => {
       GeneratedFile.checkGeneratedFile(root, { path: "out.txt", contents })
     )
     expect(Exit.isSuccess(exit)).toBe(true)
+  })
+
+  // Same closure as the exec codes: the discriminator is only load-bearing
+  // while no drift failure can omit it, and the shared constructor is the
+  // path every other module reaches this error through.
+  it("refuses a drift failure that names no reason", () => {
+    const withoutReason = {
+      _tag: "smithers-build/DriftError",
+      path: "out.txt",
+      message: "the generated file is missing"
+    }
+    expect(() => Schema.decodeUnknownSync(GeneratedFile.DriftError)(withoutReason)).toThrow()
+    expect(Schema.decodeUnknownSync(GeneratedFile.DriftError)({ ...withoutReason, reason: "missing" }).reason)
+      .toBe("missing")
+  })
+
+  it("makes the shared constructor name a reason", () => {
+    expect(GeneratedFile.driftError("out.txt", "the generator rewrote it", "drifted").reason).toBe("drifted")
+    expect(GeneratedFile.driftError("out.txt", "it could not be read", "unreadable").reason).toBe("unreadable")
   })
 })
 

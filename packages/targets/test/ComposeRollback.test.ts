@@ -78,6 +78,59 @@ describe("check-mode rollback", () => {
     expect(await Fs.readFile(NodePath.join(root, "out", "kept.txt"), "utf8")).toBe("kept\n")
   })
 
+  it("reports and removes a directory tree the generator created", async () => {
+    const exit = await check(
+      "require('node:fs').mkdirSync('out', { recursive: true }); require('node:fs').writeFileSync('out/file.txt', 'new\\n')",
+      ["out"]
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(JSON.stringify(exit)).toContain("out")
+    expect(JSON.stringify(exit)).toContain("written by the generator")
+    await expect(Fs.lstat(NodePath.join(root, "out"))).rejects.toThrow()
+  })
+
+  it("restores a deleted directory tree with its bytes and modes", async () => {
+    const directory = NodePath.join(root, "out")
+    const nested = NodePath.join(directory, "nested")
+    const first = NodePath.join(directory, "first.txt")
+    const second = NodePath.join(nested, "second.txt")
+    await Fs.mkdir(nested, { recursive: true })
+    await Fs.writeFile(first, "first checked in\n")
+    await Fs.writeFile(second, "second checked in\n")
+    await Fs.chmod(directory, 0o750)
+    await Fs.chmod(nested, 0o710)
+    await Fs.chmod(first, 0o640)
+    await Fs.chmod(second, 0o600)
+
+    const exit = await check("require('node:fs').rmSync('out', { recursive: true })", ["out"])
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(JSON.stringify(exit)).toContain("out")
+    expect(JSON.stringify(exit)).toContain("generator removes it")
+    expect(await Fs.readFile(first, "utf8")).toBe("first checked in\n")
+    expect(await Fs.readFile(second, "utf8")).toBe("second checked in\n")
+    expect((await Fs.lstat(directory)).mode & 0o777).toBe(0o750)
+    expect((await Fs.lstat(nested)).mode & 0o777).toBe(0o710)
+    expect((await Fs.lstat(first)).mode & 0o777).toBe(0o640)
+    expect((await Fs.lstat(second)).mode & 0o777).toBe(0o600)
+  })
+
+  it("reports and restores a permissions-only change inside a declared directory", async () => {
+    const directory = NodePath.join(root, "out")
+    const path = NodePath.join(directory, "file.txt")
+    await Fs.mkdir(directory)
+    await Fs.writeFile(path, "checked in\n")
+    await Fs.chmod(path, 0o640)
+
+    const exit = await check("require('node:fs').chmodSync('out/file.txt', 0o755)", ["out"])
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(JSON.stringify(exit)).toContain("out/file.txt")
+    expect(JSON.stringify(exit)).toContain("changed its permissions")
+    expect((await Fs.lstat(path)).mode & 0o777).toBe(0o640)
+    expect(await Fs.readFile(path, "utf8")).toBe("checked in\n")
+  })
+
   it("reports the first appended line when checked-in text is an exact prefix", async () => {
     await Fs.writeFile(NodePath.join(root, "out.txt"), "same")
     const exit = await check("require('node:fs').writeFileSync('out.txt', 'same\\nextra')", ["out.txt"])
@@ -99,6 +152,55 @@ describe("check-mode rollback", () => {
     const restored = await Fs.lstat(NodePath.join(root, "out.txt"))
     expect(restored.isSymbolicLink()).toBe(false)
     expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("checked in\n")
+  })
+
+  it("refuses a symbolic link substituted for an output ancestor", async () => {
+    const directory = NodePath.join(root, "out")
+    const sentinel = NodePath.join(outside, "file.txt")
+    await Fs.mkdir(directory)
+    await Fs.writeFile(NodePath.join(directory, "file.txt"), "checked in\n")
+    await Fs.writeFile(sentinel, "outside sentinel\n")
+
+    const exit = await check(
+      `const fs = require('node:fs'); fs.rmSync('out', { recursive: true }); fs.symlinkSync(${
+        JSON.stringify(outside)
+      }, 'out', 'dir')`,
+      ["out/file.txt"]
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(JSON.stringify(exit)).toContain("symbolic link")
+    expect(await Fs.readFile(sentinel, "utf8")).toBe("outside sentinel\n")
+  })
+
+  it("refuses a regular file standing where an output's parent directory belongs", async () => {
+    await Fs.writeFile(NodePath.join(root, "out"), "not a directory\n")
+    const exit = await check("require('node:fs').writeFileSync('unrelated.txt', 'x')", ["out/file.txt"])
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(JSON.stringify(exit)).toContain("non-directory ancestor")
+    expect(await Fs.readFile(NodePath.join(root, "out"), "utf8")).toBe("not a directory\n")
+  })
+
+  it("refuses a declared write set that leaves the workspace", async () => {
+    const sentinel = NodePath.join(outside, "sentinel.txt")
+    await Fs.writeFile(sentinel, "untouched\n")
+    const exit = await check("require('node:fs').writeFileSync('unrelated.txt', 'x')", ["../escape.txt"])
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(JSON.stringify(exit)).toContain("escapes the workspace")
+    expect(await Fs.readFile(sentinel, "utf8")).toBe("untouched\n")
+  })
+
+  it("restores a checked-in symbolic link the generator replaced with a file", async () => {
+    await Fs.writeFile(NodePath.join(root, "real.txt"), "real\n")
+    await Fs.symlink("real.txt", NodePath.join(root, "link.txt"))
+    const exit = await check(
+      "const fs = require('node:fs'); fs.unlinkSync('link.txt'); fs.writeFileSync('link.txt', 'plain\\n')",
+      ["link.txt"]
+    )
+    expect(Exit.isFailure(exit)).toBe(true)
+    const restored = await Fs.lstat(NodePath.join(root, "link.txt"))
+    expect(restored.isSymbolicLink()).toBe(true)
+    expect(await Fs.readlink(NodePath.join(root, "link.txt"))).toBe("real.txt")
   })
 
   it("removes an output the generator created where the checkout has none", async () => {

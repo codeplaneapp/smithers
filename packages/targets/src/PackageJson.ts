@@ -904,7 +904,10 @@ export const sync = (
   Effect.gen(function*() {
     const failure = (message: string): WriteFileError | DriftError =>
       payload.mode === "check"
-        ? new DriftError({ path: payload.path, message })
+        // Regenerating does not answer any of these: the declared fields are
+        // invalid, or the path does not resolve. They are `unreadable` for the
+        // same reason a permissions failure is.
+        ? new DriftError({ path: payload.path, message, reason: "unreadable" })
         : new WriteFileError({ path: payload.path, message })
     const relative = yield* Effect.try({
       try: () => resolveOutputPath(payload.path),
@@ -1023,6 +1026,9 @@ export const sync = (
         const differences = diffFields(fields, existing)
         return new DriftError({
           path: payload.path,
+          // The manifest-level diff replaces the message, never the reason the
+          // file check reached: an unreadable manifest stays unreadable.
+          reason: error.reason,
           message: differences.length === 0
             ? "the checked-in manifest carries the right fields but not the generated key order or formatting"
             : `the checked-in manifest drifted: ${differences.join("; ")}`

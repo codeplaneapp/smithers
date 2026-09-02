@@ -64,6 +64,98 @@ describe("secret destination redaction", () => {
       await upstream.close()
     }
   })
+
+  it("redacts a destination pathname echoed without its query", async () => {
+    const upstream = await listen((request, response) => {
+      const pathname = new URL(request.url ?? "/", "http://upstream.invalid").pathname
+      response.writeHead(200, { "x-echo-pathname": pathname })
+      response.end(`pathname=${pathname}`)
+    })
+    const secretPathname = "/secret-webhook/abc123"
+    const destination = `${upstream.origin}${secretPathname}?token=zzz`
+    const vault = SecretProxy.makeVault({ read: () => destination })
+    const proxy = await SecretProxy.startProxy(vault)
+    try {
+      const capability = proxy.urlFor(Secret.Secret("PROXY_DESTINATION_URL"))
+      const answer = await get(capability)
+      const echoed = answer.headers["x-echo-pathname"]
+      expect(answer.status).toBe(200)
+      expect(answer.body).not.toContain(secretPathname)
+      expect(answer.body).not.toContain("secret-webhook")
+      expect(answer.body).not.toContain("abc123")
+      expect(typeof echoed === "string" ? echoed : "").not.toContain(secretPathname)
+      expect(typeof echoed === "string" ? echoed : "").not.toContain("secret-webhook")
+      expect(typeof echoed === "string" ? echoed : "").not.toContain("abc123")
+    } finally {
+      await proxy.close()
+      await upstream.close()
+    }
+  })
+
+  it("redacts a destination query echoed without its pathname", async () => {
+    const upstream = await listen((request, response) => {
+      const search = new URL(request.url ?? "/", "http://upstream.invalid").search
+      response.writeHead(200, { "x-echo-search": search })
+      response.end(`search=${search}`)
+    })
+    const secretSearch = "?token=query-secret-zzz"
+    const destination = `${upstream.origin}/webhook${secretSearch}`
+    const vault = SecretProxy.makeVault({ read: () => destination })
+    const proxy = await SecretProxy.startProxy(vault)
+    try {
+      const capability = proxy.urlFor(Secret.Secret("PROXY_DESTINATION_URL"))
+      const answer = await get(capability)
+      const echoed = answer.headers["x-echo-search"]
+      expect(answer.status).toBe(200)
+      expect(answer.body).not.toContain(secretSearch)
+      expect(answer.body).not.toContain("query-secret-zzz")
+      expect(typeof echoed === "string" ? echoed : "").not.toContain(secretSearch)
+      expect(typeof echoed === "string" ? echoed : "").not.toContain("query-secret-zzz")
+    } finally {
+      await proxy.close()
+      await upstream.close()
+    }
+  })
+
+  it("redacts a full absolute destination URL", async () => {
+    let destination = ""
+    const upstream = await listen((_request, response) => {
+      response.writeHead(200, { "x-echo-destination": destination })
+      response.end(destination)
+    })
+    destination = `${upstream.origin}/secret-webhook/full-url?token=full-secret`
+    const vault = SecretProxy.makeVault({ read: () => destination })
+    const proxy = await SecretProxy.startProxy(vault)
+    try {
+      const capability = proxy.urlFor(Secret.Secret("PROXY_DESTINATION_URL"))
+      const answer = await get(capability)
+      const echoed = answer.headers["x-echo-destination"]
+      expect(answer.status).toBe(200)
+      expect(answer.body).not.toContain(destination)
+      expect(answer.body).not.toContain("full-secret")
+      expect(typeof echoed === "string" ? echoed : "").not.toContain(destination)
+      expect(typeof echoed === "string" ? echoed : "").not.toContain("full-secret")
+    } finally {
+      await proxy.close()
+      await upstream.close()
+    }
+  })
+
+  it("does not redact a bare slash for a destination without a query", async () => {
+    const body = "slashes / stay / unchanged"
+    const upstream = await listen((_request, response) => response.end(body))
+    const vault = SecretProxy.makeVault({ read: () => `${upstream.origin}/` })
+    const proxy = await SecretProxy.startProxy(vault)
+    try {
+      const capability = proxy.urlFor(Secret.Secret("PROXY_DESTINATION_URL"))
+      const answer = await get(capability)
+      expect(answer.status).toBe(200)
+      expect(answer.body).toBe(body)
+    } finally {
+      await proxy.close()
+      await upstream.close()
+    }
+  })
 })
 
 const throughProxy = (

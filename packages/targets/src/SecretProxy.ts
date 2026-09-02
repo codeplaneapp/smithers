@@ -493,7 +493,12 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
           { placeholder: entry.url, value: target.href },
           { placeholder: entry.url, value: resolved },
           { placeholder: capability.origin, value: target.origin },
-          ...(requestTarget === "/" ? [] : [{ placeholder: capability.pathname, value: requestTarget }])
+          ...(requestTarget === "/" ? [] : [{ placeholder: capability.pathname, value: requestTarget }]),
+          // A bare slash and an empty search occur in unrelated response text
+          // too often to replace safely. The boundary sorts every admitted
+          // value longest-first before redacting, so whole URLs win over parts.
+          ...(target.pathname === "/" ? [] : [{ placeholder: capability.pathname, value: target.pathname }]),
+          ...(target.search === "" ? [] : [{ placeholder: capability.search, value: target.search }])
         ]
       } else {
         try {

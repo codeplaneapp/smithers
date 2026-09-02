@@ -759,6 +759,19 @@ export const appSetFilter = (attrs: unknown): MetadataFilter | undefined => {
 export const maximumMetadataDepth = 32
 
 /**
+ * Keys one metadata filter may compare, counted across the whole tree.
+ *
+ * The depth bound alone leaves a filter that is wide rather than deep
+ * unbounded: 64 keys at each of 32 levels is one shallow declaration and
+ * millions of comparisons against every manifest in a crate set. The budget is
+ * spent per key compared, so both shapes are bounded by one number.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maximumMetadataMembers = 10_000
+
+/**
  * Table keys a parsed manifest may never carry.
  *
  * `__proto__`, `constructor`, and `prototype` are the three keys that reach
@@ -775,19 +788,33 @@ const reservedMetadataKeys = new Set(["__proto__", "constructor", "prototype"])
  * same value, and keys it does not name are ignored. Nested tables recurse;
  * scalars compare by value.
  *
+ * Both bounds are enforced, {@link maximumMetadataDepth} and
+ * {@link maximumMetadataMembers}: a breach raises rather than returning
+ * `false`, because a filter that outran its budget has not been evaluated and
+ * reporting "no match" would silently drop crates from the set.
+ *
  * @category matching
  * @since 0.1.0
  */
-export const metadataMatches = (metadata: unknown, filter: unknown, depth = 0): boolean => {
+export const metadataMatches = (
+  metadata: unknown,
+  filter: unknown,
+  depth = 0,
+  budget: { count: number } = { count: 0 }
+): boolean => {
   if (depth > maximumMetadataDepth) throw new RangeError("cargo metadata filter is too deep")
   if (typeof filter !== "object" || filter === null || Array.isArray(filter)) return metadata === filter
   if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) return false
   const subject = metadata as Record<string, unknown>
   for (const [key, expected] of Object.entries(filter as Record<string, unknown>)) {
+    budget.count += 1
+    if (budget.count > maximumMetadataMembers) {
+      throw new RangeError("cargo metadata filter compares more keys than the declaration bound")
+    }
     // Own properties only: an inherited `toString` or `constructor` must never
     // satisfy a filter the manifest never declared.
     if (!Object.hasOwn(subject, key)) return false
-    if (!metadataMatches(subject[key], expected, depth + 1)) return false
+    if (!metadataMatches(subject[key], expected, depth + 1, budget)) return false
   }
   return true
 }
@@ -1130,6 +1157,16 @@ export const isAppSet = (value: unknown): value is Target.AnyTarget =>
 // BUILD-era options at all, so a bare call is the check and any object is the
 // target.
 
+function fmtRule(): FmtCheck
+function fmtRule(attrs: (typeof FmtAttrs)["~type.make.in"]): ReturnType<typeof packageFmtDefinition>
+function fmtRule(
+  attrs?: (typeof FmtAttrs)["~type.make.in"]
+): FmtCheck | ReturnType<typeof packageFmtDefinition> {
+  if (attrs === undefined) return fmtCheck()
+  requireAtMostOneSelector("Cargo.Fmt", attrs, ["workspace", "crates"])
+  return packageFmtDefinition(attrs)
+}
+
 /**
  * The `cargo fmt` gate: a BUILD-era check value when called bare, and the
  * package-mode target when called with a crate selector.
@@ -1148,12 +1185,25 @@ export const isAppSet = (value: unknown): value is Target.AnyTarget =>
  * @category targets
  * @since 0.1.0
  */
-export function Fmt(): FmtCheck
-export function Fmt(attrs: (typeof FmtAttrs)["~type.make.in"]): Target.AnyTarget
-export function Fmt(attrs?: (typeof FmtAttrs)["~type.make.in"]): FmtCheck | Target.AnyTarget {
-  if (attrs === undefined) return fmtCheck()
-  requireAtMostOneSelector("Cargo.Fmt", attrs, ["workspace", "crates"])
-  return packageFmtDefinition(attrs)
+export const Fmt = Target.rule(packageFmtDefinition, fmtRule)
+
+function clippyRule(options?: {
+  readonly allTargets?: boolean | undefined
+  readonly locked?: boolean | undefined
+  readonly denyWarnings?: boolean | undefined
+}): ClippyCheck
+function clippyRule(
+  attrs: (typeof PackageClippyAttrs)["~type.make.in"]
+): ReturnType<typeof packageClippyDefinition>
+function clippyRule(attrs?: unknown): ClippyCheck | ReturnType<typeof packageClippyDefinition> {
+  if (!namesCrates(attrs)) {
+    requireSelectorForPackageKeys("Cargo.Clippy", attrs, clippyCheckOptions)
+    return clippyCheck(attrs as Parameters<typeof clippyCheck>[0])
+  }
+  requireOneSelector("Cargo.Clippy", attrs, crateSelectors)
+  return packageClippyDefinition(
+    attrs as (typeof PackageClippyAttrs)["~type.make.in"]
+  )
 }
 
 /**
@@ -1170,21 +1220,17 @@ export function Fmt(attrs?: (typeof FmtAttrs)["~type.make.in"]): FmtCheck | Targ
  * @category targets
  * @since 0.1.0
  */
-export function Clippy(options?: {
-  readonly allTargets?: boolean | undefined
-  readonly locked?: boolean | undefined
-  readonly denyWarnings?: boolean | undefined
-}): ClippyCheck
-export function Clippy(attrs: (typeof PackageClippyAttrs)["~type.make.in"]): Target.AnyTarget
-export function Clippy(attrs?: unknown): ClippyCheck | Target.AnyTarget {
+export const Clippy = Target.rule(packageClippyDefinition, clippyRule)
+
+function testRule(options?: { readonly locked?: boolean | undefined }): TestCheck
+function testRule(attrs: (typeof PackageTestAttrs)["~type.make.in"]): ReturnType<typeof packageTestDefinition>
+function testRule(attrs?: unknown): TestCheck | ReturnType<typeof packageTestDefinition> {
   if (!namesCrates(attrs)) {
-    requireSelectorForPackageKeys("Cargo.Clippy", attrs, clippyCheckOptions)
-    return clippyCheck(attrs as Parameters<typeof clippyCheck>[0])
+    requireSelectorForPackageKeys("Cargo.Test", attrs, testCheckOptions)
+    return testCheck(attrs as Parameters<typeof testCheck>[0])
   }
-  requireOneSelector("Cargo.Clippy", attrs, crateSelectors)
-  return packageClippyDefinition(
-    attrs as (typeof PackageClippyAttrs)["~type.make.in"]
-  )
+  requireOneSelector("Cargo.Test", attrs, crateSelectors)
+  return packageTestDefinition(attrs as (typeof PackageTestAttrs)["~type.make.in"])
 }
 
 /**
@@ -1201,16 +1247,7 @@ export function Clippy(attrs?: unknown): ClippyCheck | Target.AnyTarget {
  * @category targets
  * @since 0.1.0
  */
-export function Test(options?: { readonly locked?: boolean | undefined }): TestCheck
-export function Test(attrs: (typeof PackageTestAttrs)["~type.make.in"]): Target.AnyTarget
-export function Test(attrs?: unknown): TestCheck | Target.AnyTarget {
-  if (!namesCrates(attrs)) {
-    requireSelectorForPackageKeys("Cargo.Test", attrs, testCheckOptions)
-    return testCheck(attrs as Parameters<typeof testCheck>[0])
-  }
-  requireOneSelector("Cargo.Test", attrs, crateSelectors)
-  return packageTestDefinition(attrs as (typeof PackageTestAttrs)["~type.make.in"])
-}
+export const Test = Target.rule(packageTestDefinition, testRule)
 
 /**
  * The crate selection one declaration fixes on its own, or undefined when the

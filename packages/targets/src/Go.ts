@@ -75,9 +75,11 @@ const packagesDefinition = Target.make("Go.Packages", {
   implementation: () => Target.notImplemented("Go.Packages")
 })
 /** */
-export const Packages = (
-  attrs: (typeof PackagesAttrs)["~type.make.in"]
-): Target.AnyTarget & { readonly files: Compose.TargetFiles } => Compose.attachFiles(packagesDefinition(attrs))
+export const Packages = Target.rule(
+  packagesDefinition,
+  (attrs: (typeof PackagesAttrs)["~type.make.in"]): Target.AnyTarget & { readonly files: Compose.TargetFiles } =>
+    Compose.attachFiles(packagesDefinition(attrs))
+)
 
 const packageSelection = Schema.Union([
   Schema.Array(Schema.NonEmptyString),

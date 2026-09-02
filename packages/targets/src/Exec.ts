@@ -239,8 +239,16 @@ export const ExecError = Schema.Struct({
   exitCode: Schema.Number,
   stdout: Schema.String,
   stderr: Schema.String,
-  /** Which failure class this is. */
-  code: Schema.optional(ExecFailureCode),
+  /**
+   * Which failure class this is.
+   *
+   * Required, not optional: every production branch already assigns one, and
+   * an optional field left the exported type admitting the untyped failure
+   * this field exists to eliminate. A caller deciding whether to retry a
+   * transient spawn, report a missing executable, treat a timeout as a budget
+   * problem, or escalate a secret-proxy failure can switch on it exhaustively.
+   */
+  code: ExecFailureCode,
   /** The signal that terminated the child, when one did. */
   signal: Schema.optional(Schema.NonEmptyString)
 })

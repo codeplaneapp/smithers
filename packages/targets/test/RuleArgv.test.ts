@@ -2,13 +2,11 @@
  * The argv each rule plans, per attr combination.
  *
  * These rules render their command inside the Flow body, so nothing before
- * this file proved that `strict` becomes `--strict`, that a `version`
- * changeset run reaches the irreversible action rather than the ordinary one,
- * or that `Clean` refuses to leave the directory it is declared against.
+ * this file proved that `strict` becomes `--strict` or that a `version`
+ * changeset run reaches the irreversible action rather than the ordinary one.
  */
 import { describe, expect, it } from "vitest"
 import { Changesets } from "../src/Changesets.ts"
-import { Clean } from "../src/Clean.ts"
 import { DepsLint } from "../src/DepsLint.ts"
 import { Dev } from "../src/Dev.ts"
 import * as Input from "../src/Input.ts"
@@ -49,28 +47,6 @@ describe("PackageLint", () => {
     const withAttw = plannedCalls(PackageLint({ ...base, strict: false, pack: true, attw: true }))
     expect(withAttw).toHaveLength(2)
     expect(withAttw[1]?.payload["argv"]).toEqual(["pnpm", "exec", "attw", "--pack", "."])
-  })
-})
-
-describe("Clean", () => {
-  const base = { runtime, paths: ["dist"], deps: [], includeNodeModules: false, cwd: "packages/example" }
-
-  it.each(["/abs", ".", "..", "../escape"])("refuses the path %s", (path) => {
-    expect(() => plannedArgv(Clean({ ...base, paths: [path] })))
-      .toThrow(/only removes paths inside its directory/)
-  })
-
-  it("appends node_modules only when the declaration asks for it", () => {
-    expect(plannedArgv(Clean(base)).at(-1)).toBe("dist")
-    expect(plannedArgv(Clean({ ...base, includeNodeModules: true })).slice(-2)).toEqual(["dist", "node_modules"])
-  })
-
-  it("scopes a non-root cwd through the same normalizer and refuses one that escapes", () => {
-    expect(plannedCalls(Clean({ ...base, cwd: "./packages/example" }))[0]?.payload["cwd"])
-      .toBe("packages/example")
-    expect(plannedCalls(Clean({ ...base, cwd: "." }))[0]?.payload["cwd"]).toBe(".")
-    expect(() => plannedArgv(Clean({ ...base, cwd: "/outside" })))
-      .toThrow(/only removes paths inside its directory/)
   })
 })
 

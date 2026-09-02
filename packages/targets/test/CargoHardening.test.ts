@@ -51,6 +51,32 @@ describe("Cargo.metadataMatches own-property discipline", () => {
     expect(Cargo.metadataMatches({ a: 1, b: { c: 2 } }, { b: { c: 2 } })).toBe(true)
     expect(Cargo.metadataMatches({ a: 1 }, { a: 2 })).toBe(false)
   })
+
+  // The depth bound alone leaves a wide filter unbounded: it is shallow, so it
+  // never trips the depth check, and every manifest in a crate set is walked
+  // against all of it.
+  it("refuses a filter that compares more keys than the bound, however shallow", () => {
+    const wide: Record<string, unknown> = {}
+    for (let index = 0; index <= Cargo.maximumMetadataMembers; index += 1) wide[`k${index}`] = index
+    expect(() => Cargo.metadataMatches(wide, wide)).toThrow(/more keys than the declaration bound/)
+  })
+
+  it("spends the member budget across the whole tree, not per level", () => {
+    const level = (): Record<string, unknown> => {
+      const table: Record<string, unknown> = {}
+      for (let index = 0; index < 1000; index += 1) table[`k${index}`] = index
+      return table
+    }
+    const wide: Record<string, unknown> = {}
+    for (let index = 0; index < 12; index += 1) wide[`n${index}`] = level()
+    expect(() => Cargo.metadataMatches(wide, wide)).toThrow(/more keys than the declaration bound/)
+  })
+
+  it("still matches a filter inside the bound", () => {
+    const table: Record<string, unknown> = {}
+    for (let index = 0; index < 100; index += 1) table[`k${index}`] = index
+    expect(Cargo.metadataMatches(table, table)).toBe(true)
+  })
 })
 
 describe("Cargo overload discrimination", () => {
