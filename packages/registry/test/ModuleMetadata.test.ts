@@ -369,7 +369,7 @@ describe("ModuleMetadata", () => {
   })
 
   it("preserves an out-of-range code-point escape without throwing", () => {
-    const source = 'export default Flow.make({ description: "hi \\u{FFFFFF}", capabilities: [] })'
+    const source = "export default Flow.make({ description: \"hi \\u{FFFFFF}\", capabilities: [] })"
 
     expect(() => ModuleMetadata.parse(source)).not.toThrow()
     expect(ModuleMetadata.parse(source).description).toBe("hi \\u{FFFFFF}")

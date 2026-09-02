@@ -39,7 +39,7 @@
  * (`docs/migration` Phase 5 finding 1), and a missing flow is a wiring mistake
  * an operator can fix only if the message says which flow is missing.
  *
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 import * as Annotations from "@smthrs/core/Annotations"
 import * as Digest from "@smthrs/core/Digest"
@@ -76,7 +76,7 @@ import { type DiscoveryError, discoveryError, type RegistryError } from "./Regis
  * host that calls it something else.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const defaultAgent = "agent"
 
@@ -88,7 +88,7 @@ export const defaultAgent = "agent"
  * call site. A markdown flow receives its `{ args }` here.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Payload = Schema.Struct({
   input: Schema.optionalKey(Schema.Json)
@@ -98,7 +98,7 @@ export const Payload = Schema.Struct({
  * The payload a bridged flow is executed with.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Payload = typeof Payload.Type
 
@@ -113,7 +113,7 @@ export type Payload = typeof Payload.Type
  * selects the seat.
  *
  * @category schemas
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Invocation = Schema.Struct({
   /** The discovered flow's registry name. */
@@ -124,8 +124,27 @@ export const Invocation = Schema.Struct({
   prompt: Schema.String,
   /** The seat the descriptor declared, or `null`. */
   model: Schema.NullOr(Schema.String),
-  /** The placement directive the descriptor declared, or `null`. */
+  /**
+   * The lowered host kind, or `null`. A loaded body annotation wins over the
+   * descriptor directive.
+   */
   placement: Schema.NullOr(Schema.Literals(["client", "local", "sandbox", "remote"])),
+  /**
+   * Host-selection detail for the lowered placement, or `null` when it names
+   * no image, profile, or target. A loaded body annotation wins here too.
+   *
+   * An absent key decodes to `null`. This envelope is a durable action payload
+   * — hosts pass `Invocation` itself as an `Action.make` payload schema — so a
+   * journal row written before this field existed is decoded again on replay.
+   * Without the decoding default that replay would fail on a missing key. The
+   * default applies to DECODING only: encoding still writes the key, so the
+   * step key an envelope carrying a placement hashes to does not move.
+   */
+  placementOptions: Schema.NullOr(Schema.Struct({
+    image: Schema.optional(Schema.String),
+    profile: Schema.optional(Schema.String),
+    target: Schema.optional(Schema.String)
+  })).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   /** The capabilities the descriptor declared. */
   capabilities: Schema.Array(Schema.String),
   /** The collaborator flows the descriptor declared. */
@@ -136,7 +155,7 @@ export const Invocation = Schema.Struct({
  * Everything a delegate is told about the descriptor it is running.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Invocation = typeof Invocation.Type
 
@@ -152,7 +171,7 @@ export type Invocation = typeof Invocation.Type
  * it is a choice at all.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Delegate {
   readonly _tag: string
@@ -179,7 +198,7 @@ export interface Delegate {
  * Stable reasons a descriptor cannot be made runnable.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const ExecutableErrorCode = Schema.Literals([
   "missing_delegate",
@@ -192,7 +211,7 @@ export const ExecutableErrorCode = Schema.Literals([
  * Stable reasons a descriptor cannot be made runnable.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type ExecutableErrorCode = typeof ExecutableErrorCode.Type
 
@@ -205,13 +224,14 @@ export type ExecutableErrorCode = typeof ExecutableErrorCode.Type
  * missing.
  *
  * @category errors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export class ExecutableError extends Schema.TaggedError<ExecutableError>()(
   "flows/registry/ExecutableError",
   {
     code: ExecutableErrorCode,
     flow: Schema.String,
+    path: Schema.optional(Schema.String),
     delegate: Schema.optional(Schema.String),
     available: Schema.Array(Schema.String),
     message: Schema.String,
@@ -223,7 +243,7 @@ export class ExecutableError extends Schema.TaggedError<ExecutableError>()(
  * The runtime decisions lowered off a descriptor and its loaded body.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Lowered {
   /**
@@ -268,7 +288,7 @@ export interface Lowered {
  * child execution id with.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type Registration = FlowRuntime | Action.Implementations | Crypto.Crypto
 
@@ -276,7 +296,7 @@ export type Registration = FlowRuntime | Action.Implementations | Crypto.Crypto
  * One discovered flow, made runnable.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Executable {
   /** The descriptor this was built from. */
@@ -297,7 +317,7 @@ export interface Executable {
  * How a descriptor is loaded and what it may delegate to.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Options {
   /** The registered runtime flows a descriptor may delegate to. */
@@ -314,6 +334,7 @@ export interface Options {
 const refuse = (options: {
   readonly code: ExecutableErrorCode
   readonly flow: string
+  readonly path?: string | undefined
   readonly delegate?: string | undefined
   readonly available?: ReadonlyArray<string> | undefined
   readonly message: string
@@ -322,6 +343,7 @@ const refuse = (options: {
   new ExecutableError({
     code: options.code,
     flow: options.flow,
+    path: options.path,
     delegate: options.delegate,
     available: options.available ?? [],
     message: options.message,
@@ -329,43 +351,28 @@ const refuse = (options: {
   })
 
 /**
- * The three characters a path may legally contain that a URL reads as
- * structure rather than as a name, in the order they must be escaped: `%`
- * first, or escaping the other two would corrupt a literal `%` beside them.
- */
-const urlStructural: ReadonlyArray<readonly [string, string]> = [
-  ["%", "%25"],
-  ["#", "%23"],
-  ["?", "%3F"]
-]
-
-/**
  * A `file:` specifier for an absolute filesystem path.
  *
- * Written by hand rather than with `node:url` because this package is
- * browser-safe: a host that bundles a registry must not pull a Node builtin in
- * behind it. Doing it by hand means doing what `pathToFileURL` does. A `#` or
- * a `?` in a directory name is both a legal filename character and URL syntax,
- * and concatenating one unescaped truncates the specifier at it, so
- * `file:///a#b.ts` addresses `/a`. The loader then imports the wrong module,
- * or none, with nothing in the failure to say why.
+ * Written by hand rather than with `node:url` so a package importing this
+ * conversion does not also require a Node builtin or a bundler shim for one.
+ * It follows `pathToFileURL`'s escaping for filesystem paths. A `#` or a `?`
+ * in a directory name is both a legal filename character and URL syntax, and
+ * concatenating one unescaped truncates the specifier at it, so `file:///a#b.ts`
+ * addresses `/a`. The loader then imports the wrong module, or none, with
+ * nothing in the failure to say why.
  *
  * Exported because {@link Options.load} receives a filesystem path, not a
  * specifier: a host that supplies its own loader has to make the same
- * conversion, and in a browser bundle it has no `pathToFileURL` to make it
- * with.
+ * conversion without depending on `node:url` here.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const fileSpecifier = (path: string): string => {
   if (path.startsWith("file:")) return path
-  const posix = path.replaceAll("\\", "/")
-  const escaped = urlStructural.reduce(
-    (value, [character, escape]) => value.replaceAll(character, escape),
-    posix
-  )
-  return posix.startsWith("/") ? `file://${escaped}` : `file:///${escaped}`
+  const normalized = /^[A-Za-z]:[\\/]/.test(path) ? path.replaceAll("\\", "/") : path
+  const escaped = encodeURI(normalized).replaceAll("#", "%23").replaceAll("?", "%3F")
+  return normalized.startsWith("/") ? `file://${escaped}` : `file:///${escaped}`
 }
 
 const importModule = (path: string): Effect.Effect<unknown, unknown> =>
@@ -384,7 +391,7 @@ const importModule = (path: string): Effect.Effect<unknown, unknown> =>
  * choose between them, and the bridge refuses rather than guesses.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const delegateOf = (
   descriptor: Descriptor.FlowDescriptor,
@@ -432,7 +439,7 @@ const placementOf = (literal: Descriptor.Placement): CorePlacement.Placement => 
  * express either.
  *
  * @category conversions
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const lower = (
   descriptor: Descriptor.FlowDescriptor,
@@ -443,6 +450,46 @@ export const lower = (
   placement: Option.getOrUndefined(Annotations.getOption(annotations, Annotations.Placement)) ??
     Option.getOrUndefined(Option.map(descriptor.placement, placementOf))
 })
+
+const ownedJson = (value: Schema.Json): Schema.Json => {
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map(ownedJson))
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.freeze(Object.fromEntries(Object.entries(value).map(([key, child]) => [key, ownedJson(child)])))
+  }
+  return value
+}
+
+const ownedStrings = (values: ReadonlyArray<string>): Array<string> => {
+  const copy = [...values]
+  Object.freeze(copy)
+  return copy
+}
+
+const invocationPlacement = (
+  placement: CorePlacement.Placement | undefined
+): Pick<Invocation, "placement" | "placementOptions"> => {
+  if (placement === undefined) return { placement: null, placementOptions: null }
+  switch (placement._tag) {
+    case "flows/core/Placement/Client":
+      return { placement: "client", placementOptions: null }
+    case "flows/core/Placement/Local":
+      return { placement: "local", placementOptions: null }
+    case "flows/core/Placement/Sandbox":
+    case "flows/core/Placement/Remote": {
+      const options = {
+        ...(placement.image === undefined ? {} : { image: placement.image }),
+        ...(placement.profile === undefined ? {} : { profile: placement.profile }),
+        ...(placement.target === undefined ? {} : { target: placement.target })
+      }
+      return {
+        placement: placement._tag === "flows/core/Placement/Sandbox" ? "sandbox" : "remote",
+        placementOptions: Object.keys(options).length === 0 ? null : Object.freeze(options)
+      }
+    }
+  }
+}
 
 /** The captured declaration identity a policy contributes to the node's key. */
 const captured = (lowered: Lowered): Readonly<Record<string, unknown>> => ({
@@ -519,6 +566,7 @@ const sourceBytes = (
         refuse({
           code: "body_unavailable",
           flow: descriptor.name,
+          path: sourcePath,
           message: `the body of flow "${descriptor.name}" is unavailable at "${sourcePath}"`,
           cause
         })
@@ -532,6 +580,7 @@ const sourceBytes = (
         refuse({
           code: "body_unavailable",
           flow: descriptor.name,
+          path: sourcePath,
           message:
             `the body of flow "${descriptor.name}" changed at "${sourcePath}" after discovery; refresh the registry before running it`
         })
@@ -563,14 +612,17 @@ const loadModule = (
   options: Options
 ): Effect.Effect<LoadedBody, ExecutableError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
+    const platformPath = yield* Path.Path
     if (descriptor.body.contentDigest !== undefined) {
       yield* sourceBytes(descriptor, path)
     }
-    const loaded = yield* (options.load ?? importModule)(path).pipe(
+    const loadPath = path.startsWith("file:") ? path : platformPath.resolve(path)
+    const loaded = yield* (options.load ?? importModule)(loadPath).pipe(
       Effect.mapError((cause) =>
         refuse({
           code: "body_unavailable",
           flow: descriptor.name,
+          path,
           message: `the body of flow "${descriptor.name}" could not be loaded from "${path}"`,
           cause
         })
@@ -582,6 +634,7 @@ const loadModule = (
         refuse({
           code: "invalid_module",
           flow: descriptor.name,
+          path,
           message: `"${path}" must default-export a Flow.make value; flow "${descriptor.name}" cannot be run`
         })
       )
@@ -624,8 +677,9 @@ const dispatchedAction = (options: {
     success: Schema.Unknown,
     error: Schema.Unknown
   })
-  const layer = declaration.toLayer((envelope: Invocation) =>
-    CacheEnvironment.withCache(
+  const layer = declaration.toLayer((envelope: Invocation) => {
+    const identityEnvelope = Schema.encodeUnknownSync(Invocation)(envelope) as unknown as Schema.Json
+    return CacheEnvironment.withCache(
       Action.make({
         name: `${tag}/run`,
         success: Schema.Unknown,
@@ -643,7 +697,7 @@ const dispatchedAction = (options: {
         // recorded answer is never served to the next caller's question — and
         // the policy itself, because `ActionPersistence` assumes a changed
         // `ttlMs` is a changed step key when it fences its own expiry verdict.
-        idempotencyKey: { delegate: delegate._tag, invocation: envelope, cache },
+        idempotencyKey: { delegate: delegate._tag, invocation: identityEnvelope, cache },
         metadata: boundaryOf(descriptor),
         execute: Effect.gen(function*() {
           const instance = yield* FlowInstance
@@ -651,14 +705,14 @@ const dispatchedAction = (options: {
             instance.executionId,
             tag,
             delegate._tag,
-            envelope
+            identityEnvelope
           )
           return yield* delegate.execute(envelope, { executionId })
         })
       }),
       cache
     )
-  )
+  })
   return { declaration, layer }
 }
 
@@ -676,7 +730,7 @@ const dispatchedAction = (options: {
  * drive.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const fromDescriptor = (
   descriptor: Descriptor.FlowDescriptor,
@@ -704,15 +758,19 @@ export const fromDescriptor = (
       ? yield* loadMarkdown(descriptor, descriptor.body.path, descriptor.body.baseDirectory)
       : yield* loadModule(descriptor, descriptor.body.path, options)
     const lowered = lower(descriptor, body.annotations)
-    const invocation = (input: Schema.Json): Invocation => ({
-      flow: descriptor.name,
-      input,
-      prompt: body.prompt,
-      model: Option.getOrNull(descriptor.model),
-      placement: Option.getOrNull(descriptor.placement),
-      capabilities: descriptor.capabilities,
-      flows: descriptor.flows
-    })
+    const invocation = (input: Schema.Json): Invocation => {
+      const placement = invocationPlacement(lowered.placement)
+      return Object.freeze({
+        flow: descriptor.name,
+        input: ownedJson(input),
+        prompt: body.prompt,
+        model: Option.getOrNull(descriptor.model),
+        placement: placement.placement,
+        placementOptions: placement.placementOptions,
+        capabilities: ownedStrings(descriptor.capabilities),
+        flows: ownedStrings(descriptor.flows)
+      })
+    }
     // WHAT THE BRIDGED FLOW DISPATCHES, AND WHY IT DEPENDS ON THE POLICY.
     //
     // Without a cache policy the delegation is a CALL: the delegate's node goes
@@ -744,13 +802,15 @@ export const fromDescriptor = (
     // would ever be reused. Everything the body reads is inert descriptor data,
     // so declaring it makes the flow's identity a function of the descriptor
     // rather than of the process that loaded it.
+    const placement = invocationPlacement(lowered.placement)
     const build = PlanNode.capture(
       {
         flow: descriptor.name,
         delegate: name,
         prompt: body.prompt,
         model: Option.getOrNull(descriptor.model),
-        placement: Option.getOrNull(descriptor.placement),
+        placement: placement.placement,
+        placementOptions: placement.placementOptions,
         capabilities: [...descriptor.capabilities],
         flows: [...descriptor.flows],
         priority: lowered.priority ?? null,
@@ -790,7 +850,7 @@ export const fromDescriptor = (
  * Makes one discovered flow runnable by registry name.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const fromRegistry = (
   name: string,
@@ -809,7 +869,7 @@ export const fromRegistry = (
  * Every discovered flow this host can run, and the ones it declined.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface Catalog {
   readonly executables: ReadonlyArray<Executable>
@@ -824,7 +884,7 @@ export interface Catalog {
  * catalog and hoping the two agree.
  *
  * @category services
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const Catalog: Context.Service<Catalog, Catalog> = Context.Service("flows/registry/Catalog")
 
@@ -845,7 +905,7 @@ export const Catalog: Context.Service<Catalog, Catalog> = Context.Service("flows
  * `body_unavailable` and `invalid_module` are defects in the entry.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const catalog = (
   options: Options
@@ -884,7 +944,7 @@ export const catalog = (
  * inside the runtime.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layer = (
   options: Options
@@ -918,7 +978,7 @@ export const layer = (
  * How a project's flow registry is assembled.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export interface ProjectOptions {
   /** The project root. `<root>/flows` is scanned for `flow.ts` and `flow.mdx`. */
@@ -956,7 +1016,7 @@ export interface ProjectOptions {
  * list, feeds the executor catalog.
  *
  * @category layers
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const layerProject = (
   options: ProjectOptions
@@ -978,6 +1038,7 @@ export const layerProject = (
             code: "read_failed",
             module: "Executable",
             method: "layerProject",
+            path: root,
             description: `could not access the project flows directory "${root}"`,
             cause
           })

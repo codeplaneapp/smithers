@@ -1,16 +1,16 @@
 /**
  * Refreshable, progressively-disclosed flow registry.
  *
- * Implements lookup, first-found collision handling, on-demand bodies, and
- * same-session rediscovery from
- * [Flow Registry](../../../docs/specs/Concepts/Flow%20Registry.md).
+ * Lookup, first-found collision handling, on-demand bodies, and same-session
+ * rediscovery. Governing contract: `packages/registry/docs/api.md`, published
+ * as https://smithers.sh/api/registry.
  *
  * @since 0.1.0
  */
 import * as Digest from "@smthrs/core/Digest"
 import { Context, Effect, Layer, Option, Path, Ref } from "effect"
 import * as FileSystem from "effect/FileSystem"
-import { DiscoveryWarning, type FlowBody, FlowBodyModule, type FlowDescriptor, type Source } from "./Descriptor.ts"
+import { DiscoveryWarning, type FlowBody, FlowBodyModule, FlowDescriptor, type Source } from "./Descriptor.ts"
 import { Discovery } from "./Discovery.ts"
 import * as MarkdownFlow from "./MarkdownFlow.ts"
 import * as Pack from "./Pack.ts"
@@ -59,6 +59,9 @@ export interface PackConfig {
  *
  * Reads observe one complete snapshot. `refresh` rescans all configured
  * sources and atomically replaces it only after every source succeeds.
+ * Descriptors and warnings returned by the service are frozen copies owned by
+ * the registry. Mutating a descriptor or configuration value supplied by a
+ * caller cannot change later registry answers.
  *
  * @category services
  * @since 0.1.0
@@ -112,14 +115,61 @@ const notFound = (name: string): RegistryError =>
     description: `flow "${name}" was not found`
   })
 
+const ownedValue = <A>(value: A, seen: WeakMap<object, object> = new WeakMap()): A => {
+  if (value === null || typeof value !== "object") return value
+  const input = value as object
+  const previous = seen.get(input)
+  if (previous !== undefined) return previous as A
+
+  const copy: object = Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value))
+  seen.set(input, copy)
+  for (const key of Reflect.ownKeys(input)) {
+    const property = Object.getOwnPropertyDescriptor(input, key)!
+    Object.defineProperty(copy, key, {
+      configurable: Boolean(property.configurable),
+      enumerable: Boolean(property.enumerable),
+      writable: true,
+      value: ownedValue(Reflect.get(input, key), seen)
+    })
+  }
+  return Object.freeze(copy) as A
+}
+
+/**
+ * One deep, frozen copy of a descriptor the registry owns outright.
+ *
+ * Re-constructing through the class is what drops any own property a caller
+ * hung on the value it passed; the single `ownedValue` pass over the result is
+ * what makes the copy deep and frozen. Doing both in one pass matters: a copy
+ * per field followed by a copy of the assembled descriptor cloned every
+ * descriptor twice per `refresh`, and gave each field its own `seen` map, so a
+ * value two fields shared came back as two objects. One pass and one map keeps
+ * the cost at one traversal per descriptor and preserves that sharing.
+ */
+const ownedDescriptor = (entry: FlowDescriptor): FlowDescriptor => ownedValue(new FlowDescriptor({ ...entry }))
+
+const ownedConfig = (config: Config): Config =>
+  ownedValue({
+    sources: [...config.sources],
+    ...(config.packs === undefined
+      ? {}
+      : {
+        packs: {
+          installed: [...config.packs.installed],
+          runtimeVersion: config.packs.runtimeVersion
+        }
+      })
+  })
+
 const snapshotFrom = (
   entries: ReadonlyArray<FlowDescriptor>,
   registryWarnings: ReadonlyArray<DiscoveryWarning>
 ): Snapshot => {
   const byName = new Map<string, FlowDescriptor>()
   const snapshotEntries: Array<FlowDescriptor> = []
-  const snapshotWarnings = Array.from(registryWarnings)
-  for (const entry of entries) {
+  const snapshotWarnings = registryWarnings.map((warning) => ownedValue(warning))
+  for (const supplied of entries) {
+    const entry = ownedDescriptor(supplied)
     const existing = byName.get(entry.name)
     if (existing !== undefined) {
       snapshotWarnings.push(
@@ -163,9 +213,12 @@ const scanPacks = (
 > =>
   Effect.gen(function*() {
     const path = yield* Path.Path
+    const installed = [...config.installed]
     const scans: Array<Pack.Scan> = []
-    for (const pack of config.installed) {
+    for (const pack of installed) {
       yield* Pack.checkCompatible(pack, config.runtimeVersion)
+    }
+    for (const pack of installed) {
       const entries: Array<FlowDescriptor> = []
       const warnings: Array<DiscoveryWarning> = []
       for (const source of yield* Pack.sources(pack, path)) {
@@ -174,6 +227,7 @@ const scanPacks = (
             registryError({
               code: "invalid_pack",
               method: "make",
+              path: source.root,
               description:
                 `pack "${pack.manifest.name}@${pack.manifest.version}" declares a source at "${source.root}" that could not be scanned`,
               cause
@@ -284,6 +338,7 @@ const fromRef = (
           registryError({
             code: "body_unavailable",
             method: "loadBody",
+            path: bodyPath,
             description: `body for flow "${name}" is unavailable at "${bodyPath}"`,
             cause
           })
@@ -297,6 +352,7 @@ const fromRef = (
           registryError({
             code: "body_unavailable",
             method: "loadBody",
+            path: bodyPath,
             description:
               `body for flow "${name}" changed at "${bodyPath}" after discovery; refresh the registry before loading it`
           })
@@ -348,12 +404,13 @@ export const make = (
   Registry,
   RegistryError | DiscoveryError,
   Discovery | FileSystem.FileSystem | Path.Path
-> =>
-  Effect.gen(function*() {
+> => {
+  const configSnapshot = ownedConfig(config)
+  return Effect.gen(function*() {
     const discovery = yield* Discovery
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const scan = scanSources(config, discovery).pipe(
+    const scan = scanSources(configSnapshot, discovery).pipe(
       Effect.provideService(Path.Path, path),
       Effect.provideService(FileSystem.FileSystem, fs)
     )
@@ -362,6 +419,7 @@ export const make = (
     const refresh = Effect.flatMap(scan, (snapshot) => Ref.set(state, snapshot))
     return fromRef(state, fs, path, refresh)
   })
+}
 
 /**
  * Provides a registry constructed from ordered discovery sources.
@@ -387,16 +445,18 @@ export const layer = (
 export const layerFromDescriptors = (
   entries: ReadonlyArray<FlowDescriptor>,
   warnings: ReadonlyArray<DiscoveryWarning> = []
-): Layer.Layer<Registry, never, FileSystem.FileSystem | Path.Path> =>
-  Layer.effect(
+): Layer.Layer<Registry, never, FileSystem.FileSystem | Path.Path> => {
+  const snapshot = snapshotFrom(entries, warnings)
+  return Layer.effect(
     Registry,
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const state = yield* Ref.make(snapshotFrom(entries, warnings))
+      const state = yield* Ref.make(snapshot)
       return fromRef(state, fs, path, Effect.void)
     })
   )
+}
 
 /**
  * Scans a set of installed packs and constructs a registry over their merged
@@ -427,7 +487,11 @@ export const layerFromPacks = (
   Registry,
   RegistryError | DiscoveryError,
   Discovery | FileSystem.FileSystem | Path.Path
-> => layer({ sources: [], packs: { installed: packs, runtimeVersion: options.runtimeVersion } })
+> => {
+  // The host that calls Pack.read must surface its manifest warnings before
+  // projecting that result to Installed, whose public shape retains none.
+  return layer({ sources: [], packs: { installed: packs, runtimeVersion: options.runtimeVersion } })
+}
 
 /**
  * Creates an empty registry stub with optional method overrides.

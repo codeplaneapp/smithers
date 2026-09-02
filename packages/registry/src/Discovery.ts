@@ -1,10 +1,8 @@
 /**
  * Portable discovery of markdown and module-backed flows.
  *
- * Implements the file layout and progressive-disclosure lifecycle in
- * [Flow Registry](../../../docs/specs/Concepts/Flow%20Registry.md),
- * [File Conventions](../../../docs/specs/Specs/File%20Conventions.md), and
- * [Flow Directory](../../../docs/specs/Specs/Flow%20Directory.md).
+ * Governing contract: `packages/registry/docs/api.md`, published as
+ * https://smithers.sh/api/registry.
  *
  * Discovery follows symbolic links when the host `FileSystem.stat` does. A
  * visited-directory identity set stops cycles and aliases, while a 32-segment
@@ -84,7 +82,7 @@ const moduleMetadataChunkSize = 8 * 1024
  * build artifacts or hostile entries before `readFile` allocates their bytes.
  *
  * @category constants
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const entrySizeLimit = 4 * 1024 * 1024
 
@@ -92,17 +90,36 @@ export const entrySizeLimit = 4 * 1024 * 1024
  * Maximum number of entry-name segments traversed below a source root.
  *
  * @category constants
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const maximumTraversalDepth = 32
+
+/** The one wording both entry-size refusals use, so a consumer sees one message. */
+const oversizedEntry = (location: string, size: bigint | number): string =>
+  `Entry "${location}" is ${size} bytes, exceeding the ${entrySizeLimit}-byte discovery input ceiling`
+
+/**
+ * Either an entry's metadata, or the reason it was refused unread.
+ *
+ * `Oversized` carries the byte length actually read, which is what the
+ * `entry_too_large` warning reports when a host's reported size was wrong.
+ */
+type EntryMetadata =
+  | { readonly _tag: "Oversized"; readonly size: number }
+  | { readonly _tag: "Metadata"; readonly contentDigest: string; readonly text: string }
 
 /**
  * Reads just enough of an entry file to decide its metadata.
  *
- * The complete admitted file is read because discovery also hashes every body.
- * The entry-size check in `visit` is this module's only I/O and allocation
- * bound; `metadataReadLimit` separately bounds how much of those bytes is
- * decoded and parsed. Module prefixes use larger chunks to avoid repeatedly
+ * The complete admitted file is read because discovery also hashes every body,
+ * so `visit` refuses an entry whose REPORTED size is past `entrySizeLimit`
+ * before this function allocates anything. That check is a fast path, not the
+ * bound: it trusts `stat`, and a host that under-reports or omits a size — an
+ * in-memory or remote `FileSystem`, a special file — would otherwise walk
+ * straight past the ceiling. So the bytes actually read are measured here, and
+ * an oversized entry is refused before it is hashed, decoded, or parsed.
+ * `metadataReadLimit` separately bounds how much of an admitted entry's bytes
+ * is decoded and parsed. Module prefixes use larger chunks to avoid repeatedly
  * tokenizing hundreds of nearly identical 512-byte prefixes.
  */
 const readMetadata = (
@@ -111,7 +128,10 @@ const readMetadata = (
   kind: "markdown" | "module"
 ) =>
   fs.readFile(location).pipe(
-    Effect.map((bytes) => {
+    Effect.map((bytes): EntryMetadata => {
+      if (bytes.length > entrySizeLimit) {
+        return { _tag: "Oversized", size: bytes.length }
+      }
       const contentDigest = Digest.digest(bytes)
       const decoder = new TextDecoder()
       const chunkSize = kind === "module" ? moduleMetadataChunkSize : markdownMetadataChunkSize
@@ -124,7 +144,7 @@ const readMetadata = (
           : ModuleMetadata.isComplete(text)
         if (complete) break
       }
-      return { contentDigest, text: text + decoder.decode() }
+      return { _tag: "Metadata", contentDigest, text: text + decoder.decode() }
     })
   )
 
@@ -309,11 +329,7 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
                 )
               } else if (selectedInfo.size > FileSystem.Size(entrySizeLimit)) {
                 warnings.push(
-                  warning(
-                    "entry_too_large",
-                    location,
-                    `Entry "${location}" is ${selectedInfo.size} bytes, exceeding the ${entrySizeLimit}-byte discovery input ceiling`
-                  )
+                  warning("entry_too_large", location, oversizedEntry(location, selectedInfo.size))
                 )
               } else {
                 const contents = yield* Effect.result(
@@ -328,6 +344,13 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
                       undefined,
                       contents.failure
                     )
+                  )
+                } else if (contents.success._tag === "Oversized") {
+                  // The reported size was wrong. The bytes are the authority,
+                  // so the entry is refused with the same code and wording the
+                  // stat path uses, before anything hashes or parses them.
+                  warnings.push(
+                    warning("entry_too_large", location, oversizedEntry(location, contents.success.size))
                   )
                 } else if (selected === "flow.ts") {
                   const metadata = ModuleMetadata.parse(contents.success.text)
@@ -409,7 +432,7 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
 
             for (const child of directories) {
               if (visitedDirectories.has(child.identity)) {
-                const ancestor = directoryOrigins.get(child.identity) ?? child.location
+                const ancestor = directoryOrigins.get(child.identity)!
                 warnings.push(
                   warning(
                     "symlink_cycle",
@@ -438,7 +461,7 @@ export const make = (fs: FileSystem.FileSystem, path: Path.Path): Discovery =>
           new Map([[rootIdentity, source.root]]),
           rootEntries
         )
-        entries.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
+        entries.sort((left, right) => Number(left.path > right.path) - Number(left.path < right.path))
         warnings.sort(compareWarnings)
         return new SourceScan({ entries, warnings })
       })

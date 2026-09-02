@@ -403,35 +403,35 @@ const decodeEscapes = (value: string): string =>
   value.replace(
     /\\(u\{[0-9a-fA-F]{1,6}\}|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|n|r|t|b|f|v|0|\\|"|'|`)/g,
     (_match, sequence: string) => {
-    switch (sequence) {
-      case "n":
-        return "\n"
-      case "r":
-        return "\r"
-      case "t":
-        return "\t"
-      case "b":
-        return "\b"
-      case "f":
-        return "\f"
-      case "v":
-        return "\v"
-      case "0":
-        return "\0"
-      case "\\":
-        return "\\"
-      case "\"":
-        return "\""
-      case "'":
-        return "'"
-      case "`":
-        return "`"
-      default: {
-        const hexadecimal = sequence.startsWith("u{") ? sequence.slice(2, -1) : sequence.slice(1)
-        const codePoint = Number.parseInt(hexadecimal, 16)
-        return codePoint > 0x10ffff ? `\\${sequence}` : String.fromCodePoint(codePoint)
+      switch (sequence) {
+        case "n":
+          return "\n"
+        case "r":
+          return "\r"
+        case "t":
+          return "\t"
+        case "b":
+          return "\b"
+        case "f":
+          return "\f"
+        case "v":
+          return "\v"
+        case "0":
+          return "\0"
+        case "\\":
+          return "\\"
+        case "\"":
+          return "\""
+        case "'":
+          return "'"
+        case "`":
+          return "`"
+        default: {
+          const hexadecimal = sequence.startsWith("u{") ? sequence.slice(2, -1) : sequence.slice(1)
+          const codePoint = Number.parseInt(hexadecimal, 16)
+          return codePoint > 0x10ffff ? `\\${sequence}` : String.fromCodePoint(codePoint)
+        }
       }
-    }
     }
   )
 

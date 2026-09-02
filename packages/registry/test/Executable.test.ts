@@ -24,7 +24,8 @@ import * as Option from "effect/Option"
 import * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import { execFile } from "node:child_process"
-import { fileURLToPath } from "node:url"
+import { relative } from "node:path"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import * as Descriptor from "../src/Descriptor.ts"
 import * as Discovery from "../src/Discovery.ts"
 import * as Executable from "../src/Executable.ts"
@@ -87,6 +88,26 @@ const descriptorNamed = (name: string) =>
 const registryLayer = Registry.layer({
   sources: [{ source: "project", root: flowsRoot, naming: "path" }]
 }).pipe(Layer.provide(Layer.merge(Discovery.layer.pipe(Layer.provide(platform)), platform)))
+
+const invocationGolden = {
+  flow: "greet",
+  input: { name: "world" },
+  prompt: "",
+  model: null,
+  placement: "local",
+  placementOptions: null,
+  capabilities: ["*"],
+  flows: ["test/echo"]
+}
+
+const attemptMutation = (mutation: () => void): void => {
+  try {
+    mutation()
+  } catch {
+    // Frozen invocation values reject writes in strict mode. Assertions read
+    // the envelope again so both throwing and silent hosts prove ownership.
+  }
+}
 
 describe("delegate resolution", () => {
   it.effect("delegates to the one flow a descriptor names", () =>
@@ -183,6 +204,7 @@ describe("refusals", () => {
       })
       const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
       expect(failure.code).toBe("body_unavailable")
+      expect(failure.path).toBe(`${flowsRoot}/changelog/absent.mdx`)
       expect(failure.message).toContain("absent.mdx")
     }).pipe(Effect.provide(platform)))
 
@@ -194,6 +216,7 @@ describe("refusals", () => {
       })
       const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
       expect(failure.code).toBe("body_unavailable")
+      expect(failure.path).toBe(`${modulesRoot}/absent.mjs`)
       expect(failure.message).toContain("absent.mjs")
     }).pipe(Effect.provide(platform)))
 
@@ -208,6 +231,7 @@ describe("refusals", () => {
       })
       const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
       expect(failure).toMatchObject({ code: "body_unavailable", flow: "greet" })
+      expect(failure.path).toBe(`${modulesRoot}/plain.mjs`)
       expect(failure.message).toContain("changed")
       expect(failure.message).toContain("refresh")
     }).pipe(Effect.provide(platform)))
@@ -242,6 +266,7 @@ describe("refusals", () => {
       })
       const failure = yield* Effect.flip(Executable.fromDescriptor(descriptor, options()))
       expect(failure.code).toBe("invalid_module")
+      expect(failure.path).toBe(`${modulesRoot}/plain.mjs`)
       expect(failure.message).toContain("plain.mjs")
     }).pipe(Effect.provide(platform)))
 
@@ -256,6 +281,20 @@ describe("refusals", () => {
 })
 
 describe("the module specifier", () => {
+  it.each([
+    ["backslash", "/repo/we\\ird/flow.ts"],
+    ["newline", "/repo/a\nb/flow.ts"],
+    ["tab", "/repo/a\tb/flow.ts"],
+    ["space", "/repo/a b/flow.ts"],
+    ["fragment marker", "/repo/a#b/flow.ts"],
+    ["query marker", "/repo/a?b/flow.ts"],
+    ["percent", "/repo/a%b/flow.ts"],
+    ["non-ASCII", "/repo/üní/flow.ts"],
+    ["plain", "/repo/plain/flow.ts"]
+  ])("matches pathToFileURL for a %s in a POSIX path", (_label, path) => {
+    expect(Executable.fileSpecifier(path)).toBe(pathToFileURL(path).href)
+  })
+
   it("escapes the characters a path and a URL both claim", () => {
     // `#`, `?`, and a literal `%` are legal in a filename and structural in a
     // URL. Concatenating one truncates the specifier at it, so the loader
@@ -268,6 +307,20 @@ describe("the module specifier", () => {
     expect(Executable.fileSpecifier("/flows/a%23b/flow.ts")).toBe("file:///flows/a%2523b/flow.ts")
     // Anything already written as a specifier is the caller's own, untouched.
     expect(Executable.fileSpecifier("file:///flows/greet/flow.ts")).toBe("file:///flows/greet/flow.ts")
+  })
+
+  it("keeps a Windows drive path and a rootless path addressable", () => {
+    // A drive path is the one case where a backslash is a separator rather
+    // than a legal filename character, so it becomes `/` before escaping.
+    // `pathToFileURL` is not the oracle here: on POSIX it reads `C:\...` as a
+    // relative name and resolves it against the process directory.
+    expect(Executable.fileSpecifier("C:\\repo\\flow.ts")).toBe("file:///C:/repo/flow.ts")
+    expect(Executable.fileSpecifier("C:/repo/we\\ird.ts")).toBe("file:///C:/repo/we/ird.ts")
+    // A rootless path is not an absolute filesystem path, and the loader
+    // resolves one against the ambient `Path` service before it reaches here.
+    // Reaching this conversion with one anyway still produces a specifier a
+    // loader can report, rather than a bare `file:` scheme.
+    expect(Executable.fileSpecifier("flows/greet/flow.ts")).toBe("file:///flows/greet/flow.ts")
   })
 
   it("builds a specifier Node's own loader resolves", async () => {
@@ -323,6 +376,7 @@ describe("annotation lowering", () => {
         Option.some(CorePlacement.sandbox())
       )
       expect(executable.invocation(null).placement).toBe("sandbox")
+      expect(executable.invocation(null).placementOptions).toBeNull()
     }).pipe(Effect.provide(platform)))
 
   it.effect("prefers a placement the body annotates over the descriptor's directive", () =>
@@ -334,10 +388,92 @@ describe("annotation lowering", () => {
         options({ load: () => Effect.succeed({ default: annotated }) })
       )
       expect(executable.lowered.placement).toEqual(CorePlacement.remote({ profile: "builder" }))
-      // The descriptor's own directive still travels, because it is what a
-      // driver that never loaded the module can read.
-      expect(executable.invocation(null).placement).toBe("local")
+      const invocation = executable.invocation(null)
+      expect(invocation.placement).toBe("remote")
+      expect(invocation.placementOptions).toEqual({ profile: "builder" })
+      expect(Object.isFrozen(invocation.placementOptions)).toBe(true)
     }).pipe(Effect.provide(platform)))
+
+  it.effect("round trips every lowered placement through the Invocation schema", () =>
+    Effect.gen(function*() {
+      const descriptor = yield* descriptorNamed("greet")
+      const variants: ReadonlyArray<
+        readonly [
+          CorePlacement.Placement,
+          Executable.Invocation["placement"],
+          Executable.Invocation["placementOptions"]
+        ]
+      > = [
+        [CorePlacement.client(), "client", null],
+        [CorePlacement.local(), "local", null],
+        [CorePlacement.sandbox({ image: "registry-sandbox:latest" }), "sandbox", {
+          image: "registry-sandbox:latest"
+        }],
+        [CorePlacement.remote({ profile: "builder", target: "control-plane" }), "remote", {
+          profile: "builder",
+          target: "control-plane"
+        }]
+      ]
+
+      for (const [placement, kind, placementOptions] of variants) {
+        const annotated = CoreFlow.within(greetModule, placement)
+        const executable = yield* Executable.fromDescriptor(
+          descriptor,
+          options({ load: () => Effect.succeed({ default: annotated }) })
+        )
+        const invocation = executable.invocation({ variant: kind })
+        const encoded = Schema.encodeUnknownSync(Executable.Invocation)(invocation)
+        const decoded = Schema.decodeUnknownSync(Executable.Invocation)(encoded)
+        expect(encoded).toMatchObject({ placement: kind, placementOptions })
+        expect(decoded).toEqual(invocation)
+      }
+    }).pipe(Effect.provide(platform)))
+
+  /**
+   * Hosts pass `Invocation` itself as an `Action.make` payload schema
+   * (`examples/src/16-fan-out-fan-in.ts`, `examples/src/24-control-plane-and-gateway.ts`),
+   * so an envelope is decoded again from the journal on replay. A row written
+   * before `placementOptions` existed carries no such key, and a required key
+   * would fail that replay. The decoding default is what keeps it readable.
+   */
+  it("decodes a journal row written before placementOptions existed", () => {
+    const journaled = {
+      flow: "greet",
+      input: null,
+      prompt: "",
+      model: null,
+      placement: "sandbox",
+      capabilities: ["fs:read"],
+      flows: []
+    }
+
+    const decoded = Schema.decodeUnknownSync(Executable.Invocation)(journaled)
+
+    expect(decoded.placementOptions).toBeNull()
+    expect(decoded.placement).toBe("sandbox")
+  })
+
+  it("still decodes an explicit placementOptions and re-encodes the key", () => {
+    const journaled = {
+      flow: "greet",
+      input: null,
+      prompt: "",
+      model: null,
+      placement: "remote",
+      placementOptions: { profile: "builder", target: "control-plane" },
+      capabilities: [],
+      flows: []
+    }
+
+    const decoded = Schema.decodeUnknownSync(Executable.Invocation)(journaled)
+
+    expect(decoded.placementOptions).toEqual({ profile: "builder", target: "control-plane" })
+    // Encoding is untouched by the decoding default, so the step key an
+    // envelope carrying a placement hashes to does not move.
+    expect(Schema.encodeUnknownSync(Executable.Invocation)(decoded)).toMatchObject({
+      placementOptions: { profile: "builder", target: "control-plane" }
+    })
+  })
 
   it.effect("lowers every placement literal a descriptor can carry", () =>
     Effect.gen(function*() {
@@ -474,6 +610,16 @@ describe("the host's catalog", () => {
 })
 
 describe("the project registry", () => {
+  it.effect("loads a module discovered through a relative project root", () =>
+    Effect.gen(function*() {
+      const executable = yield* Executable.fromRegistry("greet", options())
+      expect(executable.delegate).toBe("test/echo")
+      expect(executable.invocation({ name: "relative" }).input).toEqual({ name: "relative" })
+    }).pipe(
+      Effect.provide(Executable.layerProject({ root: relative(process.cwd(), projectRoot) })),
+      Effect.provide(platform)
+    ))
+
   it.effect("discovers a project's own flows", () =>
     Effect.gen(function*() {
       const registry = yield* Registry.Registry
@@ -614,15 +760,15 @@ describe("the project registry", () => {
             PlatformError.systemError({ _tag: "PermissionDenied", module: "FileSystem", method: "exists" })
           )
       }))
-      const exit = yield* Effect.exit(Effect.provide(
+      const failure = yield* Effect.flip(Effect.provide(
         Effect.void,
         Executable.layerProject({ root: projectRoot }).pipe(Layer.provide(Layer.merge(unreadable, NodePath.layer)))
       ))
       // "I could not look" is not "there is nothing there". Reporting an
       // unreadable root as an empty project would hide every flow behind a
       // permissions mistake.
-      expect(exit._tag).toBe("Failure")
-      expect(JSON.stringify(exit)).toContain("read_failed")
+      expect(failure.code).toBe("read_failed")
+      expect(failure.path).toBe(`${projectRoot}/flows`)
     }))
 
   it.effect("keeps a pack's flows when the project has no flows directory of its own", () =>
@@ -692,19 +838,57 @@ describe("the project registry", () => {
 })
 
 describe("the delegating body", () => {
+  it.effect("owns every mutable value in each invocation", () =>
+    Effect.gen(function*() {
+      const descriptor = yield* descriptorNamed("greet")
+      const executable = yield* Executable.fromDescriptor(descriptor, options())
+      const input = { nested: { values: ["original"] } }
+      const first = executable.invocation(input)
+
+      attemptMutation(() => (first.capabilities as Array<string>).push("fs:write:**"))
+      attemptMutation(() => (first.flows as Array<string>).push("test/other"))
+      attemptMutation(() => {
+        ;(first.input as { nested: { values: Array<string> } }).nested.values.push("mutated")
+      })
+
+      const second = executable.invocation(input)
+      expect(input).toEqual({ nested: { values: ["original"] } })
+      expect(second.capabilities).toEqual(["*"])
+      expect(second.flows).toEqual(["test/echo"])
+      expect(second.input).toEqual({ nested: { values: ["original"] } })
+      expect(Object.isFrozen(first)).toBe(true)
+      expect(Object.isFrozen(first.capabilities)).toBe(true)
+      expect(Object.isFrozen(first.flows)).toBe(true)
+      expect(Object.isFrozen(first.input)).toBe(true)
+      expect(Object.isFrozen((first.input as { nested: object }).nested)).toBe(true)
+      expect(Object.isFrozen((first.input as { nested: { values: object } }).nested.values)).toBe(true)
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("keeps asynchronous delegate input stable after the caller mutates its object", () =>
+    Effect.gen(function*() {
+      const descriptor = yield* descriptorNamed("greet")
+      const executable = yield* Executable.fromDescriptor(descriptor, options())
+      const input = { nested: { values: ["original"] } }
+      const readAfterYield = async (invocation: Executable.Invocation) => {
+        await Promise.resolve()
+        return invocation.input
+      }
+
+      const pending = readAfterYield(executable.invocation(input))
+      input.nested.values.push("mutated")
+      const observed = yield* Effect.promise(() => pending)
+
+      expect(observed).toEqual({ nested: { values: ["original"] } })
+    }).pipe(Effect.provide(platform)))
+
   it.effect("hands the delegate the descriptor's metadata and the caller's input", () =>
     Effect.gen(function*() {
       const descriptor = yield* descriptorNamed("greet")
       const executable = yield* Executable.fromDescriptor(descriptor, options())
-      expect(executable.invocation({ name: "world" })).toEqual({
-        flow: "greet",
-        input: { name: "world" },
-        prompt: "",
-        model: null,
-        placement: "local",
-        capabilities: ["*"],
-        flows: ["test/echo"]
-      })
+      const encoded = Schema.encodeUnknownSync(Executable.Invocation)(
+        executable.invocation({ name: "world" })
+      )
+      expect(JSON.stringify(encoded)).toBe(JSON.stringify(invocationGolden))
     }).pipe(Effect.provide(platform)))
 
   it.effect("defaults an absent input to null rather than to undefined", () =>

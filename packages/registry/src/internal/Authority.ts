@@ -1,8 +1,8 @@
 /**
  * Conservative effect-tier inference for statically projected authority.
  *
- * Implements the capability implications in
- * [Effect Taxonomy](../../../../docs/specs/Concepts/Effect%20Taxonomy.md).
+ * Governing contract: `packages/registry/docs/api.md`, published as
+ * https://smithers.sh/api/registry.
  *
  * @since 0.1.0
  */
@@ -30,7 +30,7 @@ export const maxTier = (left: EffectTier, right: EffectTier): EffectTier =>
  * whose authority discovery cannot independently resolve.
  *
  * @category authority
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const unprojectableDelegation = (): {
   readonly capabilities: ReadonlyArray<string>
@@ -67,9 +67,7 @@ const tierForCapability = (capability: string): EffectTier => {
       !/^[A-Za-z]:\//.test(resource) &&
       !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(resource) &&
       firstSegment?.startsWith("~") !== true &&
-      !segments.some((segment) =>
-        segment.startsWith("$") || segment.includes("${") || /^%[^%]+%$/.test(segment)
-      )
+      !segments.some((segment) => segment.startsWith("$") || segment.includes("${") || /^%[^%]+%$/.test(segment))
     ) {
       let depth = 0
       for (const segment of segments) {

@@ -1,10 +1,8 @@
 /**
  * Serializable flow-registry descriptors.
  *
- * Implements the descriptor contracts in
- * [Flow Registry](../../../docs/specs/Concepts/Flow%20Registry.md),
- * [Input](../../../docs/specs/Specs/Input.md), and
- * [Effect Taxonomy](../../../docs/specs/Concepts/Effect%20Taxonomy.md).
+ * Governing contract: `packages/registry/docs/api.md`, published as
+ * https://smithers.sh/api/registry.
  * `EffectDeclaration` is the fully explicit discovery projection of
  * `packages/core/src/Effects.ts`; placement literals are lowered by
  * `packages/core/src/Markdown.ts` into `packages/core/src/Placement.ts`
@@ -130,7 +128,7 @@ export class SchemaRefNone extends Schema.TaggedClass<SchemaRefNone>("flows/regi
  * a descriptor stays serializable and comparable.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export class SchemaRefInline extends Schema.TaggedClass<SchemaRefInline>("flows/registry/SchemaRef/Inline")(
   "Inline",
@@ -406,7 +404,7 @@ export type BudgetCeiling = typeof BudgetCeiling.Type
  * what {@link budgetUnbounded} spells out for a flow that declares neither.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const FlowBudget = Schema.Struct({
   tokens: Schema.optional(BudgetCeiling),
@@ -417,7 +415,7 @@ export const FlowBudget = Schema.Struct({
  * The tokens and milliseconds a flow declares.
  *
  * @category models
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export type FlowBudget = typeof FlowBudget.Type
 
@@ -432,7 +430,7 @@ export type FlowBudget = typeof FlowBudget.Type
  * envelope has decided the flow may spend what it likes.
  *
  * @category constructors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const budgetUnbounded: FlowBudget = Object.freeze({})
 
@@ -472,7 +470,7 @@ export class FlowDescriptor extends Schema.Class<FlowDescriptor>("flows/registry
  * way everywhere.
  *
  * @category accessors
- * @since 0.1.0
+ * @since 1.0.0-rc.0
  */
 export const budgetOf = (descriptor: FlowDescriptor): FlowBudget =>
   descriptor.budget === undefined ? budgetUnbounded : Object.freeze({ ...descriptor.budget })

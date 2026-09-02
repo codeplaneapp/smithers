@@ -18,6 +18,8 @@ type Node =
   | { readonly kind: "special"; readonly type: FileSystem.File.Type }
   | { readonly kind: "unstattable" }
 
+type FileNode = Extract<Node, { readonly kind: "file" }>
+
 const denied = (method: string, path: string) =>
   PlatformError.systemError({
     _tag: "PermissionDenied",
@@ -116,7 +118,7 @@ const scanError = (nodes: Map<string, Node>, source: Partial<Source> = {}) =>
     }).pipe(Effect.provide(NodePath.layer))
   )
 
-const skill = (description: string, name?: string): Node => ({
+const skill = (description: string, name?: string): FileNode => ({
   kind: "file",
   contents: [
     "---",
@@ -370,7 +372,7 @@ describe("Discovery traversal", () => {
 
   it("bounds a duplicate directory listing by physical identity", async () => {
     const result = await scan(tree({
-      [root]: { kind: "directory", entries: ["dup", "dup"] },
+      [root]: { kind: "directory", entries: ["dup", "dup", "dup"] },
       [`${root}/dup`]: { kind: "directory", entries: ["SKILL.md"] },
       [`${root}/dup/SKILL.md`]: {
         kind: "file",
@@ -380,6 +382,7 @@ describe("Discovery traversal", () => {
 
     expect(result.entries.map((entry) => entry.path)).toEqual([`${root}/dup/SKILL.md`])
     expect(result.warnings.map((warning) => warning.code)).toEqual([
+      "symlink_cycle",
       "symlink_cycle",
       "unknown_frontmatter_key",
       "unprojectable_authority"
@@ -412,14 +415,18 @@ describe("Discovery traversal", () => {
   it("skips an oversized entry before reading its bytes", async () => {
     const location = `${root}/huge/SKILL.md`
     const calls: FileSystemCalls = { readFile: [] }
-    const result = await scan(tree({
-      [root]: { kind: "directory", entries: ["huge"] },
-      [`${root}/huge`]: { kind: "directory", entries: ["SKILL.md"] },
-      [location]: {
-        ...skill("Too large to read."),
-        reportedSize: expectedEntrySizeLimit + 1
-      }
-    }), {}, calls)
+    const result = await scan(
+      tree({
+        [root]: { kind: "directory", entries: ["huge"] },
+        [`${root}/huge`]: { kind: "directory", entries: ["SKILL.md"] },
+        [location]: {
+          ...skill("Too large to read."),
+          reportedSize: expectedEntrySizeLimit + 1
+        }
+      }),
+      {},
+      calls
+    )
 
     expect(result.entries).toEqual([])
     expect(result.warnings).toEqual([expect.objectContaining({
@@ -430,17 +437,59 @@ describe("Discovery traversal", () => {
     expect(calls.readFile).toEqual([])
   })
 
+  /**
+   * The stat pre-check is a fast path, not the bound. A host whose `stat`
+   * under-reports or omits a size — an in-memory or remote FileSystem, a
+   * special file — walks straight past it, so the bytes actually read decide.
+   * `readFile` IS called here; the guarantee is that an oversized entry is
+   * refused with the same code before it is hashed, parsed, or registered.
+   */
+  it("refuses an oversized entry whose reported size was wrong", async () => {
+    const location = `${root}/lying/SKILL.md`
+    const body = "x".repeat(expectedEntrySizeLimit)
+    const calls: FileSystemCalls = { readFile: [] }
+    const contents = [
+      "---",
+      "description: The host under-reported this entry.",
+      "capabilities: []",
+      "---",
+      body,
+      ""
+    ].join("\n")
+    const result = await scan(
+      tree({
+        [root]: { kind: "directory", entries: ["lying"] },
+        [`${root}/lying`]: { kind: "directory", entries: ["SKILL.md"] },
+        [location]: { kind: "file", contents, reportedSize: 0 }
+      }),
+      {},
+      calls
+    )
+
+    expect(result.entries).toEqual([])
+    expect(result.warnings).toEqual([expect.objectContaining({
+      code: "entry_too_large",
+      path: location,
+      message: expect.stringContaining(String(new TextEncoder().encode(contents).length))
+    })])
+    expect(calls.readFile).toEqual([location])
+  })
+
   it("still discovers an entry reported just below the input ceiling", async () => {
     const location = `${root}/bounded/SKILL.md`
     const calls: FileSystemCalls = { readFile: [] }
-    const result = await scan(tree({
-      [root]: { kind: "directory", entries: ["bounded"] },
-      [`${root}/bounded`]: { kind: "directory", entries: ["SKILL.md"] },
-      [location]: {
-        ...skill("Within the input ceiling."),
-        reportedSize: expectedEntrySizeLimit - 1
-      }
-    }), {}, calls)
+    const result = await scan(
+      tree({
+        [root]: { kind: "directory", entries: ["bounded"] },
+        [`${root}/bounded`]: { kind: "directory", entries: ["SKILL.md"] },
+        [location]: {
+          ...skill("Within the input ceiling."),
+          reportedSize: expectedEntrySizeLimit - 1
+        }
+      }),
+      {},
+      calls
+    )
 
     expect(result.entries.map((entry) => entry.name)).toEqual(["bounded"])
     expect(result.warnings).toEqual([])
@@ -553,6 +602,7 @@ describe("Registry over a virtual host", () => {
 
     expect(result.before).toMatchObject({ _tag: "Prompt", text: "Original body." })
     expect(result.stale).toMatchObject({ code: "body_unavailable", method: "loadBody" })
+    expect(result.stale.path).toBe(`${root}/review/SKILL.md`)
     expect(result.after).toMatchObject({ _tag: "Prompt", text: "Rewritten body." })
     expect(result.declaredBefore.body.contentDigest).toMatch(/^[0-9a-f]{64}$/)
     expect(result.declaredAfter.body.contentDigest).toMatch(/^[0-9a-f]{64}$/)
@@ -577,7 +627,8 @@ describe("Registry over a virtual host", () => {
     expect(result.warnings).toEqual([expect.objectContaining({
       code: "symlink_cycle",
       path: `${root}/review`,
-      message: `Directory "${root}/review" resolves to already visited directory "${root}/review"; skipping recursive traversal`
+      message:
+        `Directory "${root}/review" resolves to already visited directory "${root}/review"; skipping recursive traversal`
     })])
   })
 })

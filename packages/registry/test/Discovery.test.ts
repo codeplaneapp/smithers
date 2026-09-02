@@ -27,14 +27,17 @@ const scan = (source: Source) =>
 
 const writeMarkdownFlow = (directory: string, name?: string): void => {
   mkdirSync(directory, { recursive: true })
-  writeFileSync(join(directory, "flow.mdx"), [
-    "---",
-    ...(name === undefined ? [] : [`name: ${name}`]),
-    "description: A temporary flow.",
-    "capabilities: []",
-    "---",
-    "body"
-  ].join("\n"))
+  writeFileSync(
+    join(directory, "flow.mdx"),
+    [
+      "---",
+      ...(name === undefined ? [] : [`name: ${name}`]),
+      "description: A temporary flow.",
+      "capabilities: []",
+      "---",
+      "body"
+    ].join("\n")
+  )
 }
 
 const withTemporaryRoot = async <A>(run: (root: string) => Promise<A>): Promise<A> => {

@@ -10,16 +10,20 @@ npm install @smthrs/registry
 
 The root entry point exports these namespaces; each is also importable from `@smthrs/registry/<Module>`.
 
-| Module          | Public exports                                                                                                                                                                                                                                                                                                                                                                                                 | Description                                                                                        |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `Descriptor`    | `EffectTier`, `Placement`, `EffectDeclaration`, `SchemaRefMarkdownArgs`, `SchemaRefMarkdownOutput`, `SchemaRefModule`, `SchemaRefNone`, `SchemaRef`, `BodyRefMarkdown`, `BodyRefModule`, `BodyRef`, `FlowBodyPrompt`, `FlowBodyModule`, `FlowBody`, `PackRef`, `Provenance`, `Source`, `DiscoveryWarningCode`, `DiscoveryWarning`, `FlowBudget`, `budgetUnbounded`, `FlowDescriptor`, `budgetOf`, `SourceScan` | Defines the serializable descriptor, body, schema, source, provenance, budget, and warning models. |
-| `Disclosure`    | `toEntries`, `toXml`                                                                                                                                                                                                                                                                                                                                                                                           | Projects descriptors to compact entries or Agent Skills XML.                                       |
-| `Discovery`     | `Discovery`, `make`, `layer`, `makeNoop`, `layerNoop`                                                                                                                                                                                                                                                                                                                                                          | Defines and implements metadata-only source scanning over FileSystem and Path.                     |
-| `Executable`    | `defaultAgent`, `Payload`, `Invocation`, `Delegate`, `ExecutableErrorCode`, `ExecutableError`, `Lowered`, `Registration`, `Executable`, `Options`, `fileSpecifier`, `delegateOf`, `lower`, `fromDescriptor`, `fromRegistry`, `Catalog`, `catalog`, `layer`, `ProjectOptions`, `layerProject`                                                                                                                   | Turns a discovered descriptor into a registered, engine-runnable `@smthrs/flow` flow.              |
-| `MarkdownFlow`  | `Input`, `Output`, `FromMarkdownOptions`, `FromMarkdownResult`, `fromMarkdown`, `loadBody`, `renderPrompt`, `toCoreFrontmatter`                                                                                                                                                                                                                                                                                | Parses Markdown metadata, loads prompt bodies lazily, and renders invocation prompts.              |
-| `Pack`          | `Origin`, `Requires`, `Manifest`, `Installed`, `File`, `Scan`, `read`, `digest`, `compatible`, `sources`, `attribute`, `merge`, `checkCompatible`                                                                                                                                                                                                                                                              | Reads pack manifests, addresses their contents, and merges packs by origin.                        |
-| `Registry`      | `Config`, `PackConfig`, `Registry`, `make`, `layer`, `layerFromDescriptors`, `layerFromPacks`, `makeNoop`, `layerNoop`                                                                                                                                                                                                                                                                                         | Provides ordered discovery, lookup, visibility, lazy body loading, refresh, and warnings.          |
-| `RegistryError` | `DiscoveryErrorCode`, `DiscoveryError`, `RegistryErrorCode`, `RegistryError`, `RegistryFailure`, `discoveryError`, `registryError`                                                                                                                                                                                                                                                                             | Defines typed discovery and registry failures and constructors.                                    |
+| Module          | What it owns                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------ |
+| `Descriptor`    | The serializable descriptor, body, schema, source, provenance, budget, and warning models. |
+| `Disclosure`    | Projects descriptors to compact entries or Agent Skills XML.                               |
+| `Discovery`     | Metadata-only source scanning over `FileSystem` and `Path`.                                |
+| `Executable`    | Turns a discovered descriptor into a registered, engine-runnable `@smthrs/flow` flow.      |
+| `MarkdownFlow`  | Parses markdown metadata, loads prompt bodies lazily, and renders invocation prompts.      |
+| `Pack`          | Reads pack manifests, addresses their contents, and merges packs by origin.                |
+| `Registry`      | Ordered discovery, lookup, visibility, lazy body loading, refresh, and warnings.           |
+| `RegistryError` | Typed discovery and registry failures and their constructors.                              |
+
+Every export of every namespace, with a one-line summary, is generated from this
+package's own JSDoc onto https://smithers.sh/api/registry. That page is the
+reference; this file is the orientation.
 
 ```ts
 import { Registry } from "@smthrs/registry"
@@ -70,18 +74,21 @@ A delegate no host registered is `ExecutableError { code: "missing_delegate" }`,
 raised while the executable is being built rather than at dispatch, and it names
 the missing flow and lists what is registered.
 
-Every delegate receives the same serializable `Invocation` envelope — the flow's
-name, the caller's input, the rendered prompt, the declared seat, the placement
-directive, the declared capabilities, and the declared collaborator flows — so
-one registered driver runs many descriptors.
+Every delegate receives the same serializable `Invocation` envelope: the flow's
+name, the caller's input, the rendered prompt, the declared seat, the lowered
+placement as a host kind plus its `image`, `profile`, and `target` options, the
+declared capabilities, and the declared collaborator flows. One registered driver
+therefore runs many descriptors. The envelope and everything in it is frozen, and
+the same values are captured as the delegating node's durable identity, so what a
+delegate reads and what the engine recorded cannot diverge.
 
 Three declarations are lowered onto the runtime:
 
-| Declared on the body                                                                              | Lowered onto                                                                                                                                                                        |
-| ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CacheEnvironment.CachePolicyAnnotation` (what `@smthrs/patterns`' `withCache` writes)            | the action the bridged flow dispatches, which is what `@smthrs/engine-store` reads a policy off; also the delegating node's captured key material and the flow's own annotation bag |
-| `Annotations.Priority`                                                                            | the delegating node's `Node.priority`, which becomes `NodeDraft.priority` for `@smthrs/engine-store`'s `PlanScheduler`                                                              |
-| `Flow.within(...)`, or the descriptor's own `"use sandbox"` directive or `placement:` frontmatter | the flow's `@smthrs/flow` placement annotation and the `Invocation.placement` a host selects a spawn target with                                                                    |
+| Declared on the body                                                                              | Lowered onto                                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CacheEnvironment.CachePolicyAnnotation` (what `@smthrs/patterns`' `withCache` writes)            | the action the bridged flow dispatches, which is what `@smthrs/engine-store` reads a policy off; also the delegating node's captured key material and the flow's own annotation bag                                         |
+| `Annotations.Priority`                                                                            | the delegating node's `Node.priority`, which becomes `NodeDraft.priority` for `@smthrs/engine-store`'s `PlanScheduler`                                                                                                      |
+| `Flow.within(...)`, or the descriptor's own `"use sandbox"` directive or `placement:` frontmatter | the flow's `@smthrs/flow` placement annotation and the `Invocation.placement` plus `Invocation.placementOptions` a host selects a spawn target with. The body annotation wins over the descriptor's directive in all three. |
 
 Read the table with these limits, which the suites pin as behavior rather than
 as intent:
@@ -126,25 +133,16 @@ the layer as `RegistryError { code: "invalid_pack" }` naming the pack.
 
 ## Workflow packs
 
-A pack is a directory with a `pack.json` manifest, the shareable unit a project installs rather than copies:
-
-```json
-{
-  "name": "review-pack",
-  "version": "1.2.0",
-  "flows": ["flows"],
-  "skills": ["skills"],
-  "requires": { "smithers": ">=1.0.0" }
-}
-```
-
-`Pack.read(fs, path, dir)` decodes one manifest and fails `RegistryError { code: "invalid_pack" }` when it is missing, unparseable, or incomplete. `Pack.digest(manifest, files)` is the content address a lock file records: it covers the manifest and every measured file by its own hash under its pack-relative path, so re-reading the same bytes in a different order produces the same digest and editing a flow body changes it.
+A pack is a directory with a `pack.json` manifest, the shareable unit a project
+installs rather than copies. The manifest format, the path confinement rules, the
+content address, the compatibility grammar, and the merge precedence are
+documented once on https://smithers.sh/api/registry.
 
 `Registry.layerFromPacks(packs, { runtimeVersion })` scans a set of packs into one registry:
 
 ```ts
-import { Discovery, Pack, Registry } from "@smthrs/registry"
-import { Effect, Layer } from "effect"
+import { Discovery, Registry } from "@smthrs/registry"
+import { Layer } from "effect"
 
 const registry = Registry.layerFromPacks(
   [
@@ -155,12 +153,6 @@ const registry = Registry.layerFromPacks(
 ).pipe(Layer.provide(Discovery.layer))
 ```
 
-Three rules govern the merge:
-
-- **Precedence is the origin, not the list order.** Every `local` pack outranks every `installed` one, so a project pack shadows a vendored flow of the same name wherever the host listed it.
-- **A shadowed flow is reported, not dropped silently.** The loser becomes a `DiscoveryWarning { code: "shadowed" }` naming both packs and versions, readable through `registry.warnings()`.
-- **Compatibility is checked before anything is scanned.** A pack whose `requires.smithers` range this runtime does not satisfy fails `RegistryError { code: "incompatible_pack" }` at load rather than at the first call into one of its flows. The range grammar is `*`, an exact version, and the `>=`, `>`, `<=`, `<`, `^`, `~` comparators, space-separated as a conjunction. `^` and `~` read the way npm reads them: `^` allows everything up to the next bump of the left-most non-zero field, so `^1.2.0` accepts `1.9.0` while `^0.2.3` refuses `0.9.0` and `^0.0.3` accepts only `0.0.3`. A range the parser cannot read is refused rather than assumed compatible.
-
 Every descriptor a pack contributes carries `provenance.pack` with the pack name, version, and origin, so a catalog entry says where it came from.
 
-The `pack add | remove | list | update | eject` CLI verbs are not part of this package. This is the runtime contract underneath them: it reads manifests from directories a caller names and holds no filesystem policy of its own.
+The `pack add | remove | list | update | eject` CLI verbs are not part of this package. This is the runtime contract underneath them.

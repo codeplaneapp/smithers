@@ -7,8 +7,8 @@
  * U+FFFD. Tab, line feed, carriage return, and valid astral characters are
  * preserved.
  *
- * Implements the model-context projection in
- * [Flow Registry](../../../docs/specs/Concepts/Flow%20Registry.md).
+ * Governing contract: `packages/registry/docs/api.md`, published as
+ * https://smithers.sh/api/registry.
  *
  * @since 0.1.0
  */

@@ -1,11 +1,18 @@
 /**
+ * Flow discovery and the catalog a model is shown: portable descriptors
+ * scanned off a filesystem, disclosed to an agent in a compact form, and
+ * resolved back to a runnable body on demand.
+ *
+ * Discovery is metadata-only. Scanning a source parses markdown frontmatter
+ * and module metadata without evaluating a module or reading a prompt body, so
+ * a catalog of a thousand flows costs a thousand frontmatter parses and no
+ * imports. A body is loaded when a flow is actually invoked, and its bytes are
+ * checked against the content address discovery recorded.
+ *
+ * Governing contract: `packages/registry/docs/api.md`, published as
+ * https://smithers.sh/api/registry.
+ *
  * @since 0.1.0
- *
- * `/registry` — descriptor discovery and progressive-disclosure registry
- * services for the flows harness.
- *
- * See [Flow Registry](../../../docs/specs/Concepts/Flow%20Registry.md)
- * for the governing design.
  */
 
 /**

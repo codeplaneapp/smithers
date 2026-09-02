@@ -1,9 +1,8 @@
 /**
  * Discovery and prompt rendering for markdown-backed flows.
  *
- * Implements the markdown compatibility and one-schema/five-doors rules in
- * [Flow Registry](../../../docs/specs/Concepts/Flow%20Registry.md) and
- * [Input](../../../docs/specs/Specs/Input.md).
+ * Governing contract: `packages/registry/docs/api.md`, published as
+ * https://smithers.sh/api/registry.
  *
  * @since 0.1.0
  */

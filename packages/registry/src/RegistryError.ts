@@ -4,8 +4,8 @@
  * Codes are a stable public contract: callers branch on them and UIs map them
  * to remediation. Never repurpose a code; add one.
  *
- * Implements the error contract described by
- * [Flow Registry](../../../docs/specs/Concepts/Flow%20Registry.md).
+ * Governing contract: `packages/registry/docs/api.md`, published as
+ * https://smithers.sh/api/registry.
  *
  * @since 0.1.0
  */
