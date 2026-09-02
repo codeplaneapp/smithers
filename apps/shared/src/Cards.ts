@@ -453,9 +453,25 @@ export const CardSchema = z.discriminatedUnion("kind", [
           state: z.enum(["open", "closed"]),
           author: z.string().nullable(),
           comments: z.number().int().nonnegative(),
-          updatedAt: z.string().nullable()
+          updatedAt: z.string().nullable(),
+          /** Where the row came from: jjhub's own tracker, or GitHub for a mirrored repo. Optional so older cards parse. */
+          source: z.enum(["jjhub", "github"]).optional(),
+          htmlUrl: z.string().optional()
         })
-      )
+      ),
+      /**
+       * The GitHub read's provenance (X-Metadata-* headers on
+       * /api/user/github-repos/{o}/{r}/issues): "synced" with a syncedAt, or
+       * "live"; stale=true when the store is behind; a sync error verbatim.
+       * Absent when GitHub was not read (not linked, not mirrored, refused).
+       */
+      github: z.object({
+        source: z.string(),
+        syncedAt: z.string().nullable(),
+        stale: z.boolean(),
+        syncError: z.string().nullable(),
+        refusal: z.string().nullable()
+      }).optional()
     })
   }),
   z.object({
