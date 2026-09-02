@@ -48,7 +48,10 @@ export function TabBodies() {
       <ConfirmDialog
         open={pendingClose !== undefined}
         title={`Close ${pendingClose?.title ?? "this tab"}?`}
-        body="Its process is still running and will be stopped."
+        body={pendingClose?.kind === "terminal" && pendingClose.workspaceId !== undefined
+          // A workspace terminal's process lives in the cloud workspace: closing the tab detaches; workspace.session.destroy ends it.
+          ? "This tab detaches from the workspace session; the session keeps running in the cloud workspace."
+          : "Its process is still running and will be stopped."}
         confirmLabel="Close tab"
         destructive
         onConfirm={() => controller.runCommand("tab.close.confirm")}

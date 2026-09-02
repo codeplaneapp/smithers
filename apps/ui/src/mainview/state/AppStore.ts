@@ -752,6 +752,70 @@ const createChangeCollection = (backend: PersistenceBackend) =>
 const orderedTabs = (collections: Pick<AppCollections, "tabs">): Array<TabRow> =>
   [...collections.tabs.values()].sort((left, right) => left.ordinal - right.ordinal)
 
+/*
+ * Remove tabs from the strip in one transaction: the nearest surviving tab
+ * to the left of the active one takes over (else main), a pending close
+ * question about a removed tab is answered, and a harness tab's agent card
+ * follows its process. Main is never removed.
+ */
+const closeTabRows = (
+  collections: Pick<AppCollections, "tabs" | "sessions" | "cards">,
+  ids: ReadonlyArray<string>,
+  revision: number
+): void => {
+  const closing: Array<TabRow> = []
+  for (const id of ids) {
+    const tab = collections.tabs.get(id)
+    if (tab !== undefined && tab.kind !== "main") closing.push(tab)
+  }
+  if (closing.length === 0) return
+  const closingIds = new Set(closing.map((tab) => tab.id))
+  const activeId = collections.sessions.get(SESSION_ID)?.activeTabId ?? MAIN_TAB_ID
+  let fallback: string | undefined
+  if (closingIds.has(activeId)) {
+    const ordered = orderedTabs(collections)
+    const index = ordered.findIndex((candidate) => candidate.id === activeId)
+    fallback = MAIN_TAB_ID
+    for (let left = index - 1; left >= 0; left -= 1) {
+      const candidate = ordered[left]!
+      if (!closingIds.has(candidate.id)) {
+        fallback = candidate.id
+        break
+      }
+    }
+  }
+  collections.tabs.delete([...closingIds])
+  for (const tab of closing) {
+    if (tab.kind !== "harness") continue
+    // Closing a subagent's tab stops its process; its card says so with no exit code to claim.
+    for (const card of collections.cards.values()) {
+      if (card.kind === "agent" && card.payload.tabId === tab.id && card.payload.phase === "running") {
+        collections.cards.update(card.id, (draft) => {
+          if (draft.kind !== "agent") return
+          draft.payload.phase = "exited"
+          draft.payload.exitCode = null
+          draft.status = "acted"
+        })
+      }
+    }
+  }
+  collections.sessions.update(SESSION_ID, (draft) => {
+    if (fallback !== undefined) draft.activeTabId = fallback
+    if (draft.pendingTabCloseId !== undefined && draft.pendingTabCloseId !== null && closingIds.has(draft.pendingTabCloseId)) {
+      draft.pendingTabCloseId = null
+    }
+    draft.revision = revision
+  })
+}
+
+/** The terminal tabs attached to cloud workspaces — all of them, or those of the named workspaces. */
+const workspaceTabIds = (collections: Pick<AppCollections, "tabs">, workspaceIds?: ReadonlySet<string>): Array<string> =>
+  [...collections.tabs.values()]
+    .filter((tab) =>
+      tab.kind === "terminal" && tab.workspaceId !== undefined && (workspaceIds === undefined || workspaceIds.has(tab.workspaceId))
+    )
+    .map((tab) => tab.id)
+
 const seed = async (collections: AppCollections): Promise<void> => {
   await Promise.all([
     collections.sessions.preload(),
@@ -2236,34 +2300,9 @@ export const createAppStore = async (
           break
         }
 
-        case "tab.closed": {
-          const closing = collections.tabs.get(transition.id)
-          if (closing === undefined || closing.kind === "main") return
-          // The tab to the left takes over when the closed tab was active.
-          const ordered = orderedTabs(collections)
-          const index = ordered.findIndex((candidate) => candidate.id === closing.id)
-          const fallback = ordered[index - 1]?.id ?? MAIN_TAB_ID
-          collections.tabs.delete(closing.id)
-          if (closing.kind === "harness") {
-            // Closing a subagent's tab stops its process; its card says so with no exit code to claim.
-            for (const card of collections.cards.values()) {
-              if (card.kind === "agent" && card.payload.tabId === closing.id && card.payload.phase === "running") {
-                collections.cards.update(card.id, (draft) => {
-                  if (draft.kind !== "agent") return
-                  draft.payload.phase = "exited"
-                  draft.payload.exitCode = null
-                  draft.status = "acted"
-                })
-              }
-            }
-          }
-          collections.sessions.update(SESSION_ID, (draft) => {
-            if ((draft.activeTabId ?? MAIN_TAB_ID) === closing.id) draft.activeTabId = fallback
-            if (draft.pendingTabCloseId === closing.id) draft.pendingTabCloseId = null
-            draft.revision = revision
-          })
+        case "tab.closed":
+          closeTabRows(collections, [transition.id], revision)
           break
-        }
 
         case "tab.menu.toggled":
           collections.sessions.update(SESSION_ID, (draft) => {
@@ -2462,6 +2501,8 @@ export const createAppStore = async (
               Object.assign(draft, row)
             })
           }
+          // Signed out, no workspace terminal can attach: its tabs close with the session, in this transaction.
+          if (transition.state === "signed-out") closeTabRows(collections, workspaceTabIds(collections), revision)
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.revision = revision
           })
@@ -2488,6 +2529,8 @@ export const createAppStore = async (
             )
             .map((copy) => copy.id)
           if (staleCopies.length > 0) collections.workingCopies.delete(staleCopies)
+          // A workspace the list no longer carries takes its terminal tabs with it, here, not one redial later.
+          if (stale.length > 0) closeTabRows(collections, workspaceTabIds(collections, new Set(stale)), revision)
           for (const workspace of transition.workspaces) {
             const row: CloudWorkspaceRow = { ...workspace, updatedAt: createdAt, revision }
             if (collections.cloudWorkspaces.get(workspace.id) === undefined) collections.cloudWorkspaces.insert(row)
@@ -2545,6 +2588,41 @@ export const createAppStore = async (
               Object.assign(draft, copy)
             })
           }
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
+        case "workspace.session.destroyed": {
+          // The tab attached to the session closes and the card stops pointing at it, together.
+          closeTabRows(
+            collections,
+            [...collections.tabs.values()]
+              .filter((tab) => tab.kind === "terminal" && tab.workspaceId !== undefined && tab.sessionId === transition.sessionId)
+              .map((tab) => tab.id),
+            revision
+          )
+          for (const card of collections.cards.values()) {
+            if (card.kind !== "workspace" || card.payload.terminalSessionId !== transition.sessionId) continue
+            collections.cards.update(card.id, (draft) => {
+              if (draft.kind !== "workspace") return
+              delete draft.payload.terminalSessionId
+            })
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
+        case "workspace.deleted": {
+          // Gone is a fact: the card, the collection row, its tree copy, and its terminal tabs leave in one transaction.
+          const { workspaceId } = transition
+          const cardId = `workspace-${workspaceId}`
+          if (collections.cards.get(cardId) !== undefined) collections.cards.delete(cardId)
+          if (collections.cloudWorkspaces.get(workspaceId) !== undefined) collections.cloudWorkspaces.delete(workspaceId)
+          const copyId = `workspace:${workspaceId}`
+          if (collections.workingCopies.get(copyId) !== undefined) collections.workingCopies.delete(copyId)
+          closeTabRows(collections, workspaceTabIds(collections, new Set([workspaceId])), revision)
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.revision = revision
           })

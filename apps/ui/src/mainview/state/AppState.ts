@@ -1183,6 +1183,13 @@ export type AppTransition =
     workspace: CloudWorkspaceInput
   }
   /*
+   * A destroyed session and a deleted workspace are facts the card, the
+   * collection, and the terminal tabs learn in ONE transaction: a tab whose
+   * session or workspace is gone closes here, never one poll later.
+   */
+  | { type: "workspace.session.destroyed"; actor: Actor; sessionId: string }
+  | { type: "workspace.deleted"; actor: Actor; workspaceId: string }
+  /*
    * Lane change: one change read through the ChangeSeam (change.view, a
    * land's re-read). Upsert only — the collection answers "what is the
    * current revision of this change" for the pinned cards.
