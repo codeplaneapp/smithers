@@ -36,6 +36,15 @@ const HEAVY_MODULES = [
  * against an empty bundle. A consuming entry is the honest shape: this one
  * builds to about 1 MB with ~900 functions.
  */
+/**
+ * Warnings from the most recent bundle, kept so a failure can say WHY.
+ *
+ * A dynamic `import()` Bun cannot resolve is externalized with a warning
+ * rather than failing the build, so a green `built.success` says nothing about
+ * whether the module made it in.
+ */
+let lastBuildLogs: ReadonlyArray<string> = [];
+
 async function bundleAsConsumed(modulePath: string): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "smithers-ui-barrel-"));
   try {
@@ -48,6 +57,7 @@ async function bundleAsConsumed(modulePath: string): Promise<string> {
     const built = await Bun.build({ entrypoints: [entry], target: "browser" });
     if (!built.success) throw new AggregateError(built.logs, `could not bundle ${modulePath}`);
     const outputs = await Promise.all(built.outputs.map((artifact) => artifact.text()));
+    lastBuildLogs = built.logs.map((entry) => String(entry));
     return outputs.join("\n");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -81,6 +91,16 @@ describe("the base barrel carries no heavy renderer", () => {
     // The control: the negative assertion above only means something while the
     // dependency is genuinely reachable from somewhere in this package.
     const bundle = await bundleAsConsumed("src/adapters/knowledge-graph.ts");
-    expect(bundle).toContain("node_modules/d3-force");
+    // d3-force reaches this bundle ONLY through a runtime `import("d3-force")`
+    // — every static reference in KnowledgeGraph.tsx is a type and is erased.
+    // Bun externalizes a dynamic import it cannot resolve instead of failing,
+    // so assert on the whole picture: a bare `toContain` on a green build
+    // cannot distinguish "not bundled" from "not resolvable".
+    expect({
+      bundled: bundle.includes("node_modules/d3-force"),
+      externalized: /import\(\s*["']d3-force["']\s*\)/.test(bundle),
+      bytes: bundle.length,
+      logs: lastBuildLogs,
+    }).toMatchObject({ bundled: true, externalized: false });
   }, 120_000);
 });
