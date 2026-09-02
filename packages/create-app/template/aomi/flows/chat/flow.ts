@@ -1,10 +1,13 @@
 /**
  * The chat flow: chain questions in, an answer plus cards out.
  *
- * This is the Build page's conversation. It is a chat flow, so the realm and
- * the transcript survive between turns: a follow-up question runs against the
- * fork the previous turn opened, and a script the user likes is still in the
- * turn's cell history when they ask to keep it.
+ * This is the Build page's conversation. `chat: true` is routing metadata: the
+ * Worker offers this flow on `POST /api/agent/turn` and refuses it on
+ * `POST /api/flows/run`. It does not carry the realm across turns by itself.
+ * Each turn opens its own execution, so continuity is whatever the host
+ * replays into the next turn's payload, and a follow-up question re-opens the
+ * fork unless the session has already put that history back in front of the
+ * model.
  *
  * The file's location is its name. `flows/chat/flow.ts` is the flow `chat`, its
  * seat and teaching come from the root AGENT.ts, and its tools come from the

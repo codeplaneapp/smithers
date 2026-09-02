@@ -13,14 +13,14 @@
     "preview": "vite preview",
     "deploy": "wrangler deploy",
     "routes": "smithers-routes",
+    "routes:check": "smithers-routes --check",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:record": "SMTHRS_RECORD=1 vitest run"
+    "test": "vitest run"
   },
   "dependencies": {
-    "@smthrs/core": "0.1.0",
+    "@smthrs/core": "1.0.0-rc.0",
     "@smthrs/create-app": "0.1.0",
-    "@smthrs/harness": "0.1.0",
+    "@smthrs/harness": "1.0.0-rc.0",
     "@smthrs/targets": "0.1.0",
     "effect": "4.0.0-rc.108",
     "react": "^19.2.8",

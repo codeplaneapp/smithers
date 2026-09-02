@@ -49,7 +49,7 @@ describe("layer inputs", () => {
     const sandbox = defineSandbox({ limits: { heapBytes: 1024, interruptChecks: 10, wallClockMs: 5 } })
     expect(sandbox.limits.heapBytes).toBe(1024)
     expect(defineAgent({ seat: "s", system: [], limits: { calls: 4 } }).limits?.calls).toBe(4)
-    expect(defineTools([]).sources).toEqual([])
+    expect(defineTools({ sources: [] }).sources).toEqual([])
   })
 
   it("composes a host whether or not the agent layer declares budgets", () => {
@@ -62,13 +62,13 @@ describe("layer inputs", () => {
       layerFor({
         agent: defineAgent({ seat: "s", system: [], limits: { calls: 4 }, maxFrames: 3 }),
         sandbox,
-        tools: defineTools([]),
+        tools: defineTools({ sources: [] }),
         seats,
         crypto
       })
     ).toBeDefined()
     expect(
-      layerFor({ agent: defineAgent({ seat: "s", system: [] }), sandbox, tools: defineTools([]), seats, crypto })
+      layerFor({ agent: defineAgent({ seat: "s", system: [] }), sandbox, tools: defineTools({ sources: [] }), seats, crypto })
     ).toBeDefined()
   })
 

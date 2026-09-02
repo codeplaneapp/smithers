@@ -5,9 +5,12 @@
  * repository's layout is not a rule.
  */
 import { afterEach, describe, expect, it } from "@effect/vitest"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { spawnSync } from "node:child_process"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, sep } from "node:path"
+import ts from "typescript"
+import type { AppRoutes } from "../src/app.ts"
 import { defaultDirs } from "../src/app.ts"
 import { discover, render, renderAll, renderUi, resolveLayer, RouterError, writeRoutes } from "../src/router.ts"
 
@@ -27,6 +30,46 @@ const appTree = (files: Record<string, string>): string => {
     writeFileSync(full, contents)
   }
   return root
+}
+
+/**
+ * Every import a generated module declares, as binding and specifier.
+ *
+ * The golden-string assertions below compare text, so a generated module that
+ * text-matches an equally broken expectation still passes. Reading the real
+ * import list back is what proves the two properties the generator owes: one
+ * binding per routed file, and no specifier the router did not put there.
+ */
+const importsOf = (source: string): ReadonlyArray<{ readonly binding: string; readonly specifier: string }> => {
+  const file = ts.createSourceFile("routes.gen.ts", source, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS)
+  return file.statements.flatMap((statement) => {
+    if (!ts.isImportDeclaration(statement)) return []
+    const bindings = statement.importClause?.namedBindings
+    const specifier = ts.isStringLiteral(statement.moduleSpecifier) ? statement.moduleSpecifier.text : ""
+    // A bare `import "./x"` carries no clause at all, which is exactly the
+    // shape an injected specifier takes; it is reported with an empty binding
+    // so the assertions below see it.
+    if (bindings === undefined || !ts.isNamespaceImport(bindings)) return [{ binding: "", specifier }]
+    return [{ binding: bindings.name.text, specifier }]
+  })
+}
+
+/**
+ * What the JavaScript parser says about a generated module, or `""`.
+ *
+ * `node --check` is the real engine rather than a transpiler: TypeScript's
+ * `transpileModule` elides an unused import, which is precisely the duplicate
+ * the generator used to emit, and reports nothing. `as const` is the only
+ * TypeScript-only syntax either generated file carries, so stripping it leaves
+ * a module Node parses as-is.
+ */
+const parseErrors = (source: string): string => {
+  const directory = mkdtempSync(join(tmpdir(), "smthrs-parse-"))
+  roots.push(directory)
+  const file = join(directory, "generated.mjs")
+  writeFileSync(file, source.replaceAll(" as const", ""))
+  const result = spawnSync(process.execPath, ["--check", file], { encoding: "utf8" })
+  return result.status === 0 ? "" : result.stderr
 }
 
 const dirs = defaultDirs
@@ -91,6 +134,51 @@ describe("discover", () => {
     const routes = discover({ root, dirs })
     expect(routes.panes).toEqual([])
     expect(routes.pages).toEqual([{ route: "/", file: "app/page.tsx" }])
+  })
+
+  it("routes app/panes/<dir>/page.tsx as a page, not as a pane named page", () => {
+    const root = appTree({
+      ...layers,
+      "app/panes/balances.tsx": "export const Pane = {}\n",
+      "app/panes/deep/page.tsx": "export default () => null\n",
+      // Only the file directly under panes/ is a pane. A nested .tsx that is
+      // not a page.tsx is not routed at all.
+      "app/panes/chain/balance.tsx": "export const Pane = {}\n"
+    })
+    const routes = discover({ root, dirs })
+    expect(routes.panes).toEqual([{ name: "balances", file: "app/panes/balances.tsx" }])
+    expect(routes.pages).toEqual([{ route: "/panes/deep", file: "app/panes/deep/page.tsx" }])
+  })
+
+  it("ignores a nested layout.tsx: only the app root has a shell layout", () => {
+    const root = appTree({
+      ...layers,
+      "app/page.tsx": "export default () => null\n",
+      "app/nested/page.tsx": "export default () => null\n",
+      "app/nested/layout.tsx": "export default () => null\n"
+    })
+    const routes = discover({ root, dirs })
+    expect(routes.layout).toBeUndefined()
+    const output = renderUi(routes)
+    expect(output).toContain("export const layout = undefined")
+    expect(output).not.toContain("app/nested/layout.tsx")
+  })
+
+  it("ignores a dangling symlink instead of failing with a raw ENOENT", () => {
+    const root = appTree({ ...layers, "app/page.tsx": "export default () => null\n" })
+    symlinkSync(join(root, "nowhere.tsx"), join(root, "app", "dangling.tsx"))
+    expect(discover({ root, dirs }).pages).toEqual([{ route: "/", file: "app/page.tsx" }])
+  })
+
+  it("ignores a self-referential directory symlink instead of recursing to ELOOP", { timeout: 5000 }, () => {
+    const root = appTree({ ...layers, "app/page.tsx": "export default () => null\n" })
+    symlinkSync(join(root, "app"), join(root, "app", "loop"))
+    expect(discover({ root, dirs }).pages).toEqual([{ route: "/", file: "app/page.tsx" }])
+  })
+
+  it("reads a root that carries a trailing separator the same as the normalized one", () => {
+    const root = appTree({ ...layers, "app/page.tsx": "export default () => null\n" })
+    expect(discover({ root: `${root}${sep}`, dirs })).toEqual(discover({ root, dirs }))
   })
 
   it("honors non-default dirs", () => {
@@ -163,6 +251,41 @@ describe("layer resolution", () => {
     const root = appTree(layers)
     expect(resolveLayer(root, root, "AGENT.ts", new Set(["AGENT.ts"]))).toBe("AGENT.ts")
   })
+
+  it("refuses rather than hangs when the root carries a trailing separator", { timeout: 5000 }, () => {
+    // `dirname("/")` is `"/"`, and the walk used to stop only on a raw string
+    // match with the root, so an unnormalized root spun forever instead of
+    // reporting the missing layer. Shell tab completion appends the separator.
+    const root = appTree(layers)
+    try {
+      resolveLayer(`${root}${sep}`, join(root, "flows", "chat"), "TOOLS.ts", new Set(["AGENT.ts"]))
+      expect.unreachable("resolveLayer should have thrown")
+    } catch (error) {
+      expect((error as RouterError).code).toBe("missing_layer")
+      expect((error as RouterError).message).toContain("flows/chat")
+    }
+  })
+
+  it("refuses rather than hangs for a directory outside the root", { timeout: 5000 }, () => {
+    const root = appTree(layers)
+    try {
+      resolveLayer(root, dirname(root), "AGENT.ts", new Set(["AGENT.ts"]))
+      expect.unreachable("resolveLayer should have thrown")
+    } catch (error) {
+      expect((error as RouterError).code).toBe("missing_layer")
+      expect((error as RouterError).message).toContain("outside the app root")
+    }
+  })
+
+  it("refuses rather than hangs for the filesystem root", { timeout: 5000 }, () => {
+    try {
+      resolveLayer(sep, sep, "AGENT.ts", new Set<string>())
+      expect.unreachable("resolveLayer should have thrown")
+    } catch (error) {
+      expect((error as RouterError).code).toBe("missing_layer")
+      expect((error as RouterError).message).toContain("no AGENT.ts found for .")
+    }
+  })
 })
 
 describe("name collisions", () => {
@@ -202,6 +325,42 @@ describe("name collisions", () => {
       expect((error as RouterError).code).toBe("invalid_name")
     }
   })
+
+  it("refuses a page directory segment that is not lowercase kebab-case", () => {
+    // The practical trigger is not an attacker: `app/v1.2/page.tsx` was
+    // accepted, and its route then collided with `app/v1-2/page.tsx`.
+    const root = appTree({ ...layers, "app/v1.2/page.tsx": "export default () => null\n" })
+    try {
+      discover({ root, dirs })
+      expect.unreachable("discover should have thrown")
+    } catch (error) {
+      expect((error as RouterError).code).toBe("invalid_name")
+      expect((error as RouterError).message).toContain("app/v1.2/page.tsx")
+    }
+  })
+
+  it("refuses a page directory that would close the generated import specifier", () => {
+    const root = appTree({
+      ...layers,
+      "app/x\";import \"./evil.ts\";/page.tsx": "export default () => null\n"
+    })
+    try {
+      discover({ root, dirs })
+      expect.unreachable("discover should have thrown")
+    } catch (error) {
+      expect((error as RouterError).code).toBe("invalid_name")
+    }
+  })
+
+  it("refuses an uppercase page directory segment at any depth", () => {
+    const root = appTree({ ...layers, "app/operate/Logs/page.tsx": "export default () => null\n" })
+    try {
+      discover({ root, dirs })
+      expect.unreachable("discover should have thrown")
+    } catch (error) {
+      expect((error as RouterError).code).toBe("invalid_name")
+    }
+  })
 })
 
 describe("render", () => {
@@ -216,42 +375,42 @@ describe("render", () => {
     })
     const expectedRuntime = [
       "// Generated by @smthrs/create-app from the flows and layer files. Do not edit.",
-      "// Regenerate with `pnpm routes`; `smithers-build '//:routes'` checks for drift.",
+      "// Regenerate with `pnpm routes`; `smithers-build lint '//:routes'` checks for drift.",
       "/* eslint-disable */",
       "",
       "import * as layer0 from \"./AGENT.ts\"",
       "import * as layer1 from \"./SANDBOX.ts\"",
       "import * as layer2 from \"./TOOLS.ts\"",
       "import * as layer3 from \"./flows/build/AGENT.ts\"",
-      "import * as flow_build from \"./flows/build/flow.ts\"",
-      "import * as flow_chat from \"./flows/chat/flow.ts\"",
+      "import * as flow0 from \"./flows/build/flow.ts\"",
+      "import * as flow1 from \"./flows/chat/flow.ts\"",
       "",
       "export const paneNames = [\"balances\"] as const",
       "",
       "export const flows = [",
-      "  { id: \"build\", file: \"flows/build/flow.ts\", spec: flow_build.Flow, agent: layer3.Agent, " +
+      "  { id: \"build\", file: \"flows/build/flow.ts\", spec: flow0.Flow, agent: layer3.Agent, " +
       "sandbox: layer1.Sandbox, tools: layer2.Tools },",
-      "  { id: \"chat\", file: \"flows/chat/flow.ts\", spec: flow_chat.Flow, agent: layer0.Agent, " +
+      "  { id: \"chat\", file: \"flows/chat/flow.ts\", spec: flow1.Flow, agent: layer0.Agent, " +
       "sandbox: layer1.Sandbox, tools: layer2.Tools },",
       "] as const",
       ""
     ].join("\n")
     const expectedUi = [
       "// Generated by @smthrs/create-app from the app directory. Do not edit.",
-      "// Regenerate with `pnpm routes`; `smithers-build '//:routes'` checks for drift.",
+      "// Regenerate with `pnpm routes`; `smithers-build lint '//:routes'` checks for drift.",
       "/* eslint-disable */",
       "",
-      "import * as pane_balances from \"./app/panes/balances.tsx\"",
-      "import * as page__ from \"./app/page.tsx\"",
+      "import * as pane0 from \"./app/panes/balances.tsx\"",
+      "import * as page0 from \"./app/page.tsx\"",
       "",
       "export const layout = undefined",
       "",
       "export const pages = [",
-      "  { route: \"/\", file: \"app/page.tsx\", component: page__.default },",
+      "  { route: \"/\", file: \"app/page.tsx\", component: page0.default },",
       "] as const",
       "",
       "export const panes = {",
-      "  \"balances\": pane_balances.Pane,",
+      "  \"balances\": pane0.Pane,",
       "} as const",
       ""
     ].join("\n")
@@ -260,6 +419,56 @@ describe("render", () => {
     expect(render(routes)).toBe(expectedRuntime)
     expect(renderUi(routes)).toBe(expectedUi)
     expect(renderAll(routes)).toEqual({ "routes.gen.ts": expectedRuntime, "routes.ui.gen.ts": expectedUi })
+  })
+
+  it("gives two routes that differ only in their separator two distinct bindings", () => {
+    // `a-b` and `a/b` are both legal, and every identifier derived from the
+    // route mapped them onto one binding: the generated module then declared
+    // the same name twice and did not parse, while the generator exited 0.
+    const root = appTree({
+      ...layers,
+      "flows/a-b/flow.ts": "export const Flow = {}\n",
+      "flows/a/b/flow.ts": "export const Flow = {}\n",
+      "app/a-b/page.tsx": "export default () => null\n",
+      "app/a/b/page.tsx": "export default () => null\n",
+      "app/panes/a-b.tsx": "export const Pane = {}\n"
+    })
+    const routes = discover({ root, dirs })
+    expect(routes.flows.map((flow) => flow.id)).toEqual(["a-b", "a/b"])
+    expect(routes.pages.map((page) => page.route)).toEqual(["/a-b", "/a/b"])
+
+    for (const source of [render(routes), renderUi(routes)]) {
+      const declared = importsOf(source)
+      expect(declared.length).toBeGreaterThan(0)
+      expect(new Set(declared.map((entry) => entry.binding)).size).toBe(declared.length)
+      expect(parseErrors(source)).toBe("")
+    }
+  })
+
+  it("emits every import specifier as an escaped string literal", () => {
+    // `discover` refuses these paths, so the renderer is driven directly: the
+    // two defenses are independent, and a caller that builds an `AppRoutes` by
+    // hand still cannot inject a statement into a generated module.
+    const hostile = "app/x\";import \"./evil.ts\";//page.tsx"
+    const routes: AppRoutes = {
+      layout: undefined,
+      pages: [{ route: "/x", file: hostile }],
+      panes: [{ name: "x", file: hostile }],
+      flows: [{ id: "x", file: hostile, agent: "AGENT.ts", sandbox: "SANDBOX.ts", tools: "TOOLS.ts" }]
+    }
+    // The hostile path survives whole inside one string literal rather than
+    // closing it, so the module declares only the imports the router put there
+    // and no `import "./evil.ts"` statement of its own.
+    const expected = {
+      runtime: ["./AGENT.ts", "./SANDBOX.ts", "./TOOLS.ts", `./${hostile}`],
+      ui: [`./${hostile}`, `./${hostile}`]
+    }
+    for (const [kind, source] of [["runtime", render(routes)], ["ui", renderUi(routes)]] as const) {
+      const declared = importsOf(source)
+      expect(declared.map((entry) => entry.specifier)).toEqual(expected[kind])
+      expect(declared.every((entry) => entry.binding !== "")).toBe(true)
+      expect(parseErrors(source)).toBe("")
+    }
   })
 
   it("renders empty tables for an empty app, not a broken file", () => {

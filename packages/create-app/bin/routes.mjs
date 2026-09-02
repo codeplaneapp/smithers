@@ -1,54 +1,38 @@
 #!/usr/bin/env node
 // `smithers-routes`: regenerate routes.gen.ts and routes.ui.gen.ts at an app
-// root. `--check` writes nothing and exits 1 on drift, which is the form
-// `smithers-build '//:routes'` runs.
+// root. `--check` writes nothing and exits 1 on drift. The build graph checks
+// drift through `smithers-build lint '//:routes'`, which runs the generator in
+// write mode and compares the declared `changes`; the bare `smithers-build
+// '//:routes'` form is the write form and checks nothing.
 //
-// Runs under Node's built-in type stripping: every module it reaches is
-// erasable syntax only.
-import { defaultDirs } from "../src/app.ts"
-import { writeRoutes } from "../src/router.ts"
+// A published install ships `dist/esm/routesBin.js`, and Node refuses to strip
+// types from any file under node_modules, so the built entry is preferred
+// whenever it exists. A source checkout has no `dist`, so the source module
+// runs through Node's own type stripping and `pnpm exec smithers-routes` needs
+// no build step.
+import { existsSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 
-const argv = process.argv.slice(2)
+const built = new URL("../dist/esm/routesBin.js", import.meta.url)
+let entry = built
 
-const flag = (name, fallback) => {
-  const index = argv.indexOf(`--${name}`)
-  if (index === -1) return fallback
-  const value = argv[index + 1]
-  if (value === undefined || value.startsWith("--")) {
-    console.error(`--${name} expects a value`)
-    process.exit(2)
+if (!existsSync(fileURLToPath(built))) {
+  // Type stripping is experimental on Node 22, and its warning would prepend a
+  // paragraph of noise to every development invocation. Only that one warning
+  // is dropped; everything else still reaches stderr.
+  const emitWarning = process.emitWarning.bind(process)
+  process.emitWarning = (warning, ...rest) => {
+    const type = typeof rest[0] === "string" ? rest[0] : rest[0]?.type
+    if (type === "ExperimentalWarning" && String(warning).includes("Type Stripping")) return
+    emitWarning(warning, ...rest)
   }
-  return value
+  entry = new URL("../src/routesBin.ts", import.meta.url)
 }
 
-if (argv.includes("--help") || argv.includes("-h")) {
-  console.log(
-    "usage: smithers-routes [--check] [--root <dir>] [--app <dir>] [--flows <dir>] [--tools <dir>]\n\n" +
-      "  --check  report drift instead of writing; exit 1 when a file is stale"
-  )
-  process.exit(0)
-}
+const { runRoutesBin } = await import(entry.href)
 
-const root = flag("root", process.cwd())
-const dirs = {
-  app: flag("app", defaultDirs.app),
-  flows: flag("flows", defaultDirs.flows),
-  tools: flag("tools", defaultDirs.tools)
-}
-const check = argv.includes("--check")
-
-let report
-try {
-  report = writeRoutes({ root, dirs, check })
-} catch (cause) {
-  console.error(cause instanceof Error ? cause.message : String(cause))
-  process.exit(1)
-}
-
-if (check) {
-  for (const file of report.stale) console.error(`${file} is out of date; run \`pnpm routes\``)
-  process.exit(report.stale.length === 0 ? 0 : 1)
-}
-
-const { flows, pages, panes } = report.counts
-console.log(`routes: ${pages} pages, ${panes} panes, ${flows} flows`)
+// `process.exitCode` rather than `process.exit`, so a report written to a pipe
+// is flushed before the process ends.
+process.exitCode = runRoutesBin(process.argv.slice(2), {
+  io: { out: (line) => console.log(line), err: (line) => console.error(line) }
+})

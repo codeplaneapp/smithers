@@ -7,9 +7,12 @@
  * shell reads one JSON object per line and never polls.
  *
  * Milestone 1 ships the mock path. `env.APP_MOCK_TURN !== "0"` streams a
- * plausible sequence so the shell works end to end; `"0"` asks for the real
- * `Agent.run` path below, which is written out in full and does not run under
- * workerd yet. The blockers are named at {@link liveTurn}.
+ * plausible sequence so the shell works end to end. `"0"` asks for the real
+ * `Agent.run` path, which is written out in full at {@link liveTurn} and does
+ * not run under workerd yet, so it is refused with
+ * {@link liveRuntimeUnsupported} rather than started: three upstream blockers
+ * stop it, and a caller that flips the flag deserves to be told which rather
+ * than handed whichever of them fails first.
  */
 import type { AgentSpec, AnyFlowSpec, SandboxSpec, ToolsSpec } from "@smthrs/create-app/app"
 import { layerFor, materializeFlow } from "@smthrs/create-app/runtime"
@@ -142,6 +145,21 @@ const failureMessage = (cause: unknown): string =>
   cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "The turn failed."
 
 /**
+ * The refusal `APP_MOCK_TURN=0` gets today, exported so the flow-run path and
+ * the tests state the same thing once.
+ *
+ * The three blockers are named in full because each one is a fix in a
+ * different package, and a deployer who set the flag has no other way to learn
+ * why nothing ran. {@link liveTurn} carries the file and line for each.
+ */
+export const liveRuntimeUnsupported =
+  "unsupported_runtime: the live agent path does not run under workerd yet. Three upstream blockers: "
+  + "(1) @smthrs/harness compiles its QuickJS variant with WebAssembly.compile, which workerd refuses; "
+  + "(2) @smthrs/create-app/runtime builds AgentAction.layerHost without `flows`, so the app's tool sources "
+  + "never reach a cell; (3) @smthrs/database has no Durable Object SQLite driver, so a turn's journal does "
+  + "not survive the request. Leave APP_MOCK_TURN at \"1\" until all three land."
+
+/**
  * Runs one turn and returns its NDJSON body.
  *
  * The stream is closed exactly once, on the one path every branch ends on: a
@@ -156,7 +174,11 @@ export const runTurn = (options: TurnOptions): ReadableStream<Uint8Array> => {
         controller.enqueue(line(frame))
       }
       try {
-        await (mock ? mockTurn(options, emit) : liveTurn(options, emit))
+        // The refusal is raised rather than returned, so it takes the same
+        // `error` frame and `failed` row every other turn failure takes. The
+        // shell needs no branch for it.
+        if (!mock) throw new Error(liveRuntimeUnsupported)
+        await mockTurn(options, emit)
         options.session.settle(options.signal.aborted ? "idle" : "ready")
       } catch (cause) {
         // The Recent column is written before the refusal, because the refusal
@@ -368,7 +390,10 @@ const sessionSources = (
  *     journal does not survive the request. `AppSession` persists the app's
  *     own state instead.
  */
-const liveTurn = async (options: TurnOptions, emit: (frame: TurnFrame) => void): Promise<void> => {
+// Exported, and unreachable from `runTurn`, on purpose: it is the written-out
+// shape the fix will take, kept compiling against the current package APIs so
+// the three blockers above are the only thing left to land.
+export const liveTurn = async (options: TurnOptions, emit: (frame: TurnFrame) => void): Promise<void> => {
   const { env, request, session, signal } = options
   const route = routeFor(request.flowId)
   if (route === undefined) {

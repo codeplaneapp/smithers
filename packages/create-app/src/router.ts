@@ -7,9 +7,14 @@
  * the whole authoring contract, and file location is the only thing that names
  * anything:
  *
- * - `<app>/layout.tsx` is the shell layout, and it is optional.
- * - `<app>/**\/page.tsx` is the page at `/<dir>`; `<app>/page.tsx` is `/`.
- * - `<app>/panes/<name>.tsx` is the pane `<name>`.
+ * - `<app>/layout.tsx` is the shell layout, and it is optional. Only the app
+ *   root's `layout.tsx` is a shell layout: a nested one is an ordinary file the
+ *   router ignores.
+ * - `<app>/**\/page.tsx` is the page at `/<dir>`; `<app>/page.tsx` is `/`. Every
+ *   directory segment of that route is a route name, so each one must match
+ *   {@link RouterErrorCode} `invalid_name`'s lowercase kebab-case grammar.
+ * - `<app>/panes/<name>.tsx` is the pane `<name>`, and only at that exact
+ *   depth: `<app>/panes/<dir>/page.tsx` is the page `/panes/<dir>`.
  * - `<flows>/**\/flow.ts` or `flow.mdx` is the flow named by its directory, so
  *   `flows/build/plan/flow.ts` is the flow `build/plan`.
  * - `AGENT.ts`, `SANDBOX.ts`, and `TOOLS.ts` are layers for every flow in
@@ -17,9 +22,12 @@
  *   nothing merges, so the app root must provide all three for resolution to
  *   terminate.
  *
+ * Symbolic links are neither walked nor routed, so a checkout's dangling or
+ * self-referential links cannot fail or wedge a route generation.
+ *
  * @since 0.1.0
  */
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, posix, relative, resolve, sep } from "node:path"
 import type { AppDirs, AppRoutes, FlowRoute, PageRoute, PaneRoute } from "./app.ts"
 
@@ -76,12 +84,21 @@ const NAME = /^[a-z][a-z0-9-]*$/
 
 const toPosix = (path: string): string => path.split(sep).join(posix.sep)
 
+// `withFileTypes` reports each entry's own type, so nothing here follows a
+// symbolic link. `statSync` did follow: a dangling link threw a raw ENOENT
+// with no route context, a directory link pointing at an ancestor recursed
+// until ELOOP, and a link into an external tree was walked in full. Skipping
+// links removes all three at once, and the syscall with them.
+//
+// Directory order is not sorted here: `discover` sorts the whole collected set
+// before it routes anything, so the generated tables are already independent
+// of what the filesystem hands back.
 const walk = (dir: string, visit: (file: string) => void): void => {
-  for (const entry of readdirSync(dir).sort()) {
-    if (IGNORED.has(entry)) continue
-    const full = join(dir, entry)
-    if (statSync(full).isDirectory()) walk(full, visit)
-    else visit(full)
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (IGNORED.has(entry.name)) continue
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) walk(full, visit)
+    else if (entry.isFile()) visit(full)
   }
 }
 
@@ -89,20 +106,32 @@ const walk = (dir: string, visit: (file: string) => void): void => {
  * Resolves one layer kind for one directory: the nearest `<kind>` at `dir` or
  * any ancestor up to and including `root`.
  *
+ * Both paths are normalized before the walk, and `dir` must sit inside `root`.
+ * Without that the loop had no stopping condition: it compared raw strings, so
+ * a root carrying a trailing separator (which shell tab completion appends)
+ * never matched, and `dirname("/")` is `"/"`, so the walk spun forever instead
+ * of raising `missing_layer`.
+ *
  * @category constructors
  * @since 0.1.0
  */
 export const resolveLayer = (root: string, dir: string, kind: LayerKind, files: ReadonlySet<string>): string => {
-  let current = dir
+  const boundary = resolve(root)
+  const start = resolve(dir)
+  const label = start === boundary ? "." : toPosix(relative(boundary, start))
+  if (start !== boundary && !start.startsWith(`${boundary}${sep}`)) {
+    throw new RouterError("missing_layer", `${label} is outside the app root, so no ${kind} can resolve for it`)
+  }
+  let current = start
   for (;;) {
-    const candidate = toPosix(relative(root, join(current, kind)))
+    const candidate = toPosix(relative(boundary, join(current, kind)))
     if (files.has(candidate)) return candidate
-    if (current === root) break
+    if (current === boundary) break
     current = dirname(current)
   }
   throw new RouterError(
     "missing_layer",
-    `no ${kind} found for ${toPosix(relative(root, dir))} or any ancestor; add one at the app root`
+    `no ${kind} found for ${label} or any ancestor; add one at the app root`
   )
 }
 
@@ -122,11 +151,15 @@ export const resolveLayer = (root: string, dir: string, kind: LayerKind, files: 
  * @since 0.1.0
  */
 export const discover = (options: RouterOptions): AppRoutes => {
-  const { dirs, root } = options
+  const { dirs } = options
+  // Normalized once, so every `relative` below and every ancestor walk in
+  // `resolveLayer` compares the same spelling of the same directory.
+  const root = resolve(options.root)
   const files = new Set<string>()
   walk(root, (file) => files.add(toPosix(relative(root, file))))
 
   const appPrefix = `${dirs.app}/`
+  const panesDir = `${dirs.app}/panes`
   const flowsPrefix = `${dirs.flows}/`
   const layout = files.has(`${dirs.app}/layout.tsx`) ? `${dirs.app}/layout.tsx` : undefined
 
@@ -143,7 +176,12 @@ export const discover = (options: RouterOptions): AppRoutes => {
   }
 
   for (const file of [...files].sort()) {
-    if (file.startsWith(`${dirs.app}/panes/`) && file.endsWith(".tsx")) {
+    // Exactly one level below `panes/`, which is what the docstring, the
+    // `routes` target's input glob in `package.ts`, and the Vite plugin's
+    // watcher all already declare. Matching at any depth made
+    // `app/panes/deep/page.tsx` the pane `page` instead of the page
+    // `/panes/deep`, and put a routed file outside the target's `data` set.
+    if (posix.dirname(file) === panesDir && file.endsWith(".tsx")) {
       const name = posix.basename(file, ".tsx")
       if (!NAME.test(name)) throw new RouterError("invalid_name", `pane file name must match ${NAME}: ${file}`)
       claim(`pane:${name}`, file)
@@ -153,6 +191,12 @@ export const discover = (options: RouterOptions): AppRoutes => {
     if (file.startsWith(appPrefix) && posix.basename(file) === "page.tsx") {
       const dir = posix.dirname(file).slice(appPrefix.length - 1)
       const route = dir === "" ? "/" : `/${dir.replace(/^\//, "")}`
+      // Every directory segment names the route, so it obeys the same grammar
+      // a pane and a flow segment do. Unvalidated, `app/v1.2/page.tsx` was
+      // accepted and any character at all reached the generated import.
+      if (route !== "/" && !route.slice(1).split("/").every((segment) => NAME.test(segment))) {
+        throw new RouterError("invalid_name", `page directory segments must match ${NAME}: ${file}`)
+      }
       claim(`page:${route}`, file)
       pages.push({ route, file })
       continue
@@ -176,11 +220,21 @@ export const discover = (options: RouterOptions): AppRoutes => {
   return { layout, pages, panes, flows }
 }
 
-const identifier = (prefix: string, key: string): string => `${prefix}_${key.replace(/[^A-Za-z0-9]/g, "_")}`
+// Import bindings are numbered by position rather than derived from the route,
+// because no derivation from the route is injective: `[^A-Za-z0-9] -> "_"`
+// mapped the flows `a-b` and `a/b`, and the pages `/a-b`, `/a/b` and `/a_b`,
+// onto one binding each, and the generated module then failed to parse while
+// the generator reported success.
+const binding = (prefix: string, index: number): string => `${prefix}${index}`
+
+// Every specifier is a JSON string literal rather than an interpolated
+// template, so no character in a file path can close the literal and inject a
+// statement into the generated module.
+const specifier = (file: string): string => JSON.stringify(`./${file}`)
 
 const header = (what: string): ReadonlyArray<string> => [
   `// Generated by @smthrs/create-app from ${what}. Do not edit.`,
-  "// Regenerate with `pnpm routes`; `smithers-build '//:routes'` checks for drift.",
+  "// Regenerate with `pnpm routes`; `smithers-build lint '//:routes'` checks for drift.",
   "/* eslint-disable */",
   ""
 ]
@@ -202,19 +256,21 @@ export const render = (routes: AppRoutes): string => {
   const layerIds = new Map<string, string>()
   let index = 0
   for (const file of [...layerFiles].sort()) {
-    const id = `layer${index++}`
+    const id = binding("layer", index++)
     layerIds.set(file, id)
-    lines.push(`import * as ${id} from "./${file}"`)
+    lines.push(`import * as ${id} from ${specifier(file)}`)
   }
-  for (const flow of routes.flows) lines.push(`import * as ${identifier("flow", flow.id)} from "./${flow.file}"`)
+  for (const [position, flow] of routes.flows.entries()) {
+    lines.push(`import * as ${binding("flow", position)} from ${specifier(flow.file)}`)
+  }
   lines.push("")
   lines.push(`export const paneNames = ${JSON.stringify(routes.panes.map((pane) => pane.name))} as const`)
   lines.push("")
   lines.push("export const flows = [")
-  for (const flow of routes.flows) {
+  for (const [position, flow] of routes.flows.entries()) {
     lines.push(
       `  { id: ${JSON.stringify(flow.id)}, file: ${JSON.stringify(flow.file)}, spec: ${
-        identifier("flow", flow.id)
+        binding("flow", position)
       }.Flow, ` +
         `agent: ${layerIds.get(flow.agent)}.Agent, sandbox: ${layerIds.get(flow.sandbox)}.Sandbox, tools: ${
           layerIds.get(flow.tools)
@@ -235,24 +291,30 @@ export const render = (routes: AppRoutes): string => {
  */
 export const renderUi = (routes: AppRoutes): string => {
   const lines: Array<string> = [...header("the app directory")]
-  for (const pane of routes.panes) lines.push(`import * as ${identifier("pane", pane.name)} from "./${pane.file}"`)
-  if (routes.layout !== undefined) lines.push(`import * as layoutModule from "./${routes.layout}"`)
-  for (const page of routes.pages) lines.push(`import * as ${identifier("page", page.route)} from "./${page.file}"`)
+  for (const [position, pane] of routes.panes.entries()) {
+    lines.push(`import * as ${binding("pane", position)} from ${specifier(pane.file)}`)
+  }
+  if (routes.layout !== undefined) lines.push(`import * as layoutModule from ${specifier(routes.layout)}`)
+  for (const [position, page] of routes.pages.entries()) {
+    lines.push(`import * as ${binding("page", position)} from ${specifier(page.file)}`)
+  }
   lines.push("")
   lines.push(`export const layout = ${routes.layout === undefined ? "undefined" : "layoutModule.default"}`)
   lines.push("")
   lines.push("export const pages = [")
-  for (const page of routes.pages) {
+  for (const [position, page] of routes.pages.entries()) {
     lines.push(
       `  { route: ${JSON.stringify(page.route)}, file: ${JSON.stringify(page.file)}, component: ${
-        identifier("page", page.route)
+        binding("page", position)
       }.default },`
     )
   }
   lines.push("] as const")
   lines.push("")
   lines.push("export const panes = {")
-  for (const pane of routes.panes) lines.push(`  ${JSON.stringify(pane.name)}: ${identifier("pane", pane.name)}.Pane,`)
+  for (const [position, pane] of routes.panes.entries()) {
+    lines.push(`  ${JSON.stringify(pane.name)}: ${binding("pane", position)}.Pane,`)
+  }
   lines.push("} as const")
   lines.push("")
   return lines.join("\n")

@@ -53,7 +53,7 @@ describe("defineTools", () => {
   it("tags the spec and keeps the sources in declaration order", () => {
     const first = { name: "ledger", flows: [] } as never
     const second = { name: "ui", flows: [] } as never
-    expect(defineTools([first, second])).toEqual({
+    expect(defineTools({ sources: [first, second] })).toEqual({
       _tag: "ToolsSpec",
       sources: [first, second],
       grant: [{ action: "*", resource: "*" }]
@@ -97,12 +97,12 @@ describe("defaults", () => {
 
 describe("defineTools grant", () => {
   it("defaults to the appliance grant", () => {
-    const tools = defineTools([])
+    const tools = defineTools({ sources: [] })
     expect(tools.grant).toEqual([{ action: "*", resource: "*" }])
   })
 
   it("keeps a narrowed grant as declared", () => {
-    const tools = defineTools([], { grant: [{ action: "net:post:*", resource: "https://example.com/*" }] })
-    expect(tools.grant).toEqual([{ action: "net:post:*", resource: "https://example.com/*" }])
+    const tools = defineTools({ sources: [], grant: [{ action: "net:post", resource: "https://example.com/*" }] })
+    expect(tools.grant).toEqual([{ action: "net:post", resource: "https://example.com/*" }])
   })
 })

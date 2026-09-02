@@ -5,4 +5,4 @@ import { ui } from "./tools/ui.ts"
 
 // Root tool layer: the FlowBinding sources every flow below this directory
 // reaches as ctx.call("<source>/<flow>", input).
-export const Tools = defineTools([tevm, ui, promote])
+export const Tools = defineTools({ sources: [tevm, ui, promote] })

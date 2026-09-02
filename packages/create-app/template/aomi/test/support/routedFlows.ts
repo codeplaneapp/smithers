@@ -52,6 +52,6 @@ export const routedFlows = (cards: Array<AppCard>): ReadonlyArray<RoutedFlow> =>
     spec: route.spec,
     agent: route.agent,
     sandbox: route.sandbox,
-    tools: defineTools(route.tools.sources.map((source) => source.name === ui.name ? ui : source))
+    tools: defineTools({ sources: route.tools.sources.map((source) => source.name === ui.name ? ui : source) })
   })) as unknown as ReadonlyArray<RoutedFlow>
 }

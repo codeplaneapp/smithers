@@ -5,8 +5,11 @@
  * seat and teaching come from the nearest ancestor AGENT.ts, and its tools come
  * from the nearest ancestor TOOLS.ts. Nothing here names a model.
  *
- * `chat: true` keeps the realm and the transcript between turns, so a follow-up
- * question runs against what the previous turn left behind.
+ * `chat: true` is routing metadata: it tells a host to offer this flow on its
+ * turn endpoint rather than its flow-run endpoint. It does not carry a
+ * conversation across turns by itself. Each turn opens its own execution from
+ * its own payload, so a host that wants continuity replays the history it kept
+ * into the next turn's payload.
  */
 import { defineFlow } from "@smthrs/create-app/app"
 import * as Schema from "effect/Schema"

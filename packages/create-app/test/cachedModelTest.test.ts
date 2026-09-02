@@ -20,6 +20,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { pathToFileURL } from "node:url"
+import { inspect } from "node:util"
 import { defineAgent, defineFlow, defineSandbox, defineTools } from "../src/index.ts"
 import { cachedModelTest, preparedRequest, recording, type RoutedFlow, runCachedModelTest } from "../src/testing.ts"
 
@@ -44,7 +45,7 @@ const Agent = defineAgent({
 
 const Sandbox = defineSandbox({ limits: { heapBytes: 32 * 1024 * 1024, wallClockMs: 10_000 } })
 
-const Tools = defineTools([])
+const Tools = defineTools({ sources: [] })
 
 const routed: ReadonlyArray<RoutedFlow> = [{
   id: "echo",
@@ -256,9 +257,13 @@ describe("refusals", () => {
     // is produced without a provider, and the events are cleared so the stream
     // fails at the first call rather than after a settled turn.
     //
-    // The assertion is the rejection itself, not its text. `asModel` maps the
-    // recorded failure to a `ModelError`, and the engine then re-encodes that
-    // failure for the journal, so the message the caller sees is the engine's.
+    // `content_policy` rather than `rate_limited` because the recorded code is
+    // reconstructed rather than flattened, and `ModelError.retryable` is true
+    // for a rate limit: the agent would then wait out a backoff no provider is
+    // going to clear. That the surfaced failure names this exact code is the
+    // assertion — a replay that mapped every recording onto
+    // `invalid_provider_output` would hand the code under test a different
+    // decision than the recording captured.
     const recorded = JSON.parse(readFileSync(fixturePath, "utf8")) as {
       calls: Array<{ events: ReadonlyArray<unknown>; failure?: unknown }>
     }
@@ -269,20 +274,29 @@ describe("refusals", () => {
         calls: recorded.calls.map((call) => ({
           ...call,
           events: [],
-          failure: { code: "rate_limited", message: "slow down" }
+          failure: { code: "content_policy", message: "refused", httpStatus: 400 }
         }))
       })
     )
 
-    await expect(
-      runCachedModelTest("recorded failure", {
-        fixture: pathToFileURL(failingPath),
-        flow: "echo",
-        payload: { topic: "durable workflows" },
-        routes: async () => routed,
-        expect: () => {}
-      })
-    ).rejects.toThrow()
+    const failure = await runCachedModelTest("recorded failure", {
+      fixture: pathToFileURL(failingPath),
+      flow: "echo",
+      payload: { topic: "durable workflows" },
+      routes: async () => routed,
+      expect: () => {}
+    }).then(() => undefined, (error: unknown) => error)
+
+    // The engine re-encodes the failure for the journal and keeps only its
+    // message, so what reaches the caller is the provider's own wording. That
+    // is the assertion: the replay used to rewrite every recorded failure as
+    // `recorded model replay failed: <code>`, which told the code under test
+    // that the double had misbehaved rather than that the provider had
+    // refused.
+    const rendered = inspect(failure, { depth: 20 })
+    expect(failure).toBeDefined()
+    expect(rendered).toContain("refused")
+    expect(rendered).not.toContain("recorded model replay failed")
   })
 
   it("surfaces a replay of a request the fixture never recorded", async () => {

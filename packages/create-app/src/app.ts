@@ -19,6 +19,7 @@
  *
  * @since 0.1.0
  */
+import type * as Capability from "@smthrs/capability/Capability"
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
 import type * as Schema from "effect/Schema"
 
@@ -165,11 +166,23 @@ export const defineAgent = (options: Omit<AgentSpec, "_tag">): AgentSpec => ({ _
 /**
  * The sandbox budget every cell of every flow under a `SANDBOX.ts` runs under.
  *
- * The three limits are the author-facing names for three of the five in
- * `@smthrs/harness/Sandbox`: `heapBytes` is `memoryBytes`, `interruptChecks`
- * is `steps`, and `wallClockMs` is `totalMs` — the whole-evaluation backstop,
+ * `@smthrs/harness/Sandbox`'s `Limits` has six fields: `calls`, `memoryBytes`,
+ * `steps`, `timeMs`, `totalMs`, and `callMs`. Four are reachable from an app.
+ * Three are named here: `heapBytes` is `memoryBytes`, `interruptChecks` is
+ * `steps`, and `wallClockMs` is `totalMs`, the whole-evaluation backstop with
  * host calls included. `calls` is declared on the agent layer instead, because
  * how many tools a step may reach for is a property of the agent.
+ *
+ * `timeMs` (per-cell compute) and `callMs` (per-call wall clock) stay
+ * host-owned and have no author-facing name: they bound one QuickJS evaluation
+ * and one host call rather than the app's policy, and a host that embeds this
+ * runtime sets them from its own request deadline.
+ *
+ * Every limit is optional and an omitted one is not zero: the harness fills it
+ * from `Sandbox.defaultLimits`, which at rc.0 is 64 calls, 128 MiB, 1000
+ * steps, 30 s `timeMs`, 900 s `totalMs`, and 120 s `callMs`. So
+ * `defineSandbox({ limits: {} })` accepts every default rather than declaring
+ * no budget.
  *
  * @category models
  * @since 0.1.0
@@ -217,6 +230,11 @@ export interface ToolsSpec {
    * everything a shipped binding declares is granted. Without it the harness
    * refuses every call that declares a capability, `tevm/*` included. Narrow
    * it when the app embeds tools it does not own.
+   *
+   * The field is required here and defaulted by {@link defineTools}: a spec
+   * built by hand — which the aomi Worker does when it re-binds a routed
+   * table's sources — must state its envelope rather than inherit one
+   * silently.
    */
   readonly grant: ReadonlyArray<ToolsGrant>
 }
@@ -224,11 +242,19 @@ export interface ToolsSpec {
 /**
  * One capability pattern of a {@link ToolsSpec} grant.
  *
+ * `action` is `@smthrs/capability`'s closed `PatternAction` union rather than a
+ * string, so an action the kernel does not know is a compile error in the
+ * `TOOLS.ts` that declares it. It used to be `string`, and an unknown action
+ * type-checked and then failed inside `layerFor` with an anonymous schema
+ * message naming neither the grant nor the field. `resource` stays a string
+ * because its only constraint is a length bound `@smthrs/create-app/runtime`
+ * checks when it builds the envelope.
+ *
  * @category models
  * @since 0.1.0
  */
 export interface ToolsGrant {
-  readonly action: string
+  readonly action: Capability.PatternAction
   readonly resource: string
 }
 
@@ -240,24 +266,30 @@ export interface ToolsGrant {
  * import { defineTools } from "@smthrs/create-app/app"
  * import { ledger } from "./tools/ledger.ts"
  *
- * export const Tools = defineTools([ledger])
+ * export const Tools = defineTools({ sources: [ledger] })
  * ```
  *
  * @category constructors
  * @since 0.1.0
  */
 export const defineTools = (
-  sources: ReadonlyArray<FlowBinding.Source>,
-  options?: { readonly grant?: ReadonlyArray<ToolsGrant> }
-): ToolsSpec => ({ _tag: "ToolsSpec", sources, grant: options?.grant ?? [{ action: "*", resource: "*" }] })
+  options: Omit<ToolsSpec, "_tag" | "grant"> & { readonly grant?: ReadonlyArray<ToolsGrant> }
+): ToolsSpec => ({ _tag: "ToolsSpec", sources: options.sources, grant: options.grant ?? [{ action: "*", resource: "*" }] })
 
 /**
  * One flow: a payload, an output schema, and the prompt that opens the run.
  *
  * A flow declares no seat and no system prompt of its own beyond `system`,
- * which is appended after the resolved `AGENT.ts` teaching. `chat: true` keeps
- * the conversation across turns; the default runs the flow to completion from
- * its payload.
+ * which is appended after the resolved `AGENT.ts` teaching.
+ *
+ * `chat` is routing metadata and nothing else: it decides which endpoint a
+ * host offers the flow on. A host reports it on its flow listing and sends a
+ * `chat: true` flow to its turn endpoint rather than its flow-run endpoint;
+ * the aomi template's Worker refuses a chat flow on `POST /api/flows/run` for
+ * exactly that reason. Nothing in `@smthrs/create-app/runtime` reads it, and
+ * no execution in this package carries a conversation across turns: each turn
+ * opens its own execution from its own payload. A host that wants continuity
+ * owns the history it replays into the next turn's payload.
  *
  * @category models
  * @since 0.1.0

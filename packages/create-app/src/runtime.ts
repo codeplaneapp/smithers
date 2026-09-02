@@ -32,6 +32,7 @@ import {
   defaultCallLimit,
   defaultMaxFrames,
   type SandboxSpec,
+  type ToolsGrant,
   type ToolsSpec
 } from "./app.ts"
 
@@ -109,6 +110,68 @@ export interface LayerOptions {
   readonly crypto: Layer.Layer<Crypto.Crypto>
 }
 
+/**
+ * Why a routed app's host could not be composed.
+ *
+ * `invalid_grant` is a `TOOLS.ts` capability grant the kernel's pattern
+ * grammar does not accept.
+ *
+ * @category models
+ * @since 0.1.0
+ */
+export type LayerErrorCode = "invalid_grant"
+
+/**
+ * A refused layer composition, thrown rather than returned because every
+ * caller — the Worker, a test, the dev server — wants the host build to stop.
+ *
+ * @category errors
+ * @since 0.1.0
+ */
+export class LayerError extends Error {
+  /**
+   * @category models
+   * @since 0.1.0
+   */
+  override readonly name = "LayerError"
+  /**
+   * @category models
+   * @since 0.1.0
+   */
+  readonly code: LayerErrorCode
+  constructor(code: LayerErrorCode, message: string) {
+    super(message)
+    this.code = code
+  }
+}
+
+const patternActions: ReadonlySet<string> = new Set(Capability.PatternAction.literals)
+
+/**
+ * Decodes one declared grant into the capability pattern the harness enforces.
+ *
+ * The grant is checked here rather than passed through as `never`: an unknown
+ * action or an over-long resource used to reach `CapabilityPattern`'s schema
+ * and fail with a message that named neither the grant that carried it nor the
+ * component that was wrong.
+ */
+const patternOf = (grant: ToolsGrant, index: number): Capability.CapabilityPattern => {
+  if (!patternActions.has(grant.action)) {
+    throw new LayerError(
+      "invalid_grant",
+      `TOOLS.ts grant[${index}].action is not a capability action: ${JSON.stringify(grant.action)}`
+    )
+  }
+  if (grant.resource.length > Capability.maxResourceLength) {
+    throw new LayerError(
+      "invalid_grant",
+      `TOOLS.ts grant[${index}].resource is ${grant.resource.length} characters; `
+        + `the limit is ${Capability.maxResourceLength}`
+    )
+  }
+  return new Capability.CapabilityPattern({ action: grant.action, resource: grant.resource })
+}
+
 /** The context window a seat is assumed to have until a resolver says otherwise. */
 const defaultContextWindowTokens = 200_000
 
@@ -157,7 +220,7 @@ export const layerFor = (options: LayerOptions) => {
     registry: emptyRegistry(),
     limits: limitsOf(options.agent, options.sandbox),
     flows: options.tools.sources,
-    capabilityEnvelope: options.tools.grant.map((pattern) => new Capability.CapabilityPattern(pattern as never)),
+    capabilityEnvelope: options.tools.grant.map(patternOf),
     maxFrames: options.agent.maxFrames ?? defaultMaxFrames
   })
   const seats = SeatResolver.layer({

@@ -22,19 +22,20 @@
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { Interpreter } from "@smthrs/flow"
-import { make as makeModel, type Model } from "@smthrs/model/Model"
+import { make as makeModel, type Model, type ModelFailure } from "@smthrs/model/Model"
 import { ModelError } from "@smthrs/model/ModelError"
 import type * as ModelEvent from "@smthrs/model/ModelEvent"
 import type * as ModelRequest from "@smthrs/model/ModelRequest"
 import type * as Route from "@smthrs/model/Route"
 import { Fixture, type RecordedCall } from "@smthrs/testing/Fixture"
-import type { ModelEventLike, ModelRequestLike } from "@smthrs/testing/ModelLike"
+import type { ModelErrorLike, ModelEventLike, ModelRequestLike } from "@smthrs/testing/ModelLike"
+import { modelErrorTag } from "@smthrs/testing/ModelLike"
 import * as RecordedModel from "@smthrs/testing/RecordedModel"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { expect as vitestExpect, test } from "vitest"
@@ -184,6 +185,34 @@ const toRequestLike = (request: ModelRequest.ModelRequest): ModelRequestLike => 
 })
 
 /**
+ * Projects a live provider failure onto the structural shape a fixture stores.
+ *
+ * Every field `ModelErrorLike` declares is carried, retry metadata included:
+ * a consumer that parks on a reset-bearing refusal branches on those fields,
+ * so a replay that dropped them would exercise a different path than the
+ * recording did. Keys the error does not carry are omitted rather than written
+ * as `undefined`, which is the shape the fixture schema declares.
+ *
+ * A permission or grant-store failure returns `undefined` and is not recorded.
+ * Those are kernel decisions rather than provider responses, and
+ * `ModelErrorLike`'s own contract is that a fixture never stores one: replaying
+ * it would hand the code under test a provider refusal the provider never made.
+ */
+const toFailureLike = (error: ModelFailure): ModelErrorLike | undefined => {
+  if (error._tag !== modelErrorTag) return undefined
+  return {
+    code: error.code,
+    message: error.message,
+    ...(error.retryAfterMillis === undefined ? {} : { retryAfterMillis: error.retryAfterMillis }),
+    ...(error.resetAtEpochMillis === undefined ? {} : { resetAtEpochMillis: error.resetAtEpochMillis }),
+    ...(error.resetSource === undefined ? {} : { resetSource: error.resetSource }),
+    ...(error.providerCode === undefined ? {} : { providerCode: error.providerCode }),
+    ...(error.requestId === undefined ? {} : { requestId: error.requestId }),
+    ...(error.httpStatus === undefined ? {} : { httpStatus: error.httpStatus })
+  }
+}
+
+/**
  * Wraps a live model so every request and its events are appended to `sink`.
  *
  * The sink fires once per request, when its stream ends. A failed or
@@ -204,39 +233,74 @@ export const recordModel = (live: Model, sink: (call: RecordedCall) => void): Mo
     stream: (request) =>
       Stream.suspend(() => {
         const events: Array<ModelEventLike> = []
+        let failure: ModelErrorLike | undefined
+        // Snapshotted before the provider is handed the request, not in
+        // `flush`: a provider that mutates the request in place would
+        // otherwise be recorded asking its own mutation rather than what the
+        // caller asked.
+        const snapshot = toRequestLike(request)
         const flush = Effect.sync(() => {
-          sink({ request: toRequestLike(request), model: request.modelId, events: [...events] })
+          sink({
+            request: snapshot,
+            model: request.modelId,
+            events: [...events],
+            ...(failure === undefined ? {} : { failure })
+          })
         })
         return live.stream(request).pipe(
           Stream.tap((event) => Effect.sync(() => events.push(event))),
+          // A provider failure is part of the recording. Without this the
+          // fixture stored a truncated success-shaped call, and replaying it
+          // served a short stream where the provider had refused.
+          Stream.tapError((error) => Effect.sync(() => (failure = toFailureLike(error)))),
           Stream.ensuring(flush)
         )
       })
   })
 
 /**
- * Adapts a replay `ModelLike` to the production `Model` seam.
+ * Rebuilds the `ModelError` a fixture recorded.
  *
- * What arrives on the error channel is the provider failure a fixture recorded,
- * as `ModelLikeError`. That type is structural rather than `ModelError`, so it
- * is narrowed here to `invalid_provider_output`; no member of it declares a
- * `message` field, so the stable code is what identifies the failure.
+ * The replay error channel carries `ModelLikeError`, which is either the
+ * recorded provider failure or the doubles' own
+ * `CapabilityContractError`. Only the first is an outcome the code under test
+ * can handle, so it is reconstructed field for field, retry metadata included;
+ * mapping every failure onto `invalid_provider_output` replayed a different
+ * decision than the recording captured. The contract violation is a defect in
+ * the double rather than a provider response, so it keeps the
+ * `invalid_provider_output` code and names itself in the message.
  *
  * `UnscriptedModelError` and `ReplayHarnessMismatchError` do not come through
  * here. `@smthrs/testing` dies on both, because a fixture that does not
  * describe the run is a defect in the test rather than an outcome the code
  * under test can handle.
  */
+const asModelError = (error: { readonly code: string; readonly message?: string | undefined }): ModelError => {
+  if (error.code === "capability_contract_violation") {
+    return new ModelError({
+      code: "invalid_provider_output",
+      message: `recorded model replay failed: ${error.code}`
+    })
+  }
+  const recorded = error as ModelErrorLike
+  return new ModelError({
+    code: recorded.code,
+    message: recorded.message,
+    ...(recorded.retryAfterMillis === undefined ? {} : { retryAfterMillis: recorded.retryAfterMillis }),
+    ...(recorded.resetAtEpochMillis === undefined ? {} : { resetAtEpochMillis: recorded.resetAtEpochMillis }),
+    ...(recorded.resetSource === undefined ? {} : { resetSource: recorded.resetSource }),
+    ...(recorded.providerCode === undefined ? {} : { providerCode: recorded.providerCode }),
+    ...(recorded.requestId === undefined ? {} : { requestId: recorded.requestId }),
+    ...(recorded.httpStatus === undefined ? {} : { httpStatus: recorded.httpStatus })
+  })
+}
+
+/** Adapts a replay `ModelLike` to the production `Model` seam. */
 const asModel = (replay: RecordedModel.Replay): Model =>
   makeModel({
     stream: (request) =>
       replay.model.stream(request).pipe(
-        Stream.mapError((error) =>
-          new ModelError({
-            code: "invalid_provider_output",
-            message: `recorded model replay failed: ${error.code}`
-          })
-        ),
+        Stream.mapError(asModelError),
         Stream.map((event): ModelEvent.ModelEvent => event)
       )
   })
@@ -244,9 +308,25 @@ const asModel = (replay: RecordedModel.Replay): Model =>
 const importModule = (root: string, file: string): Promise<Record<string, unknown>> =>
   import(/* @vite-ignore */ pathToFileURL(resolve(root, file)).href) as Promise<Record<string, unknown>>
 
-const named = <T>(module_: Record<string, unknown>, name: string, file: string): T => {
+/**
+ * Reads one declared export and proves it is the spec its file owes.
+ *
+ * Every spec carries a `_tag`, and nothing used to read it: `export const
+ * Agent = 42` in an `AGENT.ts` was accepted here and failed much later inside
+ * `AgentAction.layerHost`, with a message that named neither the file nor the
+ * field.
+ */
+const named = <T extends { readonly _tag: string }>(
+  module_: Record<string, unknown>,
+  name: string,
+  file: string,
+  spec: { readonly tag: T["_tag"]; readonly constructor: string }
+): T => {
   const value = module_[name]
   if (value === undefined) throw new Error(`${file} must export \`${name}\``)
+  if (typeof value !== "object" || value === null || (value as { _tag?: unknown })._tag !== spec.tag) {
+    throw new Error(`${file} must export \`${name}\` built by ${spec.constructor}`)
+  }
   return value as T
 }
 
@@ -279,19 +359,47 @@ const discoverRoutedFlow = async (id: string, root: string, dirs: AppDirs): Prom
   return [{
     id: route.id,
     file: route.file,
-    spec: named<AnyFlowSpec>(flowModule, "Flow", route.file),
-    agent: named<AgentSpec>(agentModule, "Agent", route.agent),
-    sandbox: named<SandboxSpec>(sandboxModule, "Sandbox", route.sandbox),
-    tools: named<ToolsSpec>(toolsModule, "Tools", route.tools)
+    spec: named<AnyFlowSpec>(flowModule, "Flow", route.file, { tag: "FlowSpec", constructor: "defineFlow" }),
+    agent: named<AgentSpec>(agentModule, "Agent", route.agent, { tag: "AgentSpec", constructor: "defineAgent" }),
+    sandbox: named<SandboxSpec>(sandboxModule, "Sandbox", route.sandbox, {
+      tag: "SandboxSpec",
+      constructor: "defineSandbox"
+    }),
+    tools: named<ToolsSpec>(toolsModule, "Tools", route.tools, { tag: "ToolsSpec", constructor: "defineTools" })
   }]
 }
 
-const readFixture = (path: string): Effect.Effect<typeof Fixture.Type, Schema.SchemaError> =>
-  Schema.decodeUnknownEffect(Fixture)(JSON.parse(readFileSync(path, "utf8")))
+/**
+ * Decodes one fixture file, naming it in every failure.
+ *
+ * `JSON.parse` used to run eagerly outside the returned effect, so a fixture
+ * with a trailing comma rejected with a bare `SyntaxError` carrying no path,
+ * and a schema-drifted fixture surfaced its `SchemaError` unwrapped and
+ * equally anonymous. Both now fail as one error whose message begins with the
+ * fixture path, with the original failure kept as the cause.
+ */
+const readFixture = (path: string): Effect.Effect<typeof Fixture.Type> =>
+  Effect.try({
+    try: () => JSON.parse(readFileSync(path, "utf8")) as unknown,
+    catch: (cause) => new Error(`${path} is not valid JSON: ${String(cause)}`, { cause })
+  }).pipe(
+    Effect.flatMap((parsed) =>
+      Schema.decodeUnknownEffect(Fixture)(parsed).pipe(
+        Effect.mapError((cause) =>
+          new Error(`${path} is not a @smthrs/testing fixture: ${cause.message}`, { cause })
+        )
+      )
+    ),
+    Effect.orDie
+  )
 
 const writeFixture = (path: string, calls: ReadonlyArray<RecordedCall>): void => {
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, `${JSON.stringify({ calls }, null, 2)}\n`)
+  // Written through a neighbouring temporary file and renamed, so an
+  // interrupted process cannot leave the committed fixture truncated.
+  const staging = `${path}.recording`
+  writeFileSync(staging, `${JSON.stringify({ calls }, null, 2)}\n`)
+  renameSync(staging, path)
 }
 
 /**
@@ -352,27 +460,29 @@ export const runCachedModelTest = async <P, O>(
     Layer.provideMerge(host)
   )
 
-  try {
-    // `materializeFlow` erases the flow's payload and success schemas, so the
-    // call site restates them. `execute` reads `this.payloadSchema`, so it stays
-    // bound to its flow.
-    const execute = materialized.flow.execute.bind(materialized.flow) as (
-      payload: unknown,
-      options: { readonly executionId: string }
-    ) => Effect.Effect<O, unknown, never>
-    const output = await Effect.runPromise(
-      execute(options.payload, { executionId: `e2e/${flow.id}/${name}` }).pipe(
-        Effect.orDie,
-        Effect.provide(runtime as unknown as Layer.Layer<never>)
-      )
+  // `materializeFlow` erases the flow's payload and success schemas, so the
+  // call site restates them. `execute` reads `this.payloadSchema`, so it stays
+  // bound to its flow.
+  const execute = materialized.flow.execute.bind(materialized.flow) as (
+    payload: unknown,
+    options: { readonly executionId: string }
+  ) => Effect.Effect<O, unknown, never>
+  const output = await Effect.runPromise(
+    execute(options.payload, { executionId: `e2e/${flow.id}/${name}` }).pipe(
+      Effect.orDie,
+      Effect.provide(runtime as unknown as Layer.Layer<never>)
     )
-    await options.expect(output)
-  } finally {
-    if (recording()) writeFixture(fixturePath, calls)
-  }
+  )
+  await options.expect(output)
 
+  // Only a run that reached here writes the fixture. The write used to sit in
+  // a `finally`, so a provider 429, a bad payload, or an assertion that no
+  // longer held replaced a good committed fixture with a partial one — and a
+  // run that made no calls truncated it to `{"calls": []}` before the guard
+  // below could fire. A failed recording now leaves the committed bytes alone.
   if (recording()) {
     vitestExpect(calls.length, "recording produced no model calls").toBeGreaterThan(0)
+    writeFixture(fixturePath, calls)
   }
 }
 

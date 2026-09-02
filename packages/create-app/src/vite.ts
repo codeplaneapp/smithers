@@ -9,9 +9,11 @@
  *
  * @since 0.1.0
  */
+import { join } from "node:path"
+import { pathToFileURL } from "node:url"
 import type { Plugin } from "vite"
 import type { AppManifest, Brand, BrandToken } from "./app.ts"
-import { writeRoutes } from "./router.ts"
+import { RouterError, writeRoutes } from "./router.ts"
 
 /**
  * The virtual module holding the brand as CSS custom properties.
@@ -109,7 +111,13 @@ export const brandCss = (brand: Brand): string => {
  */
 export const loadManifest = async (root: string): Promise<AppManifest> => {
   const { tsImport } = await import("tsx/esm/api")
-  const loaded = await tsImport(`${root}/PACKAGE.ts`, { parentURL: import.meta.url, tsconfig: false }) as {
+  // `parentURL` is derived from the app root rather than from `import.meta.url`.
+  // The published CommonJS build lowers `import.meta` to `{}`, so the module
+  // URL is `undefined` there and `tsImport` refuses the call; resolving the
+  // manifest relative to the app that owns it is also the more accurate
+  // context, because that is where its imports live.
+  const target = pathToFileURL(join(root, "PACKAGE.ts")).href
+  const loaded = await tsImport(target, { parentURL: target, tsconfig: false }) as {
     readonly App?: { readonly manifest?: AppManifest }
   }
   const manifest = loaded.App?.manifest
@@ -131,6 +139,19 @@ export interface CreateAppPluginOptions {
   readonly root?: string
   /** Manifest loader. Defaults to {@link loadManifest} over `<root>/PACKAGE.ts`. */
   readonly manifest?: () => Promise<AppManifest>
+  /**
+   * What to do with a `RouterError` raised while the dev server is running.
+   *
+   * Defaults to reporting it on stderr. `configResolved` is deliberately not
+   * routed through it: Vite awaits that hook, so a refused tree at startup
+   * must fail the startup.
+   */
+  readonly onRouterError?: (error: RouterError) => void
+}
+
+/** Reports a refused tree without taking the dev server down. */
+const reportOnStderr = (error: RouterError): void => {
+  process.stderr.write(`smthrs-create-app: ${error.code}: ${error.message}\n`)
 }
 
 /** The slice of `ViteDevServer` the plugin watches. */
@@ -195,8 +216,21 @@ export const createApp = (options: CreateAppPluginOptions = {}): CreateAppPlugin
       regenerate()
     },
     configureServer(server: WatchedServer): void {
+      const report = options.onRouterError ?? reportOnStderr
       const onChange = (file: string): void => {
-        if (isRouted(file)) regenerate()
+        if (!isRouted(file)) return
+        try {
+          regenerate()
+        } catch (cause) {
+          // This listener runs inside chokidar's emit, so a throw is an
+          // uncaught exception that takes the dev server down rather than an
+          // error overlay. Creating a capitalised pane file, adding a second
+          // flow.ts for an existing id, or deleting the root AGENT.ts all
+          // raise one. A refused tree leaves the previous tables on disk and
+          // is reported; anything else is a defect and still propagates.
+          if (!(cause instanceof RouterError)) throw cause
+          report(cause)
+        }
       }
       server.watcher.on("add", onChange)
       server.watcher.on("unlink", onChange)

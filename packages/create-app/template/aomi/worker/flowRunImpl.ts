@@ -145,8 +145,14 @@ export const runFlowRun = async (options: FlowRunOptions): Promise<Phase> => {
   if (route === undefined) {
     return card.settle("failed", { error: `No flow is routed as "${options.request.flowId}".` })
   }
-  const mock = options.env.APP_MOCK_TURN !== "0"
-  return mock ? mockRun(options, route, card) : liveRun(options, route, card)
+  // `APP_MOCK_TURN=0` is refused rather than started, for the same three
+  // upstream reasons the turn path names. A run that dies inside the sandbox
+  // loader tells a deployer nothing; the shared message tells them what to
+  // wait for.
+  if (options.env.APP_MOCK_TURN === "0") {
+    return card.settle("failed", { error: liveRuntimeUnsupported })
+  }
+  return mockRun(options, route, card)
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +237,10 @@ const failureMessage = (cause: unknown): string =>
  * `Agent.layerDefaults` compiles, the tool sources missing from
  * `AgentAction.layerHost`, and the absent Durable Object journal driver.
  */
-const liveRun = async (options: FlowRunOptions, route: FlowRoute, card: RunCard): Promise<Phase> => {
+// Exported, and unreachable from `runFlowRun`, on purpose: it is the
+// written-out shape the fix will take, kept compiling against the current
+// package APIs so the three blockers are the only thing left to land.
+export const liveRun = async (options: FlowRunOptions, route: FlowRoute, card: RunCard): Promise<Phase> => {
   const { env, request, signal } = options
   // `AnyFlowSpec` erases the payload's field types, so the struct built from it
   // reports `unknown` decoding services and no usable value type. The cast

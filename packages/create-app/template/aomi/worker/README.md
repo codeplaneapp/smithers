@@ -9,10 +9,14 @@ second deployable and no origin server.
 | File | What it is |
 | --- | --- |
 | `wrangler.jsonc` | Worker name, custom domain, assets, Durable Object bindings, vars |
-| `index.ts` | The router. One switch over `Routes` from `src/api.ts`; everything else falls through to `ASSETS` |
+| `index.ts` | The entry point. Exports the Durable Object class, so it is the only module here that imports `cloudflare:workers` |
+| `router.ts` | The router. One switch over `Routes` from `src/api.ts`; everything else falls through to `ASSETS`. Free of `cloudflare:workers`, so `test/worker.test.ts` drives it on plain Node |
+| `registry.ts` | Which Durable Object holds a session, and the one well-known object that holds the session list |
 | `env.ts` | The bindings, as an interface. Nothing else reads configuration |
 | `AppSession.ts` | One Durable Object per session: transcript, cards, saved flows |
-| `turn.ts` | One agent turn as an NDJSON stream of `TurnFrame` lines |
+| `turn.ts` | One agent turn as an NDJSON stream of `TurnFrame` lines, with the runtime imported lazily |
+| `turnImpl.ts` | The turn itself: the mock stream, and the live `Agent.run` path behind it |
+| `flowRunImpl.ts` | `POST /api/flows/run`: a routed flow executed outside the conversation |
 | `seats.ts` | `anthropic:<model>` resolved to a live model over workerd's `fetch` |
 | `crypto.ts` | `effect/Crypto` over WebCrypto, because effect ships no Worker layer |
 
@@ -37,7 +41,7 @@ than the SPA's `index.html`.
 
 ```sh
 pnpm install
-cp .dev.vars.example .dev.vars   # then fill in ANTHROPIC_API_KEY
+cp .dev.vars.example .dev.vars   # then fill in the seat's provider key
 pnpm dev
 ```
 
@@ -59,10 +63,12 @@ when no `--config` flag is given: `resolveWranglerConfigPath` in
 `node_modules/wrangler/wrangler-dist/cli.js:2942` returns early with
 `redirected: false` as soon as `--config` is set. Passing
 `--config worker/wrangler.jsonc` makes wrangler bundle `worker/index.ts` with
-esbuild alone, which fails on `virtual:smthrs-app/manifest` — the create-app
-plugin's virtual module, reachable from `routes.gen.ts`. `package.json`'s
-`deploy` script and `CreateApp`'s deploy target both still pass `--config`; both
-need the flag dropped.
+esbuild alone, which fails on `virtual:smthrs-app/manifest`, the create-app
+plugin's virtual module, reachable from `routes.gen.ts`.
+
+`package.json`'s `deploy` script is a bare `wrangler deploy` and `CreateApp`'s
+deploy target passes no `--config` either, so both paths already take the
+redirect.
 
 Credentials, exported in the deploying shell:
 
@@ -74,9 +80,13 @@ export CLOUDFLARE_ACCOUNT_ID=<account id>
 Secrets, set once per environment and never committed:
 
 ```sh
-wrangler secret put ANTHROPIC_API_KEY --config worker/wrangler.jsonc
-wrangler secret put TEVM_FORK_RPC_URL --config worker/wrangler.jsonc
+wrangler secret put OPENAI_API_KEY --config worker/wrangler.jsonc
 ```
+
+`seats.ts` reads the credential for the provider the seat names, so the secret
+follows `AGENT.ts`: `OPENAI_API_KEY` for the `openai:gpt-5.5` this template
+ships, `ANTHROPIC_API_KEY` for an `anthropic:` seat. `TEVM_FORK_RPC_URL` is not
+a deploy secret: only `test/tevm.test.ts` reads it, from `.dev.vars`.
 
 `routes: [{ pattern: "aomi.smithers.sh", custom_domain: true }]` binds the
 custom domain. Wrangler creates the DNS record and the certificate on the
