@@ -36,6 +36,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import { digest, truncateBytes } from "./internal/Text.ts"
 import * as MemoryStore from "./MemoryStore.ts"
 import * as Recall from "./Recall.ts"
 import * as SnapshotRecorder from "./SnapshotRecorder.ts"
@@ -83,28 +84,6 @@ export interface DeclaredText {
 const encoder = new TextEncoder()
 const openingFence = "<flows_memory_context>"
 const closingFence = "</flows_memory_context>"
-
-const digest = (text: string): string => {
-  let hash = 2166136261
-  for (const byte of encoder.encode(text)) {
-    hash ^= byte
-    hash = Math.imul(hash, 16777619)
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0")
-}
-
-const truncateBytes = (text: string, maxBytes: number): string => {
-  if (encoder.encode(text).byteLength <= maxBytes) return text
-  const characters = [...text]
-  let low = 0
-  let high = characters.length
-  while (low < high) {
-    const middle = Math.ceil((low + high) / 2)
-    if (encoder.encode(characters.slice(0, middle).join("")).byteLength <= maxBytes) low = middle
-    else high = middle - 1
-  }
-  return characters.slice(0, low).join("")
-}
 
 const render = (
   primers: ReadonlyArray<{ readonly bank: string; readonly text: string }>,

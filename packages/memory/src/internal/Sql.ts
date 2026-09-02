@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import type * as SqlError from "effect/unstable/sql/SqlError"
 import type { Kind } from "../Namespace.ts"
+import { searchableText } from "./Text.ts"
 
 /**
  * The pair of services the memory schema operates through.
@@ -56,6 +57,7 @@ export interface FtsMatch {
 }
 
 const ftsTable = (kind: Kind): string => `memory_fts_${kind}`
+const compositeMessagePrimaryKey = /PRIMARY\s+KEY\s*\(\s*thread_id\s*,\s*id\s*\)/iu
 
 /**
  * Creates every authoritative memory table idempotently in one database
@@ -98,13 +100,32 @@ export const migrate = (database: DatabaseService): Effect.Effect<void, Database
         CHECK (length(namespace_id) > 0)
       )`
       yield* sql`CREATE TABLE IF NOT EXISTS memory_messages (
-        id TEXT PRIMARY KEY CHECK (length(id) > 0),
+        id TEXT NOT NULL CHECK (length(id) > 0),
         thread_id TEXT NOT NULL,
         role TEXT NOT NULL,
         text TEXT NOT NULL,
         at_ms INTEGER NOT NULL,
+        PRIMARY KEY (thread_id, id),
         FOREIGN KEY (thread_id) REFERENCES memory_threads (thread_id)
       )`
+      const messageTables = yield* sql<{ readonly sql: string | null }>`SELECT sql FROM sqlite_master
+        WHERE type = 'table' AND name = 'memory_messages'`
+      const messageDefinition = messageTables[0]?.sql
+      if (messageDefinition !== undefined && !compositeMessagePrimaryKey.test(messageDefinition ?? "")) {
+        yield* sql`CREATE TABLE memory_messages_v2 (
+          id TEXT NOT NULL CHECK (length(id) > 0),
+          thread_id TEXT NOT NULL,
+          role TEXT NOT NULL,
+          text TEXT NOT NULL,
+          at_ms INTEGER NOT NULL,
+          PRIMARY KEY (thread_id, id),
+          FOREIGN KEY (thread_id) REFERENCES memory_threads (thread_id)
+        )`
+        yield* sql`INSERT INTO memory_messages_v2 (id, thread_id, role, text, at_ms)
+          SELECT id, thread_id, role, text, at_ms FROM memory_messages`
+        yield* sql`DROP TABLE memory_messages`
+        yield* sql`ALTER TABLE memory_messages_v2 RENAME TO memory_messages`
+      }
       yield* sql`CREATE INDEX IF NOT EXISTS memory_messages_thread_order_idx
         ON memory_messages (thread_id, at_ms, id)`
       yield* sql`CREATE TABLE IF NOT EXISTS memory_notes (
@@ -201,9 +222,18 @@ export const enableFts = (
       VALUES (${kind}, ${enabledAtMs})
       ON CONFLICT (namespace_kind) DO NOTHING`
     yield* sql`DELETE FROM ${table}`
-    yield* sql`INSERT INTO ${table} (record_id, record_kind, namespace_id, record_key, text)
-      SELECT fact_key, 'fact', namespace_id, fact_key, value_json
-      FROM memory_facts WHERE namespace_kind = ${kind}`
+    const facts = yield* sql<{
+      readonly fact_key: string
+      readonly namespace_id: string
+      readonly value_json: string
+    }>`SELECT fact_key, namespace_id, value_json
+      FROM memory_facts WHERE namespace_kind = ${kind}
+      ORDER BY namespace_id, fact_key`
+    for (const fact of facts) {
+      const value = JSON.parse(fact.value_json) as unknown
+      yield* sql`INSERT INTO ${table} (record_id, record_kind, namespace_id, record_key, text)
+        VALUES (${fact.fact_key}, 'fact', ${fact.namespace_id}, ${fact.fact_key}, ${searchableText(value)})`
+    }
     yield* sql`INSERT INTO ${table} (record_id, record_kind, namespace_id, record_key, text)
       SELECT id, 'note', namespace_id, id, text
       FROM memory_notes WHERE namespace_kind = ${kind}`

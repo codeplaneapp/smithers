@@ -1,4 +1,4 @@
-import { Cause, Effect, Fiber, Layer } from "effect"
+import { Cause, Effect, Fiber, Layer, Logger } from "effect"
 import { TestClock } from "effect/testing"
 import { describe, expect, it } from "vitest"
 import * as MemoryStore from "../src/MemoryStore.ts"
@@ -126,7 +126,30 @@ describe("Source", () => {
       store: storeOf(() => Effect.succeed([])),
       recall: Recall.makeNoop()
     })
-    expect(declared).toEqual({ text: "", digest: "811c9dc5" })
+    expect(declared).toEqual({
+      text: "",
+      digest: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    })
+  })
+
+  it("pins declared text digests to SHA-256 golden vectors", async () => {
+    const input = { lineageId: "golden", iteration: 0, banks: [], query: "q" }
+    const declared = (text: string) =>
+      Effect.runPromise(
+        Source.declaredText({ read: () => Effect.succeed(text) }, input).pipe(
+          Effect.provideService(MemoryStore.MemoryStore, MemoryStore.makeNoop()),
+          Effect.provideService(Recall.Recall, Recall.makeNoop())
+        )
+      )
+
+    await expect(declared("")).resolves.toEqual({
+      text: "",
+      digest: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    })
+    await expect(declared("abc")).resolves.toEqual({
+      text: "abc",
+      digest: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    })
   })
 
   it("renders every primer bank before the recalled rows", async () => {
@@ -199,6 +222,68 @@ describe("Source", () => {
     expect(next.text).toContain("read-2")
     expect(other.text).toContain("read-3")
     expect(reads).toBe(3)
+  })
+
+  it("keeps the first query for one identity and warns with the changed field", async () => {
+    const logged: Array<string> = []
+    const source = Source.make()
+    const store = storeOf(() => Effect.succeed([]))
+    const recall = Recall.make({
+      recall: (input) => Effect.succeed([{ bank: "bank", key: "row", text: input.query, score: 1 }])
+    })
+    const [first, frozen] = await Effect.runPromise(
+      Effect.all([
+        source.read({ lineageId: "same", iteration: 1, banks: ["bank"], query: "first" }),
+        source.read({ lineageId: "same", iteration: 1, banks: ["bank"], query: "second" })
+      ], { concurrency: 1 }).pipe(
+        Effect.provideService(MemoryStore.MemoryStore, store),
+        Effect.provideService(Recall.Recall, recall),
+        Effect.provide(Logger.layer([Logger.make<unknown, void>(({ message }) => logged.push(String(message))) ]))
+      )
+    )
+    expect(frozen).toBe(first)
+    expect(frozen).toContain("first")
+    expect(logged.some((message) => message.includes("query"))).toBe(true)
+  })
+
+  it("does not warn when changed inputs use different snapshot identities", async () => {
+    const logged: Array<string> = []
+    const source = Source.make()
+    await Effect.runPromise(
+      Effect.all([
+        source.read({ lineageId: "one", iteration: 1, banks: ["bank"], query: "first" }),
+        source.read({ lineageId: "two", iteration: 1, banks: ["bank"], query: "second" })
+      ]).pipe(
+        Effect.provideService(MemoryStore.MemoryStore, storeOf(() => Effect.succeed([]))),
+        Effect.provideService(Recall.Recall, Recall.makeNoop()),
+        Effect.provide(Logger.layer([Logger.make<unknown, void>(({ message }) => logged.push(String(message))) ]))
+      )
+    )
+    expect(logged).toEqual([])
+  })
+
+  it("reads primer notes once for duplicate and aliased banks", async () => {
+    let scans = 0
+    const store = MemoryStore.MemoryStore.of({
+      listNotes: () => Effect.sync(() => {
+        scans += 1
+        return [{ text: "primer" }]
+      })
+    } as unknown as MemoryStore.Service)
+    const text = await Effect.runPromise(
+      Source.make().read({
+        lineageId: "dedupe",
+        iteration: 0,
+        banks: [],
+        primerBanks: ["bank", "flow-bank", "bank"],
+        query: "q"
+      }).pipe(
+        Effect.provideService(MemoryStore.MemoryStore, store),
+        Effect.provideService(Recall.Recall, Recall.makeNoop())
+      )
+    )
+    expect(scans).toBe(1)
+    expect(text.match(/\[primer:/gu)).toHaveLength(1)
   })
 
   it("refetches for a source built after the one that froze the snapshot", async () => {
@@ -281,7 +366,7 @@ describe("Source", () => {
 
     expect(second).toEqual(first)
     expect(changed.digest).not.toBe(first.digest)
-    expect(first.digest).toMatch(/^[0-9a-f]{8}$/)
+    expect(first.digest).toMatch(/^[0-9a-f]{64}$/)
   })
 
   it("reads through the default source value", async () => {

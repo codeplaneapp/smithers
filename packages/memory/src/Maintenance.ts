@@ -68,13 +68,21 @@ export const limitHistory = (
   Effect.gen(function*() {
     if (!Number.isFinite(options.maxTokens) || options.maxTokens < 0) {
       return yield* Effect.fail(
-        new MemoryError({ code: "store", message: "maxTokens must be a non-negative finite number" })
+        new MemoryError({
+          code: "invalid_argument",
+          message: "maxTokens must be a non-negative finite number",
+          path: ["maxTokens"]
+        })
       )
     }
     const charsPerToken = options.charsPerToken ?? 4
     if (!Number.isFinite(charsPerToken) || charsPerToken <= 0) {
       return yield* Effect.fail(
-        new MemoryError({ code: "store", message: "charsPerToken must be a positive finite number" })
+        new MemoryError({
+          code: "invalid_argument",
+          message: "charsPerToken must be a positive finite number",
+          path: ["charsPerToken"]
+        })
       )
     }
     const store = yield* MemoryStore
@@ -174,7 +182,11 @@ export const compact = <E, R>(
     const keepRecent = options.keepRecent ?? 2
     if (!Number.isSafeInteger(keepRecent) || keepRecent < 0) {
       return yield* Effect.fail(
-        new MemoryError({ code: "store", message: "keepRecent must be a non-negative safe integer" })
+        new MemoryError({
+          code: "invalid_argument",
+          message: "keepRecent must be a non-negative safe integer",
+          path: ["keepRecent"]
+        })
       )
     }
     const store = yield* MemoryStore

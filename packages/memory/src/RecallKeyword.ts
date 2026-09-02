@@ -9,6 +9,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { compareText } from "./internal/Text.ts"
 import type * as MemoryError from "./MemoryError.ts"
 import * as MemoryStore from "./MemoryStore.ts"
 import * as Namespace from "./Namespace.ts"
@@ -33,8 +34,6 @@ export interface Row {
 
 const normalize = (value: string): ReadonlyArray<string> =>
   value.normalize("NFKC").toLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter(Boolean)
-
-const compareText = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
 
 const score = (query: ReadonlyArray<string>, row: Row): number => {
   const haystack = `${row.key} ${row.text}`.normalize("NFKC").toLowerCase()

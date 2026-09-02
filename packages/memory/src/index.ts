@@ -5,6 +5,11 @@
  */
 
 /**
+ * @category constructors @since 0.1.0
+ */
+export * as Bank from "./Bank.ts"
+
+/**
  * @category embeddings @since 0.1.0
  * @slop
  */

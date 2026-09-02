@@ -1,5 +1,6 @@
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { describe, expect, it } from "vitest"
+import * as Bank from "../src/Bank.ts"
 import * as Recall from "../src/Recall.ts"
 
 describe("Recall", () => {
@@ -50,23 +51,62 @@ describe("Recall", () => {
     expect([direct, layered]).toEqual([[], []])
   })
 
-  it("preserves an explicit bank lifetime and treats every other bank as flow-local", () => {
-    expect([
-      Recall.namespaceForBank("flow-one"),
-      Recall.namespaceForBank("agent-fleet"),
-      Recall.namespaceForBank("user-will"),
-      Recall.namespaceForBank("global-history"),
-      Recall.namespaceForBank("unprefixed"),
-      Recall.namespaceForBank("global-"),
-      Recall.namespaceForBank("")
-    ]).toEqual([
+  it("round-trips schema-valid namespaces and rejects an empty bank through the validating parser", async () => {
+    for (const namespace of [
       { kind: "flow", id: "one" },
       { kind: "agent", id: "fleet" },
       { kind: "user", id: "will" },
-      { kind: "global", id: "history" },
-      { kind: "flow", id: "unprefixed" },
-      { kind: "flow", id: "global-" },
-      { kind: "flow", id: "" }
-    ])
+      { kind: "global", id: "history" }
+    ] as const) {
+      expect(Recall.namespaceForBank(Recall.bankForNamespace(namespace))).toEqual(namespace)
+    }
+    await expect(Effect.runPromise(Effect.flip(Bank.parse("")))).resolves.toMatchObject({
+      code: "invalid_namespace"
+    })
+  })
+
+  it("enforces every model-facing recall ceiling at decode", () => {
+    const decode = Schema.decodeUnknownSync(Recall.Input)
+    const base = { banks: ["bank"], query: "q" }
+    expect(decode({
+      ...base,
+      banks: Array.from({ length: Recall.MAX_RECALL_BANKS }, (_, index) => `bank-${index}`)
+    }).banks).toHaveLength(Recall.MAX_RECALL_BANKS)
+    expect(() => decode({
+      ...base,
+      banks: Array.from({ length: Recall.MAX_RECALL_BANKS + 1 }, (_, index) => `bank-${index}`)
+    })).toThrow()
+
+    expect(decode({ ...base, banks: ["b".repeat(Recall.MAX_RECALL_BANK_NAME_LENGTH)] }).banks[0]).toHaveLength(
+      Recall.MAX_RECALL_BANK_NAME_LENGTH
+    )
+    expect(() => decode({
+      ...base,
+      banks: ["b".repeat(Recall.MAX_RECALL_BANK_NAME_LENGTH + 1)]
+    })).toThrow()
+
+    expect(decode({ ...base, query: "q".repeat(Recall.MAX_RECALL_QUERY_BYTES) }).query).toHaveLength(
+      Recall.MAX_RECALL_QUERY_BYTES
+    )
+    expect(() => decode({ ...base, query: "q".repeat(Recall.MAX_RECALL_QUERY_BYTES + 1) })).toThrow()
+
+    expect(decode({ ...base, maxTokens: Recall.MAX_RECALL_TOKENS }).maxTokens).toBe(Recall.MAX_RECALL_TOKENS)
+    expect(() => decode({ ...base, maxTokens: Recall.MAX_RECALL_TOKENS + 1 })).toThrow()
+    expect(() => decode({ ...base, maxTokens: -1 })).toThrow()
+  })
+
+  it("rejects a several-hundred-level tag group through the model-facing input without overflowing", () => {
+    let group: unknown = { tags: ["scope:project"] }
+    for (let level = 0; level < 500; level++) group = { or: [group] }
+
+    let failure: unknown
+    try {
+      Schema.decodeUnknownSync(Recall.Input)({ banks: ["bank"], query: "q", tagGroups: [group] })
+    } catch (cause) {
+      failure = cause
+    }
+    expect(failure).toBeDefined()
+    expect(failure).not.toBeInstanceOf(RangeError)
+    expect(String(failure)).toContain("invalid_tag")
   })
 })

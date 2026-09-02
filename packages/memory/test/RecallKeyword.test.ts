@@ -53,6 +53,26 @@ describe("RecallKeyword", () => {
     expect(result).toEqual([])
   })
 
+  it.each([
+    [["bank", "bank"], "duplicate"],
+    [["bank", "flow-bank"], "aliased"]
+  ] as const)("scans one resolved namespace and returns one row for %s banks", async (banks) => {
+    let scans = 0
+    const result = await Effect.runPromise(
+      Keyword.recall({ banks: [...banks], query: "alpha" }).pipe(
+        Effect.provideService(
+          MemoryStore.MemoryStore,
+          storeOf(() => Effect.sync(() => {
+            scans += 1
+            return [rows[0]!]
+          }))
+        )
+      )
+    )
+    expect(scans).toBe(1)
+    expect(result.map((row) => row.key)).toEqual(["alpha"])
+  })
+
   it("scores an absent term as zero, drops zero-scoring rows, and breaks exact ties by key", async () => {
     const tied = [
       { key: "b", text: "alpha", tags: [], updatedAtMs: 5 },

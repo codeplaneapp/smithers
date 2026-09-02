@@ -10,12 +10,11 @@
  */
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { compareText, literalFtsQuery } from "./internal/Text.ts"
 import type * as MemoryError from "./MemoryError.ts"
 import * as MemoryStore from "./MemoryStore.ts"
 import * as Namespace from "./Namespace.ts"
 import * as Recall from "./Recall.ts"
-
-const compareText = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
 
 /**
  * Escapes a query into a quoted, implicit-AND FTS5 expression.
@@ -24,15 +23,7 @@ const compareText = (left: string, right: string): number => left < right ? -1 :
  * @since 0.1.0
  * @slop
  */
-export const literalFtsQuery = (query: string): string => {
-  const wellFormed = query
-    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/gu, "\uFFFD")
-    .replaceAll("\0", " ")
-    .trim()
-  return wellFormed.length === 0
-    ? ""
-    : wellFormed.split(/\s+/u).map((term) => `"${term.replaceAll("\"", "\"\"")}"`).join(" ")
-}
+export { literalFtsQuery }
 
 const run = (input: Recall.Input): Effect.Effect<Recall.Output, MemoryError.MemoryError, MemoryStore.MemoryStore> =>
   Effect.gen(function*() {
@@ -44,7 +35,7 @@ const run = (input: Recall.Input): Effect.Effect<Recall.Output, MemoryError.Memo
       input.banks.map((namespace) =>
         store.searchFts({
           namespace: Recall.namespaceForBank(namespace),
-          query,
+          query: input.query,
           limit: requested * 5,
           status: "accepted"
         })

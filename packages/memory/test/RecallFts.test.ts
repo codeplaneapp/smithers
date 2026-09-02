@@ -4,6 +4,7 @@ import * as MemoryError from "../src/MemoryError.ts"
 import * as MemoryStore from "../src/MemoryStore.ts"
 import * as Recall from "../src/Recall.ts"
 import * as Fts from "../src/RecallFts.ts"
+import * as TestMemory from "../src/test/TestMemory.ts"
 
 const ftsRow = (overrides: Partial<MemoryStore.FtsRow>): MemoryStore.FtsRow => ({
   id: "id",
@@ -27,6 +28,22 @@ describe("RecallFts", () => {
   it("quotes each term and preserves implicit AND", () => {
     expect(Fts.literalFtsQuery("one two\" three")).toBe("\"one\" \"two\"\"\" \"three\"")
     expect(Fts.literalFtsQuery(" \0 ")).toBe("")
+  })
+
+  it("leaves store query escaping to the authoritative store", async () => {
+    const queries: Array<string> = []
+    const store = storeOf((input) => {
+      queries.push(input.query)
+      return Effect.succeed([])
+    })
+
+    await Effect.runPromise(
+      Fts.recall({ banks: ["bank"], query: "one OR two" }).pipe(
+        Effect.provideService(MemoryStore.MemoryStore, store)
+      )
+    )
+
+    expect(queries).toEqual(["one OR two"])
   })
 
   it("replaces lone surrogates, splits on NUL, and empties a whitespace-only query", () => {
@@ -60,6 +77,26 @@ describe("RecallFts", () => {
       Fts.recall({ banks: [], query: "durable" }).pipe(Effect.provideService(MemoryStore.MemoryStore, store))
     )
     expect([blankQuery, noBanks]).toEqual([[], []])
+  })
+
+  it.each([
+    ["duplicate", ["bank", "bank"]],
+    ["aliased", ["bank", "flow-bank"]]
+  ] as const)("scans one resolved namespace and returns one row for %s banks", async (_label, banks) => {
+    let scans = 0
+    const result = await Effect.runPromise(
+      Fts.recall({ banks: [...banks], query: "durable" }).pipe(
+        Effect.provideService(
+          MemoryStore.MemoryStore,
+          storeOf(() => Effect.sync(() => {
+            scans += 1
+            return [ftsRow({ key: "one", text: "durable" })]
+          }))
+        )
+      )
+    )
+    expect(scans).toBe(1)
+    expect(result.map((row) => row.key)).toEqual(["one"])
   })
 
   it("merges banks, drops non-accepted and mismatched rows, and orders by score, recency, then key", async () => {
@@ -134,5 +171,26 @@ describe("RecallFts", () => {
     expect(rows).toEqual([
       { bank: "flow-one", key: "runbook", text: "durable recovery", score: 1, updatedAtMs: 0 }
     ])
+  })
+
+  it("returns the same rows as MemoryStore for a query containing a quote", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const store = yield* MemoryStore.MemoryStore
+        yield* store.putNote({
+          namespace: "bank",
+          id: "quoted",
+          text: "durable quoted recovery",
+          tags: [],
+          provenance: {}
+        })
+        yield* store.enableFts("flow")
+        const input = { banks: ["bank"], query: "durable\"" }
+        const direct = yield* store.searchFts({ namespace: "bank", query: input.query, limit: 20 })
+        const recalled = yield* Fts.recall(input)
+        return { direct, recalled }
+      }).pipe(Effect.provide(TestMemory.layer))
+    )
+    expect(result.recalled.map((row) => row.key)).toEqual(result.direct.map((row) => row.key))
   })
 })

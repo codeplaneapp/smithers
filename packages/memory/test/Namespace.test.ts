@@ -1,8 +1,27 @@
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { describe, expect, it } from "vitest"
+import * as Bank from "../src/Bank.ts"
 import * as Namespace from "../src/Namespace.ts"
 
+const leaf = (): Namespace.TagGroup => ({ tags: ["scope:project"] })
+
+const nested = (depth: number): Namespace.TagGroup => {
+  let group = leaf()
+  for (let level = 1; level < depth; level++) group = { not: group }
+  return group
+}
+
+const wide = (nodes: number): Namespace.TagGroup => ({
+  or: Array.from({ length: nodes - 1 }, leaf)
+})
+
 describe("Namespace", () => {
+  it("parses banks through the validating public counterpart", async () => {
+    await expect(Effect.runPromise(Bank.parse("agent-worker"))).resolves.toEqual({ kind: "agent", id: "worker" })
+    const failure = await Effect.runPromise(Effect.flip(Bank.parse("")))
+    expect(failure.code).toBe("invalid_namespace")
+  })
+
   it("decodes the four structured namespace kinds", () => {
     const decode = Schema.decodeUnknownSync(Namespace.Namespace)
     for (const kind of ["flow", "agent", "user", "global"] as const) {
@@ -55,5 +74,30 @@ describe("Namespace", () => {
     expect(Namespace.matches(group, ["branch:main", "scope:secret"])).toBe(false)
     expect(Namespace.matches(group, ["branch:feature", "scope:project"])).toBe(false)
     expect(Schema.decodeUnknownSync(Namespace.TagGroup)(group)).toEqual(group)
+  })
+
+  it("accepts the exact tag-group depth limit and rejects the next level without overflowing", () => {
+    const decode = Schema.decodeUnknownSync(Namespace.TagGroup)
+    expect(decode(nested(Namespace.MAX_TAG_GROUP_DEPTH))).toEqual(nested(Namespace.MAX_TAG_GROUP_DEPTH))
+
+    let failure: unknown
+    try {
+      decode(nested(Namespace.MAX_TAG_GROUP_DEPTH + 1))
+    } catch (cause) {
+      failure = cause
+    }
+    expect(failure).toBeDefined()
+    expect(failure).not.toBeInstanceOf(RangeError)
+    expect(String(failure)).toContain("invalid_tag")
+  })
+
+  it("accepts the exact tag-group node limit and rejects one additional wide node", () => {
+    const decode = Schema.decodeUnknownSync(Namespace.TagGroup)
+    expect(decode(wide(Namespace.MAX_TAG_GROUP_NODES))).toEqual(wide(Namespace.MAX_TAG_GROUP_NODES))
+    expect(() => decode(wide(Namespace.MAX_TAG_GROUP_NODES + 1))).toThrow(/invalid_tag/u)
+  })
+
+  it("evaluates an undecoded over-budget group as false without recursive stack growth", () => {
+    expect(Namespace.matches(nested(500), ["scope:project"])).toBe(false)
   })
 })

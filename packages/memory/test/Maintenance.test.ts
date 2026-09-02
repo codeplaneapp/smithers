@@ -1,5 +1,6 @@
 import { Deferred, Effect, Exit, Fiber } from "effect"
 import { TestClock } from "effect/testing"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { describe, expect, it } from "vitest"
 import * as Maintenance from "../src/Maintenance.ts"
 import * as MemoryStore from "../src/MemoryStore.ts"
@@ -9,6 +10,10 @@ const namespace = { kind: "flow", id: "maintenance" } as const
 
 const run = <A, E>(effect: Effect.Effect<A, E, MemoryStore.MemoryStore>) =>
   Effect.runPromise(effect.pipe(Effect.provide(TestMemory.layer), Effect.provide(TestClock.layer())))
+
+const runWithDatabase = <A, E>(
+  effect: Effect.Effect<A, E, MemoryStore.MemoryStore | SqlClient.SqlClient>
+) => Effect.runPromise(effect.pipe(Effect.provide(TestMemory.layerWithDatabase), Effect.provide(TestClock.layer())))
 
 const append = (store: MemoryStore.Service, threadId: string, count: number) =>
   Effect.forEach(
@@ -25,9 +30,11 @@ const append = (store: MemoryStore.Service, threadId: string, count: number) =>
   )
 
 describe("Maintenance", () => {
-  it("collects expired facts in one finite TTL pass", async () => {
-    const result = await run(Effect.gen(function*() {
+  it("collects expired facts and their search projections in one finite TTL pass", async () => {
+    const result = await runWithDatabase(Effect.gen(function*() {
       const store = yield* MemoryStore.MemoryStore
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      yield* store.enableFts("flow")
       yield* store.putFact({
         namespace,
         key: "temporary",
@@ -36,14 +43,62 @@ describe("Maintenance", () => {
         provenance: {}
       })
       yield* store.putFact({ namespace, key: "permanent", value: "value", provenance: {} })
+      yield* sql`INSERT INTO memory_vectors (
+        record_kind, record_id, namespace_kind, namespace_id,
+        embedding_model, content_digest, dimensions, vector_bytes, updated_at_ms
+      ) VALUES ('fact', 'temporary', 'flow', 'maintenance', 'test', 'digest', 1, ${new Uint8Array(4)}, 0)`
       yield* TestClock.adjust("5 millis")
       const collected = yield* Maintenance.ttlGc
       const facts = yield* store.listFacts({ namespace })
-      return { collected, facts }
+      const factRows = yield* sql<{ readonly count: number }>`SELECT count(*) AS count
+        FROM memory_facts WHERE namespace_kind = 'flow' AND namespace_id = 'maintenance' AND fact_key = 'temporary'`
+      const ftsRows = yield* sql<{ readonly count: number }>`SELECT count(*) AS count
+        FROM memory_fts_flow WHERE namespace_id = 'maintenance' AND record_kind = 'fact' AND record_id = 'temporary'`
+      const vectorRows = yield* sql<{ readonly count: number }>`SELECT count(*) AS count
+        FROM memory_vectors WHERE namespace_kind = 'flow' AND namespace_id = 'maintenance'
+          AND record_kind = 'fact' AND record_id = 'temporary'`
+      return {
+        collected,
+        facts,
+        projectionCounts: [factRows[0]?.count, ftsRows[0]?.count, vectorRows[0]?.count]
+      }
     }))
 
     expect(result.collected).toEqual({ deletedFacts: 1 })
     expect(result.facts.map((fact) => fact.key)).toEqual(["permanent"])
+    expect(result.projectionCounts).toEqual([0, 0, 0])
+  })
+
+  it("collects FTS and vector projections across namespace kinds", async () => {
+    const result = await runWithDatabase(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      const agentNamespace = { kind: "agent", id: "maintenance-agent" } as const
+      yield* store.enableFts("flow")
+      yield* store.enableFts("agent")
+      yield* store.putFact({ namespace, key: "shared", value: "flow value", ttlMs: 1, provenance: {} })
+      yield* store.putFact({ namespace: agentNamespace, key: "shared", value: "agent value", ttlMs: 1, provenance: {} })
+      for (const [kind, id] of [["flow", "maintenance"], ["agent", "maintenance-agent"]] as const) {
+        for (const model of ["model-a", "model-b"]) {
+          yield* sql`INSERT INTO memory_vectors (
+            record_kind, record_id, namespace_kind, namespace_id,
+            embedding_model, content_digest, dimensions, vector_bytes, updated_at_ms
+          ) VALUES ('fact', 'shared', ${kind}, ${id}, ${model}, 'digest', 1, ${new Uint8Array(4)}, 0)`
+        }
+      }
+      yield* TestClock.adjust("1 millis")
+      const collected = yield* Maintenance.ttlGc
+      const flowFts = yield* sql<{ readonly count: number }>`SELECT count(*) AS count FROM memory_fts_flow
+        WHERE record_kind = 'fact' AND record_id = 'shared' AND namespace_id = 'maintenance'`
+      const agentFts = yield* sql<{ readonly count: number }>`SELECT count(*) AS count FROM memory_fts_agent
+        WHERE record_kind = 'fact' AND record_id = 'shared' AND namespace_id = 'maintenance-agent'`
+      const vectors = yield* sql<{ readonly count: number }>`SELECT count(*) AS count FROM memory_vectors
+        WHERE record_kind = 'fact' AND record_id = 'shared'`
+      return { collected, projectionCounts: [flowFts[0]?.count, agentFts[0]?.count, vectors[0]?.count] }
+    }))
+
+    expect(result.collected).toEqual({ deletedFacts: 2 })
+    expect(result.projectionCounts).toEqual([0, 0, 0])
   })
 
   it("deletes oldest history until the approximate token budget is met", async () => {
@@ -103,11 +158,11 @@ describe("Maintenance", () => {
 
       yield* append(store, "write-failure", 4)
       yield* store.appendMessage({
-        threadId: "other",
+        threadId: "write-failure",
         id: "summary-conflict",
         role: "system",
         text: "existing",
-        at: 0
+        at: 99
       })
       const writeExit = yield* Effect.exit(
         Maintenance.compact({
@@ -132,7 +187,8 @@ describe("Maintenance", () => {
       "write-failure-message-0",
       "write-failure-message-1",
       "write-failure-message-2",
-      "write-failure-message-3"
+      "write-failure-message-3",
+      "summary-conflict"
     ])
   })
 
@@ -172,13 +228,13 @@ describe("Maintenance", () => {
       ]
     }))
 
-    expect(failures.map((error) => [error.code, error.message])).toEqual([
-      ["store", "maxTokens must be a non-negative finite number"],
-      ["store", "maxTokens must be a non-negative finite number"],
-      ["store", "maxTokens must be a non-negative finite number"],
-      ["store", "charsPerToken must be a positive finite number"],
-      ["store", "charsPerToken must be a positive finite number"],
-      ["store", "charsPerToken must be a positive finite number"]
+    expect(failures.map((error) => [error.code, error.path])).toEqual([
+      ["invalid_argument", ["maxTokens"]],
+      ["invalid_argument", ["maxTokens"]],
+      ["invalid_argument", ["maxTokens"]],
+      ["invalid_argument", ["charsPerToken"]],
+      ["invalid_argument", ["charsPerToken"]],
+      ["invalid_argument", ["charsPerToken"]]
     ])
   })
 
@@ -214,9 +270,9 @@ describe("Maintenance", () => {
       ]
     }))
 
-    expect(failures.map((error) => [error.code, error.message])).toEqual([
-      ["store", "keepRecent must be a non-negative safe integer"],
-      ["store", "keepRecent must be a non-negative safe integer"]
+    expect(failures.map((error) => [error.code, error.path])).toEqual([
+      ["invalid_argument", ["keepRecent"]],
+      ["invalid_argument", ["keepRecent"]]
     ])
   })
 

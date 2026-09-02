@@ -9,6 +9,7 @@ import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 import * as Flows from "../src/Flows.ts"
+import { MemoryError } from "../src/MemoryError.ts"
 import * as MemoryStore from "../src/MemoryStore.ts"
 import * as MemoryTrellis from "../src/MemoryTrellis.ts"
 import * as Recall from "../src/Recall.ts"
@@ -53,6 +54,49 @@ const remembered = (bank: string, key: string, text: string) =>
     }))
 
 describe("WithMemory", () => {
+  it("rejects an invalid namespace and out-of-range budget at annotation time", () => {
+    for (const invalid of [
+      { ...policy, namespace: { kind: "flow" as const, id: "" } },
+      { ...policy, maxTokens: -1 },
+      { ...policy, maxTokens: Recall.MAX_RECALL_TOKENS + 1 }
+    ]) {
+      expect(() => WithMemory.withMemory(Flows.recall, invalid)).toThrow(MemoryError)
+    }
+  })
+
+  it("detaches and deep-freezes policy refusals before handlers run", async () => {
+    const original = {
+      namespace: { kind: "flow" as const, id: "frozen" },
+      recall: "none" as const,
+      maxTokens: 128,
+      retain: "never" as const
+    }
+    const scopedRecall = WithMemory.withMemory(Flows.recall, original)
+    const scopedRemember = WithMemory.withMemory(Flows.remember, original)
+    const attached = WithMemory.policyOf(scopedRecall)!
+
+    original.namespace.id = "mutated"
+    original.recall = "auto" as never
+    original.retain = "on-complete" as never
+    expect(Reflect.set(attached as object, "recall", "auto")).toBe(false)
+    expect(Reflect.set(attached.namespace as object, "id", "mutated-again")).toBe(false)
+
+    const result = await Effect.runPromise(
+      Effect.sync(() => {
+        Reflect.set(attached as object, "retain", "on-complete")
+      }).pipe(
+        Effect.andThen(Effect.all({
+          recalled: Flows.runRecallFor(scopedRecall, { banks: ["bank"], query: "q" }),
+          remembered: Flows.runRememberFor(scopedRemember, { bank: "bank", key: "key", text: "text" })
+        }))
+      )
+    )
+    expect(Object.isFrozen(attached)).toBe(true)
+    expect(Object.isFrozen(attached.namespace)).toBe(true)
+    expect(attached.namespace.id).toBe("frozen")
+    expect(result).toEqual({ recalled: [], remembered: { key: "key" } })
+  })
+
   it("annotates the flow and every flow it declares", () => {
     const nested = [passthrough("first"), passthrough("second")]
     const parent = Flow.make({

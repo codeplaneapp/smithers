@@ -1,8 +1,9 @@
-import { Effect } from "effect"
+import * as DurableWriter from "@smthrs/database/DurableWriter"
+import { Effect, Layer } from "effect"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { describe, expect, it } from "vitest"
-import type { MemoryError } from "../src/MemoryError.ts"
+import { MemoryError } from "../src/MemoryError.ts"
 import * as MemoryStore from "../src/MemoryStore.ts"
 import type * as Namespace from "../src/Namespace.ts"
 import { literalFtsQuery } from "../src/RecallFts.ts"
@@ -85,18 +86,136 @@ describe("MemoryStore", () => {
     expect(result.afterExpiry).toEqual([])
   })
 
-  it("appends ordered history idempotently on message id", async () => {
+  it("persists and indexes one detached snapshot of a stateful fact value", async () => {
+    let reads = 0
+    const value = {
+      get content() {
+        reads += 1
+        return `snapshot-${reads}`
+      }
+    }
+    const result = await runWithDatabase(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      yield* store.enableFts("flow")
+      yield* store.putFact({ namespace, key: "stateful", value, provenance: {} })
+      const stored = yield* store.getFact({ namespace, key: "stateful" })
+      const indexed = yield* sql<{ readonly text: string }>`SELECT text FROM memory_fts_flow
+        WHERE namespace_id = 'project-1' AND record_kind = 'fact' AND record_id = 'stateful'`
+      return { stored, indexed: indexed[0]?.text }
+    }))
+
+    expect(reads).toBe(1)
+    expect(result.stored?.value).toEqual({ content: "snapshot-1" })
+    expect(result.indexed).toBe("snapshot-1")
+  })
+
+  it("does not re-read a fact value mutated at the write boundary", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const writer = yield* DurableWriter.DurableWriter
+        const value = { content: "before" }
+        let mutate = false
+        const write: DurableWriter.Service["write"] = (effect) =>
+          (mutate
+            ? Effect.sync(() => {
+              value.content = "after"
+              mutate = false
+            })
+            : Effect.void).pipe(Effect.andThen(writer.write(effect)))
+        const store = yield* MemoryStore.make.pipe(
+          Effect.provideService(DurableWriter.DurableWriter, DurableWriter.DurableWriter.of({ write }))
+        )
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        yield* store.enableFts("flow")
+        mutate = true
+        yield* store.putFact({ namespace, key: "mutated", value, provenance: {} })
+        const stored = yield* store.getFact({ namespace, key: "mutated" })
+        const indexed = yield* sql<{ readonly text: string }>`SELECT text FROM memory_fts_flow
+          WHERE namespace_id = 'project-1' AND record_kind = 'fact' AND record_id = 'mutated'`
+        return { live: value.content, stored, indexed: indexed[0]?.text }
+      }).pipe(Effect.provide(TestMemory.layerWithDatabase))
+    )
+
+    expect(result.live).toBe("after")
+    expect(result.stored?.value).toEqual({ content: "before" })
+    expect(result.indexed).toBe("before")
+  })
+
+  it("round-trips facts through JSON serialization rules", async () => {
+    const values = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const sparse = new Array<unknown>(3)
+      sparse[1] = "middle"
+      yield* store.putFact({ namespace, key: "nan", value: Number.NaN, provenance: {} })
+      yield* store.putFact({ namespace, key: "infinity", value: Number.POSITIVE_INFINITY, provenance: {} })
+      yield* store.putFact({ namespace, key: "undefined", value: { kept: true, dropped: undefined }, provenance: {} })
+      yield* store.putFact({ namespace, key: "sparse", value: sparse, provenance: {} })
+      const facts = yield* Effect.forEach(
+        ["nan", "infinity", "undefined", "sparse"],
+        (key) => store.getFact({ namespace, key })
+      )
+      return facts.map((fact) => fact?.value)
+    }))
+
+    expect(values).toEqual([null, null, { kept: true }, [null, "middle", null]])
+  })
+
+  it("accepts validated bank strings uniformly across namespace-bearing operations", async () => {
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      yield* store.putFact({ namespace: "agent-team", key: "fact", value: "value", provenance: {} })
+      const fact = yield* store.getFact({ namespace: "agent-team", key: "fact" })
+      const facts = yield* store.listFacts({ namespace: "agent-team" })
+      const thread = yield* store.createThread({ id: "thread-bank", namespace: "agent-team" })
+      const threads = yield* store.listThreads({ namespace: "agent-team" })
+      const note = yield* store.putNote({
+        namespace: "agent-team",
+        id: "note-bank",
+        text: "note",
+        tags: [],
+        provenance: {}
+      })
+      const deleted = yield* store.deleteFact({ namespace: "agent-team", key: "fact" })
+      return { fact, facts, thread, threads, note, deleted }
+    }))
+
+    expect(result.fact?.namespace).toEqual({ kind: "agent", id: "team" })
+    expect(result.facts).toHaveLength(1)
+    expect(result.thread.namespace).toEqual({ kind: "agent", id: "team" })
+    expect(result.threads.map((thread) => thread.id)).toEqual(["thread-bank"])
+    expect(result.note.namespace).toEqual({ kind: "agent", id: "team" })
+    expect(result.deleted).toBe(true)
+  })
+
+  it("paginates messages by the stable at-and-id cursor", async () => {
+    const pages = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      for (const message of [
+        { threadId: "paged", id: "a", role: "user", text: "a", at: 1 },
+        { threadId: "paged", id: "b", role: "user", text: "b", at: 2 },
+        { threadId: "paged", id: "c", role: "user", text: "c", at: 2 }
+      ]) yield* store.appendMessage(message)
+      const first = yield* store.listMessages({ threadId: "paged", limit: 2 })
+      const last = first.at(-1)!
+      const second = yield* store.listMessages({
+        threadId: "paged",
+        limit: 2,
+        cursor: { at: last.at, id: last.id }
+      })
+      return { first, second }
+    }))
+
+    expect(pages.first.map((message) => message.id)).toEqual(["a", "b"])
+    expect(pages.second.map((message) => message.id)).toEqual(["c"])
+  })
+
+  it("appends ordered history and accepts an exact same-payload retry", async () => {
     const messages = await run(Effect.gen(function*() {
       const store = yield* MemoryStore.MemoryStore
       yield* store.appendMessage({ threadId: "thread-1", id: "b", role: "assistant", text: "second", at: 2 })
       yield* store.appendMessage({ threadId: "thread-1", id: "a", role: "user", text: "first", at: 1 })
-      yield* store.appendMessage({
-        threadId: "thread-1",
-        id: "a",
-        role: "user",
-        text: "must not replace",
-        at: 9
-      })
+      yield* store.appendMessage({ threadId: "thread-1", id: "a", role: "user", text: "first", at: 1 })
       return yield* store.listMessages({ threadId: "thread-1" })
     }))
 
@@ -106,11 +225,92 @@ describe("MemoryStore", () => {
     ])
   })
 
+  it("scopes message ids to their thread", async () => {
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const first = { threadId: "thread-1", id: "shared", role: "user", text: "first", at: 1 } as const
+      const second = { threadId: "thread-2", id: "shared", role: "assistant", text: "second", at: 2 } as const
+      yield* store.appendMessage(first)
+      yield* store.appendMessage(second)
+      return yield* Effect.all([
+        store.listMessages({ threadId: first.threadId }),
+        store.listMessages({ threadId: second.threadId })
+      ])
+    }))
+
+    expect(result).toEqual([
+      [{ threadId: "thread-1", id: "shared", role: "user", text: "first", at: 1 }],
+      [{ threadId: "thread-2", id: "shared", role: "assistant", text: "second", at: 2 }]
+    ])
+  })
+
+  it("rejects same-thread message retries whose immutable fields differ", async () => {
+    const failures = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const original = { threadId: "thread", id: "message", role: "user", text: "original", at: 1 } as const
+      yield* store.appendMessage(original)
+      return [
+        yield* Effect.flip(store.appendMessage({ ...original, role: "assistant" })),
+        yield* Effect.flip(store.appendMessage({ ...original, text: "changed" })),
+        yield* Effect.flip(store.appendMessage({ ...original, at: 2 }))
+      ]
+    }))
+
+    expect(failures.map((failure) => [failure.code, failure.path])).toEqual([
+      ["idempotency_conflict", ["role"]],
+      ["idempotency_conflict", ["text"]],
+      ["idempotency_conflict", ["at"]]
+    ])
+  })
+
+  it("upgrades the legacy global message key without losing rows", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        yield* sql`DROP TABLE memory_messages`
+        yield* sql`CREATE TABLE memory_messages (
+          id TEXT PRIMARY KEY CHECK (length(id) > 0),
+          thread_id TEXT NOT NULL,
+          role TEXT NOT NULL,
+          text TEXT NOT NULL,
+          at_ms INTEGER NOT NULL,
+          FOREIGN KEY (thread_id) REFERENCES memory_threads (thread_id)
+        )`
+        yield* sql`CREATE INDEX memory_messages_thread_order_idx
+          ON memory_messages (thread_id, at_ms, id)`
+        yield* sql`INSERT INTO memory_threads (
+          thread_id, namespace_kind, namespace_id, created_at_ms, updated_at_ms
+        ) VALUES ('legacy-thread', 'global', 'history', 1, 1)`
+        yield* sql`INSERT INTO memory_messages (id, thread_id, role, text, at_ms)
+          VALUES ('shared', 'legacy-thread', 'user', 'legacy', 1)`
+        const store = yield* Effect.service(MemoryStore.MemoryStore).pipe(
+          Effect.provide(Layer.fresh(MemoryStore.layer))
+        )
+        yield* store.appendMessage({ threadId: "new-thread", id: "shared", role: "assistant", text: "new", at: 2 })
+        const table = yield* sql<{ readonly sql: string }>`SELECT sql FROM sqlite_master
+          WHERE type = 'table' AND name = 'memory_messages'`
+        return {
+          definition: table[0]?.sql,
+          messages: yield* Effect.all([
+            store.listMessages({ threadId: "legacy-thread" }),
+            store.listMessages({ threadId: "new-thread" })
+          ])
+        }
+      }).pipe(Effect.provide(TestMemory.layerWithDatabase))
+    )
+
+    expect(result.definition).toMatch(/PRIMARY KEY\s*\(\s*thread_id\s*,\s*id\s*\)/iu)
+    expect(result.messages).toEqual([
+      [{ threadId: "legacy-thread", id: "shared", role: "user", text: "legacy", at: 1 }],
+      [{ threadId: "new-thread", id: "shared", role: "assistant", text: "new", at: 2 }]
+    ])
+  })
+
   it("supports the complete fact, thread, note, and message contract", async () => {
     const result = await run(Effect.gen(function*() {
       const store = yield* MemoryStore.MemoryStore
       yield* store.putFact({ namespace, key: "delete-me", value: "value", provenance: {} })
-      const allFacts = yield* store.listAllFacts()
+      const allFacts = yield* store.listAllFacts
       const deletedFact = yield* store.deleteFact({ namespace, key: "delete-me" })
       const thread = yield* store.createThread({
         id: "thread-crud",
@@ -126,7 +326,7 @@ describe("MemoryStore", () => {
         at: 1
       })
       const count = yield* store.countMessages({ threadId: thread.id })
-      const fetched = yield* store.getThread(thread.id)
+      const fetched = yield* store.getThread({ threadId: thread.id })
       const threads = yield* store.listThreads({ namespace })
       yield* store.putNote({
         namespace,
@@ -136,8 +336,8 @@ describe("MemoryStore", () => {
         provenance: {}
       })
       const note = yield* store.getNote({ id: "get-note" })
-      const deletedThread = yield* store.deleteThread(thread.id)
-      const missing = yield* store.getThread(thread.id)
+      const deletedThread = yield* store.deleteThread({ threadId: thread.id })
+      const missing = yield* store.getThread({ threadId: thread.id })
       return {
         allFacts,
         deletedFact,
@@ -160,8 +360,8 @@ describe("MemoryStore", () => {
     expect(result.missing).toBeUndefined()
   })
 
-  it("projects equal record ids independently in different namespaces", async () => {
-    const rows = await Effect.runPromise(
+  it("keeps equal record ids authoritative across namespaces without implicit vectors", async () => {
+    const result = await Effect.runPromise(
       Effect.gen(function*() {
         const store = yield* MemoryStore.MemoryStore
         const sql = yield* Effect.service(SqlClient.SqlClient)
@@ -177,15 +377,21 @@ describe("MemoryStore", () => {
           value: "second",
           provenance: {}
         })
-        return yield* sql<{ readonly namespace_id: string }>`
+        const rows = yield* sql<{ readonly namespace_id: string }>`
           SELECT namespace_id FROM memory_vectors
           WHERE record_kind = 'fact' AND record_id = 'shared'
           ORDER BY namespace_id
         `
+        const facts = yield* Effect.all([
+          store.getFact({ namespace: { kind: "flow", id: "one" }, key: "shared" }),
+          store.getFact({ namespace: { kind: "flow", id: "two" }, key: "shared" })
+        ])
+        return { rows, facts }
       }).pipe(Effect.provide(TestMemory.layerWithDatabase))
     )
 
-    expect(rows.map((row) => row.namespace_id)).toEqual(["one", "two"])
+    expect(result.rows).toEqual([])
+    expect(result.facts.map((fact) => fact?.value)).toEqual(["first", "second"])
   })
 
   it("keeps notes immutable and hides targets only for accepted superseders", async () => {
@@ -307,6 +513,85 @@ describe("MemoryStore", () => {
     expect(result.notes).toEqual([])
   })
 
+  it("treats the normalized supersession set as immutable creation data", async () => {
+    const result = await runWithDatabase(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      yield* store.putNote({ namespace, id: "target-a", text: "a", tags: [], provenance: {} })
+      yield* store.putNote({ namespace, id: "target-b", text: "b", tags: [], provenance: {} })
+      const note = (id: string, supersedes: ReadonlyArray<string>) => ({
+        namespace,
+        id,
+        text: "replacement",
+        tags: [] as const,
+        provenance: {},
+        supersedes
+      })
+
+      yield* store.putNote(note("normalized", ["target-a", "target-b"]))
+      yield* store.putNote(note("normalized", ["target-b", "target-a"]))
+      yield* store.putNote(note("normalized", ["target-a", "target-a", "target-b"]))
+
+      yield* store.putNote(note("added", ["target-a"]))
+      const added = yield* Effect.flip(store.putNote(note("added", ["target-a", "target-b"])))
+      yield* store.putNote(note("removed", ["target-a", "target-b"]))
+      const removed = yield* Effect.flip(store.putNote(note("removed", ["target-a"])))
+      yield* store.putNote(note("missing", []))
+      const missing = yield* Effect.flip(store.putNote(note("missing", ["missing-target"])))
+      const edges = yield* sql<{ readonly count: number }>`SELECT count(*) AS count
+        FROM memory_note_supersedes WHERE superseder_id = 'normalized'`
+      return { failures: [added, removed, missing], normalizedEdges: edges[0]?.count }
+    }))
+
+    expect(result.failures.map((failure) => failure.code)).toEqual([
+      "supersede_conflict",
+      "supersede_conflict",
+      "supersede_conflict"
+    ])
+    expect(result.normalizedEdges).toBe(2)
+  })
+
+  it("accepts a creation retry after the note status changes", async () => {
+    const retried = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const input = {
+        namespace,
+        id: "status-retry",
+        text: "reviewed",
+        tags: [] as const,
+        provenance: { runId: "run" },
+        status: "pending" as const
+      }
+      yield* store.putNote(input)
+      yield* store.setNoteStatus({ id: input.id, status: "accepted" })
+      return yield* store.putNote(input)
+    }))
+
+    expect(retried.status).toBe("accepted")
+  })
+
+  it("accepts equivalent note provenance with a different key order", async () => {
+    const retried = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      yield* store.putNote({
+        namespace,
+        id: "provenance-retry",
+        text: "same",
+        tags: [],
+        provenance: { runId: "run", nodeId: "node" }
+      })
+      return yield* store.putNote({
+        namespace,
+        id: "provenance-retry",
+        text: "same",
+        tags: [],
+        provenance: { nodeId: "node", runId: "run" }
+      })
+    }))
+
+    expect(retried.provenance).toEqual({ runId: "run", nodeId: "node" })
+  })
+
   it("filters authoritative raw rows by tags, status, and supersession", async () => {
     const rows = await run(Effect.gen(function*() {
       const store = yield* MemoryStore.MemoryStore
@@ -345,6 +630,31 @@ describe("MemoryStore", () => {
       ["note", "note-1", "note text"]
     ])
     expect(rows.every((row) => row.bank === "flow-project-1")).toBe(true)
+  })
+
+  it("prefers validated first-class fact tags and falls back for legacy rows", async () => {
+    const rows = await runWithDatabase(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      yield* store.putFact({
+        namespace,
+        key: "current",
+        value: { content: "current", tags: ["scope:legacy-value"] },
+        tags: ["scope:first-class"],
+        provenance: {}
+      })
+      yield* sql`INSERT INTO memory_facts (
+        namespace_kind, namespace_id, fact_key, value_json, tags_json, ttl_ms,
+        provenance_json, created_at_ms, updated_at_ms
+      ) VALUES (
+        'flow', 'project-1', 'legacy', '{"content":"legacy","tags":["scope:legacy"]}', NULL, NULL,
+        '{}', 0, 0
+      )`
+      return yield* store.searchRows({ namespace })
+    }))
+
+    expect(rows.find((row) => row.key === "current")?.tags).toEqual(["scope:first-class"])
+    expect(rows.find((row) => row.key === "legacy")?.tags).toEqual(["scope:legacy"])
   })
 
   it("fails loudly before FTS enablement, then backfills and updates the per-kind index", async () => {
@@ -390,6 +700,59 @@ describe("MemoryStore", () => {
     expect(result.fresh[0]?.rank).toEqual(expect.any(Number))
   })
 
+  it("indexes backfilled facts with the same text and query semantics as live writes", async () => {
+    const vectors = [
+      { value: "rootstringtoken", queries: [["rootstringtoken", true]] as const },
+      {
+        value: {
+          content: "contenttoken",
+          tags: ["scope:tagonlytoken"],
+          hiddenkeytoken: "ignored"
+        },
+        queries: [["contenttoken", true], ["tagonlytoken", false], ["hiddenkeytoken", false]] as const
+      },
+      {
+        value: { indexedkeytoken: "objectvaluetoken" },
+        queries: [["objectvaluetoken", true], ["indexedkeytoken", true]] as const
+      },
+      { value: ["arraytoken"], queries: [["arraytoken", true]] as const },
+      { value: "Unicode café 東京", queries: [["café", true], ["東京", true]] as const }
+    ] as const
+    const result = await runWithDatabase(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      for (const [index, vector] of vectors.entries()) {
+        yield* store.putFact({ namespace, key: `before-${index}`, value: vector.value, provenance: {} })
+      }
+      yield* store.enableFts("flow")
+      for (const [index, vector] of vectors.entries()) {
+        yield* store.putFact({ namespace, key: `after-${index}`, value: vector.value, provenance: {} })
+      }
+      const rows = yield* sql<{ readonly record_id: string; readonly text: string }>`
+        SELECT record_id, text FROM memory_fts_flow
+        WHERE namespace_id = 'project-1' AND record_kind = 'fact'
+        ORDER BY record_id
+      `
+      const matches: Array<readonly [string, boolean, ReadonlyArray<string>]> = []
+      for (const vector of vectors) {
+        for (const [query, expectedMatch] of vector.queries) {
+          const found = yield* store.searchFts({ namespace, query, limit: 20 })
+          matches.push([query, expectedMatch, found.map((row) => row.id).sort()])
+        }
+      }
+      return { rows, matches }
+    }))
+
+    const textById = new Map(result.rows.map((row) => [row.record_id, row.text]))
+    for (const index of vectors.keys()) {
+      expect(textById.get(`before-${index}`)).toBe(textById.get(`after-${index}`))
+    }
+    for (const [query, expectedMatch, ids] of result.matches) {
+      const index = vectors.findIndex((vector) => vector.queries.some(([term]) => term === query))
+      expect(ids).toEqual(expectedMatch ? [`after-${index}`, `before-${index}`] : [])
+    }
+  })
+
   it("validates namespaces, identifiers, tags, and times before touching the database", async () => {
     const failures = await run(Effect.gen(function*() {
       const store = yield* MemoryStore.MemoryStore
@@ -412,14 +775,15 @@ describe("MemoryStore", () => {
         ),
         yield* Effect.flip(store.putNote({ namespace, id: "n", text: "t", tags: overCap, provenance: {} })),
         yield* Effect.flip(store.putNote({ namespace, id: "", text: "t", tags: [], provenance: {} })),
+        yield* Effect.flip(store.createThread({ namespace, id: "" })),
         yield* Effect.flip(store.appendMessage({ threadId: "", id: "m", role: "user", text: "x", at: 0 })),
         yield* Effect.flip(store.appendMessage({ threadId: "t", id: "", role: "user", text: "x", at: 0 })),
         yield* Effect.flip(store.appendMessage({ threadId: "t", id: "m", role: "", text: "x", at: 0 })),
         yield* Effect.flip(store.appendMessage({ threadId: "t", id: "m", role: "user", text: "x", at: -1 })),
         yield* Effect.flip(store.getFact({ namespace, key: "" })),
         yield* Effect.flip(store.deleteFact({ namespace, key: "" })),
-        yield* Effect.flip(store.getThread("")),
-        yield* Effect.flip(store.deleteThread("")),
+        yield* Effect.flip(store.getThread({ threadId: "" })),
+        yield* Effect.flip(store.deleteThread({ threadId: "" })),
         yield* Effect.flip(store.listMessages({ threadId: "" })),
         yield* Effect.flip(store.countMessages({ threadId: "" })),
         yield* Effect.flip(store.deleteMessages({ threadId: "", ids: ["a"] })),
@@ -430,32 +794,32 @@ describe("MemoryStore", () => {
       ]
     }))
 
-    expect(failures.map((error) => [error.code, error.message])).toEqual([
-      ["invalid_namespace", "memory namespace is invalid"],
-      ["store", "fact key must not be empty"],
-      ["store", "ttlMs must be a non-negative safe integer"],
-      ["store", "ttlMs must be a non-negative safe integer"],
-      ["invalid_tag", "memory tags violate the vocabulary or 16-tag cap"],
-      ["invalid_tag", "memory tags violate the vocabulary or 16-tag cap"],
-      ["store", "note id must not be empty"],
-      ["store", "threadId must not be empty"],
-      ["store", "message id must not be empty"],
-      ["store", "message role must not be empty"],
-      ["store", "message at must be a non-negative safe integer"],
-      ["store", "fact key must not be empty"],
-      ["store", "fact key must not be empty"],
-      ["store", "threadId must not be empty"],
-      ["store", "threadId must not be empty"],
-      ["store", "threadId must not be empty"],
-      ["store", "threadId must not be empty"],
-      ["store", "threadId must not be empty"],
-      ["store", "note id must not be empty"],
-      ["store", "note id must not be empty"],
-      ["store", "supersederId must not be empty"],
-      ["store", "targetId must not be empty"]
+    expect(failures.map((error) => [error.code, error.path])).toEqual([
+      ["invalid_namespace", undefined],
+      ["invalid_argument", ["key"]],
+      ["invalid_argument", ["ttlMs"]],
+      ["invalid_argument", ["ttlMs"]],
+      ["invalid_tag", undefined],
+      ["invalid_tag", undefined],
+      ["invalid_argument", ["id"]],
+      ["invalid_argument", ["id"]],
+      ["invalid_argument", ["threadId"]],
+      ["invalid_argument", ["id"]],
+      ["invalid_argument", ["role"]],
+      ["invalid_argument", ["at"]],
+      ["invalid_argument", ["key"]],
+      ["invalid_argument", ["key"]],
+      ["invalid_argument", ["threadId"]],
+      ["invalid_argument", ["threadId"]],
+      ["invalid_argument", ["threadId"]],
+      ["invalid_argument", ["threadId"]],
+      ["invalid_argument", ["threadId"]],
+      ["invalid_argument", ["id"]],
+      ["invalid_argument", ["id"]],
+      ["invalid_argument", ["supersederId"]],
+      ["invalid_argument", ["targetId"]]
     ])
-    expect(failures[0]?.cause).toBeDefined()
-    expect(failures[1]?.cause).toBeUndefined()
+    expect(failures.every((error) => error.cause === undefined)).toBe(true)
   })
 
   it("refuses a value, provenance, or metadata JSON cannot represent", async () => {
@@ -471,12 +835,12 @@ describe("MemoryStore", () => {
       ]
     }))
 
-    expect(failures.map((error) => [error.code, error.message])).toEqual([
-      ["store", "fact value is not JSON-serializable"],
-      ["store", "fact value is not JSON-serializable"],
-      ["store", "fact provenance is not JSON-serializable"],
-      ["store", "note provenance is not JSON-serializable"],
-      ["store", "thread metadata is not JSON-serializable"]
+    expect(failures.map((error) => [error.code, error.path, error.cause])).toEqual([
+      ["invalid_argument", ["value"], undefined],
+      ["invalid_argument", ["value"], undefined],
+      ["invalid_argument", ["provenance"], undefined],
+      ["invalid_argument", ["provenance"], undefined],
+      ["invalid_argument", ["metadata"], undefined]
     ])
   })
 
@@ -494,7 +858,7 @@ describe("MemoryStore", () => {
       const emptyPrefix = yield* store.listFacts({ namespace, prefix: "" })
       const unmatchedPrefix = yield* store.listFacts({ namespace, prefix: "zzz" })
       const isolated = yield* store.getFact({ namespace: other, key: "alpha" })
-      const all = yield* store.listAllFacts()
+      const all = yield* store.listAllFacts
       const deleted = yield* store.deleteFact({ namespace, key: "alpha" })
       const afterDelete = yield* store.listFacts({ namespace })
       return {
@@ -531,12 +895,12 @@ describe("MemoryStore", () => {
     const result = await run(Effect.gen(function*() {
       const store = yield* MemoryStore.MemoryStore
       const bare = yield* store.createThread({ namespace })
-      const fetched = yield* store.getThread(bare.id)
+      const fetched = yield* store.getThread({ threadId: bare.id })
       const duplicate = yield* Effect.flip(store.createThread({ id: bare.id, namespace: other, title: "ignored" }))
       const all = yield* store.listThreads()
       const scoped = yield* store.listThreads({ namespace: other })
       const ids = yield* store.listThreadIds
-      const missing = yield* store.deleteThread("absent")
+      const missing = yield* store.deleteThread({ threadId: "absent" })
       return { bare, fetched, duplicate, all, scoped, ids, missing }
     }))
 
@@ -552,6 +916,57 @@ describe("MemoryStore", () => {
     expect(result.scoped).toEqual([])
     expect(result.ids).toEqual([result.bare.id])
     expect(result.missing).toBe(false)
+  })
+
+  it("rolls back a generated thread when its transactional read back fails", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        let inserted = false
+        const failingSql = new Proxy(sql, {
+          apply(target, thisArg, argumentsList) {
+            const statement = (argumentsList[0] as TemplateStringsArray).join(" ")
+            if (statement.includes("INSERT INTO memory_threads")) {
+              inserted = true
+            } else if (inserted && statement.includes("FROM memory_threads WHERE thread_id")) {
+              return Effect.fail(new Error("injected thread read failure"))
+            }
+            return Reflect.apply(target, thisArg, argumentsList)
+          }
+        })
+        const failingStore = yield* MemoryStore.make.pipe(
+          Effect.provideService(SqlClient.SqlClient, failingSql)
+        )
+        const failure = yield* Effect.flip(failingStore.createThread({ namespace }))
+        const store = yield* MemoryStore.MemoryStore
+        const retried = yield* store.createThread({ namespace })
+        const threads = yield* store.listThreads({ namespace })
+        return { failure, retried, threads }
+      }).pipe(Effect.provide(TestMemory.layerWithDatabase))
+    )
+
+    expect(result.failure.code).toBe("store")
+    expect(result.threads).toEqual([result.retried])
+  })
+
+  it("accepts equivalent thread metadata with a different key order", async () => {
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const first = yield* store.createThread({
+        id: "metadata-retry",
+        namespace,
+        metadata: { alpha: 1, nested: { left: true, right: false } }
+      })
+      const retried = yield* store.createThread({
+        id: "metadata-retry",
+        namespace,
+        metadata: { nested: { right: false, left: true }, alpha: 1 }
+      })
+      return { first, retried, threads: yield* store.listThreads({ namespace }) }
+    }))
+
+    expect(result.retried).toEqual(result.first)
+    expect(result.threads).toEqual([result.first])
   })
 
   it("counts, de-duplicates, chunks, and compacts messages at their boundaries", async () => {
@@ -590,9 +1005,9 @@ describe("MemoryStore", () => {
     expect(result.noIds).toBe(0)
     expect(result.duplicates).toBe(1)
     expect(result.chunked).toBe(2)
-    expect([result.mismatched.code, result.mismatched.message]).toEqual([
-      "store",
-      "summary threadId must match the compacted thread"
+    expect([result.mismatched.code, result.mismatched.path]).toEqual([
+      "invalid_argument",
+      ["summary", "threadId"]
     ])
     expect(result.summaryOnly).toBe(0)
     expect([result.unknownThread.code, result.unknownThread.message]).toEqual([
@@ -732,9 +1147,63 @@ describe("MemoryStore", () => {
     expect(result.one.map((row) => row.key)).toEqual(["plain"])
     expect(result.generous).toHaveLength(2)
     expect(result.single.map((row) => row.key)).toEqual(["tagged"])
-    expect([result.negative.message, result.fractional.message]).toEqual([
-      "searchRows limit must be a non-negative safe integer",
-      "searchRows limit must be a non-negative safe integer"
+    expect([result.negative, result.fractional].map((error) => [error.code, error.path])).toEqual([
+      ["invalid_argument", ["limit"]],
+      ["invalid_argument", ["limit"]]
+    ])
+  })
+
+  it("matches the previous full-sort semantics at the exact limit and limit plus one", async () => {
+    const result = await run(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      for (let index = 0; index < 5; index++) {
+        yield* store.putFact({ namespace, key: `fact-${index}`, value: `value-${index}`, provenance: {} })
+        yield* TestClock.adjust("1 millis")
+      }
+      const all = yield* store.searchRows({ namespace })
+      const exact = yield* store.searchRows({ namespace, limit: 3 })
+      yield* store.putFact({ namespace, key: "fact-plus-one", value: "newest", provenance: {} })
+      const after = yield* store.searchRows({ namespace })
+      const limitedAfter = yield* store.searchRows({ namespace, limit: 3 })
+      return { all, exact, after, limitedAfter }
+    }))
+
+    expect(result.exact).toEqual(result.all.slice(0, 3))
+    expect(result.limitedAfter).toEqual(result.after.slice(0, 3))
+    expect(result.exact).toHaveLength(3)
+    expect(result.limitedAfter).toHaveLength(3)
+  })
+
+  it("bounds the SQL rowset before decoding rows outside the search limit", async () => {
+    const rows = await runWithDatabase(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      yield* store.putFact({ namespace, key: "newest", value: "safe", provenance: {} })
+      yield* sql`PRAGMA ignore_check_constraints = ON`
+      yield* sql`INSERT INTO memory_facts (
+        namespace_kind, namespace_id, fact_key, value_json, tags_json, ttl_ms,
+        provenance_json, created_at_ms, updated_at_ms
+      ) VALUES ('flow', 'project-1', 'outside-limit', '{oops', NULL, NULL, '{}', -1, -1)`
+      return yield* store.searchRows({ namespace, limit: 1 })
+    }))
+
+    expect(rows.map((row) => row.key)).toEqual(["newest"])
+  })
+
+  it("rejects invalid search limits before reading backend tables", async () => {
+    const failures = await runWithDatabase(Effect.gen(function*() {
+      const store = yield* MemoryStore.MemoryStore
+      const sql = yield* Effect.service(SqlClient.SqlClient)
+      yield* sql`DROP TABLE memory_facts`
+      const rows = yield* Effect.flip(store.searchRows({ namespace, limit: -1 }))
+      yield* sql`DROP TABLE memory_fts_kinds`
+      const fts = yield* Effect.flip(store.searchFts({ namespace, query: "query", limit: -1 }))
+      return [rows, fts]
+    }))
+
+    expect(failures.map((error) => [error.code, error.path])).toEqual([
+      ["invalid_argument", ["limit"]],
+      ["invalid_argument", ["limit"]]
     ])
   })
 
@@ -815,9 +1284,9 @@ describe("MemoryStore", () => {
     expect(result.blank).toEqual([])
     expect(result.surrogate.map((row) => row.key).sort()).toEqual(["durable-extra", "durable-note", "runbook"])
     expect(result.zeroLimit).toEqual([])
-    expect([result.negativeLimit.message, result.fractionalLimit.message]).toEqual([
-      "searchFts limit must be a non-negative safe integer",
-      "searchFts limit must be a non-negative safe integer"
+    expect([result.negativeLimit, result.fractionalLimit].map((error) => [error.code, error.path])).toEqual([
+      ["invalid_argument", ["limit"]],
+      ["invalid_argument", ["limit"]]
     ])
     expect(result.defaulted.map((row) => row.key).sort()).toEqual(["durable-extra", "durable-note", "runbook"])
     expect(result.truncated).toHaveLength(2)
@@ -838,11 +1307,11 @@ describe("MemoryStore", () => {
       ["getFact", noop.getFact({ namespace, key: "k" })],
       ["deleteFact", noop.deleteFact({ namespace, key: "k" })],
       ["listFacts", noop.listFacts({ namespace })],
-      ["listAllFacts", noop.listAllFacts()],
+      ["listAllFacts", noop.listAllFacts],
       ["createThread", noop.createThread({ namespace })],
-      ["getThread", noop.getThread("t")],
+      ["getThread", noop.getThread({ threadId: "t" })],
       ["listThreads", noop.listThreads()],
-      ["deleteThread", noop.deleteThread("t")],
+      ["deleteThread", noop.deleteThread({ threadId: "t" })],
       ["appendMessage", noop.appendMessage({ threadId: "t", id: "m", role: "user", text: "x", at: 0 })],
       ["listMessages", noop.listMessages({ threadId: "t" })],
       ["countMessages", noop.countMessages({ threadId: "t" })],
@@ -882,14 +1351,14 @@ describe("MemoryStore", () => {
     )
     const layered = await Effect.runPromise(
       Effect.service(MemoryStore.MemoryStore).pipe(
-        Effect.flatMap((store) => Effect.flip(store.listAllFacts())),
+        Effect.flatMap((store) => Effect.flip(store.listAllFacts)),
         Effect.provide(MemoryStore.layerNoop())
       )
     )
     const layeredOverride = await Effect.runPromise(
       Effect.service(MemoryStore.MemoryStore).pipe(
-        Effect.flatMap((store) => store.listAllFacts()),
-        Effect.provide(MemoryStore.layerNoop({ listAllFacts: () => Effect.succeed([]) }))
+        Effect.flatMap((store) => store.listAllFacts),
+        Effect.provide(MemoryStore.layerNoop({ listAllFacts: Effect.succeed([]) }))
       )
     )
 
@@ -912,16 +1381,44 @@ describe("MemoryStore", () => {
     expect(failure.cause).toBeDefined()
   })
 
-  it("keeps an authoritative write when the advisory vector projection fails", async () => {
-    const stored = await runWithDatabase(Effect.gen(function*() {
+  it("does not project vectors from authoritative writes by default", async () => {
+    const result = await runWithDatabase(Effect.gen(function*() {
       const store = yield* MemoryStore.MemoryStore
       const sql = yield* Effect.service(SqlClient.SqlClient)
-      yield* sql`DROP TABLE memory_vectors`
       yield* store.putFact({ namespace, key: "durable", value: "written", provenance: {} })
-      return yield* store.getFact({ namespace, key: "durable" })
+      yield* store.putNote({ namespace, id: "note", text: "written", tags: [], provenance: {} })
+      const stored = yield* store.getFact({ namespace, key: "durable" })
+      const rows = yield* sql<{ readonly count: number }>`SELECT count(*) AS count FROM memory_vectors`
+      return { stored, count: Number(rows[0]?.count ?? -1) }
     }))
 
-    expect(stored?.value).toBe("written")
+    expect(result.stored?.value).toBe("written")
+    expect(result.count).toBe(0)
+  })
+
+  it("wraps a forged memory error tag as a genuine store failure", async () => {
+    const failure = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* Effect.service(SqlClient.SqlClient)
+        const forged = { _tag: "flows/memory/MemoryError" }
+        const failingSql = new Proxy(sql, {
+          apply(target, thisArg, argumentsList) {
+            const strings = argumentsList[0] as TemplateStringsArray
+            if (strings.join(" ").includes("FROM memory_facts")) {
+              return Effect.fail(forged)
+            }
+            return Reflect.apply(target, thisArg, argumentsList)
+          }
+        })
+        const store = yield* MemoryStore.make.pipe(
+          Effect.provideService(SqlClient.SqlClient, failingSql)
+        )
+        return yield* Effect.flip(store.listFacts({ namespace }))
+      }).pipe(Effect.provide(TestMemory.layerWithDatabase))
+    )
+
+    expect(failure).toBeInstanceOf(MemoryError)
+    expect(failure).toMatchObject({ code: "store", message: "could not list memory facts" })
   })
 
   it("reports a stored row it cannot decode as a typed memory error", async () => {
@@ -953,7 +1450,7 @@ describe("MemoryStore", () => {
       yield* sql`INSERT INTO memory_threads (
         thread_id, namespace_kind, namespace_id, title, metadata_json, created_at_ms, updated_at_ms
       ) VALUES ('bad-thread', 'flow', 'threads', NULL, '{oops', 0, 0)`
-      const invalidMetadata = yield* Effect.flip(store.getThread("bad-thread"))
+      const invalidMetadata = yield* Effect.flip(store.getThread({ threadId: "bad-thread" }))
       return [scalarProvenance, nullProvenance, storedTags, invalidJson, invalidMetadata]
     }))
 

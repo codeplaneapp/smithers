@@ -17,8 +17,11 @@ export const MemoryErrorCode = Schema.Literals([
   "fts_not_enabled",
   "invalid_namespace",
   "invalid_tag",
+  "invalid_argument",
   "supersede_conflict",
+  "idempotency_conflict",
   "embedding_unavailable",
+  "vector_model_mismatch",
   "store"
 ])
 
@@ -41,5 +44,6 @@ export type MemoryErrorCode = typeof MemoryErrorCode.Type
 export class MemoryError extends Schema.TaggedError<MemoryError>()("flows/memory/MemoryError", {
   code: MemoryErrorCode,
   message: Schema.String,
+  path: Schema.optional(Schema.Array(Schema.String)),
   cause: Schema.optional(Schema.Defect())
 }) {}

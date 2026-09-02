@@ -15,12 +15,11 @@ import * as Layer from "effect/Layer"
 import * as Semaphore from "effect/Semaphore"
 import * as Embedding from "./Embedding.ts"
 import type { DatabaseService } from "./internal/Sql.ts"
+import { compareText, digest, searchableText, vectorBytes } from "./internal/Text.ts"
 import * as MemoryError from "./MemoryError.ts"
 import * as MemoryStore from "./MemoryStore.ts"
 import * as Namespace from "./Namespace.ts"
 import * as Recall from "./Recall.ts"
-
-const compareText = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
 
 /**
  * Durable vector projection row.
@@ -50,7 +49,10 @@ export interface Vector {
  */
 export interface VectorStore {
   readonly upsert: (vector: Vector) => Effect.Effect<void, MemoryError.MemoryError>
-  readonly list: (banks: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<Vector>, MemoryError.MemoryError>
+  readonly list: (
+    banks: ReadonlyArray<string>,
+    model: string
+  ) => Effect.Effect<ReadonlyArray<Vector>, MemoryError.MemoryError>
 }
 
 /**
@@ -101,11 +103,6 @@ export const budgetLimits = {
 export const defaultModel = Embedding.inProcessModel
 const defaultHalfLifeMs = 7 * 24 * 60 * 60 * 1000
 
-const vectorBytes = (vector: ReadonlyArray<number>): Uint8Array => {
-  const values = new Float32Array(vector)
-  return new Uint8Array(values.buffer)
-}
-
 const maximumDimensions = 65_536
 
 const readVector = (
@@ -127,12 +124,41 @@ const readVector = (
         for (let index = 0; index < dimensions; index++) vector[index] = view.getFloat32(index * 4, true)
         return vector
       },
-      catch: (cause) =>
-        new MemoryError.MemoryError({ code: "store", message: "stored memory vector could not be decoded", cause })
+      catch: () => new MemoryError.MemoryError({ code: "store", message: "stored memory vector could not be decoded" })
     })
 
-const sqlError = (cause: unknown): MemoryError.MemoryError =>
-  new MemoryError.MemoryError({ code: "store", message: "memory vector projection failed", cause })
+const sqlError = (): MemoryError.MemoryError =>
+  new MemoryError.MemoryError({ code: "store", message: "memory vector projection failed" })
+
+const invalidArgument = (message: string, path: ReadonlyArray<string>): MemoryError.MemoryError =>
+  new MemoryError.MemoryError({ code: "invalid_argument", message, path })
+
+const validateVector = (vector: Vector): MemoryError.MemoryError | undefined => {
+  if (vector.bank.length === 0) return invalidArgument("vector bank must not be empty", ["bank"])
+  if (vector.key.length === 0) return invalidArgument("vector key must not be empty", ["key"])
+  if (vector.model.length === 0) return invalidArgument("vector model must not be empty", ["model"])
+  if (vector.contentDigest.length === 0) {
+    return invalidArgument("vector contentDigest must not be empty", ["contentDigest"])
+  }
+  if (vector.dimensions !== vector.vector.length) {
+    return invalidArgument("vector dimensions must match vector length", ["dimensions"])
+  }
+  if (
+    !Number.isSafeInteger(vector.dimensions) ||
+    vector.dimensions < 1 ||
+    vector.dimensions > maximumDimensions
+  ) {
+    return invalidArgument(`vector dimensions must be between 1 and ${maximumDimensions}`, ["dimensions"])
+  }
+  const invalidComponent = vector.vector.findIndex((component) => !Number.isFinite(component))
+  if (invalidComponent !== -1) {
+    return invalidArgument("vector components must be finite", ["vector", String(invalidComponent)])
+  }
+  if (!Number.isSafeInteger(vector.updatedAtMs) || vector.updatedAtMs < 0) {
+    return invalidArgument("vector updatedAtMs must be a non-negative safe integer", ["updatedAtMs"])
+  }
+  return undefined
+}
 
 /**
  * Builds the SQLite adapter for the migration-owned `memory_vectors` table.
@@ -143,8 +169,11 @@ const sqlError = (cause: unknown): MemoryError.MemoryError =>
  */
 export const makeSqlVectorStore = (database: DatabaseService): VectorStore => ({
   upsert: (vector) =>
-    database.write(
-      database.sql`
+    Effect.suspend(() => {
+      const failure = validateVector(vector)
+      if (failure !== undefined) return Effect.fail(failure)
+      return database.write(
+        database.sql`
       INSERT INTO memory_vectors (
         record_kind, record_id, namespace_kind, namespace_id,
         embedding_model, content_digest, dimensions, vector_bytes, updated_at_ms
@@ -167,8 +196,9 @@ export const makeSqlVectorStore = (database: DatabaseService): VectorStore => ({
         vector_bytes = excluded.vector_bytes,
         updated_at_ms = excluded.updated_at_ms
     `
-    ).pipe(Effect.mapError(sqlError), Effect.asVoid),
-  list: (banks) =>
+      ).pipe(Effect.mapError(sqlError), Effect.asVoid)
+    }),
+  list: (banks, model) =>
     Effect.all(
       banks.map((bank) => {
         const namespace = Recall.namespaceForBank(bank)
@@ -177,6 +207,7 @@ export const makeSqlVectorStore = (database: DatabaseService): VectorStore => ({
             embedding_model, content_digest, dimensions, vector_bytes, updated_at_ms
           FROM memory_vectors
           WHERE namespace_kind = ${namespace.kind} AND namespace_id = ${namespace.id}
+            AND embedding_model = ${model}
         `.pipe(Effect.map((rows) => ({ bank, rows })))
       }),
       { concurrency: "unbounded" }
@@ -196,31 +227,16 @@ export const makeSqlVectorStore = (database: DatabaseService): VectorStore => ({
           }))))
       ),
       Effect.mapError((cause) =>
-        cause instanceof MemoryError.MemoryError ? cause : sqlError(cause)
+        cause instanceof MemoryError.MemoryError ? cause : sqlError()
       )
     )
 })
 
-const digest = (text: string): string => {
-  let hash = 2166136261
-  for (const byte of new TextEncoder().encode(text)) {
-    hash ^= byte
-    hash = Math.imul(hash, 16777619)
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0")
-}
-
-const factText = (value: unknown): string => {
-  if (typeof value === "string") return value
-  try {
-    return JSON.stringify(value) ?? String(value)
-  } catch {
-    return String(value)
-  }
-}
-
 const mismatch = (message: string): MemoryError.MemoryError =>
   new MemoryError.MemoryError({ code: "embedding_unavailable", message })
+
+const vectorMismatch = (message: string): MemoryError.MemoryError =>
+  new MemoryError.MemoryError({ code: "vector_model_mismatch", message })
 
 const cosine = (left: ReadonlyArray<number>, right: ReadonlyArray<number>): number => {
   if (left.length !== right.length || left.length === 0) return 0
@@ -242,7 +258,8 @@ const recency = (updatedAtMs: number, nowMs: number, halfLifeMs: number): number
 
 /**
  * Computes a semantic recall result from a vector projection and authoritative
- * rows. A model or dimension mismatch is a typed embedding failure.
+ * rows. Foreign-model rows are skipped and matching-model dimension
+ * mismatches are typed stored-data failures.
  *
  * @category constructors
  * @since 0.1.0
@@ -258,16 +275,14 @@ export const recall = (
     const model = options.model ?? defaultModel
     const limit = budgetLimits[input.budget ?? "mid"]
     const query = yield* embedding.embed(input.query)
-    const vectors = yield* options.vectorStore.list(input.banks)
-    if (vectors.some((vector) => vector.model !== model)) {
-      return yield* Effect.fail(mismatch(`embedding model mismatch: expected ${model}`))
-    }
+    const vectors = yield* options.vectorStore.list(input.banks, model)
     if (
       vectors.some((vector) =>
-        vector.dimensions !== query.vector.length || vector.vector.length !== query.vector.length
+        vector.model === model &&
+        (vector.dimensions !== query.vector.length || vector.vector.length !== query.vector.length)
       )
     ) {
-      return yield* Effect.fail(mismatch("embedding dimensions do not match the query vector"))
+      return yield* Effect.fail(vectorMismatch("embedding dimensions do not match the query vector"))
     }
     const rows = yield* Effect.all(
       input.banks.map((namespace) =>
@@ -295,10 +310,12 @@ export const recall = (
     }
     const ranked: Array<Recall.Result> = []
     for (const vector of vectors) {
+      if (vector.model !== model) continue
       const row = byIdentity.get(
         `${vector.bank}\u0000${vector.recordKind ?? "note"}\u0000${vector.recordId ?? vector.key}`
       )
       if (row === undefined) continue
+      if (vector.contentDigest !== digest(searchableText(row.text))) continue
       if (row.status !== undefined && row.status !== "accepted") continue
       if (input.tagGroups !== undefined && !input.tagGroups.every((group) => Namespace.matches(group, row.tags))) {
         continue
@@ -360,24 +377,34 @@ export const makeProjector = (options: Options): Projector => {
   }) =>
     Effect.suspend(() => {
       const model = options.model ?? defaultModel
+      const snapshot = Object.freeze({
+        bank: row.bank,
+        key: row.key,
+        text: row.text,
+        updatedAtMs: row.updatedAtMs,
+        recordKind: row.recordKind,
+        recordId: row.recordId
+      })
       const task = Effect.gen(function*() {
         const embedding = yield* Embedding.Embedding
-        const response = yield* embedding.embed(row.text)
+        const response = yield* embedding.embed(snapshot.text)
         yield* options.vectorStore.upsert({
-          ...row,
+          bank: snapshot.bank,
+          key: snapshot.key,
           model,
-          contentDigest: digest(row.text),
+          contentDigest: digest(snapshot.text),
           dimensions: response.vector.length,
           vector: response.vector,
-          recordKind: row.recordKind,
-          recordId: row.recordId
+          updatedAtMs: snapshot.updatedAtMs,
+          recordKind: snapshot.recordKind,
+          recordId: snapshot.recordId
         })
       }).pipe(
         Effect.retry({ times: 1 }),
         Effect.catch((cause) => Effect.logWarning(`memory semantic projection failed: ${String(cause)}`)),
         Effect.asVoid
       )
-      const identity = `${model}\u0000${row.bank}\u0000${row.key}`
+      const identity = `${model}\u0000${snapshot.bank}\u0000${snapshot.key}`
       let entry = locks.get(identity)
       if (entry === undefined) {
         entry = { lock: Semaphore.makeUnsafe(1), users: 0 }
@@ -424,35 +451,44 @@ export const decorateStore = (
 ): MemoryStore.Service => {
   const project = (row: Parameters<Projector>[0]): Effect.Effect<void> =>
     projector(row).pipe(Effect.provideService(Embedding.Embedding, embedding))
+  const superviseAfterCommit = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<void> =>
+    effect.pipe(Effect.ignoreCause({ log: true, message: "memory semantic post-commit projection failed" }))
   return {
     ...store,
     putFact: (input) =>
       store.putFact(input).pipe(
-        Effect.andThen(store.getFact({ namespace: input.namespace, key: input.key })),
-        Effect.flatMap((fact) =>
-          fact === undefined
-            ? Effect.void
-            : project({
-              bank: `${fact.namespace.kind}-${fact.namespace.id}`,
-              key: fact.key,
-              text: factText(fact.value),
-              updatedAtMs: fact.updatedAtMs,
-              recordKind: "fact" as const,
-              recordId: fact.key
-            })
+        Effect.tap(() =>
+          superviseAfterCommit(
+            store.getFact({ namespace: input.namespace, key: input.key }).pipe(
+              Effect.flatMap((fact) =>
+                fact === undefined
+                  ? Effect.void
+                  : project({
+                    bank: `${fact.namespace.kind}-${fact.namespace.id}`,
+                    key: fact.key,
+                    text: searchableText(fact.value),
+                    updatedAtMs: fact.updatedAtMs,
+                    recordKind: "fact" as const,
+                    recordId: fact.key
+                  })
+              )
+            )
+          )
         )
       ),
     putNote: (input) =>
       store.putNote(input).pipe(
         Effect.tap((note) =>
-          project({
-            bank: `${note.namespace.kind}-${note.namespace.id}`,
-            key: note.id,
-            text: note.text,
-            updatedAtMs: note.createdAtMs,
-            recordKind: "note",
-            recordId: note.id
-          })
+          superviseAfterCommit(
+            project({
+              bank: `${note.namespace.kind}-${note.namespace.id}`,
+              key: note.id,
+              text: note.text,
+              updatedAtMs: note.createdAtMs,
+              recordKind: "note",
+              recordId: note.id
+            })
+          )
         )
       )
   }
