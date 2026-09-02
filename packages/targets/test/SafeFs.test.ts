@@ -53,6 +53,9 @@ describe("SafeFs.errorCode", () => {
     })
 
     expect(SafeFs.errorCode({ code: "ENOENT" })).toBe("ENOENT")
+    expect(SafeFs.errorCode({ code: 7 })).toBeUndefined()
+    expect(SafeFs.errorCode("ENOENT")).toBeUndefined()
+    expect(SafeFs.errorCode(null)).toBeUndefined()
     expect(SafeFs.errorCode(getter)).toBeUndefined()
     expect(SafeFs.errorCode(proxy)).toBeUndefined()
     expect(calls).toBe(0)
@@ -213,6 +216,66 @@ describe("SafeFs.digestFile", () => {
     expect(Math.max(...sizes)).toBe(SafeFs.chunkBytes)
   })
 
+  it("accepts ordinary numeric stat metadata without losing precision", async () => {
+    await write("numeric.ts", "numeric stats\n")
+    const io: SafeFs.Io = {
+      ...SafeFs.defaultIo,
+      lstat: (path) => Fs.lstat(path),
+      open: async (path) => {
+        const handle = await Fs.open(path, "r")
+        return {
+          stat: () => handle.stat(),
+          read: async (into) => (await handle.read(into, 0, into.byteLength, null)).bytesRead,
+          close: () => handle.close()
+        }
+      }
+    }
+    expect(await SafeFs.digestFile(at("numeric.ts"), { root: await canonical(), io })).toBe(sha256("numeric stats\n"))
+  })
+
+  it("refuses an invalid numeric size reported by the open descriptor", async () => {
+    await write("invalid-size.ts", "content\n")
+    const io: SafeFs.Io = {
+      ...SafeFs.defaultIo,
+      open: async (path) => {
+        const handle = await SafeFs.defaultIo.open(path)
+        return {
+          ...handle,
+          stat: async () => ({ ...await handle.stat(), size: -1, isFile: () => true }) as never
+        }
+      }
+    }
+    await expect(SafeFs.digestFile(at("invalid-size.ts"), { root: await canonical(), io }))
+      .rejects.toThrow(/invalid file size/)
+  })
+
+  it.each(
+    [
+      [new Error("close failed"), "close failed"],
+      [new Error(""), "unknown failure"],
+      ["string close failure", "string close failure"],
+      ["", "unknown failure"],
+      [new Proxy(new Error("hidden close failure"), {}), "unknown failure"]
+    ] as const
+  )("reports a descriptor close failure after a successful read", async (closeFailure, message) => {
+    await write("close.ts", "content\n")
+    const io: SafeFs.Io = {
+      ...SafeFs.defaultIo,
+      open: async (path) => {
+        const handle = await SafeFs.defaultIo.open(path)
+        return {
+          ...handle,
+          close: async () => {
+            await handle.close()
+            throw closeFailure
+          }
+        }
+      }
+    }
+    await expect(SafeFs.digestFile(at("close.ts"), { root: await canonical(), io, what: "close probe" }))
+      .rejects.toThrow(message)
+  })
+
   it.each([Number.NaN, -1, 1.5, SafeFs.chunkBytes + 1])(
     "refuses an invalid descriptor read length %s",
     async (bytesRead) => {
@@ -321,6 +384,65 @@ describe("SafeFs.readText", () => {
       await Fs.chmod(at("ignore"), 0o600).catch(() => undefined)
     }
   })
+
+  it.skipIf(process.platform === "win32")("rejects a final symlink when the caller requires no-follow", async () => {
+    await write("actual.txt", "inside\n")
+    await Fs.symlink("actual.txt", at("link.txt"))
+
+    await expect(SafeFs.readText(at("link.txt"), {
+      root: await canonical(),
+      symlinks: "reject",
+      what: "configuration"
+    })).rejects.toThrow(`configuration is a symbolic link: ${at("link.txt")}`)
+  })
+
+  it.skipIf(process.platform === "win32")(
+    "reports a symlink or its target disappearing during resolution",
+    async () => {
+      await write("target.txt", "content\n")
+      await Fs.symlink("target.txt", at("link.txt"))
+      const confinedRoot = await canonical()
+      const link = NodePath.join(confinedRoot, "link.txt")
+      const target = NodePath.join(confinedRoot, "target.txt")
+      const gone = Object.assign(new Error("gone"), { code: "ENOENT" })
+      const linkGone: SafeFs.Io = {
+        ...SafeFs.defaultIo,
+        realpath: (path) => path === link ? Promise.reject(gone) : SafeFs.defaultIo.realpath(path)
+      }
+      expect(await SafeFs.readText(at("link.txt"), { root: confinedRoot, io: linkGone })).toBeUndefined()
+
+      const targetGone: SafeFs.Io = {
+        ...SafeFs.defaultIo,
+        lstat: (path) => path === target ? Promise.reject(gone) : SafeFs.defaultIo.lstat(path)
+      }
+      expect(await SafeFs.readText(at("link.txt"), { root: confinedRoot, io: targetGone })).toBeUndefined()
+    }
+  )
+
+  it("refuses a direct path whose real parent is outside the confined root", async () => {
+    const path = NodePath.join(outside, "outside.txt")
+    await Fs.writeFile(path, "outside\n", "utf8")
+
+    await expect(SafeFs.readText(path, { root: await canonical(), what: "configuration" }))
+      .rejects.toThrow(`configuration resolves outside the workspace: ${path}`)
+  })
+
+  it("propagates a non-absence failure while resolving a confined parent", async () => {
+    await write("config.txt", "content\n")
+    const denied = Object.assign(new Error("parent denied"), { code: "EACCES" })
+    const io: SafeFs.Io = { ...SafeFs.defaultIo, realpath: () => Promise.reject(denied) }
+
+    await expect(SafeFs.readText(at("config.txt"), { root: await canonical(), io, what: "configuration" }))
+      .rejects.toBe(denied)
+  })
+
+  it.skipIf(process.platform === "win32")("refuses a symlink whose in-workspace target is a directory", async () => {
+    await Fs.mkdir(at("actual"))
+    await Fs.symlink("actual", at("link"))
+
+    await expect(SafeFs.readText(at("link"), { root: await canonical(), what: "configuration" }))
+      .rejects.toThrow(`configuration is not a regular file: ${at("link")}`)
+  })
 })
 
 describe("SafeFs.resolveDirectory", () => {
@@ -331,6 +453,14 @@ describe("SafeFs.resolveDirectory", () => {
     const options = { root: await canonical(), what: "directory" }
     expect(await SafeFs.resolveDirectory(at("link"), options)).toBeUndefined()
     expect(await SafeFs.resolveDirectory(at("real"), options)).toMatchObject({ path: at("real") })
+    expect(await SafeFs.resolveDirectory(at("real"))).toMatchObject({ path: at("real") })
+    expect(await SafeFs.resolveDirectory(at("missing"))).toBeUndefined()
+  })
+
+  it("propagates a directory stat failure that is not absence", async () => {
+    const denied = Object.assign(new Error("directory denied"), { code: "EACCES" })
+    const io: SafeFs.Io = { ...SafeFs.defaultIo, lstat: () => Promise.reject(denied) }
+    await expect(SafeFs.resolveDirectory(at("denied"), { io })).rejects.toBe(denied)
   })
 
   it("refuses a directory reached through a link out of the workspace", async () => {

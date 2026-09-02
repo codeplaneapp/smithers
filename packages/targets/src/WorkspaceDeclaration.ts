@@ -600,9 +600,7 @@ export const Workspace = (name: string, options: WorkspaceOptions): WorkspaceDec
     for (const [repoName, repo] of Object.entries(options.repos)) {
       if (!workspaceName.test(repoName)) {
         throw new TypeError(
-          `Workspace repo name is not portable: ${
-            JSON.stringify(repoName.slice(0, maximumRejectedNameCodeUnits))
-          }`
+          `Workspace repo name is not portable: ${JSON.stringify(repoName.slice(0, maximumRejectedNameCodeUnits))}`
         )
       }
       if (!LocalRepository.isDeclaration(repo)) {

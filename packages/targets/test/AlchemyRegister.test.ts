@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest"
 import { type Attrs as GithubCiGenAttrs, GithubCiGen } from "../src/GithubCiGen.ts"
 import * as Input from "../src/Input.ts"
-import { expand, isPackageDefaults, PackageDefaults, TypeId as PackageDefaultsTypeId } from "../src/PackageDefaults.ts"
+import {
+  expand,
+  isPackageDefaults,
+  matches,
+  PackageDefaults,
+  TypeId as PackageDefaultsTypeId
+} from "../src/PackageDefaults.ts"
+import * as PackageJson from "../src/PackageJson.ts"
 import { type Attrs as PnpmWorkspaceAttrs, PnpmWorkspace } from "../src/PnpmWorkspaceFile.ts"
 import { Secret } from "../src/Secret.ts"
+import * as Shell from "../src/Shell.ts"
 import * as Target from "../src/Target.ts"
 import { packageManager } from "./toolchain.ts"
 
@@ -44,6 +52,14 @@ describe("Alchemy-style BUILD.ts constructors", () => {
     })
     expect(isPackageDefaults(proxy)).toBe(false)
     expect(isPackageDefaults({ [PackageDefaultsTypeId]: PackageDefaultsTypeId })).toBe(false)
+    expect(isPackageDefaults({
+      [PackageDefaultsTypeId]: PackageDefaultsTypeId,
+      directories: { _tag: "Glob", pattern: "packages/*", exclude: [42] },
+      marker: "package.json",
+      unless: "BUILD.ts",
+      macro: () => ({}),
+      attrs: {}
+    })).toBe(false)
     expect(invoked).toBe(false)
 
     const declaration = PackageDefaults({
@@ -52,6 +68,65 @@ describe("Alchemy-style BUILD.ts constructors", () => {
     })
     expect(() => expand(declaration, "packages/a")).toThrow(/plain record/)
     expect(invoked).toBe(false)
+  })
+
+  it("honours explicit defaults and a predeclared glob", () => {
+    const directories = Input.glob("packages/*", { exclude: ["packages/private"] })
+    const attrs = { publishable: true }
+    const declaration = PackageDefaults({
+      directories,
+      marker: "deno.json",
+      unless: "PACKAGE.ts",
+      macro: () => ({}),
+      attrs
+    })
+
+    expect(declaration.directories).toBe(directories)
+    expect(declaration.marker).toBe("deno.json")
+    expect(declaration.unless).toBe("PACKAGE.ts")
+    expect(declaration.attrs).toEqual(attrs)
+  })
+
+  it("matches relative directories and applies exclusions", () => {
+    const declaration = PackageDefaults({
+      directories: Input.glob("packages/*", { exclude: ["packages/private"] }),
+      macro: () => ({})
+    })
+
+    expect(matches(declaration, "", "packages/public")).toBe(true)
+    expect(matches(declaration, "", "apps/public")).toBe(false)
+    expect(matches(declaration, "", "packages/private")).toBe(false)
+  })
+
+  it("applies one macro, lets declared attrs override cwd, and sorts supported declarations", () => {
+    let received: Readonly<Record<string, unknown>> | undefined
+    const alpha = Shell.Test({ command: "alpha" })
+    const zulu = Shell.Test({ command: "zulu" })
+    const declaration = PackageDefaults({
+      directories: "packages/*",
+      attrs: { cwd: "declared/cwd", feature: true },
+      macro: (attrs) => {
+        received = attrs
+        return {
+          zulu,
+          ignored: 42,
+          manifest: PackageJson.PackageJson({ name: "fixture", version: "1.0.0" }),
+          alpha
+        }
+      }
+    })
+
+    const result = expand(declaration, "packages/fixture")
+    expect(received).toEqual({ cwd: "declared/cwd", feature: true })
+    expect(result.targets).toEqual([["alpha", alpha], ["zulu", zulu]])
+    expect(result.declarations.map(([name]) => name)).toEqual(["manifest"])
+  })
+
+  it("refuses a macro result containing no supported declaration", () => {
+    const declaration = PackageDefaults({ directories: "packages/*", macro: () => ({ ignored: 42 }) })
+
+    expect(() => expand(declaration, "packages/fixture"))
+      .toThrow("default target synthesized no targets for //packages/fixture")
   })
 
   it("applies the GitHub CI constructor defaults", () => {

@@ -47,6 +47,13 @@ describe("RemoteCache.make", () => {
       .toThrow(/bounded/)
   })
 
+  it("refuses endpoints that become empty or exceed the byte ceiling after trimming", () => {
+    expect(() => RemoteCache.normalizeEndpoint("   ")).toThrow(/bounded absolute HTTPS URL/)
+    expect(() =>
+      RemoteCache.normalizeEndpoint(`https://cache.example.test/${"é".repeat(RemoteCache.maximumEndpointBytes / 2)}`)
+    ).toThrow(/bounded absolute HTTPS URL/)
+  })
+
   it("requires a valid non-reserved token variable name", () => {
     expect(() => Secret("not valid")).toThrow(/environment variable name/)
     expect(() => RemoteCache.make({ endpoint: "https://cache.example.test", token: Secret("SMITHERS_CACHE_URL") }))
@@ -57,6 +64,13 @@ describe("RemoteCache.make", () => {
         token: Secret(`A${"B".repeat(RemoteCache.maximumTokenEnvironmentLength)}`)
       })
     ).toThrow(/bounded/)
+  })
+
+  it("validates the token environment normalizer at its public boundary", () => {
+    expect(() => RemoteCache.normalizeTokenEnv(42 as never)).toThrow(TypeError)
+    expect(() => RemoteCache.normalizeTokenEnv("bad-name")).toThrow(/environment variable name/)
+    expect(() => RemoteCache.normalizeTokenEnv("TOKEN\n")).toThrow(/bounded well-formed text/)
+    expect(RemoteCache.normalizeTokenEnv("  PROJECT_CACHE_TOKEN  ")).toBe("PROJECT_CACHE_TOKEN")
   })
 
   it("rejects malformed option bags and hostile declarations without invoking accessors", () => {
@@ -71,6 +85,9 @@ describe("RemoteCache.make", () => {
     expect(() => RemoteCache.make(options as never)).toThrow(/data property/)
     expect(() => RemoteCache.make({ endpoint: "https://cache.example.test", typo: true } as never))
       .toThrow(/unknown option/)
+    expect(() => RemoteCache.make(new Date() as never)).toThrow(/plain object/)
+    expect(() => RemoteCache.make(new Proxy({ endpoint: "https://cache.example.test" }, {}) as never))
+      .toThrow(/plain object/)
 
     const declaration = Object.defineProperty({}, RemoteCache.TypeId, {
       get: () => {

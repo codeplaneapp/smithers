@@ -81,10 +81,20 @@ describe("failureMessage", () => {
   })
 
   it("bounds and well-forms diagnostic text", () => {
+    expect(failureMessage("")).toBe("unknown failure")
     expect(failureMessage("bad\ud800text")).toBe("bad\ufffdtext")
     expect(failureMessage("x".repeat(maximumFailureMessageCodeUnits + 1))).toHaveLength(
       maximumFailureMessageCodeUnits
     )
+  })
+
+  it.each([
+    [42, "42"],
+    [42n, "42"],
+    [false, "false"],
+    [Symbol.for("failure"), "Symbol(failure)"]
+  ])("renders the primitive failure %s without user conversion", (cause, expected) => {
+    expect(failureMessage(cause)).toBe(expected)
   })
 })
 
@@ -166,6 +176,27 @@ describe("atomic generated-file writes", () => {
     await expect(write("generated/config.json", "x".repeat(maximumGeneratedFileBytes + 1)))
       .rejects.toThrow(/generated contents exceed/)
     await expect(Fs.stat(NodePath.join(root, "generated"))).rejects.toMatchObject({ code: "ENOENT" })
+  })
+
+  it("refuses an overlong output path before touching the filesystem", async () => {
+    await expect(write(`${"a".repeat(16 * 1024)}.json`, "content\n"))
+      .rejects.toThrow(/path exceeds 16384 UTF-8 bytes/)
+    expect(await Fs.readdir(root)).toEqual([])
+  })
+
+  it("refuses an output path deeper than the component ceiling", async () => {
+    const path = `${Array.from({ length: 257 }, () => "a").join("/")}/out.txt`
+
+    await expect(write(path, "content\n")).rejects.toThrow(/path exceeds 256 components/)
+    expect(await Fs.readdir(root)).toEqual([])
+  })
+
+  it("refuses a workspace root that is not a real directory", async () => {
+    const file = NodePath.join(root, "not-a-directory")
+    await Fs.writeFile(file, "content\n", "utf8")
+
+    await expect(Effect.runPromise(writeGeneratedFile(file, { path: "out.txt", contents: "new\n" })))
+      .rejects.toThrow(/workspace root is not a real directory/)
   })
 
   it("honors cancellation before filesystem work starts", async () => {

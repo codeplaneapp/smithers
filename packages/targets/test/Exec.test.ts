@@ -14,6 +14,7 @@ import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import * as Exec from "../src/Exec.ts"
+import * as Secret from "../src/Secret.ts"
 
 let root: string
 let outside: string
@@ -31,6 +32,16 @@ const run = (
   options: { readonly workspaceRoot: string; readonly cacheDirectory?: string | undefined },
   value: Exec.Payload
 ): Promise<Exit.Exit<Exec.Result, Exec.ExecError>> => Effect.runPromiseExit(Exec.run(options, value))
+
+const failed = async (value: Exec.Payload, options: Parameters<typeof Exec.run>[0] = { workspaceRoot: root }) => {
+  const exit = await Effect.runPromiseExit(Exec.run(options, value))
+  if (Exit.isSuccess(exit)) throw new Error("expected an exec failure")
+  const rendered = JSON.stringify(exit.cause)
+  const parsed = JSON.parse(rendered) as { readonly failures?: ReadonlyArray<{ readonly error: Exec.ExecError }> }
+  const error = parsed.failures?.[0]?.error
+  if (error === undefined) throw new Error(`expected an ExecError: ${rendered}`)
+  return error
+}
 
 beforeEach(async () => {
   root = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-exec-")))
@@ -145,5 +156,112 @@ describe("run", () => {
 
     expect(Exit.isFailure(await run({ workspaceRoot: root }, value))).toBe(true)
     expect(calls).toBe(0)
+  })
+
+  it("rejects hostile payload records with a typed diagnostic", async () => {
+    const inherited = Object.assign(Object.create({ inherited: true }) as object, payload(["node", "-e", "0"]))
+    expect((await failed(inherited as Exec.Payload)).stderr).toContain("plain object")
+
+    const unknown = { ...payload(["node", "-e", "0"]), typo: true }
+    expect((await failed(unknown as Exec.Payload)).stderr).toContain("unknown property")
+
+    const symbol = payload(["node", "-e", "0"]) as Exec.Payload & Record<PropertyKey, unknown>
+    symbol[Symbol("extra")] = true
+    expect((await failed(symbol)).stderr).toContain("unknown property")
+
+    const nonEnumerable = payload(["node", "-e", "0"])
+    Object.defineProperty(nonEnumerable, "cwd", { value: ".", enumerable: false })
+    expect((await failed(nonEnumerable)).stderr).toContain("enumerable data property")
+  })
+
+  it("rejects arrays whose shape could hide or replace an argument", async () => {
+    const wrongPrototype = payload(["node", "-e", "0"])
+    Object.setPrototypeOf(wrongPrototype.argv, null)
+    expect((await failed(wrongPrototype)).stderr).toContain("exec argv must be an array")
+
+    const decorated = payload(["node", "-e", "0"])
+    Object.defineProperty(decorated.argv, "extra", { value: true })
+    expect((await failed(decorated)).stderr).toContain("dense array without extra properties")
+
+    const missing = payload(["node", "-e", "0"])
+    delete (missing.argv as unknown as Array<string>)[1]
+    Object.defineProperty(missing.argv, "extra", { value: "balanced-name-count" })
+    expect((await failed(missing)).stderr).toContain("dense array without extra properties")
+  })
+
+  it("rejects environment and executable declarations that are not portable", async () => {
+    const symbolEnvironment = payload(["node", "-e", "0"])
+    const env = symbolEnvironment.env as Record<PropertyKey, string>
+    env[Symbol("hidden")] = "value"
+    expect((await failed(symbolEnvironment)).stderr).toContain("symbol property")
+
+    expect((await failed(payload(["", "-e", "0"]))).stderr).toContain("must name an executable")
+    const wideArgument = "é".repeat(600_000)
+    expect((await failed(payload(["node", wideArgument, wideArgument]))).stderr).toContain("exec argv exceeds")
+    expect(
+      (await failed({
+        ...payload(["node", "-e", "0"]),
+        env: { Name: "first", NAME: "second" }
+      })).stderr
+    ).toContain("repeats a case-insensitive name")
+    expect(
+      (await failed({
+        ...payload(["node", "-e", "0"]),
+        env: { LARGE: "x".repeat(2 * 1024 * 1024 + 1) }
+      })).stderr
+    ).toContain("environment exceeds")
+    expect(
+      (await failed(payload(["node", "-e", "0"]), {
+        workspaceRoot: root,
+        sensitiveEnv: ["not-portable"]
+      })).stderr
+    ).toContain("sensitive environment name is not portable")
+  })
+
+  it("rejects duplicate secret bindings and conflicts with declared environment", async () => {
+    const credential = Secret.HttpSecret(Secret.Secret("EXEC_TEST_TOKEN"), ["https://example.test"])
+    expect(
+      (await failed({
+        ...payload(["node", "-e", "0"]),
+        secrets: [credential, credential]
+      })).stderr
+    ).toContain("declares the secret \"EXEC_TEST_TOKEN\" twice")
+    expect(
+      (await failed({
+        ...payload(["node", "-e", "0"]),
+        env: { EXEC_TEST_TOKEN: "not-secret" },
+        secrets: [credential]
+      })).stderr
+    ).toContain("also declares it as a secret")
+  })
+
+  it("resolves runtime and script placeholders immediately before the real spawn", async () => {
+    const exit = await run(
+      { workspaceRoot: root },
+      {
+        ...payload([
+          Exec.runtimeBinToken,
+          "-e",
+          "process.stdout.write(process.argv[1])",
+          `${Exec.scriptTokenPrefix}//scripts/generate.mjs}`
+        ]),
+        after: { completed: true }
+      }
+    )
+    if (!Exit.isSuccess(exit)) throw new Error(`expected success: ${JSON.stringify(exit.cause)}`)
+    expect(exit.value.stdout).toBe("scripts/generate.mjs")
+  })
+
+  it("streams the exact stdout and stderr bytes to declared observers", async () => {
+    const stdout: Array<number> = []
+    const stderr: Array<number> = []
+    const exit = await Effect.runPromiseExit(Exec.run({
+      workspaceRoot: root,
+      onStdout: (chunk) => stdout.push(...chunk),
+      onStderr: (chunk) => stderr.push(...chunk)
+    }, payload([process.execPath, "-e", "process.stdout.write('out'); process.stderr.write('err')"])))
+    if (!Exit.isSuccess(exit)) throw new Error(`expected success: ${JSON.stringify(exit.cause)}`)
+    expect(Buffer.from(stdout).toString("utf8")).toBe("out")
+    expect(Buffer.from(stderr).toString("utf8")).toBe("err")
   })
 })

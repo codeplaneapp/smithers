@@ -9,8 +9,8 @@
 import { describe, expect, it } from "vitest"
 import { Changesets } from "../src/Changesets.ts"
 import { Clean } from "../src/Clean.ts"
-import { Dev } from "../src/Dev.ts"
 import { DepsLint } from "../src/DepsLint.ts"
+import { Dev } from "../src/Dev.ts"
 import * as Input from "../src/Input.ts"
 import { JsrPublish } from "../src/JsrPublish.ts"
 import { Lockfile } from "../src/Lockfile.ts"
@@ -190,6 +190,11 @@ describe("Vitest rules", () => {
       .toEqual(["pnpm", "exec", "vitest", "watch", "--config", "vitest.config.ts", "--environment", "node"])
   })
 
+  it("VitestWatch omits the config flag when discovery owns configuration", () => {
+    expect(plannedArgv(VitestWatch({ ...base, config: null })))
+      .toEqual(["pnpm", "exec", "vitest", "watch", "--environment", "node"])
+  })
+
   it("VitestCoverage declares the report directory it captures", () => {
     const { environment: _environment, ...coverageBase } = base
     const target = VitestCoverage({
@@ -233,8 +238,37 @@ describe("TsBuild", () => {
     expect(Target.metadata(target).outputs?.paths).toEqual(["dist/esm"])
   })
 
+  it.each(
+    [
+      ["dual", "esm,cjs"],
+      ["cjs", "cjs"]
+    ] as const
+  )("renders a %s tsup distribution and every external", (format, renderedFormat) => {
+    const target = TsBuild({
+      ...base,
+      tool: { name: "tsup", external: ["effect", "vitest"] },
+      format
+    })
+    expect(plannedArgv(target)).toEqual([
+      "pnpm",
+      "exec",
+      "tsup",
+      "src/index.ts",
+      "--format",
+      renderedFormat,
+      "--out-dir",
+      "dist",
+      "--external",
+      "effect",
+      "--external",
+      "vitest"
+    ])
+    expect(Target.metadata(target).outputs?.paths).toEqual(["dist"])
+  })
+
   it("refuses a tsc declaration that asks for a dual distribution", () => {
-    expect(() => TsBuild({ ...base, tool: { name: "tsc" }, format: "dual" })).toThrow()
+    expect(() => TsBuild({ ...base, tool: { name: "tsc" }, format: "dual" }))
+      .toThrow(/tsc tool cannot produce the dual format/)
   })
 })
 
@@ -263,6 +297,29 @@ describe("TypedocDocs", () => {
       "--plugin",
       "typedoc-plugin-markdown",
       "packages/example/src/index.ts"
+    ])
+  })
+
+  it("omits --options when TypeDoc should discover its own configuration", () => {
+    const argv = plannedArgv(TypedocDocs({
+      packageManager,
+      sources: [],
+      deps: [],
+      tsconfig: Input.file("//tsconfig.json"),
+      config: null,
+      entryPoints: [Input.file("//src/index.ts")],
+      plugin: [],
+      outDir: "docs/api"
+    }))
+    expect(argv).toEqual([
+      "pnpm",
+      "exec",
+      "typedoc",
+      "--out",
+      "docs/api",
+      "--tsconfig",
+      "tsconfig.json",
+      "src/index.ts"
     ])
   })
 })
@@ -362,5 +419,35 @@ describe("DepsLint", () => {
       ignoreBinaries: ["b"]
     })
     expect(plannedArgv(target)).toEqual(["pnpm", "exec", "depcheck", "--ignores=a,b"])
+  })
+
+  it("runs depcheck without an empty ignores option", () => {
+    const target = DepsLint({
+      ...base,
+      tool: "depcheck",
+      ignoreDependencies: [],
+      ignoreBinaries: []
+    })
+    expect(plannedArgv(target)).toEqual(["pnpm", "exec", "depcheck"])
+  })
+
+  it("writes exactly the declared knip ignore category", () => {
+    const target = DepsLint({
+      ...base,
+      tool: "knip",
+      ignoreDependencies: ["optional-package"],
+      ignoreBinaries: []
+    })
+    const argv = plannedCalls(target)[0]?.payload["argv"] as ReadonlyArray<string>
+    expect(JSON.parse(argv.at(-1) ?? "null")).toEqual({ ignoreDependencies: ["optional-package"] })
+
+    const binaries = DepsLint({
+      ...base,
+      tool: "knip",
+      ignoreDependencies: [],
+      ignoreBinaries: ["optional-binary"]
+    })
+    const binaryArgv = plannedCalls(binaries)[0]?.payload["argv"] as ReadonlyArray<string>
+    expect(JSON.parse(binaryArgv.at(-1) ?? "null")).toEqual({ ignoreBinaries: ["optional-binary"] })
   })
 })

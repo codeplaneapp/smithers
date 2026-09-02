@@ -87,6 +87,7 @@ describe("scaffold", () => {
     expect(boilerplate("123", payload)[2]?.[1]).toContain("export const package123")
     expect(boilerplate("default", payload)[2]?.[1]).toContain("export const packageDefault")
     expect(boilerplate("eval", payload)[2]?.[1]).toContain("export const packageEval")
+    expect(boilerplate("---", payload)[2]?.[1]).toContain("export const packageName")
   })
 
   it("names the flag when no package name was supplied", async () => {

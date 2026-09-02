@@ -7,6 +7,7 @@ import * as Mise from "../src/Mise.ts"
 import * as Secret from "../src/Secret.ts"
 import * as Target from "../src/Target.ts"
 import * as WorkspaceDeclaration from "../src/WorkspaceDeclaration.ts"
+import { plannedCalls } from "./plan.ts"
 
 describe("Mise and Foundry toolchain declarations", () => {
   const config = Input.file("//mise.toml")
@@ -41,6 +42,24 @@ describe("Mise and Foundry toolchain declarations", () => {
   it("rejects unknown declaration fields", () => {
     expect(() => Mise.Mise({ config, extra: true } as never)).toThrow(/unknown option/)
     expect(() => Foundry.Toolchain({ config, version: "1" } as never)).toThrow(/unknown option/)
+  })
+
+  it.each(
+    [
+      [() => Mise.Mise(null as never), "Mise options must be an object"],
+      [() => Mise.Mise({ config: "mise.toml" } as never), "Mise config must be an S.file declaration"],
+      [() => Foundry.Toolchain(null as never), "Foundry.Toolchain options must be an object"],
+      [
+        () => Foundry.Toolchain({ config: "foundry.toml" } as never),
+        "Foundry.Toolchain config must be an S.file declaration"
+      ],
+      [
+        () => Foundry.Toolchain({ config, versions: { _tag: "Other" } } as never),
+        "Foundry.Toolchain versions must be an S.Mise declaration"
+      ]
+    ] as const
+  )("rejects malformed toolchain input with TypeError: %s", (construct, message) => {
+    expect(construct).toThrowError(new TypeError(message))
   })
 })
 
@@ -99,9 +118,22 @@ describe("Anvil and Docker targets", () => {
     ])
     const second = Docker.Build({ dockerfile: Input.file("//other/Dockerfile"), context: "//" })
     expect(Target.metadata(second).outputs?.paths).not.toEqual(Target.metadata(build).outputs?.paths)
-    expect(Docker.imageOutputPath("a-b", "Docker.Bake x a/b"))
-      .not.toBe(Docker.imageOutputPath("a-b", "Docker.Bake x a?b"))
+    // Two bake targets whose slug is lossy-equal keep two output paths.
+    expect(Docker.imageOutputPath("a-b", ["Docker.Bake", "x", "a/b"]))
+      .not.toBe(Docker.imageOutputPath("a-b", ["Docker.Bake", "x", "a?b"]))
+    // The label is parts, not a joined string, so no path can forge the
+    // boundary between two of them.
+    expect(Docker.imageOutputPath("api", ["Docker.Build", "a", "b/c"]))
+      .not.toBe(Docker.imageOutputPath("api", ["Docker.Build", "a/b", "c"]))
     expect(Target.metadata(push)).toMatchObject({ target: "Docker.Push", cacheable: false })
+    expect(plannedCalls(bake)[0]).toEqual({
+      action: "smithers-build/not-implemented",
+      payload: { target: "Docker.Bake" }
+    })
+    expect(plannedCalls(push)[0]).toEqual({
+      action: "smithers-build/not-implemented",
+      payload: { target: "Docker.Push" }
+    })
   })
 
   it("rejects unknown and malformed service attrs", () => {

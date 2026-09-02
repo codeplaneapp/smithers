@@ -10,6 +10,7 @@ import * as BundlerTarget from "../src/BundlerTarget.ts"
 import { Filegroup } from "../src/Filegroup.ts"
 import * as Input from "../src/Input.ts"
 import * as Target from "../src/Target.ts"
+import { plannedCalls } from "./plan.ts"
 
 const config = Input.file("//rsbuild.config.ts")
 const srcs = Filegroup({ srcs: [Input.glob("src/**")] })
@@ -90,6 +91,46 @@ describe("Bundler.Rspack.build", () => {
     const target = build({ env: { BUNDLE_ANALYZE: "true" } })
     const attrs = Target.metadata(target).attrs as { readonly env?: Record<string, string> }
     expect(attrs.env).toEqual({ BUNDLE_ANALYZE: "true" })
+  })
+
+  it.each(
+    [
+      [undefined, {}],
+      [{ BUNDLE_ANALYZE: "true" }, { BUNDLE_ANALYZE: "true" }]
+    ] as const
+  )("plans the sealed build payload with env %j", (env, expectedEnv) => {
+    const calls = plannedCalls(build({ env }))
+
+    expect(calls[0]).toEqual({
+      action: "smithers-build/bundler-build",
+      payload: {
+        configPath: "rsbuild.config.ts",
+        environment: "client",
+        mode: "production",
+        env: expectedEnv,
+        outDirs: ["dist"]
+      }
+    })
+    expect(calls[1]).toEqual({
+      action: "smithers-build/capture-outputs",
+      payload: { cwd: ".", paths: ["dist"] }
+    })
+  })
+})
+
+describe("Bundler.Rspack declaration boundaries", () => {
+  it.each([
+    [() => BundlerTarget.Rspack(null as never), "Bundler.Rspack requires a declared config file"],
+    [() => BundlerTarget.Rspack({} as never), "Bundler.Rspack requires a declared config file"],
+    [
+      () => BundlerTarget.Rspack({ config, typo: true } as never),
+      "Bundler.Rspack received unknown option \"typo\""
+    ],
+    [() => rspack.resolve(null as never), "Bundler.Rspack resolve options must be an object"],
+    [() => rspack.build(null as never), "Bundler.Rspack build options must be an object"]
+  ])("rejects malformed factory input before rebuilding attrs", (operation, message) => {
+    expect(operation).toThrow(TypeError)
+    expect(operation).toThrow(message)
   })
 })
 

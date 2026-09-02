@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import * as CronTarget from "../src/CronTarget.ts"
 import * as S from "../src/Smithers.ts"
 import * as Target from "../src/Target.ts"
 
@@ -75,6 +76,14 @@ describe("Node/npm PACKAGE.ts constructors", () => {
     expect(() => S.Cron({ schedule: 1, run: [] } as never)).toThrow(/Cron declaration/)
     expect(() => S.Copy({ from: file, to: 1 } as never)).toThrow(/Copy declaration/)
     expect(() => S.Files.digest("nope" as never)).toThrow(/Files\.digest requires a target/)
+  })
+
+  it("reads Cron attrs only from Cron targets", () => {
+    const cron = S.Cron({ schedule: "0 6 * * 1", run: [check] })
+    expect(CronTarget.attrsOf(cron)).toEqual({ schedule: "0 6 * * 1", run: [check] })
+    expect(() => CronTarget.attrsOf(check)).toThrowError(
+      new TypeError("expected a Cron target, received Shell.Test")
+    )
   })
 
   it("lowers compact Github.Ci to the existing CiGen object", () => {

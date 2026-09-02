@@ -3,12 +3,11 @@
  * input is read, and what stays mutable afterwards.
  */
 import { describe, expect, it } from "vitest"
-import * as Input from "../src/Input.ts"
 import { Smithers } from "../src/index.ts"
+import * as Input from "../src/Input.ts"
 import * as Target from "../src/Target.ts"
 
-const docsParity = () =>
-  Smithers.DocsParity({ readme: Smithers.file("README.md"), deps: [], cwd: "packages/targets" })
+const docsParity = () => Smithers.DocsParity({ readme: Smithers.file("README.md"), deps: [], cwd: "packages/targets" })
 
 describe("author input is read once, as data", () => {
   it("never invokes an accessor on the author's attrs", () => {

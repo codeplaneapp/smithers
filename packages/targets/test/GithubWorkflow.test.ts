@@ -86,6 +86,29 @@ describe("parseWorkflow", () => {
     ).toThrow(/exactly one of `uses` or `run`/)
   })
 
+  it("refuses sequence items and invalid identifiers where mappings are required", () => {
+    expect(() => parseWorkflow("jobs:\n  - test:\n      runs-on: ubuntu-latest\n"))
+      .toThrow(/expected a job mapping entry, not a sequence item/)
+    expect(() =>
+      parseWorkflow(
+        "jobs:\n  bad.id:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
+      )
+    ).toThrow(/not a valid GitHub Actions job id/)
+    expect(() =>
+      parseWorkflow(
+        "jobs:\n  test:\n    - runs-on: ubuntu-latest\n"
+      )
+    ).toThrow(/expected a mapping entry in job "test", not a sequence item/)
+  })
+
+  it("skips deeper unknown step metadata without losing the executable field", () => {
+    const workflow = parseWorkflow(
+      "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ready\n          nested: ignored\n"
+    )
+
+    expect(workflow.jobs[0]?.steps[0]?.run).toBe("echo ready")
+  })
+
   it("accepts an unconditional reusable-workflow job as executable", () => {
     const workflow = parseWorkflow("jobs:\n  delegated:\n    uses: owner/repo/.github/workflows/ci.yml@main\n")
     expect(workflow.jobs[0]).toMatchObject({
@@ -436,6 +459,63 @@ describe("parseWorkflow", () => {
   it("refuses a line that is not a mapping entry", () => {
     expect(() => parseWorkflow("jobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - bare\n"))
       .toThrow(WorkflowParseError)
+  })
+
+  it("refuses quoted scalars and keys it cannot decode exactly", () => {
+    const job = "on: push\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
+    expect(() => parseStrictWorkflow(`name: \"unterminated\n${job}`)).toThrow(/unterminated quoted scalar/)
+    expect(() => parseStrictWorkflow(`name: 'can'not'\n${job}`)).toThrow(/unsupported single-quoted scalar/)
+    expect(() =>
+      parseStrictWorkflow(
+        "on: push\njobs:\n  \"test:\n    runs-on: ubuntu-latest\n"
+      )
+    ).toThrow(/unterminated quoted key/)
+
+    const escaped = parseStrictWorkflow(
+      "on: push\njobs:\n  \"te\\u0073t\":\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
+    )
+    expect(escaped.jobs.map((entry) => entry.id)).toEqual(["test"])
+    expect(() =>
+      parseStrictWorkflow(
+        "on: push\njobs:\n  'te''st':\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
+      )
+    ).toThrow(/"te'st" is not a valid GitHub Actions job id/)
+  })
+
+  it("refuses ambiguous or empty workflow trigger forms", () => {
+    const jobs = "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
+    const cases: ReadonlyArray<readonly [string, RegExp]> = [
+      [` on: push\n${jobs}`, /unexpected indentation at the top level/],
+      [`- on: push\n${jobs}`, /mapping entry at the top level, not a sequence item/],
+      [`on: push-event\n${jobs}`, /not a supported workflow event name shape/],
+      [`on: push\n  pull_request:\n${jobs}`, /cannot have both an inline value and a block/],
+      [`on:\n  push:\n  - pull_request\n${jobs}`, /mixes a mapping and a sequence/],
+      [`on:\n  push:\n  push:\n${jobs}`, /duplicate workflow event "push"/],
+      [`on: [push\n${jobs}`, /unterminated inline workflow event sequence/],
+      [`on: [push, ]\n${jobs}`, /declares no trigger/],
+      [`on: [push, push]\n${jobs}`, /contains a duplicate event/],
+      [`on: {push: {}}\n${jobs}`, /inline workflow event mappings are not supported/]
+    ]
+    for (const [source, message] of cases) expect(() => parseStrictWorkflow(source)).toThrow(message)
+  })
+
+  it("carries an empty block condition and a step advisory value without losing later fields", () => {
+    const workflow = parseWorkflow(
+      [
+        "jobs:",
+        "  test:",
+        "    if:",
+        "      expression: ignored",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: pnpm test",
+        "        continue-on-error: true",
+        ""
+      ].join("\n")
+    )
+    expect(workflow.jobs[0]).toMatchObject({ condition: "", runsOn: "ubuntu-latest" })
+    expect(workflow.jobs[0]?.steps[0]).toMatchObject({ run: "pnpm test", continueOnError: "true" })
+    expect(missingRequiredJobs(workflow, ["test"])).toEqual(["test (conditional)"])
   })
 
   it("parses the Smithers repository's own pipeline", async () => {

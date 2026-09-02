@@ -76,6 +76,7 @@ describe("Rust.Toolchain", () => {
     }
     expect(() => RustToolchain.Toolchain({ channel: "1.9\n1" })).toThrow()
     expect(RustToolchain.Toolchain({ channel: "1.91", cargo: "cargo-1.91" }).cargo).toBe("cargo-1.91")
+    expect(RustToolchain.Toolchain({ channel: "1.91", rustup: "rustup-1.91" }).rustup).toBe("rustup-1.91")
   })
 
   it("refuses a pin that is not a declared file input", () => {
@@ -108,5 +109,39 @@ describe("Rust.Toolchain", () => {
     const stable = pinnedKeyMaterial("[toolchain]\nchannel = \"1.91\"\n")
     expect(stable).toEqual(pinnedKeyMaterial("[toolchain]\nchannel = \"1.91\"\n"))
     expect(stable).not.toEqual(pinnedKeyMaterial("[toolchain]\nchannel = \"1.92\"\n"))
+  })
+
+  it("projects only compiler identity fields, with absent pins represented explicitly", () => {
+    const channel = RustToolchain.Toolchain({
+      workspace: Input.file("//Cargo.toml"),
+      channel: "1.91",
+      cargo: "cargo-1.91",
+      rustup: "rustup-1.91"
+    })
+    expect(RustToolchain.toolchainIdentity(channel)).toEqual({
+      tag: "RustToolchain",
+      channel: "1.91",
+      toolchain: null,
+      lockfile: null,
+      workspace: "//Cargo.toml",
+      versions: null,
+      cargo: "cargo-1.91",
+      rustup: "rustup-1.91"
+    })
+
+    const files = RustToolchain.Toolchain({
+      toolchain: Input.file("//rust-toolchain.toml"),
+      lockfile: Input.file("//Cargo.lock")
+    })
+    expect(RustToolchain.toolchainIdentity(files)).toEqual({
+      tag: "RustToolchain",
+      channel: null,
+      toolchain: "//rust-toolchain.toml",
+      lockfile: "//Cargo.lock",
+      workspace: null,
+      versions: null,
+      cargo: "cargo",
+      rustup: "rustup"
+    })
   })
 })

@@ -83,6 +83,8 @@ export const docs = Smithers.DocsParity({
 export const docsPages = Smithers.Generate({
   script: Smithers.file("//packages/targets/scripts/docs.mjs"),
   data: [
+    Smithers.file("//packages/targets/Package.ts"),
+    Smithers.file("//packages/targets/package.json"),
     Smithers.glob("//packages/targets/src/**/*.ts"),
     Smithers.glob("//packages/targets/docs/*.md")
   ],

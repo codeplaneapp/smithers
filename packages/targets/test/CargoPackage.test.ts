@@ -72,6 +72,16 @@ describe("Cargo.Fetch", () => {
     expect(Cargo.packageArgs("Cargo.Fetch", attrsOf(bare), { _tag: "Workspace" })).toEqual(["fetch"])
   })
 
+  it.each(
+    [
+      [null, undefined],
+      [{ workspace: true }, { _tag: "Workspace" }],
+      [{ package: "api" }, { _tag: "Package", name: "api" }]
+    ] as const
+  )("derives the selection represented by %o", (attrs, expected) => {
+    expect(Cargo.selectionOf(attrs)).toEqual(expected)
+  })
+
   it("refuses a fetch that names both a manifest and a crate set", () => {
     // Both are selectors and they say different things about what is locked;
     // silently preferring one would lock a domain the declaration did not name.

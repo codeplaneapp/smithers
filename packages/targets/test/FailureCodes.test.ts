@@ -138,7 +138,9 @@ describe("CiToolchain executable validation", () => {
   )
 
   it("still accepts an ordinary absolute path", () => {
-    expect(CiToolchain.Browser({ executable: "/usr/bin/google-chrome", reason: "the runner image ships it" }).executable)
+    expect(
+      CiToolchain.Browser({ executable: "/usr/bin/google-chrome", reason: "the runner image ships it" }).executable
+    )
       .toBe("/usr/bin/google-chrome")
   })
 

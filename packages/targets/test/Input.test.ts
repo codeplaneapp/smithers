@@ -69,6 +69,13 @@ describe("Input.expandGlob", () => {
     }
   )
 
+  it("fails closed when hostile scan limits cannot be inspected", async () => {
+    const revoked = Proxy.revocable({}, {})
+    revoked.revoke()
+    await expect(Input.expandGlob(root, "", "**/*.ts", { limits: revoked.proxy }))
+      .rejects.toThrow(/scan limits could not be inspected/)
+  })
+
   it("observes cancellation before traversing the workspace", async () => {
     const controller = new AbortController()
     controller.abort(new Error("cancelled by test"))
@@ -504,10 +511,24 @@ describe("Input.digestFiles", () => {
       await expect(Input.digestFiles(root, [], { concurrency })).rejects.toThrow(/digest concurrency/)
     }
   )
+
+  it.each([-1, 1.5, Input.maximumDigestFiles + 1])(
+    "refuses the invalid digest file limit %s",
+    async (maximumFiles) => {
+      await expect(Input.digestFiles(root, [], { maximumFiles })).rejects.toThrow(/digest file limit/)
+    }
+  )
+})
+
+describe("Input.rootRelative", () => {
+  it("renders workspace-root paths from both the root and a package directory", () => {
+    expect(Input.rootRelative("", "//src/index.ts")).toBe("src/index.ts")
+    expect(Input.rootRelative("packages/app", "//scripts/check.mjs")).toBe("../../scripts/check.mjs")
+  })
 })
 
 describe("Input.gitDiff", () => {
-  it.each(["", "--output=outside", "\uD800", "HEAD\0other"])(
+  it.each(["", "--output=outside", "\uD800", "\uD800x", "\uDC00", "HEAD\0other"])(
     "refuses the unsafe base %j",
     (base) => {
       expect(() => Input.gitDiff(base)).toThrow(/not a usable revision/)
@@ -516,6 +537,23 @@ describe("Input.gitDiff", () => {
 
   it("accepts an ordinary revision expression", () => {
     expect(Input.gitDiff("origin/main...HEAD")).toEqual({ _tag: "GitDiff", base: "origin/main...HEAD" })
+    expect(Input.gitDiff("release-😀")).toEqual({ _tag: "GitDiff", base: "release-😀" })
+    expect(Input.gitDiff({
+      base: "main",
+      paths: ["src/a.ts"],
+      added: ["src/new.ts"],
+      addedLines: "changed"
+    })).toEqual({
+      _tag: "GitDiff",
+      base: "main",
+      paths: ["src/a.ts"],
+      added: ["src/new.ts"],
+      addedLines: "changed"
+    })
+  })
+
+  it("rejects a non-string member in the PACKAGE.ts glob shorthand", () => {
+    expect(() => Input.glob(["src/**/*.ts", 7 as never])).toThrow(/glob patterns must be strings/)
   })
 })
 

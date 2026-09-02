@@ -111,6 +111,8 @@ describe("PackageJson typing and defaults", () => {
 
   it("validates the npm name at declaration time", () => {
     expect(assertPackageName("@smthrs/widget")).toBe("@smthrs/widget")
+    expect(() => assertPackageName(7 as never)).toThrow(/not a string/)
+    expect(() => assertPackageName("a".repeat(215))).toThrow(/longer than 214/)
     expect(() => PackageJson({ name: "Widget", version: "0.1.0" })).toThrow(/lowercase/)
     expect(() => PackageJson({ name: "wid get", version: "0.1.0" })).toThrow(/not a publishable npm name/)
     expect(() => PackageJson({ name: "", version: "0.1.0" })).toThrow(/empty/)
@@ -196,6 +198,22 @@ describe("PackageJson typing and defaults", () => {
     expect(declaration.fields["custom"]).toEqual({ nested: { value: 1 } })
     expect(Object.isFrozen(declaration)).toBe(true)
     expect(Object.isFrozen(declaration.fields)).toBe(true)
+    expect(PackageJson({ name: "widget", version: "0.1.0", description: "A small widget." }).fields)
+      .toMatchObject({ description: "A small widget." })
+  })
+
+  it("validates the model and ignores explicitly undefined optional values", () => {
+    expect(() => PackageJson({ name: "widget", version: "0.1.0", model: " bad " })).toThrow(/model/)
+    expect(() => PackageJson({ name: "widget", version: "0.1.0", model: "" })).toThrow(/model/)
+    const declaration = PackageJson({
+      name: "widget",
+      version: "0.1.0",
+      description: undefined,
+      keywords: undefined
+    })
+    expect(declaration.generated).toEqual([])
+    expect(declaration.fields).not.toHaveProperty("description")
+    expect(declaration.fields).not.toHaveProperty("keywords")
   })
 })
 
@@ -302,6 +320,19 @@ describe("publish derivation", () => {
     expect(fields["exports"]).toEqual({ "./package.json": "./package.json", ".": "./src/index.ts" })
   })
 
+  it("defaults explicitly undefined publish options", () => {
+    const lib = build("packages/widget")
+    const fields = manifest(
+      PackageJson({
+        name: "widget",
+        version: "0.1.0",
+        publish: { entry: lib, access: undefined, provenance: undefined }
+      }),
+      [[lib, "//packages/widget:lib"]]
+    )
+    expect(fields["publishConfig"]).toEqual({ access: "public", provenance: true })
+  })
+
   it("fails precisely when the entry declares no outDir, no format, or no entries", () => {
     const Fake = Target.make("PackageJsonTestPublishFake", {
       attrs: Schema.Struct({
@@ -377,12 +408,23 @@ describe("template merge", () => {
   })
 
   it("validates template option shapes and nested string records", () => {
+    expect(() => PackageJsonTemplate.make(null as never)).toThrowError(
+      new TypeError("PackageJsonTemplate options must be a plain object")
+    )
+    expect(() => PackageJsonTemplate.make(Object.create({ inherited: true }) as never)).toThrowError(
+      new TypeError("PackageJsonTemplate options must be a plain object")
+    )
+    expect(() => PackageJsonTemplate.make({ [Symbol("option")]: true } as never)).toThrowError(
+      new TypeError("PackageJsonTemplate options must not carry symbol-keyed properties")
+    )
     expect(() => PackageJsonTemplate.make({ type: "script" })).toThrow(/module.*commonjs/)
     expect(() => PackageJsonTemplate.make({ engines: { node: 22 } as never })).toThrow(/must be a non-empty/)
     expect(() => PackageJsonTemplate.make({ fields: { scripts: {} } })).toThrow(
       /modeled field "scripts" twice/
     )
     expect(() => PackageJsonTemplate.make({ typo: true } as never)).toThrow(/unknown option "typo"/)
+    expect(PackageJsonTemplate.make({ author: undefined }).fields).not.toHaveProperty("author")
+    expect(PackageJsonTemplate.make({ fields: { custom: true } }).fields).toMatchObject({ custom: true })
   })
 })
 
@@ -392,12 +434,14 @@ describe("render", () => {
       scripts: { lint: "b", build: "a" },
       version: "0.1.0",
       zzz: 1,
+      aaa: 2,
       name: "widget",
       license: "MIT"
     })
-    expect(Object.keys(JSON.parse(text) as object)).toEqual(["name", "version", "license", "scripts", "zzz"])
+    expect(Object.keys(JSON.parse(text) as object)).toEqual(["name", "version", "license", "scripts", "aaa", "zzz"])
     expect(Object.keys((JSON.parse(text) as { scripts: object }).scripts)).toEqual(["build", "lint"])
     expect(text.endsWith("}\n")).toBe(true)
+    expect(Object.keys(JSON.parse(render({ aaa: 1, zzz: 2 })) as object)).toEqual(["aaa", "zzz"])
   })
 
   it("preserves __proto__ as data and refuses values JSON would change", () => {
@@ -405,6 +449,14 @@ describe("render", () => {
     expect(JSON.parse(text)).toEqual(JSON.parse("{\"name\":\"widget\",\"__proto__\":{\"safe\":true}}"))
     expect(() => render({ value: undefined })).toThrow(/undefined/)
     expect(() => render({ value: Number.POSITIVE_INFINITY })).toThrow(/non-finite/)
+  })
+
+  it("bounds the final encoded manifest after deterministic ordering", () => {
+    let nested: unknown = Array.from({ length: 70_000 }, () => 0)
+    for (let depth = 0; depth < 32; depth += 1) nested = [nested]
+    expect(() => render({ nested })).toThrow(
+      `manifest fields exceed the ${maximumManifestBytes}-byte rendered manifest limit`
+    )
   })
 })
 
@@ -417,6 +469,9 @@ describe("diffFields", () => {
     expect(diffFields({ name: "a" }, {})).toEqual([`name: missing, expected "a"`])
     expect(diffFields({ nullable: null }, {})).toEqual(["nullable: missing, expected null"])
     expect(diffFields({}, { nullable: null })).toEqual(["nullable: unexpected null"])
+    const [bounded] = diffFields({ custom: "a".repeat(200) }, { custom: "b".repeat(200) })
+    expect(bounded).toContain("...")
+    expect(bounded?.length).toBeLessThan(300)
   })
 })
 
@@ -524,6 +579,11 @@ describe("check and write roundtrip", () => {
     const invalid = payload({ fields: { name: "widget", custom: BigInt(1) } })
     expect((await failure(invalid)).message).toContain("declared manifest fields are invalid")
   })
+
+  it("rejects duplicate generated fields through the sync failure channel", async () => {
+    const drift = await failure(payload({ generated: ["description", "description"] }))
+    expect(drift.message).toContain("generated field list contains duplicates")
+  })
 })
 
 describe("generated fields, cache, and refresh", () => {
@@ -579,6 +639,16 @@ describe("generated fields, cache, and refresh", () => {
     expect(() => parseGenerated("x".repeat(maximumGeneratedResponseBytes + 1), ["description"])).toThrow(
       `exceeds ${maximumGeneratedResponseBytes} bytes`
     )
+    expect(() => parseGenerated("   ", ["description"])).toThrow(/response is empty/)
+    expect(() => parseGenerated("[]", ["description"])).toThrow(/not a JSON object/)
+    expect(() => parseGenerated("{\"keywords\":[\"one\",\"two\"]}", ["keywords"]))
+      .toThrow(/invalid keywords array/)
+    expect(() =>
+      parseGenerated(
+        "{\"keywords\":[\"one\",\"two\",\"three\",\"four\",\"five\",\"six\",\"seven\",\"eight\",\"nine\"]}",
+        ["keywords"]
+      )
+    ).toThrow(/invalid keywords array/)
   })
 
   it("keys generated prose by package, engine, model, prompt, and declared inputs", async () => {
@@ -591,6 +661,13 @@ describe("generated fields, cache, and refresh", () => {
       generationContext(root, { ...base, promptVersion: "2" }, { cacheDirectory: ".flows" })
     ])
     expect(new Set(contexts.map((context) => context.digest)).size).toBe(contexts.length)
+  })
+
+  it("builds a stable generation context when optional inputs are absent", async () => {
+    const context = await generationContext(root, payload(), { cacheDirectory: ".flows" })
+    expect(context.readme).toBe("")
+    expect(context.sources).toEqual([])
+    expect(context.digest).toMatch(/^[0-9a-f]{64}$/)
   })
 
   it("fails when a declared generation README is missing", async () => {
@@ -667,6 +744,25 @@ describe("generated fields, cache, and refresh", () => {
     const [entry] = await Fs.readdir(directory)
     expect(entry).toBeDefined()
     const path = NodePath.join(directory, entry!)
+
+    const original = JSON.parse(await Fs.readFile(path, "utf8")) as {
+      readonly version: number
+      readonly contextDigest: string
+      readonly fields: Record<string, unknown>
+    }
+    const different = { description: "different", keywords: ["other", "cache", "value"] }
+    const invalidEnvelopes: ReadonlyArray<unknown> = [
+      { ...original, extra: true, fields: different },
+      { ...original, version: 2, fields: different },
+      { ...original, contextDigest: "wrong-digest", fields: different },
+      { ...original, fields: [] },
+      { ...original, fields: { ...different, extra: true } },
+      { ...original, fields: { description: "", keywords: different.keywords } }
+    ]
+    for (const envelope of invalidEnvelopes) {
+      await Fs.writeFile(path, JSON.stringify(envelope), "utf8")
+      await run(withGenerated())
+    }
 
     await Fs.writeFile(path, "{ malformed", "utf8")
     await run(withGenerated())

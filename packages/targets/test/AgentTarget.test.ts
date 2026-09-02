@@ -3,6 +3,7 @@ import * as AgentTarget from "../src/AgentTarget.ts"
 import * as Filegroup from "../src/Filegroup.ts"
 import * as Input from "../src/Input.ts"
 import * as Target from "../src/Target.ts"
+import { plannedCalls } from "./plan.ts"
 
 const context: Target.ImplementationContext = {
   sourceFile: "/workspace/src/PACKAGE.ts",
@@ -41,6 +42,14 @@ describe("workspace agent declarations", () => {
     const ref = AgentTarget.Agents["luna"]
     expect(ref).toEqual({ _tag: "AgentRef", name: "luna" })
     expect(Object.isFrozen(ref)).toBe(true)
+  })
+
+  it("rejects malformed declaration tables and model names", () => {
+    expect(AgentTarget.isAgentsDeclaration(null)).toBe(false)
+    expect(AgentTarget.isAgentsDeclaration({})).toBe(false)
+    expect(() => AgentTarget.Agents(null as never)).toThrow("Agents requires a name-to-agent record")
+    expect(() => AgentTarget.ClaudeCode({ model: "" })).toThrow("Agent.ClaudeCode requires a model name")
+    expect(() => AgentTarget.Codex(null as never)).toThrow("Agent.Codex requires a model name")
   })
 })
 
@@ -122,6 +131,29 @@ describe("Agent.Diff", () => {
     expect(Target.metadata(target).target).toBe("Agent.Diff")
     expect(Target.metadata(target).kinds).toEqual(["run"])
   })
+
+  it("plans the sealed diff action with default optional surfaces", () => {
+    const target = AgentTarget.Diff({
+      prompt: Input.file("prompts/task.md"),
+      data: [],
+      changes: ["src/**"],
+      gates: [],
+      maxRounds: 2
+    })
+    const call = plannedCalls(target)[0]
+
+    expect(call?.action).toBe("smithers-build/agent-diff")
+    expect(call?.payload).toMatchObject({
+      promptPath: "prompts/task.md",
+      payloadSpec: {},
+      mcp: [],
+      diffs: [],
+      changes: ["src/**"],
+      gateIdentities: [],
+      maxRounds: 2
+    })
+    expect(call?.payload).not.toHaveProperty("agent")
+  })
 })
 
 describe("Agent.Pr", () => {
@@ -155,5 +187,26 @@ describe("Agent.Pr", () => {
     expect(payload.payloadSpec).toEqual(attrs.payload)
     expect(payload.mcp).toEqual([])
     expect(Target.metadata(AgentTarget.Pr(attrs)).attrs).toMatchObject({ payload: attrs.payload, mcp: [] })
+  })
+
+  it("plans the sealed pull-request action with the default round limit", () => {
+    const target = AgentTarget.Pr({
+      prompt: Input.file("prompts/pr.md"),
+      data: [],
+      changes: ["src/**"],
+      gates: []
+    })
+    const call = plannedCalls(target)[0]
+
+    expect(call?.action).toBe("smithers-build/agent-pr")
+    expect(call?.payload).toMatchObject({
+      promptPath: "prompts/pr.md",
+      payloadSpec: {},
+      mcp: [],
+      diffs: [],
+      changes: ["src/**"],
+      gateIdentities: [],
+      maxRounds: AgentTarget.defaultPrRounds
+    })
   })
 })

@@ -61,14 +61,37 @@ describe("check-mode rollback", () => {
     expect(stats.mode & 0o777).toBe(0o644)
   })
 
+  it("reports a removed output and restores its checked-in bytes", async () => {
+    const path = NodePath.join(root, "out.txt")
+    await Fs.writeFile(path, "checked in\n")
+    const exit = await check("require('node:fs').unlinkSync('out.txt')", ["out.txt"])
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(JSON.stringify(exit)).toContain("generator removes it")
+    expect(await Fs.readFile(path, "utf8")).toBe("checked in\n")
+  })
+
+  it("leaves an unchanged declared directory and its contents alone", async () => {
+    await Fs.mkdir(NodePath.join(root, "out"))
+    await Fs.writeFile(NodePath.join(root, "out", "kept.txt"), "kept\n")
+    const exit = await check("void 0", ["out"])
+    expect(Exit.isSuccess(exit)).toBe(true)
+    expect(await Fs.readFile(NodePath.join(root, "out", "kept.txt"), "utf8")).toBe("kept\n")
+  })
+
+  it("reports the first appended line when checked-in text is an exact prefix", async () => {
+    await Fs.writeFile(NodePath.join(root, "out.txt"), "same")
+    const exit = await check("require('node:fs').writeFileSync('out.txt', 'same\\nextra')", ["out.txt"])
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(JSON.stringify(exit)).toContain("first difference at line 2: (end of file) became \\\"extra\\\"")
+    expect(await Fs.readFile(NodePath.join(root, "out.txt"), "utf8")).toBe("same")
+  })
+
   it("never writes through a symbolic link the generator substituted for an output", async () => {
     const sentinel = NodePath.join(outside, "sentinel.txt")
     await Fs.writeFile(sentinel, "untouched\n")
     await Fs.writeFile(NodePath.join(root, "out.txt"), "checked in\n")
     const exit = await check(
-      `const fs = require('node:fs'); fs.unlinkSync('out.txt'); fs.symlinkSync(${
-        JSON.stringify(sentinel)
-      }, 'out.txt')`,
+      `const fs = require('node:fs'); fs.unlinkSync('out.txt'); fs.symlinkSync(${JSON.stringify(sentinel)}, 'out.txt')`,
       ["out.txt"]
     )
     expect(Exit.isFailure(exit)).toBe(true)

@@ -1,3 +1,7 @@
+import { Flow, FlowRuntime } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Latch from "effect/Latch"
+import * as Layer from "effect/Layer"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
@@ -14,6 +18,43 @@ const write = async (relative: string, text: string): Promise<void> => {
   const path = NodePath.join(root, relative)
   await Fs.mkdir(NodePath.dirname(path), { recursive: true })
   await Fs.writeFile(path, text, "utf8")
+}
+
+const runLive = async (workspaceRoot: string, payload: Filegroup.Payload): Promise<Filegroup.Files> => {
+  type Registered = (
+    payload: Filegroup.Payload,
+    executionId: string
+  ) => Effect.Effect<Filegroup.Files, Filegroup.FilegroupError>
+  let registered: Registered | undefined
+  const runtime = FlowRuntime.FlowRuntime.of(
+    {
+      register: (_flow: unknown, execute: Registered) =>
+        Effect.sync(() => {
+          registered = execute
+        }),
+      actionExecute: (action: { readonly execute: Effect.Effect<unknown, unknown> }) =>
+        Effect.map(Effect.exit(action.execute), (exit) => new Flow.Complete({ exit }))
+    } as unknown as FlowRuntime.FlowRuntime["Service"]
+  )
+  return Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+    yield* Layer.build(
+      Filegroup.ExpandFilegroupLive({ workspaceRoot }).pipe(
+        Layer.provide(Layer.succeed(FlowRuntime.FlowRuntime, runtime))
+      )
+    )
+    if (registered === undefined) throw new Error("filegroup action was not registered")
+    const instance = FlowRuntime.FlowInstance.of({
+      executionId: "filegroup-live-test",
+      actionState: {
+        count: 0,
+        latch: Latch.makeUnsafe()
+      }
+    } as never)
+    return yield* registered(payload, "filegroup-live-test").pipe(
+      Effect.provideService(FlowRuntime.FlowInstance, instance),
+      Effect.provideService(FlowRuntime.FlowRuntime, runtime)
+    )
+  })))
 }
 
 beforeEach(async () => {
@@ -134,5 +175,20 @@ describe("Filegroup.expand", () => {
       { _tag: "Glob", pattern: "**/*.ts", exclude: [] }
     ])
     expect(expanded.map((entry) => entry.path)).toEqual(["src/a.ts"])
+  })
+})
+
+describe("ExpandFilegroupLive", () => {
+  it("executes the registered action against real workspace files", async () => {
+    await write("src/a.ts", "export const a = 1\n")
+    await expect(runLive(root, { sources: [Input.file("src/a.ts")] })).resolves.toEqual([
+      { path: "src/a.ts", digest: expect.stringMatching(/^[0-9a-f]{64}$/) }
+    ])
+  })
+
+  it("maps filesystem failures to the action's stable error tag", async () => {
+    await expect(runLive(NodePath.join(root, "missing"), {
+      sources: [Input.glob("**/*.ts")]
+    })).rejects.toMatchObject({ _tag: "smithers-build/FilegroupError" })
   })
 })

@@ -82,6 +82,33 @@ describe("streaming file contents", () => {
     expect(await measureOutput(root, ".", "out/empty.bin")).toMatchObject({ fileCount: 1 })
   })
 
+  it("captures through ordinary number-valued filesystem metadata", async () => {
+    await write("out/file.bin", "number stats\n")
+    const io = seam({
+      lstat: (path) => Fs.lstat(path),
+      openFile: async (path) => {
+        const handle = await Fs.open(path, "r")
+        return {
+          stat: () => handle.stat(),
+          read: async (into) => (await handle.read(into, 0, into.byteLength, null)).bytesRead,
+          close: () => handle.close()
+        }
+      }
+    })
+
+    expect(await measureOutput(root, ".", "out", { io })).toEqual(await measureOutput(root, ".", "out"))
+  })
+
+  it("sorts a reversed directory listing by code unit before digesting it", async () => {
+    await write("out/a.txt", "a")
+    await write("out/b.txt", "b")
+    const io = seam({
+      readdir: async (path, remaining) => [...await defaultCaptureIo.readdir(path, remaining)].reverse()
+    })
+
+    expect(await measureOutput(root, ".", "out", { io })).toEqual(await measureOutput(root, ".", "out"))
+  })
+
   it.each([Number.NaN, -1, 1.5, 256 * 1024 + 1])(
     "refuses the invalid descriptor read length %s",
     async (bytesRead) => {
@@ -113,6 +140,57 @@ describe("streaming file contents", () => {
     await Fs.link(at("original"), at("out"))
     await expect(measureOutput(root, ".", "out"))
       .rejects.toMatchObject({ message: expect.stringContaining("hard-linked file") })
+  })
+
+  it("refuses unusable metadata reported by the opened descriptor", async () => {
+    await write("out/file.bin", "content")
+    const io = seam({
+      openFile: async (path) => {
+        const handle = await defaultCaptureIo.openFile(path)
+        return {
+          ...handle,
+          stat: async () => {
+            const stats = await handle.stat()
+            return { ...stats, size: -1, isFile: () => true } as unknown as NodeFs.Stats
+          }
+        }
+      }
+    })
+
+    await expect(measureOutput(root, ".", "out/file.bin", { io }))
+      .rejects.toMatchObject({ message: expect.stringContaining("reports unusable metadata") })
+  })
+
+  it("refuses a file that disappears after its bytes were read", async () => {
+    await write("out/file.bin", "content")
+    let observations = 0
+    const io = seam({
+      lstat: (path) => {
+        if (path === at("out", "file.bin")) {
+          observations += 1
+          if (observations === 3) return Promise.reject(Object.assign(new Error("gone"), { code: "ENOENT" }))
+        }
+        return defaultCaptureIo.lstat(path)
+      }
+    })
+
+    await expect(measureOutput(root, ".", "out", { io }))
+      .rejects.toMatchObject({ message: expect.stringContaining("changed while it was being read") })
+  })
+
+  it("reports the earliest traversal failure when concurrent file opens fail", async () => {
+    await write("out/a.txt", "a")
+    await write("out/b.txt", "b")
+    const io = seam({
+      openFile: async (path) => {
+        if (path.endsWith("b.txt")) await new Promise((resolve) => setTimeout(resolve, 10))
+        throw new Error(path.endsWith("a.txt") ? "first open failure" : "later open failure")
+      }
+    })
+
+    await expect(measureOutput(root, ".", "out", { io })).rejects.toMatchObject({
+      message: expect.stringMatching(/a\.txt: first open failure/)
+    })
   })
 
   it("closes the descriptor when cancellation arrives during a read", async () => {
@@ -225,6 +303,27 @@ describe("a final-component swap", () => {
     await expect(measureOutput(root, ".", "out", {
       io: seam({
         lstat: (path) => path === at("out", "a.txt") ? Promise.resolve(other) : defaultCaptureIo.lstat(path)
+      })
+    })).rejects.toMatchObject({
+      message: expect.stringContaining("was replaced while it was being captured")
+    })
+  })
+
+  it("refuses a file name that disappears immediately after it is opened", async () => {
+    await write("out/a.txt", "content")
+    let opened = false
+
+    await expect(measureOutput(root, ".", "out", {
+      io: seam({
+        openFile: async (path) => {
+          const handle = await defaultCaptureIo.openFile(path)
+          opened = true
+          return handle
+        },
+        lstat: (path) =>
+          opened && path === at("out", "a.txt")
+            ? Promise.reject(Object.assign(new Error("gone"), { code: "ENOENT" }))
+            : defaultCaptureIo.lstat(path)
       })
     })).rejects.toMatchObject({
       message: expect.stringContaining("was replaced while it was being captured")
@@ -405,6 +504,39 @@ describe("output tree limits", () => {
       .rejects.toMatchObject({ message: expect.stringContaining("more than 2 entries") })
   })
 
+  it("counts a nested entry before later siblings against the same limit", async () => {
+    await write("out/a/inside.txt", "inside")
+    await write("out/b.txt", "sibling")
+
+    await expect(measureOutput(root, ".", "out", { limits: limits({ entries: 2 }) }))
+      .rejects.toMatchObject({ message: expect.stringContaining("more than 2 entries") })
+  })
+
+  it("refuses two manifest names that normalize to the same Unicode form", async () => {
+    await write("out/source.txt", "content")
+    const source = at("out", "source.txt")
+    const virtual = new Set([at("out", "\u00e9.txt"), at("out", "e\u0301.txt")])
+    const io = seam({
+      readdir: async (path, remaining) => {
+        if (path !== at("out")) return defaultCaptureIo.readdir(path, remaining)
+        const [entry] = await defaultCaptureIo.readdir(path, remaining)
+        const named = (name: string): NodeFs.Dirent =>
+          Object.create(
+            Object.getPrototypeOf(entry),
+            {
+              ...Object.getOwnPropertyDescriptors(entry),
+              name: { configurable: true, enumerable: true, value: name, writable: true }
+            }
+          ) as NodeFs.Dirent
+        return [named("\u00e9.txt"), named("e\u0301.txt")]
+      },
+      lstat: (path) => virtual.has(path) ? defaultCaptureIo.lstat(source) : defaultCaptureIo.lstat(path)
+    })
+
+    await expect(measureOutput(root, ".", "out", { io }))
+      .rejects.toMatchObject({ message: expect.stringContaining("normalize alike") })
+  })
+
   it("refuses a tree with more files than the limit allows", async () => {
     for (const name of ["a", "b", "c", "d"]) await write(`out/${name}.txt`, name)
 
@@ -473,6 +605,15 @@ describe("output tree limits", () => {
       .rejects.toMatchObject({ message: expect.stringContaining("limit entries is not usable") })
     expect(invoked).toBe(false)
   })
+
+  it("rejects capture limits whose property descriptors cannot be inspected", async () => {
+    await Fs.mkdir(at("out"), { recursive: true })
+    const revoked = Proxy.revocable(limits({}), {})
+    revoked.revoke()
+
+    await expect(measureOutput(root, ".", "out", { limits: revoked.proxy }))
+      .rejects.toMatchObject({ message: expect.stringContaining("limits could not be read") })
+  })
 })
 
 describe("capture confinement", () => {
@@ -499,10 +640,49 @@ describe("capture confinement", () => {
       .rejects.toMatchObject({ message: expect.stringContaining("overlaps the configured cache directory") })
   })
 
+  it("refuses empty, absolute, root, and escaping cache directories", async () => {
+    await write("out/file", "content")
+    for (const value of ["", NodePath.join(root, "cache")]) {
+      await expect(measureOutput(root, ".", "out", { cacheDirectory: value }))
+        .rejects.toMatchObject({ message: expect.stringContaining("not workspace-relative") })
+    }
+    for (const value of [".", ".."]) {
+      await expect(measureOutput(root, ".", "out", { cacheDirectory: value }))
+        .rejects.toMatchObject({ message: expect.stringContaining("leaves the workspace") })
+    }
+  })
+
   it("refuses a replacement-character filename", async () => {
     await write("out/�.txt", "content")
     await expect(measureOutput(root, ".", "out"))
       .rejects.toMatchObject({ message: expect.stringContaining("invalid UTF-8 byte sequence") })
+  })
+
+  it.each([
+    ["..", "reserved name"],
+    ["nested/name", "path separator"],
+    ["back\\slash", "backslash"],
+    ["null\0byte", "null byte"],
+    ["surrogate\ud800", "unpaired UTF-16 surrogate"]
+  ])("refuses the non-portable manifest name %j", async (name, reason) => {
+    await write("out/source.txt", "content")
+    const io = seam({
+      readdir: async (path, remaining) => {
+        const [entry] = await defaultCaptureIo.readdir(path, remaining)
+        return [
+          Object.create(
+            Object.getPrototypeOf(entry),
+            {
+              ...Object.getOwnPropertyDescriptors(entry),
+              name: { configurable: true, enumerable: true, value: name, writable: true }
+            }
+          ) as NodeFs.Dirent
+        ]
+      }
+    })
+
+    await expect(measureOutput(root, ".", "out", { io }))
+      .rejects.toMatchObject({ message: expect.stringContaining(reason) })
   })
 })
 

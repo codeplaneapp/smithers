@@ -60,6 +60,12 @@ describe("Workspace", () => {
 })
 
 describe("Config.normalizeCacheDirectory", () => {
+  it("rejects a non-string cache directory as a caller type error", () => {
+    expect(() => Config.normalizeCacheDirectory(null as never)).toThrowError(
+      new TypeError("cacheDirectory must be a string")
+    )
+  })
+
   it("normalizes redundant separators, dot segments, and whitespace", () => {
     expect(Config.normalizeCacheDirectory("  .flows/  ")).toBe(".flows")
     expect(Config.normalizeCacheDirectory("./.flows")).toBe(".flows")

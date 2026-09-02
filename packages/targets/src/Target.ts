@@ -196,7 +196,13 @@ export interface KindView {
  * with one, for example a generator whose `build` writes and whose `lint`
  * checks drift, returns re-derived inputs, outputs, and cacheability for the
  * mapped attrs. `implementationDigest` identifies the implementation and every
- * optional function that derives attrs, inputs, outputs, or cacheability.
+ * optional function that derives attrs, inputs, outputs, or cacheability. It
+ * is a within-process identity only: a callback not built with `Node.capture`
+ * has a function identity carrying a per-process nonce, and every built-in
+ * target passes ordinary closures, so the digest differs on every process
+ * start. It tells one target apart from another inside one run and must never
+ * be key material for anything replayed across processes; the package
+ * executor and the agent verdict cache both leave it out for that reason.
  * `outputs` is the declared output tree, undefined for a target that promises
  * none. Dependencies are re-derived from verb-effective attrs and may vary by
  * verb. `verbGate`, when present, is the complete set of verbs
@@ -959,10 +965,7 @@ export const make = <
     const site = sourceSite()
     let attrs: Attrs["Type"]
     try {
-      attrs = options.attrs.make(
-        snapshotAttrs(attrsInput, 0, { count: 0 }, new Map()) as Attrs["~type.make.in"],
-        strictMake
-      )
+      attrs = options.attrs.make(snapshotAttrs(attrsInput, 0, { count: 0 }, new Map()), strictMake)
     } catch (cause) {
       throw declarationRejected(id, site, cause)
     }
@@ -1005,10 +1008,7 @@ export const make = <
       }
       let mapped: Attrs["Type"]
       try {
-        mapped = options.attrs.make(
-          snapshotAttrs(candidate, 0, { count: 0 }, new Map()) as Attrs["~type.make.in"],
-          strictMake
-        )
+        mapped = options.attrs.make(snapshotAttrs(candidate, 0, { count: 0 }, new Map()), strictMake)
       } catch (cause) {
         throw declarationRejected(`${id} (${kind})`, site, cause)
       }

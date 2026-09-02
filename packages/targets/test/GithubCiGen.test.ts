@@ -11,12 +11,23 @@ import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
 import { describe, expect, it } from "vitest"
 import * as CiToolchain from "../src/CiToolchain.ts"
-import { artifactSteps, Attrs, Gate, GithubCiGen, Job, MatrixRow, render, TargetStep } from "../src/GithubCiGen.ts"
+import {
+  artifactSteps,
+  Attrs,
+  Gate,
+  GithubCiGen,
+  Job,
+  MatrixRow,
+  render,
+  TargetStep,
+  toolchainSteps
+} from "../src/GithubCiGen.ts"
 import { parseWorkflow as parseStrictWorkflow } from "../src/GithubWorkflow.ts"
 import * as RustToolchain from "../src/RustToolchain.ts"
 import { Secret } from "../src/Secret.ts"
 import * as Target from "../src/Target.ts"
 import * as Verb from "../src/Verb.ts"
+import { plannedCalls } from "./plan.ts"
 import { packageManager, runtime } from "./toolchain.ts"
 
 /** Most focused fixtures omit trigger prose; supply the smallest real trigger. */
@@ -26,6 +37,14 @@ const parseWorkflow = (source: string): ReturnType<typeof parseStrictWorkflow> =
 const node = CiToolchain.Node({ runtime, release: "22.19.0" })
 const bareNode = CiToolchain.Node({ runtime, release: "22.19.0", cachePackageStore: false })
 const rust = CiToolchain.Rust({ toolchain: RustToolchain.Pinned({}) })
+
+describe("CiToolchain.Needs", () => {
+  it("defaults to no runtime setup and preserves an explicit ripgrep pin", () => {
+    expect(CiToolchain.Needs()).toMatchObject({ install: true, runtimes: [], submodules: false })
+    const ripgrep = CiToolchain.Ripgrep({ release: "14.1.1" })
+    expect(CiToolchain.Needs({ ripgrep }).ripgrep).toEqual(ripgrep)
+  })
+})
 
 /** The golden pipeline `write` mode renders. */
 const goldenAttrs = {
@@ -305,6 +324,49 @@ describe("render", () => {
     ).toThrow(/at least one workflow trigger/)
   })
 
+  it("renders each supported trigger independently", () => {
+    const dispatch = render(attrsOf({
+      ...goldenAttrs,
+      pushBranches: [],
+      pullRequest: false,
+      workflowDispatch: true
+    }))
+    expect(dispatch).toContain("  workflow_dispatch:\n")
+    expect(dispatch).not.toContain("  push:\n")
+    expect(dispatch).not.toContain("  pull_request:\n")
+
+    const push = render(attrsOf({
+      ...goldenAttrs,
+      pushBranches: ["main"],
+      pullRequest: false,
+      workflowDispatch: false
+    }))
+    expect(push).toContain("  push:\n")
+    expect(push).not.toContain("  pull_request:\n")
+    expect(push).not.toContain("  workflow_dispatch:\n")
+  })
+
+  it("omits disabled install, Rust cache, and jj colocation setup steps", () => {
+    const attrs = attrsOf({
+      ...goldenAttrs,
+      gates: [],
+      jobs: [{
+        id: "test",
+        runsOn: "ubuntu-latest",
+        toolchain: CiToolchain.Needs({
+          install: false,
+          rust: CiToolchain.Rust({ toolchain: RustToolchain.Pinned({}), cache: false }),
+          jj: CiToolchain.Jj({ release: "0.39.0", colocate: false })
+        }),
+        steps: [{ verb: Verb.Test, pattern: "//..." }]
+      }]
+    }) as typeof goldenAttrs
+    const steps = toolchainSteps(attrs, attrs.jobs[0]!)
+    expect(steps.some((step) => step.run?.startsWith("pnpm install") === true)).toBe(false)
+    expect(steps.some((step) => step.uses === "Swatinem/rust-cache@v2")).toBe(false)
+    expect(steps.some((step) => step.run === "jj git init --colocate")).toBe(false)
+  })
+
   it("refuses a job that runs targets without installing the workspace", () => {
     expect(() =>
       render(attrsOf({
@@ -376,6 +438,31 @@ describe("render", () => {
     for (const timeout of [1, 360]) {
       expect(render(attrsOf(withTimeout(timeout)))).toContain(`    timeout-minutes: ${timeout}\n`)
     }
+  })
+
+  it("revalidates scalar text and CLI verbs at the exported render boundary", () => {
+    const constructed = attrsOf({
+      ...goldenAttrs,
+      gates: [],
+      jobs: [{
+        id: "test",
+        runsOn: "ubuntu-latest",
+        toolchain: CiToolchain.Needs({ runtimes: [node] }),
+        steps: [{ verb: Verb.Test, pattern: "//..." }]
+      }]
+    }) as unknown as Record<string, unknown>
+    expect(() => render({ ...constructed, workflowName: "CI\u0001broken" } as never)).toThrow(/control character/)
+    expect(() =>
+      render({
+        ...constructed,
+        jobs: [{
+          id: "test",
+          runsOn: "ubuntu-latest",
+          toolchain: CiToolchain.Needs({ runtimes: [node] }),
+          steps: [{ verb: "deploy", pattern: "//..." }]
+        }]
+      } as never)
+    ).toThrow(/no CLI verb/)
   })
 
   it("quotes values that would otherwise change the shape of the YAML", () => {
@@ -535,6 +622,29 @@ describe("render", () => {
           }]
         } as never)
       ).toThrow()
+    }
+    const constructed = attrsOf({
+      ...goldenAttrs,
+      gates: [],
+      jobs: [{
+        id: "test",
+        runsOn: "ubuntu-latest",
+        toolchain: CiToolchain.Needs({ runtimes: [node] }),
+        steps: [{ verb: Verb.Test, pattern: "//..." }]
+      }]
+    }) as unknown as Record<string, unknown>
+    for (const parallelism of [0, -1, 257, 1.5]) {
+      expect(() =>
+        render({
+          ...constructed,
+          jobs: [{
+            id: "test",
+            runsOn: "ubuntu-latest",
+            toolchain: CiToolchain.Needs({ runtimes: [node] }),
+            steps: [{ verb: Verb.Test, pattern: "//...", parallelism }]
+          }]
+        } as never)
+      ).toThrow(/parallelism/)
     }
   })
 
@@ -701,6 +811,21 @@ describe("GithubCiGen target wiring", () => {
     // A writing target is not cacheable; its checking form is.
     expect(metadata.cacheable).toBe(false)
     expect(metadata.forKind("lint").cacheable).toBe(true)
+    expect((metadata.forKind("build").attrs as { readonly mode: string }).mode).toBe("write")
+  })
+
+  it("plans the rendered workflow through the declared generated-file mode", () => {
+    const writing = plannedCalls(GithubCiGen({ ...goldenAttrs }) as never)
+    expect(writing).toEqual([{
+      action: "smithers-build/write-file",
+      payload: { path: goldenAttrs.output, contents: golden }
+    }])
+
+    const checking = plannedCalls(GithubCiGen({ ...goldenAttrs, mode: "check" }) as never)
+    expect(checking).toEqual([{
+      action: "smithers-build/check-file",
+      payload: { path: goldenAttrs.output, contents: golden }
+    }])
   })
 })
 

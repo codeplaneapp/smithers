@@ -40,15 +40,21 @@ describe("S.Package", () => {
     expect(descriptor.enumerable).toBe(false)
     expect(descriptor.configurable).toBe(false)
     expect(descriptor.writable).toBe(false)
+    expect(metadata(Package({ targets: { lint, suite } })).keys).toEqual(["lint", "suite"])
   })
 
-  it("wraps a declared file input into a filegroup target under the key", () => {
-    const value = Package({ targets: { schema: Input.file("schema.graphql") } })
+  it("wraps declared file and glob inputs into filegroup targets under their keys", () => {
+    const value = Package({
+      targets: { schema: Input.file("schema.graphql"), sources: Input.glob("src/**/*.ts") }
+    })
     expect(Target.isTarget(value.schema)).toBe(true)
     expect(isFilegroup(value.schema)).toBe(true)
+    expect(Target.isTarget(value.sources)).toBe(true)
+    expect(isFilegroup(value.sources)).toBe(true)
   })
 
   it("rejects non-target values, bad keys, Proxy maps, and symbol keys", () => {
+    expect(() => Package(null as never)).toThrowError(new TypeError("Package options must be a plain object"))
     expect(() => Package({ targets: { bad: 42 as never } })).toThrow(/not a target/)
     expect(() => Package({ targets: { "no:colon": lint } as never })).toThrow(/A-Za-z_/)
     expect(() => Package({ targets: new Proxy({}, {}) as never })).toThrow(/plain object/)
@@ -148,9 +154,11 @@ describe("Runtime.Node and PackageManager.Yarn forms", () => {
     const yarn = PackageManager.Yarn({
       manifest: Input.file("//package.json"),
       lockfile: Input.file("//yarn.lock"),
-      audit: { severity: "critical", recursive: true }
+      audit: { severity: "critical", recursive: true },
+      version: "4.5.0"
     })
     expect(PackageManager.isYarnDeclaration(yarn)).toBe(true)
+    expect(yarn.version).toBe("4.5.0")
   })
 
   it("validates the Pnpm workspace declaration like Yarn's", () => {

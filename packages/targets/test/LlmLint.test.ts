@@ -73,6 +73,23 @@ const scriptCli = async (name: string, body: string): Promise<string> => {
   return executable
 }
 
+/** Runs one review with a real executable standing in for git on PATH. */
+const withGitProgram = async <A>(body: string, use: () => Promise<A>): Promise<A> => {
+  const directory = NodePath.join(root, "git-bin")
+  const executable = NodePath.join(directory, "git")
+  await Fs.mkdir(directory, { recursive: true })
+  await Fs.writeFile(executable, `#!/usr/bin/env node\n${body}\n`, "utf8")
+  await Fs.chmod(executable, 0o755)
+  const previous = process.env["PATH"]
+  process.env["PATH"] = `${directory}${NodePath.delimiter}${previous ?? ""}`
+  try {
+    return await use()
+  } finally {
+    if (previous === undefined) delete process.env["PATH"]
+    else process.env["PATH"] = previous
+  }
+}
+
 const payload = (overrides: Partial<LlmLint.Payload> = {}): LlmLint.Payload => ({
   base: "HEAD",
   include: [Input.glob("src/**/*.ts")],
@@ -364,6 +381,49 @@ describe("LlmLint.review changed-file filtering", () => {
     expect((failure as LlmLint.LlmReviewError).message).toMatch(/control characters/)
   })
 
+  it.each([
+    ["a listing without its final NUL", "src/a.ts", /final NUL delimiter/],
+    ["a path that is not normalized", "src/..\/src/a.ts\0", /path the review cannot use/],
+    ["one path listed twice", "src/a.ts\0src/a.ts\0", /more than once/]
+  ])("rejects %s from git", async (_description, output, message) => {
+    const cli = await fakeCli("unused-malformed-git", claudeEnvelope("[]"))
+    const failure = await withGitProgram(
+      `process.stdout.write(${JSON.stringify(output)})`,
+      () =>
+        Effect.runPromise(Effect.flip(LlmLint.review({ workspaceRoot: root, executable: cli.executable }, payload())))
+    )
+    expect(failure._tag).toBe("smithers-build/LlmReviewError")
+    expect((failure as LlmLint.LlmReviewError).phase).toBe("diff")
+    expect((failure as LlmLint.LlmReviewError).message).toMatch(message)
+    expect(await cli.calls()).toEqual([])
+  })
+
+  it("reports a bounded suffix when git diff exits non-zero", async () => {
+    const cli = await fakeCli("unused-failed-git", claudeEnvelope("[]"))
+    const failure = await withGitProgram(
+      "process.stderr.write('discarded-git-prefix' + 'x'.repeat(3000) + 'git-diagnostic-end', () => process.exit(9))",
+      () =>
+        Effect.runPromise(Effect.flip(LlmLint.review({ workspaceRoot: root, executable: cli.executable }, payload())))
+    )
+    const message = (failure as LlmLint.LlmReviewError).message
+    expect(message).toContain("git diff exited 9")
+    expect(message).toContain("git-diagnostic-end")
+    expect(message).not.toContain("discarded-git-prefix")
+    expect(await cli.calls()).toEqual([])
+  })
+
+  it("matches workspace-root notation in include globs", async () => {
+    await write("src/a.ts", "export const a = 3\n")
+    const cli = await fakeCli("root-pattern", claudeEnvelope("[]"))
+    const report = await Effect.runPromise(
+      LlmLint.review(
+        { workspaceRoot: root, executable: cli.executable },
+        payload({ include: [Input.glob("//src/**/*.ts")] })
+      )
+    )
+    expect(report.files).toEqual(["src/a.ts"])
+  })
+
   it("refuses a review that would require more than the bounded number of model calls", async () => {
     for (let index = 0; index <= LlmLint.maximumReviewBatches; index += 1) {
       await write(`src/many-${index}.ts`, `export const value${index} = 0\n`)
@@ -496,6 +556,18 @@ describe("LlmLint.review engines", () => {
     expect((failure as LlmLint.LlmReviewError).phase).toBe("parse")
   })
 
+  it("rejects valid JSON that is not a findings array", async () => {
+    await write("src/a.ts", "export const a = 3\n")
+    const cli = await fakeCli("non-array", claudeEnvelope("{}"))
+    const failure = await Effect.runPromise(
+      Effect.flip(LlmLint.review({ workspaceRoot: root, executable: cli.executable }, payload()))
+    )
+
+    expect(failure._tag).toBe("smithers-build/LlmReviewError")
+    expect((failure as LlmLint.LlmReviewError).phase).toBe("parse")
+    expect((failure as LlmLint.LlmReviewError).message).toMatch(/not a findings array/)
+  })
+
   it("rejects a non-JSON line in the codex JSONL protocol", async () => {
     await write("src/a.ts", "export const a = 3\n")
     const cli = await fakeCli("codex-preamble", `not json\n${codexEnvelope("[]")}`)
@@ -573,6 +645,54 @@ describe("LlmLint.review engines", () => {
 })
 
 describe("LlmLint.review resource and filesystem boundaries", () => {
+  it("bounds the aggregate bytes of context files", async () => {
+    await write("src/a.ts", "export const a = 3\n")
+    await Promise.all(
+      Array.from({ length: 3 }, (_, index) => write(`context/${index}.txt`, "x".repeat(700_000)))
+    )
+    const cli = await fakeCli("aggregate-context", claudeEnvelope("[]"))
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        LlmLint.review(
+          { workspaceRoot: root, executable: cli.executable },
+          payload({ context: [Input.glob("context/*.txt")] })
+        )
+      )
+    )
+
+    expect(failure._tag).toBe("smithers-build/LlmReviewError")
+    expect((failure as LlmLint.LlmReviewError).phase).toBe("read")
+    expect((failure as LlmLint.LlmReviewError).message).toContain(
+      `${LlmLint.maximumContextContentBytes}-byte aggregate limit`
+    )
+    expect(await cli.calls()).toEqual([])
+  })
+
+  it("bounds the number of expanded context files", async () => {
+    await write("src/a.ts", "export const a = 3\n")
+    await Promise.all(
+      Array.from(
+        { length: LlmLint.maximumContextFiles + 1 },
+        (_, index) => write(`wide-context/${index}.txt`, "context\n")
+      )
+    )
+    const cli = await fakeCli("wide-context", claudeEnvelope("[]"))
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        LlmLint.review(
+          { workspaceRoot: root, executable: cli.executable },
+          payload({ context: [Input.glob("wide-context/*.txt")] })
+        )
+      )
+    )
+
+    expect(failure._tag).toBe("smithers-build/LlmReviewError")
+    expect((failure as LlmLint.LlmReviewError).phase).toBe("read")
+    expect((failure as LlmLint.LlmReviewError).message)
+      .toContain(`more than ${LlmLint.maximumContextFiles} files`)
+    expect(await cli.calls()).toEqual([])
+  })
+
   it("rejects a changed file replaced by a symbolic link", async () => {
     await Fs.rm(NodePath.join(root, "src/a.ts"))
     await Fs.symlink("b.ts", NodePath.join(root, "src/a.ts"))
@@ -737,6 +857,180 @@ describe("LlmLint.review resource and filesystem boundaries", () => {
       if (previousToken === undefined) delete process.env["SMITHERS_CACHE_TOKEN"]
       else process.env["SMITHERS_CACHE_TOKEN"] = previousToken
     }
+  })
+})
+
+describe("LlmLint.promptEngine protocol boundary", () => {
+  it("runs both engine adapters with their isolated argv and returns plain answer text", async () => {
+    const claude = await fakeCli("prompt-claude", JSON.stringify({ type: "result", result: "claude answer" }))
+    const claudeAnswer = await Effect.runPromise(LlmLint.promptEngine(
+      { workspaceRoot: root, executable: claude.executable },
+      { engine: "claude", model: "claude-opus-5", prompt: "review this" }
+    ))
+    expect(claudeAnswer).toBe("claude answer")
+    expect((await claude.calls())[0]).toMatchObject({
+      args: expect.arrayContaining(["--model", "claude-opus-5"]),
+      stdin: "review this"
+    })
+
+    const codex = await fakeCli("prompt-codex", codexEnvelope("codex answer"))
+    const codexAnswer = await Effect.runPromise(LlmLint.promptEngine(
+      { workspaceRoot: root, executable: codex.executable },
+      { engine: "codex", model: "gpt-5.6-luna", prompt: "inspect this" }
+    ))
+    expect(codexAnswer).toBe("codex answer")
+    expect((await codex.calls())[0]).toMatchObject({
+      args: expect.arrayContaining(["--model", "gpt-5.6-luna"]),
+      stdin: "inspect this"
+    })
+    expect(LlmLint.engineExecutable("claude")).toBe("claude")
+    expect(LlmLint.engineExecutable("codex")).toBe("codex")
+  })
+
+  it.each(
+    [
+      ["claude without an envelope", "claude", "[]"],
+      ["claude with a non-string result", "claude", JSON.stringify({ result: 7 })],
+      ["codex without a completed answer", "codex", JSON.stringify({ type: "turn.completed" })]
+    ] as const
+  )("rejects %s", async (_description, engine, output) => {
+    const cli = await fakeCli(`prompt-invalid-${engine}`, output)
+    const failure = await Effect.runPromise(Effect.flip(LlmLint.promptEngine(
+      { workspaceRoot: root, executable: cli.executable },
+      { engine, model: "model", prompt: "prompt" }
+    )))
+    expect(failure._tag).toBe("smithers-build/LlmReviewError")
+    expect((failure as LlmLint.LlmReviewError).phase).toBe("parse")
+  })
+
+  it("bounds the malformed envelope excerpt in a protocol diagnostic", async () => {
+    const output = JSON.stringify({ result: 7, padding: "x".repeat(400) })
+    const cli = await fakeCli("prompt-long-invalid", output)
+    const failure = await Effect.runPromise(Effect.flip(LlmLint.promptEngine(
+      { workspaceRoot: root, executable: cli.executable },
+      { engine: "claude", model: "model", prompt: "prompt" }
+    )))
+    const message = (failure as LlmLint.LlmReviewError).message
+    expect(message).toContain("unexpected claude CLI output")
+    expect(message).toContain("...")
+    expect(message).not.toContain("x".repeat(250))
+  })
+
+  it("rejects unusable request and runtime options before spawning", async () => {
+    const cli = await fakeCli("prompt-unused", JSON.stringify({ result: "answer" }))
+    const cases: ReadonlyArray<
+      readonly [
+        Parameters<typeof LlmLint.promptEngine>[0],
+        Parameters<
+          typeof LlmLint.promptEngine
+        >[1],
+        RegExp
+      ]
+    > = [
+      [
+        { workspaceRoot: root, executable: cli.executable },
+        { engine: "claude", model: "", prompt: "prompt" },
+        /model.*usable text/
+      ],
+      [
+        { workspaceRoot: root, executable: "" },
+        { engine: "claude", model: "model", prompt: "prompt" },
+        /executable.*usable text/
+      ],
+      [
+        { workspaceRoot: root, executable: cli.executable, sensitiveEnv: ["bad-name"] },
+        { engine: "claude", model: "model", prompt: "prompt" },
+        /environment name is not usable/
+      ],
+      [
+        {
+          workspaceRoot: root,
+          executable: cli.executable,
+          sensitiveEnv: Array.from({ length: 257 }, (_, index) => `SECRET_${index}`)
+        },
+        { engine: "claude", model: "model", prompt: "prompt" },
+        /too many sensitive environment names/
+      ]
+    ]
+    for (const [options, request, message] of cases) {
+      const failure = await Effect.runPromise(Effect.flip(LlmLint.promptEngine(options, request)))
+      expect((failure as LlmLint.LlmReviewError).message).toMatch(message)
+    }
+    expect(await cli.calls()).toEqual([])
+  })
+
+  it("deduplicates sensitive names while withholding their values", async () => {
+    const executable = await scriptCli(
+      "prompt-sensitive",
+      "let stdin = \"\"\n" +
+        "for await (const chunk of process.stdin) stdin += chunk\n" +
+        "process.stdout.write(JSON.stringify({ result: String(process.env.PROMPT_SECRET) }))"
+    )
+    const previous = process.env["PROMPT_SECRET"]
+    process.env["PROMPT_SECRET"] = "must-not-leak"
+    try {
+      const answer = await Effect.runPromise(LlmLint.promptEngine(
+        { workspaceRoot: root, executable, sensitiveEnv: ["PROMPT_SECRET", "PROMPT_SECRET"] },
+        { engine: "claude", model: "model", prompt: "prompt" }
+      ))
+      expect(answer).toBe("undefined")
+    } finally {
+      if (previous === undefined) delete process.env["PROMPT_SECRET"]
+      else process.env["PROMPT_SECRET"] = previous
+    }
+  })
+
+  it("rejects invalid UTF-8 from model stdout", async () => {
+    const executable = await scriptCli(
+      "prompt-invalid-utf8",
+      "process.stdin.resume()\nprocess.stdin.on('end', () => process.stdout.write(Buffer.from([0xff])))"
+    )
+    const failure = await Effect.runPromise(Effect.flip(LlmLint.promptEngine(
+      { workspaceRoot: root, executable },
+      { engine: "claude", model: "model", prompt: "prompt" }
+    )))
+    expect(failure._tag).toBe("smithers-build/LlmReviewError")
+    expect((failure as LlmLint.LlmReviewError).message).toContain("stdout is not valid UTF-8")
+  })
+
+  it("keeps only a valid decoded suffix of a long non-zero-exit diagnostic", async () => {
+    const executable = await scriptCli(
+      "prompt-long-stderr",
+      "process.stdin.resume()\nprocess.stdin.on('end', () => {" +
+        "process.stderr.write('discarded-prefix' + 'x'.repeat(70000) + 'diagnostic-end', () => process.exit(7)) })"
+    )
+    const failure = await Effect.runPromise(Effect.flip(LlmLint.promptEngine(
+      { workspaceRoot: root, executable },
+      { engine: "claude", model: "model", prompt: "prompt" }
+    )))
+    const message = (failure as LlmLint.LlmReviewError).message
+    expect(message).toContain("exited 7")
+    expect(message).toContain("diagnostic-end")
+    expect(message).not.toContain("discarded-prefix")
+  })
+
+  it("reports malformed UTF-8 in a non-zero-exit stderr tail without replacement text", async () => {
+    const executable = await scriptCli(
+      "prompt-invalid-stderr",
+      "process.stdin.resume()\nprocess.stdin.on('end', () => { process.stderr.write(Buffer.from([0xff])); process.exit(2) })"
+    )
+    const failure = await Effect.runPromise(Effect.flip(LlmLint.promptEngine(
+      { workspaceRoot: root, executable },
+      { engine: "claude", model: "model", prompt: "prompt" }
+    )))
+    expect((failure as LlmLint.LlmReviewError).message).toContain("<stderr was not valid UTF-8>")
+  })
+
+  it.skipIf(process.platform === "win32")("reports the signal that terminated a model process", async () => {
+    const executable = await scriptCli(
+      "prompt-signal",
+      "process.stdin.resume()\nprocess.stdin.on('end', () => process.kill(process.pid, 'SIGTERM'))"
+    )
+    const failure = await Effect.runPromise(Effect.flip(LlmLint.promptEngine(
+      { workspaceRoot: root, executable },
+      { engine: "claude", model: "model", prompt: "prompt" }
+    )))
+    expect((failure as LlmLint.LlmReviewError).message).toContain("subprocess terminated by SIGTERM")
   })
 })
 

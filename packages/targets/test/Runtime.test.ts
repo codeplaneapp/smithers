@@ -50,6 +50,16 @@ describe("Runtime declarations", () => {
     expect(() => Runtime.Bun({ version: ">=22.19.0" })).toThrow()
   })
 
+  it("rejects missing Node options and admits an exact Bun workspace pin", () => {
+    expect(() => Runtime.Node(null as never)).toThrow(TypeError)
+    expect(() => Runtime.Node(null as never)).toThrow("Runtime.Node options must be an object")
+    expect(() => Runtime.Node({} as never)).toThrow("Runtime.Node requires a manifest or a version")
+
+    const bun = Runtime.Bun({ version: "1.3.4" as never })
+    expect(Runtime.isBunDeclaration(bun)).toBe(true)
+    expect(bun).toEqual({ _tag: "BunRuntimeDeclaration", version: "1.3.4", executable: "bun" })
+  })
+
   it("honours an executable override and rejects unusable ones", () => {
     expect(Runtime.Node({ version: ">=22.19.0", executable: "/opt/node/bin/node" }).executable).toBe(
       "/opt/node/bin/node"

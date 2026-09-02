@@ -329,6 +329,31 @@ describe("payload and environment boundary", () => {
     await expect(Fs.stat(marker)).rejects.toMatchObject({ code: "ENOENT" })
   })
 
+  it("bounds the number of declared environment entries", async () => {
+    const env = Object.fromEntries(Array.from({ length: 4_097 }, (_, index) => [`VALUE_${index}`, "x"]))
+    const error = await failed(payload("process.exit(0)", { env }))
+
+    expect(error.code).toBe("invalid_payload")
+    expect(error.stderr).toContain("exec environment has more than 4096 entries")
+  })
+
+  it("bounds the aggregate argv bytes before spawning", async () => {
+    const marker = NodePath.join(root, "oversize-argv-ran")
+    const error = await failed({
+      ...payload("process.exit(0)"),
+      argv: [
+        process.execPath,
+        "-e",
+        `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "x")`,
+        "x".repeat(2 * 1024 * 1024 + 1)
+      ]
+    })
+
+    expect(error.code).toBe("invalid_payload")
+    expect(error.exitCode).toBe(-1)
+    await expect(Fs.stat(marker)).rejects.toMatchObject({ code: "ENOENT" })
+  })
+
   it("kills a tool when its declared timeout expires", async () => {
     const error = await failed(payload("setInterval(() => undefined, 1000)", { timeoutMs: 25 }))
     expect(error.exitCode).toBe(-1)

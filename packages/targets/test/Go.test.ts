@@ -52,6 +52,15 @@ describe("S.Go", () => {
     ).toThrow(/unknown option/)
     expect(() => S.Nix.DevShell({ flake: S.file("//flake.nix"), lock: S.file("//flake.lock"), nope: true } as never))
       .toThrow(/unknown option/)
+    expect(() => S.Nix.DevShell(null as never)).toThrowError(
+      new TypeError("Nix.DevShell options must be an object")
+    )
+    expect(() => S.Nix.DevShell({ flake: S.file("//flake.nix"), lock: "flake.lock" } as never)).toThrowError(
+      new TypeError("Nix.DevShell flake and lock must be S.file declarations")
+    )
+    expect(() => S.Nix.DevShell({ flake: "flake.nix", lock: S.file("//flake.lock") } as never)).toThrowError(
+      new TypeError("Nix.DevShell flake and lock must be S.file declarations")
+    )
   })
 
   it("admits a toolchain-only workspace and keeps Node declarations all-or-none", () => {

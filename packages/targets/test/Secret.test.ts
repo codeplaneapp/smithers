@@ -72,6 +72,13 @@ describe("Secret declarations", () => {
     })
     expect(() => Secret.Secret("NPM_TOKEN", accessor)).toThrow(/data property/)
     expect(() => Secret.Secret("NPM_TOKEN", proxy)).toThrow(/plain object/)
+    expect(() => Secret.Secret("NPM_TOKEN", null as never)).toThrowError(
+      new TypeError("Secret options must be a plain object")
+    )
+    expect(() => Secret.Secret("NPM_TOKEN", new Date() as never)).toThrow(/plain object/)
+    expect(() => Secret.Secret("NPM_TOKEN", { typo: true } as never)).toThrowError(
+      new TypeError("Secret received unknown option \"typo\"")
+    )
     expect(() => Secret.Secret("NPM_TOKEN", { fallback: 1 as never })).toThrow(/bounded non-empty/)
     expect(() => Secret.Secret("NPM_TOKEN", { [Symbol("extra")]: true } as never)).toThrow(/symbol/)
     expect(Secret.isSecret(forged)).toBe(false)
@@ -318,6 +325,15 @@ describe("SecretProxy vault", () => {
     expect(() => SecretProxy.makeVault({ typo: true } as never)).toThrow(/unknown/)
     expect(() => SecretProxy.makeVault(accessor)).toThrow(/data property/)
     expect(calls).toBe(0)
+  })
+
+  it("rejects forged bindings, declarations, and request origins", () => {
+    const vault = SecretProxy.makeVault({ read: () => "value" })
+    expect(() => vault.mint({} as never)).toThrow(/HTTP credential binding/)
+    expect(() => vault.resolve({} as never)).toThrow(/secret declaration/)
+    expect(() => vault.request("not a URL")).toThrow(/must be an HTTP origin/)
+    expect(() => vault.request("https://api.example.test/path")).toThrow(/exact HTTP origin/)
+    expect(() => vault.request("ftp://api.example.test")).toThrow(/exact HTTP origin/)
   })
 })
 
@@ -609,7 +625,18 @@ describe("SecretProxy server", () => {
   it("rejects malformed CONNECT authorities and parses bracketed IPv6", async () => {
     expect(SecretProxy.parseConnectAuthority("example.com:443")).toEqual({ host: "example.com", port: 443 })
     expect(SecretProxy.parseConnectAuthority("[::1]:8443")).toEqual({ host: "::1", port: 8443 })
-    for (const authority of ["example.com", "example.com:nope", "example.com:0", "example.com:65536", "::1:443"]) {
+    for (
+      const authority of [
+        "example.com",
+        "example.com:nope",
+        "example.com:0",
+        "example.com:65536",
+        "::1:443",
+        "[]:443",
+        "[host]:443",
+        "[::1]443"
+      ]
+    ) {
       expect(SecretProxy.parseConnectAuthority(authority)).toBeUndefined()
     }
 
