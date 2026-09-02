@@ -83,7 +83,7 @@ import {
 import { canonicalIssue, cappedIssue, schemaIssuePath } from "./internal/issues.ts"
 import { accepted, alreadyApplied, canonical, emptyEnvelope, planCard, sameEnvelope } from "./internal/planning.ts"
 import * as Lineage from "./Lineage.ts"
-import initial from "./migrations/0001_control_tables.ts"
+import { initial } from "./migrations/0001_control_tables.ts"
 import { plannable } from "./SystemFlows.ts"
 
 /**

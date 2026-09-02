@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed the CommonJS build of the migration set. `migrations/0001_control_tables`
+  now exports `initial` as a named binding and every importer reads it by name,
+  because esbuild's Node interop for a default import of a sibling module
+  resolved to the whole exports object instead of the Effect, so
+  `require("@smthrs/control")` failed at load with
+  `initial.pipe is not a function`.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 ### Added

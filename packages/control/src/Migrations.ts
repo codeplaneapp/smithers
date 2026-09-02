@@ -9,7 +9,7 @@
  */
 import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import * as Layer from "effect/Layer"
-import initial from "./migrations/0001_control_tables.ts"
+import { initial } from "./migrations/0001_control_tables.ts"
 
 /**
  * The control package's namespaced migration set.
