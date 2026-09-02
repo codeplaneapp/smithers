@@ -34,6 +34,36 @@ describe("Logger layers", () => {
     expect(values[0]?.annotations).toEqual({ runId: "run-1" })
   })
 
+  it("leaves an application-chosen minimum level alone and pins it only when asked", async () => {
+    const inherited = captured()
+    const survived = await Effect.runPromise(
+      Effect.gen(function*() {
+        yield* Effect.logDebug("below the effect default but above the application's")
+        return yield* References.MinimumLogLevel
+      }).pipe(
+        Effect.provide(Logger.layer(inherited.logger)),
+        Effect.provideService(References.MinimumLogLevel, "Debug")
+      )
+    )
+
+    expect(survived).toBe("Debug")
+    expect(inherited.values).toHaveLength(1)
+
+    const pinned = captured()
+    const overridden = await Effect.runPromise(
+      Effect.gen(function*() {
+        yield* Effect.logInfo("below the pinned level")
+        return yield* References.MinimumLogLevel
+      }).pipe(
+        Effect.provide(Logger.layer(pinned.logger, { minimumLogLevel: "Warn" })),
+        Effect.provideService(References.MinimumLogLevel, "Debug")
+      )
+    )
+
+    expect(overridden).toBe("Warn")
+    expect(pinned.values).toHaveLength(0)
+  })
+
   it("composes `layer` around a caller-supplied logger, defaults and all", async () => {
     const { logger, values } = captured()
     const level = await Effect.runPromise(

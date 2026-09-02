@@ -18,7 +18,6 @@ import type { Configuration as ResourceConfiguration } from "./Resource.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Options {
   readonly resource: ResourceConfiguration
@@ -33,7 +32,6 @@ export interface Options {
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerOtel = (options: Options): Layer.Layer<never, Resource.InvalidResourceConfiguration> =>
   Layer.unwrap(

@@ -21,7 +21,6 @@ import {
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Options {
   readonly resource: ResourceConfiguration
@@ -38,7 +37,6 @@ export interface Options {
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerOtel = (options: Options): Layer.Layer<never, InvalidResourceConfiguration> => {
   const resource = resourceLayer(options.resource)
@@ -71,6 +69,5 @@ export const layerOtel = (options: Options): Layer.Layer<never, InvalidResourceC
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerNoop: Layer.Layer<never> = Layer.empty

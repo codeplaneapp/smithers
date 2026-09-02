@@ -24,6 +24,7 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import type * as Headers from "effect/unstable/http/Headers"
 import type * as HttpClient from "effect/unstable/http/HttpClient"
 import * as Otlp from "effect/unstable/observability/Otlp"
+import * as Endpoint from "./Endpoint.ts"
 import * as Resource from "./Resource.ts"
 
 /**
@@ -33,7 +34,6 @@ import * as Resource from "./Resource.ts"
  *
  * @category resource
  * @since 0.1.0
- * @slop
  */
 export const defaultServiceName = "flows"
 
@@ -49,7 +49,6 @@ export const defaultServiceName = "flows"
  *
  * @category resource
  * @since 0.1.0
- * @slop
  */
 export const defaultServiceVersion = "1.0.0-rc.0"
 
@@ -58,12 +57,13 @@ export const defaultServiceVersion = "1.0.0-rc.0"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Options {
   /**
    * The collector base URL, for example `http://localhost:4318`. Signals are
-   * posted below it at `/v1/logs`, `/v1/metrics`, and `/v1/traces`.
+   * posted below it at `/v1/logs`, `/v1/metrics`, and `/v1/traces`. It must be
+   * an absolute `http:` or `https:` URL without credentials; anything else
+   * fails layer acquisition with {@link Endpoint.InvalidExporterEndpoint}.
    */
   readonly baseUrl: string
   /** Overrides {@link defaultServiceName} as the `service.name` attribute. */
@@ -94,23 +94,29 @@ export interface Options {
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer = (
   options: Options
-): Layer.Layer<never, Resource.InvalidResourceConfiguration, HttpClient.HttpClient> =>
+): Layer.Layer<
+  never,
+  Resource.InvalidResourceConfiguration | Endpoint.InvalidExporterEndpoint,
+  HttpClient.HttpClient
+> =>
   Layer.unwrap(
     Effect.map(
-      Resource.decode({
-        serviceName: options.serviceName ?? defaultServiceName,
-        serviceVersion: options.serviceVersion ?? defaultServiceVersion,
-        ...(options.attributes === undefined ? {} : { attributes: options.attributes })
-      }),
-      (decoded) => {
+      Effect.all([
+        Resource.decode({
+          serviceName: options.serviceName ?? defaultServiceName,
+          serviceVersion: options.serviceVersion ?? defaultServiceVersion,
+          ...(options.attributes === undefined ? {} : { attributes: options.attributes })
+        }),
+        Endpoint.decode(options.baseUrl, "baseUrl")
+      ]),
+      ([decoded, baseUrl]) => {
         const resource = Resource.toOpenTelemetryConfiguration(decoded)
         return (
           Otlp.layerJson({
-            baseUrl: options.baseUrl,
+            baseUrl,
             resource: {
               serviceName: resource.serviceName,
               // `serviceVersion` is supplied above before Resource decoding.
@@ -143,9 +149,10 @@ export const layer = (
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
-export const layerFetch = (options: Options): Layer.Layer<never, Resource.InvalidResourceConfiguration> =>
+export const layerFetch = (
+  options: Options
+): Layer.Layer<never, Resource.InvalidResourceConfiguration | Endpoint.InvalidExporterEndpoint> =>
   layer(options).pipe(Layer.provide(FetchHttpClient.layer))
 
 /**
@@ -155,6 +162,5 @@ export const layerFetch = (options: Options): Layer.Layer<never, Resource.Invali
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerNoop: Layer.Layer<never> = Layer.empty

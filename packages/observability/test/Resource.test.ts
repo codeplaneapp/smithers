@@ -6,7 +6,7 @@ import * as Otel from "../src/Otel.ts"
 import * as Otlp from "../src/Otlp.ts"
 import * as Resource from "../src/Resource.ts"
 
-const failureOf = async <A>(layer: Layer.Layer<A, Resource.InvalidResourceConfiguration>) => {
+const failureOf = async <A, E>(layer: Layer.Layer<A, E>) => {
   const exit = await Effect.runPromiseExit(Effect.scoped(Layer.build(layer)))
   expect(exit._tag).toBe("Failure")
   if (exit._tag === "Success") throw new Error("expected resource refusal")

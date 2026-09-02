@@ -1,6 +1,6 @@
 ## Runtime and platform contract
 
-The package is tested with `effect@4.0.0-rc.108`. `Otlp`, `Logger`,
+The package is tested with `effect@4.0.0-rc.108`. `Otlp`, `Endpoint`, `Logger`,
 `JournalLogger`, `Metric`, `Otel`, and `Resource` are reachable from the root
 barrel. `Otlp.layerFetch` uses Effect's HTTP exporter and the host's global
 `fetch`, so that subpath is browser-safe and does not require an OpenTelemetry
@@ -8,9 +8,11 @@ SDK.
 
 The package as a whole is not Effect-only. `Otel` and `Resource` bridge the
 OpenTelemetry API, while `NodeOtel` and `BrowserOtel` use the SDK packages
-declared in this package's manifest. `NodeOtel` reaches Node-specific SDK code
-and must not enter a browser graph. `BrowserOtel` accepts processors and
-readers created by the application and contains no Node built-in.
+declared in this package's manifest. `NodeOtel` resolves Node-only host modules,
+including the bare `async_hooks` specifier that `@opentelemetry/sdk-trace-node`
+reaches through `@opentelemetry/context-async-hooks`, so it does not bundle for
+a browser and must not enter a browser graph. `BrowserOtel` accepts processors
+and readers created by the application and contains no Node module.
 
 ## Resource validation
 
@@ -28,6 +30,23 @@ values are not retained in the error.
 - NUL and unpaired UTF-16 surrogates are refused. Valid astral Unicode is
   preserved.
 
+## Collector endpoints
+
+`Otlp.layer`, `Otlp.layerFetch`, and `NodeOtel.layerOtel` decode their collector
+endpoint the same way they decode a resource. It must be an absolute `http:` or
+`https:` URL of at most 2,048 characters carrying no userinfo. Anything else
+fails layer acquisition with `Endpoint.InvalidExporterEndpoint`, code
+`invalid_exporter_endpoint`, and the name of the option it arrived on:
+`baseUrl` for `Otlp`, `endpoint` for `NodeOtel`. The rejected value is not
+retained in the error.
+
+Acquisition is the only place this can be reported. Export failure is absorbed
+by design, so a layer built against an unusable endpoint would otherwise look
+exactly like a working one and simply never deliver.
+
+Repeated trailing separators are normalized away, so `http://host//` and
+`http://host` both post to `http://host/v1/traces`.
+
 ## Journal forwarding
 
 `JournalLogger.layerJournalForwarding` snapshots, bounds, and redacts a log
@@ -41,23 +60,50 @@ The queue defaults to 256 records and accepts a configured capacity from 1
 through 65,536. A snapshot accepts at most 1 MiB of encoded data, 4,096
 container members, and 64 container edges. Unreadable values become
 `[Unrenderable]`; values past a ceiling become `[Truncated]`; deep values become
-`[Deep]`. The same journal redaction rules used for durable events run before
-queue admission.
+`[Deep]`. Container-shaped fields keep their shape: annotations whose snapshot
+spent the budget arrive as `{ "[Truncated]": "[Truncated]" }` rather than as a
+scalar. A projection that still fails `TelemetryLog` degrades to a total record
+with an empty cause, so every durable `telemetry.log` row decodes with the
+exported schema. Text is bounded in one pass that never cuts a surrogate pair.
+The same journal redaction rules used for durable events run before queue
+admission.
 
-The callback never blocks. A full queue drops the new record. Journal delivery
-failure is absorbed because reporting it through the same logger would recurse.
-Closing the layer interrupts the worker and can drop records queued behind an
-in-flight write. Invalid run ids or capacities fail layer acquisition with
-`InvalidJournalLoggerOptions`; they are never routed through the lossy worker.
+The callback never blocks. A full queue drops the new record. A journal
+delivery failure is reported as a warning annotated with the run id, and a
+defect raised by a journal implementation is reported the same way and the
+worker keeps draining; interruption still ends it. Each of those three losses
+advances `Metric.droppedLogRecords`. Reporting is safe because the worker is
+forked before the logger it feeds is installed, so its ambient logger set never
+contains that logger. Closing the layer interrupts the worker and can drop
+records queued behind an in-flight write. Invalid run ids or capacities fail
+layer acquisition with `InvalidJournalLoggerOptions`; they are never routed
+through the lossy worker.
+
+The layer replaces the ambient logger set unless `mergeWithExisting` is `true`.
+It provides `References.MinimumLogLevel` only when `minimumLogLevel` is given,
+so an application that chose a level elsewhere keeps it and Effect's own `Info`
+default applies otherwise.
+
+## Logger layers
+
+`Logger.layerPrettyDev`, `Logger.layerStructuredJson`, and `Logger.layer` follow
+the same two rules. `mergeWithExisting` defaults to `false`, matching Effect's
+own `Logger.layer`, so installing one of them replaces the ambient logger set.
+`minimumLogLevel` is applied only when the caller names it. `Logger.layerNoop`
+is the exception: silencing is its purpose, so it pins `None` unless the caller
+names another level.
 
 ## Runtime metrics
 
-`Metric` exports three cross-package runtime signals. `runThroughput` advances
-only after `RunStore.transitionOwned` commits a terminal transition.
-`activeSeats` is a gauge held for the lifetime of a production `Agent.run`
-stream and released on success, failure, or interruption. `quotaParks`
-advances when the sealed quota decision is first executed, not when that
-decision is replayed after a wake or process restart.
+`Metric` exports three cross-package runtime signals and one of its own.
+`runThroughput` advances only after `RunStore.transitionOwned` commits a
+terminal transition. `activeSeats` is a gauge held for the lifetime of a
+production `Agent.run` stream and released on success, failure, or
+interruption. `quotaParks` advances when the sealed quota decision is first
+executed, not when that decision is replayed after a wake or process restart.
+`droppedLogRecords` counts operational log records lost before durable
+delivery, one per queue overflow, per journal delivery failure, and per defect
+the forwarding worker recovers from.
 
 Step-cache lookup and write counters remain owned by `@smthrs/step-cache`.
 This package does not duplicate those handles.

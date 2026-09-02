@@ -13,6 +13,7 @@ import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Endpoint from "./Endpoint.ts"
 import * as Resource from "./Resource.ts"
 import type { Configuration as ResourceConfiguration } from "./Resource.ts"
 
@@ -21,17 +22,18 @@ import type { Configuration as ResourceConfiguration } from "./Resource.ts"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Options {
+  /**
+   * The collector base URL. It must be an absolute `http:` or `https:` URL
+   * without credentials; anything else fails layer acquisition with
+   * {@link Endpoint.InvalidExporterEndpoint}.
+   */
   readonly endpoint: string
   readonly resource: ResourceConfiguration
   readonly shutdownTimeout?: Duration.Input | undefined
   readonly exportIntervalMillis?: number | undefined
 }
-
-const endpointFor = (endpoint: string, signal: "traces" | "metrics" | "logs"): string =>
-  `${endpoint.replace(/\/$/, "")}/v1/${signal}`
 
 /**
  * Builds a scoped Node OTLP/HTTP layer for all three telemetry signals.
@@ -39,32 +41,37 @@ const endpointFor = (endpoint: string, signal: "traces" | "metrics" | "logs"): s
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
-export const layerOtel = (options: Options): Layer.Layer<never, Resource.InvalidResourceConfiguration> =>
+export const layerOtel = (
+  options: Options
+): Layer.Layer<never, Resource.InvalidResourceConfiguration | Endpoint.InvalidExporterEndpoint> =>
   Layer.unwrap(
-    Effect.map(Resource.decode(options.resource), (decoded) =>
-      NodeSdk.layer(() => {
-        const resource = Resource.toOpenTelemetryConfiguration(decoded)
-        const endpoint = options.endpoint
-        const spanProcessor = new BatchSpanProcessor(new OTLPTraceExporter({ url: endpointFor(endpoint, "traces") }))
-        const logRecordProcessor = new BatchLogRecordProcessor({
-          exporter: new OTLPLogExporter({ url: endpointFor(endpoint, "logs") })
+    Effect.map(
+      Effect.all([Resource.decode(options.resource), Endpoint.decode(options.endpoint, "endpoint")]),
+      ([decoded, endpoint]) =>
+        NodeSdk.layer(() => {
+          const resource = Resource.toOpenTelemetryConfiguration(decoded)
+          const spanProcessor = new BatchSpanProcessor(
+            new OTLPTraceExporter({ url: Endpoint.signalUrl(endpoint, "traces") })
+          )
+          const logRecordProcessor = new BatchLogRecordProcessor({
+            exporter: new OTLPLogExporter({ url: Endpoint.signalUrl(endpoint, "logs") })
+          })
+          const metricReader = options.exportIntervalMillis === undefined
+            ? new PeriodicExportingMetricReader({
+              exporter: new OTLPMetricExporter({ url: Endpoint.signalUrl(endpoint, "metrics") })
+            })
+            : new PeriodicExportingMetricReader({
+              exporter: new OTLPMetricExporter({ url: Endpoint.signalUrl(endpoint, "metrics") }),
+              exportIntervalMillis: options.exportIntervalMillis
+            })
+          return {
+            resource,
+            spanProcessor,
+            logRecordProcessor,
+            metricReader,
+            shutdownTimeout: options.shutdownTimeout
+          }
         })
-        const metricReader = options.exportIntervalMillis === undefined
-          ? new PeriodicExportingMetricReader({
-            exporter: new OTLPMetricExporter({ url: endpointFor(endpoint, "metrics") })
-          })
-          : new PeriodicExportingMetricReader({
-            exporter: new OTLPMetricExporter({ url: endpointFor(endpoint, "metrics") }),
-            exportIntervalMillis: options.exportIntervalMillis
-          })
-        return {
-          resource,
-          spanProcessor,
-          logRecordProcessor,
-          metricReader,
-          shutdownTimeout: options.shutdownTimeout
-        }
-      }))
+    )
   )

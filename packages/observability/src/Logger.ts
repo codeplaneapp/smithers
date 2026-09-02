@@ -13,18 +13,38 @@ import * as References from "effect/References"
  *
  * @category models
  * @since 0.1.0
- * @slop
  */
 export interface Options {
+  /**
+   * Pins `References.MinimumLogLevel` for the whole application. Omitted, the
+   * layer leaves that reference alone and Effect's own `Info` default applies.
+   */
   readonly minimumLogLevel?: LogLevel.LogLevel | undefined
+  /**
+   * Keeps the ambient loggers alongside this one. Defaults to `false`, which
+   * replaces the ambient logger set, matching Effect's own `Logger.layer`.
+   */
   readonly mergeWithExisting?: boolean | undefined
 }
 
-const withMinimumLogLevel = (layer: Layer.Layer<never>, minimumLogLevel: LogLevel.LogLevel): Layer.Layer<never> =>
-  Layer.merge(layer, Layer.succeed(References.MinimumLogLevel, minimumLogLevel))
+/**
+ * Installs the minimum-level reference only when the caller named a level, so
+ * a layer that adds a sink does not pin the level an application chose
+ * elsewhere. Effect's own default for the reference is already `Info`.
+ */
+const withMinimumLogLevel = (
+  layer: Layer.Layer<never>,
+  minimumLogLevel: LogLevel.LogLevel | undefined
+): Layer.Layer<never> =>
+  minimumLogLevel === undefined
+    ? layer
+    : Layer.merge(layer, Layer.succeed(References.MinimumLogLevel, minimumLogLevel))
 
-const optionsWithDefaults = (options?: Options): Required<Pick<Options, "minimumLogLevel" | "mergeWithExisting">> => ({
-  minimumLogLevel: options?.minimumLogLevel ?? "Info",
+const optionsWithDefaults = (options?: Options): {
+  readonly minimumLogLevel: LogLevel.LogLevel | undefined
+  readonly mergeWithExisting: boolean
+} => ({
+  minimumLogLevel: options?.minimumLogLevel,
   mergeWithExisting: options?.mergeWithExisting ?? false
 })
 
@@ -33,7 +53,6 @@ const optionsWithDefaults = (options?: Options): Required<Pick<Options, "minimum
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerPrettyDev = (options?: Options): Layer.Layer<never> => {
   const resolved = optionsWithDefaults(options)
@@ -41,7 +60,7 @@ export const layerPrettyDev = (options?: Options): Layer.Layer<never> => {
     Logger.layer([Logger.consolePretty({ colors: "auto", mode: "auto" })], {
       mergeWithExisting: resolved.mergeWithExisting
     }),
-    resolved.minimumLogLevel as LogLevel.LogLevel
+    resolved.minimumLogLevel
   )
 }
 
@@ -50,13 +69,12 @@ export const layerPrettyDev = (options?: Options): Layer.Layer<never> => {
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerStructuredJson = (options?: Options): Layer.Layer<never> => {
   const resolved = optionsWithDefaults(options)
   return withMinimumLogLevel(
     Logger.layer([Logger.consoleJson], { mergeWithExisting: resolved.mergeWithExisting }),
-    resolved.minimumLogLevel as LogLevel.LogLevel
+    resolved.minimumLogLevel
   )
 }
 
@@ -65,7 +83,6 @@ export const layerStructuredJson = (options?: Options): Layer.Layer<never> => {
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layerNoop = (options?: Pick<Options, "minimumLogLevel">): Layer.Layer<never> =>
   withMinimumLogLevel(
@@ -78,12 +95,11 @@ export const layerNoop = (options?: Pick<Options, "minimumLogLevel">): Layer.Lay
  *
  * @category layers
  * @since 0.1.0
- * @slop
  */
 export const layer = (logger: Logger.Logger<unknown, unknown>, options?: Options): Layer.Layer<never> => {
   const resolved = optionsWithDefaults(options)
   return withMinimumLogLevel(
     Logger.layer([logger], { mergeWithExisting: resolved.mergeWithExisting }),
-    resolved.minimumLogLevel as LogLevel.LogLevel
+    resolved.minimumLogLevel
   )
 }

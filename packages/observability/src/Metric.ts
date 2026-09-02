@@ -12,7 +12,6 @@ const prefix = "flows/"
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const runThroughput = Metric.counter(`${prefix}run/throughput`, {
   description: "Completed flow runs"
@@ -23,7 +22,6 @@ export const runThroughput = Metric.counter(`${prefix}run/throughput`, {
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const activeSeats = Metric.gauge(`${prefix}seat/active`, {
   description: "Currently active execution seats"
@@ -34,10 +32,23 @@ export const activeSeats = Metric.gauge(`${prefix}seat/active`, {
  *
  * @category metrics
  * @since 0.1.0
- * @slop
  */
 export const quotaParks = Metric.counter(`${prefix}quota/park`, {
   description: "Runs parked by quota enforcement"
+})
+
+/**
+ * Counts operational log records lost before durable delivery.
+ *
+ * Advances once per record dropped by a saturated forwarding queue, once per
+ * journal delivery failure, and once per defect the forwarding worker recovers
+ * from, so telemetry loss is distinguishable from an idle logger.
+ *
+ * @category metrics
+ * @since 1.0.0-rc.0
+ */
+export const droppedLogRecords = Metric.counter(`${prefix}observability/log/dropped`, {
+  description: "Operational log records dropped before durable delivery"
 })
 
 /**
@@ -45,10 +56,10 @@ export const quotaParks = Metric.counter(`${prefix}quota/park`, {
  *
  * @category registry
  * @since 0.1.0
- * @slop
  */
 export const registry = {
   runThroughput,
   activeSeats,
-  quotaParks
+  quotaParks,
+  droppedLogRecords
 } as const

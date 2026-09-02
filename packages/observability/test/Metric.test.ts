@@ -14,11 +14,29 @@ describe("Metric registry", () => {
           seats: yield* Metric.value(FlowsMetric.activeSeats),
           parks: yield* Metric.value(FlowsMetric.quotaParks)
         }
-      })
+      }).pipe(Effect.provideService(Metric.MetricRegistry, new Map()))
     )
     expect(result.throughput.count).toBe(1)
     expect(result.seats.value).toBe(3)
     expect(result.parks.count).toBe(2)
-    expect(Object.keys(FlowsMetric.registry)).toHaveLength(3)
+  })
+
+  /**
+   * The identifiers are the dashboard contract: the handles are updated at
+   * producer seams in `@smthrs/agent` and `@smthrs/run-store`, so a rename that
+   * only the value assertions covered would ship silently.
+   */
+  it("publishes the exact metric identifiers and no others", () => {
+    expect(
+      Object.fromEntries(
+        Object.entries(FlowsMetric.registry).map(([name, handle]) => [name, handle.id])
+      )
+    ).toEqual({
+      runThroughput: "flows/run/throughput",
+      activeSeats: "flows/seat/active",
+      quotaParks: "flows/quota/park",
+      droppedLogRecords: "flows/observability/log/dropped"
+    })
+    expect(Object.keys(FlowsMetric.registry)).toHaveLength(4)
   })
 })

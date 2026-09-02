@@ -1,6 +1,6 @@
 import { Journal, JournalEvent } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
-import { Cause, Deferred, Effect, Layer, Logger, Result, Schema } from "effect"
+import { Cause, Deferred, Effect, Layer, Logger, Metric, References, Result, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
   InvalidJournalLoggerOptions,
@@ -13,9 +13,108 @@ import {
   truncatedMarker,
   unrenderableMarker
 } from "../src/JournalLogger.ts"
+import { droppedLogRecords } from "../src/Metric.ts"
 
 const run = <A, E>(program: Effect.Effect<A, E, never>) => Effect.runPromise(program.pipe(Effect.scoped))
 const runId = (value: string): JournalEvent.RunId => Schema.decodeUnknownSync(JournalEvent.RunId)(value)
+
+/** The malformation `Resource` refuses, used here as an independent oracle. */
+const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+
+/** Waits for an out-of-band worker effect without pinning a wall-clock delay. */
+const settled = (predicate: () => boolean) =>
+  Effect.gen(function*() {
+    for (let attempt = 0; attempt < 400 && !predicate(); attempt++) yield* Effect.sleep("5 millis")
+  })
+
+/** A journal stand-in whose receipts are accepted in arrival order. */
+const acceptingJournal = (onEmit: (input: JournalEvent.Input) => Effect.Effect<void, Journal.JournalError>) => {
+  let sequence = 0
+  return Journal.layerNoop({
+    emitLossy: (input) =>
+      onEmit(input).pipe(
+        Effect.map(() => ({
+          _tag: "Accepted" as const,
+          seq: sequence as JournalEvent.Seq,
+          sourceSeq: sequence++ as JournalEvent.SourceSeq
+        }))
+      )
+  })
+}
+
+/** A seeded generator, so a red property run is reproducible from its seed. */
+const mulberry32 = (seed: number) => () => {
+  seed = (seed + 0x6d2b79f5) | 0
+  let value = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+  value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value
+  return ((value ^ (value >>> 14)) >>> 0) / 4294967296
+}
+
+/**
+ * Values chosen to attack the snapshot: identity traps, unreadable members,
+ * malformed text, and payloads past every declared ceiling.
+ */
+const hostileValue = (next: () => number, depth: number): unknown => {
+  const pick = Math.floor(next() * 16)
+  switch (pick) {
+    case 0: {
+      const cycle: { self?: unknown } = {}
+      cycle.self = cycle
+      return cycle
+    }
+    case 1:
+      return Object.defineProperty({}, "value", {
+        enumerable: true,
+        get: () => {
+          throw new Error("must not run")
+        }
+      })
+    case 2: {
+      const revoked = Proxy.revocable({ value: "secret" }, {})
+      revoked.revoke()
+      return { revoked: revoked.proxy }
+    }
+    case 3:
+      return "\u{1F600}".repeat(1 + Math.floor(next() * 64))
+    case 4:
+      return `${"\ud800"}lone${"\udfff"}`
+    case 5:
+      return depth > 6 ? "leaf" : { next: hostileValue(next, depth + 1) }
+    case 6:
+      return Array.from({ length: maximumSnapshotMembers + 8 }, (_, index) => index)
+    case 7:
+      return { apiKey: "x".repeat(maximumSnapshotBytes) }
+    case 8:
+      return 2n ** 70n
+    case 9:
+      return Symbol("hostile")
+    case 10:
+      return () => undefined
+    case 11:
+      return new Date(next() > 0.5 ? 0 : Number.NaN)
+    case 12:
+      return new Uint8Array([1, 2, 3])
+    case 13:
+      return { token: "sk-live-abcdefgh", nested: depth > 4 ? null : hostileValue(next, depth + 1) }
+    case 14:
+      return [Number.NaN, Number.POSITIVE_INFINITY, true, null, "\u0000"]
+    default:
+      return `plain-${Math.floor(next() * 1000)}`
+  }
+}
+
+/** Collects only the warnings a forwarding worker reports to the ambient set. */
+const warningSink = () => {
+  const warnings: Array<{ message: unknown; annotations: Readonly<Record<string, unknown>> }> = []
+  const logger = Logger.make<unknown, void>((options) => {
+    if (options.logLevel !== "Warn") return
+    warnings.push({
+      message: options.message,
+      annotations: options.fiber.getRef(References.CurrentLogAnnotations)
+    })
+  })
+  return { warnings, logger }
+}
 
 const entriesEventually = (
   journal: Journal.Service,
@@ -424,5 +523,384 @@ describe("JournalLogger", () => {
     )
 
     expect(seen).toEqual([["merged"]])
+  })
+
+  it("keeps annotations a record when one logged value spends the whole snapshot budget", async () => {
+    const id = runId("spent-budget-run")
+    const payload = await run(
+      Effect.gen(function*() {
+        const journal = yield* Journal.Journal
+        yield* Effect.logInfo({ apiKey: "x".repeat(maximumSnapshotBytes) }).pipe(
+          Effect.annotateLogs({ lane: "spent" })
+        )
+        const [entry] = yield* entriesEventually(journal, id, 1)
+        return Schema.decodeUnknownSync(TelemetryLog)(entry!.payload)
+      }).pipe(
+        Effect.provide(Layer.provideMerge(layerJournalForwarding({ runId: id }), TestJournal.layer()))
+      )
+    )
+
+    expect(payload.message).toEqual([{ apiKey: "[REDACTED]" }])
+    expect(payload.annotations).toEqual({ [truncatedMarker]: truncatedMarker })
+  })
+
+  it("names an unusable annotations reference instead of writing a scalar", async () => {
+    const id = runId("annotation-shape-run")
+    const payloads = await run(
+      Effect.gen(function*() {
+        const journal = yield* Journal.Journal
+        yield* Effect.withFiber((fiber) =>
+          Effect.sync(() => {
+            const logger = [...fiber.getRef(Logger.CurrentLoggers)][0]!
+            for (const annotations of [null, ["not", "a", "record"]]) {
+              logger.log({
+                message: ["shape"],
+                logLevel: "Info",
+                cause: Cause.empty,
+                fiber: {
+                  id: fiber.id,
+                  context: fiber.context,
+                  currentSpan: undefined,
+                  getRef: () => annotations
+                } as never,
+                date: new Date(0)
+              })
+            }
+          })
+        )
+        const entries = yield* entriesEventually(journal, id, 2)
+        return entries.map((entry) => Schema.decodeUnknownSync(TelemetryLog)(entry.payload))
+      }).pipe(
+        Effect.provide(Layer.provideMerge(layerJournalForwarding({ runId: id }), TestJournal.layer()))
+      )
+    )
+
+    expect(payloads.map((payload) => payload.annotations)).toEqual([
+      { [truncatedMarker]: truncatedMarker },
+      { [truncatedMarker]: truncatedMarker }
+    ])
+  })
+
+  it("degrades to a decodable total record when the projection fails its own schema", async () => {
+    const id = runId("schema-guard-run")
+    const payload = await run(
+      Effect.gen(function*() {
+        const journal = yield* Journal.Journal
+        // A negative interrupt identity is outside `TelemetryInterrupt`, so the
+        // projected payload is a durable row no consumer could decode.
+        yield* Effect.logError("refused", Cause.interrupt(-1))
+        const [entry] = yield* entriesEventually(journal, id, 1)
+        return Schema.decodeUnknownSync(TelemetryLog)(entry!.payload)
+      }).pipe(
+        Effect.provide(Layer.provideMerge(layerJournalForwarding({ runId: id }), TestJournal.layer()))
+      )
+    )
+
+    expect(payload).toMatchObject({
+      level: "Error",
+      message: truncatedMarker,
+      annotations: {},
+      cause: { version: 1, reasons: [] }
+    })
+  })
+
+  it("bounds a multi-megabyte record in one pass and never retains half a surrogate pair", async () => {
+    const id = runId("bounded-cost-run")
+    const astral = "\u{1F600}".repeat(600_000)
+    const escaped = `"\\\n\u0001aéあ𐀀\u{1F600}`.repeat(200_000)
+    const malformed = `${"\ud800"}lone${"\udfff"}`.repeat(200_000)
+    const { elapsed, payloads } = await run(
+      Effect.gen(function*() {
+        const journal = yield* Journal.Journal
+        const measured = yield* Effect.withFiber((fiber) =>
+          Effect.sync(() => {
+            const logger = [...fiber.getRef(Logger.CurrentLoggers)][0]!
+            const emit = (message: unknown) =>
+              logger.log({
+                message,
+                logLevel: "Info",
+                cause: Cause.empty,
+                fiber: fiber as never,
+                date: new Date(0)
+              })
+            // One full encode of the same value is the unit of work. It is
+            // native, so it absorbs machine load and coverage instrumentation
+            // the same way the snapshot does and keeps this bound stable.
+            const encodeOnce = () => {
+              const at = performance.now()
+              new TextEncoder().encode(JSON.stringify(astral))
+              return performance.now() - at
+            }
+            encodeOnce()
+            const unit = Math.min(encodeOnce(), encodeOnce(), encodeOnce())
+            const started = performance.now()
+            emit(astral)
+            const cost = performance.now() - started
+            emit(escaped)
+            emit(malformed)
+            return cost / unit
+          })
+        )
+        const entries = yield* entriesEventually(journal, id, 3)
+        return {
+          elapsed: measured,
+          payloads: entries.map((entry) => Schema.decodeUnknownSync(TelemetryLog)(entry.payload))
+        }
+      }).pipe(
+        Effect.provide(Layer.provideMerge(layerJournalForwarding({ runId: id }), TestJournal.layer()))
+      )
+    )
+
+    // The binary search this replaced re-encoded the value about twenty times:
+    // 122 ms against a 2.0 ms single pass for this input, or nine reference
+    // encodes for the search alone before the rest of the snapshot ran.
+    expect(elapsed, `snapshot cost in reference encodes: ${elapsed.toFixed(1)}`).toBeLessThan(12)
+    for (const payload of payloads) {
+      const message = payload.message as string
+      expect(message.endsWith(truncatedMarker)).toBe(true)
+      expect(new TextEncoder().encode(JSON.stringify(payload)).byteLength).toBeLessThanOrEqual(maximumSnapshotBytes)
+    }
+    // A cut inside a surrogate pair would leave text this package's own
+    // `Resource` validator refuses. The third input was malformed on arrival,
+    // so only the first two carry that guarantee.
+    expect(loneSurrogate.test(payloads[0]!.message as string)).toBe(false)
+    expect(loneSurrogate.test(payloads[1]!.message as string)).toBe(false)
+  })
+
+  it("reports and counts a journal delivery failure, then keeps forwarding", async () => {
+    const sink = warningSink()
+    const delivered: Array<unknown> = []
+    let attempts = 0
+    const dropped = await run(
+      Effect.gen(function*() {
+        const before = yield* Metric.value(droppedLogRecords)
+        yield* Effect.logInfo("refused")
+        yield* settled(() => sink.warnings.length >= 1)
+        yield* Effect.logInfo("accepted")
+        yield* settled(() => delivered.length >= 1)
+        return (yield* Metric.value(droppedLogRecords)).count - before.count
+      }).pipe(
+        Effect.provide(
+          Layer.provide(
+            layerJournalForwarding({ runId: runId("delivery-failure-run") }),
+            Layer.merge(
+              acceptingJournal((input) => {
+                attempts += 1
+                return attempts === 1
+                  ? Effect.fail(new Journal.JournalError({ code: "journal_closed", message: "emitLossy is closed" }))
+                  : Effect.sync(() => {
+                    delivered.push((input.payload as TelemetryLog).message)
+                  })
+              }),
+              Logger.layer([sink.logger], { mergeWithExisting: false })
+            )
+          )
+        )
+      )
+    )
+
+    expect(sink.warnings[0]?.message).toEqual(["A telemetry log record could not be forwarded"])
+    expect(sink.warnings[0]?.annotations).toMatchObject({ runId: "delivery-failure-run" })
+    expect(delivered).toEqual([["accepted"]])
+    expect(dropped).toBe(1)
+  })
+
+  it("survives a journal defect instead of dying for the rest of the run", async () => {
+    const sink = warningSink()
+    const delivered: Array<unknown> = []
+    let attempts = 0
+    const dropped = await run(
+      Effect.gen(function*() {
+        const before = yield* Metric.value(droppedLogRecords)
+        yield* Effect.logInfo("defective")
+        yield* settled(() => sink.warnings.length >= 1)
+        yield* Effect.logInfo("recovered")
+        yield* settled(() => delivered.length >= 1)
+        return (yield* Metric.value(droppedLogRecords)).count - before.count
+      }).pipe(
+        Effect.provide(
+          Layer.provide(
+            layerJournalForwarding({ runId: runId("defect-run") }),
+            Layer.merge(
+              acceptingJournal((input) => {
+                attempts += 1
+                if (attempts === 1) return Effect.die(new Error("journal driver exploded"))
+                return Effect.sync(() => {
+                  delivered.push((input.payload as TelemetryLog).message)
+                })
+              }),
+              Logger.layer([sink.logger], { mergeWithExisting: false })
+            )
+          )
+        )
+      )
+    )
+
+    expect(sink.warnings[0]?.message).toEqual(["The telemetry forwarding worker recovered from a defect"])
+    expect(delivered).toEqual([["recovered"]])
+    expect(dropped).toBe(1)
+  })
+
+  it("treats interruption as fatal rather than recovering from it like a defect", async () => {
+    const sink = warningSink()
+    const delivered: Array<unknown> = []
+    let attempts = 0
+    await run(
+      Effect.gen(function*() {
+        yield* Effect.logInfo("interrupted")
+        yield* Effect.sleep("40 millis")
+        yield* Effect.logInfo("never drained")
+        yield* Effect.sleep("40 millis")
+      }).pipe(
+        Effect.provide(
+          Layer.provide(
+            layerJournalForwarding({ runId: runId("worker-interrupt-run") }),
+            Layer.merge(
+              acceptingJournal(() => {
+                attempts += 1
+                return attempts === 1 ? Effect.interrupt : Effect.sync(() => {
+                  delivered.push(attempts)
+                })
+              }),
+              Logger.layer([sink.logger], { mergeWithExisting: false })
+            )
+          )
+        )
+      )
+    )
+
+    expect(sink.warnings).toEqual([])
+    expect(delivered).toEqual([])
+  })
+
+  it("counts the record a saturated queue drops", async () => {
+    const entered = Deferred.makeUnsafe<void>()
+    const release = Deferred.makeUnsafe<void>()
+    const dropped = await run(
+      Effect.gen(function*() {
+        const before = yield* Metric.value(droppedLogRecords)
+        yield* Effect.logInfo("first")
+        yield* Deferred.await(entered)
+        yield* Effect.logInfo("second")
+        yield* Effect.logInfo("dropped")
+        yield* Deferred.succeed(release, undefined)
+        yield* Effect.sleep("20 millis")
+        return (yield* Metric.value(droppedLogRecords)).count - before.count
+      }).pipe(
+        Effect.provide(
+          Layer.provide(
+            layerJournalForwarding({ runId: runId("overflow-metric-run"), capacity: 1 }),
+            acceptingJournal(() => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))))
+          )
+        )
+      )
+    )
+
+    expect(dropped).toBe(1)
+  })
+
+  it("leaves an application-chosen minimum level alone and replaces the ambient loggers by default", async () => {
+    const seen: Array<unknown> = []
+    const ambient = Logger.make<unknown, void>((options) => seen.push(options.message))
+    const id = runId("defaults-run")
+    const payload = await run(
+      Effect.gen(function*() {
+        const journal = yield* Journal.Journal
+        yield* Effect.logDebug("below the effect default")
+        const [entry] = yield* entriesEventually(journal, id, 1)
+        return Schema.decodeUnknownSync(TelemetryLog)(entry!.payload)
+      }).pipe(
+        Effect.provide(
+          Layer.provideMerge(
+            layerJournalForwarding({ runId: id }),
+            Layer.merge(TestJournal.layer(), Logger.layer([ambient], { mergeWithExisting: false }))
+          )
+        ),
+        Effect.provideService(References.MinimumLogLevel, "Debug")
+      )
+    )
+
+    expect(payload.level).toBe("Debug")
+    expect(seen).toEqual([])
+  })
+
+  it("freezes the durable telemetry.log wire shape", async () => {
+    const id = runId("golden-run")
+    const cause = Cause.combine(
+      Cause.fail({ code: "golden_failure" }),
+      Cause.combine(Cause.die({ reason: "golden_defect" }), Cause.combine(Cause.interrupt(7), Cause.interrupt()))
+    )
+    const payload = await run(
+      Effect.gen(function*() {
+        const journal = yield* Journal.Journal
+        yield* Effect.logError("golden", cause).pipe(
+          Effect.annotateLogs({ lane: "golden", attempt: 2 }),
+          Effect.withSpan("golden-span")
+        )
+        const [entry] = yield* entriesEventually(journal, id, 1)
+        return Schema.decodeUnknownSync(TelemetryLog)(entry!.payload)
+      }).pipe(
+        Effect.provide(Layer.provideMerge(layerJournalForwarding({ runId: id }), TestJournal.layer()))
+      )
+    )
+
+    const { fiberId, spanId, timestamp, traceId, ...frozen } = payload
+    expect(frozen).toEqual({
+      version: 1,
+      level: "Error",
+      message: ["golden"],
+      annotations: { lane: "golden", attempt: 2 },
+      cause: {
+        version: 1,
+        reasons: [
+          { _tag: "Fail", error: { code: "golden_failure" } },
+          { _tag: "Die", defect: { reason: "golden_defect" } },
+          { _tag: "Interrupt", fiberId: 7 },
+          { _tag: "Interrupt", fiberId: null }
+        ]
+      }
+    })
+    expect(Number.isInteger(fiberId) && fiberId >= 0).toBe(true)
+    expect(traceId).toMatch(/^[0-9a-f]{32}$/)
+    expect(spanId).toMatch(/^[0-9a-f]{16}$/)
+    expect(timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+  })
+
+  it("keeps every generated payload decodable and inside the byte ceiling", async () => {
+    const seed = 0x5eed_1234
+    const next = mulberry32(seed)
+    const captured: Array<JournalEvent.Input> = []
+    const records = 200
+    await run(
+      Effect.gen(function*() {
+        for (let index = 0; index < records; index++) {
+          yield* Effect.logInfo({ value: hostileValue(next, 0) }).pipe(
+            Effect.annotateLogs({ note: { value: hostileValue(next, 0) } })
+          )
+        }
+        yield* settled(() => captured.length >= records)
+      }).pipe(
+        Effect.provide(
+          Layer.provide(
+            layerJournalForwarding({ runId: runId("property-run"), capacity: maximumCapacity }),
+            acceptingJournal((input) =>
+              Effect.sync(() => {
+                captured.push(input)
+              })
+            )
+          )
+        )
+      )
+    )
+
+    expect(captured, `seed ${seed}`).toHaveLength(records)
+    for (const [index, input] of captured.entries()) {
+      const decoded = () => Schema.decodeUnknownSync(TelemetryLog)(input.payload)
+      expect(decoded, `seed ${seed}, record ${index}`).not.toThrow()
+      expect(
+        new TextEncoder().encode(JSON.stringify(input.payload)).byteLength,
+        `seed ${seed}, record ${index}`
+      ).toBeLessThanOrEqual(maximumSnapshotBytes)
+    }
   })
 })

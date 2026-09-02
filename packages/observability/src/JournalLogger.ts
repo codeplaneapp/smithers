@@ -6,14 +6,16 @@
 import * as Journal from "@smthrs/journal/Journal"
 import * as JournalEvent from "@smthrs/journal/JournalEvent"
 import * as Redaction from "@smthrs/journal/Redaction"
-import type * as Cause from "effect/Cause"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Logger from "effect/Logger"
 import type * as LogLevel from "effect/LogLevel"
+import * as EffectMetric from "effect/Metric"
 import * as Queue from "effect/Queue"
 import * as References from "effect/References"
 import * as Schema from "effect/Schema"
+import { droppedLogRecords } from "./Metric.ts"
 
 /**
  * Largest queue accepted by the forwarding logger.
@@ -70,9 +72,19 @@ export const truncatedMarker = "[Truncated]"
  * @since 1.0.0-rc.0
  */
 export interface Options {
+  /** The run every forwarded record is attributed to. */
   readonly runId: JournalEvent.RunId
+  /** Queue depth, 1 through {@link maximumCapacity}. Defaults to 256. */
   readonly capacity?: number | undefined
+  /**
+   * Pins `References.MinimumLogLevel` for the whole application. Omitted, the
+   * layer leaves that reference alone and Effect's own `Info` default applies.
+   */
   readonly minimumLogLevel?: LogLevel.LogLevel | undefined
+  /**
+   * Keeps the ambient loggers alongside the forwarder. Defaults to `false`,
+   * which replaces the ambient logger set.
+   */
   readonly mergeWithExisting?: boolean | undefined
 }
 
@@ -249,22 +261,53 @@ const reserve = (budget: SnapshotBudget, bytes: number): boolean => {
 
 const textBytes = (value: string): number => encoder.encode(JSON.stringify(value)).byteLength
 
-const boundedText = (value: string, budget: SnapshotBudget): string => {
-  const direct = value.length <= maximumSnapshotBytes ? value : value.slice(0, maximumSnapshotBytes)
-  const bytes = textBytes(direct)
-  if (direct.length === value.length && reserve(budget, bytes)) return direct
-  let low = 0
-  let high = direct.length
-  const markerBytes = textBytes(truncatedMarker)
-  const available = Math.max(0, budget.bytes - markerBytes)
-  while (low < high) {
-    const middle = Math.ceil((low + high) / 2)
-    if (textBytes(direct.slice(0, middle)) <= available) low = middle
-    else high = middle - 1
+const quoteBytes = 2
+const shortEscapes = new Set([0x08, 0x09, 0x0a, 0x0c, 0x0d])
+
+/** Bytes one non-surrogate code unit occupies inside a JSON string body. */
+const unitBytes = (code: number): number => {
+  if (code === 0x22 || code === 0x5c) return 2
+  if (code < 0x20) return shortEscapes.has(code) ? 2 : 6
+  if (code < 0x80) return 1
+  if (code < 0x800) return 2
+  return 3
+}
+
+const isLowSurrogate = (code: number): boolean => code >= 0xdc00 && code <= 0xdfff
+
+/**
+ * The longest prefix whose JSON string body fits `limit` bytes, measured in one
+ * forward pass. A surrogate pair is admitted or refused whole, so the retained
+ * text is well formed whenever the input is.
+ */
+const boundedPrefix = (value: string, limit: number): { readonly text: string; readonly bytes: number } => {
+  let bytes = 0
+  let index = 0
+  while (index < value.length) {
+    const code = value.charCodeAt(index)
+    let width = 1
+    let cost: number
+    if (code >= 0xd800 && code <= 0xdbff && isLowSurrogate(value.charCodeAt(index + 1))) {
+      width = 2
+      cost = 4
+    } else if (code >= 0xd800 && code <= 0xdfff) {
+      cost = 6
+    } else {
+      cost = unitBytes(code)
+    }
+    if (bytes + cost > limit) break
+    bytes += cost
+    index += width
   }
-  const prefix = direct.slice(0, low)
-  budget.bytes = Math.max(0, budget.bytes - textBytes(prefix) - markerBytes)
-  return `${prefix}${truncatedMarker}`
+  return { text: value.slice(0, index), bytes }
+}
+
+const boundedText = (value: string, budget: SnapshotBudget): string => {
+  if (value.length <= maximumSnapshotBytes && reserve(budget, textBytes(value))) return value
+  const markerBytes = textBytes(truncatedMarker)
+  const prefix = boundedPrefix(value, Math.max(0, budget.bytes - markerBytes - quoteBytes))
+  budget.bytes = Math.max(0, budget.bytes - (prefix.bytes + quoteBytes) - markerBytes)
+  return `${prefix.text}${truncatedMarker}`
 }
 
 const snapshotValue = (
@@ -367,6 +410,20 @@ const snapshotCause = (cause: Cause.Cause<unknown>, budget: SnapshotBudget): Tel
   })
 })
 
+const isTelemetryLog = Schema.is(TelemetryLog)
+
+/**
+ * Annotations are a container in the durable schema, so a snapshot that spent
+ * the budget names the loss inside a record instead of replacing the record
+ * with a scalar the schema refuses.
+ */
+const snapshotAnnotations = (value: unknown, budget: SnapshotBudget): Readonly<Record<string, unknown>> => {
+  const snapshot = snapshotValue(value, budget, new WeakSet())
+  return typeof snapshot === "object" && snapshot !== null && !Array.isArray(snapshot)
+    ? snapshot as Readonly<Record<string, unknown>>
+    : { [truncatedMarker]: truncatedMarker }
+}
+
 const snapshotLog = (options: Logger.Options<unknown>): TelemetryLog => {
   const budget: SnapshotBudget = {
     bytes: maximumSnapshotBytes,
@@ -378,18 +435,17 @@ const snapshotLog = (options: Logger.Options<unknown>): TelemetryLog => {
       version: 1,
       level: options.logLevel,
       message: snapshotValue(options.message, budget, new WeakSet()),
-      annotations: snapshotValue(
-        options.fiber.getRef(References.CurrentLogAnnotations),
-        budget,
-        new WeakSet()
-      ) as Readonly<Record<string, unknown>>,
+      annotations: snapshotAnnotations(options.fiber.getRef(References.CurrentLogAnnotations), budget),
       cause: snapshotCause(options.cause, budget),
       fiberId: options.fiber.id,
       ...(span === undefined ? {} : { traceId: span.traceId, spanId: span.spanId }),
       timestamp: options.date.toISOString()
     }
     const redacted = Redaction.redact(candidate, { onTooDeep: "name" }) as TelemetryLog
-    return encoder.encode(JSON.stringify(redacted)).byteLength <= maximumSnapshotBytes
+    // The durable row is only useful if the exported schema decodes it, so an
+    // oversized or schema-invalid projection degrades to the total record
+    // rather than to a payload every consumer throws on.
+    return encoder.encode(JSON.stringify(redacted)).byteLength <= maximumSnapshotBytes && isTelemetryLog(redacted)
       ? redacted
       : { ...candidate, message: truncatedMarker, annotations: {}, cause: { version: 1, reasons: [] } }
   } catch {
@@ -424,9 +480,16 @@ const makeLog = (options: Logger.Options<unknown>, runId: JournalEvent.RunId): J
  *
  * Configuration is decoded before a worker starts. The callback snapshots and
  * redacts a bounded DTO synchronously, then performs only non-blocking queue
- * admission. Overflow and journal delivery failures are telemetry losses, not
- * application failures; closing the scope interrupts the worker and may drop
- * records still queued behind an in-flight write.
+ * admission. Overflow, journal delivery failures, and journal defects are
+ * telemetry losses, not application failures: each one advances
+ * `Metric.droppedLogRecords`, the two failure paths also log a warning through
+ * the ambient loggers, and the worker keeps draining. Closing the scope
+ * interrupts the worker and may drop records still queued behind an in-flight
+ * write.
+ *
+ * The layer replaces the ambient logger set unless `mergeWithExisting` is
+ * `true`, and provides `MinimumLogLevel` only when `minimumLogLevel` is given,
+ * so an application that set that reference elsewhere keeps it.
  *
  * @category layers
  * @since 1.0.0-rc.0
@@ -442,23 +505,56 @@ export const layerJournalForwarding = (
           Effect.gen(function*() {
             const journal = yield* Journal.Journal
             const queue = yield* Queue.bounded<JournalEvent.Input>(configured.capacity ?? 256)
+            const dropped = EffectMetric.update(droppedLogRecords, 1)
+            // This worker is forked before the logger it feeds is installed, so
+            // its ambient logger set cannot contain that logger and a warning
+            // here cannot enqueue itself. Delivery stays lossy; the loss is
+            // reported and counted instead of vanishing.
             const forward = Effect.fn("JournalLogger.forward")((input: JournalEvent.Input) =>
-              // Reporting a forwarding failure through this logger would
-              // recursively enqueue another record. Delivery is deliberately
-              // lossy, so the worker absorbs the typed journal refusal.
-              Effect.ignore(journal.emitLossy(input))
+              journal.emitLossy(input).pipe(
+                Effect.catch((error) =>
+                  dropped.pipe(
+                    Effect.andThen(
+                      Effect.annotateLogs(Effect.logWarning("A telemetry log record could not be forwarded"), {
+                        runId: configured.runId,
+                        error
+                      })
+                    )
+                  )
+                )
+              )
             )
             yield* Effect.forever(
-              Queue.take(queue).pipe(Effect.flatMap(forward))
+              Queue.take(queue).pipe(
+                Effect.flatMap(forward),
+                // A defect from a journal implementation would otherwise end
+                // this fiber for the rest of the run, silently, while the layer
+                // still looks installed. Interruption stays fatal.
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.failCause(cause)
+                    : dropped.pipe(
+                      Effect.andThen(
+                        Effect.annotateLogs(
+                          Effect.logWarning("The telemetry forwarding worker recovered from a defect"),
+                          { runId: configured.runId, cause }
+                        )
+                      )
+                    )
+                )
+              )
             ).pipe(Effect.forkScoped)
 
             const logger = Logger.make<unknown, void>((logOptions) => {
-              Queue.offerUnsafe(queue, makeLog(logOptions, configured.runId))
+              const accepted = Queue.offerUnsafe(queue, makeLog(logOptions, configured.runId))
+              if (!accepted) droppedLogRecords.updateUnsafe(1, logOptions.fiber.context)
             })
             const current = yield* Effect.withFiber((fiber) => Effect.sync(() => fiber.getRef(Logger.CurrentLoggers)))
             return new Set(configured.mergeWithExisting === true ? current : []).add(logger)
           })
         ),
-        Layer.succeed(References.MinimumLogLevel, configured.minimumLogLevel ?? "Info")
+        configured.minimumLogLevel === undefined
+          ? Layer.empty
+          : Layer.succeed(References.MinimumLogLevel, configured.minimumLogLevel)
       ))
   )
