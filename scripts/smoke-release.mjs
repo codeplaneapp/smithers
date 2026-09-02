@@ -17,6 +17,7 @@
  * usage: node scripts/smoke-release.mjs <pack-directory>
  */
 import { spawn } from "node:child_process"
+import { build as bundle } from "esbuild"
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -201,6 +202,91 @@ try {
   }
   if (failures.length > 0) {
     throw new Error(`release tarballs failed to load:\n${failures.join("\n\n")}`)
+  }
+
+  // Invoke the CLI's lazy documentation API through both published spellings
+  // and module systems. A root import alone did not expose a broken CJS
+  // `import.meta` fallback because the Docs namespace was never evaluated.
+  const docsChecks = [
+    [
+      "ESM",
+      [
+        "--input-type=module",
+        "--eval",
+        [
+          'const direct = await import("@smthrs/cli/Docs")',
+          'const { Docs: root } = await import("@smthrs/cli")',
+          "for (const docs of [direct, root]) {",
+          '  if (!docs.directory().endsWith("/node_modules/@smthrs/cli/docs")) throw new Error(docs.directory())',
+          '  if (!docs.file(false).endsWith("/docs/llms.txt")) throw new Error(docs.file(false))',
+          '  const read = docs.read(false)',
+          '  if (!read.found || !read.text.includes("# Smithers")) throw new Error("CLI docs bundle was not readable")',
+          "}"
+        ].join("\n")
+      ]
+    ],
+    [
+      "CJS",
+      [
+        "--eval",
+        [
+          'const direct = require("@smthrs/cli/Docs")',
+          'const { Docs: root } = require("@smthrs/cli")',
+          "for (const docs of [direct, root]) {",
+          '  if (!docs.directory().endsWith("/node_modules/@smthrs/cli/docs")) throw new Error(docs.directory())',
+          '  if (!docs.file(false).endsWith("/docs/llms.txt")) throw new Error(docs.file(false))',
+          '  const read = docs.read(false)',
+          '  if (!read.found || !read.text.includes("# Smithers")) throw new Error("CLI docs bundle was not readable")',
+          "}"
+        ].join("\n")
+      ]
+    ]
+  ]
+  for (const [label, args] of docsChecks) {
+    const checked = await runQuietly(process.execPath, args, smokeRoot)
+    if (!checked.ok) failures.push(`@smthrs/cli: ${label} Docs invocation failed\n${checked.output.trimEnd()}`)
+  }
+
+  // Bundle a bare side-effect import from the installed tarball. The package
+  // manifest, not this repository's source graph, decides whether esbuild may
+  // erase the CLI entry. Other packages stay external so this assertion is
+  // exactly about retaining `@smthrs/cli/bin` in ESM and CommonJS consumers.
+  const sideEffectBuild = async (format) =>
+    bundle({
+      absWorkingDir: smokeRoot,
+      stdin: {
+        contents: format === "esm" ? 'import "@smthrs/cli/bin"\n' : 'require("@smthrs/cli/bin")\n',
+        resolveDir: smokeRoot,
+        sourcefile: `cli-side-effect.${format === "esm" ? "mjs" : "cjs"}`
+      },
+      bundle: true,
+      format,
+      platform: "node",
+      treeShaking: true,
+      write: false,
+      metafile: true,
+      logLevel: "silent",
+      plugins: [{
+        name: "external-packages-except-cli-entry",
+        setup(build) {
+          build.onResolve({ filter: /^[^./]/ }, (args) =>
+            args.path === "@smthrs/cli/bin" ? undefined : { path: args.path, external: true }
+          )
+        }
+      }]
+    })
+  for (const format of ["esm", "cjs"]) {
+    const result = await sideEffectBuild(format)
+    const suffix = `/@smthrs/cli/dist/${format}/bin.js`
+    const retained = Object.values(result.metafile.outputs).some((output) =>
+      Object.entries(output.inputs).some(([path, contribution]) =>
+        path.endsWith(suffix) && contribution.bytesInOutput > 0
+      )
+    )
+    if (!retained) failures.push(`@smthrs/cli: ${format.toUpperCase()} tree shaking removed the bin side effect`)
+  }
+  if (failures.length > 0) {
+    throw new Error(`release tarball consumer checks failed:\n${failures.join("\n\n")}`)
   }
 
   await writeFile(
