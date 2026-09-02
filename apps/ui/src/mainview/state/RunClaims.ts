@@ -206,7 +206,7 @@ export const renderedRunTurnText = (command: string, modelText: string): string 
  *   "make me a workflow that summarizes open PRs"  — "make" … "PRs"
  *   "summarize the last push to main"              — "push" … "main"
  *
- * Both are ordinary, POSSIBLE asks (a run reads the watched repositories),
+ * Both are ordinary, POSSIBLE asks (a run reads the loaded repositories),
  * and both keyed the impossible class, so the answer would have been replaced
  * with "I can't open a pull request" / "I can't push to a branch" — the truth
  * bar failing in the other direction, the app lying about what it cannot do.

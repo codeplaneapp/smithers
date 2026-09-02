@@ -237,7 +237,6 @@ export const createPresentationController = (
   const debugSnapshot = (): { readonly value: string } => {
     const identity = ctx.store.collections.identitySessions.get("identity")
     const billing = ctx.store.collections.billingAccounts.get("billing")
-    const watched = ctx.store.collections.watchedRepos.get("watched")
     return surfaceDebugRead(
       "App state snapshot",
       JSON.stringify({
@@ -251,7 +250,7 @@ export const createPresentationController = (
           ? null
           : { state: identity.state, login: identity.login, allowlisted: identity.allowlisted, admin: identity.admin },
         billing: billing === undefined ? null : { state: billing.state, totalUsd: billing.totalUsd },
-        watchedRepos: watched?.selected ?? null,
+        repositories: [...ctx.store.collections.repositories.keys()],
         commands: ctx.commands.entries().map((entry) => ({
           name: entry.binding.descriptor.name,
           trigger: entry.binding.descriptor.modelInvocable ? "both" : "user",

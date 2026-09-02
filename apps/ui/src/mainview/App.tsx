@@ -143,7 +143,6 @@ function App() {
   const { data: toastRows } = useLiveQuery((q) =>
     q.from({ toast: collections.toasts }).orderBy(({ toast }) => toast.createdAt)
   )
-  const { data: watchedRows } = useLiveQuery(collections.watchedRepos)
   const { data: harnessRows } = useLiveQuery(collections.harnesses)
   const { data: connectorRows } = useLiveQuery(collections.connectors)
   const { data: repoRows } = useLiveQuery(collections.repos)
@@ -254,13 +253,9 @@ function App() {
   /*
    * The suggestion row is DERIVED (§2a/§2f — never stored, never
    * fabricated): the genuinely-next state-derived step when one exists
-   * (signed-out → Sign in; never-chosen → Choose repos). An empty pill row
+   * (signed-out → Sign in; no repo open → Select a repo). An empty pill row
    * is a correct state; a fabricated one is a violation.
    */
-  const watched = watchedRows[0]
-  const needsSelection = identity?.state === "signed-in" && identity.allowlisted &&
-    (watched === undefined || watched.selected === null) &&
-    controller.commands.find("repos.watch") !== undefined
   /*
    * Selecting a repository is the one next step, and locally it is the native
    * folder picker (repo.open) — the IDE's open-folder — never a sign-in.
@@ -268,8 +263,7 @@ function App() {
   const step = repoStep({
     localPickerAvailable: controller.nativeRepositoriesAvailable && controller.commands.find("repo.open") !== undefined,
     connectors: connectorRows,
-    repos: repoRows,
-    needsSelection
+    repos: repoRows
   })
   /*
    * The pills are the recommendation row's projection (state/Recommend.ts):
@@ -456,10 +450,6 @@ function App() {
                     onGrantConfirm={(id) => controller.runCommandArgs("admin.grant.confirm", id)}
                     onGrantCancel={(id) => controller.runCommandArgs("admin.grant.cancel", id)}
                     onQueueApprove={(login) => controller.runCommandArgs("admin.queue.approve", login)}
-                    onRepoToggle={(name) => controller.runCommandArgs("repos.watch.toggle", name)}
-                    onReposSelectAll={() => controller.runCommand("repos.watch.all")}
-                    onReposSelectNone={() => controller.runCommand("repos.watch.none")}
-                    onReposConfirm={() => controller.runCommand("repos.watch.confirm")}
                     maximized={session.maximizedCardId === entry.card.id}
                     onMaximize={(id) => controller.runCommandArgs("card.maximize", id)}
                     onMinimize={() => controller.runCommand("card.minimize")}

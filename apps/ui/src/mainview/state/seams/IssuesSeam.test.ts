@@ -12,8 +12,8 @@ import type { AppStore } from "../AppStore"
  * issues.view / issues.close / issues.comment against stubbed platform routes.
  * Substance lands as cards ("issue-list", "issue") in store.collections.cards;
  * failures come back as honest error strings (CommandOutcome "failed"), never
- * throws. One watched repository ("will/flows") stands in for the repo
- * resolution, matching the RepoContext single-watched rule.
+ * throws. One loaded repository ("will/flows") stands in for the repo
+ * resolution, matching the RepoContext single-repository rule.
  */
 
 const memoryStorage = (): StorageApi => {
@@ -84,14 +84,12 @@ const signedIn = async (store: AppStore): Promise<void> => {
   await settled()
 }
 
-/** ONE watched repo, so repo resolution answers "will/flows" without an argument. */
+/** ONE loaded repo, so repo resolution answers "will/flows" without an argument. */
 const reposChosen = async (store: AppStore): Promise<void> => {
   store.dispatch({
-    type: "watched.replaced",
+    type: "repositories.loaded",
     actor: "system",
-    selected: ["will/flows"],
-    selectedAt: "2026-08-12T09:00:00.000Z",
-    via: "command"
+    repositories: [{ id: "will/flows", org: "will", ownerKind: "user", name: "flows", head: null }]
   })
   await settled()
 }
@@ -350,20 +348,21 @@ describe("issues seam — honest failures, never throws", () => {
     expect(store.collections.cards.get("issue-will/flows-7")).toBeUndefined()
   })
 
-  test("with several watched repositories and no argument, the answer is the honest choice", async () => {
+  test("with several loaded repositories and no argument, the answer is the honest choice", async () => {
     const { store, controller } = await issuesController(backend({}))
     store.dispatch({
-      type: "watched.replaced",
+      type: "repositories.loaded",
       actor: "system",
-      selected: ["will/flows", "will/smithers"],
-      selectedAt: "2026-08-12T09:05:00.000Z",
-      via: "command"
+      repositories: [
+        { id: "will/flows", org: "will", ownerKind: "user", name: "flows", head: null },
+        { id: "will/smithers", org: "will", ownerKind: "user", name: "smithers", head: null }
+      ]
     })
     await settled()
     const outcome = await controller.commands.run("issues.list")
     expect(outcome.status).toBe("failed")
     if (outcome.status === "failed") {
-      expect(outcome.error).toContain("Several repositories are watched")
+      expect(outcome.error).toContain("Several repositories are loaded")
     }
     expect(store.collections.cards.get("issues-will/flows")).toBeUndefined()
   })

@@ -51,15 +51,6 @@ const silentAgent: NativeAgent = {
   subscribe: () => () => {}
 }
 
-const unavailableRepositories: NativeRepositories = {
-  available: false,
-  pickLocalRepository: async () => ({
-    status: "error",
-    code: "native-required",
-    message: "Local repositories can only be connected from the Smithers native app."
-  })
-}
-
 const nativeRepositories: NativeRepositories = {
   available: true,
   pickLocalRepository: async () => ({ status: "cancelled" })
@@ -203,22 +194,77 @@ describe("the composer header: the repository selector and where it lives", () =
     expect(`${selector} ${text(chip)}`.match(/smithersai\/smithers/g)).toHaveLength(1)
   })
 
-  test("a watched GitHub repository: the origin chip does not repeat the selector's owner/repo", async () => {
-    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    const controller = createAppController(store, unavailableRepositories, silentAgent, {
-      ...backend({
-        "/api/auth/session": json(200, { login: "will", allowlisted: true, admin: false }),
-        "/api/identity/watched": json(200, { selected: ["smithersai/smithers"], selectedAt: "2026-08-30", via: "command" }),
-        "/api/identity/repos": json(200, { candidates: [], cached: false })
-      })
+  test("a loaded GitHub repository: the origin chip does not repeat the selector's owner/repo", async () => {
+    const { store, controller } = await localController()
+    await persisted(store, {
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [{ id: "smithersai/smithers", org: "smithersai", ownerKind: "org", name: "smithers", head: null }]
     })
-    await controller.loadSession()
-    await settled()
+    await persisted(store, { type: "repo.selected", actor: "user", id: "smithersai/smithers" })
     const view = mount(controller)
     await view.act(() => {})
 
     expect(text(byTestId(view.host, "composer-repo-trigger"))).toBe("smithersai/smithers")
-    expect(byTestId(view.host, "repo-chip")).toBeNull()
+    const chip = byTestId(view.host, "repo-chip")
+    expect(chip?.dataset.origin).toBe("cloud")
+    expect(text(chip)).not.toContain("smithersai/smithers")
+    expect(text(chip?.querySelector(".composer-origin-name") ?? null)).toBe("head")
+  })
+
+  test("a repository at its head: the origin chip reads `head @ <change id>` (lane piper step 4)", async () => {
+    const { store, controller } = await localController()
+    await persisted(store, {
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [
+        { id: "will/flows", org: "will", ownerKind: "user", name: "flows", head: { bookmark: "main", changeId: "qupxosqw", commitId: "abc123" } }
+      ]
+    })
+    await persisted(store, { type: "repo.selected", actor: "user", id: "will/flows" })
+    const view = mount(controller)
+    await view.act(() => {})
+
+    expect(text(byTestId(view.host, "composer-repo-trigger"))).toBe("will/flows")
+    const chip = byTestId(view.host, "repo-chip")
+    expect(chip?.dataset.origin).toBe("cloud")
+    expect(text(chip?.querySelector(".composer-origin-name") ?? null)).toBe("head @ qupxosqw")
+  })
+
+  test("a local working copy with a jj probe: the origin chip reads `~/path · N ahead of main`", async () => {
+    const { store, controller } = await localController()
+    await persisted(store, {
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [
+        { id: "smithersai/smithers", org: "smithersai", ownerKind: "org", name: "smithers", head: { bookmark: "main", changeId: "qp", commitId: "c1" } }
+      ]
+    })
+    await persisted(store, {
+      type: "repos.loaded",
+      actor: "system",
+      repos: [{
+        id: "smithers",
+        path: "/Users/williamcory/smithers",
+        name: "smithers",
+        git: { branch: "main", remote: "git@github.com:smithersai/smithers.git" },
+        jj: { changeId: "kxyz", commitId: "deadbeef", ahead: 3, bookmark: "main" },
+        warnings: [],
+        smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts", workspaces: [] }
+      }]
+    })
+    await persisted(store, {
+      type: "repo.selected",
+      actor: "user",
+      id: "smithersai/smithers#local:/Users/williamcory/smithers"
+    })
+    const view = mount(controller)
+    await view.act(() => {})
+
+    expect(text(byTestId(view.host, "composer-repo-trigger"))).toBe("smithersai/smithers · smithers")
+    const chip = byTestId(view.host, "repo-chip")
+    expect(chip?.dataset.origin).toBe("local")
+    expect(text(chip)).toBe("~/smithers · 3 ahead of main")
   })
 })
 

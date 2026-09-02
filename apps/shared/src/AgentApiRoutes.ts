@@ -21,14 +21,6 @@ export const AUTH_NATIVE_CLAIM_PATH = "/api/auth/native/claim"
 export const AUTH_CALLBACK_PATH = "/api/auth/github/callback"
 export const AUTH_LOGOUT_PATH = "/api/auth/logout"
 export const IDENTITY_REQUEST_ACCESS_PATH = "/api/identity/request-access"
-/*
- * The watched-repos contract, served by the identity worker (it owns the
- * session and the GitHub token vault): the chooser's candidates, and the
- * user's selection (null = never chosen, a real distinct state — NOT "all
- * repos"; [] = deliberately chose none).
- */
-export const REPO_CANDIDATES_PATH = "/api/identity/repos"
-export const WATCHED_REPOS_PATH = "/api/identity/watched"
 export const BILLING_BALANCE_PATH = "/api/billing/balance"
 export const BILLING_USAGE_PATH = "/api/billing/usage"
 /*

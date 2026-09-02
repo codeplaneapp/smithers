@@ -100,7 +100,7 @@ export const createTurnController = (
     const snapshot = store.agentContextSnapshot()
     const current = store.session()
     const identity = store.collections.identitySessions.get("identity")
-    const watched = store.collections.watchedRepos.get("watched")
+    const loadedRepoIds = [...store.collections.repositories.keys()]
     const billingAccount = store.collections.billingAccounts.get("billing")
     const selected = current.selectedWorldDocumentId === null
       ? undefined
@@ -130,24 +130,21 @@ export const createTurnController = (
       })),
       /*
        * Sign-in IS the GitHub connector (§2a′): connection truth derives
-       * from the validated session + the watched-repos selection, never
-       * from the legacy local-connector store.
+       * from the validated session, never from the legacy local-connector
+       * store. The repository inventory is the loaded repositories (lane
+       * piper).
        */
       github: {
         connected: identity?.state === "signed-in",
         login: identity?.state === "signed-in" ? identity.login : null,
-        watchedRepos: identity?.state !== "signed-in"
-          ? null
-          : watched === undefined || watched.selected === null
-          ? "unselected"
-          : watched.selected.length,
+        repositories: identity?.state !== "signed-in" ? null : loadedRepoIds.length,
         /*
          * §22.7: a COUNT left the model declining to answer "what repos do
-         * you watch?" while the names were served plainly by the seam it
+         * I have?" while the names were served plainly by the seam it
          * was already reading.
          */
-        ...(identity?.state === "signed-in" && watched?.selected != null
-          ? { watchedRepoNames: [...watched.selected] }
+        ...(identity?.state === "signed-in" && loadedRepoIds.length > 0
+          ? { repositoryNames: loadedRepoIds }
           : {})
       },
       /*
@@ -207,7 +204,7 @@ export const createTurnController = (
           : []),
         "Run app commands through the \"commands\" tool — the same code path as the UI buttons and slash commands.",
         "Render structured cards (plans, approvals, statuses, recommendations) in the transcript.",
-        "Create, list, and run Smithers workflows on the user's watched repositories (flow.create, flow.list, flow.run) — runs report live as embedded cards in this chat.",
+        "Create, list, and run Smithers workflows on the user's loaded repositories (flow.create, flow.list, flow.run) — runs report live as embedded cards in this chat.",
         ...(store.collections.repos.size > 0
           ? [
             "Read the open repositories listed above: files.list <path> [repo] lists a directory and files.read <path> [repo] renders a file as a card in this chat (a bare call means the active repository); target.list shows a repository's Smithers targets."
@@ -235,17 +232,12 @@ export const createTurnController = (
    */
   const turnInstructions = (): string => {
     const identity = store.collections.identitySessions.get("identity")
-    const watched = store.collections.watchedRepos.get("watched")
     const signedIn = identity?.state === "signed-in"
     return smithersInstructions(agentVisibleCatalog(ctx.commands.callable()), {
       github: {
         connected: signedIn,
         login: signedIn ? identity.login : null,
-        watchedRepos: !signedIn
-          ? null
-          : watched === undefined || watched.selected === null
-          ? "unselected"
-          : watched.selected.length
+        repositories: !signedIn ? null : store.collections.repositories.size
       },
       localRepositories: [
         ...new Set([

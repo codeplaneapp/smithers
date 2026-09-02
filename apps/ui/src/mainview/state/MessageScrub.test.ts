@@ -5,9 +5,9 @@ describe("the tool-echo scrub", () => {
   test("strips an inline execute blob and keeps the prose around it", () => {
     expect(
       scrubToolEcho(
-        "Let me check.{\"action\":\"execute\",\"name\":\"repos.watch\",\"args\":\"\"}Here is the chooser."
+        "Let me check.{\"action\":\"execute\",\"name\":\"flow.list\",\"args\":\"\"}Here is the list."
       )
-    ).toBe("Let me check.Here is the chooser.")
+    ).toBe("Let me check.Here is the list.")
   })
 
   test("strips list blobs and multiple blobs", () => {

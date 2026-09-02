@@ -4,18 +4,18 @@ import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import App from "../App"
-import { chooserFilter, chooserKeyAction, chooserMove, freshnessLabel } from "../ChatCards"
 import { ControllerTestProvider } from "../ControllerContext"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "./AppController"
-import type { AppController as AppControllerType, AppServices } from "./AppController"
+import type { AppController as AppControllerType } from "./AppController"
 import { createAppStore } from "./AppStore"
 import type { AppStore } from "./AppStore"
 
 /*
- * Wave 10, DOM half: the derived pill row (§2a/§2f), the chooser card's
- * keyboard completeness, the admin-only reset/devtools absence, the maximize
- * transition's element identity (§2d′), and the pre-model auth gate (§2a″).
+ * Wave 10, DOM half: the derived pill row (§2a/§2f), the admin-only
+ * reset/devtools absence, the maximize transition's element identity (§2d′),
+ * and the pre-model auth gate (§2a″). (The wave's repo-chooser keyboard
+ * suite retired with the watch subsystem — lane piper.)
  */
 
 GlobalRegistrator.register()
@@ -80,33 +80,7 @@ const silentAgent: NativeAgent = {
   subscribe: () => () => {}
 }
 
-const json = (status: number, body: unknown): Response =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
-
-const backend = (
-  routes: Record<string, Response | ((request: Request) => Response | Promise<Response>)>
-): AppServices => ({
-  fetchImpl: async (input, init) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-    const absolute = new URL(url, "https://app.test")
-    const path = absolute.pathname + absolute.search
-    for (const [route, answer] of Object.entries(routes)) {
-      if (path === route || path.startsWith(`${route}?`)) {
-        return typeof answer === "function"
-          ? answer(new Request(absolute.toString(), init))
-          : answer.clone()
-      }
-    }
-    return json(404, { status: "error", message: `no stub for ${path}` })
-  }
-})
-
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
-
-const CANDIDATES = [
-  { fullName: "will/flows", private: false, pushedAt: "2026-08-07T12:00:00.000Z", openIssues: 4 },
-  { fullName: "will/smithers", private: false, pushedAt: "2026-08-06T09:00:00.000Z", openIssues: 2 }
-]
 
 const signedIn = async (store: AppStore, admin = false): Promise<void> => {
   store.dispatch({
@@ -126,14 +100,7 @@ describe("wave 10 — the derived pill row (§2a/§2f)", () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const controller = createAppController(store, unavailableRepositories, silentAgent)
     await signedIn(store)
-    // A selection exists (zero chosen) → no needsSelection step; no reco → no gold pill.
-    store.dispatch({
-      type: "watched.replaced",
-      actor: "system",
-      selected: [],
-      selectedAt: "2026-08-09T09:00:00.000Z",
-      via: "onboarding"
-    })
+    // No repo step and no recommendation → no pill. An empty row is correct.
     await settled()
     const { host } = mount(controller)
     expect(host.querySelectorAll(".smithers-suggestion")).toHaveLength(0)
@@ -156,138 +123,6 @@ describe("wave 10 — the derived pill row (§2a/§2f)", () => {
     expect(host.querySelectorAll(".smithers-suggestion")).toHaveLength(0)
     const signIn = host.querySelector<HTMLElement>("[data-testid=\"chrome-sign-in\"]")
     expect(signIn?.dataset.flow).toBe("auth.sign-in")
-  })
-
-  test("needsSelection, the one pill opens the chooser as the gold binding", async () => {
-    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    const controller = createAppController(store, unavailableRepositories, silentAgent, {
-      features: { suggestionPills: true },
-      ...backend({
-        "/api/identity/watched": json(200, { selected: null, selectedAt: null, via: null }),
-        "/api/identity/repos": json(200, { candidates: CANDIDATES, cached: false })
-      })
-    })
-    await signedIn(store)
-    await controller.openFirstRunRepos()
-    await settled()
-    const { host } = mount(controller)
-    const pills = host.querySelectorAll<HTMLElement>(".smithers-suggestion")
-    expect(pills).toHaveLength(1)
-    expect(pills[0]?.dataset.flow).toBe("repos.watch")
-    expect(pills[0]?.dataset.gold).toBe("true")
-  })
-})
-
-describe("wave 10 — the chooser card, keyboard-complete", () => {
-  const chooserController = async () => {
-    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    const puts: Array<unknown> = []
-    const controller = createAppController(store, unavailableRepositories, silentAgent, {
-      fetchImpl: async (input, init) => {
-        const url = typeof input === "string" ? input : String(input)
-        const path = new URL(url, "https://app.test").pathname
-        if (path === "/api/identity/repos") {
-          return json(200, { candidates: CANDIDATES, cached: false })
-        }
-        if (path === "/api/identity/watched" && init?.method === "PUT") {
-          puts.push(typeof init.body === "string" ? JSON.parse(init.body) : undefined)
-          return json(200, { selected: ["will/flows"], selectedAt: "2026-08-09T10:00:00.000Z", via: "onboarding" })
-        }
-        if (path === "/api/identity/watched") {
-          return json(200, { selected: null, selectedAt: null, via: null })
-        }
-        return json(404, { status: "error", message: `no stub for ${path}` })
-      }
-    })
-    await signedIn(store)
-    await controller.openFirstRunRepos()
-    return { store, controller, puts }
-  }
-
-  test("rows render with name, freshness, and issue count; the filter logic is pure and complete", async () => {
-    const { controller } = await chooserController()
-    const { host } = mount(controller)
-    const rows = host.querySelectorAll(".repo-chooser-row")
-    expect(rows).toHaveLength(2)
-    expect(rows[0]?.textContent).toContain("will/flows")
-    expect(rows[0]?.textContent).toContain("4 open issues")
-
-    // Typing filters (the pure mapping the input delegates to).
-    expect(chooserFilter(CANDIDATES, "smithers").map((candidate) => candidate.fullName)).toEqual(["will/smithers"])
-    expect(chooserFilter(CANDIDATES, "")).toHaveLength(2)
-    expect(chooserFilter(CANDIDATES, "zzz")).toHaveLength(0)
-  })
-
-  test("the keyboard map: arrows move, space toggles only with an empty filter, Enter confirms", () => {
-    expect(chooserKeyAction("ArrowDown", "")).toEqual({ kind: "move", delta: 1 })
-    expect(chooserKeyAction("ArrowUp", "")).toEqual({ kind: "move", delta: -1 })
-    expect(chooserKeyAction(" ", "")).toEqual({ kind: "toggle" })
-    // Space with text in the filter is text, never a toggle.
-    expect(chooserKeyAction(" ", "flo")).toEqual({ kind: "none" })
-    expect(chooserKeyAction("Enter", "")).toEqual({ kind: "confirm" })
-    expect(chooserKeyAction("a", "")).toEqual({ kind: "none" })
-  })
-
-  test("arrows at the window's end grow the window instead of trapping the highlight on page one", () => {
-    // 205 repositories, 50 rendered: ArrowDown on row 50 must page forward —
-    // the old modulo wrap stranded a keyboard-only user inside the first page.
-    const atWindowEnd = chooserMove({
-      delta: 1,
-      highlightedIndex: 49,
-      visibleCount: 50,
-      visibleLimit: 50,
-      totalCount: 205
-    })
-    expect(atWindowEnd).toEqual({ highlighted: 50, visibleLimit: 100 })
-    // Within the window, movement is a plain step.
-    expect(
-      chooserMove({ delta: 1, highlightedIndex: 10, visibleCount: 50, visibleLimit: 50, totalCount: 205 })
-    ).toEqual({ highlighted: 11, visibleLimit: 50 })
-    // At the TRUE end (the whole inventory rendered), down wraps to the top.
-    expect(
-      chooserMove({ delta: 1, highlightedIndex: 204, visibleCount: 205, visibleLimit: 205, totalCount: 205 })
-    ).toEqual({ highlighted: 0, visibleLimit: 205 })
-    // Up from the top wraps to the bottom of the rendered window.
-    expect(
-      chooserMove({ delta: -1, highlightedIndex: 0, visibleCount: 50, visibleLimit: 50, totalCount: 205 })
-    ).toEqual({ highlighted: 49, visibleLimit: 50 })
-    // The last page grows only to the inventory's size.
-    expect(
-      chooserMove({ delta: 1, highlightedIndex: 199, visibleCount: 200, visibleLimit: 200, totalCount: 205 })
-    ).toEqual({ highlighted: 200, visibleLimit: 205 })
-  })
-
-  test("freshness labels read from an injected clock, not the ambient one", () => {
-    const now = Date.parse("2026-08-20T12:00:00Z")
-    expect(freshnessLabel(null, now)).toBe("never pushed")
-    expect(freshnessLabel("2026-08-20T09:00:00Z", now)).toBe("today")
-    expect(freshnessLabel("2026-08-19T09:00:00Z", now)).toBe("yesterday")
-    expect(freshnessLabel("2026-08-10T09:00:00Z", now)).toBe("10d ago")
-    expect(freshnessLabel("2026-06-20T09:00:00Z", now)).toBe("2mo ago")
-    expect(freshnessLabel("2024-08-20T09:00:00Z", now)).toBe("2y ago")
-  })
-
-  test("row click toggles, all/none bindings fire, confirm PUTs the selection", async () => {
-    const { store, controller, puts } = await chooserController()
-    const { host } = mount(controller)
-
-    const row = host.querySelector<HTMLButtonElement>(".repo-chooser-row")
-    act(() => row?.click())
-    await settled()
-    let card = store.collections.cards.get("repo-chooser")
-    expect(card?.kind === "repo-chooser" ? card.payload.selected : []).toEqual(["will/flows"])
-
-    act(() => host.querySelector<HTMLButtonElement>("[data-flow=\"repos.watch.confirm\"]")?.click())
-    await settled()
-    await settled()
-    expect(puts).toHaveLength(1)
-    expect(puts[0]).toEqual({ selected: ["will/flows"], via: "onboarding" })
-    expect(store.collections.cards.get("repo-chooser")).toBeUndefined()
-    expect(
-      [...store.collections.messages.values()].some((message) =>
-        message.text.includes("change this anytime — just ask")
-      )
-    ).toBe(true)
   })
 })
 
@@ -318,7 +153,7 @@ describe("wave 10 — admin-only affordances are absent, not hidden (§2/§2b)",
     expect(host.querySelector(".devtools-panel")).toBeNull()
     act(() => void controller.runCommand("admin.devtools"))
     expect(host.querySelector(".devtools-panel")).not.toBeNull()
-    expect(host.querySelector(".devtools-registry")?.textContent).toContain("repos.watch")
+    expect(host.querySelector(".devtools-registry")?.textContent).toContain("flow.list")
     act(() => void controller.runCommand("admin.devtools"))
     expect(host.querySelector(".devtools-panel")).toBeNull()
   })

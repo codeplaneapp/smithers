@@ -101,12 +101,6 @@ export interface AppController {
   readonly toggleTheme: () => void
   /** Wear a color theme (/theme) — the axis orthogonal to light/dark. */
   readonly setPalette: (args: string) => string | void
-  /* Wave 10 — the onboarding chooser (repos.watch) and the watched set. */
-  readonly openRepoChooser: (preselect?: string) => Promise<string | void>
-  readonly toggleWatchedRepo: (fullName: string) => string | void
-  readonly selectAllWatchedRepos: () => void
-  readonly selectNoWatchedRepos: () => void
-  readonly confirmWatchedRepos: () => Promise<string | void>
   /* /clear (§2h): sweep the transcript into world notes, THEN clear. */
   readonly clearConversation: () => Promise<string | void>
   /* The browser tool + surface (§2d/§2d′). */
@@ -121,7 +115,7 @@ export interface AppController {
   ) => Promise<string | void | { readonly value: string }>
   readonly listWorkspaceWorkflows: () => Promise<string | void | { readonly value: string }>
   readonly runWorkflow: (name: string, repo?: string) => Promise<string | void | { readonly value: string }>
-  /* Wave 12 §2 — the answer to "which watched repository?" (one act). */
+  /* Wave 12 §2 — the answer to "which loaded repository?" (one act). */
   readonly chooseWorkflowRepo: (fullName: string) => Promise<string | void | { readonly value: string }>
   /* Wave 12 §3 — the two acts a run that has gone quiet offers. */
   readonly stopWatchingRun: (cardId: string) => string | void
@@ -302,8 +296,6 @@ export interface AppController {
   readonly refreshBalance: () => Promise<void>
   /** Refresh the balance and surface it as a card in the transcript. */
   readonly showBalance: () => Promise<string | { readonly value: string }>
-  /** Beat 5: read the watched-repos selection; never-chosen opens the repo chooser. */
-  readonly openFirstRunRepos: () => Promise<void>
   /* The admin plugin's controller half — registered as commands only for admin sessions. */
   readonly adminAllowlist: (action: "add" | "remove", login: string) => Promise<string | void>
   readonly adminGrant: (amountUsd: number, login: string) => string | void
@@ -608,8 +600,8 @@ export const createAppController = (
   /*
    * The requirement axis (registry.ts commandRequirements): the registry's
    * run path parks a user-invoked command here when a requirement is unmet,
-   * and the seams that can satisfy one (identity load, watched-repos
-   * confirm) resume it. Durable in the session row because sign-in is a
+   * and the seams that can satisfy one (identity load) resume it. Durable in
+   * the session row because sign-in is a
    * full OAuth redirect. One parking spot, latest wins.
    */
   const deferCommand = (name: string, args: string | null, requirement: string): void => {
@@ -655,18 +647,12 @@ export const createAppController = (
   const recommender = createRecommendController(ctx, {
     catalog: () => ctx.commands.all(),
     state: () => ctx.commands.state(),
-    repoStep: () => {
-      const identity = store.collections.identitySessions.get("identity")
-      const watched = store.collections.watchedRepos.get("watched")
-      return repoStep({
+    repoStep: () =>
+      repoStep({
         localPickerAvailable: repositories.available && ctx.commands.find("repo.open") !== undefined,
         connectors: [...store.collections.connectors.values()],
-        repos: [...store.collections.repos.values()],
-        needsSelection: identity?.state === "signed-in" && identity.allowlisted &&
-          (watched === undefined || watched.selected === null) &&
-          ctx.commands.find("repos.watch") !== undefined
-      })
-    },
+        repos: [...store.collections.repos.values()]
+      }),
     // Without the pills there is nowhere for an agent answer to show, so no side turn launches.
     config: { ...services.recommender, enabled: (services.recommender?.enabled ?? false) && features.suggestionPills }
   })
@@ -759,19 +745,12 @@ export const createAppController = (
   ctx.resumeDeferredCommand = resumeDeferredCommand
 
   const {
-    openRepoChooser,
-    toggleWatchedRepo,
-    selectAllWatchedRepos,
-    selectNoWatchedRepos,
-    confirmWatchedRepos,
-    openFirstRunRepos,
     connectLocalRepository,
     makeConnectorReadOnly,
     askConnectorRemoval,
     cancelConnectorRemoval,
     removeConnector
-  } = createConnectorController(ctx, promptSignIn)
-  ctx.openRepoChooser = openRepoChooser
+  } = createConnectorController(ctx)
 
   /*
    * The agent's entry point ALWAYS runs as actor smithers (wired through
@@ -811,11 +790,6 @@ export const createAppController = (
     cancelWorldDelete,
     decideApproval,
     retryLastTurn,
-    openRepoChooser,
-    toggleWatchedRepo,
-    selectAllWatchedRepos,
-    selectNoWatchedRepos,
-    confirmWatchedRepos,
     clearConversation,
     openBrowser,
     createWorkflow,
@@ -930,7 +904,6 @@ export const createAppController = (
     dismissToast,
     refreshBalance,
     showBalance,
-    openFirstRunRepos,
     adminAllowlist,
     adminGrant,
     adminGrantConfirm,
@@ -940,7 +913,6 @@ export const createAppController = (
     adminHealth,
     snapshot: () => {
       const identity = store.collections.identitySessions.get("identity")
-      const watched = store.collections.watchedRepos.get("watched")
       const signedIn = identity?.state === "signed-in"
       return {
         surface: store.session().surface,
@@ -955,7 +927,6 @@ export const createAppController = (
         // undefined/"" (tsc types the field string, hence the cast).
         admin: (signedIn && identity.admin) ||
           (import.meta.env?.DEV as boolean | string | undefined) === true,
-        needsSelection: signedIn && identity.allowlisted && (watched === undefined || watched.selected === null),
         signedOut: identity?.state === "signed-out",
         hasOpenRepos: store.collections.repos.size > 0,
         recent: store.session().recentCommands ?? [],
@@ -1029,11 +1000,6 @@ export const createAppController = (
     cancelWorldDelete,
     decideApproval,
     retryLastTurn,
-    openRepoChooser,
-    toggleWatchedRepo,
-    selectAllWatchedRepos,
-    selectNoWatchedRepos,
-    confirmWatchedRepos,
     clearConversation,
     openBrowser,
     createWorkflow,
@@ -1148,7 +1114,6 @@ export const createAppController = (
     dismissToast,
     refreshBalance,
     showBalance,
-    openFirstRunRepos,
     adminAllowlist,
     adminGrant,
     adminGrantConfirm,

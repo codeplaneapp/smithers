@@ -3,7 +3,7 @@
  * https://canary.smithers.sh with the sanctioned persistent Playwright
  * profile (codeplanesmithers — see the multi-test-github-account skill),
  * then verifies the signed-in chat states wave 10 owns:
- *  - the chooser card appears IFF no watched selection exists; with a
+ *  - (retired with the watch subsystem, lane piper: the chooser bar)
  *    selection, the chat opens clean,
  *  - no standing composer status chrome (§2g),
  *  - no reset button / no admin chrome for a non-admin (§2),
@@ -83,9 +83,9 @@ if (!signedIn) {
 
 /*
  * These bars are about what a signed-in FIRST LOAD renders, and the sanctioned
- * profile persists the app's store between runs: an earlier run's repo-chooser
- * card sat in the transcript and failed "a selection exists ⇒ NO chooser" for a
- * product that had done nothing wrong. Start from a genuinely clean slate (the
+ * profile persists the app's store between runs: an earlier run's cards
+ * sat in the transcript and failed bars about THIS load for a product that
+ * had done nothing wrong. Start from a genuinely clean slate (the
  * session cookie survives) so a failure here means the product, not history.
  */
 const survivors = await resetPersistedStore(context, page, BASE)
@@ -95,28 +95,6 @@ check(
   survivors.length === 0 ? "localStorage + OPFS empty" : `OPFS still holds: ${survivors.join(", ")}`
 )
 await page.waitForTimeout(3000)
-
-// The watched-repos truth, straight from the seam through the app origin.
-const watched = await page.evaluate(async () => {
-  const response = await fetch("/api/identity/watched")
-  return { status: response.status, body: await response.json().catch(() => null) }
-})
-check("GET /api/identity/watched answers", watched.status === 200, JSON.stringify(watched.body))
-const selected = typeof watched.body === "object" && watched.body !== null
-  ? ((watched.body as { selected?: unknown }).selected ?? null)
-  : null
-
-await page.waitForTimeout(2500)
-const chooserCount = await page.locator("[data-kind=\"repo-chooser\"]").count()
-if (selected === null) {
-  check("no selection ⇒ the onboarding chooser card is in the transcript", chooserCount > 0, `${chooserCount} chooser`)
-} else {
-  check(
-    "a selection exists ⇒ NO chooser; the chat opens clean",
-    chooserCount === 0,
-    `selected: ${JSON.stringify(selected)}`
-  )
-}
 
 // §2g: no standing status chrome; §2: no admin affordances for this non-admin.
 const bodyText = (await page.locator("body").textContent()) ?? ""

@@ -7,8 +7,11 @@
  */
 import { Button } from "@smthrs/ui"
 import { FileText, Folder } from "lucide-react"
-import { lazy, Suspense } from "react"
+import { lazy, Suspense, useContext } from "react"
+import { useLiveQuery } from "@tanstack/react-db"
 import type { Card } from "../state/AppState"
+import type { AppController } from "../state/AppController"
+import { ControllerContext } from "../ControllerContext"
 
 /*
  * A markdown file renders through the shared WYSIWYG editor the World notes
@@ -41,6 +44,97 @@ export interface FileCardActions {
 /** The entry's full path under the card's path — the argument the row's command takes. */
 const childPath = (parent: string, name: string): string => parent === "" ? name : `${parent}/${name}`
 
+/** Ids render short: jj change ids are already short words; commit hashes take the first 8. */
+const shortId = (id: string): string => (id.length > 12 ? id.slice(0, 8) : id)
+
+/*
+ * The card's address header (lane piper step 5, ADR 0001): the global path
+ * `/org/repo/path` the payload carries, plus the position the read was taken
+ * at, plus — when the inventory says the repository's head has moved since —
+ * a "head moved to <id> · refresh" line. Nothing auto-refreshes: the card
+ * states where it stands; the human (or the model) re-reads explicitly.
+ * The controller is read from context directly so component tests without a
+ * provider still render the plain address.
+ */
+const FileCardHeader = (props: {
+  readonly repo: string
+  readonly path: string
+  readonly address?: string | undefined
+  readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null } | undefined
+  readonly refreshCommand: "files.read" | "files.list"
+  readonly onRunCommand: (name: string, args?: string) => void
+}) => {
+  const controller = useContext(ControllerContext)
+  if (controller === null) return <FileCardAddressLine {...props} head={null} />
+  return <FileCardHeaderLive {...props} controller={controller} />
+}
+
+const FileCardAddressLine = ({
+  repo,
+  path,
+  address,
+  readAt,
+  head,
+  refreshCommand,
+  onRunCommand
+}: {
+  readonly repo: string
+  readonly path: string
+  readonly address?: string | undefined
+  readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null } | undefined
+  readonly head: { readonly changeId: string | null; readonly commitId: string | null } | null
+  readonly refreshCommand: "files.read" | "files.list"
+  readonly onRunCommand: (name: string, args?: string) => void
+}) => {
+  const moved = head !== null && readAt?.commitId != null && head.commitId != null && head.commitId !== readAt.commitId
+  const refreshArgs = `${path === "" ? "/" : path} ${repo}`
+  return (
+    <div>
+      <p className="world-card-path">
+        {address ?? `${repo} · ${path || "/"}`}
+        {readAt?.changeId != null ? ` · ${shortId(readAt.changeId)}` : null}
+      </p>
+      {moved ?
+        (
+          <p className="world-card-empty">
+            head moved to {shortId(head.changeId ?? head.commitId ?? "")}
+            {" · "}
+            <Button
+              variant="ghost"
+              size="sm"
+              data-flow={refreshCommand}
+              onClick={() => onRunCommand(refreshCommand, refreshArgs)}
+            >
+              refresh
+            </Button>
+          </p>
+        ) :
+        null}
+    </div>
+  )
+}
+
+const FileCardHeaderLive = ({
+  controller,
+  ...props
+}: {
+  readonly controller: AppController
+  readonly repo: string
+  readonly path: string
+  readonly address?: string | undefined
+  readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null } | undefined
+  readonly refreshCommand: "files.read" | "files.list"
+  readonly onRunCommand: (name: string, args?: string) => void
+}) => {
+  const { data: repositoryRows } = useLiveQuery((q) =>
+    q.from({ repository: controller.store.collections.repositories }).select(({ repository }) => ({
+      id: repository.id,
+      head: repository.head
+    })))
+  const head = repositoryRows.find((row) => row.id === props.repo)?.head ?? null
+  return <FileCardAddressLine {...props} head={head} />
+}
+
 export const FileListCardBody = ({
   card,
   onRunCommand
@@ -48,9 +142,14 @@ export const FileListCardBody = ({
   const { repo, path, entries } = card.payload
   return (
     <div className="world-card-list">
-      <p className="world-card-path">
-        {repo} · {path || "/"}
-      </p>
+      <FileCardHeader
+        repo={repo}
+        path={path}
+        address={card.payload.address}
+        readAt={card.payload.readAt}
+        refreshCommand="files.list"
+        onRunCommand={onRunCommand}
+      />
       <ul className="world-card-list">
         {entries.length === 0 ?
           (
@@ -96,12 +195,18 @@ export const FileListCardBody = ({
 }
 
 export const FileCardBody = ({
-  card
+  card,
+  onRunCommand
 }: { readonly card: Extract<Card, { kind: "file" }> } & FileCardActions) => (
   <div className="world-card-list">
-    <p className="world-card-path">
-      {card.payload.repo} · {card.payload.path}
-    </p>
+    <FileCardHeader
+      repo={card.payload.repo}
+      path={card.payload.path}
+      address={card.payload.address}
+      readAt={card.payload.readAt}
+      refreshCommand="files.read"
+      onRunCommand={onRunCommand}
+    />
     {card.payload.binary === true ?
       (
         <p className="world-card-empty">

@@ -111,18 +111,7 @@ const SMITHERS_MESSAGES =
 const openingMessage = (host: HTMLElement): string =>
   (host.querySelector(SMITHERS_MESSAGES)?.textContent ?? "").replace(/\s+/g, " ").trim()
 
-/** Every rendered Smithers message, in transcript order. */
-const smithersMessages = (host: HTMLElement): Array<string> =>
-  [...host.querySelectorAll(SMITHERS_MESSAGES)].map((node) =>
-    (node.textContent ?? "").replace(/\s+/g, " ").trim()
-  )
-
 const FILLER = /Tell me what you[’']re working on/
-
-const CANDIDATES = [
-  { fullName: "will/flows", private: false, pushedAt: "2026-08-07T12:00:00.000Z", openIssues: 4 },
-  { fullName: "will/smithers", private: false, pushedAt: "2026-08-06T09:00:00.000Z", openIssues: 2 }
-]
 
 describe("wave 14 §1 — the opening message is never filler", () => {
   test("signed out: no opening message at all; the transcript starts empty (LOCAL-APP.md)", async () => {
@@ -144,69 +133,4 @@ describe("wave 14 §1 — the opening message is never filler", () => {
     expect(FILLER.test(markup())).toBe(false)
   })
 
-  test("signed in, never-chosen: the FIRST message is the repo chooser's welcome", async () => {
-    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    const controller = createAppController(store, unavailableRepositories, silentAgent, {
-      ...backend({
-        "/api/auth/session": json(200, { login: "will", allowlisted: true, admin: false }),
-        "/api/identity/watched": json(200, { selected: null, selectedAt: null, via: null }),
-        "/api/identity/repos": json(200, { candidates: CANDIDATES, cached: false })
-      })
-    })
-    await controller.loadSession()
-    await controller.openFirstRunRepos()
-    await settled()
-
-    const { host, markup } = mount(controller)
-    // The opening entry is the initialization read; the chooser's welcome follows it.
-    const messages = smithersMessages(host)
-    expect(messages[0]).toContain("Smithers initialized successfully")
-    expect(messages[1]).toContain("choose which repositories")
-    expect(openingMessage(host)).not.toMatch(/^Hey/)
-    expect(FILLER.test(markup())).toBe(false)
-  })
-
-  test("signed in, repositories unreadable: the FIRST message is the honest state, still not filler", async () => {
-    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    const controller = createAppController(store, unavailableRepositories, silentAgent, {
-      ...backend({
-        "/api/auth/session": json(200, { login: "will", allowlisted: true, admin: false }),
-        "/api/identity/watched": json(200, { selected: null, selectedAt: null, via: null }),
-        "/api/identity/repos": json(503, { status: "error" })
-      })
-    })
-    await controller.loadSession()
-    await controller.openFirstRunRepos()
-    await settled()
-
-    const { host, markup } = mount(controller)
-    expect(smithersMessages(host)[1]).toContain("couldn't read your repositories")
-    expect(FILLER.test(markup())).toBe(false)
-  })
-
-  test("signed in, still loading: only the initialization read shows — the toast carries the wait, not a filler line", async () => {
-    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    // The watched read is genuinely in flight: this route never answers, so
-    // the boot is observed mid-wait rather than after it.
-    const controller = createAppController(store, unavailableRepositories, silentAgent, {
-      fetchImpl: async (input: unknown) => {
-        const path = new URL(String(input), "https://app.test").pathname
-        if (path === "/api/auth/session") {
-          return json(200, { login: "will", allowlisted: true, admin: false })
-        }
-        if (path === "/api/identity/watched") return new Promise<Response>(() => {})
-        return json(404, { status: "error" })
-      }
-    })
-    void controller.loadSession()
-    await settled()
-
-    const { host, markup } = mount(controller)
-    // Nothing about the wait is claimed before the watched read answers: the
-    // opening read states only what the host registered. The 300ms toast law
-    // (AppController) is what speaks about the wait.
-    expect(smithersMessages(host)).toHaveLength(1)
-    expect(openingMessage(host)).toContain("Smithers initialized successfully")
-    expect(FILLER.test(markup())).toBe(false)
-  })
 })

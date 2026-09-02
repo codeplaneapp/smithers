@@ -123,7 +123,7 @@ export const CardSchema = z.discriminatedUnion("kind", [
        * never reconstructs the authority it is exercising.
        */
       approval: z.record(z.string(), z.unknown()).optional(),
-      /** The watched repo whose per-user gateway the run lives on. */
+      /** The loaded repository whose per-user gateway the run lives on. */
       repo: z.string().optional(),
       decision: z.enum(["approved", "denied"]).optional(),
       decidedAt: z.number().optional(),
@@ -212,30 +212,6 @@ export const CardSchema = z.discriminatedUnion("kind", [
         })
         .nullable(),
       checkedAt: z.string()
-    })
-  }),
-  /*
-   * Wave 10 — the repo-chooser card: the onboarding conversation's one
-   * question, embedded in the transcript (never a takeover). `via` records
-   * how the chooser was opened (first run, /repos.watch, or the agent tool)
-   * and lands on the PUT /api/identity/watched call unchanged.
-   */
-  z.object({
-    ...cardBaseShape,
-    kind: z.literal("repo-chooser"),
-    payload: z.object({
-      candidates: z.array(
-        z.object({
-          fullName: z.string(),
-          private: z.boolean(),
-          pushedAt: z.string().nullable(),
-          openIssues: z.number().int().nonnegative()
-        })
-      ),
-      selected: z.array(z.string()),
-      via: z.enum(["onboarding", "command", "agent"]),
-      phase: z.enum(["choosing", "saving", "failed"]),
-      error: z.string().optional()
     })
   }),
   /* The connect surface as an embedded chat card (the agent's connect form; §2c″). */
@@ -332,10 +308,10 @@ export const CardSchema = z.discriminatedUnion("kind", [
     })
   }),
   /*
-   * Wave 12 §2 — which watched repository. With more than one watched repo and
+   * Wave 12 §2 — which loaded repository. With more than one loaded repo and
    * no `owner/repo` argument, the target is a genuine user choice (the
    * ≤3-questions law permits it), so it is asked as an embedded card among the
-   * WATCHED set — never guessed, never a takeover. One act answers it.
+   * loaded set — never guessed, never a takeover. One act answers it.
    */
   z.object({
     ...cardBaseShape,

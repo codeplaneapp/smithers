@@ -57,9 +57,6 @@ const runSignedInEntry = async (entry: "load" | "adopt") => {
     }
   })
   ctx.identityChanged = () => calls.push("identityChanged")
-  ctx.openFirstRunRepos = async () => {
-    calls.push("openFirstRunRepos")
-  }
   ctx.resumeWorkflowRuns = () => calls.push("resumeWorkflowRuns")
   ctx.resumeDeferredCommand = () => calls.push("resumeDeferredCommand")
   ctx.withToast = async <T>(
@@ -115,48 +112,8 @@ describe("signed-in session adoption", () => {
     expect(live.calls).toEqual([
       "identityChanged",
       "refreshBalance",
-      "openFirstRunRepos",
       "resumeWorkflowRuns",
       "resumeDeferredCommand"
     ])
-  })
-})
-
-
-describe("the first-run chooser on the local host", () => {
-  test("a signed-in session on the local app resumes work but opens no GitHub watch-list chooser", async () => {
-    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    const calls: string[] = []
-    const ctx = createControllerContext(store, repositories, agent, {
-      bootstrap: {
-        apiVersion: 1,
-        host: "local",
-        version: "0.0.1",
-        buildSha: "test",
-        capabilities: ["agent", "identity", "local.repositories", "local.targets", "local.terminal", "local.harnesses"],
-        authFlow: "both",
-        sandbox: null
-      },
-      fetchImpl: async (input) => {
-        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
-        const body = new URL(url, "https://app.test").pathname.endsWith("/auth/session")
-          ? signedIn
-          : { state: "ok", allowedToStartWork: true, balance: { totalUsd: "500", lifetimeChargedUsd: "0", chargeCount: 0 } }
-        return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })
-      }
-    })
-    ctx.openFirstRunRepos = async () => {
-      calls.push("openFirstRunRepos")
-    }
-    ctx.resumeWorkflowRuns = () => calls.push("resumeWorkflowRuns")
-    ctx.resumeDeferredCommand = () => calls.push("resumeDeferredCommand")
-    ctx.withToast = async <T>(key: string, _title: string, _doneTitle: string, work: () => Promise<T | string>): Promise<T | string> => {
-      if (key === "billing.balance.refresh") calls.push("refreshBalance")
-      return work()
-    }
-    const controller = createAuthBillingController(ctx, () => 0)
-    await controller.loadSession()
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(calls).toEqual(["refreshBalance", "resumeWorkflowRuns", "resumeDeferredCommand"])
   })
 })

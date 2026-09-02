@@ -81,10 +81,6 @@ const PRESENTATION_ONLY = [
   "onGrantCancel(", // delegated: App.tsx binds it to admin.grant.cancel
   "onQueueApprove(", // delegated: App.tsx binds it to admin.queue.approve
   "onDismiss(", // delegated: App.tsx binds it to runCommandArgs("toast.dismiss", ...)
-  "onRepoToggle(", // delegated: App.tsx binds it to runCommandArgs("repos.watch.toggle", ...)
-  "onReposSelectAll(", // delegated: App.tsx binds it to repos.watch.all
-  "onReposSelectNone(", // delegated: App.tsx binds it to repos.watch.none
-  "onReposConfirm(", // delegated: App.tsx binds it to repos.watch.confirm
   "onMaximize(", // delegated: App.tsx binds it to runCommandArgs("card.maximize", ...)
   "onMinimize(", // delegated: App.tsx binds it to card.minimize
   "onFrameBack", // delegated: App.tsx binds it to frame.back
@@ -173,10 +169,10 @@ describe("launch-law parity: every affordance is a command", () => {
       /* The multi-parity domain cards: every handler routes through onRunCommand. */
       "../cards/IssueCards.tsx": 2,
       "../cards/LandingCards.tsx": 4,
-      "../cards/FileCards.tsx": 2,
+      "../cards/FileCards.tsx": 3,
       "../cards/KeysCard.tsx": 1,
-      /* Mark-all-read, plus the empty state's named next step (§28.2). */
-      "../cards/NotificationsCard.tsx": 2,
+      /* Mark-all-read. */
+      "../cards/NotificationsCard.tsx": 1,
       "../cards/RepoImportCard.tsx": 1,
       /* The /theme picker: nine swatches, one shared handler through onRunCommand. */
       "../cards/ThemePickerCard.tsx": 1,
@@ -190,8 +186,8 @@ describe("launch-law parity: every affordance is a command", () => {
       "../cards/RunTimelineCard.tsx": 1,
       "../cards/RunHistoryCard.tsx": 1,
       "../cards/AffectedCard.tsx": 1,
-      /* Repo chooser, connection, world and browser card interactions. */
-      "../cards/ConversationCards.tsx": 8,
+      /* Connection, world and browser card interactions. */
+      "../cards/ConversationCards.tsx": 4,
       /*
        * The local-app target cards (docs/LOCAL-APP.md "Cards"): one shared
        * Run handler per file through onRunCommand — the plugin card's per-entry
@@ -214,7 +210,7 @@ describe("launch-law parity: every affordance is a command", () => {
        * the admin reset, and the theme toggle (chrome that stays visible on
        * every tab).
        */
-      "../tabs/ChromeBar.tsx": 15,
+      "../tabs/ChromeBar.tsx": 18,
       /* The live-process close question: confirm through tab.close.confirm. */
       "../tabs/TabBodies.tsx": 1
     })
@@ -227,8 +223,6 @@ describe("launch-law parity: every affordance is a command", () => {
     expect(app).toContain("runCommandArgs(\n")
     expect(app).toContain("\"approval.approve\"")
     expect(app).toContain("\"approval.deny\"")
-    expect(app).toContain("runCommandArgs(\"repos.watch.toggle\"")
-    expect(app).toContain("\"repos.watch.confirm\"")
     expect(app).toContain("runCommandArgs(\"card.maximize\"")
     expect(app).toContain("runCommand(\"frame.back\"")
     expect(app).toContain("runCommand(\"frame.forward\"")

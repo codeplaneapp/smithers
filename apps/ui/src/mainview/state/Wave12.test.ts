@@ -8,7 +8,7 @@
  * model's intent — the exact wave-11 transcript is replayed through the real
  * controller and the lie must not be on screen.
  *
- * §2 (which watched repository), §3 (a run the workspace never finishes) and
+ * §2 (which loaded repository), §3 (a run the workspace never finishes) and
  * §4 (the residuals) are pinned the same way: through the real controller,
  * against a relay double speaking the shapes the receipts recorded.
  */
@@ -184,7 +184,7 @@ const relay = (options: {
   }
 }
 
-const signIn = async (store: Awaited<ReturnType<typeof webStore>>, watched: string[] = [REPO]) => {
+const signIn = async (store: Awaited<ReturnType<typeof webStore>>, loaded: string[] = [REPO]) => {
   store.dispatch({
     type: "identity.session.loaded",
     actor: "system",
@@ -195,11 +195,15 @@ const signIn = async (store: Awaited<ReturnType<typeof webStore>>, watched: stri
     scopesPlain: null
   })
   store.dispatch({
-    type: "watched.replaced",
+    type: "repositories.loaded",
     actor: "system",
-    selected: watched,
-    selectedAt: "2026-08-09T10:00:00.000Z",
-    via: "onboarding"
+    repositories: loaded.map((fullName) => ({
+      id: fullName,
+      org: fullName.split("/")[0] ?? "",
+      ownerKind: "user",
+      name: fullName.split("/")[1] ?? "",
+      head: null
+    }))
   })
   await settle(2)
 }
@@ -468,8 +472,8 @@ describe("wave 12 §1 — the model may not narrate run state", () => {
   })
 })
 
-describe("wave 12 §2 — flow.create asks WHICH watched repo", () => {
-  test("one watched repo is not a question", async () => {
+describe("wave 12 §2 — flow.create asks WHICH loaded repo", () => {
+  test("one loaded repo is not a question", async () => {
     const store = await webStore()
     const double = relay()
     const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
@@ -498,7 +502,7 @@ describe("wave 12 §2 — flow.create asks WHICH watched repo", () => {
     expect(store.collections.cards.get("workflow-repo")).toBeUndefined()
   })
 
-  test("more than one watched repo and no argument: the chooser-among-watched, then one act creates it", async () => {
+  test("more than one loaded repo and no argument: the chooser-among-loaded, then one act creates it", async () => {
     const store = await webStore()
     const double = relay()
     const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
@@ -508,14 +512,14 @@ describe("wave 12 §2 — flow.create asks WHICH watched repo", () => {
     expect(said(asked)).toContain("2 repositories")
     /*
      * Review pass: a QUESTION is not a failure. Live on canary the transcript
-     * read "Smithers tried /flow.create — failed: You watch 3
+     * read "Smithers tried /flow.create — failed: You have 3
      * repositories…" beside the card that had just asked, correctly, which one.
      */
     expect(asked.status).toBe("executed")
     // EMBED LAW: the question is a card in the transcript, the surface stays.
     const card = store.collections.cards.get("workflow-repo")
     expect(card?.kind).toBe("workflow-repo")
-    expect(card?.kind === "workflow-repo" && card.payload.repos).toEqual([REPO, OTHER_REPO])
+    expect(card?.kind === "workflow-repo" && [...card.payload.repos].sort()).toEqual([OTHER_REPO, REPO].sort())
     expect(store.collections.sessions.get("main")?.surface).toBe("chat")
     // Nothing was provisioned on a guess.
     expect(double.calls.some((call) => call.path === "/api/workflow/provision")).toBe(false)
@@ -537,72 +541,6 @@ describe("wave 12 §2 — flow.create asks WHICH watched repo", () => {
     const again = await controller.commands.run("flow.repo.choose", OTHER_REPO)
     expect(said(again)).toContain("already answered")
     expect(double.state.launched).toHaveLength(1)
-  })
-
-  test("a repo outside the watched set is still the wave-10 chooser, not this question", async () => {
-    const store = await webStore()
-    const double = relay()
-    const controller = createAppController(store, unavailableRepositories, silentAgent(), {
-      ...double.services,
-      fetchImpl: async (input, init) => {
-        const absolute = new URL(
-          typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
-          "https://app.test"
-        )
-        if (absolute.pathname === "/api/identity/repos") return json(200, { candidates: [] })
-        if (absolute.pathname === "/api/identity/watched") return json(200, { selected: [REPO], via: null })
-        return double.services.fetchImpl?.(input, init) ?? json(404, {})
-      }
-    })
-    await signIn(store, [REPO, OTHER_REPO])
-
-    const outcome = await controller.commands.run("flow.create", "summarize my issues someone/else")
-    expect(said(outcome)).toContain("someone/else")
-    expect(store.collections.cards.get("repo-chooser")).toBeDefined()
-    expect(store.collections.cards.get("workflow-repo")).toBeUndefined()
-  })
-
-  test("the durable selection is the app's on first run — the question is askable (review)", async () => {
-    /*
-     * The selection read needs no GitHub: `/api/identity/watched` answers it
-     * from the seam's own store, so a signed-in returning user can create a
-     * workflow without being sent back through the onboarding chooser they
-     * already answered.
-     */
-    const store = await webStore()
-    const double = relay()
-    const controller = createAppController(store, unavailableRepositories, silentAgent(), {
-      ...double.services,
-      fetchImpl: async (input, init) => {
-        const absolute = new URL(
-          typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
-          "https://app.test"
-        )
-        if (absolute.pathname === "/api/identity/watched") {
-          return json(200, { selected: [REPO, OTHER_REPO], selectedAt: "2026-08-09T10:00:00.000Z", via: "agent" })
-        }
-        return double.services.fetchImpl?.(input, init) ?? json(404, {})
-      }
-    })
-    store.dispatch({
-      type: "identity.session.loaded",
-      actor: "system",
-      state: "signed-in",
-      login: "codeplanesmithers",
-      allowlisted: true,
-      admin: false,
-      scopesPlain: null
-    })
-    await controller.openFirstRunRepos()
-    await settle(4)
-
-    // The durable selection is the app's…
-    expect(store.collections.watchedRepos.get("watched")?.selected).toEqual([REPO, OTHER_REPO])
-    // …so §2's question is askable, instead of the onboarding chooser again.
-    const asked = await controller.commands.run("flow.create", "summarize my open issues")
-    expect(said(asked)).toContain("2 repositories")
-    expect(store.collections.cards.get("workflow-repo")).toBeDefined()
-    expect(store.collections.cards.get("repo-chooser")).toBeUndefined()
   })
 
   test("the model may not answer the human's question for them (review)", async () => {

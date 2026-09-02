@@ -14,8 +14,6 @@ const cases = [...appendix.matchAll(/\*\*(A\.\d+)\*\* `\/([^`\s]+)`(?: `([^`]+)`
 const validArgs: Record<string, string> = {
   theme: "paper",
   send: "hello",
-  "repos.watch": "codeplanesmithers/canary-sandbox",
-  "repos.watch.toggle": "codeplanesmithers/canary-sandbox",
   browser: "https://example.com",
   "flow.create": "summarize open issues codeplanesmithers/canary-sandbox",
   "flow.repo.choose": "codeplanesmithers/canary-sandbox",

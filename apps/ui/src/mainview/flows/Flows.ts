@@ -195,7 +195,9 @@ export const USER_ONLY_VISIBLE: ReadonlyArray<{ readonly name: string; readonly 
   { name: "billing.portal", why: "external billing portal; the human clicks" },
   { name: "admin.devtools", why: "admin panel presentation toggle" },
   { name: "debug.backend", why: "admin diagnostics presentation" },
-  { name: "debug.grants.reset", why: "admin-only grant wipe" }
+  { name: "debug.grants.reset", why: "admin-only grant wipe" },
+  { name: "cloud.sign-in", why: "external browser OAuth on the human's account; the human clicks" },
+  { name: "cloud.sign-out", why: "drops the human's cloud credential; the human clicks" }
 ]
 
 export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => {
@@ -404,58 +406,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow(SEND),
   alias("send", SEND),
-  flow({
-    /*
-     * Wave 10 onboarding — the repo chooser, one flow three ways: the card's
-     * confirm, /repos.watch, and the agent call ("watch my flows repo too"
-     * resolves here). An optional repo pre-selects it. Re-running reopens the
-     * chooser pre-filled with the current selection.
-     */
-    name: "repos.watch",
-    summary: "Choose which repositories Smithers watches",
-    runtime: ["identity"],
-    args: "[repo]",
-    requires: ["signed-in"],
-    input: RepoTarget,
-    handler: ({ repo }) => actions.openRepoChooser(repo)
-  }),
-  flow({
-    name: "repos.watch.toggle",
-    summary: "Toggle a repository in the chooser",
-    runtime: ["identity"],
-    hidden: true,
-    userOnly: true,
-    args: "<fullName>",
-    input: Schema.Struct({ fullName: Schema.String }),
-    handler: ({ fullName }) => actions.toggleWatchedRepo(fullName)
-  }),
-  flow({
-    name: "repos.watch.all",
-    summary: "Select every repository in the chooser",
-    runtime: ["identity"],
-    hidden: true,
-    userOnly: true,
-    input: NoPayload,
-    handler: () => actions.selectAllWatchedRepos()
-  }),
-  flow({
-    name: "repos.watch.none",
-    summary: "Select no repositories in the chooser",
-    runtime: ["identity"],
-    hidden: true,
-    userOnly: true,
-    input: NoPayload,
-    handler: () => actions.selectNoWatchedRepos()
-  }),
-  flow({
-    name: "repos.watch.confirm",
-    summary: "Confirm the watched-repositories selection",
-    runtime: ["identity"],
-    hidden: true,
-    userOnly: true,
-    input: NoPayload,
-    handler: () => actions.confirmWatchedRepos()
-  }),
   flow(CLEAR),
   alias("clear", CLEAR),
   flow(BROWSER),
@@ -467,14 +417,14 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      * the relay event stream (THE EMBED LAW).
      *
      * Wave 12 §2: a trailing `owner/repo` names the target. Without one and
-     * with more than one watched repo, the chooser-among-watched asks — the
-     * target is a genuine user choice, not a guess.
+     * with more than one loaded repository, the chooser-among-loaded asks —
+     * the target is a genuine user choice, not a guess.
      */
     name: "flow.create",
     summary: "Create a Smithers workflow from a description",
     runtime: ["jjhub"],
     args: "<description> [owner/repo]",
-    requires: ["signed-in", "repos-selected"],
+    requires: ["signed-in"],
     capabilities: ["outbound:launch"],
     input: Schema.Struct({
       description: Schema.String,
@@ -493,7 +443,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      * user-only keeps it un-executable even by a model that guesses the name.
      */
     name: "flow.repo.choose",
-    summary: "Choose which watched repository a workflow belongs to",
+    summary: "Choose which loaded repository a workflow belongs to",
     runtime: ["jjhub"],
     hidden: true,
     userOnly: true,
@@ -540,7 +490,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     summary: "Run a workflow on your workspace",
     runtime: ["jjhub"],
     args: "<name> [owner/repo]",
-    requires: ["signed-in", "repos-selected"],
+    requires: ["signed-in"],
     capabilities: ["outbound:launch"],
     input: Schema.Struct({
       name: Schema.String,

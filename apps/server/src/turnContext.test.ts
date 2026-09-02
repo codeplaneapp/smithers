@@ -12,7 +12,7 @@ const context: AgentRuntimeContext = {
   theme: "dark",
   selectedWorldDocument: null,
   connectors: [],
-  github: { connected: false, login: null, watchedRepos: null },
+  github: { connected: false, login: null, repositories: null },
   worldState: { documentCount: 0, documents: [] },
   capabilities: ["Hold a streaming conversation in this chat and read its visible transcript."],
   limitations: ["Cannot see or control the host environment beyond what this context block states."]

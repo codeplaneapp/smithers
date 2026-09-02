@@ -376,3 +376,78 @@ describe("the sidebar's Repos section", () => {
     expect(store.session().activeTabId).toBe("main")
   })
 })
+
+/*
+ * The piper tree (ADR 0001, lane piper step 3): the cloud inventory renders
+ * `org/ → repo → working copies`; selecting a repo row names `org/repo`,
+ * selecting a copy row names `org/repo#copyId`; a local checkout whose remote
+ * parses into the inventory nests under its repository instead of standing
+ * alone. No mirror glyph — the backend has no mirror status yet.
+ */
+describe("the sidebar's piper tree", () => {
+  const repo = (id: string, name: string, path: string, remote: string | null) => ({
+    id,
+    path,
+    name,
+    git: { branch: "main", remote },
+    smithers: { detected: false, workspaceFile: null, declarationFiles: [], reason: "no WORKSPACE.ts", workspaces: [] },
+    warnings: []
+  })
+
+  test("cloud repositories group under their org; repo and copy rows select the piper grammar", async () => {
+    const { store, controller } = await localHarness()
+    await persisted(store, {
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [
+        { id: "will/flows", org: "will", ownerKind: "user", name: "flows", head: { bookmark: "main", changeId: "qupxosqw", commitId: "abc123" } },
+        { id: "smithersai/smithers", org: "smithersai", ownerKind: "org", name: "smithers", head: null }
+      ]
+    })
+    await persisted(store, {
+      type: "workingcopies.workspaces.loaded",
+      actor: "system",
+      copies: [{ id: "ws-1", repoId: "will/flows", kind: "workspace", label: "fix-landings", workspaceId: "ws-1", state: "running" }]
+    })
+    const { host, act } = mount(controller)
+    // One org header per org, the repo rows beneath; no mirror glyph anywhere.
+    expect(host.querySelector("[data-testid=repo-org-will]")?.textContent).toBe("will/")
+    expect(host.querySelector("[data-testid=repo-org-smithersai]")?.textContent).toBe("smithersai/")
+    expect(host.querySelector("[data-testid=repo-will\\/flows]")).not.toBeNull()
+    expect(host.querySelector("[data-testid=repo-smithersai\\/smithers]")).not.toBeNull()
+    // The workspace copy nests under its repo, labelled `label · state`.
+    const copy = host.querySelector<HTMLElement>("[data-testid=copy-ws-1]")
+    expect(copy?.textContent).toContain("fix-landings · running")
+    // Selecting the repo row names org/repo; selecting the copy row names org/repo#copyId.
+    await act(() => host.querySelector<HTMLButtonElement>('[data-testid="repo-select-will\\/flows"]')?.click())
+    expect(store.session().activeRepoKey).toBe("will/flows")
+    await act(() => copy?.querySelector<HTMLButtonElement>("[data-flow=\"repo.select\"]")?.click())
+    expect(store.session().activeRepoKey).toBe("will/flows#ws-1")
+  })
+
+  test("a local checkout whose remote parses into the inventory nests as `label · N ahead`", async () => {
+    const { store, controller } = await localHarness()
+    await persisted(store, {
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [
+        { id: "smithersai/smithers", org: "smithersai", ownerKind: "org", name: "smithers", head: { bookmark: "main", changeId: "qp", commitId: "c1" } }
+      ]
+    })
+    await persisted(store, {
+      type: "repos.loaded",
+      actor: "system",
+      repos: [{
+        ...repo("r1", "smithers", "/Users/will/smithers", "git@github.com:smithersai/smithers.git"),
+        jj: { changeId: "kxyz", commitId: "deadbeef", ahead: 3, bookmark: "main" }
+      }]
+    })
+    const { host } = mount(controller)
+    // Not a standalone row: the checkout nests under smithersai/smithers with its ahead count.
+    expect(host.querySelector("[data-testid=repo-local\\:\\/Users\\/will\\/smithers]")).toBeNull()
+    const copy = host.querySelector<HTMLElement>("[data-testid=copy-local\\:\\/Users\\/will\\/smithers]")
+    expect(copy).not.toBeNull()
+    expect(copy?.textContent).toContain("smithers · 3 ahead")
+    expect(copy?.closest("[data-testid=repo-smithersai\\/smithers]")).not.toBeNull()
+  })
+})

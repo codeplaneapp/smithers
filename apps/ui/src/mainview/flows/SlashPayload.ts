@@ -106,8 +106,6 @@ const targetRef = (name: string, args: string | undefined): Parsed => {
 const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = {
   "appearance.theme": (args) => ok({ palette: args ?? "" }),
   "chat.send": (args) => required("text", args, "send needs the text to submit"),
-  "repos.watch": (args) => optional("repo", args),
-  "repos.watch.toggle": (args) => required("fullName", args, "repos.watch.toggle needs a repository name"),
   "browser.open": (args) => required("url", args, "browser needs a URL: /browser.open https://example.com"),
   /*
    * The description keeps the trailing `owner/repo` token: createWorkflow

@@ -76,7 +76,7 @@ const scriptedToolAgent = (
 
 const signIn = async (
   store: Awaited<ReturnType<typeof webStore>>,
-  watched: Array<string> = ["codeplanesmithers/smithers-demo"]
+  loaded: Array<string> = ["codeplanesmithers/smithers-demo"]
 ) => {
   store.dispatch({
     type: "identity.session.loaded",
@@ -88,11 +88,15 @@ const signIn = async (
     scopesPlain: null
   })
   store.dispatch({
-    type: "watched.replaced",
+    type: "repositories.loaded",
     actor: "system",
-    selected: watched,
-    selectedAt: "2026-08-10T10:00:00.000Z",
-    via: "onboarding"
+    repositories: loaded.map((fullName) => ({
+      id: fullName,
+      org: fullName.split("/")[0] ?? "",
+      ownerKind: "user",
+      name: fullName.split("/")[1] ?? "",
+      head: null
+    }))
   })
   await settle(2)
 }
@@ -111,7 +115,7 @@ describe("wave 13 §F — the capability section is generated from the live cata
         { name: "flow.create", summary: "Create a Smithers workflow", args: "<description>" }
       ],
       {
-        github: { connected: false, login: null, watchedRepos: null },
+        github: { connected: false, login: null, repositories: null },
         localRepositories: [],
         localRepositoriesAvailable: false
       }
@@ -140,7 +144,7 @@ describe("wave 13 §F — the capability section is generated from the live cata
    */
   test("the laundering rule names the live shape, the 'we can' form, and refuses approval-as-capability", () => {
     const prompt = smithersInstructions([{ name: "flow.create", summary: "Create a Smithers workflow" }], {
-      github: { connected: true, login: "codeplanesmithers", watchedRepos: 1 },
+      github: { connected: true, login: "codeplanesmithers", repositories: 1 },
       localRepositories: [],
       localRepositoriesAvailable: false
     })
@@ -169,7 +173,7 @@ describe("wave 13 §F — the capability section is generated from the live cata
     ["F-5 (pull request)", "push to a branch or open a pull request — not directly, and not through a run"]
   ])("%s is named as a can't-yet in the generated section", (_ask, phrase) => {
     const prompt = smithersInstructions([{ name: "world", summary: "See what Smithers understands" }], {
-      github: { connected: true, login: "codeplanesmithers", watchedRepos: 1 },
+      github: { connected: true, login: "codeplanesmithers", repositories: 1 },
       localRepositories: [],
       localRepositoriesAvailable: false
     })
@@ -188,7 +192,7 @@ describe("wave 13 §F — the capability section is generated from the live cata
     const prompt = smithersInstructions(
       [{ name: "browser", summary: "Open a web page as a card Smithers can read", args: "<url>" }],
       {
-        github: { connected: true, login: "codeplanesmithers", watchedRepos: 1 },
+        github: { connected: true, login: "codeplanesmithers", repositories: 1 },
         localRepositories: [],
         localRepositoriesAvailable: false
       }
@@ -200,11 +204,11 @@ describe("wave 13 §F — the capability section is generated from the live cata
 
   test("the connector line states the signed-in truth", () => {
     const prompt = smithersInstructions([], {
-      github: { connected: true, login: "codeplanesmithers", watchedRepos: 2 },
+      github: { connected: true, login: "codeplanesmithers", repositories: 2 },
       localRepositories: ["flows"],
       localRepositoriesAvailable: true
     })
-    expect(prompt).toContain("GitHub is connected as codeplanesmithers, watching 2 repositories")
+    expect(prompt).toContain("GitHub is connected as codeplanesmithers, 2 repositories loaded")
     expect(prompt).toContain("Local repositories connected: flows")
   })
 
@@ -225,8 +229,7 @@ describe("wave 13 §F — the capability section is generated from the live cata
     // The generated section reflects THIS session's truth.
     expect(instructions).toContain("What you can do is EXACTLY this")
     expect(instructions).toContain("/flow.create")
-    expect(instructions).toContain("/repos.watch")
-    expect(instructions).toContain("GitHub is connected as codeplanesmithers, watching 1 repositories")
+    expect(instructions).toContain("GitHub is connected as codeplanesmithers, 1 repositories loaded")
     expect(instructions).toContain("Everything else is a can't-yet")
     // User-only browser mechanics are not the agent's to offer.
     expect(instructions).not.toContain("/theme")

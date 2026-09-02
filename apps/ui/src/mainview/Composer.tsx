@@ -4,6 +4,7 @@ import {
   BookOpen,
   Bot,
   ChevronDown,
+  Cloud,
   FolderGit2,
   GitPullRequest,
   HardDrive,
@@ -21,7 +22,7 @@ import { roleMenuEntries } from "./AgentRoleMenu"
 import { useController } from "./ControllerContext"
 import { composeRefs, stampFlows, stampTestIds } from "./FlowStamp"
 import { SELECT_REPO_LABEL } from "./Onboarding"
-import { activeRepoOf, repoKeyOf, WORLD_DISPLAY_NAME } from "./state/AppState"
+import { activeRepoOf, parseRepoSelection, repoKeyOf, WORLD_DISPLAY_NAME } from "./state/AppState"
 
 /** Stable Playwright handle; spread past ChatComposer's excess-property check. */
 const COMPOSER_INPUT_TEST_ID: Record<string, string> = { "data-testid": "composer-input" }
@@ -415,8 +416,8 @@ function ComposerAdd({
  * repository's name as the trigger ("Select a repo" until there is one), the
  * repository origins as its menu. Every entry is a command binding: the
  * native folder dialog through repo.open, capability-scoped local
- * repositories through connector.add, GitHub through auth.sign-in /
- * repos.watch, cloud import through repos.import, and full management
+ * repositories through connector.add, GitHub through auth.sign-in,
+ * cloud import through repos.import, and full management
  * through /connect.
  */
 function ComposerConnect({
@@ -434,7 +435,9 @@ function ComposerConnect({
   const { data: repoRows } = useLiveQuery(collections.repos)
   const { data: operationRows } = useLiveQuery(collections.connectorOperations)
   const { data: identityRows } = useLiveQuery(collections.identitySessions)
-  const { data: watchedRows } = useLiveQuery(collections.watchedRepos)
+  const { data: repositoryRows } = useLiveQuery(collections.repositories)
+  const { data: copyRows } = useLiveQuery(collections.workingCopies)
+  const { data: cloudSessionRows } = useLiveQuery(collections.cloudSessions)
   /* The active repository is session state (activeRepoKey): one rule with the sidebar and the tabs. */
   const { data: activeRows } = useLiveQuery((q) =>
     q.from({ session: collections.sessions }).select(({ session }) => ({
@@ -457,13 +460,63 @@ function ComposerConnect({
   const selecting = operation?.phase === "selecting-local-repository"
   const identity = identityRows[0]
   const signedIn = identity?.state === "signed-in"
-  const watched = watchedRows[0]?.selected ?? []
   const activeRepo = activeRepoOf(activeRows[0] ?? { activeRepoKey: null }, repos)
-  const selected = activeRepo?.name ?? connectors[0]?.name ?? (signedIn ? watched[0] : undefined)
+  /*
+   * The trigger names the selection in the piper grammar (lane piper step
+   * 3/4): `org/repo` at its head, `org/repo · copy` for a working copy. The
+   * legacy pin key still reads through the open-repo rows until every reader
+   * moves.
+   */
+  const activeKey = activeRows[0]?.activeRepoKey ?? null
+  const selection = activeKey === null ? null : parseRepoSelection(activeKey)
+  const selectedCopy = selection !== null && "repoId" in selection && selection.copyId !== undefined
+    ? copyRows.find((row) => row.id === selection.copyId)
+    : undefined
+  const selected = selection !== null && "repoId" in selection
+    ? selectedCopy !== undefined ? `${selection.repoId} · ${selectedCopy.label}` : selection.repoId
+    : activeRepo?.name ?? connectors[0]?.name
   const connected = selected !== undefined
   const canOpenRepo = controller.commands.find("repo.open") !== undefined
   const canAddConnector = controller.nativeRepositoriesAvailable &&
     controller.commands.find("connector.add") !== undefined
+  const cloudSignedIn = cloudSessionRows[0]?.state === "signed-in"
+  const copyLabel = (copy: (typeof copyRows)[number]): string =>
+    copy.kind === "workspace"
+      ? copy.state === undefined ? copy.label : `${copy.label} · ${copy.state}`
+      : copy.ahead === undefined ? copy.label : `${copy.label} · ${copy.ahead} ahead`
+
+  const cloudEntries: ReadonlyArray<MenuEntry> = [...repositoryRows]
+    .sort((left, right) => left.org.localeCompare(right.org) || left.name.localeCompare(right.name))
+    .flatMap((repository) => [
+      {
+        key: `cloud:${repository.id}`,
+        flow: "repo.select",
+        args: repository.id,
+        active: activeKey === repository.id,
+        content: (
+          <>
+            <Cloud size={14} aria-hidden="true" />
+            <span className="composer-connect-name">{repository.name}</span>
+            <span className="composer-connect-branch">{repository.org}/</span>
+          </>
+        )
+      },
+      ...copyRows
+        .filter((copy) => copy.repoId === repository.id)
+        .map((copy) => ({
+          key: `copy:${copy.id}`,
+          flow: "repo.select",
+          args: `${repository.id}#${copy.id}`,
+          active: activeKey === `${repository.id}#${copy.id}`,
+          content: (
+            <>
+              {copy.kind === "local" ? <Laptop size={14} aria-hidden="true" /> : <Cloud size={14} aria-hidden="true" />}
+              <span className="composer-connect-name">{copyLabel(copy)}</span>
+              <span className="composer-connect-branch">{repository.id}</span>
+            </>
+          )
+        }))
+    ])
 
   const entries: ReadonlyArray<MenuEntry> = [
     ...repos.map((repo) => ({
@@ -492,6 +545,19 @@ function ComposerConnect({
         </>
       )
     })),
+    ...cloudEntries,
+    ...(!cloudSignedIn && controller.commands.find("cloud.sign-in") !== undefined
+      ? [{
+        key: "cloud.sign-in",
+        flow: "cloud.sign-in",
+        content: (
+          <>
+            <Cloud size={14} aria-hidden="true" />
+            Sign in to Smithers Cloud…
+          </>
+        )
+      }]
+      : []),
     ...(canOpenRepo
       ? [{
         key: "repo.open",
@@ -519,18 +585,7 @@ function ComposerConnect({
         args: "read"
       }]
       : []),
-    ...(signedIn && controller.commands.find("repos.watch") !== undefined
-      ? [{
-        key: "repos.watch",
-        flow: "repos.watch",
-        content: (
-          <>
-            <GitPullRequest size={14} aria-hidden="true" />
-            Choose GitHub repositories…
-          </>
-        )
-      }]
-      : !signedIn && controller.commands.find("auth.sign-in") !== undefined
+    ...(!signedIn && controller.commands.find("auth.sign-in") !== undefined
       ? [{
         key: "auth.sign-in",
         flow: "auth.sign-in",
@@ -665,36 +720,81 @@ function ComposerConnect({
 }
 
 /*
- * Where the selected repository lives, beside the selector: a local path for
- * a repository this machine opened or connected. A watched GitHub repository
- * adds nothing when the selector already names the same owner/repo. A
- * projection of the same rows the selector reads; it never stores a choice of
- * its own.
+ * Where the selected repository lives, beside the selector (lane piper step
+ * 4): a local working copy reads `~/smithers · 3 ahead of main` (the jj
+ * probe's count against the default bookmark, or the checkout's branch when
+ * no probe ran); a repository selected at its head reads `head @ qupxosqw`.
+ * A projection of the same rows the selector reads; it never stores a choice
+ * of its own.
  */
 function ComposerOrigin() {
   const controller = useController()
   const { collections } = controller.store
   const { data: repoRows } = useLiveQuery(collections.repos)
   const { data: connectorRows } = useLiveQuery(collections.connectors)
-  const { data: identityRows } = useLiveQuery(collections.identitySessions)
-  const { data: watchedRows } = useLiveQuery(collections.watchedRepos)
+  const { data: repositoryRows } = useLiveQuery(collections.repositories)
+  const { data: copyRows } = useLiveQuery(collections.workingCopies)
   const { data: activeRows } = useLiveQuery((q) =>
     q.from({ session: collections.sessions }).select(({ session }) => ({
       id: session.id,
       activeRepoKey: session.activeRepoKey
     }))
   )
-  const repo = activeRepoOf(activeRows[0] ?? { activeRepoKey: null }, repoRows)
+  const activeKey = activeRows[0]?.activeRepoKey ?? null
+  const selection = activeKey === null ? null : parseRepoSelection(activeKey)
   const connector = [...connectorRows].sort((left, right) => left.name.localeCompare(right.name))[0]
-  const signedIn = identityRows[0]?.state === "signed-in"
-  const watched = signedIn ? watchedRows[0]?.selected?.[0] : undefined
 
+  if (selection !== null && "repoId" in selection) {
+    if (selection.copyId !== undefined) {
+      const copy = copyRows.find((row) => row.id === selection.copyId)
+      if (copy !== undefined) {
+        const repository = repositoryRows.find((row) => row.id === copy.repoId)
+        return (
+          <span className="composer-origin" data-origin={copy.kind} data-testid="repo-chip" title={copy.path ?? copy.workspaceId ?? copy.id}>
+            {copy.kind === "local" ? <Laptop size={14} aria-hidden="true" /> : <Cloud size={14} aria-hidden="true" />}
+            <span className="composer-origin-name">
+              {copy.kind === "local" && copy.path !== undefined ? abbreviateHomePath(copy.path) : copy.label}
+            </span>
+            {copy.ahead !== undefined && repository?.head !== null && repository?.head !== undefined
+              ? <span className="composer-origin-branch">{` · ${copy.ahead} ahead of ${repository.head.bookmark}`}</span>
+              : copy.state !== undefined
+              ? <span className="composer-origin-branch">{` · ${copy.state}`}</span>
+              : null}
+          </span>
+        )
+      }
+    } else {
+      const repository = repositoryRows.find((row) => row.id === selection.repoId)
+      const headId = repository?.head?.changeId ?? null
+      if (repository !== undefined) {
+        return (
+          <span className="composer-origin" data-origin="cloud" data-testid="repo-chip" title={repository.id}>
+            <Cloud size={14} aria-hidden="true" />
+            <span className="composer-origin-name">
+              {headId === null ? "head" : `head @ ${headId.length > 12 ? headId.slice(0, 8) : headId}`}
+            </span>
+          </span>
+        )
+      }
+    }
+  }
+
+  /* The legacy rows: an open checkout selected by its pin key, else a connector. */
+  const legacyCopyId = selection !== null && !("repoId" in selection) ? selection.legacyCopyId : null
+  const legacyCopy = legacyCopyId === null ? undefined : copyRows.find((row) => row.id === legacyCopyId)
+  const repo = legacyCopy?.path !== undefined
+    ? repoRows.find((row) => row.path === legacyCopy.path)
+    : activeRepoOf(activeRows[0] ?? { activeRepoKey: null }, repoRows)
   if (repo !== undefined) {
+    const ahead = legacyCopy?.ahead ?? repo.jj?.ahead
+    const bookmark = repo.jj?.bookmark ?? null
     return (
       <span className="composer-origin" data-origin="local" data-testid="repo-chip" title={repo.path}>
         <Laptop size={14} aria-hidden="true" />
         <span className="composer-origin-name">{abbreviateHomePath(repo.path)}</span>
-        {repo.git?.branch !== undefined && repo.git?.branch !== null
+        {ahead !== undefined && bookmark !== null
+          ? <span className="composer-origin-branch">{` · ${ahead} ahead of ${bookmark}`}</span>
+          : repo.git?.branch !== undefined && repo.git?.branch !== null
           ? <span className="composer-origin-branch">{` · ${repo.git.branch}`}</span>
           : null}
       </span>
@@ -710,10 +810,6 @@ function ComposerOrigin() {
           : null}
       </span>
     )
-  }
-  if (watched !== undefined) {
-    // The selector already names this watched repository; repeating it is not an origin.
-    return null
   }
   return null
 }

@@ -32,8 +32,8 @@ export const createWorkflowPumpController = (
    * Workflows in the conversation ("make me a workflow").
    *
    * Every act routes through the per-user gateway seam on the product Worker:
-   * provision-or-resume the workspace gateway for a WATCHED repo (the watched
-   * set is the universe — anything outside it routes to the chooser), then the
+   * provision-or-resume the workspace gateway for a loaded repo (the loaded
+   * set is the universe), then the
    * gateway's own procedures. A run renders as an embedded run card (THE EMBED
    * LAW) whose pump re-reads the `run-summary`, `transcript`, and `approvals`
    * projections. A projection carries the whole current answer rather than a

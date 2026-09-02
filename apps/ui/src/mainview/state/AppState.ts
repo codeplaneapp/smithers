@@ -242,7 +242,7 @@ export type Frame = z.infer<typeof FrameSchema>
  */
 export const ToastSchema = z.object({
   id: z.string(),
-  /** The work identity ("repos.first-run"): one toast per background flow. */
+  /** The work identity ("billing.balance.refresh"): one toast per background flow. */
   key: z.string(),
   title: z.string(),
   status: z.enum(["running", "ok", "failed"]),
@@ -538,21 +538,6 @@ export const inConversation = (row: { readonly tabId?: string | undefined }, tab
 export const MAIN_TAB_ID = "main"
 
 export const mainTab = (): TabRow => ({ id: "main", kind: "main", title: "Smithers", ordinal: 0 })
-
-/*
- * The watched-repos selection (Wave 10): a local mirror of the identity
- * seam's GET /api/identity/watched answer. `selected: null` = never chosen (a real
- * distinct state, NOT "all repos"); an empty array = deliberately chose none.
- */
-export const WatchedReposSchema = z.object({
-  id: z.literal("watched"),
-  selected: z.array(z.string()).nullable(),
-  selectedAt: z.string().nullable(),
-  via: z.enum(["onboarding", "command", "agent"]).nullable(),
-  updatedAt: z.number(),
-  revision: z.number().int().nonnegative()
-})
-export type WatchedRepos = z.infer<typeof WatchedReposSchema>
 
 /*
  * The tool-call stream the admin dev-tools panel reads (Wave 10, §2b): the
@@ -1002,28 +987,6 @@ export type AppTransition =
     detail: string
   }
   | { type: "toast.dismissed"; actor: "user" | "system"; id: string }
-	| {
-			/*
-			 * First login with no watched-repos selection yet — open the
-			 * repo-chooser card in the transcript with the inline candidates.
-			 */
-			type: "repos.selection.needed";
-			actor: "system";
-			candidates: ReadonlyArray<{
-				fullName: string;
-				private: boolean;
-				pushedAt: string | null;
-				openIssues: number;
-			}>;
-	  }
-	| {
-			/* The watched-repos selection changed (onboarding, /repos.watch, or asking). */
-			type: "watched.replaced";
-			actor: Actor;
-			selected: string[];
-			selectedAt: string | null;
-			via: "onboarding" | "command" | "agent" | null;
-	  }
 	| { type: "card.removed"; actor: Actor; id: string }
   | {
     /* The visible one-line record of an agent tool execution. */
@@ -1208,14 +1171,7 @@ export const initialBillingAccount = (): BillingAccount => ({
  * the OPENING message before the honest content arrived, and the opening
  * message is the one the product is judged by. Signed out, the opening (and
  * only) message IS the auth conversation state — App.tsx derives it, nothing
- * is seeded under it. Signed in and never-chosen, the FIRST message is the
- * repo chooser's welcome; signed in with a selection, the transcript opens
- * clean. A filler line ahead of either is invention, because it claims a
- * conversation before there is one.
- *
- * That leaves the transcript empty while the first-run watched read is in
- * flight. Empty-while-loading is a valid state: the 300ms toast law already
- * says out loud what is running ("Reading your repositories…"), so the wait is
- * narrated by the toast rather than papered over by a message that says
- * nothing true.
+ * is seeded under it. Signed in, the transcript opens clean and the loaded
+ * repositories arrive through the inventory seam. A filler line ahead of
+ * either is invention, because it claims a conversation before there is one.
  */

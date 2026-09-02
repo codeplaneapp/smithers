@@ -59,7 +59,6 @@ const chatState: CommandState = {
   typing: false,
   hasConnectors: false,
   admin: false,
-  needsSelection: false,
   signedOut: false
 }
 
@@ -71,8 +70,7 @@ describe("command registry pure model", () => {
     expect(recommendedNames({ ...chatState, typing: true })).toEqual(["chat.stop"])
   })
 
-  test("an unmade watched-repos selection leads; signed-out, sign-in is the only step", () => {
-    expect(recommendedNames({ ...chatState, needsSelection: true })[0]).toBe("repos.watch")
+  test("signed-out, sign-in is the only step", () => {
     expect(recommendedNames({ ...chatState, signedOut: true })).toEqual(["auth.sign-in"])
     // Typing still outranks everything.
     expect(recommendedNames({ ...chatState, signedOut: true, typing: true })).toEqual(["chat.stop"])
@@ -110,11 +108,11 @@ describe("command registry pure model", () => {
       // `connect` is chatState's leading recommendation, and its summary
       // happens to carry the needle. A name match still leads.
       { name: "connect", summary: "Connect the repos you work in" },
-      { name: "repos.watch", summary: "Choose what to watch" },
+      { name: "repos.import", summary: "Import one to the cloud" },
       { name: "repos.list", summary: "Show them" }
     ]
     expect(slashItems(chatState, "repos", commands).map((item) => item.flow.name)).toEqual([
-      "repos.watch",
+      "repos.import",
       "repos.list",
       "connect"
     ])
@@ -524,11 +522,6 @@ describe("command registry bindings", () => {
       "stop",
       "chat.send",
       "send",
-      "repos.watch",
-      "repos.watch.toggle",
-      "repos.watch.all",
-      "repos.watch.none",
-      "repos.watch.confirm",
       "chat.clear",
       "clear",
       "browser.open",
@@ -562,6 +555,8 @@ describe("command registry bindings", () => {
       "auth.prompt",
       "auth.sign-out",
       "auth.request-access",
+      "cloud.sign-in",
+      "cloud.sign-out",
       "toast.dismiss",
       "billing.balance",
       "balance",
@@ -744,7 +739,6 @@ describe("command registry bindings", () => {
       expect(agentNames).not.toContain(userOnly)
     }
     expect(agentNames).toContain("connect")
-    expect(agentNames).toContain("repos.watch")
     expect(agentNames).toContain("browser.open")
 
     // Asking for one anyway gets an honest tool-result error naming the

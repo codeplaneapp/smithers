@@ -203,33 +203,6 @@ describe("signing out leaves nothing of the account behind", () => {
     expect([...store.collections.transitions.values()].every((row) => !row.payload.includes("alice"))).toBe(true)
   })
 
-  test("an Alice watched-selection response cannot repopulate state after sign-out", async () => {
-    let answer!: (response: Response) => void
-    const delayed = new Promise<Response>((resolve) => {
-      answer = resolve
-    })
-    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    const controller = createAppController(
-      store,
-      unavailableRepositories,
-      unavailableAgent,
-      backend({
-        "/api/identity/watched": () => delayed,
-        "/api/auth/logout": () => json(200, { ok: true })
-      })
-    )
-    signedIn(store, "alice")
-    const pending = controller.openFirstRunRepos()
-    await settled()
-    await controller.commands.run("auth.sign-out")
-    answer(json(200, { selected: ["alice/private"], selectedAt: "2026-08-09T09:00:00.000Z", via: "onboarding" }))
-    await pending
-    await settled()
-
-    expect(store.collections.watchedRepos.get("watched")?.selected ?? null).toBeNull()
-    expect(store.collections.identitySessions.get("identity")?.state).toBe("signed-out")
-  })
-
   test("an unavailable identity seam scrubs nothing — silence is not a sign-out", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const controller = createAppController(

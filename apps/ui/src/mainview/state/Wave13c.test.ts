@@ -84,11 +84,15 @@ const signIn = async (store: Awaited<ReturnType<typeof webStore>>) => {
     scopesPlain: null
   })
   store.dispatch({
-    type: "watched.replaced",
+    type: "repositories.loaded",
     actor: "system",
-    selected: ["codeplanesmithers/smithers-demo"],
-    selectedAt: "2026-08-10T10:00:00.000Z",
-    via: "onboarding"
+    repositories: ["codeplanesmithers/smithers-demo"].map((fullName) => ({
+      id: fullName,
+      org: fullName.split("/")[0] ?? "",
+      ownerKind: "user",
+      name: fullName.split("/")[1] ?? "",
+      head: null
+    }))
   })
   await settle(2)
 }
@@ -168,7 +172,7 @@ describe("wave 13c — the ask keys the gate", () => {
   /*
    * The gate keys on the ASK, so a loose pattern is not merely noisy — it
    * makes the app deny a capability it HAS. "Pull request" and "push" are
-   * also nouns for things a run can READ off a watched repository, and every
+   * also nouns for things a run can READ off a loaded repository, and every
    * ask below is one the catalog can serve: none may arm the hold.
    */
   test("a READING ask about PRs or pushes is possible work — it arms nothing", () => {

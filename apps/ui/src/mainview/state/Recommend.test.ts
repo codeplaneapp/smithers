@@ -26,7 +26,6 @@ const state: CommandState = {
   typing: false,
   hasConnectors: true,
   admin: false,
-  needsSelection: false,
   signedOut: false,
   identity: "signed-in as will"
 }

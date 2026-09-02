@@ -97,20 +97,20 @@ export const AgentRuntimeContextSchema = z.object({
    * Sign-in IS the GitHub connector — one act, one truth (Wave 10, §2a′):
    * a valid GitHub session means the GitHub connector IS connected, so the
    * model never routes a signed-in user toward "connecting GitHub" again.
-   * watchedRepos is the count of the user's chosen set, "unselected" when
-   * they have never chosen, and null when signed out.
+   * repositories is the count of the loaded repository inventory (lane
+   * piper), and null when signed out.
    */
   github: z.object({
     connected: z.boolean(),
     login: z.string().nullable(),
-    watchedRepos: z.union([z.number().int().nonnegative(), z.literal("unselected")]).nullable(),
+    repositories: z.number().int().nonnegative().nullable(),
     /*
-     * The chosen repositories BY NAME. A count alone left the model
-     * declining to answer "what repos do you watch?" while the names were
+     * The loaded repositories BY NAME. A count alone left the model
+     * declining to answer "what repos do I have?" while the names were
      * served plainly by the seam it was already reading (§22.7). Optional so
      * a boundary built before this field still validates the payload.
      */
-    watchedRepoNames: z.array(z.string()).optional()
+    repositoryNames: z.array(z.string()).optional()
   }),
   /*
    * The account's own money, as the client already holds it. Asked "what is my
@@ -195,19 +195,19 @@ export const renderAgentRuntimeContext = (context: AgentRuntimeContext): string 
     }
   }
   if (context.github.connected) {
-    const watched = context.github.watchedRepos === "unselected"
-      ? "the user has NOT chosen which repos to watch yet — repo work routes to the repos.watch chooser, never to a sign-in they already have"
-      : typeof context.github.watchedRepos === "number"
-      ? `watching ${context.github.watchedRepos} chosen repo(s)`
-      : "watch set unknown"
+    const loaded = typeof context.github.repositories === "number"
+      ? `${context.github.repositories} ${
+        context.github.repositories === 1 ? "repository" : "repositories"
+      } loaded`
+      : "repository inventory unknown"
     lines.push(
       `- GitHub: CONNECTED as ${
         context.github.login ?? "a GitHub user"
-      } (sign-in and the GitHub connector are one act) — ${watched}.`
+      } (sign-in and the GitHub connector are one act) — ${loaded}.`
     )
-    const names = context.github.watchedRepoNames ?? []
+    const names = context.github.repositoryNames ?? []
     if (names.length > 0) {
-      lines.push(`  Watched repositories, by name: ${names.join(", ")}.`)
+      lines.push(`  Loaded repositories, by name: ${names.join(", ")}.`)
     }
   } else {
     lines.push("- GitHub: not connected (no signed-in session).")

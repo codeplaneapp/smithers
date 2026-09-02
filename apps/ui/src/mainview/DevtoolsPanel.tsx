@@ -19,7 +19,6 @@ export function DevtoolsPanel() {
   const toolCalls = [...toolCallRows].sort((left, right) => left.createdAt - right.createdAt).slice(-30)
   const identity = controller.store.collections.identitySessions.get("identity")
   const billing = controller.store.collections.billingAccounts.get("billing")
-  const watched = controller.store.collections.watchedRepos.get("watched")
   const registryState = controller.commands.state()
   /*
    * The journal scrubber (§14 debug mode): an empty cap shows the live fold;
@@ -222,7 +221,7 @@ export function DevtoolsPanel() {
 												admin: identity.admin,
 											},
 								billing: billing === undefined ? null : { state: billing.state, totalUsd: billing.totalUsd },
-								watchedRepos: watched?.selected ?? null,
+								repositories: [...controller.store.collections.repositories.keys()],
 							},
 							null,
 							2,

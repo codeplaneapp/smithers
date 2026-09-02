@@ -112,7 +112,7 @@ export const modelInvocable = (entry: FlowEntry): boolean => entry.binding.descr
  * unmet requirements in declaration order: the FIRST unmet one wins, its
  * `fulfill` flow runs now, and the original flow re-enters `run` after the
  * predicate flips — so a flow with several requirements steps through them one
- * at a time (sign in → choose repos → execute), each step re-checked against
+ * at a time (sign in → execute), each step re-checked against
  * live state, never a stale plan.
  */
 export interface FlowRequirement {
@@ -130,7 +130,7 @@ export interface FlowRequirement {
  * The requirement table. Every entry's `satisfied` reads only CommandState, so
  * the table stays unit-testable; every entry's `fulfill` names a registered
  * flow, gated by parity.test.ts. A seam that can SATISFY a requirement
- * (identity load, watched-repos confirm) calls resumeDeferredCommand — adding
+ * (identity load) calls resumeDeferredCommand — adding
  * a requirement here means wiring its satisfying seam there.
  */
 export const flowRequirements: ReadonlyArray<FlowRequirement> = [
@@ -142,12 +142,6 @@ export const flowRequirements: ReadonlyArray<FlowRequirement> = [
     satisfied: (state) => !state.signedOut,
     fulfill: "auth.sign-in",
     reason: "Sign in with GitHub first"
-  },
-  {
-    id: "repos-selected",
-    satisfied: (state) => !state.needsSelection,
-    fulfill: "repos.watch",
-    reason: "Choose which repositories Smithers watches first"
   },
   {
     /*
@@ -181,8 +175,6 @@ export interface CommandState {
   readonly hasConnectors: boolean
   /** The validated session carries admin:true; the admin plugin registers only then. */
   readonly admin: boolean
-  /** Signed-in but the watched-repos selection has never been made (Wave 10 onboarding). */
-  readonly needsSelection: boolean
   /** No validated session: the one next step is sign-in. */
   readonly signedOut: boolean
   /** A repository is open in the local app (the repos collection); optional so fixtures stay minimal. */
@@ -202,8 +194,7 @@ export interface CommandState {
 
 /**
  * The ordered recommendations for an app state — the next-action output the
- * slash menu reads. The first entry is gold: an unmade watched-repos
- * selection is onboarding's one question; signed-out, sign-in is the only
+ * slash menu reads. The first entry is gold: signed-out, sign-in is the only
  * step; away from the chat, returning to it leads.
  */
 export const recommendedNames = (state: CommandState): ReadonlyArray<string> => {
@@ -212,8 +203,7 @@ export const recommendedNames = (state: CommandState): ReadonlyArray<string> => 
   const base = state.hasConnectors
     ? (["world", "connect"] as const)
     : (["connect", "world"] as const)
-  const withSelection = state.needsSelection ? (["repos.watch", ...base] as const) : base
-  return state.surface === "chat" ? [...withSelection] : ["chat", ...withSelection]
+  return state.surface === "chat" ? [...base] : ["chat", ...base]
 }
 
 /*

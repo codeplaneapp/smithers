@@ -17,9 +17,9 @@ import { createAppStore } from "./AppStore"
  *
  * The FIRST message says "Smithers initialized successfully" and reads back
  * what the host registered (bootstrap, capabilities, flows, harnesses,
- * repositories). Its one next step is "Select a repo": locally the native
- * folder picker (`repo.open`, the IDE's open-folder), on Cloud the GitHub
- * chooser (`repos.watch`). The pill under the composer names the same step.
+ * repositories). Its one next step is "Select a repo": the native folder
+ * picker (`repo.open`, the IDE's open-folder). The pill under the composer
+ * names the same step.
  */
 
 GlobalRegistrator.register()
@@ -227,14 +227,12 @@ describe("onboarding — the opening entry", () => {
     expect(host.querySelector(".message-cta")).toBeNull()
   })
 
-  test("cloud host, signed in and never-chosen: the pill says Select a repo and opens the GitHub chooser", async () => {
+  test("cloud host, signed in: with no local picker there is no repo step and no pill", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const controller = createAppController(store, unavailableRepositories, silentAgent, {
       features: { suggestionPills: true },
       ...backend({
-        "/api/auth/session": json(200, { login: "will", allowlisted: true, admin: false }),
-        "/api/identity/watched": json(200, { selected: null, selectedAt: null, via: null }),
-        "/api/identity/repos": json(200, { candidates: [], cached: false })
+        "/api/auth/session": json(200, { login: "will", allowlisted: true, admin: false })
       })
     })
     await controller.loadSession()
@@ -243,9 +241,8 @@ describe("onboarding — the opening entry", () => {
     const host = mount(controller)
     expect(text(host.querySelector(SMITHERS_MESSAGES))).toContain("Smithers initialized successfully")
     const pills = [...host.querySelectorAll<HTMLElement>(".smithers-suggestion")]
-    expect(pills.map((pill) => text(pill))).toEqual(["Select a repo"])
-    expect(pills[0]?.dataset.flow).toBe("repos.watch")
-    expect(host.querySelector<HTMLElement>(".message-cta")?.dataset.flow).toBe("repos.watch")
+    expect(pills.map((pill) => text(pill))).not.toContain("Select a repo")
+    expect(host.querySelector(".message-cta")).toBeNull()
   })
 
   test("local host, signed out: sign-in is an option, so the init read still opens the session", async () => {
@@ -301,30 +298,25 @@ describe("onboarding — the pill feature flag", () => {
 })
 
 describe("onboarding — the pure rules", () => {
-  test("a connected repository ends the local step; the cloud step follows needsSelection", () => {
-    expect(repoStep({ localPickerAvailable: true, connectors: [], repos: [], needsSelection: false })).toBe("local")
-    expect(repoStep({ localPickerAvailable: true, connectors: [{}], repos: [], needsSelection: false })).toBe("none")
+  test("a connected or open repository ends the local step", () => {
+    expect(repoStep({ localPickerAvailable: true, connectors: [], repos: [] })).toBe("local")
+    expect(repoStep({ localPickerAvailable: true, connectors: [{}], repos: [] })).toBe("none")
     /*
-     * The defect: a signed-in session with an unmade GitHub watch list fell
-     * through to "cloud" after a LOCAL repo opened, so "Select a repo" stayed
-     * on screen right after the user selected one. An open repository or a
-     * connector answers the step whatever the watch list says.
+     * The defect: "Select a repo" stayed on screen right after the user
+     * selected one. An open repository or a connector answers the step.
      */
-    expect(repoStep({ localPickerAvailable: true, connectors: [], repos: [{}], needsSelection: true })).toBe("none")
-    expect(repoStep({ localPickerAvailable: false, connectors: [{}], repos: [], needsSelection: true })).toBe("none")
-    expect(repoStep({ localPickerAvailable: false, connectors: [], repos: [], needsSelection: true })).toBe("cloud")
-    expect(repoStep({ localPickerAvailable: false, connectors: [], repos: [], needsSelection: false })).toBe("none")
+    expect(repoStep({ localPickerAvailable: true, connectors: [], repos: [{}] })).toBe("none")
+    expect(repoStep({ localPickerAvailable: false, connectors: [{}], repos: [] })).toBe("none")
+    expect(repoStep({ localPickerAvailable: false, connectors: [], repos: [] })).toBe("none")
   })
 
   test("the pill and the message action name the same flow for the step", () => {
     expect(repoSuggestion("none")).toEqual([])
     expect(repoSuggestion("local")[0]?.flow).toBe("repo.open")
-    expect(repoSuggestion("cloud")[0]?.flow).toBe("repos.watch")
     const facts = { bootstrap: undefined, flowCount: 3, harnesses: [], connectors: [], repos: [] }
     expect(initMessage({ ...facts, repoStep: "none" }).action).toBeUndefined()
     expect(initMessage({ ...facts, repoStep: "none" }).text).not.toContain("Select a repo")
     expect(initMessage({ ...facts, repoStep: "local" }).action).toEqual({ flow: "repo.open", label: "Select a repo" })
-    expect(initMessage({ ...facts, repoStep: "cloud" }).action).toEqual({ flow: "repos.watch", label: "Select a repo" })
   })
 
   test("an open repository and a connector both read back by name", () => {

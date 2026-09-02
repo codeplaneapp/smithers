@@ -56,7 +56,6 @@ import {
   ToastSchema,
   ToolCallRecordSchema,
   TransitionRecordSchema,
-  WatchedReposSchema,
   WorkingCopySchema,
   WorkspaceSchema,
   WORLD_DISPLAY_NAME,
@@ -87,7 +86,6 @@ import type {
   Toast,
   ToolCallRecord,
   TransitionRecord,
-  WatchedRepos,
   WorkingCopy,
   Workspace,
   WorldDocument
@@ -122,10 +120,6 @@ const staleLogKeys = <T extends { readonly id: string }>(
     .map((row) => row.id)
 }
 
-/** The onboarding welcome's stable id, so a boot refresh upserts instead of duplicating. */
-export const ONBOARDING_MESSAGE_ID = "message-onboarding"
-/** The onboarding chooser's stable id: one chooser at a time, upserted. */
-export const REPO_CHOOSER_CARD_ID = "repo-chooser"
 /** The /theme picker's stable id: one picker at a time, upserted. */
 export const THEME_PICKER_CARD_ID = "theme-picker"
 
@@ -274,7 +268,6 @@ const PERSISTED_COLLECTION_SPECS: ReadonlyArray<LegacyCollectionSpec> = [
   { id: "app-identity-sessions", schema: IdentitySessionSchema },
   { id: "app-billing-accounts", schema: BillingAccountSchema },
   { id: "app-toasts", schema: ToastSchema },
-  { id: "app-watched-repos", schema: WatchedReposSchema },
   { id: "app-tool-calls", schema: ToolCallRecordSchema },
   { id: "app-chain-events", schema: ChainEventRecordSchema },
   { id: "app-tabs", schema: TabSchema },
@@ -507,7 +500,6 @@ export interface AppCollections {
   readonly identitySessions: ReturnType<typeof createIdentitySessionCollection>
   readonly billingAccounts: ReturnType<typeof createBillingAccountCollection>
   readonly toasts: ReturnType<typeof createToastCollection>
-  readonly watchedRepos: ReturnType<typeof createWatchedReposCollection>
   readonly toolCalls: ReturnType<typeof createToolCallCollection>
   readonly chainEvents: ReturnType<typeof createChainEventCollection>
   /* The local-app tab strip and what its `+` menu and repo chip read (docs/LOCAL-APP.md). */
@@ -632,13 +624,6 @@ const createToastCollection = (backend: PersistenceBackend) =>
     schema: ToastSchema
   })
 
-const createWatchedReposCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-watched-repos",
-    getKey: (watched: WatchedRepos) => watched.id,
-    schema: WatchedReposSchema
-  })
-
 const createToolCallCollection = (backend: PersistenceBackend) =>
   createPersistedCollection(backend, {
     id: "app-tool-calls",
@@ -753,7 +738,6 @@ const seed = async (collections: AppCollections): Promise<void> => {
     collections.identitySessions.preload(),
     collections.billingAccounts.preload(),
     collections.toasts.preload(),
-    collections.watchedRepos.preload(),
     collections.toolCalls.preload(),
     collections.chainEvents.preload(),
     collections.tabs.preload(),
@@ -791,8 +775,8 @@ const seed = async (collections: AppCollections): Promise<void> => {
     }
   }
   // Wave 14 §1: nothing seeds the transcript. Signed out, the auth message is
-  // the whole conversation; signed in and never-chosen, the repo chooser's
-  // welcome is the first message. See AppState's note on the removed welcome.
+  // the whole conversation; signed in, the transcript opens clean and the
+  // inventory seam fills the repositories. See AppState's note.
   if (collections.connectorOperations.get("connector-operation") === undefined) {
     await collections.connectorOperations
       .insert(initialConnectorOperation())
@@ -918,7 +902,6 @@ const forgetAccountState = (collections: AppCollections): void => {
       collections.messages,
       collections.cards,
       collections.toasts,
-      collections.watchedRepos,
       collections.toolCalls,
       collections.chainEvents,
       collections.transitions
@@ -994,7 +977,6 @@ export const createAppStore = async (
     identitySessions: createIdentitySessionCollection(resolvedBackend),
     billingAccounts: createBillingAccountCollection(resolvedBackend),
     toasts: createToastCollection(resolvedBackend),
-    watchedRepos: createWatchedReposCollection(resolvedBackend),
     toolCalls: createToolCallCollection(resolvedBackend),
     chainEvents: createChainEventCollection(resolvedBackend),
     tabs: createTabCollection(resolvedBackend),
@@ -1067,7 +1049,6 @@ export const createAppStore = async (
         collections.identitySessions.utils.acceptMutations(transaction),
         collections.billingAccounts.utils.acceptMutations(transaction),
         collections.toasts.utils.acceptMutations(transaction),
-        collections.watchedRepos.utils.acceptMutations(transaction),
         collections.toolCalls.utils.acceptMutations(transaction),
         collections.chainEvents.utils.acceptMutations(transaction),
         collections.tabs.utils.acceptMutations(transaction),
@@ -1629,79 +1610,6 @@ export const createAppStore = async (
             draft.revision = revision
           })
           break
-
-        case "repos.selection.needed": {
-          // Onboarding's one question: a short welcome plus the chooser
-          // card, in the transcript.
-          const seedOnly = collections.messages.size === 1 &&
-            [...collections.messages.keys()][0]?.endsWith("-welcome-smithers") === true
-          if (seedOnly && collections.messages.get(ONBOARDING_MESSAGE_ID) === undefined) {
-            const seedKey = [...collections.messages.keys()][0]
-            if (seedKey !== undefined) collections.messages.delete(seedKey)
-          }
-          if (collections.messages.get(ONBOARDING_MESSAGE_ID) === undefined) {
-            insertMessage({
-              id: ONBOARDING_MESSAGE_ID,
-              role: "smithers",
-              text:
-                "Welcome — before I read anything, choose which repositories I should watch. Nothing else is touched.",
-              status: "complete",
-              createdAt,
-              ordinal: seedOnly ? 0 : nextOrdinal(collections)
-            })
-          }
-          const existingChooser = collections.cards.get(REPO_CHOOSER_CARD_ID)
-          let highest = 0
-          for (const message of collections.messages.values()) highest = Math.max(highest, message.ordinal)
-          for (const card of collections.cards.values()) highest = Math.max(highest, card.ordinal)
-          const chooser: Card = {
-            id: REPO_CHOOSER_CARD_ID,
-            kind: "repo-chooser",
-            title: "Choose the repositories Smithers watches",
-            status: "active",
-            createdAt: existingChooser?.createdAt ?? createdAt,
-            ordinal: existingChooser?.ordinal ?? highest + 1,
-            payload: {
-              candidates: transition.candidates.map((candidate) => ({ ...candidate })),
-              selected: existingChooser?.kind === "repo-chooser" ? [...existingChooser.payload.selected] : [],
-              via: "onboarding",
-              phase: "choosing"
-            }
-          }
-          if (existingChooser === undefined) {
-            insertCard(chooser)
-          } else {
-            collections.cards.update(REPO_CHOOSER_CARD_ID, (draft) => {
-              Object.assign(draft, chooser)
-            })
-          }
-          collections.sessions.update(SESSION_ID, (draft) => {
-            draft.revision = revision
-          })
-          break
-        }
-
-        case "watched.replaced": {
-          const watched: WatchedRepos = {
-            id: "watched",
-            selected: [...transition.selected],
-            selectedAt: transition.selectedAt,
-            via: transition.via,
-            updatedAt: createdAt,
-            revision
-          }
-          if (collections.watchedRepos.get("watched") === undefined) {
-            collections.watchedRepos.insert(watched)
-          } else {
-            collections.watchedRepos.update("watched", (draft) => {
-              Object.assign(draft, watched)
-            })
-          }
-          collections.sessions.update(SESSION_ID, (draft) => {
-            draft.revision = revision
-          })
-          break
-        }
 
         case "theme.changed":
           collections.sessions.update(SESSION_ID, (draft) => {

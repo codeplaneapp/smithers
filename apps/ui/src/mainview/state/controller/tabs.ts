@@ -7,7 +7,7 @@ import {
 import { agentRole, agentRoleTitle } from "smithers-shared/AgentRoles"
 import type { AgentRoleId } from "smithers-shared/AgentRoles"
 import { hasCapability } from "smithers-shared/AppBootstrap"
-import { activeRepoOf, MAIN_TAB_ID, repoKeyOf } from "../AppState"
+import { activeRepoOf, MAIN_TAB_ID, parseRepoSelection, repoKeyOf } from "../AppState"
 import type { PinnedRepo, Repo, TabRow } from "../AppState"
 import type { CommandResult } from "../../flows/Flows"
 import type { ControllerContext } from "./context"
@@ -365,6 +365,16 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
   }
 
   const selectRepo: TabsController["selectRepo"] = async (repoKey) => {
+    /*
+     * Lane piper: `org/repo` and `org/repo#copyId` tokens select from the
+     * inventory — the reducer validates them. The legacy pin key keeps its
+     * reopen-an-unopened-checkout behavior until every reader moves.
+     */
+    const selection = parseRepoSelection(repoKey)
+    if (selection !== null && "repoId" in selection) {
+      store.dispatch({ type: "repo.selected", actor: "user", id: repoKey })
+      return
+    }
     const pin: PinnedRepo | undefined = collections.pinnedRepos.get(repoKey)
     if (pin === undefined) return `There is no pinned repository with key ${repoKey}.`
     const open = [...collections.repos.values()].some((repo) => repoKeyOf(repo.path) === repoKey)

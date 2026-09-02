@@ -2,8 +2,8 @@ import { useLiveQuery } from "@tanstack/react-db"
 import { FolderGit2, Moon, Plus, RotateCcw, Sun, X } from "lucide-react"
 import { roleMenuEntries } from "../AgentRoleMenu"
 import { useController } from "../ControllerContext"
-import { activeRepoOf, MAIN_TAB_ID, repoKeyOf } from "../state/AppState"
-import type { PinnedRepo, TabRow } from "../state/AppState"
+import { MAIN_TAB_ID, parseRepoSelection } from "../state/AppState"
+import type { TabRow, WorkingCopy } from "../state/AppState"
 import { SELECT_REPO_LABEL } from "../Onboarding"
 
 /*
@@ -33,7 +33,8 @@ export function ChromeBar() {
   const { data: identityRows } = useLiveQuery(collections.identitySessions)
   const { data: repoRows } = useLiveQuery(collections.repos)
   const { data: pinRows } = useLiveQuery((q) => q.from({ pin: collections.pinnedRepos }).orderBy(({ pin }) => pin.pinnedAt))
-  const { data: connectorRows } = useLiveQuery(collections.connectors)
+  const { data: repositoryRows } = useLiveQuery(collections.repositories)
+  const { data: copyRows } = useLiveQuery(collections.workingCopies)
   const session = sessionRows[0]
   const identity = identityRows[0]
   const activeTabId = session?.activeTabId ?? MAIN_TAB_ID
@@ -52,32 +53,53 @@ export function ChromeBar() {
   const canAddTab = canOpenTerminal || canOpenHarnesses
 
   /*
-   * The Repos section's rows: every pin (opening a repository pins it), then
-   * any connector not pinned by path. Open repos are pins already, so the
-   * active repository is always a row here — the highlighted one.
+   * The Repos section is the piper tree (ADR 0001, lane piper step 3): the
+   * cloud inventory grouped `org/ → repo → working copies`, and local
+   * checkouts the inventory does not know as standalone rows (their repoId
+   * never invents an owner). Selecting a repo row names `org/repo`; selecting
+   * a copy row names `org/repo#copyId` — the legacy pin key still selects.
+   * No mirror glyph: the backend has no mirror status yet (plue#445).
    */
-  const activeRepo = activeRepoOf(session ?? { activeRepoKey: null }, repoRows)
-  const activeKey = activeRepo === undefined ? session?.activeRepoKey ?? null : repoKeyOf(activeRepo.path)
-  const openKeys = new Set(repoRows.map((repo) => repoKeyOf(repo.path)))
-  const rows: ReadonlyArray<PinnedRepo> = [
-    ...pinRows,
-    ...connectorRows
-      .filter((connector) => pinRows.every((pin) => pin.id !== repoKeyOf(connector.root)))
-      .map((connector) => ({
-        id: repoKeyOf(connector.root),
-        name: connector.name,
-        path: connector.root,
-        branch: connector.branch,
-        origin: "local" as const,
-        pinnedAt: connector.createdAt
-      }))
-  ]
-  const rowKeys = new Set(rows.map((row) => row.id))
+  const activeKey = session?.activeRepoKey ?? null
+  const selection = activeKey === null ? null : parseRepoSelection(activeKey)
+  const activeCopyId = selection === null ? null : "repoId" in selection ? selection.copyId ?? null : selection.legacyCopyId
+  const pinIds = new Set(pinRows.map((pin) => pin.id))
+  const openPaths = new Set(repoRows.map((repo) => repo.path))
+  const copiesByRepoId = new Map<string, ReadonlyArray<WorkingCopy>>()
+  for (const copy of copyRows) {
+    copiesByRepoId.set(copy.repoId, [...(copiesByRepoId.get(copy.repoId) ?? []), copy])
+  }
+  interface TreeRepo {
+    readonly repoId: string
+    readonly name: string
+    readonly org: string | null
+    readonly copies: ReadonlyArray<WorkingCopy>
+  }
+  const tree: Array<TreeRepo> = [...repositoryRows]
+    .sort((left, right) => left.org.localeCompare(right.org) || left.name.localeCompare(right.name))
+    .map((repository) => ({
+      repoId: repository.id,
+      name: repository.name,
+      org: repository.org,
+      copies: copiesByRepoId.get(repository.id) ?? []
+    }))
+  const knownRepoIds = new Set(repositoryRows.map((repository) => repository.id))
+  const standalone: Array<TreeRepo> = [...copiesByRepoId.entries()]
+    .filter(([repoId]) => !knownRepoIds.has(repoId))
+    .map(([repoId, copies]) => ({
+      repoId,
+      name: copies[0]?.label ?? repoId,
+      org: null,
+      copies
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name))
+  const groups = [...tree, ...standalone]
+  const copyIds = new Set(copyRows.map((copy) => copy.id))
   const mainTab = tabRows.find((tab) => tab.kind === "main")
   const tabsUnder = (key: string): ReadonlyArray<TabRow> =>
     tabRows.filter((tab) => tab.kind !== "main" && tab.repoKey === key)
   const orphanTabs = tabRows.filter((tab) =>
-    tab.kind !== "main" && (tab.repoKey === undefined || !rowKeys.has(tab.repoKey))
+    tab.kind !== "main" && (tab.repoKey === undefined || !copyIds.has(tab.repoKey))
   )
 
   const tabRow = (tab: TabRow) => (
@@ -159,7 +181,7 @@ export function ChromeBar() {
           {mainTab === undefined ? null : tabRow(mainTab)}
           <div className="repo-section" role="presentation" data-testid="repo-section">
             <div className="repo-section-title" aria-hidden="true">Repos</div>
-            {rows.length === 0 && canOpenRepo ?
+            {groups.length === 0 && canOpenRepo ?
               (
                 // No repository yet: the one step, bound exactly as the opening message binds it.
                 <button
@@ -174,64 +196,144 @@ export function ChromeBar() {
                 </button>
               ) :
               null}
-            {rows.map((row) => {
-              const active = row.id === activeKey
+            {groups.map((group, groupIndex) => {
+              /*
+               * A local checkout the inventory does not know renders as the
+               * flat row it always was (its copy id is the select token);
+               * a cloud repository renders as the org/repo tree with its
+               * working copies nested.
+               */
+              const single = group.org === null && group.copies.length === 1 ? group.copies[0] : undefined
+              const groupKey = single?.id ?? group.repoId
+              const selectToken = single?.id ?? group.repoId
+              const active = single !== undefined
+                ? activeCopyId === single.id
+                : activeKey === group.repoId || (selection !== null && "repoId" in selection && selection.repoId === group.repoId)
+              const open = single !== undefined && single.path !== undefined && openPaths.has(single.path)
+              const orgHeader = group.org !== null && groups[groupIndex - 1]?.org !== group.org
               return (
-                <div
-                  key={row.id}
-                  className="repo-group"
-                  role="presentation"
-                  data-active={active}
-                  data-open={openKeys.has(row.id)}
-                  data-testid={`repo-${row.id}`}
-                >
-                  <div className="repo" role="presentation">
-                    <button
-                      type="button"
-                      className="repo-select"
-                      aria-current={active ? "true" : undefined}
-                      title={`${row.path}${row.branch === null ? "" : ` · ${row.branch}`}`}
-                      data-flow="repo.select"
-                      data-testid={`repo-select-${row.id}`}
-                      disabled={!canSelectRepo}
-                      onClick={() => controller.runCommandArgs("repo.select", row.id)}
-                    >
-                      <FolderGit2 size={14} aria-hidden="true" />
-                      <span className="repo-name">{row.name}</span>
-                    </button>
-                    {canAddTab ?
+                <div key={groupKey} role="presentation">
+                  {orgHeader ?
+                    <div className="repo-org" aria-hidden="true" data-testid={`repo-org-${group.org ?? ""}`}>{group.org}/</div> :
+                    null}
+                  <div
+                    className="repo-group"
+                    role="presentation"
+                    data-active={active}
+                    data-open={open}
+                    data-testid={`repo-${groupKey}`}
+                  >
+                    <div className="repo" role="presentation">
+                      <button
+                        type="button"
+                        className="repo-select"
+                        aria-current={active ? "true" : undefined}
+                        title={group.repoId}
+                        data-flow="repo.select"
+                        data-testid={`repo-select-${groupKey}`}
+                        disabled={!canSelectRepo}
+                        onClick={() => controller.runCommandArgs("repo.select", selectToken)}
+                      >
+                        <FolderGit2 size={14} aria-hidden="true" />
+                        <span className="repo-name">{group.name}</span>
+                      </button>
+                      {single !== undefined && canAddTab ?
+                        (
+                          <button
+                            type="button"
+                            className="repo-add"
+                            aria-label={`New tab in ${single.label}`}
+                            title={`New tab in ${single.label}`}
+                            data-flow="tab.menu"
+                            data-testid={`repo-add-${single.id}`}
+                            onClick={() => controller.runCommandArgs("tab.menu", single.id)}
+                          >
+                            <Plus size={12} aria-hidden="true" />
+                          </button>
+                        ) :
+                        null}
+                      {single !== undefined && canSelectRepo && pinIds.has(single.id) ?
+                        (
+                          <button
+                            type="button"
+                            className="repo-unpin"
+                            aria-label={`Unpin ${single.label}`}
+                            title="Unpin repository"
+                            data-flow="repo.unpin"
+                            data-testid={`repo-unpin-${single.id}`}
+                            onClick={() => controller.runCommandArgs("repo.unpin", single.id)}
+                          >
+                            <X size={12} aria-hidden="true" />
+                          </button>
+                        ) :
+                        null}
+                    </div>
+                    {single !== undefined ?
                       (
-                        <button
-                          type="button"
-                          className="repo-add"
-                          aria-label={`New tab in ${row.name}`}
-                          title={`New tab in ${row.name}`}
-                          data-flow="tab.menu"
-                          data-testid={`repo-add-${row.id}`}
-                          onClick={() => controller.runCommandArgs("tab.menu", row.id)}
-                        >
-                          <Plus size={12} aria-hidden="true" />
-                        </button>
+                        <div className="repo-tabs" role="presentation">
+                          {tabsUnder(single.id).map(tabRow)}
+                        </div>
                       ) :
-                      null}
-                    {canSelectRepo ?
                       (
-                        <button
-                          type="button"
-                          className="repo-unpin"
-                          aria-label={`Unpin ${row.name}`}
-                          title="Unpin repository"
-                          data-flow="repo.unpin"
-                          data-testid={`repo-unpin-${row.id}`}
-                          onClick={() => controller.runCommandArgs("repo.unpin", row.id)}
-                        >
-                          <X size={12} aria-hidden="true" />
-                        </button>
-                      ) :
-                      null}
-                  </div>
-                  <div className="repo-tabs" role="presentation">
-                    {tabsUnder(row.id).map(tabRow)}
+                        <div className="repo-copies" role="presentation">
+                          {group.copies.map((copy) => {
+                            const copyActive = activeCopyId === copy.id
+                            const copyLabel = copy.kind === "workspace"
+                              ? copy.state === undefined ? copy.label : `${copy.label} · ${copy.state}`
+                              : copy.ahead === undefined ? copy.label : `${copy.label} · ${copy.ahead} ahead`
+                            return (
+                              <div key={copy.id} className="repo-copy" role="presentation" data-testid={`copy-${copy.id}`}>
+                                <button
+                                  type="button"
+                                  className="repo-select"
+                                  aria-current={copyActive ? "true" : undefined}
+                                  title={copy.path ?? copy.workspaceId ?? copy.id}
+                                  data-flow="repo.select"
+                                  data-testid={`copy-select-${copy.id}`}
+                                  disabled={!canSelectRepo}
+                                  onClick={() => controller.runCommandArgs("repo.select", `${group.repoId}#${copy.id}`)}
+                                >
+                                  <FolderGit2 size={12} aria-hidden="true" />
+                                  <span className="repo-name">{copyLabel}</span>
+                                </button>
+                                {copy.kind === "local" && canAddTab ?
+                                  (
+                                    <button
+                                      type="button"
+                                      className="repo-add"
+                                      aria-label={`New tab in ${copy.label}`}
+                                      title={`New tab in ${copy.label}`}
+                                      data-flow="tab.menu"
+                                      data-testid={`repo-add-${copy.id}`}
+                                      onClick={() => controller.runCommandArgs("tab.menu", copy.id)}
+                                    >
+                                      <Plus size={12} aria-hidden="true" />
+                                    </button>
+                                  ) :
+                                  null}
+                                {copy.kind === "local" && canSelectRepo && pinIds.has(copy.id) ?
+                                  (
+                                    <button
+                                      type="button"
+                                      className="repo-unpin"
+                                      aria-label={`Unpin ${copy.label}`}
+                                      title="Unpin repository"
+                                      data-flow="repo.unpin"
+                                      data-testid={`repo-unpin-${copy.id}`}
+                                      onClick={() => controller.runCommandArgs("repo.unpin", copy.id)}
+                                    >
+                                      <X size={12} aria-hidden="true" />
+                                    </button>
+                                  ) :
+                                  null}
+                                <div className="repo-tabs" role="presentation">
+                                  {tabsUnder(copy.id).map(tabRow)}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                   </div>
                 </div>
               )

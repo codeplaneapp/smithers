@@ -57,7 +57,7 @@ const noWorkflowSeam = (): AppServices => ({
 
 const signInAtZeroBalance = async (
   store: Awaited<ReturnType<typeof webStore>>,
-  watched: ReadonlyArray<string> = [REPO]
+  loaded: ReadonlyArray<string> = [REPO]
 ): Promise<void> => {
   store.dispatch({
     type: "identity.session.loaded",
@@ -69,11 +69,15 @@ const signInAtZeroBalance = async (
     scopesPlain: null
   })
   store.dispatch({
-    type: "watched.replaced",
+    type: "repositories.loaded",
     actor: "system",
-    selected: [...watched],
-    selectedAt: "2026-08-16T00:00:00.000Z",
-    via: "onboarding"
+    repositories: [...loaded].map((fullName) => ({
+      id: fullName,
+      org: fullName.split("/")[0] ?? "",
+      ownerKind: "user",
+      name: fullName.split("/")[1] ?? "",
+      head: null
+    }))
   })
   store.dispatch({
     type: "billing.refreshed",
@@ -161,11 +165,15 @@ describe("zero-balance workflow launch (Launch Checklist D-4)", () => {
       scopesPlain: null
     })
     store.dispatch({
-      type: "watched.replaced",
+      type: "repositories.loaded",
       actor: "system",
-      selected: [REPO],
-      selectedAt: "2026-08-16T00:00:00.000Z",
-      via: "onboarding"
+      repositories: [REPO].map((fullName) => ({
+        id: fullName,
+        org: fullName.split("/")[0] ?? "",
+        ownerKind: "user",
+        name: fullName.split("/")[1] ?? "",
+        head: null
+      }))
     })
     store.dispatch({
       type: "billing.refreshed",
@@ -199,11 +207,15 @@ describe("zero-balance workflow launch (Launch Checklist D-4)", () => {
       scopesPlain: null
     })
     store.dispatch({
-      type: "watched.replaced",
+      type: "repositories.loaded",
       actor: "system",
-      selected: [REPO],
-      selectedAt: "2026-08-16T00:00:00.000Z",
-      via: "onboarding"
+      repositories: [REPO].map((fullName) => ({
+        id: fullName,
+        org: fullName.split("/")[0] ?? "",
+        ownerKind: "user",
+        name: fullName.split("/")[1] ?? "",
+        head: null
+      }))
     })
     await settle(2)
     // `seed()` (AppStore.ts) always inserts `initialBillingAccount()` before

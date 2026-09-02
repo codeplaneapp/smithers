@@ -32,7 +32,6 @@ export const MATERIAL_TRANSITIONS: ReadonlySet<AppTransition["type"]> = new Set<
   "card.approval.decided",
   "tab.opened",
   "tab.closed",
-  "watched.replaced",
   "identity.session.loaded",
   "identity.session.cleared",
   "conversation.reset",

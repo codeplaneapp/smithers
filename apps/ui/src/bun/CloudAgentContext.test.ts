@@ -11,7 +11,7 @@ const context: AgentRuntimeContext = {
   theme: "light",
   selectedWorldDocument: "Notes.md",
   connectors: [],
-  github: { connected: false, login: null, watchedRepos: null },
+  github: { connected: false, login: null, repositories: null },
   worldState: {
     documentCount: 1,
     documents: [{ path: "Notes.md", title: "Notes", confidence: 1 }]

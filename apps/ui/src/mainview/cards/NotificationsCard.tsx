@@ -14,22 +14,8 @@ export const NotificationsCardBody = ({
     <ul className="world-card-list">
       {card.payload.items.length === 0 ?
         (
-          /*
-           * §28.2: an empty state names the next step. Notifications follow
-           * the watched set, so the move out of an empty inbox is changing
-           * what Smithers watches.
-           */
           <li className="world-card-empty">
-            Nothing new. Notifications follow the repositories Smithers watches — run{" "}
-            <button
-              type="button"
-              className="world-card-empty-action"
-              data-flow="repos.watch"
-              onClick={() => onRunCommand("repos.watch")}
-            >
-              /repos.watch
-            </button>{" "}
-            to change that set.
+            Nothing new. Notifications follow the repositories you have loaded.
           </li>
         ) :
         (

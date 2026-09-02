@@ -37,10 +37,6 @@ export function CardTabBody({ cardId }: { readonly cardId: string }) {
         onGrantConfirm={(id) => controller.runCommandArgs("admin.grant.confirm", id)}
         onGrantCancel={(id) => controller.runCommandArgs("admin.grant.cancel", id)}
         onQueueApprove={(login) => controller.runCommandArgs("admin.queue.approve", login)}
-        onRepoToggle={(name) => controller.runCommandArgs("repos.watch.toggle", name)}
-        onReposSelectAll={() => controller.runCommand("repos.watch.all")}
-        onReposSelectNone={() => controller.runCommand("repos.watch.none")}
-        onReposConfirm={() => controller.runCommand("repos.watch.confirm")}
         onMaximize={(id) => controller.runCommandArgs("card.maximize", id)}
         onMinimize={() => controller.runCommand("card.minimize")}
         onOpenInTab={(id) => controller.runCommandArgs("tab.card", id)}

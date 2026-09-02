@@ -65,27 +65,34 @@ export const createWorkflowController = (
   }
 
   /**
-   * The watched set is the universe: the target repo, the wave-10 chooser
-   * route (nothing watched, or a repo outside the set), or — wave 12 §2, when
-   * the caller opts in — the genuine question of WHICH watched repo. One
-   * watched repo is not a question; more than one, with no argument, is.
+   * The loaded repositories are the universe (lane piper): an explicit
+   * `owner/repo` names the target; otherwise one loaded repository is the
+   * target, none is the honest "load one first", and several — when the
+   * caller opts in (wave 12 §2) — is the genuine question of WHICH loaded
+   * repository. One loaded repository is not a question; more than one, with
+   * no argument, is.
    */
+  const NO_REPO_LOADED =
+    "No repository is loaded yet — sign in with /cloud.sign-in, or name one as owner/repo"
+
   const workflowTargetRepoOrAsk = (
     preferred: string | undefined,
     askWhenAmbiguous: boolean
-  ): { readonly repo: string } | { readonly chooser: string | null } | { readonly ask: ReadonlyArray<string> } => {
-    const watched = store.collections.watchedRepos.get("watched")
-    const selected = watched?.selected ?? null
-    if (selected === null || selected.length === 0) return { chooser: null }
-    if (preferred !== undefined && !selected.includes(preferred)) return { chooser: preferred }
-    if (preferred === undefined && askWhenAmbiguous && selected.length > 1) return { ask: selected }
-    return { repo: preferred ?? selected[0] ?? "" }
+  ): { readonly repo: string } | { readonly error: string } | { readonly ask: ReadonlyArray<string> } => {
+    if (preferred !== undefined) return { repo: preferred }
+    const loaded = [...store.collections.repositories.values()].map((repository) => repository.id)
+    if (loaded.length === 0) return { error: NO_REPO_LOADED }
+    if (loaded.length > 1 && askWhenAmbiguous) return { ask: loaded }
+    if (loaded.length > 1) {
+      return { error: `Several repositories are loaded (${loaded.join(", ")}) — name one as owner/repo` }
+    }
+    return { repo: loaded[0] ?? "" }
   }
 
   /** The two-way form, for the calls that do not ask (list, run-by-name). */
-  const workflowTargetRepo = (preferred?: string): { readonly repo: string } | { readonly chooser: string | null } => {
+  const workflowTargetRepo = (preferred?: string): { readonly repo: string } | { readonly error: string } => {
     const target = workflowTargetRepoOrAsk(preferred, false)
-    return "ask" in target ? { chooser: null } : target
+    return "ask" in target ? { error: NO_REPO_LOADED } : target
   }
 
   /** The `owner/repo` shape the seam addresses — the same one the Worker refuses past. */
@@ -108,13 +115,6 @@ export const createWorkflowController = (
     return { description: input.trim() }
   }
 
-  const openChooserForWorkflow = async (missing: string | null): Promise<string> => {
-    await ctx.openRepoChooser()
-    return missing === null
-      ? "Choose which repositories I should watch first — the chooser is open."
-      : `${missing} isn't one of your watched repositories — the chooser is open. Watching it is the one step that unlocks this.`
-  }
-
   const provisionWorkspaceImpl = async (repo: string): Promise<true | string> => {
     // A 409 means mid-provision: poll to a bounded deadline, never stampede.
     const deadline = Date.now() + RUN_POLL_MS * 36
@@ -135,7 +135,7 @@ export const createWorkflowController = (
       }
       if (body?.status === "ready") return true
       /*
-       * Wave 12 §4 — the watched set is a GITHUB set; a gateway needs a
+       * Wave 12 §4 — the loaded set is a GITHUB set; a gateway needs a
        * Smithers Cloud repository. When they don't coincide the honest
        * answer is that fact, not the provision seam's raw HTTP failure.
        */
@@ -214,12 +214,13 @@ export const createWorkflowController = (
 
   /*
    * Wave 12 §2 — the which-repo question, embedded. It renders only when the
-   * answer is genuinely the user's (more than one watched repo, no argument);
-   * one act answers it, and the create resumes with the repo they named.
+   * answer is genuinely the user's (more than one loaded repository, no
+   * argument); one act answers it, and the create resumes with the repo they
+   * named.
    */
   const WORKFLOW_REPO_CARD_ID = "workflow-repo"
 
-  const askWhichWatchedRepo = (
+  const askWhichRepo = (
     description: string,
     repos: ReadonlyArray<string>
   ): { readonly value: string } => {
@@ -240,12 +241,12 @@ export const createWorkflowController = (
     /*
      * A QUESTION is not a failure. A bare string result marks the outcome
      * `failed`, and live on canary the transcript read "Smithers tried
-     * /flow.create — failed: You watch 3 repositories…" beside the card
+     * /flow.create — failed: You have 3 repositories loaded…" beside the card
      * that had just asked them, correctly, which one. The command did exactly
      * what it should; the value carries the question to the model, and the
      * card carries it to the human (§2b — values never render raw).
      */
-    return { value: `You watch ${repos.length} repositories — choose the one this workflow belongs to.` }
+    return { value: `You have ${repos.length} repositories loaded — choose the one this workflow belongs to.` }
   }
 
   const chooseWorkflowRepo = async (fullName: string): Promise<string | void | { readonly value: string }> => {
@@ -287,8 +288,8 @@ export const createWorkflowController = (
     const description = split.description
     if (description === "") return "flow.create needs a description of what the workflow should do"
     const target = workflowTargetRepoOrAsk(split.repo, true)
-    if ("chooser" in target) return openChooserForWorkflow(target.chooser)
-    if ("ask" in target) return askWhichWatchedRepo(description, target.ask)
+    if ("error" in target) return target.error
+    if ("ask" in target) return askWhichRepo(description, target.ask)
     const repo = target.repo
     const provisioned = await provisionWorkspace(repo)
     if (provisioned !== true) return provisioned
@@ -320,7 +321,7 @@ export const createWorkflowController = (
     const guard = workflowIdentityGuard()
     if (guard !== undefined) return guard
     const target = workflowTargetRepo()
-    if ("chooser" in target) return openChooserForWorkflow(target.chooser)
+    if ("error" in target) return target.error
     const repo = target.repo
     const provisioned = await provisionWorkspace(repo)
     if (provisioned !== true) return provisioned
@@ -351,7 +352,7 @@ export const createWorkflowController = (
     const balanceGuard = zeroBalanceGuard()
     if (balanceGuard !== undefined) return balanceGuard
     const target = workflowTargetRepo(repoArg)
-    if ("chooser" in target) return openChooserForWorkflow(target.chooser)
+    if ("error" in target) return target.error
     const repo = target.repo
     const provisioned = await provisionWorkspace(repo)
     if (provisioned !== true) return provisioned

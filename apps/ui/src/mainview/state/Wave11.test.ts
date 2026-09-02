@@ -253,7 +253,7 @@ const relay = (options: {
   }
 }
 
-const signIn = async (store: Awaited<ReturnType<typeof webStore>>, watched: string[] | null = [REPO]) => {
+const signIn = async (store: Awaited<ReturnType<typeof webStore>>, loaded: string[] | null = [REPO]) => {
   store.dispatch({
     type: "identity.session.loaded",
     actor: "system",
@@ -263,13 +263,17 @@ const signIn = async (store: Awaited<ReturnType<typeof webStore>>, watched: stri
     admin: false,
     scopesPlain: null
   })
-  if (watched !== null) {
+  if (loaded !== null) {
     store.dispatch({
-      type: "watched.replaced",
+      type: "repositories.loaded",
       actor: "system",
-      selected: watched,
-      selectedAt: "2026-08-09T10:00:00.000Z",
-      via: "onboarding"
+      repositories: loaded.map((fullName) => ({
+        id: fullName,
+        org: fullName.split("/")[0] ?? "",
+        ownerKind: "user",
+        name: fullName.split("/")[1] ?? "",
+        head: null
+      }))
     })
   }
   await settle(2)
@@ -444,54 +448,16 @@ describe("wave 11 — the full journey: make me a workflow", () => {
   })
 })
 
-describe("wave 11 — the watched set is the universe", () => {
-  test("a repo outside the watched set routes to the chooser, and nothing is provisioned", async () => {
+describe("wave 11 — the loaded repositories are the universe", () => {
+  test("no repository loaded gets the honest name-one line instead of a guess", async () => {
     const store = await webStore()
     const double = relay()
-    const controller = createAppController(store, unavailableRepositories, silentAgent(), {
-      ...double.services,
-      fetchImpl: async (input, init) => {
-        const absolute = new URL(
-          typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
-          "https://app.test"
-        )
-        if (absolute.pathname === "/api/identity/repos") {
-          return json(200, { candidates: [{ fullName: REPO, private: false, pushedAt: null, openIssues: 0 }] })
-        }
-        if (absolute.pathname === "/api/identity/watched") {
-          return json(200, { selected: [REPO], selectedAt: null, via: null })
-        }
-        return double.services.fetchImpl?.(input, init) ?? json(404, {})
-      }
-    })
-    await signIn(store)
-
-    const outcome = await controller.commands.run("flow.run", "review-pr someone/else")
-    expect(said(outcome)).toContain("someone/else")
-    expect(store.collections.cards.get("repo-chooser")).toBeDefined()
-    expect(double.calls.some((call) => call.path === "/api/workflow/provision")).toBe(false)
-  })
-
-  test("no selection at all opens the chooser instead of guessing a repo", async () => {
-    const store = await webStore()
-    const double = relay()
-    const controller = createAppController(store, unavailableRepositories, silentAgent(), {
-      ...double.services,
-      fetchImpl: async (input, init) => {
-        const absolute = new URL(
-          typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
-          "https://app.test"
-        )
-        if (absolute.pathname === "/api/identity/repos") return json(200, { candidates: [] })
-        if (absolute.pathname === "/api/identity/watched") return json(200, { selected: null })
-        return double.services.fetchImpl?.(input, init) ?? json(404, {})
-      }
-    })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
     await signIn(store, null)
 
-    await controller.commands.run("flow.create", "summarize my issues")
+    const outcome = await controller.commands.run("flow.create", "summarize my issues")
+    expect(said(outcome)).toContain("No repository is loaded yet")
     expect(double.calls.some((call) => call.path === "/api/workflow/provision")).toBe(false)
-    expect(store.collections.cards.get("repo-chooser")).toBeDefined()
   })
 
   test("signed out, nothing reaches the seam — the answer names the one step", async () => {

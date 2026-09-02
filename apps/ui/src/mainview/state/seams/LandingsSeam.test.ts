@@ -77,11 +77,9 @@ const signedIn = async (store: AppStore): Promise<void> => {
 
 const reposChosen = async (store: AppStore): Promise<void> => {
   store.dispatch({
-    type: "watched.replaced",
+    type: "repositories.loaded",
     actor: "system",
-    selected: ["will/flows"],
-    selectedAt: "2026-08-12T09:00:00.000Z",
-    via: "command"
+    repositories: [{ id: "will/flows", org: "will", ownerKind: "user", name: "flows", head: null }]
   })
   await settled()
 }
@@ -182,7 +180,7 @@ describe("landings seam — prs.list", () => {
     expect(store.collections.cards.get("prs-will/flows")).toBeUndefined()
   })
 
-  test("with no watched repository the answer is the resolution error, verbatim", async () => {
+  test("with no loaded repository the answer is the resolution error, verbatim", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const controller = createAppController(
       store,
@@ -195,7 +193,7 @@ describe("landings seam — prs.list", () => {
     expect(outcome.status).toBe("failed")
     if (outcome.status === "failed") {
       expect(outcome.error).toBe(
-        "No repository is watched yet — run /repos.watch first, or name one as owner/repo"
+        "No repository is loaded yet — sign in with /cloud.sign-in, or name one as owner/repo"
       )
     }
   })

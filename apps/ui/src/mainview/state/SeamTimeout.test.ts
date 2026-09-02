@@ -53,9 +53,6 @@ describe("a seam that never answers becomes an honest answer", () => {
             init?.signal?.addEventListener("abort", () => reject(new Error("aborted")))
           })
         }
-        if (url.includes("/api/identity/watched")) {
-          return Promise.resolve(json(200, { selected: ["will/flows"] }))
-        }
         return Promise.resolve(json(404, { message: "no stub" }))
       }
     })
@@ -70,11 +67,15 @@ describe("a seam that never answers becomes an honest answer", () => {
     })
     await new Promise((resolve) => setTimeout(resolve, 0))
     store.dispatch({
-      type: "watched.replaced",
+      type: "repositories.loaded",
       actor: "system",
-      selected: ["will/flows"],
-      selectedAt: "2026-08-19T00:00:00.000Z",
-      via: "command"
+      repositories: ["will/flows"].map((fullName) => ({
+        id: fullName,
+        org: fullName.split("/")[0] ?? "",
+        ownerKind: "user",
+        name: fullName.split("/")[1] ?? "",
+        head: null
+      }))
     })
     await new Promise((resolve) => setTimeout(resolve, 0))
 

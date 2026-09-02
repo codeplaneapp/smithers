@@ -113,25 +113,6 @@ describe("the 300ms toast law", () => {
     expect(store.collections.toasts.get("toast-billing.balance.refresh")).toBeUndefined()
   })
 
-  test("the first-run watched-repos read reports on the same shared stack", async () => {
-    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    let release: (response: Response) => void = () => {}
-    const controller = createAppController(store, unavailableRepositories, silentAgent, {
-      fetchImpl: () =>
-        new Promise<Response>((resolve) => {
-          release = resolve
-        }),
-      toastDebounceMs: 0
-    })
-    const pending = controller.openFirstRunRepos()
-    await settled()
-    expect(store.collections.toasts.get("toast-repos.first-run")?.title).toBe("Reading your repositories…")
-
-    release(new Response(JSON.stringify({ status: "error" }), { status: 503 }))
-    await pending
-    expect(store.collections.toasts.get("toast-repos.first-run")?.status).toBe("failed")
-  })
-
   test("a settled toast states its result, never the running sentence", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     let release: (response: Response) => void = () => {}
@@ -185,7 +166,7 @@ describe("the 300ms toast law", () => {
     expect(store.collections.toasts.get("toast-billing.balance.refresh")?.status).toBe("ok")
   })
 
-  test("a flow that throws resolves honestly instead of leaving a toast running", async () => {
+  test("a flow that fails resolves honestly instead of leaving a toast running", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     let release: (response: Response) => void = () => {}
     const controller = createAppController(store, unavailableRepositories, silentAgent, {
@@ -195,16 +176,17 @@ describe("the 300ms toast law", () => {
         }),
       toastDebounceMs: 0
     })
-    const pending = controller.openFirstRunRepos()
+    const pending = controller.refreshBalance()
     await settled()
-    expect(store.collections.toasts.get("toast-repos.first-run")?.status).toBe("running")
-    // An answer that isn't a Response at all: reading it throws mid-flow.
+    expect(store.collections.toasts.get("toast-billing.balance.refresh")?.status).toBe("running")
+    // An answer that isn't a Response at all: the flow reports its own honest
+    // failure, and the toast still settles instead of hanging on "running".
     release({ ok: false } as unknown as Response)
     await pending
     await settled()
-    const toast = store.collections.toasts.get("toast-repos.first-run")
+    const toast = store.collections.toasts.get("toast-billing.balance.refresh")
     expect(toast?.status).toBe("failed")
-    expect(toast?.detail).toContain("didn't finish")
+    expect(toast?.detail).toContain("couldn't be refreshed")
   })
 
   test("toasts are notifications, not state: they never survive a restart", async () => {

@@ -42,7 +42,7 @@ import { ENVELOPE_STORAGE_KEY, STAGED_ENVELOPE_STORAGE_KEY } from "./Transaction
  * The shape version of everything AppStore persists. Bump it whenever a
  * persisted schema changes in a way an older row cannot satisfy.
  */
-export const APP_SCHEMA_VERSION = 9
+export const APP_SCHEMA_VERSION = 10
 
 /** The prefix AppStore gives every persisted collection's storage key. */
 export const PERSISTED_KEY_PREFIX = "smithers-mvp."
@@ -100,7 +100,6 @@ export const PERSISTED_COLLECTION_IDS: ReadonlyArray<string> = [
   "app-identity-sessions",
   "app-billing-accounts",
   "app-toasts",
-  "app-watched-repos",
   "app-tool-calls",
   "app-chain-events",
   "app-tabs",
@@ -111,7 +110,10 @@ export const PERSISTED_COLLECTION_IDS: ReadonlyArray<string> = [
   "app-workspaces",
   "app-branches",
   "app-frames",
-  "app-recommendations"
+  "app-recommendations",
+  "app-cloud-repositories",
+  "app-cloud-sessions",
+  "app-working-copies"
 ]
 
 /** The storage keys the gate clears on a mismatch. */

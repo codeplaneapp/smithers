@@ -46,19 +46,11 @@ const render = (
 }
 
 describe("the notifications empty state", () => {
-  test("names a flow the user can run next", () => {
+  test("reads calm and invents no next step", () => {
     const host = render(card([]))
     expect(host.innerText ?? host.textContent ?? "").toContain("Nothing new.")
-    const action = host.querySelector("[data-flow=\"repos.watch\"]")
-    expect(action).not.toBeNull()
-    expect(action?.textContent).toContain("/repos.watch")
-  })
-
-  test("the next step actually invokes that flow", () => {
-    const ran: string[] = []
-    const host = render(card([]), (name) => ran.push(name))
-    ;(host.querySelector("[data-flow=\"repos.watch\"]") as HTMLElement | null)?.click()
-    expect(ran).toEqual(["repos.watch"])
+    expect(host.textContent).toContain("repositories you have loaded")
+    expect(host.querySelector("[data-flow]")).toBeNull()
   })
 
   test("a populated inbox renders its rows and no empty state", () => {

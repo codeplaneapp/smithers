@@ -7,10 +7,10 @@ import type { AppServices } from "./AppController"
 import { createAppStore } from "./AppStore"
 
 /*
- * Wave 10 — the onboarding conversation (repos.watch), the watched set, the
- * embed law's in-app half, transcript hygiene, /clear's sweep, and the
- * sign-in-is-the-connector truth (§2a′). Controller-level, against honest
- * fetch doubles.
+ * Wave 10 — the embed law's in-app half, transcript hygiene, /clear's sweep,
+ * and the sign-in-is-the-connector truth (§2a′). Controller-level, against
+ * honest fetch doubles. (The wave's repo-chooser onboarding was retired with
+ * the watch subsystem — lane piper.)
  */
 
 const memoryStorage = (): StorageApi => {
@@ -69,12 +69,6 @@ const backend = (
   }
 })
 
-const CANDIDATES = [
-  { fullName: "will/flows", private: false, pushedAt: "2026-08-07T12:00:00.000Z", openIssues: 4 },
-  { fullName: "will/smithers", private: false, pushedAt: "2026-08-06T09:00:00.000Z", openIssues: 2 },
-  { fullName: "will/mvp", private: true, pushedAt: "2026-08-05T18:00:00.000Z", openIssues: 1 }
-]
-
 const signIn = async (store: Awaited<ReturnType<typeof webStore>>): Promise<void> => {
   store.dispatch({
     type: "identity.session.loaded",
@@ -118,216 +112,6 @@ const scriptedToolAgent = (
     }
   }
 }
-
-describe("wave 10 — the onboarding conversation", () => {
-  test("never-chosen opens the chooser card with the inline candidates, on a welcome line", async () => {
-    const store = await webStore()
-    const controller = createAppController(store, unavailableRepositories, silentAgent(), {
-      ...backend({
-        "/api/identity/watched": json(200, { selected: null, selectedAt: null, via: null }),
-        "/api/identity/repos": json(200, { candidates: CANDIDATES, cached: false })
-      })
-    })
-    await signIn(store)
-    await controller.openFirstRunRepos()
-
-    const card = store.collections.cards.get("repo-chooser")
-    expect(card?.kind).toBe("repo-chooser")
-    if (card?.kind === "repo-chooser") {
-      expect(card.payload.candidates.map((candidate) => candidate.fullName)).toEqual([
-        "will/flows",
-        "will/smithers",
-        "will/mvp"
-      ])
-      expect(card.payload.selected).toEqual([])
-      expect(card.payload.via).toBe("onboarding")
-      expect(card.payload.phase).toBe("choosing")
-    }
-    // The welcome is the one question, and the chooser is the only card.
-    expect(store.collections.messages.get("message-onboarding")?.text).toContain("choose which repositories")
-    expect([...store.collections.cards.values()].map((c) => c.kind)).toEqual(["repo-chooser"])
-    // The agent context says "unselected" — repo work routes to the chooser.
-    expect(controller.commands.state().needsSelection).toBe(true)
-  })
-
-  test("toggle/all/none and confirm: PUT carries the selection with via onboarding, and the mirror lands", async () => {
-    const store = await webStore()
-    const calls: Array<{ path: string; method: string; body: unknown }> = []
-    let selected: Array<string> = []
-    const controller = createAppController(store, unavailableRepositories, silentAgent(), {
-      ...backend(
-        {
-          "/api/identity/repos": json(200, { candidates: CANDIDATES, cached: false }),
-          "/api/identity/watched": (request) => {
-            if (request.method === "PUT") {
-              return json(200, {
-                selected,
-                selectedAt: "2026-08-09T10:00:00.000Z",
-                via: "onboarding"
-              })
-            }
-            return json(200, { selected: null, selectedAt: null, via: null })
-          }
-        },
-        calls
-      )
-    })
-    await signIn(store)
-    await controller.openFirstRunRepos()
-
-    // Toggle one, all, none, then the two the user wants.
-    await controller.commands.run("repos.watch.toggle", "will/flows")
-    expect(
-      store.collections.cards.get("repo-chooser")?.kind === "repo-chooser" &&
-        (store.collections.cards.get("repo-chooser") as Extract<
-          NonNullable<ReturnType<typeof store.collections.cards.get>>,
-          { kind: "repo-chooser" }
-        >).payload.selected
-    ).toEqual(["will/flows"])
-    await controller.commands.run("repos.watch.all")
-    let card = store.collections.cards.get("repo-chooser")
-    expect(card?.kind === "repo-chooser" ? card.payload.selected : []).toHaveLength(3)
-    await controller.commands.run("repos.watch.none")
-    card = store.collections.cards.get("repo-chooser")
-    expect(card?.kind === "repo-chooser" ? card.payload.selected : ["x"]).toEqual([])
-    await controller.commands.run("repos.watch.toggle", "will/flows")
-    await controller.commands.run("repos.watch.toggle", "will/mvp")
-
-    selected = ["will/flows", "will/mvp"]
-    const outcome = await controller.commands.run("repos.watch.confirm")
-    expect(outcome.status).toBe("executed")
-    await settled()
-    await settled()
-
-    // The PUT carried the selection with via:"onboarding".
-    const put = calls.find((call) => call.path === "/api/identity/watched" && call.method === "PUT")
-    expect(put?.body).toEqual({ selected: ["will/flows", "will/mvp"], via: "onboarding" })
-
-    // The chooser left; the one calm line names the set AND that asking changes it.
-    expect(store.collections.cards.get("repo-chooser")).toBeUndefined()
-    const confirm = [...store.collections.messages.values()].find((message) =>
-      message.text.includes("change this anytime")
-    )
-    expect(confirm?.text).toContain("Watching 2 repositories: will/flows, will/mvp")
-    expect(confirm?.text).toContain("just ask")
-
-    // The local mirror landed; the transcript holds the one calm line, no more.
-    await settled()
-    expect(store.collections.watchedRepos.get("watched")?.selected).toEqual(["will/flows", "will/mvp"])
-    expect(store.collections.watchedRepos.get("watched")?.via).toBe("onboarding")
-    expect(controller.commands.state().needsSelection).toBe(false)
-  })
-
-  test("re-running /repos.watch reopens the chooser pre-filled with the current selection (via command)", async () => {
-    const store = await webStore()
-    const controller = createAppController(store, unavailableRepositories, silentAgent(), {
-      ...backend({
-        "/api/identity/watched": json(200, {
-          selected: ["will/flows"],
-          selectedAt: "2026-08-09T09:00:00.000Z",
-          via: "onboarding"
-        }),
-        "/api/identity/repos": json(200, { candidates: CANDIDATES, cached: false })
-      })
-    })
-    await signIn(store)
-    const outcome = await controller.commands.run("repos.watch")
-    expect(outcome.status).toBe("executed")
-    const card = store.collections.cards.get("repo-chooser")
-    expect(card?.kind).toBe("repo-chooser")
-    if (card?.kind === "repo-chooser") {
-      expect(card.payload.selected).toEqual(["will/flows"])
-      expect(card.payload.via).toBe("command")
-      expect(card.payload.candidates).toHaveLength(3)
-    }
-  })
-
-  test("the agent path: 'watch my flows repo too' resolves to the same command, pre-selected, via agent", async () => {
-    const store = await webStore()
-    const controller = createAppController(store, unavailableRepositories, silentAgent(), {
-      ...backend({
-        "/api/identity/watched": json(200, {
-          selected: ["will/mvp"],
-          selectedAt: "2026-08-09T09:00:00.000Z",
-          via: "onboarding"
-        }),
-        "/api/identity/repos": json(200, { candidates: CANDIDATES, cached: false })
-      })
-    })
-    await signIn(store)
-    const result = await controller.commands.executeForAgent({
-      name: "commands",
-      arguments: JSON.stringify({ action: "execute", name: "repos.watch", args: "will/flows" })
-    })
-    expect(result).toBe("executed /repos.watch")
-    const card = store.collections.cards.get("repo-chooser")
-    expect(card?.kind).toBe("repo-chooser")
-    if (card?.kind === "repo-chooser") {
-      // Pre-selected on top of the current set; the actor is recorded as agent.
-      expect(card.payload.selected).toEqual(["will/mvp", "will/flows"])
-      expect(card.payload.via).toBe("agent")
-    }
-  })
-
-  test("an unknown pre-select is stated honestly and the chooser still opens", async () => {
-    const store = await webStore()
-    const controller = createAppController(store, unavailableRepositories, silentAgent(), {
-      ...backend({
-        "/api/identity/watched": json(200, { selected: null, selectedAt: null, via: null }),
-        "/api/identity/repos": json(200, { candidates: CANDIDATES, cached: false })
-      })
-    })
-    await signIn(store)
-    const result = await controller.commands.executeForAgent({
-      name: "commands",
-      arguments: JSON.stringify({ action: "execute", name: "repos.watch", args: "will/nope" })
-    })
-    expect(result).toContain("will/nope")
-    expect(store.collections.cards.get("repo-chooser")?.kind).toBe("repo-chooser")
-  })
-
-  test("chose-zero is a real selection that mirrors empty — no chooser, no fabricated onboarding", async () => {
-    const store = await webStore()
-    const controller = createAppController(store, unavailableRepositories, silentAgent(), {
-      ...backend({
-        "/api/identity/watched": json(200, { selected: [], selectedAt: "2026-08-09T09:00:00.000Z", via: "command" })
-      })
-    })
-    await signIn(store)
-    await controller.openFirstRunRepos()
-    expect(store.collections.watchedRepos.get("watched")?.selected).toEqual([])
-    expect(store.collections.cards.get("repo-chooser")).toBeUndefined()
-    expect(store.collections.messages.get("message-onboarding")).toBeUndefined()
-    expect(controller.commands.state().needsSelection).toBe(false)
-  })
-
-  test("a failed confirm leaves the chooser open in honest error, retryable", async () => {
-    const store = await webStore()
-    const controller = createAppController(store, unavailableRepositories, silentAgent(), {
-      ...backend({
-        "/api/identity/repos": json(200, { candidates: CANDIDATES, cached: false }),
-        "/api/identity/watched": (request) =>
-          request.method === "PUT"
-            ? json(400, {
-              code: "unknown_repos",
-              unknown: ["will/flows"],
-              message: "unknown repositories"
-            })
-            : json(200, { selected: null, selectedAt: null, via: null })
-      })
-    })
-    await signIn(store)
-    await controller.openFirstRunRepos()
-    await controller.commands.run("repos.watch.toggle", "will/flows")
-    await controller.commands.run("repos.watch.confirm")
-    const card = store.collections.cards.get("repo-chooser")
-    expect(card?.status).toBe("error")
-    if (card?.kind === "repo-chooser") {
-      expect(card.payload.phase).toBe("failed")
-      expect(card.payload.error).toContain("unknown repositories")
-    }
-  })
-})
 
 describe("wave 10 — the embed law's in-app half (§2c″)", () => {
   test("'what is in world?' through the tool double: the answer + an embedded card; the surface NEVER changes", async () => {

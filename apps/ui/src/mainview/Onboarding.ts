@@ -14,8 +14,8 @@ export const INIT_MESSAGE_ID = "init-state"
 export const INIT_TITLE = "Smithers initialized successfully"
 export const SELECT_REPO_LABEL = "Select a repo"
 
-/** How the session selects a repository: the native folder picker, the GitHub chooser, or nothing to ask. */
-export type RepoStep = "local" | "cloud" | "none"
+/** How the session selects a repository: the native folder picker, or nothing to ask. */
+export type RepoStep = "local" | "none"
 
 export interface InitFacts {
   readonly bootstrap: AppBootstrap | undefined
@@ -33,25 +33,20 @@ export interface InitMessage extends Message {
 }
 
 const REPO_STEP_FLOW: Readonly<Record<Exclude<RepoStep, "none">, string>> = {
-  local: "repo.open",
-  cloud: "repos.watch"
+  local: "repo.open"
 }
 
 export const repoStep = (input: {
   readonly localPickerAvailable: boolean
   readonly connectors: ReadonlyArray<unknown>
   readonly repos: ReadonlyArray<unknown>
-  readonly needsSelection: boolean
 }): RepoStep => {
   /*
-   * A repository already open or connected answers the step, whatever the
-   * GitHub watch list says: the pill used to fall through to "cloud" on a
-   * signed-in session after a local repo opened, so "Select a repo" stayed
-   * on screen after the user had just selected one.
+   * A repository already open or connected answers the step: the pill used
+   * to stay on screen after the user had just selected one.
    */
   if (input.connectors.length > 0 || input.repos.length > 0) return "none"
-  if (input.localPickerAvailable) return "local"
-  return input.needsSelection ? "cloud" : "none"
+  return input.localPickerAvailable ? "local" : "none"
 }
 
 /** The "Select a repo" pill for the step, or none. */

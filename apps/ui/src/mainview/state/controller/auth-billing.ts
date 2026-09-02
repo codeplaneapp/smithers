@@ -48,7 +48,6 @@ export const createAuthBillingController = (
 ): AuthBillingController => {
   const { store, services, baseUrl, boundedFetch: http, errorMessageOf, unref } = ctx
   const withToast = ctx.withToast
-  const openFirstRunRepos = (): Promise<void> => ctx.openFirstRunRepos()
   const resumeWorkflowRuns = (): void => ctx.resumeWorkflowRuns()
   const resumeDeferredCommand = (): void => ctx.resumeDeferredCommand()
   /** Returning from a failed OAuth redirect is a chat message, never a bare page. */
@@ -140,13 +139,7 @@ export const createAuthBillingController = (
     // boot: signed out it could only come back 401 — the expected state,
     // logged by the browser as a console error anyway.
     void refreshBalance()
-    // Beat 5: entering chat signed-in reads the watched-repos selection —
-    // never-chosen opens the repo chooser as the one onboarding question.
-    // The local app's repositories are the ones opened on this machine; the
-    // GitHub watch-list chooser is the cloud client's onboarding question,
-    // and nothing appears on its own after sign-in here.
     if (session.allowlisted) {
-      if (services.bootstrap?.host !== "local") void openFirstRunRepos()
       // Wave 11: a live run card's event pump resumes from its lastSeq.
       resumeWorkflowRuns()
     }

@@ -201,7 +201,7 @@ describe("agent roles — the explainer", () => {
 describe("agent roles — the orchestrator's instructions", () => {
   test("the conversation is the orchestrator: it is told each role, its model, and which ones this host cannot launch", () => {
     const prompt = smithersInstructions([], {
-      github: { connected: false, login: null, watchedRepos: null },
+      github: { connected: false, login: null, repositories: null },
       localRepositories: [],
       localRepositoriesAvailable: true
     }, [
@@ -226,7 +226,7 @@ describe("agent roles — the orchestrator's instructions", () => {
 
   test("without local harnesses the instructions carry no role section at all", () => {
     const prompt = smithersInstructions([], {
-      github: { connected: false, login: null, watchedRepos: null },
+      github: { connected: false, login: null, repositories: null },
       localRepositories: [],
       localRepositoriesAvailable: false
     })

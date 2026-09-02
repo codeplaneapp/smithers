@@ -81,12 +81,10 @@ export interface ControllerContext {
   identityChanged: () => void
   authReprobeAt: number
   loadSession: () => Promise<void>
-  openFirstRunRepos: () => Promise<void>
   resumeWorkflowRuns: () => void
   resumeDeferredCommand: () => void
   stopWorkflowPumps: () => void
   contextMessages: () => ReadonlyArray<AgentChatMessage>
-  openRepoChooser: (preselect?: string) => Promise<string | void>
   /** Open a repository through a native grant or explicit headless path. */
   openRepo: (request: RepositoryOpenRequest) => Promise<string | void>
   /**
@@ -165,12 +163,10 @@ export const createControllerContext = (
     identityChanged: () => {},
     authReprobeAt: 0,
     loadSession: async () => {},
-    openFirstRunRepos: async () => {},
     resumeWorkflowRuns: () => {},
     resumeDeferredCommand: () => {},
     stopWorkflowPumps: () => {},
     contextMessages: () => [],
-    openRepoChooser: async () => {},
     openRepo: async () => "Opening a repository is not wired.",
     gateway: undefined as unknown as GatewaySeam,
     commands: undefined as unknown as CommandRegistry,

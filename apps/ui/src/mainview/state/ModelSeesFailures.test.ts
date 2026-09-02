@@ -80,11 +80,15 @@ const ready = async (): Promise<{ store: AppStore; controller: ReturnType<typeof
   })
   await settled()
   store.dispatch({
-    type: "watched.replaced",
+    type: "repositories.loaded",
     actor: "system",
-    selected: ["codeplanesmithers/canary-sandbox", "codeplanesmithers/demo-calendar"],
-    selectedAt: "2026-08-19T00:00:00.000Z",
-    via: "command"
+    repositories: ["codeplanesmithers/canary-sandbox", "codeplanesmithers/demo-calendar"].map((fullName) => ({
+      id: fullName,
+      org: fullName.split("/")[0] ?? "",
+      ownerKind: "user",
+      name: fullName.split("/")[1] ?? "",
+      head: null
+    }))
   })
   await settled()
   return { store, controller }
@@ -175,11 +179,15 @@ describe("the model is told the numbers it is asked about", () => {
     })
     await settled()
     store.dispatch({
-      type: "watched.replaced",
+      type: "repositories.loaded",
       actor: "system",
-      selected: ["codeplanesmithers/canary-sandbox", "codeplanesmithers/demo-calendar"],
-      selectedAt: "2026-08-19T00:00:00.000Z",
-      via: "command"
+      repositories: ["codeplanesmithers/canary-sandbox", "codeplanesmithers/demo-calendar"].map((fullName) => ({
+        id: fullName,
+        org: fullName.split("/")[0] ?? "",
+        ownerKind: "user",
+        name: fullName.split("/")[1] ?? "",
+        head: null
+      }))
     })
     await settled()
     await controller.refreshBalance()
@@ -190,8 +198,8 @@ describe("the model is told the numbers it is asked about", () => {
     const context = requests[0]?.context as AgentRuntimeContext | undefined
     expect(context?.billing?.totalUsd).toBe("519")
     expect(context?.billing?.state).toBe("ok")
-    expect(context?.github.watchedRepos).toBe(2)
-    expect(context?.github.watchedRepoNames).toEqual([
+    expect(context?.github.repositories).toBe(2)
+    expect(context?.github.repositoryNames).toEqual([
       "codeplanesmithers/canary-sandbox",
       "codeplanesmithers/demo-calendar"
     ])

@@ -452,7 +452,7 @@ export const literalsUnder = (directories: ReadonlyArray<string>): ReadonlyArray
 
 /**
  * The shape of a flow name: lowercase, dot-separated, kebab inside a segment.
- * `flow.run.stop`, `admin.grant.confirm`, `repos.watch.all`. This is also the
+ * `flow.run.stop`, `admin.grant.confirm`, `repos.import`. This is also the
  * shape of a transition type and a stream frame type, which is why the broad
  * rule checks presence in the product source rather than membership in the
  * flow registry.

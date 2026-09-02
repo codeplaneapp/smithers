@@ -120,13 +120,17 @@ const signedIn = async (store: AppStore): Promise<void> => {
   await settled()
 }
 
-const reposChosen = async (store: AppStore): Promise<void> => {
+const reposLoaded = async (store: AppStore): Promise<void> => {
   store.dispatch({
-    type: "watched.replaced",
+    type: "repositories.loaded",
     actor: "system",
-    selected: ["will/flows"],
-    selectedAt: "2026-08-12T09:00:00.000Z",
-    via: "command"
+    repositories: ["will/flows"].map((fullName) => ({
+      id: fullName,
+      org: fullName.split("/")[0] ?? "",
+      ownerKind: "user",
+      name: fullName.split("/")[1] ?? "",
+      head: null
+    }))
   })
   await settled()
 }
@@ -134,7 +138,7 @@ const reposChosen = async (store: AppStore): Promise<void> => {
 const readyStore = async (services: AppServices) => {
   const built = await freshController(services)
   await signedIn(built.store)
-  await reposChosen(built.store)
+  await reposLoaded(built.store)
   return built
 }
 

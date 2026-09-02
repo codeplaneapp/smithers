@@ -24,7 +24,6 @@ import { CiMatrixCardBody } from "./cards/CiMatrixCard"
 import {
   BrowserCardBody,
   ConnectCardBody,
-  RepoChooserCardBody,
   WorldCardBody
 } from "./cards/ConversationCards"
 import { EnvCardBody } from "./cards/EnvCard"
@@ -41,15 +40,6 @@ import { HtmlCardBody, RepoCardBody, TargetRunCardBody, TargetsCardBody } from "
 import { ThemePickerCardBody } from "./cards/ThemePickerCard"
 import type { Card, WorldDocument } from "./state/AppState"
 import { timeLabel as clockLabel } from "./Timestamps"
-
-export {
-  chooserFilter,
-  chooserKeyAction,
-  chooserMove,
-  freshnessLabel,
-  REPO_CHOOSER_PAGE_SIZE
-} from "./cards/ConversationCards"
-export type { ChooserKeyAction } from "./cards/ConversationCards"
 
 const GraphCardBody = lazy(() =>
   import("./cards/GraphCard").then((module) => ({ default: module.GraphCardBody }))
@@ -92,10 +82,6 @@ const pillStatus = (card: Card): string => {
     card.kind === "theme-picker"
   ) {
     return "done"
-  }
-  if (card.kind === "repo-chooser") {
-    if (card.payload.phase === "saving") return "running"
-    return "waiting-approval"
   }
   if (card.kind === "connect" || card.kind === "world" || card.kind === "browser") {
     return "done"
@@ -381,10 +367,6 @@ export interface CardViewProps {
   readonly onGrantConfirm: (id: string) => void
   readonly onGrantCancel: (id: string) => void
   readonly onQueueApprove: (login: string) => void
-  readonly onRepoToggle: (fullName: string) => void
-  readonly onReposSelectAll: () => void
-  readonly onReposSelectNone: () => void
-  readonly onReposConfirm: () => void
   readonly onMaximize: (id: string) => void
   readonly onMinimize: () => void
   readonly onFrameBack?: () => void
@@ -481,7 +463,7 @@ const WorkflowRunCardBody = ({
 }
 
 /*
- * Wave 12 §2 — which watched repository. Embedded, keyboard-complete (arrows
+ * Wave 12 §2 — which loaded repository. Embedded, keyboard-complete (arrows
  * move, Enter chooses), and one act: choosing IS the confirm, so the create
  * resumes immediately on the repo the human named.
  */
@@ -519,7 +501,7 @@ const WorkflowRepoCardBody = ({
       <ul
         className="workflow-repo-list"
         role="listbox"
-        aria-label="Your watched repositories"
+        aria-label="Your loaded repositories"
         tabIndex={0}
         onKeyDown={onKeyDown}
       >
@@ -648,10 +630,6 @@ export function CardView({
   onGrantConfirm,
   onGrantCancel,
   onQueueApprove,
-  onRepoToggle,
-  onReposSelectAll,
-  onReposSelectNone,
-  onReposConfirm,
   onMaximize,
   onMinimize,
   onFrameBack,
@@ -800,17 +778,6 @@ export function CardView({
             null}
           {card.kind === "request-queue" ? <RequestQueueCardBody card={card} onQueueApprove={onQueueApprove} /> : null}
           {card.kind === "admin-health" ? <AdminHealthCardBody card={card} /> : null}
-          {card.kind === "repo-chooser" ?
-            (
-              <RepoChooserCardBody
-                card={card}
-                onRepoToggle={onRepoToggle}
-                onReposSelectAll={onReposSelectAll}
-                onReposSelectNone={onReposSelectNone}
-                onReposConfirm={onReposConfirm}
-              />
-            ) :
-            null}
           {card.kind === "connect" ?
             (
               <ConnectCardBody
