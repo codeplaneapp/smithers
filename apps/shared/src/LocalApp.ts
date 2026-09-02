@@ -243,6 +243,18 @@ export const RepoSchema = z.object({
   path: z.string(),
   name: z.string(),
   git: z.object({ branch: z.string().nullable(), remote: z.string().nullable() }).nullable(),
+  /*
+   * The jj probe (lane piper): the checkout's own position — its change and
+   * commit ids, how many commits it is ahead of trunk, and trunk's bookmark
+   * name. Absent when the checkout is not a jj repo or the probe failed;
+   * never a fake zero.
+   */
+  jj: z.object({
+    changeId: z.string().nullable(),
+    commitId: z.string().nullable(),
+    ahead: z.number().int().nonnegative().nullable(),
+    bookmark: z.string().nullable()
+  }).optional(),
   /** Loader and manifest problems surfaced at open; empty when the open was clean. */
   warnings: z.array(z.string()),
   /** The parsed `smithers-ui.json`; absent when the repo declares none (or an invalid one). */

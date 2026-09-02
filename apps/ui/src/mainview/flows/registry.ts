@@ -255,6 +255,7 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   { id: "notifications", label: "Notifications", summary: "GitHub notifications" },
   { id: "browser", label: "Browser", summary: "Read web pages" },
   { id: "auth", label: "Account", summary: "Sign in and out" },
+  { id: "cloud", label: "Cloud", summary: "Smithers Cloud (jjhub)" },
   { id: "billing", label: "Billing", summary: "Balance and plan" },
   { id: "card", label: "Cards", summary: "Maximize and minimize cards" },
   { id: "frame", label: "Frames", summary: "Navigate and fork frames" },

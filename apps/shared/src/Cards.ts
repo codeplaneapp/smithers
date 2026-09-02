@@ -484,6 +484,12 @@ export const CardSchema = z.discriminatedUnion("kind", [
       bookmarks: z.array(z.object({ name: z.string(), head: z.string().nullable() }))
     })
   }),
+  /*
+   * Lane piper (ADR 0001): file cards carry the GLOBAL path
+   * (`/org/repo/path`) and the position they were read at. `readAt.commitId`
+   * is what "head moved" compares — a change id survives a rebase, a commit
+   * id does not. Optional so cards persisted before the fields parse.
+   */
   z.object({
     ...cardBaseShape,
     kind: z.literal("file-list"),
@@ -492,7 +498,10 @@ export const CardSchema = z.discriminatedUnion("kind", [
       path: z.string(),
       entries: z.array(z.object({ name: z.string(), kind: z.enum(["file", "dir"]) })),
       /** True when the listing was cut (a local directory past its cap); optional so older cards parse. */
-      truncated: z.boolean().optional()
+      truncated: z.boolean().optional(),
+      /** The global path (`/org/repo/path`); absent on cards written before lane piper. */
+      address: z.string().optional(),
+      readAt: z.object({ changeId: z.string().nullable(), commitId: z.string().nullable() }).optional()
     })
   }),
   z.object({
@@ -510,7 +519,10 @@ export const CardSchema = z.discriminatedUnion("kind", [
        * reader cannot use and cannot reach (§8.27). Optional so cards
        * persisted before the field parse without a schema reset.
        */
-      binary: z.boolean().optional()
+      binary: z.boolean().optional(),
+      /** The global path (`/org/repo/path`); absent on cards written before lane piper. */
+      address: z.string().optional(),
+      readAt: z.object({ changeId: z.string().nullable(), commitId: z.string().nullable() }).optional()
     })
   }),
   /*

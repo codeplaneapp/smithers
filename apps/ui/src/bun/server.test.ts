@@ -327,6 +327,105 @@ describe("the local origin", () => {
   })
 })
 
+describe("the jjhub cloud seam", () => {
+  test("offline answers 501 like the identity stub, and the session is honestly signed-out", async () => {
+    expect((await apiFetch("/api/cloud/api/user/repos")).status).toBe(501)
+    expect((await apiFetch("/api/cloud-auth/start", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    })).status).toBe(501)
+    expect((await apiFetch("/api/cloud-auth/sign-out", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    })).status).toBe(501)
+    const session = await apiFetch("/api/cloud-auth/session")
+    expect(await session.json()).toEqual({ state: "signed-out", username: null, expiresAt: null })
+  })
+
+  test("/api/cloud/* forwards with the Bun-held bearer, the identity-proxy rewrites, and a trail line", async () => {
+    const upstreamHeaders: Array<Headers> = []
+    const upstream = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (request) => {
+        upstreamHeaders.push(request.headers)
+        const { pathname } = new URL(request.url)
+        return pathname === "/api/user/repos"
+          ? new Response(JSON.stringify([{ full_name: "will/smithers" }]), {
+            headers: {
+              "content-type": "application/json",
+              "set-cookie": "cloud_session=sealed; Domain=api.jjhub.tech; Path=/; Secure; HttpOnly"
+            }
+          })
+          : new Response("not found", { status: 404 })
+      }
+    })
+    const cloudLogs: Array<string> = []
+    const proxied = await startLocalServer({
+      port: 0,
+      distDir: dist,
+      cloudMode: "hybrid",
+      chatStub: true,
+      cloudApi: `http://127.0.0.1:${upstream.port}`,
+      cloudAuth: {
+        token: () => "smithers_test_token",
+        session: () => ({ state: "signed-in", username: "will", expiresAt: null }),
+        start: async () => ({ error: "already signed in" }),
+        signOut: async () => {},
+        stop: async () => {}
+      },
+      node: { path: "/fake/node", version: "v22.19.0" },
+      home: "/fake/home",
+      harnesses: async () => [],
+      log: (line) => cloudLogs.push(line)
+    })
+    try {
+      const bootstrap = (await (await fetch(`${proxied.origin}/api/bootstrap`, {
+        headers: { [LOCAL_SESSION_HEADER]: proxied.sessionToken }
+      })).json()) as { capabilities: Array<string> }
+      expect(bootstrap.capabilities).toContain("jjhub")
+
+      const response = await fetch(`${proxied.origin}/api/cloud/api/user/repos?per_page=1`, {
+        headers: {
+          [LOCAL_SESSION_HEADER]: proxied.sessionToken,
+          origin: proxied.origin,
+          // A renderer-supplied bearer is a forgery: the token never reaches the renderer.
+          authorization: "Bearer renderer_forgery"
+        }
+      })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual([{ full_name: "will/smithers" }])
+      expect(upstreamHeaders).toHaveLength(1)
+      const headers = upstreamHeaders[0]!
+      expect(headers.get("authorization")).toBe("Bearer smithers_test_token")
+      expect(headers.get(LOCAL_SESSION_HEADER)).toBeNull()
+      expect(headers.get("host")).toBe(`127.0.0.1:${upstream.port}`)
+      expect(headers.get("origin")).toBe(`http://127.0.0.1:${upstream.port}`)
+      const cookie = response.headers.getSetCookie()[0] ?? ""
+      expect(cookie.startsWith("cloud_session=sealed")).toBe(true)
+      expect(cookie.toLowerCase()).not.toContain("domain=")
+      expect(cookie.toLowerCase()).not.toContain("secure")
+      expect(cloudLogs.some((line) => /^GET \/api\/cloud\/api\/user\/repos -> 200 in \d+ms$/.test(line))).toBe(true)
+      // The sign-in routes answer through the injected manager.
+      const session = await fetch(`${proxied.origin}/api/cloud-auth/session`, {
+        headers: { [LOCAL_SESSION_HEADER]: proxied.sessionToken }
+      })
+      expect(await session.json()).toEqual({ state: "signed-in", username: "will", expiresAt: null })
+      const started = await fetch(`${proxied.origin}/api/cloud-auth/start`, {
+        method: "POST",
+        headers: { [LOCAL_SESSION_HEADER]: proxied.sessionToken, "content-type": "application/json" },
+        body: "{}"
+      })
+      expect(started.status).toBe(409)
+    } finally {
+      await proxied.stop()
+      upstream.stop(true)
+    }
+  })
+})
+
 describe("POST /api/repo/files", () => {
   let repoDir = ""
   let outside = ""

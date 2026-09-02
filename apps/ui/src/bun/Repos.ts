@@ -195,6 +195,48 @@ export const ownerNameOf = (remote: string | null): string | null => {
   return `${match[1]}/${match[2]}`
 }
 
+/*
+ * The jj probe (lane piper, ADR 0001): a jj checkout states its own position
+ * — the working copy's change/commit ids and how far it is ahead of trunk —
+ * the facts the sidebar's copy rows and the composer's origin chip render.
+ * Read-only like the git probe, through the same sandbox; any failure is the
+ * honest absence of the field, never a fake zero.
+ */
+const jj = async (cwd: string, args: ReadonlyArray<string>): Promise<string | null> => {
+  try {
+    const wrapped = wrapSandbox(["jj", "-R", cwd, ...args], probePolicy({ tmpdir: probeTmpdir() }), currentSandboxHost())
+    const child = Bun.spawn([...wrapped.argv], {
+      env: { ...(Bun.env as Record<string, string | undefined>) },
+      stdout: "pipe",
+      stderr: "ignore",
+      stdin: "ignore"
+    })
+    const [code, stdout] = await Promise.all([child.exited, new Response(child.stdout).text()])
+    const value = stdout.trim()
+    return code === 0 && value !== "" ? value : null
+  } catch {
+    return null
+  }
+}
+
+const probeJj = async (root: string): Promise<Repo["jj"]> => {
+  try {
+    if (!statSync(join(root, ".jj")).isDirectory()) return undefined
+  } catch {
+    return undefined
+  }
+  const [ids, aheadLines, bookmarks] = await Promise.all([
+    jj(root, ["log", "--no-graph", "-r", "@", "-T", 'change_id ++ " " ++ commit_id']),
+    jj(root, ["log", "--no-graph", "-r", "::@ ~ ::trunk()", "-T", 'commit_id ++ "\n"']),
+    jj(root, ["log", "--no-graph", "-r", "trunk()", "-T", "local_bookmarks"])
+  ])
+  if (ids === null) return undefined
+  const [changeId = null, commitId = null] = ids.split(/\s+/, 2)
+  const ahead = aheadLines === null ? null : aheadLines.split("\n").filter((line) => line.trim() !== "").length
+  const bookmark = bookmarks === null ? null : bookmarks.split(/[\s,]+/).filter((name) => name !== "")[0] ?? null
+  return { changeId: changeId ?? null, commitId: commitId ?? null, ahead, bookmark: bookmark ?? null }
+}
+
 export type InspectRepoResult =
   | { readonly status: "ok"; readonly repo: Repo }
   | { readonly status: "error"; readonly code: "not_a_directory" | "invalid_path"; readonly message: string }
@@ -216,6 +258,7 @@ export const inspectRepo = async (path: string): Promise<InspectRepoResult> => {
     : [null, null]
   const smithers = detectSmithers(root)
   const manifest = readRepoPlugin(root, smithers.workspaces.map((workspace) => workspace.path))
+  const jj = await probeJj(root)
   return {
     status: "ok",
     repo: {
@@ -223,6 +266,7 @@ export const inspectRepo = async (path: string): Promise<InspectRepoResult> => {
       path: root,
       name: ownerNameOf(remote) ?? basename(root),
       git: inside ? { branch, remote } : null,
+      ...(jj === undefined ? {} : { jj }),
       warnings: manifest.warnings,
       ...(manifest.plugin === undefined ? {} : { plugin: manifest.plugin }),
       smithers

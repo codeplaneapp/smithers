@@ -26,6 +26,12 @@ import {
 import { APP_API_VERSION, APP_BOOTSTRAP_PATH } from "smithers-shared/AppBootstrap"
 import { AgentRuntimeContextSchema } from "smithers-shared/AgentContext"
 import {
+  CLOUD_AUTH_SESSION_PATH,
+  CLOUD_AUTH_SIGN_OUT_PATH,
+  CLOUD_AUTH_START_PATH,
+  CLOUD_ROUTE_PREFIX
+} from "smithers-shared/LocalApp"
+import {
   isLocalSessionToken,
   localSessionProtocol,
   LOCAL_SESSION_HEADER,
@@ -35,6 +41,8 @@ import type { AgentTurnFrame, StartAgentTurnRequest } from "smithers-shared/Nati
 import { createChatStub } from "./ChatStub"
 import { createCloudAgent } from "./CloudAgent"
 import type { CloudAgent } from "./CloudAgent"
+import { createCloudAuth } from "./CloudAuth"
+import type { CloudAuth, CloudKeychain } from "./CloudAuth"
 import { detectHarnesses } from "./Harnesses"
 import { findNode } from "./Node"
 import type { NodeSidecar } from "./Node"
@@ -55,6 +63,8 @@ import { currentSandboxHost, sandboxEnforced } from "./Sandbox"
 export const DEFAULT_CHAT_ORIGIN = "https://canary.smithers.sh"
 /** The deployed identity seam the sign-in device flow talks to. */
 export const DEFAULT_IDENTITY_UPSTREAM = "https://canary.smithers.sh"
+/** The jjhub Cloud API `/api/cloud/*` forwards to (SMITHERS_CLOUD_API overrides). */
+export const DEFAULT_CLOUD_API = "https://api.jjhub.tech"
 export const APP_VERSION = "0.0.1"
 /** Where the SPA posts uncaught errors; the client half is state/ClientErrors.ts. */
 export const CLIENT_ERRORS_PATH = "/api/client-errors"
@@ -83,6 +93,17 @@ export interface LocalServerOptions {
    * stub mode never proxies.
    */
   readonly identityUpstream?: string | null
+  /**
+   * Where `/api/cloud/*` forwards (the jjhub Cloud API) and where the
+   * `/api/cloud-auth/*` login points. `undefined` reads SMITHERS_CLOUD_API,
+   * defaulting to DEFAULT_CLOUD_API; `null` disables the seam. Offline mode
+   * disables it either way.
+   */
+  readonly cloudApi?: string | null
+  /** Test/replay override for the Cloud sign-in manager; the default stores in the OS keychain. */
+  readonly cloudAuth?: CloudAuth
+  /** Test override for the keychain behind the default Cloud sign-in manager. */
+  readonly cloudKeychain?: CloudKeychain
   readonly version?: string
   readonly buildSha?: string
   /** Headless/dev-only escape hatch. Native production accepts picker grants only. */
@@ -244,6 +265,51 @@ const proxyIdentity = async (
   return new Response(response.body, { status: response.status, headers: out })
 }
 
+/**
+ * Forwards a jjhub Cloud request (`/api/cloud/*`) to the cloud API, following
+ * proxyIdentity: Host and Origin follow the upstream, `content-length` and
+ * the local session header are dropped, Set-Cookie is re-scoped, and the
+ * request leaves one trail line (the shared `/api/*` trail). The bearer is
+ * attached HERE, from the Bun-held credential — a renderer-supplied
+ * Authorization header is deleted, because the token never reaches the
+ * renderer (ADR 0001).
+ */
+const proxyCloud = async (
+  request: Request,
+  url: URL,
+  upstream: string,
+  token: string | undefined
+): Promise<Response> => {
+  const target = new URL(url.pathname.slice(CLOUD_ROUTE_PREFIX.length - 1) + url.search, upstream)
+  const headers = new Headers(request.headers)
+  headers.set("host", target.host)
+  headers.set("origin", new URL(upstream).origin)
+  headers.delete("content-length")
+  headers.delete(LOCAL_SESSION_HEADER)
+  headers.delete("authorization")
+  if (token !== undefined) headers.set("authorization", `Bearer ${token}`)
+  let response: Response
+  try {
+    response = await fetch(target, {
+      method: request.method,
+      headers,
+      body: request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer(),
+      redirect: "manual"
+    })
+  } catch (error) {
+    return jsonError(502, "cloud_unreachable", error instanceof Error ? error.message : "cloud upstream unreachable")
+  }
+  const out = new Headers(response.headers)
+  out.delete("content-encoding")
+  out.delete("content-length")
+  const cookies = response.headers.getSetCookie()
+  if (cookies.length > 0) {
+    out.delete("set-cookie")
+    for (const cookie of cookies) out.append("set-cookie", rescopeCookie(cookie))
+  }
+  return new Response(response.body, { status: response.status, headers: out })
+}
+
 export const startLocalServer = async (options: LocalServerOptions): Promise<LocalServer> => {
   const log = options.log ?? ((line: string) => console.log(line))
   const distDir = resolve(options.distDir)
@@ -256,6 +322,24 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     : options.identityUpstream === undefined
     ? DEFAULT_IDENTITY_UPSTREAM
     : options.identityUpstream
+  /*
+   * The jjhub Cloud seam (lane piper): offline performs no egress, so the
+   * proxy and the login answer 501 like the identity stub. Hybrid forwards
+   * to SMITHERS_CLOUD_API (default DEFAULT_CLOUD_API).
+   */
+  const cloudUpstream = !remoteEnabled
+    ? null
+    : options.cloudApi === undefined
+    ? Bun.env.SMITHERS_CLOUD_API ?? DEFAULT_CLOUD_API
+    : options.cloudApi
+  const cloudAuth: CloudAuth | undefined = cloudUpstream === null
+    ? undefined
+    : options.cloudAuth ?? await createCloudAuth({
+      api: cloudUpstream,
+      envToken: Bun.env.SMITHERS_CLOUD_TOKEN,
+      ...(options.cloudKeychain === undefined ? {} : { keychain: options.cloudKeychain }),
+      log
+    })
   const home = options.home ?? homedir()
   const harnesses: HarnessDetector = options.harnesses ?? (() => detectHarnesses())
   const sessionToken = options.sessionToken ?? randomBytes(32).toString("base64url")
@@ -290,6 +374,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       capabilities: [
         ...(agent === undefined ? [] : ["agent"]),
         ...(identityUpstream === null ? [] : ["identity"]),
+        ...(cloudUpstream === null ? [] : ["jjhub"]),
         "local.repositories",
         ...(options.allowManualRepositoryPaths === true ? ["local.repository-path-entry"] : []),
         "local.targets",
@@ -400,10 +485,30 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
   router.add("POST", CANCEL_PATH, handleChatCancel)
   router.add("POST", CHAT_CANCEL_PATH, handleChatCancel)
 
+  /*
+   * The jjhub Cloud login (lane piper, ADR 0001): start answers the URL the
+   * renderer opens in the system browser; the session answer never carries
+   * the token; sign-out forgets it. Offline answers 501 like the identity
+   * stub.
+   */
+  router.add("POST", CLOUD_AUTH_START_PATH, async () => {
+    if (cloudAuth === undefined) return jsonError(501, "not_implemented", "The cloud seam is disabled in this build.")
+    const started = await cloudAuth.start()
+    return "error" in started ? jsonError(409, "cloud_auth_unavailable", started.error) : json(started)
+  })
+  router.add("GET", CLOUD_AUTH_SESSION_PATH, () =>
+    cloudAuth === undefined
+      ? json({ state: "signed-out", username: null, expiresAt: null })
+      : json(cloudAuth.session()))
+  router.add("POST", CLOUD_AUTH_SIGN_OUT_PATH, async () => {
+    if (cloudAuth === undefined) return jsonError(501, "not_implemented", "The cloud seam is disabled in this build.")
+    await cloudAuth.signOut()
+    return json({ ok: true })
+  })
+
   // The runtime error ingest the SPA posts to (state/ClientErrors.ts holds
   // the client half of this contract): logged, never persisted.
-  router.add("POST", CLIENT_ERRORS_PATH, async ({ request }) => {
-    const body = new Uint8Array(await request.arrayBuffer())
+  router.add("POST", CLIENT_ERRORS_PATH, async ({ request }) => {    const body = new Uint8Array(await request.arrayBuffer())
     if (body.byteLength > CLIENT_ERROR_MAX_BODY) {
       return jsonError(413, "body_too_large", `Client error reports are capped at ${CLIENT_ERROR_MAX_BODY} bytes.`)
     }
@@ -507,6 +612,11 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
         }
       }
       if (router.knows(pathname)) return jsonError(405, "method_not_allowed", `${request.method} is not allowed on ${pathname}.`)
+      if (pathname.startsWith(CLOUD_ROUTE_PREFIX)) {
+        return cloudUpstream === null
+          ? jsonError(501, "not_implemented", "The cloud seam is disabled in this build.")
+          : proxyCloud(request, url, cloudUpstream, cloudAuth?.token())
+      }
       if (pathname.startsWith(AUTH_ROUTE_PREFIX) || pathname.startsWith(IDENTITY_ROUTE_PREFIX)) {
         return identityUpstream === null ? stubIdentity(pathname) : proxyIdentity(request, url, identityUpstream, log)
       }
@@ -640,6 +750,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       }
       writers.clear()
       // Every child dies with the server; nothing keeps a shell alive past the app.
+      await cloudAuth?.stop()
       await pty.killAll()
       repositoryAuthority.clear()
       server.stop(true)

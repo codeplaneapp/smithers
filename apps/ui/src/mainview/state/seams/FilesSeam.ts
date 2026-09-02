@@ -15,6 +15,7 @@
 import { REPO_FILES_PATH, RepoFilesResponseSchema } from "smithers-shared/LocalApp"
 import type { Repo, RepoFilesResponse } from "smithers-shared/LocalApp"
 import type { Card } from "../AppState"
+import { localCopyIdOf, repoIdFromRemote } from "../AppState"
 import type { AppStore } from "../AppStore"
 import { resolveOpenRepo, resolveTargetRepo } from "../RepoContext"
 import { readErrorMessage } from "./SeamContext"
@@ -65,6 +66,59 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 /** "" and "/" (and any slash dressing) normalize to the root: the empty path. */
 const normalizePath = (path: string): string => path.trim().replace(/^\/+/, "").replace(/\/+$/, "")
+
+/*
+ * The global address space (lane piper step 6, ADR 0001): every file has a
+ * global path `/org/repo/path`. A command's first token in that shape names
+ * the repo AND the path in one — but only when the two-segment prefix is a
+ * repository this app knows (the inventory, a working copy, or an open local
+ * repo), so a local root-relative absolute path (`/src/lib`) keeps its old
+ * meaning instead of becoming a cloud read of a repo that is not one.
+ */
+const GLOBAL_PATH = /^\/([\w.-]+\/[\w.-]+)(?:\/(.*))?$/
+
+const knownRepo = (store: AppStore, id: string): boolean =>
+  store.collections.repositories.get(id) !== undefined ||
+  [...store.collections.workingCopies.values()].some((copy) => copy.repoId === id) ||
+  [...store.collections.repos.values()].some((repo) => repo.name === id)
+
+const splitGlobalPath = (
+  store: AppStore,
+  path: string,
+  explicitRepo: string | undefined
+): { readonly repo: string; readonly path: string } | null => {
+  if (explicitRepo !== undefined && explicitRepo !== "") return null
+  const match = GLOBAL_PATH.exec(path.trim())
+  if (match === null) return null
+  const repo = match[1] ?? ""
+  return knownRepo(store, repo) ? { repo, path: match[2] ?? "" } : null
+}
+
+/** The card addressing (lane piper step 5): the global path, and the position a cloud read was taken at. */
+const cloudAddressing = (
+  store: AppStore,
+  repo: string,
+  normalized: string
+): { readonly address: string; readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null } } => {
+  const head = store.collections.repositories.get(repo)?.head ?? null
+  return {
+    address: `/${repo}/${normalized}`,
+    ...(head === null ? {} : { readAt: { changeId: head.changeId, commitId: head.commitId } })
+  }
+}
+
+/** A local read's addressing: the global path when the checkout maps to a repo, read at the jj probe's position. */
+const localAddressing = (
+  store: AppStore,
+  repo: Repo,
+  normalized: string
+): { readonly address?: string; readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null } } => {
+  const repoId = store.collections.workingCopies.get(localCopyIdOf(repo.path))?.repoId ?? repoIdFromRemote(repo.git?.remote)
+  return {
+    ...(repoId !== null && repoId.includes("/") ? { address: `/${repoId}/${normalized}` } : {}),
+    ...(repo.jj === undefined ? {} : { readAt: { changeId: repo.jj.changeId, commitId: repo.jj.commitId } })
+  }
+}
 
 const unsafePath = (path: string): boolean => {
   const slashNormalized = path.replace(/\\/g, "/")
@@ -226,7 +280,13 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
       status: "active",
       createdAt: Date.now(),
       ordinal: ctx.nextOrdinal(),
-      payload: { repo: repo.name, path: normalized, entries, ...(answer.body.truncated === true ? { truncated: true } : {}) }
+      payload: {
+        repo: repo.name,
+        path: normalized,
+        entries,
+        ...(answer.body.truncated === true ? { truncated: true } : {}),
+        ...localAddressing(ctx.store, repo, normalized)
+      }
     })
     return {
       value: listingValue(repo.name, normalized, entries) +
@@ -247,7 +307,8 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
       path: normalized,
       content: binary ? "" : content.slice(0, CARD_CONTENT_CAP),
       truncated,
-      ...(binary ? { binary: true } : {})
+      ...(binary ? { binary: true } : {}),
+      ...localAddressing(ctx.store, repo, normalized)
     }
     upsert({
       id: `file-${repo.name}-${normalized}`,
@@ -262,7 +323,10 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
   }
 
   return {
-    listFiles: async (path, explicitRepo) => {
+    listFiles: async (pathArg, explicitRepoArg) => {
+      const global = splitGlobalPath(ctx.store, pathArg, explicitRepoArg)
+      const path = global?.path ?? pathArg
+      const explicitRepo = global?.repo ?? explicitRepoArg
       if (unsafePath(path)) return "File paths must stay inside the repository."
       const local = localTarget(ctx.store, explicitRepo)
       if (local !== undefined) return "error" in local ? local.error : listLocal(local.repo, path)
@@ -306,12 +370,15 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
         status: "active",
         createdAt: Date.now(),
         ordinal: ctx.nextOrdinal(),
-        payload: { repo, path: normalized, entries }
+        payload: { repo, path: normalized, entries, ...cloudAddressing(ctx.store, repo, normalized) }
       })
       return { value: listingValue(repo, normalized, entries) }
     },
 
-    readFile: async (path, explicitRepo) => {
+    readFile: async (pathArg, explicitRepoArg) => {
+      const global = splitGlobalPath(ctx.store, pathArg, explicitRepoArg)
+      const path = global?.path ?? pathArg
+      const explicitRepo = global?.repo ?? explicitRepoArg
       if (unsafePath(path)) return "File paths must stay inside the repository."
       const local = localTarget(ctx.store, explicitRepo)
       if (local !== undefined) return "error" in local ? local.error : readLocal(local.repo, path)
@@ -365,7 +432,7 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
           status: "active",
           createdAt: Date.now(),
           ordinal: ctx.nextOrdinal(),
-          payload: { repo, path: normalized, content: "", truncated: false, binary: true }
+          payload: { repo, path: normalized, content: "", truncated: false, binary: true, ...cloudAddressing(ctx.store, repo, normalized) }
         })
         return { value: fileValue(repo, normalized, { content: "", truncated: false, binary: true }) }
       }
@@ -384,7 +451,8 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
         repo,
         path: normalized,
         content: truncated ? content.slice(0, CARD_CONTENT_CAP) : content,
-        truncated
+        truncated,
+        ...cloudAddressing(ctx.store, repo, normalized)
       }
       upsert({
         id: `file-${repo}-${normalized}`,

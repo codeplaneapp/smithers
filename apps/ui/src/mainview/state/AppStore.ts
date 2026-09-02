@@ -20,6 +20,8 @@ import {
   CardSchema,
   cardFrameId,
   ChainEventRecordSchema,
+  CloudRepositorySchema,
+  CloudSessionRowSchema,
   ConnectorOperationSchema,
   DEFAULT_PALETTE,
   DEFAULT_BRANCH_ID,
@@ -28,6 +30,7 @@ import {
   HarnessSchema,
   IdentitySessionSchema,
   initialBillingAccount,
+  initialCloudSession,
   initialConnectorOperation,
   initialIdentitySession,
   initialSession,
@@ -35,6 +38,7 @@ import {
   LocalRepositoryConnectorSchema,
   conversationTabIdOf,
   inConversation,
+  localCopyIdOf,
   MAIN_TAB_ID,
   mainTab,
   MessageSchema,
@@ -42,15 +46,18 @@ import {
   RECOMMENDATION_ID,
   StarredTargetSchema,
   RecommendationSchema,
+  repoIdFromRemote,
   repoKeyOf,
   RepoSchema,
   rootFrameId,
+  parseRepoSelection,
   SessionSchema,
   TabSchema,
   ToastSchema,
   ToolCallRecordSchema,
   TransitionRecordSchema,
   WatchedReposSchema,
+  WorkingCopySchema,
   WorkspaceSchema,
   WORLD_DISPLAY_NAME,
   WorldDocumentSchema
@@ -61,6 +68,8 @@ import type {
   Branch,
   Card,
   ChainEventRecord,
+  CloudRepository,
+  CloudSessionRow,
   ConnectorOperation,
   Frame,
   Harness,
@@ -79,6 +88,7 @@ import type {
   ToolCallRecord,
   TransitionRecord,
   WatchedRepos,
+  WorkingCopy,
   Workspace,
   WorldDocument
 } from "./AppState"
@@ -275,7 +285,11 @@ const PERSISTED_COLLECTION_SPECS: ReadonlyArray<LegacyCollectionSpec> = [
   { id: "app-workspaces", schema: WorkspaceSchema },
   { id: "app-branches", schema: BranchSchema },
   { id: "app-frames", schema: FrameSchema },
-  { id: "app-recommendations", schema: RecommendationSchema }
+  { id: "app-recommendations", schema: RecommendationSchema },
+  /* Lane piper: the jjhub inventory, the working copies, and the cloud session. */
+  { id: "app-cloud-repositories", schema: CloudRepositorySchema },
+  { id: "app-working-copies", schema: WorkingCopySchema },
+  { id: "app-cloud-sessions", schema: CloudSessionRowSchema }
 ]
 /** Attempts spent waiting out a locked access-handle pool. See `openOpfsDatabase`. */
 const OPFS_OPEN_ATTEMPTS = 5
@@ -508,6 +522,10 @@ export interface AppCollections {
   readonly frames: ReturnType<typeof createFrameCollection>
   /* The one next-step recommendation row the pills project (Recommend.ts). */
   readonly recommendations: ReturnType<typeof createRecommendationCollection>
+  /* Lane piper: the jjhub inventory, its working copies, and the cloud session (no token). */
+  readonly repositories: ReturnType<typeof createRepositoriesCollection>
+  readonly workingCopies: ReturnType<typeof createWorkingCopyCollection>
+  readonly cloudSessions: ReturnType<typeof createCloudSessionCollection>
 }
 
 export interface WorldStateSnapshot {
@@ -698,6 +716,27 @@ const createFrameCollection = (backend: PersistenceBackend) =>
     schema: FrameSchema
   })
 
+const createRepositoriesCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-cloud-repositories",
+    getKey: (repository: CloudRepository) => repository.id,
+    schema: CloudRepositorySchema
+  })
+
+const createWorkingCopyCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-working-copies",
+    getKey: (copy: WorkingCopy) => copy.id,
+    schema: WorkingCopySchema
+  })
+
+const createCloudSessionCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-cloud-sessions",
+    getKey: (session: CloudSessionRow) => session.id,
+    schema: CloudSessionRowSchema
+  })
+
 /** The strip's order: main first, then creation order. */
 const orderedTabs = (collections: Pick<AppCollections, "tabs">): Array<TabRow> =>
   [...collections.tabs.values()].sort((left, right) => left.ordinal - right.ordinal)
@@ -725,7 +764,10 @@ const seed = async (collections: AppCollections): Promise<void> => {
     collections.workspaces.preload(),
     collections.branches.preload(),
     collections.frames.preload(),
-    collections.recommendations.preload()
+    collections.recommendations.preload(),
+    collections.repositories.preload(),
+    collections.workingCopies.preload(),
+    collections.cloudSessions.preload()
   ])
 
   if (collections.sessions.get(SESSION_ID) === undefined) {
@@ -764,6 +806,9 @@ const seed = async (collections: AppCollections): Promise<void> => {
   }
   if (collections.billingAccounts.get("billing") === undefined) {
     await collections.billingAccounts.insert(initialBillingAccount()).isPersisted.promise
+  }
+  if (collections.cloudSessions.get("cloud") === undefined) {
+    await collections.cloudSessions.insert(initialCloudSession()).isPersisted.promise
   }
   if (collections.tabs.get(MAIN_TAB_ID) === undefined) {
     await collections.tabs.insert(mainTab()).isPersisted.promise
@@ -960,7 +1005,10 @@ export const createAppStore = async (
     workspaces: createWorkspaceCollection(resolvedBackend),
     branches: createBranchCollection(resolvedBackend),
     frames: createFrameCollection(resolvedBackend),
-    recommendations: createRecommendationCollection(resolvedBackend)
+    recommendations: createRecommendationCollection(resolvedBackend),
+    repositories: createRepositoriesCollection(resolvedBackend),
+    workingCopies: createWorkingCopyCollection(resolvedBackend),
+    cloudSessions: createCloudSessionCollection(resolvedBackend)
   }
 
   await seed(collections)
@@ -1030,7 +1078,10 @@ export const createAppStore = async (
         collections.workspaces.utils.acceptMutations(transaction),
         collections.branches.utils.acceptMutations(transaction),
         collections.frames.utils.acceptMutations(transaction),
-        collections.recommendations.utils.acceptMutations(transaction)
+        collections.recommendations.utils.acceptMutations(transaction),
+        collections.repositories.utils.acceptMutations(transaction),
+        collections.workingCopies.utils.acceptMutations(transaction),
+        collections.cloudSessions.utils.acceptMutations(transaction)
       ])
     /*
      * One atomic commit per logical transition: SQLite batches row changes in
@@ -2361,6 +2412,34 @@ export const createAppStore = async (
                 Object.assign(draft, pin)
               })
             }
+            /*
+             * Lane piper: an open checkout is a local working copy. The
+             * repoId comes from the checkout's remote when it parses, else
+             * the checkout's own name (never an invented owner); the jj
+             * probe fills ahead/readAt when the server ran one.
+             */
+            const copyId = localCopyIdOf(repo.path)
+            const existing = collections.workingCopies.get(copyId)
+            const repoId = repoIdFromRemote(repo.git?.remote) ?? existing?.repoId ?? repo.name
+            const copy: WorkingCopy = {
+              id: copyId,
+              repoId,
+              kind: "local",
+              label: repo.name,
+              path: repo.path,
+              ...(repo.jj?.ahead !== null && repo.jj?.ahead !== undefined ? { ahead: repo.jj.ahead } : {}),
+              ...(repo.jj !== null && repo.jj !== undefined
+                ? { readAt: { changeId: repo.jj.changeId, commitId: repo.jj.commitId } }
+                : {}),
+              updatedAt: now,
+              revision
+            }
+            if (existing === undefined) collections.workingCopies.insert(copy)
+            else {
+              collections.workingCopies.update(copyId, (draft) => {
+                Object.assign(draft, copy)
+              })
+            }
           }
           const openKeys = new Set(transition.repos.map((repo) => repoKeyOf(repo.path)))
           const byName = [...transition.repos].sort((left, right) => left.name.localeCompare(right.name))
@@ -2376,12 +2455,96 @@ export const createAppStore = async (
           })
           break
         }
+        case "repositories.loaded": {
+          /*
+           * Lane piper: the cloud inventory replaces the collection. A row
+           * keeps its fresher head when the new answer carries none (the
+           * per-repo bookmarks call failed this round): an absent answer is
+           * not a fact about the repo.
+           */
+          const next = new Set(transition.repositories.map((repository) => repository.id))
+          const stale = [...collections.repositories.keys()].filter((id) => !next.has(id))
+          if (stale.length > 0) collections.repositories.delete(stale)
+          for (const repository of transition.repositories) {
+            const existing = collections.repositories.get(repository.id)
+            const row: CloudRepository = {
+              ...repository,
+              head: repository.head ?? existing?.head ?? null,
+              updatedAt: createdAt,
+              revision
+            }
+            if (existing === undefined) collections.repositories.insert(row)
+            else {
+              collections.repositories.update(repository.id, (draft) => {
+                Object.assign(draft, row)
+              })
+            }
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
+        case "workingcopies.workspaces.loaded": {
+          /* The cloud workspace list replaces the workspace copies only. */
+          const next = new Set(transition.copies.map((copy) => copy.id))
+          const stale = [...collections.workingCopies.values()]
+            .filter((copy) => copy.kind === "workspace" && !next.has(copy.id))
+            .map((copy) => copy.id)
+          if (stale.length > 0) collections.workingCopies.delete(stale)
+          for (const copy of transition.copies) {
+            const row: WorkingCopy = { ...copy, updatedAt: createdAt, revision }
+            if (collections.workingCopies.get(copy.id) === undefined) collections.workingCopies.insert(row)
+            else {
+              collections.workingCopies.update(copy.id, (draft) => {
+                Object.assign(draft, row)
+              })
+            }
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
+        case "cloud.session.loaded": {
+          const row: CloudSessionRow = {
+            id: "cloud",
+            state: transition.state,
+            username: transition.username,
+            expiresAt: transition.expiresAt,
+            scopes: transition.scopes,
+            updatedAt: createdAt,
+            revision
+          }
+          if (collections.cloudSessions.get("cloud") === undefined) collections.cloudSessions.insert(row)
+          else {
+            collections.cloudSessions.update("cloud", (draft) => {
+              Object.assign(draft, row)
+            })
+          }
+          collections.sessions.update(SESSION_ID, (draft) => {
+            draft.revision = revision
+          })
+          break
+        }
         case "repo.pinned": {
           if (collections.pinnedRepos.get(transition.pin.id) === undefined) {
             collections.pinnedRepos.insert({ ...transition.pin })
           } else {
             collections.pinnedRepos.update(transition.pin.id, (draft) => {
               Object.assign(draft, transition.pin)
+            })
+          }
+          // Lane piper: a pinned checkout is a local working copy row.
+          if (collections.workingCopies.get(transition.pin.id) === undefined) {
+            collections.workingCopies.insert({
+              id: transition.pin.id,
+              repoId: transition.pin.name,
+              kind: "local",
+              label: transition.pin.name,
+              path: transition.pin.path,
+              updatedAt: createdAt,
+              revision
             })
           }
           collections.sessions.update(SESSION_ID, (draft) => {
@@ -2392,14 +2555,39 @@ export const createAppStore = async (
         case "repo.unpinned": {
           if (collections.pinnedRepos.get(transition.id) === undefined) return
           collections.pinnedRepos.delete(transition.id)
+          if (collections.workingCopies.get(transition.id)?.kind === "local") {
+            collections.workingCopies.delete(transition.id)
+          }
           collections.sessions.update(SESSION_ID, (draft) => {
             if (draft.activeRepoKey === transition.id) draft.activeRepoKey = null
+            const selected = draft.activeRepoKey
+            if (selected !== undefined && selected !== null && selected.endsWith(`#${transition.id}`)) {
+              draft.activeRepoKey = null
+            }
             draft.revision = revision
           })
           break
         }
         case "repo.selected": {
-          if (collections.pinnedRepos.get(transition.id) === undefined) return
+          /*
+           * Lane piper grammar: `org/repo` selects the repository (its
+           * head), `org/repo#copyId` one working copy. The legacy pin key
+           * (`local:/path`) still selects, so rows persisted before the
+           * grammar keep working until every reader moves.
+           */
+          const selection = parseRepoSelection(transition.id)
+          if (selection === null) return
+          if ("repoId" in selection) {
+            if (selection.copyId !== undefined) {
+              if (collections.workingCopies.get(selection.copyId) === undefined) return
+            } else if (
+              collections.repositories.get(selection.repoId) === undefined &&
+              ![...collections.workingCopies.values()].some((copy) => copy.repoId === selection.repoId)
+            ) return
+          } else if (
+            collections.pinnedRepos.get(selection.legacyCopyId) === undefined &&
+            collections.workingCopies.get(selection.legacyCopyId) === undefined
+          ) return
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.activeRepoKey = transition.id
             draft.revision = revision

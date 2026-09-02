@@ -747,6 +747,28 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     input: NoPayload,
     handler: () => actions.requestAccess()
   }),
+  /*
+   * Lane piper (ADR 0001): the jjhub Cloud login is the CLI's browser flow —
+   * Bun listens for the callback and holds the token (the keychain at rest);
+   * the renderer only opens the URL through the native door. Browser
+   * mechanics the human clicks, so user-only, like auth.sign-in.
+   */
+  flow({
+    name: "cloud.sign-in",
+    summary: "Sign in to Smithers Cloud",
+    runtime: ["jjhub"],
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.signInCloud()
+  }),
+  flow({
+    name: "cloud.sign-out",
+    summary: "Sign out of Smithers Cloud",
+    runtime: ["jjhub"],
+    userOnly: true,
+    input: NoPayload,
+    handler: () => actions.signOutCloud()
+  }),
   flow({
     name: "toast.dismiss",
     summary: "Dismiss a toast notification",

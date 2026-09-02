@@ -167,12 +167,17 @@ const ready = async (store: AppStore): Promise<void> => {
     admin: false,
     scopesPlain: null
   })
+  // Lane piper: the inventory (not the retired watch-list) is the repo source.
   store.dispatch({
-    type: "watched.replaced",
+    type: "repositories.loaded",
     actor: "system",
-    selected: ["will/flows"],
-    selectedAt: "2026-08-12T09:00:00.000Z",
-    via: "command"
+    repositories: [{
+      id: "will/flows",
+      org: "will",
+      ownerKind: "user",
+      name: "flows",
+      head: { bookmark: "main", changeId: "change123", commitId: "commit123" }
+    }]
   })
   await settled()
 }
@@ -394,7 +399,7 @@ describe("files seam — honest failures", () => {
     }
   })
 
-  test("a watched-less signed-in session answers the repo-resolution error before any request", async () => {
+  test("an inventory-less signed-in session answers the repo-resolution error before any request", async () => {
     const backend = filesBackend()
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const controller = createAppController(
@@ -417,7 +422,7 @@ describe("files seam — honest failures", () => {
     expect(outcome.status).toBe("failed")
     if (outcome.status === "failed") {
       expect(outcome.error).toBe(
-        "No repository is watched yet — run /repos.watch first, or name one as owner/repo"
+        "No repository is loaded yet — sign in with /cloud.sign-in, or name one as owner/repo"
       )
     }
     expect(backend.requests).toHaveLength(0)
@@ -513,7 +518,13 @@ describe("files seam — a repository open in the local app", () => {
     expect(outcome.status === "executed" ? outcome.value : undefined).toBe("README.md in smithersai/smithers:\n# Local — hi\n")
     expect(requests).toEqual([{ url: "/api/repo/files", body: { repoId: "repo-smithers", path: "README.md" } }])
     const card = fileCard(store, "file-smithersai/smithers-README.md")
-    expect(card?.payload).toEqual({ repo: "smithersai/smithers", path: "README.md", content: "# Local — hi\n", truncated: false })
+    expect(card?.payload).toEqual({
+      repo: "smithersai/smithers",
+      path: "README.md",
+      content: "# Local — hi\n",
+      truncated: false,
+      address: "/smithersai/smithers/README.md"
+    })
     expect(CardSchema.safeParse(card).success).toBe(true)
   })
 
@@ -526,7 +537,8 @@ describe("files seam — a repository open in the local app", () => {
     expect(card?.payload).toEqual({
       repo: "smithersai/smithers",
       path: "",
-      entries: [{ name: "src", kind: "dir" }, { name: "README.md", kind: "file" }, { name: "zeta.txt", kind: "file" }]
+      entries: [{ name: "src", kind: "dir" }, { name: "README.md", kind: "file" }, { name: "zeta.txt", kind: "file" }],
+      address: "/smithersai/smithers/"
     })
   })
 
@@ -563,7 +575,8 @@ describe("files seam — a repository open in the local app", () => {
       path: "logo.png",
       content: "",
       truncated: false,
-      binary: true
+      binary: true,
+      address: "/smithersai/smithers/logo.png"
     })
     const missing = await controller.commands.run("files.read", "missing.txt")
     expect(missing.status).toBe("failed")

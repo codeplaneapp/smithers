@@ -51,6 +51,122 @@ export const starredTargetId = (repoKey: string, label: string): string => `${re
 /** The pin key for a local path: the same key for an open repo and its connector. */
 export const repoKeyOf = (path: string): string => `local:${path}`
 
+/*
+ * Lane piper (docs/decisions/0001-piper-one-truth.md): jjhub is the one
+ * truth. A repository lives under a user or an org; its head is the default
+ * bookmark's change and commit ids. NO mirror field: the backend has no
+ * mirror status yet, and nothing here may fake one. The row is shaped so
+ * plue#445's `owner_type` and `default_bookmark_head` replace the per-repo
+ * bookmarks call when they land.
+ */
+export const RepoHeadSchema = z.object({
+  bookmark: z.string(),
+  changeId: z.string().nullable(),
+  commitId: z.string().nullable()
+})
+export type RepoHead = z.infer<typeof RepoHeadSchema>
+
+export const CloudRepositorySchema = z.object({
+  /** `org/repo` — the first two segments of every global path. */
+  id: z.string(),
+  /** The owner's login (a user or an org). */
+  org: z.string(),
+  /** GET /api/user/orgs classifies the owner; "local" = no cloud repository (ADR 0001). */
+  ownerKind: z.enum(["user", "org", "local"]),
+  name: z.string(),
+  /** The default bookmark's head; null while unloaded or when the repo declares none. */
+  head: RepoHeadSchema.nullable(),
+  updatedAt: z.number(),
+  revision: z.number().int().nonnegative()
+})
+export type CloudRepository = z.infer<typeof CloudRepositorySchema>
+
+/*
+ * A working copy of a repository (ADR 0001): a local checkout on this
+ * machine, or a cloud workspace. A checkout computes `ahead` with jj; a
+ * cloud workspace has no API field yet, so it carries state only (never
+ * faked). `readAt` is the checkout's own jj position, when the local server
+ * probed it.
+ */
+export const WorkingCopySchema = z.object({
+  /** `local:<path>` (the pin key) for a checkout; `workspace:<workspaceId>` for a cloud workspace. */
+  id: z.string(),
+  /** The repositories row this is a copy of, or the checkout's name when no cloud repo matches. */
+  repoId: z.string(),
+  kind: z.enum(["local", "workspace"]),
+  label: z.string(),
+  path: z.string().optional(),
+  workspaceId: z.string().optional(),
+  ahead: z.number().int().nonnegative().optional(),
+  state: z.string().optional(),
+  /** The checkout's jj position (a local probe); absent for workspaces and unprobed checkouts. */
+  readAt: z.object({ changeId: z.string().nullable(), commitId: z.string().nullable() }).optional(),
+  updatedAt: z.number(),
+  revision: z.number().int().nonnegative()
+})
+export type WorkingCopy = z.infer<typeof WorkingCopySchema>
+
+/*
+ * The jjhub Cloud session as the renderer may know it (lane piper step 1b):
+ * the token NEVER appears here — it lives in Bun memory and the OS keychain.
+ * "degraded" scopes mean the legacy token set lacks workspace/agent/approval
+ * scope, so those acts say "sign in again to enable".
+ */
+export const CloudSessionRowSchema = z.object({
+  id: z.literal("cloud"),
+  state: z.enum(["unknown", "signed-out", "signing-in", "signed-in"]),
+  username: z.string().nullable(),
+  expiresAt: z.string().nullable(),
+  scopes: z.literal("degraded").nullable(),
+  updatedAt: z.number(),
+  revision: z.number().int().nonnegative()
+})
+export type CloudSessionRow = z.infer<typeof CloudSessionRowSchema>
+
+export const initialCloudSession = (createdAt = Date.now()): CloudSessionRow => ({
+  id: "cloud",
+  state: "unknown",
+  username: null,
+  expiresAt: null,
+  scopes: null,
+  updatedAt: createdAt,
+  revision: 0
+})
+
+/** The working-copy id of a local checkout: the pin key, stable across reopens. */
+export const localCopyIdOf = (path: string): string => repoKeyOf(path)
+
+/**
+ * The `org/repo` a remote URL names (`git@host:org/repo.git`,
+ * `https://host/org/repo`), or null when the remote names nothing parseable.
+ * A checkout whose remote does not parse keeps its own name — never an
+ * invented owner.
+ */
+export const repoIdFromRemote = (remote: string | null | undefined): string | null => {
+  if (remote === null || remote === undefined) return null
+  const match = /[:/]([\w.-]+)\/([\w.-]+?)(?:\.git)?$/.exec(remote.trim())
+  return match === null ? null : `${match[1]}/${match[2]}`
+}
+
+/**
+ * The repo.select grammar (lane piper step 3): `org/repo` selects the
+ * repository (its head); `org/repo#copyId` selects one working copy. The
+ * legacy pin key (`local:/path`) still parses, as a copy id with no repo —
+ * rows persisted before the grammar carry it.
+ */
+export const parseRepoSelection = (
+  token: string
+): { readonly repoId: string; readonly copyId?: string } | { readonly legacyCopyId: string } | null => {
+  const hash = token.indexOf("#")
+  const head = hash === -1 ? token : token.slice(0, hash)
+  if (/^[\w.-]+\/[\w.-]+$/.test(head)) {
+    if (hash === -1) return { repoId: head }
+    const copyId = token.slice(hash + 1)
+    return copyId === "" ? null : { repoId: head, copyId }
+  }
+  return hash === -1 && token.startsWith("local:") ? { legacyCopyId: token } : null
+}
+
 export const ActorSchema = z.enum(["user", "smithers", "system"])
 export type Actor = z.infer<typeof ActorSchema>
 
@@ -962,6 +1078,31 @@ export type AppTransition =
   | { type: "pty.exited"; actor: "system"; sessionId: string; code: number | null }
   | { type: "harnesses.loaded"; actor: "system"; harnesses: ReadonlyArray<Harness> }
   | { type: "repos.loaded"; actor: "system"; repos: ReadonlyArray<Repo> }
+  /*
+   * Lane piper: the cloud repository inventory (RepositoriesSeam) replaces
+   * the repositories collection; the cloud workspace list replaces the
+   * workspace working copies (local copies sync from pins/repos.loaded); the
+   * cloud session record answers { state, username, expiresAt, scopes } —
+   * never the token.
+   */
+  | {
+    type: "repositories.loaded"
+    actor: "system"
+    repositories: ReadonlyArray<Pick<CloudRepository, "id" | "org" | "ownerKind" | "name" | "head">>
+  }
+  | {
+    type: "workingcopies.workspaces.loaded"
+    actor: "system"
+    copies: ReadonlyArray<Pick<WorkingCopy, "id" | "repoId" | "kind" | "label" | "workspaceId" | "state">>
+  }
+  | {
+    type: "cloud.session.loaded"
+    actor: "system"
+    state: "signed-out" | "signing-in" | "signed-in"
+    username: string | null
+    expiresAt: string | null
+    scopes: "degraded" | null
+  }
   /* The sidebar's pinned repositories: opening pins, unpinning forgets, selecting names the active one. */
   | { type: "repo.pinned"; actor: Actor; pin: PinnedRepo }
   | { type: "repo.unpinned"; actor: "user"; id: string }

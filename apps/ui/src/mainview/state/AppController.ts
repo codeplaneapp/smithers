@@ -42,6 +42,8 @@ import { createBillingSeam } from "./seams/BillingSeam"
 import type { BillingSeam } from "./seams/BillingSeam"
 import { createBookmarksSeam } from "./seams/BookmarksSeam"
 import type { BookmarksSeam } from "./seams/BookmarksSeam"
+import { createCloudSeam } from "./seams/CloudSeam"
+import type { CloudSeam } from "./seams/CloudSeam"
 import { createEnvironmentSeam } from "./seams/EnvironmentSeam"
 import type { EnvironmentSeam } from "./seams/EnvironmentSeam"
 import { createFilesSeam } from "./seams/FilesSeam"
@@ -54,6 +56,8 @@ import { createLandingsSeam } from "./seams/LandingsSeam"
 import type { LandingsSeam } from "./seams/LandingsSeam"
 import { createNotificationsSeam } from "./seams/NotificationsSeam"
 import type { NotificationsSeam } from "./seams/NotificationsSeam"
+import { createRepositoriesSeam } from "./seams/RepositoriesSeam"
+import type { RepositoriesSeam } from "./seams/RepositoriesSeam"
 import { createRepoImportSeam } from "./seams/RepoImportSeam"
 import type { RepoImportSeam } from "./seams/RepoImportSeam"
 import type { SeamContext } from "./seams/SeamContext"
@@ -283,6 +287,15 @@ export interface AppController {
   readonly listFiles: FilesSeam["listFiles"]
   readonly readFile: FilesSeam["readFile"]
   readonly checkGitHubApp: AppStatusSeam["checkGitHubApp"]
+  /*
+   * Lane piper: the jjhub Cloud session (the CLI browser login; the token
+   * never reaches the renderer) and the repository inventory behind the
+   * `/api/cloud/*` proxy (state/seams/CloudSeam.ts, RepositoriesSeam.ts).
+   */
+  readonly loadCloudSession: CloudSeam["loadSession"]
+  readonly signInCloud: CloudSeam["signIn"]
+  readonly signOutCloud: CloudSeam["signOut"]
+  readonly loadRepositories: RepositoriesSeam["loadRepositories"]
   /** Dismiss one toast on the shared corner stack (the toast.dismiss command). */
   readonly dismissToast: (id: string) => void
   /** Refresh the billing record from the billing seam (actor: system). */
@@ -424,6 +437,29 @@ export const createAppController = (
   const bookmarksSeam = createBookmarksSeam(seamCtx)
   const filesSeam = createFilesSeam(seamCtx)
   const appStatusSeam = createAppStatusSeam(seamCtx)
+  /*
+   * Lane piper: the cloud session and inventory seams. A definitive
+   * signed-in answer pulls the repository inventory; sign-in does the same
+   * when its wait settles.
+   */
+  const cloudSeam = createCloudSeam(seamCtx, {
+    ...(services.openExternal === undefined ? {} : { openExternal: services.openExternal })
+  })
+  const repositoriesSeam = createRepositoriesSeam(seamCtx)
+  const reloadRepositoriesWhenSignedIn = (): void => {
+    if (store.collections.cloudSessions.get("cloud")?.state === "signed-in") {
+      void repositoriesSeam.loadRepositories()
+    }
+  }
+  const loadCloudSession = async (): Promise<void> => {
+    await cloudSeam.loadSession()
+    reloadRepositoriesWhenSignedIn()
+  }
+  const signInCloud = async (): Promise<string | void> => {
+    const refusal = await cloudSeam.signIn()
+    reloadRepositoriesWhenSignedIn()
+    return refusal
+  }
 
   const {
     handleAuthReturn,
@@ -887,6 +923,10 @@ export const createAppController = (
     listFiles: filesSeam.listFiles,
     readFile: filesSeam.readFile,
     checkGitHubApp: appStatusSeam.checkGitHubApp,
+    loadCloudSession,
+    signInCloud,
+    signOutCloud: cloudSeam.signOut,
+    loadRepositories: repositoriesSeam.loadRepositories,
     dismissToast,
     refreshBalance,
     showBalance,
@@ -1101,6 +1141,10 @@ export const createAppController = (
     listFiles: filesSeam.listFiles,
     readFile: filesSeam.readFile,
     checkGitHubApp: appStatusSeam.checkGitHubApp,
+    loadCloudSession,
+    signInCloud,
+    signOutCloud: cloudSeam.signOut,
+    loadRepositories: repositoriesSeam.loadRepositories,
     dismissToast,
     refreshBalance,
     showBalance,

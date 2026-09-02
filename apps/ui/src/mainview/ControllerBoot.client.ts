@@ -67,6 +67,10 @@ const bootProgram = (session: BootSession | undefined) =>
         yield* Effect.sync(() => void controller.loadRepos())
         yield* Effect.sync(() => void controller.loadHarnesses())
       }
+      // Lane piper: the jjhub session mirrors into the store; a signed-in answer pulls the inventory.
+      if (runtime.bootstrap.capabilities.includes("jjhub")) {
+        yield* Effect.sync(() => void controller.loadCloudSession())
+      }
       if (controller.handleAuthReturn(window.location.search)) {
         window.history.replaceState(null, "", window.location.pathname)
       }

@@ -126,11 +126,9 @@ const signedIn = async (store: AppStore): Promise<void> => {
 
 const reposChosen = async (store: AppStore): Promise<void> => {
   store.dispatch({
-    type: "watched.replaced",
+    type: "repositories.loaded",
     actor: "system",
-    selected: ["will/flows"],
-    selectedAt: "2026-08-12T09:00:00.000Z",
-    via: "command"
+    repositories: [{ id: "will/flows", org: "will", ownerKind: "user", name: "flows", head: null }]
   })
   await settled()
 }
@@ -179,14 +177,14 @@ describe("environment seam — env.view", () => {
     expect(envCard(store, "acme/site")).toBeDefined()
   })
 
-  test("a watched-less signed-in session answers the repo-resolution error as-is", async () => {
+  test("an inventory-less signed-in session answers the repo-resolution error as-is", async () => {
     const { store, controller, requests } = await freshController()
     await signedIn(store)
     const outcome = await controller.commands.run("env.view")
     expect(outcome.status).toBe("failed")
     if (outcome.status === "failed") {
       expect(outcome.error).toBe(
-        "No repository is watched yet — run /repos.watch first, or name one as owner/repo"
+        "No repository is loaded yet — sign in with /cloud.sign-in, or name one as owner/repo"
       )
     }
     expect(requests).toHaveLength(0)
