@@ -90,8 +90,10 @@ describe("packages/build prose", () => {
   })
 
   it("keeps the deploy recipe on the variable names the deployment reads", () => {
-    const alchemy = read("infra/alchemy.run.ts")
-    const names = [...alchemy.matchAll(/cacheTokenVerifier\("([A-Z_]+)"\)/g)].map((match) => match[1]!)
+    // The verifier pair moved from `alchemy.run.ts` into `deployment.ts`, so
+    // the names are read where `cacheCredentialVerifiers` declares them.
+    const deployment = read("infra/deployment.ts")
+    const names = [...deployment.matchAll(/cacheTokenVerifier\("([A-Z_]+)"\)/g)].map((match) => match[1]!)
     expect(names).toEqual(["SMITHERS_CACHE_READ_TOKEN", "SMITHERS_CACHE_WRITE_TOKEN"])
     const page = read("docs/workspace/remote-caching.md")
     for (const name of names) expect(page, `remote-caching.md never names ${name}`).toContain(name)
